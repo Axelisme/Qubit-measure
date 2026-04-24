@@ -1,5 +1,4 @@
 import numpy as np
-
 from zcu_tools.utils.fitting.base import decaycos, dual_expfunc, expfunc
 from zcu_tools.utils.fitting.decay import (
     fit_decay,

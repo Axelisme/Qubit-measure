@@ -308,12 +308,10 @@ class MistOvernightAnalyzer:
 
 class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
     def __init__(
-        self, cfg: dict[str, Any], g_center: complex, e_center: complex, radius: float
+        self, cfg: MistCfg, g_center: complex, e_center: complex, radius: float
     ) -> None:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
-        _cfg = MistCfg.model_validate(deepcopy(cfg))
-        self.cfg = _cfg
-        self._init_cfg = _cfg.model_copy(deep=True)
+        self.cfg = cfg
+        self._init_cfg = cfg.model_copy(deep=True)
 
         setup_devices(self.cfg, progress=True)
 
@@ -465,5 +463,5 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
         MistOvernightAnalyzer().analyze(result=result, **kwargs)
 
     def save(self, filepath, iters, result, comment, prefix_tag) -> None:
-        comment = make_comment(self._init_cfg.model_dump(mode="python"), comment)
+        comment = make_comment(self._init_cfg.to_dict(), comment)
         MistOvernightAnalyzer.save(filepath, iters, result, comment, prefix_tag)

@@ -1,6 +1,5 @@
 import pytest
 from qick.asm_v2 import QickParam
-
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.registry import PulseRegistry
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg

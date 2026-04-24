@@ -114,7 +114,7 @@ class T1PlotAndSaveMixin:
         lengths = result["lengths"][0]
         populations = result["populations"]  # (iters, 2, times, 2)
 
-        comment = make_comment(self._init_cfg.model_dump(mode="python"), comment)
+        comment = make_comment(self._init_cfg.to_dict(), comment)
 
         # gg_populations
         save_data(
@@ -333,12 +333,10 @@ class T1WithToneTask(
     T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotDict]
 ):
     def __init__(
-        self, cfg: dict[str, Any], g_center: complex, e_center: complex, radius: float
+        self, cfg: T1WithToneCfg, g_center: complex, e_center: complex, radius: float
     ) -> None:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        _cfg = T1WithToneCfg.model_validate(deepcopy(cfg))
-        self.cfg = _cfg
-        self._init_cfg = _cfg.model_copy(deep=True)
+        self.cfg = cfg
+        self._init_cfg = cfg.model_copy(deep=True)
 
         # initial values, may be rounded later
         self.lengths = sweep2array(self.cfg.sweep.length)

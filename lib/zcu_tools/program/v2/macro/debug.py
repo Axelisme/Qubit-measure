@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 
-from typing_extensions import Optional, Union
 from qick.asm_v2 import AsmInst, Macro, QickParam
+from typing_extensions import Optional, Union
 
 from ..utils import param2str
 

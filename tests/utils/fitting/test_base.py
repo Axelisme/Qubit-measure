@@ -1,5 +1,4 @@
 import numpy as np
-
 from zcu_tools.utils.fitting.base import (
     asym_lorfunc,
     cosfunc,

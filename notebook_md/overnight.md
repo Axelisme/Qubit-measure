@@ -98,6 +98,7 @@ executor = zeo.OvernightExecutor(num_times=300, interval=120).add_measurements(
                     "sweep": {"gain": make_sweep(0.0, 0.22, 101)},
                     "relax_delay": 50.5,  # us
                 },
+                zeo.singleshot.MistCfg,
                 reps=3000,
                 rounds=1,
             ),
@@ -128,6 +129,7 @@ executor = zeo.OvernightExecutor(num_times=300, interval=120).add_measurements(
                     },
                     "relax_delay": 50.5,  # us
                 },
+                zeo.singleshot.MistCfg,
                 reps=3000,
                 rounds=1,
             ),
@@ -156,6 +158,7 @@ executor = zeo.OvernightExecutor(num_times=300, interval=120).add_measurements(
                     },
                     "relax_delay": 50.5,  # us
                 },
+                zeo.singleshot.MistCfg,
                 reps=3000,
                 rounds=1,
             ),

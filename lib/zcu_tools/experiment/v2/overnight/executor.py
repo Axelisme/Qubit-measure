@@ -72,15 +72,6 @@ class MeasurementTask(
         prefix_tag: str,
     ) -> None: ...
 
-    @abstractmethod
-    def load(self, filepath: str, **kwargs) -> T_Result: ...
-
-    @classmethod
-    @abstractmethod
-    def analyze(
-        cls, name: str, iters: NDArray[np.int64], result: T_Result, **kwargs
-    ) -> None: ...
-
 
 class OvernightBatchTask(BatchTask[str, Result, list[dict[str, Result]], OvernightCfg]):
     def __init__(self, tasks, retry_time: int = 0) -> None:
@@ -251,23 +242,6 @@ class OvernightExecutor:
         self.last_result = signals_dict
 
         return signals_dict
-
-    def analyze(
-        self,
-        result: Optional[Mapping[str, Result]] = None,
-        task_kwargs: Optional[dict[str, dict]] = None,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        iters = np.arange(self.num_times)
-
-        if task_kwargs is None:
-            task_kwargs = {}
-
-        for ms_name, ms in self.measurements.items():
-            ms.analyze(ms_name, iters, result[ms_name], **task_kwargs.get(ms_name, {}))
 
     def save(
         self,

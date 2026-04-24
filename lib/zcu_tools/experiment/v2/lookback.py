@@ -17,6 +17,7 @@ from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
+    DirectReadoutCfg,
     ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
@@ -96,7 +97,7 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
         *,
         ratio: float = 0.3,
         smooth: Optional[float] = None,
-        ro_cfg: Optional[dict] = None,
+        ro_cfg: Optional[DirectReadoutCfg] = None,
         plot_fit: bool = True,
     ) -> tuple[float, Figure]:
         if result is None:
@@ -125,8 +126,8 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
         if plot_fit:
             ax.axvline(offset, color="r", linestyle="--", label="predict_offset")
         if ro_cfg is not None:
-            trig_offset = ro_cfg["trig_offset"]
-            ro_length = ro_cfg["ro_length"]
+            trig_offset = ro_cfg.trig_offset
+            ro_length = ro_cfg.ro_length
             ax.axvline(trig_offset, color="g", linestyle="--", label="ro start")
             ax.axvline(
                 trig_offset + ro_length, color="g", linestyle="--", label="ro end"

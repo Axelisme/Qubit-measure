@@ -1,5 +1,4 @@
 import numpy as np
-
 from zcu_tools.notebook.analysis.fluxdep.models import (
     compile_transitions,
     energy2linearform,

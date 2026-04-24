@@ -2,22 +2,22 @@ from __future__ import annotations
 
 import sys
 from abc import ABC, abstractmethod
+from copy import deepcopy
 
-from pydantic import BaseModel, ConfigDict
-from typing_extensions import TYPE_CHECKING, Any, Optional
+from typing_extensions import TYPE_CHECKING, Any, Optional, Self
+
+from zcu_tools.config import ConfigBase
 
 if TYPE_CHECKING:
     from pyvisa import ResourceManager
 
 
-class DeviceInfo(BaseModel):
-    model_config = ConfigDict(extra="forbid", validate_assignment=True)
-
+class DeviceInfo(ConfigBase):
     address: str
     type: str
     label: Optional[str] = None
 
-    def update(self, **kwargs: Any) -> None:
+    def with_updates(self, **kwargs) -> Self:
         protected_fields = {"type", "address"}
         for key in kwargs:
             if key in protected_fields:
@@ -28,11 +28,7 @@ class DeviceInfo(BaseModel):
                 raise ValueError(
                     f"Unknown field '{key}' for {self.__class__.__name__}."
                 )
-        for key, value in kwargs.items():
-            setattr(self, key, value)
-
-    def to_dict(self) -> dict[str, Any]:
-        return self.model_dump(mode="python", by_alias=True, exclude_none=True)
+        return super().with_updates(**kwargs)
 
 
 class BaseDevice(ABC):
@@ -101,7 +97,7 @@ class BaseDevice(ABC):
                 f"Trying to setup device at address {self.address} with cfg for address {cfg.address}"
             )
 
-        cfg = self.info_model.model_validate(cfg.model_dump(mode="python"))
+        cfg = self.info_model.model_validate(cfg.to_dict())
 
         # private method to setup
         self._setup(cfg, progress=progress)

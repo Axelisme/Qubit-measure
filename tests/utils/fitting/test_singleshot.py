@@ -1,5 +1,4 @@
 import numpy as np
-
 from zcu_tools.utils.fitting.singleshot import (
     calc_population_pdf,
     fit_singleshot_p0,

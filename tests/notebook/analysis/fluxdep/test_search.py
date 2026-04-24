@@ -1,5 +1,4 @@
 import numpy as np
-
 from zcu_tools.notebook.analysis.fluxdep.njit import (
     candidate_breakpoint_search,
     eval_dist_bounded,
@@ -7,7 +6,6 @@ from zcu_tools.notebook.analysis.fluxdep.njit import (
 )
 
 from ._synthetic import synth_ABC as _synth
-
 
 # -------------------- eval_dist_bounded -----------------------------
 

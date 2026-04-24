@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import logging
 
-from pydantic import BaseModel, ConfigDict
 from qick import QickConfig
 from qick.asm_v2 import AveragerProgramV2
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.program.base import ImproveAcquireMixin
 
 from .macro import ImproveAsmV2
@@ -14,9 +14,7 @@ from .modules.registry import PulseRegistry
 logger = logging.getLogger(__name__)
 
 
-class ProgramV2Cfg(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
-
+class ProgramV2Cfg(ConfigBase):
     reps: int = 1
     rounds: int = 1
     initial_delay: float = 0.0
@@ -32,7 +30,7 @@ class MyProgramV2(ImproveAcquireMixin, ImproveAsmV2, AveragerProgramV2):
 
         super().__init__(
             soccfg,
-            cfg=cfg.model_dump(mode="python"),
+            cfg=cfg.to_dict(),
             reps=cfg.reps,
             initial_delay=cfg.initial_delay,
             final_wait=0.0,

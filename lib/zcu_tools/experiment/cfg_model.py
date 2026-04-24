@@ -3,21 +3,15 @@ from __future__ import annotations
 import warnings
 from copy import deepcopy
 
-from pydantic import BaseModel, ConfigDict
 from typing_extensions import Any, Mapping, Optional, TypeVar
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.device import DeviceInfo
 
 T_CfgModel = TypeVar("T_CfgModel", bound="ExpCfgModel")
 
 
-class ExpCfgModel(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        arbitrary_types_allowed=True,
-        validate_assignment=True,
-    )
-
+class ExpCfgModel(ConfigBase):
     dev: Optional[Mapping[str, DeviceInfo]] = None
 
     @classmethod

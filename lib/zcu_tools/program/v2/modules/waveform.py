@@ -22,7 +22,7 @@ from typing_extensions import (
     Union,
 )
 
-from .base import ConfigBase
+from zcu_tools.config import ConfigBase
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary

@@ -24,8 +24,8 @@ from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
-    Readout,
-    ReadoutCfg,
+    PulseReadout,
+    PulseReadoutCfg,
     Reset,
     ResetCfg,
     sweep2param,
@@ -49,7 +49,7 @@ class DispersiveModuleCfg(BaseModel):
     reset: Optional[ResetCfg] = None
     init_pulse: Optional[PulseCfg] = None
     qub_pulse: PulseCfg
-    readout: ReadoutCfg
+    readout: PulseReadoutCfg
 
 
 class DispersiveSweepCfg(BaseModel):
@@ -101,7 +101,7 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
                                 [],
                                 Pulse("qub_pulse", ctx.cfg.modules.qub_pulse),
                             ),
-                            Readout("readout", ctx.cfg.modules.readout),
+                            PulseReadout("readout", ctx.cfg.modules.readout),
                         ],
                         sweep=[
                             ("ge", 2),

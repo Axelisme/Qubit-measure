@@ -195,7 +195,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
     def analyze(
         self, result: Optional[LenRabiResult] = None, *, decay: bool = True
-    ) -> tuple[float, float, float, float, float, float, Figure]:
+    ) -> tuple[float, float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -242,7 +242,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
         fig.tight_layout()
 
-        return pi_len, pi_len_err, pi2_len, pi2_len_err, freq, freq_err, fig
+        return pi_len, pi2_len, freq, fig
 
     def save(
         self,

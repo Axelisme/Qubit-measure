@@ -1,5 +1,4 @@
 import numpy as np
-
 from zcu_tools.utils.fitting.base import cosfunc, decaycos
 from zcu_tools.utils.fitting.rabi import fit_rabi
 

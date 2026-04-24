@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.19.1
   kernelspec:
-    display_name: zcu-tools
+    display_name: .venv
     language: python
     name: python3
   language_info:
@@ -39,28 +39,17 @@ import matplotlib.pyplot as plt
 import zcu_tools.experiment.v2 as ze
 import zcu_tools.program.v2 as zp
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
-from zcu_tools.meta_tool import (
-    ModuleLibrary,
-    MetaDict,
-    SampleTable,
-    ExperimentManager,
-)
-from zcu_tools.notebook.utils import (
-    make_sweep,
-    make_comment,
-    savefig,
-    dump_device_info,
-    gc_collect,
-)
+from zcu_tools.meta_tool import ModuleLibrary, MetaDict, SampleTable, ExperimentManager
+from zcu_tools.notebook.utils import make_sweep, savefig, dump_device_info, gc_collect
 from zcu_tools.utils.datasaver import create_datafolder
 ```
 
 # Create data/result folder
 
 ```python
-chip_name = "purcell_tmon"
-res_name = "R3"
-qub_name = "Q3"
+chip_name = "test"
+res_name = "R1"
+qub_name = "Q1"
 
 result_dir = os.path.join("..", "result", chip_name, qub_name)
 database_path = create_datafolder(
@@ -72,6 +61,7 @@ em = ExperimentManager(os.path.join(result_dir, "exps"))
 ml = ModuleLibrary()
 md = MetaDict()
 ```
+
 # Connect to zcu216
 
 ```python
@@ -231,7 +221,7 @@ exp_cfg = {
     },
     "relax_delay": 0.0,  # us
 }
-cfg = ml.make_cfg(exp_cfg, rounds=500)
+cfg = ml.make_cfg(exp_cfg, ze.LookbackCfg, rounds=500)
 
 lookback_exp = ze.LookbackExp()
 _ = lookback_exp.run(soc, soccfg, cfg)
@@ -240,7 +230,7 @@ _ = lookback_exp.run(soc, soccfg, cfg)
 ```python
 %matplotlib inline
 predict_offset, fig = lookback_exp.analyze(
-    ratio=0.1, smooth=1.0, ro_cfg=cfg["modules"]["readout"]["ro_cfg"]
+    ratio=0.1, smooth=1.0, ro_cfg=cfg.modules.readout.ro_cfg
 )
 predict_offset
 ```
@@ -255,7 +245,7 @@ filename = f"lookback_{time.strftime('%H%M')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 lookback_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg, f"timeFly = {md.timeFly}us"),
+    comment=f"timeFly = {md.timeFly}us",
 )
 ```
 
@@ -300,7 +290,7 @@ exp_cfg = {
     # "sweep": make_sweep(md.r_f - 2 * md.rf_w, md.r_f + 2 * md.rf_w, 101),
     "relax_delay": 1.0,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=100, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.onetone.FreqCfg, reps=100, rounds=100)
 
 res_freq_exp = ze.onetone.FreqExp()
 _ = res_freq_exp.run(soc, soccfg, cfg)
@@ -321,7 +311,7 @@ filename = f"{res_name}_freq_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 res_freq_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg, str(params)),
+    comment=str(params),
 )
 ```
 
@@ -354,7 +344,7 @@ exp_cfg = {
     },
     "relax_delay": 1.0,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=100, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.onetone.PowerDepCfg, reps=100, rounds=100)
 
 res_gain_exp = ze.onetone.PowerDepExp()
 _ = res_gain_exp.run(soc, soccfg, cfg, earlystop_snr=100.0)
@@ -364,7 +354,6 @@ _ = res_gain_exp.run(soc, soccfg, cfg, earlystop_snr=100.0)
 filename = f"{res_name}_gain_e_{time.strftime('%H%M')}"
 res_gain_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -409,7 +398,7 @@ exp_cfg = {
     },
     "relax_delay": 0.1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, ze.onetone.FluxDepCfg, reps=1000, rounds=10)
 
 res_flux_exp = ze.onetone.FluxDepExp()
 _ = res_flux_exp.run(soc, soccfg, cfg)
@@ -418,7 +407,6 @@ _ = res_flux_exp.run(soc, soccfg, cfg)
 ```python
 res_flux_exp.save(
     filepath=os.path.join(database_path, f"{res_name}_flux"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -494,7 +482,7 @@ exp_cfg = {
     },
     "relax_delay": 0.1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=100, rounds=10)
+cfg = ml.make_cfg(exp_cfg, ze.jpa.OneToneFluxCfg, reps=100, rounds=10)
 
 
 jpa_flux_onetone_exp = ze.jpa.OneToneFluxExp()
@@ -504,7 +492,6 @@ _ = jpa_flux_onetone_exp.run(soc, soccfg, cfg)
 ```python
 jpa_flux_onetone_exp.save(
     filepath=os.path.join(database_path, "JPA_flux_onetone"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -523,7 +510,7 @@ exp_cfg = {
     "sweep": make_sweep(11750, 11800, 501),
     "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=10000, rounds=1)
+cfg = ml.make_cfg(exp_cfg, ze.jpa.FreqCfg, reps=10000, rounds=1)
 
 jpa_freq_exp = ze.jpa.FreqExp()
 _ = jpa_freq_exp.run(soc, soccfg, cfg)
@@ -540,7 +527,6 @@ filename = f"JPA_freq_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 jpa_freq_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -571,7 +557,7 @@ exp_cfg = {
     "sweep": make_sweep(-5.0e-3, 5.0e-3, 1001),
     "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=10000, rounds=1)
+cfg = ml.make_cfg(exp_cfg, ze.jpa.FluxCfg, reps=10000, rounds=1)
 
 jpa_flux_exp = ze.jpa.FluxExp()
 _ = jpa_flux_exp.run(soc, soccfg, cfg)
@@ -588,7 +574,6 @@ filename = f"JPA_flux_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 jpa_flux_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -611,7 +596,7 @@ exp_cfg = {
     "sweep": make_sweep(-20, 1, 501),
     "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=10000, rounds=1)
+cfg = ml.make_cfg(exp_cfg, ze.jpa.PowerCfg, reps=10000, rounds=1)
 
 jpa_pdr_exp = ze.jpa.PowerExp()
 _ = jpa_pdr_exp.run(soc, soccfg, cfg)
@@ -628,7 +613,6 @@ filename = f"JPA_power_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 jpa_pdr_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -658,7 +642,7 @@ exp_cfg = {
     },
     "relax_delay": 30.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=1)
+cfg = ml.make_cfg(exp_cfg, ze.jpa.JPAOptCfg, reps=1000, rounds=1)
 
 jpa_opt_exp = ze.jpa.AutoOptimizeExp()
 _ = jpa_opt_exp.run(soc, soccfg, cfg, num_points=10000)
@@ -675,7 +659,6 @@ filename = f"JPA_opt_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 jpa_opt_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -703,7 +686,7 @@ exp_cfg = {
     "sweep": make_sweep(md.r_f - 20, md.r_f + 20, 101),
     "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=5)
+cfg = ml.make_cfg(exp_cfg, ze.jpa.CheckCfg, reps=1000, rounds=5)
 
 jpa_check_exp = ze.jpa.CheckExp()
 _ = jpa_check_exp.run(soc, soccfg, cfg)
@@ -719,7 +702,6 @@ filename = f"JPA_check_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 jpa_check_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -799,7 +781,7 @@ exp_cfg = {
     "sweep": make_sweep(3100, 3150, step=0.1),
     "relax_delay": 100.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=100, rounds=1000)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.FreqCfg, reps=100, rounds=1000)
 
 qub_freq_exp = ze.twotone.FreqExp()
 _ = qub_freq_exp.run(soc, soccfg, cfg)
@@ -821,7 +803,7 @@ filename = f"{qub_name}_freq_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 qub_freq_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg, f"frequency = {f}MHz"),
+    comment=f"frequency = {f}MHz",
 )
 ```
 
@@ -865,7 +847,7 @@ exp_cfg = {
     # "relax_delay": 5 * t1,  # us
     "sweep": make_sweep(0.03, 0.3, 101),
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.rabi.LenRabiCfg, reps=1000, rounds=100)
 
 qub_lenrabi_exp = ze.twotone.rabi.LenRabiExp()
 _ = qub_lenrabi_exp.run(soc, soccfg, cfg)
@@ -886,29 +868,27 @@ filename = f"{qub_name}_rabi_length_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 qub_lenrabi_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg, f"pi len = {md.pi_len}us\npi/2 len = {md.pi2_len}us"),
+    comment=f"pi len = {md.pi_len}us\npi/2 len = {md.pi2_len}us",
 )
 ```
 
 ```python
 # pi_len = 1.0
 # pi2_len = 0.5
-qub_pulse = cfg["modules"]["qub_pulse"]
+qub_pulse = cfg.modules.qub_pulse
 ml.register_module(
-    pi_len={
-        **qub_pulse,
-        "waveform": {**qub_pulse["waveform"], "length": md.pi_len},
-        # "pre_delay": 0.005,
-        # "post_delay": 0.005,
-        "desc": "len pi pulse",
-    },
-    pi2_len={
-        **qub_pulse,
-        "waveform": {**qub_pulse["waveform"], "length": md.pi2_len},
-        # "pre_delay": 0.005,
-        # "post_delay": 0.005,
-        "desc": "len pi/2 pulse",
-    },
+    pi_len=qub_pulse.with_updates(
+        waveform={"length": md.pi_len},
+        # pre_delay=0.005,
+        # post_delay=0.005,
+        desc="len pi pulse",
+    ),
+    pi2_len=qub_pulse.with_updates(
+        waveform={"length": md.pi2_len},
+        # pre_delay=0.005,
+        # post_delay=0.005,
+        desc="len pi/2 pulse",
+    ),
 )
 ```
 
@@ -938,7 +918,7 @@ exp_cfg = {
     "sweep": make_sweep(0.01, 1.0, 51),
     # "sweep": make_sweep(0.0, max_gain, 51),
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.rabi.AmpRabiCfg, reps=1000, rounds=100)
 
 qub_amprabi_exp = ze.twotone.rabi.AmpRabiExp()
 _ = qub_amprabi_exp.run(soc, soccfg, cfg)
@@ -955,7 +935,7 @@ filename = f"{qub_name}_rabi_amplitude_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 qub_amprabi_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg, f"pi gain = {md.pi_gain}\npi/2 gain = {md.pi2_gain}"),
+    comment=f"pi gain = {md.pi_gain}\npi/2 gain = {md.pi2_gain}",
 )
 ```
 
@@ -1021,7 +1001,7 @@ exp_cfg = {
     # "relax_delay": 0.1,  # us
     "relax_delay": 1.0 * md.t1,
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.reset.single_tone.FreqCfg, reps=1000, rounds=100)
 
 single_reset_freq_exp = ze.twotone.reset.single_tone.FreqExp()
 _ = single_reset_freq_exp.run(soc, soccfg, cfg)
@@ -1042,7 +1022,7 @@ filename = f"{qub_name}_sidereset_freq_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 single_reset_freq_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg, f"frequency = {f}MHz"),
+    comment=f"frequency = {f}MHz",
 )
 ```
 
@@ -1072,7 +1052,9 @@ exp_cfg = {
     "sweep": make_sweep(0.1, 20.0, 50),
     "relax_delay": 30.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(
+    exp_cfg, ze.twotone.reset.single_tone.LengthCfg, reps=1000, rounds=100
+)
 
 single_reset_length_exp = ze.twotone.reset.single_tone.LengthExp()
 _ = single_reset_length_exp.run(soc, soccfg, cfg)
@@ -1088,19 +1070,17 @@ filename = f"{qub_name}_sidereset_length_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 single_reset_length_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
 ### Set Reset Pulse
 
 ```python
-cfg["modules"]["tested_reset"]["pulse_cfg"]["waveform"].update(length=25.0)  # us
+tested_reset = cfg.modules.tested_reset.with_updates(
+    pulse_cfg={"waveform": {"length": 25.0}}
+)  # us
 ml.register_module(
-    reset_10={
-        **cfg["modules"]["tested_reset"],
-        "desc": "Reset with one pulse from 1 to 0",
-    },
+    reset_10=tested_reset.with_updates(desc="Reset with one pulse from 1 to 0"),
 )
 ```
 
@@ -1130,7 +1110,7 @@ exp_cfg = {
     "sweep": make_sweep(0.0, 1.0, 51),
     "relax_delay": 70.0,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.reset.RabiCheckCfg, reps=1000, rounds=10)
 
 single_reset_check_exp = ze.twotone.reset.RabiCheckExp()
 _ = single_reset_check_exp.run(soc, soccfg, cfg)
@@ -1146,7 +1126,6 @@ filename = f"{qub_name}_sidereset_check_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 single_reset_check_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -1188,7 +1167,7 @@ exp_cfg = {
     # "sweep": make_sweep(4680, 4710, step=0.1),
     "relax_delay": 30.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=1000)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.FreqCfg, reps=1000, rounds=1000)
 
 dualreset_freq1_exp = ze.twotone.FreqExp()
 _ = dualreset_freq1_exp.run(soc, soccfg, cfg)
@@ -1210,7 +1189,7 @@ filename = f"{qub_name}_dualreset_freq1_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 dualreset_freq1_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg, f"frequency = {f}MHz"),
+    comment=f"frequency = {f}MHz",
 )
 ```
 
@@ -1273,7 +1252,7 @@ exp_cfg = {
     # "relax_delay": 5 / rf_w,  # us
     "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=100, rounds=1000)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.reset.dual_tone.FreqCfg, reps=100, rounds=1000)
 
 dualreset_freq2_exp = ze.twotone.reset.dual_tone.FreqExp()
 _ = dualreset_freq2_exp.run(soc, soccfg, cfg, method="hard")
@@ -1297,7 +1276,7 @@ filename = f"{qub_name}_dualreset_both_freq_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 dualreset_freq2_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg, f"frequency = ({reset_f1:.1f}, {reset_f2:.1f})MHz"),
+    comment=f"frequency = ({reset_f1:.1f}, {reset_f2:.1f})MHz",
 )
 ```
 
@@ -1312,22 +1291,19 @@ reset2_trans = (3, 1)
 
 ```python
 dualreset_len = 30.0
-tested_reset = cfg["modules"]["tested_reset"]
-tested_reset["pulse1_cfg"]["waveform"]["length"] = dualreset_len
-tested_reset["pulse2_cfg"]["waveform"]["length"] = dualreset_len
+tested_reset = cfg.modules.tested_reset
 ml.register_module(
-    reset_120={
-        "type": "reset/two_pulse",
-        "pulse1_cfg": {
-            **tested_reset["pulse1_cfg"],
+    reset_120=tested_reset.with_updates(
+        pulse1_cfg={
+            "waveform": {"length": dualreset_len},
             "freq": reset_f1,
         },
-        "pulse2_cfg": {
-            **tested_reset["pulse2_cfg"],
+        pulse2_cfg={
+            "waveform": {"length": dualreset_len},
             "freq": reset_f2,
         },
-        "desc": f"Reset with two pulse: {reset1_trans} and {reset2_trans}",
-    },
+        desc=f"Reset with two pulse: {reset1_trans} and {reset2_trans}",
+    ),
 )
 ```
 
@@ -1356,7 +1332,7 @@ exp_cfg = {
     "relax_delay": 0.5,  # us
     # "relax_delay": 3 * t1,
 }
-cfg = ml.make_cfg(exp_cfg, reps=100, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.reset.dual_tone.PowerCfg, reps=100, rounds=100)
 
 dualreset_gain_exp = ze.twotone.reset.dual_tone.PowerExp()
 _ = dualreset_gain_exp.run(soc, soccfg, cfg)
@@ -1374,7 +1350,7 @@ filename = f"{qub_name}_dualreset_gain_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 dualreset_gain_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg, f"best gain = ({gain1:.1f}, {gain2:.1f})"),
+    comment=f"best gain = ({gain1:.1f}, {gain2:.1f})",
 )
 ```
 
@@ -1404,7 +1380,7 @@ exp_cfg = {
     "sweep": make_sweep(0.05, 40.0, 51),
     "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=100, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.reset.dual_tone.LengthCfg, reps=100, rounds=100)
 
 dualreset_len_exp = ze.twotone.reset.dual_tone.LengthExp()
 _ = dualreset_len_exp.run(soc, soccfg, cfg)
@@ -1414,7 +1390,6 @@ _ = dualreset_len_exp.run(soc, soccfg, cfg)
 filename = f"{qub_name}_dualreset_time_{time.strftime('%H%M')}"
 dualreset_len_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -1442,7 +1417,7 @@ exp_cfg = {
     "sweep": make_sweep(0.0, 1.0, 51),
     "relax_delay": 0.0,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.reset.RabiCheckCfg, reps=1000, rounds=10)
 
 dualreset_check_exp = ze.twotone.reset.RabiCheckExp()
 _ = dualreset_check_exp.run(soc, soccfg, cfg)
@@ -1452,7 +1427,6 @@ _ = dualreset_check_exp.run(soc, soccfg, cfg)
 filename = f"{qub_name}_dualreset_check_{time.strftime('%H%M')}"
 dualreset_check_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -1483,7 +1457,7 @@ exp_cfg = {
     # "relax_delay": 3 * md.t1,  # us
     "sweep": make_sweep(0.03, 2 / md.rf_w, 151),
 }
-cfg = ml.make_cfg(exp_cfg, reps=100, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.rabi.LenRabiCfg, reps=100, rounds=100)
 
 rabifreq_exp = ze.twotone.rabi.LenRabiExp()
 _ = rabifreq_exp.run(soc, soccfg, cfg)
@@ -1499,7 +1473,7 @@ filename = f"{qub_name}_rabi_freq_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 rabifreq_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg, f"pi len = {md.pi_len}us\npi/2 len = {md.pi2_len}us"),
+    comment=f"pi len = {md.pi_len}us\npi/2 len = {md.pi2_len}us",
 )
 ```
 
@@ -1553,7 +1527,7 @@ exp_cfg = {
     "relax_delay": 10.5,  # us
     # "relax_delay": 3 * md.t1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.reset.bath.FreqGainCfg, reps=1000, rounds=100)
 
 bathreset_freq_exp = ze.twotone.reset.bath.FreqGainExp()
 _ = bathreset_freq_exp.run(soc, soccfg, cfg)
@@ -1569,7 +1543,6 @@ filename = f"{qub_name}_bathreset_freqgain_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 bathreset_freq_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -1616,7 +1589,7 @@ exp_cfg = {
     "relax_delay": 10.5,  # us
     # "relax_delay": 3 * md.t1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=100, rounds=1000)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.reset.bath.LengthCfg, reps=100, rounds=1000)
 
 bathreset_len_exp = ze.twotone.reset.bath.LengthExp()
 _ = bathreset_len_exp.run(soc, soccfg, cfg)
@@ -1636,7 +1609,6 @@ filename = f"{qub_name}_bathreset_len_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 bathreset_len_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -1674,7 +1646,7 @@ exp_cfg = {
     # "relax_delay": 10.5,  # us
     "relax_delay": 3 * md.t1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=100, rounds=1000)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.reset.bath.PhaseCfg, reps=100, rounds=1000)
 
 bathreset_phase_exp = ze.twotone.reset.bath.PhaseExp()
 _ = bathreset_phase_exp.run(soc, soccfg, cfg)
@@ -1690,7 +1662,6 @@ filename = f"{qub_name}_bathreset_phase_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 bathreset_phase_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -1698,7 +1669,7 @@ bathreset_phase_exp.save(
 
 ```python
 # bath_reset_len = 15.0  # us
-tested_reset: zp.BathResetCfg = cfg["modules"]["tested_reset"]
+tested_reset: zp.BathResetCfg = cfg.modules.tested_reset
 ml.register_module(
     reset_bath=tested_reset.with_updates(
         pi2_cfg=dict(
@@ -1738,7 +1709,7 @@ exp_cfg = {
     # "relax_delay": 0.5,  # us
     "relax_delay": 5 * md.t1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=100, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.reset.RabiCheckCfg, reps=100, rounds=100)
 
 bathreset_rabicheck_exp = ze.twotone.reset.RabiCheckExp()
 _ = bathreset_rabicheck_exp.run(soc, soccfg, cfg)
@@ -1754,7 +1725,6 @@ filename = f"{qub_name}_bathreset_check_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 bathreset_rabicheck_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -1798,7 +1768,7 @@ exp_cfg = {
     },
     "relax_delay": 0.1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.FreqFluxCfg, reps=1000, rounds=10)
 
 qub_flux_exp = ze.twotone.FreqFluxExp()
 _ = qub_flux_exp.run(soc, soccfg, cfg, fail_retry=3)
@@ -1808,7 +1778,6 @@ _ = qub_flux_exp.run(soc, soccfg, cfg, fail_retry=3)
 filename = f"{qub_name}_flux_{time.strftime('%H%M')}"
 qub_flux_exp.save(
     filepath=os.path.join(database_path, filename),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -1854,7 +1823,7 @@ exp_cfg = {
     },
     "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=100, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.PowerCfg, reps=100, rounds=100)
 
 qub_pdr_exp = ze.twotone.PowerExp()
 _ = qub_pdr_exp.run(soc, soccfg, cfg)
@@ -1863,7 +1832,6 @@ _ = qub_pdr_exp.run(soc, soccfg, cfg)
 ```python
 qub_pdr_exp.save(
     filepath=os.path.join(database_path, f"{qub_name}_pdr@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -1902,7 +1870,7 @@ exp_cfg = {
     },
     "relax_delay": 10.1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=100, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.CKP_Cfg, reps=100, rounds=100)
 
 ckp_exp = ze.twotone.CKP_Exp()
 _ = ckp_exp.run(soc, soccfg, cfg)
@@ -1924,7 +1892,6 @@ filename = f"{qub_name}_ckp_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 ckp_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -1953,7 +1920,7 @@ exp_cfg = {
     "relax_delay": 30.5,  # us
     # "relax_delay": 2 * t1, # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=1000)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.DispersiveCfg, reps=1000, rounds=1000)
 
 dispersive_shift_exp = ze.twotone.DispersiveExp()
 _ = dispersive_shift_exp.run(soc, soccfg, cfg)
@@ -1965,11 +1932,11 @@ md.chi, rf_w, fig = dispersive_shift_exp.analyze()
 ```
 
 ```python
-filename = f"{qub_name}_dispersive_gain{cfg['readout']['pulse_cfg']['gain']:.3f}_{time.strftime('%m%d')}"
+filename = f"{qub_name}_dispersive_gain{cfg.modules.readout.pulse_cfg.gain:.3f}_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 dispersive_shift_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg, f"chi = {md.chi:.3g} MHz, kappa = {rf_w:.3g} MHz"),
+    comment=f"chi = {md.chi:.3g} MHz, kappa = {rf_w:.3g} MHz",
 )
 ```
 
@@ -2013,7 +1980,7 @@ exp_cfg = {
     },
     "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.AcStarkCfg, reps=1000, rounds=10)
 
 ac_stark_exp = ze.twotone.AcStarkExp()
 _ = ac_stark_exp.run(soc, soccfg, cfg, earlystop_snr=50)
@@ -2027,12 +1994,11 @@ md.ac_stark_coeff, fig = ac_stark_exp.analyze(
 ```
 
 ```python
-filename = f"{qub_name}_ac_stark_freq{cfg['modules']['stark_pulse1']['freq']:.3f}MHz_{time.strftime('%m%d')}"
+filename = f"{qub_name}_ac_stark_freq{cfg.modules.stark_pulse1.freq:.3f}MHz_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 ac_stark_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    # comment=make_comment(cfg, f"ac_stark_coeff = {md.ac_stark_coeff:.3g} MHz"),
-    comment=make_comment(cfg),
+    # comment=f"ac_stark_coeff = {md.ac_stark_coeff:.3g} MHz",
 )
 ```
 
@@ -2056,7 +2022,7 @@ exp_cfg = {
     },
     "relax_delay": 10.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=1000)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.AllXYCfg, reps=1000, rounds=1000)
 
 allxy_exp = ze.twotone.AllXY_Exp()
 _ = allxy_exp.run(soc, soccfg, cfg)
@@ -2072,7 +2038,6 @@ filename = f"{qub_name}_allxy_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 allxy_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -2096,7 +2061,7 @@ exp_cfg = {
     "n_seeds": 100,
     "relax_delay": 10.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=100, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.RBCfg, reps=100, rounds=100)
 
 rb_exp = ze.twotone.RB_Exp()
 _ = rb_exp.run(soc, soccfg, cfg)
@@ -2112,7 +2077,6 @@ filename = f"{qub_name}_rb_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 rb_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -2131,7 +2095,7 @@ exp_cfg = {
     "sweep": list(range(0, 11)),
     "relax_delay": 30.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.ZigZagCfg, reps=1000, rounds=100)
 
 repeat_on = "X90_pulse"
 
@@ -2143,7 +2107,6 @@ _ = zigzag_exp.run(soc, soccfg, cfg, repeat_on=repeat_on)
 filename = f"{qub_name}_zigzag_{repeat_on}_{time.strftime('%m%d')}"
 zigzag_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -2185,16 +2148,16 @@ elif repeat_on == "X180_pulse":
     exp_cfg["sweep"].update(gain=make_sweep(md.pi_gain * 0.8, md.pi_gain * 1.2, 101))
 else:
     raise ValueError(f"Invalid repeat_on: {repeat_on}")
-cfg = ml.make_cfg(exp_cfg, reps=100, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.ZigZagScanCfg, reps=100, rounds=100)
 
 
-zigzag_sweep_exp = ze.twotone.ZigZagSweepExp()
-_ = zigzag_sweep_exp.run(soc, soccfg, cfg, repeat_on=repeat_on)
+zigzag_scan_exp = ze.twotone.ZigZagScanExp()
+_ = zigzag_scan_exp.run(soc, soccfg, cfg, repeat_on=repeat_on)
 ```
 
 ```python
 %matplotlib inline
-best_x, fig = zigzag_sweep_exp.analyze(find_range=(None, None))
+best_x, fig = zigzag_scan_exp.analyze(find_range=(None, None))
 ```
 
 ```python
@@ -2204,9 +2167,8 @@ gc_collect()
 ```python
 filename = f"{qub_name}_zigzag_sweep_{repeat_on}_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
-zigzag_sweep_exp.save(
+zigzag_scan_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -2273,7 +2235,7 @@ exp_cfg = {
     "sweep": make_sweep(md.r_f - 1.5 * md.rf_w, md.r_f + 1.5 * md.rf_w, step=0.1),
     # "sweep": make_sweep(5920, 5940, step=0.25),
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.ro_optimize.FreqCfg, reps=1000, rounds=100)
 
 opt_ro_freq_exp = ze.twotone.ro_optimize.FreqExp()
 _ = opt_ro_freq_exp.run(soc, soccfg, cfg)
@@ -2290,7 +2252,7 @@ filename = f"{qub_name}_ro_opt_freq_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 opt_ro_freq_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg, f"optimal frequency = {md.best_ro_freq:.1f}MHz"),
+    comment=f"optimal frequency = {md.best_ro_freq:.1f}MHz",
 )
 ```
 
@@ -2323,7 +2285,7 @@ exp_cfg = {
     "relax_delay": 3 * md.t1,  # us
     "sweep": make_sweep(0.01, 0.2, 151),
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.ro_optimize.PowerCfg, reps=1000, rounds=10)
 
 opt_ro_pdr_exp = ze.twotone.ro_optimize.PowerExp()
 _ = opt_ro_pdr_exp.run(soc, soccfg, cfg)
@@ -2340,7 +2302,7 @@ filename = f"{qub_name}_ro_opt_gain_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 opt_ro_pdr_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg, f"optimal power = {md.best_ro_gain:.2f}"),
+    comment=f"optimal power = {md.best_ro_gain:.2f}",
 )
 ```
 
@@ -2367,7 +2329,7 @@ exp_cfg = {
     "relax_delay": 3 * md.t1,  # us
     "sweep": make_sweep(0.01, 10.5, 51),
 }
-cfg = ml.make_cfg(exp_cfg, reps=10000, rounds=1)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.ro_optimize.LengthCfg, reps=10000, rounds=1)
 
 opt_ro_len_exp = ze.twotone.ro_optimize.LengthExp()
 _ = opt_ro_len_exp.run(soc, soccfg, cfg)
@@ -2384,7 +2346,7 @@ filename = f"{qub_name}_ro_opt_length_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 opt_ro_len_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg, f"optimal readout length = {md.best_ro_length:.2f}us"),
+    comment=f"optimal readout length = {md.best_ro_length:.2f}us",
 )
 ```
 
@@ -2428,7 +2390,7 @@ exp_cfg = {
         "length": make_sweep(5.0, 10.0, 51),
     },
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.ro_optimize.AutoOptCfg, reps=1000, rounds=10)
 
 auto_opt_ro_exp = ze.twotone.ro_optimize.AutoOptExp()
 _ = auto_opt_ro_exp.run(soc, soccfg, cfg, num_points=1001)
@@ -2444,7 +2406,6 @@ md.best_ro_freq, md.best_ro_gain, md.best_ro_length
 filename = f"{qub_name}_ro_opt_auto_{time.strftime('%m%d')}"
 auto_opt_ro_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -2494,9 +2455,9 @@ exp_cfg = {
     "sweep": make_sweep(0, 3.5, 101),  # us
     # "sweep": make_sweep(0, 1.5 * md.t2r, 101),  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.time_domain.T2RamseyCfg, reps=1000, rounds=100)
 
-activate_detune = 0.1 / cfg["sweep"]["step"]
+activate_detune = 0.1 / cfg.sweep.length["step"]
 print(f"activate_detune: {activate_detune:.2f} MHz")
 
 t2ramsey_exp = ze.twotone.time_domain.T2RamseyExp()
@@ -2514,14 +2475,12 @@ filename = f"{qub_name}_t2ramsey_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 t2ramsey_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(
-        cfg, f"activate detune = {activate_detune:.3f}MHz\nt2r = {md.t2r:.3f}us"
-    ),
+    comment=f"activate detune = {activate_detune:.3f}MHz\nt2r = {md.t2r:.3f}us",
 )
 ```
 
 ```python
-md.q_f = cfg["modules"]["pi2_pulse"].freq + activate_detune - detune
+md.q_f = cfg.modules.pi2_pulse.freq + activate_detune - detune
 md.q_f
 ```
 
@@ -2549,7 +2508,7 @@ exp_cfg = {
     "sweep": make_sweep(0.01, 300.1, 101),
     # "sweep": make_sweep(0.01, 5 * md.t1, 51),
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.time_domain.T1Cfg, reps=1000, rounds=100)
 
 t1_exp = ze.twotone.time_domain.T1Exp()
 _ = t1_exp.run(soc, soccfg, cfg, uniform=True)
@@ -2566,7 +2525,7 @@ filename = f"{qub_name}_t1_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 t1_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg, f"t1 = {md.t1:.3f}us"),
+    comment=f"t1 = {md.t1:.3f}us",
 )
 ```
 
@@ -2588,7 +2547,7 @@ exp_cfg = {
     "sweep": make_sweep(1.0, 20, 101),
     # "sweep": make_sweep(0.01*t1, 5 * t1, 51),
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.time_domain.T1WithToneCfg, reps=1000, rounds=10)
 
 t1_with_tone_exp = ze.twotone.time_domain.T1WithToneExp()
 _ = t1_with_tone_exp.run(soc, soccfg, cfg)
@@ -2601,11 +2560,11 @@ md.t1_with_tone
 ```
 
 ```python
-filename = f"{qub_name}_t1_with_tone_gain{cfg['test_pulse']['gain']:.2f}_{time.strftime('%m%d')}"
+filename = f"{qub_name}_t1_with_tone_gain{cfg.modules.test_pulse.gain:.2f}_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 t1_with_tone_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg, f"t1 = {md.t1_with_tone:.3f}us"),
+    comment=f"t1 = {md.t1_with_tone:.3f}us",
 )
 ```
 
@@ -2635,7 +2594,9 @@ exp_cfg = {
         "length": make_sweep(1.0, 30, 501),
     },
 }
-cfg = ml.make_cfg(exp_cfg, reps=100, rounds=100)
+cfg = ml.make_cfg(
+    exp_cfg, ze.twotone.time_domain.T1WithToneSweepCfg, reps=100, rounds=100
+)
 
 t1_with_tone_sweep_exp = ze.twotone.time_domain.T1WithToneSweepExp()
 _ = t1_with_tone_sweep_exp.run(soc, soccfg, cfg)
@@ -2651,7 +2612,6 @@ filename = f"{qub_name}_t1_with_tone_sweep_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 t1_with_tone_sweep_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -2672,9 +2632,9 @@ exp_cfg = {
     "sweep": make_sweep(0.0, 1.5 * md.t2e, 101),
     # "sweep": make_sweep(0.01, 5.0, 101),
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.time_domain.T2EchoCfg, reps=1000, rounds=100)
 
-activate_detune = 0.1 / cfg["sweep"]["step"]
+activate_detune = 0.1 / cfg.sweep.length["step"]
 print(f"activate_detune: {activate_detune:.2f}")
 
 t2echo_exp = ze.twotone.time_domain.T2EchoExp()
@@ -2691,9 +2651,7 @@ filename = f"{qub_name}_t2echo_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 t2echo_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(
-        cfg, f"activate detune = {activate_detune:.3f}MHz\nt2echo = {md.t2e:.3f}us"
-    ),
+    comment=f"activate detune = {activate_detune:.3f}MHz\nt2echo = {md.t2e:.3f}us",
 )
 ```
 
@@ -2720,7 +2678,7 @@ exp_cfg = {
     # "relax_delay": 30.0,  # us
     "relax_delay": 5 * md.t1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.time_domain.CPMG_Cfg, reps=1000, rounds=100)
 
 detune_ratio = 0.1
 
@@ -2737,7 +2695,6 @@ filename = f"{qub_name}_cpmg_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 cpmg_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -2805,8 +2762,8 @@ exp_cfg = {
     # "relax_delay": 70.5,  # us
     "relax_delay": 5 * md.t1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, shots=100000)
-print("readout length: ", cfg["modules"]["readout"]["ro_cfg"]["ro_length"])
+cfg = ml.make_cfg(exp_cfg, ze.singleshot.GE_Cfg, shots=100000)
+print("readout length: ", cfg.modules.readout.ro_cfg.ro_length)
 
 sh_ge_exp = ze.singleshot.GE_Exp()
 _ = sh_ge_exp.run(soc, soccfg, cfg)
@@ -2817,7 +2774,7 @@ _ = sh_ge_exp.run(soc, soccfg, cfg)
 md.fid, pops, result_dict, fig = sh_ge_exp.analyze(
     backend="center",
     # init_p0=0.0,
-    # length_ratio=cfg["readout"]["ro_cfg"]["ro_length"] / md.t1_with_tone,
+    # length_ratio=cfg.modules.readout.ro_cfg.ro_length / md.t1_with_tone,
     logscale=True,
     align_t1=True,
 )
@@ -2829,7 +2786,7 @@ filename = f"{qub_name}_sh_ge_{time.strftime('%H%M')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_ge_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg, str(result_dict)),
+    comment=str(result_dict),
 )
 ```
 
@@ -2886,7 +2843,7 @@ exp_cfg = {
     },
     "relax_delay": 70.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, shots=10000)
+cfg = ml.make_cfg(exp_cfg, ze.singleshot.CheckCfg, shots=10000)
 
 sh_exp = ze.singleshot.CheckExp()
 _ = sh_exp.run(soc, soccfg, cfg)
@@ -2902,9 +2859,7 @@ filename = f"{qub_name}_sh_g_{time.strftime('%H%M')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_ge_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(
-        cfg, f"g: {md.g_center:.3}, e: {md.e_center:.3}, radius: {md.ge_radius:.3}, "
-    ),
+    comment=f"g: {md.g_center:.3}, e: {md.e_center:.3}, radius: {md.ge_radius:.3}, ",
 )
 ```
 
@@ -2932,7 +2887,7 @@ exp_cfg = {
     # "relax_delay": 5 * t1,  # us
     "sweep": make_sweep(0.03, 0.2, 51),
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.singleshot.LenRabiCfg, reps=1000, rounds=100)
 
 sh_lenrabi_exp = ze.singleshot.LenRabiExp()
 _ = sh_lenrabi_exp.run(soc, soccfg, cfg, md.g_center, md.e_center, md.ge_radius)
@@ -2950,12 +2905,11 @@ filename = f"{qub_name}_sh_rabi_length_{time.strftime('%H%M')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_lenrabi_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(
-        cfg,
+    comment=(
         f"g: {md.g_center:.3}, "
         f"e: {md.e_center:.3}, "
         f"radius: {md.ge_radius:.3}, "
-        f"confusion:{md.confusion_matrix}",
+        f"confusion:{md.confusion_matrix}"
     ),
 )
 ```
@@ -2976,7 +2930,7 @@ exp_cfg = {
     "sweep": make_sweep(0.01, 50.1, 101),
     # "sweep": make_sweep(0.01*t1, 5 * t1, 51),
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, ze.singleshot.t1.T1Cfg, reps=1000, rounds=10)
 
 sh_t1_exp = ze.singleshot.t1.T1Exp()
 _ = sh_t1_exp.run(
@@ -2994,12 +2948,11 @@ filename = f"{qub_name}_sh_t1_{time.strftime('%H%M')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_t1_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(
-        cfg,
+    comment=(
         f"g: {md.g_center:.3}, "
         f"e: {md.e_center:.3}, "
         f"radius: {md.ge_radius:.3}, "
-        f"confusion:{md.confusion_matrix}",
+        f"confusion:{md.confusion_matrix}"
     ),
 )
 ```
@@ -3022,7 +2975,7 @@ exp_cfg = {
     "sweep": make_sweep(0.03, 20, 101),
     # "sweep": make_sweep(0.01*t1, 5 * t1, 51),
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, ze.singleshot.t1.T1WithToneCfg, reps=1000, rounds=10)
 
 sh_t1_with_tone_exp = ze.singleshot.t1.T1WithToneExp()
 _ = sh_t1_with_tone_exp.run(
@@ -3042,16 +2995,15 @@ md.t1_with_tone = t1
 ```
 
 ```python
-filename = f"{qub_name}_sh_t1_with_tone_gain{cfg['probe_pulse']['gain']:.3f}_{time.strftime('%H%M')}"
+filename = f"{qub_name}_sh_t1_with_tone_gain{cfg.modules.probe_pulse.gain:.3f}_{time.strftime('%H%M')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_t1_with_tone_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(
-        cfg,
+    comment=(
         f"g: {md.g_center:.3}, "
         f"e: {md.e_center:.3}, "
         f"radius: {md.ge_radius:.3}, "
-        f"confusion:{md.confusion_matrix}",
+        f"confusion:{md.confusion_matrix}"
     ),
 )
 ```
@@ -3082,7 +3034,7 @@ exp_cfg = {
         "length": make_sweep(0.01, 15, 501),
     },
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=1)
+cfg = ml.make_cfg(exp_cfg, ze.singleshot.t1.T1WithToneSweepCfg, reps=1000, rounds=1)
 
 sh_t1_with_tone_sweep_exp = ze.singleshot.t1.T1WithToneSweepExp()
 _ = sh_t1_with_tone_sweep_exp.run(
@@ -3102,13 +3054,12 @@ filename = f"{qub_name}_sh_t1_with_tone_sweep_{time.strftime('%H%M')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_t1_with_tone_sweep_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(
-        cfg,
+    comment=(
         f"g: {md.g_center:.3}, "
         f"e: {md.e_center:.3}, "
         f"radius: {md.ge_radius:.3}, "
         f"ac_stark_coeff: {md.ac_stark_coeff:.3}, "
-        f"confusion:{md.confusion_matrix}",
+        f"confusion:{md.confusion_matrix}"
     ),
 )
 ```
@@ -3143,7 +3094,7 @@ exp_cfg = {
     },
     "relax_delay": 20.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.singleshot.mist.PowerCfg, reps=1000, rounds=100)
 
 sh_mist_exp = ze.singleshot.mist.PowerExp()
 _ = sh_mist_exp.run(soc, soccfg, cfg, md.g_center, md.e_center, md.ge_radius)
@@ -3162,13 +3113,12 @@ filename = f"{qub_name}_sh_mist_g_short_{time.strftime('%H%M')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_mist_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(
-        cfg,
+    comment=(
         f"g: {md.g_center:.3}, "
         f"e: {md.e_center:.3}, "
         f"radius: {md.ge_radius:.3}, "
         f"ac_stark_coeff: {md.ac_stark_coeff:.3}, "
-        f"confusion:{md.confusion_matrix}",
+        f"confusion:{md.confusion_matrix}"
     ),
 )
 ```
@@ -3200,7 +3150,7 @@ exp_cfg = {
     },
     "relax_delay": 50.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, shots=1000000)
+cfg = ml.make_cfg(exp_cfg, ze.singleshot.CheckCfg, shots=1000000)
 
 sh_mist_exp = ze.singleshot.CheckExp()
 _ = sh_mist_exp.run(soc, soccfg, cfg)
@@ -3212,14 +3162,12 @@ fig = sh_mist_exp.analyze(md.g_center, md.e_center, md.ge_radius)
 ```
 
 ```python
-filename = f"{qub_name}_sh_mist_steady_gain{cfg['probe_pulse']['gain']:.4f}_{time.strftime('%H%M')}"
-# filename = f"{qub_name}_sh_e_mist_short_gain{cfg['probe_pulse']['gain']:.4f}_{time.strftime('%H%M')}"
+filename = f"{qub_name}_sh_mist_steady_gain{cfg.modules.probe_pulse.gain:.4f}_{time.strftime('%H%M')}"
+# filename = f"{qub_name}_sh_e_mist_short_gain{cfg.modules.probe_pulse.gain:.4f}_{time.strftime('%H%M')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_mist_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(
-        cfg, f"g: {md.g_center:.3}, e: {md.e_center:.3}, radius: {md.ge_radius:.3}, "
-    ),
+    comment=f"g: {md.g_center:.3}, e: {md.e_center:.3}, radius: {md.ge_radius:.3}, ",
 )
 ```
 
@@ -3262,23 +3210,22 @@ exp_cfg = {
     },
     "relax_delay": 5.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=2)
+cfg = ml.make_cfg(exp_cfg, ze.singleshot.AcStarkCfg, reps=1000, rounds=2)
 
 sh_ac_stark_exp = ze.singleshot.AcStarkExp()
 _ = sh_ac_stark_exp.run(soc, soccfg, cfg, md.g_center, md.e_center, md.ge_radius)
 ```
 
 ```python
-filename = f"{qub_name}_sh_ac_stark_rf{cfg['stark_pulse1']['freq']:.3f}MHz_{time.strftime('%H%M')}"
+filename = f"{qub_name}_sh_ac_stark_rf{cfg.modules.stark_pulse1.freq:.1f}MHz_{time.strftime('%H%M')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_ac_stark_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(
-        cfg,
+    comment=(
         f"g: {md.g_center:.3}, "
         f"e: {md.e_center:.3}, "
         f"radius: {md.ge_radius:.3}, "
-        f"confusion:{md.confusion_matrix}",
+        f"confusion:{md.confusion_matrix}"
     ),
 )
 ```
@@ -3347,7 +3294,7 @@ exp_cfg = {
     },
     "relax_delay": 50.0,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=100, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.mist.PowerDepCfg, reps=100, rounds=100)
 
 mist_exp = ze.mist.PowerDepExp()
 _ = mist_exp.run(soc, soccfg, cfg)
@@ -3365,7 +3312,7 @@ filename = f"{qub_name}_mist_e_{time.strftime('%H%M')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 mist_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg, f"ac_stark_coeff: {md.ac_stark_coeff:.3}"),
+    comment=f"ac_stark_coeff: {md.ac_stark_coeff:.3}",
 )
 ```
 
@@ -3412,7 +3359,7 @@ exp_cfg = {
     },
     "relax_delay": 0.1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=100, rounds=1000)
+cfg = ml.make_cfg(exp_cfg, ze.fastflux.TwotoneCfg, reps=100, rounds=1000)
 
 lf_twotone_exp = ze.fastflux.TwoToneExp()
 _ = lf_twotone_exp.run(soc, soccfg, cfg)
@@ -3428,7 +3375,6 @@ filename = f"{qub_name}_fastflux_twotone_{time.strftime('%H%M')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 lf_twotone_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -3470,7 +3416,7 @@ exp_cfg = {
     "readout_t": 1.05,
     "relax_delay": 10.1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=100, rounds=500)
+cfg = ml.make_cfg(exp_cfg, ze.fastflux.distortion.AccPhaseCfg, reps=100, rounds=500)
 
 lf_dt_ap_exp = ze.fastflux.distortion.AccPhaseExp()
 _ = lf_dt_ap_exp.run(soc, soccfg, cfg)
@@ -3486,7 +3432,6 @@ filename = f"{qub_name}_flux_distortion_accphase_{time.strftime('%H%M')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 lf_dt_ap_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -3521,7 +3466,7 @@ exp_cfg = {
     "readout_t": 0.95,
     "relax_delay": 0.1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=1000)
+cfg = ml.make_cfg(exp_cfg, ze.fastflux.distortion.PhaseCfg, reps=1000, rounds=1000)
 
 lf_dt_p_exp = ze.fastflux.distortion.PhaseExp()
 _ = lf_dt_p_exp.run(soc, soccfg, cfg)
@@ -3537,7 +3482,6 @@ filename = f"{qub_name}_flux_distortion_phase_{time.strftime('%H%M')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 lf_dt_p_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -3580,7 +3524,7 @@ exp_cfg = {
     "readout_t": 1.25,
     "relax_delay": 0.1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=100, rounds=1000)
+cfg = ml.make_cfg(exp_cfg, ze.fastflux.distortion.FreqCfg, reps=100, rounds=1000)
 
 lf_dt_freq_exp = ze.fastflux.distortion.FreqExp()
 _ = lf_dt_freq_exp.run(soc, soccfg, cfg)
@@ -3596,7 +3540,6 @@ filename = f"{qub_name}_flux_distortion_freq_{time.strftime('%H%M')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 lf_dt_freq_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
@@ -3632,7 +3575,7 @@ exp_cfg = {
     },
     "relax_delay": 10.1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=100, rounds=1000)
+cfg = ml.make_cfg(exp_cfg, ze.fastflux.T1Cfg, reps=100, rounds=1000)
 
 lf_t1_exp = ze.fastflux.T1Exp()
 _ = lf_t1_exp.run(soc, soccfg, cfg)
@@ -3648,7 +3591,6 @@ filename = f"{qub_name}_fastflux_t1_{time.strftime('%H%M')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 lf_t1_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 

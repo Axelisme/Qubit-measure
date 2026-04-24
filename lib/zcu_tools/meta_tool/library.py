@@ -133,7 +133,7 @@ class ModuleLibrary(SyncFile):
         for name, patch in exp_cfg.get("dev", {}).items():
             if name not in dev_cfg:
                 raise KeyError(f"Device {name} not found in global device manager.")
-            dev_cfg[name].update(**patch)
+            dev_cfg[name] = dev_cfg[name].with_updates(**patch)
         exp_cfg["dev"] = dev_cfg
 
         modules: dict[str, Union[str, dict, ModuleCfg]] = exp_cfg.get("modules", {})

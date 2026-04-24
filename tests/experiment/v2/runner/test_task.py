@@ -1,5 +1,4 @@
 import numpy as np
-
 from zcu_tools.experiment.v2.runner.state import TaskState
 from zcu_tools.experiment.v2.runner.task import Task
 

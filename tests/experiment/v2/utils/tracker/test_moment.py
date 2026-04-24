@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import numpy as np
-
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 
 

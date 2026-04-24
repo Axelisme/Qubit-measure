@@ -1,5 +1,4 @@
 import numpy as np
-
 from zcu_tools.utils.fitting.base import lorfunc, sincfunc
 from zcu_tools.utils.fitting.qubfreq import fit_qubit_freq
 

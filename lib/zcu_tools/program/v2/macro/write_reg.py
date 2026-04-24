@@ -5,7 +5,6 @@ from numbers import Integral
 
 from qick.asm_v2 import AsmInst, Macro
 
-
 logger = logging.getLogger(__name__)
 
 

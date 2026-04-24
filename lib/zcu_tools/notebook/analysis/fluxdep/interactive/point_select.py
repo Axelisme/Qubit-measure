@@ -10,11 +10,11 @@ from matplotlib.patches import Ellipse
 from numpy.typing import NDArray
 from typing_extensions import Optional
 
-from zcu_tools.notebook.persistance import SpectrumResult
 from zcu_tools.notebook.analysis.fluxdep.processing import (
     cast2real_and_norm,
     downsample_points,
 )
+from zcu_tools.notebook.persistance import SpectrumResult
 
 
 class InteractiveSelector:

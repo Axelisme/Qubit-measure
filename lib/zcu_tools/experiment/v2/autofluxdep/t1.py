@@ -157,7 +157,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
         len_sweep = make_sweep(*cfg_temp.sweep_range, self.num_expts)
         self.lengths = sweep2array(len_sweep, "time", {"soccfg": ctx.env["soccfg"]})
 
-        cfg = cfg_temp.model_dump(mode="python")
+        cfg = cfg_temp.to_dict()
         del cfg["sweep_range"]
         deepupdate(
             cfg,

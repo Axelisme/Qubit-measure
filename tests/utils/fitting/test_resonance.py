@@ -1,5 +1,4 @@
 import numpy as np
-
 from zcu_tools.utils.fitting.resonance import (
     HangerModel,
     TransmissionModel,

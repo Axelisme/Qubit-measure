@@ -134,7 +134,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
         if cfg_temp is None:
             return  # skip this task
 
-        cfg = cfg_temp.model_dump(mode="python")
+        cfg = cfg_temp.to_dict()
         deepupdate(
             cfg,
             {"dev": ctx.cfg.dev, "sweep": {"gain": self.gain_sweep}},

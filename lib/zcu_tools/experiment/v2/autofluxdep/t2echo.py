@@ -172,7 +172,7 @@ class T2EchoTask(MeasurementTask[T2EchoResult, T_RootResult, T2EchoPlotDict]):
             len_sweep, "time", {"soccfg": ctx.env["soccfg"], "scaler": 0.5}
         )
 
-        cfg = cfg_temp.model_dump(mode="python")
+        cfg = cfg_temp.to_dict()
         del cfg["sweep_range"]
         deepupdate(
             cfg,

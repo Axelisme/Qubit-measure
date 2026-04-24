@@ -156,7 +156,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         freq_sweep = make_sweep(*cfg_temp.freq_range, self.freq_expts)
         gain_sweep = make_sweep(*cfg_temp.gain_range, self.gain_expts)
 
-        cfg = cfg_temp.model_dump(mode="python")
+        cfg = cfg_temp.to_dict()
         del cfg["freq_range"]
         del cfg["gain_range"]
         deepupdate(

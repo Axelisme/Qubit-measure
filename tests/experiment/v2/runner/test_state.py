@@ -1,6 +1,5 @@
 import numpy as np
 import pytest
-
 from zcu_tools.experiment.v2.runner.state import TaskState
 
 

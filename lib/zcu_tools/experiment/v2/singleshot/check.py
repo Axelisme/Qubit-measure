@@ -35,7 +35,7 @@ CheckResult: TypeAlias = NDArray[np.complex128]
 class CheckModuleCfg(BaseModel):
     reset: Optional[ResetCfg] = None
     init_pulse: Optional[PulseCfg] = None
-    probe_pulse: Optional[PulseCfg] = None
+    probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing_extensions import Union
 from qick.asm_v2 import AsmV2, QickParam
+from typing_extensions import Union
 
-from .loop import CloseLoopReg, OpenLoopReg
-from .write_reg import WriteRegOp
 from .debug import PrintTimeStamp
 from .delay import DelayRegAuto
+from .loop import CloseLoopReg, OpenLoopReg
+from .write_reg import WriteRegOp
 
 
 class ImproveAsmV2(AsmV2):

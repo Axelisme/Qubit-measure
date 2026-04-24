@@ -182,7 +182,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
 
         len_sweep = make_sweep(*cfg_temp.sweep_range, self.num_expts)
 
-        cfg = cfg_temp.model_dump(mode="python")
+        cfg = cfg_temp.to_dict()
         del cfg["sweep_range"]
         deepupdate(
             cfg,

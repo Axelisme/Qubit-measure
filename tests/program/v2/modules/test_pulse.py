@@ -1,5 +1,4 @@
 import pytest
-
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 

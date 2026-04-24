@@ -151,7 +151,8 @@ executor = (
                             "relax_delay": 0.1,
                             "reps": 1000,
                             "rounds": 100,
-                        }
+                        },
+                        zefd.QubitFreqCfgTemplate,
                     )
                 ),
                 earlystop_snr=50,
@@ -180,7 +181,8 @@ executor = (
                             "reps": 1000,
                             "rounds": 10,
                             "sweep_range": (0.05, max(5 * prev_pi_len, 0.5)),
-                        }
+                        },
+                        zefd.LenRabiCfgTemplate,
                     )
                 ),
                 earlystop_snr=30,
@@ -211,7 +213,8 @@ executor = (
                                 max(0.0, prev_best_gain - 0.05),
                                 min(1.0, prev_best_gain + 0.05),
                             ),
-                        }
+                        },
+                        zefd.RO_OptCfgTemplate,
                     )
                 ),
             ),
@@ -232,7 +235,8 @@ executor = (
                             "reps": 1000,
                             "rounds": 10,
                             "sweep_range": (0.5, max(1.0, 5 * prev_t1)),
-                        }
+                        },
+                        zefd.T1CfgTemplate,
                     )
                 ),
                 earlystop_snr=20,
@@ -256,7 +260,8 @@ executor = (
                             "reps": 1000,
                             "rounds": 10,
                             "sweep_range": (0, 2.5 * prev_t2r),
-                        }
+                        },
+                        zefd.T2RamseyCfgTemplate,
                     )
                 ),
                 earlystop_snr=20,
@@ -282,7 +287,8 @@ executor = (
                             "reps": 1000,
                             "rounds": 10,
                             "sweep_range": (0, 2.5 * prev_t2e),
-                        }
+                        },
+                        zefd.T2EchoCfgTemplate,
                     )
                 ),
                 earlystop_snr=20,
@@ -292,12 +298,7 @@ executor = (
     .record_animation(os.path.join(em.flux_dir, f"{filename}.mp4"))
 )
 _ = executor.run(
-    dev_cfg={
-        "flux_yoko": {
-            **flux_yoko.get_info(),
-            "label": "flux_dev",
-        }
-    },
+    dev_cfg={"flux_yoko": flux_yoko.get_info().with_updates(label="flux_dev")},
     predictor=preditor.clone(),
     env_dict={"soccfg": soccfg, "soc": soc, "ml": ml.clone()},
     retry_time=0,

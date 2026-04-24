@@ -2,7 +2,6 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-
 from zcu_tools.experiment.v2.runner.base import AbsTask
 from zcu_tools.experiment.v2.runner.repeat import (
     RepeatOverTime,
@@ -29,7 +28,7 @@ def test_repeat_over_time_updates_repeat_idx(monkeypatch):
 
     r = RepeatOverTime("r", num_times=3, task=sub, interval=0.0)
     state = TaskState(root_data=r.get_default_result(), cfg={})
-    r.init(state)
+    r.init()
     r.run(state)
     r.cleanup()
 

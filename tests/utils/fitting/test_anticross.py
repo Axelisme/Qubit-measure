@@ -1,5 +1,4 @@
 import numpy as np
-
 from zcu_tools.utils.fitting.anticross import fit_anticross, get_predict_ys
 from zcu_tools.utils.fitting.base import retrieve_params
 

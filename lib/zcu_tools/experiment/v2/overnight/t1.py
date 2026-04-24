@@ -94,7 +94,7 @@ class T1PlotAndSaveMixin:
 
         x_info = {"name": "Iteration", "unit": "a.u.", "values": iters}
 
-        comment = make_comment(self._init_cfg.model_dump(mode="python"), comment)
+        comment = make_comment(self._init_cfg.to_dict(), comment)
 
         lengths = result["lengths"][0]
 
@@ -158,12 +158,10 @@ class T1Cfg(ProgramV2Cfg, ExpCfgModel):
 
 class T1Task(T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
     def __init__(
-        self, cfg: dict[str, Any], *, acquire_kwargs: Optional[dict[str, Any]] = None
+        self, cfg: T1Cfg, *, acquire_kwargs: Optional[dict[str, Any]] = None
     ) -> None:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        _cfg = T1Cfg.model_validate(deepcopy(cfg))
-        self.cfg = _cfg
-        self._init_cfg = _cfg.model_copy(deep=True)
+        self.cfg = cfg
+        self._init_cfg = cfg.model_copy(deep=True)
 
         setup_devices(self.cfg, progress=True)
 
@@ -249,12 +247,10 @@ class T1WithToneTask(
     T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotDict]
 ):
     def __init__(
-        self, cfg: dict[str, Any], *, acquire_kwargs: Optional[dict[str, Any]] = None
+        self, cfg: T1WithToneCfg, *, acquire_kwargs: Optional[dict[str, Any]] = None
     ) -> None:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        _cfg = T1WithToneCfg.model_validate(deepcopy(cfg))
-        self.cfg = _cfg
-        self._init_cfg = _cfg.model_copy(deep=True)
+        self.cfg = cfg
+        self._init_cfg = cfg.model_copy(deep=True)
 
         # initial values, may be rounded later
         self.lengths = sweep2array(self.cfg.sweep.length)

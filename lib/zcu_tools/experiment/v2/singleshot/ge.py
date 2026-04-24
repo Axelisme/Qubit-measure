@@ -20,8 +20,8 @@ from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
-    Readout,
-    ReadoutCfg,
+    PulseReadout,
+    PulseReadoutCfg,
     Reset,
     ResetCfg,
 )
@@ -167,7 +167,7 @@ class GEModuleCfg(BaseModel):
     reset: Optional[ResetCfg] = None
     init_pulse: Optional[PulseCfg] = None
     probe_pulse: PulseCfg
-    readout: ReadoutCfg
+    readout: PulseReadoutCfg
 
 
 class GE_Cfg(ProgramV2Cfg, ExpCfgModel):
@@ -202,7 +202,7 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
                     Reset("reset", modules.reset),
                     Pulse("init_pulse", modules.init_pulse),
                     Pulse("probe_pulse", probe_cfg),
-                    Readout("readout", modules.readout),
+                    PulseReadout("readout", modules.readout),
                 ],
             )
             prog.acquire(soc, progress=True)

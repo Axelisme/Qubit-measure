@@ -1,7 +1,6 @@
 from unittest.mock import MagicMock
 
 import numpy as np
-
 from zcu_tools.experiment.v2.runner.base import AbsTask
 from zcu_tools.experiment.v2.runner.batch import BatchTask
 from zcu_tools.experiment.v2.runner.state import TaskState
