@@ -25,7 +25,7 @@ class ConfigBase(BaseModel):
         return cfg.model_validate(cfg)
 
     def to_dict(self) -> dict[str, Any]:
-        return self.model_dump(mode="python", by_alias=True, exclude_none=True)
+        return self.model_dump(mode="python", exclude_none=True)
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(\n{self.to_dict()}\n)"
@@ -51,17 +51,13 @@ class ConfigBase(BaseModel):
                     return "{}"
                 lines = ["{"]
                 for k, v in value.items():
-                    lines.append(
-                        f"{inner_pad}{k!r}: {format_value(v, indent + 1)},"
-                    )
+                    lines.append(f"{inner_pad}{k!r}: {format_value(v, indent + 1)},")
                 lines.append(f"{pad}}}")
                 return "\n".join(lines)
             if isinstance(value, list):
                 if not value:
                     return "[]"
-                if all(
-                    not isinstance(v, (ConfigBase, dict, list)) for v in value
-                ):
+                if all(not isinstance(v, (ConfigBase, dict, list)) for v in value):
                     return repr(value)
                 lines = ["["]
                 for v in value:

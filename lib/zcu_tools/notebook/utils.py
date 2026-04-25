@@ -58,21 +58,47 @@ def make_sweep(
     if expts is None:
         assert stop is not None, err_str
         assert step is not None, err_str
-        expts = int((stop - start) / step + 0.99)
+
+        if step == 0:
+            assert stop == start, (
+                f"stop must equal start when step is 0, got start={start}, stop={stop}"
+            )
+            expts = 1
+        else:
+            expts_float = (stop - start) / step + 1
+            expts = int(round(expts_float))
+            assert expts > 0, f"expts must be greater than 0, but got {expts}"
+            assert abs(expts_float - expts) < 1e-9, (
+                "Inconsistent sweep settings: stop must satisfy "
+                "start + step * (expts - 1). "
+                f"got start={start}, stop={stop}, step={step}, "
+                f"derived_expts={expts_float}"
+            )
     elif step is None:
-        assert stop is not None, err_str
         assert expts is not None, err_str
-        step = (stop - start) / expts
+        if expts == 1:
+            if stop is None:
+                stop = start
+            assert stop == start, (
+                f"for expts == 1, stop must equal start, got start={start}, stop={stop}"
+            )
+            step = 0
+        else:
+            assert stop is not None, err_str
+            step = (stop - start) / (expts - 1)
 
     if force_int:
         start = int(start)
         step = int(step)
         expts = int(expts)
 
-    stop = start + step * expts
+    stop = start + step * (expts - 1)
 
     assert expts > 0, f"expts must be greater than 0, but got {expts}"
-    assert step != 0, f"step must not be zero, but got {step}"
+    if expts == 1:
+        assert step == 0, f"for expts == 1, step must be 0, but got {step}"
+    else:
+        assert step != 0, f"step must not be zero when expts > 1, but got {step}"
 
     return SweepCfg(start=start, stop=stop, expts=expts, step=step)
 
