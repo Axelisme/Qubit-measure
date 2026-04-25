@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 
 import numpy as np
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.runner.base import AbsTask
 from zcu_tools.experiment.v2.runner.soft import Scan
 from zcu_tools.experiment.v2.runner.state import TaskState
@@ -21,22 +22,21 @@ def test_scan_before_each_called_per_value_in_order():
     )
 
     root = scan.get_default_result()
-    state = TaskState(root_data=root, cfg={})
+    state = TaskState(root_data=root, cfg=ExpCfgModel())
 
-    scan.init(state)
+    scan.init(dynamic_pbar=False)
     scan.run(state)
     scan.cleanup()
 
-    # init fires first element once, run fires all three
-    assert calls == [(0, 10), (0, 10), (1, 20), (2, 30)]
+    assert calls == [(0, 10), (1, 20), (2, 30)]
     assert sub.run.call_count == 3
 
 
 def test_scan_empty_values_skips_sub_run():
     sub = _mock_subtask()
     scan = Scan("sw", [], before_each=lambda i, s, v: None, task=sub)
-    state = TaskState(root_data=scan.get_default_result(), cfg={})
-    scan.init(state)
+    state = TaskState(root_data=scan.get_default_result(), cfg=ExpCfgModel())
+    scan.init(dynamic_pbar=False)
     scan.run(state)
     scan.cleanup()
     sub.run.assert_not_called()
