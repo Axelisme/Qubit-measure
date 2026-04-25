@@ -55,28 +55,16 @@ class PulseReadoutCfg(AbsReadoutCfg):
 
     @classmethod
     def _from_dict(cls, raw_cfg: dict[str, Any], ml: ModuleLibrary) -> Self:
-        raw_cfg = deepcopy(raw_cfg)
-
-        pulse_cfg = raw_cfg["pulse_cfg"]
-        if isinstance(pulse_cfg, str):
-            pulse_cfg = ml.get_module(pulse_cfg)
-        raw_cfg["pulse_cfg"] = pulse_cfg
-
-        ro_cfg = raw_cfg["ro_cfg"]
-        if isinstance(ro_cfg, str):
-            ro_cfg = ml.get_module(ro_cfg)
-        raw_cfg["ro_cfg"] = ro_cfg
-
         # auto derive ro_ch/ro_freq from pulse_cfg.ch/freq
-        if isinstance(pulse_cfg, dict):
+        if isinstance((pulse_cfg := raw_cfg["pulse_cfg"]), dict):
             ch = pulse_cfg.get("ch")
             freq = pulse_cfg.get("freq")
-            if isinstance(ro_cfg, dict):
+            if isinstance((ro_cfg := raw_cfg["ro_cfg"]), dict):
                 ro_cfg.setdefault("ro_ch", ch)
                 ro_cfg.setdefault("ro_freq", freq)
 
-        raw_cfg["pulse_cfg"] = PulseCfg.from_raw(pulse_cfg, ml)
-        raw_cfg["ro_cfg"] = DirectReadoutCfg.from_raw(ro_cfg, ml)
+        raw_cfg["pulse_cfg"] = PulseCfg.from_raw(raw_cfg["pulse_cfg"], ml)
+        raw_cfg["ro_cfg"] = DirectReadoutCfg.from_raw(raw_cfg["ro_cfg"], ml)
 
         return super()._from_dict(raw_cfg, ml)
 

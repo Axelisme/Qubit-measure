@@ -36,13 +36,11 @@ class PulseCfg(ModuleCfg):
 
     @classmethod
     def _from_dict(cls, raw_cfg: dict[str, Any], ml: ModuleLibrary) -> Self:
-        waveform_cfg = raw_cfg["waveform"]
-        if isinstance(waveform_cfg, str):
-            waveform_cfg = ml.get_waveform(waveform_cfg)
-        raw_cfg["waveform"] = waveform_cfg
+        if isinstance(raw_cfg["waveform"], str):
+            raw_cfg["waveform"] = ml.get_waveform(raw_cfg["waveform"])
 
-        if isinstance(waveform_cfg, dict):
-            raw_cfg["waveform"] = WaveformCfg.from_dict(waveform_cfg, ml)
+        if isinstance(raw_cfg["waveform"], dict):
+            raw_cfg["waveform"] = WaveformCfg.from_dict(raw_cfg["waveform"], ml)
 
         return super()._from_dict(raw_cfg, ml)
 

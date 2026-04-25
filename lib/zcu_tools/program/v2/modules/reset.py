@@ -43,13 +43,7 @@ class PulseResetCfg(AbsResetCfg):
 
     @classmethod
     def _from_dict(cls, raw_cfg: dict[str, Any], ml: ModuleLibrary) -> Self:
-        raw_cfg = deepcopy(raw_cfg)
-
-        pulse_cfg = raw_cfg["pulse_cfg"]
-        if isinstance(pulse_cfg, str):
-            pulse_cfg = ml.get_module(pulse_cfg)
-
-        raw_cfg["pulse_cfg"] = PulseCfg.from_raw(pulse_cfg, ml)
+        raw_cfg["pulse_cfg"] = PulseCfg.from_raw(raw_cfg["pulse_cfg"], ml)
 
         return super()._from_dict(raw_cfg, ml)
 
@@ -65,18 +59,8 @@ class TwoPulseResetCfg(AbsResetCfg):
 
     @classmethod
     def _from_dict(cls, raw_cfg: dict[str, Any], ml: ModuleLibrary) -> Self:
-        raw_cfg = deepcopy(raw_cfg)
-
-        pulse1_cfg = raw_cfg["pulse1_cfg"]
-        if isinstance(pulse1_cfg, str):
-            pulse1_cfg = ml.get_module(pulse1_cfg)
-
-        pulse2_cfg = raw_cfg["pulse2_cfg"]
-        if isinstance(pulse2_cfg, str):
-            pulse2_cfg = ml.get_module(pulse2_cfg)
-
-        raw_cfg["pulse1_cfg"] = PulseCfg.from_raw(pulse1_cfg, ml)
-        raw_cfg["pulse2_cfg"] = PulseCfg.from_raw(pulse2_cfg, ml)
+        raw_cfg["pulse1_cfg"] = PulseCfg.from_raw(raw_cfg["pulse1_cfg"], ml)
+        raw_cfg["pulse2_cfg"] = PulseCfg.from_raw(raw_cfg["pulse2_cfg"], ml)
 
         return super()._from_dict(raw_cfg, ml)
 
@@ -101,21 +85,9 @@ class BathResetCfg(AbsResetCfg):
 
     @classmethod
     def _from_dict(cls, raw_cfg: dict[str, Any], ml: ModuleLibrary) -> Self:
-        raw_cfg = deepcopy(raw_cfg)
-
-        cavity_tone_cfg = raw_cfg["cavity_tone_cfg"]
-        if isinstance(cavity_tone_cfg, str):
-            cavity_tone_cfg = ml.get_module(cavity_tone_cfg)
-        qubit_tone_cfg = raw_cfg["qubit_tone_cfg"]
-        if isinstance(qubit_tone_cfg, str):
-            qubit_tone_cfg = ml.get_module(qubit_tone_cfg)
-        pi2_cfg = raw_cfg["pi2_cfg"]
-        if isinstance(pi2_cfg, str):
-            pi2_cfg = ml.get_module(pi2_cfg)
-
-        raw_cfg["cavity_tone_cfg"] = PulseCfg.from_raw(cavity_tone_cfg, ml)
-        raw_cfg["qubit_tone_cfg"] = PulseCfg.from_raw(qubit_tone_cfg, ml)
-        raw_cfg["pi2_cfg"] = PulseCfg.from_raw(pi2_cfg, ml)
+        raw_cfg["cavity_tone_cfg"] = PulseCfg.from_raw(raw_cfg["cavity_tone_cfg"], ml)
+        raw_cfg["qubit_tone_cfg"] = PulseCfg.from_raw(raw_cfg["qubit_tone_cfg"], ml)
+        raw_cfg["pi2_cfg"] = PulseCfg.from_raw(raw_cfg["pi2_cfg"], ml)
 
         return super()._from_dict(raw_cfg, ml)
 

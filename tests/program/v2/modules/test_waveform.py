@@ -1,6 +1,7 @@
 import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.program.v2.modules.waveform import (
+    AbsWaveform,
     ArbWaveformCfg,
     ConstWaveform,
     ConstWaveformCfg,
@@ -72,5 +73,5 @@ def test_waveform_registry_rejects_duplicate():
     with pytest.raises(ValueError):
 
         @Waveform.register_waveform("const")
-        class Dup:
+        class Dup(AbsWaveform):
             pass

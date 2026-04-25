@@ -21,7 +21,7 @@ def test_pulsecfg_validates_nqz():
         PulseCfg(
             waveform=ConstWaveformCfg(length=0.1),
             ch=0,
-            nqz=3,  # only 1 or 2 allowed
+            nqz=3,  # type: ignore , only 1 or 2 allowed
             freq=5000.0,
             gain=0.3,
         )

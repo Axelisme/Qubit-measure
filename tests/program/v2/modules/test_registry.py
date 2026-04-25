@@ -36,8 +36,8 @@ def test_register_different_freq_is_new():
 
 def test_calc_name_stable_with_qickparam():
     reg = PulseRegistry()
-    cfg1 = _make_cfg(freq=QickParam(start=5000.0, spans={"s": 1.0}))
-    cfg2 = _make_cfg(freq=QickParam(start=5000.0, spans={"s": 1.0}))
+    cfg1 = _make_cfg(freq=QickParam(start=5000.0, spans={"s": 1.0}))  # type: ignore
+    cfg2 = _make_cfg(freq=QickParam(start=5000.0, spans={"s": 1.0}))  # type: ignore
     assert reg.calc_name(cfg1) == reg.calc_name(cfg2)
 
 
