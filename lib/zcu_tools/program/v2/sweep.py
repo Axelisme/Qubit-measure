@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing_extensions import TypedDict
+from zcu_tools.config import ConfigBase
 
 
-class SweepCfg(TypedDict, closed=True):
+class SweepCfg(ConfigBase):
     start: float
     stop: float
     expts: int

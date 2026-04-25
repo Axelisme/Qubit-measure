@@ -122,7 +122,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
             ).acquire(ctx.env["soc"], progress=False, round_hook=update_hook)
 
         self.task = Task[T_RootResult, list[NDArray[np.float64]], MistCfg](
-            measure_fn=measure_fn, result_shape=(self.gain_sweep["expts"],)
+            measure_fn=measure_fn, result_shape=(self.gain_sweep.expts,)
         )
 
     def init(self, dynamic_pbar=False) -> None:

@@ -56,6 +56,9 @@ def format_sweep1D(sweep: Union[Mapping[str, T], T], name: str) -> dict[str, T]:
     if isinstance(sweep, np.ndarray) or isinstance(sweep, list):
         return {name: cast(T, np.asarray(sweep))}
 
+    elif isinstance(sweep, SweepCfg):
+        return {name: cast(T, sweep)}
+
     elif isinstance(sweep, dict):
         # conclude by key "start" and "stop"
         if "start" in sweep and "stop" in sweep:

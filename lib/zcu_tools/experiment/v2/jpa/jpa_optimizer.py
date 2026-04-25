@@ -133,9 +133,9 @@ class JPAOptimizer:
     ) -> None:
         # Initialize bounds
         self.bounds = ParameterBounds(
-            flux=(flux_sweep["start"], flux_sweep["stop"]),
-            freq=(freq_sweep["start"], freq_sweep["stop"]),
-            power=(gain_sweep["start"], gain_sweep["stop"]),
+            flux=(flux_sweep.start, flux_sweep.stop),
+            freq=(freq_sweep.start, freq_sweep.stop),
+            power=(gain_sweep.start, gain_sweep.stop),
         )
 
         # Calculate budget allocation
@@ -199,9 +199,9 @@ class JPAOptimizer:
         phase1_budget: int,
     ) -> int:
         """Calculate the number of flux grid points based on sweep ratios."""
-        n_flux = max(1, flux_sweep["expts"])
-        n_freq = max(1, freq_sweep["expts"])
-        n_gain = max(1, gain_sweep["expts"])
+        n_flux = max(1, flux_sweep.expts)
+        n_freq = max(1, freq_sweep.expts)
+        n_gain = max(1, gain_sweep.expts)
 
         # Scale factor to map total product of expts to phase1_budget
         # n_flux_eff * n_freq_eff * n_gain_eff ~= phase1_budget

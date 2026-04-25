@@ -133,7 +133,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         )
         gains = np.sqrt(
             np.linspace(
-                gain_sweep["start"] ** 2, gain_sweep["stop"] ** 2, gain_sweep["expts"]
+                gain_sweep.start ** 2, gain_sweep.stop ** 2, gain_sweep.expts
             )
         )
         gains = round_zcu_gain(gains, soccfg, modules.stark_pulse1.ch)
@@ -394,7 +394,7 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
         )
         gains = np.sqrt(
             np.linspace(
-                gain_sweep["start"] ** 2, gain_sweep["stop"] ** 2, gain_sweep["expts"]
+                gain_sweep.start ** 2, gain_sweep.stop ** 2, gain_sweep.expts
             )
         )
         gains = round_zcu_gain(gains, soccfg, modules.stark_pulse.ch)

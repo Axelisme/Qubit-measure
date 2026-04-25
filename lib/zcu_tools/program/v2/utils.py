@@ -26,7 +26,7 @@ def sweep2param(name: str, sweep: SweepCfg) -> QickParam:
     """
 
     # convert formatted sweep to qick v2 sweep param
-    return QickSweep1D(name, sweep["start"], sweep["stop"])
+    return QickSweep1D(name, sweep.start, sweep.stop)
 
 
 def param2str(param: Union[float, QickParam]) -> str:

@@ -166,7 +166,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                     * detune_ratio
                     * sweep2param(
                         "length",
-                        make_sweep(start=0, step=1, expts=length_sweep["expts"]),
+                        make_sweep(start=0, step=1, expts=length_sweep.expts),
                     )
                 )
 

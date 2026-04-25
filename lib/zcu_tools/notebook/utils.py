@@ -52,7 +52,7 @@ def make_sweep(
         AssertionError: 當 `expts` 小於等於 0 或 `step` 為 0 時拋出。
 
     Returns:
-        dict: 包含掃描參數的字典，鍵為 "start", "stop", "expts", "step"。
+        SweepCfg: 包含掃描參數的設定物件，欄位為 start、stop、expts、step。
     """
     err_str = "Not enough information to define a sweep."
     if expts is None:
@@ -74,7 +74,7 @@ def make_sweep(
     assert expts > 0, f"expts must be greater than 0, but got {expts}"
     assert step != 0, f"step must not be zero, but got {step}"
 
-    return SweepCfg({"start": start, "stop": stop, "expts": expts, "step": step})
+    return SweepCfg(start=start, stop=stop, expts=expts, step=step)
 
 
 def get_ip_address(iface: str) -> str:

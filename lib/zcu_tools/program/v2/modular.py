@@ -47,8 +47,8 @@ class ModularProgramV2(MyProgramV2):
         # add v2 sweep loops
         if self.sweep_dict is not None:
             for name, sweep in self.sweep_dict:
-                if isinstance(sweep, dict):
-                    self.add_loop(name, count=sweep["expts"])
+                if isinstance(sweep, SweepCfg):
+                    self.add_loop(name, count=sweep.expts)
                 else:
                     self.add_loop(name, count=sweep)
 

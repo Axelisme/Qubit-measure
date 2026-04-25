@@ -131,9 +131,9 @@ def apply_round(
 
 
 def round_sweep_dict(sweep: SweepCfg, *args, **kwargs) -> SweepCfg:
-    expts = sweep["expts"]
-    span = sweep["stop"] - sweep["start"]
-    round_start = apply_round(sweep["start"], *args, **kwargs)
+    expts = sweep.expts
+    span = sweep.stop - sweep.start
+    round_start = apply_round(sweep.start, *args, **kwargs)
     round_step = apply_round(span / (expts - 1), *args, **kwargs)
     round_span = (expts - 1) * round_step
     round_stop = round_start + round_span
@@ -150,11 +150,11 @@ def sweep2array(
     if round_info is None:
         round_info = {}
 
-    if isinstance(sweep, dict):
+    if isinstance(sweep, SweepCfg):
         round_sweep = round_sweep_dict(sweep, round_type, round_info)
 
-        return round_sweep["start"] + np.linspace(
-            0, round_sweep["stop"] - round_sweep["start"], round_sweep["expts"]
+        return round_sweep.start + np.linspace(
+            0, round_sweep.stop - round_sweep.start, round_sweep.expts
         )
     elif isinstance(sweep, list) or isinstance(sweep, np.ndarray):
         if not allow_array:

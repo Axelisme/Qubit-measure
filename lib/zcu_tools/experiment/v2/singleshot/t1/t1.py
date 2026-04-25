@@ -78,12 +78,12 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         length_sweep = cfg.sweep.length
 
         if uniform:
-            assert isinstance(length_sweep, dict)
+            assert isinstance(length_sweep, SweepCfg)
             lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
         else:
-            if isinstance(length_sweep, dict):
+            if isinstance(length_sweep, SweepCfg):
                 lengths = np.geomspace(
-                    length_sweep["start"], length_sweep["stop"], length_sweep["expts"]
+                    length_sweep.start, length_sweep.stop, length_sweep.expts
                 )
             else:
                 lengths = np.asarray(length_sweep)

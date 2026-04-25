@@ -181,7 +181,7 @@ class T2EchoTask(MeasurementTask[T2EchoResult, T_RootResult, T2EchoPlotDict]):
             behavior="force",
         )
         cfg = T2EchoCfg.model_validate(cfg)
-        cfg.activate_detune = self.detune_ratio / len_sweep["step"]
+        cfg.activate_detune = self.detune_ratio / len_sweep.step
         self.last_cfg = cfg
 
         self.task.set_pbar_n(cfg.rounds)

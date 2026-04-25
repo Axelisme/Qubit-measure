@@ -180,7 +180,7 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
             {"dev": ctx.cfg.dev, "sweep": {"length": len_sweep}},
             behavior="force",
         )
-        cfg["activate_detune"] = self.detune_ratio / len_sweep["step"]
+        cfg["activate_detune"] = self.detune_ratio / len_sweep.step
         cfg = T2RamseyCfg.model_validate(cfg)
         self.last_cfg = cfg
 

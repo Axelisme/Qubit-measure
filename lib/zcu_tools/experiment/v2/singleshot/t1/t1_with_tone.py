@@ -74,18 +74,18 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         length_sweep = cfg.sweep.length
 
         if uniform:
-            assert isinstance(length_sweep, dict)
+            assert isinstance(length_sweep, SweepCfg)
             lengths = sweep2array(
                 length_sweep,
                 "time",
                 {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
             )
         else:
-            if isinstance(length_sweep, dict):
+            if isinstance(length_sweep, SweepCfg):
                 lengths = np.geomspace(
-                    length_sweep["start"],
-                    length_sweep["stop"],
-                    length_sweep["expts"],
+                    length_sweep.start,
+                    length_sweep.stop,
+                    length_sweep.expts,
                     dtype=np.float64,
                 )
             else:

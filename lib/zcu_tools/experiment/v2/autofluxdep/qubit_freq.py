@@ -124,7 +124,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
             )
 
         self.task = Task[T_RootResult, list[NDArray[np.float64]], QubitFreqCfg](
-            measure_fn=measure_fn, result_shape=(self.detune_sweep["expts"],)
+            measure_fn=measure_fn, result_shape=(self.detune_sweep.expts,)
         )
 
     def init(self, dynamic_pbar=False) -> None:

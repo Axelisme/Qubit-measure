@@ -84,12 +84,12 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
         length_sweep = cfg.sweep.length
 
-        if isinstance(length_sweep, dict):
+        if isinstance(length_sweep, SweepCfg):
             lengths = (
                 np.linspace(
-                    length_sweep["start"] ** (1 / 1.3),
-                    length_sweep["stop"] ** (1 / 1.3),
-                    length_sweep["expts"],
+                    length_sweep.start ** (1 / 1.3),
+                    length_sweep.stop ** (1 / 1.3),
+                    length_sweep.expts,
                 )
                 ** 1.3
             )
@@ -170,7 +170,9 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             ) -> list[NDArray[np.float64]]:
                 modules = ctx.cfg.modules
                 length_sweep = ctx.cfg.sweep.length
-                assert isinstance(length_sweep, dict), "uniform mode requires SweepCfg"
+                assert isinstance(length_sweep, SweepCfg), (
+                    "uniform mode requires SweepCfg"
+                )
                 length_param = sweep2param("length", length_sweep)
                 return ModularProgramV2(
                     soccfg,
