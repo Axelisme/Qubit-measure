@@ -1,7 +1,6 @@
 from unittest.mock import MagicMock
 
 import pytest
-
 from zcu_tools.program.v2.modules.base import ModuleCfg
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import (
@@ -14,7 +13,6 @@ from zcu_tools.program.v2.modules.readout import (
     Readout,
 )
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import socket
+import sys
 
+import IPython
 import psutil
 import Pyro4
 import Pyro4.naming
-from qick import QickConfig
+from qick import QickConfig, QickSoc
 from typing_extensions import Any, Literal
 
 from zcu_tools.bitfiles import get_bitfile
@@ -54,7 +56,6 @@ def start_nameserver(ns_port: int) -> None:
 def start_server(
     port: int, ns_port: int, version: Literal["v1", "v2"] = "v1", iface="eth0", **kwargs
 ) -> None:
-    from qick import QickSoc
 
     print("looking for nameserver . . .")
     ns = Pyro4.locateNS(host="0.0.0.0", port=ns_port)
@@ -94,10 +95,6 @@ def make_soc_proxy(
     # adapted from https://pyro4.readthedocs.io/en/stable/errors.html and https://stackoverflow.com/a/70433500
     if remote_traceback:
         try:
-            import sys
-
-            import IPython
-
             ip = IPython.get_ipython()  # type: ignore
             if ip is not None:
 
