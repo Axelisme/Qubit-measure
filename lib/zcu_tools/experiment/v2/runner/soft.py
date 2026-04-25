@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 
-from tqdm.auto import tqdm
 from typing_extensions import Any, Callable, Optional, Sequence, TypeVar, Union
+
+from zcu_tools.progress_bar import BaseProgressBar, make_pbar
 
 from .base import AbsTask
 from .state import T_Cfg, T_ChildResult, T_RootResult, TaskState
@@ -28,11 +29,11 @@ class Scan(AbsTask[list[T_ChildResult], T_RootResult, T_Cfg]):
         self.before_each_fn = before_each
         self.sub_task = task
 
-        self.sweep_pbar: Optional[tqdm] = None
+        self.sweep_pbar: Optional[BaseProgressBar] = None
         self.dynamic_pbar: bool = False
 
-    def make_pbar(self, leave: bool) -> tqdm:
-        return tqdm(
+    def _build_pbar(self, leave: bool) -> BaseProgressBar:
+        return make_pbar(
             total=len(self.sweep_values),
             smoothing=0,
             desc=self.sweep_name,
@@ -43,13 +44,13 @@ class Scan(AbsTask[list[T_ChildResult], T_RootResult, T_Cfg]):
         self.dynamic_pbar = dynamic_pbar
 
         if not dynamic_pbar:
-            self.sweep_pbar = self.make_pbar(leave=True)
+            self.sweep_pbar = self._build_pbar(leave=True)
 
         self.sub_task.init(dynamic_pbar=dynamic_pbar)
 
     def run(self, state: TaskState[list[T_ChildResult], T_RootResult, T_Cfg]) -> None:
         if self.dynamic_pbar:
-            self.sweep_pbar = self.make_pbar(leave=False)
+            self.sweep_pbar = self._build_pbar(leave=False)
         else:
             assert self.sweep_pbar is not None
             self.sweep_pbar.reset()
@@ -73,6 +74,7 @@ class Scan(AbsTask[list[T_ChildResult], T_RootResult, T_Cfg]):
 
             self.sub_task.run(state.child(i))
 
+            assert self.sweep_pbar is not None
             self.sweep_pbar.update()
 
         if self.dynamic_pbar:

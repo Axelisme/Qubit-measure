@@ -7,7 +7,6 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import BaseModel
-from tqdm.auto import tqdm
 from typing_extensions import Callable, Generic, Optional, TypedDict, TypeVar, cast
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -29,6 +28,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
+from zcu_tools.progress_bar import make_pbar
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting.multi_decay import fit_dual_transition_rates
 from zcu_tools.utils.func_tools import MinIntervalFunc
@@ -219,10 +219,15 @@ class T1PlotAndSaveMixin(Generic[T_Cfg]):
 
         rates = np.zeros((len(iters), 6), dtype=np.float64)
         rate_errs = np.zeros((len(iters), 6), dtype=np.float64)
-        for i, pop in enumerate(tqdm(populations, desc=name, leave=False)):
-            rate, rate_err, *_ = fit_dual_transition_rates(Ts, pop[0], pop[1])
-            rates[i] = rate
-            rate_errs[i] = rate_err
+        pbar = make_pbar(total=len(populations), desc=name, leave=False)
+        try:
+            for i, pop in enumerate(populations):
+                rate, rate_err, *_ = fit_dual_transition_rates(Ts, pop[0], pop[1])
+                rates[i] = rate
+                rate_errs[i] = rate_err
+                pbar.update()
+        finally:
+            pbar.close()
 
         ax = fig.subplots(1, 1)
         assert isinstance(ax, Axes)

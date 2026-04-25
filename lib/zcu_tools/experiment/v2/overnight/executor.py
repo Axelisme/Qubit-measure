@@ -81,13 +81,14 @@ class OvernightBatchTask(BatchTask[str, Result, list[dict[str, Result]], Overnig
 
     def run(self, ctx) -> None:
         if self.dynamic_pbar:
-            self.task_pbar = self.make_pbar(leave=False)
+            self.task_pbar = self._build_pbar(leave=False)
         else:
             assert self.task_pbar is not None
             self.task_pbar.reset()
 
         for name, task in self.tasks.items():
-            self.task_pbar.set_description(desc=f"Task [{str(name)}]")
+            assert self.task_pbar is not None
+            self.task_pbar.set_description(f"Task [{str(name)}]")
 
             run_with_retries(
                 task,

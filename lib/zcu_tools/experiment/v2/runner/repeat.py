@@ -3,9 +3,9 @@ from __future__ import annotations
 import logging
 import time
 
-from tqdm.auto import tqdm
 from typing_extensions import Optional
 
+from zcu_tools.progress_bar import BaseProgressBar, make_pbar
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
 from .base import AbsTask
@@ -82,14 +82,14 @@ class RepeatOverTime(AbsTask[list[T_ChildResult], T_RootResult, T_Cfg]):
         self.interval = interval
         self.task = task
 
-        self.iter_pbar: Optional[tqdm] = None
-        self.time_pbar: Optional[tqdm] = None
+        self.iter_pbar: Optional[BaseProgressBar] = None
+        self.time_pbar: Optional[BaseProgressBar] = None
         self.dynamic_pbar: bool = False
 
-    def make_pbar(self, leave: bool) -> tuple[tqdm, tqdm]:
+    def _build_pbar(self, leave: bool) -> tuple[BaseProgressBar, BaseProgressBar]:
         return (
-            tqdm(total=self.num_times, smoothing=0, desc=self.name, leave=leave),
-            tqdm(
+            make_pbar(total=self.num_times, smoothing=0, desc=self.name, leave=leave),
+            make_pbar(
                 total=self.interval,
                 smoothing=0,
                 desc="Passing Time",
@@ -104,13 +104,13 @@ class RepeatOverTime(AbsTask[list[T_ChildResult], T_RootResult, T_Cfg]):
         self.dynamic_pbar = dynamic_pbar
 
         if not dynamic_pbar:
-            self.iter_pbar, self.time_pbar = self.make_pbar(leave=True)
+            self.iter_pbar, self.time_pbar = self._build_pbar(leave=True)
 
         self.task.init(dynamic_pbar=dynamic_pbar)
 
     def run(self, state: TaskState[list[T_ChildResult], T_RootResult, T_Cfg]) -> None:
         if self.dynamic_pbar:
-            self.iter_pbar, self.time_pbar = self.make_pbar(leave=False)
+            self.iter_pbar, self.time_pbar = self._build_pbar(leave=False)
         else:
             assert self.iter_pbar is not None
             assert self.time_pbar is not None
@@ -122,9 +122,11 @@ class RepeatOverTime(AbsTask[list[T_ChildResult], T_RootResult, T_Cfg]):
         for i in range(self.num_times):
             while time.time() - start_t < self.interval:
                 pass_time = round(time.time() - start_t, 1)
-                self.time_pbar.update(pass_time - self.time_pbar.n)  # type: ignore[arg-type]
+                assert self.time_pbar is not None
+                self.time_pbar.update(pass_time - self.time_pbar.n)
 
                 time.sleep(0.1)
+            assert self.time_pbar is not None
             self.time_pbar.reset()
 
             start_t = time.time()
@@ -133,6 +135,7 @@ class RepeatOverTime(AbsTask[list[T_ChildResult], T_RootResult, T_Cfg]):
 
             self.task.run(state.child(i))
 
+            assert self.iter_pbar is not None
             self.iter_pbar.update()
 
             # If have time left, force trigger hooks

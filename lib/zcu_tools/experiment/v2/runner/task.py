@@ -4,8 +4,9 @@ import logging
 
 import numpy as np
 from numpy.typing import NDArray
-from tqdm.auto import tqdm
 from typing_extensions import Any, Callable, Generic, Optional, Sequence, Type, TypeVar
+
+from zcu_tools.progress_bar import BaseProgressBar, make_pbar
 
 from .base import AbsTask
 from .state import T_Cfg, T_RootResult, TaskState
@@ -45,7 +46,7 @@ class Task(
         self.dtype = dtype
         self.pbar_n = pbar_n
 
-        self.avg_pbar: Optional[tqdm] = None
+        self.avg_pbar: Optional[BaseProgressBar] = None
         self.dynamic_pbar: bool = False
 
     def set_pbar_n(self, pbar_n: Optional[int]) -> None:
@@ -54,9 +55,9 @@ class Task(
             self.avg_pbar.total = pbar_n
             self.avg_pbar.refresh()
 
-    def make_pbar(self, leave: bool) -> tqdm:
+    def _build_pbar(self, leave: bool) -> BaseProgressBar:
         total = self.pbar_n
-        return tqdm(
+        return make_pbar(
             total=total,
             smoothing=0,
             desc="rounds",
@@ -68,11 +69,11 @@ class Task(
         self.dynamic_pbar = dynamic_pbar
 
         if not dynamic_pbar:
-            self.avg_pbar = self.make_pbar(leave=True)
+            self.avg_pbar = self._build_pbar(leave=True)
 
     def run(self, state: TaskState[NDArray[T_DType], T_RootResult, T_Cfg]) -> None:
         if self.dynamic_pbar:
-            self.avg_pbar = self.make_pbar(leave=False)
+            self.avg_pbar = self._build_pbar(leave=False)
         else:
             assert self.avg_pbar is not None
             self.avg_pbar.reset()
@@ -88,6 +89,7 @@ class Task(
         signal = self.raw2signal_fn(self.measure_fn(state, update_hook))
 
         if self.pbar_n is not None:
+            assert self.avg_pbar is not None
             self.avg_pbar.update(self.pbar_n - self.avg_pbar.n)
 
         logger.debug("Task.run: done, signal shape=%s", getattr(signal, "shape", "?"))

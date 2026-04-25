@@ -9,7 +9,6 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import BaseModel
-from tqdm.auto import tqdm
 from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
@@ -32,6 +31,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
+from zcu_tools.progress_bar import make_pbar
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting.multi_decay import fit_dual_transition_rates
 
@@ -266,10 +266,15 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         N = populations.shape[0]
         rates = np.zeros((N, 6), dtype=np.float64)
         rate_Covs = np.zeros((N, 6, 6), dtype=np.float64)
-        for i, pop in enumerate(tqdm(populations, desc="Fitting transition rates")):
-            rate, *_, (_, pCov1), _ = fit_dual_transition_rates(Ts, pop[0], pop[1])
-            rates[i] = rate
-            rate_Covs[i] = pCov1[:6, :6]
+        pbar = make_pbar(total=N, desc="Fitting transition rates")
+        try:
+            for i, pop in enumerate(populations):
+                rate, *_, (_, pCov1), _ = fit_dual_transition_rates(Ts, pop[0], pop[1])
+                rates[i] = rate
+                rate_Covs[i] = pCov1[:6, :6]
+                pbar.update()
+        finally:
+            pbar.close()
 
         if ac_coeff is None:
             xs = xs

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 
-from tqdm.auto import tqdm
 from typing_extensions import Hashable, Mapping, Optional, TypeVar
+
+from zcu_tools.progress_bar import BaseProgressBar, make_pbar
 
 from .base import AbsTask
 from .state import Result, T_Cfg, T_ChildResult, T_RootResult, TaskState, cast
@@ -19,17 +20,17 @@ class BatchTask(AbsTask[dict[T_Key, T_ChildResult], T_RootResult, T_Cfg]):
     ) -> None:
         self.tasks = dict(tasks)
 
-        self.task_pbar: Optional[tqdm] = None
+        self.task_pbar: Optional[BaseProgressBar] = None
         self.dynamic_pbar: bool = False
 
-    def make_pbar(self, leave: bool) -> tqdm:
-        return tqdm(total=len(self.tasks), smoothing=0, leave=leave)
+    def _build_pbar(self, leave: bool) -> BaseProgressBar:
+        return make_pbar(total=len(self.tasks), smoothing=0, leave=leave)
 
     def init(self, dynamic_pbar: bool = False) -> None:
         self.dynamic_pbar = dynamic_pbar
 
         if not dynamic_pbar:
-            self.task_pbar = self.make_pbar(leave=True)
+            self.task_pbar = self._build_pbar(leave=True)
 
         # force dynamic pbar for each task
         for name, task in self.tasks.items():
@@ -37,7 +38,7 @@ class BatchTask(AbsTask[dict[T_Key, T_ChildResult], T_RootResult, T_Cfg]):
 
     def run(self, state) -> None:
         if self.dynamic_pbar:
-            self.task_pbar = self.make_pbar(leave=False)
+            self.task_pbar = self._build_pbar(leave=False)
         else:
             assert self.task_pbar is not None
             self.task_pbar.reset()
@@ -45,7 +46,8 @@ class BatchTask(AbsTask[dict[T_Key, T_ChildResult], T_RootResult, T_Cfg]):
         logger.debug("BatchTask.run: %d tasks", len(self.tasks))
 
         for name, task in self.tasks.items():
-            self.task_pbar.set_description(desc=f"Task [{str(name)}]")
+            assert self.task_pbar is not None
+            self.task_pbar.set_description(f"Task [{str(name)}]")
             logger.debug("BatchTask.run: starting task '%s'", name)
 
             task.run(
