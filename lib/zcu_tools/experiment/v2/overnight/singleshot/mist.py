@@ -16,7 +16,6 @@ from zcu_tools.experiment.utils import make_comment, parse_comment, setup_device
 from zcu_tools.experiment.v2.runner import Task, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2D
-from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     ProgramV2Cfg,
@@ -26,6 +25,7 @@ from zcu_tools.program.v2 import (
     ReadoutCfg,
     Reset,
     ResetCfg,
+    SweepCfg,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data

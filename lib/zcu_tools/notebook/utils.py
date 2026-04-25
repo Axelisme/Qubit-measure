@@ -12,7 +12,7 @@ from typing_extensions import TYPE_CHECKING, Mapping, Optional, Union
 from zcu_tools.device import DeviceInfo, GlobalDeviceManager
 from zcu_tools.device.sgs100a import RohdeSchwarzSGS100A
 from zcu_tools.device.yoko import YOKOGS200
-from zcu_tools.program import SweepCfg
+from zcu_tools.program.v2 import SweepCfg
 
 if TYPE_CHECKING:
     try:

@@ -1,12 +1,40 @@
 from __future__ import annotations
 
 import numpy as np
-from numpy.typing import NDArray
-from typing_extensions import Mapping, TypeVar, Union, cast
+from pydantic import BaseModel
+from typing_extensions import Any, Mapping, Optional, TypeVar, Union, cast, get_args
 
-from zcu_tools.program import SweepCfg
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.program.v2 import SweepCfg
 
-T = TypeVar("T", bound=Union[SweepCfg, NDArray])
+T = TypeVar("T", bound=Union[SweepCfg, list])
+
+
+def unwrap_model_annotation(annotation: Any) -> Optional[type[BaseModel]]:
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return annotation
+
+    for arg in get_args(annotation):
+        if (model := unwrap_model_annotation(arg)) is not None:
+            return model
+
+    return None
+
+
+def get_single_sweep_name(cfg_model: type[ExpCfgModel]) -> Optional[str]:
+    sweep_field = cfg_model.model_fields.get("sweep")
+    if sweep_field is None:
+        return None
+
+    sweep_model = unwrap_model_annotation(sweep_field.annotation)
+    if sweep_model is None:
+        return None
+
+    sweep_names = tuple(sweep_model.model_fields)
+    if len(sweep_names) != 1:
+        return None
+
+    return sweep_names[0]
 
 
 def format_sweep1D(sweep: Union[Mapping[str, T], T], name: str) -> dict[str, T]:

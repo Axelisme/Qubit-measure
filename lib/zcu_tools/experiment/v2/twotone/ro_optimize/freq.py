@@ -17,7 +17,6 @@ from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.liveplot import LivePlot1D
-from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Branch,
     ModularProgramV2,
@@ -28,6 +27,7 @@ from zcu_tools.program.v2 import (
     ReadoutCfg,
     Reset,
     ResetCfg,
+    SweepCfg,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data

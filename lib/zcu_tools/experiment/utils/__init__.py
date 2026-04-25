@@ -7,7 +7,7 @@ from .device import (
     set_power_in_dev_cfg,
     setup_devices,
 )
-from .sweep import format_sweep1D
+from .sweep import format_sweep1D, get_single_sweep_name
 
 __all__ = [
     # device
@@ -19,6 +19,7 @@ __all__ = [
     "setup_devices",
     # sweep
     "format_sweep1D",
+    "get_single_sweep_name",
     # comment
     "make_comment",
     "parse_comment",

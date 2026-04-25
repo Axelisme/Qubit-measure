@@ -25,7 +25,6 @@ from zcu_tools.experiment.v2.utils import (
     wrap_earlystop_check,
 )
 from zcu_tools.liveplot import LivePlot2DwithLine
-from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Join,
     ModularProgramV2,
@@ -37,6 +36,7 @@ from zcu_tools.program.v2 import (
     Reset,
     ResetCfg,
     SoftDelay,
+    SweepCfg,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data

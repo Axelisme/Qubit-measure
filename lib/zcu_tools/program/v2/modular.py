@@ -7,9 +7,9 @@ from numpy.typing import NDArray
 from qick import QickConfig
 from typing_extensions import Optional, Sequence, Union
 
-from ..base import SweepCfg
 from .base import MyProgramV2, ProgramV2Cfg
 from .modules import Module
+from .sweep import SweepCfg
 
 logger = logging.getLogger(__name__)
 

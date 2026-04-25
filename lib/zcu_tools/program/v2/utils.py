@@ -5,7 +5,7 @@ import logging
 from qick.asm_v2 import QickParam, QickSweep1D
 from typing_extensions import Union
 
-from zcu_tools.program import SweepCfg
+from .sweep import SweepCfg
 
 logger = logging.getLogger(__name__)
 

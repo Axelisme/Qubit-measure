@@ -18,7 +18,7 @@ from scipy.stats import qmc
 from skopt import Optimizer
 from typing_extensions import Optional
 
-from zcu_tools.program import SweepCfg
+from zcu_tools.program.v2 import SweepCfg
 
 # Suppress skopt warnings about duplicate points
 warnings.filterwarnings(

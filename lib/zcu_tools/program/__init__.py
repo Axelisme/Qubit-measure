@@ -1,4 +1,5 @@
-from .base import ImproveAcquireMixin, SweepCfg, TrackerProtocol
+from .base import ImproveAcquireMixin, TrackerProtocol
+from .v2 import SweepCfg
 
 __all__ = [
     # improve acquire

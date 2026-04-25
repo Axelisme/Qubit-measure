@@ -23,7 +23,6 @@ from zcu_tools.experiment.utils import make_comment, parse_comment, setup_device
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
-from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Branch,
     ModularProgramV2,
@@ -35,6 +34,7 @@ from zcu_tools.program.v2 import (
     Reset,
     ResetCfg,
     ScanWith,
+    SweepCfg,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_decay

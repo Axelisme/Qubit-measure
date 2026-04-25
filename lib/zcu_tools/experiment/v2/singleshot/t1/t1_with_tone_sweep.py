@@ -18,7 +18,6 @@ from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.singleshot.util import calc_populations
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2D, MultiLivePlot, make_plot_frame
-from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Branch,
     ModularProgramV2,
@@ -29,6 +28,7 @@ from zcu_tools.program.v2 import (
     ReadoutCfg,
     Reset,
     ResetCfg,
+    SweepCfg,
     sweep2param,
 )
 from zcu_tools.progress_bar import make_pbar

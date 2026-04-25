@@ -4,11 +4,12 @@ from copy import deepcopy
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel
 from typing_extensions import Any, Optional, TypeVar, Union, cast
 from yaml.nodes import MappingNode
 
 from zcu_tools.device import GlobalDeviceManager
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import format_sweep1D, get_single_sweep_name
 from zcu_tools.program.v2 import ModuleCfg, WaveformCfg
 from zcu_tools.utils import deepupdate, format_obj
 
@@ -53,9 +54,9 @@ class ModuleDumper(yaml.SafeDumper):
 # 註冊自定義的 dict 處理函數
 ModuleDumper.add_representer(dict, ModuleDumper.represent_dict)
 
+T_ExpCfg = TypeVar("T_ExpCfg", bound=ExpCfgModel)
 T_ModuleCfg = TypeVar("T_ModuleCfg", bound=ModuleCfg)
 T_WaveformCfg = TypeVar("T_WaveformCfg", bound=WaveformCfg)
-T_CfgModel = TypeVar("T_CfgModel", bound=BaseModel)
 
 
 class ModuleLibrary(SyncFile):
@@ -126,8 +127,8 @@ class ModuleLibrary(SyncFile):
             yaml.dump(dump_cfg, f, Dumper=ModuleDumper, sort_keys=False)
 
     def make_cfg(
-        self, exp_cfg: dict[str, Any], cfg_model: type[T_CfgModel], **kwargs
-    ) -> T_CfgModel:
+        self, exp_cfg: dict[str, Any], cfg_model: type[T_ExpCfg], **kwargs
+    ) -> T_ExpCfg:
         exp_cfg = deepcopy(exp_cfg)
         deepupdate(exp_cfg, kwargs, behavior="force")
 
@@ -139,9 +140,15 @@ class ModuleLibrary(SyncFile):
             dev_cfg[name] = dev_cfg[name].with_updates(**patch)
         exp_cfg["dev"] = dev_cfg
 
-        modules: dict[str, Union[str, dict, ModuleCfg]] = exp_cfg.get("modules", {})
-        for name, sub_cfg in modules.items():
-            modules[name] = ModuleCfg.from_raw(sub_cfg, self)
+        # format modules
+        if (modules := exp_cfg.get("modules")) is not None:
+            for name, sub_cfg in modules.items():
+                modules[name] = ModuleCfg.from_raw(sub_cfg, self)
+
+        # format sweep
+        if (sweep_cfg := exp_cfg.get("sweep")) is not None:
+            if (sweep_name := get_single_sweep_name(cfg_model)) is not None:
+                exp_cfg["sweep"] = format_sweep1D(sweep_cfg, sweep_name)
 
         return cfg_model.model_validate(exp_cfg)
 

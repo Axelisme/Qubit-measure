@@ -7,7 +7,7 @@ from numpy.typing import NDArray
 from qick import QickConfig
 from typing_extensions import Any, Callable, Literal, Optional, Sequence, TypeVar, Union
 
-from zcu_tools.program import SweepCfg
+from zcu_tools.program.v2 import SweepCfg
 
 T_Value = TypeVar("T_Value", NDArray[np.float64], float)
 
