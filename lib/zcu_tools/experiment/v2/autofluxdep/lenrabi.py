@@ -5,9 +5,9 @@ from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Any, Callable, Optional, TypedDict
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState
@@ -84,7 +84,7 @@ def auto_fit_lenrabi(
     )
 
 
-class LenRabiModuleCfg(BaseModel):
+class LenRabiModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     rabi_pulse: PulseCfg
     readout: ReadoutCfg
@@ -95,7 +95,7 @@ class LenRabiCfgTemplate(ProgramV2Cfg, ExpCfgModel):
     sweep_range: tuple[float, float]
 
 
-class LenRabiSweepCfg(BaseModel):
+class LenRabiSweepCfg(ConfigBase):
     length: SweepCfg
 
 

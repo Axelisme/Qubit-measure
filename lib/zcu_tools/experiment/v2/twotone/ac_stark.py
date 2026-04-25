@@ -7,7 +7,6 @@ import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import (
     Any,
     Callable,
@@ -15,6 +14,7 @@ from typing_extensions import (
     TypeAlias,
 )
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -93,14 +93,14 @@ def get_resonance_freq(
     return np.array(s_xs), np.array(s_freqs)
 
 
-class AcStarkModuleCfg(BaseModel):
+class AcStarkModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     stark_pulse1: PulseCfg
     stark_pulse2: PulseCfg
     readout: ReadoutCfg
 
 
-class AcStarkSweepCfg(BaseModel):
+class AcStarkSweepCfg(ConfigBase):
     gain: SweepCfg
     freq: SweepCfg
 
@@ -354,14 +354,14 @@ def acstark_ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.fl
     return rotate2real(signals).real
 
 
-class AcStarkRamseyModuleCfg(BaseModel):
+class AcStarkRamseyModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     pi2_pulse: PulseCfg
     stark_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class AcStarkRamseySweepCfg(BaseModel):
+class AcStarkRamseySweepCfg(ConfigBase):
     gain: SweepCfg
     length: SweepCfg
 

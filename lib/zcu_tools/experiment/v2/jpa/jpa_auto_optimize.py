@@ -9,9 +9,9 @@ from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d import Axes3D
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Any, Callable, Mapping, Optional, TypeAlias, cast
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -49,13 +49,13 @@ JPAOptimizeResult: TypeAlias = tuple[
 ]
 
 
-class JPAOptModuleCfg(BaseModel):
+class JPAOptModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class JPAOptSweepCfg(BaseModel):
+class JPAOptSweepCfg(ConfigBase):
     jpa_flux: SweepCfg
     jpa_freq: SweepCfg
     jpa_power: SweepCfg

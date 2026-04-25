@@ -6,10 +6,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from scipy.ndimage import gaussian_filter1d
 from typing_extensions import Any, Callable, Optional, TypeAlias, cast
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -42,14 +42,14 @@ def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class T1ModuleCfg(BaseModel):
+class T1ModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     flux_pulse: PulseCfg
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T1SweepCfg(BaseModel):
+class T1SweepCfg(ConfigBase):
     gain: SweepCfg
     length: SweepCfg
 

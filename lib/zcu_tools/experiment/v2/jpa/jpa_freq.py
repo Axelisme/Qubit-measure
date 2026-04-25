@@ -6,9 +6,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Any, Callable, Optional, TypeAlias
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import (
@@ -38,13 +38,13 @@ from zcu_tools.utils.datasaver import load_data, save_data
 FreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class FreqModuleCfg(BaseModel):
+class FreqModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class FreqSweepCfg(BaseModel):
+class FreqSweepCfg(ConfigBase):
     jpa_freq: SweepCfg
 
 

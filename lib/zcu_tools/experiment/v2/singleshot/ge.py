@@ -7,9 +7,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Any, Literal, Optional, TypeAlias, cast
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -163,7 +163,7 @@ def optimize_ge_radius(
 GE_Result: TypeAlias = NDArray[np.complex128]
 
 
-class GEModuleCfg(BaseModel):
+class GEModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     init_pulse: Optional[PulseCfg] = None
     probe_pulse: PulseCfg

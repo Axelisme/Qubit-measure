@@ -8,9 +8,9 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Any, Callable, Optional, TypeAlias
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -41,14 +41,14 @@ T1WithToneSweepResult: TypeAlias = tuple[
 ]
 
 
-class T1WithToneSweepModuleCfg(BaseModel):
+class T1WithToneSweepModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     pi_pulse: PulseCfg
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T1WithToneSweepSweepCfg(BaseModel):
+class T1WithToneSweepSweepCfg(ConfigBase):
     length: SweepCfg
     gain: Optional[SweepCfg] = None
     freq: Optional[SweepCfg] = None

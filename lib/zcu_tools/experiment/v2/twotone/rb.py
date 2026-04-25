@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import (
     Any,
     Callable,
@@ -17,6 +16,7 @@ from typing_extensions import (
     Union,
 )
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -175,7 +175,7 @@ def rb_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(mean_signals).real
 
 
-class RBModuleCfg(BaseModel):
+class RBModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     I_pulse: Optional[PulseCfg] = None
     X90_pulse: PulseCfg
@@ -183,7 +183,7 @@ class RBModuleCfg(BaseModel):
     readout: ReadoutCfg
 
 
-class RBSweepCfg(BaseModel):
+class RBSweepCfg(ConfigBase):
     depth: Union[SweepCfg, list[int]]
 
 

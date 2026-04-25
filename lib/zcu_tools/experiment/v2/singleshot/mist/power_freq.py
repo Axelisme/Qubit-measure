@@ -7,9 +7,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Any, Callable, Optional, TypeAlias
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -37,14 +37,14 @@ FreqPowerResult: TypeAlias = tuple[
 ]
 
 
-class FreqPowerModuleCfg(BaseModel):
+class FreqPowerModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     init_pulse: Optional[PulseCfg] = None
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class FreqPowerSweepCfg(BaseModel):
+class FreqPowerSweepCfg(ConfigBase):
     freq: SweepCfg
     gain: SweepCfg
 

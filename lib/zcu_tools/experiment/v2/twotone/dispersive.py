@@ -8,9 +8,9 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Any, Optional, TypeAlias
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -45,14 +45,14 @@ def dispersive_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
     return np.abs(signals)
 
 
-class DispersiveModuleCfg(BaseModel):
+class DispersiveModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     init_pulse: Optional[PulseCfg] = None
     qub_pulse: PulseCfg
     readout: PulseReadoutCfg
 
 
-class DispersiveSweepCfg(BaseModel):
+class DispersiveSweepCfg(ConfigBase):
     freq: SweepCfg
 
 

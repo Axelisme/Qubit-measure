@@ -5,9 +5,9 @@ from copy import deepcopy
 import numpy as np
 import plotly.graph_objects as go
 from numpy.typing import NDArray
-from pydantic import BaseModel
-from typing_extensions import Any, Callable, Mapping, Optional, TypeAlias, cast
+from typing_extensions import Any, Callable, Mapping, Optional, TypeAlias
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -56,14 +56,14 @@ def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return mist_signals
 
 
-class FluxDepModuleCfg(BaseModel):
+class FluxDepModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     init_pulse: Optional[PulseCfg] = None
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class FluxDepSweepCfg(BaseModel):
+class FluxDepSweepCfg(ConfigBase):
     flux: SweepCfg
     gain: SweepCfg
 
@@ -239,7 +239,9 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> FluxDepResult:
-        signals, values, gains, comment = load_data(filepath, return_comment=True, **kwargs)
+        signals, values, gains, comment = load_data(
+            filepath, return_comment=True, **kwargs
+        )
         assert values is not None and gains is not None
         assert len(values.shape) == 1 and len(gains.shape) == 1
         assert signals.shape == (len(values), len(gains))
@@ -249,11 +251,9 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         signals = signals.astype(np.complex128)
 
         if comment is not None:
-
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-
                 self.last_cfg = FluxDepCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (values, gains, signals)
 

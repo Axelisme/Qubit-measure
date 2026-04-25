@@ -7,14 +7,14 @@ from typing_extensions import TYPE_CHECKING, Any, Literal, Optional, Self, Union
 
 from .base import Module, ModuleCfg
 from .util import round_timestamp
-from .waveform import UnionWaveformCfg, Waveform
+from .waveform import UnionWaveformCfg, Waveform, WaveformCfg
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
     from zcu_tools.program.v2.modular import ModularProgramV2
 
 
-@ModuleCfg.bind_handler
+@ModuleCfg.bind_handler("pulse")
 class PulseCfg(ModuleCfg):
     type: Literal["pulse"] = "pulse"
     waveform: UnionWaveformCfg
@@ -35,14 +35,16 @@ class PulseCfg(ModuleCfg):
     ro_ch: Optional[int] = None
 
     @classmethod
-    def from_dict(cls, raw_cfg: dict[str, Any], ml: "ModuleLibrary") -> Self:
-        raw_cfg = deepcopy(raw_cfg)
-
-        waveform_cfg = raw_cfg.get("waveform")
+    def _from_dict(cls, raw_cfg: dict[str, Any], ml: ModuleLibrary) -> Self:
+        waveform_cfg = raw_cfg["waveform"]
         if isinstance(waveform_cfg, str):
-            raw_cfg["waveform"] = ml.get_waveform(waveform_cfg)
+            waveform_cfg = ml.get_waveform(waveform_cfg)
+        raw_cfg["waveform"] = waveform_cfg
 
-        return cls.model_validate(raw_cfg)
+        if isinstance(waveform_cfg, dict):
+            raw_cfg["waveform"] = WaveformCfg.from_dict(waveform_cfg, ml)
+
+        return super()._from_dict(raw_cfg, ml)
 
     def set_param(self, name: str, value: Union[float, QickParam]) -> None:
         if name == "length":

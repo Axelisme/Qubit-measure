@@ -5,10 +5,10 @@ from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from scipy.ndimage import gaussian_filter
 from typing_extensions import Callable, Optional, TypedDict
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState
@@ -44,7 +44,7 @@ def ro_opt_fluxdep_signal2real(signals: NDArray[np.float64]) -> NDArray[np.float
     return np.array(list(map(ro_opt_signal2real, signals)), dtype=np.float64)
 
 
-class RO_OptModuleCfg(BaseModel):
+class RO_OptModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     pi_pulse: PulseCfg
     readout: PulseReadoutCfg
@@ -56,7 +56,7 @@ class RO_OptCfgTemplate(ProgramV2Cfg, ExpCfgModel):
     gain_range: tuple[float, float]
 
 
-class RO_OptSweepCfg(BaseModel):
+class RO_OptSweepCfg(ConfigBase):
     freq: SweepCfg
     gain: SweepCfg
 

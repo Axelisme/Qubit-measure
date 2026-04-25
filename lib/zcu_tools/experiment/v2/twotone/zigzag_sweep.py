@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from scipy.ndimage import gaussian_filter1d
 from typing_extensions import (
     Any,
@@ -16,6 +15,7 @@ from typing_extensions import (
     TypeAlias,
 )
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -49,14 +49,14 @@ def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real  # type: ignore
 
 
-class ZigZagScanModuleCfg(BaseModel):
+class ZigZagScanModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     X90_pulse: PulseCfg
     X180_pulse: Optional[PulseCfg] = None
     readout: ReadoutCfg
 
 
-class ZigZagScanSweepCfg(BaseModel):
+class ZigZagScanSweepCfg(ConfigBase):
     gain: Optional[SweepCfg] = None
     freq: Optional[SweepCfg] = None
 

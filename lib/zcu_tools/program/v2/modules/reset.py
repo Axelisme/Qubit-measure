@@ -25,55 +25,60 @@ if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
 
 
-@ModuleCfg.bind_handler
-class NoneResetCfg(ModuleCfg):
-    type: Literal["reset/none"] = "reset/none"
+class AbsResetCfg(ModuleCfg): ...
 
-    @classmethod
-    def from_dict(cls, raw_cfg: dict[str, Any], ml: "ModuleLibrary") -> Self:
-        return cls.model_validate(raw_cfg)
+
+@ModuleCfg.bind_handler("reset/none")
+class NoneResetCfg(AbsResetCfg):
+    type: Literal["reset/none"] = "reset/none"
 
     def set_param(self, name: str, value: Union[float, QickParam]) -> None:
         raise ValueError("NoneReset does not support set_param")
 
 
-@ModuleCfg.bind_handler
-class PulseResetCfg(ModuleCfg):
+@ModuleCfg.bind_handler("reset/pulse")
+class PulseResetCfg(AbsResetCfg):
     type: Literal["reset/pulse"] = "reset/pulse"
     pulse_cfg: PulseCfg
 
     @classmethod
-    def from_dict(cls, raw_cfg: dict[str, Any], ml: "ModuleLibrary") -> Self:
+    def _from_dict(cls, raw_cfg: dict[str, Any], ml: ModuleLibrary) -> Self:
         raw_cfg = deepcopy(raw_cfg)
 
-        pulse_cfg = raw_cfg.get("pulse_cfg")
+        pulse_cfg = raw_cfg["pulse_cfg"]
         if isinstance(pulse_cfg, str):
-            raw_cfg["pulse_cfg"] = ml.get_module(pulse_cfg)
+            pulse_cfg = ml.get_module(pulse_cfg)
 
-        return cls.model_validate(raw_cfg)
+        raw_cfg["pulse_cfg"] = PulseCfg.from_raw(pulse_cfg, ml)
+
+        return super()._from_dict(raw_cfg, ml)
 
     def set_param(self, name: str, value: Union[float, QickParam]) -> None:
         self.pulse_cfg.set_param(name, value)
 
 
-@ModuleCfg.bind_handler
-class TwoPulseResetCfg(ModuleCfg):
+@ModuleCfg.bind_handler("reset/two_pulse")
+class TwoPulseResetCfg(AbsResetCfg):
     type: Literal["reset/two_pulse"] = "reset/two_pulse"
     pulse1_cfg: PulseCfg
     pulse2_cfg: PulseCfg
 
     @classmethod
-    def from_dict(cls, raw_cfg: dict[str, Any], ml: "ModuleLibrary") -> Self:
+    def _from_dict(cls, raw_cfg: dict[str, Any], ml: ModuleLibrary) -> Self:
         raw_cfg = deepcopy(raw_cfg)
 
-        pulse1_cfg = raw_cfg.get("pulse1_cfg")
+        pulse1_cfg = raw_cfg["pulse1_cfg"]
         if isinstance(pulse1_cfg, str):
-            raw_cfg["pulse1_cfg"] = ml.get_module(pulse1_cfg)
-        pulse2_cfg = raw_cfg.get("pulse2_cfg")
-        if isinstance(pulse2_cfg, str):
-            raw_cfg["pulse2_cfg"] = ml.get_module(pulse2_cfg)
+            pulse1_cfg = ml.get_module(pulse1_cfg)
 
-        return cls.model_validate(raw_cfg)
+        pulse2_cfg = raw_cfg["pulse2_cfg"]
+        if isinstance(pulse2_cfg, str):
+            pulse2_cfg = ml.get_module(pulse2_cfg)
+
+        raw_cfg["pulse1_cfg"] = PulseCfg.from_raw(pulse1_cfg, ml)
+        raw_cfg["pulse2_cfg"] = PulseCfg.from_raw(pulse2_cfg, ml)
+
+        return super()._from_dict(raw_cfg, ml)
 
     def set_param(self, name: str, value: Union[float, QickParam]) -> None:
         if name in ["gain1", "freq1"]:
@@ -87,28 +92,32 @@ class TwoPulseResetCfg(ModuleCfg):
             raise ValueError(f"Unknown parameter: {name}")
 
 
-@ModuleCfg.bind_handler
-class BathResetCfg(ModuleCfg):
+@ModuleCfg.bind_handler("reset/bath")
+class BathResetCfg(AbsResetCfg):
     type: Literal["reset/bath"] = "reset/bath"
     cavity_tone_cfg: PulseCfg
     qubit_tone_cfg: PulseCfg
     pi2_cfg: PulseCfg
 
     @classmethod
-    def from_dict(cls, raw_cfg: dict[str, Any], ml: "ModuleLibrary") -> Self:
+    def _from_dict(cls, raw_cfg: dict[str, Any], ml: ModuleLibrary) -> Self:
         raw_cfg = deepcopy(raw_cfg)
 
-        cavity_tone_cfg = raw_cfg.get("cavity_tone_cfg")
+        cavity_tone_cfg = raw_cfg["cavity_tone_cfg"]
         if isinstance(cavity_tone_cfg, str):
-            raw_cfg["cavity_tone_cfg"] = ml.get_module(cavity_tone_cfg)
-        qubit_tone_cfg = raw_cfg.get("qubit_tone_cfg")
+            cavity_tone_cfg = ml.get_module(cavity_tone_cfg)
+        qubit_tone_cfg = raw_cfg["qubit_tone_cfg"]
         if isinstance(qubit_tone_cfg, str):
-            raw_cfg["qubit_tone_cfg"] = ml.get_module(qubit_tone_cfg)
-        pi2_cfg = raw_cfg.get("pi2_cfg")
+            qubit_tone_cfg = ml.get_module(qubit_tone_cfg)
+        pi2_cfg = raw_cfg["pi2_cfg"]
         if isinstance(pi2_cfg, str):
-            raw_cfg["pi2_cfg"] = ml.get_module(pi2_cfg)
+            pi2_cfg = ml.get_module(pi2_cfg)
 
-        return cls.model_validate(raw_cfg)
+        raw_cfg["cavity_tone_cfg"] = PulseCfg.from_raw(cavity_tone_cfg, ml)
+        raw_cfg["qubit_tone_cfg"] = PulseCfg.from_raw(qubit_tone_cfg, ml)
+        raw_cfg["pi2_cfg"] = PulseCfg.from_raw(pi2_cfg, ml)
+
+        return super()._from_dict(raw_cfg, ml)
 
     def set_param(self, name: str, value: Union[float, QickParam]) -> None:
         if name in ["qub_gain", "qub_freq"]:
@@ -137,24 +146,25 @@ class AbsReset(Module):
 
 
 class Reset(AbsReset):
-    _supported_reset: ClassVar[dict[str, type["AbsReset"]]] = {}
+    _supported_reset: ClassVar[dict[type[AbsResetCfg], type[AbsReset]]] = {}
 
     def __init__(self, name: str, cfg: Optional[ResetCfg]) -> None:
         if cfg is None:
             cfg = NoneResetCfg(desc="Auto derived from None")
-        cfg_type = cfg.type
-        if cfg_type not in self._supported_reset:
-            raise ValueError(f"Unknown reset type: {cfg_type}")
-        self.reset = self._supported_reset[cfg_type](name, cfg)
+        if type(cfg) not in self._supported_reset:
+            raise ValueError(f"Unknown reset type: {type(cfg)}")
+        self.reset = self._supported_reset[type(cfg)](name, cfg)
 
     @classmethod
-    def bind_reset(cls, id_name: str) -> Callable[[type["AbsReset"]], type["AbsReset"]]:
-        def decorator(sub_cls: type["AbsReset"]) -> type["AbsReset"]:
+    def bind_reset(
+        cls, cfg_cls: type[AbsResetCfg]
+    ) -> Callable[[type[AbsReset]], type[AbsReset]]:
+        def decorator(sub_cls: type[AbsReset]) -> type[AbsReset]:
             if (
-                registered_cls := cls._supported_reset.setdefault(id_name, sub_cls)
+                registered_cls := cls._supported_reset.setdefault(cfg_cls, sub_cls)
             ) != sub_cls:
                 raise ValueError(
-                    f"Reset {id_name} already registered by {registered_cls.__name__}"
+                    f"Reset {cfg_cls.__name__} already registered by {registered_cls.__name__}"
                 )
             return sub_cls
 
@@ -176,7 +186,7 @@ class Reset(AbsReset):
         return self.reset.run(prog, t)
 
 
-@Reset.bind_reset(NoneResetCfg.module_type())
+@Reset.bind_reset(NoneResetCfg)
 class NoneReset(AbsReset):
     def __init__(self, name: str, cfg: NoneResetCfg) -> None:
         self.name = name
@@ -193,7 +203,7 @@ class NoneReset(AbsReset):
         return t
 
 
-@Reset.bind_reset(PulseResetCfg.module_type())
+@Reset.bind_reset(PulseResetCfg)
 class PulseReset(AbsReset):
     def __init__(self, name: str, cfg: PulseResetCfg) -> None:
         self.name = name
@@ -212,7 +222,7 @@ class PulseReset(AbsReset):
         return self.reset_pulse.run(prog, t)
 
 
-@Reset.bind_reset(TwoPulseResetCfg.module_type())
+@Reset.bind_reset(TwoPulseResetCfg)
 class TwoPulseReset(AbsReset):
     def __init__(self, name: str, cfg: TwoPulseResetCfg) -> None:
         self.name = name
@@ -237,7 +247,7 @@ class TwoPulseReset(AbsReset):
         return calc_max_length(pulse1_t, pulse2_t)
 
 
-@Reset.bind_reset(BathResetCfg.module_type())
+@Reset.bind_reset(BathResetCfg)
 class BathReset(AbsReset):
     def __init__(self, name: str, cfg: BathResetCfg) -> None:
         self.name = name

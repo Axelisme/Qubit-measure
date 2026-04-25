@@ -7,10 +7,10 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from scipy.ndimage import gaussian_filter
 from typing_extensions import Callable, Optional, TypedDict
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState
@@ -47,14 +47,14 @@ class MistPlotDict(TypedDict, closed=True):
     current: LivePlot1D
 
 
-class MistModuleCfg(BaseModel):
+class MistModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     init_pulse: Optional[PulseCfg] = None
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class MistSweepCfg(BaseModel):
+class MistSweepCfg(ConfigBase):
     gain: SweepCfg
 
 

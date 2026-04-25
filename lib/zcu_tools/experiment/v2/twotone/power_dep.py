@@ -4,9 +4,9 @@ from copy import deepcopy
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Any, Callable, Optional, TypeAlias
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -27,7 +27,7 @@ def gain_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(minus_background(signals, axis=1))
 
 
-class PowerSweepCfg(BaseModel):
+class PowerSweepCfg(ConfigBase):
     gain: SweepCfg
     freq: SweepCfg
 

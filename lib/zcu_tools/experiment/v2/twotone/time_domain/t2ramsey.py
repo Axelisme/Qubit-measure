@@ -6,9 +6,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Any, Optional, TypeAlias
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -40,13 +40,13 @@ def t2ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
 T2RamseyResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class T2RamseyModuleCfg(BaseModel):
+class T2RamseyModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     pi2_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T2RamseySweepCfg(BaseModel):
+class T2RamseySweepCfg(ConfigBase):
     length: SweepCfg
 
 

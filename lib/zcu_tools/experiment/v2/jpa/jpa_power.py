@@ -6,9 +6,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Any, Callable, Mapping, Optional, TypeAlias, cast
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -39,13 +39,13 @@ from zcu_tools.utils.datasaver import load_data, save_data
 PowerResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class PowerModuleCfg(BaseModel):
+class PowerModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class PowerSweepCfg(BaseModel):
+class PowerSweepCfg(ConfigBase):
     jpa_power: SweepCfg
 
 

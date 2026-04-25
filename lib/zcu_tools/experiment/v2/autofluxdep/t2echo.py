@@ -4,9 +4,9 @@ from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Callable, Optional, TypedDict
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState
@@ -54,7 +54,7 @@ def t2echo_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.fl
     return np.array(list(map(t2echo_signal2real, signals)), dtype=np.float64)
 
 
-class T2EchoModuleCfg(BaseModel):
+class T2EchoModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     pi_pulse: PulseCfg
     pi2_pulse: PulseCfg
@@ -66,7 +66,7 @@ class T2EchoCfgTemplate(ProgramV2Cfg, ExpCfgModel):
     sweep_range: tuple[float, float]
 
 
-class T2EchoSweepCfg(BaseModel):
+class T2EchoSweepCfg(ConfigBase):
     length: SweepCfg
 
 

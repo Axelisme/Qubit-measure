@@ -5,9 +5,9 @@ from copy import deepcopy
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Any, Callable, Literal, Optional, TypeAlias, cast
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -31,12 +31,12 @@ from zcu_tools.utils.fitting import HangerModel, TransmissionModel, get_proper_m
 FreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class FreqModuleCfg(BaseModel):
+class FreqModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     readout: PulseReadoutCfg
 
 
-class FreqSweepCfg(BaseModel):
+class FreqSweepCfg(ConfigBase):
     freq: SweepCfg
 
 

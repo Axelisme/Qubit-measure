@@ -4,9 +4,9 @@ from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Callable, Optional, TypedDict, cast
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState
@@ -49,7 +49,7 @@ def qubitfreq_fluxdep_signal2real(
 class QubitFreqCfgTemplate(TwoToneCfg, ExpCfgModel): ...
 
 
-class QubitFreqSweepCfg(BaseModel):
+class QubitFreqSweepCfg(ConfigBase):
     detune: SweepCfg
 
 

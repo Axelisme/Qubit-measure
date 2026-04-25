@@ -6,9 +6,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Any, Callable, Optional, TypeAlias
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -41,14 +41,14 @@ def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
     return rotate2real(signals).real
 
 
-class PhaseModuleCfg(BaseModel):
+class PhaseModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     init_pulse: Optional[PulseCfg] = None
     tested_reset: BathResetCfg
     readout: ReadoutCfg
 
 
-class PhaseSweepCfg(BaseModel):
+class PhaseSweepCfg(ConfigBase):
     phase: SweepCfg
 
 

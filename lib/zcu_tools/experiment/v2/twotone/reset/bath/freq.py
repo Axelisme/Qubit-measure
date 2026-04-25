@@ -7,11 +7,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from qick.asm_v2 import QickSweep1D
 from scipy.ndimage import gaussian_filter
 from typing_extensions import Any, Callable, Optional, TypeAlias
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -39,14 +39,14 @@ FreqGainResult: TypeAlias = tuple[
 ]
 
 
-class FreqGainModuleCfg(BaseModel):
+class FreqGainModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     init_pulse: Optional[PulseCfg] = None
     tested_reset: BathResetCfg
     readout: ReadoutCfg
 
 
-class FreqGainSweepCfg(BaseModel):
+class FreqGainSweepCfg(ConfigBase):
     gain: SweepCfg
     freq: SweepCfg
 

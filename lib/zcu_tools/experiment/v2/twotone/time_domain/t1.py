@@ -7,7 +7,6 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from scipy.ndimage import gaussian_filter
 from typing_extensions import (
     Any,
@@ -18,6 +17,7 @@ from typing_extensions import (
 )
 
 import zcu_tools.utils.fitting as ft
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -51,13 +51,13 @@ def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real  # (times, signals)
 
 
-class T1ModuleCfg(BaseModel):
+class T1ModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T1SweepCfg(BaseModel):
+class T1SweepCfg(ConfigBase):
     length: Union[SweepCfg, list[float]]
 
 
@@ -313,14 +313,14 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         return Ts, signals
 
 
-class T1WithToneModuleCfg(BaseModel):
+class T1WithToneModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     pi_pulse: PulseCfg
     test_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T1WithToneSweepAxisCfg(BaseModel):
+class T1WithToneSweepAxisCfg(ConfigBase):
     length: SweepCfg
 
 
@@ -488,7 +488,7 @@ def t1_sweep_tone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.flo
     return rotate2real(signals).real
 
 
-class T1WithToneSweepSweepCfg(BaseModel):
+class T1WithToneSweepSweepCfg(ConfigBase):
     gain: SweepCfg
     length: SweepCfg
 

@@ -6,9 +6,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Any, Callable, Optional, TypeAlias
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -39,7 +39,7 @@ def reset_rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
     return rotate2real(signals).real
 
 
-class RabiCheckModuleCfg(BaseModel):
+class RabiCheckModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     rabi_pulse: PulseCfg
     tested_reset: ResetCfg
@@ -47,7 +47,7 @@ class RabiCheckModuleCfg(BaseModel):
     readout: ReadoutCfg
 
 
-class RabiCheckSweepCfg(BaseModel):
+class RabiCheckSweepCfg(ConfigBase):
     gain: SweepCfg
 
 

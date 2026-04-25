@@ -4,9 +4,9 @@ from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Callable, Optional, TypedDict
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState
@@ -56,7 +56,7 @@ def t2ramsey_fluxdep_signal2real(
     return np.array(list(map(t2ramsey_signal2real, signals)), dtype=np.float64)
 
 
-class T2RamseyModuleCfg(BaseModel):
+class T2RamseyModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     pi2_pulse: PulseCfg
     readout: ReadoutCfg
@@ -67,7 +67,7 @@ class T2RamseyCfgTemplate(ProgramV2Cfg, ExpCfgModel):
     sweep_range: tuple[float, float]
 
 
-class T2RamseySweepCfg(BaseModel):
+class T2RamseySweepCfg(ConfigBase):
     length: SweepCfg
 
 

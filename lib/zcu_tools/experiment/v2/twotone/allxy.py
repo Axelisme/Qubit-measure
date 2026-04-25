@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from scipy.optimize import curve_fit
 from typing_extensions import (
     Any,
@@ -15,6 +14,7 @@ from typing_extensions import (
     TypeAlias,
 )
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -116,7 +116,7 @@ def allxy_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 # ------------------------------------------------------------------------------
 
 
-class AllXYModuleCfg(BaseModel):
+class AllXYModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     I_pulse: Optional[PulseCfg] = None
     X180_pulse: PulseCfg

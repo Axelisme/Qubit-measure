@@ -4,9 +4,9 @@ from copy import deepcopy
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Any, Mapping, Optional, TypeAlias
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -37,7 +37,7 @@ def freqflux_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
     return np.abs(minus_background(signals, axis=1))
 
 
-class FreqFluxSweepCfg(BaseModel):
+class FreqFluxSweepCfg(ConfigBase):
     flux: SweepCfg
     freq: SweepCfg
 

@@ -6,9 +6,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Any, Optional, TypeAlias
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -26,7 +26,7 @@ from .util import calc_populations
 LenRabiResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class LenRabiSweepCfg(BaseModel):
+class LenRabiSweepCfg(ConfigBase):
     length: SweepCfg
 
 

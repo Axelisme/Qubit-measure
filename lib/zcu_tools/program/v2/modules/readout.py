@@ -26,8 +26,11 @@ if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
 
 
-@ModuleCfg.bind_handler
-class DirectReadoutCfg(ModuleCfg):
+class AbsReadoutCfg(ModuleCfg): ...
+
+
+@ModuleCfg.bind_handler("readout/direct")
+class DirectReadoutCfg(AbsReadoutCfg):
     type: Literal["readout/direct"] = "readout/direct"
     ro_ch: int
     ro_length: Union[float, QickParam]
@@ -44,32 +47,38 @@ class DirectReadoutCfg(ModuleCfg):
             raise ValueError(f"Unknown parameter: {name}")
 
 
-@ModuleCfg.bind_handler
-class PulseReadoutCfg(ModuleCfg):
+@ModuleCfg.bind_handler("readout/pulse")
+class PulseReadoutCfg(AbsReadoutCfg):
     type: Literal["readout/pulse"] = "readout/pulse"
     pulse_cfg: PulseCfg
     ro_cfg: DirectReadoutCfg
 
     @classmethod
-    def from_dict(cls, raw_cfg: dict[str, Any], ml: "ModuleLibrary") -> Self:
+    def _from_dict(cls, raw_cfg: dict[str, Any], ml: ModuleLibrary) -> Self:
         raw_cfg = deepcopy(raw_cfg)
 
-        pulse_cfg = raw_cfg.get("pulse_cfg")
+        pulse_cfg = raw_cfg["pulse_cfg"]
         if isinstance(pulse_cfg, str):
-            raw_cfg["pulse_cfg"] = ml.get_module(pulse_cfg)
-        ro_cfg = raw_cfg.get("ro_cfg")
+            pulse_cfg = ml.get_module(pulse_cfg)
+        raw_cfg["pulse_cfg"] = pulse_cfg
+
+        ro_cfg = raw_cfg["ro_cfg"]
         if isinstance(ro_cfg, str):
-            raw_cfg["ro_cfg"] = ml.get_module(ro_cfg)
+            ro_cfg = ml.get_module(ro_cfg)
+        raw_cfg["ro_cfg"] = ro_cfg
 
         # auto derive ro_ch/ro_freq from pulse_cfg.ch/freq
-        if isinstance(pulse_cfg := raw_cfg.get("pulse_cfg"), dict):
+        if isinstance(pulse_cfg, dict):
             ch = pulse_cfg.get("ch")
             freq = pulse_cfg.get("freq")
-            if isinstance(ro_cfg := raw_cfg.get("ro_cfg"), dict):
+            if isinstance(ro_cfg, dict):
                 ro_cfg.setdefault("ro_ch", ch)
                 ro_cfg.setdefault("ro_freq", freq)
 
-        return cls.model_validate(raw_cfg)
+        raw_cfg["pulse_cfg"] = PulseCfg.from_raw(pulse_cfg, ml)
+        raw_cfg["ro_cfg"] = DirectReadoutCfg.from_raw(ro_cfg, ml)
+
+        return super()._from_dict(raw_cfg, ml)
 
     def set_param(self, name: str, value: Union[float, QickParam]) -> None:
         if name == "gain":
@@ -99,24 +108,23 @@ class AbsReadout(Module):
 
 
 class Readout(AbsReadout):
-    _supported_readout: ClassVar[dict[str, type["AbsReadout"]]] = {}
+    _supported_readout: ClassVar[dict[type[AbsReadoutCfg], type[AbsReadout]]] = {}
 
     def __init__(self, name: str, cfg: ReadoutCfg) -> None:
-        cfg_type = cfg.type
-        if cfg_type not in self._supported_readout:
-            raise ValueError(f"Unknown readout type: {cfg_type}")
-        self.readout = self._supported_readout[cfg_type](name, cfg)
+        if type(cfg) not in self._supported_readout:
+            raise ValueError(f"Unknown readout type: {type(cfg)}")
+        self.readout = self._supported_readout[type(cfg)](name, cfg)
 
     @classmethod
     def bind_readout(
-        cls, id_name: str
-    ) -> Callable[[type["AbsReadout"]], type["AbsReadout"]]:
-        def decorator(sub_cls: type["AbsReadout"]) -> type["AbsReadout"]:
+        cls, cfg_cls: type[AbsReadoutCfg]
+    ) -> Callable[[type[AbsReadout]], type[AbsReadout]]:
+        def decorator(sub_cls: type[AbsReadout]) -> type[AbsReadout]:
             if (
-                registered_cls := cls._supported_readout.setdefault(id_name, sub_cls)
+                registered_cls := cls._supported_readout.setdefault(cfg_cls, sub_cls)
             ) != sub_cls:
                 raise ValueError(
-                    f"Readout {id_name} already registered by {registered_cls.__name__}"
+                    f"Readout {cfg_cls.__name__} already registered by {registered_cls.__name__}"
                 )
             return sub_cls
 
@@ -138,7 +146,7 @@ class Readout(AbsReadout):
         return self.readout.run(prog, t)
 
 
-@Readout.bind_readout(DirectReadoutCfg.module_type())
+@Readout.bind_readout(DirectReadoutCfg)
 class DirectReadout(AbsReadout):
     def __init__(self, name: str, cfg: DirectReadoutCfg) -> None:
         self.name = name
@@ -174,7 +182,7 @@ class DirectReadout(AbsReadout):
         return t
 
 
-@Readout.bind_readout(PulseReadoutCfg.module_type())
+@Readout.bind_readout(PulseReadoutCfg)
 class PulseReadout(AbsReadout):
     def __init__(self, name: str, cfg: PulseReadoutCfg) -> None:
         self.name = name

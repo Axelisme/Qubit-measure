@@ -10,9 +10,9 @@ from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
 from numpy import float64
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Any, Optional, TypeAlias
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -69,7 +69,7 @@ def get_resonance_freq(
     return np.array(s_xs), np.array(s_freqs)
 
 
-class AcStarkModuleCfg(BaseModel):
+class AcStarkModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     init_pulse: Optional[PulseCfg] = None
     stark_pulse1: PulseCfg
@@ -77,7 +77,7 @@ class AcStarkModuleCfg(BaseModel):
     readout: ReadoutCfg
 
 
-class AcStarkSweepCfg(BaseModel):
+class AcStarkSweepCfg(ConfigBase):
     gain: SweepCfg
     freq: SweepCfg
 

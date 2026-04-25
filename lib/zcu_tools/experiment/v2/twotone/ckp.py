@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import (
     Any,
     Callable,
@@ -15,6 +14,7 @@ from typing_extensions import (
     TypeAlias,
 )
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -77,7 +77,7 @@ def get_resonance_freq(
     return np.array(s_xs), np.array(s_freqs)
 
 
-class CKPModuleCfg(BaseModel):
+class CKPModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     pi_pulse: PulseCfg
     res_pulse: PulseCfg
@@ -85,7 +85,7 @@ class CKPModuleCfg(BaseModel):
     readout: ReadoutCfg
 
 
-class CKPSweepCfg(BaseModel):
+class CKPSweepCfg(ConfigBase):
     res_freq: SweepCfg
     qub_freq: SweepCfg
 

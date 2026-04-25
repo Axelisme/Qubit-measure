@@ -4,9 +4,9 @@ from copy import deepcopy
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Any, Callable, Mapping, Optional, TypeAlias
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -36,12 +36,12 @@ OneToneFluxResult: TypeAlias = tuple[
 ]
 
 
-class OneToneFluxModuleCfg(BaseModel):
+class OneToneFluxModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     readout: PulseReadoutCfg
 
 
-class OneToneFluxSweepCfg(BaseModel):
+class OneToneFluxSweepCfg(ConfigBase):
     jpa_flux: SweepCfg
     freq: SweepCfg
 

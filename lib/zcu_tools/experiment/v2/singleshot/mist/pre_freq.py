@@ -6,9 +6,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Any, Callable, Optional, TypeAlias
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -34,7 +34,7 @@ from ..util import calc_populations
 PreFreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class PreFreqModuleCfg(BaseModel):
+class PreFreqModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     init_pulse: PulseCfg
     pi_pulse: Optional[PulseCfg] = None
@@ -42,7 +42,7 @@ class PreFreqModuleCfg(BaseModel):
     readout: ReadoutCfg
 
 
-class PreFreqSweepCfg(BaseModel):
+class PreFreqSweepCfg(ConfigBase):
     freq: SweepCfg
 
 

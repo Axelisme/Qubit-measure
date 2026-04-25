@@ -6,9 +6,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Any, Callable, Optional, TypeAlias
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -41,14 +41,14 @@ def twotone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class TwoToneModuleCfg(BaseModel):
+class TwoToneModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     flux_pulse: PulseCfg
     qub_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class TwoToneSweepCfg(BaseModel):
+class TwoToneSweepCfg(ConfigBase):
     gain: SweepCfg
     freq: SweepCfg
 

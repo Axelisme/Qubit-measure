@@ -7,11 +7,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from skopt import Optimizer
 from skopt.space import Real
 from typing_extensions import Any, Optional, TypeAlias, cast
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
@@ -86,13 +86,13 @@ class ReadoutOptimizer:
         return param
 
 
-class AutoOptModuleCfg(BaseModel):
+class AutoOptModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     qub_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class AutoOptSweepCfg(BaseModel):
+class AutoOptSweepCfg(ConfigBase):
     freq: SweepCfg
     gain: SweepCfg
     length: SweepCfg

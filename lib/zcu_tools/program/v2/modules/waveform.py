@@ -33,10 +33,13 @@ class WaveformCfg(ConfigBase):
     style: str
 
     @classmethod
-    def from_dict(cls, raw_cfg: dict[str, Any], ml: "ModuleLibrary") -> Self:
-        return TypeAdapter(
-            Annotated[UnionWaveformCfg, Field(discriminator="style")]
-        ).validate_python(raw_cfg)
+    def from_dict(cls, raw_cfg: dict[str, Any], ml: ModuleLibrary) -> Self:
+        try:
+            return TypeAdapter(
+                Annotated[UnionWaveformCfg, Field(discriminator="style")]
+            ).validate_python(raw_cfg)
+        except Exception as e:
+            raise ValueError(f"Failed to parse waveform config: {raw_cfg}") from e
 
 
 class ConstWaveformCfg(WaveformCfg):

@@ -4,9 +4,9 @@ from copy import deepcopy
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Callable, Mapping, Optional, TypeAlias, cast
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -41,12 +41,12 @@ def fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
 
-class FluxDepModuleCfg(BaseModel):
+class FluxDepModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     readout: PulseReadoutCfg
 
 
-class FluxDepSweepCfg(BaseModel):
+class FluxDepSweepCfg(ConfigBase):
     freq: SweepCfg
     flux: SweepCfg
 

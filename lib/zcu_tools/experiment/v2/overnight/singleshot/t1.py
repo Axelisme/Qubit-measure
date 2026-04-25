@@ -6,9 +6,9 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Callable, Generic, Optional, TypedDict, TypeVar, cast
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState
@@ -242,13 +242,13 @@ class T1PlotAndSaveMixin(Generic[T_Cfg]):
         ax.grid(True)
 
 
-class T1ModuleCfg(BaseModel):
+class T1ModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T1SweepCfg(BaseModel):
+class T1SweepCfg(ConfigBase):
     length: SweepCfg
 
 
@@ -342,14 +342,14 @@ class T1Task(
         self.task.cleanup()
 
 
-class T1WithToneModuleCfg(BaseModel):
+class T1WithToneModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     pi_pulse: PulseCfg
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T1WithToneSweepCfg(BaseModel):
+class T1WithToneSweepCfg(ConfigBase):
     length: SweepCfg
 
 

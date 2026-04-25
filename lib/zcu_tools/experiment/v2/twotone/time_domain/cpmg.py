@@ -8,7 +8,6 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from scipy.ndimage import gaussian_filter1d
 from typing_extensions import (
     Any,
@@ -19,6 +18,7 @@ from typing_extensions import (
     Union,
 )
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -59,14 +59,14 @@ CPMG_Result: TypeAlias = tuple[
 ]
 
 
-class CPMG_ModuleCfg(BaseModel):
+class CPMG_ModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     pi2_pulse: PulseCfg
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class CPMG_SweepCfg(BaseModel):
+class CPMG_SweepCfg(ConfigBase):
     times: Union[SweepCfg, Sequence[int]]
     length: SweepCfg
 

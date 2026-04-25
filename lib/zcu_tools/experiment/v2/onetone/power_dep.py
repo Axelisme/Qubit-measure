@@ -4,9 +4,9 @@ from copy import deepcopy
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Any, Callable, Optional, TypeAlias
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -35,12 +35,12 @@ def gaindep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rescale(minus_background(np.abs(signals), axis=1), axis=1)
 
 
-class PowerDepModuleCfg(BaseModel):
+class PowerDepModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     readout: PulseReadoutCfg
 
 
-class PowerDepSweepCfg(BaseModel):
+class PowerDepSweepCfg(ConfigBase):
     gain: SweepCfg
     freq: SweepCfg
 

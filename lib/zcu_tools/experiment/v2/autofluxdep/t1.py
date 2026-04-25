@@ -4,9 +4,9 @@ from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import Callable, Optional, TypedDict
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState
@@ -54,7 +54,7 @@ def t1_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
     return np.array(list(map(t1_signal2real, signals)), dtype=np.float64)
 
 
-class T1ModuleCfg(BaseModel):
+class T1ModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     pi_pulse: PulseCfg
     readout: ReadoutCfg
@@ -65,7 +65,7 @@ class T1CfgTemplate(ProgramV2Cfg, ExpCfgModel):
     sweep_range: tuple[float, float]
 
 
-class T1SweepCfg(BaseModel):
+class T1SweepCfg(ConfigBase):
     length: SweepCfg
 
 

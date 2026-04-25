@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import BaseModel
 from typing_extensions import (
     Any,
     Literal,
@@ -14,6 +13,7 @@ from typing_extensions import (
     TypeAlias,
 )
 
+from zcu_tools.config import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -45,14 +45,14 @@ def t2echo_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class T2EchoModuleCfg(BaseModel):
+class T2EchoModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     pi2_pulse: PulseCfg
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T2EchoSweepCfg(BaseModel):
+class T2EchoSweepCfg(ConfigBase):
     length: SweepCfg
 
 
