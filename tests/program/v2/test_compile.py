@@ -7,14 +7,12 @@ _initialize / _body / compile pipeline.
 from __future__ import annotations
 
 import pytest
-
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules import Delay, SoftDelay
 from zcu_tools.program.v2.sweep import SweepCfg
 
 from .conftest import make_mock_soccfg
-
 
 # ---------------------------------------------------------------------------
 # Helpers
