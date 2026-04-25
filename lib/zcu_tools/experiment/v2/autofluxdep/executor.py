@@ -87,13 +87,13 @@ class FluxDepInfoDict(UserDict):
         self.last_info[key] = deepcopy(item)
 
 
-class FluxDepBatchTask(BatchTask[str, T_Result, T_RootResult, FluxDepCfg]):
+class FluxDepBatchTask(BatchTask[str, Result, T_RootResult, FluxDepCfg]):
     def __init__(self, tasks, retry_time: int = 0) -> None:
         self.retry_time = retry_time
 
         super().__init__(tasks)
 
-    def run(self, ctx) -> None:
+    def run(self, ctx: TaskState) -> None:
         if self.dynamic_pbar:
             self.task_pbar = self.make_pbar(leave=False)
         else:
@@ -105,7 +105,7 @@ class FluxDepBatchTask(BatchTask[str, T_Result, T_RootResult, FluxDepCfg]):
 
             run_with_retries(
                 task,
-                ctx.child(name),
+                ctx.child(name, child_type=Result),
                 self.retry_time,
                 dynamic_pbar=True,
                 raise_error=False,

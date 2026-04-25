@@ -1,4 +1,5 @@
-from copy import deepcopy
+from __future__ import annotations
+
 from pathlib import Path
 
 import numpy as np
@@ -314,7 +315,9 @@ class T1Task(
         self.lengths = sweep2array(
             self.cfg.sweep.length, "time", {"soccfg": ctx.env["soccfg"]}
         )
-        self.task.run(ctx.child("populations", new_cfg=self.cfg))
+        self.task.run(
+            ctx.child_with_cfg("populations", self.cfg, child_type=NDArray[np.float64])
+        )
 
         with MinIntervalFunc.force_execute():
             ctx.set_value(
@@ -415,7 +418,9 @@ class T1WithToneTask(
         self.lengths = sweep2array(
             self.cfg.sweep.length, "time", {"soccfg": ctx.env["soccfg"]}
         )
-        self.task.run(ctx.child("populations", new_cfg=self.cfg))
+        self.task.run(
+            ctx.child_with_cfg("populations", self.cfg, child_type=NDArray[np.float64])
+        )
 
         with MinIntervalFunc.force_execute():
             ctx.set_value(

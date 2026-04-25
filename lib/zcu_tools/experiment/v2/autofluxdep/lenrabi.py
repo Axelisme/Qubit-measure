@@ -195,7 +195,9 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
 
         rabi_pulse = cfg.modules.rabi_pulse
         self.task.set_pbar_n(cfg.rounds)
-        self.task.run(ctx.child("raw_signals", new_cfg=cfg))
+        self.task.run(
+            ctx.child_with_cfg("raw_signals", cfg, child_type=NDArray[np.complex128])
+        )
 
         real_signals = lenrabi_signal2real(ctx.value["raw_signals"])
 

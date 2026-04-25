@@ -230,7 +230,9 @@ class T1Task(
         self.lengths = sweep2array(self.lengths, "time", {"soccfg": ctx.env["soccfg"]})
         self.last_cfg = self.cfg
 
-        self.task.run(ctx.child("signals", new_cfg=self.cfg))
+        self.task.run(
+            ctx.child_with_cfg("signals", self.cfg, child_type=NDArray[np.complex128])
+        )
 
         with MinIntervalFunc.force_execute():
             ctx.set_value(
@@ -326,7 +328,9 @@ class T1WithToneTask(
         )
         self.last_cfg = self.cfg
 
-        self.task.run(ctx.child("signals", new_cfg=self.cfg))
+        self.task.run(
+            ctx.child_with_cfg("signals", self.cfg, child_type=NDArray[np.complex128])
+        )
 
         ctx.set_value(
             T1Result(

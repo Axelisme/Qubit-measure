@@ -3,11 +3,11 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass, field
 from numbers import Number
-from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 from typing_extensions import (
+    Any,
     Callable,
     Generic,
     Hashable,
@@ -31,6 +31,7 @@ T_ChildCfg = TypeVar("T_ChildCfg", bound=ExpCfgModel)
 T_Result = TypeVar("T_Result", bound=Result)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
 T_ChildResult = TypeVar("T_ChildResult", bound=Result)
+T_MappingResult = TypeVar("T_MappingResult", bound=Mapping[Any, Any])
 
 
 @dataclass
@@ -47,7 +48,7 @@ class TaskState(Generic[T_Result, T_RootResult, T_Cfg]):
     root_data: T_RootResult
     cfg: T_Cfg
     env: dict[str, Any] = field(default_factory=dict)
-    on_update: Optional[Callable[["TaskState[Result, T_RootResult, Any]"], Any]] = None
+    on_update: Optional[Callable[["TaskState[Any, T_RootResult, Any]"], Any]] = None
     path: tuple[Union[int, Hashable], ...] = field(default_factory=tuple)
 
     # ------------------------------------------------------------------
@@ -56,32 +57,56 @@ class TaskState(Generic[T_Result, T_RootResult, T_Cfg]):
 
     @overload
     def child(
-        self, addr: Union[int, Hashable], new_cfg: None = None
+        self: "TaskState[list[T_ChildResult], T_RootResult, T_Cfg]",
+        addr: int,
+        child_type: None = None,
     ) -> "TaskState[T_ChildResult, T_RootResult, T_Cfg]": ...
 
     @overload
     def child(
-        self, addr: Union[int, Hashable], new_cfg: T_ChildCfg
-    ) -> "TaskState[T_ChildResult, T_RootResult, T_ChildCfg]": ...
+        self: "TaskState[T_MappingResult, T_RootResult, T_Cfg]",
+        addr: Hashable,
+        child_type: type[T_ChildResult],
+    ) -> "TaskState[T_ChildResult, T_RootResult, T_Cfg]": ...
 
     def child(
         self,
         addr: Union[int, Hashable],
-        new_cfg: Optional[T_ChildCfg] = None,
-    ) -> Union[
-        TaskState[T_ChildResult, T_RootResult, T_Cfg],
-        TaskState[T_ChildResult, T_RootResult, T_ChildCfg],
-    ]:
-        """Return a new TaskState pointing to a child result.
-
-        Strategy A: `cfg` is deep-copied when `new_cfg` is None, so that
-        modifications in the child do not affect the parent's cfg.
-        """
-        actual_cfg = self.cfg if new_cfg is None else new_cfg
-
+        child_type: Optional[type[T_ChildResult]] = None,
+    ) -> TaskState[T_ChildResult, T_RootResult, T_Cfg]:
         return TaskState(
             root_data=self.root_data,
-            cfg=deepcopy(actual_cfg),  # type: ignore
+            cfg=deepcopy(self.cfg),
+            env=self.env,
+            on_update=self.on_update,
+            path=self.path + (addr,),
+        )
+
+    @overload
+    def child_with_cfg(
+        self: "TaskState[list[T_ChildResult], T_RootResult, T_Cfg]",
+        addr: int,
+        new_cfg: T_ChildCfg,
+        child_type: None = None,
+    ) -> "TaskState[T_ChildResult, T_RootResult, T_ChildCfg]": ...
+
+    @overload
+    def child_with_cfg(
+        self: "TaskState[T_MappingResult, T_RootResult, T_Cfg]",
+        addr: Hashable,
+        new_cfg: T_ChildCfg,
+        child_type: type[T_ChildResult],
+    ) -> "TaskState[T_ChildResult, T_RootResult, T_ChildCfg]": ...
+
+    def child_with_cfg(
+        self,
+        addr: Union[int, Hashable],
+        new_cfg: T_ChildCfg,
+        child_type: Optional[type[T_ChildResult]] = None,
+    ) -> TaskState[T_ChildResult, T_RootResult, T_ChildCfg]:
+        return TaskState(
+            root_data=self.root_data,
+            cfg=deepcopy(new_cfg),
             env=self.env,
             on_update=self.on_update,
             path=self.path + (addr,),
@@ -133,9 +158,9 @@ class TaskState(Generic[T_Result, T_RootResult, T_Cfg]):
                 raise ValueError(f"Expected NDArray or number, got {type(value)}")
             np.copyto(dst=target, src=value)
 
-        self._trigger_update()
+        self._trigger_update_hook()
 
-    def _trigger_update(self) -> None:
+    def _trigger_update_hook(self) -> None:
         if self.on_update is not None:
             # Expose a read-only view of the root result to the callback.
             snapshot = TaskState[Result, T_RootResult, T_Cfg](

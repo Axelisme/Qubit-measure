@@ -1,4 +1,5 @@
-from copy import deepcopy
+from __future__ import annotations
+
 from pathlib import Path
 
 import numpy as np
@@ -379,7 +380,9 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
                 "gen_ch": self.cfg.modules.probe_pulse.ch,
             },
         )
-        self.task.run(ctx.child("populations", new_cfg=self.cfg))
+        self.task.run(
+            ctx.child_with_cfg("populations", self.cfg, child_type=NDArray[np.float64])
+        )
 
         with MinIntervalFunc.force_execute():
             ctx.set_value(

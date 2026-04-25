@@ -12,12 +12,7 @@ from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import (
-    format_sweep1D,
-    make_comment,
-    parse_comment,
-    setup_devices,
-)
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -217,11 +212,9 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         signals = signals.astype(np.complex128)
 
         if comment is not None:
-
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-
                 self.last_cfg = LengthCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (lens, signals)
 

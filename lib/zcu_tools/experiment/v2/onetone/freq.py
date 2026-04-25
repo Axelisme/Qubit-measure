@@ -10,12 +10,7 @@ from typing_extensions import Any, Callable, Literal, Optional, TypeAlias, cast
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import (
-    format_sweep1D,
-    make_comment,
-    parse_comment,
-    setup_devices,
-)
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D

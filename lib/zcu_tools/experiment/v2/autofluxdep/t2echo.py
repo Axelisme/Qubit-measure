@@ -185,7 +185,9 @@ class T2EchoTask(MeasurementTask[T2EchoResult, T_RootResult, T2EchoPlotDict]):
         self.last_cfg = cfg
 
         self.task.set_pbar_n(cfg.rounds)
-        self.task.run(ctx.child("raw_signals", new_cfg=cfg))
+        self.task.run(
+            ctx.child_with_cfg("raw_signals", cfg, child_type=NDArray[np.complex128])
+        )
 
         raw_signals = ctx.value["raw_signals"]
         assert isinstance(raw_signals, np.ndarray)

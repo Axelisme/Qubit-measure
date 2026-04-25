@@ -6,7 +6,7 @@ from tqdm.auto import tqdm
 from typing_extensions import Hashable, Mapping, Optional, TypeVar
 
 from .base import AbsTask
-from .state import T_Cfg, T_ChildResult, T_RootResult
+from .state import Result, T_Cfg, T_ChildResult, T_RootResult, TaskState, cast
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ class BatchTask(AbsTask[dict[T_Key, T_ChildResult], T_RootResult, T_Cfg]):
     def __init__(
         self, tasks: Mapping[T_Key, AbsTask[T_ChildResult, T_RootResult, T_Cfg]]
     ) -> None:
-        self.tasks = tasks
+        self.tasks = dict(tasks)
 
         self.task_pbar: Optional[tqdm] = None
         self.dynamic_pbar: bool = False
@@ -48,7 +48,12 @@ class BatchTask(AbsTask[dict[T_Key, T_ChildResult], T_RootResult, T_Cfg]):
             self.task_pbar.set_description(desc=f"Task [{str(name)}]")
             logger.debug("BatchTask.run: starting task '%s'", name)
 
-            task.run(state.child(name))
+            task.run(
+                cast(
+                    "TaskState[T_ChildResult, T_RootResult, T_Cfg]",
+                    state.child(name, child_type=Result),
+                )
+            )
 
             self.task_pbar.update()
 

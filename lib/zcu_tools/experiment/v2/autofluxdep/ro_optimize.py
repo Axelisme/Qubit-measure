@@ -188,7 +188,9 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         )
 
         self.task.set_pbar_n(cfg.rounds)
-        self.task.run(ctx.child("raw_signals", new_cfg=cfg))
+        self.task.run(
+            ctx.child_with_cfg("raw_signals", cfg, child_type=NDArray[np.float64])
+        )
 
         raw_signals = ctx.value["raw_signals"]
         assert isinstance(raw_signals, np.ndarray)

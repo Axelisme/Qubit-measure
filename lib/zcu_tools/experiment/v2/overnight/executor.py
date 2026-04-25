@@ -79,7 +79,7 @@ class OvernightBatchTask(BatchTask[str, Result, list[dict[str, Result]], Overnig
 
         super().__init__(tasks)
 
-    def run(self, ctx: TaskState[Result, T_RootResult, OvernightCfg]) -> None:
+    def run(self, ctx) -> None:
         if self.dynamic_pbar:
             self.task_pbar = self.make_pbar(leave=False)
         else:
@@ -91,7 +91,7 @@ class OvernightBatchTask(BatchTask[str, Result, list[dict[str, Result]], Overnig
 
             run_with_retries(
                 task,
-                ctx.child(name),
+                ctx.child(name, child_type=Result),
                 self.retry_time,
                 dynamic_pbar=True,
                 # raise_error=False,
