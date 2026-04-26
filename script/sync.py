@@ -25,6 +25,20 @@ def get_jupytext_version() -> Optional[str]:
         return None
 
 
+def _is_git_ignored(path: Path) -> bool:
+    """Return True if *path* is ignored by gitignore rules."""
+    try:
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", str(path)],
+            check=False,
+            capture_output=True,
+        )
+    except FileNotFoundError:
+        return False
+
+    return result.returncode == 0
+
+
 def _normalize_notebook(nb: dict) -> dict:
     """Return a deep-copied notebook dict with unstable fields removed."""
     nb_copy = copy.deepcopy(nb)
@@ -84,6 +98,16 @@ def sync_files(
         processed_count += 1
         relative_path = source_file.relative_to(source_path)
         dest_file = dest_path / relative_path.with_suffix(dest_ext)
+        markdown_file: Optional[Path] = None
+
+        if source_file.suffix == ".md":
+            markdown_file = source_file
+        elif dest_file.suffix == ".md":
+            markdown_file = dest_file
+
+        if markdown_file is not None and _is_git_ignored(markdown_file):
+            print(f"⏩ 跳過已被 .gitignore 忽略的 Markdown: {markdown_file}")
+            continue
 
         # Pre-convert source to destination format for comparison/writing
         source_notebook: Optional[dict] = None
