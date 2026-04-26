@@ -7,7 +7,7 @@ import numpy as np
 from tqdm.auto import tqdm
 from typing_extensions import Literal, Optional
 
-from .base import BaseDevice, DeviceInfo
+from .base import BaseDevice, BaseDeviceInfo
 
 STATUS_MAP = {"on": "1", "off": "0"}
 MODE_MAPS = {"voltage": "VOLT", "current": "CURR"}
@@ -21,7 +21,7 @@ STATUS_MAP_INV = {v: k for k, v in STATUS_MAP.items()}
 MODE_MAPS_INV = {v: k for k, v in MODE_MAPS.items()}
 
 
-class YOKOGS200Info(DeviceInfo):
+class YOKOGS200Info(BaseDeviceInfo):
     type: Literal["YOKOGS200"] = "YOKOGS200"
     output: Literal["on", "off"] = "off"
     mode: Literal["voltage", "current"] = "voltage"

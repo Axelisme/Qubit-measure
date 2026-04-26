@@ -160,7 +160,14 @@ class ModuleLibrary(SyncFile):
             if (sweep_name := get_single_sweep_name(cfg_model)) is not None:
                 exp_cfg["sweep"] = format_sweep1D(sweep_cfg, sweep_name)
 
-        return cfg_model.model_validate(exp_cfg)
+        try:
+            return cfg_model.model_validate(exp_cfg)
+        except Exception as e:
+            raise ValueError(
+                f"Error validating experiment config with {cfg_model.__name__}:\n"
+                f"exp_cfg: {exp_cfg}\n"
+                f"error: {e}"
+            ) from e
 
     @auto_sync("write")
     def register_waveform(

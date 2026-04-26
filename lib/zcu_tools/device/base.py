@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from pyvisa import ResourceManager
 
 
-class DeviceInfo(ConfigBase):
+class BaseDeviceInfo(ConfigBase):
     address: str
     type: str
     label: Optional[str] = None
@@ -35,7 +35,7 @@ class BaseDevice(ABC):
     Base class for all devices.
     """
 
-    info_model: type[DeviceInfo] = DeviceInfo
+    info_model: type[BaseDeviceInfo] = BaseDeviceInfo
 
     def __init__(self, address: str, rm: ResourceManager) -> None:
         self.address = address
@@ -79,9 +79,9 @@ class BaseDevice(ABC):
     # ----- abstract methods -----
 
     @abstractmethod
-    def _setup(self, cfg: DeviceInfo, *, progress: bool = True) -> None: ...
+    def _setup(self, cfg: BaseDeviceInfo, *, progress: bool = True) -> None: ...
 
-    def setup(self, cfg: DeviceInfo, *, progress: bool = True) -> None:
+    def setup(self, cfg: BaseDeviceInfo, *, progress: bool = True) -> None:
         """
         Setup the device with the given configuration.
         """
@@ -102,7 +102,7 @@ class BaseDevice(ABC):
         self._setup(cfg, progress=progress)
 
     @abstractmethod
-    def get_info(self) -> DeviceInfo:
+    def get_info(self) -> BaseDeviceInfo:
         """
         Get the current configuration of the device.
         """

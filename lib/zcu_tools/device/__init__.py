@@ -3,9 +3,14 @@ from __future__ import annotations
 import threading
 import warnings
 
-from typing_extensions import Any, ClassVar, Mapping
+from typing_extensions import Any, ClassVar, Mapping, Union, TypeAlias, cast
 
-from .base import BaseDevice, DeviceInfo
+from .base import BaseDevice, BaseDeviceInfo
+from .yoko import YOKOGS200, YOKOGS200Info
+from .sgs100a import RohdeSchwarzSGS100A, RohdeSchwarzSGS100AInfo
+from .fake import FakeDevice, FakeDeviceInfo
+
+DeviceInfo: TypeAlias = Union[YOKOGS200Info, RohdeSchwarzSGS100AInfo, FakeDeviceInfo]
 
 
 class GlobalDeviceManager:
@@ -51,4 +56,24 @@ class GlobalDeviceManager:
     @classmethod
     def get_all_info(cls) -> dict[str, DeviceInfo]:
         with cls._lock:
-            return {name: device.get_info() for name, device in cls._devices.items()}
+            return {
+                name: cast(DeviceInfo, device.get_info())
+                for name, device in cls._devices.items()
+            }
+
+
+__all__ = [
+    # base
+    "BaseDevice",
+    "BaseDeviceInfo",
+    # devices
+    "YOKOGS200",
+    "YOKOGS200Info",
+    "RohdeSchwarzSGS100A",
+    "RohdeSchwarzSGS100AInfo",
+    "FakeDevice",
+    "FakeDeviceInfo",
+    # manager
+    "GlobalDeviceManager",
+    "DeviceInfo",
+]

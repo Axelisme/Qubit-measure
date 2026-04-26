@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing_extensions import Literal
 
-from .base import BaseDevice, DeviceInfo
+from .base import BaseDevice, BaseDeviceInfo
 
 STATUS_MAP = {"on": "1", "off": "0"}
 
@@ -10,7 +10,7 @@ STATUS_MAP = {"on": "1", "off": "0"}
 STATUS_MAP_INV = {v: k for k, v in STATUS_MAP.items()}
 
 
-class RohdeSchwarzSGS100AInfo(DeviceInfo):
+class RohdeSchwarzSGS100AInfo(BaseDeviceInfo):
     type: Literal["RohdeSchwarzSGS100A"] = "RohdeSchwarzSGS100A"
     output: Literal["on", "off"] = "off"
     IQ: Literal["on", "off"] = "off"
