@@ -1,5 +1,8 @@
 import pytest
 from qick.asm_v2 import QickParam
+from zcu_tools.program.v2.modules import (
+    WaveformCfgFactory,  # ensures leaf subclass registration
+)
 from zcu_tools.program.v2.modules.waveform import (
     ArbWaveformCfg,
     ConstWaveform,
@@ -9,7 +12,6 @@ from zcu_tools.program.v2.modules.waveform import (
     DragWaveformCfg,
     GaussWaveform,
     GaussWaveformCfg,
-    WaveformCfg,
 )
 
 
@@ -69,10 +71,10 @@ def test_waveform_build_dispatch_cosine():
 
 
 def test_waveform_adapter_dispatches_by_style():
-    cfg = WaveformCfg.from_raw({"style": "gauss", "length": 1.0, "sigma": 0.2})
+    cfg = WaveformCfgFactory.from_raw({"style": "gauss", "length": 1.0, "sigma": 0.2})
     assert isinstance(cfg, GaussWaveformCfg)
 
 
 def test_waveform_adapter_rejects_unknown_style():
     with pytest.raises(Exception):
-        WaveformCfg.from_raw({"style": "no_such_style", "length": 1.0})
+        WaveformCfgFactory.from_raw({"style": "no_such_style", "length": 1.0})

@@ -32,39 +32,50 @@ class ModuleCfg(ConfigBase):
     type: str
     desc: Optional[str] = None
 
-    _leaf_subclasses: ClassVar[list[type[ModuleCfg]]] = []
-    _adapter: ClassVar[Optional[TypeAdapter]] = None
-
-    @classmethod
-    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
-        super().__pydantic_init_subclass__(**kwargs)
-        field = cls.model_fields.get("type")
-        if field is not None and get_origin(field.annotation) is Literal:
-            ModuleCfg._leaf_subclasses.append(cls)
-            ModuleCfg._adapter = None
-
-    @classmethod
-    def _get_adapter(cls) -> TypeAdapter:
-        if ModuleCfg._adapter is None:
-            if not ModuleCfg._leaf_subclasses:
-                raise RuntimeError("No ModuleCfg leaf subclasses registered")
-            union = Annotated[
-                Union[tuple(ModuleCfg._leaf_subclasses)],
-                Field(discriminator="type"),
-            ]
-            ModuleCfg._adapter = TypeAdapter(union)
-        return ModuleCfg._adapter
-
-    @classmethod
-    def from_raw(cls, raw: Any, *, ml: Optional[ModuleLibrary] = None) -> ModuleCfg:
-        ctx = {"ml": ml} if ml is not None else None
-        return cls._get_adapter().validate_python(raw, context=ctx)
-
     def build(self, name: str) -> Module:
         raise NotImplementedError(f"{type(self).__name__}.build is not implemented")
 
     def set_param(self, name: str, value: Union[float, QickParam]) -> None:
         raise NotImplementedError(f"{type(self).__name__} does not support set_param")
+
+
+class ModuleCfgFactory:
+    _registry: ClassVar[dict[str, type[ModuleCfg]]] = {}
+    _adapter: ClassVar[Optional[TypeAdapter]] = None
+
+    @classmethod
+    def register(cls, *module_cfgs: type[ModuleCfg]) -> None:
+        for mc in module_cfgs:
+            field = mc.model_fields.get("type")
+            if field is None or get_origin(field.annotation) is not Literal:
+                raise TypeError(
+                    f"{mc.__name__} cannot be registered: missing Literal 'type' field"
+                )
+            type_value = field.default
+            existing = cls._registry.get(type_value)
+            if existing is not None and existing is not mc:
+                raise ValueError(
+                    f"Type discriminator {type_value!r} already registered to {existing.__name__}"
+                )
+            cls._registry[type_value] = mc
+        cls._adapter = None
+
+    @classmethod
+    def _get_adapter(cls) -> TypeAdapter:
+        if cls._adapter is None:
+            if not cls._registry:
+                raise RuntimeError("No ModuleCfg leaf subclasses registered")
+            union = Annotated[
+                Union[tuple(cls._registry.values())],
+                Field(discriminator="type"),
+            ]
+            cls._adapter = TypeAdapter(union)
+        return cls._adapter
+
+    @classmethod
+    def from_raw(cls, raw: Any, *, ml: Optional[ModuleLibrary] = None) -> ModuleCfg:
+        ctx = {"ml": ml} if ml is not None else None
+        return cls._get_adapter().validate_python(raw, context=ctx)
 
 
 class Module(ABC):

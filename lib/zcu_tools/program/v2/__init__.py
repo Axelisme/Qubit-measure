@@ -13,6 +13,7 @@ from .modules import (
     LoadValue,
     Module,
     ModuleCfg,
+    ModuleCfgFactory,
     Pulse,
     PulseCfg,
     PulseReadout,
@@ -30,6 +31,7 @@ from .modules import (
     TwoPulseReset,
     TwoPulseResetCfg,
     WaveformCfg,
+    WaveformCfgFactory,
 )
 from .onetone import OneToneCfg, OneToneProgram
 from .sweep import SweepCfg

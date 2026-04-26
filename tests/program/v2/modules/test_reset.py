@@ -2,7 +2,9 @@ from unittest.mock import MagicMock
 
 import pytest
 from pydantic import TypeAdapter
-from zcu_tools.program.v2.modules import ModuleCfg  # ensures leaf subclass registration
+from zcu_tools.program.v2.modules import (
+    ModuleCfgFactory,  # ensures leaf subclass registration
+)
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.reset import (
     AbsResetCfg,
@@ -72,7 +74,7 @@ class TestNoneResetCfg:
         assert isinstance(cfg, NoneResetCfg)
 
     def test_module_adapter_dispatch(self):
-        cfg = ModuleCfg.from_raw({"type": "reset/none"})
+        cfg = ModuleCfgFactory.from_raw({"type": "reset/none"})
         assert isinstance(cfg, NoneResetCfg)
 
     def test_set_param_always_raises(self):
@@ -110,7 +112,7 @@ class TestPulseResetCfg:
         assert isinstance(cfg.pulse_cfg, PulseCfg)
 
     def test_module_adapter_dispatch(self):
-        cfg = ModuleCfg.from_raw(self._dict())
+        cfg = ModuleCfgFactory.from_raw(self._dict())
         assert isinstance(cfg, PulseResetCfg)
         assert isinstance(cfg.pulse_cfg, PulseCfg)
 
@@ -173,7 +175,7 @@ class TestTwoPulseResetCfg:
         assert isinstance(cfg.pulse1_cfg, PulseCfg)
 
     def test_module_adapter_dispatch(self):
-        cfg = ModuleCfg.from_raw(self._dict())
+        cfg = ModuleCfgFactory.from_raw(self._dict())
         assert isinstance(cfg, TwoPulseResetCfg)
         assert isinstance(cfg.pulse1_cfg, PulseCfg)
         assert isinstance(cfg.pulse2_cfg, PulseCfg)
@@ -252,7 +254,7 @@ class TestBathResetCfg:
         assert isinstance(cfg.pi2_cfg, PulseCfg)
 
     def test_module_adapter_dispatch(self):
-        cfg = ModuleCfg.from_raw(self._dict())
+        cfg = ModuleCfgFactory.from_raw(self._dict())
         assert isinstance(cfg, BathResetCfg)
 
     def test_cfgs_as_strings(self):

@@ -10,7 +10,12 @@ from yaml.nodes import MappingNode
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import format_sweep1D, get_single_sweep_name
-from zcu_tools.program.v2 import ModuleCfg, WaveformCfg
+from zcu_tools.program.v2 import (
+    ModuleCfg,
+    ModuleCfgFactory,
+    WaveformCfg,
+    WaveformCfgFactory,
+)
 from zcu_tools.utils import deepupdate, format_obj
 
 from .syncfile import SyncFile, auto_sync
@@ -99,7 +104,7 @@ class ModuleLibrary(SyncFile):
         self.waveforms = {}
         for name, wav_cfg in cfg["waveforms"].items():
             try:
-                wav_cfg = WaveformCfg.from_raw(wav_cfg, ml=self)
+                wav_cfg = WaveformCfgFactory.from_raw(wav_cfg, ml=self)
             except Exception as e:
                 raise ValueError(
                     f"Error parsing waveform {name} in module library: \n{e}"
@@ -109,7 +114,7 @@ class ModuleLibrary(SyncFile):
         self.modules = {}
         for name, mod_cfg in cfg["modules"].items():
             try:
-                mod_cfg = ModuleCfg.from_raw(mod_cfg, ml=self)
+                mod_cfg = ModuleCfgFactory.from_raw(mod_cfg, ml=self)
             except Exception as e:
                 raise ValueError(
                     f"Error parsing module {name} in module library: \n{e}"
@@ -148,7 +153,7 @@ class ModuleLibrary(SyncFile):
                 if isinstance(sub_cfg, ModuleCfg):
                     modules[name] = sub_cfg
                 else:
-                    modules[name] = ModuleCfg.from_raw(sub_cfg, ml=self)
+                    modules[name] = ModuleCfgFactory.from_raw(sub_cfg, ml=self)
 
         # format sweep
         if (sweep_cfg := exp_cfg.get("sweep")) is not None:
@@ -167,7 +172,7 @@ class ModuleLibrary(SyncFile):
         # filter out non-waveform attributes
         for name, wav_cfg in wav_kwargs.items():
             if isinstance(wav_cfg, dict):
-                wav_cfg = WaveformCfg.from_raw(wav_cfg, ml=self)
+                wav_cfg = WaveformCfgFactory.from_raw(wav_cfg, ml=self)
             self.waveforms[name] = wav_cfg  # directly overwrite
         self._dirty = True
 
@@ -178,7 +183,7 @@ class ModuleLibrary(SyncFile):
 
         for name, mod_cfg in mod_kwargs.items():
             if isinstance(mod_cfg, dict):
-                mod_cfg = ModuleCfg.from_raw(mod_cfg, ml=self)
+                mod_cfg = ModuleCfgFactory.from_raw(mod_cfg, ml=self)
             self.modules[name] = mod_cfg  # directly overwrite
 
         self._dirty = True

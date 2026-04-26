@@ -2,7 +2,9 @@ from unittest.mock import MagicMock
 
 import pytest
 from pydantic import TypeAdapter
-from zcu_tools.program.v2.modules import ModuleCfg  # ensures leaf subclass registration
+from zcu_tools.program.v2.modules import (
+    ModuleCfgFactory,  # ensures leaf subclass registration
+)
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import (
     AbsReadoutCfg,
@@ -91,7 +93,7 @@ class TestDirectReadoutCfg:
         assert cfg.gen_ch == 1
 
     def test_module_adapter_dispatch(self):
-        cfg = ModuleCfg.from_raw(_direct_dict())
+        cfg = ModuleCfgFactory.from_raw(_direct_dict())
         assert isinstance(cfg, DirectReadoutCfg)
         assert cfg.trig_offset == 0.0
         assert cfg.gen_ch is None
@@ -163,7 +165,7 @@ class TestPulseReadoutCfg:
         assert isinstance(cfg.pulse_cfg, PulseCfg)
 
     def test_module_adapter_dispatch(self):
-        cfg = ModuleCfg.from_raw(_pulse_dict())
+        cfg = ModuleCfgFactory.from_raw(_pulse_dict())
         assert isinstance(cfg, PulseReadoutCfg)
         assert isinstance(cfg.pulse_cfg, PulseCfg)
         assert isinstance(cfg.ro_cfg, DirectReadoutCfg)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import qick.asm_v2 as qick_asm_v2
 
-from .base import Module, ModuleCfg
+from .base import Module, ModuleCfg, ModuleCfgFactory
 from .control import Branch, Repeat, SoftRepeat
 from .delay import Delay, DelayAuto, Join, SoftDelay
 from .dmem import LoadValue, ScanWith
@@ -41,6 +41,26 @@ from .waveform import (
     FlatTopWaveformCfg,
     GaussWaveformCfg,
     WaveformCfg,
+    WaveformCfgFactory,
+)
+
+ModuleCfgFactory.register(
+    PulseCfg,
+    DirectReadoutCfg,
+    PulseReadoutCfg,
+    NoneResetCfg,
+    PulseResetCfg,
+    TwoPulseResetCfg,
+    BathResetCfg,
+)
+
+WaveformCfgFactory.register(
+    ConstWaveformCfg,
+    CosineWaveformCfg,
+    GaussWaveformCfg,
+    DragWaveformCfg,
+    ArbWaveformCfg,
+    FlatTopWaveformCfg,
 )
 
 # TODO: waiting qick official implementation
@@ -62,6 +82,7 @@ __all__ = [
     # base
     "Module",
     "ModuleCfg",
+    "ModuleCfgFactory",
     # control
     "Branch",
     "Repeat",
@@ -111,4 +132,5 @@ __all__ = [
     "FlatTopWaveformCfg",
     "GaussWaveformCfg",
     "WaveformCfg",
+    "WaveformCfgFactory",
 ]

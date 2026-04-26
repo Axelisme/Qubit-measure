@@ -8,7 +8,7 @@ from typing_extensions import TYPE_CHECKING, Annotated, Any, Literal, Optional, 
 
 from .base import Module, ModuleCfg, get_ml_from_context
 from .util import round_timestamp
-from .waveform import AbsWaveform, WaveformCfg
+from .waveform import AbsWaveform, WaveformCfg, WaveformCfgFactory
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
@@ -23,7 +23,7 @@ def _resolve_waveform_ref(value: Any, info: ValidationInfo) -> Any:
             )
         return ml.get_waveform(value)
     if isinstance(value, dict):
-        return WaveformCfg.from_raw(value, ml=get_ml_from_context(info))
+        return WaveformCfgFactory.from_raw(value, ml=get_ml_from_context(info))
     return value
 
 
