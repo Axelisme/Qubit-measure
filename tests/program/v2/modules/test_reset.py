@@ -1,10 +1,10 @@
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.program.v2.modules.base import ModuleCfg
+from pydantic import TypeAdapter
+from zcu_tools.program.v2.modules import ModuleCfg  # ensures leaf subclass registration
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.reset import (
-    AbsReset,
     AbsResetCfg,
     BathReset,
     BathResetCfg,
@@ -13,6 +13,7 @@ from zcu_tools.program.v2.modules.reset import (
     PulseReset,
     PulseResetCfg,
     Reset,
+    ResetCfg,
     TwoPulseReset,
     TwoPulseResetCfg,
 )
@@ -21,6 +22,8 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, GaussWavefor
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+_RESET_ADAPTER: TypeAdapter = TypeAdapter(ResetCfg)
 
 
 def _ml():
@@ -64,17 +67,13 @@ def _make_pi2_cfg():
 
 
 class TestNoneResetCfg:
-    def test_from_dict_basic(self):
-        cfg = NoneResetCfg.from_dict({"type": "reset/none"}, _ml())
+    def test_validate_basic(self):
+        cfg = NoneResetCfg.model_validate({"type": "reset/none"})
         assert isinstance(cfg, NoneResetCfg)
 
-    def test_from_dict_via_modulecfg_dispatch(self):
-        cfg = ModuleCfg.from_dict({"type": "reset/none"}, _ml())
+    def test_module_adapter_dispatch(self):
+        cfg = ModuleCfg.from_raw({"type": "reset/none"})
         assert isinstance(cfg, NoneResetCfg)
-
-    def test_from_raw_instance_passthrough(self):
-        existing = NoneResetCfg()
-        assert NoneResetCfg.from_raw(existing, _ml()) is existing
 
     def test_set_param_always_raises(self):
         cfg = NoneResetCfg()
@@ -91,43 +90,29 @@ class TestPulseResetCfg:
     def _dict(self):
         return {"type": "reset/pulse", "pulse_cfg": _pulse_dict()}
 
-    def test_from_dict_basic(self):
-        cfg = PulseResetCfg.from_dict(self._dict(), _ml())
+    def test_validate_basic(self):
+        cfg = PulseResetCfg.model_validate(self._dict())
         assert isinstance(cfg, PulseResetCfg)
         assert isinstance(cfg.pulse_cfg, PulseCfg)
         assert cfg.pulse_cfg.ch == 1
 
-    def test_from_dict_pulse_cfg_as_dict(self):
-        cfg = PulseResetCfg.from_dict(self._dict(), _ml())
-        assert isinstance(cfg, PulseResetCfg)
+    def test_validate_pulse_cfg_freq(self):
+        cfg = PulseResetCfg.model_validate(self._dict())
         assert cfg.pulse_cfg.freq == 4000.0
 
-    def test_from_dict_pulse_cfg_as_string(self):
+    def test_pulse_cfg_as_string(self):
         ml = _ml()
-        ml.get_module.return_value = _pulse_dict()
+        ml.get_module.return_value = _make_pulse_cfg()
         d = {"type": "reset/pulse", "pulse_cfg": "my_pulse"}
-        cfg = PulseResetCfg.from_dict(d, ml)
+        cfg = PulseResetCfg.model_validate(d, context={"ml": ml})
         ml.get_module.assert_called_once_with("my_pulse")
         assert isinstance(cfg, PulseResetCfg)
         assert isinstance(cfg.pulse_cfg, PulseCfg)
 
-    def test_from_dict_via_modulecfg_dispatch(self):
-        cfg = ModuleCfg.from_dict(self._dict(), _ml())
-        assert isinstance(cfg, PulseResetCfg)
-        assert isinstance(cfg.pulse_cfg, PulseCfg)  # narrowed by isinstance above
-
-    def test_from_dict_pulse_cfg_as_string_type_is_pulsecfg(self):
-        ml = _ml()
-        ml.get_module.return_value = _pulse_dict()
-        cfg = PulseResetCfg.from_dict(
-            {"type": "reset/pulse", "pulse_cfg": "my_pulse"}, ml
-        )
+    def test_module_adapter_dispatch(self):
+        cfg = ModuleCfg.from_raw(self._dict())
         assert isinstance(cfg, PulseResetCfg)
         assert isinstance(cfg.pulse_cfg, PulseCfg)
-
-    def test_from_raw_instance_passthrough(self):
-        existing = PulseResetCfg(pulse_cfg=_make_pulse_cfg())
-        assert PulseResetCfg.from_raw(existing, _ml()) is existing
 
     def test_set_param_gain(self):
         cfg = PulseResetCfg(pulse_cfg=_make_pulse_cfg())
@@ -163,42 +148,35 @@ class TestTwoPulseResetCfg:
             "pulse2_cfg": _pulse_dict(ch=2, freq=3000.0, length=0.3),
         }
 
-    def test_from_dict_basic(self):
-        cfg = TwoPulseResetCfg.from_dict(self._dict(), _ml())
+    def test_validate_basic(self):
+        cfg = TwoPulseResetCfg.model_validate(self._dict())
         assert isinstance(cfg, TwoPulseResetCfg)
         assert isinstance(cfg.pulse1_cfg, PulseCfg)
         assert isinstance(cfg.pulse2_cfg, PulseCfg)
 
-    def test_from_dict_preserves_individual_channels(self):
-        cfg = TwoPulseResetCfg.from_dict(self._dict(), _ml())
-        assert isinstance(cfg, TwoPulseResetCfg)
+    def test_preserves_individual_channels(self):
+        cfg = TwoPulseResetCfg.model_validate(self._dict())
         assert cfg.pulse1_cfg.ch == 1
         assert cfg.pulse2_cfg.ch == 2
 
-    def test_from_dict_pulse_cfgs_as_strings(self):
+    def test_pulse_cfgs_as_strings(self):
         ml = _ml()
-        ml.get_module.return_value = _pulse_dict()
+        ml.get_module.return_value = _make_pulse_cfg()
         d = {
             "type": "reset/two_pulse",
             "pulse1_cfg": "p1",
             "pulse2_cfg": "p2",
         }
-        cfg = TwoPulseResetCfg.from_dict(d, ml)
+        cfg = TwoPulseResetCfg.model_validate(d, context={"ml": ml})
         assert ml.get_module.call_count == 2
         assert isinstance(cfg, TwoPulseResetCfg)
         assert isinstance(cfg.pulse1_cfg, PulseCfg)
 
-    def test_from_dict_via_modulecfg_dispatch(self):
-        cfg = ModuleCfg.from_dict(self._dict(), _ml())
+    def test_module_adapter_dispatch(self):
+        cfg = ModuleCfg.from_raw(self._dict())
         assert isinstance(cfg, TwoPulseResetCfg)
         assert isinstance(cfg.pulse1_cfg, PulseCfg)
         assert isinstance(cfg.pulse2_cfg, PulseCfg)
-
-    def test_from_raw_instance_passthrough(self):
-        existing = TwoPulseResetCfg(
-            pulse1_cfg=_make_pulse_cfg(), pulse2_cfg=_make_pulse_cfg(ch=2)
-        )
-        assert TwoPulseResetCfg.from_raw(existing, _ml()) is existing
 
     def test_set_param_gain1(self):
         cfg = TwoPulseResetCfg(
@@ -266,41 +244,30 @@ class TestBathResetCfg:
             },
         }
 
-    def test_from_dict_basic(self):
-        cfg = BathResetCfg.from_dict(self._dict(), _ml())
+    def test_validate_basic(self):
+        cfg = BathResetCfg.model_validate(self._dict())
         assert isinstance(cfg, BathResetCfg)
         assert isinstance(cfg.cavity_tone_cfg, PulseCfg)
         assert isinstance(cfg.qubit_tone_cfg, PulseCfg)
         assert isinstance(cfg.pi2_cfg, PulseCfg)
 
-    def test_from_dict_via_modulecfg_dispatch(self):
-        cfg = ModuleCfg.from_dict(self._dict(), _ml())
+    def test_module_adapter_dispatch(self):
+        cfg = ModuleCfg.from_raw(self._dict())
         assert isinstance(cfg, BathResetCfg)
-        assert isinstance(cfg.cavity_tone_cfg, PulseCfg)
-        assert isinstance(cfg.qubit_tone_cfg, PulseCfg)
-        assert isinstance(cfg.pi2_cfg, PulseCfg)
 
-    def test_from_dict_cfgs_as_strings(self):
+    def test_cfgs_as_strings(self):
         ml = _ml()
-        ml.get_module.return_value = _pulse_dict()
+        ml.get_module.return_value = _make_pulse_cfg()
         d = {
             "type": "reset/bath",
             "cavity_tone_cfg": "res_pulse",
             "qubit_tone_cfg": "qub_pulse",
             "pi2_cfg": "pi2_pulse",
         }
-        cfg = BathResetCfg.from_dict(d, ml)
+        cfg = BathResetCfg.model_validate(d, context={"ml": ml})
         assert ml.get_module.call_count == 3
         assert isinstance(cfg, BathResetCfg)
         assert isinstance(cfg.cavity_tone_cfg, PulseCfg)
-
-    def test_from_raw_instance_passthrough(self):
-        existing = BathResetCfg(
-            cavity_tone_cfg=_make_pulse_cfg(ch=1, freq=5000.0),
-            qubit_tone_cfg=_make_pulse_cfg(ch=2, freq=4000.0),
-            pi2_cfg=_make_pi2_cfg(),
-        )
-        assert BathResetCfg.from_raw(existing, _ml()) is existing
 
     def test_set_param_qub_gain(self):
         cfg = BathResetCfg(
@@ -383,15 +350,15 @@ class TestBathResetCfg:
 class TestResetFactory:
     def test_dispatch_none(self):
         r = Reset("r", NoneResetCfg())
-        assert isinstance(r.reset, NoneReset)
+        assert isinstance(r, NoneReset)
 
     def test_dispatch_none_from_none_arg(self):
         r = Reset("r", None)
-        assert isinstance(r.reset, NoneReset)
+        assert isinstance(r, NoneReset)
 
     def test_dispatch_pulse(self):
         r = Reset("r", PulseResetCfg(pulse_cfg=_make_pulse_cfg()))
-        assert isinstance(r.reset, PulseReset)
+        assert isinstance(r, PulseReset)
 
     def test_dispatch_two_pulse(self):
         r = Reset(
@@ -400,7 +367,7 @@ class TestResetFactory:
                 pulse1_cfg=_make_pulse_cfg(), pulse2_cfg=_make_pulse_cfg(ch=2)
             ),
         )
-        assert isinstance(r.reset, TwoPulseReset)
+        assert isinstance(r, TwoPulseReset)
 
     def test_dispatch_bath(self):
         r = Reset(
@@ -411,16 +378,19 @@ class TestResetFactory:
                 pi2_cfg=_make_pi2_cfg(),
             ),
         )
-        assert isinstance(r.reset, BathReset)
+        assert isinstance(r, BathReset)
 
     def test_unknown_cfg_raises(self):
         class UnknownCfg(AbsResetCfg):
             type: str = "unknown_reset"
 
-        with pytest.raises(ValueError):
-            Reset("r", UnknownCfg())  # type: ignore[arg-type]
+            def build(self, name):
+                raise NotImplementedError
 
-    def test_name_delegated(self):
+        with pytest.raises(NotImplementedError):
+            Reset("r", UnknownCfg())
+
+    def test_name_set(self):
         r = Reset("myname", NoneResetCfg())
         assert r.name == "myname"
 
@@ -456,28 +426,17 @@ class TestResetFactory:
             is True
         )
 
-    def test_bind_reset_duplicate_raises(self):
-        class NewCfg(AbsResetCfg):
-            type: str = "new_unique_reset"
 
-        @Reset.bind_reset(NewCfg)
-        class _NewReset(AbsReset):
-            def __init__(self, name: str, cfg: NewCfg) -> None:  # noqa: ARG002
-                self.name = name
+class TestResetCfgAdapter:
+    def test_dispatch_none(self):
+        cfg = _RESET_ADAPTER.validate_python({"type": "reset/none"})
+        assert isinstance(cfg, NoneResetCfg)
 
-            def init(self, _prog) -> None: ...  # type: ignore[override]
-
-            def total_length(self, _prog):
-                return 0.0
-
-            def run(self, _prog, t=0.0):
-                return t
-
-        with pytest.raises(ValueError):
-
-            @Reset.bind_reset(NewCfg)
-            class _AnotherReset(AbsReset):
-                pass
+    def test_dispatch_pulse(self):
+        cfg = _RESET_ADAPTER.validate_python(
+            {"type": "reset/pulse", "pulse_cfg": _pulse_dict()}
+        )
+        assert isinstance(cfg, PulseResetCfg)
 
 
 # ---------------------------------------------------------------------------

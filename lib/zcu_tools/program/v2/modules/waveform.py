@@ -10,16 +10,14 @@ from typing_extensions import (
     TYPE_CHECKING,
     Annotated,
     Any,
-    Callable,
     ClassVar,
     Literal,
     NotRequired,
     Optional,
-    Self,
-    Type,
     TypeAlias,
     TypedDict,
     Union,
+    get_origin,
 )
 
 from zcu_tools.config import ConfigBase
@@ -31,20 +29,49 @@ if TYPE_CHECKING:
 
 class WaveformCfg(ConfigBase):
     style: str
+    length: Union[float, QickParam]
+
+    _leaf_subclasses: ClassVar[list[type[WaveformCfg]]] = []
+    _adapter: ClassVar[Optional[TypeAdapter]] = None
 
     @classmethod
-    def from_dict(cls, raw_cfg: dict[str, Any], ml: ModuleLibrary) -> Self:
-        try:
-            return TypeAdapter(
-                Annotated[UnionWaveformCfg, Field(discriminator="style")]
-            ).validate_python(raw_cfg)
-        except Exception as e:
-            raise ValueError(f"Failed to parse waveform config: {raw_cfg}") from e
+    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        super().__pydantic_init_subclass__(**kwargs)
+        field = cls.model_fields.get("style")
+        if field is not None and get_origin(field.annotation) is Literal:
+            WaveformCfg._leaf_subclasses.append(cls)
+            WaveformCfg._adapter = None
+
+    @classmethod
+    def _get_adapter(cls) -> TypeAdapter:
+        if WaveformCfg._adapter is None:
+            if not WaveformCfg._leaf_subclasses:
+                raise RuntimeError("No WaveformCfg leaf subclasses registered")
+            union = Annotated[
+                Union[tuple(WaveformCfg._leaf_subclasses)],
+                Field(discriminator="style"),
+            ]
+            WaveformCfg._adapter = TypeAdapter(union)
+        return WaveformCfg._adapter
+
+    @classmethod
+    def from_raw(cls, raw: Any, *, ml: Optional[ModuleLibrary] = None) -> WaveformCfg:
+        ctx = {"ml": ml} if ml is not None else None
+        return cls._get_adapter().validate_python(raw, context=ctx)
+
+    def build(self, name: str) -> AbsWaveform:
+        raise NotImplementedError(f"{type(self).__name__}.build is not implemented")
+
+    def set_param(self, name: str, value: Union[float, QickParam]) -> None:
+        raise NotImplementedError(f"{type(self).__name__} does not support set_param")
 
 
 class ConstWaveformCfg(WaveformCfg):
     style: Literal["const"] = "const"
     length: Union[float, QickParam]
+
+    def build(self, name: str) -> ConstWaveform:
+        return ConstWaveform(name, self)
 
     def set_param(self, name: str, value: Union[float, QickParam]) -> None:
         if name == "length":
@@ -56,6 +83,9 @@ class ConstWaveformCfg(WaveformCfg):
 class CosineWaveformCfg(WaveformCfg):
     style: Literal["cosine"] = "cosine"
     length: float
+
+    def build(self, name: str) -> CosineWaveform:
+        return CosineWaveform(name, self)
 
     def set_param(self, name: str, value: Union[float, QickParam]) -> None:
         if name != "length":
@@ -69,6 +99,9 @@ class GaussWaveformCfg(WaveformCfg):
     style: Literal["gauss"] = "gauss"
     length: float
     sigma: float
+
+    def build(self, name: str) -> GaussWaveform:
+        return GaussWaveform(name, self)
 
     def set_param(self, name: str, value: Union[float, QickParam]) -> None:
         if isinstance(value, QickParam):
@@ -92,6 +125,9 @@ class DragWaveformCfg(WaveformCfg):
     sigma: float
     delta: float
     alpha: float
+
+    def build(self, name: str) -> DragWaveform:
+        return DragWaveform(name, self)
 
     def set_param(self, name: str, value: Union[float, QickParam]) -> None:
         if isinstance(value, QickParam):
@@ -118,12 +154,16 @@ class ArbWaveformCfg(WaveformCfg):
     length: float
     data: str
 
+    def build(self, name: str) -> ArbWaveform:
+        return ArbWaveform(name, self)
+
     def set_param(self, name: str, value: Union[float, QickParam]) -> None:
         raise ValueError("Arb waveform length and data cannot be changed")
 
 
-RaiseWaveformCfg: TypeAlias = Union[
-    CosineWaveformCfg, GaussWaveformCfg, DragWaveformCfg, ArbWaveformCfg
+RaiseWaveformCfg: TypeAlias = Annotated[
+    Union[CosineWaveformCfg, GaussWaveformCfg, DragWaveformCfg, ArbWaveformCfg],
+    Field(discriminator="style"),
 ]
 
 
@@ -132,21 +172,14 @@ class FlatTopWaveformCfg(WaveformCfg):
     length: Union[float, QickParam]
     raise_waveform: RaiseWaveformCfg
 
+    def build(self, name: str) -> FlatTopWaveform:
+        return FlatTopWaveform(name, self)
+
     def set_param(self, param_name: str, param_value: Union[float, QickParam]) -> None:
         if param_name == "length":
             self.length = param_value
         else:
             raise ValueError(f"Unknown parameter: {param_name}")
-
-
-UnionWaveformCfg: TypeAlias = Union[
-    ConstWaveformCfg,
-    CosineWaveformCfg,
-    GaussWaveformCfg,
-    DragWaveformCfg,
-    ArbWaveformCfg,
-    FlatTopWaveformCfg,
-]
 
 
 class QickWaveformKwargs(TypedDict):
@@ -157,13 +190,12 @@ class QickWaveformKwargs(TypedDict):
 
 
 class AbsWaveform(ABC):
-    def __init__(self, name: str, waveform_cfg: UnionWaveformCfg) -> None:
-        self.name = name
-        self.waveform_cfg = waveform_cfg
+    name: str
+    waveform_cfg: WaveformCfg
 
     @property
     def length(self) -> Union[float, QickParam]:
-        return self.waveform_cfg.length
+        return self.waveform_cfg.length  # type: ignore[attr-defined]
 
     @abstractmethod
     def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None: ...
@@ -172,46 +204,6 @@ class AbsWaveform(ABC):
     def to_wav_kwargs(self) -> QickWaveformKwargs: ...
 
 
-class Waveform(AbsWaveform):
-    _supported_waveforms: ClassVar[dict[str, type[AbsWaveform]]] = {}
-
-    @classmethod
-    def register_waveform(
-        cls, style: str
-    ) -> Callable[[Type[AbsWaveform]], Type[AbsWaveform]]:
-        if style in cls._supported_waveforms:
-            raise ValueError(
-                f"Waveform style {style} already registered by {cls._supported_waveforms[style].__name__}"
-            )
-
-        def decorator(wav_cls: Type[AbsWaveform]) -> Type[AbsWaveform]:
-            cls._supported_waveforms[style] = wav_cls
-            return wav_cls
-
-        return decorator
-
-    def __init__(self, name: str, waveform_cfg: UnionWaveformCfg) -> None:
-        waveform_style = waveform_cfg.style
-        if waveform_style not in self._supported_waveforms:
-            raise ValueError(f"Unknown waveform style: {waveform_style}")
-        self.waveform = self._supported_waveforms[waveform_style](name, waveform_cfg)
-
-    @property
-    def name(self) -> str:
-        return self.waveform.name
-
-    @property
-    def length(self) -> Union[float, QickParam]:
-        return self.waveform.length
-
-    def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None:
-        self.waveform.create(prog, ch, **kwargs)
-
-    def to_wav_kwargs(self) -> QickWaveformKwargs:
-        return self.waveform.to_wav_kwargs()
-
-
-@Waveform.register_waveform("const")
 class ConstWaveform(AbsWaveform):
     def __init__(self, name: str, waveform_cfg: ConstWaveformCfg) -> None:
         self.name = name
@@ -223,7 +215,6 @@ class ConstWaveform(AbsWaveform):
         return {"style": "const", "length": self.length}
 
 
-@Waveform.register_waveform("cosine")
 class CosineWaveform(AbsWaveform):
     def __init__(self, name: str, waveform_cfg: CosineWaveformCfg) -> None:
         self.name = name
@@ -231,7 +222,7 @@ class CosineWaveform(AbsWaveform):
 
     @property
     def length(self) -> float:
-        return self.waveform_cfg.length
+        return self.waveform_cfg.length  # type: ignore[return-value]
 
     def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None:
         prog.add_cosine(ch, self.name, length=self.length, **kwargs)
@@ -240,7 +231,6 @@ class CosineWaveform(AbsWaveform):
         return {"style": "arb", "envelope": self.name}
 
 
-@Waveform.register_waveform("gauss")
 class GaussWaveform(AbsWaveform):
     def __init__(self, name: str, waveform_cfg: GaussWaveformCfg) -> None:
         self.name = name
@@ -248,10 +238,11 @@ class GaussWaveform(AbsWaveform):
 
     @property
     def length(self) -> float:
-        return self.waveform_cfg.length
+        return self.waveform_cfg.length  # type: ignore[return-value]
 
     def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None:
         wav_cfg = self.waveform_cfg
+        assert isinstance(wav_cfg, GaussWaveformCfg)
         prog.add_gauss(
             ch,
             self.name,
@@ -264,7 +255,6 @@ class GaussWaveform(AbsWaveform):
         return {"style": "arb", "envelope": self.name}
 
 
-@Waveform.register_waveform("drag")
 class DragWaveform(AbsWaveform):
     def __init__(self, name: str, waveform_cfg: DragWaveformCfg) -> None:
         self.name = name
@@ -272,10 +262,11 @@ class DragWaveform(AbsWaveform):
 
     @property
     def length(self) -> float:
-        return self.waveform_cfg.length
+        return self.waveform_cfg.length  # type: ignore[return-value]
 
     def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None:
         wav_cfg = self.waveform_cfg
+        assert isinstance(wav_cfg, DragWaveformCfg)
         prog.add_DRAG(
             ch,
             self.name,
@@ -290,7 +281,6 @@ class DragWaveform(AbsWaveform):
         return {"style": "arb", "envelope": self.name}
 
 
-@Waveform.register_waveform("arb")
 class ArbWaveform(AbsWaveform):
     def __init__(self, name: str, waveform_cfg: ArbWaveformCfg) -> None:
         self.name = name
@@ -298,7 +288,7 @@ class ArbWaveform(AbsWaveform):
 
     @property
     def length(self) -> float:
-        return self.waveform_cfg.length
+        return self.waveform_cfg.length  # type: ignore[return-value]
 
     def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None:
         idata, qdata = self.make_iqdata(ch, prog, **kwargs)
@@ -310,7 +300,9 @@ class ArbWaveform(AbsWaveform):
         # lazy import to avoid circular import
         from zcu_tools.meta_tool.arb_waveform import ArbWaveformDatabase
 
-        idata_raw, qdata_raw, time_raw = ArbWaveformDatabase.get(self.waveform_cfg.data)
+        cfg = self.waveform_cfg
+        assert isinstance(cfg, ArbWaveformCfg)
+        idata_raw, qdata_raw, time_raw = ArbWaveformDatabase.get(cfg.data)
 
         maxv = prog.soccfg.get_maxv(ch)
         samps_per_clk = prog.soccfg["gens"][ch]["samps_per_clk"]
@@ -335,13 +327,12 @@ class ArbWaveform(AbsWaveform):
         return {"style": "arb", "envelope": self.name}
 
 
-@Waveform.register_waveform("flat_top")
 class FlatTopWaveform(AbsWaveform):
     def __init__(self, name: str, waveform_cfg: FlatTopWaveformCfg) -> None:
         self.name = name
         self.waveform_cfg = waveform_cfg
 
-        self.raise_waveform = Waveform(name, waveform_cfg.raise_waveform)
+        self.raise_waveform: AbsWaveform = waveform_cfg.raise_waveform.build(name)
 
     def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None:
         kwargs.setdefault("even_length", True)

@@ -2,22 +2,34 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from pydantic import BeforeValidator, ValidationInfo
 from qick.asm_v2 import QickParam
-from typing_extensions import TYPE_CHECKING, Any, Literal, Optional, Self, Union
+from typing_extensions import TYPE_CHECKING, Annotated, Any, Literal, Optional, Union
 
-from .base import Module, ModuleCfg
+from .base import Module, ModuleCfg, get_ml_from_context
 from .util import round_timestamp
-from .waveform import UnionWaveformCfg, Waveform, WaveformCfg
+from .waveform import AbsWaveform, WaveformCfg
 
 if TYPE_CHECKING:
-    from zcu_tools.meta_tool import ModuleLibrary
     from zcu_tools.program.v2.modular import ModularProgramV2
 
 
-@ModuleCfg.bind_handler("pulse")
+def _resolve_waveform_ref(value: Any, info: ValidationInfo) -> Any:
+    if isinstance(value, str):
+        ml = get_ml_from_context(info)
+        if ml is None:
+            raise ValueError(
+                f"Cannot resolve waveform reference {value!r} without ModuleLibrary context"
+            )
+        return ml.get_waveform(value)
+    if isinstance(value, dict):
+        return WaveformCfg.from_raw(value, ml=get_ml_from_context(info))
+    return value
+
+
 class PulseCfg(ModuleCfg):
     type: Literal["pulse"] = "pulse"
-    waveform: UnionWaveformCfg
+    waveform: Annotated[WaveformCfg, BeforeValidator(_resolve_waveform_ref)]
     ch: int
     nqz: Literal[1, 2]
     freq: Union[float, QickParam]
@@ -34,15 +46,8 @@ class PulseCfg(ModuleCfg):
     outsel: Optional[int] = None
     ro_ch: Optional[int] = None
 
-    @classmethod
-    def _from_dict(cls, raw_cfg: dict[str, Any], ml: ModuleLibrary) -> Self:
-        if isinstance(raw_cfg["waveform"], str):
-            raw_cfg["waveform"] = ml.get_waveform(raw_cfg["waveform"])
-
-        if isinstance(raw_cfg["waveform"], dict):
-            raw_cfg["waveform"] = WaveformCfg.from_dict(raw_cfg["waveform"], ml)
-
-        return super()._from_dict(raw_cfg, ml)
+    def build(self, name: str) -> Pulse:
+        return Pulse(name, self)
 
     def set_param(self, name: str, value: Union[float, QickParam]) -> None:
         if name == "length":
@@ -70,7 +75,7 @@ class Pulse(Module):
         if self.cfg is None:
             return
 
-        self.waveform = Waveform(f"{self.name}_waveform", self.cfg.waveform)
+        self.waveform: AbsWaveform = self.cfg.waveform.build(f"{self.name}_waveform")
         self.pulse_id = prog.pulse_registry.calc_name(self.cfg)
 
         prog.pulse_registry.check_valid_mixer_freq(self.name, self.cfg)

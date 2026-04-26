@@ -3,66 +3,73 @@ from __future__ import annotations
 from abc import abstractmethod
 from copy import deepcopy
 
+from pydantic import BeforeValidator, Field, ValidationInfo
 from qick.asm_v2 import QickParam
 from typing_extensions import (
     TYPE_CHECKING,
+    Annotated,
     Any,
-    Callable,
-    ClassVar,
     Literal,
     Optional,
-    Self,
     TypeAlias,
     Union,
 )
 
-from .base import Module, ModuleCfg
+from .base import Module, ModuleCfg, get_ml_from_context
 from .pulse import Pulse, PulseCfg
 from .util import calc_max_length
 
 if TYPE_CHECKING:
-    from zcu_tools.meta_tool import ModuleLibrary
     from zcu_tools.program.v2.modular import ModularProgramV2
 
 
-class AbsResetCfg(ModuleCfg): ...
+def _resolve_pulse_ref(value: Any, info: ValidationInfo) -> Any:
+    if isinstance(value, str):
+        ml = get_ml_from_context(info)
+        if ml is None:
+            raise ValueError(
+                f"Cannot resolve pulse reference {value!r} without ModuleLibrary context"
+            )
+        return ml.get_module(value)
+    return value
 
 
-@ModuleCfg.bind_handler("reset/none")
+PulseOrRef: TypeAlias = Annotated[PulseCfg, BeforeValidator(_resolve_pulse_ref)]
+
+
+class AbsResetCfg(ModuleCfg):
+    @abstractmethod
+    def build(self, name: str) -> AbsReset: ...
+
+
 class NoneResetCfg(AbsResetCfg):
     type: Literal["reset/none"] = "reset/none"
+
+    def build(self, name: str) -> NoneReset:
+        return NoneReset(name, self)
 
     def set_param(self, name: str, value: Union[float, QickParam]) -> None:
         raise ValueError("NoneReset does not support set_param")
 
 
-@ModuleCfg.bind_handler("reset/pulse")
 class PulseResetCfg(AbsResetCfg):
     type: Literal["reset/pulse"] = "reset/pulse"
-    pulse_cfg: PulseCfg
+    pulse_cfg: PulseOrRef
 
-    @classmethod
-    def _from_dict(cls, raw_cfg: dict[str, Any], ml: ModuleLibrary) -> Self:
-        raw_cfg["pulse_cfg"] = PulseCfg.from_raw(raw_cfg["pulse_cfg"], ml)
-
-        return super()._from_dict(raw_cfg, ml)
+    def build(self, name: str) -> PulseReset:
+        return PulseReset(name, self)
 
     def set_param(self, name: str, value: Union[float, QickParam]) -> None:
         self.pulse_cfg.set_param(name, value)
 
 
-@ModuleCfg.bind_handler("reset/two_pulse")
 class TwoPulseResetCfg(AbsResetCfg):
     type: Literal["reset/two_pulse"] = "reset/two_pulse"
-    pulse1_cfg: PulseCfg
-    pulse2_cfg: PulseCfg
+    pulse1_cfg: PulseOrRef
+    pulse2_cfg: PulseOrRef
 
-    @classmethod
-    def _from_dict(cls, raw_cfg: dict[str, Any], ml: ModuleLibrary) -> Self:
-        raw_cfg["pulse1_cfg"] = PulseCfg.from_raw(raw_cfg["pulse1_cfg"], ml)
-        raw_cfg["pulse2_cfg"] = PulseCfg.from_raw(raw_cfg["pulse2_cfg"], ml)
-
-        return super()._from_dict(raw_cfg, ml)
+    def build(self, name: str) -> TwoPulseReset:
+        return TwoPulseReset(name, self)
 
     def set_param(self, name: str, value: Union[float, QickParam]) -> None:
         if name in ["gain1", "freq1"]:
@@ -76,20 +83,14 @@ class TwoPulseResetCfg(AbsResetCfg):
             raise ValueError(f"Unknown parameter: {name}")
 
 
-@ModuleCfg.bind_handler("reset/bath")
 class BathResetCfg(AbsResetCfg):
     type: Literal["reset/bath"] = "reset/bath"
-    cavity_tone_cfg: PulseCfg
-    qubit_tone_cfg: PulseCfg
-    pi2_cfg: PulseCfg
+    cavity_tone_cfg: PulseOrRef
+    qubit_tone_cfg: PulseOrRef
+    pi2_cfg: PulseOrRef
 
-    @classmethod
-    def _from_dict(cls, raw_cfg: dict[str, Any], ml: ModuleLibrary) -> Self:
-        raw_cfg["cavity_tone_cfg"] = PulseCfg.from_raw(raw_cfg["cavity_tone_cfg"], ml)
-        raw_cfg["qubit_tone_cfg"] = PulseCfg.from_raw(raw_cfg["qubit_tone_cfg"], ml)
-        raw_cfg["pi2_cfg"] = PulseCfg.from_raw(raw_cfg["pi2_cfg"], ml)
-
-        return super()._from_dict(raw_cfg, ml)
+    def build(self, name: str) -> BathReset:
+        return BathReset(name, self)
 
     def set_param(self, name: str, value: Union[float, QickParam]) -> None:
         if name in ["qub_gain", "qub_freq"]:
@@ -106,7 +107,10 @@ class BathResetCfg(AbsResetCfg):
             raise ValueError(f"Unknown parameter: {name}")
 
 
-ResetCfg: TypeAlias = Union[NoneResetCfg, PulseResetCfg, TwoPulseResetCfg, BathResetCfg]
+ResetCfg: TypeAlias = Annotated[
+    Union[NoneResetCfg, PulseResetCfg, TwoPulseResetCfg, BathResetCfg],
+    Field(discriminator="type"),
+]
 
 
 class AbsReset(Module):
@@ -117,48 +121,13 @@ class AbsReset(Module):
         return True
 
 
-class Reset(AbsReset):
-    _supported_reset: ClassVar[dict[type[AbsResetCfg], type[AbsReset]]] = {}
-
-    def __init__(self, name: str, cfg: Optional[ResetCfg]) -> None:
-        if cfg is None:
-            cfg = NoneResetCfg(desc="Auto derived from None")
-        if type(cfg) not in self._supported_reset:
-            raise ValueError(f"Unknown reset type: {type(cfg)}")
-        self.reset = self._supported_reset[type(cfg)](name, cfg)
-
-    @classmethod
-    def bind_reset(
-        cls, cfg_cls: type[AbsResetCfg]
-    ) -> Callable[[type[AbsReset]], type[AbsReset]]:
-        def decorator(sub_cls: type[AbsReset]) -> type[AbsReset]:
-            if (
-                registered_cls := cls._supported_reset.setdefault(cfg_cls, sub_cls)
-            ) != sub_cls:
-                raise ValueError(
-                    f"Reset {cfg_cls.__name__} already registered by {registered_cls.__name__}"
-                )
-            return sub_cls
-
-        return decorator
-
-    @property
-    def name(self) -> str:
-        return self.reset.name
-
-    def init(self, prog: ModularProgramV2) -> None:
-        self.reset.init(prog)
-
-    def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]:
-        return self.reset.total_length(prog)
-
-    def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        return self.reset.run(prog, t)
+def Reset(name: str, cfg: Optional[AbsResetCfg]) -> AbsReset:
+    """Factory: dispatch a reset cfg to its concrete impl. None → NoneReset."""
+    if cfg is None:
+        cfg = NoneResetCfg(desc="Auto derived from None")
+    return cfg.build(name)
 
 
-@Reset.bind_reset(NoneResetCfg)
 class NoneReset(AbsReset):
     def __init__(self, name: str, cfg: NoneResetCfg) -> None:
         self.name = name
@@ -175,7 +144,6 @@ class NoneReset(AbsReset):
         return t
 
 
-@Reset.bind_reset(PulseResetCfg)
 class PulseReset(AbsReset):
     def __init__(self, name: str, cfg: PulseResetCfg) -> None:
         self.name = name
@@ -194,7 +162,6 @@ class PulseReset(AbsReset):
         return self.reset_pulse.run(prog, t)
 
 
-@Reset.bind_reset(TwoPulseResetCfg)
 class TwoPulseReset(AbsReset):
     def __init__(self, name: str, cfg: TwoPulseResetCfg) -> None:
         self.name = name
@@ -219,7 +186,6 @@ class TwoPulseReset(AbsReset):
         return calc_max_length(pulse1_t, pulse2_t)
 
 
-@Reset.bind_reset(BathResetCfg)
 class BathReset(AbsReset):
     def __init__(self, name: str, cfg: BathResetCfg) -> None:
         self.name = name

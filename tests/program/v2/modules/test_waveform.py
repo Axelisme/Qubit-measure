@@ -1,7 +1,6 @@
 import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.program.v2.modules.waveform import (
-    AbsWaveform,
     ArbWaveformCfg,
     ConstWaveform,
     ConstWaveformCfg,
@@ -10,7 +9,7 @@ from zcu_tools.program.v2.modules.waveform import (
     DragWaveformCfg,
     GaussWaveform,
     GaussWaveformCfg,
-    Waveform,
+    WaveformCfg,
 )
 
 
@@ -52,26 +51,28 @@ def test_arb_waveform_set_param_rejected():
         cfg.set_param("length", 2.0)
 
 
-def test_waveform_factory_dispatch_const():
-    wf = Waveform("n", ConstWaveformCfg(length=1.0))
-    assert isinstance(wf.waveform, ConstWaveform)
+def test_waveform_build_dispatch_const():
+    wf = ConstWaveformCfg(length=1.0).build("n")
+    assert isinstance(wf, ConstWaveform)
     assert wf.length == 1.0
     assert wf.name == "n"
 
 
-def test_waveform_factory_dispatch_gauss():
-    wf = Waveform("g", GaussWaveformCfg(length=1.0, sigma=0.2))
-    assert isinstance(wf.waveform, GaussWaveform)
+def test_waveform_build_dispatch_gauss():
+    wf = GaussWaveformCfg(length=1.0, sigma=0.2).build("g")
+    assert isinstance(wf, GaussWaveform)
 
 
-def test_waveform_factory_dispatch_cosine():
-    wf = Waveform("c", CosineWaveformCfg(length=1.0))
-    assert isinstance(wf.waveform, CosineWaveform)
+def test_waveform_build_dispatch_cosine():
+    wf = CosineWaveformCfg(length=1.0).build("c")
+    assert isinstance(wf, CosineWaveform)
 
 
-def test_waveform_registry_rejects_duplicate():
-    with pytest.raises(ValueError):
+def test_waveform_adapter_dispatches_by_style():
+    cfg = WaveformCfg.from_raw({"style": "gauss", "length": 1.0, "sigma": 0.2})
+    assert isinstance(cfg, GaussWaveformCfg)
 
-        @Waveform.register_waveform("const")
-        class Dup(AbsWaveform):
-            pass
+
+def test_waveform_adapter_rejects_unknown_style():
+    with pytest.raises(Exception):
+        WaveformCfg.from_raw({"style": "no_such_style", "length": 1.0})

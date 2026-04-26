@@ -4,32 +4,42 @@ import warnings
 from abc import abstractmethod
 from copy import deepcopy
 
+from pydantic import BeforeValidator, Field, ValidationInfo, model_validator
 from qick.asm_v2 import QickParam
 from typing_extensions import (
     TYPE_CHECKING,
+    Annotated,
     Any,
-    Callable,
-    ClassVar,
     Literal,
     Optional,
-    Self,
     TypeAlias,
     Union,
 )
 
-from .base import Module, ModuleCfg
+from .base import Module, ModuleCfg, get_ml_from_context
 from .pulse import Pulse, PulseCfg
 from .util import calc_max_length, round_timestamp
 
 if TYPE_CHECKING:
-    from zcu_tools.meta_tool import ModuleLibrary
     from zcu_tools.program.v2.modular import ModularProgramV2
 
 
-class AbsReadoutCfg(ModuleCfg): ...
+def _resolve_pulse_ref(value: Any, info: ValidationInfo) -> Any:
+    if isinstance(value, str):
+        ml = get_ml_from_context(info)
+        if ml is None:
+            raise ValueError(
+                f"Cannot resolve pulse reference {value!r} without ModuleLibrary context"
+            )
+        return ml.get_module(value)
+    return value
 
 
-@ModuleCfg.bind_handler("readout/direct")
+class AbsReadoutCfg(ModuleCfg):
+    @abstractmethod
+    def build(self, name: str) -> AbsReadout: ...
+
+
 class DirectReadoutCfg(AbsReadoutCfg):
     type: Literal["readout/direct"] = "readout/direct"
     ro_ch: int
@@ -37,6 +47,9 @@ class DirectReadoutCfg(AbsReadoutCfg):
     ro_freq: Union[float, QickParam]
     trig_offset: Union[float, QickParam] = 0.0
     gen_ch: Optional[int] = None
+
+    def build(self, name: str) -> DirectReadout:
+        return DirectReadout(name, self)
 
     def set_param(self, name: str, value: Union[float, QickParam]) -> None:
         if name == "ro_freq":
@@ -47,26 +60,27 @@ class DirectReadoutCfg(AbsReadoutCfg):
             raise ValueError(f"Unknown parameter: {name}")
 
 
-@ModuleCfg.bind_handler("readout/pulse")
 class PulseReadoutCfg(AbsReadoutCfg):
     type: Literal["readout/pulse"] = "readout/pulse"
-    pulse_cfg: PulseCfg
+    pulse_cfg: Annotated[PulseCfg, BeforeValidator(_resolve_pulse_ref)]
     ro_cfg: DirectReadoutCfg
 
+    @model_validator(mode="before")
     @classmethod
-    def _from_dict(cls, raw_cfg: dict[str, Any], ml: ModuleLibrary) -> Self:
-        # auto derive ro_ch/ro_freq from pulse_cfg.ch/freq
-        if isinstance((pulse_cfg := raw_cfg["pulse_cfg"]), dict):
-            ch = pulse_cfg.get("ch")
-            freq = pulse_cfg.get("freq")
-            if isinstance((ro_cfg := raw_cfg["ro_cfg"]), dict):
-                ro_cfg.setdefault("ro_ch", ch)
-                ro_cfg.setdefault("ro_freq", freq)
+    def _autoderive_ro_fields(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        pulse_cfg = data.get("pulse_cfg")
+        ro_cfg = data.get("ro_cfg")
+        if isinstance(pulse_cfg, dict) and isinstance(ro_cfg, dict):
+            if "ch" in pulse_cfg:
+                ro_cfg.setdefault("ro_ch", pulse_cfg["ch"])
+            if "freq" in pulse_cfg:
+                ro_cfg.setdefault("ro_freq", pulse_cfg["freq"])
+        return data
 
-        raw_cfg["pulse_cfg"] = PulseCfg.from_raw(raw_cfg["pulse_cfg"], ml)
-        raw_cfg["ro_cfg"] = DirectReadoutCfg.from_raw(raw_cfg["ro_cfg"], ml)
-
-        return super()._from_dict(raw_cfg, ml)
+    def build(self, name: str) -> PulseReadout:
+        return PulseReadout(name, self)
 
     def set_param(self, name: str, value: Union[float, QickParam]) -> None:
         if name == "gain":
@@ -84,7 +98,10 @@ class PulseReadoutCfg(AbsReadoutCfg):
             raise ValueError(f"Unknown parameter: {name}")
 
 
-ReadoutCfg: TypeAlias = Union[PulseReadoutCfg, DirectReadoutCfg]
+ReadoutCfg: TypeAlias = Annotated[
+    Union[DirectReadoutCfg, PulseReadoutCfg],
+    Field(discriminator="type"),
+]
 
 
 class AbsReadout(Module):
@@ -95,46 +112,11 @@ class AbsReadout(Module):
         return True
 
 
-class Readout(AbsReadout):
-    _supported_readout: ClassVar[dict[type[AbsReadoutCfg], type[AbsReadout]]] = {}
-
-    def __init__(self, name: str, cfg: ReadoutCfg) -> None:
-        if type(cfg) not in self._supported_readout:
-            raise ValueError(f"Unknown readout type: {type(cfg)}")
-        self.readout = self._supported_readout[type(cfg)](name, cfg)
-
-    @classmethod
-    def bind_readout(
-        cls, cfg_cls: type[AbsReadoutCfg]
-    ) -> Callable[[type[AbsReadout]], type[AbsReadout]]:
-        def decorator(sub_cls: type[AbsReadout]) -> type[AbsReadout]:
-            if (
-                registered_cls := cls._supported_readout.setdefault(cfg_cls, sub_cls)
-            ) != sub_cls:
-                raise ValueError(
-                    f"Readout {cfg_cls.__name__} already registered by {registered_cls.__name__}"
-                )
-            return sub_cls
-
-        return decorator
-
-    @property
-    def name(self) -> str:
-        return self.readout.name
-
-    def init(self, prog: ModularProgramV2) -> None:
-        self.readout.init(prog)
-
-    def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]:
-        return self.readout.total_length(prog)
-
-    def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        return self.readout.run(prog, t)
+def Readout(name: str, cfg: AbsReadoutCfg) -> AbsReadout:
+    """Factory: dispatch a readout cfg to its concrete impl."""
+    return cfg.build(name)
 
 
-@Readout.bind_readout(DirectReadoutCfg)
 class DirectReadout(AbsReadout):
     def __init__(self, name: str, cfg: DirectReadoutCfg) -> None:
         self.name = name
@@ -170,7 +152,6 @@ class DirectReadout(AbsReadout):
         return t
 
 
-@Readout.bind_readout(PulseReadoutCfg)
 class PulseReadout(AbsReadout):
     def __init__(self, name: str, cfg: PulseReadoutCfg) -> None:
         self.name = name

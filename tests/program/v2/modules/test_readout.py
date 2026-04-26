@@ -1,22 +1,25 @@
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.program.v2.modules.base import ModuleCfg
+from pydantic import TypeAdapter
+from zcu_tools.program.v2.modules import ModuleCfg  # ensures leaf subclass registration
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import (
-    AbsReadout,
     AbsReadoutCfg,
     DirectReadout,
     DirectReadoutCfg,
     PulseReadout,
     PulseReadoutCfg,
     Readout,
+    ReadoutCfg,
 )
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+_READOUT_ADAPTER: TypeAdapter = TypeAdapter(ReadoutCfg)
 
 
 def _ml():
@@ -68,13 +71,13 @@ def _make_pulse_ro_cfg(ch=3, ro_ch=None):
 
 
 # ---------------------------------------------------------------------------
-# DirectReadoutCfg – from_dict / from_raw / set_param
+# DirectReadoutCfg – validation / set_param
 # ---------------------------------------------------------------------------
 
 
 class TestDirectReadoutCfg:
-    def test_from_dict_basic(self):
-        cfg = DirectReadoutCfg.from_dict(_direct_dict(), _ml())
+    def test_validate_basic(self):
+        cfg = DirectReadoutCfg.model_validate(_direct_dict())
         assert isinstance(cfg, DirectReadoutCfg)
         assert cfg.ro_ch == 0
         assert cfg.ro_length == 1.0
@@ -82,41 +85,20 @@ class TestDirectReadoutCfg:
         assert cfg.trig_offset == 0.0
         assert cfg.gen_ch is None
 
-    def test_from_dict_with_optional_fields(self):
-        cfg = DirectReadoutCfg.from_dict(_direct_dict(trig_offset=0.05, gen_ch=1), _ml())
-        assert isinstance(cfg, DirectReadoutCfg)
+    def test_validate_with_optional_fields(self):
+        cfg = DirectReadoutCfg.model_validate(_direct_dict(trig_offset=0.05, gen_ch=1))
         assert cfg.trig_offset == 0.05
         assert cfg.gen_ch == 1
 
-    def test_from_dict_via_modulecfg_dispatch(self):
-        cfg = ModuleCfg.from_dict(_direct_dict(), _ml())
+    def test_module_adapter_dispatch(self):
+        cfg = ModuleCfg.from_raw(_direct_dict())
         assert isinstance(cfg, DirectReadoutCfg)
         assert cfg.trig_offset == 0.0
         assert cfg.gen_ch is None
 
-    def test_from_raw_dict(self):
-        cfg = DirectReadoutCfg.from_raw(_direct_dict(), _ml())
-        assert isinstance(cfg, DirectReadoutCfg)
-
-    def test_from_raw_instance_passthrough(self):
-        existing = _make_direct_cfg()
-        result = DirectReadoutCfg.from_raw(existing, _ml())
-        assert result is existing
-
-    def test_from_raw_string_calls_ml(self):
-        ml = _ml()
-        ml.get_module.return_value = _direct_dict()
-        cfg = DirectReadoutCfg.from_raw("my_ro", ml)
-        ml.get_module.assert_called_once_with("my_ro")
-        assert isinstance(cfg, DirectReadoutCfg)
-
-    def test_from_raw_wrong_type_raises(self):
-        with pytest.raises((ValueError, Exception)):
-            DirectReadoutCfg.from_raw(_make_pulse_cfg(), _ml())  # type: ignore[arg-type]
-
     def test_extra_field_rejected(self):
         with pytest.raises(Exception):
-            DirectReadoutCfg.from_dict(_direct_dict(unknown_field=99), _ml())
+            DirectReadoutCfg.model_validate(_direct_dict(unknown_field=99))
 
     def test_set_param_ro_freq(self):
         cfg = _make_direct_cfg()
@@ -135,72 +117,56 @@ class TestDirectReadoutCfg:
 
 
 # ---------------------------------------------------------------------------
-# PulseReadoutCfg – from_dict / from_raw / auto-derivation / set_param
+# PulseReadoutCfg – validation / auto-derivation / set_param
 # ---------------------------------------------------------------------------
 
 
 class TestPulseReadoutCfg:
-    def test_from_dict_basic(self):
-        cfg = PulseReadoutCfg.from_dict(_pulse_dict(), _ml())
+    def test_validate_basic(self):
+        cfg = PulseReadoutCfg.model_validate(_pulse_dict())
         assert isinstance(cfg, PulseReadoutCfg)
         assert isinstance(cfg.pulse_cfg, PulseCfg)
         assert isinstance(cfg.ro_cfg, DirectReadoutCfg)
 
-    def test_from_dict_auto_derives_ro_ch_from_pulse_ch(self):
-        cfg = PulseReadoutCfg.from_dict(_pulse_dict(), _ml())
-        assert isinstance(cfg, PulseReadoutCfg)
+    def test_auto_derives_ro_ch_from_pulse_ch(self):
+        cfg = PulseReadoutCfg.model_validate(_pulse_dict())
         assert cfg.ro_cfg.ro_ch == 3  # derived from pulse_cfg.ch
 
-    def test_from_dict_auto_derives_ro_freq_from_pulse_freq(self):
-        cfg = PulseReadoutCfg.from_dict(_pulse_dict(), _ml())
-        assert isinstance(cfg, PulseReadoutCfg)
+    def test_auto_derives_ro_freq_from_pulse_freq(self):
+        cfg = PulseReadoutCfg.model_validate(_pulse_dict())
         assert cfg.ro_cfg.ro_freq == 7000.0  # derived from pulse_cfg.freq
 
-    def test_from_dict_explicit_ro_ch_not_overwritten(self):
+    def test_explicit_ro_ch_not_overwritten(self):
         d = _pulse_dict()
         d["ro_cfg"]["ro_ch"] = 9  # type: ignore[index]
-        cfg = PulseReadoutCfg.from_dict(d, _ml())
-        assert isinstance(cfg, PulseReadoutCfg)
+        cfg = PulseReadoutCfg.model_validate(d)
         assert cfg.ro_cfg.ro_ch == 9
 
-    def test_from_dict_explicit_ro_freq_not_overwritten(self):
+    def test_explicit_ro_freq_not_overwritten(self):
         d = _pulse_dict()
         d["ro_cfg"]["ro_ch"] = 3  # type: ignore[index]
         d["ro_cfg"]["ro_freq"] = 9999.0  # type: ignore[index]
-        cfg = PulseReadoutCfg.from_dict(d, _ml())
-        assert isinstance(cfg, PulseReadoutCfg)
+        cfg = PulseReadoutCfg.model_validate(d)
         assert cfg.ro_cfg.ro_freq == 9999.0
 
-    def test_from_dict_pulse_cfg_as_string_uses_ml(self):
+    def test_pulse_cfg_as_string_uses_ml_context(self):
         ml = _ml()
-        ml.get_module.return_value = {
-            "type": "pulse",
-            "waveform": {"style": "const", "length": 0.5},
-            "ch": 0,
-            "nqz": 1,
-            "freq": 5000.0,
-            "gain": 0.8,
-        }
+        ml.get_module.return_value = _make_pulse_cfg(ch=0, freq=5000.0)
         d = {
             "type": "readout/pulse",
             "pulse_cfg": "library_pulse",
             "ro_cfg": {"ro_ch": 0, "ro_length": 1.0, "ro_freq": 5000.0},
         }
-        cfg = PulseReadoutCfg.from_dict(d, ml)
+        cfg = PulseReadoutCfg.model_validate(d, context={"ml": ml})
         ml.get_module.assert_called_once_with("library_pulse")
         assert isinstance(cfg, PulseReadoutCfg)
         assert isinstance(cfg.pulse_cfg, PulseCfg)
 
-    def test_from_dict_via_modulecfg_dispatch(self):
-        cfg = ModuleCfg.from_dict(_pulse_dict(), _ml())
+    def test_module_adapter_dispatch(self):
+        cfg = ModuleCfg.from_raw(_pulse_dict())
         assert isinstance(cfg, PulseReadoutCfg)
         assert isinstance(cfg.pulse_cfg, PulseCfg)
         assert isinstance(cfg.ro_cfg, DirectReadoutCfg)
-
-    def test_from_raw_instance_passthrough(self):
-        existing = _make_pulse_ro_cfg()
-        result = PulseReadoutCfg.from_raw(existing, _ml())
-        assert result is existing
 
     def test_set_param_gain(self):
         cfg = _make_pulse_ro_cfg()
@@ -237,27 +203,30 @@ class TestPulseReadoutCfg:
 
 
 # ---------------------------------------------------------------------------
-# Readout factory – dispatch and allow_rerun
+# Readout factory – dispatch
 # ---------------------------------------------------------------------------
 
 
 class TestReadoutFactory:
     def test_dispatch_direct(self):
         ro = Readout("ro", _make_direct_cfg())
-        assert isinstance(ro.readout, DirectReadout)
+        assert isinstance(ro, DirectReadout)
 
     def test_dispatch_pulse(self):
         ro = Readout("ro", _make_pulse_ro_cfg())
-        assert isinstance(ro.readout, PulseReadout)
+        assert isinstance(ro, PulseReadout)
 
     def test_unknown_cfg_raises(self):
         class UnknownCfg(AbsReadoutCfg):
             type: str = "unknown"
 
-        with pytest.raises(ValueError):
-            Readout("ro", UnknownCfg())  # type: ignore[arg-type]
+            def build(self, name):
+                raise NotImplementedError
 
-    def test_name_delegated(self):
+        with pytest.raises(NotImplementedError):
+            Readout("ro", UnknownCfg())
+
+    def test_name_set(self):
         ro = Readout("myro", _make_direct_cfg())
         assert ro.name == "myro"
 
@@ -266,29 +235,6 @@ class TestReadoutFactory:
 
     def test_allow_rerun_pulse(self):
         assert Readout("ro", _make_pulse_ro_cfg()).allow_rerun() is True
-
-    def test_bind_readout_duplicate_raises(self):
-        class NewCfg(AbsReadoutCfg):
-            type: str = "new_unique_ro"
-
-        @Readout.bind_readout(NewCfg)
-        class _NewRo(AbsReadout):
-            def __init__(self, name: str, cfg: NewCfg) -> None:
-                self.name = name
-
-            def init(self, prog) -> None: ...  # type: ignore[override]
-
-            def total_length(self, prog):
-                return 0.0
-
-            def run(self, prog, t=0.0):
-                return t
-
-        with pytest.raises(ValueError):
-
-            @Readout.bind_readout(NewCfg)
-            class _AnotherRo(AbsReadout):
-                pass
 
 
 # ---------------------------------------------------------------------------
@@ -345,3 +291,18 @@ class TestPulseReadoutRuntime:
 
     def test_allow_rerun(self):
         assert PulseReadout("ro", _make_pulse_ro_cfg()).allow_rerun() is True
+
+
+# ---------------------------------------------------------------------------
+# ReadoutCfg discriminated union adapter
+# ---------------------------------------------------------------------------
+
+
+class TestReadoutCfgAdapter:
+    def test_dispatch_direct(self):
+        cfg = _READOUT_ADAPTER.validate_python(_direct_dict())
+        assert isinstance(cfg, DirectReadoutCfg)
+
+    def test_dispatch_pulse(self):
+        cfg = _READOUT_ADAPTER.validate_python(_pulse_dict())
+        assert isinstance(cfg, PulseReadoutCfg)
