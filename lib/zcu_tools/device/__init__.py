@@ -51,6 +51,8 @@ class GlobalDeviceManager:
     ) -> None:
         with cls._lock:
             for name, cfg in dev_cfg.items():
+                if name not in cls._devices:
+                    raise ValueError(f"Device {name} not found")
                 cls._devices[name].setup(cfg, progress=progress)
 
     @classmethod

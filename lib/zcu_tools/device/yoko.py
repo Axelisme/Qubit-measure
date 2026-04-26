@@ -187,6 +187,10 @@ class YOKOGS200(BaseDevice):
             rampstep = DEFAULT_RAMPSTEP[mode]
         self._rampstep = rampstep
 
+    # Returns the mode (voltage or current)
+    def get_mode(self) -> Literal["voltage", "current"]:
+        return MODE_MAPS_INV[self.query(":SOURce:FUNCtion?")]  # type: ignore
+
     # ==========================================================================#
 
     def _get_level(self) -> float:
@@ -200,7 +204,6 @@ class YOKOGS200(BaseDevice):
                 f"One can only get voltage when the device is in voltage mode. but it is in {mode} mode."
             )
 
-        self.write(f"SOURce:FUNCtion {MODE_MAPS['voltage']}")
         return self._get_level()
 
     # Returns the current in amps as a float
@@ -211,12 +214,7 @@ class YOKOGS200(BaseDevice):
                 f"One can only get current when the device is in current mode. but it is in {mode} mode."
             )
 
-        self.write(f"SOURce:FUNCtion {MODE_MAPS['current']}")
         return self._get_level()
-
-    # Returns the mode (voltage or current)
-    def get_mode(self) -> Literal["voltage", "current"]:
-        return MODE_MAPS_INV[self.query(":SOURce:FUNCtion?")]  # type: ignore
 
     # ==========================================================================#
 
