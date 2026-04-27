@@ -4,7 +4,7 @@ import logging
 import math
 
 from qick.asm_v2 import QickParam
-from typing_extensions import Self, Sequence, TypeAlias, Union, TYPE_CHECKING
+from typing_extensions import TYPE_CHECKING, Self, Sequence, TypeAlias, Union
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
@@ -58,14 +58,6 @@ class LoadValue(Module):
     def init(self, prog: ModularProgramV2) -> None:
         self.offset = prog.add_dmem(self._packed_values)
 
-        # addr_reg computes dmem address / shift amount; word_reg holds the
-        # fetched packed word. addr_reg is reused for shift once word is loaded.
-        temp_reg_num = 2 if self._is_compressed else 1
-        temp_regs = prog.acquire_temp_reg(temp_reg_num)
-        self.addr_reg = temp_regs[0]
-        if self._is_compressed:
-            self.word_reg = temp_regs[1]
-
         if not self.use_existed:
             prog.add_reg(self.val_reg)
 
@@ -84,7 +76,14 @@ class LoadValue(Module):
     def run(
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-        addr_reg = self.addr_reg
+        # addr_reg computes dmem address / shift amount; word_reg holds the
+        # fetched packed word. addr_reg is reused for shift once word is loaded.
+        temp_reg_num = 2 if self._is_compressed else 1
+        temp_regs = prog.acquire_temp_reg(temp_reg_num)
+        addr_reg = temp_regs[0]
+        if self._is_compressed:
+            word_reg = temp_regs[1]
+
         if not self._is_compressed:
             # addr = idx [+ offset]
             if self.offset == 0:
@@ -98,14 +97,14 @@ class LoadValue(Module):
         prog.write_reg_op(addr_reg, self.idx_reg, "ASR", self._word_shift)
         if self.offset != 0:
             prog.inc_reg(addr_reg, self.offset)
-        prog.read_dmem(dst=self.word_reg, addr=addr_reg)
+        prog.read_dmem(dst=word_reg, addr=addr_reg)
 
         # shift = (idx AND #slot_mask) [SL #bits_shift]
         shift_reg = addr_reg  # reuse addr_reg
         prog.write_reg_op(shift_reg, self.idx_reg, "AND", self._slot_mask)
         if self._bits_shift > 0:
             prog.write_reg_op(shift_reg, shift_reg, "SL", self._bits_shift)
-        prog.write_reg_op(self.val_reg, self.word_reg, "ASR", shift_reg)
+        prog.write_reg_op(self.val_reg, word_reg, "ASR", shift_reg)
 
         prog.write_reg_op(self.val_reg, self.val_reg, "AND", self._value_mask)
 

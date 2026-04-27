@@ -24,10 +24,9 @@ from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
-    Branch,
+    ComputedPulse,
     ModularProgramV2,
     ProgramV2Cfg,
-    Pulse,
     PulseCfg,
     Readout,
     ReadoutCfg,
@@ -247,16 +246,18 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
                     modules=[
                         Reset("reset", modules.reset),
                         ScanWith("gate_idx", gate_seq, val_reg="gate_idx").add_content(
-                            Branch(
+                            ComputedPulse(
                                 "basic_gate",
-                                Pulse("gate_Id", Id_pulse),
-                                Pulse("gate_X90", X90_pulse),
-                                Pulse("gate_X180", X180_pulse),
-                                Pulse("gate_MX90", MX90_pulse),
-                                Pulse("gate_Y90", Y90_pulse),
-                                Pulse("gate_Y180", Y180_pulse),
-                                Pulse("gate_MY90", MY90_pulse),
-                                compare_by="gate_idx",
+                                val_reg="gate_idx",
+                                pulses=[
+                                    Id_pulse,
+                                    X90_pulse,
+                                    X180_pulse,
+                                    MX90_pulse,
+                                    Y90_pulse,
+                                    Y180_pulse,
+                                    MY90_pulse,
+                                ],
                             )
                         ),
                         Readout("readout", modules.readout),

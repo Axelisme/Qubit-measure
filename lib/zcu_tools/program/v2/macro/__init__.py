@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from .debug import PrintTimeStamp
 from .delay import DelayRegAuto
 from .loop import CloseLoopReg, OpenLoopReg
+from .pluse_reg import PulseFromWmemReg
 from .write_reg import WriteRegOp
 
 
@@ -71,6 +72,12 @@ class ImproveAsmV2(AsmV2):
     ) -> None:
         """Insert a debug macro that prints the current time (cycle count) with a name."""
         self.append_macro(PrintTimeStamp(name, t, prefix=prefix))
+
+    def pulse_wmem_reg(
+        self, ch: int, addr_reg: str, t: Union[float, QickParam] = 0.0, tag=None
+    ) -> None:
+        """Play one waveform from wmem using a runtime-computed address register."""
+        self.append_macro(PulseFromWmemReg(ch=ch, addr_reg=addr_reg, t=t, tag=tag))
 
 
 __all__ = ["ImproveAsmV2"]
