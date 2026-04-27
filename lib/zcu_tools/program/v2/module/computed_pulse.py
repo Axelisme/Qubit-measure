@@ -32,20 +32,24 @@ class ComputedPulse(Module):
         if first_cfg is None:
             raise ValueError("ComputedPulse requires at least one non-None pulse cfg")
 
-        self._ch: Optional[int] = None
-        self._pulse_modules: list[Pulse] = []
-        self._pre_delay: float = 0.0
         self._wmem_base = 0
+        self._pulse_modules: list[Pulse] = []
+        self._ch: Optional[int] = None
+        self._pre_delay: float = 0.0
         self._max_total_length = 0.0
-        self._initialized = False
+
+        def to_float_scalar(value: Union[float, QickParam], field: str) -> float:
+            if isinstance(value, QickParam):
+                raise NotImplementedError(
+                    f"ComputedPulse does not support swept {field} in candidate pulses"
+                )
+            return float(value)
 
         pulse_cfgs: list[PulseCfg] = []
         timings: list[tuple[float, float, float]] = []
         pre_delay_ref: Optional[float] = None
         for cfg in raw_pulses:
-            pulse_cfg = (
-                self._make_dummy_from(first_cfg) if cfg is None else deepcopy(cfg)
-            )
+            pulse_cfg = first_cfg.with_updates(gain=0.0) if cfg is None else cfg
 
             if pulse_cfg.waveform.style == "flat_top":
                 raise NotImplementedError(
@@ -59,9 +63,9 @@ class ComputedPulse(Module):
                     "All ComputedPulse candidates must use the same channel"
                 )
 
-            pre_delay = self._to_float_scalar(pulse_cfg.pre_delay, "pre_delay")
-            post_delay = self._to_float_scalar(pulse_cfg.post_delay, "post_delay")
-            length = self._to_float_scalar(pulse_cfg.waveform.length, "length")
+            pre_delay = to_float_scalar(pulse_cfg.pre_delay, "pre_delay")
+            post_delay = to_float_scalar(pulse_cfg.post_delay, "post_delay")
+            length = to_float_scalar(pulse_cfg.waveform.length, "length")
             if pre_delay_ref is None:
                 pre_delay_ref = pre_delay
             elif pre_delay_ref != pre_delay:
@@ -82,19 +86,6 @@ class ComputedPulse(Module):
             Pulse(f"{self.name}_cand_{i}", cfg, block_mode=True)
             for i, cfg in enumerate(pulse_cfgs)
         ]
-
-    @staticmethod
-    def _make_dummy_from(ref_cfg: PulseCfg) -> PulseCfg:
-        # Keep waveform/channel/frequency the same, mute by gain.
-        return ref_cfg.with_updates(gain=0.0)
-
-    @staticmethod
-    def _to_float_scalar(value: Union[float, QickParam], field: str) -> float:
-        if isinstance(value, QickParam):
-            raise NotImplementedError(
-                f"ComputedPulse does not support swept {field} in candidate pulses"
-            )
-        return float(value)
 
     def init(self, prog: ModularProgramV2) -> None:
         wave_idxs: list[int] = []
