@@ -74,7 +74,7 @@ class PulseReadoutCfg(AbsReadoutCfg):
         ro_cfg = data.get("ro_cfg")
         if isinstance(pulse_cfg, dict) and isinstance(ro_cfg, dict):
             if "ch" in pulse_cfg:
-                ro_cfg.setdefault("ro_ch", pulse_cfg["ch"])
+                ro_cfg.setdefault("gen_ch", pulse_cfg["ch"])
             if "freq" in pulse_cfg:
                 ro_cfg.setdefault("ro_freq", pulse_cfg["freq"])
         return data
