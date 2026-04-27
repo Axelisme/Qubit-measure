@@ -3,6 +3,7 @@ from __future__ import annotations
 import qick.asm_v2 as qick_asm_v2
 
 from .base import Module, ModuleCfg, ModuleCfgFactory
+from .computed_pulse import ComputedPulse
 from .control import Branch, Repeat, SoftRepeat
 from .delay import Delay, DelayAuto, Join, SoftDelay
 from .dmem import LoadValue, ScanWith
@@ -98,6 +99,8 @@ __all__ = [
     # pulse
     "Pulse",
     "PulseCfg",
+    # computed pulse
+    "ComputedPulse",
     # readout
     "AbsReadout",
     "AbsReadoutCfg",

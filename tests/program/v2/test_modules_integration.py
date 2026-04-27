@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from typing import Literal
 
+import pytest
 from zcu_tools.program.v2.base import ProgramV2Cfg
-from zcu_tools.program.v2.module import ComputedPulse
 from zcu_tools.program.v2.modular import ModularProgramV2
+from zcu_tools.program.v2.modules import ComputedPulse
 from zcu_tools.program.v2.modules.control import Branch, Repeat, SoftRepeat
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, Join, SoftDelay
 from zcu_tools.program.v2.modules.dmem import LoadValue, ScanWith
@@ -30,7 +31,6 @@ from zcu_tools.program.v2.modules.reset import (
     Reset,
     TwoPulseResetCfg,
 )
-import pytest
 from zcu_tools.program.v2.modules.waveform import (
     ConstWaveformCfg,
     FlatTopWaveformCfg,

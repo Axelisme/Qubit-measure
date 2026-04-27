@@ -6,12 +6,11 @@ import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.modular import ModularProgramV2
-from zcu_tools.program.v2.module import ComputedPulse
-from zcu_tools.program.v2.modules import Pulse, ScanWith
+from zcu_tools.program.v2.modules import ComputedPulse, Pulse, ScanWith
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
-from .conftest import make_mock_soccfg
+from ..conftest import make_mock_soccfg
 
 GEN_CH = 0
 GEN_FREQ = 1000.0
