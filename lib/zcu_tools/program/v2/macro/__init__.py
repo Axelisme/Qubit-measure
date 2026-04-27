@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from qick.asm_v2 import AsmV2, QickParam
 from typing_extensions import Union
+from contextlib import contextmanager
 
 from .debug import PrintTimeStamp
 from .delay import DelayRegAuto
@@ -34,11 +35,16 @@ class ImproveAsmV2(AsmV2):
 
     # ---- delay macro ----
 
-    def disable_delay(self) -> None:
-        self._delay_disabled = True
+    def disable_delay(self) -> contextmanager:
+        @contextmanager
+        def _disable_scope():
+            self._delay_disabled = True
+            try:
+                yield
+            finally:
+                self._delay_disabled = False
 
-    def enable_delay(self) -> None:
-        self._delay_disabled = False
+        return _disable_scope
 
     def delay_auto(
         self, t: Union[float, QickParam] = 0.0, gens=True, ros=True, tag: str = None

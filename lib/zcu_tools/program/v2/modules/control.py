@@ -58,13 +58,14 @@ class Repeat(Module):
         else:
             prog.open_loop(self.n, self.name)
 
-        cur_t = 0.0
-        for mod in self.sub_modules:
-            if logger.isEnabledFor(logging.DEBUG):
-                prog.debug_macro(
-                    f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
-                )
-            cur_t = mod.run(prog, cur_t)
+        with prog.disable_delay():
+            cur_t = 0.0
+            for mod in self.sub_modules:
+                if logger.isEnabledFor(logging.DEBUG):
+                    prog.debug_macro(
+                        f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
+                    )
+                cur_t = mod.run(prog, cur_t)
         prog.delay(t=cur_t)
 
         if isinstance(self.n, str):
@@ -169,13 +170,14 @@ class Branch(Module):
                 skip_label = f"{self.name}_branch_skip_{i}"
                 prog.cond_jump(skip_label, self.compare_reg, "NZ", "-", i)
 
-            cur_t: Union[float, QickParam] = 0.0
-            for mod in branch:
-                if logger.isEnabledFor(logging.DEBUG):
-                    prog.debug_macro(
-                        f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
-                    )
-                cur_t = mod.run(prog, cur_t)
+            with prog.disable_delay():
+                cur_t: Union[float, QickParam] = 0.0
+                for mod in branch:
+                    if logger.isEnabledFor(logging.DEBUG):
+                        prog.debug_macro(
+                            f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
+                        )
+                    cur_t = mod.run(prog, cur_t)
 
             # TODO: support branch with swept duration
             if isinstance(cur_t, QickParam):
