@@ -59,7 +59,7 @@ class MeasurementTask(
         self,
         plotters: T_PlotDict,
         ctx: TaskState,
-        signals: T_Result,
+        results: T_Result,
     ) -> None: ...
 
     @abstractmethod
@@ -79,7 +79,7 @@ class OvernightBatchTask(BatchTask[str, Result, list[dict[str, Result]], Overnig
 
         super().__init__(tasks)
 
-    def run(self, ctx) -> None:
+    def run(self, state) -> None:
         if self.dynamic_pbar:
             self.task_pbar = self._build_pbar(leave=False)
         else:
@@ -92,7 +92,7 @@ class OvernightBatchTask(BatchTask[str, Result, list[dict[str, Result]], Overnig
 
             run_with_retries(
                 task,
-                ctx.child(name, child_type=Result),
+                state.child(name, child_type=Result),
                 self.retry_time,
                 dynamic_pbar=True,
                 # raise_error=False,

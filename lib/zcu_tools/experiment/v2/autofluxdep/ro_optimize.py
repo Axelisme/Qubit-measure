@@ -147,10 +147,10 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
     def init(self, dynamic_pbar=False) -> None:
         self.task.init(dynamic_pbar=dynamic_pbar)
 
-    def run(self, ctx: TaskState[RO_OptResult, T_RootResult, FluxDepCfg]) -> None:
-        info: FluxDepInfoDict = ctx.env["info"]
+    def run(self, state: TaskState[RO_OptResult, T_RootResult, FluxDepCfg]) -> None:
+        info: FluxDepInfoDict = state.env["info"]
 
-        cfg_temp = self.cfg_maker(ctx, ctx.env["ml"])
+        cfg_temp = self.cfg_maker(state, state.env["ml"])
         if cfg_temp is None:
             return  # skip this task
 
@@ -162,7 +162,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         del cfg["gain_range"]
         deepupdate(
             cfg,
-            {"dev": ctx.cfg.dev, "sweep": {"freq": freq_sweep, "gain": gain_sweep}},
+            {"dev": state.cfg.dev, "sweep": {"freq": freq_sweep, "gain": gain_sweep}},
             behavior="force",
         )
         cfg = RO_OptCfg.model_validate(cfg)
@@ -173,7 +173,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
             freq_sweep,
             "freq",
             {
-                "soccfg": ctx.env["soccfg"],
+                "soccfg": state.env["soccfg"],
                 "gen_ch": modules.readout.pulse_cfg.ch,
                 "ro_ch": modules.readout.ro_cfg.ro_ch,
             },
@@ -182,17 +182,17 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
             gain_sweep,
             "gain",
             {
-                "soccfg": ctx.env["soccfg"],
+                "soccfg": state.env["soccfg"],
                 "gen_ch": modules.readout.pulse_cfg.ch,
             },
         )
 
         self.task.set_pbar_n(cfg.rounds)
         self.task.run(
-            ctx.child_with_cfg("raw_signals", cfg, child_type=NDArray[np.float64])
+            state.child_with_cfg("raw_signals", cfg, child_type=NDArray[np.float64])
         )
 
-        raw_signals = ctx.value["raw_signals"]
+        raw_signals = state.value["raw_signals"]
         assert isinstance(raw_signals, np.ndarray)
 
         real_signals = ro_opt_signal2real(raw_signals)
@@ -212,7 +212,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         info["opt_readout"] = readout_cfg
 
         with MinIntervalFunc.force_execute():
-            ctx.set_value(
+            state.set_value(
                 RO_OptResult(
                     raw_signals=raw_signals,
                     freqs=self.freqs,

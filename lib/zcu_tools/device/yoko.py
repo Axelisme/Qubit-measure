@@ -29,7 +29,7 @@ class YOKOGS200Info(BaseDeviceInfo):
     rampstep: float = DEFAULT_RAMPSTEP["voltage"]
 
 
-class YOKOGS200(BaseDevice):
+class YOKOGS200(BaseDevice[YOKOGS200Info]):
     info_model = YOKOGS200Info
 
     # Initializes session for device.
@@ -80,9 +80,8 @@ class YOKOGS200(BaseDevice):
 
         self._check_voltage(voltage)
 
-        if progress:
-            dist = abs(current_voltage - voltage)
-            pbar = tqdm(total=round(dist, 2), unit="V", leave=False)
+        dist = abs(current_voltage - voltage)
+        pbar = tqdm(total=round(dist, 2), unit="V", leave=False, disable=not progress)
 
         step = 10 * self._rampstep
         steps = max(1, round(abs(voltage - current_voltage) / step))
@@ -90,12 +89,10 @@ class YOKOGS200(BaseDevice):
         for tempvolt in voltages:
             self._set_voltage_direct(tempvolt)
 
-            if progress:
-                cur_dist = abs(tempvolt - voltage)
-                pbar.update(round(dist - cur_dist, 2) - pbar.n)
+            cur_dist = abs(tempvolt - voltage)
+            pbar.update(round(dist - cur_dist, 2) - pbar.n)
 
-        if progress:
-            pbar.close()
+        pbar.close()
 
     def set_voltage(self, voltage: float, progress: bool = True) -> float:
         mode = self.get_mode()
@@ -129,9 +126,8 @@ class YOKOGS200(BaseDevice):
 
         self._check_current(current)
 
-        if progress:
-            dist = 1e3 * abs(current_current - current)
-            pbar = tqdm(total=round(dist, 2), unit="mA", leave=False)
+        dist = 1e3 * abs(current_current - current)
+        pbar = tqdm(total=round(dist, 2), unit="mA", leave=False, disable=not progress)
 
         step = 10 * self._rampstep
         steps = max(1, round(abs(current - current_current) / step))
@@ -139,12 +135,10 @@ class YOKOGS200(BaseDevice):
         for tempcurrent in currents:
             self._set_current_direct(tempcurrent)
 
-            if progress:
-                cur_dist = 1e3 * abs(tempcurrent - current)
-                pbar.update(round(dist - cur_dist, 2) - pbar.n)
+            cur_dist = 1e3 * abs(tempcurrent - current)
+            pbar.update(round(dist - cur_dist, 2) - pbar.n)
 
-        if progress:
-            pbar.close()
+        pbar.close()
 
     # Ramp up the current (amps) in increments of _rampstep, waiting _rampinterval
     # between each increment.
@@ -218,7 +212,7 @@ class YOKOGS200(BaseDevice):
 
     # ==========================================================================#
 
-    def _setup(self, cfg: YOKOGS200Info, /, progress: bool = True) -> None:
+    def _setup(self, cfg, *, progress: bool = True) -> None:
         if self.get_output() != "on" and cfg.output == "on":
             warnings.warn("YOKOGS200 output is off, did you forget to turn it on?")
 

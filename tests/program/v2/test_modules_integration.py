@@ -95,6 +95,40 @@ def _direct_ro_cfg(ro_ch=RO_CH, ro_freq=RO_FREQ, ro_length=RO_LENGTH):
 
 
 # ---------------------------------------------------------------------------
+# ModularProgram temp_reg scope
+# ---------------------------------------------------------------------------
+
+
+class TestTempRegScope:
+    def test_acquire_temp_reg_with_scope(self):
+        prog = _make_prog(modules=[])
+
+        with prog.acquire_temp_reg(1) as regs:
+            assert len(regs) == 1
+            assert regs[0] == "temp_reg_0"
+
+    def test_acquire_temp_reg_nested_scope_reuses_registers(self):
+        prog = _make_prog(modules=[])
+
+        with prog.acquire_temp_reg(2) as outer_regs:
+            with prog.acquire_temp_reg(1) as inner_regs:
+                assert inner_regs == outer_regs[:1]
+
+    def test_acquire_temp_reg_zero_returns_empty_list(self):
+        prog = _make_prog(modules=[])
+
+        with prog.acquire_temp_reg(0) as regs:
+            assert regs == []
+
+    def test_acquire_temp_reg_negative_raises(self):
+        prog = _make_prog(modules=[])
+
+        with pytest.raises(ValueError, match="greater than or equal to 0"):
+            with prog.acquire_temp_reg(-1):
+                pass
+
+
+# ---------------------------------------------------------------------------
 # Delay modules
 # ---------------------------------------------------------------------------
 

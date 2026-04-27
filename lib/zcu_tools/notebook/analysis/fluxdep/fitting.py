@@ -14,7 +14,7 @@ from numba import set_num_threads
 from numpy.typing import NDArray
 from scipy.optimize import least_squares
 from tqdm.auto import tqdm, trange
-from typing_extensions import overload
+from typing_extensions import Literal, Optional, overload
 
 from zcu_tools.notebook.persistance import TransitionDict
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
@@ -31,9 +31,10 @@ def search_in_database(
     EJb: tuple[float, float],
     ECb: tuple[float, float],
     ELb: tuple[float, float],
+    *,
     n_jobs: int = 1,
     fuzzy: bool = True,
-    plot: bool = True,
+    plot: Literal[True] = True,
 ) -> tuple[tuple[float, float, float], Figure]: ...
 
 
@@ -46,9 +47,10 @@ def search_in_database(
     EJb: tuple[float, float],
     ECb: tuple[float, float],
     ELb: tuple[float, float],
+    *,
     n_jobs: int = 1,
     fuzzy: bool = True,
-    plot: bool = False,
+    plot: Literal[False],
 ) -> tuple[tuple[float, float, float], None]: ...
 
 
@@ -60,10 +62,11 @@ def search_in_database(
     EJb: tuple[float, float],
     ECb: tuple[float, float],
     ELb: tuple[float, float],
+    *,
     n_jobs: int = 1,
     fuzzy: bool = True,
     plot: bool = True,
-) -> tuple[tuple[float, float, float], Figure | None]:
+) -> tuple[tuple[float, float, float], Optional[Figure]]:
     """Search a precomputed fluxonium database for (EJ, EC, EL) best matching
     the observed (fluxs, freqs).
 

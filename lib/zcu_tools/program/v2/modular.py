@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
+from typing import Iterator
 
 import numpy as np
 from numpy.typing import NDArray
@@ -31,6 +33,7 @@ class ModularProgramV2(MyProgramV2):
         self.sweep_dict = sweep
         self._dmem_buffer = []
         self._temp_regs: list[str] = []
+        self._temp_reg_scope_stack: list[int] = []
 
         logger.debug(
             "ModularProgramV2.__init__: %d modules, reps=%s, relax_delay=%s",
@@ -76,7 +79,8 @@ class ModularProgramV2(MyProgramV2):
         self._dmem_buffer.extend(values)
         return offset
 
-    def acquire_temp_reg(self, num: int = 1) -> list[str]:
+    @contextmanager
+    def acquire_temp_reg(self, num: int = 1) -> Iterator[list[str]]:
         """Acquire shared scratch registers for temporary calculations.
 
         The returned registers are shared across modules. Callers must not
@@ -85,16 +89,28 @@ class ModularProgramV2(MyProgramV2):
         if num < 0:
             raise ValueError(f"num must be greater than or equal to 0, got {num}")
         elif num == 0:
-            return []
+            yield []
+            return
 
         while len(self._temp_regs) < num:
             reg_name = f"temp_reg_{len(self._temp_regs)}"
             self.add_reg(reg_name, allow_reuse=True)
             self._temp_regs.append(reg_name)
 
-        return self._temp_regs[:num]
+        self._temp_reg_scope_stack.append(num)
+        try:
+            yield self._temp_regs[:num]
+        finally:
+            if len(self._temp_reg_scope_stack) == 0:
+                raise RuntimeError("temp register scope stack is already empty")
+            active_num = self._temp_reg_scope_stack.pop()
+            if active_num != num:
+                raise RuntimeError(
+                    "temp register scope mismatch: "
+                    f"expected {num} regs, got scope {active_num}"
+                )
 
-    def compile_datamem(self) -> Optional[NDArray[np.int32]]:
+    def compile_datamem(self) -> Optional[NDArray[np.int32]]:  # type: ignore
         if len(self._dmem_buffer) == 0:
             return None
 

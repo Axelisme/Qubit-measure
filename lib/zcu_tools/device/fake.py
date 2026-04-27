@@ -11,7 +11,7 @@ class FakeDeviceInfo(BaseDeviceInfo):
     value: float
 
 
-class FakeDevice(BaseDevice):
+class FakeDevice(BaseDevice[FakeDeviceInfo]):
     info_model = FakeDeviceInfo
 
     def __init__(self) -> None:
@@ -44,7 +44,7 @@ class FakeDevice(BaseDevice):
 
     # ==========================================================================#
 
-    def _setup(self, cfg: FakeDeviceInfo, /, progress: bool = True) -> None:
+    def _setup(self, cfg, *, progress: bool = True) -> None:
         self.set_output(cfg.output)
         self.set_value(cfg.value)
 

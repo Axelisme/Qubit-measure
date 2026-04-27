@@ -115,11 +115,10 @@ class ComputedPulse(Module):
     ) -> Union[float, QickParam]:
         assert self._ch is not None
 
-        (addr_reg,) = prog.acquire_temp_reg(1)
-
-        # addr_reg = base_wave_idx + gate_idx
-        prog.write_reg_op(addr_reg, self.val_reg, "+", self._wmem_base)
-        prog.pulse_wmem_reg(self._ch, addr_reg, t=t + self._pre_delay)
+        with prog.acquire_temp_reg(1) as (addr_reg,):
+            # addr_reg = base_wave_idx + gate_idx
+            prog.write_reg_op(addr_reg, self.val_reg, "+", self._wmem_base)
+            prog.pulse_wmem_reg(self._ch, addr_reg, t=t + self._pre_delay)
 
         return t + self._max_total_length
 

@@ -21,7 +21,7 @@ class ProgramV2Cfg(ConfigBase):
     relax_delay: float = 0.0
 
 
-class MyProgramV2(ImproveAcquireMixin, ImproveAsmV2, AveragerProgramV2):
+class MyProgramV2(ImproveAcquireMixin, ImproveAsmV2, AveragerProgramV2):  # type: ignore
     def __init__(self, soccfg: QickConfig, cfg: ProgramV2Cfg, **kwargs) -> None:
 
         # v2 program need to pass reps and final_delay to init

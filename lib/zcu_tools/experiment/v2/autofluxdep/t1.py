@@ -147,22 +147,22 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
     def init(self, dynamic_pbar=False) -> None:
         self.task.init(dynamic_pbar=dynamic_pbar)
 
-    def run(self, ctx: TaskState[T1Result, T_RootResult, FluxDepCfg]) -> None:
-        info: FluxDepInfoDict = ctx.env["info"]
+    def run(self, state: TaskState[T1Result, T_RootResult, FluxDepCfg]) -> None:
+        info: FluxDepInfoDict = state.env["info"]
 
-        cfg_temp = self.cfg_maker(ctx, ctx.env["ml"])
+        cfg_temp = self.cfg_maker(state, state.env["ml"])
 
         if cfg_temp is None:
             return  # skip this task
 
         len_sweep = make_sweep(*cfg_temp.sweep_range, self.num_expts)
-        self.lengths = sweep2array(len_sweep, "time", {"soccfg": ctx.env["soccfg"]})
+        self.lengths = sweep2array(len_sweep, "time", {"soccfg": state.env["soccfg"]})
 
         cfg = cfg_temp.to_dict()
         del cfg["sweep_range"]
         deepupdate(
             cfg,
-            {"dev": ctx.cfg.dev, "sweep": {"length": len_sweep}},
+            {"dev": state.cfg.dev, "sweep": {"length": len_sweep}},
             behavior="force",
         )
         cfg = T1Cfg.model_validate(cfg)
@@ -171,10 +171,10 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
 
         self.task.set_pbar_n(cfg.rounds)
         self.task.run(
-            ctx.child_with_cfg("raw_signals", cfg, child_type=NDArray[np.complex128])
+            state.child_with_cfg("raw_signals", cfg, child_type=NDArray[np.complex128])
         )
 
-        raw_signals = ctx.value["raw_signals"]
+        raw_signals = state.value["raw_signals"]
         assert isinstance(raw_signals, np.ndarray)
 
         real_signals = t1_signal2real(raw_signals)
@@ -192,7 +192,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
             info["smooth_t1"] = 0.5 * (info.last.get("smooth_t1", t1) + t1)
 
         with MinIntervalFunc.force_execute():
-            ctx.set_value(
+            state.set_value(
                 T1Result(
                     raw_signals=raw_signals,
                     length=self.lengths.copy(),

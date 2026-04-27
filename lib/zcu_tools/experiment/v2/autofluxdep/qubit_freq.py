@@ -132,22 +132,22 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
 
         self.freq_err_pred = IDWInterpolation()
 
-    def run(self, ctx: TaskState[QubitFreqResult, T_RootResult, FluxDepCfg]) -> None:
-        predictor: FluxoniumPredictor = ctx.env["predictor"]
-        info: FluxDepInfoDict = ctx.env["info"]
+    def run(self, state: TaskState[QubitFreqResult, T_RootResult, FluxDepCfg]) -> None:
+        predictor: FluxoniumPredictor = state.env["predictor"]
+        info: FluxDepInfoDict = state.env["info"]
 
         flux = info["flux_value"]
         predict_freq = predictor.predict_freq(flux)
         info["predict_freq"] = predict_freq + self.freq_err_pred.predict(flux)
 
-        cfg_temp = self.cfg_maker(ctx, ctx.env["ml"])
+        cfg_temp = self.cfg_maker(state, state.env["ml"])
         if cfg_temp is None:
             return  # skip this task
 
         cfg = cfg_temp.to_dict()
         deepupdate(
             cfg,
-            {"dev": ctx.cfg.dev, "sweep": {"detune": self.detune_sweep}},
+            {"dev": state.cfg.dev, "sweep": {"detune": self.detune_sweep}},
             behavior="force",
         )
         cfg = QubitFreqCfg.model_validate(cfg)
@@ -159,15 +159,15 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
         self.detunes = sweep2array(
             cfg.sweep.detune,
             "freq",
-            {"soccfg": ctx.env["soccfg"], "gen_ch": modules.qub_pulse.ch},
+            {"soccfg": state.env["soccfg"], "gen_ch": modules.qub_pulse.ch},
         )
 
         self.task.set_pbar_n(cfg.rounds)
         self.task.run(
-            ctx.child_with_cfg("raw_signals", cfg, child_type=NDArray[np.complex128])
+            state.child_with_cfg("raw_signals", cfg, child_type=NDArray[np.complex128])
         )
 
-        raw_signals = ctx.value["raw_signals"]
+        raw_signals = state.value["raw_signals"]
         assert isinstance(raw_signals, np.ndarray)
 
         real_signals = qubitfreq_signal2real(raw_signals)
@@ -217,7 +217,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
             )
 
         with MinIntervalFunc.force_execute():
-            ctx.set_value(
+            state.set_value(
                 QubitFreqResult(
                     raw_signals=raw_signals,
                     predict_freq=np.array(center_freq),

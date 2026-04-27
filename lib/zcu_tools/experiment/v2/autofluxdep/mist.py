@@ -128,8 +128,8 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
     def init(self, dynamic_pbar=False) -> None:
         self.task.init(dynamic_pbar=dynamic_pbar)
 
-    def run(self, ctx: TaskState[MistResult, T_RootResult, FluxDepCfg]) -> None:
-        cfg_temp = self.cfg_maker(ctx, ctx.env["ml"])
+    def run(self, state: TaskState[MistResult, T_RootResult, FluxDepCfg]) -> None:
+        cfg_temp = self.cfg_maker(state, state.env["ml"])
 
         if cfg_temp is None:
             return  # skip this task
@@ -137,7 +137,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
         cfg = cfg_temp.to_dict()
         deepupdate(
             cfg,
-            {"dev": ctx.cfg.dev, "sweep": {"gain": self.gain_sweep}},
+            {"dev": state.cfg.dev, "sweep": {"gain": self.gain_sweep}},
             behavior="force",
         )
         cfg = MistCfg.model_validate(cfg)
@@ -147,21 +147,21 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
             cfg.sweep.gain,
             "gain",
             {
-                "soccfg": ctx.env["soccfg"],
+                "soccfg": state.env["soccfg"],
                 "gen_ch": cfg.modules.mist_pulse.ch,
             },
         )
 
         self.task.set_pbar_n(cfg.rounds)
         self.task.run(
-            ctx.child_with_cfg("raw_signals", cfg, child_type=NDArray[np.complex128])
+            state.child_with_cfg("raw_signals", cfg, child_type=NDArray[np.complex128])
         )
 
-        raw_signals = ctx.value["raw_signals"]
+        raw_signals = state.value["raw_signals"]
         assert isinstance(raw_signals, np.ndarray)
 
         with MinIntervalFunc.force_execute():
-            ctx.set_value(
+            state.set_value(
                 MistResult(
                     raw_signals=raw_signals,
                     success=np.array(True),

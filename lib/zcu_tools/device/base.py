@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from abc import ABC, abstractmethod
 
-from typing_extensions import TYPE_CHECKING, Optional, Self
+from typing_extensions import TYPE_CHECKING, Generic, Optional, Self, TypeVar
 
 from zcu_tools.cfg_model import ConfigBase
 
@@ -30,7 +30,10 @@ class BaseDeviceInfo(ConfigBase):
         return super().with_updates(**kwargs)
 
 
-class BaseDevice(ABC):
+T_DeviceInfo = TypeVar("T_DeviceInfo", bound=BaseDeviceInfo)
+
+
+class BaseDevice(ABC, Generic[T_DeviceInfo]):
     """
     Base class for all devices.
     """
@@ -79,30 +82,28 @@ class BaseDevice(ABC):
     # ----- abstract methods -----
 
     @abstractmethod
-    def _setup(self, cfg: BaseDeviceInfo, *, progress: bool = True) -> None: ...
+    def _setup(self, cfg: T_DeviceInfo, *, progress: bool = True) -> None: ...
 
-    def setup(self, cfg: BaseDeviceInfo, *, progress: bool = True) -> None:
+    def setup(self, cfg: T_DeviceInfo, *, progress: bool = True) -> None:
         """
         Setup the device with the given configuration.
         """
-        # sanity checks
-        if cfg.type != self.__class__.__name__:
-            raise RuntimeError(
-                f"Trying to setup device of type {self.__class__.__name__} with cfg of type {cfg.type}"
-            )
 
         if cfg.address != self.address:
             raise RuntimeError(
                 f"Trying to setup device at address {self.address} with cfg for address {cfg.address}"
             )
 
-        cfg = self.info_model.model_validate(cfg.to_dict())
+        if not isinstance(cfg, self.info_model):
+            raise RuntimeError(
+                f"Trying to setup device of type {self.__class__.__name__} with cfg of type {type(cfg)}"
+            )
 
         # private method to setup
         self._setup(cfg, progress=progress)
 
     @abstractmethod
-    def get_info(self) -> BaseDeviceInfo:
+    def get_info(self) -> T_DeviceInfo:
         """
         Get the current configuration of the device.
         """

@@ -18,7 +18,7 @@ class RohdeSchwarzSGS100AInfo(BaseDeviceInfo):
     power_dBm: float = -120.0
 
 
-class RohdeSchwarzSGS100A(BaseDevice):
+class RohdeSchwarzSGS100A(BaseDevice[RohdeSchwarzSGS100AInfo]):
     info_model = RohdeSchwarzSGS100AInfo
 
     def get_output(self) -> Literal["on", "off"]:
@@ -77,7 +77,7 @@ class RohdeSchwarzSGS100A(BaseDevice):
 
     # ==========================================================================#
 
-    def _setup(self, cfg: RohdeSchwarzSGS100AInfo, /, progress: bool = True) -> None:
+    def _setup(self, cfg, *, progress: bool = True) -> None:
         self.set_output(cfg.output)
         self.set_IQ_state(cfg.IQ)
         self.set_frequency(cfg.freq_Hz)

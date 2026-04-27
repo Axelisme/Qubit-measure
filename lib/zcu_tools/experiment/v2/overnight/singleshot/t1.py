@@ -316,19 +316,21 @@ class T1Task(
     def init(self, dynamic_pbar: bool = False) -> None:
         self.task.init(dynamic_pbar=dynamic_pbar)
 
-    def run(self, ctx: TaskState[T1Result, T_RootResult, OvernightCfg]) -> None:
+    def run(self, state: TaskState[T1Result, T_RootResult, OvernightCfg]) -> None:
         self.lengths = sweep2array(
-            self.cfg.sweep.length, "time", {"soccfg": ctx.env["soccfg"]}
+            self.cfg.sweep.length, "time", {"soccfg": state.env["soccfg"]}
         )
         self.task.run(
-            ctx.child_with_cfg("populations", self.cfg, child_type=NDArray[np.float64])
+            state.child_with_cfg(
+                "populations", self.cfg, child_type=NDArray[np.float64]
+            )
         )
 
         with MinIntervalFunc.force_execute():
-            ctx.set_value(
+            state.set_value(
                 T1Result(
                     lengths=self.lengths,
-                    populations=ctx.value["populations"],
+                    populations=state.value["populations"],
                 )
             )
 
@@ -419,19 +421,21 @@ class T1WithToneTask(
     def init(self, dynamic_pbar: bool = False) -> None:
         self.task.init(dynamic_pbar=dynamic_pbar)
 
-    def run(self, ctx: TaskState[T1Result, T_RootResult, OvernightCfg]) -> None:
+    def run(self, state: TaskState[T1Result, T_RootResult, OvernightCfg]) -> None:
         self.lengths = sweep2array(
-            self.cfg.sweep.length, "time", {"soccfg": ctx.env["soccfg"]}
+            self.cfg.sweep.length, "time", {"soccfg": state.env["soccfg"]}
         )
         self.task.run(
-            ctx.child_with_cfg("populations", self.cfg, child_type=NDArray[np.float64])
+            state.child_with_cfg(
+                "populations", self.cfg, child_type=NDArray[np.float64]
+            )
         )
 
         with MinIntervalFunc.force_execute():
-            ctx.set_value(
+            state.set_value(
                 T1Result(
                     lengths=self.lengths,
-                    populations=ctx.value["populations"],
+                    populations=state.value["populations"],
                 )
             )
 

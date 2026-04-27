@@ -84,7 +84,7 @@ class T1PlotAndSaveMixin(Generic[T_Cfg]):
             ),
         )
 
-    def update_plotter(self, plotters, ctx, results) -> None:
+    def update_plotter(self, plotters: T1PlotDict, ctx, results) -> None:
         iters = ctx.env_dict["iters"]
 
         lengths = results["lengths"][0]
@@ -226,19 +226,21 @@ class T1Task(
     def init(self, dynamic_pbar=False) -> None:
         self.task.init(dynamic_pbar=dynamic_pbar)
 
-    def run(self, ctx: TaskState[T1Result, T_RootResult, OvernightCfg]) -> None:
-        self.lengths = sweep2array(self.lengths, "time", {"soccfg": ctx.env["soccfg"]})
+    def run(self, state: TaskState[T1Result, T_RootResult, OvernightCfg]) -> None:
+        self.lengths = sweep2array(
+            self.lengths, "time", {"soccfg": state.env["soccfg"]}
+        )
         self.last_cfg = self.cfg
 
         self.task.run(
-            ctx.child_with_cfg("signals", self.cfg, child_type=NDArray[np.complex128])
+            state.child_with_cfg("signals", self.cfg, child_type=NDArray[np.complex128])
         )
 
         with MinIntervalFunc.force_execute():
-            ctx.set_value(
+            state.set_value(
                 T1Result(
                     lengths=self.lengths,
-                    signals=ctx.value["signals"],
+                    signals=state.value["signals"],
                 )
             )
 
@@ -317,25 +319,25 @@ class T1WithToneTask(
     def init(self, dynamic_pbar=False) -> None:
         self.task.init(dynamic_pbar=dynamic_pbar)
 
-    def run(self, ctx: TaskState[T1Result, T_RootResult, OvernightCfg]) -> None:
+    def run(self, state) -> None:
         self.lengths = sweep2array(
             self.lengths,
             "time",
             {
-                "soccfg": ctx.env["soccfg"],
+                "soccfg": state.env["soccfg"],
                 "gen_ch": self.cfg.modules.probe_pulse.ch,
             },
         )
         self.last_cfg = self.cfg
 
         self.task.run(
-            ctx.child_with_cfg("signals", self.cfg, child_type=NDArray[np.complex128])
+            state.child_with_cfg("signals", self.cfg, child_type=NDArray[np.complex128])
         )
 
-        ctx.set_value(
+        state.set_value(
             T1Result(
                 lengths=self.lengths,
-                signals=ctx.value["signals"],
+                signals=state.value["signals"],
             )
         )
 

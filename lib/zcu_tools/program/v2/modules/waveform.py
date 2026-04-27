@@ -23,8 +23,8 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 
 if TYPE_CHECKING:
-    from zcu_tools.program.v2.modular import ModularProgramV2
     from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.program.v2.modular import ModularProgramV2
 
 
 class WaveformCfg(ConfigBase):
@@ -186,11 +186,11 @@ class FlatTopWaveformCfg(WaveformCfg):
     def build(self, name: str) -> FlatTopWaveform:
         return FlatTopWaveform(name, self)
 
-    def set_param(self, param_name: str, param_value: Union[float, QickParam]) -> None:
-        if param_name == "length":
-            self.length = param_value
+    def set_param(self, name: str, value: Union[float, QickParam]) -> None:
+        if name == "length":
+            self.length = value
         else:
-            raise ValueError(f"Unknown parameter: {param_name}")
+            raise ValueError(f"Unknown parameter: {name}")
 
 
 class QickWaveformKwargs(TypedDict):

@@ -176,8 +176,8 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
     def init(self, dynamic_pbar: bool = False) -> None:
         self.task.init(dynamic_pbar=dynamic_pbar)
 
-    def run(self, ctx: TaskState[LenRabiResult, Any, FluxDepCfg]) -> None:
-        cfg_temp = self.cfg_maker(ctx, ctx.env["ml"])
+    def run(self, state: TaskState[LenRabiResult, Any, FluxDepCfg]) -> None:
+        cfg_temp = self.cfg_maker(state, state.env["ml"])
         if cfg_temp is None:
             return  # skip this task
 
@@ -187,7 +187,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
         del cfg["sweep_range"]
         deepupdate(
             cfg,
-            {"dev": ctx.cfg.dev, "sweep": {"length": len_sweep}},
+            {"dev": state.cfg.dev, "sweep": {"length": len_sweep}},
             behavior="force",
         )
         cfg = LenRabiCfg.model_validate(cfg)
@@ -196,13 +196,13 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
         rabi_pulse = cfg.modules.rabi_pulse
         self.task.set_pbar_n(cfg.rounds)
         self.task.run(
-            ctx.child_with_cfg("raw_signals", cfg, child_type=NDArray[np.complex128])
+            state.child_with_cfg("raw_signals", cfg, child_type=NDArray[np.complex128])
         )
 
-        real_signals = lenrabi_signal2real(ctx.value["raw_signals"])
+        real_signals = lenrabi_signal2real(state.value["raw_signals"])
 
         self.lengths = sweep2array(
-            len_sweep, "time", {"soccfg": ctx.env["soccfg"], "gen_ch": rabi_pulse.ch}
+            len_sweep, "time", {"soccfg": state.env["soccfg"], "gen_ch": rabi_pulse.ch}
         )
 
         (pi_len, _, pi2_len, _, rabi_freq, _, mean_err, fit_signals) = auto_fit_lenrabi(
@@ -219,7 +219,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
             success = False
 
         if success:
-            info: FluxDepInfoDict = ctx.env["info"]
+            info: FluxDepInfoDict = state.env["info"]
 
             cur_pi_product = pi_len * rabi_pulse.gain
             prev_pi_product = info.last.get("smooth_pi_product", cur_pi_product)
@@ -240,9 +240,9 @@ class LenRabiTask(MeasurementTask[LenRabiResult, Any, LenRabiPlotDict]):
             info["lenrabi_success_idx"] = info["flux_idx"]
 
         with MinIntervalFunc.force_execute():
-            ctx.set_value(
+            state.set_value(
                 LenRabiResult(
-                    raw_signals=ctx.value["raw_signals"],
+                    raw_signals=state.value["raw_signals"],
                     length=self.lengths.copy(),
                     pi_length=np.array(pi_len),
                     pi2_length=np.array(pi2_len),

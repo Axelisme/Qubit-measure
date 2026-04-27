@@ -371,24 +371,23 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
     def init(self, dynamic_pbar: bool = False) -> None:
         self.task.init(dynamic_pbar=dynamic_pbar)
 
-    def run(self, ctx: TaskState[MistResult, T_RootResult, OvernightCfg]) -> None:
+    def run(self, state: TaskState[MistResult, T_RootResult, OvernightCfg]) -> None:
         self.gains = sweep2array(
             self.gains,
             "gain",
-            {
-                "soccfg": ctx.env["soccfg"],
-                "gen_ch": self.cfg.modules.probe_pulse.ch,
-            },
+            {"soccfg": state.env["soccfg"], "gen_ch": self.cfg.modules.probe_pulse.ch},
         )
         self.task.run(
-            ctx.child_with_cfg("populations", self.cfg, child_type=NDArray[np.float64])
+            state.child_with_cfg(
+                "populations", self.cfg, child_type=NDArray[np.float64]
+            )
         )
 
         with MinIntervalFunc.force_execute():
-            ctx.set_value(
+            state.set_value(
                 MistResult(
                     gains=self.gains,
-                    populations=ctx.value["populations"],
+                    populations=state.value["populations"],
                 )
             )
 

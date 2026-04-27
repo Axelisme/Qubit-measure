@@ -93,7 +93,7 @@ class FluxDepBatchTask(BatchTask[str, Result, T_RootResult, FluxDepCfg]):
 
         super().__init__(tasks)
 
-    def run(self, ctx: TaskState) -> None:
+    def run(self, state: TaskState) -> None:
         if self.dynamic_pbar:
             self.task_pbar = self._build_pbar(leave=False)
         else:
@@ -106,7 +106,7 @@ class FluxDepBatchTask(BatchTask[str, Result, T_RootResult, FluxDepCfg]):
 
             run_with_retries(
                 task,
-                ctx.child(name, child_type=Result),
+                state.child(name, child_type=Result),
                 self.retry_time,
                 dynamic_pbar=True,
                 raise_error=False,

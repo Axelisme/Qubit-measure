@@ -79,43 +79,44 @@ class LoadValue(Module):
         # addr_reg computes dmem address / shift amount; word_reg holds the
         # fetched packed word. addr_reg is reused for shift once word is loaded.
         temp_reg_num = 2 if self._is_compressed else 1
-        temp_regs = prog.acquire_temp_reg(temp_reg_num)
-        addr_reg = temp_regs[0]
-        if self._is_compressed:
-            word_reg = temp_regs[1]
-
-        if not self._is_compressed:
-            # addr = idx [+ offset]
-            if self.offset == 0:
-                prog.write_reg(addr_reg, self.idx_reg)
+        with prog.acquire_temp_reg(temp_reg_num) as (addr_reg, *other_regs):
+            if self._is_compressed:
+                word_reg = other_regs[0]
             else:
-                prog.write_reg_op(addr_reg, self.idx_reg, "+", self.offset)
-            prog.read_dmem(dst=self.val_reg, addr=addr_reg)
-            return t
+                word_reg = ""  # not use
 
-        # addr = (idx ASR #word_shift) [+ #offset]
-        prog.write_reg_op(addr_reg, self.idx_reg, "ASR", self._word_shift)
-        if self.offset != 0:
-            prog.inc_reg(addr_reg, self.offset)
-        prog.read_dmem(dst=word_reg, addr=addr_reg)
+            if not self._is_compressed:
+                # addr = idx [+ offset]
+                if self.offset == 0:
+                    prog.write_reg(addr_reg, self.idx_reg)
+                else:
+                    prog.write_reg_op(addr_reg, self.idx_reg, "+", self.offset)
+                prog.read_dmem(dst=self.val_reg, addr=addr_reg)
+                return t
 
-        # shift = (idx AND #slot_mask) [SL #bits_shift]
-        shift_reg = addr_reg  # reuse addr_reg
-        prog.write_reg_op(shift_reg, self.idx_reg, "AND", self._slot_mask)
-        if self._bits_shift > 0:
-            prog.write_reg_op(shift_reg, shift_reg, "SL", self._bits_shift)
-        prog.write_reg_op(self.val_reg, word_reg, "ASR", shift_reg)
+            # addr = (idx ASR #word_shift) [+ #offset]
+            prog.write_reg_op(addr_reg, self.idx_reg, "ASR", self._word_shift)
+            if self.offset != 0:
+                prog.inc_reg(addr_reg, self.offset)
+            prog.read_dmem(dst=word_reg, addr=addr_reg)
 
-        prog.write_reg_op(self.val_reg, self.val_reg, "AND", self._value_mask)
+            # shift = (idx AND #slot_mask) [SL #bits_shift]
+            shift_reg = addr_reg  # reuse addr_reg
+            prog.write_reg_op(shift_reg, self.idx_reg, "AND", self._slot_mask)
+            if self._bits_shift > 0:
+                prog.write_reg_op(shift_reg, shift_reg, "SL", self._bits_shift)
+            prog.write_reg_op(self.val_reg, word_reg, "ASR", shift_reg)
 
-        if self._signed_mode:
-            sign_clear_label = f"{self.name}_sign_clear"
-            # skip the bias subtraction when the sign bit is clear
-            prog.cond_jump(
-                sign_clear_label, self.val_reg, "Z", "&", self._sign_bit_mask
-            )
-            prog.inc_reg(self.val_reg, -self._sign_bias)
-            prog.label(sign_clear_label)
+            prog.write_reg_op(self.val_reg, self.val_reg, "AND", self._value_mask)
+
+            if self._signed_mode:
+                sign_clear_label = f"{self.name}_sign_clear"
+                # skip the bias subtraction when the sign bit is clear
+                prog.cond_jump(
+                    sign_clear_label, self.val_reg, "Z", "&", self._sign_bit_mask
+                )
+                prog.inc_reg(self.val_reg, -self._sign_bias)
+                prog.label(sign_clear_label)
 
         return t
 

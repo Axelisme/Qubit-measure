@@ -59,7 +59,9 @@ ignore = ["E402", "F401"]
 
 [tool.pyright]
 include = ["lib"]
-typeCheckingMode = "basic"
+typeCheckingMode = "standard"
+reportMissingImports = "none"
+reportIncompatibleVariableOverride = "none"
 
 [tool.pytest.ini_options]
 filterwarnings = ["ignore::DeprecationWarning:matplotlib.*"]
