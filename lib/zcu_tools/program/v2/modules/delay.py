@@ -3,12 +3,13 @@ from __future__ import annotations
 import logging
 
 from qick.asm_v2 import QickParam
-from typing_extensions import Optional, Sequence, Union
+from typing_extensions import Optional, Sequence, Union, TYPE_CHECKING
 
 from .base import Module
 from .util import merge_max_length, round_timestamp
 
-from zcu_tools.program.v2.modular import ModularProgramV2
+if TYPE_CHECKING:
+    from zcu_tools.program.v2.modular import ModularProgramV2
 
 logger = logging.getLogger(__name__)
 
@@ -115,17 +116,17 @@ class Join(Module):
         )
 
         end_t_list = []
-        for list in self.join_modules:
-            cur_t = t
-            for m in list:
-                if logger.isEnabledFor(logging.DEBUG):
-                    prog.debug_macro(
-                        f"{type(m).__name__}({m.name})", cur_t, prefix="\t"
-                    )
-                cur_t = m.run(prog, cur_t)
+        with prog.disable_delay():
+            for list in self.join_modules:
+                cur_t = t
+                for m in list:
+                    if logger.isEnabledFor(logging.DEBUG):
+                        prog.debug_macro(
+                            f"{type(m).__name__}({m.name})", cur_t, prefix="\t"
+                        )
+                    cur_t = m.run(prog, cur_t)
 
-            end_t_list.append(cur_t)
-
+                end_t_list.append(cur_t)
         end_t = merge_max_length(*end_t_list)
 
         return end_t

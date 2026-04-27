@@ -58,14 +58,13 @@ class Repeat(Module):
         else:
             prog.open_loop(self.n, self.name)
 
-        with prog.disable_delay():
-            cur_t = 0.0
-            for mod in self.sub_modules:
-                if logger.isEnabledFor(logging.DEBUG):
-                    prog.debug_macro(
-                        f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
-                    )
-                cur_t = mod.run(prog, cur_t)
+        cur_t = 0.0
+        for mod in self.sub_modules:
+            if logger.isEnabledFor(logging.DEBUG):
+                prog.debug_macro(
+                    f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
+                )
+            cur_t = mod.run(prog, cur_t)
         prog.delay(t=cur_t)
 
         if isinstance(self.n, str):

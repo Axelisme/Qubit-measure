@@ -12,13 +12,15 @@ from typing_extensions import (
     Optional,
     TypeAlias,
     Union,
+    TYPE_CHECKING,
 )
 
 from .base import Module, ModuleCfg, get_ml_from_context
 from .pulse import Pulse, PulseCfg
 from .util import calc_max_length
 
-from zcu_tools.program.v2.modular import ModularProgramV2
+if TYPE_CHECKING:
+    from zcu_tools.program.v2.modular import ModularProgramV2
 
 
 def _resolve_pulse_ref(value: Any, info: ValidationInfo) -> Any:

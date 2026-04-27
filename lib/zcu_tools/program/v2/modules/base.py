@@ -16,9 +16,9 @@ from typing_extensions import (
 )
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.program.v2.modular import ModularProgramV2
 
 if TYPE_CHECKING:
+    from zcu_tools.program.v2.modular import ModularProgramV2
     from zcu_tools.meta_tool import ModuleLibrary
 
 

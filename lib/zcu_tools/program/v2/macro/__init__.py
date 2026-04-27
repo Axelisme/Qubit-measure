@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+
 from qick.asm_v2 import AsmV2, QickParam
-from typing_extensions import Union
+from typing_extensions import Union, Optional
 from contextlib import contextmanager
 
 from .debug import PrintTimeStamp
@@ -12,8 +13,8 @@ from .write_reg import WriteRegOp
 
 class ImproveAsmV2(AsmV2):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
         self._delay_disabled = False
+        super().__init__(*args, **kwargs)
 
     def write_reg_op(
         self, dst: str, lhs: str, op: str, rhs: Union[int, str, None] = None
@@ -35,28 +36,29 @@ class ImproveAsmV2(AsmV2):
 
     # ---- delay macro ----
 
-    def disable_delay(self) -> contextmanager:
-        @contextmanager
-        def _disable_scope():
-            self._delay_disabled = True
-            try:
-                yield
-            finally:
-                self._delay_disabled = False
-
-        return _disable_scope
+    @contextmanager
+    def disable_delay(self):
+        self._delay_disabled = True
+        try:
+            yield
+        finally:
+            self._delay_disabled = False
 
     def delay_auto(
-        self, t: Union[float, QickParam] = 0.0, gens=True, ros=True, tag: str = None
+        self,
+        t: Union[float, QickParam] = 0.0,
+        gens=True,
+        ros=True,
+        tag: Optional[str] = None,
     ):
         if self._delay_disabled:
             raise RuntimeError("Delay macros are currently disabled.")
-        return super().delay_auto(t, gens, ros, tag)
+        return super().delay_auto(t, gens, ros, tag)  # type: ignore
 
-    def delay(self, t: Union[float, QickParam], tag: str = None):
+    def delay(self, t: Union[float, QickParam], tag: Optional[str] = None):
         if self._delay_disabled:
             raise RuntimeError("Delay macros are currently disabled.")
-        return super().delay(t, tag)
+        return super().delay(t, tag)  # type: ignore
 
     def delay_reg_auto(self, time_reg: str, gens=True, ros=True) -> None:
         """Auto-align to timeline, then increment by runtime cycles from a register."""
