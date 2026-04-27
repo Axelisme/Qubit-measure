@@ -123,8 +123,11 @@ class Branch(Module):
     iteration of that outer loop the counter selects the corresponding branch,
     so branch *i* runs exactly once (at iteration *i*).
 
-    Each branch is wrapped with delay / delay_auto to flush timing, so branches
-    may have different durations. The module always returns 0.0.
+    Branch selection uses a binary cond_jump dispatch tree. For non-power-of-two
+    branch counts, shorter paths are padded with NOP so each branch starts after
+    the same number of control instructions. Each branch is wrapped with delay /
+    delay_auto to flush timing, so branches may have different durations. The
+    module always returns 0.0.
     """
 
     def __init__(
@@ -159,19 +162,16 @@ class Branch(Module):
         prog.delay(t=t)
         prog.delay_auto(t=0)
 
-        end_label = f"{self.name}_branch_end"
         n = len(self.branches)
+        max_depth = (n - 1).bit_length()
 
-        for i, branch in enumerate(self.branches):
-            is_last = i == n - 1
-
-            if not is_last:
-                skip_label = f"{self.name}_branch_skip_{i}"
-                prog.cond_jump(skip_label, self.compare_reg, "NZ", "-", i)
+        def run_branch(i: int, depth: int) -> None:
+            for _ in range(max_depth - depth):
+                prog.nop()
 
             with prog.disable_delay():
                 cur_t: Union[float, QickParam] = 0.0
-                for mod in branch:
+                for mod in self.branches[i]:
                     if logger.isEnabledFor(logging.DEBUG):
                         prog.debug_macro(
                             f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
@@ -184,11 +184,24 @@ class Branch(Module):
 
             prog.delay(t=cur_t)
 
-            if not is_last:
-                prog.jump(end_label)
-                prog.label(skip_label)
+        def emit_dispatch(lo: int, hi: int, depth: int) -> None:
+            if hi - lo == 1:
+                run_branch(lo, depth)
+                return
 
-        prog.label(end_label)
+            mid = (lo + hi) // 2
+            left_label = f"{self.name}_branch_l_{lo}_{mid}"
+            end_label = f"{self.name}_branch_e_{lo}_{hi}"
+
+            # compare_reg < mid -> left half, else right half
+            prog.cond_jump(left_label, self.compare_reg, "S", "-", mid)
+            emit_dispatch(mid, hi, depth + 1)
+            prog.jump(end_label)
+            prog.label(left_label)
+            emit_dispatch(lo, mid, depth + 1)
+            prog.label(end_label)
+
+        emit_dispatch(0, n, 0)
 
         prog.delay_auto(t=0)
 
