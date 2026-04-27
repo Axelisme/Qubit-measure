@@ -41,6 +41,8 @@ class ConfigBase(BaseModel):
                 lines = [f"{value.__class__.__name__}("]
                 for name in fields:
                     attr = getattr(value, name)
+                    if attr is None:
+                        continue
                     lines.append(
                         f"{inner_pad}{name} = {format_value(attr, indent + 1)},"
                     )
@@ -51,6 +53,8 @@ class ConfigBase(BaseModel):
                     return "{}"
                 lines = ["{"]
                 for k, v in value.items():
+                    if v is None:
+                        continue
                     lines.append(f"{inner_pad}{k!r}: {format_value(v, indent + 1)},")
                 lines.append(f"{pad}}}")
                 return "\n".join(lines)
