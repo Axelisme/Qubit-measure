@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 
 from typing_extensions import TYPE_CHECKING, Optional, Self
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 
 if TYPE_CHECKING:
     from pyvisa import ResourceManager

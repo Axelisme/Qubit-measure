@@ -8,7 +8,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typing_extensions import Any, Callable, Optional, TypeAlias, cast
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -251,7 +251,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> FreqResult:
-        signals2D, lengths, freqs, comment = load_data(filepath, return_comment=True, **kwargs)
+        signals2D, lengths, freqs, comment = load_data(
+            filepath, return_comment=True, **kwargs
+        )
         assert freqs is not None and lengths is not None
         assert len(freqs.shape) == 1 and len(lengths.shape) == 1
         assert signals2D.shape == (len(freqs), len(lengths))

@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from typing_extensions import Any, Callable, Optional, TypeAlias
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import (
@@ -167,7 +167,9 @@ class FluxExp(AbsExperiment[FluxResult, FluxCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> FluxResult:
-        signals, jpa_fluxs, _, comment = load_data(filepath, return_comment=True, **kwargs)
+        signals, jpa_fluxs, _, comment = load_data(
+            filepath, return_comment=True, **kwargs
+        )
         assert jpa_fluxs is not None
         assert len(jpa_fluxs.shape) == 1 and len(signals.shape) == 1
         assert jpa_fluxs.shape == signals.shape
@@ -176,11 +178,9 @@ class FluxExp(AbsExperiment[FluxResult, FluxCfg]):
         signals = signals.astype(np.float64)
 
         if comment is not None:
-
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-
                 self.last_cfg = FluxCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (jpa_fluxs, signals)
 

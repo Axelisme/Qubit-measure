@@ -14,7 +14,7 @@ from typing_extensions import (
     TypeAlias,
 )
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -383,11 +383,9 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         signals = signals.astype(np.complex128)
 
         if comment is not None:
-
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-
                 self.last_cfg = CKP_Cfg.validate_or_warn(cfg, source=g_filepath)
         self.last_result = (res_freqs, qub_freqs, signals)
 

@@ -8,7 +8,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typing_extensions import Any, Callable, Optional, TypeAlias
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -190,7 +190,9 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> TwoToneResult:
-        signals2D, gains, freqs, comment = load_data(filepath, return_comment=True, **kwargs)
+        signals2D, gains, freqs, comment = load_data(
+            filepath, return_comment=True, **kwargs
+        )
         assert freqs is not None
         assert len(gains.shape) == 1 and len(freqs.shape) == 1
         assert signals2D.shape == (len(gains), len(freqs))

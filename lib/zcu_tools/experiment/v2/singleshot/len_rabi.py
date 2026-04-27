@@ -8,7 +8,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typing_extensions import Any, Optional, TypeAlias
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -179,7 +179,9 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> LenRabiResult:
-        populations, lens, _, comment = load_data(filepath, return_comment=True, **kwargs)
+        populations, lens, _, comment = load_data(
+            filepath, return_comment=True, **kwargs
+        )
         assert lens is not None
 
         lens = lens.astype(np.float64)
@@ -188,11 +190,9 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         lens = lens * 1e6  # s -> us
 
         if comment is not None:
-
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-
                 self.last_cfg = LenRabiCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (lens, populations)
 

@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 from qick.asm_v2 import QickSweep1D
 from typing_extensions import Any, Callable, Optional, TypeAlias
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices

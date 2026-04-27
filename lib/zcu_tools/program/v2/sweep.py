@@ -4,7 +4,7 @@ import math
 
 from pydantic import model_validator
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 
 
 class SweepCfg(ConfigBase):

@@ -9,7 +9,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typing_extensions import Any, Callable, Optional, TypeAlias
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -354,11 +354,9 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         populations = np.real(populations).astype(np.float64)
 
         if comment is not None:
-
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-
                 self.last_cfg = T1WithToneCfg.validate_or_warn(cfg, source=g_filepath)
         self.last_result = (Ts, populations)
 

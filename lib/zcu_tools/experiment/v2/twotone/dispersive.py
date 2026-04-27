@@ -10,7 +10,7 @@ from matplotlib.patches import Circle
 from numpy.typing import NDArray
 from typing_extensions import Any, Optional, TypeAlias
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -263,11 +263,9 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
         signals = signals.astype(np.complex128)
 
         if comment is not None:
-
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-
                 self.last_cfg = DispersiveCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (freqs, signals)
 

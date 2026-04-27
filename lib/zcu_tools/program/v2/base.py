@@ -5,7 +5,7 @@ import logging
 from qick import QickConfig
 from qick.asm_v2 import AveragerProgramV2
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.program.base import ImproveAcquireMixin
 
 from .macro import ImproveAsmV2

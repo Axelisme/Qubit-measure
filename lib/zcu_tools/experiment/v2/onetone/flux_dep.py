@@ -6,7 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 from typing_extensions import Callable, Mapping, Optional, TypeAlias, cast
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -190,11 +190,9 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         signals2D = signals2D.astype(np.complex128)
 
         if comment is not None:
-
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-
                 self.last_cfg = FluxDepCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (values, freqs, signals2D)
 

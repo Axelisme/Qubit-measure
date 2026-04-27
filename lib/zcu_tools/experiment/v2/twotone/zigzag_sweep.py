@@ -15,7 +15,7 @@ from typing_extensions import (
     TypeAlias,
 )
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -253,7 +253,9 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> ZigZagScanResult:
-        signals, times, values, comment = load_data(filepath, return_comment=True, **kwargs)
+        signals, times, values, comment = load_data(
+            filepath, return_comment=True, **kwargs
+        )
         assert times is not None and values is not None
         assert len(times.shape) == 1 and len(values.shape) == 1
         assert signals.shape == (len(values), len(times))
@@ -265,11 +267,9 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
         signals = signals.astype(np.complex128)
 
         if comment is not None:
-
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-
                 self.last_cfg = ZigZagScanCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (times, values, signals)
 

@@ -12,7 +12,7 @@ from numpy import float64
 from numpy.typing import NDArray
 from typing_extensions import Any, Optional, TypeAlias
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -110,9 +110,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
             {"soccfg": soccfg, "gen_ch": modules.stark_pulse2.ch},
         )
         gains = np.sqrt(
-            np.linspace(
-                gain_sweep.start ** 2, gain_sweep.stop ** 2, gain_sweep.expts
-            )
+            np.linspace(gain_sweep.start**2, gain_sweep.stop**2, gain_sweep.expts)
         )
         gains = sweep2array(
             gains, "gain", {"soccfg": soccfg, "gen_ch": modules.stark_pulse1.ch}
@@ -447,7 +445,9 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         g_filepath, e_filepath = filepath
 
         # Load ground populations
-        g_pop, gains, freqs, comment = load_data(g_filepath, return_comment=True, **kwargs)
+        g_pop, gains, freqs, comment = load_data(
+            g_filepath, return_comment=True, **kwargs
+        )
         assert freqs is not None
         assert len(gains.shape) == 1 and len(freqs.shape) == 1
         assert g_pop.shape == (len(gains), len(freqs))
@@ -467,11 +467,9 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         populations = np.real(populations).astype(np.float64)
 
         if comment is not None:
-
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-
                 self.last_cfg = AcStarkCfg.validate_or_warn(cfg, source=g_filepath)
         self.last_result = (gains, freqs, populations)
 

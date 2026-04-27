@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from typing_extensions import Any, Callable, Optional, TypeAlias, cast
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -226,7 +226,9 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> T1Result:
-        signals2D, gains, lengths, comment = load_data(filepath, return_comment=True, **kwargs)
+        signals2D, gains, lengths, comment = load_data(
+            filepath, return_comment=True, **kwargs
+        )
         assert lengths is not None
         assert len(gains.shape) == 1 and len(lengths.shape) == 1
         assert signals2D.shape == (len(gains), len(lengths))

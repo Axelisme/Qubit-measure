@@ -9,7 +9,7 @@ from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from typing_extensions import Any, Callable, Optional, TypeAlias, cast
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -202,7 +202,9 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> MistResult:
-        signals2D, flux_gains, mist_gains, comment = load_data(filepath, return_comment=True, **kwargs)
+        signals2D, flux_gains, mist_gains, comment = load_data(
+            filepath, return_comment=True, **kwargs
+        )
         assert mist_gains is not None
         assert len(flux_gains.shape) == 1 and len(mist_gains.shape) == 1
         assert signals2D.shape == (len(flux_gains), len(mist_gains))

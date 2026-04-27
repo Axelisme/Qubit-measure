@@ -13,7 +13,7 @@ from typing_extensions import (
     TypeAlias,
 )
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -243,11 +243,9 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
         signals = signals.astype(np.complex128)
 
         if comment is not None:
-
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-
                 self.last_cfg = T2EchoCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (Ts, signals)
 

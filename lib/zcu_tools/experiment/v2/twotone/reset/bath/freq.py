@@ -11,7 +11,7 @@ from qick.asm_v2 import QickSweep1D
 from scipy.ndimage import gaussian_filter
 from typing_extensions import Any, Callable, Optional, TypeAlias
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -289,12 +289,12 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         ).astype(np.complex128)
 
         if comment is not None:
-
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-
-                self.last_cfg = FreqGainCfg.validate_or_warn(cfg, source=str(deg0_filepath))
+                self.last_cfg = FreqGainCfg.validate_or_warn(
+                    cfg, source=str(deg0_filepath)
+                )
         self.last_result = (gains, freqs, signals)
 
         return gains, freqs, signals

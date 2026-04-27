@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 from numpy.typing import NDArray
 from typing_extensions import Any, Callable, Mapping, Optional, TypeAlias
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel

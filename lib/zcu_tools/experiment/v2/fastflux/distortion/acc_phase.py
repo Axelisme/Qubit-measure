@@ -8,7 +8,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typing_extensions import Any, Callable, Optional, TypeAlias
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -239,7 +239,9 @@ class AccPhaseExp(AbsExperiment[AccPhaseResult, AccPhaseCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> AccPhaseResult:
-        signals2D, lengths, phases, comment = load_data(filepath, return_comment=True, **kwargs)
+        signals2D, lengths, phases, comment = load_data(
+            filepath, return_comment=True, **kwargs
+        )
         assert phases is not None and lengths is not None
         assert len(phases.shape) == 1 and len(lengths.shape) == 1
         assert signals2D.shape == (len(phases), len(lengths))

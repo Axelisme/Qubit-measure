@@ -9,7 +9,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typing_extensions import Any, Literal, Optional, TypeAlias, cast
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -411,11 +411,9 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
         signals = signals.astype(np.complex128)
 
         if comment is not None:
-
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-
                 self.last_cfg = GE_Cfg.validate_or_warn(cfg, source=filepath)
         self.last_result = signals.T
 

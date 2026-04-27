@@ -5,7 +5,7 @@ from copy import deepcopy
 
 from typing_extensions import Any, Mapping, Optional, TypeVar
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
 
 T_CfgModel = TypeVar("T_CfgModel", bound="ExpCfgModel")

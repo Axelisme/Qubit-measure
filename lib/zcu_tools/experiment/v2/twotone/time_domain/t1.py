@@ -17,7 +17,7 @@ from typing_extensions import (
 )
 
 import zcu_tools.utils.fitting as ft
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -304,11 +304,9 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         signals = signals.astype(np.complex128)
 
         if comment is not None:
-
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-
                 self.last_cfg = T1Cfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (Ts, signals)
 
@@ -469,11 +467,9 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
         signals = signals.astype(np.complex128)
 
         if comment is not None:
-
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-
                 self.last_cfg = T1WithToneCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (Ts, signals)
 
@@ -689,12 +685,12 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         signals = signals.astype(np.complex128)
 
         if comment is not None:
-
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-
-                self.last_cfg = T1WithToneSweepCfg.validate_or_warn(cfg, source=filepath)
+                self.last_cfg = T1WithToneSweepCfg.validate_or_warn(
+                    cfg, source=filepath
+                )
         self.last_result = (gains, Ts, signals)
 
         return gains, Ts, signals

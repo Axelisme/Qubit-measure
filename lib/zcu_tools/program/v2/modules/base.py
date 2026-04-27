@@ -15,7 +15,7 @@ from typing_extensions import (
     get_origin,
 )
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary

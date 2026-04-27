@@ -45,7 +45,7 @@ def _pulse_dict(**kw):
             "freq": 7000.0,
             "gain": 0.8,
         },
-        "ro_cfg": {"type": "readout/direct", "ro_length": 2.0},
+        "ro_cfg": {"type": "readout/direct", "ro_ch": 0, "ro_length": 2.0},
     }
     d.update(kw)
     return d
@@ -68,7 +68,9 @@ def _make_direct_cfg(ro_ch=0, ro_freq=5000.0):
 def _make_pulse_ro_cfg(ch=3, ro_ch=None):
     return PulseReadoutCfg(
         pulse_cfg=_make_pulse_cfg(ch=ch, freq=7000.0),
-        ro_cfg=_make_direct_cfg(ro_ch=ro_ch if ro_ch is not None else ch, ro_freq=7000.0),
+        ro_cfg=_make_direct_cfg(
+            ro_ch=ro_ch if ro_ch is not None else ch, ro_freq=7000.0
+        ),
     )
 
 
@@ -132,7 +134,7 @@ class TestPulseReadoutCfg:
 
     def test_auto_derives_ro_ch_from_pulse_ch(self):
         cfg = PulseReadoutCfg.model_validate(_pulse_dict())
-        assert cfg.ro_cfg.ro_ch == 3  # derived from pulse_cfg.ch
+        assert cfg.ro_cfg.gen_ch == 3  # derived from pulse_cfg.ch
 
     def test_auto_derives_ro_freq_from_pulse_freq(self):
         cfg = PulseReadoutCfg.model_validate(_pulse_dict())

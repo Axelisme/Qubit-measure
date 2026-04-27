@@ -11,7 +11,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from numpy.typing import NDArray
 from typing_extensions import Any, Callable, Mapping, Optional, TypeAlias, cast
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -346,7 +346,9 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
 
         # Load params (iterations x 3)
         param_path = str(_filepath.with_name(_filepath.name + "_params"))
-        params_data, iters, param_types, comment = load_data(param_path, return_comment=True, **kwargs)
+        params_data, iters, param_types, comment = load_data(
+            param_path, return_comment=True, **kwargs
+        )
         assert iters is not None and param_types is not None
         assert len(iters.shape) == 1 and len(param_types.shape) == 1
         assert params_data.shape == (len(param_types), len(iters))

@@ -13,7 +13,7 @@ from typing_extensions import (
     TypeAlias,
 )
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -200,17 +200,17 @@ class FreqDepExp(AbsExperiment[FreqResult, FreqCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> FreqResult:
-        populations, freqs, _, comment = load_data(filepath, return_comment=True, **kwargs)
+        populations, freqs, _, comment = load_data(
+            filepath, return_comment=True, **kwargs
+        )
 
         freqs = 1e-6 * freqs  # Hz to MHz
         populations = np.real(populations).astype(np.float64)
 
         if comment is not None:
-
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-
                 self.last_cfg = FreqCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (freqs, populations)
 

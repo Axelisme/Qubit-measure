@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from typing_extensions import Any, Optional, TypeAlias
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -188,7 +188,9 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> LengthResult:
-        signals, lengths, _, comment = load_data(filepath, return_comment=True, **kwargs)
+        signals, lengths, _, comment = load_data(
+            filepath, return_comment=True, **kwargs
+        )
         assert lengths is not None
         assert len(lengths.shape) == 1 and len(signals.shape) == 1
         assert lengths.shape == signals.shape
@@ -199,11 +201,9 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         signals = signals.astype(np.float64)
 
         if comment is not None:
-
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-
                 self.last_cfg = LengthCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (lengths, signals)
 

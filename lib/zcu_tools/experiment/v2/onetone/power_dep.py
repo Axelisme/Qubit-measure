@@ -6,7 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 from typing_extensions import Any, Callable, Optional, TypeAlias
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -180,7 +180,9 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> PowerDepResult:
-        signals2D, freqs, gains, comment = load_data(filepath, return_comment=True, **kwargs)
+        signals2D, freqs, gains, comment = load_data(
+            filepath, return_comment=True, **kwargs
+        )
         assert freqs is not None and gains is not None
         assert len(freqs.shape) == 1 and len(gains.shape) == 1
         assert signals2D.shape == (len(gains), len(freqs))

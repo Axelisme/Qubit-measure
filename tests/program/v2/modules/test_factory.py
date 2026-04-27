@@ -2,7 +2,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from typing_extensions import Literal
-
 from zcu_tools.program.v2.modules import (
     ModuleCfgFactory,
     WaveformCfgFactory,
@@ -29,7 +28,6 @@ from zcu_tools.program.v2.modules.waveform import (
     GaussWaveformCfg,
     WaveformCfg,
 )
-
 
 # ---------------------------------------------------------------------------
 # ModuleCfgFactory

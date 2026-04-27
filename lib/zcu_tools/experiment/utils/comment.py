@@ -4,7 +4,7 @@ import json
 import time
 from typing import Any, Optional
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.utils import format_obj
 
 

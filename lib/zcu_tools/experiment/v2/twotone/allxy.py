@@ -14,7 +14,7 @@ from typing_extensions import (
     TypeAlias,
 )
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -371,7 +371,9 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> AllXY_Result:
-        signals, gate_idxs, _, comment = load_data(filepath, return_comment=True, **kwargs)
+        signals, gate_idxs, _, comment = load_data(
+            filepath, return_comment=True, **kwargs
+        )
         assert len(gate_idxs.shape) == 1 and len(signals.shape) == 1
         assert len(gate_idxs) == len(ALLXY_SEQUENCE)
         assert signals.shape == gate_idxs.shape
@@ -379,11 +381,9 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
         signals = signals.astype(np.complex128)
 
         if comment is not None:
-
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-
                 self.last_cfg = AllXYCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = signals
 

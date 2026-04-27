@@ -8,7 +8,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typing_extensions import Any, Callable, Mapping, Optional, TypeAlias, cast
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -168,7 +168,9 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> PowerResult:
-        signals, jpa_powers, _, comment = load_data(filepath, return_comment=True, **kwargs)
+        signals, jpa_powers, _, comment = load_data(
+            filepath, return_comment=True, **kwargs
+        )
         assert jpa_powers is not None
         assert len(jpa_powers.shape) == 1 and len(signals.shape) == 1
         assert jpa_powers.shape == signals.shape
@@ -177,11 +179,9 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         signals = signals.astype(np.float64)
 
         if comment is not None:
-
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-
                 self.last_cfg = PowerCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (jpa_powers, signals)
 

@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from typing_extensions import Any, Callable, Optional, TypeAlias
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
@@ -196,11 +196,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         signals = signals.astype(np.float64)
 
         if comment is not None:
-
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-
                 self.last_cfg = FreqCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (freqs, signals)
 

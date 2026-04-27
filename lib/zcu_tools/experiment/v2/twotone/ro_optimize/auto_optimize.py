@@ -11,7 +11,7 @@ from skopt import Optimizer
 from skopt.space import Real
 from typing_extensions import Any, Optional, TypeAlias, cast
 
-from zcu_tools.config import ConfigBase
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
