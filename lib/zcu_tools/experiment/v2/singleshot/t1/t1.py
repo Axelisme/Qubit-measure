@@ -208,14 +208,14 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                     soccfg,
                     ctx.cfg,
                     modules=[
-                        Reset("reset", modules.reset),
-                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
                         LoadValue(
                             "load_t1_delay",
                             values=list(length_cycles),
                             idx_reg="length_idx",
                             val_reg="t1_delay_cycle",
                         ),
+                        Reset("reset", modules.reset),
+                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
                         DelayAuto("t1_delay", t="t1_delay_cycle"),
                         Readout("readout", modules.readout),
                     ],

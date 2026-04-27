@@ -84,14 +84,14 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.reset),
-                    Pulse("X90_pulse", X90_pulse),
                     LoadValue(
                         "load_repeat_count",
                         values=loop_n,
                         idx_reg="times",
                         val_reg="repeat_count",
                     ),
+                    Reset("reset", modules.reset),
+                    Pulse("X90_pulse", X90_pulse),
                     Repeat("zigzag_loop", n="repeat_count").add_content(
                         Pulse(f"loop_{repeat_on}", repeat_pulse)
                     ),
