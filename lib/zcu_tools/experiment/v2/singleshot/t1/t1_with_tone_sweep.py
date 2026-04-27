@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, TypeAlias
+from typing_extensions import Any, Callable, Optional, TypeAlias, Union
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -35,6 +35,8 @@ from zcu_tools.progress_bar import make_pbar
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting.multi_decay import fit_dual_transition_rates
 
+from .util import measure_with_sweep
+
 # (values, times, signals)
 T1WithToneSweepResult: TypeAlias = tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]
@@ -49,7 +51,7 @@ class T1WithToneSweepModuleCfg(ConfigBase):
 
 
 class T1WithToneSweepSweepCfg(ConfigBase):
-    length: SweepCfg
+    length: Union[SweepCfg, list[float]]
     gain: Optional[SweepCfg] = None
     freq: Optional[SweepCfg] = None
 
@@ -60,20 +62,10 @@ class T1WithToneSweepCfg(ProgramV2Cfg, ExpCfgModel):
 
 
 class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: T1WithToneSweepCfg,
-        g_center: complex,
-        e_center: complex,
-        radius: float,
-    ) -> T1WithToneSweepResult:
-        cfg = deepcopy(cfg)
-        setup_devices(cfg, progress=True)
+    def _resolve_outer_sweep(
+        self, cfg: T1WithToneSweepCfg, soccfg
+    ) -> tuple[str, NDArray[np.float64]]:
         modules = cfg.modules
-
-        length_sweep = cfg.sweep.length
         sweep_dict = cfg.sweep.model_dump(exclude_none=True)
         sweep_keys = [k for k in sweep_dict if k != "length"]
         if len(sweep_keys) != 1:
@@ -81,59 +73,19 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                 f"Expected exactly one sweep key besides 'length', got {sweep_keys!r}"
             )
         sweep_name = sweep_keys[0]
-        x_sweep = sweep_dict[sweep_name]
-
         if sweep_name not in ["gain", "freq"]:
             raise ValueError(f"Unsupported sweep key: {sweep_name}")
 
+        x_sweep = sweep_dict[sweep_name]
         xs = sweep2array(
             x_sweep,
             sweep_name,  # type: ignore
             round_info={"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
             allow_array=True,
         )
-        lengths = sweep2array(
-            length_sweep,
-            "time",
-            {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
-        )
+        return sweep_name, xs
 
-        def measure_fn(
-            ctx: TaskState[NDArray[np.float64], Any, T1WithToneSweepCfg],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
-        ) -> list[NDArray[np.float64]]:
-            cfg = ctx.cfg
-            modules = cfg.modules
-
-            length_sweep = cfg.sweep.length
-            length_param = sweep2param("length", length_sweep)
-            modules.probe_pulse.set_param("length", length_param)
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.reset),
-                    Branch(
-                        "ge",
-                        Pulse("probe_pulse_g", modules.probe_pulse),
-                        [
-                            Pulse("pi_pulse", modules.pi_pulse),
-                            Pulse("probe_pulse", modules.probe_pulse),
-                        ],
-                    ),
-                    Readout("readout", modules.readout),
-                ],
-                sweep=[("ge", 2), ("length", length_sweep)],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                g_center=g_center,
-                e_center=e_center,
-                ge_radius=radius,
-            )
-
+    def _make_viewer_ctx(self, sweep_name: str):
         fig, axs = make_plot_frame(4, 2, plot_instant=True, figsize=(12, 10))
         axs[3][0].set_ylim(0.0, 1.0)
         axs[3][1].set_ylim(0.0, 1.0)
@@ -162,7 +114,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                 ),
             )
 
-        with MultiLivePlot(
+        viewer = MultiLivePlot(
             fig,
             dict(
                 gg_2d=make_plotter2d(axs[0][0]),
@@ -174,7 +126,74 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                 eo_2d=make_plotter2d(axs[2][1], show_ylabel=False),
                 e_1d=make_plotter1d(axs[3][1], show_ylabel=False),
             ),
-        ) as viewer:
+        )
+        return fig, viewer
+
+    def _run_uniform(
+        self,
+        soc,
+        soccfg,
+        cfg: T1WithToneSweepCfg,
+        g_center: complex,
+        e_center: complex,
+        radius: float,
+    ) -> T1WithToneSweepResult:
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
+
+        length_sweep = cfg.sweep.length
+        assert isinstance(length_sweep, SweepCfg), "uniform mode requires SweepCfg"
+
+        sweep_name, xs = self._resolve_outer_sweep(cfg, soccfg)
+
+        lengths = sweep2array(
+            length_sweep,
+            "time",
+            {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
+        )
+
+        def measure_fn(
+            ctx: TaskState[NDArray[np.float64], Any, T1WithToneSweepCfg],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg = ctx.cfg
+            modules = cfg.modules
+
+            inner_length_sweep = cfg.sweep.length
+            assert isinstance(inner_length_sweep, SweepCfg), (
+                "uniform mode requires SweepCfg"
+            )
+            length_param = sweep2param("length", inner_length_sweep)
+            modules.probe_pulse.set_param("length", length_param)
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.reset),
+                    Branch(
+                        "ge",
+                        Pulse("probe_pulse_g", modules.probe_pulse),
+                        [
+                            Pulse("pi_pulse", modules.pi_pulse),
+                            Pulse("probe_pulse", modules.probe_pulse),
+                        ],
+                    ),
+                    Readout("readout", modules.readout),
+                ],
+                sweep=[("ge", 2), ("length", inner_length_sweep)],
+            ).acquire(
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                g_center=g_center,
+                e_center=e_center,
+                ge_radius=radius,
+            )
+
+        fig, viewer = self._make_viewer_ctx(sweep_name)
+
+        with viewer:
 
             def update_fn(i, ctx, value) -> None:
                 ctx.cfg.modules.probe_pulse.set_param(sweep_name, value)
@@ -182,7 +201,6 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
 
             def plot_fn(ctx) -> None:
                 i = ctx.env["idx"]
-
                 populations = calc_populations(np.asarray(ctx.root_data))
 
                 viewer.get_plotter("gg_2d").update(
@@ -230,11 +248,162 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
             populations = np.asarray(populations)
         plt.close(fig)
 
-        # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (xs, lengths, populations)
 
         return xs, lengths, populations
+
+    def _run_non_uniform(
+        self,
+        soc,
+        soccfg,
+        cfg: T1WithToneSweepCfg,
+        g_center: complex,
+        e_center: complex,
+        radius: float,
+    ) -> T1WithToneSweepResult:
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
+
+        length_sweep = cfg.sweep.length
+        sweep_name, xs = self._resolve_outer_sweep(cfg, soccfg)
+
+        if isinstance(length_sweep, SweepCfg):
+            lengths = np.geomspace(
+                length_sweep.start,
+                length_sweep.stop,
+                length_sweep.expts,
+                dtype=np.float64,
+            )
+        else:
+            lengths = np.asarray(length_sweep, dtype=np.float64)
+        lengths = sweep2array(
+            lengths,
+            "time",
+            {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
+            allow_array=True,
+        )
+        lengths = np.unique(lengths)
+
+        def measure_fn(
+            ctx: TaskState[NDArray[np.float64], Any, T1WithToneSweepCfg],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            def prog_maker(
+                cfg: T1WithToneSweepCfg, length_param
+            ) -> ModularProgramV2:
+                _cfg = deepcopy(cfg)
+                modules = _cfg.modules
+                modules.probe_pulse.set_param("length", length_param)
+
+                return ModularProgramV2(
+                    soccfg,
+                    _cfg,
+                    modules=[
+                        Reset("reset", modules.reset),
+                        Branch(
+                            "ge",
+                            Pulse("probe_pulse_g", modules.probe_pulse),
+                            [
+                                Pulse("pi_pulse", modules.pi_pulse),
+                                Pulse("probe_pulse", modules.probe_pulse),
+                            ],
+                        ),
+                        Readout("readout", modules.readout),
+                    ],
+                    sweep=[("ge", 2)],
+                )
+
+            return measure_with_sweep(
+                ctx,
+                prog_maker,
+                lengths.tolist(),
+                sweep_shape=(2,),
+                soc=soc,
+                progress=False,
+                round_hook=update_hook,
+                g_center=g_center,
+                e_center=e_center,
+                ge_radius=radius,
+            )
+
+        fig, viewer = self._make_viewer_ctx(sweep_name)
+
+        with viewer:
+
+            def update_fn(i, ctx, value) -> None:
+                ctx.cfg.modules.probe_pulse.set_param(sweep_name, value)
+                ctx.env["idx"] = i
+
+            def plot_fn(ctx) -> None:
+                i = ctx.env["idx"]
+                populations = calc_populations(np.asarray(ctx.root_data))
+
+                viewer.get_plotter("gg_2d").update(
+                    xs, lengths, populations[:, 0, :, 0], refresh=False
+                )
+                viewer.get_plotter("ge_2d").update(
+                    xs, lengths, populations[:, 0, :, 1], refresh=False
+                )
+                viewer.get_plotter("go_2d").update(
+                    xs, lengths, populations[:, 0, :, 2], refresh=False
+                )
+                viewer.get_plotter("g_1d").update(
+                    lengths, populations[i, 0].T, refresh=False
+                )
+                viewer.get_plotter("eg_2d").update(
+                    xs, lengths, populations[:, 1, :, 0], refresh=False
+                )
+                viewer.get_plotter("ee_2d").update(
+                    xs, lengths, populations[:, 1, :, 1], refresh=False
+                )
+                viewer.get_plotter("eo_2d").update(
+                    xs, lengths, populations[:, 1, :, 2], refresh=False
+                )
+                viewer.get_plotter("e_1d").update(
+                    lengths, populations[i, 1].T, refresh=False
+                )
+
+                viewer.refresh()
+
+            populations = run_task(
+                task=Task(
+                    measure_fn=measure_fn,
+                    raw2signal_fn=lambda raw: np.transpose(raw[0][0], (1, 0, 2)),
+                    result_shape=(2, len(lengths), 2),
+                    dtype=np.float64,
+                    pbar_n=cfg.rounds,
+                ).scan(
+                    sweep_name,
+                    xs.tolist(),
+                    before_each=update_fn,
+                ),
+                init_cfg=cfg,
+                on_update=plot_fn,
+            )
+            populations = np.asarray(populations)
+        plt.close(fig)
+
+        self.last_cfg = deepcopy(cfg)
+        self.last_result = (xs, lengths, populations)
+
+        return xs, lengths, populations
+
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: T1WithToneSweepCfg,
+        g_center: complex,
+        e_center: complex,
+        radius: float,
+        *,
+        uniform: bool = True,
+    ) -> T1WithToneSweepResult:
+        if uniform:
+            return self._run_uniform(soc, soccfg, cfg, g_center, e_center, radius)
+        else:
+            return self._run_non_uniform(soc, soccfg, cfg, g_center, e_center, radius)
 
     def analyze(
         self,

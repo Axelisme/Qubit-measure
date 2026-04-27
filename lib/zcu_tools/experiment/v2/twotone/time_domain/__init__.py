@@ -1,11 +1,11 @@
 from .cpmg import CPMG_Cfg, CPMG_Exp
 from .t1 import (
+    ScanT1WithToneCfg,
+    ScanT1WithToneExp,
     T1Cfg,
     T1Exp,
     T1WithToneCfg,
     T1WithToneExp,
-    T1WithToneSweepCfg,
-    T1WithToneSweepExp,
 )
 from .t2echo import T2EchoCfg, T2EchoExp
 from .t2ramsey import T2RamseyCfg, T2RamseyExp
@@ -19,8 +19,8 @@ __all__ = [
     "T1Cfg",
     "T1WithToneExp",
     "T1WithToneCfg",
-    "T1WithToneSweepExp",
-    "T1WithToneSweepCfg",
+    "ScanT1WithToneExp",
+    "ScanT1WithToneCfg",
     # t2echo
     "T2EchoExp",
     "T2EchoCfg",

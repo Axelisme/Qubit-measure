@@ -85,13 +85,8 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         length_sweep = cfg.sweep.length
 
         if isinstance(length_sweep, SweepCfg):
-            lengths = (
-                np.linspace(
-                    length_sweep.start ** (1 / 1.3),
-                    length_sweep.stop ** (1 / 1.3),
-                    length_sweep.expts,
-                )
-                ** 1.3
+            lengths = np.geomspace(
+                length_sweep.start, length_sweep.stop, length_sweep.expts
             )
         else:
             lengths = np.asarray(length_sweep)
@@ -477,41 +472,39 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
 
 
 # (values, times, signals)
-T1WithToneSweepResult: TypeAlias = tuple[
+ScanT1WithToneResult: TypeAlias = tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
 
-def t1_sweep_tone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+def t1_with_tone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class T1WithToneSweepSweepCfg(ConfigBase):
-    gain: SweepCfg
+class ScanT1WithToneSweepCfg(ConfigBase):
+    gain: Union[SweepCfg, list[float]]
     length: SweepCfg
 
 
-class T1WithToneSweepCfg(ProgramV2Cfg, ExpCfgModel):
+class ScanT1WithToneCfg(ProgramV2Cfg, ExpCfgModel):
     modules: T1WithToneModuleCfg
-    sweep: T1WithToneSweepSweepCfg
+    sweep: ScanT1WithToneSweepCfg
 
 
-class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
+class ScanT1WithToneExp(AbsExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
     def run(
         self,
         soc,
         soccfg,
-        cfg: T1WithToneSweepCfg,
+        cfg: ScanT1WithToneCfg,
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
-    ) -> T1WithToneSweepResult:
+    ) -> ScanT1WithToneResult:
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
-        gain_sweep: Union[SweepCfg, NDArray[np.float64]] = cfg.sweep.gain
-
         gains = sweep2array(
-            gain_sweep,
+            cfg.sweep.gain,
             "gain",
             {"soccfg": soccfg, "gen_ch": modules.test_pulse.ch},
             allow_array=True,
@@ -522,40 +515,34 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
             {"soccfg": soccfg, "gen_ch": modules.test_pulse.ch},
         )
 
-        length_param = sweep2param("length", cfg.sweep.length)
-        modules.test_pulse.set_param("length", length_param)
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any, ScanT1WithToneCfg],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg = ctx.cfg
+            modules = cfg.modules
+
+            length_sweep = cfg.sweep.length
+            length_param = sweep2param("length", length_sweep)
+            modules.test_pulse.set_param("length", length_param)
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.reset),
+                    Pulse("pi_pulse", modules.pi_pulse),
+                    Pulse("test_pulse", modules.test_pulse),
+                    Readout("readout", modules.readout),
+                ],
+                sweep=[("length", length_sweep)],
+            ).acquire(
+                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
+            )
 
         with LivePlot2DwithLine(
             "gain", "Time (us)", line_axis=1, num_lines=5
         ) as viewer:
-
-            def measure_fn(
-                ctx: TaskState[NDArray[np.complex128], Any, T1WithToneSweepCfg],
-                update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
-            ) -> list[NDArray[np.float64]]:
-                return ModularProgramV2(
-                    soccfg,
-                    ctx.cfg,
-                    modules=[
-                        Reset(
-                            "reset",
-                            ctx.cfg.modules.reset,
-                        ),
-                        Pulse(name="pi_pulse", cfg=ctx.cfg.modules.pi_pulse),
-                        Pulse(
-                            name="test_pulse",
-                            cfg=ctx.cfg.modules.test_pulse,
-                        ),
-                        Readout("readout", cfg=ctx.cfg.modules.readout),
-                    ],
-                    sweep=[("length", ctx.cfg.sweep.length)],
-                ).acquire(
-                    soc,
-                    progress=False,
-                    round_hook=update_hook,
-                    **(acquire_kwargs or {}),
-                )
-
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn,
@@ -570,7 +557,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                 ),
                 init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
-                    gains, lengths, t1_sweep_tone_signal2real(np.asarray(ctx.root_data))
+                    gains, lengths, t1_with_tone_signal2real(np.asarray(ctx.root_data))
                 ),
             )
             signals = np.asarray(signals)
@@ -582,7 +569,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         return gains, lengths, signals
 
     def analyze(
-        self, result: Optional[T1WithToneSweepResult] = None
+        self, result: Optional[ScanT1WithToneResult] = None
     ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], Figure]:
         if result is None:
             result = self.last_result
@@ -591,7 +578,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         gains, ts, signals = result
 
         signals: NDArray[np.complex128] = gaussian_filter(signals, sigma=1)  # type: ignore
-        real_signals = t1_sweep_tone_signal2real(signals)
+        real_signals = t1_with_tone_signal2real(signals)
 
         t1s = np.full(len(gains), np.nan, dtype=np.float64)
         t1errs = np.zeros_like(t1s)
@@ -647,7 +634,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
     def save(
         self,
         filepath: str,
-        result: Optional[T1WithToneSweepResult] = None,
+        result: Optional[ScanT1WithToneResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/t1_with_tone_sweep",
         **kwargs,
@@ -671,7 +658,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> T1WithToneSweepResult:
+    def load(self, filepath: str, **kwargs) -> ScanT1WithToneResult:
         signals, gains, Ts, comment = load_data(filepath, return_comment=True, **kwargs)
         assert gains is not None and Ts is not None
         assert len(gains.shape) == 1 and len(Ts.shape) == 1
@@ -688,9 +675,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-                self.last_cfg = T1WithToneSweepCfg.validate_or_warn(
-                    cfg, source=filepath
-                )
+                self.last_cfg = ScanT1WithToneCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (gains, Ts, signals)
 
         return gains, Ts, signals

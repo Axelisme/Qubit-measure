@@ -10,6 +10,10 @@ from .write_reg import WriteRegOp
 
 
 class ImproveAsmV2(AsmV2):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._delay_disabled = False
+
     def write_reg_op(
         self, dst: str, lhs: str, op: str, rhs: Union[int, str, None] = None
     ) -> None:
@@ -28,10 +32,30 @@ class ImproveAsmV2(AsmV2):
         """Close the register-driven loop opened with ``open_loop_reg(name)``."""
         self.append_macro(CloseLoopReg(name=name))
 
-    def delay_reg_auto(
-        self, time_reg: str, gens: bool = True, ros: bool = True
-    ) -> None:
+    # ---- delay macro ----
+
+    def disable_delay(self) -> None:
+        self._delay_disabled = True
+
+    def enable_delay(self) -> None:
+        self._delay_disabled = False
+
+    def delay_auto(
+        self, t: Union[float, QickParam] = 0.0, gens=True, ros=True, tag: str = None
+    ):
+        if self._delay_disabled:
+            raise RuntimeError("Delay macros are currently disabled.")
+        return super().delay_auto(t, gens, ros, tag)
+
+    def delay(self, t: Union[float, QickParam], tag: str = None):
+        if self._delay_disabled:
+            raise RuntimeError("Delay macros are currently disabled.")
+        return super().delay(t, tag)
+
+    def delay_reg_auto(self, time_reg: str, gens=True, ros=True) -> None:
         """Auto-align to timeline, then increment by runtime cycles from a register."""
+        if self._delay_disabled:
+            raise RuntimeError("Delay macros are currently disabled.")
         self.append_macro(DelayRegAuto(time_reg=time_reg, gens=gens, ros=ros))
 
     def debug_macro(

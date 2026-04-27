@@ -142,7 +142,7 @@ def round_sweep_dict(sweep: SweepCfg, *args, **kwargs) -> SweepCfg:
 
 
 def sweep2array(
-    sweep: Union[SweepCfg, Sequence, NDArray],
+    sweep: Union[SweepCfg, list, NDArray],
     round_type: Literal["none", "time", "freq", "phase", "gain"] = "none",
     round_info: Optional[dict[str, Any]] = None,
     allow_array: bool = False,

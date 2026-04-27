@@ -3,13 +3,12 @@ from __future__ import annotations
 import logging
 
 from qick.asm_v2 import QickParam
-from typing_extensions import TYPE_CHECKING, Optional, Sequence, Union
+from typing_extensions import Optional, Sequence, Union
 
 from .base import Module
 from .util import merge_max_length, round_timestamp
 
-if TYPE_CHECKING:
-    from zcu_tools.program.v2.modular import ModularProgramV2
+from zcu_tools.program.v2.modular import ModularProgramV2
 
 logger = logging.getLogger(__name__)
 

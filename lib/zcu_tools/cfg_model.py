@@ -1,9 +1,16 @@
 from __future__ import annotations
 
-from copy import deepcopy
-
-from pydantic import BaseModel, ConfigDict
+import numpy as np
+from pydantic import BaseModel, ConfigDict, ValidationError
 from typing_extensions import Any, Self
+
+
+def _json_fallback(obj: Any) -> str:
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    raise ValidationError(
+        f"Object of type {type(obj).__name__} is not JSON serializable"
+    )
 
 
 class ConfigBase(BaseModel):
@@ -12,7 +19,7 @@ class ConfigBase(BaseModel):
     )
 
     def with_updates(self, **kwargs) -> Self:
-        cfg = deepcopy(self)
+        cfg = self.model_copy(deep=True)
 
         def deepupdate_cfg(cfg: ConfigBase, d: dict[str, Any]) -> None:
             for key, value in d.items():
@@ -27,47 +34,13 @@ class ConfigBase(BaseModel):
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump(mode="python", exclude_none=True)
 
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(\n{self.to_dict()}\n)"
+    def to_json(self, **kwargs) -> str:
+        return self.model_dump_json(
+            indent=4, exclude_none=True, fallback=_json_fallback, **kwargs
+        )
 
     def __str__(self) -> str:
-        def format_value(value: Any, indent: int) -> str:
-            pad = "    " * indent
-            inner_pad = "    " * (indent + 1)
-            if isinstance(value, ConfigBase):
-                fields = list(value.__class__.model_fields.keys())
-                if not fields:
-                    return f"{value.__class__.__name__}()"
-                lines = [f"{value.__class__.__name__}("]
-                for name in fields:
-                    attr = getattr(value, name)
-                    if attr is None:
-                        continue
-                    lines.append(
-                        f"{inner_pad}{name} = {format_value(attr, indent + 1)},"
-                    )
-                lines.append(f"{pad})")
-                return "\n".join(lines)
-            if isinstance(value, dict):
-                if not value:
-                    return "{}"
-                lines = ["{"]
-                for k, v in value.items():
-                    if v is None:
-                        continue
-                    lines.append(f"{inner_pad}{k!r}: {format_value(v, indent + 1)},")
-                lines.append(f"{pad}}}")
-                return "\n".join(lines)
-            if isinstance(value, list):
-                if not value:
-                    return "[]"
-                if all(not isinstance(v, (ConfigBase, dict, list)) for v in value):
-                    return repr(value)
-                lines = ["["]
-                for v in value:
-                    lines.append(f"{inner_pad}{format_value(v, indent + 1)},")
-                lines.append(f"{pad}]")
-                return "\n".join(lines)
-            return repr(value)
+        return self.to_json()
 
-        return format_value(self, 0)
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self})"

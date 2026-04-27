@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Optional, TypeAlias, Union
+from typing_extensions import Any, Callable, Optional, TypeAlias, Union
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -19,6 +19,8 @@ from zcu_tools.liveplot import LivePlot1D, MultiLivePlot, make_plot_frame
 from zcu_tools.program.v2 import (
     Branch,
     Delay,
+    DelayAuto,
+    LoadValue,
     ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
@@ -34,7 +36,6 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting.multi_decay import calc_lambdas, fit_dual_transition_rates
 
 from ..util import calc_populations
-from .util import measure_with_sweep
 
 # (times, signals)
 T1Result: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
@@ -47,7 +48,7 @@ class T1ModuleCfg(ConfigBase):
 
 
 class T1SweepCfg(ConfigBase):
-    length: SweepCfg
+    length: Union[SweepCfg, list[float]]
 
 
 class T1Cfg(ProgramV2Cfg, ExpCfgModel):
@@ -62,7 +63,36 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
     to measure the qubit's energy relaxation.
     """
 
-    def run(
+    def _make_viewer_ctx(self):
+        fig, axs = make_plot_frame(1, 2, plot_instant=True, figsize=(12, 5))
+        axs[0][0].set_ylim(0, 1)
+        axs[0][1].set_ylim(0, 1)
+
+        line_kwargs = [
+            dict(label="Ground"),
+            dict(label="Excited"),
+            dict(label="Other"),
+        ]
+        viewer = MultiLivePlot(
+            fig,
+            dict(
+                init_g=LivePlot1D(
+                    "Time (us)",
+                    "Amplitude",
+                    existed_axes=[[axs[0][0]]],
+                    segment_kwargs=dict(num_lines=3, line_kwargs=line_kwargs),
+                ),
+                init_e=LivePlot1D(
+                    "Time (us)",
+                    "Amplitude",
+                    existed_axes=[[axs[0][1]]],
+                    segment_kwargs=dict(num_lines=3, line_kwargs=line_kwargs),
+                ),
+            ),
+        )
+        return fig, viewer
+
+    def _run_uniform(
         self,
         soc,
         soccfg,
@@ -70,122 +100,55 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         g_center: complex,
         e_center: complex,
         radius: float,
-        uniform: bool = False,
     ) -> T1Result:
-        cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
 
         length_sweep = cfg.sweep.length
+        assert isinstance(length_sweep, SweepCfg), "uniform mode requires SweepCfg"
+        lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
 
-        if uniform:
-            assert isinstance(length_sweep, SweepCfg)
-            lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
-        else:
-            if isinstance(length_sweep, SweepCfg):
-                lengths = np.geomspace(
-                    length_sweep.start, length_sweep.stop, length_sweep.expts
-                )
-            else:
-                lengths = np.asarray(length_sweep)
-            lengths = sweep2array(lengths, "time", {"soccfg": soccfg}, allow_array=True)
-            lengths = np.unique(lengths)
+        fig, viewer = self._make_viewer_ctx()
 
-        fig, axs = make_plot_frame(1, 2, plot_instant=True, figsize=(12, 5))
-        axs[0][0].set_ylim(0, 1)
-        axs[0][1].set_ylim(0, 1)
-
-        with MultiLivePlot(
-            fig,
-            dict(
-                init_g=LivePlot1D(
-                    "Time (us)",
-                    "Amplitude",
-                    existed_axes=[[axs[0][0]]],
-                    segment_kwargs=dict(
-                        num_lines=3,
-                        line_kwargs=[
-                            dict(label="Ground"),
-                            dict(label="Excited"),
-                            dict(label="Other"),
-                        ],
-                    ),
-                ),
-                init_e=LivePlot1D(
-                    "Time (us)",
-                    "Amplitude",
-                    existed_axes=[[axs[0][1]]],
-                    segment_kwargs=dict(
-                        num_lines=3,
-                        line_kwargs=[
-                            dict(label="Ground"),
-                            dict(label="Excited"),
-                            dict(label="Other"),
-                        ],
-                    ),
-                ),
-            ),
-        ) as viewer:
-
-            def plot_fn(ctx: TaskState) -> None:
-                populations = calc_populations(np.asarray(ctx.root_data))  # (N, 2, 3)
-
-                viewer.get_plotter("init_g").update(
-                    lengths, populations[:, 0].T, refresh=False
-                )
-                viewer.get_plotter("init_e").update(
-                    lengths, populations[:, 1].T, refresh=False
-                )
-
-                viewer.refresh()
+        with viewer:
 
             def measure_fn(
-                ctx: TaskState[NDArray[np.float64], Any, T1Cfg], update_hook
+                ctx: TaskState[NDArray[np.float64], Any, T1Cfg],
+                update_hook: Optional[Callable],
             ):
-                def prog_maker(cfg, t1_delay):
-                    cfg = deepcopy(cfg)
-                    modules = cfg.modules
-                    fpga_sweep: list[tuple[str, Union[int, SweepCfg]]] = (
-                        [("length", cfg.sweep.length), ("ge", 2)]
-                        if uniform
-                        else [("ge", 2)]
-                    )
-                    return ModularProgramV2(
-                        soccfg,
-                        cfg,
-                        modules=[
-                            Reset("reset", modules.reset),
-                            Branch(
-                                "ge",
-                                [],
-                                [
-                                    Pulse("pi_pulse", modules.pi_pulse),
-                                    Delay("t1_delay", delay=t1_delay),
-                                ],
-                            ),
-                            Readout("readout", modules.readout),
-                        ],
-                        sweep=fpga_sweep,
-                    )
-
-                acquire_kwargs = dict(
-                    soc=soc,
+                modules = ctx.cfg.modules
+                inner_length_sweep = ctx.cfg.sweep.length
+                assert isinstance(inner_length_sweep, SweepCfg), (
+                    "uniform mode requires SweepCfg"
+                )
+                length_param = sweep2param("length", inner_length_sweep)
+                return ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset("reset", modules.reset),
+                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                        Delay("t1_delay", delay=length_param),
+                        Readout("readout", modules.readout),
+                    ],
+                    sweep=[("length", inner_length_sweep), ("ge", 2)],
+                ).acquire(
+                    soc,
                     progress=False,
                     round_hook=update_hook,
                     g_center=g_center,
                     e_center=e_center,
                     ge_radius=radius,
                 )
-                if uniform:
-                    len_param = sweep2param("length", ctx.cfg.sweep.length)
-                    return prog_maker(ctx.cfg, len_param).acquire(**acquire_kwargs)
-                else:
-                    return measure_with_sweep(
-                        ctx,
-                        prog_maker,
-                        lengths.tolist(),
-                        sweep_shape=(2,),
-                        **acquire_kwargs,
-                    )
+
+            def plot_fn(ctx: TaskState) -> None:
+                populations = calc_populations(np.asarray(ctx.root_data))  # (N, 2, 3)
+                viewer.get_plotter("init_g").update(
+                    lengths, populations[:, 0].T, refresh=False
+                )
+                viewer.get_plotter("init_e").update(
+                    lengths, populations[:, 1].T, refresh=False
+                )
+                viewer.refresh()
 
             populations = run_task(
                 task=Task(
@@ -200,11 +163,115 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             )
         plt.close(fig)
 
-        # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (lengths, populations)
 
         return lengths, populations
+
+    def _run_non_uniform(
+        self,
+        soc,
+        soccfg,
+        cfg: T1Cfg,
+        g_center: complex,
+        e_center: complex,
+        radius: float,
+    ) -> T1Result:
+        setup_devices(cfg, progress=True)
+
+        length_sweep = cfg.sweep.length
+
+        if isinstance(length_sweep, SweepCfg):
+            lengths = np.geomspace(
+                length_sweep.start, length_sweep.stop, length_sweep.expts
+            )
+        else:
+            lengths = np.asarray(length_sweep)
+        length_cycles = np.asarray(
+            [int(soccfg.us2cycles(t)) for t in lengths], dtype=np.int64
+        )
+        length_cycles = np.unique(length_cycles)
+        lengths = np.asarray(
+            [soccfg.cycles2us(int(cycle)) for cycle in length_cycles], dtype=np.float64
+        )
+
+        fig, viewer = self._make_viewer_ctx()
+
+        with viewer:
+
+            def measure_fn(
+                ctx: TaskState[NDArray[np.float64], Any, T1Cfg],
+                update_hook: Optional[Callable],
+            ):
+                modules = ctx.cfg.modules
+                return ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset("reset", modules.reset),
+                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                        LoadValue(
+                            "load_t1_delay",
+                            values=list(length_cycles),
+                            idx_reg="length_idx",
+                            val_reg="t1_delay_cycle",
+                        ),
+                        DelayAuto("t1_delay", t="t1_delay_cycle"),
+                        Readout("readout", modules.readout),
+                    ],
+                    sweep=[("length_idx", len(length_cycles)), ("ge", 2)],
+                ).acquire(
+                    soc,
+                    progress=False,
+                    round_hook=update_hook,
+                    g_center=g_center,
+                    e_center=e_center,
+                    ge_radius=radius,
+                )
+
+            def plot_fn(ctx: TaskState) -> None:
+                populations = calc_populations(np.asarray(ctx.root_data))  # (N, 2, 3)
+                viewer.get_plotter("init_g").update(
+                    lengths, populations[:, 0].T, refresh=False
+                )
+                viewer.get_plotter("init_e").update(
+                    lengths, populations[:, 1].T, refresh=False
+                )
+                viewer.refresh()
+
+            populations = run_task(
+                task=Task(
+                    measure_fn=measure_fn,
+                    raw2signal_fn=lambda raw: raw[0][0],
+                    result_shape=(len(lengths), 2, 2),
+                    dtype=np.float64,
+                    pbar_n=cfg.rounds,
+                ),
+                init_cfg=cfg,
+                on_update=plot_fn,
+            )
+        plt.close(fig)
+
+        self.last_cfg = deepcopy(cfg)
+        self.last_result = (lengths, populations)
+
+        return lengths, populations
+
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: T1Cfg,
+        g_center: complex,
+        e_center: complex,
+        radius: float,
+        *,
+        uniform: bool = False,
+    ) -> T1Result:
+        if uniform:
+            return self._run_uniform(soc, soccfg, cfg, g_center, e_center, radius)
+        else:
+            return self._run_non_uniform(soc, soccfg, cfg, g_center, e_center, radius)
 
     def analyze(
         self,

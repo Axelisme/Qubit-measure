@@ -4,10 +4,9 @@ import logging
 import math
 
 from qick.asm_v2 import QickParam
-from typing_extensions import TYPE_CHECKING, Self, Sequence, TypeAlias, Union
+from typing_extensions import Self, Sequence, TypeAlias, Union
 
-if TYPE_CHECKING:
-    from zcu_tools.program.v2.modular import ModularProgramV2
+from zcu_tools.program.v2.modular import ModularProgramV2
 
 
 from .base import Module

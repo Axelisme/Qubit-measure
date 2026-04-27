@@ -67,7 +67,7 @@ class CPMG_ModuleCfg(ConfigBase):
 
 
 class CPMG_SweepCfg(ConfigBase):
-    times: Union[SweepCfg, Sequence[int]]
+    times: Union[SweepCfg, list[int]]
     length: SweepCfg
 
 

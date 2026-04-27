@@ -4,14 +4,13 @@ from copy import deepcopy
 
 from pydantic import BeforeValidator, ValidationInfo
 from qick.asm_v2 import QickParam
-from typing_extensions import TYPE_CHECKING, Annotated, Any, Literal, Optional, Union
+from typing_extensions import Annotated, Any, Literal, Optional, Union
 
 from .base import Module, ModuleCfg, get_ml_from_context
 from .util import round_timestamp
 from .waveform import AbsWaveform, WaveformCfg, WaveformCfgFactory
 
-if TYPE_CHECKING:
-    from zcu_tools.program.v2.modular import ModularProgramV2
+from zcu_tools.program.v2.modular import ModularProgramV2
 
 
 def _resolve_waveform_ref(value: Any, info: ValidationInfo) -> Any:
