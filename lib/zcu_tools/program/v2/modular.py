@@ -45,8 +45,6 @@ class ModularProgramV2(MyProgramV2):
         super().__init__(soccfg, cfg, **kwargs)
 
     def _initialize(self, cfg: ProgramV2Cfg) -> None:
-        super()._initialize(cfg)
-
         # add v2 sweep loops
         if self.sweep_dict is not None:
             for name, sweep in self.sweep_dict:
@@ -65,7 +63,6 @@ class ModularProgramV2(MyProgramV2):
         )
 
     def _body(self, cfg: ProgramV2Cfg) -> None:
-
         t = 0.0
         for module in self.modules:
             if logger.isEnabledFor(logging.DEBUG):

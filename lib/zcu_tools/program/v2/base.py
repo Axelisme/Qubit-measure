@@ -30,13 +30,17 @@ class MyProgramV2(ImproveAcquireMixin, ImproveAsmV2, AveragerProgramV2):  # type
 
         super().__init__(
             soccfg,
-            cfg=cfg.to_dict(),
+            cfg=None,
             reps=cfg.reps,
             initial_delay=cfg.initial_delay,
             final_wait=0.0,
             final_delay=cfg.relax_delay,
             **kwargs,
         )
+
+    def _initialize(self, cfg: ProgramV2Cfg) -> None: ...
+
+    def _body(self, cfg: ProgramV2Cfg) -> None: ...
 
     def compile(self) -> None:
         super().compile()
