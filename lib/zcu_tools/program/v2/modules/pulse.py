@@ -2,34 +2,21 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from pydantic import BeforeValidator, ValidationInfo
+from pydantic import BeforeValidator
 from qick.asm_v2 import QickParam
 from typing_extensions import TYPE_CHECKING, Annotated, Any, Literal, Optional, Union
 
-from .base import Module, ModuleCfg, get_ml_from_context
+from .base import AbsModuleCfg, Module
 from .util import round_timestamp
-from .waveform import AbsWaveform, WaveformCfg, WaveformCfgFactory
+from .waveform import AbsWaveform, WaveformCfg, resolve_waveform_ref
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
 
 
-def _resolve_waveform_ref(value: Any, info: ValidationInfo) -> Any:
-    if isinstance(value, str):
-        ml = get_ml_from_context(info)
-        if ml is None:
-            raise ValueError(
-                f"Cannot resolve waveform reference {value!r} without ModuleLibrary context"
-            )
-        return ml.get_waveform(value)
-    if isinstance(value, dict):
-        return WaveformCfgFactory.from_raw(value, ml=get_ml_from_context(info))
-    return value
-
-
-class PulseCfg(ModuleCfg):
+class PulseCfg(AbsModuleCfg):
     type: Literal["pulse"] = "pulse"
-    waveform: Annotated[WaveformCfg, BeforeValidator(_resolve_waveform_ref)]
+    waveform: Annotated[WaveformCfg, BeforeValidator(resolve_waveform_ref)]
     ch: int
     nqz: Literal[1, 2]
     freq: Union[float, QickParam]

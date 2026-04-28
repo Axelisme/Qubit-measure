@@ -1,8 +1,10 @@
 from . import modules, utils
 from .base import MyProgramV2, ProgramV2Cfg
-from .mocksoc import make_mock_soccfg
+from .mocksoc import MockQickSoc, make_mock_soc, make_mock_soccfg
 from .modular import ModularProgramV2
 from .modules import (
+    AbsModuleCfg,
+    AbsWaveformCfg,
     BathReset,
     BathResetCfg,
     Branch,

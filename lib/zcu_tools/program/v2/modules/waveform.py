@@ -4,32 +4,29 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import Field, TypeAdapter
+from pydantic import BeforeValidator, Field, TypeAdapter, ValidationInfo
 from qick.asm_v2 import QickParam
 from typing_extensions import (
     TYPE_CHECKING,
     Annotated,
     Any,
-    ClassVar,
     Literal,
     NotRequired,
     Optional,
-    Self,
     TypeAlias,
     TypedDict,
     Union,
-    get_origin,
+    cast,
 )
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.utils import deepupdate
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
     from zcu_tools.program.v2.modular import ModularProgramV2
 
 
-class WaveformCfg(ConfigBase):
+class AbsWaveformCfg(ConfigBase):
     style: str
     length: Union[float, QickParam]
 
@@ -40,46 +37,7 @@ class WaveformCfg(ConfigBase):
         raise NotImplementedError(f"{type(self).__name__} does not support set_param")
 
 
-class WaveformCfgFactory:
-    _registry: ClassVar[dict[str, type[WaveformCfg]]] = {}
-    _adapter: ClassVar[Optional[TypeAdapter]] = None
-
-    @classmethod
-    def register(cls, *waveform_cfgs: type[WaveformCfg]) -> None:
-        for wc in waveform_cfgs:
-            field = wc.model_fields.get("style")
-            if field is None or get_origin(field.annotation) is not Literal:
-                raise TypeError(
-                    f"{wc.__name__} cannot be registered: missing Literal 'style' field"
-                )
-            style_value = field.default
-            existing = cls._registry.get(style_value)
-            if existing is not None and existing is not wc:
-                raise ValueError(
-                    f"Style discriminator {style_value!r} already registered to {existing.__name__}"
-                )
-            cls._registry[style_value] = wc
-        cls._adapter = None
-
-    @classmethod
-    def _get_adapter(cls) -> TypeAdapter:
-        if cls._adapter is None:
-            if not cls._registry:
-                raise RuntimeError("No WaveformCfg leaf subclasses registered")
-            union = Annotated[
-                Union[tuple(cls._registry.values())],
-                Field(discriminator="style"),
-            ]
-            cls._adapter = TypeAdapter(union)
-        return cls._adapter
-
-    @classmethod
-    def from_raw(cls, raw: Any, *, ml: Optional[ModuleLibrary] = None) -> WaveformCfg:
-        ctx = {"ml": ml} if ml is not None else None
-        return cls._get_adapter().validate_python(raw, context=ctx)
-
-
-class ConstWaveformCfg(WaveformCfg):
+class ConstWaveformCfg(AbsWaveformCfg):
     style: Literal["const"] = "const"
     length: Union[float, QickParam]
 
@@ -93,7 +51,7 @@ class ConstWaveformCfg(WaveformCfg):
             raise ValueError(f"Unknown parameter: {name}")
 
 
-class CosineWaveformCfg(WaveformCfg):
+class CosineWaveformCfg(AbsWaveformCfg):
     style: Literal["cosine"] = "cosine"
     length: float
 
@@ -108,7 +66,7 @@ class CosineWaveformCfg(WaveformCfg):
         self.length = value
 
 
-class GaussWaveformCfg(WaveformCfg):
+class GaussWaveformCfg(AbsWaveformCfg):
     style: Literal["gauss"] = "gauss"
     length: float
     sigma: float
@@ -132,7 +90,7 @@ class GaussWaveformCfg(WaveformCfg):
             raise ValueError(f"Unknown parameter: {name}")
 
 
-class DragWaveformCfg(WaveformCfg):
+class DragWaveformCfg(AbsWaveformCfg):
     style: Literal["drag"] = "drag"
     length: float
     sigma: float
@@ -162,7 +120,7 @@ class DragWaveformCfg(WaveformCfg):
             raise ValueError(f"Unknown parameter: {name}")
 
 
-class ArbWaveformCfg(WaveformCfg):
+class ArbWaveformCfg(AbsWaveformCfg):
     style: Literal["arb"] = "arb"
     length: float
     data: str
@@ -174,13 +132,22 @@ class ArbWaveformCfg(WaveformCfg):
         raise ValueError("Arb waveform length and data cannot be changed")
 
 
+def resolve_waveform_ref(value: Any, info: ValidationInfo) -> Any:
+    if isinstance(value, str):
+        if info.context is None:
+            raise ValueError("ModuleLibrary context not found")
+        return cast(ModuleLibrary, info.context["ml"]).get_waveform(value)
+    return value
+
+
 RaiseWaveformCfg: TypeAlias = Annotated[
     Union[CosineWaveformCfg, GaussWaveformCfg, DragWaveformCfg, ArbWaveformCfg],
+    BeforeValidator(resolve_waveform_ref),
     Field(discriminator="style"),
 ]
 
 
-class FlatTopWaveformCfg(WaveformCfg):
+class FlatTopWaveformCfg(AbsWaveformCfg):
     style: Literal["flat_top"] = "flat_top"
     length: Union[float, QickParam]
     raise_waveform: RaiseWaveformCfg
@@ -195,6 +162,31 @@ class FlatTopWaveformCfg(WaveformCfg):
             raise ValueError(f"Unknown parameter: {name}")
 
 
+WaveformCfg: TypeAlias = Annotated[
+    Union[
+        ConstWaveformCfg,
+        CosineWaveformCfg,
+        GaussWaveformCfg,
+        DragWaveformCfg,
+        ArbWaveformCfg,
+        FlatTopWaveformCfg,
+    ],
+    BeforeValidator(resolve_waveform_ref),
+    Field(discriminator="style"),
+]
+
+
+class WaveformCfgFactory:
+    @classmethod
+    def from_raw(cls, raw: Any, *, ml: Optional[ModuleLibrary] = None) -> WaveformCfg:
+        if isinstance(raw, str):
+            if ml is None:
+                raise ValueError("ModuleLibrary context not found")
+            raw = ml.get_waveform(raw)
+        ctx = {"ml": ml} if ml is not None else None
+        return TypeAdapter(WaveformCfg).validate_python(raw, context=ctx)
+
+
 class QickWaveformKwargs(TypedDict):
     style: Literal["const", "arb", "flat_top"]
 
@@ -204,7 +196,7 @@ class QickWaveformKwargs(TypedDict):
 
 class AbsWaveform(ABC):
     name: str
-    waveform_cfg: WaveformCfg
+    waveform_cfg: AbsWaveformCfg
 
     @property
     def length(self) -> Union[float, QickParam]:

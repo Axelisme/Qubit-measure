@@ -11,6 +11,8 @@ from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import format_sweep1D, get_single_sweep_name
 from zcu_tools.program.v2 import (
+    AbsModuleCfg,
+    AbsWaveformCfg,
     ModuleCfg,
     ModuleCfgFactory,
     WaveformCfg,
@@ -60,8 +62,8 @@ class ModuleDumper(yaml.SafeDumper):
 ModuleDumper.add_representer(dict, ModuleDumper.represent_dict)
 
 T_ExpCfg = TypeVar("T_ExpCfg", bound=ExpCfgModel)
-T_ModuleCfg = TypeVar("T_ModuleCfg", bound=ModuleCfg)
-T_WaveformCfg = TypeVar("T_WaveformCfg", bound=WaveformCfg)
+T_ModuleCfg = TypeVar("T_ModuleCfg", bound=AbsModuleCfg)
+T_WaveformCfg = TypeVar("T_WaveformCfg", bound=AbsWaveformCfg)
 
 
 class ModuleLibrary(SyncFile):
@@ -104,7 +106,7 @@ class ModuleLibrary(SyncFile):
         self.waveforms = {}
         for name, wav_cfg in cfg["waveforms"].items():
             try:
-                wav_cfg = WaveformCfgFactory.from_raw(wav_cfg, ml=self)
+                wav_cfg = WaveformCfgFactory.from_raw(wav_cfg)
             except Exception as e:
                 raise ValueError(
                     f"Error parsing waveform {name} in module library: \n{e}"
@@ -114,7 +116,7 @@ class ModuleLibrary(SyncFile):
         self.modules = {}
         for name, mod_cfg in cfg["modules"].items():
             try:
-                mod_cfg = ModuleCfgFactory.from_raw(mod_cfg, ml=self)
+                mod_cfg = ModuleCfgFactory.from_raw(mod_cfg)
             except Exception as e:
                 raise ValueError(
                     f"Error parsing module {name} in module library: \n{e}"
@@ -148,12 +150,7 @@ class ModuleLibrary(SyncFile):
         # format modules
         if (modules := exp_cfg.get("modules")) is not None:
             for name, sub_cfg in modules.items():
-                if isinstance(sub_cfg, str):
-                    sub_cfg = self.get_module(sub_cfg)
-                if isinstance(sub_cfg, ModuleCfg):
-                    modules[name] = sub_cfg
-                else:
-                    modules[name] = ModuleCfgFactory.from_raw(sub_cfg, ml=self)
+                modules[name] = ModuleCfgFactory.from_raw(sub_cfg, ml=self)
 
         # format sweep
         if (sweep_cfg := exp_cfg.get("sweep")) is not None:
@@ -200,7 +197,7 @@ class ModuleLibrary(SyncFile):
         self,
         name: str,
         override_cfg: Optional[dict[str, Any]] = None,
-        type: type[T_WaveformCfg] = WaveformCfg,
+        type: type[T_WaveformCfg] = AbsWaveformCfg,
     ) -> T_WaveformCfg:
         if name not in self.waveforms:
             raise ValueError(
@@ -221,7 +218,7 @@ class ModuleLibrary(SyncFile):
         self,
         name: str,
         override_cfg: Optional[dict[str, Any]] = None,
-        type: type[T_ModuleCfg] = ModuleCfg,
+        type: type[T_ModuleCfg] = AbsModuleCfg,
     ) -> T_ModuleCfg:
         if name not in self.modules:
             raise ValueError(

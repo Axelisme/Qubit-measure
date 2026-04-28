@@ -3,19 +3,18 @@ from __future__ import annotations
 from abc import abstractmethod
 from copy import deepcopy
 
-from pydantic import BeforeValidator, Field, ValidationInfo
+from pydantic import BeforeValidator, Field
 from qick.asm_v2 import QickParam
 from typing_extensions import (
     TYPE_CHECKING,
     Annotated,
-    Any,
     Literal,
     Optional,
     TypeAlias,
     Union,
 )
 
-from .base import Module, ModuleCfg, get_ml_from_context
+from .base import AbsModuleCfg, Module, resolve_module_ref
 from .pulse import Pulse, PulseCfg
 from .util import calc_max_length
 
@@ -23,21 +22,10 @@ if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
 
 
-def _resolve_pulse_ref(value: Any, info: ValidationInfo) -> Any:
-    if isinstance(value, str):
-        ml = get_ml_from_context(info)
-        if ml is None:
-            raise ValueError(
-                f"Cannot resolve pulse reference {value!r} without ModuleLibrary context"
-            )
-        return ml.get_module(value)
-    return value
+PulseOrRef: TypeAlias = Annotated[PulseCfg, BeforeValidator(resolve_module_ref)]
 
 
-PulseOrRef: TypeAlias = Annotated[PulseCfg, BeforeValidator(_resolve_pulse_ref)]
-
-
-class AbsResetCfg(ModuleCfg):
+class AbsResetCfg(AbsModuleCfg):
     @abstractmethod
     def build(self, name: str) -> AbsReset: ...
 

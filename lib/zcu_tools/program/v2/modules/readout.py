@@ -4,7 +4,7 @@ import warnings
 from abc import abstractmethod
 from copy import deepcopy
 
-from pydantic import BeforeValidator, Field, ValidationInfo, model_validator
+from pydantic import BeforeValidator, Field, model_validator
 from qick.asm_v2 import QickParam
 from typing_extensions import (
     TYPE_CHECKING,
@@ -16,7 +16,7 @@ from typing_extensions import (
     Union,
 )
 
-from .base import Module, ModuleCfg, get_ml_from_context
+from .base import AbsModuleCfg, Module, resolve_module_ref
 from .pulse import Pulse, PulseCfg
 from .util import calc_max_length, round_timestamp
 
@@ -24,18 +24,7 @@ if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
 
 
-def _resolve_pulse_ref(value: Any, info: ValidationInfo) -> Any:
-    if isinstance(value, str):
-        ml = get_ml_from_context(info)
-        if ml is None:
-            raise ValueError(
-                f"Cannot resolve pulse reference {value!r} without ModuleLibrary context"
-            )
-        return ml.get_module(value)
-    return value
-
-
-class AbsReadoutCfg(ModuleCfg):
+class AbsReadoutCfg(AbsModuleCfg):
     @abstractmethod
     def build(self, name: str) -> AbsReadout: ...
 
@@ -62,7 +51,7 @@ class DirectReadoutCfg(AbsReadoutCfg):
 
 class PulseReadoutCfg(AbsReadoutCfg):
     type: Literal["readout/pulse"] = "readout/pulse"
-    pulse_cfg: Annotated[PulseCfg, BeforeValidator(_resolve_pulse_ref)]
+    pulse_cfg: Annotated[PulseCfg, BeforeValidator(resolve_module_ref)]
     ro_cfg: DirectReadoutCfg
 
     @model_validator(mode="before")
