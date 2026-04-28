@@ -38,6 +38,8 @@ class MyProgramV2(ImproveAcquireMixin, ImproveAsmV2, AveragerProgramV2):  # type
             **kwargs,
         )
 
+        logger.debug("ASM:\n%s", self.asm())
+
     def _initialize(self, cfg: ProgramV2Cfg) -> None: ...
 
     def _body(self, cfg: ProgramV2Cfg) -> None: ...
