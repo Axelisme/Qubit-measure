@@ -136,7 +136,7 @@ def resolve_waveform_ref(value: Any, info: ValidationInfo) -> Any:
     if isinstance(value, str):
         if info.context is None:
             raise ValueError("ModuleLibrary context not found")
-        return cast(ModuleLibrary, info.context["ml"]).get_waveform(value)
+        return cast("ModuleLibrary", info.context["ml"]).get_waveform(value)
     return value
 
 

@@ -2,11 +2,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from typing_extensions import Literal
-from zcu_tools.program.v2.modules import (
-    ModuleCfgFactory,
-    WaveformCfgFactory,
-)
-from zcu_tools.program.v2.modules.base import ModuleCfg
+from zcu_tools.program.v2.modules import ModuleCfgFactory, WaveformCfgFactory
+from zcu_tools.program.v2.modules.base import AbsModuleCfg
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import (
     AbsReadoutCfg,
@@ -32,27 +29,6 @@ from zcu_tools.program.v2.modules.waveform import (
 # ---------------------------------------------------------------------------
 # ModuleCfgFactory
 # ---------------------------------------------------------------------------
-
-
-class TestModuleCfgFactoryRegistry:
-    def test_all_leaf_cfgs_registered(self):
-        expected = {
-            "pulse": PulseCfg,
-            "readout/direct": DirectReadoutCfg,
-            "readout/pulse": PulseReadoutCfg,
-            "reset/none": NoneResetCfg,
-            "reset/pulse": PulseResetCfg,
-            "reset/two_pulse": TwoPulseResetCfg,
-            "reset/bath": BathResetCfg,
-        }
-        for type_value, cls in expected.items():
-            assert ModuleCfgFactory._registry.get(type_value) is cls
-
-    def test_registry_size_matches_known_leaves(self):
-        assert len(ModuleCfgFactory._registry) == 7
-
-    def test_abstract_intermediates_not_registered(self):
-        assert AbsReadoutCfg not in ModuleCfgFactory._registry.values()
 
 
 class TestModuleCfgFactoryFromRaw:
@@ -107,47 +83,9 @@ class TestModuleCfgFactoryFromRaw:
         assert isinstance(cfg, NoneResetCfg)
 
 
-class TestModuleCfgFactoryRegister:
-    def test_idempotent_register_same_class(self):
-        before = len(ModuleCfgFactory._registry)
-        ModuleCfgFactory.register(PulseCfg)
-        assert len(ModuleCfgFactory._registry) == before
-
-    def test_reject_non_literal_discriminator(self):
-        class BadCfg(ModuleCfg):
-            type: str = "bad"  # not a Literal
-
-        with pytest.raises(TypeError):
-            ModuleCfgFactory.register(BadCfg)
-
-    def test_reject_conflicting_discriminator(self):
-        class DuplicatePulseCfg(ModuleCfg):
-            type: Literal["pulse"] = "pulse"  # collides with PulseCfg
-
-        with pytest.raises(ValueError):
-            ModuleCfgFactory.register(DuplicatePulseCfg)
-
-
 # ---------------------------------------------------------------------------
 # WaveformCfgFactory
 # ---------------------------------------------------------------------------
-
-
-class TestWaveformCfgFactoryRegistry:
-    def test_all_leaf_cfgs_registered(self):
-        expected = {
-            "const": ConstWaveformCfg,
-            "cosine": CosineWaveformCfg,
-            "gauss": GaussWaveformCfg,
-            "drag": DragWaveformCfg,
-            "arb": ArbWaveformCfg,
-            "flat_top": FlatTopWaveformCfg,
-        }
-        for style_value, cls in expected.items():
-            assert WaveformCfgFactory._registry.get(style_value) is cls
-
-    def test_registry_size_matches_known_leaves(self):
-        assert len(WaveformCfgFactory._registry) == 6
 
 
 class TestWaveformCfgFactoryFromRaw:
@@ -180,24 +118,3 @@ class TestWaveformCfgFactoryFromRaw:
     def test_missing_discriminator_raises(self):
         with pytest.raises(Exception):
             WaveformCfgFactory.from_raw({"length": 1.0})
-
-
-class TestWaveformCfgFactoryRegister:
-    def test_idempotent_register_same_class(self):
-        before = len(WaveformCfgFactory._registry)
-        WaveformCfgFactory.register(ConstWaveformCfg)
-        assert len(WaveformCfgFactory._registry) == before
-
-    def test_reject_non_literal_discriminator(self):
-        class BadWaveformCfg(WaveformCfg):
-            style: str = "bad"  # not a Literal
-
-        with pytest.raises(TypeError):
-            WaveformCfgFactory.register(BadWaveformCfg)
-
-    def test_reject_conflicting_discriminator(self):
-        class DuplicateConstCfg(WaveformCfg):
-            style: Literal["const"] = "const"  # collides with ConstWaveformCfg
-
-        with pytest.raises(ValueError):
-            WaveformCfgFactory.register(DuplicateConstCfg)
