@@ -1,5 +1,6 @@
 from . import modules, utils
 from .base import MyProgramV2, ProgramV2Cfg
+from .mocksoc import make_mock_soccfg
 from .modular import ModularProgramV2
 from .modules import (
     BathReset,
