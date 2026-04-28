@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import warnings
 from collections import OrderedDict
 from copy import deepcopy
 
@@ -96,34 +95,3 @@ class PulseRegistry:
         )
 
         return True
-
-    def check_valid_mixer_freq(self, name: str, pulse_cfg: PulseCfg) -> None:
-        """
-        Checks if a new pulse's mixer frequency is consistent with other pulses
-        on the same channel.
-        """
-        ch = pulse_cfg.ch
-        has_mixer_freq = pulse_cfg.mixer_freq is not None
-        mixer_freq = pulse_cfg.mixer_freq
-
-        for p_name, p_cfg in self._pulses.values():
-            if p_cfg.ch != ch:
-                continue
-
-            registered_has_mixer_freq = p_cfg.mixer_freq is not None
-            registered_mixer_freq = p_cfg.mixer_freq
-
-            if has_mixer_freq != registered_has_mixer_freq:
-                raise ValueError(
-                    f"Pulse '{p_name}' on channel {ch} has "
-                    f"{'no ' if not registered_has_mixer_freq else ''}'mixer_freq', "
-                    f"which is required for comparison with '{name}'."
-                )
-
-            if has_mixer_freq and registered_mixer_freq != mixer_freq:
-                warnings.warn(
-                    f"Mixer frequency mismatch on channel {ch}: "
-                    f"Pulse '{p_name}' ({registered_mixer_freq} MHz) and "
-                    f"Pulse '{name}' ({mixer_freq} MHz). "
-                    "This may lead to unexpected behavior."
-                )

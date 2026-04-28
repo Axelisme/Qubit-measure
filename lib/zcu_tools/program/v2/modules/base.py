@@ -18,8 +18,8 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 
 if TYPE_CHECKING:
-    from zcu_tools.program.v2.modular import ModularProgramV2
     from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.program.v2.modular import ModularProgramV2
 
 
 def get_ml_from_context(info: ValidationInfo) -> Optional[ModuleLibrary]:

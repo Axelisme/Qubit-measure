@@ -240,6 +240,9 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
                 Y180_pulse = X180_pulse.with_updates(phase=X180_pulse.phase + 90.0)
                 MY90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase - 90.0)
 
+                if Id_pulse is None:
+                    Id_pulse = X90_pulse.with_updates(gain=0.0)
+
                 prog_cahce[(seed, depth)] = ModularProgramV2(
                     soccfg,
                     cfg,

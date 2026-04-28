@@ -8,11 +8,11 @@ from qick.asm_v2 import AsmInst, TimedMacro
 class PulseFromWmemReg(TimedMacro):
     """Play one waveform using a runtime-computed wmem address register."""
 
-    # fields: ch (int), addr_reg (str), t (float | QickParam), tag (str | None)
-    def preprocess(self, prog):  # type: ignore[override]
+    # fields: ch (int), addr_reg (str), t (float | QickParam)
+    def preprocess(self, prog):
         self.convert_time(prog, self.t, "t")
 
-    def expand(self, prog):  # type: ignore[override]
+    def expand(self, prog):  # type: ignore
         tproc_ch = prog.soccfg["gens"][self.ch]["tproc_ch"]
         t_reg = self.t_regs["t"]
         addr = f"&{prog._get_reg(self.addr_reg)}"
@@ -27,4 +27,3 @@ class PulseFromWmemReg(TimedMacro):
             inst["TIME"] = "@" + str(t_reg)
         insts.append(AsmInst(inst=inst, addr_inc=1))
         return insts
-

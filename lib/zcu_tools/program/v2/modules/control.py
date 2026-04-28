@@ -7,7 +7,6 @@ from typing_extensions import Optional, Self, TypeAlias, Union
 
 from zcu_tools.program.v2.modular import ModularProgramV2
 
-
 from .base import Module
 
 logger = logging.getLogger(__name__)
@@ -65,6 +64,14 @@ class Repeat(Module):
                     f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
                 )
             cur_t = mod.run(prog, cur_t)
+
+        if not cur_t > 0.09:
+            logger.warning(
+                "Repeat '%s' has long body duration %s, which may cause imprecise timing due to loop overhead. Consider using SoftRepeat for better timing accuracy.",
+                self.name,
+                cur_t,
+            )
+
         prog.delay(t=cur_t)
 
         if isinstance(self.n, str):

@@ -7,13 +7,13 @@ from copy import deepcopy
 from pydantic import BeforeValidator, Field, ValidationInfo, model_validator
 from qick.asm_v2 import QickParam
 from typing_extensions import (
+    TYPE_CHECKING,
     Annotated,
     Any,
     Literal,
     Optional,
     TypeAlias,
     Union,
-    TYPE_CHECKING,
 )
 
 from .base import Module, ModuleCfg, get_ml_from_context

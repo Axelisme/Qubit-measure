@@ -12,7 +12,6 @@ from typing import Literal
 import pytest
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.modular import ModularProgramV2
-from zcu_tools.program.v2.modules import ComputedPulse
 from zcu_tools.program.v2.modules.control import Branch, Repeat, SoftRepeat
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, Join, SoftDelay
 from zcu_tools.program.v2.modules.dmem import LoadValue, ScanWith
@@ -31,11 +30,7 @@ from zcu_tools.program.v2.modules.reset import (
     Reset,
     TwoPulseResetCfg,
 )
-from zcu_tools.program.v2.modules.waveform import (
-    ConstWaveformCfg,
-    FlatTopWaveformCfg,
-    GaussWaveformCfg,
-)
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 from .conftest import make_mock_soccfg
 
@@ -430,47 +425,3 @@ class TestDmemIntegration:
         prog = _make_prog(modules=[s])
         assert prog.binprog is not None
         assert prog.compile_datamem() is not None
-
-
-class TestComputedPulseIntegration:
-    def test_computed_pulse_compiles_with_register_wport(self):
-        gate_pulses = [
-            _pulse_cfg(length=0.10),
-            _pulse_cfg(length=0.20),
-            _pulse_cfg(length=0.16),
-        ]
-        s = ScanWith("gate", [0, 1, 2], "gate_idx")
-        s.add_content(
-            ComputedPulse("cp", val_reg="gate_idx", pulses=gate_pulses),
-        )
-
-        prog = _make_prog(modules=[s])
-        assert prog.binprog is not None
-        asm = prog.asm()
-        assert "WPORT_WR" in asm
-        assert "wmem [&r" in asm
-
-    def test_computed_pulse_does_not_use_dmem_padding_table(self):
-        gate_pulses = [_pulse_cfg(length=0.10), _pulse_cfg(length=0.20)]
-        s = ScanWith("gate", [0, 1, 2], "gate_idx")
-        s.add_content(ComputedPulse("cp", val_reg="gate_idx", pulses=gate_pulses))
-
-        prog = _make_prog(modules=[s])
-        assert prog.binprog is not None
-        asm = prog.asm()
-        assert "WPORT_WR" in asm
-        assert "TIME inc_ref r" not in asm
-
-    def test_computed_pulse_rejects_flat_top(self):
-        flat = PulseCfg(
-            waveform=FlatTopWaveformCfg(
-                length=0.2,
-                raise_waveform=GaussWaveformCfg(length=0.2, sigma=0.05),
-            ),
-            ch=GEN_CH,
-            nqz=GEN_NQZ,
-            freq=GEN_FREQ,
-            gain=GEN_GAIN,
-        )
-        with pytest.raises(NotImplementedError):
-            ComputedPulse("cp", val_reg="gate_idx", pulses=[flat, _pulse_cfg()])

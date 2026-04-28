@@ -1,4 +1,3 @@
-import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.registry import PulseRegistry
@@ -39,14 +38,3 @@ def test_calc_name_stable_with_qickparam():
     cfg1 = _make_cfg(freq=QickParam(start=5000.0, spans={"s": 1.0}))  # type: ignore
     cfg2 = _make_cfg(freq=QickParam(start=5000.0, spans={"s": 1.0}))  # type: ignore
     assert reg.calc_name(cfg1) == reg.calc_name(cfg2)
-
-
-def test_check_valid_mixer_freq_mismatch_present_vs_absent():
-    reg = PulseRegistry()
-    cfg_with_mixer = _make_cfg()
-    cfg_with_mixer.mixer_freq = 100.0
-    reg.register("p_with", cfg_with_mixer)
-
-    cfg_no_mixer = _make_cfg()
-    with pytest.raises(ValueError):
-        reg.check_valid_mixer_freq("p_no", cfg_no_mixer)

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 
 from qick.asm_v2 import AsmV2, QickParam
-from typing_extensions import Union, Optional
-from contextlib import contextmanager
+from typing_extensions import Optional, Union
 
 from .debug import PrintTimeStamp
 from .delay import DelayRegAuto
@@ -74,10 +74,10 @@ class ImproveAsmV2(AsmV2):
         self.append_macro(PrintTimeStamp(name, t, prefix=prefix))
 
     def pulse_wmem_reg(
-        self, ch: int, addr_reg: str, t: Union[float, QickParam] = 0.0, tag=None
+        self, ch: int, addr_reg: str, t: Union[float, QickParam] = 0.0
     ) -> None:
         """Play one waveform from wmem using a runtime-computed address register."""
-        self.append_macro(PulseFromWmemReg(ch=ch, addr_reg=addr_reg, t=t, tag=tag))
+        self.append_macro(PulseFromWmemReg(ch=ch, addr_reg=addr_reg, t=t))
 
 
 __all__ = ["ImproveAsmV2"]

@@ -4,7 +4,7 @@ from copy import deepcopy
 
 from pydantic import BeforeValidator, ValidationInfo
 from qick.asm_v2 import QickParam
-from typing_extensions import Annotated, Any, Literal, Optional, Union, TYPE_CHECKING
+from typing_extensions import TYPE_CHECKING, Annotated, Any, Literal, Optional, Union
 
 from .base import Module, ModuleCfg, get_ml_from_context
 from .util import round_timestamp
@@ -65,21 +65,26 @@ class Pulse(Module):
         cfg: Optional[PulseCfg],
         tag: Optional[str] = None,
         block_mode: bool = True,
+        pulse_id: Optional[str] = None,
     ) -> None:
         self.name = name
         self.cfg = deepcopy(cfg) if cfg is not None else None
         self.tag = tag
         self.block_mode = block_mode
+        self.pulse_id = pulse_id
 
     def init(self, prog: ModularProgramV2) -> None:
         if self.cfg is None:
             return
 
         self.waveform: AbsWaveform = self.cfg.waveform.build(f"{self.name}_waveform")
-        self.pulse_id = prog.pulse_registry.calc_name(self.cfg)
+        if self.pulse_id is None:
+            self.pulse_id = prog.pulse_registry.calc_name(self.cfg)
 
-        prog.pulse_registry.check_valid_mixer_freq(self.name, self.cfg)
-        if prog.pulse_registry.register(self.name, self.cfg):
+            # auto reuse pulse
+            if prog.pulse_registry.register(self.name, self.cfg):
+                self.init_pulse(prog, self.pulse_id)
+        else:  # if provided pulse_id, always init pulse (no reuse)
             self.init_pulse(prog, self.pulse_id)
 
     def init_pulse(self, prog: ModularProgramV2, pulse_id: str) -> None:

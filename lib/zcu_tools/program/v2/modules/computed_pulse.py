@@ -15,112 +15,63 @@ if TYPE_CHECKING:
 class ComputedPulse(Module):
     """Select one primitive pulse by register-computed wmem address."""
 
-    def __init__(
-        self,
-        name: str,
-        *,
-        val_reg: str,
-        pulses: Sequence[Optional[PulseCfg]],
-    ) -> None:
+    def __init__(self, name: str, *, val_reg: str, pulses: Sequence[PulseCfg]) -> None:
         self.name = name
         self.val_reg = val_reg
-        raw_pulses = list(pulses)
-        if len(raw_pulses) < 2:
+
+        raw_cfgs = list(pulses)
+        if len(raw_cfgs) < 2:
             raise ValueError("ComputedPulse requires at least 2 candidate pulses")
 
-        first_cfg = next((cfg for cfg in raw_pulses if cfg is not None), None)
-        if first_cfg is None:
-            raise ValueError("ComputedPulse requires at least one non-None pulse cfg")
+        self.ref_cfg = raw_cfgs[0]
 
-        self._wmem_base = 0
-        self._pulse_modules: list[Pulse] = []
-        self._ch: Optional[int] = None
-        self._pre_delay: float = 0.0
-        self._max_total_length = 0.0
+        if any([cfg.ch != self.ref_cfg.ch for cfg in raw_cfgs]):
+            raise ValueError("All candidate pulses must have the same channel")
 
-        def to_float_scalar(value: Union[float, QickParam], field: str) -> float:
-            if isinstance(value, QickParam):
-                raise NotImplementedError(
-                    f"ComputedPulse does not support swept {field} in candidate pulses"
-                )
-            return float(value)
+        if any(cfg.pre_delay != self.ref_cfg.pre_delay for cfg in raw_cfgs):
+            raise ValueError("All candidate pulses must have the same pre_delay")
 
-        pulse_cfgs: list[PulseCfg] = []
-        timings: list[tuple[float, float, float]] = []
-        pre_delay_ref: Optional[float] = None
-        for cfg in raw_pulses:
-            pulse_cfg = first_cfg.with_updates(gain=0.0) if cfg is None else cfg
-
-            if pulse_cfg.waveform.style == "flat_top":
-                raise NotImplementedError(
-                    "ComputedPulse does not support flat_top waveform"
-                )
-
-            if self._ch is None:
-                self._ch = pulse_cfg.ch
-            elif self._ch != pulse_cfg.ch:
-                raise ValueError(
-                    "All ComputedPulse candidates must use the same channel"
-                )
-
-            pre_delay = to_float_scalar(pulse_cfg.pre_delay, "pre_delay")
-            post_delay = to_float_scalar(pulse_cfg.post_delay, "post_delay")
-            length = to_float_scalar(pulse_cfg.waveform.length, "length")
-            if pre_delay_ref is None:
-                pre_delay_ref = pre_delay
-            elif pre_delay_ref != pre_delay:
-                raise ValueError(
-                    "All ComputedPulse candidates must share identical pre_delay"
-                )
-
-            pulse_cfgs.append(pulse_cfg)
-            timings.append((pre_delay, length, post_delay))
-
-        assert self._ch is not None
-        assert pre_delay_ref is not None
-
-        self._pre_delay = pre_delay_ref
-        total_lengths = [pre + length + post for pre, length, post in timings]
-        self._max_total_length = max(total_lengths)
-        self._pulse_modules = [
-            Pulse(f"{self.name}_cand_{i}", cfg, block_mode=True)
-            for i, cfg in enumerate(pulse_cfgs)
+        self.pulse_modules = [
+            Pulse(f"{self.name}_w{i}", cfg, f"{self.name}_w{i}")
+            for i, cfg in enumerate(raw_cfgs)
         ]
 
     def init(self, prog: ModularProgramV2) -> None:
-        wave_idxs: list[int] = []
-        for pulse_mod in self._pulse_modules:
+        for pulse_mod in self.pulse_modules:
             pulse_mod.init(prog)
 
-            wave_names = prog.list_pulse_waveforms(pulse_mod.pulse_id)
-            if len(wave_names) != 1:
-                raise ValueError(
-                    "ComputedPulse requires one waveform per candidate pulse "
-                    f"(got {len(wave_names)} for {pulse_mod.pulse_id})"
-                )
-            wave_idxs.append(prog.wave2idx[wave_names[0]])
+        wave_idxs = [
+            prog.wave2idx[prog.list_pulse_waveforms(pulse_mod.pulse_id)[0]]
+            for pulse_mod in self.pulse_modules
+        ]
 
-        sorted_idxs = sorted(wave_idxs)
-        expected = list(range(sorted_idxs[0], sorted_idxs[0] + len(sorted_idxs)))
-        if sorted_idxs != expected:
+        expected = list(range(min(wave_idxs), max(wave_idxs) + 1))
+        if wave_idxs != expected:
             raise ValueError(
                 "ComputedPulse candidate waveform indices must be contiguous, "
-                f"got {sorted_idxs}"
+                f"got {wave_idxs}"
             )
 
-        self._wmem_base = min(wave_idxs)
+        self.wmem_offset = min(wave_idxs)
 
     def run(
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-        assert self._ch is not None
-
+        ref_cfg = self.ref_cfg
         with prog.acquire_temp_reg(1) as (addr_reg,):
-            # addr_reg = base_wave_idx + gate_idx
-            prog.write_reg_op(addr_reg, self.val_reg, "+", self._wmem_base)
-            prog.pulse_wmem_reg(self._ch, addr_reg, t=t + self._pre_delay)
+            # addr_reg = wmem_offset + gate_idx
+            prog.write_reg_op(addr_reg, self.val_reg, "+", self.wmem_offset)
+            prog.pulse_wmem_reg(ref_cfg.ch, addr_reg, t=t + ref_cfg.pre_delay)
 
-        return t + self._max_total_length
+        return t + self.total_length(prog)
+
+    def total_length(self, prog: ModularProgramV2) -> float:
+        lengths = [pulse.total_length(prog) for pulse in self.pulse_modules]
+        if any([isinstance(length, QickParam) for length in lengths]):
+            raise ValueError(
+                "ComputedPulse total length cannot be determined at compile time"
+            )
+        return max([float(length) for length in lengths])
 
     def allow_rerun(self) -> bool:
         return True

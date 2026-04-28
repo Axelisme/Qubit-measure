@@ -9,14 +9,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
-from typing_extensions import (
-    Any,
-    Callable,
-    Optional,
-    Sequence,
-    TypeAlias,
-    Union,
-)
+from typing_extensions import Any, Callable, Optional, TypeAlias, Union
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
