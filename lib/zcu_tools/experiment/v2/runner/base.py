@@ -51,14 +51,16 @@ class AbsTask(ABC, Generic[T_Result, T_RootResult, T_Cfg]):
         self,
         name: str,
         values: Sequence[T_Value],
-        before_each: Callable[
-            [int, TaskState[list[T_Result], T_RootResult, T_Cfg], T_Value], Any
-        ],
+        before_each: Optional[
+            Callable[
+                [int, TaskState[list[T_Result], T_RootResult, T_Cfg], T_Value], Any
+            ]
+        ] = None,
     ) -> Scan[T_Result, T_RootResult, T_Cfg]:
         """Scan a task over a sequence of values."""
         from .soft import Scan
 
-        return Scan(name, values, before_each, task=self)
+        return Scan(name, values, task=self, before_each=before_each)
 
     def repeat(
         self, name: str, times: int, interval: float = 0.0

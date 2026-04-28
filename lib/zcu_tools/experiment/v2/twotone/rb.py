@@ -318,7 +318,7 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
             signals = run_task(
                 task=Task(measure_fn=measure_fn, pbar_n=1)
                 .scan("depth", depths.tolist(), before_each=update_seq_depth)
-                .scan("rounds", list(range(rounds)), before_each=lambda *_: None)
+                .scan("rounds", list(range(rounds)))
                 .scan("seed", entropys.tolist(), before_each=update_seq_seed),
                 init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
