@@ -86,10 +86,11 @@ class AccPhaseExp(AbsExperiment[AccPhaseResult, AccPhaseCfg]):
             ctx: TaskState[NDArray[np.complex128], Any, AccPhaseCfg],
             update_hook: Optional[Callable],
         ) -> list[NDArray[np.float64]]:
-            modules = ctx.cfg.modules
+            cfg = ctx.cfg
+            modules = cfg.modules
 
-            length_sweep = ctx.cfg.sweep.length
-            phase_sweep = ctx.cfg.sweep.phase
+            length_sweep = cfg.sweep.length
+            phase_sweep = cfg.sweep.phase
             length_param = sweep2param("length", length_sweep)
             phase_param = sweep2param("phase", phase_sweep)
 
@@ -102,13 +103,12 @@ class AccPhaseExp(AbsExperiment[AccPhaseResult, AccPhaseCfg]):
                         Pulse("flux_pulse", modules.flux_pulse),
                         [
                             SoftDelay("wait_time", delay=length_param),
-                            Pulse("pi2_pulse1", modules.pi2_pulse, tag="pi2_pulse1"),
+                            Pulse("pi2_pulse1", modules.pi2_pulse),
                         ],
-                        SoftDelay("readout_t", ctx.cfg.readout_t),
+                        SoftDelay("readout_t", cfg.readout_t),
                     ),
                     Pulse(
-                        name="pi2_pulse2",
-                        cfg=modules.pi2_pulse.with_updates(phase=phase_param),
+                        "pi2_pulse2", modules.pi2_pulse.with_updates(phase=phase_param)
                     ),
                     Readout("readout", modules.readout),
                 ],

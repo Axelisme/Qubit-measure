@@ -7,12 +7,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.optimize import curve_fit
-from typing_extensions import (
-    Any,
-    Callable,
-    Optional,
-    TypeAlias,
-)
+from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -21,11 +16,10 @@ from zcu_tools.experiment.utils import make_comment, parse_comment, setup_device
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
-    Branch,
+    ComputedPulse,
     LoadValue,
     ModularProgramV2,
     ProgramV2Cfg,
-    Pulse,
     PulseCfg,
     Readout,
     ReadoutCfg,
@@ -152,20 +146,11 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
             Y180_pulse = X180_pulse.with_updates(phase=X180_pulse.phase + 90)
             Y90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 90)
 
-            pulse_map = {
-                "I": I_pulse,
-                "X180": X180_pulse,
-                "Y180": Y180_pulse,
-                "X90": X90_pulse,
-                "Y90": Y90_pulse,
-            }
+            if I_pulse is None:
+                I_pulse = X90_pulse.with_updates(gain=0.0)
 
-            def make_branch(name: str, compare_by: str) -> Branch:
-                return Branch(
-                    name,
-                    *(Pulse(f"{name}_{gate}", pulse_map[gate]) for gate in GATE_LIST),
-                    compare_by=compare_by,
-                )
+            # Order must match GATE_LIST = ["I", "X90", "Y90", "X180", "Y180"]
+            gate_pulses = [I_pulse, X90_pulse, Y90_pulse, X180_pulse, Y180_pulse]
 
             return ModularProgramV2(
                 soccfg,
@@ -184,8 +169,8 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
                         val_reg="gate_idx2",
                     ),
                     Reset("reset", modules.reset),
-                    make_branch("gate1", compare_by="gate_idx1"),
-                    make_branch("gate2", compare_by="gate_idx2"),
+                    ComputedPulse("gate1", val_reg="gate_idx1", pulses=gate_pulses),
+                    ComputedPulse("gate2", val_reg="gate_idx2", pulses=gate_pulses),
                     Readout("readout", modules.readout),
                 ],
                 sweep=[("allxy_idx", len(ALLXY_SEQUENCE))],

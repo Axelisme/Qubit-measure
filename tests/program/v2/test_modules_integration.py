@@ -102,12 +102,15 @@ class TestTempRegScope:
             assert len(regs) == 1
             assert regs[0] == "temp_reg_0"
 
-    def test_acquire_temp_reg_nested_scope_reuses_registers(self):
+    def test_acquire_temp_reg_nested_scope_is_disjoint(self):
         prog = _make_prog(modules=[])
 
         with prog.acquire_temp_reg(2) as outer_regs:
             with prog.acquire_temp_reg(1) as inner_regs:
-                assert inner_regs == outer_regs[:1]
+                # nested scope must not clobber outer regs
+                assert set(inner_regs).isdisjoint(outer_regs)
+                assert inner_regs == ["temp_reg_2"]
+                assert outer_regs == ["temp_reg_0", "temp_reg_1"]
 
     def test_acquire_temp_reg_zero_returns_empty_list(self):
         prog = _make_prog(modules=[])
