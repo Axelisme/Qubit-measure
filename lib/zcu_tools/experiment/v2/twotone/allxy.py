@@ -187,13 +187,20 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
             ),
         ) as viewer:
             # Configure x-axis labels
+            name_map = {
+                "I": "$I$",
+                "X90": "$X_{90}$",
+                "Y90": "$Y_{90}$",
+                "X180": "$X_{180}$",
+                "Y180": "$Y_{180}$",
+            }
+            gate_labels = [
+                f"{name_map[gate1]}-{name_map[gate2]}"
+                for gate1, gate2 in ALLXY_SEQUENCE
+            ]
             ax = viewer.get_ax()
             ax.set_xticks(np.arange(len(ALLXY_SEQUENCE)))
-            ax.set_xticklabels(
-                [f"({gate1}, {gate2})" for gate1, gate2 in ALLXY_SEQUENCE],
-                rotation=45,
-                ha="right",
-            )
+            ax.set_xticklabels(gate_labels, rotation=30, ha="right", fontsize=8)
 
             signals = run_task(
                 task=Task(

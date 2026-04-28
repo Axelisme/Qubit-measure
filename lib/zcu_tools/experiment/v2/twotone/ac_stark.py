@@ -136,8 +136,48 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         )
         gains = round_zcu_gain(gains, soccfg, modules.stark_pulse1.ch)
 
-        freq_param = sweep2param("freq", freq_sweep)
-        modules.stark_pulse2.set_param("freq", freq_param)
+        current_snr = 0.0
+
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any, AcStarkCfg],
+            update_hook: Callable[[int, list[NDArray[np.float64]]], None],
+        ) -> list[NDArray[np.float64]]:
+            nonlocal current_snr
+            cfg = ctx.cfg
+            modules = cfg.modules
+
+            freq_sweep = cfg.sweep.freq
+            freq_param = sweep2param("freq", freq_sweep)
+            modules.stark_pulse2.set_param("freq", freq_param)
+
+            def update_snr(snr: float) -> None:
+                nonlocal current_snr
+                current_snr = snr
+
+            return (
+                prog := ModularProgramV2(
+                    soccfg,
+                    cfg,
+                    modules=[
+                        Reset("reset", modules.reset),
+                        Pulse("stark_pulse1", modules.stark_pulse1, block_mode=False),
+                        Pulse("stark_pulse2", modules.stark_pulse2),
+                        Readout("readout", modules.readout),
+                    ],
+                    sweep=[("freq", freq_sweep)],
+                )
+            ).acquire(
+                soc,
+                progress=False,
+                round_hook=wrap_earlystop_check(
+                    prog,
+                    update_hook,
+                    earlystop_snr,
+                    signal2real_fn=lambda x: rotate2real(x).real,
+                    after_check=update_snr,
+                ),
+                **(acquire_kwargs or {}),
+            )
 
         with LivePlot2DwithLine(
             "Stark Pulse Gain (a.u.)",
@@ -146,37 +186,6 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
             num_lines=2,
             uniform=False,
         ) as viewer:
-            ax1d = viewer.get_ax("1d")
-
-            def measure_fn(
-                ctx: TaskState[NDArray[np.complex128], Any, AcStarkCfg],
-                update_hook: Callable[[int, list[NDArray[np.float64]]], None],
-            ) -> list[NDArray[np.float64]]:
-                modules = ctx.cfg.modules
-                prog = ModularProgramV2(
-                    soccfg,
-                    ctx.cfg,
-                    modules=[
-                        Reset("reset", modules.reset),
-                        Pulse("stark_pulse1", modules.stark_pulse1, block_mode=False),
-                        Pulse("stark_pulse2", modules.stark_pulse2),
-                        Readout("readout", modules.readout),
-                    ],
-                    sweep=[("freq", ctx.cfg.sweep.freq)],
-                )
-                return prog.acquire(
-                    soc,
-                    progress=False,
-                    round_hook=wrap_earlystop_check(
-                        prog,
-                        update_hook,
-                        earlystop_snr,
-                        signal2real_fn=np.abs,
-                        after_check=lambda snr: ax1d.set_title(f"snr = {snr:.1f}"),
-                    ),
-                    **(acquire_kwargs or {}),
-                )
-
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn,
@@ -191,7 +200,10 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
                 ),
                 init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
-                    gains, freqs, acstark_signal2real(np.asarray(ctx.root_data))
+                    gains,
+                    freqs,
+                    acstark_signal2real(np.asarray(ctx.root_data)),
+                    title=f"snr = {current_snr:.1f}" if current_snr else None,
                 ),
             )
             signals = np.asarray(signals)

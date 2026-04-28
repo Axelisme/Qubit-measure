@@ -61,7 +61,7 @@ class CPMG_ModuleCfg(ConfigBase):
 
 class CPMG_SweepCfg(ConfigBase):
     times: Union[SweepCfg, list[int]]
-    length: SweepCfg
+    length: Optional[SweepCfg] = None
 
 
 class CPMG_Cfg(ProgramV2Cfg, ExpCfgModel):
@@ -133,76 +133,84 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                 f"pi_pulse_length: {pi_pulse.waveform.length:.2g}",
             )
 
+        current_snr = 0.0
+
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any, CPMG_Cfg],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            nonlocal current_snr
+
+            cfg = ctx.cfg
+            modules = cfg.modules
+
+            assert update_hook is not None
+
+            time = ctx.env["time"]
+            pi2_pulse = modules.pi2_pulse
+            pi_pulse = modules.pi_pulse
+            dpulse_len = pi_pulse.waveform.length - pi2_pulse.waveform.length
+
+            length_sweep = cfg.sweep.length
+            assert length_sweep is not None
+            length_param = sweep2param("length", length_sweep)
+            detune_param = (
+                360
+                * detune_ratio
+                * sweep2param(
+                    "length",
+                    make_sweep(start=0, step=1, expts=length_sweep.expts),
+                )
+            )
+
+            interval = length_param / (2 * time)
+
+            def update_snr(snr: float) -> None:
+                nonlocal current_snr
+                current_snr = snr
+
+            return (
+                prog := ModularProgramV2(
+                    soccfg,
+                    cfg,
+                    modules=[
+                        Reset("reset", modules.reset),
+                        Pulse("pi2_pulse1", pi2_pulse, block_mode=False),
+                        Delay("first_delay", interval - 0.5 * dpulse_len),
+                        Repeat("pi_loop", time - 1).add_content(
+                            [
+                                Pulse("pi_pulse", pi_pulse, block_mode=False),
+                                SoftDelay("inner_delay", 2 * interval),
+                            ]
+                        ),
+                        Pulse("last_pi_pulse", pi_pulse, block_mode=False),
+                        Delay("last_delay", interval + 0.5 * dpulse_len),
+                        Pulse(
+                            name="pi2_pulse2",
+                            cfg=pi2_pulse.with_updates(
+                                phase=pi2_pulse.phase + detune_param
+                            ),
+                        ),
+                        Readout("readout", modules.readout),
+                    ],
+                    sweep=[("length", length_sweep)],
+                )
+            ).acquire(
+                soc,
+                progress=False,
+                round_hook=wrap_earlystop_check(
+                    prog,
+                    update_hook,
+                    earlystop_snr,
+                    signal2real_fn=lambda x: rotate2real(x).real,
+                    after_check=update_snr,
+                ),
+                **(acquire_kwargs or {}),
+            )
+
         with LivePlot2DwithLine(
             "Number of Pi", "Time idxs", line_axis=1, num_lines=2
         ) as viewer:
-            ax1d = viewer.get_ax("1d")
-
-            def measure_fn(
-                ctx: TaskState[NDArray[np.complex128], Any, CPMG_Cfg],
-                update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
-            ) -> list[NDArray[np.float64]]:
-                cfg = ctx.cfg
-                modules = cfg.modules
-
-                assert update_hook is not None
-
-                time = ctx.env["time"]
-                pi2_pulse = modules.pi2_pulse
-                pi_pulse = modules.pi_pulse
-                dpulse_len = pi_pulse.waveform.length - pi2_pulse.waveform.length
-
-                length_sweep = cfg.sweep.length
-                length_param = sweep2param("length", length_sweep)
-                detune_param = (
-                    360
-                    * detune_ratio
-                    * sweep2param(
-                        "length",
-                        make_sweep(start=0, step=1, expts=length_sweep.expts),
-                    )
-                )
-
-                interval = length_param / (2 * time)
-
-                return (
-                    prog := ModularProgramV2(
-                        soccfg,
-                        cfg,
-                        modules=[
-                            Reset("reset", modules.reset),
-                            Pulse("pi2_pulse1", pi2_pulse, block_mode=False),
-                            Delay("first_delay", interval - 0.5 * dpulse_len),
-                            Repeat("pi_loop", time - 1).add_content(
-                                [
-                                    Pulse("pi_pulse", pi_pulse, block_mode=False),
-                                    SoftDelay("inner_delay", 2 * interval),
-                                ]
-                            ),
-                            Pulse("last_pi_pulse", pi_pulse, block_mode=False),
-                            Delay("last_delay", interval + 0.5 * dpulse_len),
-                            Pulse(
-                                name="pi2_pulse2",
-                                cfg=pi2_pulse.with_updates(
-                                    phase=pi2_pulse.phase + detune_param
-                                ),
-                            ),
-                            Readout("readout", modules.readout),
-                        ],
-                        sweep=[("length", length_sweep)],
-                    )
-                ).acquire(
-                    soc,
-                    progress=False,
-                    round_hook=wrap_earlystop_check(
-                        prog,
-                        update_hook,
-                        earlystop_snr,
-                        signal2real_fn=lambda x: rotate2real(x).real,
-                        after_check=lambda snr: ax1d.set_title(f"snr = {snr:.1f}"),
-                    ),
-                    **(acquire_kwargs or {}),
-                )
 
             def update_fn(
                 i: int, ctx: TaskState[Any, Any, CPMG_Cfg], time: float
@@ -225,6 +233,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                     times.astype(np.float64),
                     lengths[ctx.env["length_idx"]],
                     cpmg_signal2real(np.asarray(ctx.root_data)),
+                    title=f"snr = {current_snr:.1f}" if current_snr else None,
                 ),
             )
             signals = np.asarray(signals)

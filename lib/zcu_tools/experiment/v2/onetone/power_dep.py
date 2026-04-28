@@ -32,7 +32,7 @@ PowerDepResult: TypeAlias = tuple[
 
 
 def gaindep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return rescale(minus_background(np.abs(signals), axis=1), axis=1)
+    return rescale(minus_background(np.abs(signals), axis=-1), axis=-1)
 
 
 class PowerDepModuleCfg(ConfigBase):
@@ -80,9 +80,13 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
             },
         )
 
+        current_snr = 0.0
+
         def measure_fn(
             ctx: TaskState[Any, Any, PowerDepCfg], update_hook: Optional[Callable]
         ) -> list[NDArray[np.float64]]:
+            nonlocal current_snr
+
             cfg = ctx.cfg
             modules = cfg.modules
 
@@ -91,6 +95,10 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
             freq_sweep = cfg.sweep.freq
             freq_param = sweep2param("freq", freq_sweep)
             modules.readout.set_param("freq", freq_param)
+
+            def update_snr(snr: float) -> None:
+                nonlocal current_snr
+                current_snr = snr
 
             return (
                 prog := ModularProgramV2(
@@ -109,8 +117,8 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
                     prog,
                     update_hook,
                     earlystop_snr,
-                    signal2real_fn=np.abs,
-                    after_check=lambda snr: ax1d.set_title(f"snr = {snr:.1f}"),
+                    signal2real_fn=gaindep_signal2real,
+                    after_check=update_snr,
                 ),
             )
 
@@ -118,8 +126,6 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         with LivePlot2DwithLine(
             "Power (a.u.)", "Frequency (MHz)", line_axis=1, num_lines=10
         ) as viewer:
-            ax1d = viewer.get_ax("1d")
-
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn,
@@ -134,7 +140,10 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
                 ),
                 init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
-                    gains, freqs, gaindep_signal2real(np.asarray(ctx.root_data))
+                    gains,
+                    freqs,
+                    gaindep_signal2real(np.asarray(ctx.root_data)),
+                    title=f"snr = {current_snr:.1f}" if current_snr else None,
                 ),
             )
             signals = np.asarray(signals)
