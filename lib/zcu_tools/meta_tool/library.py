@@ -212,7 +212,7 @@ class ModuleLibrary(SyncFile):
             raise ValueError(f"Waveform {name} is not required type {type.__name__}")
 
         if override_cfg is not None:
-            waveform = waveform.with_updates(**override_cfg)
+            waveform = waveform.with_updates(context=dict(ml=self), **override_cfg)
 
         return deepcopy(waveform)
 
@@ -233,14 +233,16 @@ class ModuleLibrary(SyncFile):
             raise ValueError(f"Module {name} is not required type {type.__name__}")
 
         if override_cfg is not None:
-            module = module.with_updates(**override_cfg)
+            module = module.with_updates(context=dict(ml=self), **override_cfg)
 
         return deepcopy(module)
 
     @auto_sync("write")
     def update_module(self, name: str, override_cfg: dict[str, Any]) -> None:
         self._check_can_write()
-        self.modules[name] = self.modules[name].with_updates(**override_cfg)
+        self.modules[name] = self.modules[name].with_updates(
+            context=dict(ml=self), **override_cfg
+        )
         self._dirty = True
 
     def __str__(self) -> str:

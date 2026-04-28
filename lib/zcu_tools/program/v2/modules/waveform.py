@@ -14,6 +14,7 @@ from typing_extensions import (
     Literal,
     NotRequired,
     Optional,
+    Self,
     TypeAlias,
     TypedDict,
     Union,
@@ -21,6 +22,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.utils import deepupdate
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary

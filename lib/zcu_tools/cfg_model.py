@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, ValidationError
-from typing_extensions import Any, Self
+from typing_extensions import Any, Optional, Self
+
+from zcu_tools.utils import deepupdate
 
 
 def _json_fallback(obj: Any) -> str:
@@ -18,18 +20,11 @@ class ConfigBase(BaseModel):
         extra="forbid", arbitrary_types_allowed=True, validate_assignment=True
     )
 
-    def with_updates(self, **kwargs) -> Self:
-        cfg = self.model_copy(deep=True)
+    def with_updates(self, *, context: Optional[dict] = None, **kwargs) -> Self:
+        cfg_dict = self.to_dict()
+        deepupdate(cfg_dict, kwargs, behavior="force")
 
-        def deepupdate_cfg(cfg: ConfigBase, d: dict[str, Any]) -> None:
-            for key, value in d.items():
-                if isinstance(value, dict):
-                    deepupdate_cfg(getattr(cfg, key), value)
-                else:
-                    setattr(cfg, key, value)
-
-        deepupdate_cfg(cfg, kwargs)
-        return cfg.model_validate(cfg)
+        return self.model_validate(cfg_dict, context=context)
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump(mode="python", exclude_none=True)
