@@ -44,46 +44,6 @@ class Repeat(Module):
         for mod in self.sub_modules:
             mod.init(prog)
 
-    def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        logger.debug("Repeat.run: name='%s', n='%s', t=%s", self.name, self.n, t)
-
-        prog.delay(t=t)
-        prog.delay_auto(t=0)
-
-        if isinstance(self.n, int) and self.n <= 0:
-            return 0.0
-
-        if isinstance(self.n, str):
-            prog.open_loop_reg(self.n, self.name)
-        else:
-            prog.open_loop(self.n, self.name)
-
-        cur_t = 0.0
-        for mod in self.sub_modules:
-            if logger.isEnabledFor(logging.DEBUG):
-                prog.debug_macro(
-                    f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
-                )
-            cur_t = mod.run(prog, cur_t)
-
-        if not cur_t > 0.09:
-            logger.warning(
-                "Repeat '%s' has long body duration %s, which may cause imprecise timing due to loop overhead. Consider using SoftRepeat for better timing accuracy.",
-                self.name,
-                cur_t,
-            )
-
-        prog.delay(t=cur_t)
-
-        if isinstance(self.n, str):
-            prog.close_loop_reg(self.name)
-        else:
-            prog.close_loop()
-
-        return 0.0  # prog.delay will modify ref time
-
     def ir_run(
         self,
         builder: IRBuilder,
@@ -132,30 +92,12 @@ class SoftRepeat(Module):
     def add_content(self, mod: SubModule) -> Self:
         if isinstance(mod, Module):
             mod = [mod]
-
-        for m in mod:
-            if not m.allow_rerun():
-                raise ValueError(
-                    f"Module {m.name} does not allow rerun, cannot be used in SoftRepeat"
-                )
-
         self.sub_modules.extend(mod)
         return self
-
-    def allow_rerun(self) -> bool:
-        return all(mod.allow_rerun() for mod in self.sub_modules)
 
     def init(self, prog: ModularProgramV2) -> None:
         for mod in self.sub_modules:
             mod.init(prog)
-
-    def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        for _ in range(self.n):
-            for mod in self.sub_modules:
-                t = mod.run(prog, t)
-        return t
 
     def ir_run(
         self,
@@ -177,11 +119,11 @@ class Branch(Module):
     iteration of that outer loop the counter selects the corresponding branch,
     so branch *i* runs exactly once (at iteration *i*).
 
-    Branch selection uses a binary cond_jump dispatch tree. For non-power-of-two
-    branch counts, shorter paths are padded with NOP so each branch starts after
-    the same number of control instructions. Each branch is wrapped with delay /
-    delay_auto to flush timing, so branches may have different durations. The
-    module always returns 0.0.
+    Branch selection uses a binary cond_jump dispatch tree. Branch-path balancing
+    (NOP padding) is handled later by the IR pass pipeline
+    (`AlignBranchDispatch`). Each branch is wrapped with delay / delay_auto to
+    flush timing, so branches may have different durations. The module always
+    returns 0.0.
     """
 
     def __init__(
@@ -202,80 +144,6 @@ class Branch(Module):
             for mod in branch:
                 mod.init(prog)
 
-    def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        logger.debug(
-            "Branch.run: name='%s', compare_reg='%s', n_branches=%d, t=%s",
-            self.name,
-            self.compare_reg,
-            len(self.branches),
-            t,
-        )
-
-        prog.delay(t=t)
-        prog.delay_auto(t=0)
-
-        n = len(self.branches)
-        max_depth = (n - 1).bit_length()
-
-        def run_branch(i: int, depth: int) -> None:
-            for _ in range(max_depth - depth):
-                prog.nop()
-
-            with prog.disable_delay():
-                cur_t: Union[float, QickParam] = 0.0
-                for mod in self.branches[i]:
-                    if logger.isEnabledFor(logging.DEBUG):
-                        prog.debug_macro(
-                            f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
-                        )
-                    cur_t = mod.run(prog, cur_t)
-
-            # TODO: support branch with swept duration
-            if isinstance(cur_t, QickParam):
-                raise NotImplementedError("Branch with swept duration is not supported")
-
-            prog.delay(t=cur_t)
-
-        def emit_dispatch(lo: int, hi: int, depth: int) -> None:
-            if hi - lo == 1:
-                run_branch(lo, depth)
-                return
-
-            mid = (lo + hi) // 2
-            left_label = f"{self.name}_branch_l_{lo}_{mid}"
-            end_label = f"{self.name}_branch_e_{lo}_{hi}"
-
-            # compare_reg < mid -> left half, else right half
-            prog.cond_jump(left_label, self.compare_reg, "S", "-", mid)
-            emit_dispatch(mid, hi, depth + 1)
-            prog.jump(end_label)
-            prog.label(left_label)
-            emit_dispatch(lo, mid, depth + 1)
-            prog.label(end_label)
-
-        emit_dispatch(0, n, 0)
-
-        prog.delay_auto(t=0)
-
-        return 0.0
-
-    def _branch_depths(self) -> list[int]:
-        n = len(self.branches)
-        depths = [0] * n
-
-        def fill_depth(lo: int, hi: int, depth: int) -> None:
-            if hi - lo == 1:
-                depths[lo] = depth
-                return
-            mid = (lo + hi) // 2
-            fill_depth(mid, hi, depth + 1)
-            fill_depth(lo, mid, depth + 1)
-
-        fill_depth(0, n, 0)
-        return depths
-
     def ir_run(
         self,
         builder: IRBuilder,
@@ -285,16 +153,9 @@ class Branch(Module):
         builder.ir_delay(t)
         builder.ir_delay_auto(t=0.0)
 
-        n = len(self.branches)
-        max_depth = (n - 1).bit_length()
-        branch_depths = self._branch_depths()
-
         with builder.ir_branch(self.compare_reg) as branch:
-            for i, mods in enumerate(self.branches):
+            for mods in self.branches:
                 with branch.arm():
-                    for _ in range(max_depth - branch_depths[i]):
-                        builder.ir_nop()
-
                     with prog.disable_delay():
                         cur_t: Union[float, QickParam] = 0.0
                         for mod in mods:

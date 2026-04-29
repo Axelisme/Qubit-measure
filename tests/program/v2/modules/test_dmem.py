@@ -6,7 +6,6 @@ def test_small_values_not_compressed():
     lv = LoadValue("x", [1, 2, 3], idx_reg="i", val_reg="v")
     assert lv._is_compressed is False
     assert lv._packed_values == [1, 2, 3]
-    assert lv.allow_rerun() is True
 
 
 def test_large_small_range_gets_compressed():
@@ -16,7 +15,6 @@ def test_large_small_range_gets_compressed():
     assert lv._bits_per_value == 2
     assert lv._values_per_word == 16
     assert len(lv._packed_values) == 64 // 16
-    assert lv.allow_rerun() is True
 
 
 def test_negative_values_rejected():

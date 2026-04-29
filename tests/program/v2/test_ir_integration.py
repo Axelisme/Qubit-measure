@@ -1,4 +1,4 @@
-"""Integration tests for IR builder, emitter, and feature flag (Phase 1R)."""
+"""Integration tests for IR builder, emitter, and feature flags."""
 
 from __future__ import annotations
 
@@ -21,16 +21,11 @@ from zcu_tools.program.v2.modules.pulse import Pulse
 from zcu_tools.program.v2.modules.reset import NoneReset, NoneResetCfg
 
 
-def test_feature_flag_env(monkeypatch) -> None:
-    """ZCU_TOOLS_USE_IR is read per-call so notebooks can toggle live."""
-    from zcu_tools.program.v2.modular import _ir_enabled
+def test_default_pipeline_is_available() -> None:
+    from zcu_tools.program.v2.ir.passes import make_default_pipeline
 
-    monkeypatch.delenv("ZCU_TOOLS_USE_IR", raising=False)
-    assert _ir_enabled() is False
-    monkeypatch.setenv("ZCU_TOOLS_USE_IR", "true")
-    assert _ir_enabled() is True
-    monkeypatch.setenv("ZCU_TOOLS_USE_IR", "0")
-    assert _ir_enabled() is False
+    pipeline = make_default_pipeline()
+    assert pipeline is not None
 
 
 def test_module_has_ir_run() -> None:

@@ -106,9 +106,6 @@ class AbsReset(Module):
     @abstractmethod
     def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]: ...
 
-    def allow_rerun(self) -> bool:
-        return True
-
 
 def Reset(name: str, cfg: Optional[AbsResetCfg]) -> AbsReset:
     """Factory: dispatch a reset cfg to its concrete impl. None → NoneReset."""
@@ -126,11 +123,6 @@ class NoneReset(AbsReset):
 
     def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]:
         return 0.0
-
-    def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        return t
 
     def ir_run(
         self,
@@ -152,11 +144,6 @@ class PulseReset(AbsReset):
 
     def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]:
         return self.reset_pulse.total_length(prog)
-
-    def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        return self.reset_pulse.run(prog, t)
 
     def ir_run(
         self,
@@ -182,13 +169,6 @@ class TwoPulseReset(AbsReset):
         return calc_max_length(
             self.reset_pulse1.total_length(prog), self.reset_pulse2.total_length(prog)
         )
-
-    def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        pulse1_t = self.reset_pulse1.run(prog, t)
-        pulse2_t = self.reset_pulse2.run(prog, t)
-        return calc_max_length(pulse1_t, pulse2_t)
 
     def ir_run(
         self,
@@ -222,17 +202,6 @@ class BathReset(AbsReset):
         return calc_max_length(
             self.res_pulse.total_length(prog), self.qub_pulse.total_length(prog)
         ) + self.pi2_pulse.total_length(prog)
-
-    def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        self.res_pulse.run(prog, t)
-        self.qub_pulse.run(prog, t)
-
-        prog.delay(t + self.total_length(prog))
-        prog.delay_auto(0.0)
-
-        return self.pi2_pulse.run(prog, 0.0)
 
     def ir_run(
         self,

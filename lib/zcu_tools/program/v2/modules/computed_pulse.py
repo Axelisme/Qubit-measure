@@ -82,28 +82,6 @@ class ComputedPulse(Module):
 
         self.wmem_offset = min(flat_idxs)
 
-    def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        ref_cfg = self.ref_cfg
-        with prog.acquire_temp_reg(1) as (addr_reg,):
-            # base = wmem_offset + gate_idx * stride
-            if self._stride == 1:
-                prog.write_reg_op(addr_reg, self.val_reg, "+", self.wmem_offset)
-            else:
-                # x*3 = (x<<1) + x; avoids relying on REG_WR multiplication.
-                prog.write_reg_op(addr_reg, self.val_reg, "<<", 1)
-                prog.write_reg_op(addr_reg, addr_reg, "+", self.val_reg)
-                prog.write_reg_op(addr_reg, addr_reg, "+", self.wmem_offset)
-            prog.pulse_wmem_reg(
-                ref_cfg.ch,
-                addr_reg,
-                t=t + ref_cfg.pre_delay,
-                flat_top_pulse=self._is_flat_top,
-            )
-
-        return t + self.total_length(prog)
-
     def ir_run(
         self,
         builder: IRBuilder,
@@ -137,5 +115,3 @@ class ComputedPulse(Module):
             )
         return max([float(length) for length in lengths])
 
-    def allow_rerun(self) -> bool:
-        return True

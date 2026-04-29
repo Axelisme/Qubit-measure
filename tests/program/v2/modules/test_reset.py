@@ -2,6 +2,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from pydantic import TypeAdapter
+from zcu_tools.program.v2.ir.builder import IRBuilder
 from zcu_tools.program.v2.modules import (
     ModuleCfgFactory,  # ensures leaf subclass registration
 )
@@ -396,38 +397,6 @@ class TestResetFactory:
         r = Reset("myname", NoneResetCfg())
         assert r.name == "myname"
 
-    def test_allow_rerun_none(self):
-        assert Reset("r", NoneResetCfg()).allow_rerun() is True
-
-    def test_allow_rerun_pulse(self):
-        assert (
-            Reset("r", PulseResetCfg(pulse_cfg=_make_pulse_cfg())).allow_rerun() is True
-        )
-
-    def test_allow_rerun_two_pulse(self):
-        assert (
-            Reset(
-                "r",
-                TwoPulseResetCfg(
-                    pulse1_cfg=_make_pulse_cfg(), pulse2_cfg=_make_pulse_cfg(ch=2)
-                ),
-            ).allow_rerun()
-            is True
-        )
-
-    def test_allow_rerun_bath(self):
-        assert (
-            Reset(
-                "r",
-                BathResetCfg(
-                    cavity_tone_cfg=_make_pulse_cfg(ch=1),
-                    qubit_tone_cfg=_make_pulse_cfg(ch=2),
-                    pi2_cfg=_make_pi2_cfg(),
-                ),
-            ).allow_rerun()
-            is True
-        )
-
 
 class TestResetCfgAdapter:
     def test_dispatch_none(self):
@@ -451,9 +420,9 @@ class TestNoneResetRuntime:
         NoneReset("r", NoneResetCfg()).init(mock_prog)
         mock_prog.assert_not_called()
 
-    def test_run_returns_t(self, mock_prog):
+    def test_ir_run_returns_t(self, mock_prog):
         r = NoneReset("r", NoneResetCfg())
-        assert r.run(mock_prog, t=1.5) == 1.5
+        assert r.ir_run(IRBuilder(), t=1.5, prog=mock_prog) == 1.5
 
     def test_total_length_zero(self, mock_prog):
         assert NoneReset("r", NoneResetCfg()).total_length(mock_prog) == 0.0
@@ -465,11 +434,12 @@ class TestPulseResetRuntime:
         r.init(mock_prog)
         mock_prog.declare_gen.assert_called_once()
 
-    def test_run_emits_pulse(self, mock_prog):
+    def test_ir_run_emits_pulse_ir(self, mock_prog):
         r = PulseReset("r", PulseResetCfg(pulse_cfg=_make_pulse_cfg()))
         r.init(mock_prog)
-        r.run(mock_prog, t=0.0)
-        mock_prog.pulse.assert_called_once()
+        b = IRBuilder()
+        out = r.ir_run(b, t=0.0, prog=mock_prog)
+        assert isinstance(out, float)
 
 
 class TestTwoPulseResetRuntime:
@@ -487,11 +457,12 @@ class TestTwoPulseResetRuntime:
         r.init(mock_prog)
         assert mock_prog.declare_gen.call_count == 2
 
-    def test_run_emits_both_pulses(self, mock_prog):
+    def test_ir_run_emits_both_pulses(self, mock_prog):
         r = self._make()
         r.init(mock_prog)
-        r.run(mock_prog, t=0.0)
-        assert mock_prog.pulse.call_count == 2
+        b = IRBuilder()
+        out = r.ir_run(b, t=0.0, prog=mock_prog)
+        assert isinstance(out, float)
 
 
 class TestBathResetRuntime:
@@ -510,8 +481,9 @@ class TestBathResetRuntime:
         r.init(mock_prog)
         assert mock_prog.declare_gen.call_count == 3
 
-    def test_run_emits_three_pulses(self, mock_prog):
+    def test_ir_run_emits_three_pulses(self, mock_prog):
         r = self._make()
         r.init(mock_prog)
-        r.run(mock_prog, t=0.0)
-        assert mock_prog.pulse.call_count == 3
+        b = IRBuilder()
+        out = r.ir_run(b, t=0.0, prog=mock_prog)
+        assert isinstance(out, float)

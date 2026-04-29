@@ -1,11 +1,4 @@
-"""ASM parity tests between legacy and IR paths.
-
-These tests compile the same module graph twice:
-1) legacy path (`ZCU_TOOLS_USE_IR=0`)
-2) IR path (`ZCU_TOOLS_USE_IR=1`)
-
-Then compare generated ASM text for exact parity.
-"""
+"""Compatibility smoke tests after legacy path removal."""
 
 from __future__ import annotations
 
@@ -52,12 +45,8 @@ def _pulse_cfg(
     )
 
 
-def _compile_asm(
-    monkeypatch: pytest.MonkeyPatch,
-    use_ir: bool,
-    module_factory: ModuleFactory,
-) -> str:
-    monkeypatch.setenv("ZCU_TOOLS_USE_IR", "1" if use_ir else "0")
+def _compile_asm(monkeypatch: pytest.MonkeyPatch, module_factory: ModuleFactory) -> str:
+    monkeypatch.delenv("ZCU_TOOLS_USE_IR", raising=False)
     prog = _make_prog(module_factory())
     return prog.asm()
 
@@ -103,18 +92,15 @@ def _case_softrepeat_softdelay() -> Sequence[Module]:
         _case_softrepeat_softdelay,
     ],
 )
-def test_ir_legacy_asm_parity(
+def test_ir_asm_compiles(
     monkeypatch: pytest.MonkeyPatch,
     module_factory: ModuleFactory,
 ) -> None:
-    legacy_asm = _compile_asm(monkeypatch, use_ir=False, module_factory=module_factory)
-    ir_asm = _compile_asm(monkeypatch, use_ir=True, module_factory=module_factory)
-    assert ir_asm == legacy_asm
+    asm = _compile_asm(monkeypatch, module_factory=module_factory)
+    assert isinstance(asm, str)
+    assert len(asm) > 0
 
 
-def test_ir_legacy_asm_parity_harness_compiles(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Sanity check that both paths can compile and produce ASM text."""
-    legacy_asm = _compile_asm(monkeypatch, use_ir=False, module_factory=_case_empty)
-    ir_asm = _compile_asm(monkeypatch, use_ir=True, module_factory=_case_empty)
-    assert isinstance(legacy_asm, str)
-    assert isinstance(ir_asm, str)
+def test_ir_asm_harness_compiles(monkeypatch: pytest.MonkeyPatch) -> None:
+    asm = _compile_asm(monkeypatch, module_factory=_case_empty)
+    assert isinstance(asm, str)

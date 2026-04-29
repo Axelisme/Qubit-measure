@@ -117,18 +117,6 @@ class Pulse(Module):
             ),
         )
 
-    def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        cfg = self.cfg
-        if cfg is None:
-            return t
-
-        prog.pulse(cfg.ch, self.pulse_id, t=t + cfg.pre_delay, tag=self.tag)
-        if self.block_mode:
-            return t + self.total_length(prog)
-        return t
-
     def ir_run(
         self,
         builder: IRBuilder,
@@ -146,5 +134,3 @@ class Pulse(Module):
 
         return t + self.total_length(prog)
 
-    def allow_rerun(self) -> bool:
-        return True

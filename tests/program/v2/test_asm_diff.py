@@ -1,9 +1,7 @@
-"""ASM diff tests for legacy vs IR program body generation."""
+"""ASM compile smoke tests for representative module graphs."""
 
 from __future__ import annotations
 
-from difflib import unified_diff
-import re
 from typing import Callable, Optional, Sequence, Union
 
 import pytest
@@ -27,10 +25,10 @@ def _compile_asm(
     monkeypatch: pytest.MonkeyPatch,
     modules: Sequence[Module],
     *,
-    use_ir: bool,
+    enable_opt: bool,
     sweep: SweepSpec = None,
 ) -> str:
-    monkeypatch.setenv("ZCU_TOOLS_USE_IR", "1" if use_ir else "0")
+    monkeypatch.setenv("ZCU_TOOLS_IR_OPT", "1" if enable_opt else "0")
     prog = ModularProgramV2(
         make_mock_soccfg(),
         ProgramV2Cfg(),
@@ -38,38 +36,6 @@ def _compile_asm(
         sweep=sweep,
     )
     return prog.asm()
-
-
-def _normalize_branch_labels(asm: str) -> str:
-    """Normalize branch label namespace so legacy/IR naming schemes can compare."""
-    asm = re.sub(r"irb\d+_(l|e)_(\d+)_(\d+)", r"branch_\1_\2_\3", asm)
-    asm = re.sub(r"[A-Za-z0-9]+_branch_(l|e)_(\d+)_(\d+)", r"branch_\1_\2_\3", asm)
-    return asm
-
-
-def _assert_no_asm_diff(
-    monkeypatch: pytest.MonkeyPatch,
-    module_factory: ModuleFactory,
-    *,
-    sweep: SweepSpec = None,
-) -> None:
-    legacy_asm = _normalize_branch_labels(
-        _compile_asm(monkeypatch, module_factory(), use_ir=False, sweep=sweep)
-    )
-    ir_asm = _normalize_branch_labels(
-        _compile_asm(monkeypatch, module_factory(), use_ir=True, sweep=sweep)
-    )
-    if ir_asm != legacy_asm:
-        diff = "\n".join(
-            unified_diff(
-                legacy_asm.splitlines(),
-                ir_asm.splitlines(),
-                fromfile="legacy",
-                tofile="ir",
-                lineterm="",
-            )
-        )
-        pytest.fail(f"ASM mismatch between legacy and IR paths:\n{diff}")
 
 
 def _case_pulse_readout() -> Sequence[Module]:
@@ -130,10 +96,16 @@ def _case_branch_softdelay() -> Sequence[Module]:
         (_case_branch_softdelay, [("sel", 3)]),
     ],
 )
-def test_asm_diff_parity(
+def test_asm_compile_with_and_without_opt(
     monkeypatch: pytest.MonkeyPatch,
     module_factory: ModuleFactory,
     sweep: SweepSpec,
 ) -> None:
-    """Compile both paths and show unified diff on mismatch."""
-    _assert_no_asm_diff(monkeypatch, module_factory, sweep=sweep)
+    asm_no_opt = _compile_asm(
+        monkeypatch, module_factory(), enable_opt=False, sweep=sweep
+    )
+    asm_opt = _compile_asm(monkeypatch, module_factory(), enable_opt=True, sweep=sweep)
+    assert isinstance(asm_no_opt, str)
+    assert isinstance(asm_opt, str)
+    assert len(asm_no_opt) > 0
+    assert len(asm_opt) > 0

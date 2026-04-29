@@ -73,47 +73,6 @@ class LoadValue(Module):
             self._values_per_word,
         )
 
-    def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        # addr_reg computes dmem address / shift amount; word_reg holds the
-        # fetched packed word. addr_reg is reused for shift once word is loaded.
-        temp_reg_num = 2 if self._is_compressed else 1
-        with prog.acquire_temp_reg(temp_reg_num) as (addr_reg, *other_regs):
-            if self._is_compressed:
-                word_reg = other_regs[0]
-            else:
-                word_reg = ""  # not use
-
-            if not self._is_compressed:
-                # addr = idx [+ offset]
-                if self.offset == 0:
-                    prog.write_reg(addr_reg, self.idx_reg)
-                else:
-                    prog.write_reg_op(addr_reg, self.idx_reg, "+", self.offset)
-                prog.read_dmem(dst=self.val_reg, addr=addr_reg)
-                return t
-
-            # addr = (idx ASR #word_shift) [+ #offset]
-            prog.write_reg_op(addr_reg, self.idx_reg, "ASR", self._word_shift)
-            if self.offset != 0:
-                prog.inc_reg(addr_reg, self.offset)
-            prog.read_dmem(dst=word_reg, addr=addr_reg)
-
-            # shift = (idx AND #slot_mask) [SL #bits_shift]
-            shift_reg = addr_reg  # reuse addr_reg
-            prog.write_reg_op(shift_reg, self.idx_reg, "AND", self._slot_mask)
-            if self._bits_shift > 0:
-                prog.write_reg_op(shift_reg, shift_reg, "SL", self._bits_shift)
-            prog.write_reg_op(self.val_reg, word_reg, "ASR", shift_reg)
-
-            prog.write_reg_op(self.val_reg, self.val_reg, "AND", self._value_mask)
-
-        return t
-
-    def allow_rerun(self) -> bool:
-        return True
-
     def ir_run(
         self,
         builder: IRBuilder,
@@ -225,11 +184,6 @@ class ScanWith(Module):
 
     def init(self, prog: ModularProgramV2) -> None:
         self.repeat_mod.init(prog)
-
-    def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        return self.repeat_mod.run(prog, t)
 
     def ir_run(
         self,

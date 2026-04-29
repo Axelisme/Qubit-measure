@@ -1,4 +1,5 @@
 import pytest
+from zcu_tools.program.v2.ir.builder import IRBuilder
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
@@ -51,6 +52,5 @@ def test_pulsecfg_set_param_unknown_rejected():
 
 def test_pulse_none_cfg_is_no_op(mock_prog):
     p = Pulse("p", None)
-    assert p.run(mock_prog, t=0.5) == 0.5
+    assert p.ir_run(IRBuilder(), t=0.5, prog=mock_prog) == 0.5
     assert p.total_length(mock_prog) == 0.0
-    assert p.allow_rerun() is True

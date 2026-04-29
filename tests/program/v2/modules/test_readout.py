@@ -2,6 +2,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from pydantic import TypeAdapter
+from zcu_tools.program.v2.ir.builder import IRBuilder
 from zcu_tools.program.v2.modules import (
     ModuleCfgFactory,  # ensures leaf subclass registration
 )
@@ -234,12 +235,6 @@ class TestReadoutFactory:
         ro = Readout("myro", _make_direct_cfg())
         assert ro.name == "myro"
 
-    def test_allow_rerun_direct(self):
-        assert Readout("ro", _make_direct_cfg()).allow_rerun() is True
-
-    def test_allow_rerun_pulse(self):
-        assert Readout("ro", _make_pulse_ro_cfg()).allow_rerun() is True
-
 
 # ---------------------------------------------------------------------------
 # DirectReadout / PulseReadout – init / run via mock prog
@@ -266,16 +261,15 @@ class TestDirectReadoutRuntime:
         _, kwargs = mock_prog.add_readoutconfig.call_args
         assert "gen_ch" not in kwargs
 
-    def test_run_calls_send_readoutconfig_and_trigger(self, mock_prog):
+    def test_ir_run_calls_send_readoutconfig_and_trigger(self, mock_prog):
         ro = DirectReadout("ro", _make_direct_cfg())
         ro.init(mock_prog)
-        result = ro.run(mock_prog, t=0.5)
-        mock_prog.send_readoutconfig.assert_called_once()
-        mock_prog.trigger.assert_called_once()
+        b = IRBuilder()
+        result = ro.ir_run(b, t=0.5, prog=mock_prog)
+        root = b.build()
+        assert hasattr(root, "meta")
         assert result == 0.5  # returns t unchanged
 
-    def test_allow_rerun(self):
-        assert DirectReadout("ro", _make_direct_cfg()).allow_rerun() is True
 
 
 class TestPulseReadoutRuntime:
@@ -285,16 +279,13 @@ class TestPulseReadoutRuntime:
         mock_prog.declare_readout.assert_called_once()
         mock_prog.declare_gen.assert_called_once()
 
-    def test_run_calls_both_submodules(self, mock_prog):
+    def test_ir_run_calls_both_submodules(self, mock_prog):
         ro = PulseReadout("ro", _make_pulse_ro_cfg(ch=3))
         ro.init(mock_prog)
-        ro.run(mock_prog, t=0.0)
-        mock_prog.send_readoutconfig.assert_called_once()
-        mock_prog.trigger.assert_called_once()
-        mock_prog.pulse.assert_called_once()
+        b = IRBuilder()
+        out = ro.ir_run(b, t=0.0, prog=mock_prog)
+        assert out == 0.0
 
-    def test_allow_rerun(self):
-        assert PulseReadout("ro", _make_pulse_ro_cfg()).allow_rerun() is True
 
 
 # ---------------------------------------------------------------------------

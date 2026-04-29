@@ -98,9 +98,6 @@ class AbsReadout(Module):
     @abstractmethod
     def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]: ...
 
-    def allow_rerun(self) -> bool:
-        return True
-
 
 def Readout(name: str, cfg: AbsReadoutCfg) -> AbsReadout:
     """Factory: dispatch a readout cfg to its concrete impl."""
@@ -131,15 +128,6 @@ class DirectReadout(AbsReadout):
             round_timestamp(prog, self.cfg.trig_offset)
             + round_timestamp(prog, self.cfg.ro_length, ro_ch=self.cfg.ro_ch),
         )
-
-    def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        ro_ch = self.cfg.ro_ch
-        trig_offset = self.cfg.trig_offset
-        prog.send_readoutconfig(ro_ch, self.name, t=0.0)  # type: ignore
-        prog.trigger([ro_ch], t=t + trig_offset)
-        return t
 
     def ir_run(
         self, builder: IRBuilder, t: Union[float, QickParam], prog: ModularProgramV2
@@ -182,17 +170,6 @@ class PulseReadout(AbsReadout):
         return calc_max_length(
             self.ro_window.total_length(prog), self.pulse.total_length(prog)
         )
-
-    def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        self.ro_window.run(prog, t)
-        self.pulse.run(prog, t)
-
-        prog.delay(t + self.total_length(prog))
-        prog.delay_auto(0.0)
-
-        return 0.0
 
     def ir_run(
         self,

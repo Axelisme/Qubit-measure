@@ -40,10 +40,6 @@ class Module(ABC):
     def init(self, prog: ModularProgramV2) -> None: ...
 
     @abstractmethod
-    def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]: ...
-
     def ir_run(
         self,
         builder: IRBuilder,
@@ -51,7 +47,5 @@ class Module(ABC):
         prog: ModularProgramV2,
     ) -> Union[float, QickParam]:
         """Emit IR for this module starting at t. Returns next t for the following module."""
-        raise NotImplementedError(f"{type(self).__name__}.ir_run() not implemented")
+        ...
 
-    def allow_rerun(self) -> bool:
-        return False
