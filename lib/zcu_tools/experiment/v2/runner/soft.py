@@ -19,12 +19,10 @@ class Scan(AbsTask[list[T_ChildResult], T_RootResult, T_Cfg]):
         self,
         name: str,
         values: Sequence[T_Value],
+        before_each: Callable[
+            [int, TaskState[list[T_ChildResult], T_RootResult, T_Cfg], T_Value], Any
+        ],
         task: AbsTask[T_ChildResult, T_RootResult, T_Cfg],
-        before_each: Optional[
-            Callable[
-                [int, TaskState[list[T_ChildResult], T_RootResult, T_Cfg], T_Value], Any
-            ]
-        ] = None,
     ) -> None:
         self.sweep_values = list(values)
         self.sweep_name = name
@@ -65,8 +63,7 @@ class Scan(AbsTask[list[T_ChildResult], T_RootResult, T_Cfg]):
         )
 
         for i, v in enumerate(self.sweep_values):
-            if self.before_each_fn is not None:
-                self.before_each_fn(i, state, v)
+            self.before_each_fn(i, state, v)
 
             logger.debug(
                 "Scan '%s' step %d/%d, value=%s",

@@ -162,11 +162,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                         ctx.cfg.modules.qub_pulse.set_param("length", length)
                     ),
                 )
-                .scan(
-                    "round",  # implement round loop here
-                    list(range(rounds)),
-                    before_each=lambda *_: None,
-                ),
+                .repeat("round", rounds),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     lengths, rabi_signal2real(average_round(ctx.root_data))
