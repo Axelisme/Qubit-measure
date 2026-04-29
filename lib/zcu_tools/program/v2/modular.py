@@ -14,8 +14,10 @@ from .sweep import SweepCfg
 
 logger = logging.getLogger(__name__)
 
-# Feature flag to enable IR-based lowering for modules
-ZCU_TOOLS_USE_IR = os.getenv("ZCU_TOOLS_USE_IR", "false").lower() in ("true", "1", "yes")
+
+def _ir_enabled() -> bool:
+    """Read ZCU_TOOLS_USE_IR each call so notebooks can toggle without re-import."""
+    return os.getenv("ZCU_TOOLS_USE_IR", "false").lower() in ("true", "1", "yes")
 
 
 class ModularProgramV2(MyProgramV2):
@@ -63,7 +65,7 @@ class ModularProgramV2(MyProgramV2):
         )
 
     def _body(self, cfg: ProgramV2Cfg) -> None:
-        if ZCU_TOOLS_USE_IR:
+        if _ir_enabled():
             self._body_ir(cfg)
         else:
             self._body_legacy(cfg)

@@ -37,7 +37,6 @@ def test_pulse_lower() -> None:
     assert ir_node.ch == "0"
     assert ir_node.pulse_name == "test_pulse_id"
     assert ir_node.pre_delay == 0.01
-    assert ir_node.post_delay == 0.02
     assert ir_node.advance == 0.07
 
 

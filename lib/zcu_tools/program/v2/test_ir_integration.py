@@ -33,12 +33,16 @@ def test_module_ir_lowering() -> None:
     assert hasattr(reset, "lower")
 
 
-def test_feature_flag_env() -> None:
-    """Test that ZCU_TOOLS_USE_IR can be read from environment."""
-    from .modular import ZCU_TOOLS_USE_IR
+def test_feature_flag_env(monkeypatch) -> None:
+    """ZCU_TOOLS_USE_IR is read per-call so notebooks can toggle live."""
+    from .modular import _ir_enabled
 
-    # Feature flag should exist and have a boolean value
-    assert isinstance(ZCU_TOOLS_USE_IR, bool)
+    monkeypatch.delenv("ZCU_TOOLS_USE_IR", raising=False)
+    assert _ir_enabled() is False
+    monkeypatch.setenv("ZCU_TOOLS_USE_IR", "true")
+    assert _ir_enabled() is True
+    monkeypatch.setenv("ZCU_TOOLS_USE_IR", "0")
+    assert _ir_enabled() is False
 
 
 class _DummyProg:
@@ -96,7 +100,6 @@ def test_emitter_preserves_timing_and_readout_steps() -> None:
         ch="0",
         pulse_name="p0",
         pre_delay=0.1,
-        post_delay=0.2,
         advance=0.7,
         tag="pulse_tag",
         meta=IRMeta(source_module="test.pulse"),

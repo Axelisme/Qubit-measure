@@ -135,7 +135,7 @@ class TestEstimateDurations:
         """IRPulse duration should include pre and post delays."""
         pass_obj = EstimateDurations()
         node = IRPulse(
-            ch="ch0", pulse_name="pulse1", pre_delay=0.5, post_delay=0.3, advance=0.8
+            ch="ch0", pulse_name="pulse1", pre_delay=0.5, advance=0.8
         )
         result = pass_obj(node)
         assert isinstance(result, IRPulse)

@@ -137,19 +137,22 @@ class Pulse(Module):
         if cfg is None or self.pulse_id is None:
             return IRSeq()  # empty sequence for None config
 
-        if self.block_mode:
-            if hasattr(self, "waveform") and ctx.prog is not None:
-                advance = self.total_length(ctx.prog)
-            else:
-                advance = cfg.pre_delay + cfg.waveform.length + cfg.post_delay
+        if not self.block_mode:
+            advance: Union[float, QickParam] = 0.0
+        elif hasattr(self, "waveform") and ctx.prog is not None:
+            # Preferred path inside ModularProgramV2._body_ir(): init() has
+            # populated self.waveform and prog is available, so we can apply
+            # tproc-cycle rounding via total_length().
+            advance = self.total_length(ctx.prog)
         else:
-            advance = 0.0
+            # Unit-test path: prog/waveform not built. Use the raw cfg lengths;
+            # this skips tproc rounding but preserves arithmetic correctness.
+            advance = cfg.pre_delay + cfg.waveform.length + cfg.post_delay
 
         return IRPulse(
             ch=str(cfg.ch),
             pulse_name=self.pulse_id,
             pre_delay=cfg.pre_delay,
-            post_delay=cfg.post_delay,
             advance=advance,
             tag=self.tag,
             meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),

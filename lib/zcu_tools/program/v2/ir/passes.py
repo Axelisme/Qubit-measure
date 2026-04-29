@@ -77,7 +77,7 @@ class EstimateDurations(Pass):
     expressions leave duration as None.
 
     Duration semantics:
-    - IRPulse: pre_delay + pulse_length + post_delay
+    - IRPulse: advance (= pre_delay + pulse_length + post_delay, or 0 if non-blocking)
     - IRReadout: similar to pulse
     - IRDelay: duration value (or expression)
     - IRSeq: sum of body durations
@@ -88,16 +88,16 @@ class EstimateDurations(Pass):
     def transform(self, node: IRNode, ctx: PassCtx) -> IRNode:
         """Compute duration for this node based on children."""
         if isinstance(node, IRPulse):
-            # Pulse duration = pre_delay + pulse + post_delay
-            # Note: actual pulse length would come from pulse registry (not in IR)
-            # For now, we estimate as pre + post (actual length added by emitter)
-            dur = node.pre_delay + node.post_delay
+            # advance already encodes pre_delay + waveform length + post_delay
+            if isinstance(node.advance, (int, float)):
+                dur = float(node.advance)
+            else:
+                dur = None
             meta_with_dur = self._update_meta_duration(node.meta, dur)
             return IRPulse(
                 ch=node.ch,
                 pulse_name=node.pulse_name,
                 pre_delay=node.pre_delay,
-                post_delay=node.post_delay,
                 advance=node.advance,
                 tag=node.tag,
                 meta=meta_with_dur

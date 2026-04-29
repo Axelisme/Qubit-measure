@@ -49,11 +49,16 @@ class IRNode(ABC):
 
 @dataclass(frozen=True)
 class IRPulse(IRNode):
-    """Emit a single pulse on a channel."""
+    """Emit a single pulse on a channel.
+
+    ``advance`` is the total t-increment after this module
+    (= pre_delay + waveform length + post_delay when block_mode=True;
+    = 0 when block_mode=False). post_delay is intentionally not stored —
+    it would duplicate information already in ``advance``.
+    """
     ch: str
     pulse_name: str
     pre_delay: Union[float, QickParam]  # delay before pulse emission (us)
-    post_delay: Union[float, QickParam]  # delay after pulse emission (us)
     advance: Union[float, QickParam]  # t increment after this module
     tag: Optional[str] = None
     meta: IRMeta = field(default_factory=IRMeta)
@@ -196,10 +201,17 @@ class IRBranch(IRNode):
 
 @dataclass(frozen=True)
 class IRParallel(IRNode):
-    """Emit all children from same start-t, then merge end-t by policy."""
+    """Emit all children from same start-t, then merge end-t by policy.
+
+    ``disable_delay``: when True, wrap child emission in prog.disable_delay()
+    so any nested IRDelay/IRSeq does not corrupt the timeline. Used by Join
+    to mirror its legacy interleaved-execution behavior. Default False matches
+    PulseReadout / TwoPulseReset / BathReset (parallel pulses only).
+    """
     body: Tuple[IRNode, ...] = field(default_factory=tuple)
     end_policy: Literal["max", "index"] = "max"
     end_index: int = 0
+    disable_delay: bool = False
     meta: IRMeta = field(default_factory=IRMeta)
 
 

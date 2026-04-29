@@ -17,12 +17,14 @@ from .ir import (
     IRNop,
     IRParallel,
     IRPulse,
+    IRReadDmem,
     IRReadout,
     IRRegLoop,
     IRRegOp,
     IRSeq,
     IRSoftDelay,
 )
+from .modules.util import merge_max_length
 
 if TYPE_CHECKING:
     from .modular import ModularProgramV2
@@ -72,8 +74,11 @@ class LowerCtx:
 class Emitter:
     """Converts IR nodes back to QICK macros."""
 
-    def __init__(self, prog: ModularProgramV2) -> None:
+    def __init__(
+        self, prog: ModularProgramV2, name_alloc: NameAllocator | None = None
+    ) -> None:
         self.prog = prog
+        self.name_alloc = name_alloc or NameAllocator()
 
     def emit(self, node: IRNode, t: float | QickParam = 0.0) -> float | QickParam:
         """Emit an IR node as QICK macros and return next module reference time."""
@@ -93,6 +98,9 @@ class Emitter:
             return t
         elif isinstance(node, IRRegOp):
             self._emit_reg_op(node)
+            return t
+        elif isinstance(node, IRReadDmem):
+            self._emit_read_dmem(node)
             return t
         elif isinstance(node, IRCondJump):
             self._emit_cond_jump(node)
@@ -114,7 +122,11 @@ class Emitter:
             raise TypeError(f"Unknown IR node type: {type(node)}")
 
     def _emit_pulse(self, node: IRPulse, t: float | QickParam) -> float | QickParam:
-        """Emit a pulse node."""
+        """Emit a pulse node.
+
+        ``advance`` already encodes pre_delay + waveform length + post_delay,
+        so we never reference post_delay here.
+        """
         self.prog.pulse(int(node.ch), node.pulse_name, t=t + node.pre_delay, tag=node.tag)  # type: ignore
         return t + node.advance
 
@@ -126,7 +138,12 @@ class Emitter:
         return t
 
     def _emit_delay(self, node: IRDelay) -> float:
-        """Emit a delay node."""
+        """Emit a delay node.
+
+        Always returns 0.0 to reset the module-level reference time, mirroring
+        legacy ``Delay.run()`` / ``DelayAuto.run()``. Subsequent IR nodes in an
+        IRSeq accumulate from 0.
+        """
         if node.auto:
             if isinstance(node.duration, str):
                 # Register-based delay
@@ -154,10 +171,13 @@ class Emitter:
         """Emit a label node."""
         self.prog.label(node.name)
 
-    def _emit_nop(self, node: IRNop) -> None:
+    def _emit_nop(self, _node: IRNop) -> None:
         """Emit a NOP node."""
-        # NOP is typically just a label with no other effect; emit it as a label
-        self.prog.label("nop")
+        self.prog.nop()
+
+    def _emit_read_dmem(self, node: IRReadDmem) -> None:
+        """Emit a DMEM read node."""
+        self.prog.read_dmem(dst=node.dst, addr=node.addr)
 
     def _emit_reg_op(self, node: IRRegOp) -> None:
         """Emit a register operation node."""
@@ -194,40 +214,37 @@ class Emitter:
         self.prog.close_loop_reg(name=node.name)
         return t
 
-    def _emit_branch(self, node: IRBranch, t: float | QickParam) -> float | QickParam:
-        """Emit a branch node (binary dispatch tree)."""
-        # Build a binary tree of conditional branches
-        # For N arms, we need N-1 comparisons
-        # This is a simplified implementation; full version builds the tree structure
-        for i, arm in enumerate(node.arms):
-            if i < len(node.arms) - 1:
-                # Conditional branch to next arm
-                self.prog.cond_jump(
-                    label=f"arm_{i}",
-                    arg1=node.compare_reg,
-                    test="==",
-                    op=i,
-                    arg2=i,
-                )
-            self.prog.label(f"arm_{i}")
-            self.emit(arm, t=t)
-        return t
+    def _emit_branch(
+        self, _node: IRBranch, _t: float | QickParam
+    ) -> float | QickParam:
+        """Emit a branch node (binary dispatch tree).
+
+        Not implemented in Phase 1 — control-flow modules land in Phase 2.
+        """
+        raise NotImplementedError(
+            "IRBranch emission is deferred to Phase 2 (control-flow modules)"
+        )
 
     def _emit_parallel(
         self, node: IRParallel, t: float | QickParam
     ) -> float | QickParam:
-        """Emit children from same start-t and merge end-t by policy."""
-        child_ends = [self.emit(child, t=t) for child in node.body]
+        """Emit children from same start-t and merge end-t by policy.
+
+        Mirrors legacy parallel-block scheduling: each child starts at ``t``,
+        ``end_policy="max"`` returns the longest end-time via merge_max_length
+        (matching Join/PulseReadout/TwoPulseReset semantics), and
+        ``end_policy="index"`` picks one branch's end-time (used by BathReset
+        to chain on the cavity tone).
+        """
+        if node.disable_delay:
+            with self.prog.disable_delay():
+                child_ends = [self.emit(child, t=t) for child in node.body]
+        else:
+            child_ends = [self.emit(child, t=t) for child in node.body]
         if not child_ends:
             return t
 
         if node.end_policy == "index":
             return child_ends[node.end_index]
 
-        max_end = child_ends[0]
-        for end_t in child_ends[1:]:
-            if isinstance(max_end, QickParam) or isinstance(end_t, QickParam):
-                max_end = max_end if isinstance(max_end, QickParam) else end_t
-            else:
-                max_end = max(max_end, end_t)
-        return max_end
+        return merge_max_length(*child_ends)

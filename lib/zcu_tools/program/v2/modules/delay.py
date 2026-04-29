@@ -182,3 +182,19 @@ class Join(Module):
 
     def allow_rerun(self) -> bool:
         return all(m.allow_rerun() for mlist in self.join_modules for m in mlist)
+
+    def lower(self, ctx: LowerCtx) -> IRNode:
+        from ..ir import IRMeta, IRParallel, IRSeq
+
+        child_ctx = ctx.with_child(self.name)
+        branch_irs: list = []
+        for mod_list in self.join_modules:
+            seq_body = tuple(m.lower(child_ctx) for m in mod_list)
+            branch_irs.append(IRSeq(body=seq_body))
+
+        return IRParallel(
+            body=tuple(branch_irs),
+            end_policy="max",
+            disable_delay=True,
+            meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
+        )
