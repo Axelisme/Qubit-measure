@@ -64,13 +64,19 @@ ModuleCfg: TypeAlias = Annotated[
 
 class ModuleCfgFactory:
     @classmethod
-    def from_raw(cls, raw: Any, *, ml: Optional[ModuleLibrary] = None) -> ModuleCfg:
+    def from_raw(
+        cls,
+        raw: Union[str, dict[str, Any], AbsModuleCfg],
+        *,
+        ml: Optional[ModuleLibrary] = None,
+    ) -> ModuleCfg:
         if isinstance(raw, str):
             if ml is None:
-                raise ValueError("ModuleLibrary context not found")
+                raise ValueError(
+                    f"Got module name '{raw}' but ModuleLibrary is not provided"
+                )
             raw = ml.get_module(raw)
-        ctx = {"ml": ml} if ml is not None else None
-        return TypeAdapter(ModuleCfg).validate_python(raw, context=ctx)
+        return TypeAdapter(ModuleCfg).validate_python(raw, context=dict(ml=ml))
 
 
 def param_repr(self) -> str:

@@ -177,14 +177,19 @@ WaveformCfg: TypeAlias = Annotated[
 
 
 class WaveformCfgFactory:
-    @classmethod
-    def from_raw(cls, raw: Any, *, ml: Optional[ModuleLibrary] = None) -> WaveformCfg:
+    @staticmethod
+    def from_raw(
+        raw: Union[str, dict[str, Any], AbsWaveformCfg],
+        *,
+        ml: Optional[ModuleLibrary] = None,
+    ) -> WaveformCfg:
         if isinstance(raw, str):
             if ml is None:
-                raise ValueError("ModuleLibrary context not found")
+                raise ValueError(
+                    f"Got waveform name '{raw}' but ModuleLibrary is not provided"
+                )
             raw = ml.get_waveform(raw)
-        ctx = {"ml": ml} if ml is not None else None
-        return TypeAdapter(WaveformCfg).validate_python(raw, context=ctx)
+        return TypeAdapter(WaveformCfg).validate_python(raw, context={"ml": ml})
 
 
 class QickWaveformKwargs(TypedDict):
