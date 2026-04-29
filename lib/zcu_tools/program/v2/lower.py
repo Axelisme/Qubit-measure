@@ -92,14 +92,14 @@ class Emitter:
 
     def _emit_pulse(self, node: IRPulse) -> None:
         """Emit a pulse node."""
-        t = int(node.pre_delay) if isinstance(node.pre_delay, (int, float)) else 0
-        self.prog.pulse(int(node.ch), node.pulse_name, t=t, tag=None)
+        t = node.pre_delay if isinstance(node.pre_delay, (int, float)) else 0
+        self.prog.pulse(int(node.ch), node.pulse_name, t=t, tag=None)  # type: ignore
 
     def _emit_readout(self, node: IRReadout) -> None:
         """Emit a readout node."""
-        t = int(node.trig_offset) if isinstance(node.trig_offset, (int, float)) else 0
+        t = node.trig_offset if isinstance(node.trig_offset, (int, float)) else 0
         ros_chs = [int(ch) for ch in node.ro_chs]
-        self.prog.trigger(ros=ros_chs, t=t)
+        self.prog.trigger(ros=ros_chs, t=t)  # type: ignore
 
     def _emit_delay(self, node: IRDelay) -> None:
         """Emit a delay node."""
