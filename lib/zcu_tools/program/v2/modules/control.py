@@ -68,7 +68,7 @@ class Repeat(Module):
 
             if not cur_t > 0.09:
                 logger.warning(
-                    "Repeat '%s' has long body duration %s, which may cause imprecise timing due to loop overhead. Consider using SoftRepeat for better timing accuracy.",
+                    "Repeat '%s' has short body duration %s; loop overhead may dominate timing precision. Consider using SoftRepeat for better timing accuracy.",
                     self.name,
                     cur_t,
                 )

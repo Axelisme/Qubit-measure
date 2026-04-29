@@ -456,9 +456,40 @@ class AlignBranchDispatch(Pass):
 class ValidateInvariants(Pass):
     """Structural validations for emitter assumptions."""
 
+    def __init__(self) -> None:
+        self._defined_labels: set[str] = set()
+        self._jump_targets: set[str] = set()
+        self._branch_semantics_warned = False
+
+    def __call__(self, node: IRNode, ctx: PassCtx | None = None) -> IRNode:
+        if ctx is None:
+            ctx = PassCtx()
+        self._defined_labels.clear()
+        self._jump_targets.clear()
+        self._branch_semantics_warned = False
+
+        out = super().__call__(node, ctx)
+
+        undefined = sorted(self._jump_targets - self._defined_labels)
+        for target in undefined:
+            ctx.error(f"undefined jump target label: {target}")
+        return out
+
     def transform(self, node: IRNode, ctx: PassCtx) -> IRNode:
-        if isinstance(node, IRBranch) and len(node.arms) < 2:
-            ctx.error("IRBranch requires at least 2 arms")
+        if isinstance(node, IRLabel):
+            self._defined_labels.add(node.name)
+        if isinstance(node, (IRJump, IRCondJump)):
+            self._jump_targets.add(node.target)
+
+        if isinstance(node, IRBranch):
+            if len(node.arms) < 2:
+                ctx.error("IRBranch requires at least 2 arms")
+            elif not self._branch_semantics_warned:
+                ctx.warn(
+                    "IRBranch compare semantics: compare_reg < 0 selects first arm; "
+                    "compare_reg >= num_arms selects last arm."
+                )
+                self._branch_semantics_warned = True
         if isinstance(node, IRDelayAuto) and isinstance(node.t, str) and node.tag is not None:
             ctx.error("IRDelayAuto tag is invalid when t is register name")
         return node

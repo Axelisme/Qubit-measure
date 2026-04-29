@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import pytest
 from zcu_tools.program.v2.base import ProgramV2Cfg
+from zcu_tools.program.v2.ir import IRBranch, IRDelay
 from zcu_tools.program.v2.modular import ModularProgramV2
-from zcu_tools.program.v2.modules import Delay, SoftDelay
+from zcu_tools.program.v2.modules import Delay, Module, SoftDelay
 from zcu_tools.program.v2.sweep import SweepCfg
 
 from .conftest import make_mock_soccfg
@@ -101,3 +102,20 @@ def test_datamem_none_when_empty():
 def test_various_channel_counts(n_gens, n_readouts):
     prog = _make_prog(n_gens=n_gens, n_readouts=n_readouts)
     assert prog.binprog is not None
+
+
+class _BadIrBranchModule(Module):
+    name = "bad_branch"
+
+    def init(self, prog: ModularProgramV2) -> None:
+        pass
+
+    def ir_run(self, builder, t, prog):
+        # Intentionally emit invalid IR to verify pipeline fail-fast behavior.
+        builder._emit(IRBranch(compare_reg="sel", arms=(IRDelay(0.1),)))
+        return t
+
+
+def test_compile_fails_fast_on_ir_pass_error() -> None:
+    with pytest.raises(RuntimeError, match="IR pass validation failed"):
+        _make_prog(modules=[_BadIrBranchModule()])

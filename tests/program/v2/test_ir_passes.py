@@ -7,6 +7,8 @@ from zcu_tools.program.v2.ir.nodes import (
     IRBranch,
     IRCondJump,
     IRDelay,
+    IRJump,
+    IRLabel,
     IRLoop,
     IRNop,
     IRPulse,
@@ -109,3 +111,15 @@ def test_reorder_pulse_like_nodes_does_not_cross_barrier() -> None:
     assert isinstance(new_root.body[0], IRPulse)
     assert isinstance(new_root.body[1], IRCondJump)
     assert isinstance(new_root.body[2], IRSendReadoutConfig)
+
+
+def test_validate_invariants_reports_undefined_label_target() -> None:
+    root = IRSeq(body=(IRJump(target="L_missing"),))
+    _, ctx = make_default_pipeline(PassConfig(min_body_us=0.0))(root)
+    assert any("undefined jump target label:" in msg for msg in ctx.diagnostics)
+
+
+def test_validate_invariants_accepts_defined_label_target() -> None:
+    root = IRSeq(body=(IRJump(target="L0"), IRLabel(name="L0")))
+    _, ctx = make_default_pipeline(PassConfig(min_body_us=0.0))(root)
+    assert all("undefined jump target label" not in msg for msg in ctx.diagnostics)

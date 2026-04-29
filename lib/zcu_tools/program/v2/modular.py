@@ -14,6 +14,13 @@ from .sweep import SweepCfg
 logger = logging.getLogger(__name__)
 
 
+def _raise_on_ir_pass_errors(diagnostics: Sequence[str]) -> None:
+    errors = [msg for msg in diagnostics if msg.startswith("error:")]
+    if not errors:
+        return
+    raise RuntimeError("IR pass validation failed:\n" + "\n".join(errors))
+
+
 class ModularProgramV2(MyProgramV2):
     """
     A class that allows custom behavior based on the provided modules.
@@ -78,6 +85,7 @@ class ModularProgramV2(MyProgramV2):
         root_ir, pass_ctx = make_default_pipeline()(root_ir)
         for msg in pass_ctx.diagnostics:
             logger.warning("IR pass: %s", msg)
+        _raise_on_ir_pass_errors(pass_ctx.diagnostics)
         Emitter(self).emit(root_ir)
 
     def add_dmem(self, values: Sequence[int]) -> int:
