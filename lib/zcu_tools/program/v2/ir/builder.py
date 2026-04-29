@@ -15,8 +15,8 @@ from qick.asm_v2 import QickParam
 from .nodes import (
     IRBranch,
     IRCondJump,
-    IRDelayAuto,
     IRDelay,
+    IRDelayAuto,
     IRJump,
     IRLabel,
     IRLoop,
@@ -28,8 +28,8 @@ from .nodes import (
     IRReadout,
     IRRegLoop,
     IRRegOp,
-    RegOp,
     IRSeq,
+    RegOp,
 )
 
 
@@ -99,7 +99,7 @@ class IRBuilder:
 
     def ir_delay_auto(
         self,
-        t: Union[float, QickParam] = 0.0,
+        t: Union[float, QickParam, str] = 0.0,
         gens: bool = True,
         ros: bool = True,
         tag: Optional[str] = None,
@@ -149,7 +149,9 @@ class IRBuilder:
             yield
         finally:
             body_nodes = self._pop()
-            loop_body = IRSeq(body=body_nodes) if len(body_nodes) != 1 else body_nodes[0]
+            loop_body = (
+                IRSeq(body=body_nodes) if len(body_nodes) != 1 else body_nodes[0]
+            )
             self._emit(IRLoop(name=name, n=n, body=loop_body))
 
     @contextmanager
@@ -160,7 +162,9 @@ class IRBuilder:
             yield
         finally:
             body_nodes = self._pop()
-            loop_body = IRSeq(body=body_nodes) if len(body_nodes) != 1 else body_nodes[0]
+            loop_body = (
+                IRSeq(body=body_nodes) if len(body_nodes) != 1 else body_nodes[0]
+            )
             self._emit(IRRegLoop(name=name, n_reg=n_reg, body=loop_body))
 
     @contextmanager
@@ -222,9 +226,7 @@ class _BranchCtx:
             yield
         finally:
             arm_nodes = self._builder._pop()
-            arm_ir = (
-                IRSeq(body=arm_nodes) if len(arm_nodes) != 1 else arm_nodes[0]
-            )
+            arm_ir = IRSeq(body=arm_nodes) if len(arm_nodes) != 1 else arm_nodes[0]
             self._arms.append(arm_ir)
 
     def finish(self) -> Tuple[IRNode, ...]:

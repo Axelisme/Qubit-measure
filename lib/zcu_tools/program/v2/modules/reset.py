@@ -136,6 +136,7 @@ class NoneReset(AbsReset):
         self,
         builder: IRBuilder,
         t: Union[float, QickParam],
+        prog: ModularProgramV2,
     ) -> Union[float, QickParam]:
         return t
 
@@ -161,8 +162,9 @@ class PulseReset(AbsReset):
         self,
         builder: IRBuilder,
         t: Union[float, QickParam],
+        prog: ModularProgramV2,
     ) -> Union[float, QickParam]:
-        return self.reset_pulse.ir_run(builder, t)
+        return self.reset_pulse.ir_run(builder, t, prog)
 
 
 class TwoPulseReset(AbsReset):
@@ -192,16 +194,14 @@ class TwoPulseReset(AbsReset):
         self,
         builder: IRBuilder,
         t: Union[float, QickParam],
+        prog: ModularProgramV2,
     ) -> Union[float, QickParam]:
-        self.reset_pulse1.ir_run(builder, t)
-        self.reset_pulse2.ir_run(builder, t)
-        prog = self.reset_pulse1._prog
-        end_t = merge_max_length(
-            t + self.reset_pulse1.total_length(prog),
-            t + self.reset_pulse2.total_length(prog),
-        )
-        builder.ir_delay(end_t)
+        self.reset_pulse1.ir_run(builder, t, prog)
+        self.reset_pulse2.ir_run(builder, t, prog)
+
+        builder.ir_delay(t + self.total_length(prog))
         builder.ir_delay_auto(0.0)
+
         return 0.0
 
 
@@ -219,28 +219,31 @@ class BathReset(AbsReset):
         self.pi2_pulse.init(prog)
 
     def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]:
-        return self.res_pulse.total_length(prog) + self.pi2_pulse.total_length(prog)
+        return calc_max_length(
+            self.res_pulse.total_length(prog), self.qub_pulse.total_length(prog)
+        ) + self.pi2_pulse.total_length(prog)
 
     def run(
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-        res_t = self.res_pulse.run(prog, t)
+        self.res_pulse.run(prog, t)
         self.qub_pulse.run(prog, t)
-        end_t = self.pi2_pulse.run(prog, res_t)
-        return end_t
+
+        prog.delay(t + self.total_length(prog))
+        prog.delay_auto(0.0)
+
+        return self.pi2_pulse.run(prog, 0.0)
 
     def ir_run(
         self,
         builder: IRBuilder,
         t: Union[float, QickParam],
+        prog: ModularProgramV2,
     ) -> Union[float, QickParam]:
-        # stage 1: res + qub start together; advance by res_pulse end (legacy BathReset semantics)
-        self.res_pulse.ir_run(builder, t)
-        self.qub_pulse.ir_run(builder, t)
-        prog = self.res_pulse._prog
-        res_end = t + self.res_pulse.total_length(prog)
-        builder.ir_delay(res_end)
+        self.res_pulse.ir_run(builder, t, prog)
+        self.qub_pulse.ir_run(builder, t, prog)
+
+        builder.ir_delay(t + self.total_length(prog))
         builder.ir_delay_auto(0.0)
 
-        # stage 2: pi2 starts at new ref_t (0 after delay+delay_auto)
-        return self.pi2_pulse.ir_run(builder, 0.0)
+        return self.pi2_pulse.ir_run(builder, 0.0, prog)

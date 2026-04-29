@@ -14,17 +14,18 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Tuple
 
 from .nodes import (
-    IRNode,
-    IRSeq,
-    IRLoop,
-    IRRegLoop,
     IRBranch,
+    IRLoop,
+    IRNode,
+    IRRegLoop,
+    IRSeq,
 )
 
 
 @dataclass
 class PassConfig:
     """Configuration for all passes in the pipeline."""
+
     min_body_us: float = 0.09  # threshold for UnrollShortLoops (µs)
     enable_fusion: bool = True  # enable FuseAdjacentDelays
     enable_align_branches: bool = True  # enable AlignBranchDispatch
@@ -34,6 +35,7 @@ class PassConfig:
 @dataclass
 class PassCtx:
     """Context passed through the pass pipeline."""
+
     config: PassConfig = field(default_factory=PassConfig)
     diagnostics: List[str] = field(default_factory=list)  # collected warnings/errors
 
@@ -90,17 +92,23 @@ class Pass(ABC):
 
         elif isinstance(node, IRLoop):
             transformed_body = self._visit(node.body, ctx)
-            node_with_new_body = IRLoop(name=node.name, n=node.n, body=transformed_body, meta=node.meta)
+            node_with_new_body = IRLoop(
+                name=node.name, n=node.n, body=transformed_body, meta=node.meta
+            )
             return self.transform(node_with_new_body, ctx)
 
         elif isinstance(node, IRRegLoop):
             transformed_body = self._visit(node.body, ctx)
-            node_with_new_body = IRRegLoop(name=node.name, n_reg=node.n_reg, body=transformed_body, meta=node.meta)
+            node_with_new_body = IRRegLoop(
+                name=node.name, n_reg=node.n_reg, body=transformed_body, meta=node.meta
+            )
             return self.transform(node_with_new_body, ctx)
 
         elif isinstance(node, IRBranch):
             transformed_arms = tuple(self._visit(arm, ctx) for arm in node.arms)
-            node_with_new_arms = IRBranch(compare_reg=node.compare_reg, arms=transformed_arms, meta=node.meta)
+            node_with_new_arms = IRBranch(
+                compare_reg=node.compare_reg, arms=transformed_arms, meta=node.meta
+            )
             return self.transform(node_with_new_arms, ctx)
 
         else:

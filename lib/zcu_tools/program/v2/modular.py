@@ -90,7 +90,7 @@ class ModularProgramV2(MyProgramV2):
         for module in self.modules:
             if logger.isEnabledFor(logging.DEBUG):
                 self.debug_macro(f"{type(module).__name__}({module.name})", t)
-            t = module.ir_run(builder, t)
+            t = module.ir_run(builder, t, self)
 
         # emit trailing delay to sync timeline (mirrors legacy _body_legacy)
         if t != 0.0:

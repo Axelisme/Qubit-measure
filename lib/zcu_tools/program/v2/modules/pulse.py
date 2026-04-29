@@ -62,7 +62,6 @@ class Pulse(Module):
         self.pulse_id = pulse_id
 
     def init(self, prog: ModularProgramV2) -> None:
-        self._prog = prog
         if self.cfg is None:
             return
 
@@ -134,6 +133,7 @@ class Pulse(Module):
         self,
         builder: IRBuilder,
         t: Union[float, QickParam],
+        prog: ModularProgramV2,
     ) -> Union[float, QickParam]:
         cfg = self.cfg
         if cfg is None or self.pulse_id is None:
@@ -144,10 +144,7 @@ class Pulse(Module):
         if not self.block_mode:
             return t
 
-        if hasattr(self, "_prog"):
-            return t + self.total_length(self._prog)
-        # unit-test path: prog not available, skip rounding
-        return t + cfg.pre_delay + cfg.waveform.length + cfg.post_delay
+        return t + self.total_length(prog)
 
     def allow_rerun(self) -> bool:
         return True

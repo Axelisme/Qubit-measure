@@ -36,6 +36,7 @@ class Delay(Module):
         self,
         builder: IRBuilder,
         t: Union[float, QickParam],
+        prog: ModularProgramV2,
     ) -> Union[float, QickParam]:
         builder.ir_delay(self.delay, tag=self.tag)
         return 0.0
@@ -62,6 +63,7 @@ class SoftDelay(Module):
         self,
         builder: IRBuilder,
         t: Union[float, QickParam],
+        prog: ModularProgramV2,
     ) -> Union[float, QickParam]:
         # SoftDelay advances the timeline without emitting any instruction
         return t + self.delay
@@ -103,6 +105,7 @@ class DelayAuto(Module):
         self,
         builder: IRBuilder,
         t: Union[float, QickParam],
+        prog: ModularProgramV2,
     ) -> Union[float, QickParam]:
         builder.ir_delay_auto(self.t, gens=self.gens, ros=self.ros, tag=self.tag)
         return 0.0
@@ -127,7 +130,6 @@ class Join(Module):
         self.join_modules = join_modules
 
     def init(self, prog: ModularProgramV2) -> None:
-        self._prog = prog
         for list in self.join_modules:
             for m in list:
                 m.init(prog)
@@ -181,8 +183,8 @@ class Join(Module):
         self,
         builder: IRBuilder,
         t: Union[float, QickParam],
+        prog: ModularProgramV2,
     ) -> Union[float, QickParam]:
-        prog = self._prog
         list_modules = [list(branch) for branch in self.join_modules]
         cur_t_list: list[Union[float, QickParam]] = [t for _ in list_modules]
 
@@ -202,7 +204,7 @@ class Join(Module):
             while (i := find_next_branch()) is not None:
                 cur_t = cur_t_list[i]
                 mod = list_modules[i].pop(0)
-                cur_t_list[i] = mod.ir_run(builder, cur_t)
+                cur_t_list[i] = mod.ir_run(builder, cur_t, prog)
 
         end_t = merge_max_length(*cur_t_list)
         builder.ir_delay(end_t)

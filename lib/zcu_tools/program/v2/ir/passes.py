@@ -140,7 +140,10 @@ class EstimateDurations(Pass):
             body_dur = node.body.meta.duration
             dur2 = None if body_dur is None else node.n * body_dur
             return IRLoop(
-                name=node.name, n=node.n, body=node.body, meta=self._with_dur(node.meta, dur2)
+                name=node.name,
+                n=node.n,
+                body=node.body,
+                meta=self._with_dur(node.meta, dur2),
             )
 
         elif isinstance(node, IRRegLoop):
@@ -197,7 +200,9 @@ class EstimateDurations(Pass):
                 meta=self._with_dur(node.meta, 0.0),
             )
         elif isinstance(node, IRReadDmem):
-            return IRReadDmem(dst=node.dst, addr=node.addr, meta=self._with_dur(node.meta, 0.0))
+            return IRReadDmem(
+                dst=node.dst, addr=node.addr, meta=self._with_dur(node.meta, 0.0)
+            )
         elif isinstance(node, IRNop):
             return IRNop(meta=self._with_dur(node.meta, 0.0))
         else:

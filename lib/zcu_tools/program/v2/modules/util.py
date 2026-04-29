@@ -52,6 +52,10 @@ def calc_max_length(
         return length1
     elif length1 < length2:
         return length2
+    elif (
+        isinstance(length1, float) and isinstance(length2, float) and length1 == length2
+    ):
+        return length1
 
     warnings.warn(
         f"Detected overlap between {param2str(length1)} and {param2str(length2)}; "

@@ -142,9 +142,7 @@ class DirectReadout(AbsReadout):
         return t
 
     def ir_run(
-        self,
-        builder: IRBuilder,
-        t: Union[float, QickParam],
+        self, builder: IRBuilder, t: Union[float, QickParam], prog: ModularProgramV2
     ) -> Union[float, QickParam]:
         ro_ch = str(self.cfg.ro_ch)
         builder.ir_readout(
@@ -185,21 +183,22 @@ class PulseReadout(AbsReadout):
     ) -> Union[float, QickParam]:
         self.ro_window.run(prog, t)
         self.pulse.run(prog, t)
-        return t + self.total_length(prog)
+
+        prog.delay(t + self.total_length(prog))
+        prog.delay_auto(0.0)
+
+        return 0.0
 
     def ir_run(
         self,
         builder: IRBuilder,
         t: Union[float, QickParam],
+        prog: ModularProgramV2,
     ) -> Union[float, QickParam]:
-        self.ro_window.ir_run(builder, t)
-        self.pulse.ir_run(builder, t)
+        self.ro_window.ir_run(builder, t, prog)
+        self.pulse.ir_run(builder, t, prog)
 
-        prog = self.pulse._prog
-        ro_end = t + self.ro_window.total_length(prog)
-        pulse_end = t + self.pulse.total_length(prog)
-        end_t = merge_max_length(ro_end, pulse_end)
-
-        builder.ir_delay(end_t)
+        builder.ir_delay(t + self.total_length(prog))
         builder.ir_delay_auto(0.0)
+
         return 0.0
