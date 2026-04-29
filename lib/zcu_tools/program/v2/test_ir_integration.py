@@ -1,36 +1,14 @@
-"""Integration tests for IR lowering in ModularProgramV2."""
+"""Integration tests for IR builder, emitter, and feature flag (Phase 1R)."""
 
 from __future__ import annotations
 
 import pytest
 
+from .ir import IRDelay, IRDelayAuto, IRMeta, IRPulse, IRReadout
+from .ir.builder import IRBuilder
 from .lower import Emitter
-from .ir import IRDelay, IRMeta, IRPulse, IRReadout, IRSoftDelay
-from .modules.pulse import Pulse, PulseCfg
+from .modules.pulse import Pulse
 from .modules.reset import NoneReset, NoneResetCfg
-from .modules.waveform import ConstWaveformCfg
-
-
-def test_module_ir_lowering() -> None:
-    """Test that modules can lower to IR without crashing."""
-    # Create a simple pulse
-    pulse_cfg = PulseCfg(
-        type="pulse",
-        waveform=ConstWaveformCfg(style="const", length=0.04),
-        ch=0,
-        nqz=1,
-        freq=100.0,
-        gain=1.0,
-    )
-    pulse = Pulse(name="test_pulse", cfg=pulse_cfg)
-    pulse.pulse_id = "test_pulse_id"
-
-    # Create a reset module
-    reset = NoneReset(name="reset", cfg=NoneResetCfg(type="reset/none"))
-
-    # Both modules should have lower() methods
-    assert hasattr(pulse, "lower")
-    assert hasattr(reset, "lower")
 
 
 def test_feature_flag_env(monkeypatch) -> None:
@@ -45,15 +23,20 @@ def test_feature_flag_env(monkeypatch) -> None:
     assert _ir_enabled() is False
 
 
+def test_module_has_ir_run() -> None:
+    reset = NoneReset(name="r", cfg=NoneResetCfg(type="reset/none"))
+    assert hasattr(reset, "ir_run")
+
+
 class _DummyProg:
     def __init__(self) -> None:
-        self.calls = []
+        self.calls: list = []
 
     def pulse(self, ch, name, t=0, tag=None):
         self.calls.append(("pulse", ch, name, t, tag))
 
-    def send_readoutconfig(self, ch, name, t=0, tag=None):
-        self.calls.append(("send_readoutconfig", ch, name, t, tag))
+    def send_readoutconfig(self, ch, name, t=0):
+        self.calls.append(("send_readoutconfig", ch, name, t))
 
     def trigger(self, ros=None, t=0, **kwargs):
         self.calls.append(("trigger", tuple(ros or []), t))
@@ -69,6 +52,9 @@ class _DummyProg:
 
     def label(self, name):
         self.calls.append(("label", name))
+
+    def nop(self):
+        self.calls.append(("nop",))
 
     def write_reg_op(self, dst, lhs, op, rhs):
         self.calls.append(("write_reg_op", dst, lhs, op, rhs))
@@ -91,54 +77,128 @@ class _DummyProg:
     def close_loop_reg(self, name):
         self.calls.append(("close_loop_reg", name))
 
+    def read_dmem(self, dst, addr):
+        self.calls.append(("read_dmem", dst, addr))
 
-def test_emitter_preserves_timing_and_readout_steps() -> None:
+
+# ---------------------------------------------------------------------------
+# Emitter tests
+# ---------------------------------------------------------------------------
+
+
+def test_emitter_pulse() -> None:
     prog = _DummyProg()
     emitter = Emitter(prog)  # type: ignore[arg-type]
 
-    pulse = IRPulse(
-        ch="0",
-        pulse_name="p0",
-        pre_delay=0.1,
-        advance=0.7,
-        tag="pulse_tag",
-        meta=IRMeta(source_module="test.pulse"),
-    )
-    readout = IRReadout(
-        ch="1",
-        ro_chs=("1",),
-        pulse_name="ro_cfg",
-        trig_offset=0.05,
-        meta=IRMeta(source_module="test.readout"),
-    )
-    soft = IRSoftDelay(duration=0.3, meta=IRMeta(source_module="test.soft"))
+    node = IRPulse(ch="0", pulse_name="p0", t=1.1, tag="ptag")
+    emitter.emit(node)
 
-    t = emitter.emit(pulse, t=1.0)
-    t = emitter.emit(readout, t=t)
-    t = emitter.emit(soft, t=t)
-
-    assert ("pulse", 0, "p0", 1.1, "pulse_tag") in prog.calls
-    assert ("send_readoutconfig", 1, "ro_cfg", 1.7, None) in prog.calls
-    assert ("trigger", (1,), 1.75) in prog.calls
-    assert t == pytest.approx(2.0)
+    assert ("pulse", 0, "p0", 1.1, "ptag") in prog.calls
 
 
-def test_emitter_forwards_delay_auto_gens_ros() -> None:
+def test_emitter_readout_sends_config_and_triggers() -> None:
     prog = _DummyProg()
     emitter = Emitter(prog)  # type: ignore[arg-type]
 
-    node = IRDelay(
-        duration=0.2,
-        auto=True,
-        gens=False,
-        ros=True,
-        tag="d",
-        meta=IRMeta(source_module="test.delay"),
-    )
-    t = emitter.emit(node, t=1.0)
+    node = IRReadout(ch="1", ro_chs=("1",), pulse_name="ro_cfg", t=0.5)
+    emitter.emit(node)
 
-    assert ("delay_auto", 0.2, False, True, "d") in prog.calls
-    assert t == 0.0
+    assert ("send_readoutconfig", 1, "ro_cfg", 0.5) in prog.calls
+    assert ("trigger", (1,), 0.5) in prog.calls
+
+
+def test_emitter_delay() -> None:
+    prog = _DummyProg()
+    emitter = Emitter(prog)  # type: ignore[arg-type]
+
+    node = IRDelay(t=0.3, tag="bar")
+    emitter.emit(node)
+
+    assert ("delay", 0.3, "bar") in prog.calls
+
+
+def test_emitter_delay_auto() -> None:
+    prog = _DummyProg()
+    emitter = Emitter(prog)  # type: ignore[arg-type]
+
+    node = IRDelayAuto(t=0.0, gens=False, ros=True, tag="da")
+    emitter.emit(node)
+
+    assert ("delay_auto", 0.0, False, True, "da") in prog.calls
+
+
+def test_emitter_delay_auto_register() -> None:
+    prog = _DummyProg()
+    emitter = Emitter(prog)  # type: ignore[arg-type]
+
+    node = IRDelayAuto(t="time_reg", gens=True, ros=False)
+    emitter.emit(node)
+
+    assert ("delay_reg_auto", "time_reg", True, False) in prog.calls
+
+
+def test_emitter_seq_order() -> None:
+    from .ir.nodes import IRSeq
+    prog = _DummyProg()
+    emitter = Emitter(prog)  # type: ignore[arg-type]
+
+    node = IRSeq(body=(
+        IRPulse(ch="0", pulse_name="p1", t=0.0),
+        IRDelay(t=1.0),
+        IRPulse(ch="0", pulse_name="p2", t=0.0),
+    ))
+    emitter.emit(node)
+
+    names = [c[2] for c in prog.calls if c[0] == "pulse"]
+    assert names == ["p1", "p2"]
+    assert ("delay", 1.0, None) in prog.calls
+
+
+# ---------------------------------------------------------------------------
+# IRBuilder tests
+# ---------------------------------------------------------------------------
+
+
+def test_builder_scope_loop() -> None:
+    from .ir.nodes import IRLoop, IRSeq
+
+    b = IRBuilder()
+    b.ir_delay(0.0)
+    b.ir_delay_auto(0.0)
+    with b.ir_loop("loop0", n=5):
+        b.ir_pulse("0", "p", t=0.0)
+        b.ir_delay(1.0)
+        b.ir_delay_auto(0.0)
+    b.ir_delay(0.0)
+
+    root = b.build()
+    assert isinstance(root, IRSeq)
+    # top-level: delay_auto, loop, delay
+    loop = [n for n in root.body if isinstance(n, IRLoop)]
+    assert len(loop) == 1
+    assert loop[0].n == 5
+
+
+def test_builder_unclosed_scope_raises() -> None:
+    b = IRBuilder()
+    b._push()  # manually push without matching pop
+    with pytest.raises(RuntimeError, match="unclosed scope"):
+        b.build()
+
+
+def test_builder_branch_arms() -> None:
+    from .ir.nodes import IRBranch
+
+    b = IRBuilder()
+    with b.ir_branch("reg0") as branch:
+        with branch.arm():
+            b.ir_delay(1.0)
+        with branch.arm():
+            b.ir_delay(2.0)
+
+    root = b.build()
+    assert isinstance(root, IRBranch)
+    assert len(root.arms) == 2
 
 
 if __name__ == "__main__":

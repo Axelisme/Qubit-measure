@@ -2,11 +2,26 @@
 
 from __future__ import annotations
 
-from typing import Dict, Optional, cast
 from dataclasses import replace
+from typing import Dict, Optional, cast
+
 from .nodes import (
-    IRNode, IRMeta, IRLabel, IRJump, IRCondJump, IRLoop, IRRegLoop, IRSeq, IRDelay,
-    IRPulse, IRReadout, IRBranch, IRNop, IRRegOp, IRReadDmem, IRSoftDelay, IRParallel
+    IRBranch,
+    IRCondJump,
+    IRDelay,
+    IRDelayAuto,
+    IRJump,
+    IRLabel,
+    IRLoop,
+    IRMeta,
+    IRNode,
+    IRNop,
+    IRPulse,
+    IRReadDmem,
+    IRReadout,
+    IRRegLoop,
+    IRRegOp,
+    IRSeq,
 )
 from .pass_base import Pass, PassCtx
 
@@ -14,20 +29,15 @@ from .pass_base import Pass, PassCtx
 class FreshLabels(Pass):
     """Rename all labels to avoid collisions from structural duplication.
 
-    When a subtree is cloned (e.g., in UnrollShortLoops or SoftRepeat
-    lowering), label names must be fresh to avoid jump target ambiguity.
-
-    This pass must run FIRST in the pipeline.
+    Must run FIRST in the pipeline.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._label_map: Dict[str, str] = {}
         self._counter: int = 0
         self._needs_reset: bool = True
 
     def transform(self, node: IRNode, ctx: PassCtx) -> IRNode:
-        """Rename label, jump, and condjump nodes using a fresh name counter."""
-        # Reset mapping at root (top-level call)
         if self._needs_reset:
             self._label_map.clear()
             self._counter = 0
@@ -37,35 +47,31 @@ class FreshLabels(Pass):
             if node.name not in self._label_map:
                 self._label_map[node.name] = f"_label_{self._counter}"
                 self._counter += 1
-            fresh_name = self._label_map[node.name]
-            return IRLabel(name=fresh_name, meta=node.meta)
+            return IRLabel(name=self._label_map[node.name], meta=node.meta)
 
         elif isinstance(node, IRJump):
-            old_target = node.target
-            if old_target not in self._label_map:
-                self._label_map[old_target] = f"_label_{self._counter}"
+            if node.target not in self._label_map:
+                self._label_map[node.target] = f"_label_{self._counter}"
                 self._counter += 1
-            return IRJump(target=self._label_map[old_target], meta=node.meta)
+            return IRJump(target=self._label_map[node.target], meta=node.meta)
 
         elif isinstance(node, IRCondJump):
-            old_target = node.target
-            if old_target not in self._label_map:
-                self._label_map[old_target] = f"_label_{self._counter}"
+            if node.target not in self._label_map:
+                self._label_map[node.target] = f"_label_{self._counter}"
                 self._counter += 1
             return IRCondJump(
-                target=self._label_map[old_target],
+                target=self._label_map[node.target],
                 arg1=node.arg1,
                 test=node.test,
                 op=node.op,
                 arg2=node.arg2,
-                meta=node.meta
+                meta=node.meta,
             )
 
         else:
             return node
 
     def __call__(self, node: IRNode, ctx: PassCtx | None = None) -> IRNode:
-        """Override to reset state before each top-level call."""
         self._needs_reset = True
         return super().__call__(node, ctx)
 
@@ -73,163 +79,126 @@ class FreshLabels(Pass):
 class EstimateDurations(Pass):
     """Estimate IR subtree duration via bottom-up walk.
 
-    Sets `node.meta.duration` for all nodes. Nodes with QickParam
-    expressions leave duration as None.
-
     Duration semantics:
-    - IRPulse: advance (= pre_delay + pulse_length + post_delay, or 0 if non-blocking)
-    - IRReadout: similar to pulse
-    - IRDelay: duration value (or expression)
-    - IRSeq: sum of body durations
-    - IRLoop: n * body.duration (or None if body has None)
-    - Composite nodes propagate None upward if any child has None
+    - IRPulse: 0 (no timeline advance — only IRDelay advances ref_t)
+    - IRDelay: t (numeric) or None (QickParam)
+    - IRDelayAuto: None (hardware alignment — unknown statically)
+    - IRSeq: sum of body durations; None if any child is None
+    - IRLoop: n * body.duration; None if body has None
+    - IRBranch: max(arm durations); None if any arm is None
     """
 
     def transform(self, node: IRNode, ctx: PassCtx) -> IRNode:
-        """Compute duration for this node based on children."""
         if isinstance(node, IRPulse):
-            # advance already encodes pre_delay + waveform length + post_delay
-            if isinstance(node.advance, (int, float)):
-                dur = float(node.advance)
-            else:
-                dur = None
-            meta_with_dur = self._update_meta_duration(node.meta, dur)
+            # Pulses don't advance ref_t; they contribute 0 to timeline
             return IRPulse(
                 ch=node.ch,
                 pulse_name=node.pulse_name,
-                pre_delay=node.pre_delay,
-                advance=node.advance,
+                t=node.t,
                 tag=node.tag,
-                meta=meta_with_dur
+                meta=self._with_dur(node.meta, 0.0),
             )
 
         elif isinstance(node, IRReadout):
-            if isinstance(node.trig_offset, (int, float)):
-                dur = float(node.trig_offset)
-            else:
-                dur = None
-            meta_with_dur = self._update_meta_duration(node.meta, dur)
             return IRReadout(
                 ch=node.ch,
                 ro_chs=node.ro_chs,
                 pulse_name=node.pulse_name,
-                trig_offset=node.trig_offset,
-                meta=meta_with_dur
+                t=node.t,
+                meta=self._with_dur(node.meta, 0.0),
             )
 
         elif isinstance(node, IRDelay):
-            # Delay duration is the duration value if numeric
-            if isinstance(node.duration, (int, float)):
-                dur: Optional[float] = float(node.duration)
-            else:
-                # QickParam expression or string — duration unknown
-                dur = None
-            meta_with_dur = self._update_meta_duration(node.meta, dur)
-            return IRDelay(
-                duration=node.duration,
-                auto=node.auto,
+            dur: Optional[float] = (
+                float(node.t) if isinstance(node.t, (int, float)) else None
+            )
+            return IRDelay(t=node.t, tag=node.tag, meta=self._with_dur(node.meta, dur))
+
+        elif isinstance(node, IRDelayAuto):
+            # Hardware alignment: static duration unknown
+            return IRDelayAuto(
+                t=node.t,
                 gens=node.gens,
                 ros=node.ros,
                 tag=node.tag,
-                meta=meta_with_dur
+                meta=self._with_dur(node.meta, None),
             )
 
-        elif isinstance(node, IRSoftDelay):
-            if isinstance(node.duration, (int, float)):
-                dur = float(node.duration)
-            else:
-                dur = None
-            meta_with_dur = self._update_meta_duration(node.meta, dur)
-            return IRSoftDelay(duration=node.duration, meta=meta_with_dur)
-
         elif isinstance(node, IRSeq):
-            # Sum durations; None if any child is None
-            dur = 0.0
+            total: Optional[float] = 0.0
             for child in node.body:
+                if total is None:
+                    break
                 child_dur = child.meta.duration
                 if child_dur is None:
-                    dur = None
-                    break
-                dur += child_dur
-            meta_with_dur = self._update_meta_duration(node.meta, dur)
-            return IRSeq(body=node.body, meta=meta_with_dur)
+                    total = None
+                else:
+                    total += child_dur
+            return IRSeq(body=node.body, meta=self._with_dur(node.meta, total))
 
         elif isinstance(node, IRLoop):
-            # Loop duration = n * body.duration
             body_dur = node.body.meta.duration
-            if body_dur is None:
-                dur = None
-            else:
-                dur = node.n * body_dur
-            meta_with_dur = self._update_meta_duration(node.meta, dur)
-            return IRLoop(name=node.name, n=node.n, body=node.body, meta=meta_with_dur)
+            dur2 = None if body_dur is None else node.n * body_dur
+            return IRLoop(
+                name=node.name, n=node.n, body=node.body, meta=self._with_dur(node.meta, dur2)
+            )
 
         elif isinstance(node, IRRegLoop):
-            # Register-driven loop: duration unknown (depends on runtime register)
-            meta_with_dur = self._update_meta_duration(node.meta, None)
             return IRRegLoop(
                 name=node.name,
                 n_reg=node.n_reg,
                 body=node.body,
-                meta=meta_with_dur
+                meta=self._with_dur(node.meta, None),
             )
 
         elif isinstance(node, IRBranch):
-            # Branch duration = max(arm durations), None if any arm is None
             if not node.arms:
-                dur = 0.0
+                dur3: Optional[float] = 0.0
             else:
                 arm_durs = [arm.meta.duration for arm in node.arms]
                 if any(d is None for d in arm_durs):
-                    dur = None
+                    dur3 = None
                 else:
-                    dur = max(cast(list[float], arm_durs))
-            meta_with_dur = self._update_meta_duration(node.meta, dur)
-            return IRBranch(compare_reg=node.compare_reg, arms=node.arms, meta=meta_with_dur)
-
-        elif isinstance(node, IRParallel):
-            if not node.body:
-                dur = 0.0
-            else:
-                child_durs = [child.meta.duration for child in node.body]
-                if any(d is None for d in child_durs):
-                    dur = None
-                elif node.end_policy == "index":
-                    dur = cast(list[float], child_durs)[node.end_index]
-                else:
-                    numeric_durs = cast(list[float], child_durs)
-                    dur = max(numeric_durs) if numeric_durs else 0.0
-            meta_with_dur = self._update_meta_duration(node.meta, dur)
-            return IRParallel(
-                body=node.body,
-                end_policy=node.end_policy,
-                end_index=node.end_index,
-                meta=meta_with_dur,
+                    dur3 = max(cast(list[float], arm_durs))
+            return IRBranch(
+                compare_reg=node.compare_reg,
+                arms=node.arms,
+                meta=self._with_dur(node.meta, dur3),
             )
 
         else:
-            # Leaf nodes without explicit duration (Label, Jump, CondJump, etc.)
-            # These contribute 0 to durations
-            meta_with_dur = self._update_meta_duration(node.meta, 0.0)
-            # Need to reconstruct node with new meta based on type
-            if isinstance(node, IRLabel):
-                return IRLabel(name=node.name, meta=meta_with_dur)
-            elif isinstance(node, IRJump):
-                return IRJump(target=node.target, meta=meta_with_dur)
-            elif isinstance(node, IRCondJump):
-                return IRCondJump(
-                    target=node.target,
-                    arg1=node.arg1,
-                    test=node.test,
-                    op=node.op,
-                    arg2=node.arg2,
-                    meta=meta_with_dur
-                )
-            else:
-                # Other leaf nodes (should have handled all types above)
-                return node
+            # Label, Jump, CondJump, RegOp, ReadDmem, Nop — contribute 0
+            return self._rebuild_zero_dur(node)
 
     @staticmethod
-    def _update_meta_duration(meta: IRMeta, dur: Optional[float]) -> IRMeta:
-        """Create new metadata with updated duration."""
+    def _with_dur(meta: IRMeta, dur: Optional[float]) -> IRMeta:
         return replace(meta, duration=dur)
+
+    def _rebuild_zero_dur(self, node: IRNode) -> IRNode:
+        if isinstance(node, IRLabel):
+            return IRLabel(name=node.name, meta=self._with_dur(node.meta, 0.0))
+        elif isinstance(node, IRJump):
+            return IRJump(target=node.target, meta=self._with_dur(node.meta, 0.0))
+        elif isinstance(node, IRCondJump):
+            return IRCondJump(
+                target=node.target,
+                arg1=node.arg1,
+                test=node.test,
+                op=node.op,
+                arg2=node.arg2,
+                meta=self._with_dur(node.meta, 0.0),
+            )
+        elif isinstance(node, IRRegOp):
+            return IRRegOp(
+                dst=node.dst,
+                lhs=node.lhs,
+                op=node.op,
+                rhs=node.rhs,
+                meta=self._with_dur(node.meta, 0.0),
+            )
+        elif isinstance(node, IRReadDmem):
+            return IRReadDmem(dst=node.dst, addr=node.addr, meta=self._with_dur(node.meta, 0.0))
+        elif isinstance(node, IRNop):
+            return IRNop(meta=self._with_dur(node.meta, 0.0))
+        else:
+            return node

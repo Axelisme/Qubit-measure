@@ -11,8 +11,7 @@ from zcu_tools.cfg_model import ConfigBase
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
     from zcu_tools.program.v2.modular import ModularProgramV2
-    from zcu_tools.program.v2.lower import LowerCtx
-    from zcu_tools.program.v2.ir import IRNode
+    from zcu_tools.program.v2.ir.builder import IRBuilder
 
 
 def resolve_module_ref(value: Any, info: ValidationInfo) -> Any:
@@ -45,9 +44,13 @@ class Module(ABC):
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]: ...
 
-    def lower(self, ctx: LowerCtx) -> IRNode:
-        """Lower this module to IR. Optional; defaults to raising NotImplementedError."""
-        raise NotImplementedError(f"{type(self).__name__}.lower() not implemented")
+    def ir_run(
+        self,
+        builder: IRBuilder,
+        t: Union[float, QickParam],
+    ) -> Union[float, QickParam]:
+        """Emit IR for this module starting at t. Returns next t for the following module."""
+        raise NotImplementedError(f"{type(self).__name__}.ir_run() not implemented")
 
     def allow_rerun(self) -> bool:
         return False

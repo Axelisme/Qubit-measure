@@ -16,12 +16,11 @@ from typing_extensions import (
 
 from .base import AbsModuleCfg, Module, resolve_module_ref
 from .pulse import Pulse, PulseCfg
-from .util import calc_max_length
+from .util import calc_max_length, merge_max_length
 
 if TYPE_CHECKING:
+    from zcu_tools.program.v2.ir.builder import IRBuilder
     from zcu_tools.program.v2.modular import ModularProgramV2
-    from zcu_tools.program.v2.lower import LowerCtx
-    from zcu_tools.program.v2.ir import IRNode
 
 
 PulseOrRef: TypeAlias = Annotated[PulseCfg, BeforeValidator(resolve_module_ref)]
@@ -133,10 +132,12 @@ class NoneReset(AbsReset):
     ) -> Union[float, QickParam]:
         return t
 
-    def lower(self, ctx: LowerCtx) -> IRNode:
-        from ..ir import IRSeq
-
-        return IRSeq()
+    def ir_run(
+        self,
+        builder: IRBuilder,
+        t: Union[float, QickParam],
+    ) -> Union[float, QickParam]:
+        return t
 
 
 class PulseReset(AbsReset):
@@ -156,9 +157,12 @@ class PulseReset(AbsReset):
     ) -> Union[float, QickParam]:
         return self.reset_pulse.run(prog, t)
 
-    def lower(self, ctx: LowerCtx) -> IRNode:
-        child_ctx = ctx.with_child(self.name)
-        return self.reset_pulse.lower(child_ctx)
+    def ir_run(
+        self,
+        builder: IRBuilder,
+        t: Union[float, QickParam],
+    ) -> Union[float, QickParam]:
+        return self.reset_pulse.ir_run(builder, t)
 
 
 class TwoPulseReset(AbsReset):
@@ -184,18 +188,21 @@ class TwoPulseReset(AbsReset):
         pulse2_t = self.reset_pulse2.run(prog, t)
         return calc_max_length(pulse1_t, pulse2_t)
 
-    def lower(self, ctx: LowerCtx) -> IRNode:
-        from ..ir import IRMeta, IRParallel
-
-        child_ctx = ctx.with_child(self.name)
-        pulse1_ir = self.reset_pulse1.lower(child_ctx)
-        pulse2_ir = self.reset_pulse2.lower(child_ctx)
-
-        return IRParallel(
-            body=(pulse1_ir, pulse2_ir),
-            end_policy="max",
-            meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
+    def ir_run(
+        self,
+        builder: IRBuilder,
+        t: Union[float, QickParam],
+    ) -> Union[float, QickParam]:
+        self.reset_pulse1.ir_run(builder, t)
+        self.reset_pulse2.ir_run(builder, t)
+        prog = self.reset_pulse1._prog
+        end_t = merge_max_length(
+            t + self.reset_pulse1.total_length(prog),
+            t + self.reset_pulse2.total_length(prog),
         )
+        builder.ir_delay(end_t)
+        builder.ir_delay_auto(0.0)
+        return 0.0
 
 
 class BathReset(AbsReset):
@@ -222,16 +229,18 @@ class BathReset(AbsReset):
         end_t = self.pi2_pulse.run(prog, res_t)
         return end_t
 
-    def lower(self, ctx: LowerCtx) -> IRNode:
-        from ..ir import IRMeta, IRParallel, IRSeq
+    def ir_run(
+        self,
+        builder: IRBuilder,
+        t: Union[float, QickParam],
+    ) -> Union[float, QickParam]:
+        # stage 1: res + qub start together; advance by res_pulse end (legacy BathReset semantics)
+        self.res_pulse.ir_run(builder, t)
+        self.qub_pulse.ir_run(builder, t)
+        prog = self.res_pulse._prog
+        res_end = t + self.res_pulse.total_length(prog)
+        builder.ir_delay(res_end)
+        builder.ir_delay_auto(0.0)
 
-        child_ctx = ctx.with_child(self.name)
-        res_ir = self.res_pulse.lower(child_ctx)
-        qub_ir = self.qub_pulse.lower(child_ctx)
-        pi2_ir = self.pi2_pulse.lower(child_ctx)
-        first_stage = IRParallel(body=(res_ir, qub_ir), end_policy="index", end_index=0)
-
-        return IRSeq(
-            body=(first_stage, pi2_ir),
-            meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
-        )
+        # stage 2: pi2 starts at new ref_t (0 after delay+delay_auto)
+        return self.pi2_pulse.ir_run(builder, 0.0)

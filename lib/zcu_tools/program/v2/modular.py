@@ -81,24 +81,23 @@ class ModularProgramV2(MyProgramV2):
         self.delay(t=t)
 
     def _body_ir(self, cfg: ProgramV2Cfg) -> None:
-        """IR-based emit path: lower() → IR → Emitter → macros."""
-        from .lower import LowerCtx, NameAllocator, Emitter
+        """IR-based emit path: ir_run() → IRBuilder → Emitter → macros."""
+        from .ir.builder import IRBuilder
+        from .lower import Emitter
 
-        # Lower all modules to IR
-        name_alloc = NameAllocator()
-        ir_nodes = []
-        for module in self.modules:
-            ctx = LowerCtx(prog=self, name_alloc=name_alloc)
-            ir_node = module.lower(ctx)
-            ir_nodes.append(ir_node)
-
-        # Emit IR to QICK macros
-        emitter = Emitter(self)
+        builder = IRBuilder()
         t = 0.0
-        for ir_node in ir_nodes:
-            t = emitter.emit(ir_node, t=t)
+        for module in self.modules:
+            if logger.isEnabledFor(logging.DEBUG):
+                self.debug_macro(f"{type(module).__name__}({module.name})", t)
+            t = module.ir_run(builder, t)
 
-        self.delay(t=t)
+        # emit trailing delay to sync timeline (mirrors legacy _body_legacy)
+        if t != 0.0:
+            builder.ir_delay(t)
+
+        root_ir = builder.build()
+        Emitter(self).emit(root_ir)
 
     def add_dmem(self, values: Sequence[int]) -> int:
         offset = len(self._dmem_buffer)

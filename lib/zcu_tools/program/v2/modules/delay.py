@@ -9,9 +9,8 @@ from .base import Module
 from .util import merge_max_length, round_timestamp
 
 if TYPE_CHECKING:
+    from zcu_tools.program.v2.ir.builder import IRBuilder
     from zcu_tools.program.v2.modular import ModularProgramV2
-    from zcu_tools.program.v2.lower import LowerCtx
-    from zcu_tools.program.v2.ir import IRNode
 
 logger = logging.getLogger(__name__)
 
@@ -33,15 +32,13 @@ class Delay(Module):
 
         return 0.0  # reset reference time
 
-    def lower(self, ctx: LowerCtx) -> IRNode:
-        from ..ir import IRDelay, IRMeta
-
-        return IRDelay(
-            duration=self.delay,
-            auto=False,
-            tag=self.tag,
-            meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
-        )
+    def ir_run(
+        self,
+        builder: IRBuilder,
+        t: Union[float, QickParam],
+    ) -> Union[float, QickParam]:
+        builder.ir_delay(self.delay, tag=self.tag)
+        return 0.0
 
     def allow_rerun(self) -> bool:
         return self.tag is None
@@ -61,13 +58,13 @@ class SoftDelay(Module):
 
         return round_timestamp(prog, self.delay)
 
-    def lower(self, ctx: LowerCtx) -> IRNode:
-        from ..ir import IRMeta, IRSoftDelay
-
-        return IRSoftDelay(
-            duration=self.delay,
-            meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
-        )
+    def ir_run(
+        self,
+        builder: IRBuilder,
+        t: Union[float, QickParam],
+    ) -> Union[float, QickParam]:
+        # SoftDelay advances the timeline without emitting any instruction
+        return t + self.delay
 
     def allow_rerun(self) -> bool:
         return True
@@ -102,17 +99,13 @@ class DelayAuto(Module):
             prog.delay_auto(t=self.t, gens=self.gens, ros=self.ros, tag=self.tag)  # type: ignore
         return 0.0
 
-    def lower(self, ctx: LowerCtx) -> IRNode:
-        from ..ir import IRDelay, IRMeta
-
-        return IRDelay(
-            duration=self.t,
-            auto=True,
-            gens=self.gens,
-            ros=self.ros,
-            tag=self.tag,
-            meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
-        )
+    def ir_run(
+        self,
+        builder: IRBuilder,
+        t: Union[float, QickParam],
+    ) -> Union[float, QickParam]:
+        builder.ir_delay_auto(self.t, gens=self.gens, ros=self.ros, tag=self.tag)
+        return 0.0
 
     def allow_rerun(self) -> bool:
         return self.tag is None
@@ -134,6 +127,7 @@ class Join(Module):
         self.join_modules = join_modules
 
     def init(self, prog: ModularProgramV2) -> None:
+        self._prog = prog
         for list in self.join_modules:
             for m in list:
                 m.init(prog)
@@ -183,18 +177,34 @@ class Join(Module):
     def allow_rerun(self) -> bool:
         return all(m.allow_rerun() for mlist in self.join_modules for m in mlist)
 
-    def lower(self, ctx: LowerCtx) -> IRNode:
-        from ..ir import IRMeta, IRParallel, IRSeq
+    def ir_run(
+        self,
+        builder: IRBuilder,
+        t: Union[float, QickParam],
+    ) -> Union[float, QickParam]:
+        prog = self._prog
+        list_modules = [list(branch) for branch in self.join_modules]
+        cur_t_list: list[Union[float, QickParam]] = [t for _ in list_modules]
 
-        child_ctx = ctx.with_child(self.name)
-        branch_irs: list = []
-        for mod_list in self.join_modules:
-            seq_body = tuple(m.lower(child_ctx) for m in mod_list)
-            branch_irs.append(IRSeq(body=seq_body))
+        def find_next_branch() -> Optional[int]:
+            min_i = None
+            min_t = 0.0
+            for i, (ct, mod_list) in enumerate(zip(cur_t_list, list_modules)):
+                if not mod_list:
+                    continue
+                ct_val = ct.minval() if isinstance(ct, QickParam) else ct
+                if min_i is None or ct_val < min_t:
+                    min_i = i
+                    min_t = ct_val
+            return min_i
 
-        return IRParallel(
-            body=tuple(branch_irs),
-            end_policy="max",
-            disable_delay=True,
-            meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
-        )
+        with prog.disable_delay():
+            while (i := find_next_branch()) is not None:
+                cur_t = cur_t_list[i]
+                mod = list_modules[i].pop(0)
+                cur_t_list[i] = mod.ir_run(builder, cur_t)
+
+        end_t = merge_max_length(*cur_t_list)
+        builder.ir_delay(end_t)
+        builder.ir_delay_auto(0.0)
+        return 0.0

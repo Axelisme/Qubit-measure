@@ -18,12 +18,11 @@ from typing_extensions import (
 
 from .base import AbsModuleCfg, Module, resolve_module_ref
 from .pulse import Pulse, PulseCfg
-from .util import calc_max_length, round_timestamp
+from .util import calc_max_length, merge_max_length, round_timestamp
 
 if TYPE_CHECKING:
+    from zcu_tools.program.v2.ir.builder import IRBuilder
     from zcu_tools.program.v2.modular import ModularProgramV2
-    from zcu_tools.program.v2.lower import LowerCtx
-    from zcu_tools.program.v2.ir import IRNode
 
 
 class AbsReadoutCfg(AbsModuleCfg):
@@ -142,18 +141,19 @@ class DirectReadout(AbsReadout):
         prog.trigger([ro_ch], t=t + trig_offset)
         return t
 
-    def lower(self, ctx: LowerCtx) -> IRNode:
-        from ..ir import IRReadout, IRMeta
-
-        ro_ch = self.cfg.ro_ch
-
-        return IRReadout(
-            ch=str(ro_ch),
-            ro_chs=(str(ro_ch),),
+    def ir_run(
+        self,
+        builder: IRBuilder,
+        t: Union[float, QickParam],
+    ) -> Union[float, QickParam]:
+        ro_ch = str(self.cfg.ro_ch)
+        builder.ir_readout(
+            ch=ro_ch,
+            ro_chs=(ro_ch,),
             pulse_name=self.name,
-            trig_offset=self.cfg.trig_offset,
-            meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
+            t=t + self.cfg.trig_offset,
         )
+        return t
 
 
 class PulseReadout(AbsReadout):
@@ -187,15 +187,19 @@ class PulseReadout(AbsReadout):
         self.pulse.run(prog, t)
         return t + self.total_length(prog)
 
-    def lower(self, ctx: LowerCtx) -> IRNode:
-        from ..ir import IRMeta, IRParallel
+    def ir_run(
+        self,
+        builder: IRBuilder,
+        t: Union[float, QickParam],
+    ) -> Union[float, QickParam]:
+        self.ro_window.ir_run(builder, t)
+        self.pulse.ir_run(builder, t)
 
-        child_ctx = ctx.with_child(self.name)
-        pulse_ir = self.pulse.lower(child_ctx)
-        ro_ir = self.ro_window.lower(child_ctx)
+        prog = self.pulse._prog
+        ro_end = t + self.ro_window.total_length(prog)
+        pulse_end = t + self.pulse.total_length(prog)
+        end_t = merge_max_length(ro_end, pulse_end)
 
-        return IRParallel(
-            body=(ro_ir, pulse_ir),
-            end_policy="max",
-            meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
-        )
+        builder.ir_delay(end_t)
+        builder.ir_delay_auto(0.0)
+        return 0.0

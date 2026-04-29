@@ -11,9 +11,8 @@ from .util import round_timestamp
 from .waveform import AbsWaveform, WaveformCfg, resolve_waveform_ref
 
 if TYPE_CHECKING:
+    from zcu_tools.program.v2.ir.builder import IRBuilder
     from zcu_tools.program.v2.modular import ModularProgramV2
-    from zcu_tools.program.v2.lower import LowerCtx
-    from zcu_tools.program.v2.ir import IRNode
 
 
 class PulseCfg(AbsModuleCfg):
@@ -63,6 +62,7 @@ class Pulse(Module):
         self.pulse_id = pulse_id
 
     def init(self, prog: ModularProgramV2) -> None:
+        self._prog = prog
         if self.cfg is None:
             return
 
@@ -130,33 +130,24 @@ class Pulse(Module):
             return t + self.total_length(prog)
         return t
 
-    def lower(self, ctx: LowerCtx) -> IRNode:
-        from ..ir import IRPulse, IRMeta, IRSeq
-
+    def ir_run(
+        self,
+        builder: IRBuilder,
+        t: Union[float, QickParam],
+    ) -> Union[float, QickParam]:
         cfg = self.cfg
         if cfg is None or self.pulse_id is None:
-            return IRSeq()  # empty sequence for None config
+            return t
+
+        builder.ir_pulse(str(cfg.ch), self.pulse_id, t=t + cfg.pre_delay, tag=self.tag)
 
         if not self.block_mode:
-            advance: Union[float, QickParam] = 0.0
-        elif hasattr(self, "waveform") and ctx.prog is not None:
-            # Preferred path inside ModularProgramV2._body_ir(): init() has
-            # populated self.waveform and prog is available, so we can apply
-            # tproc-cycle rounding via total_length().
-            advance = self.total_length(ctx.prog)
-        else:
-            # Unit-test path: prog/waveform not built. Use the raw cfg lengths;
-            # this skips tproc rounding but preserves arithmetic correctness.
-            advance = cfg.pre_delay + cfg.waveform.length + cfg.post_delay
+            return t
 
-        return IRPulse(
-            ch=str(cfg.ch),
-            pulse_name=self.pulse_id,
-            pre_delay=cfg.pre_delay,
-            advance=advance,
-            tag=self.tag,
-            meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
-        )
+        if hasattr(self, "_prog"):
+            return t + self.total_length(self._prog)
+        # unit-test path: prog not available, skip rounding
+        return t + cfg.pre_delay + cfg.waveform.length + cfg.post_delay
 
     def allow_rerun(self) -> bool:
         return True

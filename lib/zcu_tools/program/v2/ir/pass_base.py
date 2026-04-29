@@ -11,13 +11,14 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Optional, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 from .nodes import (
-    IRNode, IRPulse, IRReadout, IRDelay, IRRegOp, IRReadDmem,
-    IRCondJump, IRJump, IRLabel, IRNop, IRSoftDelay,
-    IRSeq, IRLoop, IRRegLoop, IRBranch,
-    IRParallel, IRLeaf, IRComposite
+    IRNode,
+    IRSeq,
+    IRLoop,
+    IRRegLoop,
+    IRBranch,
 )
 
 
@@ -101,16 +102,6 @@ class Pass(ABC):
             transformed_arms = tuple(self._visit(arm, ctx) for arm in node.arms)
             node_with_new_arms = IRBranch(compare_reg=node.compare_reg, arms=transformed_arms, meta=node.meta)
             return self.transform(node_with_new_arms, ctx)
-
-        elif isinstance(node, IRParallel):
-            transformed_body = tuple(self._visit(child, ctx) for child in node.body)
-            node_with_new_body = IRParallel(
-                body=transformed_body,
-                end_policy=node.end_policy,
-                end_index=node.end_index,
-                meta=node.meta,
-            )
-            return self.transform(node_with_new_body, ctx)
 
         else:
             # Leaf node: no children to transform

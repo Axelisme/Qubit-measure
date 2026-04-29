@@ -1,90 +1,93 @@
 """IR node definitions for program/v2 compilation pipeline.
 
-All IR nodes are frozen dataclasses to ensure immutability and enable
-structural sharing. Composite nodes carry metadata about their subtree.
+All IR nodes are frozen dataclasses. Leaf nodes carry a single `t` field
+meaning "relative to the current ref_t". Only IRDelay / IRDelayAuto advance
+ref_t (mirroring QICK hardware semantics).
 """
 
 from __future__ import annotations
 
 from abc import ABC
 from dataclasses import dataclass, field
-from typing import Tuple, Optional, Any, Union, Literal
 from enum import Enum
+from typing import Any, Dict, Optional, Tuple, Union
+
 from qick.asm_v2 import QickParam
 
 
 class RegOp(str, Enum):
     """Register operation codes."""
+
     ADD = "+"
     SUB = "-"
     AND = "&"
     OR = "|"
     XOR = "^"
-    SL = "SL"  # shift left
-    SR = "SR"  # shift right
-    ASR = "ASR"  # arithmetic shift right
+    SL = "SL"
+    SR = "SR"
+    ASR = "ASR"
 
 
 @dataclass(frozen=True)
 class IRMeta:
-    """Metadata attached to IR nodes.
+    """Metadata attached to IR nodes."""
 
-    Preserved throughout passes to track source module, timing, and side effects.
-    """
-    source_module: str = ""  # hierarchical path for diagnostics
-    duration: Optional[float] = None  # computed duration in us; None if contains QickParam
-
-    extra: dict[str, Any] = field(default_factory=dict)  # scratch pad for passes
+    source_module: str = ""
+    duration: Optional[float] = None  # None when subtree contains QickParam
+    extra: Dict[str, Any] = field(default_factory=dict)
 
 
 class IRNode(ABC):
-    """Base class for all IR nodes. Frozen dataclasses ensure immutability."""
+    """Base class for all IR nodes."""
+
     meta: IRMeta
 
 
 # ============================================================================
-# Leaf IR Nodes (atomic operations)
+# Leaf IR Nodes
 # ============================================================================
 
 
 @dataclass(frozen=True)
 class IRPulse(IRNode):
-    """Emit a single pulse on a channel.
+    """Emit a single pulse at time t relative to the current ref_t."""
 
-    ``advance`` is the total t-increment after this module
-    (= pre_delay + waveform length + post_delay when block_mode=True;
-    = 0 when block_mode=False). post_delay is intentionally not stored —
-    it would duplicate information already in ``advance``.
-    """
     ch: str
     pulse_name: str
-    pre_delay: Union[float, QickParam]  # delay before pulse emission (us)
-    advance: Union[float, QickParam]  # t increment after this module
+    t: Union[float, QickParam]
     tag: Optional[str] = None
     meta: IRMeta = field(default_factory=IRMeta)
 
 
 @dataclass(frozen=True)
 class IRReadout(IRNode):
-    """Trigger readout on channels."""
+    """Trigger readout; t is relative to current ref_t (trig_offset folded in by caller)."""
+
     ch: str
-    ro_chs: Tuple[str, ...]  # readout channels to trigger
+    ro_chs: Tuple[str, ...]
     pulse_name: str
-    trig_offset: Union[float, QickParam]  # timing offset for trigger pulse (us)
+    t: Union[float, QickParam]
     meta: IRMeta = field(default_factory=IRMeta)
 
 
 @dataclass(frozen=True)
 class IRDelay(IRNode):
-    """Delay execution.
+    """Delay: advances ref_t by t."""
 
-    Attributes:
-        duration: delay duration in us (or float/QickParam expression)
-        auto: if True, auto-aligns to max active channel timestamp before delay
-        tag: optional barrier tag; tagged delays are not fused or moved by passes
+    t: Union[float, QickParam]
+    tag: Optional[str] = None
+    meta: IRMeta = field(default_factory=IRMeta)
+
+
+@dataclass(frozen=True)
+class IRDelayAuto(IRNode):
+    """HW-align then advance ref_t by t (usually 0).
+
+    When t is a str, it names a runtime register (delay_reg_auto path).
+    A tagged delay cannot use a register t.
     """
-    duration: Union[float, QickParam, str]  # float/QickParam(us) or runtime reg(str)
-    auto: bool = False
+
+    t: Union[float, QickParam, str] = 0.0
     gens: bool = True
     ros: bool = True
     tag: Optional[str] = None
@@ -92,51 +95,49 @@ class IRDelay(IRNode):
 
 
 @dataclass(frozen=True)
-class IRSoftDelay(IRNode):
-    """Timeline-only delay that does not emit any macro."""
-    duration: Union[float, QickParam]
-    meta: IRMeta = field(default_factory=IRMeta)
-
-
-@dataclass(frozen=True)
 class IRRegOp(IRNode):
     """Register arithmetic: dst = lhs <op> rhs."""
-    dst: str  # destination register
-    lhs: str  # left operand register
-    op: RegOp  # operation
-    rhs: Union[int, str, None]  # right operand: literal int, register, or None (copy)
+
+    dst: str
+    lhs: str
+    op: RegOp
+    rhs: Union[int, str, None]
     meta: IRMeta = field(default_factory=IRMeta)
 
 
 @dataclass(frozen=True)
 class IRReadDmem(IRNode):
-    """Read value from DMEM (data memory)."""
-    dst: str  # destination register
-    addr: str  # address register or literal
+    """Read value from DMEM."""
+
+    dst: str
+    addr: str
     meta: IRMeta = field(default_factory=IRMeta)
 
 
 @dataclass(frozen=True)
 class IRCondJump(IRNode):
     """Conditional jump: if (arg1 <test> arg2) goto target."""
-    target: str  # label to jump to
-    arg1: str  # register to test
-    test: str  # test code: "Z" (==0), "S" (<0), "N" (>0)
-    op: Optional[str] = None  # optional operation: "-", "+"
-    arg2: Union[int, str, None] = None  # operand for operation
+
+    target: str
+    arg1: str
+    test: str
+    op: Optional[str] = None
+    arg2: Union[int, str, None] = None
     meta: IRMeta = field(default_factory=IRMeta)
 
 
 @dataclass(frozen=True)
 class IRJump(IRNode):
     """Unconditional jump."""
-    target: str  # label to jump to
+
+    target: str
     meta: IRMeta = field(default_factory=IRMeta)
 
 
 @dataclass(frozen=True)
 class IRLabel(IRNode):
     """Label definition."""
+
     name: str
     meta: IRMeta = field(default_factory=IRMeta)
 
@@ -144,6 +145,7 @@ class IRLabel(IRNode):
 @dataclass(frozen=True)
 class IRNop(IRNode):
     """No-operation instruction (used for padding)."""
+
     meta: IRMeta = field(default_factory=IRMeta)
 
 
@@ -155,75 +157,49 @@ class IRNop(IRNode):
 @dataclass(frozen=True)
 class IRSeq(IRNode):
     """Sequential composition of IR nodes."""
+
     body: Tuple[IRNode, ...] = field(default_factory=tuple)
     meta: IRMeta = field(default_factory=IRMeta)
 
 
 @dataclass(frozen=True)
 class IRLoop(IRNode):
-    """Counted loop: repeat body n times.
+    """Counted loop: repeat body n times."""
 
-    Translates to QICK OpenLoop/CloseLoop pair.
-    """
     name: str
-    n: int  # loop count (must be constant at IR level)
+    n: int
     body: IRNode
     meta: IRMeta = field(default_factory=IRMeta)
 
 
 @dataclass(frozen=True)
 class IRRegLoop(IRNode):
-    """Register-driven loop: repeat body n_reg times.
+    """Register-driven loop: repeat body n_reg times."""
 
-    The loop count is stored in a runtime register.
-    Translates to QICK OpenLoopReg/CloseLoopReg pair.
-    """
     name: str
-    n_reg: str  # register holding loop count
+    n_reg: str
     body: IRNode
     meta: IRMeta = field(default_factory=IRMeta)
 
 
 @dataclass(frozen=True)
 class IRBranch(IRNode):
-    """N-way dispatch based on register comparison.
+    """N-way dispatch based on register comparison."""
 
-    Emitter builds binary tree; pass adds NOP padding to align paths.
-
-    Attributes:
-        compare_reg: register to test
-        arms: tuple of IR nodes for each branch
-    """
     compare_reg: str
     arms: Tuple[IRNode, ...] = field(default_factory=tuple)
     meta: IRMeta = field(default_factory=IRMeta)
 
 
-@dataclass(frozen=True)
-class IRParallel(IRNode):
-    """Emit all children from same start-t, then merge end-t by policy.
-
-    ``disable_delay``: when True, wrap child emission in prog.disable_delay()
-    so any nested IRDelay/IRSeq does not corrupt the timeline. Used by Join
-    to mirror its legacy interleaved-execution behavior. Default False matches
-    PulseReadout / TwoPulseReset / BathReset (parallel pulses only).
-    """
-    body: Tuple[IRNode, ...] = field(default_factory=tuple)
-    end_policy: Literal["max", "index"] = "max"
-    end_index: int = 0
-    disable_delay: bool = False
-    meta: IRMeta = field(default_factory=IRMeta)
-
-
 # ============================================================================
-# Type aliases for visitor pattern
+# Type aliases
 # ============================================================================
 
 IRLeaf = Union[
     IRPulse,
     IRReadout,
     IRDelay,
-    IRSoftDelay,
+    IRDelayAuto,
     IRRegOp,
     IRReadDmem,
     IRCondJump,
@@ -231,4 +207,4 @@ IRLeaf = Union[
     IRLabel,
     IRNop,
 ]
-IRComposite = Union[IRSeq, IRLoop, IRRegLoop, IRBranch, IRParallel]
+IRComposite = Union[IRSeq, IRLoop, IRRegLoop, IRBranch]
