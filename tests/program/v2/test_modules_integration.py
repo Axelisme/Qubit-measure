@@ -372,9 +372,6 @@ class TestDmemIntegration:
     def _scan_values_large(self):
         return list(range(40))
 
-    def _scan_values_signed(self):
-        return list(range(-20, 20))
-
     def test_load_value_small_uncompressed(self):
         # 5 values → below compression threshold (30), stays uncompressed
         lv = LoadValue(
@@ -396,15 +393,9 @@ class TestDmemIntegration:
         assert prog.binprog is not None
         assert lv._is_compressed
 
-    def test_load_value_signed_large(self):
-        vals = self._scan_values_signed()
-        lv = LoadValue("lv", vals, idx_reg="myloop", val_reg="myval")
-        r = Repeat("myloop", len(vals))
-        r.add_content(lv)
-        prog = _make_prog(modules=[r])
-        assert prog.binprog is not None
-        assert lv._is_compressed
-        assert lv._signed_mode
+    def test_load_value_negative_rejected(self):
+        with pytest.raises(ValueError, match="non-negative"):
+            LoadValue("lv", [-1, 0, 1], idx_reg="myloop", val_reg="myval")
 
     def test_compile_datamem_not_none(self):
         vals = self._scan_values_large()

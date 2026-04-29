@@ -32,6 +32,8 @@ class LoadValue(Module):
         self.values = [int(v) for v in values]
         if len(self.values) == 0:
             raise ValueError("LoadValue requires a non-empty values sequence")
+        if any(v < 0 for v in self.values):
+            raise ValueError("LoadValue values must be non-negative integers")
         self.use_existed = use_existed
         self.auto_compress = auto_compress
 
@@ -43,13 +45,10 @@ class LoadValue(Module):
 
         self._packed_values: list[int] = list(self.values)
         self._is_compressed = False
-        self._signed_mode = False
         self._bits_per_value = 32
         self._values_per_word = 1
         self._slot_mask = 0
         self._value_mask = 0xFFFFFFFF
-        self._sign_bit_mask = 0
-        self._sign_bias = 0
         self._word_shift = 0
         self._bits_shift = 0
 
@@ -109,36 +108,16 @@ class LoadValue(Module):
 
             prog.write_reg_op(self.val_reg, self.val_reg, "AND", self._value_mask)
 
-            if self._signed_mode:
-                sign_clear_label = f"{self.name}_sign_clear"
-                # skip the bias subtraction when the sign bit is clear
-                prog.cond_jump(
-                    sign_clear_label, self.val_reg, "Z", "&", self._sign_bit_mask
-                )
-                prog.inc_reg(self.val_reg, -self._sign_bias)
-                prog.label(sign_clear_label)
-
         return t
 
     def allow_rerun(self) -> bool:
-        return not self._is_compressed or not self._signed_mode
+        return True
 
     @staticmethod
-    def _bits_needed_unsigned(value: int) -> int:
+    def _bits_needed(value: int) -> int:
         if value < 0:
             raise ValueError("unsigned bit width requires non-negative value")
         return max(1, value.bit_length())
-
-    @staticmethod
-    def _bits_needed_signed(min_value: int, max_value: int) -> int:
-        for bits in range(2, 33):
-            lower = -(1 << (bits - 1))
-            upper = (1 << (bits - 1)) - 1
-            if lower <= min_value and max_value <= upper:
-                return bits
-        raise ValueError(
-            f"values out of signed 32-bit range: min={min_value}, max={max_value}"
-        )
 
     def _pack_values(self, bits_per_value: int, value_mask: int) -> list[int]:
         packed: list[int] = []
@@ -156,14 +135,8 @@ class LoadValue(Module):
         if not self.auto_compress or len(self.values) < 30:
             return
 
-        min_value = min(self.values)
         max_value = max(self.values)
-        self._signed_mode = min_value < 0
-
-        if self._signed_mode:
-            bits = self._bits_needed_signed(min_value, max_value)
-        else:
-            bits = self._bits_needed_unsigned(max_value)
+        bits = self._bits_needed(max_value)
 
         # Round bits up to a power of 2 so the shift amount is always
         # (slot << bits_shift), avoiding a dmem shift table. This never hurts
@@ -187,10 +160,6 @@ class LoadValue(Module):
         self._word_shift = int(math.log2(values_per_word))
         self._bits_shift = int(math.log2(bits))
         self._packed_values = self._pack_values(bits, value_mask)
-
-        if self._signed_mode:
-            self._sign_bit_mask = 1 << (bits - 1)
-            self._sign_bias = 1 << bits
 
 
 class ScanWith(Module):
