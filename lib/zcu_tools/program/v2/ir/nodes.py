@@ -60,6 +60,16 @@ class IRPulse(IRNode):
 
 
 @dataclass(frozen=True)
+class IRSendReadoutConfig(IRNode):
+    """Send readout configuration at time t."""
+
+    ch: str
+    pulse_name: str
+    t: Union[float, QickParam]
+    meta: IRMeta = field(default_factory=IRMeta)
+
+
+@dataclass(frozen=True)
 class IRReadout(IRNode):
     """Trigger readout; t is relative to current ref_t (trig_offset folded in by caller)."""
 
@@ -67,6 +77,17 @@ class IRReadout(IRNode):
     ro_chs: Tuple[str, ...]
     pulse_name: str
     t: Union[float, QickParam]
+    meta: IRMeta = field(default_factory=IRMeta)
+
+
+@dataclass(frozen=True)
+class IRPulseWmemReg(IRNode):
+    """Play pulse from runtime-computed wmem address register."""
+
+    ch: int
+    addr_reg: str
+    t: Union[float, QickParam]
+    flat_top_pulse: bool = False
     meta: IRMeta = field(default_factory=IRMeta)
 
 
@@ -197,7 +218,9 @@ class IRBranch(IRNode):
 
 IRLeaf = Union[
     IRPulse,
+    IRSendReadoutConfig,
     IRReadout,
+    IRPulseWmemReg,
     IRDelay,
     IRDelayAuto,
     IRRegOp,

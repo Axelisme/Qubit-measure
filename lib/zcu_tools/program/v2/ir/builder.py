@@ -24,6 +24,8 @@ from .nodes import (
     IRNode,
     IRNop,
     IRPulse,
+    IRPulseWmemReg,
+    IRSendReadoutConfig,
     IRReadDmem,
     IRReadout,
     IRRegLoop,
@@ -90,12 +92,36 @@ class IRBuilder:
     ) -> None:
         self._emit(IRReadout(ch=ch, ro_chs=ro_chs, pulse_name=pulse_name, t=t))
 
+    def ir_send_readoutconfig(
+        self,
+        ch: str,
+        pulse_name: str,
+        t: Union[float, QickParam],
+    ) -> None:
+        self._emit(IRSendReadoutConfig(ch=ch, pulse_name=pulse_name, t=t))
+
     def ir_delay(
         self,
         t: Union[float, QickParam],
         tag: Optional[str] = None,
     ) -> None:
         self._emit(IRDelay(t=t, tag=tag))
+
+    def ir_pulse_wmem_reg(
+        self,
+        ch: int,
+        addr_reg: str,
+        t: Union[float, QickParam] = 0.0,
+        flat_top_pulse: bool = False,
+    ) -> None:
+        self._emit(
+            IRPulseWmemReg(
+                ch=ch,
+                addr_reg=addr_reg,
+                t=t,
+                flat_top_pulse=flat_top_pulse,
+            )
+        )
 
     def ir_delay_auto(
         self,
@@ -110,10 +136,11 @@ class IRBuilder:
         self,
         dst: str,
         lhs: str,
-        op: RegOp,
+        op: Union[RegOp, str],
         rhs: Union[int, str, None],
     ) -> None:
-        self._emit(IRRegOp(dst=dst, lhs=lhs, op=op, rhs=rhs))
+        reg_op = op if isinstance(op, RegOp) else RegOp(op)
+        self._emit(IRRegOp(dst=dst, lhs=lhs, op=reg_op, rhs=rhs))
 
     def ir_read_dmem(self, dst: str, addr: str) -> None:
         self._emit(IRReadDmem(dst=dst, addr=addr))

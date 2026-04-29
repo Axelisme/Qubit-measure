@@ -38,7 +38,7 @@ class Delay(Module):
         t: Union[float, QickParam],
         prog: ModularProgramV2,
     ) -> Union[float, QickParam]:
-        builder.ir_delay(self.delay, tag=self.tag)
+        builder.ir_delay(t=round_timestamp(prog, self.delay), tag=self.tag)
         return 0.0
 
     def allow_rerun(self) -> bool:
@@ -65,8 +65,9 @@ class SoftDelay(Module):
         t: Union[float, QickParam],
         prog: ModularProgramV2,
     ) -> Union[float, QickParam]:
-        # SoftDelay advances the timeline without emitting any instruction
-        return t + self.delay
+        # Keep legacy semantics: SoftDelay returns its own rounded delay and
+        # does not accumulate with incoming t.
+        return round_timestamp(prog, self.delay)
 
     def allow_rerun(self) -> bool:
         return True

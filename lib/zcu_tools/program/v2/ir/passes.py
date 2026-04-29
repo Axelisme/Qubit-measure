@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Dict, Optional, cast
+from typing import Dict, List, Optional, cast
 
 from .nodes import (
     IRBranch,
@@ -17,13 +17,15 @@ from .nodes import (
     IRNode,
     IRNop,
     IRPulse,
+    IRPulseWmemReg,
     IRReadDmem,
     IRReadout,
+    IRSendReadoutConfig,
     IRRegLoop,
     IRRegOp,
     IRSeq,
 )
-from .pass_base import Pass, PassCtx
+from .pass_base import Pass, PassConfig, PassCtx, PassPipeline
 
 
 class FreshLabels(Pass):
@@ -96,6 +98,23 @@ class EstimateDurations(Pass):
                 pulse_name=node.pulse_name,
                 t=node.t,
                 tag=node.tag,
+                meta=self._with_dur(node.meta, 0.0),
+            )
+
+        elif isinstance(node, IRPulseWmemReg):
+            return IRPulseWmemReg(
+                ch=node.ch,
+                addr_reg=node.addr_reg,
+                t=node.t,
+                flat_top_pulse=node.flat_top_pulse,
+                meta=self._with_dur(node.meta, 0.0),
+            )
+
+        elif isinstance(node, IRSendReadoutConfig):
+            return IRSendReadoutConfig(
+                ch=node.ch,
+                pulse_name=node.pulse_name,
+                t=node.t,
                 meta=self._with_dur(node.meta, 0.0),
             )
 
@@ -207,3 +226,151 @@ class EstimateDurations(Pass):
             return IRNop(meta=self._with_dur(node.meta, 0.0))
         else:
             return node
+
+
+class UnrollShortLoops(Pass):
+    """Unroll small-count loops with short known body duration."""
+
+    def transform(self, node: IRNode, ctx: PassCtx) -> IRNode:
+        if not isinstance(node, IRLoop):
+            return node
+
+        body_dur = node.body.meta.duration
+        if body_dur is None:
+            return node
+        if body_dur > ctx.config.min_body_us:
+            return node
+
+        max_unroll_iters = int(ctx.config.extra.get("max_unroll_iters", 16))
+        if node.n > max_unroll_iters:
+            ctx.warn(
+                f"skip unroll loop '{node.name}': n={node.n} exceeds max_unroll_iters={max_unroll_iters}"
+            )
+            return node
+
+        if node.n <= 0:
+            return IRSeq(body=(), meta=node.meta)
+        if node.n == 1:
+            return node.body
+
+        unrolled: List[IRNode] = []
+        for _ in range(node.n):
+            unrolled.append(node.body)
+        return IRSeq(body=tuple(unrolled), meta=node.meta)
+
+
+class FuseAdjacentDelays(Pass):
+    """Fuse adjacent numeric IRDelay nodes to reduce macro count."""
+
+    def transform(self, node: IRNode, ctx: PassCtx) -> IRNode:
+        if not isinstance(node, IRSeq):
+            return node
+        if not ctx.config.enable_fusion:
+            return node
+
+        fused: List[IRNode] = []
+        linear_body: List[IRNode] = []
+        for child in node.body:
+            if isinstance(child, IRSeq):
+                linear_body.extend(child.body)
+            else:
+                linear_body.append(child)
+
+        for child in linear_body:
+            if (
+                fused
+                and isinstance(fused[-1], IRDelay)
+                and isinstance(child, IRDelay)
+                and isinstance(fused[-1].t, (int, float))
+                and isinstance(child.t, (int, float))
+                and fused[-1].tag == child.tag
+            ):
+                prev = cast(IRDelay, fused.pop())
+                fused.append(
+                    IRDelay(
+                        t=float(prev.t) + float(child.t),
+                        tag=prev.tag,
+                        meta=prev.meta,
+                    )
+                )
+            else:
+                fused.append(child)
+
+        return IRSeq(body=tuple(fused), meta=node.meta)
+
+
+class AlignBranchDispatch(Pass):
+    """Pad branch arms with IRNop so arm dispatch paths are balanced."""
+
+    def transform(self, node: IRNode, ctx: PassCtx) -> IRNode:
+        if not isinstance(node, IRBranch):
+            return node
+        if not ctx.config.enable_align_branches:
+            return node
+        if len(node.arms) < 2:
+            return node
+
+        arm_costs = [self._inst_cost(arm) for arm in node.arms]
+        if any(cost is None for cost in arm_costs):
+            ctx.warn("skip branch alignment: non-static arm cost detected")
+            return node
+
+        known_costs = cast(List[int], arm_costs)
+        max_cost = max(known_costs)
+        new_arms: List[IRNode] = []
+        for arm, cost in zip(node.arms, known_costs):
+            pad = max_cost - cost
+            if pad <= 0:
+                new_arms.append(arm)
+                continue
+            arm_seq = arm if isinstance(arm, IRSeq) else IRSeq(body=(arm,))
+            padded_body = arm_seq.body + tuple(IRNop() for _ in range(pad))
+            new_arms.append(IRSeq(body=padded_body, meta=arm_seq.meta))
+        return IRBranch(compare_reg=node.compare_reg, arms=tuple(new_arms), meta=node.meta)
+
+    def _inst_cost(self, node: IRNode) -> Optional[int]:
+        if isinstance(node, IRSeq):
+            total = 0
+            for child in node.body:
+                c = self._inst_cost(child)
+                if c is None:
+                    return None
+                total += c
+            return total
+        if isinstance(node, IRLoop):
+            body = self._inst_cost(node.body)
+            return None if body is None else 2 + body * node.n
+        if isinstance(node, IRRegLoop):
+            return None
+        if isinstance(node, IRBranch):
+            arm_costs = [self._inst_cost(arm) for arm in node.arms]
+            if any(c is None for c in arm_costs):
+                return None
+            return 1 + max(cast(List[int], arm_costs))
+        return 1
+
+
+class ValidateInvariants(Pass):
+    """Structural validations for emitter assumptions."""
+
+    def transform(self, node: IRNode, ctx: PassCtx) -> IRNode:
+        if isinstance(node, IRBranch) and len(node.arms) < 2:
+            ctx.error("IRBranch requires at least 2 arms")
+        if isinstance(node, IRDelayAuto) and isinstance(node.t, str) and node.tag is not None:
+            ctx.error("IRDelayAuto tag is invalid when t is register name")
+        return node
+
+
+def make_default_pipeline(config: PassConfig | None = None) -> PassPipeline:
+    """Build the default optimization + validation pipeline."""
+    return PassPipeline(
+        passes=[
+            FreshLabels(),
+            EstimateDurations(),
+            UnrollShortLoops(),
+            FuseAdjacentDelays(),
+            AlignBranchDispatch(),
+            ValidateInvariants(),
+        ],
+        config=config,
+    )

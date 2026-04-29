@@ -7,6 +7,7 @@ from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 
 if TYPE_CHECKING:
+    from zcu_tools.program.v2.ir.builder import IRBuilder
     from zcu_tools.program.v2.modular import ModularProgramV2
 
 
@@ -95,6 +96,31 @@ class ComputedPulse(Module):
                 prog.write_reg_op(addr_reg, addr_reg, "+", self.val_reg)
                 prog.write_reg_op(addr_reg, addr_reg, "+", self.wmem_offset)
             prog.pulse_wmem_reg(
+                ref_cfg.ch,
+                addr_reg,
+                t=t + ref_cfg.pre_delay,
+                flat_top_pulse=self._is_flat_top,
+            )
+
+        return t + self.total_length(prog)
+
+    def ir_run(
+        self,
+        builder: IRBuilder,
+        t: Union[float, QickParam],
+        prog: ModularProgramV2,
+    ) -> Union[float, QickParam]:
+        ref_cfg = self.ref_cfg
+        with prog.acquire_temp_reg(1) as (addr_reg,):
+            # base = wmem_offset + gate_idx * stride
+            if self._stride == 1:
+                builder.ir_reg_op(addr_reg, self.val_reg, "+", self.wmem_offset)
+            else:
+                # x*3 = (x<<1) + x; avoid multiplication dependence.
+                builder.ir_reg_op(addr_reg, self.val_reg, "SL", 1)
+                builder.ir_reg_op(addr_reg, addr_reg, "+", self.val_reg)
+                builder.ir_reg_op(addr_reg, addr_reg, "+", self.wmem_offset)
+            builder.ir_pulse_wmem_reg(
                 ref_cfg.ch,
                 addr_reg,
                 t=t + ref_cfg.pre_delay,

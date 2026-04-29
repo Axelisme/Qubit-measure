@@ -4,16 +4,26 @@ from __future__ import annotations
 
 import pytest
 
-from .ir import IRDelay, IRDelayAuto, IRMeta, IRPulse, IRReadout
-from .ir.builder import IRBuilder
-from .lower import Emitter
-from .modules.pulse import Pulse
-from .modules.reset import NoneReset, NoneResetCfg
+from zcu_tools.program.v2.ir import (
+    IRBranch,
+    IRDelay,
+    IRDelayAuto,
+    IRMeta,
+    IRNop,
+    IRPulse,
+    IRReadout,
+    IRSendReadoutConfig,
+    IRSeq,
+)
+from zcu_tools.program.v2.ir.builder import IRBuilder
+from zcu_tools.program.v2.lower import Emitter
+from zcu_tools.program.v2.modules.pulse import Pulse
+from zcu_tools.program.v2.modules.reset import NoneReset, NoneResetCfg
 
 
 def test_feature_flag_env(monkeypatch) -> None:
     """ZCU_TOOLS_USE_IR is read per-call so notebooks can toggle live."""
-    from .modular import _ir_enabled
+    from zcu_tools.program.v2.modular import _ir_enabled
 
     monkeypatch.delenv("ZCU_TOOLS_USE_IR", raising=False)
     assert _ir_enabled() is False
@@ -100,10 +110,10 @@ def test_emitter_readout_sends_config_and_triggers() -> None:
     prog = _DummyProg()
     emitter = Emitter(prog)  # type: ignore[arg-type]
 
-    node = IRReadout(ch="1", ro_chs=("1",), pulse_name="ro_cfg", t=0.5)
-    emitter.emit(node)
+    emitter.emit(IRSendReadoutConfig(ch="1", pulse_name="ro_cfg", t=0.0))
+    emitter.emit(IRReadout(ch="1", ro_chs=("1",), pulse_name="ro_cfg", t=0.5))
 
-    assert ("send_readoutconfig", 1, "ro_cfg", 0.5) in prog.calls
+    assert ("send_readoutconfig", 1, "ro_cfg", 0.0) in prog.calls
     assert ("trigger", (1,), 0.5) in prog.calls
 
 
@@ -138,20 +148,47 @@ def test_emitter_delay_auto_register() -> None:
 
 
 def test_emitter_seq_order() -> None:
-    from .ir.nodes import IRSeq
     prog = _DummyProg()
     emitter = Emitter(prog)  # type: ignore[arg-type]
 
-    node = IRSeq(body=(
-        IRPulse(ch="0", pulse_name="p1", t=0.0),
-        IRDelay(t=1.0),
-        IRPulse(ch="0", pulse_name="p2", t=0.0),
-    ))
+    node = IRSeq(
+        body=(
+            IRPulse(ch="0", pulse_name="p1", t=0.0),
+            IRDelay(t=1.0),
+            IRPulse(ch="0", pulse_name="p2", t=0.0),
+        )
+    )
     emitter.emit(node)
 
     names = [c[2] for c in prog.calls if c[0] == "pulse"]
     assert names == ["p1", "p2"]
     assert ("delay", 1.0, None) in prog.calls
+
+
+def test_emitter_branch_binary_dispatch() -> None:
+    prog = _DummyProg()
+    emitter = Emitter(prog)  # type: ignore[arg-type]
+
+    node = IRBranch(
+        compare_reg="sel",
+        arms=(
+            IRSeq(body=(IRNop(), IRDelay(0.1))),
+            IRSeq(body=(IRDelay(0.2),)),
+            IRSeq(body=(IRDelay(0.3),)),
+        ),
+    )
+    emitter.emit(node)
+
+    cond_calls = [c for c in prog.calls if c[0] == "cond_jump"]
+    assert len(cond_calls) == 2
+    mids = sorted(c[5] for c in cond_calls)
+    assert mids == [1, 2]
+    assert all(c[2] == "sel" for c in cond_calls)
+
+    # Branch labels must be unique and deterministic per branch node.
+    labels = [c[1] for c in prog.calls if c[0] == "label"]
+    assert "irb0_l_0_1" in labels
+    assert "irb0_l_1_2" in labels
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +197,7 @@ def test_emitter_seq_order() -> None:
 
 
 def test_builder_scope_loop() -> None:
-    from .ir.nodes import IRLoop, IRSeq
+    from zcu_tools.program.v2.ir.nodes import IRLoop, IRSeq
 
     b = IRBuilder()
     b.ir_delay(0.0)
@@ -187,7 +224,7 @@ def test_builder_unclosed_scope_raises() -> None:
 
 
 def test_builder_branch_arms() -> None:
-    from .ir.nodes import IRBranch
+    from zcu_tools.program.v2.ir.nodes import IRBranch
 
     b = IRBuilder()
     with b.ir_branch("reg0") as branch:

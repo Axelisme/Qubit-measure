@@ -16,6 +16,8 @@ from .nodes import (
     IRNode,
     IRNop,
     IRPulse,
+    IRPulseWmemReg,
+    IRSendReadoutConfig,
     IRReadDmem,
     IRReadout,
     IRRegLoop,
@@ -24,12 +26,23 @@ from .nodes import (
     RegOp,
 )
 from .pass_base import Pass, PassConfig, PassCtx
+from .passes import (
+    AlignBranchDispatch,
+    EstimateDurations,
+    FreshLabels,
+    FuseAdjacentDelays,
+    UnrollShortLoops,
+    ValidateInvariants,
+    make_default_pipeline,
+)
 
 __all__ = [
     "IRBuilder",
     "IRMeta",
     "IRNode",
     "IRPulse",
+    "IRPulseWmemReg",
+    "IRSendReadoutConfig",
     "IRReadout",
     "IRDelay",
     "IRDelayAuto",
@@ -47,4 +60,11 @@ __all__ = [
     "Pass",
     "PassConfig",
     "PassCtx",
+    "FreshLabels",
+    "EstimateDurations",
+    "UnrollShortLoops",
+    "FuseAdjacentDelays",
+    "AlignBranchDispatch",
+    "ValidateInvariants",
+    "make_default_pipeline",
 ]

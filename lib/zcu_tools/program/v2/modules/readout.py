@@ -137,7 +137,7 @@ class DirectReadout(AbsReadout):
     ) -> Union[float, QickParam]:
         ro_ch = self.cfg.ro_ch
         trig_offset = self.cfg.trig_offset
-        prog.send_readoutconfig(ro_ch, self.name, t=t)  # type: ignore
+        prog.send_readoutconfig(ro_ch, self.name, t=0.0)  # type: ignore
         prog.trigger([ro_ch], t=t + trig_offset)
         return t
 
@@ -145,6 +145,11 @@ class DirectReadout(AbsReadout):
         self, builder: IRBuilder, t: Union[float, QickParam], prog: ModularProgramV2
     ) -> Union[float, QickParam]:
         ro_ch = str(self.cfg.ro_ch)
+        builder.ir_send_readoutconfig(
+            ch=ro_ch,
+            pulse_name=self.name,
+            t=0.0,
+        )
         builder.ir_readout(
             ch=ro_ch,
             ro_chs=(ro_ch,),

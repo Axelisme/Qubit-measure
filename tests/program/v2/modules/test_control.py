@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from qick.asm_v2 import QickParam
+from zcu_tools.program.v2.ir.builder import IRBuilder
+from zcu_tools.program.v2.ir.nodes import IRBranch, IRDelay, IRDelayAuto, IRLoop, IRSeq
 from zcu_tools.program.v2.modules.base import Module
-from zcu_tools.program.v2.modules.control import Branch
+from zcu_tools.program.v2.modules.control import Branch, Repeat, SoftRepeat
 
 
 class _FixedDurationModule(Module):
@@ -13,11 +15,14 @@ class _FixedDurationModule(Module):
     def init(self, prog) -> None:
         pass
 
-    def run(self, prog, t=0.0):
+    def run(self, prog, t: float | QickParam = 0.0) -> float | QickParam:
         return self.duration
 
     def allow_rerun(self) -> bool:
         return True
+
+    def ir_run(self, builder, t: float | QickParam, prog) -> float | QickParam:
+        return self.duration
 
 
 def test_branch_uses_binary_dispatch_cond_jump(mock_prog):
@@ -70,7 +75,7 @@ def test_branch_power_of_two_has_no_nop_padding(mock_prog):
 
 def test_branch_rejects_qickparam_duration(mock_prog):
     class _QickParamDurationModule(_FixedDurationModule):
-        def run(self, prog, t=0.0):
+        def run(self, prog, t: float | QickParam = 0.0) -> float | QickParam:
             return QickParam(start=0.1)
 
     b = Branch(
@@ -85,3 +90,50 @@ def test_branch_rejects_qickparam_duration(mock_prog):
         assert "swept duration" in str(exc)
     else:
         raise AssertionError("Expected NotImplementedError for QickParam branch duration")
+
+
+def test_repeat_ir_run_emits_loop(mock_prog):
+    r = Repeat("r", 3).add_content(_FixedDurationModule("d", 0.2))
+    b = IRBuilder()
+
+    out = r.ir_run(b, t=0.25, prog=mock_prog)
+    root = b.build()
+
+    assert out == 0.0
+    assert isinstance(root, IRSeq)
+    assert isinstance(root.body[0], IRDelay)
+    assert isinstance(root.body[1], IRDelayAuto)
+    assert isinstance(root.body[2], IRLoop)
+
+
+def test_soft_repeat_ir_run_unrolls(mock_prog):
+    s = SoftRepeat("sr", 2).add_content(_FixedDurationModule("d", 0.1))
+    b = IRBuilder()
+
+    out = s.ir_run(b, t=0.0, prog=mock_prog)
+    root = b.build()
+
+    assert out == 0.1
+    assert isinstance(root, IRSeq)
+    assert len(root.body) == 0
+
+
+def test_branch_ir_run_emits_ir_branch_and_final_delay_auto(mock_prog):
+    bmod = Branch(
+        "sel",
+        [_FixedDurationModule("b0", 0.1)],
+        [_FixedDurationModule("b1", 0.2)],
+        [_FixedDurationModule("b2", 0.3)],
+    )
+    b = IRBuilder()
+
+    out = bmod.ir_run(b, t=0.25, prog=mock_prog)
+    root = b.build()
+
+    assert out == 0.0
+    assert isinstance(root, IRSeq)
+    assert isinstance(root.body[0], IRDelay)
+    assert isinstance(root.body[1], IRDelayAuto)
+    assert isinstance(root.body[2], IRBranch)
+    assert isinstance(root.body[3], IRDelayAuto)
+    assert len(root.body[2].arms) == 3

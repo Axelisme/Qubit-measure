@@ -7,6 +7,7 @@ from qick.asm_v2 import QickParam
 from typing_extensions import TYPE_CHECKING, Self, Sequence, TypeAlias, Union
 
 if TYPE_CHECKING:
+    from zcu_tools.program.v2.ir.builder import IRBuilder
     from zcu_tools.program.v2.modular import ModularProgramV2
 
 
@@ -113,6 +114,44 @@ class LoadValue(Module):
     def allow_rerun(self) -> bool:
         return True
 
+    def ir_run(
+        self,
+        builder: IRBuilder,
+        t: Union[float, QickParam],
+        prog: ModularProgramV2,
+    ) -> Union[float, QickParam]:
+        temp_reg_num = 2 if self._is_compressed else 1
+        with prog.acquire_temp_reg(temp_reg_num) as (addr_reg, *other_regs):
+            if self._is_compressed:
+                word_reg = other_regs[0]
+            else:
+                word_reg = ""
+
+            if not self._is_compressed:
+                # addr = idx [+ offset]
+                if self.offset == 0:
+                    builder.ir_reg_op(addr_reg, self.idx_reg, "+", None)
+                else:
+                    builder.ir_reg_op(addr_reg, self.idx_reg, "+", self.offset)
+                builder.ir_read_dmem(dst=self.val_reg, addr=addr_reg)
+                return t
+
+            # addr = (idx ASR #word_shift) [+ #offset]
+            builder.ir_reg_op(addr_reg, self.idx_reg, "ASR", self._word_shift)
+            if self.offset != 0:
+                builder.ir_reg_op(addr_reg, addr_reg, "+", self.offset)
+            builder.ir_read_dmem(dst=word_reg, addr=addr_reg)
+
+            # shift = (idx AND #slot_mask) [SL #bits_shift]
+            shift_reg = addr_reg
+            builder.ir_reg_op(shift_reg, self.idx_reg, "&", self._slot_mask)
+            if self._bits_shift > 0:
+                builder.ir_reg_op(shift_reg, shift_reg, "SL", self._bits_shift)
+            builder.ir_reg_op(self.val_reg, word_reg, "ASR", shift_reg)
+            builder.ir_reg_op(self.val_reg, self.val_reg, "&", self._value_mask)
+
+        return t
+
     @staticmethod
     def _bits_needed(value: int) -> int:
         if value < 0:
@@ -191,3 +230,11 @@ class ScanWith(Module):
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
         return self.repeat_mod.run(prog, t)
+
+    def ir_run(
+        self,
+        builder: IRBuilder,
+        t: Union[float, QickParam],
+        prog: ModularProgramV2,
+    ) -> Union[float, QickParam]:
+        return self.repeat_mod.ir_run(builder, t, prog)

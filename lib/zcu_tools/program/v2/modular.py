@@ -20,6 +20,11 @@ def _ir_enabled() -> bool:
     return os.getenv("ZCU_TOOLS_USE_IR", "false").lower() in ("true", "1", "yes")
 
 
+def _ir_opt_enabled() -> bool:
+    """Toggle IR optimization passes while Phase 3R is under rollout."""
+    return os.getenv("ZCU_TOOLS_IR_OPT", "false").lower() in ("true", "1", "yes")
+
+
 class ModularProgramV2(MyProgramV2):
     """
     A class that allows custom behavior based on the provided modules.
@@ -83,6 +88,7 @@ class ModularProgramV2(MyProgramV2):
     def _body_ir(self, cfg: ProgramV2Cfg) -> None:
         """IR-based emit path: ir_run() → IRBuilder → Emitter → macros."""
         from .ir.builder import IRBuilder
+        from .ir.passes import make_default_pipeline
         from .lower import Emitter
 
         builder = IRBuilder()
@@ -92,11 +98,15 @@ class ModularProgramV2(MyProgramV2):
                 self.debug_macro(f"{type(module).__name__}({module.name})", t)
             t = module.ir_run(builder, t, self)
 
-        # emit trailing delay to sync timeline (mirrors legacy _body_legacy)
-        if t != 0.0:
-            builder.ir_delay(t)
+        # Always emit trailing delay to mirror legacy _body_legacy behavior,
+        # including the t=0.0 case.
+        builder.ir_delay(t)
 
         root_ir = builder.build()
+        if _ir_opt_enabled():
+            root_ir, pass_ctx = make_default_pipeline()(root_ir)
+            for msg in pass_ctx.diagnostics:
+                logger.warning("IR pass: %s", msg)
         Emitter(self).emit(root_ir)
 
     def add_dmem(self, values: Sequence[int]) -> int:
