@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 import numpy as np
 from numpy.typing import NDArray
@@ -12,6 +13,9 @@ from .modules import Module
 from .sweep import SweepCfg
 
 logger = logging.getLogger(__name__)
+
+# Feature flag to enable IR-based lowering for modules
+ZCU_TOOLS_USE_IR = os.getenv("ZCU_TOOLS_USE_IR", "false").lower() in ("true", "1", "yes")
 
 
 class ModularProgramV2(MyProgramV2):
@@ -59,6 +63,13 @@ class ModularProgramV2(MyProgramV2):
         )
 
     def _body(self, cfg: ProgramV2Cfg) -> None:
+        if ZCU_TOOLS_USE_IR:
+            self._body_ir(cfg)
+        else:
+            self._body_legacy(cfg)
+
+    def _body_legacy(self, cfg: ProgramV2Cfg) -> None:
+        """Original emit path: run() → macros directly."""
         t = 0.0
         for module in self.modules:
             if logger.isEnabledFor(logging.DEBUG):
@@ -66,6 +77,25 @@ class ModularProgramV2(MyProgramV2):
             t = module.run(self, t)
 
         self.delay(t=t)
+
+    def _body_ir(self, cfg: ProgramV2Cfg) -> None:
+        """IR-based emit path: lower() → IR → Emitter → macros."""
+        from .lower import LowerCtx, NameAllocator, Emitter
+
+        # Lower all modules to IR
+        name_alloc = NameAllocator()
+        ir_nodes = []
+        for module in self.modules:
+            ctx = LowerCtx(prog=self, name_alloc=name_alloc)
+            ir_node = module.lower(ctx)
+            ir_nodes.append(ir_node)
+
+        # Emit IR to QICK macros
+        emitter = Emitter(self)
+        for ir_node in ir_nodes:
+            emitter.emit(ir_node)
+
+        self.delay(t=0.0)
 
     def add_dmem(self, values: Sequence[int]) -> int:
         offset = len(self._dmem_buffer)
