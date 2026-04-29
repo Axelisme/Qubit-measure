@@ -12,8 +12,8 @@ from zcu_tools.program.v2.modules.control import Branch, Repeat, SoftRepeat
 from zcu_tools.program.v2.modules.delay import SoftDelay
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.readout import DirectReadout, DirectReadoutCfg
-from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.sweep import SweepCfg
 
 from .conftest import make_mock_soccfg
 

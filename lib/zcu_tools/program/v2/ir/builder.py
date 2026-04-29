@@ -25,11 +25,11 @@ from .nodes import (
     IRNop,
     IRPulse,
     IRPulseWmemReg,
-    IRSendReadoutConfig,
     IRReadDmem,
     IRReadout,
     IRRegLoop,
     IRRegOp,
+    IRSendReadoutConfig,
     IRSeq,
     RegOp,
 )
@@ -107,6 +107,15 @@ class IRBuilder:
     ) -> None:
         self._emit(IRDelay(t=t, tag=tag))
 
+    def ir_delay_auto(
+        self,
+        t: Union[float, QickParam, str] = 0.0,
+        gens: bool = True,
+        ros: bool = True,
+        tag: Optional[str] = None,
+    ) -> None:
+        self._emit(IRDelayAuto(t=t, gens=gens, ros=ros, tag=tag))
+
     def ir_pulse_wmem_reg(
         self,
         ch: int,
@@ -122,15 +131,6 @@ class IRBuilder:
                 flat_top_pulse=flat_top_pulse,
             )
         )
-
-    def ir_delay_auto(
-        self,
-        t: Union[float, QickParam, str] = 0.0,
-        gens: bool = True,
-        ros: bool = True,
-        tag: Optional[str] = None,
-    ) -> None:
-        self._emit(IRDelayAuto(t=t, gens=gens, ros=ros, tag=tag))
 
     def ir_reg_op(
         self,

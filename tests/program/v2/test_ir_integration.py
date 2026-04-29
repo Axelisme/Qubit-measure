@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from zcu_tools.program.v2.ir import (
     IRBranch,
     IRDelay,

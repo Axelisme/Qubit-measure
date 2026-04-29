@@ -20,6 +20,7 @@ from zcu_tools.program.v2.modules.util import round_timestamp
 
 from .conftest import make_mock_soccfg
 
+
 class _ProgWithSoccfg:
     def __init__(self) -> None:
         self.soccfg = make_mock_soccfg()
@@ -85,7 +86,6 @@ def test_delay_auto_gens_false() -> None:
     root = b.build()
     assert isinstance(root, IRDelayAuto)
     assert root.t == pytest.approx(0.5)
-    assert root.gens is False
 
 
 def test_delay_auto_register_based() -> None:

@@ -68,7 +68,6 @@ class DelayAuto(Module):
         self.gens = gens
         self.ros = ros
         self.tag = tag
-
         if tag is not None and isinstance(t, str):
             raise ValueError("DelayAuto with tag cannot have t as a register name")
 
@@ -120,5 +119,4 @@ class Join(Module):
 
         end_t = merge_max_length(*cur_t_list)
         builder.ir_delay(end_t)
-        builder.ir_delay_auto(0.0)
         return 0.0

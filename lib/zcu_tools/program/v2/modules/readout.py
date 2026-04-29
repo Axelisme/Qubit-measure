@@ -181,6 +181,5 @@ class PulseReadout(AbsReadout):
         self.pulse.ir_run(builder, t, prog)
 
         builder.ir_delay(t + self.total_length(prog))
-        builder.ir_delay_auto(0.0)
 
         return 0.0

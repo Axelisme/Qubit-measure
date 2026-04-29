@@ -51,7 +51,6 @@ class Repeat(Module):
         prog: ModularProgramV2,
     ) -> Union[float, QickParam]:
         builder.ir_delay(t)
-        builder.ir_delay_auto(t=0.0)
 
         if isinstance(self.n, int) and self.n <= 0:
             return 0.0
@@ -151,7 +150,6 @@ class Branch(Module):
         prog: ModularProgramV2,
     ) -> Union[float, QickParam]:
         builder.ir_delay(t)
-        builder.ir_delay_auto(t=0.0)
 
         with builder.ir_branch(self.compare_reg) as branch:
             for mods in self.branches:
@@ -168,5 +166,4 @@ class Branch(Module):
 
                     builder.ir_delay(cur_t)
 
-        builder.ir_delay_auto(t=0.0)
         return 0.0

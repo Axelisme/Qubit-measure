@@ -18,9 +18,9 @@ from .ir import (
     IRPulseWmemReg,
     IRReadDmem,
     IRReadout,
-    IRSendReadoutConfig,
     IRRegLoop,
     IRRegOp,
+    IRSendReadoutConfig,
     IRSeq,
 )
 

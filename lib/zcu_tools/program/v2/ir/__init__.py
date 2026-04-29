@@ -17,17 +17,16 @@ from .nodes import (
     IRNop,
     IRPulse,
     IRPulseWmemReg,
-    IRSendReadoutConfig,
     IRReadDmem,
     IRReadout,
     IRRegLoop,
     IRRegOp,
+    IRSendReadoutConfig,
     IRSeq,
     RegOp,
 )
 from .pass_base import Pass, PassConfig, PassCtx
 from .passes import (
-    AlignBranchDispatch,
     EstimateDurations,
     FreshLabels,
     FuseAdjacentDelays,
@@ -66,7 +65,6 @@ __all__ = [
     "UnrollShortLoops",
     "FuseAdjacentDelays",
     "ReorderPulseLikeByTime",
-    "AlignBranchDispatch",
     "ValidateInvariants",
     "make_default_pipeline",
 ]

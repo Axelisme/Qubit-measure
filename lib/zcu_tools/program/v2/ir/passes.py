@@ -20,9 +20,9 @@ from .nodes import (
     IRPulseWmemReg,
     IRReadDmem,
     IRReadout,
-    IRSendReadoutConfig,
     IRRegLoop,
     IRRegOp,
+    IRSendReadoutConfig,
     IRSeq,
 )
 from .pass_base import Pass, PassConfig, PassCtx, PassPipeline
@@ -402,57 +402,6 @@ class ReorderPulseLikeByTime(Pass):
         return (1, 0.0)
 
 
-class AlignBranchDispatch(Pass):
-    """Pad branch arms with IRNop so arm dispatch paths are balanced."""
-
-    def transform(self, node: IRNode, ctx: PassCtx) -> IRNode:
-        if not isinstance(node, IRBranch):
-            return node
-        if not ctx.config.enable_align_branches:
-            return node
-        if len(node.arms) < 2:
-            return node
-
-        arm_costs = [self._inst_cost(arm) for arm in node.arms]
-        if any(cost is None for cost in arm_costs):
-            ctx.warn("skip branch alignment: non-static arm cost detected")
-            return node
-
-        known_costs = cast(List[int], arm_costs)
-        max_cost = max(known_costs)
-        new_arms: List[IRNode] = []
-        for arm, cost in zip(node.arms, known_costs):
-            pad = max_cost - cost
-            if pad <= 0:
-                new_arms.append(arm)
-                continue
-            arm_seq = arm if isinstance(arm, IRSeq) else IRSeq(body=(arm,))
-            padded_body = arm_seq.body + tuple(IRNop() for _ in range(pad))
-            new_arms.append(IRSeq(body=padded_body, meta=arm_seq.meta))
-        return IRBranch(compare_reg=node.compare_reg, arms=tuple(new_arms), meta=node.meta)
-
-    def _inst_cost(self, node: IRNode) -> Optional[int]:
-        if isinstance(node, IRSeq):
-            total = 0
-            for child in node.body:
-                c = self._inst_cost(child)
-                if c is None:
-                    return None
-                total += c
-            return total
-        if isinstance(node, IRLoop):
-            body = self._inst_cost(node.body)
-            return None if body is None else 2 + body * node.n
-        if isinstance(node, IRRegLoop):
-            return None
-        if isinstance(node, IRBranch):
-            arm_costs = [self._inst_cost(arm) for arm in node.arms]
-            if any(c is None for c in arm_costs):
-                return None
-            return 1 + max(cast(List[int], arm_costs))
-        return 1
-
-
 class ValidateInvariants(Pass):
     """Structural validations for emitter assumptions."""
 
@@ -490,7 +439,11 @@ class ValidateInvariants(Pass):
                     "compare_reg >= num_arms selects last arm."
                 )
                 self._branch_semantics_warned = True
-        if isinstance(node, IRDelayAuto) and isinstance(node.t, str) and node.tag is not None:
+        if (
+            isinstance(node, IRDelayAuto)
+            and isinstance(node.t, str)
+            and node.tag is not None
+        ):
             ctx.error("IRDelayAuto tag is invalid when t is register name")
         return node
 
@@ -504,7 +457,6 @@ def make_default_pipeline(config: PassConfig | None = None) -> PassPipeline:
             UnrollShortLoops(),
             FuseAdjacentDelays(),
             ReorderPulseLikeByTime(),
-            AlignBranchDispatch(),
             ValidateInvariants(),
         ],
         config=config,

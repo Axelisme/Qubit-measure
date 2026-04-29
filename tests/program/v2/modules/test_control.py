@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from qick.asm_v2 import QickParam
 from zcu_tools.program.v2.ir.builder import IRBuilder
-from zcu_tools.program.v2.ir.nodes import IRBranch, IRDelay, IRDelayAuto, IRLoop, IRSeq
+from zcu_tools.program.v2.ir.nodes import IRBranch, IRDelay, IRLoop, IRSeq
 from zcu_tools.program.v2.lower import Emitter
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.control import Branch, Repeat, SoftRepeat
@@ -103,8 +103,7 @@ def test_repeat_ir_run_emits_loop(mock_prog):
     assert out == 0.0
     assert isinstance(root, IRSeq)
     assert isinstance(root.body[0], IRDelay)
-    assert isinstance(root.body[1], IRDelayAuto)
-    assert isinstance(root.body[2], IRLoop)
+    assert isinstance(root.body[1], IRLoop)
 
 
 def test_soft_repeat_ir_run_unrolls(mock_prog):
@@ -119,7 +118,7 @@ def test_soft_repeat_ir_run_unrolls(mock_prog):
     assert len(root.body) == 0
 
 
-def test_branch_ir_run_emits_ir_branch_and_final_delay_auto(mock_prog):
+def test_branch_ir_run_emits_ir_branch(mock_prog):
     bmod = Branch(
         "sel",
         [_FixedDurationModule("b0", 0.1)],
@@ -134,7 +133,5 @@ def test_branch_ir_run_emits_ir_branch_and_final_delay_auto(mock_prog):
     assert out == 0.0
     assert isinstance(root, IRSeq)
     assert isinstance(root.body[0], IRDelay)
-    assert isinstance(root.body[1], IRDelayAuto)
-    assert isinstance(root.body[2], IRBranch)
-    assert isinstance(root.body[3], IRDelayAuto)
-    assert len(root.body[2].arms) == 3
+    assert isinstance(root.body[1], IRBranch)
+    assert len(root.body[1].arms) == 3
