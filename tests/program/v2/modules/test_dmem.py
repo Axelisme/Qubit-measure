@@ -37,7 +37,7 @@ def test_empty_values_rejected():
 
 
 def test_bits_needed_unsigned_boundaries():
-    assert LoadValue._bits_needed_unsigned(0) == 1
-    assert LoadValue._bits_needed_unsigned(1) == 1
-    assert LoadValue._bits_needed_unsigned(2) == 2
-    assert LoadValue._bits_needed_unsigned(255) == 8
+    assert LoadValue._bits_needed(0) == 1
+    assert LoadValue._bits_needed(1) == 1
+    assert LoadValue._bits_needed(2) == 2
+    assert LoadValue._bits_needed(255) == 8
