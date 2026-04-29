@@ -134,7 +134,9 @@ class TestEstimateDurations:
     def test_pulse_duration(self):
         """IRPulse duration should include pre and post delays."""
         pass_obj = EstimateDurations()
-        node = IRPulse(ch="ch0", pulse_name="pulse1", pre_delay=0.5, post_delay=0.3)
+        node = IRPulse(
+            ch="ch0", pulse_name="pulse1", pre_delay=0.5, post_delay=0.3, advance=0.8
+        )
         result = pass_obj(node)
         assert isinstance(result, IRPulse)
         # Duration: 0.5 + 0.3 = 0.8 (actual pulse length not in IR)

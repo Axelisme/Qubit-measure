@@ -146,13 +146,12 @@ class DirectReadout(AbsReadout):
         from ..ir import IRReadout, IRMeta
 
         ro_ch = self.cfg.ro_ch
-        trig_offset = self.cfg.trig_offset if isinstance(self.cfg.trig_offset, (int, float)) else 0.0
 
         return IRReadout(
             ch=str(ro_ch),
             ro_chs=(str(ro_ch),),
             pulse_name=self.name,
-            trig_offset=trig_offset,
+            trig_offset=self.cfg.trig_offset,
             meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
         )
 
@@ -189,13 +188,14 @@ class PulseReadout(AbsReadout):
         return t + self.total_length(prog)
 
     def lower(self, ctx: LowerCtx) -> IRNode:
-        from ..ir import IRSeq, IRMeta
+        from ..ir import IRMeta, IRParallel
 
         child_ctx = ctx.with_child(self.name)
         pulse_ir = self.pulse.lower(child_ctx)
         ro_ir = self.ro_window.lower(child_ctx)
 
-        return IRSeq(
-            body=(pulse_ir, ro_ir),
+        return IRParallel(
+            body=(ro_ir, pulse_ir),
+            end_policy="max",
             meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
         )

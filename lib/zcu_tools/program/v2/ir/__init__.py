@@ -12,6 +12,7 @@ from .nodes import (
     IRPulse,
     IRReadout,
     IRDelay,
+    IRSoftDelay,
     IRRegOp,
     IRReadDmem,
     IRCondJump,
@@ -22,6 +23,7 @@ from .nodes import (
     IRLoop,
     IRRegLoop,
     IRBranch,
+    IRParallel,
 )
 from .pass_base import Pass, PassConfig, PassCtx
 
@@ -31,6 +33,7 @@ __all__ = [
     "IRPulse",
     "IRReadout",
     "IRDelay",
+    "IRSoftDelay",
     "IRRegOp",
     "IRReadDmem",
     "IRCondJump",
@@ -41,6 +44,7 @@ __all__ = [
     "IRLoop",
     "IRRegLoop",
     "IRBranch",
+    "IRParallel",
     "Pass",
     "PassConfig",
     "PassCtx",

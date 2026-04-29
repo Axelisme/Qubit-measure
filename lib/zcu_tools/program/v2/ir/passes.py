@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Dict, Optional, cast
 from dataclasses import replace
 from .nodes import (
     IRNode, IRMeta, IRLabel, IRJump, IRCondJump, IRLoop, IRRegLoop, IRSeq, IRDelay,
-    IRPulse, IRReadout, IRBranch, IRNop, IRRegOp, IRReadDmem
+    IRPulse, IRReadout, IRBranch, IRNop, IRRegOp, IRReadDmem, IRSoftDelay, IRParallel
 )
 from .pass_base import Pass, PassCtx
 
@@ -98,11 +98,16 @@ class EstimateDurations(Pass):
                 pulse_name=node.pulse_name,
                 pre_delay=node.pre_delay,
                 post_delay=node.post_delay,
+                advance=node.advance,
+                tag=node.tag,
                 meta=meta_with_dur
             )
 
         elif isinstance(node, IRReadout):
-            dur = node.trig_offset
+            if isinstance(node.trig_offset, (int, float)):
+                dur = float(node.trig_offset)
+            else:
+                dur = None
             meta_with_dur = self._update_meta_duration(node.meta, dur)
             return IRReadout(
                 ch=node.ch,
@@ -123,9 +128,19 @@ class EstimateDurations(Pass):
             return IRDelay(
                 duration=node.duration,
                 auto=node.auto,
+                gens=node.gens,
+                ros=node.ros,
                 tag=node.tag,
                 meta=meta_with_dur
             )
+
+        elif isinstance(node, IRSoftDelay):
+            if isinstance(node.duration, (int, float)):
+                dur = float(node.duration)
+            else:
+                dur = None
+            meta_with_dur = self._update_meta_duration(node.meta, dur)
+            return IRSoftDelay(duration=node.duration, meta=meta_with_dur)
 
         elif isinstance(node, IRSeq):
             # Sum durations; None if any child is None
@@ -168,9 +183,29 @@ class EstimateDurations(Pass):
                 if any(d is None for d in arm_durs):
                     dur = None
                 else:
-                    dur = max(arm_durs)
+                    dur = max(cast(list[float], arm_durs))
             meta_with_dur = self._update_meta_duration(node.meta, dur)
             return IRBranch(compare_reg=node.compare_reg, arms=node.arms, meta=meta_with_dur)
+
+        elif isinstance(node, IRParallel):
+            if not node.body:
+                dur = 0.0
+            else:
+                child_durs = [child.meta.duration for child in node.body]
+                if any(d is None for d in child_durs):
+                    dur = None
+                elif node.end_policy == "index":
+                    dur = cast(list[float], child_durs)[node.end_index]
+                else:
+                    numeric_durs = cast(list[float], child_durs)
+                    dur = max(numeric_durs) if numeric_durs else 0.0
+            meta_with_dur = self._update_meta_duration(node.meta, dur)
+            return IRParallel(
+                body=node.body,
+                end_policy=node.end_policy,
+                end_index=node.end_index,
+                meta=meta_with_dur,
+            )
 
         else:
             # Leaf nodes without explicit duration (Label, Jump, CondJump, etc.)

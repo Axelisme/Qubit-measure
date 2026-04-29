@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import pytest
-from qick import QickConfig
+from qick.asm_v2 import QickParam
 
-from .modular import ModularProgramV2
 from .modules.pulse import Pulse, PulseCfg
 from .modules.delay import Delay, SoftDelay, DelayAuto
 from .modules.readout import DirectReadout, DirectReadoutCfg
 from .modules.reset import NoneReset, NoneResetCfg
 from .lower import LowerCtx, NameAllocator
-from .base import ProgramV2Cfg
-from .ir import IRPulse, IRDelay, IRSeq, IRReadout
+from .ir import IRPulse, IRDelay, IRReadout, IRSoftDelay, IRSeq
 
 
 def test_pulse_lower() -> None:
@@ -40,6 +38,7 @@ def test_pulse_lower() -> None:
     assert ir_node.pulse_name == "test_pulse_id"
     assert ir_node.pre_delay == 0.01
     assert ir_node.post_delay == 0.02
+    assert ir_node.advance == 0.07
 
 
 def test_delay_lower() -> None:
@@ -56,14 +55,14 @@ def test_delay_lower() -> None:
 
 
 def test_soft_delay_lower() -> None:
-    """Test SoftDelay.lower() produces empty IRSeq."""
+    """Test SoftDelay.lower() preserves timeline-only duration."""
     soft_delay = SoftDelay(name="test_soft_delay", delay=0.05)
 
     ctx = LowerCtx(prog=None, name_alloc=NameAllocator())  # type: ignore
     ir_node = soft_delay.lower(ctx)
 
-    assert isinstance(ir_node, IRSeq)
-    assert len(ir_node.body) == 0
+    assert isinstance(ir_node, IRSoftDelay)
+    assert ir_node.duration == 0.05
 
 
 def test_delay_auto_lower() -> None:
@@ -76,6 +75,8 @@ def test_delay_auto_lower() -> None:
     assert isinstance(ir_node, IRDelay)
     assert ir_node.duration == 0.05
     assert ir_node.auto is True
+    assert ir_node.gens is True
+    assert ir_node.ros is True
     assert ir_node.tag is None
 
 
@@ -89,6 +90,8 @@ def test_delay_auto_register_lower() -> None:
     assert isinstance(ir_node, IRDelay)
     assert ir_node.duration == "time_reg"
     assert ir_node.auto is True
+    assert ir_node.gens is True
+    assert ir_node.ros is True
 
 
 def test_direct_readout_lower() -> None:
@@ -111,6 +114,25 @@ def test_direct_readout_lower() -> None:
     assert ir_node.ro_chs == ("0",)
     assert ir_node.pulse_name == "test_readout"
     assert ir_node.trig_offset == 0.001
+
+
+def test_qickparam_preserved_in_lower() -> None:
+    """Test lower() keeps QickParam instead of coercing to 0.0."""
+    param = QickParam(start=0.25, spans={})
+
+    delay = Delay(name="delay_param", delay=param, tag=None)
+    delay_ctx = LowerCtx(prog=None, name_alloc=NameAllocator())  # type: ignore
+    delay_ir = delay.lower(delay_ctx)
+    assert isinstance(delay_ir, IRDelay)
+    assert delay_ir.duration is param
+
+    delay_auto = DelayAuto(name="delay_auto_param", t=param, gens=False, ros=True)
+    auto_ctx = LowerCtx(prog=None, name_alloc=NameAllocator())  # type: ignore
+    auto_ir = delay_auto.lower(auto_ctx)
+    assert isinstance(auto_ir, IRDelay)
+    assert auto_ir.duration is param
+    assert auto_ir.gens is False
+    assert auto_ir.ros is True
 
 
 def test_none_reset_lower() -> None:

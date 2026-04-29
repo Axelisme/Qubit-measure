@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from abc import ABC
 from dataclasses import dataclass, field
-from typing import Tuple, Optional, Any, Union
+from typing import Tuple, Optional, Any, Union, Literal
 from enum import Enum
+from qick.asm_v2 import QickParam
 
 
 class RegOp(str, Enum):
@@ -51,8 +52,10 @@ class IRPulse(IRNode):
     """Emit a single pulse on a channel."""
     ch: str
     pulse_name: str
-    pre_delay: float  # delay before pulse emission (us)
-    post_delay: float  # delay after pulse emission (us)
+    pre_delay: Union[float, QickParam]  # delay before pulse emission (us)
+    post_delay: Union[float, QickParam]  # delay after pulse emission (us)
+    advance: Union[float, QickParam]  # t increment after this module
+    tag: Optional[str] = None
     meta: IRMeta = field(default_factory=IRMeta)
 
 
@@ -62,7 +65,7 @@ class IRReadout(IRNode):
     ch: str
     ro_chs: Tuple[str, ...]  # readout channels to trigger
     pulse_name: str
-    trig_offset: float  # timing offset for trigger pulse (us)
+    trig_offset: Union[float, QickParam]  # timing offset for trigger pulse (us)
     meta: IRMeta = field(default_factory=IRMeta)
 
 
@@ -75,9 +78,18 @@ class IRDelay(IRNode):
         auto: if True, auto-aligns to max active channel timestamp before delay
         tag: optional barrier tag; tagged delays are not fused or moved by passes
     """
-    duration: Union[float, str]  # float (us) or QickParam expression (str)
+    duration: Union[float, QickParam, str]  # float/QickParam(us) or runtime reg(str)
     auto: bool = False
+    gens: bool = True
+    ros: bool = True
     tag: Optional[str] = None
+    meta: IRMeta = field(default_factory=IRMeta)
+
+
+@dataclass(frozen=True)
+class IRSoftDelay(IRNode):
+    """Timeline-only delay that does not emit any macro."""
+    duration: Union[float, QickParam]
     meta: IRMeta = field(default_factory=IRMeta)
 
 
@@ -182,9 +194,29 @@ class IRBranch(IRNode):
     meta: IRMeta = field(default_factory=IRMeta)
 
 
+@dataclass(frozen=True)
+class IRParallel(IRNode):
+    """Emit all children from same start-t, then merge end-t by policy."""
+    body: Tuple[IRNode, ...] = field(default_factory=tuple)
+    end_policy: Literal["max", "index"] = "max"
+    end_index: int = 0
+    meta: IRMeta = field(default_factory=IRMeta)
+
+
 # ============================================================================
 # Type aliases for visitor pattern
 # ============================================================================
 
-IRLeaf = Union[IRPulse, IRReadout, IRDelay, IRRegOp, IRReadDmem, IRCondJump, IRJump, IRLabel, IRNop]
-IRComposite = Union[IRSeq, IRLoop, IRRegLoop, IRBranch]
+IRLeaf = Union[
+    IRPulse,
+    IRReadout,
+    IRDelay,
+    IRSoftDelay,
+    IRRegOp,
+    IRReadDmem,
+    IRCondJump,
+    IRJump,
+    IRLabel,
+    IRNop,
+]
+IRComposite = Union[IRSeq, IRLoop, IRRegLoop, IRBranch, IRParallel]

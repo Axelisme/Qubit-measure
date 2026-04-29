@@ -185,14 +185,15 @@ class TwoPulseReset(AbsReset):
         return calc_max_length(pulse1_t, pulse2_t)
 
     def lower(self, ctx: LowerCtx) -> IRNode:
-        from ..ir import IRSeq, IRMeta
+        from ..ir import IRMeta, IRParallel
 
         child_ctx = ctx.with_child(self.name)
         pulse1_ir = self.reset_pulse1.lower(child_ctx)
         pulse2_ir = self.reset_pulse2.lower(child_ctx)
 
-        return IRSeq(
+        return IRParallel(
             body=(pulse1_ir, pulse2_ir),
+            end_policy="max",
             meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
         )
 
@@ -222,14 +223,15 @@ class BathReset(AbsReset):
         return end_t
 
     def lower(self, ctx: LowerCtx) -> IRNode:
-        from ..ir import IRSeq, IRMeta
+        from ..ir import IRMeta, IRParallel, IRSeq
 
         child_ctx = ctx.with_child(self.name)
         res_ir = self.res_pulse.lower(child_ctx)
         qub_ir = self.qub_pulse.lower(child_ctx)
         pi2_ir = self.pi2_pulse.lower(child_ctx)
+        first_stage = IRParallel(body=(res_ir, qub_ir), end_policy="index", end_index=0)
 
         return IRSeq(
-            body=(res_ir, qub_ir, pi2_ir),
+            body=(first_stage, pi2_ir),
             meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
         )

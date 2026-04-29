@@ -2,16 +2,30 @@
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Tuple
 
-from .ir import IRNode, IRPulse, IRReadout, IRDelay, IRLabel, IRNop, IRRegOp, IRCondJump, IRJump, IRSeq, IRLoop, IRRegLoop, IRBranch
+from qick.asm_v2 import QickParam
+
+from .ir import (
+    IRBranch,
+    IRCondJump,
+    IRDelay,
+    IRJump,
+    IRLabel,
+    IRLoop,
+    IRNode,
+    IRNop,
+    IRParallel,
+    IRPulse,
+    IRReadout,
+    IRRegLoop,
+    IRRegOp,
+    IRSeq,
+    IRSoftDelay,
+)
 
 if TYPE_CHECKING:
     from .modular import ModularProgramV2
-
-logger = logging.getLogger(__name__)
-
 
 class NameAllocator:
     """Allocates fresh label and register names to avoid collisions."""
@@ -61,59 +75,80 @@ class Emitter:
     def __init__(self, prog: ModularProgramV2) -> None:
         self.prog = prog
 
-    def emit(self, node: IRNode) -> None:
-        """Emit an IR node as QICK macros."""
+    def emit(self, node: IRNode, t: float | QickParam = 0.0) -> float | QickParam:
+        """Emit an IR node as QICK macros and return next module reference time."""
         if isinstance(node, IRPulse):
-            self._emit_pulse(node)
+            return self._emit_pulse(node, t)
         elif isinstance(node, IRReadout):
-            self._emit_readout(node)
+            return self._emit_readout(node, t)
         elif isinstance(node, IRDelay):
-            self._emit_delay(node)
+            return self._emit_delay(node)
+        elif isinstance(node, IRSoftDelay):
+            return self._emit_soft_delay(node, t)
         elif isinstance(node, IRLabel):
             self._emit_label(node)
+            return t
         elif isinstance(node, IRNop):
             self._emit_nop(node)
+            return t
         elif isinstance(node, IRRegOp):
             self._emit_reg_op(node)
+            return t
         elif isinstance(node, IRCondJump):
             self._emit_cond_jump(node)
+            return t
         elif isinstance(node, IRJump):
             self._emit_jump(node)
+            return t
         elif isinstance(node, IRSeq):
-            self._emit_seq(node)
+            return self._emit_seq(node, t)
         elif isinstance(node, IRLoop):
-            self._emit_loop(node)
+            return self._emit_loop(node, t)
         elif isinstance(node, IRRegLoop):
-            self._emit_reg_loop(node)
+            return self._emit_reg_loop(node, t)
         elif isinstance(node, IRBranch):
-            self._emit_branch(node)
+            return self._emit_branch(node, t)
+        elif isinstance(node, IRParallel):
+            return self._emit_parallel(node, t)
         else:
             raise TypeError(f"Unknown IR node type: {type(node)}")
 
-    def _emit_pulse(self, node: IRPulse) -> None:
+    def _emit_pulse(self, node: IRPulse, t: float | QickParam) -> float | QickParam:
         """Emit a pulse node."""
-        t = node.pre_delay if isinstance(node.pre_delay, (int, float)) else 0
-        self.prog.pulse(int(node.ch), node.pulse_name, t=t, tag=None)  # type: ignore
+        self.prog.pulse(int(node.ch), node.pulse_name, t=t + node.pre_delay, tag=node.tag)  # type: ignore
+        return t + node.advance
 
-    def _emit_readout(self, node: IRReadout) -> None:
+    def _emit_readout(self, node: IRReadout, t: float | QickParam) -> float | QickParam:
         """Emit a readout node."""
-        t = node.trig_offset if isinstance(node.trig_offset, (int, float)) else 0
         ros_chs = [int(ch) for ch in node.ro_chs]
-        self.prog.trigger(ros=ros_chs, t=t)  # type: ignore
+        self.prog.send_readoutconfig(int(node.ch), node.pulse_name, t=t)  # type: ignore
+        self.prog.trigger(ros=ros_chs, t=t + node.trig_offset)  # type: ignore
+        return t
 
-    def _emit_delay(self, node: IRDelay) -> None:
+    def _emit_delay(self, node: IRDelay) -> float:
         """Emit a delay node."""
         if node.auto:
             if isinstance(node.duration, str):
                 # Register-based delay
-                self.prog.delay_reg_auto(time_reg=node.duration)
+                self.prog.delay_reg_auto(
+                    time_reg=node.duration, gens=node.gens, ros=node.ros
+                )
             else:
                 # Regular auto delay
-                self.prog.delay_auto(t=node.duration, tag=node.tag)
+                self.prog.delay_auto(
+                    t=node.duration, gens=node.gens, ros=node.ros, tag=node.tag
+                )
         else:
-            # Regular delay
-            delay_t = node.duration if isinstance(node.duration, (int, float)) else 0
-            self.prog.delay(t=delay_t, tag=node.tag)
+            if isinstance(node.duration, str):
+                raise ValueError("IRDelay(auto=False) cannot use register duration")
+            self.prog.delay(t=node.duration, tag=node.tag)
+        return 0.0
+
+    def _emit_soft_delay(
+        self, node: IRSoftDelay, t: float | QickParam
+    ) -> float | QickParam:
+        """Emit a timeline-only delay node."""
+        return t + node.duration
 
     def _emit_label(self, node: IRLabel) -> None:
         """Emit a label node."""
@@ -136,24 +171,30 @@ class Emitter:
         """Emit an unconditional jump node."""
         self.prog.jump(node.target)
 
-    def _emit_seq(self, node: IRSeq) -> None:
+    def _emit_seq(self, node: IRSeq, t: float | QickParam) -> float | QickParam:
         """Emit a sequence node (sequential composition)."""
+        cur_t = t
         for child in node.body:
-            self.emit(child)
+            cur_t = self.emit(child, cur_t)
+        return cur_t
 
-    def _emit_loop(self, node: IRLoop) -> None:
+    def _emit_loop(self, node: IRLoop, t: float | QickParam) -> float | QickParam:
         """Emit a loop node."""
         self.prog.open_loop(n=node.n, name=node.name)
-        self.emit(node.body)
+        self.emit(node.body, t=0.0)
         self.prog.close_loop()
+        return t
 
-    def _emit_reg_loop(self, node: IRRegLoop) -> None:
+    def _emit_reg_loop(
+        self, node: IRRegLoop, t: float | QickParam
+    ) -> float | QickParam:
         """Emit a register-driven loop node."""
         self.prog.open_loop_reg(n_reg=node.n_reg, name=node.name)
-        self.emit(node.body)
+        self.emit(node.body, t=0.0)
         self.prog.close_loop_reg(name=node.name)
+        return t
 
-    def _emit_branch(self, node: IRBranch) -> None:
+    def _emit_branch(self, node: IRBranch, t: float | QickParam) -> float | QickParam:
         """Emit a branch node (binary dispatch tree)."""
         # Build a binary tree of conditional branches
         # For N arms, we need N-1 comparisons
@@ -169,4 +210,24 @@ class Emitter:
                     arg2=i,
                 )
             self.prog.label(f"arm_{i}")
-            self.emit(arm)
+            self.emit(arm, t=t)
+        return t
+
+    def _emit_parallel(
+        self, node: IRParallel, t: float | QickParam
+    ) -> float | QickParam:
+        """Emit children from same start-t and merge end-t by policy."""
+        child_ends = [self.emit(child, t=t) for child in node.body]
+        if not child_ends:
+            return t
+
+        if node.end_policy == "index":
+            return child_ends[node.end_index]
+
+        max_end = child_ends[0]
+        for end_t in child_ends[1:]:
+            if isinstance(max_end, QickParam) or isinstance(end_t, QickParam):
+                max_end = max_end if isinstance(max_end, QickParam) else end_t
+            else:
+                max_end = max(max_end, end_t)
+        return max_end

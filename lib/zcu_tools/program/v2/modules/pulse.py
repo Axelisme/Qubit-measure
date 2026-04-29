@@ -137,14 +137,21 @@ class Pulse(Module):
         if cfg is None or self.pulse_id is None:
             return IRSeq()  # empty sequence for None config
 
-        pre_delay = cfg.pre_delay if isinstance(cfg.pre_delay, (int, float)) else 0.0
-        post_delay = cfg.post_delay if isinstance(cfg.post_delay, (int, float)) else 0.0
+        if self.block_mode:
+            if hasattr(self, "waveform") and ctx.prog is not None:
+                advance = self.total_length(ctx.prog)
+            else:
+                advance = cfg.pre_delay + cfg.waveform.length + cfg.post_delay
+        else:
+            advance = 0.0
 
         return IRPulse(
             ch=str(cfg.ch),
             pulse_name=self.pulse_id,
-            pre_delay=pre_delay,
-            post_delay=post_delay,
+            pre_delay=cfg.pre_delay,
+            post_delay=cfg.post_delay,
+            advance=advance,
+            tag=self.tag,
             meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
         )
 

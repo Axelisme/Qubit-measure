@@ -36,9 +36,8 @@ class Delay(Module):
     def lower(self, ctx: LowerCtx) -> IRNode:
         from ..ir import IRDelay, IRMeta
 
-        delay_val = self.delay if isinstance(self.delay, (int, float)) else 0.0
         return IRDelay(
-            duration=delay_val,
+            duration=self.delay,
             auto=False,
             tag=self.tag,
             meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
@@ -63,10 +62,12 @@ class SoftDelay(Module):
         return round_timestamp(prog, self.delay)
 
     def lower(self, ctx: LowerCtx) -> IRNode:
-        from ..ir import IRSeq
+        from ..ir import IRMeta, IRSoftDelay
 
-        # SoftDelay is a no-op for IR purposes; it's just adding to timeline
-        return IRSeq()
+        return IRSoftDelay(
+            duration=self.delay,
+            meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
+        )
 
     def allow_rerun(self) -> bool:
         return True
@@ -104,15 +105,11 @@ class DelayAuto(Module):
     def lower(self, ctx: LowerCtx) -> IRNode:
         from ..ir import IRDelay, IRMeta
 
-        if isinstance(self.t, str):
-            # Register-based delay
-            duration = self.t
-        else:
-            duration = self.t if isinstance(self.t, (int, float)) else 0.0
-
         return IRDelay(
-            duration=duration,
+            duration=self.t,
             auto=True,
+            gens=self.gens,
+            ros=self.ros,
             tag=self.tag,
             meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
         )

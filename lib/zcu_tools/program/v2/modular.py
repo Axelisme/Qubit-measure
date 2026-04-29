@@ -92,10 +92,11 @@ class ModularProgramV2(MyProgramV2):
 
         # Emit IR to QICK macros
         emitter = Emitter(self)
+        t = 0.0
         for ir_node in ir_nodes:
-            emitter.emit(ir_node)
+            t = emitter.emit(ir_node, t=t)
 
-        self.delay(t=0.0)
+        self.delay(t=t)
 
     def add_dmem(self, values: Sequence[int]) -> int:
         offset = len(self._dmem_buffer)
