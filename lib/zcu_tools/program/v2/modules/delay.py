@@ -93,9 +93,9 @@ class Join(Module):
         if len(args) == 0:
             raise ValueError("Join must contain at least one module")
 
-        join_modules = [[m] if isinstance(m, Module) else m for m in args]
-        for list in join_modules:
-            for m in list:
+        join_modules = [[m] if isinstance(m, Module) else list(m) for m in args]
+        for mod_list in join_modules:
+            for m in mod_list:
                 if isinstance(m, (DelayAuto, Delay)):
                     raise ValueError("modules cannot contain DelayAuto or Delay")
 
@@ -115,19 +115,36 @@ class Join(Module):
             t,
         )
 
-        end_t_list = []
-        with prog.disable_delay():
-            for list in self.join_modules:
-                cur_t = t
-                for m in list:
-                    if logger.isEnabledFor(logging.DEBUG):
-                        prog.debug_macro(
-                            f"{type(m).__name__}({m.name})", cur_t, prefix="\t"
-                        )
-                    cur_t = m.run(prog, cur_t)
+        list_modules = list(list(list_mod) for list_mod in self.join_modules)
+        cur_t_list: list[Union[float, QickParam]] = [t for _ in list_modules]
 
-                end_t_list.append(cur_t)
-        end_t = merge_max_length(*end_t_list)
+        def find_next_branch() -> Optional[int]:
+            min_i = None
+            min_t = 0.0
+            for i, (t, mod_list) in enumerate(zip(cur_t_list, list_modules)):
+                if len(mod_list) == 0:
+                    continue  # skip empty branch
+                if isinstance(t, QickParam):
+                    t = t.minval()
+                if min_i is None or t < min_t:
+                    min_i = i
+                    min_t = t
+            return min_i
+
+        with prog.disable_delay():
+            # use interleaved execution to avoid execution delay afftected actual pulse time
+            while (i := find_next_branch()) is not None:
+                cur_t = cur_t_list[i]
+                mod = list_modules[i].pop(0)
+
+                if logger.isEnabledFor(logging.DEBUG):
+                    prog.debug_macro(
+                        f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
+                    )
+
+                cur_t_list[i] = mod.run(prog, cur_t)
+
+        end_t = merge_max_length(*cur_t_list)
 
         return end_t
 
