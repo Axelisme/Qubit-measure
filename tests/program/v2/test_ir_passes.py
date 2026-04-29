@@ -3,7 +3,16 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.program.v2.ir.nodes import IRBranch, IRDelay, IRLoop, IRNop, IRSeq
+from zcu_tools.program.v2.ir.nodes import (
+    IRBranch,
+    IRCondJump,
+    IRDelay,
+    IRLoop,
+    IRNop,
+    IRPulse,
+    IRSendReadoutConfig,
+    IRSeq,
+)
 from zcu_tools.program.v2.ir.pass_base import PassConfig
 from zcu_tools.program.v2.ir.passes import make_default_pipeline
 
@@ -68,3 +77,35 @@ def test_align_branch_dispatch_pads_short_arms() -> None:
     # First arm was padded to match second arm cost.
     assert isinstance(new_root.arms[0].body[-1], IRNop)
     assert len(new_root.arms[0].body) == len(new_root.arms[1].body)
+
+
+def test_reorder_pulse_like_nodes_by_t_within_segment() -> None:
+    root = IRSeq(
+        body=(
+            IRPulse(ch="0", pulse_name="p_late", t=0.3),
+            IRSendReadoutConfig(ch="0", pulse_name="cfg_early", t=0.1),
+            IRPulse(ch="0", pulse_name="p_mid", t=0.2),
+        )
+    )
+    new_root, _ = make_default_pipeline(PassConfig(min_body_us=0.0))(root)
+    assert isinstance(new_root, IRSeq)
+    assert isinstance(new_root.body[0], IRSendReadoutConfig)
+    assert isinstance(new_root.body[1], IRPulse)
+    assert isinstance(new_root.body[2], IRPulse)
+    assert new_root.body[1].pulse_name == "p_mid"
+    assert new_root.body[2].pulse_name == "p_late"
+
+
+def test_reorder_pulse_like_nodes_does_not_cross_barrier() -> None:
+    root = IRSeq(
+        body=(
+            IRPulse(ch="0", pulse_name="p_late", t=0.3),
+            IRCondJump(target="L0", arg1="r0", test="S", op="-", arg2=1),
+            IRSendReadoutConfig(ch="0", pulse_name="cfg_early", t=0.1),
+        )
+    )
+    new_root, _ = make_default_pipeline(PassConfig(min_body_us=0.0))(root)
+    assert isinstance(new_root, IRSeq)
+    assert isinstance(new_root.body[0], IRPulse)
+    assert isinstance(new_root.body[1], IRCondJump)
+    assert isinstance(new_root.body[2], IRSendReadoutConfig)

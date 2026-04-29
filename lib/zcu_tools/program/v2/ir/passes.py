@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Dict, List, Optional, cast
+from typing import Dict, List, Optional, Union, cast
 
 from .nodes import (
     IRBranch,
@@ -235,6 +235,12 @@ class UnrollShortLoops(Pass):
         if not isinstance(node, IRLoop):
             return node
 
+        if self._references_reg(node.body, node.name):
+            ctx.warn(
+                f"skip unroll loop '{node.name}': body references loop counter register"
+            )
+            return node
+
         body_dur = node.body.meta.duration
         if body_dur is None:
             return node
@@ -257,6 +263,27 @@ class UnrollShortLoops(Pass):
         for _ in range(node.n):
             unrolled.append(node.body)
         return IRSeq(body=tuple(unrolled), meta=node.meta)
+
+    def _references_reg(self, node: IRNode, reg_name: str) -> bool:
+        if isinstance(node, IRSeq):
+            return any(self._references_reg(child, reg_name) for child in node.body)
+        if isinstance(node, IRLoop):
+            return self._references_reg(node.body, reg_name)
+        if isinstance(node, IRRegLoop):
+            return node.n_reg == reg_name or self._references_reg(node.body, reg_name)
+        if isinstance(node, IRBranch):
+            return any(self._references_reg(arm, reg_name) for arm in node.arms)
+        if isinstance(node, IRRegOp):
+            if node.dst == reg_name or node.lhs == reg_name:
+                return True
+            return isinstance(node.rhs, str) and node.rhs == reg_name
+        if isinstance(node, IRReadDmem):
+            return node.dst == reg_name or node.addr == reg_name
+        if isinstance(node, IRCondJump):
+            if node.arg1 == reg_name:
+                return True
+            return isinstance(node.arg2, str) and node.arg2 == reg_name
+        return False
 
 
 class FuseAdjacentDelays(Pass):
@@ -297,6 +324,82 @@ class FuseAdjacentDelays(Pass):
                 fused.append(child)
 
         return IRSeq(body=tuple(fused), meta=node.meta)
+
+
+class ReorderPulseLikeByTime(Pass):
+    """Reorder pulse-like nodes by ascending t within safe local segments."""
+
+    def transform(self, node: IRNode, ctx: PassCtx) -> IRNode:
+        if not isinstance(node, IRSeq):
+            return node
+
+        out: List[IRNode] = []
+        segment: List[IRNode] = []
+
+        def flush_segment() -> None:
+            if not segment:
+                return
+            out.extend(self._reorder_segment(segment))
+            segment.clear()
+
+        for child in node.body:
+            if self._is_barrier(child):
+                flush_segment()
+                out.append(child)
+            else:
+                segment.append(child)
+        flush_segment()
+
+        return IRSeq(body=tuple(out), meta=node.meta)
+
+    def _reorder_segment(self, segment: List[IRNode]) -> List[IRNode]:
+        slots = [i for i, n in enumerate(segment) if self._is_reorderable(n)]
+        if len(slots) < 2:
+            return list(segment)
+
+        candidates = [
+            cast(Union[IRPulse, IRSendReadoutConfig], segment[i]) for i in slots
+        ]
+        candidates_sorted = sorted(candidates, key=self._t_key)
+
+        rebuilt = list(segment)
+        for i, node in zip(slots, candidates_sorted):
+            rebuilt[i] = node
+        return rebuilt
+
+    @staticmethod
+    def _is_reorderable(node: IRNode) -> bool:
+        return isinstance(node, (IRPulse, IRSendReadoutConfig))
+
+    @staticmethod
+    def _is_barrier(node: IRNode) -> bool:
+        return isinstance(
+            node,
+            (
+                IRDelay,
+                IRDelayAuto,
+                IRReadout,
+                IRLabel,
+                IRJump,
+                IRCondJump,
+                IRRegOp,
+                IRReadDmem,
+                IRLoop,
+                IRRegLoop,
+                IRBranch,
+            ),
+        )
+
+    @staticmethod
+    def _t_key(node: Union[IRPulse, IRSendReadoutConfig]) -> tuple[int, float]:
+        t = node.t
+        if isinstance(t, (int, float)):
+            return (0, float(t))
+        if hasattr(t, "minval"):
+            min_v = t.minval()
+            if isinstance(min_v, (int, float)):
+                return (0, float(min_v))
+        return (1, 0.0)
 
 
 class AlignBranchDispatch(Pass):
@@ -369,6 +472,7 @@ def make_default_pipeline(config: PassConfig | None = None) -> PassPipeline:
             EstimateDurations(),
             UnrollShortLoops(),
             FuseAdjacentDelays(),
+            ReorderPulseLikeByTime(),
             AlignBranchDispatch(),
             ValidateInvariants(),
         ],

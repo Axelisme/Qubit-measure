@@ -35,7 +35,6 @@ class Delay(Module):
         return 0.0
 
 
-
 class SoftDelay(Module):
     def __init__(self, name: str, delay: Union[float, QickParam]) -> None:
         self.name = name
@@ -53,7 +52,6 @@ class SoftDelay(Module):
         # Keep legacy semantics: SoftDelay returns its own rounded delay and
         # does not accumulate with incoming t.
         return round_timestamp(prog, self.delay)
-
 
 
 class DelayAuto(Module):
@@ -86,7 +84,6 @@ class DelayAuto(Module):
         return 0.0
 
 
-
 class Join(Module):
     def __init__(self, *args: Union[Module, Sequence[Module]]) -> None:
         self.name = ""
@@ -113,26 +110,13 @@ class Join(Module):
         t: Union[float, QickParam],
         prog: ModularProgramV2,
     ) -> Union[float, QickParam]:
-        list_modules = [list(branch) for branch in self.join_modules]
-        cur_t_list: list[Union[float, QickParam]] = [t for _ in list_modules]
-
-        def find_next_branch() -> Optional[int]:
-            min_i = None
-            min_t = 0.0
-            for i, (ct, mod_list) in enumerate(zip(cur_t_list, list_modules)):
-                if not mod_list:
-                    continue
-                ct_val = ct.minval() if isinstance(ct, QickParam) else ct
-                if min_i is None or ct_val < min_t:
-                    min_i = i
-                    min_t = ct_val
-            return min_i
-
+        cur_t_list: list[Union[float, QickParam]] = []
         with prog.disable_delay():
-            while (i := find_next_branch()) is not None:
-                cur_t = cur_t_list[i]
-                mod = list_modules[i].pop(0)
-                cur_t_list[i] = mod.ir_run(builder, cur_t, prog)
+            for branch in self.join_modules:
+                cur_t = t
+                for mod in branch:
+                    cur_t = mod.ir_run(builder, cur_t, prog)
+                cur_t_list.append(cur_t)
 
         end_t = merge_max_length(*cur_t_list)
         builder.ir_delay(end_t)
