@@ -24,6 +24,7 @@ from .nodes import (
     IRRegOp,
     IRSendReadoutConfig,
     IRSeq,
+    RegOp,
 )
 from .pass_base import Pass, PassConfig, PassCtx, PassPipeline
 
@@ -235,11 +236,7 @@ class UnrollShortLoops(Pass):
         if not isinstance(node, IRLoop):
             return node
 
-        if self._references_reg(node.body, node.name):
-            ctx.warn(
-                f"skip unroll loop '{node.name}': body references loop counter register"
-            )
-            return node
+        counter_referenced = self._references_reg(node.body, node.name)
 
         body_dur = node.body.meta.duration
         if body_dur is None:
@@ -256,12 +253,33 @@ class UnrollShortLoops(Pass):
 
         if node.n <= 0:
             return IRSeq(body=(), meta=node.meta)
-        if node.n == 1:
+        if node.n == 1 and not counter_referenced:
             return node.body
 
         unrolled: List[IRNode] = []
+        if counter_referenced:
+            # Preserve loop-counter semantics when the loop body reads/writes it.
+            # Equivalent to "counter = 0" before entering the unrolled body.
+            unrolled.append(
+                IRRegOp(
+                    dst=node.name,
+                    lhs=node.name,
+                    op=RegOp.SUB,
+                    rhs=node.name,
+                )
+            )
         for _ in range(node.n):
             unrolled.append(node.body)
+            if counter_referenced:
+                # Equivalent to IncReg(dst=node.name, src=1).
+                unrolled.append(
+                    IRRegOp(
+                        dst=node.name,
+                        lhs=node.name,
+                        op=RegOp.ADD,
+                        rhs=1,
+                    )
+                )
         return IRSeq(body=tuple(unrolled), meta=node.meta)
 
     def _references_reg(self, node: IRNode, reg_name: str) -> bool:
@@ -324,6 +342,22 @@ class FuseAdjacentDelays(Pass):
                 fused.append(child)
 
         return IRSeq(body=tuple(fused), meta=node.meta)
+
+
+class RemoveZeroDelays(Pass):
+    """Remove IRDelay nodes with exact numeric zero duration."""
+
+    def transform(self, node: IRNode, ctx: PassCtx) -> IRNode:
+        if not isinstance(node, IRSeq):
+            return node
+
+        compact: List[IRNode] = []
+        for child in node.body:
+            if isinstance(child, IRDelay) and isinstance(child.t, (int, float)):
+                if float(child.t) == 0.0:
+                    continue
+            compact.append(child)
+        return IRSeq(body=tuple(compact), meta=node.meta)
 
 
 class ReorderPulseLikeByTime(Pass):
@@ -455,6 +489,7 @@ def make_default_pipeline(config: PassConfig | None = None) -> PassPipeline:
             FreshLabels(),
             EstimateDurations(),
             UnrollShortLoops(),
+            RemoveZeroDelays(),
             FuseAdjacentDelays(),
             ReorderPulseLikeByTime(),
             ValidateInvariants(),

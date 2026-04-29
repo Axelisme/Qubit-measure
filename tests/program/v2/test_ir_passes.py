@@ -12,6 +12,7 @@ from zcu_tools.program.v2.ir.nodes import (
     IRLoop,
     IRNop,
     IRPulse,
+    IRRegOp,
     IRSendReadoutConfig,
     IRSeq,
 )
@@ -62,6 +63,44 @@ def test_fuse_adjacent_delays_with_same_tag_only() -> None:
     assert new_root.body[1].tag == "b"
 
 
+def test_remove_zero_delays_before_fusion() -> None:
+    root = IRSeq(
+        body=(
+            IRDelay(0.0),
+            IRDelay(0.1),
+            IRDelay(0.0),
+            IRDelay(0.2),
+        )
+    )
+    new_root, _ = make_default_pipeline(PassConfig(min_body_us=0.0))(root)
+    assert isinstance(new_root, IRSeq)
+    assert len(new_root.body) == 1
+    assert isinstance(new_root.body[0], IRDelay)
+    assert new_root.body[0].t == pytest.approx(0.3)
+
+
+def test_unroll_short_loop_with_counter_reference_inserts_counter_updates() -> None:
+    body = IRSeq(
+        body=(
+            IRRegOp(dst="l0", lhs="l0", op="+", rhs=1),
+            IRDelay(0.01),
+        )
+    )
+    root = IRSeq(body=(IRLoop(name="l0", n=2, body=body),))
+    new_root, _ = make_default_pipeline(PassConfig(min_body_us=0.05, enable_fusion=False))(root)
+    assert isinstance(new_root, IRSeq)
+    assert len(new_root.body) == 1
+    unrolled = new_root.body[0]
+    assert isinstance(unrolled, IRSeq)
+    # init-to-zero + 2*(body + inc)
+    assert len(unrolled.body) == 5
+    assert isinstance(unrolled.body[0], IRRegOp)
+    assert isinstance(unrolled.body[1], IRSeq)
+    assert isinstance(unrolled.body[2], IRRegOp)
+    assert isinstance(unrolled.body[3], IRSeq)
+    assert isinstance(unrolled.body[4], IRRegOp)
+
+
 def test_align_branch_dispatch_pads_short_arms() -> None:
     root = IRBranch(
         compare_reg="sel",
@@ -76,9 +115,10 @@ def test_align_branch_dispatch_pads_short_arms() -> None:
     assert isinstance(new_root, IRBranch)
     assert isinstance(new_root.arms[0], IRSeq)
     assert isinstance(new_root.arms[1], IRSeq)
-    # First arm was padded to match second arm cost.
-    assert isinstance(new_root.arms[0].body[-1], IRNop)
-    assert len(new_root.arms[0].body) == len(new_root.arms[1].body)
+    # AlignBranchDispatch has been removed; branch arms keep original shape.
+    assert isinstance(new_root.arms[0].body[-1], IRDelay)
+    assert len(new_root.arms[0].body) == 1
+    assert len(new_root.arms[1].body) == 2
 
 
 def test_reorder_pulse_like_nodes_by_t_within_segment() -> None:
