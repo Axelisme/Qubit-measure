@@ -10,6 +10,8 @@ from .util import merge_max_length, round_timestamp
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
+    from zcu_tools.program.v2.lower import LowerCtx
+    from zcu_tools.program.v2.ir import IRNode
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,17 @@ class Delay(Module):
 
         return 0.0  # reset reference time
 
+    def lower(self, ctx: LowerCtx) -> IRNode:
+        from ..ir import IRDelay, IRMeta
+
+        delay_val = self.delay if isinstance(self.delay, (int, float)) else 0.0
+        return IRDelay(
+            duration=delay_val,
+            auto=False,
+            tag=self.tag,
+            meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
+        )
+
     def allow_rerun(self) -> bool:
         return self.tag is None
 
@@ -48,6 +61,12 @@ class SoftDelay(Module):
     ) -> Union[float, QickParam]:
 
         return round_timestamp(prog, self.delay)
+
+    def lower(self, ctx: LowerCtx) -> IRNode:
+        from ..ir import IRSeq
+
+        # SoftDelay is a no-op for IR purposes; it's just adding to timeline
+        return IRSeq()
 
     def allow_rerun(self) -> bool:
         return True
@@ -81,6 +100,22 @@ class DelayAuto(Module):
         else:
             prog.delay_auto(t=self.t, gens=self.gens, ros=self.ros, tag=self.tag)  # type: ignore
         return 0.0
+
+    def lower(self, ctx: LowerCtx) -> IRNode:
+        from ..ir import IRDelay, IRMeta
+
+        if isinstance(self.t, str):
+            # Register-based delay
+            duration = self.t
+        else:
+            duration = self.t if isinstance(self.t, (int, float)) else 0.0
+
+        return IRDelay(
+            duration=duration,
+            auto=True,
+            tag=self.tag,
+            meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
+        )
 
     def allow_rerun(self) -> bool:
         return self.tag is None

@@ -22,6 +22,8 @@ from .util import calc_max_length, round_timestamp
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
+    from zcu_tools.program.v2.lower import LowerCtx
+    from zcu_tools.program.v2.ir import IRNode
 
 
 class AbsReadoutCfg(AbsModuleCfg):
@@ -140,6 +142,20 @@ class DirectReadout(AbsReadout):
         prog.trigger([ro_ch], t=t + trig_offset)
         return t
 
+    def lower(self, ctx: LowerCtx) -> IRNode:
+        from ..ir import IRReadout, IRMeta
+
+        ro_ch = self.cfg.ro_ch
+        trig_offset = self.cfg.trig_offset if isinstance(self.cfg.trig_offset, (int, float)) else 0.0
+
+        return IRReadout(
+            ch=str(ro_ch),
+            ro_chs=(str(ro_ch),),
+            pulse_name=self.name,
+            trig_offset=trig_offset,
+            meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
+        )
+
 
 class PulseReadout(AbsReadout):
     def __init__(self, name: str, cfg: PulseReadoutCfg) -> None:
@@ -171,3 +187,15 @@ class PulseReadout(AbsReadout):
         self.ro_window.run(prog, t)
         self.pulse.run(prog, t)
         return t + self.total_length(prog)
+
+    def lower(self, ctx: LowerCtx) -> IRNode:
+        from ..ir import IRSeq, IRMeta
+
+        child_ctx = ctx.with_child(self.name)
+        pulse_ir = self.pulse.lower(child_ctx)
+        ro_ir = self.ro_window.lower(child_ctx)
+
+        return IRSeq(
+            body=(pulse_ir, ro_ir),
+            meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
+        )

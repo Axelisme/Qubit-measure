@@ -12,6 +12,8 @@ from .waveform import AbsWaveform, WaveformCfg, resolve_waveform_ref
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
+    from zcu_tools.program.v2.lower import LowerCtx
+    from zcu_tools.program.v2.ir import IRNode
 
 
 class PulseCfg(AbsModuleCfg):
@@ -127,6 +129,24 @@ class Pulse(Module):
         if self.block_mode:
             return t + self.total_length(prog)
         return t
+
+    def lower(self, ctx: LowerCtx) -> IRNode:
+        from ..ir import IRPulse, IRMeta, IRSeq
+
+        cfg = self.cfg
+        if cfg is None or self.pulse_id is None:
+            return IRSeq()  # empty sequence for None config
+
+        pre_delay = cfg.pre_delay if isinstance(cfg.pre_delay, (int, float)) else 0.0
+        post_delay = cfg.post_delay if isinstance(cfg.post_delay, (int, float)) else 0.0
+
+        return IRPulse(
+            ch=str(cfg.ch),
+            pulse_name=self.pulse_id,
+            pre_delay=pre_delay,
+            post_delay=post_delay,
+            meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
+        )
 
     def allow_rerun(self) -> bool:
         return True

@@ -20,6 +20,8 @@ from .util import calc_max_length
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
+    from zcu_tools.program.v2.lower import LowerCtx
+    from zcu_tools.program.v2.ir import IRNode
 
 
 PulseOrRef: TypeAlias = Annotated[PulseCfg, BeforeValidator(resolve_module_ref)]
@@ -131,6 +133,11 @@ class NoneReset(AbsReset):
     ) -> Union[float, QickParam]:
         return t
 
+    def lower(self, ctx: LowerCtx) -> IRNode:
+        from ..ir import IRSeq
+
+        return IRSeq()
+
 
 class PulseReset(AbsReset):
     def __init__(self, name: str, cfg: PulseResetCfg) -> None:
@@ -148,6 +155,10 @@ class PulseReset(AbsReset):
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
         return self.reset_pulse.run(prog, t)
+
+    def lower(self, ctx: LowerCtx) -> IRNode:
+        child_ctx = ctx.with_child(self.name)
+        return self.reset_pulse.lower(child_ctx)
 
 
 class TwoPulseReset(AbsReset):
@@ -173,6 +184,18 @@ class TwoPulseReset(AbsReset):
         pulse2_t = self.reset_pulse2.run(prog, t)
         return calc_max_length(pulse1_t, pulse2_t)
 
+    def lower(self, ctx: LowerCtx) -> IRNode:
+        from ..ir import IRSeq, IRMeta
+
+        child_ctx = ctx.with_child(self.name)
+        pulse1_ir = self.reset_pulse1.lower(child_ctx)
+        pulse2_ir = self.reset_pulse2.lower(child_ctx)
+
+        return IRSeq(
+            body=(pulse1_ir, pulse2_ir),
+            meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
+        )
+
 
 class BathReset(AbsReset):
     def __init__(self, name: str, cfg: BathResetCfg) -> None:
@@ -197,3 +220,16 @@ class BathReset(AbsReset):
         self.qub_pulse.run(prog, t)
         end_t = self.pi2_pulse.run(prog, res_t)
         return end_t
+
+    def lower(self, ctx: LowerCtx) -> IRNode:
+        from ..ir import IRSeq, IRMeta
+
+        child_ctx = ctx.with_child(self.name)
+        res_ir = self.res_pulse.lower(child_ctx)
+        qub_ir = self.qub_pulse.lower(child_ctx)
+        pi2_ir = self.pi2_pulse.lower(child_ctx)
+
+        return IRSeq(
+            body=(res_ir, qub_ir, pi2_ir),
+            meta=IRMeta(source_module=".".join(ctx.parent_path + (self.name,))),
+        )
