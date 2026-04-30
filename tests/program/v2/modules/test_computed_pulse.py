@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.modular import ModularProgramV2
@@ -109,6 +111,16 @@ def test_flat_top_emits_three_wport_wr_per_run():
     # ramp_down) sharing the same TIME. The program loops twice (sweep=2), so
     # we expect at least 3 occurrences in the inner body.
     assert asm.count("WPORT_WR") >= 3
+
+
+def test_flat_top_uses_distinct_wmem_regs_for_three_segments():
+    pulses = [_flat_top_pulse(gain=0.2), _flat_top_pulse(gain=0.5)]
+    prog = _make_prog(_gate_modules(pulses))
+    asm = prog.asm()
+    regs = re.findall(r"WPORT_WR\s+p\d+\s+wmem\s+\[&([^\]]+)\]", asm)
+    assert len(regs) >= 3
+    r0, r1, r2 = regs[:3]
+    assert len({r0, r1, r2}) == 3
 
 
 def test_const_emits_one_wport_wr_per_run():

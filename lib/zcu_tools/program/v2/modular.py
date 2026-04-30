@@ -10,11 +10,12 @@ from typing_extensions import Optional, Sequence, Union
 from .base import MyProgramV2, ProgramV2Cfg
 from .modules import Module
 from .sweep import SweepCfg
+from .ir import IRBuilder, PassConfig, make_default_pipeline, Emitter
 
 logger = logging.getLogger(__name__)
 
 
-def _raise_on_ir_pass_errors(diagnostics: Sequence[str]) -> None:
+def raise_on_ir_pass_errors(diagnostics: Sequence[str]) -> None:
     errors = [msg for msg in diagnostics if msg.startswith("error:")]
     if not errors:
         return
@@ -67,29 +68,27 @@ class ModularProgramV2(MyProgramV2):
 
     def _body(self, cfg: ProgramV2Cfg) -> None:
         """IR-based emit path: ir_run() → IRBuilder → Emitter → macros."""
-        from .ir.builder import IRBuilder
-        from .ir.pass_base import PassConfig
-        from .ir.passes import make_default_pipeline
-        from .lower import Emitter
 
-        builder = IRBuilder()
+        # IR generation
         t = 0.0
+        builder = IRBuilder()
         for module in self.modules:
-            if logger.isEnabledFor(logging.DEBUG):
-                self.debug_macro(f"{type(module).__name__}({module.name})", t)
             t = module.ir_run(builder, t, self)
-
-        # Always emit trailing delay (including t=0.0).
-        builder.ir_delay(t)
+        builder.ir_delay(t)  # Always emit trailing delay.
 
         root_ir = builder.build()
-        # 20% safety margin absorbs estimate inaccuracy and pre/post-amble overhead.
-        pmem_budget = int(self.tproccfg["pmem_size"] * 0.8)
+
+        pmem_budget = int(self.tproccfg["pmem_size"] * 0.8)  # 20% safety margin
         pass_config = PassConfig(pmem_budget=pmem_budget)
+
         root_ir, pass_ctx = make_default_pipeline(pass_config)(root_ir)
         for msg in pass_ctx.diagnostics:
             logger.warning("IR pass: %s", msg)
-        _raise_on_ir_pass_errors(pass_ctx.diagnostics)
+
+        errors = [msg for msg in pass_ctx.diagnostics if msg.startswith("error:")]
+        if errors:
+            raise RuntimeError("IR pass validation failed:\n" + "\n".join(errors))
+
         Emitter(self).emit(root_ir)
 
     def add_dmem(self, values: Sequence[int]) -> int:

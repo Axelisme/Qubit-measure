@@ -32,7 +32,6 @@ class RegOp(str, Enum):
 class IRMeta:
     """Metadata attached to IR nodes."""
 
-    source_module: str = ""
     extra: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -51,10 +50,9 @@ class IRNode(ABC):
 class IRPulse(IRNode):
     """Emit a single pulse at time t relative to the current ref_t."""
 
-    ch: str
-    pulse_name: str
+    ch: int
+    pulse_id: str
     t: Union[float, QickParam]
-    tag: Optional[str] = None
     meta: IRMeta = field(default_factory=IRMeta)
 
 
@@ -62,8 +60,8 @@ class IRPulse(IRNode):
 class IRSendReadoutConfig(IRNode):
     """Send readout configuration at time t."""
 
-    ch: str
-    pulse_name: str
+    ch: int
+    readout_id: str
     t: Union[float, QickParam]
     meta: IRMeta = field(default_factory=IRMeta)
 
@@ -73,14 +71,13 @@ class IRReadout(IRNode):
     """Trigger readout; t is relative to current ref_t (trig_offset folded in by caller)."""
 
     ch: str
-    ro_chs: Tuple[str, ...]
-    pulse_name: str
+    ro_chs: Tuple[int, ...]
     t: Union[float, QickParam]
     meta: IRMeta = field(default_factory=IRMeta)
 
 
 @dataclass(frozen=True)
-class IRPulseWmemReg(IRNode):
+class IRPulseByReg(IRNode):
     """Play pulse from runtime-computed wmem address register."""
 
     ch: int
@@ -95,7 +92,6 @@ class IRDelay(IRNode):
     """Delay: advances ref_t by t."""
 
     t: Union[float, QickParam]
-    tag: Optional[str] = None
     meta: IRMeta = field(default_factory=IRMeta)
 
 
@@ -107,13 +103,11 @@ class IRDelayAuto(IRNode):
       - float / int: static delay value lowered to ``prog.delay_auto``.
       - QickParam: parameterized delay lowered to ``prog.delay_auto``.
       - str: name of a runtime register; lowered to ``prog.delay_reg_auto``.
-        In this case ``tag`` MUST be None (tagging requires a static path).
     """
 
     t: Union[float, QickParam, str] = 0.0
     gens: bool = True
     ros: bool = True
-    tag: Optional[str] = None
     meta: IRMeta = field(default_factory=IRMeta)
 
 
@@ -236,7 +230,7 @@ IRLeaf = Union[
     IRPulse,
     IRSendReadoutConfig,
     IRReadout,
-    IRPulseWmemReg,
+    IRPulseByReg,
     IRDelay,
     IRDelayAuto,
     IRRegOp,

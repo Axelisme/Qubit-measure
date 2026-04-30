@@ -7,6 +7,7 @@ from zcu_tools.program.v2.ir.nodes import (
     IRBranch,
     IRCondJump,
     IRDelay,
+    IRDelayAuto,
     IRJump,
     IRLabel,
     IRLoop,
@@ -33,6 +34,34 @@ def test_unroll_short_loop() -> None:
     # Unrolled (3x0.01), flattened, then fused with trailing 0.2.
     assert isinstance(new_root.body[0], IRDelay)
     assert new_root.body[0].t == pytest.approx(0.23)
+
+
+def test_unroll_single_iteration_loop() -> None:
+    root = IRSeq(
+        body=(
+            IRLoop(name="l0", n=1, body=IRDelay(0.01)),
+            IRDelay(0.2),
+        )
+    )
+    new_root, _ = make_default_pipeline(PassConfig(pmem_budget=1000))(root)
+    assert isinstance(new_root, IRSeq)
+    assert len(new_root.body) == 1
+    assert isinstance(new_root.body[0], IRDelay)
+    assert new_root.body[0].t == pytest.approx(0.21)
+
+
+def test_unroll_zero_iteration_loop() -> None:
+    root = IRSeq(
+        body=(
+            IRLoop(name="l0", n=0, body=IRDelay(0.01)),
+            IRDelay(0.2),
+        )
+    )
+    new_root, _ = make_default_pipeline(PassConfig(pmem_budget=1000))(root)
+    assert isinstance(new_root, IRSeq)
+    assert len(new_root.body) == 1
+    assert isinstance(new_root.body[0], IRDelay)
+    assert new_root.body[0].t == pytest.approx(0.2)
 
 
 def test_skip_unroll_large_loop_count() -> None:
@@ -98,6 +127,23 @@ def test_unroll_skipped_when_counter_register_referenced() -> None:
     assert loop.name == "l0"
     assert any(
         "skip unroll loop 'l0': body references counter register" in msg
+        for msg in ctx.diagnostics
+    )
+
+
+def test_unroll_skipped_when_body_has_symbolic_timing() -> None:
+    body = IRSeq(body=(IRDelayAuto(t="delay_reg"),))
+    root = IRSeq(body=(IRLoop(name="l0", n=3, body=body),))
+    new_root, ctx = make_default_pipeline(
+        PassConfig(pmem_budget=1000, enable_fusion=False)
+    )(root)
+    assert isinstance(new_root, IRSeq)
+    assert len(new_root.body) == 1
+    loop = new_root.body[0]
+    assert isinstance(loop, IRLoop)
+    assert loop.name == "l0"
+    assert any(
+        "skip unroll loop 'l0': body contains symbolic timing" in msg
         for msg in ctx.diagnostics
     )
 

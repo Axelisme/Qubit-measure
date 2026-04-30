@@ -5,7 +5,7 @@ from numbers import Integral
 from qick.asm_v2 import AsmInst, TimedMacro
 
 
-class PulseFromWmemReg(TimedMacro):
+class PulseByReg(TimedMacro):
     """Play one or more pre-addressed wmem entries back-to-back at the same TIME.
 
     Emits exactly ``len(addr_regs)`` ``WPORT_WR`` instructions with no other

@@ -16,7 +16,7 @@ from .nodes import (
     IRNode,
     IRNop,
     IRPulse,
-    IRPulseWmemReg,
+    IRPulseByReg,
     IRReadDmem,
     IRReadout,
     IRRegLoop,
@@ -48,7 +48,7 @@ def estimate_insts(node: IRNode) -> int:
         arms_total = sum(estimate_insts(arm) for arm in node.arms)
         dispatch_overhead = 2 * max(0, len(node.arms) - 1)
         return arms_total + dispatch_overhead
-    if isinstance(node, IRPulseWmemReg):
+    if isinstance(node, IRPulseByReg):
         return 2
     if isinstance(node, IRCondJump):
         return 2
@@ -171,9 +171,14 @@ class UnrollInfo:
     n: int
     depth: int  # 1 for outermost IRLoop, increases with nesting
     body_nonloop_insts: int  # inst count of body excluding direct child IRLoops
-    direct_loop_children: List[int] = field(default_factory=list)  # ids of IRLoops directly nested in body
-    descendant_loops: List[int] = field(default_factory=list)  # transitively nested IRLoop ids
+    direct_loop_children: List[int] = field(
+        default_factory=list
+    )  # ids of IRLoops directly nested in body
+    descendant_loops: List[int] = field(
+        default_factory=list
+    )  # transitively nested IRLoop ids
     counter_referenced: bool = False
+    has_symbolic_timing: bool = False
     over_iter_limit: bool = False
 
 
@@ -185,7 +190,9 @@ class MarkUnrollInfo(Pass):
     subsequent ``UnrollShortLoops`` pass.
     """
 
-    def transform(self, node: IRNode, ctx: PassCtx) -> IRNode:  # pragma: no cover - unused
+    def transform(
+        self, node: IRNode, ctx: PassCtx
+    ) -> IRNode:  # pragma: no cover - unused
         return node
 
     def __call__(self, node: IRNode, ctx: PassCtx | None = None) -> IRNode:
@@ -227,6 +234,7 @@ class MarkUnrollInfo(Pass):
             direct_loop_children=direct_children,
             descendant_loops=descendants,
             counter_referenced=_references_reg(node.body, node.name),
+            has_symbolic_timing=_contains_symbolic_timing(node.body),
             over_iter_limit=node.n > max_iters,
         )
         ctx.unroll_info[info.node_id] = info
@@ -295,11 +303,14 @@ class UnrollShortLoops(Pass):
     starts at the baseline (no-unroll) inst estimate of the entire tree.
 
     Counter-referenced loops and loops with ``n > max_unroll_iters`` are
-    skipped (with diagnostic warnings). Loops with ``n < 2`` cannot save any
-    instructions and are not unrolled either (preserved as-is).
+    skipped (with diagnostic warnings). Loops with ``n == 0`` are always
+    eliminated as empty sequences. Loops with ``n == 1`` are unrolled when
+    otherwise eligible (no budget consumption).
     """
 
-    def transform(self, node: IRNode, ctx: PassCtx) -> IRNode:  # pragma: no cover - unused
+    def transform(
+        self, node: IRNode, ctx: PassCtx
+    ) -> IRNode:  # pragma: no cover - unused
         return node
 
     def __call__(self, node: IRNode, ctx: PassCtx | None = None) -> IRNode:
@@ -323,9 +334,17 @@ class UnrollShortLoops(Pass):
         empty_chosen: Set[int] = set()
         candidates: List[UnrollInfo] = []
         for info in infos.values():
+            if info.n == 0:
+                candidates.append(info)
+                continue
             if info.counter_referenced:
                 ctx.warn(
                     f"skip unroll loop '{info.name}': body references counter register"
+                )
+                continue
+            if info.n > 1 and info.has_symbolic_timing:
+                ctx.warn(
+                    f"skip unroll loop '{info.name}': body contains symbolic timing"
                 )
                 continue
             if info.over_iter_limit:
@@ -334,7 +353,7 @@ class UnrollShortLoops(Pass):
                     f"max_unroll_iters={ctx.config.max_unroll_iters}"
                 )
                 continue
-            if info.n < 2:
+            if info.n < 1:
                 continue
             candidates.append(info)
 
@@ -396,11 +415,15 @@ class UnrollShortLoops(Pass):
                     return IRSeq(body=(), meta=node.meta)
                 if node.n == 1:
                     return new_body
-                return IRSeq(body=tuple(new_body for _ in range(node.n)), meta=node.meta)
+                return IRSeq(
+                    body=tuple(new_body for _ in range(node.n)), meta=node.meta
+                )
             return IRLoop(name=node.name, n=node.n, body=new_body, meta=node.meta)
         if isinstance(node, IRRegLoop):
             new_body = self._rewrite(node.body, chosen)
-            return IRRegLoop(name=node.name, n_reg=node.n_reg, body=new_body, meta=node.meta)
+            return IRRegLoop(
+                name=node.name, n_reg=node.n_reg, body=new_body, meta=node.meta
+            )
         if isinstance(node, IRSeq):
             new_children = tuple(self._rewrite(child, chosen) for child in node.body)
             return IRSeq(body=new_children, meta=node.meta)
@@ -429,6 +452,24 @@ def _references_reg(node: IRNode, reg_name: str) -> bool:
         if node.arg1 == reg_name:
             return True
         return isinstance(node.arg2, str) and node.arg2 == reg_name
+    return False
+
+
+def _contains_symbolic_timing(node: IRNode) -> bool:
+    if isinstance(node, IRSeq):
+        return any(_contains_symbolic_timing(child) for child in node.body)
+    if isinstance(node, IRLoop):
+        return _contains_symbolic_timing(node.body)
+    if isinstance(node, IRRegLoop):
+        return _contains_symbolic_timing(node.body)
+    if isinstance(node, IRBranch):
+        return any(_contains_symbolic_timing(arm) for arm in node.arms)
+    if isinstance(node, (IRPulse, IRSendReadoutConfig, IRReadout, IRPulseByReg)):
+        return not isinstance(node.t, (int, float))
+    if isinstance(node, IRDelay):
+        return not isinstance(node.t, (int, float))
+    if isinstance(node, IRDelayAuto):
+        return not isinstance(node.t, (int, float))
     return False
 
 

@@ -3,6 +3,9 @@
 Module authors call builder.ir_*(…) methods to emit IR nodes. Context managers
 ir_loop / ir_branch push a scope on entry and pop+wrap into IRLoop / IRBranch on
 exit. The builder tracks no timing state — callers compute and pass t themselves.
+
+Temp-register allocation (acquire_temp_reg) is also managed here so that build-time
+callers (modules) do not touch the prog-side scope stack before lowering.
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ from .nodes import (
     IRNode,
     IRNop,
     IRPulse,
-    IRPulseWmemReg,
+    IRPulseByReg,
     IRReadDmem,
     IRReadout,
     IRRegLoop,
@@ -55,6 +58,12 @@ class IRBuilder:
         # Stack of pending node lists: each entry is the body list for the
         # current scope. Bottom of the stack is the top-level sequence.
         self._stack: List[List[IRNode]] = [[]]
+        # Temp-reg depth tracking: each entry is the total depth after the
+        # corresponding acquire_temp_reg call (same semantics as the prog-side
+        # ImproveAsmV2._temp_reg_scope_stack, but tracked purely at build time).
+        self._temp_reg_scope_stack: List[int] = []
+        # High-water mark: maximum temp_reg depth reached during this build.
+        self._max_temp_reg_depth: int = 0
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -81,16 +90,15 @@ class IRBuilder:
         t: Union[float, QickParam],
         tag: Optional[str] = None,
     ) -> None:
-        self._emit(IRPulse(ch=ch, pulse_name=pulse_name, t=t, tag=tag))
+        self._emit(IRPulse(ch=ch, pulse_id=pulse_name, t=t, tag=tag))
 
     def ir_readout(
         self,
         ch: str,
-        ro_chs: Tuple[str, ...],
-        pulse_name: str,
+        ro_chs: Tuple[int, ...],
         t: Union[float, QickParam],
     ) -> None:
-        self._emit(IRReadout(ch=ch, ro_chs=ro_chs, pulse_name=pulse_name, t=t))
+        self._emit(IRReadout(ch=ch, ro_chs=ro_chs, t=t))
 
     def ir_send_readoutconfig(
         self,
@@ -98,7 +106,7 @@ class IRBuilder:
         pulse_name: str,
         t: Union[float, QickParam],
     ) -> None:
-        self._emit(IRSendReadoutConfig(ch=ch, pulse_name=pulse_name, t=t))
+        self._emit(IRSendReadoutConfig(ch=ch, readout_id=pulse_name, t=t))
 
     def ir_delay(
         self,
@@ -124,12 +132,7 @@ class IRBuilder:
         flat_top_pulse: bool = False,
     ) -> None:
         self._emit(
-            IRPulseWmemReg(
-                ch=ch,
-                addr_reg=addr_reg,
-                t=t,
-                flat_top_pulse=flat_top_pulse,
-            )
+            IRPulseByReg(ch=ch, addr_reg=addr_reg, t=t, flat_top_pulse=flat_top_pulse)
         )
 
     def ir_reg_op(
@@ -207,6 +210,9 @@ class IRBuilder:
             arms = branch_ctx.finish()
             self._emit(IRBranch(compare_reg=compare_reg, arms=arms))
 
+    # ------------------------------------------------------------------
+    # Temp-register allocation (build-time depth tracking)
+    # ------------------------------------------------------------------
     # ------------------------------------------------------------------
     # Build
     # ------------------------------------------------------------------

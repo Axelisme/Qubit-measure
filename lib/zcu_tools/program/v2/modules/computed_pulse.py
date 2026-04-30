@@ -89,7 +89,7 @@ class ComputedPulse(Module):
         prog: ModularProgramV2,
     ) -> Union[float, QickParam]:
         ref_cfg = self.ref_cfg
-        with prog.acquire_temp_reg(1) as (addr_reg,):
+        with builder.acquire_temp_reg(1) as (addr_reg,):
             # base = wmem_offset + gate_idx * stride
             if self._stride == 1:
                 builder.ir_reg_op(addr_reg, self.val_reg, "+", self.wmem_offset)
@@ -103,6 +103,7 @@ class ComputedPulse(Module):
                 addr_reg,
                 t=t + ref_cfg.pre_delay,
                 flat_top_pulse=self._is_flat_top,
+                outer_temp_count=outer_count,
             )
 
         return t + self.total_length(prog)
@@ -114,4 +115,3 @@ class ComputedPulse(Module):
                 "ComputedPulse total length cannot be determined at compile time"
             )
         return max([float(length) for length in lengths])
-

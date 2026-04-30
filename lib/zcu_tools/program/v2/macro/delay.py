@@ -8,7 +8,7 @@ from qick.asm_v2 import AsmInst, TimedMacro
 logger = logging.getLogger(__name__)
 
 
-class DelayRegAuto(TimedMacro):
+class DelayAutoReg(TimedMacro):
     """Auto-align to timeline, then increment by runtime cycles from a register.
 
     The register value is interpreted as tProc cycles (not microseconds).
