@@ -27,6 +27,14 @@ class Instruction:
         if not cmd:
             raise ValueError(f"Unknown instruction format: {d}")
 
+        if cmd == "__META__":
+            return MetaInst(
+                type=d.get("TYPE", ""),
+                name=d.get("NAME", ""),
+                line=d.get("LINE"),
+                p_addr=d.get("P_ADDR"),
+            )
+
         # Default to GenericInst for now
         args = {k: v for k, v in d.items() if k not in ("CMD", "LINE", "P_ADDR")}
         return GenericInst(
@@ -66,6 +74,21 @@ class LabelInst(Instruction):
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"LABEL": self.name}
         d.update(self.args)
+        if self.line is not None:
+            d["LINE"] = self.line
+        if self.p_addr is not None:
+            d["P_ADDR"] = self.p_addr
+        return d
+
+
+@dataclass(frozen=True)
+class MetaInst(Instruction):
+    """Meta instruction used for structural control like loops."""
+    type: str = ""
+    name: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"CMD": "__META__", "TYPE": self.type, "NAME": self.name}
         if self.line is not None:
             d["LINE"] = self.line
         if self.p_addr is not None:

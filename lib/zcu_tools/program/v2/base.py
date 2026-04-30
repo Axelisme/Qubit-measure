@@ -8,9 +8,9 @@ from qick.asm_v2 import AveragerProgramV2
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.program.base import ImproveAcquireMixin
 
+from .ir import IRComplieMixin
 from .macro import ImproveAsmV2
 from .modules.registry import PulseRegistry
-from .ir import IRComplieMixin
 
 logger = logging.getLogger(__name__)
 

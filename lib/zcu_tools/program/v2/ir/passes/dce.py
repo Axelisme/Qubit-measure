@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from ..node import IRNode
+from ..instructions import Instruction, LabelInst
+from ..node import BlockNode, IRNode, RootNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
-from ..instructions import LabelInst
 
 
 class LabelDCEPass(AbsPipeLinePass):
@@ -13,18 +13,27 @@ class LabelDCEPass(AbsPipeLinePass):
     """
 
     def process(self, ir: IRNode, ctx: PipeLineContext) -> IRNode:
+        if not isinstance(ir, RootNode):
+            return ir  # Pass if it's not a RootNode
+
         used_labels: set[str] = set()
 
-        for inst in ir.insts:
-            if isinstance(inst, LabelInst):
-                used_labels.add(inst.name)
+        def _find_labels(node: IRNode) -> None:
+            if isinstance(node, BlockNode):
+                for inst in node.insts:
+                    if isinstance(inst, LabelInst):
+                        used_labels.add(inst.name)
+                    elif isinstance(inst, IRNode):
+                        _find_labels(inst)
+
+        _find_labels(ir)
 
         # Keep only labels that are actually used
-        # Note: QICK also supports reserved labels like 'PREV', 'HERE', 'NEXT', 'SKIP'
-        # which are not stored in ir.labels, so we only filter what's in ir.labels.
         new_labels = {
             name: addr for name, addr in ir.labels.items() if name in used_labels
         }
 
-        # Return a new IRNode with the optimized labels
-        return IRNode(ir.insts, new_labels)
+        # Return a new RootNode with the optimized labels, preserving insts
+        # Since we might not want to mutate `ir.labels` directly if treating nodes as mostly immutable.
+        new_ir = RootNode(insts=ir.insts, labels=new_labels)
+        return new_ir

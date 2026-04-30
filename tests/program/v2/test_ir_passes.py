@@ -1,7 +1,6 @@
 import pytest
-
-from zcu_tools.program.v2.ir.node import IRNode
-from zcu_tools.program.v2.ir.instructions import LabelInst, GenericInst
+from zcu_tools.program.v2.ir.instructions import GenericInst, LabelInst
+from zcu_tools.program.v2.ir.node import RootNode
 from zcu_tools.program.v2.ir.passes.dce import LabelDCEPass
 from zcu_tools.program.v2.ir.pipeline import PipeLineContext
 
@@ -15,13 +14,13 @@ def test_label_dce_pass():
         # This acts as a reference to "used_label"
         LabelInst(name="used_label"),
     ]
-    
+
     labels = {
         "used_label": "&1",
         "dead_label": "&2"
     }
-    
-    ir = IRNode(insts=insts, labels=labels)
+
+    ir = RootNode(insts=insts, labels=labels)
     
     dce_pass = LabelDCEPass()
     opt_ir = dce_pass.process(ir, PipeLineContext())
