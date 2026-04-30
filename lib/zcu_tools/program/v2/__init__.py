@@ -31,7 +31,6 @@ from .modules import (
     ResetCfg,
     ScanWith,
     SoftDelay,
-    SoftRepeat,
     TwoPulseReset,
     TwoPulseResetCfg,
     WaveformCfg,

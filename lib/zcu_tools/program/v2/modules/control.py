@@ -27,6 +27,7 @@ class Repeat(Module):
         self.name = name
         self.n = n
         self.sub_modules = []
+        self.counter_reg = self.name
 
         if isinstance(n, int) and n < 0:
             raise ValueError(f"Repeat n must be greater than or equal to 0, got {n}")
@@ -38,88 +39,35 @@ class Repeat(Module):
         return self
 
     def init(self, prog: ModularProgramV2) -> None:
+        prog.add_reg(self.counter_reg)
         for mod in self.sub_modules:
             mod.init(prog)
 
     def run(
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-        logger.debug("Repeat.run: name='%s', n='%s', t=%s", self.name, self.n, t)
+        logger.debug(
+            "Repeat.run: name='%s', counter_reg='%s', n='%s', t=%s",
+            self.name,
+            self.counter_reg,
+            self.n,
+            t,
+        )
 
         prog.delay(t=t)
-        prog.delay_auto(t=0)
+        prog.delay_auto(t=0.0)
 
-        if isinstance(self.n, int) and self.n <= 0:
-            return 0.0
-
-        if isinstance(self.n, str):
-            prog.open_loop_reg(self.n, self.name)
-        else:
-            prog.open_loop(self.n, self.name)
+        prog.open_inner_loop(self.name, self.counter_reg, self.n)
 
         cur_t = 0.0
         for mod in self.sub_modules:
-            if logger.isEnabledFor(logging.DEBUG):
-                prog.debug_macro(
-                    f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
-                )
             cur_t = mod.run(prog, cur_t)
-
-        if not cur_t > 0.09:
-            logger.warning(
-                "Repeat '%s' has long body duration %s, which may cause imprecise timing due to loop overhead. Consider using SoftRepeat for better timing accuracy.",
-                self.name,
-                cur_t,
-            )
-
         prog.delay(t=cur_t)
+        prog.delay_auto(t=0.0)
 
-        if isinstance(self.n, str):
-            prog.close_loop_reg(self.name)
-        else:
-            prog.close_loop()
+        prog.close_inner_loop(self.name, self.counter_reg)
 
         return 0.0  # prog.delay will modify ref time
-
-
-class SoftRepeat(Module):
-    """Repeat a module or a list of modules n times"""
-
-    def __init__(self, name: str, n: int) -> None:
-        self.name = name
-        self.n = n
-        self.sub_modules = []
-
-        if n < 0:
-            raise ValueError(f"Repeat n must be greater than or equal to 0, got {n}")
-
-    def add_content(self, mod: SubModule) -> Self:
-        if isinstance(mod, Module):
-            mod = [mod]
-
-        for m in mod:
-            if not m.allow_rerun():
-                raise ValueError(
-                    f"Module {m.name} does not allow rerun, cannot be used in SoftRepeat"
-                )
-
-        self.sub_modules.extend(mod)
-        return self
-
-    def allow_rerun(self) -> bool:
-        return all(mod.allow_rerun() for mod in self.sub_modules)
-
-    def init(self, prog: ModularProgramV2) -> None:
-        for mod in self.sub_modules:
-            mod.init(prog)
-
-    def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        for _ in range(self.n):
-            for mod in self.sub_modules:
-                t = mod.run(prog, t)
-        return t
 
 
 class Branch(Module):

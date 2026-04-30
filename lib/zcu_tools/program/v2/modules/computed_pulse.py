@@ -94,7 +94,7 @@ class ComputedPulse(Module):
                 prog.write_reg_op(addr_reg, self.val_reg, "<<", 1)
                 prog.write_reg_op(addr_reg, addr_reg, "+", self.val_reg)
                 prog.write_reg_op(addr_reg, addr_reg, "+", self.wmem_offset)
-            prog.pulse_wmem_reg(
+            prog.pulse_by_reg(
                 ref_cfg.ch,
                 addr_reg,
                 t=t + ref_cfg.pre_delay,

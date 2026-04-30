@@ -7,8 +7,8 @@ from typing_extensions import Generator, Optional, Union
 
 from .debug import PrintTimeStamp
 from .delay import DelayRegAuto
-from .loop import CloseLoopReg, OpenLoopReg
-from .pluse_reg import PulseFromWmemReg
+from .loop import CloseInnerLoop, OpenInnerLoop
+from .pluse_reg import PulseByReg
 from .write_reg import WriteRegOp
 
 
@@ -16,7 +16,7 @@ class ImproveAsmV2(AsmV2):
     def __init__(self, *args, **kwargs):
         self._delay_disabled = False
         self._temp_regs: list[str] = []
-        self._temp_reg_scope_stack: list[int] = []
+        self._reg_num_stack: list[int] = []
 
         super().__init__(*args, **kwargs)
 
@@ -26,17 +26,11 @@ class ImproveAsmV2(AsmV2):
         """REG_WR dst = lhs op rhs, resolving register names at expand time."""
         self.append_macro(WriteRegOp(dst=dst, lhs=lhs, op=op, rhs=rhs))
 
-    def open_loop_reg(self, n_reg: str, name: str) -> None:
-        """Start a register-driven loop.
+    def open_inner_loop(self, name: str, counter_reg: str, n: Union[str, int]) -> None:
+        self.append_macro(OpenInnerLoop(name=name, counter_reg=counter_reg, n=n))
 
-        Counter register ``{name}_count`` is allocated by the macro's
-        preprocess. Must be closed by ``close_loop_reg`` with the same name.
-        """
-        self.append_macro(OpenLoopReg(name=name, n_reg=n_reg))
-
-    def close_loop_reg(self, name: str) -> None:
-        """Close the register-driven loop opened with ``open_loop_reg(name)``."""
-        self.append_macro(CloseLoopReg(name=name))
+    def close_inner_loop(self, name: str, counter_reg: str) -> None:
+        self.append_macro(CloseInnerLoop(name=name, counter_reg=counter_reg))
 
     # ---- delay macro ----
 
@@ -76,7 +70,7 @@ class ImproveAsmV2(AsmV2):
         """Insert a debug macro that prints the current time (cycle count) with a name."""
         self.append_macro(PrintTimeStamp(name, t, prefix=prefix))
 
-    def pulse_wmem_reg(
+    def pulse_by_reg(
         self,
         ch: int,
         addr_reg: str,
@@ -88,20 +82,16 @@ class ImproveAsmV2(AsmV2):
         With ``flat_top_pulse=True``, fires 3 contiguous wmem entries (ramp_up
         at ``addr_reg``, flat at ``+1``, ramp_down at ``+2``) sharing the same
         TIME. The +1/+2 addresses are pre-computed into nested temp regs
-        *before* the macro is appended, so the macro emits 3 ``WPORT_WR``
-        back-to-back with no other instructions interleaved (preserving
-        hardware-level pulse continuity).
         """
-        if not flat_top_pulse:
-            self.append_macro(PulseFromWmemReg(ch=ch, t=t, addr_regs=[addr_reg]))
-            return
-
-        with self.acquire_temp_reg(2) as (addr_reg2, addr_reg3):
-            self.write_reg_op(addr_reg2, addr_reg, "+", 1)
-            self.write_reg_op(addr_reg3, addr_reg, "+", 2)
-            self.append_macro(
-                PulseFromWmemReg(ch=ch, t=t, addr_regs=[addr_reg, addr_reg2, addr_reg3])
-            )
+        if flat_top_pulse:
+            with self.acquire_temp_reg(2) as (addr_reg2, addr_reg3):
+                self.write_reg_op(addr_reg2, addr_reg, "+", 1)
+                self.write_reg_op(addr_reg3, addr_reg, "+", 2)
+                self.append_macro(
+                    PulseByReg(ch=ch, t=t, addr_regs=[addr_reg, addr_reg2, addr_reg3])
+                )
+        else:
+            self.append_macro(PulseByReg(ch=ch, t=t, addr_regs=[addr_reg]))
 
     @contextmanager
     def acquire_temp_reg(self, num: int = 1) -> Generator[list[str]]:
@@ -118,7 +108,7 @@ class ImproveAsmV2(AsmV2):
             yield []
             return
 
-        used = self._temp_reg_scope_stack[-1] if self._temp_reg_scope_stack else 0
+        used = self._reg_num_stack[-1] if self._reg_num_stack else 0
         total = used + num
 
         while len(self._temp_regs) < total:
@@ -126,18 +116,13 @@ class ImproveAsmV2(AsmV2):
             self.add_reg(reg_name)  # type: ignore
             self._temp_regs.append(reg_name)
 
-        self._temp_reg_scope_stack.append(total)
+        self._reg_num_stack.append(total)
         try:
             yield self._temp_regs[used:total]
         finally:
-            if len(self._temp_reg_scope_stack) == 0:
+            if len(self._reg_num_stack) == 0:
                 raise RuntimeError("temp register scope stack is already empty")
-            popped = self._temp_reg_scope_stack.pop()
-            if popped != total:
-                raise RuntimeError(
-                    "temp register scope mismatch: "
-                    f"expected total {total}, got {popped}"
-                )
+            self._reg_num_stack.pop()
 
 
 __all__ = ["ImproveAsmV2"]

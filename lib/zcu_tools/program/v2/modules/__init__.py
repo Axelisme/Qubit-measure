@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 from .base import AbsModuleCfg, Module, resolve_module_ref
 from .computed_pulse import ComputedPulse
-from .control import Branch, Repeat, SoftRepeat
+from .control import Branch, Repeat
 from .delay import Delay, DelayAuto, Join, SoftDelay
 from .dmem import LoadValue, ScanWith
 from .pulse import Pulse, PulseCfg

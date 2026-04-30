@@ -44,10 +44,8 @@ class ModularProgramV2(MyProgramV2):
         # add v2 sweep loops
         if self.sweep_dict is not None:
             for name, sweep in self.sweep_dict:
-                if isinstance(sweep, SweepCfg):
-                    self.add_loop(name, count=sweep.expts)
-                else:
-                    self.add_loop(name, count=sweep)
+                count = sweep.expts if isinstance(sweep, SweepCfg) else sweep
+                self.add_loop(name, count=count)
 
         # initialize modules
         for module in self.modules:
@@ -64,7 +62,6 @@ class ModularProgramV2(MyProgramV2):
             if logger.isEnabledFor(logging.DEBUG):
                 self.debug_macro(f"{type(module).__name__}({module.name})", t)
             t = module.run(self, t)
-
         self.delay(t=t)
 
     def add_dmem(self, values: Sequence[int]) -> int:

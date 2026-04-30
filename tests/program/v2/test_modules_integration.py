@@ -12,7 +12,7 @@ from typing import Literal
 import pytest
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.modular import ModularProgramV2
-from zcu_tools.program.v2.modules.control import Branch, Repeat, SoftRepeat
+from zcu_tools.program.v2.modules.control import Branch, Repeat
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, Join, SoftDelay
 from zcu_tools.program.v2.modules.dmem import LoadValue, ScanWith
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
@@ -309,18 +309,6 @@ class TestControlIntegration:
 
     def test_repeat_with_pulse(self):
         r = Repeat("r", 5)
-        r.add_content(Pulse("p", _pulse_cfg()))
-        prog = _make_prog(modules=[r])
-        assert prog.binprog is not None
-
-    def test_soft_repeat_compiles(self):
-        r = SoftRepeat("r", 3)
-        r.add_content(SoftDelay("d", 0.1))
-        prog = _make_prog(modules=[r])
-        assert prog.binprog is not None
-
-    def test_soft_repeat_with_pulse(self):
-        r = SoftRepeat("r", 2)
         r.add_content(Pulse("p", _pulse_cfg()))
         prog = _make_prog(modules=[r])
         assert prog.binprog is not None
