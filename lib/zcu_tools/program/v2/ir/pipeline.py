@@ -31,34 +31,3 @@ class PipeLine:
         for _pass in self.passes:
             ir = _pass.process(ir, ctx)
         return ir, ctx
-
-
-def make_default_pipeline(config: PipeLineConfig) -> PipeLine:
-    from .passes import (
-        BranchCaseNormalizePass,
-        ConstantLoopUnrollPass,
-        IRStructureValidationPass,
-        LabelDCEPass,
-        LabelReferenceValidationPass,
-        LoopInvariantHoistPass,
-        PeepholePass,
-        TimedInstructionMergePass,
-        TimingSanityPass,
-        ZeroDelayDCEPass,
-    )
-
-    return PipeLine(
-        config,
-        [
-            IRStructureValidationPass(),
-            BranchCaseNormalizePass(),
-            ConstantLoopUnrollPass(),
-            LoopInvariantHoistPass(),
-            PeepholePass(),
-            ZeroDelayDCEPass(),
-            TimedInstructionMergePass(),
-            TimingSanityPass(),
-            LabelReferenceValidationPass(),
-            LabelDCEPass(),
-        ],
-    )

@@ -4,6 +4,39 @@ from typing import Union
 
 from .instructions import Instruction, MetaInst
 from .node import BlockNode, IRBranch, IRBranchCase, IRLoop, IRNode, RootNode
+from .passes import (
+    BranchCaseNormalizePass,
+    ConstantLoopUnrollPass,
+    IRStructureValidationPass,
+    LabelDCEPass,
+    LabelReferenceValidationPass,
+    LoopInvariantHoistPass,
+    PeepholePass,
+    TimedInstructionMergePass,
+    TimingSanityPass,
+    ZeroDelayDCEPass,
+)
+from .pipeline import PipeLine, PipeLineConfig
+
+
+def make_default_pipeline(config: PipeLineConfig, disable: bool = False) -> PipeLine:
+    return PipeLine(
+        config,
+        [
+            IRStructureValidationPass(),
+            BranchCaseNormalizePass(),
+            ConstantLoopUnrollPass(),
+            LoopInvariantHoistPass(),
+            PeepholePass(),
+            ZeroDelayDCEPass(),
+            TimedInstructionMergePass(),
+            TimingSanityPass(),
+            LabelReferenceValidationPass(),
+            LabelDCEPass(),
+        ]
+        if not disable
+        else [],
+    )
 
 
 class IRBuilder:
