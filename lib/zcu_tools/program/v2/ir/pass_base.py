@@ -22,8 +22,8 @@ from .nodes import IRBranch, IRLoop, IRNode, IRRegLoop, IRSeq
 class PassConfig:
     """Configuration for all passes in the pipeline."""
 
-    max_unroll_leaves: int = 4  # leaf-count threshold for UnrollShortLoops
-    max_unroll_iters: int = 16  # max n that UnrollShortLoops will unroll
+    pmem_budget: int = 0  # pmem inst budget for UnrollShortLoops (must be set explicitly)
+    max_unroll_iters: int = 16  # hard upper bound on n for UnrollShortLoops
     enable_fusion: bool = True  # enable FuseAdjacentDelays
     extra: Dict[str, Any] = field(default_factory=dict)  # extensible config
 
@@ -40,7 +40,8 @@ class PassCtx:
     diagnostics: List[str] = field(default_factory=list)  # collected warnings/errors
     label_map: Dict[str, str] = field(default_factory=dict)
     label_counter: int = 0
-    max_unroll_leaves: int = 32  # set by UnrollShortLoops when it runs
+    pmem_used: int = 0  # accumulated inst count consumed by greedy unroll
+    unroll_info: Dict[int, Any] = field(default_factory=dict)  # id(IRLoop) -> UnrollInfo, set by MarkUnrollInfo
 
     def warn(self, msg: str) -> None:
         """Record a diagnostic warning."""

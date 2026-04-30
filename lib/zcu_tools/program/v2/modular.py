@@ -68,6 +68,7 @@ class ModularProgramV2(MyProgramV2):
     def _body(self, cfg: ProgramV2Cfg) -> None:
         """IR-based emit path: ir_run() → IRBuilder → Emitter → macros."""
         from .ir.builder import IRBuilder
+        from .ir.pass_base import PassConfig
         from .ir.passes import make_default_pipeline
         from .lower import Emitter
 
@@ -82,7 +83,10 @@ class ModularProgramV2(MyProgramV2):
         builder.ir_delay(t)
 
         root_ir = builder.build()
-        root_ir, pass_ctx = make_default_pipeline()(root_ir)
+        # 20% safety margin absorbs estimate inaccuracy and pre/post-amble overhead.
+        pmem_budget = int(self.tproccfg["pmem_size"] * 0.8)
+        pass_config = PassConfig(pmem_budget=pmem_budget)
+        root_ir, pass_ctx = make_default_pipeline(pass_config)(root_ir)
         for msg in pass_ctx.diagnostics:
             logger.warning("IR pass: %s", msg)
         _raise_on_ir_pass_errors(pass_ctx.diagnostics)

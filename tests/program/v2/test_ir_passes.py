@@ -10,7 +10,6 @@ from zcu_tools.program.v2.ir.nodes import (
     IRJump,
     IRLabel,
     IRLoop,
-    IRNop,
     IRPulse,
     IRRegOp,
     IRSendReadoutConfig,
@@ -28,7 +27,7 @@ def test_unroll_short_loop() -> None:
             IRDelay(0.2),
         )
     )
-    new_root, _ = make_default_pipeline(PassConfig())(root)
+    new_root, _ = make_default_pipeline(PassConfig(pmem_budget=1000))(root)
     assert isinstance(new_root, IRSeq)
     assert len(new_root.body) == 1
     # Unrolled (3x0.01), flattened, then fused with trailing 0.2.
@@ -38,7 +37,7 @@ def test_unroll_short_loop() -> None:
 
 def test_skip_unroll_large_loop_count() -> None:
     root = IRSeq(body=(IRLoop(name="l0", n=32, body=IRDelay(0.01)),))
-    config = PassConfig(max_unroll_iters=16)
+    config = PassConfig(pmem_budget=1000, max_unroll_iters=16)
     new_root, ctx = make_default_pipeline(config)(root)
     assert isinstance(new_root, IRSeq)
     assert isinstance(new_root.body[0], IRLoop)
@@ -53,7 +52,7 @@ def test_fuse_adjacent_delays_with_same_tag_only() -> None:
             IRDelay(0.3, tag="b"),
         )
     )
-    new_root, _ = make_default_pipeline(PassConfig())(root)
+    new_root, _ = make_default_pipeline(PassConfig(pmem_budget=1000))(root)
     assert isinstance(new_root, IRSeq)
     assert len(new_root.body) == 2
     assert isinstance(new_root.body[0], IRDelay)
@@ -73,7 +72,7 @@ def test_remove_zero_delays_before_fusion() -> None:
             IRDelay(0.2),
         )
     )
-    new_root, _ = make_default_pipeline(PassConfig())(root)
+    new_root, _ = make_default_pipeline(PassConfig(pmem_budget=1000))(root)
     assert isinstance(new_root, IRSeq)
     assert len(new_root.body) == 1
     assert isinstance(new_root.body[0], IRDelay)
@@ -88,7 +87,9 @@ def test_unroll_skipped_when_counter_register_referenced() -> None:
         )
     )
     root = IRSeq(body=(IRLoop(name="l0", n=2, body=body),))
-    new_root, ctx = make_default_pipeline(PassConfig(enable_fusion=False))(root)
+    new_root, ctx = make_default_pipeline(
+        PassConfig(pmem_budget=1000, enable_fusion=False)
+    )(root)
     # Loop is preserved because body references the loop's counter register.
     assert isinstance(new_root, IRSeq)
     assert len(new_root.body) == 1
@@ -110,7 +111,7 @@ def test_branch_arms_kept_unaligned_after_pipeline() -> None:
         ),
     )
     new_root, _ = make_default_pipeline(
-        PassConfig(enable_fusion=False)
+        PassConfig(pmem_budget=1000, enable_fusion=False)
     )(root)
     assert isinstance(new_root, IRBranch)
     # AlignBranchDispatch has been removed; branch arms keep original shape.
@@ -128,7 +129,7 @@ def test_reorder_pulse_like_nodes_by_t_within_segment() -> None:
             IRPulse(ch="0", pulse_name="p_mid", t=0.2),
         )
     )
-    new_root, _ = make_default_pipeline(PassConfig())(root)
+    new_root, _ = make_default_pipeline(PassConfig(pmem_budget=1000))(root)
     assert isinstance(new_root, IRSeq)
     assert isinstance(new_root.body[0], IRSendReadoutConfig)
     assert isinstance(new_root.body[1], IRPulse)
@@ -145,7 +146,7 @@ def test_reorder_pulse_like_nodes_does_not_cross_barrier() -> None:
             IRSendReadoutConfig(ch="0", pulse_name="cfg_early", t=0.1),
         )
     )
-    new_root, _ = make_default_pipeline(PassConfig())(root)
+    new_root, _ = make_default_pipeline(PassConfig(pmem_budget=1000))(root)
     assert isinstance(new_root, IRSeq)
     assert isinstance(new_root.body[0], IRPulse)
     assert isinstance(new_root.body[1], IRCondJump)
@@ -154,11 +155,67 @@ def test_reorder_pulse_like_nodes_does_not_cross_barrier() -> None:
 
 def test_validate_invariants_reports_undefined_label_target() -> None:
     root = IRSeq(body=(IRJump(target="L_missing"),))
-    _, ctx = make_default_pipeline(PassConfig())(root)
+    _, ctx = make_default_pipeline(PassConfig(pmem_budget=1000))(root)
     assert any("undefined jump target label:" in msg for msg in ctx.diagnostics)
 
 
 def test_validate_invariants_accepts_defined_label_target() -> None:
     root = IRSeq(body=(IRJump(target="L0"), IRLabel(name="L0")))
-    _, ctx = make_default_pipeline(PassConfig())(root)
+    _, ctx = make_default_pipeline(PassConfig(pmem_budget=1000))(root)
     assert all("undefined jump target label" not in msg for msg in ctx.diagnostics)
+
+
+def _nested_outer_inner(outer_n: int, inner_n: int, body_pulses: int) -> IRSeq:
+    inner_body = IRSeq(
+        body=tuple(
+            IRPulse(ch="0", pulse_name=f"p{i}", t=0.0) for i in range(body_pulses)
+        )
+    )
+    inner = IRLoop(name="inner", n=inner_n, body=inner_body)
+    outer = IRLoop(name="outer", n=outer_n, body=inner)
+    return IRSeq(body=(outer,))
+
+
+def test_unroll_budget_rich_unrolls_all() -> None:
+    # nested outer(n=10)/inner(n=10, body=5 pulses); large budget → both unroll.
+    root = _nested_outer_inner(outer_n=10, inner_n=10, body_pulses=5)
+    new_root, ctx = make_default_pipeline(PassConfig(pmem_budget=1000))(root)
+    # All loops gone — only flattened pulses remain.
+    assert isinstance(new_root, IRSeq)
+    assert all(isinstance(n, IRPulse) for n in new_root.body)
+    assert len(new_root.body) == 10 * 10 * 5
+    assert ctx.pmem_used <= 1000
+
+
+def test_unroll_budget_tight_inner_priority() -> None:
+    # Budget=60: inner unrolls (delta=41), outer kept (would exceed budget).
+    root = _nested_outer_inner(outer_n=10, inner_n=10, body_pulses=5)
+    new_root, ctx = make_default_pipeline(PassConfig(pmem_budget=60))(root)
+    assert isinstance(new_root, IRSeq)
+    outer = new_root.body[0]
+    assert isinstance(outer, IRLoop)
+    assert outer.name == "outer"
+    # Inner unrolled → outer body is now a flat IRSeq of pulses (no inner IRLoop).
+    assert isinstance(outer.body, IRSeq)
+    assert all(isinstance(n, IRPulse) for n in outer.body.body)
+    assert len(outer.body.body) == 10 * 5
+    assert ctx.pmem_used <= 60
+
+
+def test_unroll_budget_too_small_keeps_loops() -> None:
+    # Budget=30: even inner unroll (delta=41) would exceed → both kept.
+    root = _nested_outer_inner(outer_n=10, inner_n=10, body_pulses=5)
+    new_root, ctx = make_default_pipeline(PassConfig(pmem_budget=30))(root)
+    assert isinstance(new_root, IRSeq)
+    outer = new_root.body[0]
+    assert isinstance(outer, IRLoop)
+    inner = outer.body
+    assert isinstance(inner, IRLoop)
+    assert inner.name == "inner"
+    assert ctx.pmem_used <= 30
+
+
+def test_unroll_zero_budget_raises() -> None:
+    root = IRSeq(body=(IRLoop(name="l0", n=3, body=IRDelay(0.01)),))
+    with pytest.raises(ValueError, match="pmem_budget"):
+        make_default_pipeline(PassConfig(pmem_budget=0))(root)

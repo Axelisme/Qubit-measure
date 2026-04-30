@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import List, Union, cast
+from dataclasses import dataclass, field
+from typing import Dict, List, Set, Union, cast
 
 from .nodes import (
     IRBranch,
@@ -13,6 +14,7 @@ from .nodes import (
     IRLabel,
     IRLoop,
     IRNode,
+    IRNop,
     IRPulse,
     IRPulseWmemReg,
     IRReadDmem,
@@ -33,14 +35,8 @@ def estimate_insts(node: IRNode) -> int:
       - Estimating low → may approach pmem cap; absorbed by the 20% safety
         margin applied at budget-injection time.
 
-    Per-node estimates:
-      - Pulse-like / delay / reg-op / read-dmem / jump / nop: 1
-      - IRPulseWmemReg: 2 (address read + pulse trigger)
-      - IRCondJump: 2 (TEST + JUMP)
-      - IRLabel: 0 (label is an address, not an instruction)
-      - IRSeq: sum of children
-      - IRLoop / IRRegLoop: open(2) + body + close(2)
-      - IRBranch: sum(arms) + 2 * (num_arms - 1) for binary dispatch
+    Unknown node types raise TypeError so newly-added IR nodes must be
+    classified explicitly here rather than silently defaulting.
     """
     if isinstance(node, IRSeq):
         return sum(estimate_insts(child) for child in node.body)
@@ -58,9 +54,22 @@ def estimate_insts(node: IRNode) -> int:
         return 2
     if isinstance(node, IRLabel):
         return 0
-    # Default leaf: pulse / readout / send_readoutconfig / delay / delay_auto /
-    # reg_op / read_dmem / jump / nop -> 1
-    return 1
+    if isinstance(
+        node,
+        (
+            IRPulse,
+            IRSendReadoutConfig,
+            IRReadout,
+            IRDelay,
+            IRDelayAuto,
+            IRRegOp,
+            IRReadDmem,
+            IRJump,
+            IRNop,
+        ),
+    ):
+        return 1
+    raise TypeError(f"estimate_insts: unhandled IR node type {type(node).__name__}")
 
 
 class FreshLabels(Pass):
@@ -148,77 +157,279 @@ class FlattenSeq(Pass):
         return node
 
 
-class UnrollShortLoops(Pass):
-    """Unroll small loops with few body instructions.
+@dataclass
+class UnrollInfo:
+    """Per-IRLoop metadata collected by MarkUnrollInfo for budget-aware unroll.
 
-    Triggers when ``leaf_count(body) <= max_unroll_leaves`` AND
-    ``n <= max_unroll_iters``. Leaf counting walks composite nodes recursively
-    so that a loop wrapping a single pulse counts as 1 leaf, not 0.
+    Identification uses ``id(node)`` and is valid as long as the IRLoop instance
+    is not rebuilt between MarkUnrollInfo and UnrollShortLoops — i.e. no other
+    pass runs in between.
     """
 
-    def transform(self, node: IRNode, ctx: PassCtx) -> IRNode:
-        if not isinstance(node, IRLoop):
-            return node
+    node_id: int
+    name: str
+    n: int
+    depth: int  # 1 for outermost IRLoop, increases with nesting
+    body_nonloop_insts: int  # inst count of body excluding direct child IRLoops
+    direct_loop_children: List[int] = field(default_factory=list)  # ids of IRLoops directly nested in body
+    descendant_loops: List[int] = field(default_factory=list)  # transitively nested IRLoop ids
+    counter_referenced: bool = False
+    over_iter_limit: bool = False
 
-        # If the body reads/writes the loop counter register, the register is
-        # declared by the lowering layer's open_loop(). Unrolling removes that
-        # declaration, so the body's RegOp/CondJump on the counter would
-        # reference a non-existent register. Skip unroll in that case.
-        if self._references_reg(node.body, node.name):
-            ctx.warn(
-                f"skip unroll loop '{node.name}': body references counter register"
-            )
-            return node
 
-        leaf_count = self._count_leaves(node.body)
-        if leaf_count > ctx.config.max_unroll_leaves:
-            return node
+class MarkUnrollInfo(Pass):
+    """Collect IRLoop metadata into ``ctx.unroll_info`` for budget-aware unroll.
 
-        if node.n > ctx.config.max_unroll_iters:
-            ctx.warn(
-                f"skip unroll loop '{node.name}': n={node.n} exceeds "
-                f"max_unroll_iters={ctx.config.max_unroll_iters}"
-            )
-            return node
+    Does not modify the tree — overrides ``__call__`` to walk read-only and
+    return the same root, preserving ``id(node)`` for use as dict keys in the
+    subsequent ``UnrollShortLoops`` pass.
+    """
 
-        if node.n <= 0:
-            return IRSeq(body=(), meta=node.meta)
+    def transform(self, node: IRNode, ctx: PassCtx) -> IRNode:  # pragma: no cover - unused
+        return node
 
-        if node.n == 1:
-            return node.body
+    def __call__(self, node: IRNode, ctx: PassCtx | None = None) -> IRNode:
+        if ctx is None:
+            ctx = PassCtx()
+        ctx.unroll_info.clear()
+        self._walk(node, ctx, depth=0)
+        return node
 
-        return IRSeq(body=tuple(node.body for _ in range(node.n)), meta=node.meta)
+    def _walk(self, node: IRNode, ctx: PassCtx, depth: int) -> None:
+        if isinstance(node, IRLoop):
+            self._record_loop(node, ctx, depth + 1)
+            self._walk(node.body, ctx, depth + 1)
+            return
+        if isinstance(node, IRRegLoop):
+            self._walk(node.body, ctx, depth + 1)
+            return
+        if isinstance(node, IRSeq):
+            for child in node.body:
+                self._walk(child, ctx, depth)
+            return
+        if isinstance(node, IRBranch):
+            for arm in node.arms:
+                self._walk(arm, ctx, depth)
+            return
+        # leaves: nothing to record
+
+    def _record_loop(self, node: IRLoop, ctx: PassCtx, depth: int) -> None:
+        direct_children: List[int] = []
+        descendants: List[int] = []
+        body_nonloop = self._body_nonloop_insts(node.body, direct_children, descendants)
+        max_iters = ctx.config.max_unroll_iters
+        info = UnrollInfo(
+            node_id=id(node),
+            name=node.name,
+            n=node.n,
+            depth=depth,
+            body_nonloop_insts=body_nonloop,
+            direct_loop_children=direct_children,
+            descendant_loops=descendants,
+            counter_referenced=_references_reg(node.body, node.name),
+            over_iter_limit=node.n > max_iters,
+        )
+        ctx.unroll_info[info.node_id] = info
 
     @classmethod
-    def _count_leaves(cls, node: IRNode) -> int:
-        if isinstance(node, IRSeq):
-            return sum(cls._count_leaves(child) for child in node.body)
-        if isinstance(node, (IRLoop, IRRegLoop)):
-            return cls._count_leaves(node.body)
-        if isinstance(node, IRBranch):
-            return sum(cls._count_leaves(arm) for arm in node.arms)
-        return 1
+    def _body_nonloop_insts(
+        cls,
+        node: IRNode,
+        direct_children: List[int],
+        descendants: List[int],
+    ) -> int:
+        """Sum inst estimate of body, treating direct IRLoop children as 0.
 
-    def _references_reg(self, node: IRNode, reg_name: str) -> bool:
-        if isinstance(node, IRSeq):
-            return any(self._references_reg(child, reg_name) for child in node.body)
+        IRLoop children's contribution to parent body is computed dynamically
+        in UnrollShortLoops based on whether they are chosen for unrolling.
+        Descendants are still collected for transitive lookup.
+        """
         if isinstance(node, IRLoop):
-            return self._references_reg(node.body, reg_name)
-        if isinstance(node, IRRegLoop):
-            return node.n_reg == reg_name or self._references_reg(node.body, reg_name)
+            direct_children.append(id(node))
+            descendants.append(id(node))
+            descendants.extend(cls._collect_descendant_loops(node.body))
+            return 0
+        if isinstance(node, IRSeq):
+            return sum(
+                cls._body_nonloop_insts(child, direct_children, descendants)
+                for child in node.body
+            )
         if isinstance(node, IRBranch):
-            return any(self._references_reg(arm, reg_name) for arm in node.arms)
-        if isinstance(node, IRRegOp):
-            if node.dst == reg_name or node.lhs == reg_name:
-                return True
-            return isinstance(node.rhs, str) and node.rhs == reg_name
-        if isinstance(node, IRReadDmem):
-            return node.dst == reg_name or node.addr == reg_name
-        if isinstance(node, IRCondJump):
-            if node.arg1 == reg_name:
-                return True
-            return isinstance(node.arg2, str) and node.arg2 == reg_name
-        return False
+            arms_total = sum(
+                cls._body_nonloop_insts(arm, direct_children, descendants)
+                for arm in node.arms
+            )
+            return arms_total + 2 * max(0, len(node.arms) - 1)
+        # IRRegLoop and other composites/leaves: use estimate_insts directly,
+        # and still collect any nested IRLoops as descendants.
+        descendants.extend(cls._collect_descendant_loops(node))
+        return estimate_insts(node)
+
+    @classmethod
+    def _collect_descendant_loops(cls, node: IRNode) -> List[int]:
+        out: List[int] = []
+        if isinstance(node, IRLoop):
+            out.append(id(node))
+            out.extend(cls._collect_descendant_loops(node.body))
+            return out
+        if isinstance(node, IRRegLoop):
+            out.extend(cls._collect_descendant_loops(node.body))
+            return out
+        if isinstance(node, IRSeq):
+            for child in node.body:
+                out.extend(cls._collect_descendant_loops(child))
+            return out
+        if isinstance(node, IRBranch):
+            for arm in node.arms:
+                out.extend(cls._collect_descendant_loops(arm))
+            return out
+        return out
+
+
+class UnrollShortLoops(Pass):
+    """Budget-aware greedy IRLoop unrolling.
+
+    Reads ``ctx.unroll_info`` populated by ``MarkUnrollInfo``. Candidates are
+    sorted by ``(-depth, body_insts_baseline, n)`` and unrolled greedily as
+    long as ``ctx.pmem_used`` stays within ``config.pmem_budget``. ``pmem_used``
+    starts at the baseline (no-unroll) inst estimate of the entire tree.
+
+    Counter-referenced loops and loops with ``n > max_unroll_iters`` are
+    skipped (with diagnostic warnings). Loops with ``n < 2`` cannot save any
+    instructions and are not unrolled either (preserved as-is).
+    """
+
+    def transform(self, node: IRNode, ctx: PassCtx) -> IRNode:  # pragma: no cover - unused
+        return node
+
+    def __call__(self, node: IRNode, ctx: PassCtx | None = None) -> IRNode:
+        if ctx is None:
+            ctx = PassCtx()
+        budget = ctx.config.pmem_budget
+        if budget <= 0:
+            raise ValueError(
+                f"UnrollShortLoops requires positive pmem_budget, got {budget}"
+            )
+        if not ctx.unroll_info:
+            # No loops to consider — nothing to do.
+            ctx.pmem_used = estimate_insts(node)
+            return node
+
+        chosen = self._select_candidates(ctx, node, budget)
+        return self._rewrite(node, chosen)
+
+    def _select_candidates(self, ctx: PassCtx, root: IRNode, budget: int) -> Set[int]:
+        infos: Dict[int, UnrollInfo] = ctx.unroll_info
+        empty_chosen: Set[int] = set()
+        candidates: List[UnrollInfo] = []
+        for info in infos.values():
+            if info.counter_referenced:
+                ctx.warn(
+                    f"skip unroll loop '{info.name}': body references counter register"
+                )
+                continue
+            if info.over_iter_limit:
+                ctx.warn(
+                    f"skip unroll loop '{info.name}': n={info.n} exceeds "
+                    f"max_unroll_iters={ctx.config.max_unroll_iters}"
+                )
+                continue
+            if info.n < 2:
+                continue
+            candidates.append(info)
+
+        # Sort: inner first (depth desc), small baseline body first, small n first.
+        candidates.sort(
+            key=lambda info: (
+                -info.depth,
+                self._effective_body_insts(info, infos, empty_chosen),
+                info.n,
+            )
+        )
+
+        chosen: Set[int] = set()
+        pmem_used = estimate_insts(root)  # baseline: nothing unrolled
+        for info in candidates:
+            eff_body = self._effective_body_insts(info, infos, chosen)
+            # Keep cost: 4 (open+close) + eff_body. Unroll cost: n * eff_body.
+            delta = (info.n - 1) * eff_body - 4
+            if delta <= 0:
+                chosen.add(info.node_id)
+                pmem_used += delta
+                continue
+            if pmem_used + delta <= budget:
+                chosen.add(info.node_id)
+                pmem_used += delta
+
+        ctx.pmem_used = pmem_used
+        return chosen
+
+    @classmethod
+    def _effective_body_insts(
+        cls,
+        info: UnrollInfo,
+        infos: Dict[int, UnrollInfo],
+        chosen: Set[int],
+    ) -> int:
+        """Compute body inst count given current chosen-set decisions.
+
+        Direct IRLoop children contribute either ``n * eff(child)`` if chosen,
+        or ``4 + eff(child)`` if preserved.
+        """
+        total = info.body_nonloop_insts
+        for child_id in info.direct_loop_children:
+            child = infos[child_id]
+            child_eff = cls._effective_body_insts(child, infos, chosen)
+            if child_id in chosen:
+                total += child.n * child_eff
+            else:
+                total += 4 + child_eff
+        return total
+
+    def _rewrite(self, node: IRNode, chosen: Set[int]) -> IRNode:
+        """Bottom-up rebuild, expanding only IRLoops whose original id is chosen."""
+        if isinstance(node, IRLoop):
+            should_unroll = id(node) in chosen
+            new_body = self._rewrite(node.body, chosen)
+            if should_unroll:
+                if node.n <= 0:
+                    return IRSeq(body=(), meta=node.meta)
+                if node.n == 1:
+                    return new_body
+                return IRSeq(body=tuple(new_body for _ in range(node.n)), meta=node.meta)
+            return IRLoop(name=node.name, n=node.n, body=new_body, meta=node.meta)
+        if isinstance(node, IRRegLoop):
+            new_body = self._rewrite(node.body, chosen)
+            return IRRegLoop(name=node.name, n_reg=node.n_reg, body=new_body, meta=node.meta)
+        if isinstance(node, IRSeq):
+            new_children = tuple(self._rewrite(child, chosen) for child in node.body)
+            return IRSeq(body=new_children, meta=node.meta)
+        if isinstance(node, IRBranch):
+            new_arms = tuple(self._rewrite(arm, chosen) for arm in node.arms)
+            return IRBranch(compare_reg=node.compare_reg, arms=new_arms, meta=node.meta)
+        return node
+
+
+def _references_reg(node: IRNode, reg_name: str) -> bool:
+    if isinstance(node, IRSeq):
+        return any(_references_reg(child, reg_name) for child in node.body)
+    if isinstance(node, IRLoop):
+        return _references_reg(node.body, reg_name)
+    if isinstance(node, IRRegLoop):
+        return node.n_reg == reg_name or _references_reg(node.body, reg_name)
+    if isinstance(node, IRBranch):
+        return any(_references_reg(arm, reg_name) for arm in node.arms)
+    if isinstance(node, IRRegOp):
+        if node.dst == reg_name or node.lhs == reg_name:
+            return True
+        return isinstance(node.rhs, str) and node.rhs == reg_name
+    if isinstance(node, IRReadDmem):
+        return node.dst == reg_name or node.addr == reg_name
+    if isinstance(node, IRCondJump):
+        if node.arg1 == reg_name:
+            return True
+        return isinstance(node.arg2, str) and node.arg2 == reg_name
+    return False
 
 
 class FuseAdjacentDelays(Pass):
@@ -402,6 +613,7 @@ def make_default_pipeline(config: PassConfig | None = None) -> PassPipeline:
         passes=[
             FreshLabels(),
             FlattenSeq(),
+            MarkUnrollInfo(),
             UnrollShortLoops(),
             FlattenSeq(),
             FuseAdjacentDelays(),
