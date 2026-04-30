@@ -34,4 +34,6 @@ class PipeLine:
 
 
 def make_default_pipeline(config: PipeLineConfig) -> PipeLine:
-    return PipeLine(config, [])
+    from .passes import LabelDCEPass
+
+    return PipeLine(config, [LabelDCEPass()])
