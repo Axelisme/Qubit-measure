@@ -33,7 +33,6 @@ class IRMeta:
     """Metadata attached to IR nodes."""
 
     source_module: str = ""
-    duration: Optional[float] = None  # None when subtree contains QickParam
     extra: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -104,8 +103,11 @@ class IRDelay(IRNode):
 class IRDelayAuto(IRNode):
     """HW-align then advance ref_t by t (usually 0).
 
-    When t is a str, it names a runtime register (delay_reg_auto path).
-    A tagged delay cannot use a register t.
+    The `t` field has three valid forms:
+      - float / int: static delay value lowered to ``prog.delay_auto``.
+      - QickParam: parameterized delay lowered to ``prog.delay_auto``.
+      - str: name of a runtime register; lowered to ``prog.delay_reg_auto``.
+        In this case ``tag`` MUST be None (tagging requires a static path).
     """
 
     t: Union[float, QickParam, str] = 0.0
@@ -185,7 +187,12 @@ class IRSeq(IRNode):
 
 @dataclass(frozen=True)
 class IRLoop(IRNode):
-    """Counted loop: repeat body n times."""
+    """Counted loop: repeat body n times.
+
+    `name` is BOTH the loop identifier and the counter register name.
+    The body may read/write that register; ``UnrollShortLoops`` detects this
+    and synthesizes counter init/increment ops when unrolling.
+    """
 
     name: str
     n: int
@@ -205,7 +212,16 @@ class IRRegLoop(IRNode):
 
 @dataclass(frozen=True)
 class IRBranch(IRNode):
-    """N-way dispatch based on register comparison."""
+    """N-way dispatch based on register comparison.
+
+    The emitter lowers this with a binary-search dispatch tree comparing
+    ``compare_reg`` against arm-index midpoints. Selection semantics:
+      - compare_reg <  0          -> first arm
+      - compare_reg >= len(arms)  -> last arm
+      - otherwise                 -> arms[compare_reg]
+
+    Requires len(arms) >= 2 (validated by ValidateInvariants).
+    """
 
     compare_reg: str
     arms: Tuple[IRNode, ...] = field(default_factory=tuple)

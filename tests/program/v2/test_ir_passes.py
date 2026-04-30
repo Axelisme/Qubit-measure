@@ -15,6 +15,7 @@ from zcu_tools.program.v2.ir.nodes import (
     IRRegOp,
     IRSendReadoutConfig,
     IRSeq,
+    RegOp,
 )
 from zcu_tools.program.v2.ir.pass_base import PassConfig
 from zcu_tools.program.v2.ir.passes import make_default_pipeline
@@ -27,7 +28,7 @@ def test_unroll_short_loop() -> None:
             IRDelay(0.2),
         )
     )
-    new_root, _ = make_default_pipeline(PassConfig(min_body_us=0.05))(root)
+    new_root, _ = make_default_pipeline(PassConfig())(root)
     assert isinstance(new_root, IRSeq)
     assert len(new_root.body) == 1
     # Unrolled (3x0.01), flattened, then fused with trailing 0.2.
@@ -37,7 +38,7 @@ def test_unroll_short_loop() -> None:
 
 def test_skip_unroll_large_loop_count() -> None:
     root = IRSeq(body=(IRLoop(name="l0", n=32, body=IRDelay(0.01)),))
-    config = PassConfig(min_body_us=0.05, extra={"max_unroll_iters": 16})
+    config = PassConfig(max_unroll_iters=16)
     new_root, ctx = make_default_pipeline(config)(root)
     assert isinstance(new_root, IRSeq)
     assert isinstance(new_root.body[0], IRLoop)
@@ -52,7 +53,7 @@ def test_fuse_adjacent_delays_with_same_tag_only() -> None:
             IRDelay(0.3, tag="b"),
         )
     )
-    new_root, _ = make_default_pipeline(PassConfig(min_body_us=0.0))(root)
+    new_root, _ = make_default_pipeline(PassConfig())(root)
     assert isinstance(new_root, IRSeq)
     assert len(new_root.body) == 2
     assert isinstance(new_root.body[0], IRDelay)
@@ -72,36 +73,35 @@ def test_remove_zero_delays_before_fusion() -> None:
             IRDelay(0.2),
         )
     )
-    new_root, _ = make_default_pipeline(PassConfig(min_body_us=0.0))(root)
+    new_root, _ = make_default_pipeline(PassConfig())(root)
     assert isinstance(new_root, IRSeq)
     assert len(new_root.body) == 1
     assert isinstance(new_root.body[0], IRDelay)
     assert new_root.body[0].t == pytest.approx(0.3)
 
 
-def test_unroll_short_loop_with_counter_reference_inserts_counter_updates() -> None:
+def test_unroll_skipped_when_counter_register_referenced() -> None:
     body = IRSeq(
         body=(
-            IRRegOp(dst="l0", lhs="l0", op="+", rhs=1),
+            IRRegOp(dst="l0", lhs="l0", op=RegOp.ADD, rhs=1),
             IRDelay(0.01),
         )
     )
     root = IRSeq(body=(IRLoop(name="l0", n=2, body=body),))
-    new_root, _ = make_default_pipeline(PassConfig(min_body_us=0.05, enable_fusion=False))(root)
+    new_root, ctx = make_default_pipeline(PassConfig(enable_fusion=False))(root)
+    # Loop is preserved because body references the loop's counter register.
     assert isinstance(new_root, IRSeq)
     assert len(new_root.body) == 1
-    unrolled = new_root.body[0]
-    assert isinstance(unrolled, IRSeq)
-    # init-to-zero + 2*(body + inc)
-    assert len(unrolled.body) == 5
-    assert isinstance(unrolled.body[0], IRRegOp)
-    assert isinstance(unrolled.body[1], IRSeq)
-    assert isinstance(unrolled.body[2], IRRegOp)
-    assert isinstance(unrolled.body[3], IRSeq)
-    assert isinstance(unrolled.body[4], IRRegOp)
+    loop = new_root.body[0]
+    assert isinstance(loop, IRLoop)
+    assert loop.name == "l0"
+    assert any(
+        "skip unroll loop 'l0': body references counter register" in msg
+        for msg in ctx.diagnostics
+    )
 
 
-def test_align_branch_dispatch_pads_short_arms() -> None:
+def test_branch_arms_kept_unaligned_after_pipeline() -> None:
     root = IRBranch(
         compare_reg="sel",
         arms=(
@@ -110,14 +110,13 @@ def test_align_branch_dispatch_pads_short_arms() -> None:
         ),
     )
     new_root, _ = make_default_pipeline(
-        PassConfig(min_body_us=0.0, enable_fusion=False)
+        PassConfig(enable_fusion=False)
     )(root)
     assert isinstance(new_root, IRBranch)
-    assert isinstance(new_root.arms[0], IRSeq)
-    assert isinstance(new_root.arms[1], IRSeq)
     # AlignBranchDispatch has been removed; branch arms keep original shape.
-    assert isinstance(new_root.arms[0].body[-1], IRDelay)
-    assert len(new_root.arms[0].body) == 1
+    # FlattenSeq unwraps single-element IRSeq arms to their sole child.
+    assert isinstance(new_root.arms[0], IRDelay)
+    assert isinstance(new_root.arms[1], IRSeq)
     assert len(new_root.arms[1].body) == 2
 
 
@@ -129,7 +128,7 @@ def test_reorder_pulse_like_nodes_by_t_within_segment() -> None:
             IRPulse(ch="0", pulse_name="p_mid", t=0.2),
         )
     )
-    new_root, _ = make_default_pipeline(PassConfig(min_body_us=0.0))(root)
+    new_root, _ = make_default_pipeline(PassConfig())(root)
     assert isinstance(new_root, IRSeq)
     assert isinstance(new_root.body[0], IRSendReadoutConfig)
     assert isinstance(new_root.body[1], IRPulse)
@@ -146,7 +145,7 @@ def test_reorder_pulse_like_nodes_does_not_cross_barrier() -> None:
             IRSendReadoutConfig(ch="0", pulse_name="cfg_early", t=0.1),
         )
     )
-    new_root, _ = make_default_pipeline(PassConfig(min_body_us=0.0))(root)
+    new_root, _ = make_default_pipeline(PassConfig())(root)
     assert isinstance(new_root, IRSeq)
     assert isinstance(new_root.body[0], IRPulse)
     assert isinstance(new_root.body[1], IRCondJump)
@@ -155,11 +154,11 @@ def test_reorder_pulse_like_nodes_does_not_cross_barrier() -> None:
 
 def test_validate_invariants_reports_undefined_label_target() -> None:
     root = IRSeq(body=(IRJump(target="L_missing"),))
-    _, ctx = make_default_pipeline(PassConfig(min_body_us=0.0))(root)
+    _, ctx = make_default_pipeline(PassConfig())(root)
     assert any("undefined jump target label:" in msg for msg in ctx.diagnostics)
 
 
 def test_validate_invariants_accepts_defined_label_target() -> None:
     root = IRSeq(body=(IRJump(target="L0"), IRLabel(name="L0")))
-    _, ctx = make_default_pipeline(PassConfig(min_body_us=0.0))(root)
+    _, ctx = make_default_pipeline(PassConfig())(root)
     assert all("undefined jump target label" not in msg for msg in ctx.diagnostics)

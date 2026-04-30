@@ -228,8 +228,12 @@ def test_builder_branch_arms() -> None:
             b.ir_delay(2.0)
 
     root = b.build()
-    assert isinstance(root, IRBranch)
-    assert len(root.arms) == 2
+    # build() always wraps in IRSeq; FlattenSeq in pipeline would unwrap singleton.
+    assert isinstance(root, IRSeq)
+    assert len(root.body) == 1
+    branch_node = root.body[0]
+    assert isinstance(branch_node, IRBranch)
+    assert len(branch_node.arms) == 2
 
 
 if __name__ == "__main__":

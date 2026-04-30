@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-from typing import Dict, List, Optional, Union, cast
+from typing import List, Union, cast
 
 from .nodes import (
     IRBranch,
@@ -13,9 +12,7 @@ from .nodes import (
     IRJump,
     IRLabel,
     IRLoop,
-    IRMeta,
     IRNode,
-    IRNop,
     IRPulse,
     IRPulseWmemReg,
     IRReadDmem,
@@ -24,46 +21,67 @@ from .nodes import (
     IRRegOp,
     IRSendReadoutConfig,
     IRSeq,
-    RegOp,
 )
 from .pass_base import Pass, PassConfig, PassCtx, PassPipeline
 
 
-class FreshLabels(Pass):
-    """Rename all labels to avoid collisions from structural duplication.
+def estimate_insts(node: IRNode) -> int:
+    """Rough instruction-count estimate for budget-aware unroll decisions.
 
-    Must run FIRST in the pipeline.
+    Constants are coarse approximations of QICK macro expansion, not exact:
+      - Estimating high → fewer loops unrolled (safe).
+      - Estimating low → may approach pmem cap; absorbed by the 20% safety
+        margin applied at budget-injection time.
+
+    Per-node estimates:
+      - Pulse-like / delay / reg-op / read-dmem / jump / nop: 1
+      - IRPulseWmemReg: 2 (address read + pulse trigger)
+      - IRCondJump: 2 (TEST + JUMP)
+      - IRLabel: 0 (label is an address, not an instruction)
+      - IRSeq: sum of children
+      - IRLoop / IRRegLoop: open(2) + body + close(2)
+      - IRBranch: sum(arms) + 2 * (num_arms - 1) for binary dispatch
+    """
+    if isinstance(node, IRSeq):
+        return sum(estimate_insts(child) for child in node.body)
+    if isinstance(node, IRLoop):
+        return 2 + estimate_insts(node.body) + 2
+    if isinstance(node, IRRegLoop):
+        return 2 + estimate_insts(node.body) + 2
+    if isinstance(node, IRBranch):
+        arms_total = sum(estimate_insts(arm) for arm in node.arms)
+        dispatch_overhead = 2 * max(0, len(node.arms) - 1)
+        return arms_total + dispatch_overhead
+    if isinstance(node, IRPulseWmemReg):
+        return 2
+    if isinstance(node, IRCondJump):
+        return 2
+    if isinstance(node, IRLabel):
+        return 0
+    # Default leaf: pulse / readout / send_readoutconfig / delay / delay_auto /
+    # reg_op / read_dmem / jump / nop -> 1
+    return 1
+
+
+class FreshLabels(Pass):
+    """Rename all labels and jump targets to avoid collisions.
+
+    Stateless: the rename map lives on ``PassCtx``. Runs FIRST so subsequent
+    passes (e.g. UnrollShortLoops) that duplicate subtrees see already-canonical
+    names — although duplicating labels still requires post-unroll uniqueness
+    handling at the duplication site.
     """
 
-    def __init__(self) -> None:
-        self._label_map: Dict[str, str] = {}
-        self._counter: int = 0
-        self._needs_reset: bool = True
-
     def transform(self, node: IRNode, ctx: PassCtx) -> IRNode:
-        if self._needs_reset:
-            self._label_map.clear()
-            self._counter = 0
-            self._needs_reset = False
-
         if isinstance(node, IRLabel):
-            if node.name not in self._label_map:
-                self._label_map[node.name] = f"_label_{self._counter}"
-                self._counter += 1
-            return IRLabel(name=self._label_map[node.name], meta=node.meta)
+            return IRLabel(name=ctx.fresh_label(node.name), meta=node.meta)
 
-        elif isinstance(node, IRJump):
-            if node.target not in self._label_map:
-                self._label_map[node.target] = f"_label_{self._counter}"
-                self._counter += 1
-            return IRJump(target=self._label_map[node.target], meta=node.meta)
+        if isinstance(node, IRJump):
+            return IRJump(target=ctx.fresh_label(node.target), meta=node.meta)
 
-        elif isinstance(node, IRCondJump):
-            if node.target not in self._label_map:
-                self._label_map[node.target] = f"_label_{self._counter}"
-                self._counter += 1
+        if isinstance(node, IRCondJump):
             return IRCondJump(
-                target=self._label_map[node.target],
+                target=ctx.fresh_label(node.target),
                 arg1=node.arg1,
                 test=node.test,
                 op=node.op,
@@ -71,216 +89,115 @@ class FreshLabels(Pass):
                 meta=node.meta,
             )
 
-        else:
-            return node
-
-    def __call__(self, node: IRNode, ctx: PassCtx | None = None) -> IRNode:
-        self._needs_reset = True
-        return super().__call__(node, ctx)
+        return node
 
 
-class EstimateDurations(Pass):
-    """Estimate IR subtree duration via bottom-up walk.
+class FlattenSeq(Pass):
+    """Normalize IRSeq structure for downstream passes.
 
-    Duration semantics:
-    - IRPulse: 0 (no timeline advance — only IRDelay advances ref_t)
-    - IRDelay: t (numeric) or None (QickParam)
-    - IRDelayAuto: None (hardware alignment — unknown statically)
-    - IRSeq: sum of body durations; None if any child is None
-    - IRLoop: n * body.duration; None if body has None
-    - IRBranch: max(arm durations); None if any arm is None
+    Guarantees after this pass:
+      - No IRSeq directly contains another IRSeq (children are spliced in).
+      - No single-element IRSeq remains as a child of IRSeq / IRLoop body /
+        IRRegLoop body / IRBranch arm — it is unwrapped to its sole child.
+      - Empty IRSeq is preserved (emitter treats it as no-op).
+
+    The builder always wraps loop bodies / branch arms / top-level emissions
+    into IRSeq, so this pass is what restores compact, canonical structure.
     """
 
     def transform(self, node: IRNode, ctx: PassCtx) -> IRNode:
-        if isinstance(node, IRPulse):
-            # Pulses don't advance ref_t; they contribute 0 to timeline
-            return IRPulse(
-                ch=node.ch,
-                pulse_name=node.pulse_name,
-                t=node.t,
-                tag=node.tag,
-                meta=self._with_dur(node.meta, 0.0),
-            )
-
-        elif isinstance(node, IRPulseWmemReg):
-            return IRPulseWmemReg(
-                ch=node.ch,
-                addr_reg=node.addr_reg,
-                t=node.t,
-                flat_top_pulse=node.flat_top_pulse,
-                meta=self._with_dur(node.meta, 0.0),
-            )
-
-        elif isinstance(node, IRSendReadoutConfig):
-            return IRSendReadoutConfig(
-                ch=node.ch,
-                pulse_name=node.pulse_name,
-                t=node.t,
-                meta=self._with_dur(node.meta, 0.0),
-            )
-
-        elif isinstance(node, IRReadout):
-            return IRReadout(
-                ch=node.ch,
-                ro_chs=node.ro_chs,
-                pulse_name=node.pulse_name,
-                t=node.t,
-                meta=self._with_dur(node.meta, 0.0),
-            )
-
-        elif isinstance(node, IRDelay):
-            dur: Optional[float] = (
-                float(node.t) if isinstance(node.t, (int, float)) else None
-            )
-            return IRDelay(t=node.t, tag=node.tag, meta=self._with_dur(node.meta, dur))
-
-        elif isinstance(node, IRDelayAuto):
-            # Hardware alignment: static duration unknown
-            return IRDelayAuto(
-                t=node.t,
-                gens=node.gens,
-                ros=node.ros,
-                tag=node.tag,
-                meta=self._with_dur(node.meta, None),
-            )
-
-        elif isinstance(node, IRSeq):
-            total: Optional[float] = 0.0
+        if isinstance(node, IRSeq):
+            flat: List[IRNode] = []
             for child in node.body:
-                if total is None:
-                    break
-                child_dur = child.meta.duration
-                if child_dur is None:
-                    total = None
+                if isinstance(child, IRSeq):
+                    flat.extend(child.body)
                 else:
-                    total += child_dur
-            return IRSeq(body=node.body, meta=self._with_dur(node.meta, total))
+                    flat.append(child)
+            return IRSeq(body=tuple(flat), meta=node.meta)
 
-        elif isinstance(node, IRLoop):
-            body_dur = node.body.meta.duration
-            dur2 = None if body_dur is None else node.n * body_dur
+        if isinstance(node, IRLoop):
             return IRLoop(
                 name=node.name,
                 n=node.n,
-                body=node.body,
-                meta=self._with_dur(node.meta, dur2),
+                body=self._unwrap_singleton(node.body),
+                meta=node.meta,
             )
 
-        elif isinstance(node, IRRegLoop):
+        if isinstance(node, IRRegLoop):
             return IRRegLoop(
                 name=node.name,
                 n_reg=node.n_reg,
-                body=node.body,
-                meta=self._with_dur(node.meta, None),
+                body=self._unwrap_singleton(node.body),
+                meta=node.meta,
             )
 
-        elif isinstance(node, IRBranch):
-            if not node.arms:
-                dur3: Optional[float] = 0.0
-            else:
-                arm_durs = [arm.meta.duration for arm in node.arms]
-                if any(d is None for d in arm_durs):
-                    dur3 = None
-                else:
-                    dur3 = max(cast(list[float], arm_durs))
+        if isinstance(node, IRBranch):
             return IRBranch(
                 compare_reg=node.compare_reg,
-                arms=node.arms,
-                meta=self._with_dur(node.meta, dur3),
+                arms=tuple(self._unwrap_singleton(arm) for arm in node.arms),
+                meta=node.meta,
             )
 
-        else:
-            # Label, Jump, CondJump, RegOp, ReadDmem, Nop — contribute 0
-            return self._rebuild_zero_dur(node)
+        return node
 
     @staticmethod
-    def _with_dur(meta: IRMeta, dur: Optional[float]) -> IRMeta:
-        return replace(meta, duration=dur)
-
-    def _rebuild_zero_dur(self, node: IRNode) -> IRNode:
-        if isinstance(node, IRLabel):
-            return IRLabel(name=node.name, meta=self._with_dur(node.meta, 0.0))
-        elif isinstance(node, IRJump):
-            return IRJump(target=node.target, meta=self._with_dur(node.meta, 0.0))
-        elif isinstance(node, IRCondJump):
-            return IRCondJump(
-                target=node.target,
-                arg1=node.arg1,
-                test=node.test,
-                op=node.op,
-                arg2=node.arg2,
-                meta=self._with_dur(node.meta, 0.0),
-            )
-        elif isinstance(node, IRRegOp):
-            return IRRegOp(
-                dst=node.dst,
-                lhs=node.lhs,
-                op=node.op,
-                rhs=node.rhs,
-                meta=self._with_dur(node.meta, 0.0),
-            )
-        elif isinstance(node, IRReadDmem):
-            return IRReadDmem(
-                dst=node.dst, addr=node.addr, meta=self._with_dur(node.meta, 0.0)
-            )
-        elif isinstance(node, IRNop):
-            return IRNop(meta=self._with_dur(node.meta, 0.0))
-        else:
-            return node
+    def _unwrap_singleton(node: IRNode) -> IRNode:
+        """If node is a 1-element IRSeq, return its sole child; else passthrough."""
+        if isinstance(node, IRSeq) and len(node.body) == 1:
+            return node.body[0]
+        return node
 
 
 class UnrollShortLoops(Pass):
-    """Unroll small-count loops with short known body duration."""
+    """Unroll small loops with few body instructions.
+
+    Triggers when ``leaf_count(body) <= max_unroll_leaves`` AND
+    ``n <= max_unroll_iters``. Leaf counting walks composite nodes recursively
+    so that a loop wrapping a single pulse counts as 1 leaf, not 0.
+    """
 
     def transform(self, node: IRNode, ctx: PassCtx) -> IRNode:
         if not isinstance(node, IRLoop):
             return node
 
-        counter_referenced = self._references_reg(node.body, node.name)
-
-        body_dur = node.body.meta.duration
-        if body_dur is None:
-            return node
-        if body_dur > ctx.config.min_body_us:
-            return node
-
-        max_unroll_iters = int(ctx.config.extra.get("max_unroll_iters", 16))
-        if node.n > max_unroll_iters:
+        # If the body reads/writes the loop counter register, the register is
+        # declared by the lowering layer's open_loop(). Unrolling removes that
+        # declaration, so the body's RegOp/CondJump on the counter would
+        # reference a non-existent register. Skip unroll in that case.
+        if self._references_reg(node.body, node.name):
             ctx.warn(
-                f"skip unroll loop '{node.name}': n={node.n} exceeds max_unroll_iters={max_unroll_iters}"
+                f"skip unroll loop '{node.name}': body references counter register"
+            )
+            return node
+
+        leaf_count = self._count_leaves(node.body)
+        if leaf_count > ctx.config.max_unroll_leaves:
+            return node
+
+        if node.n > ctx.config.max_unroll_iters:
+            ctx.warn(
+                f"skip unroll loop '{node.name}': n={node.n} exceeds "
+                f"max_unroll_iters={ctx.config.max_unroll_iters}"
             )
             return node
 
         if node.n <= 0:
             return IRSeq(body=(), meta=node.meta)
-        if node.n == 1 and not counter_referenced:
+
+        if node.n == 1:
             return node.body
 
-        unrolled: List[IRNode] = []
-        if counter_referenced:
-            # Preserve loop-counter semantics when the loop body reads/writes it.
-            # Equivalent to "counter = 0" before entering the unrolled body.
-            unrolled.append(
-                IRRegOp(
-                    dst=node.name,
-                    lhs=node.name,
-                    op=RegOp.SUB,
-                    rhs=node.name,
-                )
-            )
-        for _ in range(node.n):
-            unrolled.append(node.body)
-            if counter_referenced:
-                # Equivalent to IncReg(dst=node.name, src=1).
-                unrolled.append(
-                    IRRegOp(
-                        dst=node.name,
-                        lhs=node.name,
-                        op=RegOp.ADD,
-                        rhs=1,
-                    )
-                )
-        return IRSeq(body=tuple(unrolled), meta=node.meta)
+        return IRSeq(body=tuple(node.body for _ in range(node.n)), meta=node.meta)
+
+    @classmethod
+    def _count_leaves(cls, node: IRNode) -> int:
+        if isinstance(node, IRSeq):
+            return sum(cls._count_leaves(child) for child in node.body)
+        if isinstance(node, (IRLoop, IRRegLoop)):
+            return cls._count_leaves(node.body)
+        if isinstance(node, IRBranch):
+            return sum(cls._count_leaves(arm) for arm in node.arms)
+        return 1
 
     def _references_reg(self, node: IRNode, reg_name: str) -> bool:
         if isinstance(node, IRSeq):
@@ -305,7 +222,11 @@ class UnrollShortLoops(Pass):
 
 
 class FuseAdjacentDelays(Pass):
-    """Fuse adjacent numeric IRDelay nodes to reduce macro count."""
+    """Fuse adjacent numeric IRDelay nodes (same tag) to reduce macro count.
+
+    Assumes FlattenSeq has already removed nested IRSeq, so we don't need to
+    splice children here.
+    """
 
     def transform(self, node: IRNode, ctx: PassCtx) -> IRNode:
         if not isinstance(node, IRSeq):
@@ -314,14 +235,7 @@ class FuseAdjacentDelays(Pass):
             return node
 
         fused: List[IRNode] = []
-        linear_body: List[IRNode] = []
         for child in node.body:
-            if isinstance(child, IRSeq):
-                linear_body.extend(child.body)
-            else:
-                linear_body.append(child)
-
-        for child in linear_body:
             if (
                 fused
                 and isinstance(fused[-1], IRDelay)
@@ -487,10 +401,11 @@ def make_default_pipeline(config: PassConfig | None = None) -> PassPipeline:
     return PassPipeline(
         passes=[
             FreshLabels(),
-            EstimateDurations(),
+            FlattenSeq(),
             UnrollShortLoops(),
-            RemoveZeroDelays(),
+            FlattenSeq(),
             FuseAdjacentDelays(),
+            RemoveZeroDelays(),
             ReorderPulseLikeByTime(),
             ValidateInvariants(),
         ],

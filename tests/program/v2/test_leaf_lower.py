@@ -39,9 +39,12 @@ def test_delay_emits_ir_delay() -> None:
 
     assert next_t == 0.0
     root = b.build()
-    assert isinstance(root, IRDelay)
-    assert root.t == pytest.approx(round_timestamp(cast(Any, prog), 0.05))
-    assert root.tag is None
+    assert isinstance(root, IRSeq)
+    assert len(root.body) == 1
+    leaf = root.body[0]
+    assert isinstance(leaf, IRDelay)
+    assert leaf.t == pytest.approx(round_timestamp(cast(Any, prog), 0.05))
+    assert leaf.tag is None
 
 
 def test_delay_with_tag() -> None:
@@ -49,8 +52,10 @@ def test_delay_with_tag() -> None:
     b = IRBuilder()
     delay.ir_run(b, t=0.0, prog=_ProgWithSoccfg())  # type: ignore[call-arg]
     root = b.build()
-    assert isinstance(root, IRDelay)
-    assert root.tag == "barrier"
+    assert isinstance(root, IRSeq)
+    leaf = root.body[0]
+    assert isinstance(leaf, IRDelay)
+    assert leaf.tag == "barrier"
 
 
 def test_soft_delay_no_ir_emitted() -> None:
@@ -66,35 +71,41 @@ def test_soft_delay_no_ir_emitted() -> None:
     assert len(root.body) == 0
 
 
+def _only(root: IRSeq) -> Any:
+    assert isinstance(root, IRSeq)
+    assert len(root.body) == 1
+    return root.body[0]
+
+
 def test_delay_auto_emits_ir_delay_auto() -> None:
     da = DelayAuto(name="da", t=0.0, gens=True, ros=True)
     b = IRBuilder()
     next_t = da.ir_run(b, t=1.0, prog=_ProgWithSoccfg())  # type: ignore[call-arg]
 
     assert next_t == 0.0
-    root = b.build()
-    assert isinstance(root, IRDelayAuto)
-    assert root.t == pytest.approx(0.0)
-    assert root.gens is True
-    assert root.ros is True
+    leaf = _only(b.build())
+    assert isinstance(leaf, IRDelayAuto)
+    assert leaf.t == pytest.approx(0.0)
+    assert leaf.gens is True
+    assert leaf.ros is True
 
 
 def test_delay_auto_gens_false() -> None:
     da = DelayAuto(name="da", t=0.5, gens=False, ros=True)
     b = IRBuilder()
     da.ir_run(b, t=0.0, prog=_ProgWithSoccfg())  # type: ignore[call-arg]
-    root = b.build()
-    assert isinstance(root, IRDelayAuto)
-    assert root.t == pytest.approx(0.5)
+    leaf = _only(b.build())
+    assert isinstance(leaf, IRDelayAuto)
+    assert leaf.t == pytest.approx(0.5)
 
 
 def test_delay_auto_register_based() -> None:
     da = DelayAuto(name="da", t="time_reg", gens=True, ros=True)
     b = IRBuilder()
     da.ir_run(b, t=0.0, prog=_ProgWithSoccfg())  # type: ignore[call-arg]
-    root = b.build()
-    assert isinstance(root, IRDelayAuto)
-    assert root.t == "time_reg"
+    leaf = _only(b.build())
+    assert isinstance(leaf, IRDelayAuto)
+    assert leaf.t == "time_reg"
 
 
 def test_qickparam_preserved_in_delay() -> None:
@@ -103,12 +114,12 @@ def test_qickparam_preserved_in_delay() -> None:
     b = IRBuilder()
     prog = _ProgWithSoccfg()
     delay.ir_run(b, t=0.0, prog=prog)  # type: ignore[call-arg]
-    root = b.build()
-    assert isinstance(root, IRDelay)
+    leaf = _only(b.build())
+    assert isinstance(leaf, IRDelay)
     expected = round_timestamp(cast(Any, prog), param)
-    assert isinstance(root.t, QickParam)
+    assert isinstance(leaf.t, QickParam)
     assert isinstance(expected, QickParam)
-    assert root.t.start == pytest.approx(expected.start)
+    assert leaf.t.start == pytest.approx(expected.start)
 
 
 def test_qickparam_preserved_in_delay_auto() -> None:
@@ -116,10 +127,10 @@ def test_qickparam_preserved_in_delay_auto() -> None:
     da = DelayAuto(name="da", t=param, gens=False, ros=True)
     b = IRBuilder()
     da.ir_run(b, t=0.0, prog=_ProgWithSoccfg())  # type: ignore[call-arg]
-    root = b.build()
-    assert isinstance(root, IRDelayAuto)
-    assert root.t is param
-    assert root.gens is False
+    leaf = _only(b.build())
+    assert isinstance(leaf, IRDelayAuto)
+    assert leaf.t is param
+    assert leaf.gens is False
 
 
 # ---------------------------------------------------------------------------

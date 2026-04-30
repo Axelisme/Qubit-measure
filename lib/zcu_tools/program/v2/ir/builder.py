@@ -170,29 +170,23 @@ class IRBuilder:
 
     @contextmanager
     def ir_loop(self, name: str, n: int) -> Generator[None, None, None]:
-        """Context manager: body nodes become an IRLoop."""
+        """Context manager: body nodes become an IRLoop wrapping an IRSeq."""
         self._push()
         try:
             yield
         finally:
             body_nodes = self._pop()
-            loop_body = (
-                IRSeq(body=body_nodes) if len(body_nodes) != 1 else body_nodes[0]
-            )
-            self._emit(IRLoop(name=name, n=n, body=loop_body))
+            self._emit(IRLoop(name=name, n=n, body=IRSeq(body=body_nodes)))
 
     @contextmanager
     def ir_reg_loop(self, name: str, n_reg: str) -> Generator[None, None, None]:
-        """Context manager: body nodes become an IRRegLoop."""
+        """Context manager: body nodes become an IRRegLoop wrapping an IRSeq."""
         self._push()
         try:
             yield
         finally:
             body_nodes = self._pop()
-            loop_body = (
-                IRSeq(body=body_nodes) if len(body_nodes) != 1 else body_nodes[0]
-            )
-            self._emit(IRRegLoop(name=name, n_reg=n_reg, body=loop_body))
+            self._emit(IRRegLoop(name=name, n_reg=n_reg, body=IRSeq(body=body_nodes)))
 
     @contextmanager
     def ir_branch(self, compare_reg: str) -> Generator[_BranchCtx, None, None]:
@@ -217,25 +211,22 @@ class IRBuilder:
     # Build
     # ------------------------------------------------------------------
 
-    def build(self) -> IRNode:
-        """Return the top-level IR node (an IRSeq over all top-level emissions)."""
+    def build(self) -> IRSeq:
+        """Return the top-level IRSeq over all top-level emissions.
+
+        Always returns an IRSeq (even for 0 or 1 child) — structural normalization
+        is the FlattenSeq pass's responsibility, not the builder's.
+        """
         if len(self._stack) != 1:
             raise RuntimeError(
                 f"IRBuilder: {len(self._stack) - 1} unclosed scope(s) at build()"
             )
-        nodes = self._stack[0]
-        if len(nodes) == 0:
-            return IRSeq()
-        if len(nodes) == 1:
-            return nodes[0]
-        return IRSeq(body=tuple(nodes))
+        return IRSeq(body=tuple(self._stack[0]))
 
-    def build_with_meta(self, source_module: str = "") -> IRNode:
+    def build_with_meta(self, source_module: str = "") -> IRSeq:
         """Like build() but attaches source_module to the root IRSeq meta."""
         root = self.build()
-        if isinstance(root, IRSeq):
-            return IRSeq(body=root.body, meta=IRMeta(source_module=source_module))
-        return root
+        return IRSeq(body=root.body, meta=IRMeta(source_module=source_module))
 
 
 class _BranchCtx:
@@ -247,14 +238,13 @@ class _BranchCtx:
 
     @contextmanager
     def arm(self) -> Generator[None, None, None]:
-        """Context manager for a single branch arm."""
+        """Context manager for a single branch arm; body becomes an IRSeq."""
         self._builder._push()
         try:
             yield
         finally:
             arm_nodes = self._builder._pop()
-            arm_ir = IRSeq(body=arm_nodes) if len(arm_nodes) != 1 else arm_nodes[0]
-            self._arms.append(arm_ir)
+            self._arms.append(IRSeq(body=arm_nodes))
 
     def finish(self) -> Tuple[IRNode, ...]:
         return tuple(self._arms)

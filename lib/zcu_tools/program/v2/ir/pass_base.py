@@ -1,10 +1,12 @@
 """Pass infrastructure for IR transformation pipeline.
 
 Passes are ordered transformations that run on the IR tree:
-  FreshLabels → EstimateDurations → UnrollShortLoops → FuseAdjacentDelays
-    → AlignBranchDispatch → ValidateInvariants
+  FreshLabels → FlattenSeq → UnrollShortLoops → FlattenSeq
+    → FuseAdjacentDelays → RemoveZeroDelays → ReorderPulseLikeByTime
+    → ValidateInvariants
 
 Each pass is a stateless visitor that rebuilds the IR tree bottom-up.
+Per-run mutable state (e.g. the FreshLabels label map) lives on PassCtx.
 """
 
 from __future__ import annotations
@@ -13,31 +15,32 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Tuple
 
-from .nodes import (
-    IRBranch,
-    IRLoop,
-    IRNode,
-    IRRegLoop,
-    IRSeq,
-)
+from .nodes import IRBranch, IRLoop, IRNode, IRRegLoop, IRSeq
 
 
 @dataclass
 class PassConfig:
     """Configuration for all passes in the pipeline."""
 
-    min_body_us: float = 0.09  # threshold for UnrollShortLoops (µs)
+    max_unroll_leaves: int = 4  # leaf-count threshold for UnrollShortLoops
+    max_unroll_iters: int = 16  # max n that UnrollShortLoops will unroll
     enable_fusion: bool = True  # enable FuseAdjacentDelays
-    enable_align_branches: bool = True  # enable AlignBranchDispatch
     extra: Dict[str, Any] = field(default_factory=dict)  # extensible config
 
 
 @dataclass
 class PassCtx:
-    """Context passed through the pass pipeline."""
+    """Context passed through the pass pipeline.
+
+    ``label_map`` / ``label_counter`` are per-run state owned by FreshLabels;
+    a fresh PassCtx is built on every PassPipeline call so they reset cleanly.
+    """
 
     config: PassConfig = field(default_factory=PassConfig)
     diagnostics: List[str] = field(default_factory=list)  # collected warnings/errors
+    label_map: Dict[str, str] = field(default_factory=dict)
+    label_counter: int = 0
+    max_unroll_leaves: int = 32  # set by UnrollShortLoops when it runs
 
     def warn(self, msg: str) -> None:
         """Record a diagnostic warning."""
@@ -46,6 +49,18 @@ class PassCtx:
     def error(self, msg: str) -> None:
         """Record a diagnostic error."""
         self.diagnostics.append(f"error: {msg}")
+
+    def fresh_label(self, original: str) -> str:
+        """Return a stable rewritten name for a label/jump target.
+
+        Each distinct ``original`` maps to ``_label_{N}`` with monotonic N.
+        Repeated calls with the same ``original`` return the same rewritten name,
+        so labels and their jump targets stay consistent within one pipeline run.
+        """
+        if original not in self.label_map:
+            self.label_map[original] = f"_label_{self.label_counter}"
+            self.label_counter += 1
+        return self.label_map[original]
 
 
 class Pass(ABC):

@@ -27,7 +27,7 @@ from .nodes import (
 )
 from .pass_base import Pass, PassConfig, PassCtx
 from .passes import (
-    EstimateDurations,
+    FlattenSeq,
     FreshLabels,
     FuseAdjacentDelays,
     RemoveZeroDelays,
@@ -62,7 +62,7 @@ __all__ = [
     "PassConfig",
     "PassCtx",
     "FreshLabels",
-    "EstimateDurations",
+    "FlattenSeq",
     "UnrollShortLoops",
     "RemoveZeroDelays",
     "FuseAdjacentDelays",
