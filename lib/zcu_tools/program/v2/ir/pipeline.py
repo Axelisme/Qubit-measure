@@ -34,6 +34,17 @@ class PipeLine:
 
 
 def make_default_pipeline(config: PipeLineConfig) -> PipeLine:
-    from .passes import LabelDCEPass
+    from .passes import (
+        IRStructureValidationPass,
+        LabelDCEPass,
+        LabelReferenceValidationPass,
+    )
 
-    return PipeLine(config, [LabelDCEPass()])
+    return PipeLine(
+        config,
+        [
+            IRStructureValidationPass(),
+            LabelReferenceValidationPass(),
+            LabelDCEPass(),
+        ],
+    )

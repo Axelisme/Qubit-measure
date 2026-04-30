@@ -32,9 +32,12 @@ class OpenInnerLoop(Macro):
         end = f"{self.name}_end"
         return [
             MetaMacro(type="LOOP_START", name=self.name),
+            MetaMacro(type="LOOP_SECTION", name="initial"),
             WriteReg(dst=self.counter_reg, src=0),
             Label(label=start),
+            MetaMacro(type="LOOP_SECTION", name="stop_check"),
             CondJump(label=end, arg1=self.counter_reg, test="NS", op="-", arg2=self.n),
+            MetaMacro(type="LOOP_SECTION", name="body"),
         ]
 
 
@@ -50,6 +53,7 @@ class CloseInnerLoop(Macro):
         start = f"{self.name}_start"
         end = f"{self.name}_end"
         return [
+            MetaMacro(type="LOOP_SECTION", name="update"),
             IncReg(dst=self.counter_reg, src=1),
             Jump(label=start),
             Label(label=end),

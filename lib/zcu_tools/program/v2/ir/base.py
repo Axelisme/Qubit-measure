@@ -26,7 +26,7 @@ class IRComplieMixin(QickProgramV2):
         opt_ir, _ctx = pipeline(ir)
 
         opt_insts, opt_labels = builder.unbuild(opt_ir)
-
+        
         self.prog_list = opt_insts
         self.labels = opt_labels
 

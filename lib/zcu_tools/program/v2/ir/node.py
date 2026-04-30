@@ -28,6 +28,17 @@ class RootNode(BlockNode):
 
 
 @dataclass
-class LoopNode(BlockNode):
-    """A loop node containing an inner block."""
+class IRLoop(IRNode):
+    """A loop node separated into sections."""
     name: str = ""
+    initial: BlockNode = field(default_factory=BlockNode)
+    update: BlockNode = field(default_factory=BlockNode)
+    stop_check: BlockNode = field(default_factory=BlockNode)
+    body: BlockNode = field(default_factory=BlockNode)
+
+
+@dataclass
+class IRBranch(BlockNode):
+    """A branch node containing multiple cases."""
+    name: str = ""
+    cases: list[BlockNode] = field(default_factory=list)

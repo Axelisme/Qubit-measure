@@ -119,8 +119,11 @@ class Branch(Module):
 
         n = len(self.branches)
         max_depth = (n - 1).bit_length()
+        
+        prog._add_asm({"CMD": "__META__", "TYPE": "BRANCH_START", "NAME": self.name}, 0)
 
         def run_branch(i: int, depth: int) -> None:
+            prog._add_asm({"CMD": "__META__", "TYPE": "BRANCH_CASE_START", "NAME": str(i)}, 0)
             for _ in range(max_depth - depth):
                 prog.nop()
 
@@ -138,6 +141,7 @@ class Branch(Module):
                 raise NotImplementedError("Branch with swept duration is not supported")
 
             prog.delay(t=cur_t)
+            prog._add_asm({"CMD": "__META__", "TYPE": "BRANCH_CASE_END", "NAME": str(i)}, 0)
 
         def emit_dispatch(lo: int, hi: int, depth: int) -> None:
             if hi - lo == 1:
@@ -157,6 +161,8 @@ class Branch(Module):
             prog.label(end_label)
 
         emit_dispatch(0, n, 0)
+        
+        prog._add_asm({"CMD": "__META__", "TYPE": "BRANCH_END", "NAME": self.name}, 0)
 
         prog.delay_auto(t=0)
 

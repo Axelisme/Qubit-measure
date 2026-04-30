@@ -85,3 +85,30 @@ def test_branch_rejects_qickparam_duration(mock_prog):
         assert "swept duration" in str(exc)
     else:
         raise AssertionError("Expected NotImplementedError for QickParam branch duration")
+
+
+def test_branch_emits_meta_markers(mock_prog):
+    b = Branch(
+        "sel",
+        [_FixedDurationModule("b0", 0.1)],
+        [_FixedDurationModule("b1", 0.2)],
+        [_FixedDurationModule("b2", 0.3)],
+    )
+
+    b.run(mock_prog)
+
+    meta_calls = [
+        call.args[0]
+        for call in mock_prog._add_asm.call_args_list
+        if call.args and isinstance(call.args[0], dict) and call.args[0].get("CMD") == "__META__"
+    ]
+
+    assert meta_calls[0] == {"CMD": "__META__", "TYPE": "BRANCH_START", "NAME": "sel"}
+    assert meta_calls[-1] == {"CMD": "__META__", "TYPE": "BRANCH_END", "NAME": "sel"}
+
+    case_starts = [m for m in meta_calls if m["TYPE"] == "BRANCH_CASE_START"]
+    case_ends = [m for m in meta_calls if m["TYPE"] == "BRANCH_CASE_END"]
+    assert len(case_starts) == 3
+    assert len(case_ends) == 3
+    assert {m["NAME"] for m in case_starts} == {"0", "1", "2"}
+    assert {m["NAME"] for m in case_ends} == {"0", "1", "2"}

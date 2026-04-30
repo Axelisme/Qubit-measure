@@ -14,7 +14,7 @@ class Instruction:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "Instruction":
-        if "LABEL" in d:
+        if "LABEL" in d and "CMD" not in d:
             args = {k: v for k, v in d.items() if k not in ("LABEL", "LINE", "P_ADDR")}
             return LabelInst(
                 name=d["LABEL"],

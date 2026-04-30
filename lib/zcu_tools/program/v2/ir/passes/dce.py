@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from ..instructions import Instruction, LabelInst
-from ..node import BlockNode, IRNode, RootNode
+from ..labels import iter_label_references
+from ..node import IRNode, RootNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
+from ..traversal import walk_instructions
 
 
 class LabelDCEPass(AbsPipeLinePass):
     """
     Dead Code Elimination for labels.
-    Removes any label definitions from IRNode.labels that are not
-    referenced by any instruction (LabelInst) in the program.
+    Removes labels that are not referenced by jump-like instructions.
     """
 
     def process(self, ir: IRNode, ctx: PipeLineContext) -> IRNode:
@@ -17,16 +17,8 @@ class LabelDCEPass(AbsPipeLinePass):
             return ir  # Pass if it's not a RootNode
 
         used_labels: set[str] = set()
-
-        def _find_labels(node: IRNode) -> None:
-            if isinstance(node, BlockNode):
-                for inst in node.insts:
-                    if isinstance(inst, LabelInst):
-                        used_labels.add(inst.name)
-                    elif isinstance(inst, IRNode):
-                        _find_labels(inst)
-
-        _find_labels(ir)
+        for inst in walk_instructions(ir):
+            used_labels.update(iter_label_references(inst))
 
         # Keep only labels that are actually used
         new_labels = {
