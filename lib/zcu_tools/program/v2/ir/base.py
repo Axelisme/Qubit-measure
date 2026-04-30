@@ -6,7 +6,7 @@ from .pipeline import make_default_pipeline, PipeLineConfig
 from .builder import IRBuilder
 
 
-class IROptMixin(QickProgramV2):
+class IRComplieMixin(QickProgramV2):
     def compile(self):
         self._make_asm()
         self.optimize_asm()
