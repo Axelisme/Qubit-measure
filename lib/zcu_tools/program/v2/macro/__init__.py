@@ -12,7 +12,7 @@ from .pluse_reg import PulseByReg
 from .write_reg import WriteRegOp
 
 
-class ImproveAsmV2(AsmV2):
+class AdditionalMacroMixin(AsmV2):
     def __init__(self, *args, **kwargs):
         self._delay_disabled = False
         self._temp_regs: list[str] = []
@@ -123,6 +123,9 @@ class ImproveAsmV2(AsmV2):
             if len(self._reg_num_stack) == 0:
                 raise RuntimeError("temp register scope stack is already empty")
             self._reg_num_stack.pop()
+
+
+class ImproveAsmV2(AdditionalMacroMixin, AsmV2): ...
 
 
 __all__ = ["ImproveAsmV2"]
