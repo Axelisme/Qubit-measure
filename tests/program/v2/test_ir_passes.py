@@ -1,18 +1,31 @@
 import pytest
 from zcu_tools.program.v2.ir.analysis import instruction_reads, instruction_writes
 from zcu_tools.program.v2.ir.instructions import GenericInst, LabelInst, MetaInst
-from zcu_tools.program.v2.ir.node import BlockNode, IRBranch, IRBranchCase, IRLoop, RootNode
+from zcu_tools.program.v2.ir.node import (
+    BlockNode,
+    IRBranch,
+    IRBranchCase,
+    IRLoop,
+    RootNode,
+)
 from zcu_tools.program.v2.ir.passes.branch import BranchCaseNormalizePass
 from zcu_tools.program.v2.ir.passes.dce import LabelDCEPass
 from zcu_tools.program.v2.ir.passes.loop import ConstantLoopUnrollPass
 from zcu_tools.program.v2.ir.passes.optimize import LoopInvariantHoistPass, PeepholePass
+from zcu_tools.program.v2.ir.passes.timeline import (
+    TimedInstructionMergePass,
+    ZeroDelayDCEPass,
+)
 from zcu_tools.program.v2.ir.passes.timing import TimingSanityPass
-from zcu_tools.program.v2.ir.passes.timeline import ZeroDelayDCEPass
 from zcu_tools.program.v2.ir.passes.validation import (
     IRStructureValidationPass,
     LabelReferenceValidationPass,
 )
-from zcu_tools.program.v2.ir.pipeline import PipeLineContext
+from zcu_tools.program.v2.ir.pipeline import (
+    PipeLineConfig,
+    PipeLineContext,
+    make_default_pipeline,
+)
 from zcu_tools.program.v2.ir.traversal import walk_instructions
 
 
@@ -280,3 +293,106 @@ def test_zero_delay_dce_preserves_non_noop_time_shapes():
     ZeroDelayDCEPass().process(ir, PipeLineContext())
 
     assert ir.insts == [tagged, register_driven, set_ref, nonzero]
+
+
+def test_timed_instruction_merge_merges_adjacent_time_literals():
+    ir = RootNode(
+        insts=[
+            GenericInst(cmd="PRE"),
+            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#2"}),
+            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#3"}),
+            GenericInst(cmd="POST"),
+        ]
+    )
+
+    out = TimedInstructionMergePass().process(ir, PipeLineContext())
+
+    assert out is ir
+    assert [inst.to_dict() for inst in ir.insts] == [
+        {"CMD": "PRE"},
+        {"CMD": "TIME", "C_OP": "inc_ref", "LIT": "#5"},
+        {"CMD": "POST"},
+    ]
+
+
+def test_timed_instruction_merge_traverses_loop_sections():
+    loop = IRLoop(name="r")
+    loop.initial.append(GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#1"}))
+    loop.initial.append(GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#2"}))
+    loop.body.append(GenericInst(cmd="BODY"))
+    loop.update.append(GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#3"}))
+    loop.update.append(GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#4"}))
+    ir = RootNode(insts=[loop])
+
+    TimedInstructionMergePass().process(ir, PipeLineContext())
+
+    assert [inst.to_dict() for inst in loop.initial.insts] == [
+        {"CMD": "TIME", "C_OP": "inc_ref", "LIT": "#3"}
+    ]
+    assert [inst.cmd for inst in loop.body.insts] == ["BODY"]
+    assert [inst.to_dict() for inst in loop.update.insts] == [
+        {"CMD": "TIME", "C_OP": "inc_ref", "LIT": "#7"}
+    ]
+
+
+def test_timed_instruction_merge_does_not_cross_barriers():
+    label = LabelInst(name="barrier")
+    nested = BlockNode(
+        insts=[
+            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#5"}),
+            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#6"}),
+        ]
+    )
+    ir = RootNode(
+        insts=[
+            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#1"}),
+            label,
+            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#2"}),
+            GenericInst(cmd="WPORT_WR", args={"DST": "w0", "TIME": "@10"}),
+            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#3"}),
+            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#4"}),
+            nested,
+        ]
+    )
+
+    TimedInstructionMergePass().process(ir, PipeLineContext())
+
+    assert [item.to_dict() for item in ir.insts[:5]] == [
+        {"CMD": "TIME", "C_OP": "inc_ref", "LIT": "#1"},
+        {"LABEL": "barrier"},
+        {"CMD": "TIME", "C_OP": "inc_ref", "LIT": "#2"},
+        {"CMD": "WPORT_WR", "DST": "w0", "TIME": "@10"},
+        {"CMD": "TIME", "C_OP": "inc_ref", "LIT": "#7"},
+    ]
+    assert [inst.to_dict() for inst in nested.insts] == [
+        {"CMD": "TIME", "C_OP": "inc_ref", "LIT": "#11"},
+    ]
+
+
+def test_timed_instruction_merge_preserves_non_mergeable_time_shapes():
+    tagged = GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#1", "TAG": "keep"})
+    register_driven = GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "R1": "s1"})
+    set_ref = GenericInst(cmd="TIME", args={"C_OP": "set_ref", "LIT": "#1"})
+    zero = GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#0"})
+    negative = GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#-1"})
+    ir = RootNode(insts=[tagged, register_driven, set_ref, zero, negative])
+
+    TimedInstructionMergePass().process(ir, PipeLineContext())
+
+    assert ir.insts == [tagged, register_driven, set_ref, zero, negative]
+
+
+def test_default_pipeline_removes_zero_delay_then_merges_time_literals():
+    ir = RootNode(
+        insts=[
+            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#0"}),
+            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#2"}),
+            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#3"}),
+        ]
+    )
+
+    make_default_pipeline(PipeLineConfig())(ir)
+
+    assert [inst.to_dict() for inst in ir.insts] == [
+        {"CMD": "TIME", "C_OP": "inc_ref", "LIT": "#5"}
+    ]

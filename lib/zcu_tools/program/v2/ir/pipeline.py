@@ -42,6 +42,7 @@ def make_default_pipeline(config: PipeLineConfig) -> PipeLine:
         LabelReferenceValidationPass,
         LoopInvariantHoistPass,
         PeepholePass,
+        TimedInstructionMergePass,
         TimingSanityPass,
         ZeroDelayDCEPass,
     )
@@ -55,6 +56,7 @@ def make_default_pipeline(config: PipeLineConfig) -> PipeLine:
             LoopInvariantHoistPass(),
             PeepholePass(),
             ZeroDelayDCEPass(),
+            TimedInstructionMergePass(),
             TimingSanityPass(),
             LabelReferenceValidationPass(),
             LabelDCEPass(),

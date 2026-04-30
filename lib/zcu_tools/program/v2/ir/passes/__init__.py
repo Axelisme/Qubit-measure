@@ -2,8 +2,8 @@ from .branch import BranchCaseNormalizePass
 from .dce import LabelDCEPass
 from .loop import ConstantLoopUnrollPass
 from .optimize import LoopInvariantHoistPass, PeepholePass
+from .timeline import TimedInstructionMergePass, ZeroDelayDCEPass
 from .timing import TimingSanityPass
-from .timeline import ZeroDelayDCEPass
 from .validation import IRStructureValidationPass, LabelReferenceValidationPass
 
 __all__ = [
@@ -14,6 +14,7 @@ __all__ = [
     "LabelReferenceValidationPass",
     "LoopInvariantHoistPass",
     "PeepholePass",
+    "TimedInstructionMergePass",
     "TimingSanityPass",
     "ZeroDelayDCEPass",
 ]
