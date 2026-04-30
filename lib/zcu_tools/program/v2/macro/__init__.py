@@ -10,6 +10,7 @@ from .delay import DelayRegAuto
 from .loop import CloseInnerLoop, OpenInnerLoop
 from .pluse_reg import PulseByReg
 from .write_reg import WriteRegOp
+from .meta import MetaMacro
 
 
 class AdditionalMacroMixin(AsmV2):
@@ -64,12 +65,6 @@ class AdditionalMacroMixin(AsmV2):
             raise RuntimeError("Delay macros are currently disabled.")
         self.append_macro(DelayRegAuto(time_reg=time_reg, gens=gens, ros=ros))
 
-    def debug_macro(
-        self, name: str, t: Union[float, QickParam], prefix: str = ""
-    ) -> None:
-        """Insert a debug macro that prints the current time (cycle count) with a name."""
-        self.append_macro(PrintTimeStamp(name, t, prefix=prefix))
-
     def pulse_by_reg(
         self,
         ch: int,
@@ -92,6 +87,16 @@ class AdditionalMacroMixin(AsmV2):
                 )
         else:
             self.append_macro(PulseByReg(ch=ch, t=t, addr_regs=[addr_reg]))
+
+    def debug_macro(
+        self, name: str, t: Union[float, QickParam], prefix: str = ""
+    ) -> None:
+        """Insert a debug macro that prints the current time (cycle count) with a name."""
+        self.append_macro(PrintTimeStamp(name, t, prefix=prefix))
+
+    def meta_macro(self, type: str, name: str) -> None:
+        """Insert a meta macro that emits a meta instruction for the IR builder."""
+        self.append_macro(MetaMacro(type=type, name=name))
 
     @contextmanager
     def acquire_temp_reg(self, num: int = 1) -> Generator[list[str]]:

@@ -13,6 +13,7 @@ def iter_child_nodes(node: IRNode) -> Iterator[IRNode]:
         yield node.stop_check
         yield node.body
         yield node.update
+        yield node.jump_back
         return
 
     if isinstance(node, BlockNode):

@@ -33,6 +33,7 @@ class IRStructureValidationPass(AbsPipeLinePass):
             ("stop_check", loop.stop_check),
             ("body", loop.body),
             ("update", loop.update),
+            ("jump_back", loop.jump_back),
         )
         for section_name, section in sections:
             if not isinstance(section, BlockNode):
@@ -46,9 +47,13 @@ class IRStructureValidationPass(AbsPipeLinePass):
 
         for case in branch.cases:
             if not isinstance(case, IRBranchCase):
-                raise ValueError(f"IRBranch '{branch.name}' case must be an IRBranchCase")
+                raise ValueError(
+                    f"IRBranch '{branch.name}' case must be an IRBranchCase"
+                )
             if case.name == "":
-                raise ValueError(f"IRBranch '{branch.name}' case requires a non-empty name")
+                raise ValueError(
+                    f"IRBranch '{branch.name}' case requires a non-empty name"
+                )
             if case not in branch.insts:
                 raise ValueError(
                     f"IRBranch '{branch.name}' case is not present in branch body"

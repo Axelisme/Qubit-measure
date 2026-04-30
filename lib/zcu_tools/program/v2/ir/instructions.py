@@ -29,10 +29,11 @@ class Instruction:
 
         if cmd == "__META__":
             return MetaInst(
-                type=d.get("TYPE", ""),
-                name=d.get("NAME", ""),
-                line=d.get("LINE"),
-                p_addr=d.get("P_ADDR"),
+                type=d["TYPE"],
+                name=d["NAME"],
+                line=d["LINE"],
+                p_addr=d["P_ADDR"],
+                args=d["ARGS"],
             )
 
         # Default to GenericInst for now
@@ -84,13 +85,17 @@ class LabelInst(Instruction):
 @dataclass(frozen=True)
 class MetaInst(Instruction):
     """Meta instruction used for structural control like loops."""
+
     type: str = ""
     name: str = ""
+    args: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"CMD": "__META__", "TYPE": self.type, "NAME": self.name}
-        if self.line is not None:
-            d["LINE"] = self.line
-        if self.p_addr is not None:
-            d["P_ADDR"] = self.p_addr
-        return d
+        return {
+            "CMD": "__META__",
+            "TYPE": self.type,
+            "NAME": self.name,
+            "LINE": self.line,
+            "P_ADDR": self.p_addr,
+            "ARGS": self.args,
+        }

@@ -114,18 +114,8 @@ class Branch(Module):
             t,
         )
 
-        prog.delay(t=t)
-        prog.delay_auto(t=0)
-
-        n = len(self.branches)
-        max_depth = (n - 1).bit_length()
-        
-        prog._add_asm({"CMD": "__META__", "TYPE": "BRANCH_START", "NAME": self.name}, 0)
-
-        def run_branch(i: int, depth: int) -> None:
-            prog._add_asm({"CMD": "__META__", "TYPE": "BRANCH_CASE_START", "NAME": str(i)}, 0)
-            for _ in range(max_depth - depth):
-                prog.nop()
+        def run_branch(i: int) -> None:
+            prog.meta_macro(type="BRANCH_CASE_START", name=str(i))
 
             with prog.disable_delay():
                 cur_t: Union[float, QickParam] = 0.0
@@ -141,11 +131,12 @@ class Branch(Module):
                 raise NotImplementedError("Branch with swept duration is not supported")
 
             prog.delay(t=cur_t)
-            prog._add_asm({"CMD": "__META__", "TYPE": "BRANCH_CASE_END", "NAME": str(i)}, 0)
 
-        def emit_dispatch(lo: int, hi: int, depth: int) -> None:
+            prog.meta_macro(type="BRANCH_CASE_END", name=str(i))
+
+        def emit_dispatch(lo: int, hi: int) -> None:
             if hi - lo == 1:
-                run_branch(lo, depth)
+                run_branch(lo)
                 return
 
             mid = (lo + hi) // 2
@@ -154,16 +145,19 @@ class Branch(Module):
 
             # compare_reg < mid -> left half, else right half
             prog.cond_jump(left_label, self.compare_reg, "S", "-", mid)
-            emit_dispatch(mid, hi, depth + 1)
+            emit_dispatch(mid, hi)
             prog.jump(end_label)
             prog.label(left_label)
-            emit_dispatch(lo, mid, depth + 1)
+            emit_dispatch(lo, mid)
             prog.label(end_label)
 
-        emit_dispatch(0, n, 0)
-        
-        prog._add_asm({"CMD": "__META__", "TYPE": "BRANCH_END", "NAME": self.name}, 0)
-
+        prog.delay(t=t)
         prog.delay_auto(t=0)
+
+        n = len(self.branches)
+
+        prog.meta_macro(type="BRANCH_START", name=self.name)
+        emit_dispatch(0, n)
+        prog.meta_macro(type="BRANCH_END", name=self.name)
 
         return 0.0

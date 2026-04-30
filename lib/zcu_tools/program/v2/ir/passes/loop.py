@@ -24,6 +24,7 @@ class ConstantLoopUnrollPass(AbsPipeLinePass):
             self._rewrite_node(node.stop_check)
             self._rewrite_node(node.body)
             self._rewrite_node(node.update)
+            self._rewrite_node(node.jump_back)
             return
 
         if not isinstance(node, BlockNode):

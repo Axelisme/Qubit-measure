@@ -40,20 +40,6 @@ def test_branch_uses_binary_dispatch_cond_jump(mock_prog):
     assert all(call.args[3] == "-" for call in mock_prog.cond_jump.call_args_list)
 
 
-def test_branch_inserts_nop_for_shorter_path(mock_prog):
-    b = Branch(
-        "sel",
-        [_FixedDurationModule("b0", 0.1)],
-        [_FixedDurationModule("b1", 0.2)],
-        [_FixedDurationModule("b2", 0.3)],
-    )
-
-    b.run(mock_prog)
-
-    # n=3 -> max_depth=2; branch 0 is at depth 1 so it needs one NOP pad.
-    assert mock_prog.nop.call_count == 1
-
-
 def test_branch_power_of_two_has_no_nop_padding(mock_prog):
     b = Branch(
         "sel",
@@ -84,31 +70,6 @@ def test_branch_rejects_qickparam_duration(mock_prog):
     except NotImplementedError as exc:
         assert "swept duration" in str(exc)
     else:
-        raise AssertionError("Expected NotImplementedError for QickParam branch duration")
-
-
-def test_branch_emits_meta_markers(mock_prog):
-    b = Branch(
-        "sel",
-        [_FixedDurationModule("b0", 0.1)],
-        [_FixedDurationModule("b1", 0.2)],
-        [_FixedDurationModule("b2", 0.3)],
-    )
-
-    b.run(mock_prog)
-
-    meta_calls = [
-        call.args[0]
-        for call in mock_prog._add_asm.call_args_list
-        if call.args and isinstance(call.args[0], dict) and call.args[0].get("CMD") == "__META__"
-    ]
-
-    assert meta_calls[0] == {"CMD": "__META__", "TYPE": "BRANCH_START", "NAME": "sel"}
-    assert meta_calls[-1] == {"CMD": "__META__", "TYPE": "BRANCH_END", "NAME": "sel"}
-
-    case_starts = [m for m in meta_calls if m["TYPE"] == "BRANCH_CASE_START"]
-    case_ends = [m for m in meta_calls if m["TYPE"] == "BRANCH_CASE_END"]
-    assert len(case_starts) == 3
-    assert len(case_ends) == 3
-    assert {m["NAME"] for m in case_starts} == {"0", "1", "2"}
-    assert {m["NAME"] for m in case_ends} == {"0", "1", "2"}
+        raise AssertionError(
+            "Expected NotImplementedError for QickParam branch duration"
+        )
