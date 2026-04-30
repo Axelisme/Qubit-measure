@@ -1,6 +1,6 @@
 from zcu_tools.program.v2.ir.builder import IRBuilder
 from zcu_tools.program.v2.ir.instructions import GenericInst, Instruction
-from zcu_tools.program.v2.ir.node import IRBranch, IRLoop
+from zcu_tools.program.v2.ir.node import IRBranch, IRBranchCase, IRLoop
 import pytest
 
 
@@ -31,6 +31,8 @@ def test_builder_parses_branch_meta_to_irbranch():
     assert isinstance(branch, IRBranch)
     assert branch.name == "sel"
     assert len(branch.cases) == 2
+    assert [case.name for case in branch.cases] == ["0", "1"]
+    assert all(isinstance(case, IRBranchCase) for case in branch.cases)
     assert all(len(case.insts) == 1 for case in branch.cases)
     assert all(isinstance(case.insts[0], GenericInst) for case in branch.cases)
     assert all(case.insts[0].cmd == "NOP" for case in branch.cases)

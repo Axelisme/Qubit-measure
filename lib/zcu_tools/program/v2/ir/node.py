@@ -31,6 +31,7 @@ class RootNode(BlockNode):
 class IRLoop(IRNode):
     """A loop node separated into sections."""
     name: str = ""
+    trip_count: int | None = None
     initial: BlockNode = field(default_factory=BlockNode)
     update: BlockNode = field(default_factory=BlockNode)
     stop_check: BlockNode = field(default_factory=BlockNode)
@@ -38,7 +39,13 @@ class IRLoop(IRNode):
 
 
 @dataclass
+class IRBranchCase(BlockNode):
+    """A branch case with a stable logical identity."""
+    name: str = ""
+
+
+@dataclass
 class IRBranch(BlockNode):
     """A branch node containing multiple cases."""
     name: str = ""
-    cases: list[BlockNode] = field(default_factory=list)
+    cases: list[IRBranchCase] = field(default_factory=list)

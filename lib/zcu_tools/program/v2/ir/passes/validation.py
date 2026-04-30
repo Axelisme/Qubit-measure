@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ..instructions import MetaInst
 from ..labels import iter_label_references
-from ..node import BlockNode, IRBranch, IRLoop, IRNode, RootNode
+from ..node import BlockNode, IRBranch, IRBranchCase, IRLoop, IRNode, RootNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
 from ..traversal import walk_instructions, walk_nodes
 
@@ -45,8 +45,10 @@ class IRStructureValidationPass(AbsPipeLinePass):
             raise ValueError(f"IRBranch '{branch.name}' requires at least one case")
 
         for case in branch.cases:
-            if not isinstance(case, BlockNode):
-                raise ValueError(f"IRBranch '{branch.name}' case must be a BlockNode")
+            if not isinstance(case, IRBranchCase):
+                raise ValueError(f"IRBranch '{branch.name}' case must be an IRBranchCase")
+            if case.name == "":
+                raise ValueError(f"IRBranch '{branch.name}' case requires a non-empty name")
             if case not in branch.insts:
                 raise ValueError(
                     f"IRBranch '{branch.name}' case is not present in branch body"

@@ -35,15 +35,27 @@ class PipeLine:
 
 def make_default_pipeline(config: PipeLineConfig) -> PipeLine:
     from .passes import (
+        BranchCaseNormalizePass,
+        ConstantLoopUnrollPass,
         IRStructureValidationPass,
         LabelDCEPass,
         LabelReferenceValidationPass,
+        LoopInvariantHoistPass,
+        PeepholePass,
+        TimingSanityPass,
+        ZeroDelayDCEPass,
     )
 
     return PipeLine(
         config,
         [
             IRStructureValidationPass(),
+            BranchCaseNormalizePass(),
+            ConstantLoopUnrollPass(),
+            LoopInvariantHoistPass(),
+            PeepholePass(),
+            ZeroDelayDCEPass(),
+            TimingSanityPass(),
             LabelReferenceValidationPass(),
             LabelDCEPass(),
         ],

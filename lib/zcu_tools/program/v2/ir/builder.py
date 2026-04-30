@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Union
 
 from .instructions import Instruction, MetaInst
-from .node import BlockNode, IRBranch, IRLoop, IRNode, RootNode
+from .node import BlockNode, IRBranch, IRBranchCase, IRLoop, IRNode, RootNode
 
 
 class IRBuilder:
@@ -66,7 +66,7 @@ class IRBuilder:
                     if not struct_stack or not isinstance(struct_stack[-1], IRBranch):
                         raise ValueError("BRANCH_CASE_START outside of IRBranch")
                     branch_node = struct_stack[-1]
-                    case_block = BlockNode()
+                    case_block = IRBranchCase(name=inst.name)
                     branch_node.cases.append(case_block)
                     branch_node.append(case_block)
                     block_stack.append(case_block)
