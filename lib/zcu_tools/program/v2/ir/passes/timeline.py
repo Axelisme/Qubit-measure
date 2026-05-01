@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing_extensions import Optional
 
-from ..instructions import GenericInst, Instruction
+from ..instructions import Instruction, TimeInst
 from ..node import BlockNode, IRNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
 from ..traversal import IRTransformer
@@ -17,24 +17,26 @@ class ZeroDelayDCEPass(AbsPipeLinePass, IRTransformer):
             raise ValueError("Root node cannot be unrolled into a list")
         return res or ir
 
-    def visit_GenericInst(self, node: GenericInst) -> Optional[IRNode]:
+    def visit_TimeInst(self, node: TimeInst) -> Optional[IRNode]:
         if _is_zero_delay_inst(node):
             return None
         return node
 
 
 def _is_zero_delay_inst(inst: Instruction) -> bool:
-    if not isinstance(inst, GenericInst):
+    if not isinstance(inst, TimeInst):
         return False
-    if inst.cmd != "TIME":
+    if inst.annotations:
         return False
-    if set(inst.args) != {"C_OP", "LIT"}:
+    if inst.c_op != "inc_ref":
         return False
-    if inst.args.get("C_OP") != "inc_ref":
+    if inst.r1 is not None:
+        return False
+    if inst.lit is None:
         return False
 
-    lit = inst.args.get("LIT")
-    if not isinstance(lit, str) or not lit.startswith("#"):
+    lit = inst.lit
+    if not lit.startswith("#"):
         return False
 
     try:
@@ -53,16 +55,12 @@ class TimedInstructionMergePass(AbsPipeLinePass, IRTransformer):
         return res or ir
 
     def visit_BlockNode(self, node: BlockNode) -> Optional[IRNode]:
-        # Use generic_visit to handle recursion into structural children (like in IRLoop or IRBranch)
-        # but we also need to handle BlockNode.insts ourselves if we want to merge.
-        # Actually, generic_visit(node) will visit each item in node.insts.
-
-        # Correct approach: let generic_visit handle recursion first
+        # Use generic_visit to handle recursion first
         self.generic_visit(node)
 
         # Perform merging on node.insts
         rewritten: list[IRNode] = []
-        pending_inst: Optional[GenericInst] = None
+        pending_inst: Optional[TimeInst] = None
         pending_value = 0
         pending_count = 0
 
@@ -74,9 +72,9 @@ class TimedInstructionMergePass(AbsPipeLinePass, IRTransformer):
                 rewritten.append(pending_inst)
             else:
                 rewritten.append(
-                    GenericInst(
-                        cmd="TIME",
-                        args={"C_OP": "inc_ref", "LIT": f"#{pending_value}"},
+                    TimeInst(
+                        c_op="inc_ref",
+                        lit=f"#{pending_value}",
                         line=pending_inst.line,
                         p_addr=pending_inst.p_addr,
                     )
@@ -95,7 +93,7 @@ class TimedInstructionMergePass(AbsPipeLinePass, IRTransformer):
             if merge_value is None:
                 flush_pending()
                 rewritten.append(item)
-            elif not isinstance(item, GenericInst):
+            elif not isinstance(item, TimeInst):
                 flush_pending()
                 rewritten.append(item)
             else:
@@ -113,17 +111,19 @@ class TimedInstructionMergePass(AbsPipeLinePass, IRTransformer):
 
 
 def _positive_time_increment(inst: Instruction) -> Optional[int]:
-    if not isinstance(inst, GenericInst):
+    if not isinstance(inst, TimeInst):
         return None
-    if inst.cmd != "TIME":
+    if inst.annotations:
         return None
-    if set(inst.args) != {"C_OP", "LIT"}:
+    if inst.c_op != "inc_ref":
         return None
-    if inst.args.get("C_OP") != "inc_ref":
+    if inst.r1 is not None:
+        return None
+    if inst.lit is None:
         return None
 
-    lit = inst.args.get("LIT")
-    if not isinstance(lit, str) or not lit.startswith("#"):
+    lit = inst.lit
+    if not lit.startswith("#"):
         return None
 
     try:

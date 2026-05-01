@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..instructions import MetaInst
+from ..instructions import JumpInst, MetaInst, TestInst
 from ..labels import iter_label_references
 from ..node import BlockNode, IRBranch, IRBranchCase, IRLoop, IRNode, RootNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
@@ -39,6 +39,31 @@ class IRStructureValidationPass(AbsPipeLinePass):
             if not isinstance(section, BlockNode):
                 raise ValueError(f"IRLoop.{section_name} must be a BlockNode")
 
+        # stop_check must end with TEST + conditional JUMP
+        if len(loop.stop_check.insts) < 2:
+            raise ValueError(
+                f"IRLoop '{loop.name}' stop_check must end with TEST + JUMP pair"
+            )
+        last = loop.stop_check.insts[-1]
+        second_last = loop.stop_check.insts[-2]
+        if (
+            not isinstance(second_last, TestInst)
+            or not isinstance(last, JumpInst)
+            or last.if_cond is None
+        ):
+            raise ValueError(
+                f"IRLoop '{loop.name}' stop_check must end with TEST + conditional JUMP pair"
+            )
+
+        # jump_back must end with unconditional JUMP
+        if not loop.jump_back.insts:
+            raise ValueError(f"IRLoop '{loop.name}' jump_back cannot be empty")
+        last_inst = loop.jump_back.insts[-1]
+        if not isinstance(last_inst, JumpInst) or last_inst.if_cond is not None:
+            raise ValueError(
+                f"IRLoop '{loop.name}' jump_back must end with unconditional JUMP"
+            )
+
     def _validate_branch(self, branch: IRBranch) -> None:
         if branch.name == "":
             raise ValueError("IRBranch requires a non-empty name")
@@ -72,8 +97,10 @@ class LabelReferenceValidationPass(AbsPipeLinePass):
         # Add labels from structural node attributes
         for node in walk_nodes(ir):
             if isinstance(node, IRLoop):
-                if node.start_label: defined_labels.add(node.start_label)
-                if node.end_label: defined_labels.add(node.end_label)
+                if node.start_label:
+                    defined_labels.add(node.start_label)
+                if node.end_label:
+                    defined_labels.add(node.end_label)
 
         missing: set[str] = set()
         for inst in walk_instructions(ir):

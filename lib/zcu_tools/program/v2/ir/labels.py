@@ -8,13 +8,7 @@ PSEUDO_LABELS = frozenset({"PREV", "HERE", "NEXT", "SKIP"})
 
 
 def iter_label_references(inst: Instruction) -> Iterable[str]:
-    if not isinstance(inst, GenericInst):
-        return ()
-
-    label = inst.args.get("LABEL")
-    if not isinstance(label, str):
-        return ()
-    if label in PSEUDO_LABELS:
-        return ()
-
-    return (label,)
+    label = inst.need_label
+    if label:
+        return (label,)
+    return ()

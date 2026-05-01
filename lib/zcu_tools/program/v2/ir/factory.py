@@ -101,11 +101,11 @@ def _build_branch_case_start(inst: MetaInst, ctx: BuildContext) -> None:
         raise ValueError("BRANCH_CASE_START outside of IRBranch")
 
     branch_node = ctx.struct_stack[-1]
-    
+
     # If we were in dispatch, pop it
     if ctx.block_stack[-1] is branch_node.dispatch:
         ctx.block_stack.pop()
-    
+
     case_block = IRBranchCase(name=inst.name)
     branch_node.cases.append(case_block)
     ctx.block_stack.append(case_block)
@@ -135,7 +135,7 @@ def _build_branch_case_end(inst: MetaInst, ctx: BuildContext) -> None:
 
     ctx.case_stack.pop()
     ctx.block_stack.pop()
-    
+
     # After a case ends, we might go back to dispatch or wait for next case
     ctx.block_stack.append(branch_node.dispatch)
 
@@ -148,12 +148,16 @@ def _build_branch_end(inst: MetaInst, ctx: BuildContext) -> None:
     ):
         raise ValueError(f"Mismatched BRANCH_END for {inst.name}")
 
-    if ctx.case_stack and isinstance(ctx.struct_stack[-1], IRBranch) and ctx.case_stack[-1][0] is ctx.struct_stack[-1]:
+    if (
+        ctx.case_stack
+        and isinstance(ctx.struct_stack[-1], IRBranch)
+        and ctx.case_stack[-1][0] is ctx.struct_stack[-1]
+    ):
         raise ValueError(f"BRANCH_END with unclosed case for {inst.name}")
 
     branch_node = ctx.struct_stack.pop()
     if not isinstance(branch_node, IRBranch):
-         raise ValueError(f"Mismatched BRANCH_END for {inst.name}")
+        raise ValueError(f"Mismatched BRANCH_END for {inst.name}")
 
     if ctx.block_stack[-1] is branch_node.dispatch:
         ctx.block_stack.pop()
@@ -183,12 +187,20 @@ def build_from_instruction(inst: Instruction, ctx: BuildContext) -> None:
     # Handle Label capture for structural nodes
     if isinstance(inst, LabelInst):
         # If we just saw LOOP_START, this might be start_label
-        if ctx.struct_stack and isinstance(ctx.struct_stack[-1], IRLoop) and ctx.block_stack[-1] is ctx.root:
-             ctx.pending_label = inst.name
-             # Do NOT append it to root block
-             return
-        if ctx.struct_stack and isinstance(ctx.struct_stack[-1], IRBranch) and ctx.block_stack[-1] is ctx.root:
-             # Similar for branch? Usually labels are inside dispatch though.
-             pass
+        if (
+            ctx.struct_stack
+            and isinstance(ctx.struct_stack[-1], IRLoop)
+            and ctx.block_stack[-1] is ctx.root
+        ):
+            ctx.pending_label = inst.name
+            # Do NOT append it to root block
+            return
+        if (
+            ctx.struct_stack
+            and isinstance(ctx.struct_stack[-1], IRBranch)
+            and ctx.block_stack[-1] is ctx.root
+        ):
+            # Similar for branch? Usually labels are inside dispatch though.
+            pass
 
     ctx.current_block.append(inst)

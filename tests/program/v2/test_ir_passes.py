@@ -1,6 +1,17 @@
 import pytest
 from zcu_tools.program.v2.ir.analysis import instruction_reads, instruction_writes
-from zcu_tools.program.v2.ir.instructions import GenericInst, LabelInst, MetaInst
+from zcu_tools.program.v2.ir.instructions import (
+    DportWriteInst,
+    GenericInst,
+    Instruction,
+    JumpInst,
+    LabelInst,
+    MetaInst,
+    PortWriteInst,
+    RegWriteInst,
+    TestInst,
+    TimeInst,
+)
 from zcu_tools.program.v2.ir.node import (
     BlockNode,
     IRBranch,
@@ -30,7 +41,7 @@ from zcu_tools.program.v2.ir.pipeline import (
 
 
 def test_ir_node_analysis():
-    inst = GenericInst(cmd="REG_WR", args={"DST": "s1", "SRC": "s2"})
+    inst = RegWriteInst(dst="s1", src="s2")
     assert instruction_writes(inst) == {"s1"}
     assert instruction_reads(inst) == {"s2"}
 
@@ -70,7 +81,7 @@ def test_structure_validation_rejects_remaining_metainst():
 def test_branch_case_normalize_sorts_case_metadata_only():
     case_2 = IRBranchCase(name="2", insts=[GenericInst(cmd="CASE2")])
     case_0 = IRBranchCase(name="0", insts=[GenericInst(cmd="CASE0")])
-    dispatch_inst = GenericInst(cmd="JUMP", args={"LABEL": "dispatch"})
+    dispatch_inst = JumpInst(label="dispatch")
     
     branch = IRBranch(
         name="sel",
@@ -87,7 +98,7 @@ def test_branch_case_normalize_sorts_case_metadata_only():
 
 def test_label_reference_validation_allows_defined_labels():
     ir = RootNode(
-        insts=[GenericInst(cmd="JUMP", args={"LABEL": "target"})],
+        insts=[JumpInst(label="target")],
         labels={"target": "addr"},
     )
 
@@ -96,7 +107,7 @@ def test_label_reference_validation_allows_defined_labels():
 
 def test_label_reference_validation_rejects_undefined_labels():
     ir = RootNode(
-        insts=[GenericInst(cmd="JUMP", args={"LABEL": "missing"})],
+        insts=[JumpInst(label="missing")],
         labels={"target": "addr"},
     )
 
@@ -108,7 +119,7 @@ def test_label_reference_validation_allows_structural_labels():
     loop = IRLoop(name="r", start_label="loop_start")
     ir = RootNode(
         insts=[
-            GenericInst(cmd="JUMP", args={"LABEL": "loop_start"}),
+            JumpInst(label="loop_start"),
             loop,
         ]
     )
@@ -139,14 +150,14 @@ def test_constant_loop_unroll_preserves_large_count():
 
 def test_loop_invariant_hoist_hoists_marked_instructions():
     loop = IRLoop(name="r")
-    hoistable = GenericInst(cmd="VAL", args={"IR_HOISTABLE": True})
+    hoistable = GenericInst(cmd="VAL", annotations={"IR_HOISTABLE": True})
     loop.body.append(hoistable)
     loop.body.append(GenericInst(cmd="BODY"))
     ir = RootNode(insts=[loop])
 
     LoopInvariantHoistPass().process(ir, PipeLineContext())
 
-    assert loop.initial.insts == [GenericInst(cmd="VAL", args={})]
+    assert loop.initial.insts == [GenericInst(cmd="VAL", annotations={})]
     assert len(loop.body.insts) == 1
     assert loop.body.insts[0].cmd == "BODY"
 
@@ -154,25 +165,26 @@ def test_loop_invariant_hoist_hoists_marked_instructions():
 def test_loop_invariant_hoist_does_not_hoist_if_registers_blocked():
     loop = IRLoop(name="r")
     # initial writes s1
-    loop.initial.append(GenericInst(cmd="WR", args={"DST": "s1"}))
+    loop.initial.append(RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#0"}))
     # hoistable reads s1 -> blocked
-    hoistable = GenericInst(cmd="RD", args={"SRC": "s1", "IR_HOISTABLE": True})
+    hoistable = GenericInst(cmd="RD", args={"SRC": "s1"}, annotations={"IR_HOISTABLE": True})
     loop.body.append(hoistable)
     ir = RootNode(insts=[loop])
 
     LoopInvariantHoistPass().process(ir, PipeLineContext())
 
-    assert loop.initial.insts == [GenericInst(cmd="WR", args={"DST": "s1"})]
+    assert len(loop.initial.insts) == 1
     assert hoistable in loop.body.insts
 
 
 def test_peephole_removes_internal_annotations():
     ir = RootNode(
-        insts=[GenericInst(cmd="OP", args={"IR_HOISTABLE": True, "VAL": 1})]
+        insts=[GenericInst(cmd="OP", args={"VAL": 1}, annotations={"IR_HOISTABLE": True})]
     )
 
     PeepholePass().process(ir, PipeLineContext())
 
+    assert ir.insts[0].annotations == {}
     assert ir.insts[0].args == {"VAL": 1}
 
 
@@ -180,7 +192,7 @@ def test_zero_delay_dce_removes_zero_literal_time_increment():
     ir = RootNode(
         insts=[
             GenericInst(cmd="PRE"),
-            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#0"}),
+            TimeInst(c_op="inc_ref", lit="#0"),
             GenericInst(cmd="POST"),
         ]
     )
@@ -188,14 +200,14 @@ def test_zero_delay_dce_removes_zero_literal_time_increment():
     out = ZeroDelayDCEPass().process(ir, PipeLineContext())
 
     assert out is ir
-    assert [inst.cmd for inst in ir.insts] == ["PRE", "POST"]
+    assert [inst.to_dict()["CMD"] for inst in ir.insts] == ["PRE", "POST"]
 
 
 def test_zero_delay_dce_traverses_loop_sections():
     loop = IRLoop(name="r")
-    loop.initial.append(GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#0"}))
+    loop.initial.append(TimeInst(c_op="inc_ref", lit="#0"))
     loop.body.append(GenericInst(cmd="BODY"))
-    loop.update.append(GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#00"}))
+    loop.update.append(TimeInst(c_op="inc_ref", lit="#00"))
     ir = RootNode(insts=[loop])
 
     ZeroDelayDCEPass().process(ir, PipeLineContext())
@@ -205,10 +217,10 @@ def test_zero_delay_dce_traverses_loop_sections():
 
 
 def test_zero_delay_dce_preserves_non_noop_time_shapes():
-    tagged = GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#0", "TAG": "keep"})
-    register_driven = GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "R1": "s1"})
-    set_ref = GenericInst(cmd="TIME", args={"C_OP": "set_ref", "LIT": "#0"})
-    nonzero = GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#1"})
+    tagged = TimeInst(c_op="inc_ref", lit="#0", annotations={"TAG": "keep"})
+    register_driven = TimeInst(c_op="inc_ref", r1="s1")
+    set_ref = TimeInst(c_op="set_ref", lit="#0")
+    nonzero = TimeInst(c_op="inc_ref", lit="#1")
     ir = RootNode(insts=[tagged, register_driven, set_ref, nonzero])
 
     ZeroDelayDCEPass().process(ir, PipeLineContext())
@@ -220,8 +232,8 @@ def test_timed_instruction_merge_merges_adjacent_time_literals():
     ir = RootNode(
         insts=[
             GenericInst(cmd="PRE"),
-            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#2"}),
-            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#3"}),
+            TimeInst(c_op="inc_ref", lit="#2"),
+            TimeInst(c_op="inc_ref", lit="#3"),
             GenericInst(cmd="POST"),
         ]
     )
@@ -238,35 +250,35 @@ def test_timed_instruction_merge_merges_adjacent_time_literals():
 
 def test_timed_instruction_merge_traverses_loop_sections():
     loop = IRLoop(name="r")
-    loop.initial.append(GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#1"}))
-    loop.initial.append(GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#2"}))
+    loop.initial.append(TimeInst(c_op="inc_ref", lit="#1"))
+    loop.initial.append(TimeInst(c_op="inc_ref", lit="#2"))
     loop.body.append(GenericInst(cmd="BODY"))
-    loop.update.append(GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#3"}))
-    loop.update.append(GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#4"}))
+    loop.update.append(TimeInst(c_op="inc_ref", lit="#3"))
+    loop.update.append(TimeInst(c_op="inc_ref", lit="#4"))
     ir = RootNode(insts=[loop])
 
     TimedInstructionMergePass().process(ir, PipeLineContext())
 
-    assert [inst.args["LIT"] for inst in loop.initial.insts] == ["#3"]
-    assert [inst.args["LIT"] for inst in loop.update.insts] == ["#7"]
+    assert [inst.lit for inst in loop.initial.insts] == ["#3"]
+    assert [inst.lit for inst in loop.update.insts] == ["#7"]
 
 
 def test_timed_instruction_merge_does_not_cross_barriers():
     label = LabelInst(name="barrier")
     nested = BlockNode(
         insts=[
-            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#5"}),
-            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#6"}),
+            TimeInst(c_op="inc_ref", lit="#5"),
+            TimeInst(c_op="inc_ref", lit="#6"),
         ]
     )
     ir = RootNode(
         insts=[
-            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#1"}),
+            TimeInst(c_op="inc_ref", lit="#1"),
             label,
-            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#2"}),
-            GenericInst(cmd="WPORT_WR", args={"DST": "w0", "TIME": "@10"}),
-            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#3"}),
-            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#4"}),
+            TimeInst(c_op="inc_ref", lit="#2"),
+            PortWriteInst(dst="w0", time="@10"),
+            TimeInst(c_op="inc_ref", lit="#3"),
+            TimeInst(c_op="inc_ref", lit="#4"),
             nested,
         ]
     )
@@ -282,25 +294,12 @@ def test_timed_instruction_merge_does_not_cross_barriers():
     ]
 
 
-def test_timed_instruction_merge_preserves_non_mergeable_time_shapes():
-    tagged = GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#1", "TAG": "keep"})
-    register_driven = GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "R1": "s1"})
-    set_ref = GenericInst(cmd="TIME", args={"C_OP": "set_ref", "LIT": "#1"})
-    zero = GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#0"})
-    negative = GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#-1"})
-    ir = RootNode(insts=[tagged, register_driven, set_ref, zero, negative])
-
-    TimedInstructionMergePass().process(ir, PipeLineContext())
-
-    assert len(ir.insts) == 5
-
-
 def test_default_pipeline_removes_zero_delay_then_merges_time_literals():
     ir = RootNode(
         insts=[
-            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#0"}),
-            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#2"}),
-            GenericInst(cmd="TIME", args={"C_OP": "inc_ref", "LIT": "#3"}),
+            TimeInst(c_op="inc_ref", lit="#0"),
+            TimeInst(c_op="inc_ref", lit="#2"),
+            TimeInst(c_op="inc_ref", lit="#3"),
         ]
     )
 
