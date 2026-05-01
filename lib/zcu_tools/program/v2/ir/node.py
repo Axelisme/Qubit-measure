@@ -104,7 +104,5 @@ class IRBranch(IRNode):
 
     def emit(self, prog_list: list[dict[str, Any]]) -> None:
         self.dispatch.emit(prog_list)
-        # Note: In current implementation, cases are emitted as they are referenced
-        # within the dispatch block's ASM. If they are BlockNodes inside dispatch,
-        # dispatch.emit() will already cover them.
-        # But for structural IR, they should be logically isolated.
+        for case in self.cases:
+            case.emit(prog_list)
