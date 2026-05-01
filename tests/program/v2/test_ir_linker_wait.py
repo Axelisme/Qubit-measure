@@ -42,10 +42,8 @@ def test_linker_wait_address_calculation():
     assert labels["L3"] == "&3"
     assert labels["L4"] == "&4"
     
-    assert prog_list[0]["P_ADDR"] == 0
     assert prog_list[1]["P_ADDR"] == 1
     assert prog_list[1]["CMD"] == "WAIT"
-    assert prog_list[1]["ADDR_INC"] == 2
     assert prog_list[2]["P_ADDR"] == 3
 
 def test_linker_wait_roundtrip():

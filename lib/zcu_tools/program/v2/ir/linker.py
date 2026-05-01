@@ -26,8 +26,6 @@ class IRLinker:
                 # It's an executable instruction; assign fresh P_ADDR
                 d = inst.to_dict()
                 d["P_ADDR"] = p_addr
-                if inst.addr_inc != 1:
-                    d["ADDR_INC"] = inst.addr_inc
                 opt_prog_list.append(d)
                 p_addr += inst.addr_inc
 
@@ -82,7 +80,6 @@ class IRLinker:
 
             clean_inst = dict(inst)
             clean_inst.pop("P_ADDR", None)
-            clean_inst.pop("ADDR_INC", None)
             logical_prog_list.append(clean_inst)
 
         # Labels pointing to the end of program (trailing labels).
