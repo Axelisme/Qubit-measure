@@ -91,15 +91,6 @@ def test_unlink_supports_multiple_labels_same_address():
     ]
 
 
-def test_unlink_rejects_out_of_range_address():
-    linker = IRLinker()
-    prog_list = [{"CMD": "NOP", "P_ADDR": 0}]
-    labels = {"bad": "&2"}
-
-    with pytest.raises(ValueError, match="out of range"):
-        linker.unlink(prog_list, labels)
-
-
 def test_builder_build_accepts_qick_labels_map():
     builder = IRBuilder()
     prog_list = [

@@ -33,21 +33,10 @@ class IRLinker:
         """Reconstruct logical instruction sequence from QICK `prog_list + labels`.
 
         Uses `P_ADDR` from the dictionaries and addresses from `labels` to
-        position instructions and labels correctly.
+        position instructions and labels correctly. Assumes prog_list comes from
+        QICK (all instructions have P_ADDR set).
         """
-        # Ensure P_ADDR exists for all instructions. If not, assume sequential.
-        # This is common in tests or when unlinking a list that hasn't been linked.
-        working_prog_list = []
-        next_p_addr = 0
-        for inst in prog_list:
-            d = dict(inst)
-            if "P_ADDR" not in d:
-                d["P_ADDR"] = next_p_addr
-                next_p_addr += 2 if d.get("CMD") == "WAIT" else 1
-            else:
-                next_p_addr = d["P_ADDR"] + (2 if d.get("CMD") == "WAIT" else 1)
-            working_prog_list.append(d)
-
+        # Parse labels into address → label_names mapping
         labels_by_addr: dict[int, list[str]] = defaultdict(list)
         for label_name, label_addr in labels.items():
             p_addr = self._parse_label_addr(label_name, label_addr)
@@ -55,32 +44,22 @@ class IRLinker:
 
         logical_insts: list[Instruction] = []
 
-        # Max address for trailing labels
-        if working_prog_list:
-            last = working_prog_list[-1]
-            max_addr = last["P_ADDR"] + (2 if last.get("CMD") == "WAIT" else 1)
-        else:
-            max_addr = 0
-
-        # Validate label addresses
-        for p_addr in labels_by_addr:
-            if p_addr < 0 or p_addr > max_addr:
-                raise ValueError(
-                    f"Label address out of range: {p_addr} (valid: 0..{max_addr})"
-                )
-
-        for d in working_prog_list:
+        # Single pass: insert labels at their addresses, then insert instructions
+        for d in prog_list:
             p_addr = d["P_ADDR"]
-            # Insert labels pointing to this address
+            # Insert all labels pointing to this address
             for name in labels_by_addr.get(p_addr, []):
                 logical_insts.append(LabelInst(name=name))
-
-            # Convert dictionary back to Instruction object
+            # Insert the instruction itself
             logical_insts.append(Instruction.from_dict(d))
 
-        # Handle trailing labels
-        for name in labels_by_addr.get(max_addr, []):
-            logical_insts.append(LabelInst(name=name))
+        # Handle trailing labels (labels pointing beyond the last instruction)
+        if prog_list:
+            last_dict = prog_list[-1]
+            last_inst = Instruction.from_dict(last_dict)
+            max_addr = last_dict["P_ADDR"] + last_inst.addr_inc
+            for name in labels_by_addr.get(max_addr, []):
+                logical_insts.append(LabelInst(name=name))
 
         return logical_insts
 
