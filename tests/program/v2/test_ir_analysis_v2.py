@@ -1,13 +1,14 @@
 import pytest
 from zcu_tools.program.v2.ir.analysis import instruction_reads, instruction_writes
 from zcu_tools.program.v2.ir.instructions import (
-    TimeInst,
-    TestInst,
-    JumpInst,
-    RegWriteInst,
-    PortWriteInst,
     GenericInst,
+    JumpInst,
+    PortWriteInst,
+    RegWriteInst,
+    TestInst,
+    TimeInst,
 )
+
 
 def test_time_inst_analysis():
     # Literal lit: no reads

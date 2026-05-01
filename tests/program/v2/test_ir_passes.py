@@ -128,19 +128,20 @@ def test_label_reference_validation_allows_structural_labels():
 
 
 def test_constant_loop_unroll_unrolls_small_count():
-    loop = IRLoop(name="r", trip_count=2)
+    loop = IRLoop(name="r", counter_reg="c", n=2)
     loop.body.append(GenericInst(cmd="BODY"))
-    loop.update.append(GenericInst(cmd="INC"))
+    loop.body.append(GenericInst(cmd="INC"))
     ir = RootNode(insts=[loop])
 
     ConstantLoopUnrollPass(max_trip_count=5).process(ir, PipeLineContext())
 
-    assert len(ir.insts) == 4
-    assert [inst.cmd for inst in ir.insts] == ["BODY", "INC", "BODY", "INC"]
+    assert len(ir.insts) == 5
+    assert isinstance(ir.insts[0], RegWriteInst)
+    assert [inst.cmd for inst in ir.insts[1:]] == ["BODY", "INC", "BODY", "INC"]
 
 
 def test_constant_loop_unroll_preserves_large_count():
-    loop = IRLoop(name="r", trip_count=100)
+    loop = IRLoop(name="r", counter_reg="c", n=100)
     ir = RootNode(insts=[loop])
 
     ConstantLoopUnrollPass(max_trip_count=10).process(ir, PipeLineContext())
@@ -149,31 +150,33 @@ def test_constant_loop_unroll_preserves_large_count():
 
 
 def test_loop_invariant_hoist_hoists_marked_instructions():
-    loop = IRLoop(name="r")
+    loop = IRLoop(name="r", counter_reg="c", n=10)
     hoistable = GenericInst(cmd="VAL", annotations={"IR_HOISTABLE": True})
     loop.body.append(hoistable)
     loop.body.append(GenericInst(cmd="BODY"))
     ir = RootNode(insts=[loop])
 
-    LoopInvariantHoistPass().process(ir, PipeLineContext())
+    ir = LoopInvariantHoistPass().process(ir, PipeLineContext())
 
-    assert loop.initial.insts == [GenericInst(cmd="VAL", annotations={})]
+    assert len(ir.insts) == 2
+    assert ir.insts[0] == GenericInst(cmd="VAL", annotations={})
+    assert ir.insts[1] is loop
     assert len(loop.body.insts) == 1
     assert loop.body.insts[0].cmd == "BODY"
 
 
 def test_loop_invariant_hoist_does_not_hoist_if_registers_blocked():
-    loop = IRLoop(name="r")
-    # initial writes s1
-    loop.initial.append(RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#0"}))
+    loop = IRLoop(name="r", counter_reg="s1", n=10)
+    # The counter register "s1" is blocked automatically
     # hoistable reads s1 -> blocked
     hoistable = GenericInst(cmd="RD", args={"SRC": "s1"}, annotations={"IR_HOISTABLE": True})
     loop.body.append(hoistable)
     ir = RootNode(insts=[loop])
 
-    LoopInvariantHoistPass().process(ir, PipeLineContext())
+    ir = LoopInvariantHoistPass().process(ir, PipeLineContext())
 
-    assert len(loop.initial.insts) == 1
+    assert len(ir.insts) == 1
+    assert ir.insts[0] is loop
     assert hoistable in loop.body.insts
 
 
@@ -204,16 +207,16 @@ def test_zero_delay_dce_removes_zero_literal_time_increment():
 
 
 def test_zero_delay_dce_traverses_loop_sections():
-    loop = IRLoop(name="r")
-    loop.initial.append(TimeInst(c_op="inc_ref", lit="#0"))
+    loop = IRLoop(name="r", counter_reg="c", n=10)
+    loop.body.append(TimeInst(c_op="inc_ref", lit="#0"))
     loop.body.append(GenericInst(cmd="BODY"))
-    loop.update.append(TimeInst(c_op="inc_ref", lit="#00"))
+    loop.body.append(TimeInst(c_op="inc_ref", lit="#00"))
     ir = RootNode(insts=[loop])
 
     ZeroDelayDCEPass().process(ir, PipeLineContext())
 
-    assert loop.initial.insts == []
-    assert loop.update.insts == []
+    assert len(loop.body.insts) == 1
+    assert loop.body.insts[0].cmd == "BODY"
 
 
 def test_zero_delay_dce_preserves_non_noop_time_shapes():
@@ -249,18 +252,19 @@ def test_timed_instruction_merge_merges_adjacent_time_literals():
 
 
 def test_timed_instruction_merge_traverses_loop_sections():
-    loop = IRLoop(name="r")
-    loop.initial.append(TimeInst(c_op="inc_ref", lit="#1"))
-    loop.initial.append(TimeInst(c_op="inc_ref", lit="#2"))
+    loop = IRLoop(name="r", counter_reg="c", n=10)
+    loop.body.append(TimeInst(c_op="inc_ref", lit="#1"))
+    loop.body.append(TimeInst(c_op="inc_ref", lit="#2"))
     loop.body.append(GenericInst(cmd="BODY"))
-    loop.update.append(TimeInst(c_op="inc_ref", lit="#3"))
-    loop.update.append(TimeInst(c_op="inc_ref", lit="#4"))
+    loop.body.append(TimeInst(c_op="inc_ref", lit="#3"))
+    loop.body.append(TimeInst(c_op="inc_ref", lit="#4"))
     ir = RootNode(insts=[loop])
 
     TimedInstructionMergePass().process(ir, PipeLineContext())
 
-    assert [inst.lit for inst in loop.initial.insts] == ["#3"]
-    assert [inst.lit for inst in loop.update.insts] == ["#7"]
+    assert len(loop.body.insts) == 3
+    assert loop.body.insts[0].lit == "#3"
+    assert loop.body.insts[2].lit == "#7"
 
 
 def test_timed_instruction_merge_does_not_cross_barriers():

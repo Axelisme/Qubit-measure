@@ -1,5 +1,6 @@
-from qick.asm_v2 import QickProgramV2
 from qick import QickConfig
+from qick.asm_v2 import QickProgramV2
+
 
 class TestProg(QickProgramV2):
     def _body(self):

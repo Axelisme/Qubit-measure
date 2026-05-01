@@ -17,18 +17,19 @@ class OpenInnerLoop(Macro):
         start = f"{self.name}_start"
         end = f"{self.name}_end"
 
-        trip_count = self.n if isinstance(self.n, int) else None
+        mapped_counter = prog._get_reg(self.counter_reg)
+        mapped_n = prog._get_reg(self.n) if isinstance(self.n, str) else self.n
 
         return [
             MetaMacro(
-                type="LOOP_START", name=self.name, args={"trip_count": trip_count}
+                type="LOOP_START",
+                name=self.name,
+                args={"counter_reg": mapped_counter, "n": mapped_n},
             ),
             Label(label=start),
-            MetaMacro(type="LOOP_SECTION", name="initial"),
             WriteReg(dst=self.counter_reg, src=0),
-            MetaMacro(type="LOOP_SECTION", name="stop_check"),
             CondJump(label=end, arg1=self.counter_reg, test="NS", op="-", arg2=self.n),
-            MetaMacro(type="LOOP_SECTION", name="body"),
+            MetaMacro(type="LOOP_BODY_START", name=self.name),
         ]
 
 
@@ -44,9 +45,8 @@ class CloseInnerLoop(Macro):
         start = f"{self.name}_start"
         end = f"{self.name}_end"
         return [
-            MetaMacro(type="LOOP_SECTION", name="update"),
             IncReg(dst=self.counter_reg, src=1),
-            MetaMacro(type="LOOP_SECTION", name="jump_back"),
+            MetaMacro(type="LOOP_BODY_END", name=self.name),
             Jump(label=start),
             Label(label=end),
             MetaMacro(type="LOOP_END", name=self.name),

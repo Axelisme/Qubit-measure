@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from .instructions import GenericInst, Instruction
+from .instructions import Instruction
 
 PSEUDO_LABELS = frozenset({"PREV", "HERE", "NEXT", "SKIP"})
 

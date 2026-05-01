@@ -5,7 +5,7 @@ from zcu_tools.program.v2.ir.instructions import (
     Instruction,
     JumpInst,
 )
-from zcu_tools.program.v2.ir.node import IRBranch, IRBranchCase, IRLoop, BlockNode
+from zcu_tools.program.v2.ir.node import BlockNode, IRBranch, IRBranchCase, IRLoop
 
 
 def test_instruction_parses_jump_label_to_jumpinst():

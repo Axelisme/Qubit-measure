@@ -1,206 +1,168 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Optional
 
 from .instructions import Instruction, LabelInst, MetaInst
-from .node import BlockNode, IRBranch, IRBranchCase, IRLoop, IRNode, RootNode
+from .node import BlockNode, IRBranch, IRBranchCase, IRLoop, RootNode
 
 
-@dataclass
-class BuildContext:
-    root: RootNode
-    block_stack: list[BlockNode] = field(default_factory=list)
-    struct_stack: list[IRNode] = field(default_factory=list)
-    case_stack: list[tuple[IRBranch, str]] = field(default_factory=list)
+class InstructionStream:
+    """A stream of IR instructions for recursive descent parsing."""
 
-    # Cache for a label that appears immediately after LOOP_START or BRANCH_START
-    pending_label: Optional[str] = None
+    def __init__(self, insts: list[Instruction]):
+        self.insts = insts
+        self.pos = 0
 
-    def __post_init__(self) -> None:
-        if not self.block_stack:
-            self.block_stack.append(self.root)
+    def peek(self) -> Optional[Instruction]:
+        if self.pos < len(self.insts):
+            return self.insts[self.pos]
+        return None
 
-    @property
-    def current_block(self) -> BlockNode:
-        return self.block_stack[-1]
+    def consume(self) -> Instruction:
+        if self.pos >= len(self.insts):
+            raise ValueError("Unexpected end of instruction stream")
+        inst = self.insts[self.pos]
+        self.pos += 1
+        return inst
+
+    def consume_meta(self, expected_type: str) -> MetaInst:
+        inst = self.consume()
+        if not isinstance(inst, MetaInst) or inst.type != expected_type:
+            raise ValueError(f"Expected META {expected_type}, got {inst}")
+        return inst
 
 
-def _loop_sections(
-    loop_node: IRLoop,
-) -> tuple[BlockNode, BlockNode, BlockNode, BlockNode, BlockNode]:
-    return (
-        loop_node.initial,
-        loop_node.update,
-        loop_node.stop_check,
-        loop_node.body,
-        loop_node.jump_back,
+def parse_root(stream: InstructionStream) -> RootNode:
+    root = RootNode()
+    parse_block(stream, block=root)
+    return root
+
+
+def parse_block(
+    stream: InstructionStream,
+    block: BlockNode,
+    end_markers: frozenset[str] | set[str] = frozenset(),
+) -> None:
+    """Parses instructions into the given block until an end_marker is encountered."""
+    while True:
+        inst = stream.peek()
+        if inst is None:
+            break
+
+        if isinstance(inst, MetaInst) and inst.type in end_markers:
+            break
+
+        if isinstance(inst, MetaInst):
+            if inst.type == "LOOP_START":
+                block.append(parse_loop(stream))
+            elif inst.type == "BRANCH_START":
+                block.append(parse_branch(stream))
+            else:
+                raise ValueError(f"Unexpected MetaInst encountered: {inst}")
+        else:
+            block.append(stream.consume())
+
+
+def parse_loop(stream: InstructionStream) -> IRLoop:
+    start_meta = stream.consume_meta("LOOP_START")
+
+    # 1. Skip over physical loop control logic until LOOP_BODY_START, but capture the start label.
+    start_label = None
+    while True:
+        inst = stream.peek()
+        if inst is None:
+            raise ValueError("Unexpected end of stream while parsing LOOP_START")
+        if isinstance(inst, MetaInst) and inst.type == "LOOP_BODY_START":
+            break
+
+        inst = stream.consume()
+        if isinstance(inst, LabelInst):
+            start_label = inst.name
+
+    stream.consume_meta("LOOP_BODY_START")
+
+    loop_node = IRLoop(
+        name=start_meta.name,
+        counter_reg=start_meta.args["counter_reg"],
+        n=start_meta.args["n"],
+        start_label=start_label,
     )
 
+    # 2. Parse the body.
+    parse_block(stream, loop_node.body, end_markers={"LOOP_BODY_END"})
 
-def _build_loop_start(inst: MetaInst, ctx: BuildContext) -> None:
-    loop_node = IRLoop(name=inst.name, trip_count=inst.args["trip_count"])
-    ctx.current_block.append(loop_node)
-    ctx.struct_stack.append(loop_node)
+    stream.consume_meta("LOOP_BODY_END")
 
+    # 3. Skip over physical jump back logic until LOOP_END, but capture the end label.
+    end_label = None
+    while True:
+        inst = stream.peek()
+        if inst is None:
+            raise ValueError("Unexpected end of stream while parsing LOOP_BODY_END")
+        if isinstance(inst, MetaInst) and inst.type == "LOOP_END":
+            break
 
-def _build_loop_section(inst: MetaInst, ctx: BuildContext) -> None:
-    if not ctx.struct_stack or not isinstance(ctx.struct_stack[-1], IRLoop):
-        raise ValueError("LOOP_SECTION outside of IRLoop")
+        inst = stream.consume()
+        if isinstance(inst, LabelInst):
+            end_label = inst.name
 
-    loop_node = ctx.struct_stack[-1]
-    section_name = inst.name
-    if section_name not in {"initial", "update", "stop_check", "body", "jump_back"}:
-        raise ValueError(f"Unknown LOOP_SECTION name: {section_name}")
-
-    # Capture start_label if it's the first section and we have a pending label
-    if section_name == "initial" and ctx.pending_label:
-        loop_node.start_label = ctx.pending_label
-        ctx.pending_label = None
-
-    if len(ctx.block_stack) > 1 and ctx.block_stack[-1] in _loop_sections(loop_node):
-        ctx.block_stack.pop()
-
-    section_block = getattr(loop_node, section_name)
-    ctx.block_stack.append(section_block)
-
-
-def _build_loop_end(inst: MetaInst, ctx: BuildContext) -> None:
-    if (
-        not ctx.struct_stack
-        or not isinstance(ctx.struct_stack[-1], IRLoop)
-        or ctx.struct_stack[-1].name != inst.name
-    ):
-        raise ValueError(f"Mismatched LOOP_END for {inst.name}")
-
-    loop_node = ctx.struct_stack.pop()
-    if not isinstance(loop_node, IRLoop):
-        raise ValueError(f"Mismatched LOOP_END for {inst.name}")
-
-    # Capture end_label if the last thing in jump_back was a label
-    if loop_node.jump_back.insts:
-        last_item = loop_node.jump_back.insts[-1]
-        if isinstance(last_item, LabelInst):
-            loop_node.end_label = last_item.name
-            loop_node.jump_back.insts.pop()
-
-    if len(ctx.block_stack) > 1 and ctx.block_stack[-1] in _loop_sections(loop_node):
-        ctx.block_stack.pop()
-
-
-def _build_branch_start(inst: MetaInst, ctx: BuildContext) -> None:
-    branch_node = IRBranch(name=inst.name)
-    ctx.current_block.append(branch_node)
-    ctx.struct_stack.append(branch_node)
-    # BRANCH dispatch is where instructions go until CASE_START
-    ctx.block_stack.append(branch_node.dispatch)
-
-
-def _build_branch_case_start(inst: MetaInst, ctx: BuildContext) -> None:
-    if not ctx.struct_stack or not isinstance(ctx.struct_stack[-1], IRBranch):
-        raise ValueError("BRANCH_CASE_START outside of IRBranch")
-
-    branch_node = ctx.struct_stack[-1]
-
-    # If we were in dispatch, pop it
-    if ctx.block_stack[-1] is branch_node.dispatch:
-        ctx.block_stack.pop()
-
-    case_block = IRBranchCase(name=inst.name)
-    branch_node.cases.append(case_block)
-    ctx.block_stack.append(case_block)
-    ctx.case_stack.append((branch_node, inst.name))
-
-
-def _build_branch_case_end(inst: MetaInst, ctx: BuildContext) -> None:
-    if (
-        len(ctx.block_stack) <= 1
-        or not ctx.struct_stack
-        or not isinstance(ctx.struct_stack[-1], IRBranch)
-    ):
-        raise ValueError("BRANCH_CASE_END outside of IRBranch")
-
-    branch_node = ctx.struct_stack[-1]
-    if not ctx.case_stack or ctx.case_stack[-1][0] is not branch_node:
-        raise ValueError("BRANCH_CASE_END without matching case start")
-
-    _case_branch, case_name = ctx.case_stack[-1]
-    if case_name != inst.name:
+    end_meta = stream.consume_meta("LOOP_END")
+    if end_meta.name != loop_node.name:
         raise ValueError(
-            f"Mismatched BRANCH_CASE_END for {inst.name}, expected {case_name}"
+            f"Mismatched LOOP_END for {loop_node.name}, got {end_meta.name}"
         )
 
-    if ctx.block_stack[-1] not in branch_node.cases:
-        raise ValueError("BRANCH_CASE_END without matching case block")
-
-    ctx.case_stack.pop()
-    ctx.block_stack.pop()
-
-    # After a case ends, we might go back to dispatch or wait for next case
-    ctx.block_stack.append(branch_node.dispatch)
+    loop_node.end_label = end_label
+    return loop_node
 
 
-def _build_branch_end(inst: MetaInst, ctx: BuildContext) -> None:
-    if (
-        not ctx.struct_stack
-        or not isinstance(ctx.struct_stack[-1], IRBranch)
-        or ctx.struct_stack[-1].name != inst.name
-    ):
-        raise ValueError(f"Mismatched BRANCH_END for {inst.name}")
+def parse_branch(stream: InstructionStream) -> IRBranch:
+    start_meta = stream.consume_meta("BRANCH_START")
+    branch_node = IRBranch(name=start_meta.name)
 
-    if (
-        ctx.case_stack
-        and isinstance(ctx.struct_stack[-1], IRBranch)
-        and ctx.case_stack[-1][0] is ctx.struct_stack[-1]
-    ):
-        raise ValueError(f"BRANCH_END with unclosed case for {inst.name}")
+    # 1. Parse dispatch block until we hit cases or the end
+    parse_block(
+        stream,
+        branch_node.dispatch,
+        end_markers={"BRANCH_CASE_START", "BRANCH_END"},
+    )
 
-    branch_node = ctx.struct_stack.pop()
-    if not isinstance(branch_node, IRBranch):
-        raise ValueError(f"Mismatched BRANCH_END for {inst.name}")
+    # 2. Parse cases and any intervening dispatch instructions
+    while True:
+        inst = stream.peek()
+        if inst is None:
+            raise ValueError("Unexpected end of stream while parsing branch cases")
 
-    if ctx.block_stack[-1] is branch_node.dispatch:
-        ctx.block_stack.pop()
-    else:
-        raise ValueError("BRANCH_END with unclosed inner blocks")
+        if isinstance(inst, MetaInst) and inst.type == "BRANCH_END":
+            break
+
+        if isinstance(inst, MetaInst) and inst.type == "BRANCH_CASE_START":
+            branch_node.cases.append(parse_branch_case(stream))
+        elif isinstance(inst, MetaInst):
+            raise ValueError(f"Unexpected MetaInst between branch cases: {inst}")
+        else:
+            branch_node.dispatch.append(stream.consume())
+
+    end_meta = stream.consume_meta("BRANCH_END")
+    if end_meta.name != branch_node.name:
+        raise ValueError(
+            f"Mismatched BRANCH_END for {branch_node.name}, got {end_meta.name}"
+        )
+
+    return branch_node
 
 
-_META_BUILDERS: dict[str, Callable[[MetaInst, BuildContext], None]] = {
-    "LOOP_START": _build_loop_start,
-    "LOOP_SECTION": _build_loop_section,
-    "LOOP_END": _build_loop_end,
-    "BRANCH_START": _build_branch_start,
-    "BRANCH_CASE_START": _build_branch_case_start,
-    "BRANCH_CASE_END": _build_branch_case_end,
-    "BRANCH_END": _build_branch_end,
-}
+def parse_branch_case(stream: InstructionStream) -> IRBranchCase:
+    start_meta = stream.consume_meta("BRANCH_CASE_START")
+    case_node = IRBranchCase(name=start_meta.name)
 
+    parse_block(stream, case_node, end_markers={"BRANCH_CASE_END"})
 
-def build_from_instruction(inst: Instruction, ctx: BuildContext) -> None:
-    if isinstance(inst, MetaInst):
-        handler = _META_BUILDERS.get(inst.type)
-        if handler is None:
-            raise ValueError(f"Unknown MetaInst type: {inst.type}")
-        handler(inst, ctx)
-        return
+    end_meta = stream.consume_meta("BRANCH_CASE_END")
+    if end_meta.name != case_node.name:
+        raise ValueError(
+            f"Mismatched BRANCH_CASE_END expected {case_node.name}, got {end_meta.name}"
+        )
 
-    # Handle Label capture for structural nodes
-    if isinstance(inst, LabelInst):
-        # If we just saw LOOP_START, this might be start_label
-        if (
-            ctx.struct_stack
-            and isinstance(ctx.struct_stack[-1], IRLoop)
-            and ctx.block_stack[-1] is ctx.root
-        ):
-            ctx.pending_label = inst.name
-            # Do NOT append it to root block
-            return
-        if (
-            ctx.struct_stack
-            and isinstance(ctx.struct_stack[-1], IRBranch)
-            and ctx.block_stack[-1] is ctx.root
-        ):
-            # Similar for branch? Usually labels are inside dispatch though.
-            pass
+    return case_node
 
-    ctx.current_block.append(inst)

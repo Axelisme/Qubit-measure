@@ -23,22 +23,22 @@ class LoopInvariantHoistPass(AbsPipeLinePass, IRTransformer):
             raise ValueError("Root node cannot be unrolled into a list")
         return res or ir
 
-    def visit_IRLoop(self, node: IRLoop) -> Optional[IRNode]:
+    def visit_IRLoop(self, node: IRLoop) -> Union[IRNode, list[IRNode], None]:
         self.generic_visit(node)
-        self._hoist_loop(node)
+        hoisted = self._hoist_loop(node)
+        if hoisted:
+            return hoisted + [node]
         return node
 
-    def _hoist_loop(self, loop: IRLoop) -> None:
-        loop_control_writes = _block_reads_writes(loop.initial)[1].union(
-            _block_reads_writes(loop.update)[1]
-        )
-        loop_control_reads = _block_reads_writes(loop.stop_check)[0].union(
-            _block_reads_writes(loop.update)[0]
-        )
-        blocked_regs = loop_control_writes.union(loop_control_reads)
+    def _hoist_loop(self, loop: IRLoop) -> list[IRNode]:
+        from ..utils import regs_from_value
+        # The loop control register is written and read. The limit n might be a register.
+        blocked_regs = {loop.counter_reg}
+        if isinstance(loop.n, str):
+            blocked_regs.update(regs_from_value(loop.n))
 
-        hoisted: list[Instruction] = []
-        remaining = []
+        hoisted: list[IRNode] = []
+        remaining: list[IRNode] = []
         for item in loop.body.insts:
             if (
                 isinstance(item, Instruction)
@@ -51,8 +51,9 @@ class LoopInvariantHoistPass(AbsPipeLinePass, IRTransformer):
                 remaining.append(item)
 
         if hoisted:
-            loop.initial.insts.extend(hoisted)
             loop.body.insts = remaining
+            
+        return hoisted
 
 
 class PeepholePass(AbsPipeLinePass, IRTransformer):

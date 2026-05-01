@@ -27,42 +27,11 @@ class IRStructureValidationPass(AbsPipeLinePass):
     def _validate_loop(self, loop: IRLoop) -> None:
         if loop.name == "":
             raise ValueError("IRLoop requires a non-empty name")
+        if loop.counter_reg == "":
+            raise ValueError(f"IRLoop '{loop.name}' requires a counter_reg")
 
-        sections = (
-            ("initial", loop.initial),
-            ("stop_check", loop.stop_check),
-            ("body", loop.body),
-            ("update", loop.update),
-            ("jump_back", loop.jump_back),
-        )
-        for section_name, section in sections:
-            if not isinstance(section, BlockNode):
-                raise ValueError(f"IRLoop.{section_name} must be a BlockNode")
-
-        # stop_check must end with TEST + conditional JUMP
-        if len(loop.stop_check.insts) < 2:
-            raise ValueError(
-                f"IRLoop '{loop.name}' stop_check must end with TEST + JUMP pair"
-            )
-        last = loop.stop_check.insts[-1]
-        second_last = loop.stop_check.insts[-2]
-        if (
-            not isinstance(second_last, TestInst)
-            or not isinstance(last, JumpInst)
-            or last.if_cond is None
-        ):
-            raise ValueError(
-                f"IRLoop '{loop.name}' stop_check must end with TEST + conditional JUMP pair"
-            )
-
-        # jump_back must end with unconditional JUMP
-        if not loop.jump_back.insts:
-            raise ValueError(f"IRLoop '{loop.name}' jump_back cannot be empty")
-        last_inst = loop.jump_back.insts[-1]
-        if not isinstance(last_inst, JumpInst) or last_inst.if_cond is not None:
-            raise ValueError(
-                f"IRLoop '{loop.name}' jump_back must end with unconditional JUMP"
-            )
+        if not isinstance(loop.body, BlockNode):
+            raise ValueError(f"IRLoop '{loop.name}' body must be a BlockNode")
 
     def _validate_branch(self, branch: IRBranch) -> None:
         if branch.name == "":
@@ -97,10 +66,8 @@ class LabelReferenceValidationPass(AbsPipeLinePass):
         # Add labels from structural node attributes
         for node in walk_nodes(ir):
             if isinstance(node, IRLoop):
-                if node.start_label:
-                    defined_labels.add(node.start_label)
-                if node.end_label:
-                    defined_labels.add(node.end_label)
+                defined_labels.add(node.start_label or f"{node.name}_start")
+                defined_labels.add(node.end_label or f"{node.name}_end")
 
         missing: set[str] = set()
         for inst in walk_instructions(ir):

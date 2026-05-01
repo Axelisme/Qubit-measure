@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import List, Optional, Union
+from typing import List, Union
 
 from .instructions import Instruction
 from .node import BlockNode, IRBranch, IRBranchCase, IRLoop, IRNode, RootNode
@@ -12,8 +12,6 @@ class IRTransformer:
 
     def visit(self, node: IRNode) -> Union[IRNode, List[IRNode], None]:
         """Visit a node, returning a new node, a list of nodes, the same node, or None to delete."""
-        if node is None:
-            return None
 
         # Dispatch based on type
         if isinstance(node, RootNode):
@@ -34,7 +32,9 @@ class IRTransformer:
     def visit_RootNode(self, node: RootNode) -> Union[IRNode, List[IRNode], None]:
         return self.visit_BlockNode(node)
 
-    def visit_IRBranchCase(self, node: IRBranchCase) -> Union[IRNode, List[IRNode], None]:
+    def visit_IRBranchCase(
+        self, node: IRBranchCase
+    ) -> Union[IRNode, List[IRNode], None]:
         return self.visit_BlockNode(node)
 
     def visit_IRBranch(self, node: IRBranch) -> Union[IRNode, List[IRNode], None]:
@@ -54,17 +54,13 @@ class IRTransformer:
 
     def generic_visit(self, node: IRNode) -> Union[IRNode, List[IRNode], None]:
         """Default visitor that recurses into child nodes using structural definition."""
-        
-        # We use node.children() to identify what to visit, 
+
+        # We use node.children() to identify what to visit,
         # but for reconstruction we need to know WHICH attribute to update.
         # For simplicity and Python 3.9, we handle known structural types explicitly.
-        
+
         if isinstance(node, IRLoop):
-            node.initial = self._visit_block(node.initial)
-            node.stop_check = self._visit_block(node.stop_check)
             node.body = self._visit_block(node.body)
-            node.update = self._visit_block(node.update)
-            node.jump_back = self._visit_block(node.jump_back)
         elif isinstance(node, IRBranch):
             node.dispatch = self._visit_block(node.dispatch)
             new_cases = []

@@ -31,17 +31,21 @@ class ConstantLoopUnrollPass(AbsPipeLinePass, IRTransformer):
         return node
 
     def _try_unroll(self, loop: IRLoop) -> Optional[List[IRNode]]:
-        trip_count = loop.trip_count
-        if trip_count is None:
+        if not isinstance(loop.n, int):
             return None
+        trip_count = loop.n
         if trip_count < 0:
             raise ValueError(f"IRLoop '{loop.name}' trip_count must be non-negative")
         if trip_count > self.max_trip_count:
             return None
 
+        from ..instructions import RegWriteInst
+
         out: list[IRNode] = []
-        out.extend(deepcopy(loop.initial.insts))
+        # Initialize counter
+        out.append(RegWriteInst(dst=loop.counter_reg, src="imm", extra_args={"LIT": "#0"}))
         for _ in range(trip_count):
             out.extend(deepcopy(loop.body.insts))
-            out.extend(deepcopy(loop.update.insts))
+            # body.insts naturally contains the IncReg for the counter, 
+            # so we don't need to manually emit an update block.
         return out

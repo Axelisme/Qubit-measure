@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing_extensions import Any, Iterator, Optional
+
+from typing_extensions import Any, Iterator, Optional, Union
 
 
 class IRNode:
@@ -44,42 +45,51 @@ class RootNode(BlockNode):
 
 @dataclass
 class IRLoop(IRNode):
-    """A loop node separated into sections."""
+    """A loop node."""
 
     name: str = ""
-    trip_count: Optional[int] = None
+    counter_reg: str = ""
+    n: Union[int, str] = 0
 
     # Structural Labels (Attributes)
     start_label: Optional[str] = None
     end_label: Optional[str] = None
 
-    initial: BlockNode = field(default_factory=BlockNode)
-    stop_check: BlockNode = field(default_factory=BlockNode)
     body: BlockNode = field(default_factory=BlockNode)
-    update: BlockNode = field(default_factory=BlockNode)
-    jump_back: BlockNode = field(default_factory=BlockNode)
 
     def children(self) -> Iterator[IRNode]:
-        yield self.initial
-        yield self.stop_check
         yield self.body
-        yield self.update
-        yield self.jump_back
 
     def emit(self, prog_list: list[dict[str, Any]]) -> None:
-        from .instructions import LabelInst
+        from .instructions import JumpInst, LabelInst, RegWriteInst, TestInst
 
-        if self.start_label:
-            LabelInst(name=self.start_label).emit(prog_list)
+        start = self.start_label or f"{self.name}_start"
+        end = self.end_label or f"{self.name}_end"
 
-        self.initial.emit(prog_list)
-        self.stop_check.emit(prog_list)
+        # Initialize counter
+        RegWriteInst(dst=self.counter_reg, src="imm", extra_args={"LIT": "#0"}).emit(
+            prog_list
+        )
+
+        # Loop start label
+        LabelInst(name=start).emit(prog_list)
+
+        # Stop check
+        op_str = (
+            f"{self.counter_reg} - #{self.n}"
+            if isinstance(self.n, int)
+            else f"{self.counter_reg} - {self.n}"
+        )
+        TestInst(op=op_str, uf="0").emit(prog_list)
+        JumpInst(label=end, if_cond="NS").emit(prog_list)
+
         self.body.emit(prog_list)
-        self.update.emit(prog_list)
-        self.jump_back.emit(prog_list)
 
-        if self.end_label:
-            LabelInst(name=self.end_label).emit(prog_list)
+        # Jump back
+        JumpInst(label=start).emit(prog_list)
+
+        # Loop end label
+        LabelInst(name=end).emit(prog_list)
 
 
 @dataclass
