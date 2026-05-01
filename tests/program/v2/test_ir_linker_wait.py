@@ -1,5 +1,5 @@
 import pytest
-from zcu_tools.program.v2.ir.instructions import LabelInst, WaitInst, RegWriteInst
+from zcu_tools.program.v2.ir.instructions import LabelInst, WaitInst, RegWriteInst, Instruction
 from zcu_tools.program.v2.ir.node import RootNode, InstNode
 from zcu_tools.program.v2.ir.linker import IRLinker
 
@@ -26,7 +26,9 @@ def test_linker_wait_address_calculation():
     ])
     
     linker = IRLinker()
-    prog_list, labels = linker.link(ir)
+    inst_list = []
+    ir.emit(inst_list)
+    prog_list, labels = linker.link(inst_list)
     
     # Expected addresses:
     # L1: 0
@@ -56,26 +58,27 @@ def test_linker_wait_roundtrip():
     ])
     
     linker = IRLinker()
-    prog_list, labels = linker.link(ir)
+    inst_list = []
+    ir.emit(inst_list)
+    prog_list, labels = linker.link(inst_list)
     
     # Roundtrip: unlink
-    logical_prog_list = linker.unlink(prog_list, labels)
+    logical_insts = linker.unlink(prog_list, labels)
     
+    # Compare CMD/LABEL
+    actual_cmds = []
+    for inst in logical_insts:
+        if isinstance(inst, LabelInst):
+            actual_cmds.append({"LABEL": inst.name})
+        else:
+            actual_cmds.append({"CMD": inst.to_dict()["CMD"]})
+            
     expected = [
         {"LABEL": "L1"},
         {"CMD": "WAIT"},
         {"LABEL": "L2"},
     ]
-    
-    # Compare only LABEL and CMD for simplicity
-    actual = []
-    for item in logical_prog_list:
-        if "LABEL" in item and "CMD" not in item:
-            actual.append({"LABEL": item["LABEL"]})
-        else:
-            actual.append({"CMD": item["CMD"]})
-            
-    assert actual == expected
+    assert actual_cmds == expected
 
 if __name__ == "__main__":
     pytest.main([__file__])
