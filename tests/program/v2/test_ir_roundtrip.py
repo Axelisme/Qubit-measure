@@ -30,7 +30,7 @@ def test_structural_loop_roundtrip():
     ]
     
     builder = IRBuilder()
-    root = builder.build(prog_list)
+    root = builder.build(prog_list, {})
     
     # Verify IR structure
     assert len(root.insts) == 1

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from typing import cast
 from typing_extensions import Optional
 
 from ..instructions import Instruction, TimeInst
-from ..node import BlockNode, IRNode
+from ..node import BlockNode, IRNode, RootNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
 from ..traversal import IRTransformer
 
@@ -11,11 +12,11 @@ from ..traversal import IRTransformer
 class ZeroDelayDCEPass(AbsPipeLinePass, IRTransformer):
     """Remove lower-level zero reference-time increments."""
 
-    def process(self, ir: IRNode, ctx: PipeLineContext) -> IRNode:
+    def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:
         res = self.visit(ir)
         if isinstance(res, list):
             raise ValueError("Root node cannot be unrolled into a list")
-        return res or ir
+        return cast(RootNode, res or ir)
 
     def visit_TimeInst(self, node: TimeInst) -> Optional[IRNode]:
         if _is_zero_delay_inst(node):
@@ -48,11 +49,11 @@ def _is_zero_delay_inst(inst: Instruction) -> bool:
 class TimedInstructionMergePass(AbsPipeLinePass, IRTransformer):
     """Merge adjacent reference-time increments with identical semantics."""
 
-    def process(self, ir: IRNode, ctx: PipeLineContext) -> IRNode:
+    def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:
         res = self.visit(ir)
         if isinstance(res, list):
             raise ValueError("Root node cannot be unrolled into a list")
-        return res or ir
+        return cast(RootNode, res or ir)
 
     def visit_BlockNode(self, node: BlockNode) -> Optional[IRNode]:
         # Use generic_visit to handle recursion first

@@ -5,6 +5,7 @@ from zcu_tools.program.v2.ir.instructions import (
     Instruction,
     JumpInst,
 )
+from zcu_tools.program.v2.ir.linker import IRLinker
 from zcu_tools.program.v2.ir.node import BlockNode, IRBranch, IRBranchCase, IRLoop
 
 
@@ -40,3 +41,68 @@ def test_branch_roundtrip_preserves_cases():
     assert prog_list[0]["CMD"] == "JUMP"
     assert prog_list[1]["CMD"] == "CASE_0_BODY"
     assert prog_list[2]["CMD"] == "CASE_1_BODY"
+
+
+def test_unlink_inserts_labels_and_strips_p_addr():
+    linker = IRLinker()
+    prog_list = [
+        {"CMD": "REG_WR", "DST": "r0", "SRC": "imm", "LIT": "#1", "P_ADDR": 0},
+        {"CMD": "JUMP", "LABEL": "end", "P_ADDR": 1},
+    ]
+    labels = {"start": "&0", "end": "&2"}
+
+    logical_prog_list = linker.unlink(prog_list, labels)
+
+    assert logical_prog_list == [
+        {"LABEL": "start"},
+        {"CMD": "REG_WR", "DST": "r0", "SRC": "imm", "LIT": "#1"},
+        {"CMD": "JUMP", "LABEL": "end"},
+        {"LABEL": "end"},
+    ]
+
+
+def test_unlink_supports_multiple_labels_same_address():
+    linker = IRLinker()
+    prog_list = [{"CMD": "NOP", "P_ADDR": 0}]
+    labels = {"first": "&0", "second": "&0"}
+
+    logical_prog_list = linker.unlink(prog_list, labels)
+
+    assert logical_prog_list == [
+        {"LABEL": "first"},
+        {"LABEL": "second"},
+        {"CMD": "NOP"},
+    ]
+
+
+def test_unlink_rejects_out_of_range_address():
+    linker = IRLinker()
+    prog_list = [{"CMD": "NOP", "P_ADDR": 0}]
+    labels = {"bad": "&2"}
+
+    with pytest.raises(ValueError, match="out of range"):
+        linker.unlink(prog_list, labels)
+
+
+def test_builder_build_accepts_qick_labels_map():
+    builder = IRBuilder()
+    prog_list = [
+        {"CMD": "__META__", "TYPE": "LOOP_START", "NAME": "loop1", "ARGS": {"counter_reg": "r1", "n": 5}, "P_ADDR": 0},
+        {"CMD": "REG_WR", "DST": "r1", "SRC": "imm", "LIT": "#0", "P_ADDR": 1},
+        {"CMD": "TEST", "OP": "r1 - #5", "UF": "0", "P_ADDR": 2},
+        {"CMD": "JUMP", "LABEL": "loop1_end", "IF": "NS", "P_ADDR": 3},
+        {"CMD": "__META__", "TYPE": "LOOP_BODY_START", "NAME": "loop1", "P_ADDR": 4},
+        {"CMD": "NOP", "P_ADDR": 5},
+        {"CMD": "__META__", "TYPE": "LOOP_BODY_END", "NAME": "loop1", "P_ADDR": 6},
+        {"CMD": "JUMP", "LABEL": "loop1_start", "P_ADDR": 7},
+        {"CMD": "__META__", "TYPE": "LOOP_END", "NAME": "loop1", "P_ADDR": 8},
+    ]
+    labels = {"loop1_start": "&1", "loop1_end": "&8"}
+
+    root = builder.build(prog_list, labels)
+
+    assert len(root.insts) == 1
+    loop = root.insts[0]
+    assert isinstance(loop, IRLoop)
+    assert loop.start_label == "loop1_start"
+    assert loop.end_label == "loop1_end"

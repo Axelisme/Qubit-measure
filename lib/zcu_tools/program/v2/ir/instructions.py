@@ -16,7 +16,15 @@ class Instruction(IRNode):
     annotations: dict[str, Any] = field(default_factory=dict)
 
     def emit(self, prog_list: list[dict[str, Any]]) -> None:
-        prog_list.append(self.to_dict())
+        d = self.to_dict()
+        if self.addr_inc != 1:
+            d["ADDR_INC"] = self.addr_inc
+        prog_list.append(d)
+
+    @property
+    def addr_inc(self) -> int:
+        """Number of machine-code words this instruction will occupy."""
+        return 1
 
     @property
     def reg_read(self) -> list[str]:
@@ -528,3 +536,7 @@ class WaitInst(Instruction):
         if self.line is not None:
             d["LINE"] = self.line
         return d
+
+    @property
+    def addr_inc(self) -> int:
+        return 2

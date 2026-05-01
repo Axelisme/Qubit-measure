@@ -1,14 +1,23 @@
 from __future__ import annotations
 
+from typing_extensions import Any
+
 from .factory import InstructionStream, parse_root
 from .instructions import Instruction
 from .linker import IRLinker
-from .node import IRNode, RootNode
+from .node import RootNode
 
 
 class IRBuilder:
-    def build(self, prog_list: list[dict]) -> RootNode:
-        inst_list = [Instruction.from_dict(d) for d in prog_list]
+    def __init__(self):
+        self.linker = IRLinker()
+
+    def build(
+        self, prog_list: list[dict[str, Any]], labels: dict[str, Any]
+    ) -> RootNode:
+        source_prog_list = self.linker.unlink(prog_list, labels)
+
+        inst_list = [Instruction.from_dict(d) for d in source_prog_list]
         stream = InstructionStream(inst_list)
         root = parse_root(stream)
 
@@ -17,9 +26,5 @@ class IRBuilder:
 
         return root
 
-    def unbuild(self, ir: IRNode) -> tuple[list[dict], dict[str, str]]:
-        if not isinstance(ir, RootNode):
-            raise ValueError("IR node passed to unbuild must be a RootNode")
-
-        linker = IRLinker()
-        return linker.link(ir)
+    def unbuild(self, ir: RootNode) -> tuple[list[dict], dict[str, str]]:
+        return self.linker.link(ir)

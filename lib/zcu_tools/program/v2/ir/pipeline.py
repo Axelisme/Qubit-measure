@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from .node import IRNode
+from .node import RootNode
 
 
 @dataclass
@@ -18,7 +18,7 @@ class PipeLineContext:
 
 class AbsPipeLinePass(ABC):
     @abstractmethod
-    def process(self, ir: IRNode, ctx: PipeLineContext) -> IRNode: ...
+    def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode: ...
 
 
 class PipeLine:
@@ -26,7 +26,7 @@ class PipeLine:
         self.config = config
         self.passes = passes
 
-    def __call__(self, ir: IRNode) -> tuple[IRNode, PipeLineContext]:
+    def __call__(self, ir: RootNode) -> tuple[RootNode, PipeLineContext]:
         ctx = PipeLineContext()
         for _pass in self.passes:
             ir = _pass.process(ir, ctx)

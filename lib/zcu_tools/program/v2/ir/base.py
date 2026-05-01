@@ -17,7 +17,7 @@ class IRCompileMixin(QickProgramV2):
         insts: list[dict[str, Any]] = self.prog_list
 
         builder = IRBuilder()
-        ir = builder.build(insts)
+        ir = builder.build(insts, self.labels)
 
         config = PipeLineConfig()
         pipeline = make_default_pipeline(config)
@@ -29,9 +29,5 @@ class IRCompileMixin(QickProgramV2):
         self.prog_list = opt_insts
         self.labels = opt_labels
 
-    def _add_asm(self, inst: dict[str, Any], addr_inc: int = 1) -> None:
-        super()._add_asm(inst, addr_inc)
-
-    def _add_label(self, label: str) -> None:
-        super()._add_label(label)
-        self.prog_list.append({"LABEL": label})
+        self.p_addr = len(opt_insts)
+        self.line = len(opt_insts)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..instructions import GenericInst
-from ..node import IRNode
+from ..node import IRNode, RootNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
 from ..traversal import walk_instructions
 
@@ -9,7 +9,7 @@ from ..traversal import walk_instructions
 class TimingSanityPass(AbsPipeLinePass):
     """Validate conservative timing invariants for TIME instructions."""
 
-    def process(self, ir: IRNode, ctx: PipeLineContext) -> IRNode:
+    def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:
         for inst in walk_instructions(ir):
             if isinstance(inst, GenericInst) and inst.cmd == "TIME":
                 self._validate_time(inst)

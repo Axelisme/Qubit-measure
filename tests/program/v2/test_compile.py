@@ -77,6 +77,20 @@ def test_sweep_cfg_compiles():
     assert prog.binprog is not None
 
 
+def test_compile_keeps_labels_out_of_prog_list():
+    prog = _make_prog(sweep=[("my_loop", 10)])
+
+    assert prog.labels
+    assert all(not ("LABEL" in inst and "CMD" not in inst) for inst in prog.prog_list)
+
+
+def test_compile_refreshes_program_cursors():
+    prog = _make_prog(sweep=[("my_loop", 10)])
+
+    assert prog.p_addr == len(prog.prog_list)
+    assert prog.line == len(prog.prog_list)
+
+
 def test_reps_propagated():
     prog = _make_prog(reps=4)
     assert prog.reps == 4

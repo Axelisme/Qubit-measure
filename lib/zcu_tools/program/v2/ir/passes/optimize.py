@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import cast
 from typing_extensions import Optional, Set, Tuple, Union
 
 from ..analysis import (
@@ -9,7 +10,7 @@ from ..analysis import (
     strip_internal_annotations,
 )
 from ..instructions import Instruction
-from ..node import BlockNode, IRLoop, IRNode
+from ..node import BlockNode, IRLoop, IRNode, RootNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
 from ..traversal import IRTransformer
 
@@ -17,11 +18,11 @@ from ..traversal import IRTransformer
 class LoopInvariantHoistPass(AbsPipeLinePass, IRTransformer):
     """Hoist explicitly marked invariant instructions into the loop initial block."""
 
-    def process(self, ir: IRNode, ctx: PipeLineContext) -> IRNode:
+    def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:
         res = self.visit(ir)
         if isinstance(res, list):
             raise ValueError("Root node cannot be unrolled into a list")
-        return res or ir
+        return cast(RootNode, res or ir)
 
     def visit_IRLoop(self, node: IRLoop) -> Union[IRNode, list[IRNode], None]:
         self.generic_visit(node)
@@ -59,11 +60,11 @@ class LoopInvariantHoistPass(AbsPipeLinePass, IRTransformer):
 class PeepholePass(AbsPipeLinePass, IRTransformer):
     """Apply local cleanups that do not remove executable no-op instructions."""
 
-    def process(self, ir: IRNode, ctx: PipeLineContext) -> IRNode:
+    def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:
         res = self.visit(ir)
         if isinstance(res, list):
             raise ValueError("Root node cannot be unrolled into a list")
-        return res or ir
+        return cast(RootNode, res or ir)
 
     def visit_GenericInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
         return strip_internal_annotations(node)

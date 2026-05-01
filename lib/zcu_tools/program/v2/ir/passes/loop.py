@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import List, Optional, Union
+from typing import List, Optional, Union, cast
 
-from ..node import IRLoop, IRNode
+from ..node import IRLoop, IRNode, RootNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
 from ..traversal import IRTransformer
 
@@ -14,11 +14,11 @@ class ConstantLoopUnrollPass(AbsPipeLinePass, IRTransformer):
     def __init__(self, max_trip_count: int = 16):
         self.max_trip_count = max_trip_count
 
-    def process(self, ir: IRNode, ctx: PipeLineContext) -> IRNode:
+    def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:
         res = self.visit(ir)
         if isinstance(res, list):
             raise ValueError("Root node cannot be unrolled into a list")
-        return res or ir
+        return cast(RootNode, res or ir)
 
     def visit_IRLoop(self, node: IRLoop) -> Union[IRNode, List[IRNode], None]:
         # First recurse into inner structures

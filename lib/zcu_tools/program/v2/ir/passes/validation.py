@@ -10,7 +10,7 @@ from ..traversal import walk_instructions, walk_nodes
 class IRStructureValidationPass(AbsPipeLinePass):
     """Validate structural invariants expected by later IR passes."""
 
-    def process(self, ir: IRNode, ctx: PipeLineContext) -> IRNode:
+    def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:
         for node in walk_nodes(ir):
             if isinstance(node, IRLoop):
                 self._validate_loop(node)
@@ -56,10 +56,7 @@ class IRStructureValidationPass(AbsPipeLinePass):
 class LabelReferenceValidationPass(AbsPipeLinePass):
     """Ensure instruction label references point to known labels."""
 
-    def process(self, ir: IRNode, ctx: PipeLineContext) -> IRNode:
-        if not isinstance(ir, RootNode):
-            return ir
-
+    def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:
         from ..instructions import LabelInst
 
         defined_labels = set()

@@ -12,10 +12,7 @@ class LabelDCEPass(AbsPipeLinePass):
     Removes labels that are not referenced by jump-like instructions.
     """
 
-    def process(self, ir: IRNode, ctx: PipeLineContext) -> IRNode:
-        if not isinstance(ir, RootNode):
-            return ir  # Pass if it's not a RootNode
-
+    def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:
         from ..node import IRLoop
         from ..traversal import walk_nodes
         from ..instructions import LabelInst
