@@ -6,7 +6,7 @@ from zcu_tools.program.v2.ir.instructions import (
     JumpInst,
 )
 from zcu_tools.program.v2.ir.linker import IRLinker
-from zcu_tools.program.v2.ir.node import BlockNode, IRBranch, IRBranchCase, IRLoop
+from zcu_tools.program.v2.ir.node import BlockNode, IRBranch, IRBranchCase, IRLoop, InstNode
 
 
 def test_instruction_parses_jump_label_to_jumpinst():
@@ -23,24 +23,24 @@ def test_branch_roundtrip_preserves_cases():
     case_0_inst = GenericInst(cmd="CASE_0_BODY")
     case_1_inst = GenericInst(cmd="CASE_1_BODY")
 
-    case_0 = IRBranchCase(name="0", insts=[case_0_inst])
-    case_1 = IRBranchCase(name="1", insts=[case_1_inst])
+    case_0 = IRBranchCase(name="0", insts=[InstNode(case_0_inst)])
+    case_1 = IRBranchCase(name="1", insts=[InstNode(case_1_inst)])
 
     branch = IRBranch(
         name="sel",
-        dispatch=BlockNode(insts=[dispatch_inst]),
+        dispatch=BlockNode(insts=[InstNode(dispatch_inst)]),
         cases=[case_0, case_1],
     )
 
-    # Emit to prog_list
-    prog_list: list[dict] = []
-    branch.emit(prog_list)
+    # Emit to Instruction list
+    inst_list: list[Instruction] = []
+    branch.emit(inst_list)
 
     # Should have: dispatch_inst, case_0_inst, case_1_inst
-    assert len(prog_list) == 3
-    assert prog_list[0]["CMD"] == "JUMP"
-    assert prog_list[1]["CMD"] == "CASE_0_BODY"
-    assert prog_list[2]["CMD"] == "CASE_1_BODY"
+    assert len(inst_list) == 3
+    assert inst_list[0].cmd == "JUMP"
+    assert inst_list[1].cmd == "CASE_0_BODY"
+    assert inst_list[2].cmd == "CASE_1_BODY"
 
 
 def test_unlink_inserts_labels_and_strips_p_addr():

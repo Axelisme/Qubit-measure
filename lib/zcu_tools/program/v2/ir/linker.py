@@ -4,28 +4,32 @@ from collections import defaultdict
 from typing_extensions import Any
 
 from .node import RootNode
+from .instructions import Instruction, LabelInst
 
 
 class IRLinker:
     """Responsible for flattening the IR tree, assigning physical addresses, and resolving labels."""
 
     def link(self, ir: RootNode) -> tuple[list[dict], dict[str, str]]:
-        raw_prog_list: list[dict] = []
-        ir.emit(raw_prog_list)
+        inst_list: list[Instruction] = []
+        ir.emit(inst_list)
 
         opt_prog_list: list[dict] = []
         opt_labels: dict[str, str] = {}
 
         p_addr = 0
-        for d in raw_prog_list:
-            if "LABEL" in d and "CMD" not in d:
+        for inst in inst_list:
+            if isinstance(inst, LabelInst):
                 # It's a standalone label marker
-                opt_labels[d["LABEL"]] = f"&{p_addr}"
+                opt_labels[inst.name] = f"&{p_addr}"
             else:
                 # It's an executable instruction; assign fresh P_ADDR
+                d = inst.to_dict()
                 d["P_ADDR"] = p_addr
+                if inst.addr_inc != 1:
+                    d["ADDR_INC"] = inst.addr_inc
                 opt_prog_list.append(d)
-                p_addr += d.get("ADDR_INC", 1)
+                p_addr += inst.addr_inc
 
         return opt_prog_list, opt_labels
 

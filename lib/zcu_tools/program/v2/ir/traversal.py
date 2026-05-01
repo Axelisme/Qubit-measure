@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from typing import List, Union
 
 from .instructions import Instruction
-from .node import BlockNode, IRNode
+from .node import BlockNode, IRNode, InstNode
 
 
 class IRTransformer:
@@ -17,6 +17,28 @@ class IRTransformer:
         method_name = f"visit_{node.__class__.__name__}"
         visitor = getattr(self, method_name, self.generic_visit)
         return visitor(node)
+
+    def visit_InstNode(self, node: InstNode) -> Union[IRNode, List[IRNode], None]:
+        """Dispatch to visitor for the wrapped instruction."""
+        inst = node.inst
+        method_name = f"visit_{inst.__class__.__name__}"
+        visitor = getattr(self, method_name, None)
+        if visitor:
+            # If the visitor returns an Instruction, wrap it back in an InstNode
+            # If it returns an IRNode or list[IRNode], return it as is.
+            res = visitor(inst)
+            if res is None:
+                return None
+            if isinstance(res, list):
+                return [
+                    (InstNode(item) if isinstance(item, Instruction) else item)
+                    for item in res
+                ]
+            if isinstance(res, Instruction):
+                return InstNode(res)
+            return res
+
+        return self.generic_visit(node)
 
     def generic_visit(self, node: IRNode) -> Union[IRNode, List[IRNode], None]:
         """Default visitor that automatically recurses into child nodes using dataclass fields."""
@@ -79,5 +101,5 @@ def walk_nodes(node: IRNode) -> Iterator[IRNode]:
 
 def walk_instructions(node: IRNode) -> Iterator[Instruction]:
     for current in walk_nodes(node):
-        if isinstance(current, Instruction):
-            yield current
+        if isinstance(current, InstNode):
+            yield current.inst

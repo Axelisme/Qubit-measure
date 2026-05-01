@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from .instructions import Instruction, LabelInst, MetaInst
-from .node import BlockNode, IRBranch, IRBranchCase, IRLoop, RootNode
+from .node import BlockNode, IRBranch, IRBranchCase, IRLoop, RootNode, InstNode
 
 
 class InstructionStream:
@@ -60,7 +60,7 @@ def parse_block(
             else:
                 raise ValueError(f"Unexpected MetaInst encountered: {inst}")
         else:
-            block.append(stream.consume())
+            block.append(InstNode(stream.consume()))
 
 
 def parse_loop(stream: InstructionStream) -> IRLoop:
@@ -141,7 +141,7 @@ def parse_branch(stream: InstructionStream) -> IRBranch:
         elif isinstance(inst, MetaInst):
             raise ValueError(f"Unexpected MetaInst between branch cases: {inst}")
         else:
-            branch_node.dispatch.append(stream.consume())
+            branch_node.dispatch.append(InstNode(stream.consume()))
 
     end_meta = stream.consume_meta("BRANCH_END")
     if end_meta.name != branch_node.name:

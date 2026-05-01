@@ -4,7 +4,7 @@ from typing import cast
 from typing_extensions import Optional
 
 from ..instructions import Instruction, TimeInst
-from ..node import BlockNode, IRNode, RootNode
+from ..node import BlockNode, IRNode, RootNode, InstNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
 from ..traversal import IRTransformer
 
@@ -18,10 +18,10 @@ class ZeroDelayDCEPass(AbsPipeLinePass, IRTransformer):
             raise ValueError("Root node cannot be unrolled into a list")
         return cast(RootNode, res or ir)
 
-    def visit_TimeInst(self, node: TimeInst) -> Optional[IRNode]:
-        if _is_zero_delay_inst(node):
+    def visit_TimeInst(self, inst: TimeInst) -> Optional[Instruction]:
+        if _is_zero_delay_inst(inst):
             return None
-        return node
+        return inst
 
 
 def _is_zero_delay_inst(inst: Instruction) -> bool:
@@ -70,14 +70,14 @@ class TimedInstructionMergePass(AbsPipeLinePass, IRTransformer):
             if pending_inst is None:
                 return
             if pending_count == 1:
-                rewritten.append(pending_inst)
+                rewritten.append(InstNode(pending_inst))
             else:
                 rewritten.append(
-                    TimeInst(
+                    InstNode(TimeInst(
                         c_op="inc_ref",
                         lit=f"#{pending_value}",
                         line=pending_inst.line,
-                    )
+                    ))
                 )
             pending_inst = None
             pending_value = 0
@@ -85,20 +85,21 @@ class TimedInstructionMergePass(AbsPipeLinePass, IRTransformer):
 
         for item in node.insts:
             merge_value = (
-                _positive_time_increment(item)
-                if isinstance(item, Instruction)
+                _positive_time_increment(item.inst)
+                if isinstance(item, InstNode)
                 else None
             )
 
             if merge_value is None:
                 flush_pending()
                 rewritten.append(item)
-            elif not isinstance(item, TimeInst):
+            elif not isinstance(item, InstNode) or not isinstance(item.inst, TimeInst):
                 flush_pending()
                 rewritten.append(item)
             else:
+                inst = item.inst
                 if pending_inst is None:
-                    pending_inst = item
+                    pending_inst = inst
                     pending_value = merge_value
                     pending_count = 1
                 else:
@@ -109,7 +110,7 @@ class TimedInstructionMergePass(AbsPipeLinePass, IRTransformer):
         node.insts = rewritten
         return node
         
-    def visit_RootNode(self, node: BlockNode) -> Optional[IRNode]:
+    def visit_RootNode(self, node: RootNode) -> Optional[IRNode]:
         return self.visit_BlockNode(node)
 
     def visit_IRBranchCase(self, node: BlockNode) -> Optional[IRNode]:

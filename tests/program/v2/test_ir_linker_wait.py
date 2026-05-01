@@ -1,6 +1,6 @@
 import pytest
 from zcu_tools.program.v2.ir.instructions import LabelInst, WaitInst, RegWriteInst
-from zcu_tools.program.v2.ir.node import RootNode
+from zcu_tools.program.v2.ir.node import RootNode, InstNode
 from zcu_tools.program.v2.ir.linker import IRLinker
 
 def test_linker_wait_address_calculation():
@@ -16,13 +16,13 @@ def test_linker_wait_address_calculation():
     # L4:
     
     ir = RootNode(insts=[
-        LabelInst(name="L1"),
-        RegWriteInst(dst="r1", src="imm", extra_args={"LIT": "#1"}),
-        LabelInst(name="L2"),
-        WaitInst(),
-        LabelInst(name="L3"),
-        RegWriteInst(dst="r2", src="imm", extra_args={"LIT": "#2"}),
-        LabelInst(name="L4"),
+        InstNode(LabelInst(name="L1")),
+        InstNode(RegWriteInst(dst="r1", src="imm", extra_args={"LIT": "#1"})),
+        InstNode(LabelInst(name="L2")),
+        InstNode(WaitInst()),
+        InstNode(LabelInst(name="L3")),
+        InstNode(RegWriteInst(dst="r2", src="imm", extra_args={"LIT": "#2"})),
+        InstNode(LabelInst(name="L4")),
     ])
     
     linker = IRLinker()
@@ -52,9 +52,9 @@ def test_linker_wait_roundtrip():
     """Verify that unlink() correctly restores labels after WAIT."""
     
     ir = RootNode(insts=[
-        LabelInst(name="L1"),
-        WaitInst(),
-        LabelInst(name="L2"),
+        InstNode(LabelInst(name="L1")),
+        InstNode(WaitInst()),
+        InstNode(LabelInst(name="L2")),
     ])
     
     linker = IRLinker()

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
-from typing_extensions import Any, Iterator, Optional, Union
+from typing_extensions import Iterator, Optional, Union
+
+if TYPE_CHECKING:
+    from .instructions import Instruction
 
 
 class IRNode:
@@ -12,11 +16,21 @@ class IRNode:
         """Yield all immediate child nodes."""
         return iter([])
 
-    def emit(self, prog_list: list[dict[str, Any]]) -> None:
-        """Flatten this node into a list of QICK instructions."""
+    def emit(self, inst_list: list[Instruction]) -> None:
+        """Flatten this node into a list of Instruction objects."""
         raise NotImplementedError(
             f"{self.__class__.__name__} does not implement emit()"
         )
+
+
+@dataclass
+class InstNode(IRNode):
+    """A wrapper for a single linear instruction."""
+
+    inst: Instruction
+
+    def emit(self, inst_list: list[Instruction]) -> None:
+        inst_list.append(self.inst)
 
 
 @dataclass
@@ -31,9 +45,9 @@ class BlockNode(IRNode):
     def children(self) -> Iterator[IRNode]:
         yield from self.insts
 
-    def emit(self, prog_list: list[dict[str, Any]]) -> None:
+    def emit(self, inst_list: list[Instruction]) -> None:
         for item in self.insts:
-            item.emit(prog_list)
+            item.emit(inst_list)
 
 
 @dataclass
@@ -58,19 +72,19 @@ class IRLoop(IRNode):
     def children(self) -> Iterator[IRNode]:
         yield self.body
 
-    def emit(self, prog_list: list[dict[str, Any]]) -> None:
+    def emit(self, inst_list: list[Instruction]) -> None:
         from .instructions import JumpInst, LabelInst, RegWriteInst, TestInst
 
         start = self.start_label or f"{self.name}_start"
         end = self.end_label or f"{self.name}_end"
 
         # Initialize counter
-        RegWriteInst(dst=self.counter_reg, src="imm", extra_args={"LIT": "#0"}).emit(
-            prog_list
+        inst_list.append(
+            RegWriteInst(dst=self.counter_reg, src="imm", extra_args={"LIT": "#0"})
         )
 
         # Loop start label
-        LabelInst(name=start).emit(prog_list)
+        inst_list.append(LabelInst(name=start))
 
         # Stop check
         op_str = (
@@ -78,16 +92,16 @@ class IRLoop(IRNode):
             if isinstance(self.n, int)
             else f"{self.counter_reg} - {self.n}"
         )
-        TestInst(op=op_str, uf="0").emit(prog_list)
-        JumpInst(label=end, if_cond="NS").emit(prog_list)
+        inst_list.append(TestInst(op=op_str, uf="0"))
+        inst_list.append(JumpInst(label=end, if_cond="NS"))
 
-        self.body.emit(prog_list)
+        self.body.emit(inst_list)
 
         # Jump back
-        JumpInst(label=start).emit(prog_list)
+        inst_list.append(JumpInst(label=start))
 
         # Loop end label
-        LabelInst(name=end).emit(prog_list)
+        inst_list.append(LabelInst(name=end))
 
 
 @dataclass
@@ -110,7 +124,7 @@ class IRBranch(IRNode):
         yield self.dispatch
         yield from self.cases
 
-    def emit(self, prog_list: list[dict[str, Any]]) -> None:
-        self.dispatch.emit(prog_list)
+    def emit(self, inst_list: list[Instruction]) -> None:
+        self.dispatch.emit(inst_list)
         for case in self.cases:
-            case.emit(prog_list)
+            case.emit(inst_list)

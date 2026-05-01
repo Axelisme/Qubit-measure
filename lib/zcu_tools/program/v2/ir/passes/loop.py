@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import List, Optional, Union, cast
 
-from ..node import IRLoop, IRNode, RootNode
+from ..node import IRLoop, IRNode, RootNode, InstNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
 from ..traversal import IRTransformer
 
@@ -43,7 +43,7 @@ class ConstantLoopUnrollPass(AbsPipeLinePass, IRTransformer):
 
         out: list[IRNode] = []
         # Initialize counter
-        out.append(RegWriteInst(dst=loop.counter_reg, src="imm", extra_args={"LIT": "#0"}))
+        out.append(InstNode(RegWriteInst(dst=loop.counter_reg, src="imm", extra_args={"LIT": "#0"})))
         for _ in range(trip_count):
             out.extend(deepcopy(loop.body.insts))
             # body.insts naturally contains the IncReg for the counter, 

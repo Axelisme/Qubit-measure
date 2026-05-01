@@ -3,23 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from .node import IRNode
 from .utils import regs_from_value, strip_write_modifier
 
 
 @dataclass(frozen=True)
-class Instruction(IRNode):
+class Instruction:
     """Base class for all IR instructions."""
 
     # Optional metadata from QICK assembler
     line: Optional[int] = None
     annotations: dict[str, Any] = field(default_factory=dict)
-
-    def emit(self, prog_list: list[dict[str, Any]]) -> None:
-        d = self.to_dict()
-        if self.addr_inc != 1:
-            d["ADDR_INC"] = self.addr_inc
-        prog_list.append(d)
 
     @property
     def addr_inc(self) -> int:
@@ -269,9 +262,6 @@ class MetaInst(Instruction):
         }
         d.update(self.annotations)
         return d
-
-    def emit(self, prog_list: list[dict[str, Any]]) -> None:
-        pass
 
 
 @dataclass(frozen=True)

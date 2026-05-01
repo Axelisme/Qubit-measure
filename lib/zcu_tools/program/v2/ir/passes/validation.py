@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ..instructions import JumpInst, MetaInst, TestInst
 from ..labels import iter_label_references
-from ..node import BlockNode, IRBranch, IRBranchCase, IRLoop, IRNode, RootNode
+from ..node import BlockNode, IRBranch, IRBranchCase, IRLoop, IRNode, RootNode, InstNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
 from ..traversal import walk_instructions, walk_nodes
 
@@ -19,7 +19,7 @@ class IRStructureValidationPass(AbsPipeLinePass):
 
             if isinstance(node, BlockNode):
                 for item in node.insts:
-                    if isinstance(item, MetaInst):
+                    if isinstance(item, InstNode) and isinstance(item.inst, MetaInst):
                         raise ValueError("MetaInst should not remain inside IR nodes")
 
         return ir

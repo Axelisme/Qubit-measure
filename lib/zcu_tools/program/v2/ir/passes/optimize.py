@@ -10,7 +10,7 @@ from ..analysis import (
     strip_internal_annotations,
 )
 from ..instructions import Instruction
-from ..node import BlockNode, IRLoop, IRNode, RootNode
+from ..node import BlockNode, IRLoop, IRNode, RootNode, InstNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
 from ..traversal import IRTransformer
 
@@ -41,13 +41,16 @@ class LoopInvariantHoistPass(AbsPipeLinePass, IRTransformer):
         hoisted: list[IRNode] = []
         remaining: list[IRNode] = []
         for item in loop.body.insts:
-            if (
-                isinstance(item, Instruction)
-                and is_marked_hoistable(item)
-                and instruction_reads(item).isdisjoint(blocked_regs)
-                and instruction_writes(item).isdisjoint(blocked_regs)
-            ):
-                hoisted.append(strip_internal_annotations(item))
+            if isinstance(item, InstNode):
+                inst = item.inst
+                if (
+                    is_marked_hoistable(inst)
+                    and instruction_reads(inst).isdisjoint(blocked_regs)
+                    and instruction_writes(inst).isdisjoint(blocked_regs)
+                ):
+                    hoisted.append(InstNode(strip_internal_annotations(inst)))
+                else:
+                    remaining.append(item)
             else:
                 remaining.append(item)
 
@@ -66,48 +69,48 @@ class PeepholePass(AbsPipeLinePass, IRTransformer):
             raise ValueError("Root node cannot be unrolled into a list")
         return cast(RootNode, res or ir)
 
-    def visit_GenericInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
-        return strip_internal_annotations(node)
+    def visit_GenericInst(self, inst: Instruction) -> Optional[Instruction]:
+        return strip_internal_annotations(inst)
 
-    def visit_RegWriteInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
-        return strip_internal_annotations(node)
+    def visit_RegWriteInst(self, inst: Instruction) -> Optional[Instruction]:
+        return strip_internal_annotations(inst)
         
-    def visit_PortWriteInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
-        return strip_internal_annotations(node)
+    def visit_PortWriteInst(self, inst: Instruction) -> Optional[Instruction]:
+        return strip_internal_annotations(inst)
 
-    def visit_TimeInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
-        return strip_internal_annotations(node)
+    def visit_TimeInst(self, inst: Instruction) -> Optional[Instruction]:
+        return strip_internal_annotations(inst)
 
-    def visit_LabelInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
-        return strip_internal_annotations(node)
+    def visit_LabelInst(self, inst: Instruction) -> Optional[Instruction]:
+        return strip_internal_annotations(inst)
 
-    def visit_TestInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
-        return strip_internal_annotations(node)
+    def visit_TestInst(self, inst: Instruction) -> Optional[Instruction]:
+        return strip_internal_annotations(inst)
         
-    def visit_JumpInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
-        return strip_internal_annotations(node)
+    def visit_JumpInst(self, inst: Instruction) -> Optional[Instruction]:
+        return strip_internal_annotations(inst)
         
-    def visit_NopInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
-        return strip_internal_annotations(node)
+    def visit_NopInst(self, inst: Instruction) -> Optional[Instruction]:
+        return strip_internal_annotations(inst)
         
-    def visit_DmemReadInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
-        return strip_internal_annotations(node)
+    def visit_DmemReadInst(self, inst: Instruction) -> Optional[Instruction]:
+        return strip_internal_annotations(inst)
         
-    def visit_DmemWriteInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
-        return strip_internal_annotations(node)
+    def visit_DmemWriteInst(self, inst: Instruction) -> Optional[Instruction]:
+        return strip_internal_annotations(inst)
         
-    def visit_DportWriteInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
-        return strip_internal_annotations(node)
+    def visit_DportWriteInst(self, inst: Instruction) -> Optional[Instruction]:
+        return strip_internal_annotations(inst)
         
-    def visit_WaitInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
-        return strip_internal_annotations(node)
+    def visit_WaitInst(self, inst: Instruction) -> Optional[Instruction]:
+        return strip_internal_annotations(inst)
 
 
 def _block_reads_writes(block: BlockNode) -> Tuple[Set[str], Set[str]]:
     reads: set[str] = set()
     writes: set[str] = set()
     for item in block.insts:
-        if isinstance(item, Instruction):
-            reads.update(instruction_reads(item))
-            writes.update(instruction_writes(item))
+        if isinstance(item, InstNode):
+            reads.update(instruction_reads(item.inst))
+            writes.update(instruction_writes(item.inst))
     return reads, writes

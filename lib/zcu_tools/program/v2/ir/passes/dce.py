@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..labels import iter_label_references
-from ..node import IRNode, RootNode
+from ..node import IRNode, RootNode, InstNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
 from ..traversal import walk_instructions
 
@@ -29,10 +29,11 @@ class LabelDCEPass(AbsPipeLinePass):
 
         # Keep only labels that are actually used (we now check all LabelInsts)
         new_insts = []
-        for inst in ir.insts:
-            if isinstance(inst, LabelInst) and inst.name not in used_labels:
-                continue
-            new_insts.append(inst)
+        for node in ir.insts:
+            if isinstance(node, InstNode) and isinstance(node.inst, LabelInst):
+                if node.inst.name not in used_labels:
+                    continue
+            new_insts.append(node)
 
         new_ir = RootNode(insts=new_insts)
         return new_ir
