@@ -40,8 +40,6 @@ class BlockNode(IRNode):
 class RootNode(BlockNode):
     """The root of the IR tree."""
 
-    labels: dict[str, str] = field(default_factory=dict)
-
 
 @dataclass
 class IRLoop(IRNode):

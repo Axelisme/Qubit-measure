@@ -15,10 +15,9 @@ class IRComplieMixin(QickProgramV2):
 
     def optimize_asm(self) -> None:
         insts: list[dict[str, Any]] = self.prog_list
-        labels: dict[str, str] = self.labels
 
         builder = IRBuilder()
-        ir = builder.build(insts, labels)
+        ir = builder.build(insts)
 
         config = PipeLineConfig()
         pipeline = make_default_pipeline(config)
@@ -35,3 +34,4 @@ class IRComplieMixin(QickProgramV2):
 
     def _add_label(self, label: str) -> None:
         super()._add_label(label)
+        self.prog_list.append({"LABEL": label})

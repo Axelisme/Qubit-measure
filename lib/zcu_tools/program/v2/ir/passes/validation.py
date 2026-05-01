@@ -60,8 +60,12 @@ class LabelReferenceValidationPass(AbsPipeLinePass):
         if not isinstance(ir, RootNode):
             return ir
 
-        # defined_labels from ir.labels
-        defined_labels = set(ir.labels)
+        from ..instructions import LabelInst
+
+        defined_labels = set()
+        for inst in walk_instructions(ir):
+            if isinstance(inst, LabelInst):
+                defined_labels.add(inst.name)
         
         # Add labels from structural node attributes
         for node in walk_nodes(ir):
@@ -73,9 +77,7 @@ class LabelReferenceValidationPass(AbsPipeLinePass):
         for inst in walk_instructions(ir):
             for label in iter_label_references(inst):
                 if label not in defined_labels:
-                    # Ignore pseudo-labels like HERE
-                    if label != "HERE":
-                        missing.add(label)
+                    missing.add(label)
 
         if missing:
             labels = ", ".join(sorted(missing))

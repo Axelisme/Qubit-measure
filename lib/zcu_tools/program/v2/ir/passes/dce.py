@@ -18,6 +18,7 @@ class LabelDCEPass(AbsPipeLinePass):
 
         from ..node import IRLoop
         from ..traversal import walk_nodes
+        from ..instructions import LabelInst
 
         used_labels: set[str] = set()
         for inst in walk_instructions(ir):
@@ -29,10 +30,12 @@ class LabelDCEPass(AbsPipeLinePass):
                 used_labels.add(node.start_label or f"{node.name}_start")
                 used_labels.add(node.end_label or f"{node.name}_end")
 
-        # Keep only labels that are actually used
-        new_labels = {
-            name: addr for name, addr in ir.labels.items() if name in used_labels
-        }
+        # Keep only labels that are actually used (we now check all LabelInsts)
+        new_insts = []
+        for inst in ir.insts:
+            if isinstance(inst, LabelInst) and inst.name not in used_labels:
+                continue
+            new_insts.append(inst)
 
-        new_ir = RootNode(insts=ir.insts, labels=new_labels)
+        new_ir = RootNode(insts=new_insts)
         return new_ir

@@ -28,10 +28,9 @@ def test_structural_loop_roundtrip():
         {"LABEL": "loop1_end"},
         {"CMD": "__META__", "TYPE": "LOOP_END", "NAME": "loop1"},
     ]
-    labels = {"loop1_start": "0", "loop1_end": "100"}
     
     builder = IRBuilder()
-    root = builder.build(prog_list, labels)
+    root = builder.build(prog_list)
     
     # Verify IR structure
     assert len(root.insts) == 1
@@ -66,7 +65,7 @@ def test_pipeline_roundtrip_with_normalization():
     # Use a large trip count to avoid automatic unrolling (default max is 16)
     loop = IRLoop(name="r", counter_reg="c", n=100)
     
-    root = RootNode(insts=[loop], labels={"start": "0", "end": "100"})
+    root = RootNode(insts=[loop], )
     
     config = PipeLineConfig()
     pipeline = make_default_pipeline(config)

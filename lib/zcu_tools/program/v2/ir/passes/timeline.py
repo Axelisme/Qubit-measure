@@ -76,7 +76,6 @@ class TimedInstructionMergePass(AbsPipeLinePass, IRTransformer):
                         c_op="inc_ref",
                         lit=f"#{pending_value}",
                         line=pending_inst.line,
-                        p_addr=pending_inst.p_addr,
                     )
                 )
             pending_inst = None
@@ -108,6 +107,12 @@ class TimedInstructionMergePass(AbsPipeLinePass, IRTransformer):
         flush_pending()
         node.insts = rewritten
         return node
+        
+    def visit_RootNode(self, node: BlockNode) -> Optional[IRNode]:
+        return self.visit_BlockNode(node)
+
+    def visit_IRBranchCase(self, node: BlockNode) -> Optional[IRNode]:
+        return self.visit_BlockNode(node)
 
 
 def _positive_time_increment(inst: Instruction) -> Optional[int]:

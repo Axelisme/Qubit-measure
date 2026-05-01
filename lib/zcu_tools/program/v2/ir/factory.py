@@ -165,4 +165,3 @@ def parse_branch_case(stream: InstructionStream) -> IRBranchCase:
         )
 
     return case_node
-

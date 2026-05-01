@@ -32,12 +32,11 @@ class TestTimeInstruction:
     """Tests for TimeInst (TIME opcode)."""
 
     def test_construction_with_all_fields(self):
-        inst = TimeInst(c_op="inc_ref", lit="#10", r1="r0", line=5, p_addr=3)
+        inst = TimeInst(c_op="inc_ref", lit="#10", r1="r0", line=5)
         assert inst.c_op == "inc_ref"
         assert inst.lit == "#10"
         assert inst.r1 == "r0"
         assert inst.line == 5
-        assert inst.p_addr == 3
 
     def test_construction_with_defaults(self):
         inst = TimeInst()
@@ -45,7 +44,6 @@ class TestTimeInstruction:
         assert inst.lit is None
         assert inst.r1 is None
         assert inst.line is None
-        assert inst.p_addr is None
 
     def test_dispatch_time_to_timeinst(self):
         d = {"CMD": "TIME", "C_OP": "inc_ref", "LIT": "#5", "R1": "r1"}
@@ -83,11 +81,10 @@ class TestTestInstruction:
     """Tests for TestInst (TEST opcode)."""
 
     def test_construction_with_all_fields(self):
-        inst = TestInst(op="r1-r2", uf="1", line=7, p_addr=5)
+        inst = TestInst(op="r1-r2", uf="1", line=7)
         assert inst.op == "r1-r2"
         assert inst.uf == "1"
         assert inst.line == 7
-        assert inst.p_addr == 5
 
     def test_dispatch_test_to_testinst(self):
         d = {"CMD": "TEST", "OP": "r1==r2", "UF": "1"}
@@ -118,13 +115,13 @@ class TestJumpInstruction:
     """Tests for JumpInst (JUMP opcode)."""
 
     def test_construction_unconditional(self):
-        inst = JumpInst(label="loop", line=10, p_addr=8)
+        inst = JumpInst(label="loop", line=10)
         assert inst.label == "loop"
         assert inst.if_cond is None
         assert inst.addr is None
 
     def test_construction_conditional(self):
-        inst = JumpInst(label="exit", if_cond="eq", line=12, p_addr=9)
+        inst = JumpInst(label="exit", if_cond="eq", line=12)
         assert inst.label == "exit"
         assert inst.if_cond == "eq"
 

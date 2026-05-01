@@ -98,8 +98,10 @@ def test_branch_case_normalize_sorts_case_metadata_only():
 
 def test_label_reference_validation_allows_defined_labels():
     ir = RootNode(
-        insts=[JumpInst(label="target")],
-        labels={"target": "addr"},
+        insts=[
+            JumpInst(label="target"),
+            LabelInst(name="target")
+        ]
     )
 
     LabelReferenceValidationPass().process(ir, PipeLineContext())
@@ -107,8 +109,7 @@ def test_label_reference_validation_allows_defined_labels():
 
 def test_label_reference_validation_rejects_undefined_labels():
     ir = RootNode(
-        insts=[JumpInst(label="missing")],
-        labels={"target": "addr"},
+        insts=[JumpInst(label="missing")]
     )
 
     with pytest.raises(ValueError, match="Undefined label reference"):

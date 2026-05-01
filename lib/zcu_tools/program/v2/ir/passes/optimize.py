@@ -65,7 +65,40 @@ class PeepholePass(AbsPipeLinePass, IRTransformer):
             raise ValueError("Root node cannot be unrolled into a list")
         return res or ir
 
-    def visit_Instruction(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
+    def visit_GenericInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
+        return strip_internal_annotations(node)
+
+    def visit_RegWriteInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
+        return strip_internal_annotations(node)
+        
+    def visit_PortWriteInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
+        return strip_internal_annotations(node)
+
+    def visit_TimeInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
+        return strip_internal_annotations(node)
+
+    def visit_LabelInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
+        return strip_internal_annotations(node)
+
+    def visit_TestInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
+        return strip_internal_annotations(node)
+        
+    def visit_JumpInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
+        return strip_internal_annotations(node)
+        
+    def visit_NopInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
+        return strip_internal_annotations(node)
+        
+    def visit_DmemReadInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
+        return strip_internal_annotations(node)
+        
+    def visit_DmemWriteInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
+        return strip_internal_annotations(node)
+        
+    def visit_DportWriteInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
+        return strip_internal_annotations(node)
+        
+    def visit_WaitInst(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
         return strip_internal_annotations(node)
 
 

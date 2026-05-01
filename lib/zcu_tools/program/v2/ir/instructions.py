@@ -13,7 +13,6 @@ class Instruction(IRNode):
 
     # Optional metadata from QICK assembler
     line: Optional[int] = None
-    p_addr: Optional[int] = None
     annotations: dict[str, Any] = field(default_factory=dict)
 
     def emit(self, prog_list: list[dict[str, Any]]) -> None:
@@ -48,7 +47,6 @@ class Instruction(IRNode):
                 name=clean_d["LABEL"],
                 args=args,
                 line=clean_d.get("LINE"),
-                p_addr=clean_d.get("P_ADDR"),
                 annotations=annotations,
             )
 
@@ -61,7 +59,6 @@ class Instruction(IRNode):
                 type=clean_d["TYPE"],
                 name=clean_d["NAME"],
                 line=clean_d.get("LINE"),
-                p_addr=clean_d.get("P_ADDR"),
                 args=clean_d.get("ARGS", {}),
                 annotations=annotations,
             )
@@ -73,7 +70,6 @@ class Instruction(IRNode):
                 lit=clean_d.get("LIT"),
                 r1=clean_d.get("R1"),
                 line=clean_d.get("LINE"),
-                p_addr=clean_d.get("P_ADDR"),
                 annotations=annotations,
             )
         elif cmd == "TEST":
@@ -81,7 +77,6 @@ class Instruction(IRNode):
                 op=clean_d.get("OP", ""),
                 uf=clean_d.get("UF"),
                 line=clean_d.get("LINE"),
-                p_addr=clean_d.get("P_ADDR"),
                 annotations=annotations,
             )
         elif cmd == "JUMP":
@@ -90,7 +85,6 @@ class Instruction(IRNode):
                 if_cond=clean_d.get("IF"),
                 addr=clean_d.get("ADDR"),
                 line=clean_d.get("LINE"),
-                p_addr=clean_d.get("P_ADDR"),
                 annotations=annotations,
             )
         elif cmd == "REG_WR":
@@ -104,7 +98,6 @@ class Instruction(IRNode):
                 src=clean_d.get("SRC", ""),
                 extra_args=extra_args,
                 line=clean_d.get("LINE"),
-                p_addr=clean_d.get("P_ADDR"),
                 annotations=annotations,
             )
         elif cmd == "WPORT_WR":
@@ -118,7 +111,6 @@ class Instruction(IRNode):
                 time=clean_d.get("TIME", ""),
                 extra_args=extra_args,
                 line=clean_d.get("LINE"),
-                p_addr=clean_d.get("P_ADDR"),
                 annotations=annotations,
             )
         elif cmd == "NOP":
@@ -128,7 +120,6 @@ class Instruction(IRNode):
             return NopInst(
                 extra_args=extra_args,
                 line=clean_d.get("LINE"),
-                p_addr=clean_d.get("P_ADDR"),
                 annotations=annotations,
             )
         elif cmd == "DMEM_RD":
@@ -142,7 +133,6 @@ class Instruction(IRNode):
                 addr=clean_d.get("ADDR", ""),
                 extra_args=extra_args,
                 line=clean_d.get("LINE"),
-                p_addr=clean_d.get("P_ADDR"),
                 annotations=annotations,
             )
         elif cmd == "DMEM_WR":
@@ -156,7 +146,6 @@ class Instruction(IRNode):
                 addr=clean_d.get("ADDR", ""),
                 extra_args=extra_args,
                 line=clean_d.get("LINE"),
-                p_addr=clean_d.get("P_ADDR"),
                 annotations=annotations,
             )
         elif cmd == "DPORT_WR":
@@ -170,7 +159,6 @@ class Instruction(IRNode):
                 data=clean_d.get("DATA", ""),
                 extra_args=extra_args,
                 line=clean_d.get("LINE"),
-                p_addr=clean_d.get("P_ADDR"),
                 annotations=annotations,
             )
         elif cmd == "WAIT":
@@ -180,7 +168,6 @@ class Instruction(IRNode):
             return WaitInst(
                 extra_args=extra_args,
                 line=clean_d.get("LINE"),
-                p_addr=clean_d.get("P_ADDR"),
                 annotations=annotations,
             )
 
@@ -190,7 +177,6 @@ class Instruction(IRNode):
             cmd=cmd,
             args=args,
             line=clean_d.get("LINE"),
-            p_addr=clean_d.get("P_ADDR"),
             annotations=annotations,
         )
 
@@ -240,8 +226,6 @@ class GenericInst(Instruction):
         d.update(self.annotations)
         if self.line is not None:
             d["LINE"] = self.line
-        if self.p_addr is not None:
-            d["P_ADDR"] = self.p_addr
         return d
 
 
@@ -256,8 +240,6 @@ class LabelInst(Instruction):
         d.update(self.annotations)
         if self.line is not None:
             d["LINE"] = self.line
-        if self.p_addr is not None:
-            d["P_ADDR"] = self.p_addr
         return d
 
 
@@ -275,7 +257,6 @@ class MetaInst(Instruction):
             "TYPE": self.type,
             "NAME": self.name,
             "LINE": self.line,
-            "P_ADDR": self.p_addr,
             "ARGS": self.args,
         }
         d.update(self.annotations)
@@ -308,8 +289,6 @@ class TimeInst(Instruction):
         d.update(self.annotations)
         if self.line is not None:
             d["LINE"] = self.line
-        if self.p_addr is not None:
-            d["P_ADDR"] = self.p_addr
         return d
 
 
@@ -332,8 +311,6 @@ class TestInst(Instruction):
         d.update(self.annotations)
         if self.line is not None:
             d["LINE"] = self.line
-        if self.p_addr is not None:
-            d["P_ADDR"] = self.p_addr
         return d
 
 
@@ -362,8 +339,6 @@ class JumpInst(Instruction):
         d.update(self.annotations)
         if self.line is not None:
             d["LINE"] = self.line
-        if self.p_addr is not None:
-            d["P_ADDR"] = self.p_addr
         return d
 
 
@@ -404,8 +379,6 @@ class RegWriteInst(Instruction):
         d.update(self.annotations)
         if self.line is not None:
             d["LINE"] = self.line
-        if self.p_addr is not None:
-            d["P_ADDR"] = self.p_addr
         return d
 
 
@@ -435,8 +408,6 @@ class PortWriteInst(Instruction):
         d.update(self.annotations)
         if self.line is not None:
             d["LINE"] = self.line
-        if self.p_addr is not None:
-            d["P_ADDR"] = self.p_addr
         return d
 
 
@@ -452,8 +423,6 @@ class NopInst(Instruction):
         d.update(self.annotations)
         if self.line is not None:
             d["LINE"] = self.line
-        if self.p_addr is not None:
-            d["P_ADDR"] = self.p_addr
         return d
 
 
@@ -485,8 +454,6 @@ class DmemReadInst(Instruction):
         d.update(self.annotations)
         if self.line is not None:
             d["LINE"] = self.line
-        if self.p_addr is not None:
-            d["P_ADDR"] = self.p_addr
         return d
 
 
@@ -513,8 +480,6 @@ class DmemWriteInst(Instruction):
         d.update(self.annotations)
         if self.line is not None:
             d["LINE"] = self.line
-        if self.p_addr is not None:
-            d["P_ADDR"] = self.p_addr
         return d
 
 
@@ -547,8 +512,6 @@ class DportWriteInst(Instruction):
         d.update(self.annotations)
         if self.line is not None:
             d["LINE"] = self.line
-        if self.p_addr is not None:
-            d["P_ADDR"] = self.p_addr
         return d
 
 
@@ -564,6 +527,4 @@ class WaitInst(Instruction):
         d.update(self.annotations)
         if self.line is not None:
             d["LINE"] = self.line
-        if self.p_addr is not None:
-            d["P_ADDR"] = self.p_addr
         return d
