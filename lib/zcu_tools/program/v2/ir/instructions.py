@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
+
+from .node import IRNode
 
 
 @dataclass(frozen=True)
-class Instruction:
+class Instruction(IRNode):
     """Base class for all IR instructions."""
 
     # Optional metadata from QICK assembler
-    line: int | None = None
-    p_addr: int | None = None
+    line: Optional[int] = None
+    p_addr: Optional[int] = None
+
+    def emit(self, prog_list: list[dict[str, Any]]) -> None:
+        prog_list.append(self.to_dict())
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "Instruction":
@@ -99,3 +104,6 @@ class MetaInst(Instruction):
             "P_ADDR": self.p_addr,
             "ARGS": self.args,
         }
+
+    def emit(self, prog_list: list[dict[str, Any]]) -> None:
+        pass

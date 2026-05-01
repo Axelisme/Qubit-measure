@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .factory import BuildContext, build_from_instruction, flatten_ir_node
+from .factory import BuildContext, build_from_instruction
 from .instructions import Instruction
 from .node import IRNode, RootNode
 
@@ -28,5 +28,5 @@ class IRBuilder:
             raise ValueError("IR node passed to unbuild must be a RootNode")
 
         prog_list: list[dict] = []
-        flatten_ir_node(ir, prog_list)
+        ir.emit(prog_list)
         return prog_list, ir.labels

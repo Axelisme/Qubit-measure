@@ -8,9 +8,9 @@ from typing_extensions import Generator, Optional, Union
 from .debug import PrintTimeStamp
 from .delay import DelayRegAuto
 from .loop import CloseInnerLoop, OpenInnerLoop
+from .meta import MetaMacro
 from .pluse_reg import PulseByReg
 from .write_reg import WriteRegOp
-from .meta import MetaMacro
 
 
 class AdditionalMacroMixin(AsmV2):

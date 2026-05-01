@@ -1,52 +1,36 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Union
+from typing import List, Optional, Union
 
-from ..instructions import Instruction
-from ..node import BlockNode, IRLoop, IRNode
+from ..node import IRLoop, IRNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
+from ..traversal import IRTransformer
 
 
-class ConstantLoopUnrollPass(AbsPipeLinePass):
+class ConstantLoopUnrollPass(AbsPipeLinePass, IRTransformer):
     """Unroll loops with an explicit small constant trip count."""
 
     def __init__(self, max_trip_count: int = 16):
         self.max_trip_count = max_trip_count
 
     def process(self, ir: IRNode, ctx: PipeLineContext) -> IRNode:
-        self._rewrite_node(ir)
-        return ir
+        res = self.visit(ir)
+        if isinstance(res, list):
+            raise ValueError("Root node cannot be unrolled into a list")
+        return res or ir
 
-    def _rewrite_node(self, node: IRNode) -> None:
-        if isinstance(node, IRLoop):
-            self._rewrite_node(node.initial)
-            self._rewrite_node(node.stop_check)
-            self._rewrite_node(node.body)
-            self._rewrite_node(node.update)
-            self._rewrite_node(node.jump_back)
-            return
+    def visit_IRLoop(self, node: IRLoop) -> Union[IRNode, List[IRNode], None]:
+        # First recurse into inner structures
+        self.generic_visit(node)
 
-        if not isinstance(node, BlockNode):
-            return
+        # Try unrolling this loop
+        unrolled = self._try_unroll(node)
+        if unrolled is not None:
+            return unrolled
+        return node
 
-        rewritten = []
-        for item in node.insts:
-            if isinstance(item, IRLoop):
-                unrolled = self._try_unroll(item)
-                if unrolled is None:
-                    self._rewrite_node(item)
-                    rewritten.append(item)
-                else:
-                    rewritten.extend(unrolled)
-            elif isinstance(item, IRNode):
-                self._rewrite_node(item)
-                rewritten.append(item)
-            else:
-                rewritten.append(item)
-        node.insts = rewritten
-
-    def _try_unroll(self, loop: IRLoop) -> list[Union[Instruction, IRNode]] | None:
+    def _try_unroll(self, loop: IRLoop) -> Optional[List[IRNode]]:
         trip_count = loop.trip_count
         if trip_count is None:
             return None
@@ -55,7 +39,7 @@ class ConstantLoopUnrollPass(AbsPipeLinePass):
         if trip_count > self.max_trip_count:
             return None
 
-        out: list[Union[Instruction, IRNode]] = []
+        out: list[IRNode] = []
         out.extend(deepcopy(loop.initial.insts))
         for _ in range(trip_count):
             out.extend(deepcopy(loop.body.insts))

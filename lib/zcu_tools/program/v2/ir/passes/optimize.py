@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing_extensions import Optional, Set, Tuple, Union
+
 from ..analysis import (
     instruction_reads,
     instruction_writes,
@@ -9,34 +11,31 @@ from ..analysis import (
 from ..instructions import Instruction
 from ..node import BlockNode, IRLoop, IRNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
+from ..traversal import IRTransformer
 
 
-class LoopInvariantHoistPass(AbsPipeLinePass):
+class LoopInvariantHoistPass(AbsPipeLinePass, IRTransformer):
     """Hoist explicitly marked invariant instructions into the loop initial block."""
 
     def process(self, ir: IRNode, ctx: PipeLineContext) -> IRNode:
-        self._rewrite_node(ir)
-        return ir
+        res = self.visit(ir)
+        if isinstance(res, list):
+            raise ValueError("Root node cannot be unrolled into a list")
+        return res or ir
 
-    def _rewrite_node(self, node: IRNode) -> None:
-        if isinstance(node, IRLoop):
-            self._rewrite_node(node.initial)
-            self._rewrite_node(node.stop_check)
-            self._rewrite_node(node.body)
-            self._rewrite_node(node.update)
-            self._rewrite_node(node.jump_back)
-            self._hoist_loop(node)
-            return
-
-        if isinstance(node, BlockNode):
-            for item in node.insts:
-                if isinstance(item, IRNode):
-                    self._rewrite_node(item)
+    def visit_IRLoop(self, node: IRLoop) -> Optional[IRNode]:
+        self.generic_visit(node)
+        self._hoist_loop(node)
+        return node
 
     def _hoist_loop(self, loop: IRLoop) -> None:
-        loop_control_writes = _block_writes(loop.initial) | _block_writes(loop.update)
-        loop_control_reads = _block_reads(loop.stop_check) | _block_reads(loop.update)
-        blocked_regs = loop_control_writes | loop_control_reads
+        loop_control_writes = _block_reads_writes(loop.initial)[1].union(
+            _block_reads_writes(loop.update)[1]
+        )
+        loop_control_reads = _block_reads_writes(loop.stop_check)[0].union(
+            _block_reads_writes(loop.update)[0]
+        )
+        blocked_regs = loop_control_writes.union(loop_control_reads)
 
         hoisted: list[Instruction] = []
         remaining = []
@@ -56,48 +55,24 @@ class LoopInvariantHoistPass(AbsPipeLinePass):
             loop.body.insts = remaining
 
 
-class PeepholePass(AbsPipeLinePass):
+class PeepholePass(AbsPipeLinePass, IRTransformer):
     """Apply local cleanups that do not remove executable no-op instructions."""
 
     def process(self, ir: IRNode, ctx: PipeLineContext) -> IRNode:
-        self._rewrite_node(ir)
-        return ir
+        res = self.visit(ir)
+        if isinstance(res, list):
+            raise ValueError("Root node cannot be unrolled into a list")
+        return res or ir
 
-    def _rewrite_node(self, node: IRNode) -> None:
-        if isinstance(node, IRLoop):
-            self._rewrite_node(node.initial)
-            self._rewrite_node(node.stop_check)
-            self._rewrite_node(node.body)
-            self._rewrite_node(node.update)
-            self._rewrite_node(node.jump_back)
-            return
-
-        if not isinstance(node, BlockNode):
-            return
-
-        rewritten = []
-        for item in node.insts:
-            if isinstance(item, Instruction):
-                rewritten.append(strip_internal_annotations(item))
-            elif isinstance(item, IRNode):
-                self._rewrite_node(item)
-                rewritten.append(item)
-            else:
-                rewritten.append(item)
-        node.insts = rewritten
+    def visit_Instruction(self, node: Instruction) -> Union[IRNode, list[IRNode], None]:
+        return strip_internal_annotations(node)
 
 
-def _block_reads(block: BlockNode) -> set[str]:
+def _block_reads_writes(block: BlockNode) -> Tuple[Set[str], Set[str]]:
     reads: set[str] = set()
-    for item in block.insts:
-        if isinstance(item, Instruction):
-            reads.update(instruction_reads(item))
-    return reads
-
-
-def _block_writes(block: BlockNode) -> set[str]:
     writes: set[str] = set()
     for item in block.insts:
         if isinstance(item, Instruction):
+            reads.update(instruction_reads(item))
             writes.update(instruction_writes(item))
-    return writes
+    return reads, writes

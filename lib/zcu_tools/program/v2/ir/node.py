@@ -1,26 +1,38 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Union
-
-from .instructions import Instruction
+from typing_extensions import Any, Iterator, Optional
 
 
-@dataclass
 class IRNode:
     """Base class for all IR nodes."""
 
-    pass
+    def children(self) -> Iterator[IRNode]:
+        """Yield all immediate child nodes."""
+        return iter([])
+
+    def emit(self, prog_list: list[dict[str, Any]]) -> None:
+        """Flatten this node into a list of QICK instructions."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not implement emit()"
+        )
 
 
 @dataclass
 class BlockNode(IRNode):
-    """A sequence of instructions and other nodes."""
+    """A sequence of IR nodes."""
 
-    insts: list[Union[Instruction, "IRNode"]] = field(default_factory=list)
+    insts: list[IRNode] = field(default_factory=list)
 
-    def append(self, item: Union[Instruction, "IRNode"]) -> None:
+    def append(self, item: IRNode) -> None:
         self.insts.append(item)
+
+    def children(self) -> Iterator[IRNode]:
+        yield from self.insts
+
+    def emit(self, prog_list: list[dict[str, Any]]) -> None:
+        for item in self.insts:
+            item.emit(prog_list)
 
 
 @dataclass
@@ -35,12 +47,39 @@ class IRLoop(IRNode):
     """A loop node separated into sections."""
 
     name: str = ""
-    trip_count: int | None = None
+    trip_count: Optional[int] = None
+
+    # Structural Labels (Attributes)
+    start_label: Optional[str] = None
+    end_label: Optional[str] = None
+
     initial: BlockNode = field(default_factory=BlockNode)
-    update: BlockNode = field(default_factory=BlockNode)
     stop_check: BlockNode = field(default_factory=BlockNode)
     body: BlockNode = field(default_factory=BlockNode)
+    update: BlockNode = field(default_factory=BlockNode)
     jump_back: BlockNode = field(default_factory=BlockNode)
+
+    def children(self) -> Iterator[IRNode]:
+        yield self.initial
+        yield self.stop_check
+        yield self.body
+        yield self.update
+        yield self.jump_back
+
+    def emit(self, prog_list: list[dict[str, Any]]) -> None:
+        from .instructions import LabelInst
+
+        if self.start_label:
+            LabelInst(name=self.start_label).emit(prog_list)
+
+        self.initial.emit(prog_list)
+        self.stop_check.emit(prog_list)
+        self.body.emit(prog_list)
+        self.update.emit(prog_list)
+        self.jump_back.emit(prog_list)
+
+        if self.end_label:
+            LabelInst(name=self.end_label).emit(prog_list)
 
 
 @dataclass
@@ -51,8 +90,21 @@ class IRBranchCase(BlockNode):
 
 
 @dataclass
-class IRBranch(BlockNode):
+class IRBranch(IRNode):
     """A branch node containing multiple cases."""
 
     name: str = ""
+    # dispatch contains the binary tree of cond_jump and labels
+    dispatch: BlockNode = field(default_factory=BlockNode)
     cases: list[IRBranchCase] = field(default_factory=list)
+
+    def children(self) -> Iterator[IRNode]:
+        yield self.dispatch
+        yield from self.cases
+
+    def emit(self, prog_list: list[dict[str, Any]]) -> None:
+        self.dispatch.emit(prog_list)
+        # Note: In current implementation, cases are emitted as they are referenced
+        # within the dispatch block's ASM. If they are BlockNodes inside dispatch,
+        # dispatch.emit() will already cover them.
+        # But for structural IR, they should be logically isolated.

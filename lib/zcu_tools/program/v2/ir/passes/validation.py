@@ -54,10 +54,9 @@ class IRStructureValidationPass(AbsPipeLinePass):
                 raise ValueError(
                     f"IRBranch '{branch.name}' case requires a non-empty name"
                 )
-            if case not in branch.insts:
-                raise ValueError(
-                    f"IRBranch '{branch.name}' case is not present in branch body"
-                )
+            # Logic: In structural IR, cases are logically part of the branch.
+            # We don't need to check if they are in 'insts' because IRBranch 
+            # no longer has an 'insts' list (except inside its dispatch block).
 
 
 class LabelReferenceValidationPass(AbsPipeLinePass):
@@ -67,12 +66,22 @@ class LabelReferenceValidationPass(AbsPipeLinePass):
         if not isinstance(ir, RootNode):
             return ir
 
+        # defined_labels from ir.labels
         defined_labels = set(ir.labels)
+        
+        # Add labels from structural node attributes
+        for node in walk_nodes(ir):
+            if isinstance(node, IRLoop):
+                if node.start_label: defined_labels.add(node.start_label)
+                if node.end_label: defined_labels.add(node.end_label)
+
         missing: set[str] = set()
         for inst in walk_instructions(ir):
             for label in iter_label_references(inst):
                 if label not in defined_labels:
-                    missing.add(label)
+                    # Ignore pseudo-labels like HERE
+                    if label != "HERE":
+                        missing.add(label)
 
         if missing:
             labels = ", ".join(sorted(missing))
