@@ -1,15 +1,19 @@
 import pytest
 from zcu_tools.program.v2.ir.builder import IRBuilder
-from zcu_tools.program.v2.ir.instructions import GenericInst, Instruction
+from zcu_tools.program.v2.ir.instructions import (
+    GenericInst,
+    Instruction,
+    JumpInst,
+)
 from zcu_tools.program.v2.ir.node import IRBranch, IRBranchCase, IRLoop, BlockNode
 
 
-def test_instruction_parses_jump_label_as_generic_instruction():
+def test_instruction_parses_jump_label_to_jumpinst():
     inst = Instruction.from_dict({"CMD": "JUMP", "LABEL": "target"})
 
-    assert isinstance(inst, GenericInst)
-    assert inst.cmd == "JUMP"
-    assert inst.args == {"LABEL": "target"}
+    assert isinstance(inst, JumpInst)
+    assert inst.label == "target"
+    assert inst.if_cond is None
 
 
 def test_branch_roundtrip_preserves_cases():
