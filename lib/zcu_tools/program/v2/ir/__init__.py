@@ -1,3 +1,3 @@
-from .base import IRComplieMixin
+from .base import IRCompileMixin
 
-__all__ = ["IRComplieMixin"]
+__all__ = ["IRCompileMixin"]
