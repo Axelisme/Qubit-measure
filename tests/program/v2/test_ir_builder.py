@@ -3,7 +3,6 @@ from zcu_tools.program.v2.ir.instructions import (
     Instruction,
     JumpInst,
     LabelInst,
-    MetaInst,
     RegWriteInst,
 )
 from zcu_tools.program.v2.ir.linker import IRLinker
@@ -33,7 +32,7 @@ def test_branch_roundtrip_preserves_cases():
     branch.emit(inst_list)
 
     # TODO: compare with expected instruction list instead of just checking the cases are present
-    raise ArithmeticError("\n".join(str(inst) for inst in inst_list))
+    raise AssertionError("\n" + "\n".join(str(inst) for inst in inst_list) + "\n")
 
 
 def test_unlink_inserts_labels_and_strips_p_addr():

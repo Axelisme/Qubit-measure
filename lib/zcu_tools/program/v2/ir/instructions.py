@@ -311,7 +311,7 @@ class Instruction:
         raise NotImplementedError
 
     def __str__(self) -> str:
-        return f"{self.__class__.__name__}({[f'{k}={v}' for k, v in self.to_dict().items() if v]})"
+        return f"{self.__class__.__name__}({', '.join([f'{k}={v}' for k, v in self.to_dict().items() if v and k not in ('CMD')])})"
 
 
 @dataclass(frozen=True)
