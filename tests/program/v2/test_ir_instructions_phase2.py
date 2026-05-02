@@ -258,7 +258,7 @@ class TestRegWriteInstruction:
     def test_regwr_immutable(self):
         inst = RegWriteInst(dst="s1", src="imm")
         with pytest.raises(Exception):
-            inst = replace(inst, dst="s2")  # type: ignore
+            inst.dst = "s2"  # type: ignore
 
 
 class TestPortWriteInstruction:
@@ -317,7 +317,7 @@ class TestPortWriteInstruction:
     def test_wport_wr_immutable(self):
         inst = PortWriteInst(dst="0", time="t0")
         with pytest.raises(Exception):
-            inst = replace(inst, dst="1")  # type: ignore
+            inst.dst = "1"  # type: ignore
 
 
 class TestGenericInstruction:
