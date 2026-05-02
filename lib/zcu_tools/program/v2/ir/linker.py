@@ -1,59 +1,108 @@
 from __future__ import annotations
 
 from collections import defaultdict
+
 from typing_extensions import Any
 
-from .instructions import Instruction, LabelInst
+from .instructions import Instruction, LabelInst, MetaInst
 
 
 class IRLinker:
     """Responsible for flattening the IR tree, assigning physical addresses, and resolving labels."""
 
-    def link(self, inst_list: list[Instruction]) -> tuple[list[dict], dict[str, str]]:
+    def link(
+        self, inst_list: list[Instruction]
+    ) -> tuple[list[dict], dict[str, str], list[dict[str, Any]]]:
         opt_prog_list: list[dict] = []
         opt_labels: dict[str, str] = {}
+        opt_meta_infos: list[dict[str, Any]] = []
 
         p_addr = 0
         for inst in inst_list:
             if isinstance(inst, LabelInst):
-                # It's a standalone label marker
                 opt_labels[inst.name] = f"&{p_addr}"
+                opt_meta_infos.append(
+                    {
+                        "kind": "label",
+                        "name": inst.name,
+                        "p_addr": p_addr,
+                    }
+                )
+            elif isinstance(inst, MetaInst):
+                opt_meta_infos.append(
+                    {
+                        "kind": "meta",
+                        "type": inst.type,
+                        "name": inst.name,
+                        "info": inst.args,
+                        "p_addr": p_addr,
+                    }
+                )
             else:
-                # It's an executable instruction; assign fresh P_ADDR
                 d = inst.to_dict()
                 d["P_ADDR"] = p_addr
                 opt_prog_list.append(d)
                 p_addr += inst.addr_inc
 
-        return opt_prog_list, opt_labels
+        return opt_prog_list, opt_labels, opt_meta_infos
 
     def unlink(
-        self, prog_list: list[dict[str, Any]], labels: dict[str, Any]
+        self,
+        prog_list: list[dict[str, Any]],
+        labels: dict[str, Any],
+        meta_infos: list[dict[str, Any]],
     ) -> list[Instruction]:
-        """Reconstruct logical instruction sequence from QICK `prog_list + labels`.
-
-        Uses `P_ADDR` from the dictionaries and addresses from `labels` to
-        position instructions and labels correctly. Assumes prog_list comes from
-        QICK (all instructions have P_ADDR set).
-        """
-        # Parse labels into address → label_names mapping
-        labels_by_addr: dict[int, list[str]] = defaultdict(list)
-        for label_name, label_addr in labels.items():
-            p_addr = self._parse_label_addr(label_name, label_addr)
-            labels_by_addr[p_addr].append(label_name)
-
         logical_insts: list[Instruction] = []
 
-        # Single pass: insert labels at their addresses, then insert instructions
-        for d in prog_list:
+        # Parse fallback labels (labels added manually without calling _add_label)
+        labels_by_addr: dict[int, list[str]] = defaultdict(list)
+        tracked_labels = {m["name"] for m in meta_infos if m.get("kind") == "label"}
+
+        for label_name, label_addr in labels.items():
+            if label_name not in tracked_labels:
+                p_addr = self._parse_label_addr(label_name, label_addr)
+                labels_by_addr[p_addr].append(label_name)
+
+        # Group tracked markers by p_addr
+        markers_by_addr: dict[int, list[dict]] = defaultdict(list)
+        for m in meta_infos:
+            markers_by_addr[m["p_addr"]].append(m)
+
+        for i, d in enumerate(prog_list):
             p_addr = d["P_ADDR"]
-            # Insert all labels pointing to this address
+
+            # 1. Insert tracked markers from meta_infos for this index
+            for m in markers_by_addr.get(p_addr, []):
+                if m["kind"] == "label":
+                    logical_insts.append(LabelInst(name=m["name"]))
+                elif m["kind"] == "meta":
+                    logical_insts.append(
+                        MetaInst(type=m["type"], name=m["name"], args=m.get("info", {}))
+                    )
+            
+            # Remove from markers_by_addr so we don't process it again for trailing
+            if p_addr in markers_by_addr:
+                del markers_by_addr[p_addr]
+
+            # 2. Insert untracked fallback labels pointing to this P_ADDR
             for name in labels_by_addr.get(p_addr, []):
                 logical_insts.append(LabelInst(name=name))
-            # Insert the instruction itself
+
+            # 3. Insert the instruction itself
             logical_insts.append(Instruction.from_dict(d))
 
-        # Handle trailing labels (labels pointing beyond the last instruction)
+        # Handle trailing markers from meta_infos
+        # Any markers left in markers_by_addr are trailing
+        for p_addr, markers in sorted(markers_by_addr.items()):
+            for m in markers:
+                if m["kind"] == "label":
+                    logical_insts.append(LabelInst(name=m["name"]))
+                elif m["kind"] == "meta":
+                    logical_insts.append(
+                        MetaInst(type=m["type"], name=m["name"], args=m.get("info", {}))
+                    )
+
+        # Handle trailing fallback labels
         if prog_list:
             last_dict = prog_list[-1]
             last_inst = Instruction.from_dict(last_dict)

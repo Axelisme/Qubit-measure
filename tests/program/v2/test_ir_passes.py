@@ -14,11 +14,11 @@ from zcu_tools.program.v2.ir.instructions import (
 )
 from zcu_tools.program.v2.ir.node import (
     BlockNode,
+    InstNode,
     IRBranch,
     IRBranchCase,
     IRLoop,
     RootNode,
-    InstNode,
 )
 from zcu_tools.program.v2.ir.passes.branch import BranchCaseNormalizePass
 from zcu_tools.program.v2.ir.passes.loop import ConstantLoopUnrollPass

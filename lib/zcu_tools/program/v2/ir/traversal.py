@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from typing import List, Union
 
 from .instructions import Instruction
-from .node import BlockNode, IRNode, InstNode
+from .node import BlockNode, InstNode, IRNode
 
 
 class IRTransformer:

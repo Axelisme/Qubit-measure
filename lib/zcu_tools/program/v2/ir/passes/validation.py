@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ..instructions import JumpInst, MetaInst, TestInst
 from ..labels import iter_label_references
-from ..node import BlockNode, IRBranch, IRBranchCase, IRLoop, IRNode, RootNode, InstNode
+from ..node import BlockNode, InstNode, IRBranch, IRBranchCase, IRLoop, IRNode, RootNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
 from ..traversal import walk_instructions, walk_nodes
 

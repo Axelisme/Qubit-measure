@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import cast
+
 from typing_extensions import Optional, Set, Tuple, Union
 
 from ..analysis import (
@@ -10,7 +11,7 @@ from ..analysis import (
     strip_internal_annotations,
 )
 from ..instructions import Instruction
-from ..node import BlockNode, IRLoop, IRNode, RootNode, InstNode
+from ..node import BlockNode, InstNode, IRLoop, IRNode, RootNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
 from ..traversal import IRTransformer
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from .instructions import Instruction, LabelInst, MetaInst
-from .node import BlockNode, IRBranch, IRBranchCase, IRLoop, RootNode, InstNode
+from .node import BlockNode, InstNode, IRBranch, IRBranchCase, IRLoop, RootNode
 
 
 class InstructionStream:

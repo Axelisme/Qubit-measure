@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import List, Optional, Union, cast
 
-from ..node import IRLoop, IRNode, RootNode, InstNode
+from ..node import InstNode, IRLoop, IRNode, RootNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
 from ..traversal import IRTransformer
 

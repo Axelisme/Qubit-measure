@@ -13,9 +13,12 @@ class IRBuilder:
         self.linker = IRLinker()
 
     def build(
-        self, prog_list: list[dict[str, Any]], labels: dict[str, Any]
+        self,
+        prog_list: list[dict[str, Any]],
+        labels: dict[str, Any],
+        meta_infos: list[dict[str, Any]],
     ) -> RootNode:
-        inst_list = self.linker.unlink(prog_list, labels)
+        inst_list = self.linker.unlink(prog_list, labels, meta_infos)
 
         stream = InstructionStream(inst_list)
         root = parse_root(stream)
@@ -25,7 +28,9 @@ class IRBuilder:
 
         return root
 
-    def unbuild(self, ir: RootNode) -> tuple[list[dict], dict[str, str]]:
+    def unbuild(
+        self, ir: RootNode
+    ) -> tuple[list[dict], dict[str, str], list[dict[str, Any]]]:
         inst_list: list[Instruction] = []
         ir.emit(inst_list)
         return self.linker.link(inst_list)

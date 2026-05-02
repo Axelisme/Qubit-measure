@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..labels import iter_label_references
-from ..node import IRNode, RootNode, InstNode
+from ..node import InstNode, IRNode, RootNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
 from ..traversal import walk_instructions
 
@@ -13,9 +13,9 @@ class LabelDCEPass(AbsPipeLinePass):
     """
 
     def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:
+        from ..instructions import LabelInst
         from ..node import IRLoop
         from ..traversal import walk_nodes
-        from ..instructions import LabelInst
 
         used_labels: set[str] = set()
         for inst in walk_instructions(ir):

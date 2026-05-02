@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from typing import cast
+
 from typing_extensions import Optional
 
 from ..instructions import Instruction, TimeInst
-from ..node import BlockNode, IRNode, RootNode, InstNode
+from ..node import BlockNode, InstNode, IRNode, RootNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
 from ..traversal import IRTransformer
 
