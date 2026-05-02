@@ -27,8 +27,19 @@ class AdditionalMacroMixin(AsmV2):
         """REG_WR dst = lhs op rhs, resolving register names at expand time."""
         self.append_macro(WriteRegOp(dst=dst, lhs=lhs, op=op, rhs=rhs))
 
-    def open_inner_loop(self, name: str, counter_reg: str, n: Union[str, int]) -> None:
-        self.append_macro(OpenInnerLoop(name=name, counter_reg=counter_reg, n=n))
+    def open_inner_loop(
+        self,
+        name: str,
+        counter_reg: str,
+        n: Union[str, int],
+        *,
+        range_hint: Optional[tuple[int, int]] = None,
+    ) -> None:
+        self.append_macro(
+            OpenInnerLoop(
+                name=name, counter_reg=counter_reg, n=n, range_hint=range_hint
+            )
+        )
 
     def close_inner_loop(self, name: str, counter_reg: str) -> None:
         self.append_macro(CloseInnerLoop(name=name, counter_reg=counter_reg))

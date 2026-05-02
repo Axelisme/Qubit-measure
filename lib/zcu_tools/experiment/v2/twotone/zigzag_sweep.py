@@ -138,9 +138,11 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
                     ),
                     Reset("reset", modules.reset),
                     Pulse("X90_pulse", X90_pulse),
-                    Repeat("zigzag_loop", n="repeat_count").add_content(
-                        Pulse(f"loop_{repeat_on}", repeat_pulse)
-                    ),
+                    Repeat(
+                        "zigzag_loop",
+                        n="repeat_count",
+                        range_hint=(min(times), max(times)),
+                    ).add_content(Pulse(f"loop_{repeat_on}", repeat_pulse)),
                     Readout("readout", modules.readout),
                 ],
                 sweep=[("times", len(times)), (x_key, x_sweep)],

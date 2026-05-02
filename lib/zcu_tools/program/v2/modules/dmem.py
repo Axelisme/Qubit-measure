@@ -167,7 +167,9 @@ class ScanWith(Module):
         self, name: str, values: Sequence[int], val_reg: str, use_existed: bool = False
     ) -> None:
         self.name = name
-        repeat_mod = Repeat(f"{name}_count", len(values))
+
+        n = len(values)
+        repeat_mod = Repeat(f"{name}_count", n, range_hint=(0, n - 1))
         repeat_mod.add_content(
             LoadValue(
                 name=f"{name}_load",

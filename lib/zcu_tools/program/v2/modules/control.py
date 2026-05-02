@@ -23,11 +23,18 @@ class Repeat(Module):
     using cond_jump / jump / label, so the loop count can vary at runtime.
     """
 
-    def __init__(self, name: str, n: Union[int, str]) -> None:
+    def __init__(
+        self,
+        name: str,
+        n: Union[int, str],
+        *,
+        range_hint: Optional[tuple[int, int]] = None,
+    ) -> None:
         self.name = name
         self.n = n
         self.sub_modules = []
         self.counter_reg = self.name
+        self.range_hint = range_hint
 
         if isinstance(n, int) and n < 0:
             raise ValueError(f"Repeat n must be greater than or equal to 0, got {n}")
@@ -57,7 +64,9 @@ class Repeat(Module):
         prog.delay(t=t)
         prog.delay_auto(t=0.0)
 
-        prog.open_inner_loop(self.name, self.counter_reg, self.n)
+        prog.open_inner_loop(
+            self.name, self.counter_reg, self.n, range_hint=self.range_hint
+        )
 
         cur_t = 0.0
         for mod in self.sub_modules:

@@ -13,6 +13,16 @@ class OpenInnerLoop(Macro):
     """Register-driven counterpart of qick's OpenLoop."""
 
     # fields: name (str), counter_reg (str), n (str | int)
+    def __init__(
+        self,
+        name: str,
+        counter_reg: str,
+        n: int | str,
+        *,
+        range_hint: tuple[int, int] | None = None,
+    ) -> None:
+        super().__init__(name=name, counter_reg=counter_reg, n=n, range_hint=range_hint)
+
     def expand(self, prog):  # type: ignore[override]
         start = f"{self.name}_start"
         end = f"{self.name}_end"
@@ -24,7 +34,9 @@ class OpenInnerLoop(Macro):
             MetaMacro(
                 type="LOOP_START",
                 name=self.name,
-                args={"counter_reg": mapped_counter, "n": mapped_n},
+                info=dict(
+                    counter_reg=mapped_counter, n=mapped_n, range_hint=self.range_hint
+                ),
             ),
             WriteReg(dst=self.counter_reg, src=0),
             Label(label=start),
@@ -41,6 +53,9 @@ class CloseInnerLoop(Macro):
     """
 
     # fields: name (str), counter_reg (str)
+    def __init__(self, name: str, counter_reg: str) -> None:
+        super().__init__(name=name, counter_reg=counter_reg)
+
     def expand(self, prog):  # type: ignore[override]
         start = f"{self.name}_start"
         end = f"{self.name}_end"
