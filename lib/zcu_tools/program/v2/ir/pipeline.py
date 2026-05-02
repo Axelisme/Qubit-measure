@@ -35,7 +35,6 @@ class PipeLine:
 
 def make_default_pipeline(config: PipeLineConfig, disable: bool = False) -> PipeLine:
     from .passes import (
-        ConstantLoopUnrollPass,
         TimedInstructionMergePass,
         ZeroDelayDCEPass,
     )
