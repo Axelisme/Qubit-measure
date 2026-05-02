@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Any, Union, cast
 
 from qick.asm_v2 import QickParam
 from zcu_tools.program.v2.modules.base import Module
@@ -56,8 +57,10 @@ def test_branch_power_of_two_has_no_nop_padding(mock_prog):
 
 def test_branch_rejects_qickparam_duration(mock_prog):
     class _QickParamDurationModule(_FixedDurationModule):
-        def run(self, prog, t=0.0):
-            return QickParam(start=0.1)
+        def run(self, prog: Any, t: Union[float, QickParam] = 0.0) -> float:
+            # We want to return a QickParam to trigger the Branch error,
+            # but we cast to float to satisfy Pyright's override check.
+            return cast(float, QickParam(start=0.1))
 
     b = Branch(
         "sel",

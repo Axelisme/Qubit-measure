@@ -1,5 +1,5 @@
 from __future__ import annotations
-from zcu_tools.program.v2.ir.labels import Label
+from typing import cast
 
 from zcu_tools.program.v2.ir.instructions import (
     GenericInst,
@@ -9,6 +9,7 @@ from zcu_tools.program.v2.ir.instructions import (
     TestInst,
     TimeInst,
 )
+from zcu_tools.program.v2.ir.labels import Label
 from zcu_tools.program.v2.ir.node import BlockNode, InstNode, IRLoop, RootNode
 from zcu_tools.program.v2.ir.passes import (
     DeadLabelEliminationPass,
@@ -42,7 +43,7 @@ def test_unroll_loop_expands_simple_loop_body():
 
     assert len(out.insts) == 3
     assert all(isinstance(item, InstNode) for item in out.insts)
-    assert [item.inst.lit for item in out.insts] == ["#1", "#1", "#1"]
+    assert [cast(TimeInst, cast(InstNode, item).inst).lit for item in out.insts] == ["#1", "#1", "#1"]
 
 
 def test_unroll_loop_expands_loop_with_internal_label():
@@ -83,10 +84,10 @@ def test_dead_write_elimination_removes_overwritten_write():
 
     assert len(out.insts) == 2
     assert isinstance(out.insts[0], InstNode)
-    assert isinstance(out.insts[0].inst, RegWriteInst)
-    assert out.insts[0].inst.extra_args["LIT"] == "#2"
+    assert isinstance(cast(InstNode, out.insts[0]).inst, RegWriteInst)
+    assert getattr(cast(InstNode, out.insts[0]).inst, "extra_args")["LIT"] == "#2"
     assert isinstance(out.insts[1], InstNode)
-    assert isinstance(out.insts[1].inst, GenericInst)
+    assert isinstance(cast(InstNode, out.insts[1]).inst, GenericInst)
 
 
 def test_dead_write_elimination_keeps_write_before_read():
@@ -104,9 +105,9 @@ def test_dead_write_elimination_keeps_write_before_read():
 
     assert len(out.insts) == 3
     assert [
-        item.inst.extra_args.get("LIT")
+        getattr(cast(InstNode, item).inst, "extra_args").get("LIT")
         for item in out.insts
-        if isinstance(item.inst, RegWriteInst)
+        if isinstance(item, InstNode) and isinstance(item.inst, RegWriteInst)
     ] == [
         "#1",
         "#2",
@@ -127,7 +128,7 @@ def test_dead_label_elimination_removes_unreferenced_label():
 
     assert len(out.insts) == 1
     assert isinstance(out.insts[0], InstNode)
-    assert isinstance(out.insts[0].inst, GenericInst)
+    assert isinstance(cast(InstNode, out.insts[0]).inst, GenericInst)
 
 
 def test_dead_label_elimination_keeps_referenced_label():
@@ -144,8 +145,8 @@ def test_dead_label_elimination_keeps_referenced_label():
     )
 
     assert len(out.insts) == 2
-    assert isinstance(out.insts[0].inst, LabelInst)
-    assert isinstance(out.insts[1].inst, JumpInst)
+    assert isinstance(cast(InstNode, out.insts[0]).inst, LabelInst)
+    assert isinstance(cast(InstNode, out.insts[1]).inst, JumpInst)
 
 
 def test_default_pipeline_orders_new_passes_first():

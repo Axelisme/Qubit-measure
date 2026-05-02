@@ -1,3 +1,5 @@
+from __future__ import annotations
+from zcu_tools.program.v2.ir.labels import Label
 import pytest
 from zcu_tools.program.v2.ir.instructions import (
     LabelInst,
@@ -22,13 +24,13 @@ def test_linker_wait_address_calculation():
 
     ir = RootNode(
         insts=[
-            InstNode(LabelInst(name="L1")),
+            InstNode(LabelInst(name=Label("L1"))),
             InstNode(RegWriteInst(dst="r1", src="imm", extra_args={"LIT": "#1"})),
-            InstNode(LabelInst(name="L2")),
+            InstNode(LabelInst(name=Label("L2"))),
             InstNode(WaitInst()),
-            InstNode(LabelInst(name="L3")),
+            InstNode(LabelInst(name=Label("L3"))),
             InstNode(RegWriteInst(dst="r2", src="imm", extra_args={"LIT": "#2"})),
-            InstNode(LabelInst(name="L4")),
+            InstNode(LabelInst(name=Label("L4"))),
         ]
     )
 
@@ -61,9 +63,9 @@ def test_linker_wait_address_calculation():
 def test_linker_cursor_counts_wait_and_trailing_labels():
     ir = RootNode(
         insts=[
-            InstNode(LabelInst(name="L1")),
+            InstNode(LabelInst(name=Label("L1"))),
             InstNode(WaitInst()),
-            InstNode(LabelInst(name="L2")),
+            InstNode(LabelInst(name=Label("L2"))),
             InstNode(RegWriteInst(dst="r0", src="imm", extra_args={"LIT": "#0"})),
         ]
     )
@@ -84,9 +86,9 @@ def test_linker_wait_roundtrip():
 
     ir = RootNode(
         insts=[
-            InstNode(LabelInst(name="L1")),
+            InstNode(LabelInst(name=Label("L1"))),
             InstNode(WaitInst()),
-            InstNode(LabelInst(name="L2")),
+            InstNode(LabelInst(name=Label("L2"))),
         ]
     )
 

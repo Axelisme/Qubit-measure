@@ -36,16 +36,16 @@ def strip_internal_annotations(inst: Instruction) -> Instruction:
     return dataclasses.replace(inst, annotations={})
 
 
-def estimate_body_cost(body: list["IRNode"], config: "PipeLineConfig") -> int:
+def estimate_body_cost(body: list["IRNode"], config: PipeLineConfig) -> int:
     """Estimate the cycle cost of executing a sequence of IR nodes."""
-    from .node import InstNode, IRLoop, IRBranch
     from .instructions import (
-        PortWriteInst,
         DmemReadInst,
         DmemWriteInst,
-        MetaInst,
         LabelInst,
+        MetaInst,
+        PortWriteInst,
     )
+    from .node import InstNode, IRBranch, IRLoop
 
     cost = 0
     for node in body:
@@ -73,7 +73,9 @@ def estimate_body_cost(body: list["IRNode"], config: "PipeLineConfig") -> int:
             # Base cost for dispatch plus average case cost
             dispatch_cost = config.cost_default * len(node.dispatch.insts)
             if node.cases:
-                avg_case_cost = sum(estimate_body_cost(c.insts, config) for c in node.cases) // len(node.cases)
+                avg_case_cost = sum(
+                    estimate_body_cost(c.insts, config) for c in node.cases
+                ) // len(node.cases)
             else:
                 avg_case_cost = 0
             cost += dispatch_cost + config.cost_jump_flush + avg_case_cost

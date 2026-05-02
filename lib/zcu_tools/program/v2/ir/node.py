@@ -76,8 +76,8 @@ class IRLoop(IRNode):
 
     def emit(self, inst_list: list[Instruction]) -> None:
         from .instructions import JumpInst, LabelInst, RegWriteInst, TestInst
-
         from .labels import Label
+
         start = self.start_label or Label.make_new(f"{self.name}_start")
         end = self.end_label or Label.make_new(f"{self.name}_end")
 

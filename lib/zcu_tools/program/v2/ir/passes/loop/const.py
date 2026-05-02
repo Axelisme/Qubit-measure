@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Optional
 
-from ...node import IRLoop, IRNode, BlockNode
+from ...node import BlockNode, IRLoop, IRNode
 from ..base import OptimizationPassBase, loop_is_counter_sensitive
 
 

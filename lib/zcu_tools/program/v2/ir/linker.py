@@ -63,8 +63,9 @@ class IRLinker:
         meta_infos: list[dict[str, Any]],
     ) -> list[Instruction]:
         from .labels import Label
+
         label_map: dict[str, Label] = {}
-        
+
         def get_label(name: str) -> Label:
             if name not in label_map:
                 label_map[name] = Label.make_new(name)
@@ -86,7 +87,7 @@ class IRLinker:
         for m in meta_infos:
             markers_by_addr[m["p_addr"]].append(m)
 
-        for i, d in enumerate(prog_list):
+        for d in prog_list:
             p_addr = d["P_ADDR"]
 
             # 1. Insert tracked markers from meta_infos for this index

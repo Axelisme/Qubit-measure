@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional, Union, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 if TYPE_CHECKING:
     from .labels import Label
@@ -50,7 +50,6 @@ class Instruction:
 
     @property
     def need_label(self) -> Optional["Label"]:
-        from .labels import Label
         """Label name this instruction depends on (e.g. for JUMP or WR_ADDR)."""
         return None
 
@@ -308,9 +307,10 @@ class Instruction:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        from .labels import Label
         """Convert back to QICK prog_list dict format."""
         raise NotImplementedError
+
+
 @dataclass(frozen=True)
 class GenericInst(Instruction):
     """Fallback for instructions without a specific model."""
@@ -342,15 +342,14 @@ class GenericInst(Instruction):
     @property
     def need_label(self) -> Optional["Label"]:
         from .labels import Label
+
         label = self.args.get("LABEL")
-        from .labels import Label
 
         if isinstance(label, Label) and not _is_pseudo_label(label):
             return label
         return None
 
     def to_dict(self) -> dict[str, Any]:
-        from .labels import Label
         d: dict[str, Any] = {"CMD": self.cmd}
         d.update(self.args)
         if "LABEL" in d and d["LABEL"] is not None:
@@ -367,7 +366,6 @@ class LabelInst(Instruction):
     args: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        from .labels import Label
         d: dict[str, Any] = {"LABEL": str(self.name)}
         d.update(self.args)
         d.update(self.annotations)
@@ -385,7 +383,6 @@ class MetaInst(Instruction):
     args: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        from .labels import Label
         d = {
             "CMD": "__META__",
             "TYPE": self.type,
@@ -411,7 +408,6 @@ class TimeInst(Instruction):
         return sorted(list(regs_from_value(self.r1)))
 
     def to_dict(self) -> dict[str, Any]:
-        from .labels import Label
         d: dict[str, Any] = {"CMD": "TIME", "C_OP": self.c_op}
         if self.lit is not None:
             d["LIT"] = self.lit
@@ -438,7 +434,6 @@ class TestInst(Instruction):
         return sorted(list(regs_from_value(self.op)))
 
     def to_dict(self) -> dict[str, Any]:
-        from .labels import Label
         d: dict[str, Any] = {"CMD": "TEST", "OP": self.op}
         if self.uf is not None:
             d["UF"] = self.uf
@@ -455,7 +450,9 @@ class JumpInst(Instruction):
 
     label: Optional["Label"] = None  # Target label
     if_cond: Optional[str] = None  # Condition for conditional jump (e.g., "eq", "nz")
-    addr: Optional[Union[str, "Label"]] = None  # Direct address for large jumps (e.g., "s15" or label)
+    addr: Optional[Union[str, "Label"]] = (
+        None  # Direct address for large jumps (e.g., "s15" or label)
+    )
     wr: Optional[str] = None  # Optional register write control string
     op: Optional[str] = None  # Optional ALU expression
     uf: Optional[str] = None  # Optional flag update control
@@ -479,15 +476,17 @@ class JumpInst(Instruction):
     @property
     def need_label(self) -> Optional["Label"]:
         from .labels import Label
+
         if self.label and not _is_pseudo_label(self.label):
             return self.label
-        from .labels import Label
+
         if isinstance(self.addr, Label) and not _is_pseudo_label(self.addr):
             return self.addr
         return None
 
     def to_dict(self) -> dict[str, Any]:
         from .labels import Label
+
         d: dict[str, Any] = {"CMD": "JUMP"}
         if self.label:
             d["LABEL"] = str(self.label)
@@ -542,15 +541,17 @@ class RegWriteInst(Instruction):
     @property
     def need_label(self) -> Optional["Label"]:
         from .labels import Label
+
         if self.label and not _is_pseudo_label(self.label):
             return self.label
-        from .labels import Label
+
         if isinstance(self.addr, Label) and not _is_pseudo_label(self.addr):
             return self.addr
         return None
 
     def to_dict(self) -> dict[str, Any]:
         from .labels import Label
+
         d: dict[str, Any] = {"CMD": "REG_WR"}
         if self.wr is not None:
             d["WR"] = self.wr
@@ -607,7 +608,6 @@ class PortWriteInst(Instruction):
         return [strip_write_modifier(self.dst)]
 
     def to_dict(self) -> dict[str, Any]:
-        from .labels import Label
         d: dict[str, Any] = {"CMD": "WPORT_WR", "DST": self.dst}
         if self.src is not None:
             d["SRC"] = self.src
@@ -637,7 +637,6 @@ class NopInst(Instruction):
     extra_args: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        from .labels import Label
         d: dict[str, Any] = {"CMD": "NOP"}
         d.update(self.extra_args)
         d.update(self.annotations)
@@ -679,15 +678,17 @@ class DmemReadInst(Instruction):
     @property
     def need_label(self) -> Optional["Label"]:
         from .labels import Label
+
         if self.label and not _is_pseudo_label(self.label):
             return self.label
-        from .labels import Label
+
         if isinstance(self.addr, Label) and not _is_pseudo_label(self.addr):
             return self.addr
         return None
 
     def to_dict(self) -> dict[str, Any]:
         from .labels import Label
+
         d: dict[str, Any] = {"CMD": "REG_WR", "DST": self.dst, "SRC": self.src}
         if self.addr is not None:
             d["ADDR"] = f"&{self.addr}" if isinstance(self.addr, Label) else self.addr
@@ -733,7 +734,6 @@ class DmemWriteInst(Instruction):
         return sorted(list(reads))
 
     def to_dict(self) -> dict[str, Any]:
-        from .labels import Label
         d: dict[str, Any] = {"CMD": "DMEM_WR", "DST": self.dst, "SRC": self.src}
         if self.op is not None:
             d["OP"] = self.op
@@ -786,7 +786,6 @@ class DportWriteInst(Instruction):
         return [strip_write_modifier(self.dst)] if not self.dst.startswith("#") else []
 
     def to_dict(self) -> dict[str, Any]:
-        from .labels import Label
         d: dict[str, Any] = {"CMD": "DPORT_WR", "DST": self.dst, "DATA": self.data}
         if self.src is not None:
             d["SRC"] = self.src
@@ -830,12 +829,14 @@ class WaitInst(Instruction):
     @property
     def need_label(self) -> Optional["Label"]:
         from .labels import Label
+
         if isinstance(self.addr, Label) and not _is_pseudo_label(self.addr):
             return self.addr
         return None
 
     def to_dict(self) -> dict[str, Any]:
         from .labels import Label
+
         d: dict[str, Any] = {"CMD": "WAIT", "C_OP": self.c_op}
         if self.time is not None:
             d["TIME"] = self.time

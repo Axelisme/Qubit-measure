@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import cast
 
 from zcu_tools.program.v2.ir.instructions import GenericInst, TimeInst, WaitInst
 from zcu_tools.program.v2.ir.node import InstNode, RootNode
@@ -22,10 +23,10 @@ def test_zero_delay_dce_removes_plain_zero_increment():
 
     assert len(out.insts) == 2
     assert isinstance(out.insts[0], InstNode)
-    assert isinstance(out.insts[0].inst, TimeInst)
-    assert out.insts[0].inst.lit == "#4"
+    assert isinstance(cast(InstNode, out.insts[0]).inst, TimeInst)
+    assert getattr(cast(InstNode, out.insts[0]).inst, "lit") == "#4"
     assert isinstance(out.insts[1], InstNode)
-    assert isinstance(out.insts[1].inst, GenericInst)
+    assert isinstance(cast(InstNode, out.insts[1]).inst, GenericInst)
 
 
 def test_zero_delay_dce_removes_annotated_zero_increment():
@@ -40,7 +41,7 @@ def test_zero_delay_dce_removes_annotated_zero_increment():
 
     assert len(out.insts) == 1
     assert isinstance(out.insts[0], InstNode)
-    assert isinstance(out.insts[0].inst, GenericInst)
+    assert isinstance(cast(InstNode, out.insts[0]).inst, GenericInst)
 
 
 def test_timed_instruction_merge_merges_plain_adjacent_increments():
@@ -52,14 +53,16 @@ def test_timed_instruction_merge_merges_plain_adjacent_increments():
         ]
     )
 
-    out = TimedInstructionMergePass().process(root, PipeLineContext(config=PipeLineConfig()))
+    out = TimedInstructionMergePass().process(
+        root, PipeLineContext(config=PipeLineConfig())
+    )
 
     assert len(out.insts) == 2
     assert isinstance(out.insts[0], InstNode)
-    assert isinstance(out.insts[0].inst, TimeInst)
-    assert out.insts[0].inst.lit == "#5"
+    assert isinstance(cast(InstNode, out.insts[0]).inst, TimeInst)
+    assert getattr(cast(InstNode, out.insts[0]).inst, "lit") == "#5"
     assert isinstance(out.insts[1], InstNode)
-    assert isinstance(out.insts[1].inst, GenericInst)
+    assert isinstance(cast(InstNode, out.insts[1]).inst, GenericInst)
 
 
 def test_timed_instruction_merge_merges_annotated_adjacent_increments():
@@ -70,12 +73,14 @@ def test_timed_instruction_merge_merges_annotated_adjacent_increments():
         ]
     )
 
-    out = TimedInstructionMergePass().process(root, PipeLineContext(config=PipeLineConfig()))
+    out = TimedInstructionMergePass().process(
+        root, PipeLineContext(config=PipeLineConfig())
+    )
 
     assert len(out.insts) == 1
     assert isinstance(out.insts[0], InstNode)
-    assert isinstance(out.insts[0].inst, TimeInst)
-    assert out.insts[0].inst.lit == "#5"
+    assert isinstance(cast(InstNode, out.insts[0]).inst, TimeInst)
+    assert getattr(cast(InstNode, out.insts[0]).inst, "lit") == "#5"
 
 
 def test_timed_instruction_merge_keeps_zero_increment_as_boundary():
@@ -87,10 +92,12 @@ def test_timed_instruction_merge_keeps_zero_increment_as_boundary():
         ]
     )
 
-    out = TimedInstructionMergePass().process(root, PipeLineContext(config=PipeLineConfig()))
+    out = TimedInstructionMergePass().process(
+        root, PipeLineContext(config=PipeLineConfig())
+    )
 
     assert len(out.insts) == 3
-    assert [getattr(item.inst, "lit", None) for item in out.insts] == ["#2", "#0", "#3"]
+    assert [getattr(cast(InstNode, item).inst, "lit", None) for item in out.insts] == ["#2", "#0", "#3"]
 
 
 def test_timed_instruction_merge_does_not_cross_wait():
@@ -102,7 +109,9 @@ def test_timed_instruction_merge_does_not_cross_wait():
         ]
     )
 
-    out = TimedInstructionMergePass().process(root, PipeLineContext(config=PipeLineConfig()))
+    out = TimedInstructionMergePass().process(
+        root, PipeLineContext(config=PipeLineConfig())
+    )
 
     assert len(out.insts) == 3
-    assert [getattr(item.inst, "lit", None) for item in out.insts] == ["#2", None, "#3"]
+    assert [getattr(cast(InstNode, item).inst, "lit", None) for item in out.insts] == ["#2", None, "#3"]
