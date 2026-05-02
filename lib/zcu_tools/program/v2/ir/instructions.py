@@ -310,6 +310,9 @@ class Instruction:
         """Convert back to QICK prog_list dict format."""
         raise NotImplementedError
 
+    def __str__(self) -> str:
+        return f"{self.__class__.__name__}({[f'{k}={v}' for k, v in self.to_dict().items() if v]})"
+
 
 @dataclass(frozen=True)
 class GenericInst(Instruction):

@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
 from typing_extensions import Iterator, Optional, Union
 
-if TYPE_CHECKING:
-    from .instructions import Instruction
-    from .labels import Label
+from .instructions import (
+    JumpInst,
+    LabelInst,
+    MetaInst,
+    RegWriteInst,
+    Instruction,
+    TestInst,
+)
+from .labels import Label
 
 
 class IRNode:
@@ -75,16 +80,25 @@ class IRLoop(IRNode):
         yield self.body
 
     def emit(self, inst_list: list[Instruction]) -> None:
-        from .instructions import JumpInst, LabelInst, RegWriteInst, TestInst
-        from .labels import Label
 
         start = self.start_label or Label.make_new(f"{self.name}_start")
         end = self.end_label or Label.make_new(f"{self.name}_end")
 
-        # Initialize counter
+        # META: LOOP_START
         inst_list.append(
-            RegWriteInst(dst=self.counter_reg, src="imm", extra_args={"LIT": "#0"})
+            MetaInst(
+                type="LOOP_START",
+                name=self.name,
+                args=dict(
+                    counter_reg=self.counter_reg,
+                    n=self.n,
+                    range_hint=self.range_hint,
+                ),
+            )
         )
+
+        # Initialize counter
+        inst_list.append(RegWriteInst(dst=self.counter_reg, src="imm", lit="#0"))
 
         # Loop start label
         inst_list.append(LabelInst(name=start))
@@ -95,16 +109,31 @@ class IRLoop(IRNode):
             if isinstance(self.n, int)
             else f"{self.counter_reg} - {self.n}"
         )
+        # TODO: need to consider case of pmem_size > 2**11, it will need s15 instead of immediate
         inst_list.append(TestInst(op=op_str, uf="0"))
         inst_list.append(JumpInst(label=end, if_cond="NS"))
 
+        # META: LOOP_BODY_START
+        inst_list.append(MetaInst(type="LOOP_BODY_START", name=self.name))
+
         self.body.emit(inst_list)
+
+        # Increment counter
+        inst_list.append(
+            RegWriteInst(dst=self.counter_reg, src="op", op=f"{self.counter_reg} + #1")
+        )
+
+        # META: LOOP_BODY_END
+        inst_list.append(MetaInst(type="LOOP_BODY_END", name=self.name))
 
         # Jump back
         inst_list.append(JumpInst(label=start))
 
         # Loop end label
         inst_list.append(LabelInst(name=end))
+
+        # META: LOOP_END
+        inst_list.append(MetaInst(type="LOOP_END", name=self.name))
 
 
 @dataclass
@@ -113,21 +142,25 @@ class IRBranchCase(BlockNode):
 
     name: str = ""
 
+    def emit(self, inst_list: list[Instruction]) -> None:
+        inst_list.append(MetaInst(type="BRANCH_CASE_START", name=self.name))
+        super().emit(inst_list)
+        inst_list.append(MetaInst(type="BRANCH_CASE_END", name=self.name))
+
 
 @dataclass
 class IRBranch(IRNode):
     """A branch node containing multiple cases."""
 
     name: str = ""
-    # dispatch contains the binary tree of cond_jump and labels
-    dispatch: BlockNode = field(default_factory=BlockNode)
     cases: list[IRBranchCase] = field(default_factory=list)
 
     def children(self) -> Iterator[IRNode]:
-        yield self.dispatch
         yield from self.cases
 
     def emit(self, inst_list: list[Instruction]) -> None:
-        self.dispatch.emit(inst_list)
+        # TODO: currently it is wrong, implementing dispatch logic later
+        inst_list.append(MetaInst(type="BRANCH_START", name=self.name))
         for case in self.cases:
             case.emit(inst_list)
+        inst_list.append(MetaInst(type="BRANCH_END", name=self.name))

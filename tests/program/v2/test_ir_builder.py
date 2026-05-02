@@ -1,19 +1,13 @@
-import pytest
 from zcu_tools.program.v2.ir.builder import IRBuilder
 from zcu_tools.program.v2.ir.instructions import (
-    GenericInst,
     Instruction,
     JumpInst,
     LabelInst,
+    MetaInst,
+    RegWriteInst,
 )
 from zcu_tools.program.v2.ir.linker import IRLinker
-from zcu_tools.program.v2.ir.node import (
-    BlockNode,
-    InstNode,
-    IRBranch,
-    IRBranchCase,
-    IRLoop,
-)
+from zcu_tools.program.v2.ir.node import InstNode, IRBranch, IRBranchCase, IRLoop
 
 
 def test_instruction_parses_jump_label_to_jumpinst():
@@ -26,28 +20,20 @@ def test_instruction_parses_jump_label_to_jumpinst():
 
 def test_branch_roundtrip_preserves_cases():
     """Verify IRBranch.emit() includes dispatch + cases in order."""
-    dispatch_inst = GenericInst(cmd="JUMP", args={"LABEL": "case_0"})
-    case_0_inst = GenericInst(cmd="CASE_0_BODY")
-    case_1_inst = GenericInst(cmd="CASE_1_BODY")
+    case_0_inst = RegWriteInst(dst="r0", src="imm", lit="#1")
+    case_1_inst = RegWriteInst(dst="r0", src="imm", lit="#2")
 
     case_0 = IRBranchCase(name="0", insts=[InstNode(case_0_inst)])
     case_1 = IRBranchCase(name="1", insts=[InstNode(case_1_inst)])
 
-    branch = IRBranch(
-        name="sel",
-        dispatch=BlockNode(insts=[InstNode(dispatch_inst)]),
-        cases=[case_0, case_1],
-    )
+    branch = IRBranch(name="sel", cases=[case_0, case_1])
 
     # Emit to Instruction list
     inst_list: list[Instruction] = []
     branch.emit(inst_list)
 
-    # Should have: dispatch_inst, case_0_inst, case_1_inst
-    assert len(inst_list) == 3
-    assert isinstance(inst_list[0], GenericInst) and inst_list[0].cmd == "JUMP"
-    assert isinstance(inst_list[1], GenericInst) and inst_list[1].cmd == "CASE_0_BODY"
-    assert isinstance(inst_list[2], GenericInst) and inst_list[2].cmd == "CASE_1_BODY"
+    # TODO: compare with expected instruction list instead of just checking the cases are present
+    raise ArithmeticError("\n".join(str(inst) for inst in inst_list))
 
 
 def test_unlink_inserts_labels_and_strips_p_addr():

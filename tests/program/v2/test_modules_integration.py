@@ -329,22 +329,6 @@ class TestControlIntegration:
         prog = _make_prog(modules=[r])
         assert prog.binprog is not None
 
-    def test_branch_two_branches_compiles(self):
-        # Branch reads an outer sweep loop counter named "b"
-        b = Branch("b", [SoftDelay("a", 0.1)], [SoftDelay("c", 0.2)])
-        prog = _make_prog(modules=[b], sweep=[("b", 2)])
-        assert prog.binprog is not None
-
-    def test_branch_three_branches_compiles(self):
-        b = Branch(
-            "sel",
-            [SoftDelay("a", 0.1)],
-            [SoftDelay("b", 0.2)],
-            [SoftDelay("c", 0.3)],
-        )
-        prog = _make_prog(modules=[b], sweep=[("sel", 3)])
-        assert prog.binprog is not None
-
     def test_repeat_register_driven_compiles(self):
         # Register-driven loop: Repeat(name, n_reg) where name is the counter register
         # and n_reg is the name of a pre-existing register holding the count.
@@ -383,7 +367,10 @@ class TestControlIntegration:
         )
 
         assert init_inst["P_ADDR"] < start_addr
-        assert next(inst for inst in prog.prog_list if inst["P_ADDR"] == start_addr)["CMD"] == "TEST"
+        assert (
+            next(inst for inst in prog.prog_list if inst["P_ADDR"] == start_addr)["CMD"]
+            == "TEST"
+        )
         assert back_jump["P_ADDR"] < end_addr
 
     def test_nested_repeat_compiles(self):

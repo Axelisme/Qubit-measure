@@ -34,7 +34,9 @@ class Repeat(Module):
         self.n = n
         self.sub_modules = []
         self.counter_reg = self.name
-        self.range_hint = range_hint
+        self.range_hint = (
+            (range_hint[0], range_hint[1]) if range_hint is not None else None
+        )
 
         if isinstance(n, int) and n < 0:
             raise ValueError(f"Repeat n must be greater than or equal to 0, got {n}")

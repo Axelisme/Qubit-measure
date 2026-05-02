@@ -48,8 +48,9 @@ def test_structural_loop_roundtrip():
             "type": "LOOP_BODY_END",
             "name": "loop1",
             "info": {},
-            "p_addr": 5,
+            "p_addr": 4,
         },
+
         {"kind": "label", "name": "loop1_end", "p_addr": 6},
         {
             "kind": "meta",
