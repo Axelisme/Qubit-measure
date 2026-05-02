@@ -42,7 +42,6 @@ def make_default_pipeline(config: PipeLineConfig, disable: bool = False) -> Pipe
     return PipeLine(
         config,
         [
-            ConstantLoopUnrollPass(),
             ZeroDelayDCEPass(),
             TimedInstructionMergePass(),
         ]
