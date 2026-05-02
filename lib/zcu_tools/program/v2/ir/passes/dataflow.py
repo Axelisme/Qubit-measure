@@ -3,24 +3,26 @@ from __future__ import annotations
 from typing import Optional
 
 from ..analysis import instruction_reads, instruction_writes
-from ..node import BlockNode, InstNode, IRBranchCase, IRNode, RootNode
+from ..node import BlockNode, InstNode, IRNode
 from .base import OptimizationPassBase, is_safe_linear_inst
 
 
 class DeadWriteEliminationPass(OptimizationPassBase):
     """Remove overwritten writes in straight-line blocks."""
 
-    def visit_BlockNode(self, node: BlockNode) -> Optional[IRNode]:
+    def visit_BlockNode(self, node: BlockNode) -> Optional[IRNode | list[IRNode]]:
         if not self.ctx.config.enable_dead_write:
             return self.generic_visit(node)
 
-        rewritten: list[IRNode] = []
+        rewritten: list[IRNode | None] = []
         pending_writes: dict[str, int] = {}
 
         def flush_pending() -> None:
             pending_writes.clear()
 
-        def append_item(item: IRNode) -> None:
+        def append_item(item: IRNode | list[IRNode] | None) -> None:
+            if item is None:
+                return
             if isinstance(item, list):
                 for child in item:
                     append_item(child)
@@ -60,7 +62,7 @@ class DeadWriteEliminationPass(OptimizationPassBase):
                 prev_idx = pending_writes.get(dst)
                 if prev_idx is not None and 0 <= prev_idx < len(rewritten):
                     if rewritten[prev_idx] is not None:
-                        rewritten[prev_idx] = None  # type: ignore[assignment]
+                        rewritten[prev_idx] = None
                         self._bump_stat("dead_write.removed")
                 pending_writes[dst] = len(rewritten)
 
