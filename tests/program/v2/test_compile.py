@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import pytest
 from zcu_tools.program.v2.base import ProgramV2Cfg
+from zcu_tools.program.v2.ir import base as ir_base
+from zcu_tools.program.v2.ir.pipeline import PipeLineContext
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules import Delay, SoftDelay
 from zcu_tools.program.v2.sweep import SweepCfg
@@ -127,6 +129,25 @@ def test_rounds_propagated():
 def test_datamem_none_when_empty():
     prog = _make_prog()
     assert prog.compile_datamem() is None
+
+
+def test_compile_passes_pmem_budget_into_pipeline(monkeypatch):
+    seen: dict[str, object] = {}
+
+    class _NoopPipeline:
+        def __call__(self, ir):
+            return ir, PipeLineContext()
+
+    def fake_make_default_pipeline(config):
+        seen["config"] = config
+        return _NoopPipeline()
+
+    monkeypatch.setattr(ir_base, "make_default_pipeline", fake_make_default_pipeline)
+
+    prog = _make_prog()
+
+    assert "config" in seen
+    assert seen["config"].pmem_budget == int(prog.tproccfg["pmem_size"] * 0.8)
 
 
 # ---------------------------------------------------------------------------

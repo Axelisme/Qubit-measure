@@ -13,6 +13,7 @@ class PipeLineConfig:
     enable_dead_write: bool = True
     enable_dead_label: bool = True
     max_loop_unroll_count: int = 8
+    pmem_budget: int | None = None
 
 
 @dataclass
