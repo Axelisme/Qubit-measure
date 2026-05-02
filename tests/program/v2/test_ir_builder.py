@@ -20,7 +20,7 @@ def test_instruction_parses_jump_label_to_jumpinst():
     inst = Instruction.from_dict({"CMD": "JUMP", "LABEL": "target"})
 
     assert isinstance(inst, JumpInst)
-    assert inst.label == "target"
+    assert str(inst.label) == "target"
     assert inst.if_cond is None
 
 
@@ -64,7 +64,7 @@ def test_unlink_inserts_labels_and_strips_p_addr():
     actual = []
     for inst in logical_insts:
         if isinstance(inst, LabelInst):
-            actual.append({"LABEL": inst.name})
+            actual.append({"LABEL": str(inst.name)})
         else:
             actual.append({"CMD": inst.to_dict()["CMD"]})
 
@@ -86,7 +86,7 @@ def test_unlink_supports_multiple_labels_same_address():
     actual = []
     for inst in logical_insts:
         if isinstance(inst, LabelInst):
-            actual.append({"LABEL": inst.name})
+            actual.append({"LABEL": str(inst.name)})
         else:
             actual.append({"CMD": inst.to_dict()["CMD"]})
 
@@ -146,5 +146,5 @@ def test_builder_build_accepts_qick_labels_map():
     assert len(root.insts) == 1
     loop = root.insts[0]
     assert isinstance(loop, IRLoop)
-    assert loop.start_label == "loop1_start"
-    assert loop.end_label == "loop1_end"
+    assert str(loop.start_label) == "loop1_start"
+    assert str(loop.end_label) == "loop1_end"

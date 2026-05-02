@@ -70,8 +70,8 @@ def test_structural_loop_roundtrip():
     assert loop.name == "loop1"
     assert loop.counter_reg == "r1"
     assert loop.n == 5
-    assert loop.start_label == "loop1_start"
-    assert loop.end_label == "loop1_end"
+    assert str(loop.start_label) == "loop1_start"
+    assert str(loop.end_label) == "loop1_end"
 
     # Unbuild (emits instructions)
     opt_insts, opt_labels, opt_meta_infos, cursor = builder.unbuild(root)

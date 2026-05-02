@@ -123,7 +123,7 @@ class TestJumpInstruction:
 
     def test_construction_unconditional(self):
         inst = JumpInst(label="loop", line=10)
-        assert inst.label == "loop"
+        assert str(inst.label) == "loop"
         assert inst.if_cond is None
         assert inst.addr is None
 
@@ -133,22 +133,22 @@ class TestJumpInstruction:
         assert inst.if_cond == "eq"
 
     def test_construction_with_addr(self):
-        inst = JumpInst(label="", addr="s15")
-        assert inst.label == ""
+        inst = JumpInst(addr="s15")
+        assert inst.label is None
         assert inst.addr == "s15"
 
     def test_dispatch_jump_unconditional(self):
         d = {"CMD": "JUMP", "LABEL": "loop"}
         inst = Instruction.from_dict(d)
         assert isinstance(inst, JumpInst)
-        assert inst.label == "loop"
+        assert str(inst.label) == "loop"
         assert inst.if_cond is None
 
     def test_dispatch_jump_conditional(self):
         d = {"CMD": "JUMP", "LABEL": "end", "IF": "nz"}
         inst = Instruction.from_dict(d)
         assert isinstance(inst, JumpInst)
-        assert inst.label == "end"
+        assert str(inst.label) == "end"
         assert inst.if_cond == "nz"
 
     def test_dispatch_jump_with_addr(self):
@@ -204,7 +204,7 @@ class TestJumpInstruction:
         d = {"CMD": "JUMP"}
         inst = Instruction.from_dict(d)
         assert isinstance(inst, JumpInst)
-        assert inst.label == ""
+        assert inst.label is None
         assert inst.addr is None
 
 
@@ -397,14 +397,14 @@ class TestLabelInstruction:
         d = {"LABEL": "my_label"}
         inst = Instruction.from_dict(d)
         assert isinstance(inst, LabelInst)
-        assert inst.name == "my_label"
+        assert str(inst.name) == "my_label"
         assert inst.args == {}
 
     def test_label_with_extra_args(self):
         d = {"LABEL": "loop_start", "EXTRA": "data"}
         inst = Instruction.from_dict(d)
         assert isinstance(inst, LabelInst)
-        assert inst.name == "loop_start"
+        assert str(inst.name) == "loop_start"
         assert inst.args["EXTRA"] == "data"
 
     def test_label_roundtrip(self):

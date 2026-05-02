@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Optional, Union, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .labels import Label
 
 from .utils import regs_from_value, strip_write_modifier
 
 SPECIAL_LABELS = frozenset({"HERE", "NEXT", "PREV", "SKIP"})
 
 
-def _is_pseudo_label(value: Optional[str]) -> bool:
+def _is_pseudo_label(value: Any) -> bool:
+    from .labels import Label
+    if isinstance(value, Label):
+        return value.name in SPECIAL_LABELS
     return isinstance(value, str) and value in SPECIAL_LABELS
 
 
@@ -44,12 +50,24 @@ class Instruction:
         return []
 
     @property
-    def need_label(self) -> Optional[str]:
+    def need_label(self) -> Optional["Label"]:
         """Label name this instruction depends on (e.g. for JUMP or WR_ADDR)."""
         return None
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "Instruction":
+    def from_dict(cls, d: dict[str, Any], label_map: Optional[dict[str, "Label"]] = None) -> "Instruction":
+        def get_label(name: Any) -> Optional["Label"]:
+            if not name:
+                return None
+            from .labels import Label
+            if isinstance(name, str) and name in SPECIAL_LABELS:
+                return Label(name)
+            if label_map is not None:
+                if name not in label_map:
+                    label_map[name] = Label.make_new(name)
+                return label_map[name]
+            return Label(name)
+
         # Extract internal annotations (starting with IR_)
         annotations = {k: v for k, v in d.items() if k.startswith("IR_")}
         clean_d = {k: v for k, v in d.items() if not k.startswith("IR_")}
@@ -59,7 +77,7 @@ class Instruction:
                 k: v for k, v in clean_d.items() if k not in ("LABEL", "LINE", "P_ADDR")
             }
             return LabelInst(
-                name=clean_d["LABEL"],
+                name=get_label(clean_d["LABEL"]),
                 args=args,
                 line=clean_d.get("LINE"),
                 annotations=annotations,
@@ -103,7 +121,7 @@ class Instruction:
                 clean_d, {"LABEL", "IF", "ADDR", "WR", "OP", "UF"}
             )
             return JumpInst(
-                label=clean_d.get("LABEL", ""),
+                label=get_label(clean_d.get("LABEL", "")),
                 if_cond=clean_d.get("IF"),
                 addr=clean_d.get("ADDR"),
                 wr=clean_d.get("WR"),
@@ -137,7 +155,7 @@ class Instruction:
                     lit=clean_d.get("LIT"),
                     uf=clean_d.get("UF"),
                     if_cond=clean_d.get("IF"),
-                    label=clean_d.get("LABEL"),
+                    label=get_label(clean_d.get("LABEL")),
                     extra_args=extra_args,
                     line=clean_d.get("LINE"),
                     annotations=annotations,
@@ -155,7 +173,7 @@ class Instruction:
                 addr=clean_d.get("ADDR"),
                 uf=clean_d.get("UF"),
                 if_cond=clean_d.get("IF"),
-                label=clean_d.get("LABEL"),
+                label=get_label(clean_d.get("LABEL")),
                 extra_args=extra_args,
                 line=clean_d.get("LINE"),
                 annotations=annotations,
@@ -197,7 +215,7 @@ class Instruction:
                 lit=clean_d.get("LIT"),
                 uf=clean_d.get("UF"),
                 if_cond=clean_d.get("IF"),
-                label=clean_d.get("LABEL"),
+                label=get_label(clean_d.get("LABEL")),
                 extra_args=extra_args,
                 line=clean_d.get("LINE"),
                 annotations=annotations,
@@ -250,6 +268,8 @@ class Instruction:
 
         # Default to GenericInst for unmapped opcodes
         args = {k: v for k, v in clean_d.items() if k not in ("CMD", "LINE", "P_ADDR")}
+        if "LABEL" in args:
+            args["LABEL"] = get_label(args["LABEL"])
         return GenericInst(
             cmd=cmd,
             args=args,
@@ -291,15 +311,18 @@ class GenericInst(Instruction):
         return sorted(list(writes))
 
     @property
-    def need_label(self) -> Optional[str]:
+    def need_label(self) -> Optional["Label"]:
         label = self.args.get("LABEL")
-        if isinstance(label, str) and label not in ("HERE", "NEXT", "PREV", "SKIP"):
+        from .labels import Label
+        if isinstance(label, Label) and not _is_pseudo_label(label):
             return label
         return None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"CMD": self.cmd}
         d.update(self.args)
+        if "LABEL" in d and d["LABEL"] is not None:
+            d["LABEL"] = str(d["LABEL"])
         d.update(self.annotations)
         if self.line is not None:
             d["LINE"] = self.line
@@ -308,11 +331,11 @@ class GenericInst(Instruction):
 
 @dataclass(frozen=True)
 class LabelInst(Instruction):
-    name: str = ""
+    name: Optional["Label"] = None
     args: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"LABEL": self.name}
+        d: dict[str, Any] = {"LABEL": str(self.name)}
         d.update(self.args)
         d.update(self.annotations)
         if self.line is not None:
@@ -394,7 +417,7 @@ class TestInst(Instruction):
 class JumpInst(Instruction):
     """JUMP instruction: unconditional or conditional jump."""
 
-    label: str = ""  # Target label
+    label: Optional["Label"] = None  # Target label
     if_cond: Optional[str] = None  # Condition for conditional jump (e.g., "eq", "nz")
     addr: Optional[str] = None  # Direct address for large jumps (e.g., "s15")
     wr: Optional[str] = None  # Optional register write control string
@@ -417,7 +440,7 @@ class JumpInst(Instruction):
         return []
 
     @property
-    def need_label(self) -> Optional[str]:
+    def need_label(self) -> Optional["Label"]:
         if self.label and not _is_pseudo_label(self.label):
             return self.label
         return None
@@ -425,7 +448,7 @@ class JumpInst(Instruction):
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"CMD": "JUMP"}
         if self.label:
-            d["LABEL"] = self.label
+            d["LABEL"] = str(self.label)
         if self.addr is not None:
             d["ADDR"] = self.addr
         if self.if_cond is not None:
@@ -455,7 +478,7 @@ class RegWriteInst(Instruction):
     uf: Optional[str] = None
     wr: Optional[str] = None
     if_cond: Optional[str] = None
-    label: Optional[str] = None
+    label: Optional["Label"] = None
     extra_args: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -473,9 +496,9 @@ class RegWriteInst(Instruction):
         return [strip_write_modifier(self.dst)]
 
     @property
-    def need_label(self) -> Optional[str]:
+    def need_label(self) -> Optional["Label"]:
         label = self.label or self.extra_args.get("LABEL")
-        if isinstance(label, str) and not _is_pseudo_label(label):
+        if label and not _is_pseudo_label(label):
             return label
         return None
 
@@ -497,7 +520,7 @@ class RegWriteInst(Instruction):
         if self.if_cond is not None:
             d["IF"] = self.if_cond
         if self.label is not None:
-            d["LABEL"] = self.label
+            d["LABEL"] = str(self.label)
         d.update(self.extra_args)
         d.update(self.annotations)
         if self.line is not None:
@@ -585,7 +608,7 @@ class DmemReadInst(Instruction):
     lit: Optional[str] = None
     uf: Optional[str] = None
     if_cond: Optional[str] = None
-    label: Optional[str] = None
+    label: Optional["Label"] = None
     extra_args: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -616,7 +639,7 @@ class DmemReadInst(Instruction):
         if self.if_cond is not None:
             d["IF"] = self.if_cond
         if self.label is not None:
-            d["LABEL"] = self.label
+            d["LABEL"] = str(self.label)
         d.update(self.extra_args)
         d.update(self.annotations)
         if self.line is not None:
@@ -751,4 +774,6 @@ class WaitInst(Instruction):
 
     @property
     def addr_inc(self) -> int:
+        return 2
+
         return 2

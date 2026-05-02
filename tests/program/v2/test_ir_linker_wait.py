@@ -102,7 +102,7 @@ def test_linker_wait_roundtrip():
     actual_cmds = []
     for inst in logical_insts:
         if isinstance(inst, LabelInst):
-            actual_cmds.append({"LABEL": inst.name})
+            actual_cmds.append({"LABEL": str(inst.name)})
         else:
             actual_cmds.append(inst.to_dict())
 

@@ -7,6 +7,7 @@ from typing_extensions import Iterator, Optional, Union
 
 if TYPE_CHECKING:
     from .instructions import Instruction
+    from .labels import Label
 
 
 class IRNode:
@@ -65,8 +66,8 @@ class IRLoop(IRNode):
     range_hint: Optional[tuple[int, int]] = None
 
     # Structural Labels (Attributes)
-    start_label: Optional[str] = None
-    end_label: Optional[str] = None
+    start_label: Optional["Label"] = None
+    end_label: Optional["Label"] = None
 
     body: BlockNode = field(default_factory=BlockNode)
 
@@ -76,8 +77,9 @@ class IRLoop(IRNode):
     def emit(self, inst_list: list[Instruction]) -> None:
         from .instructions import JumpInst, LabelInst, RegWriteInst, TestInst
 
-        start = self.start_label or f"{self.name}_start"
-        end = self.end_label or f"{self.name}_end"
+        from .labels import Label
+        start = self.start_label or Label.make_new(f"{self.name}_start")
+        end = self.end_label or Label.make_new(f"{self.name}_end")
 
         # Initialize counter
         inst_list.append(

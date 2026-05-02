@@ -83,17 +83,18 @@ def test_property_types():
 
 def test_need_label():
     # JumpInst needs label
-    inst = JumpInst(label="target")
-    assert inst.need_label == "target"
+    from zcu_tools.program.v2.ir.labels import Label
+    inst = JumpInst(label=Label("target"))
+    assert str(inst.need_label) == "target"
 
     # JumpInst with special labels should NOT need it as a dependency
-    assert JumpInst(label="HERE").need_label is None
-    assert JumpInst(label="NEXT").need_label is None
+    assert JumpInst(label=Label("HERE")).need_label is None
+    assert JumpInst(label=Label("NEXT")).need_label is None
 
     # RegWriteInst with label (WR_ADDR style)
-    inst = RegWriteInst(dst="s1", src="imm", extra_args={"LABEL": "data_table"})
-    assert inst.need_label == "data_table"
+    inst = RegWriteInst(dst="s1", src="imm", extra_args={"LABEL": Label("data_table")})
+    assert str(inst.need_label) == "data_table"
 
     # GenericInst with label
-    inst = GenericInst(cmd="WR_ADDR", args={"LABEL": "my_label"})
-    assert inst.need_label == "my_label"
+    inst = GenericInst(cmd="WR_ADDR", args={"LABEL": Label("my_label")})
+    assert str(inst.need_label) == "my_label"

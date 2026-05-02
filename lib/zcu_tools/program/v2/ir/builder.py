@@ -18,6 +18,8 @@ class IRBuilder:
         labels: dict[str, Any],
         meta_infos: list[dict[str, Any]],
     ) -> RootNode:
+        from .labels import Label
+        Label.reset()
         inst_list = self.linker.unlink(prog_list, labels, meta_infos)
 
         stream = InstructionStream(inst_list)

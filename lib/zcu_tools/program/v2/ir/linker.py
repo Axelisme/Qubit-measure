@@ -29,9 +29,9 @@ class IRLinker:
         p_addr = 0
         for inst in inst_list:
             if isinstance(inst, LabelInst):
-                labels[inst.name] = f"&{p_addr}"
+                labels[str(inst.name)] = f"&{p_addr}"
                 meta_infos.append(
-                    {"kind": "label", "name": inst.name, "p_addr": p_addr}
+                    {"kind": "label", "name": str(inst.name), "p_addr": p_addr}
                 )
             elif isinstance(inst, MetaInst):
                 meta_infos.append(
@@ -62,6 +62,14 @@ class IRLinker:
         labels: dict[str, Any],
         meta_infos: list[dict[str, Any]],
     ) -> list[Instruction]:
+        from .labels import Label
+        label_map: dict[str, Label] = {}
+        
+        def get_label(name: str) -> Label:
+            if name not in label_map:
+                label_map[name] = Label.make_new(name)
+            return label_map[name]
+
         logical_insts: list[Instruction] = []
 
         # Parse fallback labels (labels added manually without calling _add_label)
@@ -84,7 +92,7 @@ class IRLinker:
             # 1. Insert tracked markers from meta_infos for this index
             for m in markers_by_addr.get(p_addr, []):
                 if m["kind"] == "label":
-                    logical_insts.append(LabelInst(name=m["name"]))
+                    logical_insts.append(LabelInst(name=get_label(m["name"])))
                 elif m["kind"] == "meta":
                     logical_insts.append(
                         MetaInst(type=m["type"], name=m["name"], args=m.get("info", {}))
@@ -96,17 +104,17 @@ class IRLinker:
 
             # 2. Insert untracked fallback labels pointing to this P_ADDR
             for name in labels_by_addr.get(p_addr, []):
-                logical_insts.append(LabelInst(name=name))
+                logical_insts.append(LabelInst(name=get_label(name)))
 
             # 3. Insert the instruction itself
-            logical_insts.append(Instruction.from_dict(d))
+            logical_insts.append(Instruction.from_dict(d, label_map=label_map))
 
         # Handle trailing markers from meta_infos
         # Any markers left in markers_by_addr are trailing
         for p_addr, markers in sorted(markers_by_addr.items()):
             for m in markers:
                 if m["kind"] == "label":
-                    logical_insts.append(LabelInst(name=m["name"]))
+                    logical_insts.append(LabelInst(name=get_label(m["name"])))
                 elif m["kind"] == "meta":
                     logical_insts.append(
                         MetaInst(type=m["type"], name=m["name"], args=m.get("info", {}))
@@ -115,10 +123,10 @@ class IRLinker:
         # Handle trailing fallback labels
         if prog_list:
             last_dict = prog_list[-1]
-            last_inst = Instruction.from_dict(last_dict)
+            last_inst = Instruction.from_dict(last_dict, label_map=label_map)
             max_addr = last_dict["P_ADDR"] + last_inst.addr_inc
             for name in labels_by_addr.get(max_addr, []):
-                logical_insts.append(LabelInst(name=name))
+                logical_insts.append(LabelInst(name=get_label(name)))
 
         return logical_insts
 
