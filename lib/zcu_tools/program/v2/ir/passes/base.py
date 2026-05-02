@@ -15,7 +15,7 @@ from ..instructions import (
     TimeInst,
     WaitInst,
 )
-from ..node import BlockNode, InstNode, IRLoop, IRNode, RootNode
+from ..node import BlockNode, InstNode, IRLoop, RootNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
 from ..traversal import IRTransformer, walk_instructions
 
@@ -49,9 +49,9 @@ def is_safe_linear_inst(inst: Instruction) -> bool:
 
 def block_contains_structural_node(block: BlockNode) -> bool:
     for item in block.insts:
-        if isinstance(item, IRNode) and not isinstance(item, InstNode):
+        if not isinstance(item, InstNode):
             return True
-        if isinstance(item, InstNode) and is_label_or_branching_inst(item.inst):
+        if is_label_or_branching_inst(item.inst):
             return True
     return False
 

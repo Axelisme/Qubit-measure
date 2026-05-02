@@ -39,30 +39,22 @@ class PipeLine:
         return ir, ctx
 
 
-def make_default_pipeline(config: PipeLineConfig, disable: bool = False) -> PipeLine:
+def make_default_pipeline(config: PipeLineConfig) -> PipeLine:
     from .passes import (
         DeadLabelEliminationPass,
         DeadWriteEliminationPass,
         TimedInstructionMergePass,
-        UnrollLoopPass,
+        UnrollSmallLoopPass,
         ZeroDelayDCEPass,
     )
 
     return PipeLine(
         config,
-        (
-            [
-                pass_
-                for enabled, pass_ in [
-                    (config.enable_unroll_loop, UnrollLoopPass()),
-                    (config.enable_dead_write, DeadWriteEliminationPass()),
-                    (config.enable_dead_label, DeadLabelEliminationPass()),
-                    (True, ZeroDelayDCEPass()),
-                    (True, TimedInstructionMergePass()),
-                ]
-                if enabled
-            ]
-            if not disable
-            else []
-        ),
+        [
+            UnrollSmallLoopPass(),
+            DeadWriteEliminationPass(),
+            DeadLabelEliminationPass(),
+            ZeroDelayDCEPass(),
+            TimedInstructionMergePass(),
+        ],
     )

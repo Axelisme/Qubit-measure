@@ -9,10 +9,10 @@ from zcu_tools.program.v2.ir.instructions import (
     TimeInst,
 )
 from zcu_tools.program.v2.ir.node import BlockNode, InstNode, IRLoop, RootNode
-from zcu_tools.program.v2.ir.passes.optimization import (
+from zcu_tools.program.v2.ir.passes import (
     DeadLabelEliminationPass,
     DeadWriteEliminationPass,
-    UnrollLoopPass,
+    UnrollSmallLoopPass,
 )
 from zcu_tools.program.v2.ir.pipeline import (
     PipeLineConfig,
@@ -37,7 +37,7 @@ def test_unroll_loop_expands_simple_loop_body():
         ]
     )
 
-    out = UnrollLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
+    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
 
     assert len(out.insts) == 3
     assert all(isinstance(item, InstNode) for item in out.insts)
@@ -61,7 +61,7 @@ def test_unroll_loop_skips_loop_with_internal_label():
         ]
     )
 
-    out = UnrollLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
+    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
 
     assert len(out.insts) == 1
     assert isinstance(out.insts[0], IRLoop)
@@ -76,7 +76,9 @@ def test_dead_write_elimination_removes_overwritten_write():
         ]
     )
 
-    out = DeadWriteEliminationPass().process(root, PipeLineContext(config=PipeLineConfig()))
+    out = DeadWriteEliminationPass().process(
+        root, PipeLineContext(config=PipeLineConfig())
+    )
 
     assert len(out.insts) == 2
     assert isinstance(out.insts[0], InstNode)
@@ -95,10 +97,16 @@ def test_dead_write_elimination_keeps_write_before_read():
         ]
     )
 
-    out = DeadWriteEliminationPass().process(root, PipeLineContext(config=PipeLineConfig()))
+    out = DeadWriteEliminationPass().process(
+        root, PipeLineContext(config=PipeLineConfig())
+    )
 
     assert len(out.insts) == 3
-    assert [item.inst.extra_args.get("LIT") for item in out.insts if isinstance(item.inst, RegWriteInst)] == [
+    assert [
+        item.inst.extra_args.get("LIT")
+        for item in out.insts
+        if isinstance(item.inst, RegWriteInst)
+    ] == [
         "#1",
         "#2",
     ]
@@ -112,7 +120,9 @@ def test_dead_label_elimination_removes_unreferenced_label():
         ]
     )
 
-    out = DeadLabelEliminationPass().process(root, PipeLineContext(config=PipeLineConfig()))
+    out = DeadLabelEliminationPass().process(
+        root, PipeLineContext(config=PipeLineConfig())
+    )
 
     assert len(out.insts) == 1
     assert isinstance(out.insts[0], InstNode)
@@ -127,7 +137,9 @@ def test_dead_label_elimination_keeps_referenced_label():
         ]
     )
 
-    out = DeadLabelEliminationPass().process(root, PipeLineContext(config=PipeLineConfig()))
+    out = DeadLabelEliminationPass().process(
+        root, PipeLineContext(config=PipeLineConfig())
+    )
 
     assert len(out.insts) == 2
     assert isinstance(out.insts[0].inst, LabelInst)
@@ -138,7 +150,7 @@ def test_default_pipeline_orders_new_passes_first():
     pipeline = make_default_pipeline(PipeLineConfig())
 
     assert [type(pass_).__name__ for pass_ in pipeline.passes] == [
-        "UnrollLoopPass",
+        "UnrollSmallLoopPass",
         "DeadWriteEliminationPass",
         "DeadLabelEliminationPass",
         "ZeroDelayDCEPass",

@@ -3,8 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Optional
 
-from ..node import IRLoop, IRNode
-from .base import OptimizationPassBase, loop_is_label_sensitive
+from ...node import IRLoop, IRNode
+from ..base import OptimizationPassBase, loop_is_label_sensitive
 
 
 def _clone_nodes(nodes: list[IRNode], repeat: int) -> list[IRNode]:
@@ -14,7 +14,7 @@ def _clone_nodes(nodes: list[IRNode], repeat: int) -> list[IRNode]:
     return cloned
 
 
-class UnrollLoopPass(OptimizationPassBase):
+class UnrollSmallLoopPass(OptimizationPassBase):
     """Expand small, structurally simple IRLoop nodes into repeated bodies."""
 
     def visit_IRLoop(self, node: IRLoop) -> Optional[IRNode | list[IRNode]]:
