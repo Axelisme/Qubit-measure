@@ -74,11 +74,13 @@ class TimedInstructionMergePass(AbsPipeLinePass, IRTransformer):
                 rewritten.append(InstNode(pending_inst))
             else:
                 rewritten.append(
-                    InstNode(TimeInst(
-                        c_op="inc_ref",
-                        lit=f"#{pending_value}",
-                        line=pending_inst.line,
-                    ))
+                    InstNode(
+                        TimeInst(
+                            c_op="inc_ref",
+                            lit=f"#{pending_value}",
+                            line=pending_inst.line,
+                        )
+                    )
                 )
             pending_inst = None
             pending_value = 0
@@ -110,7 +112,7 @@ class TimedInstructionMergePass(AbsPipeLinePass, IRTransformer):
         flush_pending()
         node.insts = rewritten
         return node
-        
+
     def visit_RootNode(self, node: RootNode) -> Optional[IRNode]:
         return self.visit_BlockNode(node)
 

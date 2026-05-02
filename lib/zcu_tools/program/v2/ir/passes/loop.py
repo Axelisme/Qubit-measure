@@ -43,9 +43,13 @@ class ConstantLoopUnrollPass(AbsPipeLinePass, IRTransformer):
 
         out: list[IRNode] = []
         # Initialize counter
-        out.append(InstNode(RegWriteInst(dst=loop.counter_reg, src="imm", extra_args={"LIT": "#0"})))
+        out.append(
+            InstNode(
+                RegWriteInst(dst=loop.counter_reg, src="imm", extra_args={"LIT": "#0"})
+            )
+        )
         for _ in range(trip_count):
             out.extend(deepcopy(loop.body.insts))
-            # body.insts naturally contains the IncReg for the counter, 
+            # body.insts naturally contains the IncReg for the counter,
             # so we don't need to manually emit an update block.
         return out

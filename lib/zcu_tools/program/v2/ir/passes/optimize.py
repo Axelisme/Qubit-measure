@@ -34,6 +34,7 @@ class LoopInvariantHoistPass(AbsPipeLinePass, IRTransformer):
 
     def _hoist_loop(self, loop: IRLoop) -> list[IRNode]:
         from ..utils import regs_from_value
+
         # The loop control register is written and read. The limit n might be a register.
         blocked_regs = {loop.counter_reg}
         if isinstance(loop.n, str):
@@ -57,7 +58,7 @@ class LoopInvariantHoistPass(AbsPipeLinePass, IRTransformer):
 
         if hoisted:
             loop.body.insts = remaining
-            
+
         return hoisted
 
 
@@ -75,7 +76,7 @@ class PeepholePass(AbsPipeLinePass, IRTransformer):
 
     def visit_RegWriteInst(self, inst: Instruction) -> Optional[Instruction]:
         return strip_internal_annotations(inst)
-        
+
     def visit_PortWriteInst(self, inst: Instruction) -> Optional[Instruction]:
         return strip_internal_annotations(inst)
 
@@ -87,22 +88,22 @@ class PeepholePass(AbsPipeLinePass, IRTransformer):
 
     def visit_TestInst(self, inst: Instruction) -> Optional[Instruction]:
         return strip_internal_annotations(inst)
-        
+
     def visit_JumpInst(self, inst: Instruction) -> Optional[Instruction]:
         return strip_internal_annotations(inst)
-        
+
     def visit_NopInst(self, inst: Instruction) -> Optional[Instruction]:
         return strip_internal_annotations(inst)
-        
+
     def visit_DmemReadInst(self, inst: Instruction) -> Optional[Instruction]:
         return strip_internal_annotations(inst)
-        
+
     def visit_DmemWriteInst(self, inst: Instruction) -> Optional[Instruction]:
         return strip_internal_annotations(inst)
-        
+
     def visit_DportWriteInst(self, inst: Instruction) -> Optional[Instruction]:
         return strip_internal_annotations(inst)
-        
+
     def visit_WaitInst(self, inst: Instruction) -> Optional[Instruction]:
         return strip_internal_annotations(inst)
 
