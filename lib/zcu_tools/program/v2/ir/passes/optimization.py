@@ -1,12 +1,11 @@
+from __future__ import annotations
+
 from .control_flow import DeadLabelEliminationPass
 from .dataflow import DeadWriteEliminationPass
 from .loop import UnrollLoopPass
-from .timeline import TimedInstructionMergePass, ZeroDelayDCEPass
 
 __all__ = [
     "DeadLabelEliminationPass",
     "DeadWriteEliminationPass",
     "UnrollLoopPass",
-    "TimedInstructionMergePass",
-    "ZeroDelayDCEPass",
 ]
