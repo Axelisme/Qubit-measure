@@ -85,6 +85,7 @@ def parse_loop(stream: InstructionStream) -> IRLoop:
         name=start_meta.name,
         counter_reg=start_meta.args["counter_reg"],
         n=start_meta.args["n"],
+        range_hint=start_meta.args.get("range_hint"),
         start_label=start_label,
     )
 

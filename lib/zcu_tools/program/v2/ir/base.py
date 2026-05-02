@@ -37,10 +37,7 @@ class IRCompileMixin(QickProgramV2):
         builder = IRBuilder()
         ir = builder.build(insts, self.labels, meta_infos)
 
-        pmem_cap = self.tproccfg.get("pmem_size")
-        pipeline = make_default_pipeline(
-            PipeLineConfig(pmem_budget=int(0.8 * pmem_cap))
-        )
+        pipeline = make_default_pipeline(pmem_capacity=self.tproccfg["pmem_size"])
 
         opt_ir, _ctx = pipeline(ir)
 

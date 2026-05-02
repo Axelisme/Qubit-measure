@@ -103,8 +103,7 @@ def test_pipeline_roundtrip_with_normalization():
         insts=[loop],
     )
 
-    config = PipeLineConfig()
-    pipeline = make_default_pipeline(config)
+    pipeline = make_default_pipeline(pmem_capacity=8192)
 
     out_ir, _ctx = pipeline(root)
 

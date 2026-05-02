@@ -62,6 +62,7 @@ class IRLoop(IRNode):
     name: str = ""
     counter_reg: str = ""
     n: Union[int, str] = 0
+    range_hint: Optional[tuple[int, int]] = None
 
     # Structural Labels (Attributes)
     start_label: Optional[str] = None

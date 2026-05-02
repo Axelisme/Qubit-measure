@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
@@ -14,6 +16,16 @@ class PipeLineConfig:
     enable_dead_label: bool = True
     max_loop_unroll_count: int = 8
     pmem_budget: int | None = None
+
+    # Unified cycle cost model
+    cost_default: int = 1
+    cost_wmem: int = 4
+    cost_dmem: int = 4
+    cost_jump_flush: int = 4
+
+
+# Global default configuration for quick debugging and toggling optimization options.
+DEFAULT_PIPELINE_CONFIG = PipeLineConfig()
 
 
 @dataclass
@@ -40,7 +52,7 @@ class PipeLine:
         return ir, ctx
 
 
-def make_default_pipeline(config: PipeLineConfig) -> PipeLine:
+def make_default_pipeline(pmem_capacity: int) -> PipeLine:
     from .passes import (
         DeadLabelEliminationPass,
         DeadWriteEliminationPass,
@@ -48,6 +60,10 @@ def make_default_pipeline(config: PipeLineConfig) -> PipeLine:
         UnrollSmallLoopPass,
         ZeroDelayDCEPass,
     )
+
+    config = deepcopy(DEFAULT_PIPELINE_CONFIG)
+    if config.pmem_budget is None:
+        config.pmem_budget = int(0.8 * pmem_capacity)
 
     return PipeLine(
         config,

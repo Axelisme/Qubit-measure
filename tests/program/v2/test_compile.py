@@ -138,16 +138,16 @@ def test_compile_passes_pmem_budget_into_pipeline(monkeypatch):
         def __call__(self, ir):
             return ir, PipeLineContext()
 
-    def fake_make_default_pipeline(config):
-        seen["config"] = config
+    def fake_make_default_pipeline(pmem_capacity):
+        seen["pmem_capacity"] = pmem_capacity
         return _NoopPipeline()
 
     monkeypatch.setattr(ir_base, "make_default_pipeline", fake_make_default_pipeline)
 
     prog = _make_prog()
 
-    assert "config" in seen
-    assert seen["config"].pmem_budget == int(prog.tproccfg["pmem_size"] * 0.8)
+    assert "pmem_capacity" in seen
+    assert seen["pmem_capacity"] == prog.tproccfg["pmem_size"]
 
 
 # ---------------------------------------------------------------------------

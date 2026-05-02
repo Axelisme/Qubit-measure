@@ -147,7 +147,7 @@ def test_dead_label_elimination_keeps_referenced_label():
 
 
 def test_default_pipeline_orders_new_passes_first():
-    pipeline = make_default_pipeline(PipeLineConfig())
+    pipeline = make_default_pipeline(pmem_capacity=8192)
 
     assert [type(pass_).__name__ for pass_ in pipeline.passes] == [
         "UnrollSmallLoopPass",
