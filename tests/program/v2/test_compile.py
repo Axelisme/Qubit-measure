@@ -31,6 +31,21 @@ def _make_prog(
     return ModularProgramV2(soccfg, cfg, modules=modules or [], sweep=sweep)
 
 
+def _addr_inc(inst: dict) -> int:
+    return 2 if inst.get("CMD") == "WAIT" else 1
+
+
+def _expected_p_addr(prog: ModularProgramV2) -> int:
+    if not prog.prog_list:
+        return 0
+    return max(inst["P_ADDR"] + _addr_inc(inst) for inst in prog.prog_list)
+
+
+def _expected_line(prog: ModularProgramV2) -> int:
+    tracked_labels = sum(1 for info in prog.meta_infos if info.get("kind") == "label")
+    return len(prog.prog_list) + tracked_labels
+
+
 # ---------------------------------------------------------------------------
 # Compile-phase tests
 # ---------------------------------------------------------------------------
@@ -87,8 +102,16 @@ def test_compile_keeps_labels_out_of_prog_list():
 def test_compile_refreshes_program_cursors():
     prog = _make_prog(sweep=[("my_loop", 10)])
 
-    assert prog.p_addr == len(prog.prog_list)
-    assert prog.line == len(prog.prog_list)
+    assert prog.p_addr == _expected_p_addr(prog)
+    assert prog.line == _expected_line(prog)
+
+
+def test_compile_refreshes_program_cursors_with_wait():
+    prog = _make_prog(modules=[Delay("wait", delay=1.0)])
+
+    assert any(inst.get("CMD") == "WAIT" for inst in prog.prog_list)
+    assert prog.p_addr == _expected_p_addr(prog)
+    assert prog.line == _expected_line(prog)
 
 
 def test_reps_propagated():

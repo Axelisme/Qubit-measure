@@ -65,6 +65,13 @@ class TestTimeInstruction:
         recovered = inst.to_dict()
         assert recovered == original
 
+    @pytest.mark.parametrize("c_op", ["rst", "updt", "set_ref", "inc_ref"])
+    def test_supported_time_c_ops_roundtrip(self, c_op):
+        original = {"CMD": "TIME", "C_OP": c_op}
+        inst = Instruction.from_dict(original)
+        assert isinstance(inst, TimeInst)
+        assert inst.to_dict() == original
+
     def test_time_immutable(self):
         inst = TimeInst(c_op="inc_ref", lit="#10")
         with pytest.raises(Exception):  # FrozenInstanceError
@@ -163,6 +170,22 @@ class TestJumpInstruction:
         recovered = inst.to_dict()
         assert recovered == original
 
+    def test_roundtrip_jump_with_raw_control_fields(self):
+        original = {
+            "CMD": "JUMP",
+            "LABEL": "loop",
+            "IF": "nz",
+            "WR": "s1 op",
+            "OP": "s1 + #1",
+            "UF": "1",
+        }
+        inst = Instruction.from_dict(original)
+        assert isinstance(inst, JumpInst)
+        assert inst.wr == "s1 op"
+        assert inst.op == "s1 + #1"
+        assert inst.uf == "1"
+        assert inst.to_dict() == original
+
     def test_roundtrip_jump_special_labels(self):
         """Test QICK special labels: NEXT, PREV, HERE, SKIP."""
         for label in ["NEXT", "PREV", "HERE", "SKIP"]:
@@ -200,7 +223,8 @@ class TestRegWriteInstruction:
         )
         assert inst.dst == "s2"
         assert inst.src == "op"
-        assert "OP" in inst.extra_args
+        assert inst.op is None
+        assert inst.extra_args["OP"] == "s1+#1"
 
     def test_dispatch_regwr_imm(self):
         d = {"CMD": "REG_WR", "DST": "s1", "SRC": "imm", "LIT": "#0"}
@@ -208,15 +232,31 @@ class TestRegWriteInstruction:
         assert isinstance(inst, RegWriteInst)
         assert inst.dst == "s1"
         assert inst.src == "imm"
-        assert inst.extra_args["LIT"] == "#0"
+        assert inst.lit == "#0"
+        assert inst.extra_args == {}
 
     def test_dispatch_regwr_op(self):
         d = {"CMD": "REG_WR", "DST": "s2", "SRC": "op", "OP": "s1+#1", "UF": "1"}
         inst = Instruction.from_dict(d)
         assert isinstance(inst, RegWriteInst)
         assert inst.src == "op"
-        assert inst.extra_args["OP"] == "s1+#1"
-        assert inst.extra_args["UF"] == "1"
+        assert inst.op == "s1+#1"
+        assert inst.uf == "1"
+
+    def test_dispatch_regwr_dmem_lowering(self):
+        d = {"CMD": "REG_WR", "DST": "s3", "SRC": "dmem", "ADDR": "s15"}
+        inst = Instruction.from_dict(d)
+        assert isinstance(inst, DmemReadInst)
+        assert inst.dst == "s3"
+        assert inst.src == "dmem"
+        assert inst.addr == "s15"
+        assert inst.to_dict() == d
+
+    def test_dispatch_legacy_dmem_rd_lowering(self):
+        d = {"CMD": "DMEM_RD", "DST": "s4", "ADDR": "s5"}
+        inst = Instruction.from_dict(d)
+        assert isinstance(inst, DmemReadInst)
+        assert inst.to_dict() == {"CMD": "REG_WR", "DST": "s4", "SRC": "dmem", "ADDR": "s5"}
 
     def test_roundtrip_regwr_imm(self):
         original = {"CMD": "REG_WR", "DST": "s1", "SRC": "imm", "LIT": "#5", "LINE": 1}
@@ -281,6 +321,15 @@ class TestPortWriteInstruction:
         recovered = inst.to_dict()
         assert recovered == original
 
+    def test_roundtrip_wport_wr_native_shape(self):
+        original = {"CMD": "WPORT_WR", "DST": "0", "SRC": "wmem", "ADDR": "&12", "TIME": "@10"}
+        inst = Instruction.from_dict(original)
+        assert isinstance(inst, PortWriteInst)
+        assert inst.src == "wmem"
+        assert inst.addr == "&12"
+        assert inst.extra_args == {}
+        assert inst.to_dict() == original
+
     def test_wport_wr_preserves_unknown_fields(self):
         """WPORT_WR can have various data fields that must be preserved."""
         original = {
@@ -323,6 +372,22 @@ class TestGenericInstruction:
         inst = Instruction.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
+
+
+class TestWaitInstruction:
+    """Tests for WaitInst."""
+
+    def test_wait_default_shape(self):
+        inst = WaitInst()
+        assert inst.to_dict() == {"CMD": "WAIT", "C_OP": "time"}
+
+    def test_wait_roundtrip(self):
+        original = {"CMD": "WAIT", "C_OP": "time", "TIME": "@10", "ADDR": "s15"}
+        inst = Instruction.from_dict(original)
+        assert isinstance(inst, WaitInst)
+        assert inst.time == "@10"
+        assert inst.addr == "s15"
+        assert inst.to_dict() == original
 
 
 class TestLabelInstruction:

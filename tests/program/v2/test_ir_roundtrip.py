@@ -1,5 +1,6 @@
-import pytest
 from typing import Any
+
+import pytest
 from zcu_tools.program.v2.ir.builder import IRBuilder
 from zcu_tools.program.v2.ir.instructions import (
     GenericInst,
@@ -73,7 +74,7 @@ def test_structural_loop_roundtrip():
     assert loop.end_label == "loop1_end"
 
     # Unbuild (emits instructions)
-    opt_insts, opt_labels, opt_meta_infos = builder.unbuild(root)
+    opt_insts, opt_labels, opt_meta_infos, cursor = builder.unbuild(root)
 
     # Verify emitted instructions (no markers)
     # The new IRLoop.emit() outputs:
@@ -89,6 +90,8 @@ def test_structural_loop_roundtrip():
     # Note: Labels are extracted into a dictionary when creating binprog, but `emit()` outputs them as LabelInst dicts.
     cmds = [inst.get("CMD") for inst in opt_insts if "CMD" in inst]
     assert cmds == expected_cmds
+    assert cursor.final_p_addr == 6
+    assert cursor.final_line == 8
 
 
 def test_pipeline_roundtrip_with_normalization():

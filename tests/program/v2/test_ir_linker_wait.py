@@ -1,6 +1,5 @@
 import pytest
 from zcu_tools.program.v2.ir.instructions import (
-    Instruction,
     LabelInst,
     RegWriteInst,
     WaitInst,
@@ -36,7 +35,7 @@ def test_linker_wait_address_calculation():
     linker = IRLinker()
     inst_list = []
     ir.emit(inst_list)
-    prog_list, labels, meta_infos = linker.link(inst_list)
+    prog_list, labels, meta_infos, cursor = linker.link(inst_list)
 
     # Expected addresses:
     # L1: 0
@@ -55,6 +54,29 @@ def test_linker_wait_address_calculation():
     assert prog_list[1]["P_ADDR"] == 1
     assert prog_list[1]["CMD"] == "WAIT"
     assert prog_list[2]["P_ADDR"] == 3
+    assert cursor.final_p_addr == 4
+    assert cursor.final_line == 7
+
+
+def test_linker_cursor_counts_wait_and_trailing_labels():
+    ir = RootNode(
+        insts=[
+            InstNode(LabelInst(name="L1")),
+            InstNode(WaitInst()),
+            InstNode(LabelInst(name="L2")),
+            InstNode(RegWriteInst(dst="r0", src="imm", extra_args={"LIT": "#0"})),
+        ]
+    )
+
+    linker = IRLinker()
+    inst_list = []
+    ir.emit(inst_list)
+    prog_list, labels, _meta_infos, cursor = linker.link(inst_list)
+
+    assert labels == {"L1": "&0", "L2": "&2"}
+    assert [inst["P_ADDR"] for inst in prog_list] == [0, 2]
+    assert cursor.final_p_addr == 3
+    assert cursor.final_line == 4
 
 
 def test_linker_wait_roundtrip():
@@ -71,7 +93,7 @@ def test_linker_wait_roundtrip():
     linker = IRLinker()
     inst_list = []
     ir.emit(inst_list)
-    prog_list, labels, meta_infos = linker.link(inst_list)
+    prog_list, labels, meta_infos, _cursor = linker.link(inst_list)
 
     # Roundtrip: unlink
     logical_insts = linker.unlink(prog_list, labels, meta_infos)
@@ -82,11 +104,11 @@ def test_linker_wait_roundtrip():
         if isinstance(inst, LabelInst):
             actual_cmds.append({"LABEL": inst.name})
         else:
-            actual_cmds.append({"CMD": inst.to_dict()["CMD"]})
+            actual_cmds.append(inst.to_dict())
 
     expected = [
         {"LABEL": "L1"},
-        {"CMD": "WAIT"},
+        {"CMD": "WAIT", "C_OP": "time"},
         {"LABEL": "L2"},
     ]
     assert actual_cmds == expected

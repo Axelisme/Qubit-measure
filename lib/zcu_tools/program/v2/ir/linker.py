@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 
 from typing_extensions import Any
 
 from .instructions import Instruction, LabelInst, MetaInst
+
+
+@dataclass(frozen=True)
+class IRCursor:
+    """Compile cursors aligned with QICK assembler semantics."""
+
+    final_p_addr: int
+    final_line: int
 
 
 class IRLinker:
@@ -12,24 +21,20 @@ class IRLinker:
 
     def link(
         self, inst_list: list[Instruction]
-    ) -> tuple[list[dict], dict[str, str], list[dict[str, Any]]]:
-        opt_prog_list: list[dict] = []
-        opt_labels: dict[str, str] = {}
-        opt_meta_infos: list[dict[str, Any]] = []
+    ) -> tuple[list[dict], dict[str, str], list[dict[str, Any]], IRCursor]:
+        prog_list: list[dict] = []
+        labels: dict[str, str] = {}
+        meta_infos: list[dict[str, Any]] = []
 
         p_addr = 0
         for inst in inst_list:
             if isinstance(inst, LabelInst):
-                opt_labels[inst.name] = f"&{p_addr}"
-                opt_meta_infos.append(
-                    {
-                        "kind": "label",
-                        "name": inst.name,
-                        "p_addr": p_addr,
-                    }
+                labels[inst.name] = f"&{p_addr}"
+                meta_infos.append(
+                    {"kind": "label", "name": inst.name, "p_addr": p_addr}
                 )
             elif isinstance(inst, MetaInst):
-                opt_meta_infos.append(
+                meta_infos.append(
                     {
                         "kind": "meta",
                         "type": inst.type,
@@ -41,10 +46,15 @@ class IRLinker:
             else:
                 d = inst.to_dict()
                 d["P_ADDR"] = p_addr
-                opt_prog_list.append(d)
+                prog_list.append(d)
                 p_addr += inst.addr_inc
 
-        return opt_prog_list, opt_labels, opt_meta_infos
+        return (
+            prog_list,
+            labels,
+            meta_infos,
+            self.compute_cursors(inst_list),
+        )
 
     def unlink(
         self,
@@ -79,7 +89,7 @@ class IRLinker:
                     logical_insts.append(
                         MetaInst(type=m["type"], name=m["name"], args=m.get("info", {}))
                     )
-            
+
             # Remove from markers_by_addr so we don't process it again for trailing
             if p_addr in markers_by_addr:
                 del markers_by_addr[p_addr]
@@ -129,3 +139,20 @@ class IRLinker:
         raise ValueError(
             f"Invalid label address type for {label_name!r}: {label_addr!r}"
         )
+
+    @staticmethod
+    def compute_cursors(inst_list: list[Instruction]) -> IRCursor:
+        """Recompute QICK-compatible cursors from the emitted IR sequence."""
+
+        p_addr = 0
+        line = 0
+
+        for inst in inst_list:
+            if isinstance(inst, MetaInst):
+                continue
+
+            line += 1
+            if not isinstance(inst, LabelInst):
+                p_addr += inst.addr_inc
+
+        return IRCursor(final_p_addr=p_addr, final_line=line)

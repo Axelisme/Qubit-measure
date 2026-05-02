@@ -10,7 +10,9 @@ from __future__ import annotations
 from typing import Literal
 
 import pytest
+from qick.asm_v2 import Label, WriteReg
 from zcu_tools.program.v2.base import ProgramV2Cfg
+from zcu_tools.program.v2.macro.loop import OpenInnerLoop
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.control import Branch, Repeat
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, Join, SoftDelay
@@ -63,6 +65,10 @@ def _make_prog(modules=None, sweep=None, n_gens=2, n_readouts=1, **cfg_kwargs):
     soccfg = make_mock_soccfg(n_gens=n_gens, n_readouts=n_readouts)
     cfg = ProgramV2Cfg(**cfg_kwargs)
     return ModularProgramV2(soccfg, cfg, modules=modules or [], sweep=sweep)
+
+
+def _label_addr(labels: dict[str, str], name: str) -> int:
+    return int(labels[name].removeprefix("&"))
 
 
 def _pulse_cfg(
@@ -295,6 +301,16 @@ class TestResetIntegration:
 
 
 class TestControlIntegration:
+    def test_open_inner_loop_expands_counter_init_before_start_label(self):
+        class _Prog:
+            def _get_reg(self, value):
+                return value
+
+        macros = OpenInnerLoop(name="r", counter_reg="r", n=4).expand(_Prog())
+
+        assert isinstance(macros[1], WriteReg)
+        assert isinstance(macros[2], Label)
+
     def test_repeat_zero_compiles(self):
         r = Repeat("r", 0)
         r.add_content(SoftDelay("d", 0.1))
@@ -338,6 +354,37 @@ class TestControlIntegration:
         r.add_content(SoftDelay("d", 0.1))
         prog = _make_prog(modules=[r], sweep=[("n_count", 4)])
         assert prog.binprog is not None
+
+    def test_repeat_register_driven_loop_roundtrip_shape(self):
+        r = Repeat("r_cnt", "n_count")
+        r.add_content(SoftDelay("d", 0.1))
+        prog = _make_prog(modules=[r], sweep=[("n_count", 4)])
+
+        start_addr = _label_addr(prog.labels, "r_cnt_start")
+        end_addr = _label_addr(prog.labels, "r_cnt_end")
+
+        init_inst = max(
+            (
+                inst
+                for inst in prog.prog_list
+                if inst.get("CMD") == "REG_WR"
+                and inst.get("SRC") == "imm"
+                and inst.get("LIT") == "#0"
+                and inst["P_ADDR"] < start_addr
+            ),
+            key=lambda inst: inst["P_ADDR"],
+        )
+        back_jump = next(
+            inst
+            for inst in prog.prog_list
+            if inst.get("CMD") == "JUMP"
+            and inst.get("LABEL") == "r_cnt_start"
+            and "IF" not in inst
+        )
+
+        assert init_inst["P_ADDR"] < start_addr
+        assert next(inst for inst in prog.prog_list if inst["P_ADDR"] == start_addr)["CMD"] == "TEST"
+        assert back_jump["P_ADDR"] < end_addr
 
     def test_nested_repeat_compiles(self):
         inner = Repeat("inner", 2)

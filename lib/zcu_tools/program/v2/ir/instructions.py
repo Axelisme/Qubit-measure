@@ -5,6 +5,20 @@ from typing import Any, Optional
 
 from .utils import regs_from_value, strip_write_modifier
 
+SPECIAL_LABELS = frozenset({"HERE", "NEXT", "PREV", "SKIP"})
+
+
+def _is_pseudo_label(value: Optional[str]) -> bool:
+    return isinstance(value, str) and value in SPECIAL_LABELS
+
+
+def _residual_fields(source: dict[str, Any], handled: set[str]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in source.items()
+        if key not in handled and key not in {"CMD", "LINE", "P_ADDR"}
+    }
+
 
 @dataclass(frozen=True)
 class Instruction:
@@ -66,107 +80,169 @@ class Instruction:
 
         # Dispatch to structured types for known opcodes
         if cmd == "TIME":
+            extra_args = _residual_fields(clean_d, {"C_OP", "LIT", "R1"})
             return TimeInst(
                 c_op=clean_d.get("C_OP", ""),
                 lit=clean_d.get("LIT"),
                 r1=clean_d.get("R1"),
+                extra_args=extra_args,
                 line=clean_d.get("LINE"),
                 annotations=annotations,
             )
         elif cmd == "TEST":
+            extra_args = _residual_fields(clean_d, {"OP", "UF"})
             return TestInst(
                 op=clean_d.get("OP", ""),
                 uf=clean_d.get("UF"),
+                extra_args=extra_args,
                 line=clean_d.get("LINE"),
                 annotations=annotations,
             )
         elif cmd == "JUMP":
+            extra_args = _residual_fields(
+                clean_d, {"LABEL", "IF", "ADDR", "WR", "OP", "UF"}
+            )
             return JumpInst(
                 label=clean_d.get("LABEL", ""),
                 if_cond=clean_d.get("IF"),
                 addr=clean_d.get("ADDR"),
+                wr=clean_d.get("WR"),
+                op=clean_d.get("OP"),
+                uf=clean_d.get("UF"),
+                extra_args=extra_args,
                 line=clean_d.get("LINE"),
                 annotations=annotations,
             )
         elif cmd == "REG_WR":
-            extra_args = {
-                k: v
-                for k, v in clean_d.items()
-                if k not in ("CMD", "DST", "SRC", "LINE", "P_ADDR")
-            }
+            src = clean_d.get("SRC", "")
+            wr = clean_d.get("WR")
+            if not clean_d.get("DST") and wr:
+                wr_parts = wr.split()
+                if wr_parts:
+                    clean_d["DST"] = wr_parts[0]
+                if len(wr_parts) > 1 and not src:
+                    clean_d["SRC"] = wr_parts[1]
+                    src = wr_parts[1]
+            if src == "dmem":
+                extra_args = _residual_fields(
+                    clean_d,
+                    {"DST", "SRC", "ADDR", "WR", "OP", "LIT", "UF", "IF", "LABEL"},
+                )
+                return DmemReadInst(
+                    dst=clean_d.get("DST", ""),
+                    src="dmem",
+                    addr=clean_d.get("ADDR"),
+                    wr=wr,
+                    op=clean_d.get("OP"),
+                    lit=clean_d.get("LIT"),
+                    uf=clean_d.get("UF"),
+                    if_cond=clean_d.get("IF"),
+                    label=clean_d.get("LABEL"),
+                    extra_args=extra_args,
+                    line=clean_d.get("LINE"),
+                    annotations=annotations,
+                )
+            extra_args = _residual_fields(
+                clean_d,
+                {"DST", "SRC", "WR", "OP", "LIT", "ADDR", "UF", "IF", "LABEL"},
+            )
             return RegWriteInst(
                 dst=clean_d.get("DST", ""),
                 src=clean_d.get("SRC", ""),
+                wr=wr,
+                op=clean_d.get("OP"),
+                lit=clean_d.get("LIT"),
+                addr=clean_d.get("ADDR"),
+                uf=clean_d.get("UF"),
+                if_cond=clean_d.get("IF"),
+                label=clean_d.get("LABEL"),
                 extra_args=extra_args,
                 line=clean_d.get("LINE"),
                 annotations=annotations,
             )
         elif cmd == "WPORT_WR":
-            extra_args = {
-                k: v
-                for k, v in clean_d.items()
-                if k not in ("CMD", "DST", "TIME", "LINE", "P_ADDR")
-            }
+            extra_args = _residual_fields(
+                clean_d, {"DST", "SRC", "ADDR", "TIME", "WR", "OP", "UF", "IF"}
+            )
             return PortWriteInst(
                 dst=clean_d.get("DST", ""),
-                time=clean_d.get("TIME", ""),
+                src=clean_d.get("SRC"),
+                addr=clean_d.get("ADDR"),
+                time=clean_d.get("TIME"),
+                wr=clean_d.get("WR"),
+                op=clean_d.get("OP"),
+                uf=clean_d.get("UF"),
+                if_cond=clean_d.get("IF"),
                 extra_args=extra_args,
                 line=clean_d.get("LINE"),
                 annotations=annotations,
             )
         elif cmd == "NOP":
-            extra_args = {
-                k: v for k, v in clean_d.items() if k not in ("CMD", "LINE", "P_ADDR")
-            }
+            extra_args = _residual_fields(clean_d, set())
             return NopInst(
                 extra_args=extra_args,
                 line=clean_d.get("LINE"),
                 annotations=annotations,
             )
         elif cmd == "DMEM_RD":
-            extra_args = {
-                k: v
-                for k, v in clean_d.items()
-                if k not in ("CMD", "DST", "ADDR", "LINE", "P_ADDR")
-            }
+            extra_args = _residual_fields(
+                clean_d, {"DST", "SRC", "ADDR", "WR", "OP", "LIT", "UF", "IF", "LABEL"}
+            )
             return DmemReadInst(
                 dst=clean_d.get("DST", ""),
-                addr=clean_d.get("ADDR", ""),
+                src=clean_d.get("SRC", "dmem"),
+                addr=clean_d.get("ADDR"),
+                wr=clean_d.get("WR"),
+                op=clean_d.get("OP"),
+                lit=clean_d.get("LIT"),
+                uf=clean_d.get("UF"),
+                if_cond=clean_d.get("IF"),
+                label=clean_d.get("LABEL"),
                 extra_args=extra_args,
                 line=clean_d.get("LINE"),
                 annotations=annotations,
             )
         elif cmd == "DMEM_WR":
-            extra_args = {
-                k: v
-                for k, v in clean_d.items()
-                if k not in ("CMD", "SRC", "ADDR", "LINE", "P_ADDR")
-            }
+            extra_args = _residual_fields(
+                clean_d,
+                {"DST", "SRC", "WR", "OP", "LIT", "UF", "IF"},
+            )
             return DmemWriteInst(
+                dst=clean_d.get("DST", ""),
                 src=clean_d.get("SRC", ""),
-                addr=clean_d.get("ADDR", ""),
+                wr=clean_d.get("WR"),
+                op=clean_d.get("OP"),
+                lit=clean_d.get("LIT"),
+                uf=clean_d.get("UF"),
+                if_cond=clean_d.get("IF"),
                 extra_args=extra_args,
                 line=clean_d.get("LINE"),
                 annotations=annotations,
             )
         elif cmd == "DPORT_WR":
-            extra_args = {
-                k: v
-                for k, v in clean_d.items()
-                if k not in ("CMD", "DST", "DATA", "LINE", "P_ADDR")
-            }
+            extra_args = _residual_fields(
+                clean_d,
+                {"DST", "SRC", "DATA", "TIME", "WR", "OP", "UF", "IF"},
+            )
             return DportWriteInst(
                 dst=clean_d.get("DST", ""),
+                src=clean_d.get("SRC"),
                 data=clean_d.get("DATA", ""),
+                time=clean_d.get("TIME"),
+                wr=clean_d.get("WR"),
+                op=clean_d.get("OP"),
+                uf=clean_d.get("UF"),
+                if_cond=clean_d.get("IF"),
                 extra_args=extra_args,
                 line=clean_d.get("LINE"),
                 annotations=annotations,
             )
         elif cmd == "WAIT":
-            extra_args = {
-                k: v for k, v in clean_d.items() if k not in ("CMD", "LINE", "P_ADDR")
-            }
+            extra_args = _residual_fields(clean_d, {"C_OP", "TIME", "ADDR"})
             return WaitInst(
+                c_op=clean_d.get("C_OP", "time"),
+                time=clean_d.get("TIME"),
+                addr=clean_d.get("ADDR"),
                 extra_args=extra_args,
                 line=clean_d.get("LINE"),
                 annotations=annotations,
@@ -271,12 +347,11 @@ class TimeInst(Instruction):
     c_op: str = ""  # inc_ref, trigger, etc.
     lit: Optional[str] = None  # e.g., "#10" for literal value
     r1: Optional[str] = None  # register operand
+    extra_args: dict[str, Any] = field(default_factory=dict)
 
     @property
     def reg_read(self) -> list[str]:
-        if self.r1 and not self.r1.startswith("#"):
-            return [self.r1]
-        return []
+        return sorted(list(regs_from_value(self.r1)))
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"CMD": "TIME", "C_OP": self.c_op}
@@ -284,6 +359,7 @@ class TimeInst(Instruction):
             d["LIT"] = self.lit
         if self.r1 is not None:
             d["R1"] = self.r1
+        d.update(self.extra_args)
         d.update(self.annotations)
         if self.line is not None:
             d["LINE"] = self.line
@@ -297,6 +373,7 @@ class TestInst(Instruction):
     __test__ = False
     op: str = ""  # The condition to test (e.g., "r1 == r2")
     uf: Optional[str] = None  # Overflow/underflow flag (usually "1")
+    extra_args: dict[str, Any] = field(default_factory=dict)
 
     @property
     def reg_read(self) -> list[str]:
@@ -306,6 +383,7 @@ class TestInst(Instruction):
         d: dict[str, Any] = {"CMD": "TEST", "OP": self.op}
         if self.uf is not None:
             d["UF"] = self.uf
+        d.update(self.extra_args)
         d.update(self.annotations)
         if self.line is not None:
             d["LINE"] = self.line
@@ -319,10 +397,28 @@ class JumpInst(Instruction):
     label: str = ""  # Target label
     if_cond: Optional[str] = None  # Condition for conditional jump (e.g., "eq", "nz")
     addr: Optional[str] = None  # Direct address for large jumps (e.g., "s15")
+    wr: Optional[str] = None  # Optional register write control string
+    op: Optional[str] = None  # Optional ALU expression
+    uf: Optional[str] = None  # Optional flag update control
+    extra_args: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def reg_read(self) -> list[str]:
+        reads: set[str] = set()
+        reads.update(regs_from_value(self.addr))
+        reads.update(regs_from_value(self.op))
+        reads.update(regs_from_value(self.wr))
+        return sorted(list(reads))
+
+    @property
+    def reg_write(self) -> list[str]:
+        if self.wr:
+            return [strip_write_modifier(self.wr)]
+        return []
 
     @property
     def need_label(self) -> Optional[str]:
-        if self.label and self.label not in ("HERE", "NEXT", "PREV", "SKIP"):
+        if self.label and not _is_pseudo_label(self.label):
             return self.label
         return None
 
@@ -334,6 +430,13 @@ class JumpInst(Instruction):
             d["ADDR"] = self.addr
         if self.if_cond is not None:
             d["IF"] = self.if_cond
+        if self.wr is not None:
+            d["WR"] = self.wr
+        if self.op is not None:
+            d["OP"] = self.op
+        if self.uf is not None:
+            d["UF"] = self.uf
+        d.update(self.extra_args)
         d.update(self.annotations)
         if self.line is not None:
             d["LINE"] = self.line
@@ -346,18 +449,23 @@ class RegWriteInst(Instruction):
 
     dst: str = ""  # Destination register
     src: str = ""  # Source: 'op' (ALU operation), 'imm' (immediate), 'reg' (register), 'dmem' (memory)
-    extra_args: dict[str, Any] = field(
-        default_factory=dict
-    )  # OP, LIT, UF, UDF, ADDR (for dmem), etc.
+    op: Optional[str] = None
+    lit: Optional[str] = None
+    addr: Optional[str] = None
+    uf: Optional[str] = None
+    wr: Optional[str] = None
+    if_cond: Optional[str] = None
+    label: Optional[str] = None
+    extra_args: dict[str, Any] = field(default_factory=dict)
 
     @property
     def reg_read(self) -> list[str]:
         reads: set[str] = set()
         reads.update(regs_from_value(self.src))
-        if "OP" in self.extra_args:
-            reads.update(regs_from_value(self.extra_args["OP"]))
-        if "ADDR" in self.extra_args:
-            reads.update(regs_from_value(self.extra_args["ADDR"]))
+        reads.update(regs_from_value(self.op))
+        reads.update(regs_from_value(self.addr))
+        reads.update(regs_from_value(self.extra_args.get("OP")))
+        reads.update(regs_from_value(self.extra_args.get("ADDR")))
         return sorted(list(reads))
 
     @property
@@ -366,13 +474,30 @@ class RegWriteInst(Instruction):
 
     @property
     def need_label(self) -> Optional[str]:
-        label = self.extra_args.get("LABEL")
-        if isinstance(label, str) and label not in ("HERE", "NEXT", "PREV", "SKIP"):
+        label = self.label or self.extra_args.get("LABEL")
+        if isinstance(label, str) and not _is_pseudo_label(label):
             return label
         return None
 
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"CMD": "REG_WR", "DST": self.dst, "SRC": self.src}
+        d: dict[str, Any] = {"CMD": "REG_WR"}
+        if self.wr is not None:
+            d["WR"] = self.wr
+        else:
+            d["DST"] = self.dst
+            d["SRC"] = self.src
+        if self.op is not None:
+            d["OP"] = self.op
+        if self.lit is not None:
+            d["LIT"] = self.lit
+        if self.addr is not None:
+            d["ADDR"] = self.addr
+        if self.uf is not None:
+            d["UF"] = self.uf
+        if self.if_cond is not None:
+            d["IF"] = self.if_cond
+        if self.label is not None:
+            d["LABEL"] = self.label
         d.update(self.extra_args)
         d.update(self.annotations)
         if self.line is not None:
@@ -385,13 +510,23 @@ class PortWriteInst(Instruction):
     """WPORT_WR instruction: write to output port."""
 
     dst: str = ""  # Destination (output port)
-    time: str = ""  # Timing reference
+    src: Optional[str] = None
+    addr: Optional[str] = None
+    time: Optional[str] = None  # Timing reference
+    wr: Optional[str] = None
+    op: Optional[str] = None
+    uf: Optional[str] = None
+    if_cond: Optional[str] = None
     extra_args: dict[str, Any] = field(default_factory=dict)  # Other fields
 
     @property
     def reg_read(self) -> list[str]:
         reads: set[str] = set()
+        reads.update(regs_from_value(self.src))
+        reads.update(regs_from_value(self.addr))
         reads.update(regs_from_value(self.time))
+        reads.update(regs_from_value(self.op))
+        reads.update(regs_from_value(self.wr))
         for val in self.extra_args.values():
             reads.update(regs_from_value(val))
         return sorted(list(reads))
@@ -401,7 +536,21 @@ class PortWriteInst(Instruction):
         return [strip_write_modifier(self.dst)]
 
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"CMD": "WPORT_WR", "DST": self.dst, "TIME": self.time}
+        d: dict[str, Any] = {"CMD": "WPORT_WR", "DST": self.dst}
+        if self.src is not None:
+            d["SRC"] = self.src
+        if self.addr is not None:
+            d["ADDR"] = self.addr
+        if self.time is not None:
+            d["TIME"] = self.time
+        if self.wr is not None:
+            d["WR"] = self.wr
+        if self.op is not None:
+            d["OP"] = self.op
+        if self.uf is not None:
+            d["UF"] = self.uf
+        if self.if_cond is not None:
+            d["IF"] = self.if_cond
         d.update(self.extra_args)
         d.update(self.annotations)
         if self.line is not None:
@@ -426,18 +575,24 @@ class NopInst(Instruction):
 
 @dataclass(frozen=True)
 class DmemReadInst(Instruction):
-    """DMEM_RD instruction: read from data memory.
-    Note: QICK often maps this to REG_WR with SRC='dmem'.
-    """
+    """DMEM read lowered to the native REG_WR form."""
 
     dst: str = ""  # Destination register
-    addr: str = ""  # Memory address (register or literal)
+    src: str = "dmem"
+    addr: Optional[str] = None  # Memory address (register or literal)
+    wr: Optional[str] = None
+    op: Optional[str] = None
+    lit: Optional[str] = None
+    uf: Optional[str] = None
+    if_cond: Optional[str] = None
+    label: Optional[str] = None
     extra_args: dict[str, Any] = field(default_factory=dict)
 
     @property
     def reg_read(self) -> list[str]:
         reads: set[str] = set()
         reads.update(regs_from_value(self.addr))
+        reads.update(regs_from_value(self.op))
         for val in self.extra_args.values():
             reads.update(regs_from_value(val))
         return sorted(list(reads))
@@ -447,7 +602,21 @@ class DmemReadInst(Instruction):
         return [strip_write_modifier(self.dst)]
 
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"CMD": "DMEM_RD", "DST": self.dst, "ADDR": self.addr}
+        d: dict[str, Any] = {"CMD": "REG_WR", "DST": self.dst, "SRC": self.src}
+        if self.addr is not None:
+            d["ADDR"] = self.addr
+        if self.wr is not None:
+            d["WR"] = self.wr
+        if self.op is not None:
+            d["OP"] = self.op
+        if self.lit is not None:
+            d["LIT"] = self.lit
+        if self.uf is not None:
+            d["UF"] = self.uf
+        if self.if_cond is not None:
+            d["IF"] = self.if_cond
+        if self.label is not None:
+            d["LABEL"] = self.label
         d.update(self.extra_args)
         d.update(self.annotations)
         if self.line is not None:
@@ -459,21 +628,36 @@ class DmemReadInst(Instruction):
 class DmemWriteInst(Instruction):
     """DMEM_WR instruction: write to data memory."""
 
+    dst: str = ""  # Memory destination
     src: str = ""  # Source (register or literal)
-    addr: str = ""  # Memory address (register or literal)
+    op: Optional[str] = None
+    lit: Optional[str] = None
+    wr: Optional[str] = None
+    uf: Optional[str] = None
+    if_cond: Optional[str] = None
     extra_args: dict[str, Any] = field(default_factory=dict)
 
     @property
     def reg_read(self) -> list[str]:
         reads: set[str] = set()
         reads.update(regs_from_value(self.src))
-        reads.update(regs_from_value(self.addr))
+        reads.update(regs_from_value(self.op))
         for val in self.extra_args.values():
             reads.update(regs_from_value(val))
         return sorted(list(reads))
 
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"CMD": "DMEM_WR", "SRC": self.src, "ADDR": self.addr}
+        d: dict[str, Any] = {"CMD": "DMEM_WR", "DST": self.dst, "SRC": self.src}
+        if self.op is not None:
+            d["OP"] = self.op
+        if self.lit is not None:
+            d["LIT"] = self.lit
+        if self.wr is not None:
+            d["WR"] = self.wr
+        if self.uf is not None:
+            d["UF"] = self.uf
+        if self.if_cond is not None:
+            d["IF"] = self.if_cond
         d.update(self.extra_args)
         d.update(self.annotations)
         if self.line is not None:
@@ -486,14 +670,24 @@ class DportWriteInst(Instruction):
     """DPORT_WR instruction: write to data port."""
 
     dst: str = ""  # Destination (port)
+    src: Optional[str] = None
     data: str = ""  # Data to write (register or literal)
+    time: Optional[str] = None
+    wr: Optional[str] = None
+    op: Optional[str] = None
+    uf: Optional[str] = None
+    if_cond: Optional[str] = None
     extra_args: dict[str, Any] = field(default_factory=dict)
 
     @property
     def reg_read(self) -> list[str]:
         reads: set[str] = set()
+        reads.update(regs_from_value(self.src))
         reads.update(regs_from_value(self.dst))
         reads.update(regs_from_value(self.data))
+        reads.update(regs_from_value(self.time))
+        reads.update(regs_from_value(self.op))
+        reads.update(regs_from_value(self.wr))
         for val in self.extra_args.values():
             reads.update(regs_from_value(val))
         return sorted(list(reads))
@@ -506,6 +700,18 @@ class DportWriteInst(Instruction):
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"CMD": "DPORT_WR", "DST": self.dst, "DATA": self.data}
+        if self.src is not None:
+            d["SRC"] = self.src
+        if self.time is not None:
+            d["TIME"] = self.time
+        if self.wr is not None:
+            d["WR"] = self.wr
+        if self.op is not None:
+            d["OP"] = self.op
+        if self.uf is not None:
+            d["UF"] = self.uf
+        if self.if_cond is not None:
+            d["IF"] = self.if_cond
         d.update(self.extra_args)
         d.update(self.annotations)
         if self.line is not None:
@@ -517,10 +723,26 @@ class DportWriteInst(Instruction):
 class WaitInst(Instruction):
     """WAIT instruction: wait for sync/trigger."""
 
+    c_op: str = "time"
+    time: Optional[str] = None
+    addr: Optional[str] = None
     extra_args: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def reg_read(self) -> list[str]:
+        reads: set[str] = set()
+        reads.update(regs_from_value(self.time))
+        reads.update(regs_from_value(self.addr))
+        for val in self.extra_args.values():
+            reads.update(regs_from_value(val))
+        return sorted(list(reads))
+
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"CMD": "WAIT"}
+        d: dict[str, Any] = {"CMD": "WAIT", "C_OP": self.c_op}
+        if self.time is not None:
+            d["TIME"] = self.time
+        if self.addr is not None:
+            d["ADDR"] = self.addr
         d.update(self.extra_args)
         d.update(self.annotations)
         if self.line is not None:

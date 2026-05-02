@@ -26,8 +26,8 @@ class OpenInnerLoop(Macro):
                 name=self.name,
                 args={"counter_reg": mapped_counter, "n": mapped_n},
             ),
-            Label(label=start),
             WriteReg(dst=self.counter_reg, src=0),
+            Label(label=start),
             CondJump(label=end, arg1=self.counter_reg, test="NS", op="-", arg2=self.n),
             MetaMacro(type="LOOP_BODY_START", name=self.name),
         ]

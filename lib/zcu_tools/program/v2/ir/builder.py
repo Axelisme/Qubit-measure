@@ -4,7 +4,7 @@ from typing_extensions import Any
 
 from .factory import InstructionStream, parse_root
 from .instructions import Instruction
-from .linker import IRLinker
+from .linker import IRCursor, IRLinker
 from .node import RootNode
 
 
@@ -30,7 +30,7 @@ class IRBuilder:
 
     def unbuild(
         self, ir: RootNode
-    ) -> tuple[list[dict], dict[str, str], list[dict[str, Any]]]:
+    ) -> tuple[list[dict], dict[str, str], list[dict[str, Any]], IRCursor]:
         inst_list: list[Instruction] = []
         ir.emit(inst_list)
         return self.linker.link(inst_list)
