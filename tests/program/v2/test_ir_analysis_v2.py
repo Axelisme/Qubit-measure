@@ -1,3 +1,5 @@
+from __future__ import annotations
+from zcu_tools.program.v2.ir.labels import Label
 import pytest
 from zcu_tools.program.v2.ir.analysis import instruction_reads, instruction_writes
 from zcu_tools.program.v2.ir.instructions import (
@@ -83,7 +85,6 @@ def test_property_types():
 
 def test_need_label():
     # JumpInst needs label
-    from zcu_tools.program.v2.ir.labels import Label
     inst = JumpInst(label=Label("target"))
     assert str(inst.need_label) == "target"
 
@@ -92,7 +93,7 @@ def test_need_label():
     assert JumpInst(label=Label("NEXT")).need_label is None
 
     # RegWriteInst with label (WR_ADDR style)
-    inst = RegWriteInst(dst="s1", src="imm", extra_args={"LABEL": Label("data_table")})
+    inst = RegWriteInst(dst="s1", src="imm", label=Label("data_table"))
     assert str(inst.need_label) == "data_table"
 
     # GenericInst with label

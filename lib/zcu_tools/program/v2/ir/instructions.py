@@ -11,11 +11,10 @@ from .utils import regs_from_value, strip_write_modifier
 SPECIAL_LABELS = frozenset({"HERE", "NEXT", "PREV", "SKIP"})
 
 
-def _is_pseudo_label(value: Any) -> bool:
-    from .labels import Label
-    if isinstance(value, Label):
-        return value.name in SPECIAL_LABELS
-    return isinstance(value, str) and value in SPECIAL_LABELS
+def _is_pseudo_label(value: Optional["Label"]) -> bool:
+    if value is None:
+        return False
+    return value.name in SPECIAL_LABELS
 
 
 def _residual_fields(source: dict[str, Any], handled: set[str]) -> dict[str, Any]:
@@ -51,22 +50,32 @@ class Instruction:
 
     @property
     def need_label(self) -> Optional["Label"]:
+        from .labels import Label
         """Label name this instruction depends on (e.g. for JUMP or WR_ADDR)."""
         return None
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any], label_map: Optional[dict[str, "Label"]] = None) -> "Instruction":
+    def from_dict(
+        cls, d: dict[str, Any], label_map: Optional[dict[str, "Label"]] = None
+    ) -> "Instruction":
+        from .labels import Label
+
         def get_label(name: Any) -> Optional["Label"]:
             if not name:
                 return None
-            from .labels import Label
-            if isinstance(name, str) and name in SPECIAL_LABELS:
+            if isinstance(name, Label):
+                return name
+            if isinstance(name, str):
+                if name.startswith("&"):
+                    name = name[1:]
+                if name in SPECIAL_LABELS:
+                    return Label(name)
+                if label_map is not None:
+                    if name not in label_map:
+                        label_map[name] = Label.make_new(name)
+                    return label_map[name]
                 return Label(name)
-            if label_map is not None:
-                if name not in label_map:
-                    label_map[name] = Label.make_new(name)
-                return label_map[name]
-            return Label(name)
+            return None
 
         # Extract internal annotations (starting with IR_)
         annotations = {k: v for k, v in d.items() if k.startswith("IR_")}
@@ -117,13 +126,18 @@ class Instruction:
                 annotations=annotations,
             )
         elif cmd == "JUMP":
+            raw_addr = clean_d.get("ADDR")
+            resolved_addr: Optional[Union[str, Label]] = raw_addr
+            if isinstance(raw_addr, str) and raw_addr.startswith("&"):
+                resolved_addr = get_label(raw_addr)
+
             extra_args = _residual_fields(
                 clean_d, {"LABEL", "IF", "ADDR", "WR", "OP", "UF"}
             )
             return JumpInst(
-                label=get_label(clean_d.get("LABEL", "")),
+                label=get_label(clean_d.get("LABEL")),
                 if_cond=clean_d.get("IF"),
-                addr=clean_d.get("ADDR"),
+                addr=resolved_addr,
                 wr=clean_d.get("WR"),
                 op=clean_d.get("OP"),
                 uf=clean_d.get("UF"),
@@ -141,6 +155,12 @@ class Instruction:
                 if len(wr_parts) > 1 and not src:
                     clean_d["SRC"] = wr_parts[1]
                     src = wr_parts[1]
+
+            raw_addr = clean_d.get("ADDR")
+            resolved_addr = raw_addr
+            if isinstance(raw_addr, str) and raw_addr.startswith("&"):
+                resolved_addr = get_label(raw_addr)
+
             if src == "dmem":
                 extra_args = _residual_fields(
                     clean_d,
@@ -149,7 +169,7 @@ class Instruction:
                 return DmemReadInst(
                     dst=clean_d.get("DST", ""),
                     src="dmem",
-                    addr=clean_d.get("ADDR"),
+                    addr=resolved_addr,
                     wr=wr,
                     op=clean_d.get("OP"),
                     lit=clean_d.get("LIT"),
@@ -170,7 +190,7 @@ class Instruction:
                 wr=wr,
                 op=clean_d.get("OP"),
                 lit=clean_d.get("LIT"),
-                addr=clean_d.get("ADDR"),
+                addr=resolved_addr,
                 uf=clean_d.get("UF"),
                 if_cond=clean_d.get("IF"),
                 label=get_label(clean_d.get("LABEL")),
@@ -203,13 +223,18 @@ class Instruction:
                 annotations=annotations,
             )
         elif cmd == "DMEM_RD":
+            raw_addr = clean_d.get("ADDR")
+            resolved_addr = raw_addr
+            if isinstance(raw_addr, str) and raw_addr.startswith("&"):
+                resolved_addr = get_label(raw_addr)
+
             extra_args = _residual_fields(
                 clean_d, {"DST", "SRC", "ADDR", "WR", "OP", "LIT", "UF", "IF", "LABEL"}
             )
             return DmemReadInst(
                 dst=clean_d.get("DST", ""),
                 src=clean_d.get("SRC", "dmem"),
-                addr=clean_d.get("ADDR"),
+                addr=resolved_addr,
                 wr=clean_d.get("WR"),
                 op=clean_d.get("OP"),
                 lit=clean_d.get("LIT"),
@@ -256,11 +281,16 @@ class Instruction:
                 annotations=annotations,
             )
         elif cmd == "WAIT":
+            raw_addr = clean_d.get("ADDR")
+            resolved_addr = raw_addr
+            if isinstance(raw_addr, str) and raw_addr.startswith("&"):
+                resolved_addr = get_label(raw_addr)
+
             extra_args = _residual_fields(clean_d, {"C_OP", "TIME", "ADDR"})
             return WaitInst(
                 c_op=clean_d.get("C_OP", "time"),
                 time=clean_d.get("TIME"),
-                addr=clean_d.get("ADDR"),
+                addr=resolved_addr,
                 extra_args=extra_args,
                 line=clean_d.get("LINE"),
                 annotations=annotations,
@@ -278,10 +308,9 @@ class Instruction:
         )
 
     def to_dict(self) -> dict[str, Any]:
+        from .labels import Label
         """Convert back to QICK prog_list dict format."""
         raise NotImplementedError
-
-
 @dataclass(frozen=True)
 class GenericInst(Instruction):
     """Fallback for instructions without a specific model."""
@@ -312,13 +341,16 @@ class GenericInst(Instruction):
 
     @property
     def need_label(self) -> Optional["Label"]:
+        from .labels import Label
         label = self.args.get("LABEL")
         from .labels import Label
+
         if isinstance(label, Label) and not _is_pseudo_label(label):
             return label
         return None
 
     def to_dict(self) -> dict[str, Any]:
+        from .labels import Label
         d: dict[str, Any] = {"CMD": self.cmd}
         d.update(self.args)
         if "LABEL" in d and d["LABEL"] is not None:
@@ -335,6 +367,7 @@ class LabelInst(Instruction):
     args: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        from .labels import Label
         d: dict[str, Any] = {"LABEL": str(self.name)}
         d.update(self.args)
         d.update(self.annotations)
@@ -352,6 +385,7 @@ class MetaInst(Instruction):
     args: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        from .labels import Label
         d = {
             "CMD": "__META__",
             "TYPE": self.type,
@@ -377,6 +411,7 @@ class TimeInst(Instruction):
         return sorted(list(regs_from_value(self.r1)))
 
     def to_dict(self) -> dict[str, Any]:
+        from .labels import Label
         d: dict[str, Any] = {"CMD": "TIME", "C_OP": self.c_op}
         if self.lit is not None:
             d["LIT"] = self.lit
@@ -403,6 +438,7 @@ class TestInst(Instruction):
         return sorted(list(regs_from_value(self.op)))
 
     def to_dict(self) -> dict[str, Any]:
+        from .labels import Label
         d: dict[str, Any] = {"CMD": "TEST", "OP": self.op}
         if self.uf is not None:
             d["UF"] = self.uf
@@ -419,7 +455,7 @@ class JumpInst(Instruction):
 
     label: Optional["Label"] = None  # Target label
     if_cond: Optional[str] = None  # Condition for conditional jump (e.g., "eq", "nz")
-    addr: Optional[str] = None  # Direct address for large jumps (e.g., "s15")
+    addr: Optional[Union[str, "Label"]] = None  # Direct address for large jumps (e.g., "s15" or label)
     wr: Optional[str] = None  # Optional register write control string
     op: Optional[str] = None  # Optional ALU expression
     uf: Optional[str] = None  # Optional flag update control
@@ -428,7 +464,8 @@ class JumpInst(Instruction):
     @property
     def reg_read(self) -> list[str]:
         reads: set[str] = set()
-        reads.update(regs_from_value(self.addr))
+        if isinstance(self.addr, str):
+            reads.update(regs_from_value(self.addr))
         reads.update(regs_from_value(self.op))
         reads.update(regs_from_value(self.wr))
         return sorted(list(reads))
@@ -441,16 +478,21 @@ class JumpInst(Instruction):
 
     @property
     def need_label(self) -> Optional["Label"]:
+        from .labels import Label
         if self.label and not _is_pseudo_label(self.label):
             return self.label
+        from .labels import Label
+        if isinstance(self.addr, Label) and not _is_pseudo_label(self.addr):
+            return self.addr
         return None
 
     def to_dict(self) -> dict[str, Any]:
+        from .labels import Label
         d: dict[str, Any] = {"CMD": "JUMP"}
         if self.label:
             d["LABEL"] = str(self.label)
         if self.addr is not None:
-            d["ADDR"] = self.addr
+            d["ADDR"] = f"&{self.addr}" if isinstance(self.addr, Label) else self.addr
         if self.if_cond is not None:
             d["IF"] = self.if_cond
         if self.wr is not None:
@@ -474,7 +516,7 @@ class RegWriteInst(Instruction):
     src: str = ""  # Source: 'op' (ALU operation), 'imm' (immediate), 'reg' (register), 'dmem' (memory)
     op: Optional[str] = None
     lit: Optional[str] = None
-    addr: Optional[str] = None
+    addr: Optional[Union[str, "Label"]] = None
     uf: Optional[str] = None
     wr: Optional[str] = None
     if_cond: Optional[str] = None
@@ -486,9 +528,11 @@ class RegWriteInst(Instruction):
         reads: set[str] = set()
         reads.update(regs_from_value(self.src))
         reads.update(regs_from_value(self.op))
-        reads.update(regs_from_value(self.addr))
+        if isinstance(self.addr, str):
+            reads.update(regs_from_value(self.addr))
         reads.update(regs_from_value(self.extra_args.get("OP")))
-        reads.update(regs_from_value(self.extra_args.get("ADDR")))
+        if isinstance(self.extra_args.get("ADDR"), str):
+            reads.update(regs_from_value(self.extra_args.get("ADDR")))
         return sorted(list(reads))
 
     @property
@@ -497,12 +541,16 @@ class RegWriteInst(Instruction):
 
     @property
     def need_label(self) -> Optional["Label"]:
-        label = self.label or self.extra_args.get("LABEL")
-        if label and not _is_pseudo_label(label):
-            return label
+        from .labels import Label
+        if self.label and not _is_pseudo_label(self.label):
+            return self.label
+        from .labels import Label
+        if isinstance(self.addr, Label) and not _is_pseudo_label(self.addr):
+            return self.addr
         return None
 
     def to_dict(self) -> dict[str, Any]:
+        from .labels import Label
         d: dict[str, Any] = {"CMD": "REG_WR"}
         if self.wr is not None:
             d["WR"] = self.wr
@@ -514,7 +562,7 @@ class RegWriteInst(Instruction):
         if self.lit is not None:
             d["LIT"] = self.lit
         if self.addr is not None:
-            d["ADDR"] = self.addr
+            d["ADDR"] = f"&{self.addr}" if isinstance(self.addr, Label) else self.addr
         if self.uf is not None:
             d["UF"] = self.uf
         if self.if_cond is not None:
@@ -559,6 +607,7 @@ class PortWriteInst(Instruction):
         return [strip_write_modifier(self.dst)]
 
     def to_dict(self) -> dict[str, Any]:
+        from .labels import Label
         d: dict[str, Any] = {"CMD": "WPORT_WR", "DST": self.dst}
         if self.src is not None:
             d["SRC"] = self.src
@@ -588,6 +637,7 @@ class NopInst(Instruction):
     extra_args: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        from .labels import Label
         d: dict[str, Any] = {"CMD": "NOP"}
         d.update(self.extra_args)
         d.update(self.annotations)
@@ -602,7 +652,7 @@ class DmemReadInst(Instruction):
 
     dst: str = ""  # Destination register
     src: str = "dmem"
-    addr: Optional[str] = None  # Memory address (register or literal)
+    addr: Optional[Union[str, "Label"]] = None  # Memory address (register or label)
     wr: Optional[str] = None
     op: Optional[str] = None
     lit: Optional[str] = None
@@ -614,20 +664,33 @@ class DmemReadInst(Instruction):
     @property
     def reg_read(self) -> list[str]:
         reads: set[str] = set()
-        reads.update(regs_from_value(self.addr))
+        if isinstance(self.addr, str):
+            reads.update(regs_from_value(self.addr))
         reads.update(regs_from_value(self.op))
         for val in self.extra_args.values():
-            reads.update(regs_from_value(val))
+            if isinstance(val, str):
+                reads.update(regs_from_value(val))
         return sorted(list(reads))
 
     @property
     def reg_write(self) -> list[str]:
         return [strip_write_modifier(self.dst)]
 
+    @property
+    def need_label(self) -> Optional["Label"]:
+        from .labels import Label
+        if self.label and not _is_pseudo_label(self.label):
+            return self.label
+        from .labels import Label
+        if isinstance(self.addr, Label) and not _is_pseudo_label(self.addr):
+            return self.addr
+        return None
+
     def to_dict(self) -> dict[str, Any]:
+        from .labels import Label
         d: dict[str, Any] = {"CMD": "REG_WR", "DST": self.dst, "SRC": self.src}
         if self.addr is not None:
-            d["ADDR"] = self.addr
+            d["ADDR"] = f"&{self.addr}" if isinstance(self.addr, Label) else self.addr
         if self.wr is not None:
             d["WR"] = self.wr
         if self.op is not None:
@@ -670,6 +733,7 @@ class DmemWriteInst(Instruction):
         return sorted(list(reads))
 
     def to_dict(self) -> dict[str, Any]:
+        from .labels import Label
         d: dict[str, Any] = {"CMD": "DMEM_WR", "DST": self.dst, "SRC": self.src}
         if self.op is not None:
             d["OP"] = self.op
@@ -722,6 +786,7 @@ class DportWriteInst(Instruction):
         return [strip_write_modifier(self.dst)] if not self.dst.startswith("#") else []
 
     def to_dict(self) -> dict[str, Any]:
+        from .labels import Label
         d: dict[str, Any] = {"CMD": "DPORT_WR", "DST": self.dst, "DATA": self.data}
         if self.src is not None:
             d["SRC"] = self.src
@@ -748,24 +813,34 @@ class WaitInst(Instruction):
 
     c_op: str = "time"
     time: Optional[str] = None
-    addr: Optional[str] = None
+    addr: Optional[Union[str, "Label"]] = None
     extra_args: dict[str, Any] = field(default_factory=dict)
 
     @property
     def reg_read(self) -> list[str]:
         reads: set[str] = set()
         reads.update(regs_from_value(self.time))
-        reads.update(regs_from_value(self.addr))
+        if isinstance(self.addr, str):
+            reads.update(regs_from_value(self.addr))
         for val in self.extra_args.values():
-            reads.update(regs_from_value(val))
+            if isinstance(val, str):
+                reads.update(regs_from_value(val))
         return sorted(list(reads))
 
+    @property
+    def need_label(self) -> Optional["Label"]:
+        from .labels import Label
+        if isinstance(self.addr, Label) and not _is_pseudo_label(self.addr):
+            return self.addr
+        return None
+
     def to_dict(self) -> dict[str, Any]:
+        from .labels import Label
         d: dict[str, Any] = {"CMD": "WAIT", "C_OP": self.c_op}
         if self.time is not None:
             d["TIME"] = self.time
         if self.addr is not None:
-            d["ADDR"] = self.addr
+            d["ADDR"] = f"&{self.addr}" if isinstance(self.addr, Label) else self.addr
         d.update(self.extra_args)
         d.update(self.annotations)
         if self.line is not None:
@@ -774,6 +849,4 @@ class WaitInst(Instruction):
 
     @property
     def addr_inc(self) -> int:
-        return 2
-
         return 2

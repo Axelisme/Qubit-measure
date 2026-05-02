@@ -1,4 +1,5 @@
 from __future__ import annotations
+from zcu_tools.program.v2.ir.labels import Label
 
 from zcu_tools.program.v2.ir.instructions import (
     GenericInst,
@@ -53,7 +54,7 @@ def test_unroll_loop_expands_loop_with_internal_label():
                 n=3,
                 body=BlockNode(
                     insts=[
-                        InstNode(LabelInst(name="inner")),
+                        InstNode(LabelInst(name=Label("inner"))),
                         InstNode(TimeInst(c_op="inc_ref", lit="#1")),
                     ]
                 ),
@@ -115,7 +116,7 @@ def test_dead_write_elimination_keeps_write_before_read():
 def test_dead_label_elimination_removes_unreferenced_label():
     root = RootNode(
         insts=[
-            InstNode(LabelInst(name="dead")),
+            InstNode(LabelInst(name=Label("dead"))),
             InstNode(GenericInst(cmd="NOP")),
         ]
     )
@@ -130,10 +131,11 @@ def test_dead_label_elimination_removes_unreferenced_label():
 
 
 def test_dead_label_elimination_keeps_referenced_label():
+    l = Label("keep")
     root = RootNode(
         insts=[
-            InstNode(LabelInst(name="keep")),
-            InstNode(JumpInst(label="keep")),
+            InstNode(LabelInst(name=l)),
+            InstNode(JumpInst(label=l)),
         ]
     )
 
