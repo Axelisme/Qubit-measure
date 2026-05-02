@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .instructions import Instruction
@@ -35,6 +35,13 @@ class Label:
     def clone_new(self) -> "Label":
         """Create a new label derived from this one's name."""
         return Label.make_new(self._name)
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> "Label":
+        # Ensure deepcopy preserves shared references within the cloned subtree
+        # while creating a fresh unique label identity overall.
+        new_label = self.clone_new()
+        memo[id(self)] = new_label
+        return new_label
 
     @classmethod
     def reset(cls) -> None:

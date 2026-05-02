@@ -44,7 +44,7 @@ def test_unroll_loop_expands_simple_loop_body():
     assert [item.inst.lit for item in out.insts] == ["#1", "#1", "#1"]
 
 
-def test_unroll_loop_skips_loop_with_internal_label():
+def test_unroll_loop_expands_loop_with_internal_label():
     root = RootNode(
         insts=[
             IRLoop(
@@ -63,8 +63,8 @@ def test_unroll_loop_skips_loop_with_internal_label():
 
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
 
-    assert len(out.insts) == 1
-    assert isinstance(out.insts[0], IRLoop)
+    assert len(out.insts) == 6
+    assert all(isinstance(item, InstNode) for item in out.insts)
 
 
 def test_dead_write_elimination_removes_overwritten_write():

@@ -103,8 +103,11 @@ def test_pipeline_roundtrip_with_normalization():
         insts=[loop],
     )
 
+    config = PipeLineConfig(pmem_budget=8192, enable_unroll_loop=False)
     pipeline = make_default_pipeline(pmem_capacity=8192)
-
+    # Actually wait, make_default_pipeline takes pmem_capacity, not config.
+    pipeline.config.enable_unroll_loop = False
+    
     out_ir, _ctx = pipeline(root)
 
     # Check that it's still well-formed

@@ -56,20 +56,10 @@ def block_contains_structural_node(block: BlockNode) -> bool:
     return False
 
 
-def loop_is_label_sensitive(loop: IRLoop) -> bool:
-    if block_contains_structural_node(loop.body):
-        return True
-
+def loop_is_counter_sensitive(loop: IRLoop) -> bool:
     for inst in walk_instructions(loop.body):
-        if isinstance(inst, LabelInst):
-            return True
-        if isinstance(inst, (JumpInst, TestInst, MetaInst)):
-            return True
-        if inst.need_label is not None:
-            return True
         if loop.counter_reg in inst.reg_read:
             return True
         if loop.counter_reg in inst.reg_write:
             return True
-
     return False
