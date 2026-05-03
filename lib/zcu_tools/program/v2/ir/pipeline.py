@@ -13,8 +13,11 @@ class PipeLineConfig:
     enable_unroll_loop: bool = True
     enable_dead_write: bool = True
     enable_dead_label: bool = True
-    max_loop_unroll_count: int = 8
     pmem_budget: int | None = None
+
+    # Unroll decision: trigger when loop overhead / scheduled_ticks >= this ratio.
+    # Default 0.1 means unroll if overhead eats ≥ 10% of the available IO window.
+    unroll_overhead_threshold: float = 0.8
 
     # Unified cycle cost model
     cost_default: int = 1

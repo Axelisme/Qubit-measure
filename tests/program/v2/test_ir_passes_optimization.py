@@ -170,7 +170,12 @@ def test_dead_label_elimination_keeps_pseudo_labels():
 
 
 def test_unroll_partial_unroll_produces_loop_plus_remainder():
-    """n=20, body_cost=1 -> k=8; expect IRLoop(n=2) + 4 inlined copies."""
+    """n=20, scheduled_ticks=1, pmem_budget=8 -> k=8; expect IRLoop(n=2) + 4 inlined copies.
+
+    loop_overhead=6, threshold=0.1 -> k_needed=ceil(6/0.1)=60.
+    body_size=1, pmem_budget=8 -> k_max=8. k=min(60,8)=8.
+    iters=20//8=2, remainder=20%8=4.
+    """
     root = RootNode(
         insts=[
             IRLoop(
@@ -182,7 +187,7 @@ def test_unroll_partial_unroll_produces_loop_plus_remainder():
         ]
     )
 
-    config = PipeLineConfig(max_loop_unroll_count=8)
+    config = PipeLineConfig(pmem_budget=8)
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
 
     # Should be: one IRLoop (the chunked loop) + 4 remainder InstNodes
@@ -193,7 +198,7 @@ def test_unroll_partial_unroll_produces_loop_plus_remainder():
 
 
 def test_unroll_partial_unroll_no_remainder():
-    """n=16, body_cost=1 -> k=8; expect IRLoop(n=2) with no remainder."""
+    """n=16, scheduled_ticks=1, pmem_budget=8 -> k=8; expect IRLoop(n=2) with no remainder."""
     root = RootNode(
         insts=[
             IRLoop(
@@ -205,7 +210,7 @@ def test_unroll_partial_unroll_no_remainder():
         ]
     )
 
-    config = PipeLineConfig(max_loop_unroll_count=8)
+    config = PipeLineConfig(pmem_budget=8)
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
 
     assert len(out.insts) == 1
@@ -213,8 +218,11 @@ def test_unroll_partial_unroll_no_remainder():
     assert cast(IRLoop, out.insts[0]).n == 2
 
 
-def test_unroll_heavy_body_skips_partial_unroll():
-    """body_cost >= target_chunk_cost -> k=1; loop should be left unchanged."""
+def test_unroll_no_scheduled_ticks_skips_unroll():
+    """Body with no inc_ref delay (pure port writes) has no scheduled IO window.
+
+    estimate_body_scheduled_ticks returns None -> fallback, loop unchanged.
+    """
     from zcu_tools.program.v2.ir.instructions import PortWriteInst
 
     heavy_insts: list[IRNode] = [InstNode(PortWriteInst(dst="0", time="t0")) for _ in range(5)]
@@ -229,9 +237,7 @@ def test_unroll_heavy_body_skips_partial_unroll():
         ]
     )
 
-    # body_cost = 5 * cost_wmem(4) = 20 -> k=1
-    config = PipeLineConfig(max_loop_unroll_count=8)
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
+    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
 
     assert len(out.insts) == 1
     assert isinstance(out.insts[0], IRLoop)
@@ -339,7 +345,8 @@ def test_unroll_partial_unroll_clones_labels_safely():
         ]
     )
 
-    config = PipeLineConfig(max_loop_unroll_count=8)
+    # body_size=2 (JumpInst=1 + TimeInst=1; LabelInst=0), pmem_budget=8 -> k_max=4
+    config = PipeLineConfig(pmem_budget=8)
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
 
     # Collect all label definitions and jump targets from emitted instructions
@@ -353,6 +360,112 @@ def test_unroll_partial_unroll_clones_labels_safely():
     # Every jump target must have a corresponding label definition (no dangling)
     internal_targets = {t for t in targets if not t.startswith("loop")}
     assert internal_targets <= defined
+
+
+def test_unroll_budget_limits_k():
+    """pmem_budget caps k below k_needed; result uses the budget-capped factor.
+
+    scheduled_ticks=1, loop_overhead=6, threshold=0.1 -> k_needed=60.
+    body_size=1, pmem_budget=3 -> k_max=3. k=3.
+    n=9: iters=9//3=3, remainder=0 -> IRLoop(n=3).
+    """
+    root = RootNode(
+        insts=[
+            IRLoop(
+                name="loop",
+                counter_reg="s0",
+                n=9,
+                body=BlockNode(insts=[InstNode(TimeInst(c_op="inc_ref", lit="#1"))]),
+            )
+        ]
+    )
+
+    config = PipeLineConfig(pmem_budget=3)
+    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
+
+    assert len(out.insts) == 1
+    assert isinstance(out.insts[0], IRLoop)
+    assert cast(IRLoop, out.insts[0]).n == 3
+
+
+def test_unroll_threshold_skips_low_overhead_loop():
+    """Loop whose overhead is already below threshold must not be unrolled.
+
+    scheduled_ticks=1000, loop_overhead=6 -> ratio=0.006 < threshold=0.1 -> no unroll.
+    """
+    root = RootNode(
+        insts=[
+            IRLoop(
+                name="loop",
+                counter_reg="s0",
+                n=50,
+                body=BlockNode(insts=[InstNode(TimeInst(c_op="inc_ref", lit="#1000"))]),
+            )
+        ]
+    )
+
+    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
+
+    assert len(out.insts) == 1
+    assert isinstance(out.insts[0], IRLoop)
+    assert cast(IRLoop, out.insts[0]).n == 50
+
+
+def test_unroll_dynamic_delay_body_not_unrolled():
+    """Body with register-driven inc_ref (r1=<reg>) must not be unrolled."""
+    root = RootNode(
+        insts=[
+            IRLoop(
+                name="loop",
+                counter_reg="s0",
+                n=10,
+                body=BlockNode(
+                    insts=[InstNode(TimeInst(c_op="inc_ref", r1="r_delay"))]
+                ),
+            )
+        ]
+    )
+
+    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
+
+    assert len(out.insts) == 1
+    assert isinstance(out.insts[0], IRLoop)
+    assert cast(IRLoop, out.insts[0]).n == 10
+
+
+def test_unroll_cpmg_style_body_triggers():
+    """CPMG-style body (3 PortWrite + inc_ref #14) triggers partial unroll.
+
+    scheduled_ticks=14, loop_overhead=6, threshold=0.3
+    -> ratio=6/14=0.43 >= 0.3 -> k_needed=ceil(6/(0.3*14))=ceil(1.43)=2.
+    No pmem_budget constraint -> k=2.
+    n=50: iters=50//2=25, remainder=0 -> IRLoop(n=25).
+    """
+    from zcu_tools.program.v2.ir.instructions import PortWriteInst
+
+    body_insts: list[IRNode] = [
+        InstNode(PortWriteInst(dst="0", time="t0")),
+        InstNode(PortWriteInst(dst="1", time="t0")),
+        InstNode(PortWriteInst(dst="2", time="t0")),
+        InstNode(TimeInst(c_op="inc_ref", lit="#14")),
+    ]
+    root = RootNode(
+        insts=[
+            IRLoop(
+                name="loop",
+                counter_reg="s0",
+                n=50,
+                body=BlockNode(insts=body_insts),
+            )
+        ]
+    )
+
+    config = PipeLineConfig(unroll_overhead_threshold=0.3)
+    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
+
+    assert len(out.insts) == 1
+    assert isinstance(out.insts[0], IRLoop)
+    assert cast(IRLoop, out.insts[0]).n == 25  # 50 // 2
 
 
 def test_default_pipeline_orders_new_passes_first():
