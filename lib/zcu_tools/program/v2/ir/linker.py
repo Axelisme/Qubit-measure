@@ -31,17 +31,17 @@ class IRLinker:
             if isinstance(inst, LabelInst):
                 labels[str(inst.name)] = f"&{p_addr}"
                 meta_infos.append(
-                    {"kind": "label", "name": str(inst.name), "p_addr": p_addr}
+                    dict(kind="label", name=str(inst.name), p_addr=p_addr)
                 )
             elif isinstance(inst, MetaInst):
                 meta_infos.append(
-                    {
-                        "kind": "meta",
-                        "type": inst.type,
-                        "name": inst.name,
-                        "info": inst.info,
-                        "p_addr": p_addr,
-                    }
+                    dict(
+                        kind="meta",
+                        type=inst.type,
+                        name=inst.name,
+                        info=inst.info,
+                        p_addr=p_addr,
+                    )
                 )
             else:
                 d = inst.to_dict()
@@ -49,12 +49,7 @@ class IRLinker:
                 prog_list.append(d)
                 p_addr += inst.addr_inc
 
-        return (
-            prog_list,
-            labels,
-            meta_infos,
-            self.compute_cursors(inst_list),
-        )
+        return prog_list, labels, meta_infos, self.compute_cursors(inst_list)
 
     def unlink(
         self,

@@ -59,9 +59,10 @@ def test_reg_write_inst_analysis():
 
 
 def test_port_write_inst_analysis():
-    # reads registers in TIME and extra_args
-    inst = PortWriteInst(dst="p1", time="s1", extra_args={"PHASE": "s2"})
-    assert instruction_writes(inst) == {"p1"}
+    # DST is a plain port-channel number (e.g. "2"), not a register.
+    # QICK always stores DST as str(tproc_ch); the "p" prefix is added by the assembler.
+    inst = PortWriteInst(dst="2", time="s1", extra_args={"PHASE": "s2"})
+    assert instruction_writes(inst) == set()
     assert instruction_reads(inst) == {"s1", "s2"}
 
 

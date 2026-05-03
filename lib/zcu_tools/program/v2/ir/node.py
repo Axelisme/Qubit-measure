@@ -110,7 +110,7 @@ class IRLoop(IRNode):
             else f"{self.counter_reg} - {self.n}"
         )
         # TODO: need to consider case of pmem_size > 2**11, it will need s15 instead of immediate
-        inst_list.append(TestInst(op=op_str, uf="0"))
+        inst_list.append(TestInst(op=op_str))
         inst_list.append(JumpInst(label=end, if_cond="NS"))
 
         # META: LOOP_BODY_START
@@ -172,7 +172,7 @@ class IRBranch(IRNode):
             end_label = Label.make_new(f"{self.name}_branch_e_{lo}_{hi}")
 
             # compare_reg - mid < 0  (i.e. compare_reg < mid) → jump to left half
-            inst_list.append(TestInst(op=f"{self.compare_reg} - #{mid}", uf="0"))
+            inst_list.append(TestInst(op=f"{self.compare_reg} - #{mid}"))
             inst_list.append(JumpInst(label=left_label, if_cond="S"))
             emit_dispatch(mid, hi)
             inst_list.append(JumpInst(label=end_label))
@@ -180,6 +180,6 @@ class IRBranch(IRNode):
             emit_dispatch(lo, mid)
             inst_list.append(LabelInst(name=end_label))
 
-        inst_list.append(MetaInst(type="BRANCH_START", name=self.name))
+        inst_list.append(MetaInst(type="BRANCH_START", name=self.name, info=dict(compare_reg=self.compare_reg)))
         emit_dispatch(0, n)
         inst_list.append(MetaInst(type="BRANCH_END", name=self.name))

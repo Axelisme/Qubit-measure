@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+
 from typing_extensions import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -12,6 +13,10 @@ PSEUDO_LABELS = frozenset({"PREV", "HERE", "NEXT", "SKIP"})
 class Label:
     """A first-class logical label identity."""
 
+    # Global allocator: tracks all allocated label names to guarantee uniqueness.
+    # INVARIANT: Label.reset() must be called before each top-level build pass
+    # (i.e., before IRBuilder.build()). Failing to do so causes make_new() to
+    # append ever-increasing numeric suffixes across compilations.
     label_set: set[str] = set()
 
     def __init__(self, name: str):
@@ -45,7 +50,7 @@ class Label:
 
     @classmethod
     def reset(cls) -> None:
-        """Clear the allocated label set."""
+        """Clear the allocated label set. Must be called before each top-level build."""
         cls.label_set.clear()
 
     def __str__(self) -> str:

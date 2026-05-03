@@ -4,16 +4,15 @@ import dataclasses
 import math
 from typing import TYPE_CHECKING
 
-from .node import InstNode, IRBranch, IRLoop, IRNode
 from .instructions import (
-    Instruction,
     DmemReadInst,
     DmemWriteInst,
+    Instruction,
     LabelInst,
     MetaInst,
     PortWriteInst,
 )
-
+from .node import InstNode, IRBranch, IRLoop, IRNode
 
 if TYPE_CHECKING:
     from .pipeline import PipeLineConfig

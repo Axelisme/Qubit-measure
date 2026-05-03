@@ -20,7 +20,7 @@ class IRBuilder:
     ) -> RootNode:
         from .labels import Label
 
-        Label.reset()
+        Label.reset()  # Must precede all Label.make_new() calls; see Label.label_set docstring
         inst_list = self.linker.unlink(prog_list, labels, meta_infos)
 
         stream = InstructionStream(inst_list)

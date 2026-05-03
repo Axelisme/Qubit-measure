@@ -318,6 +318,10 @@ class MetaInst(Instruction):
     name: str = ""
     info: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def addr_inc(self) -> int:
+        return 0  # MetaInst occupies no program memory
+
     def to_dict(self) -> dict[str, Any]:
         d = {
             "CMD": "__META__",
@@ -541,7 +545,10 @@ class PortWriteInst(Instruction):
 
     @property
     def reg_write(self) -> list[str]:
-        return [strip_write_modifier(self.dst)]
+        dst = strip_write_modifier(self.dst)
+        # DST can be a plain port number (e.g. "2") or a register (e.g. "p1").
+        # Only return it as a register write when it is not a bare integer.
+        return [dst] if dst and not dst.lstrip("-").isdigit() else []
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"CMD": "WPORT_WR", "DST": self.dst}
