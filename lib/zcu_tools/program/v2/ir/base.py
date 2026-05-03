@@ -6,7 +6,7 @@ from qick.asm_v2 import QickProgramV2
 from typing_extensions import Any
 
 from .builder import IRBuilder
-from .pipeline import PipeLineConfig, make_default_pipeline
+from .pipeline import make_default_pipeline
 
 
 class IRCompileMixin(QickProgramV2):

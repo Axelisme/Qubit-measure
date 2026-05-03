@@ -150,6 +150,25 @@ def test_dead_label_elimination_keeps_referenced_label():
     assert isinstance(cast(InstNode, out.insts[1]).inst, JumpInst)
 
 
+def test_dead_label_elimination_keeps_pseudo_labels():
+    """Pseudo labels (HERE, NEXT, PREV, SKIP) are assembler tokens, not IR labels.
+    DeadLabelEliminationPass must never remove their LabelInst even when unreferenced."""
+    for pseudo in ("HERE", "NEXT", "PREV", "SKIP"):
+        root = RootNode(
+            insts=[
+                InstNode(LabelInst(name=Label(pseudo))),
+                InstNode(NopInst()),
+            ]
+        )
+
+        out = DeadLabelEliminationPass().process(
+            root, PipeLineContext(config=PipeLineConfig())
+        )
+
+        assert len(out.insts) == 2, f"pseudo label {pseudo!r} was incorrectly removed"
+        assert isinstance(cast(InstNode, out.insts[0]).inst, LabelInst)
+
+
 def test_default_pipeline_orders_new_passes_first():
     pipeline = make_default_pipeline(pmem_capacity=8192)
 

@@ -28,7 +28,7 @@ class DeadLabelEliminationPass(OptimizationPassBase):
         return cast(RootNode, res or ir)
 
     def visit_LabelInst(self, inst: LabelInst) -> Optional[Instruction]:
-        if inst.name in SPECIAL_LABELS:
+        if str(inst.name) in SPECIAL_LABELS:
             return inst
 
         if inst.name not in self._referenced_labels:
