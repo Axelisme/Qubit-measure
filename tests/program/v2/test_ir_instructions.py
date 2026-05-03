@@ -16,7 +16,6 @@ import pytest
 from zcu_tools.program.v2.ir.instructions import (
     DmemReadInst,
     DportWriteInst,
-    GenericInst,
     Instruction,
     JumpInst,
     LabelInst,
@@ -321,29 +320,18 @@ class TestPortWriteInstruction:
             inst.dst = "1"  # type: ignore
 
 
-class TestGenericInstruction:
-    """Tests for GenericInst (fallback for unknown opcodes)."""
-
-    def test_dispatch_unknown_opcode_to_generic(self):
-        d = {"CMD": "UNKNOWN_OP", "FIELD1": "value1", "FIELD2": "value2"}
-        inst = Instruction.from_dict(d)
-        assert isinstance(inst, GenericInst)
-        assert inst.cmd == "UNKNOWN_OP"
-        assert inst.args == {"FIELD1": "value1", "FIELD2": "value2"}
+class TestUnknownOpcode:
+    def test_dispatch_unknown_opcode_raises(self):
+        with pytest.raises(ValueError, match="Unknown instruction opcode"):
+            Instruction.from_dict({"CMD": "UNKNOWN_OP", "FIELD1": "value1"})
 
     def test_dispatch_dport_wr_to_specific(self):
-        """DPORT_WR is now specially handled; should be DportWriteInst."""
+        """DPORT_WR is specially handled; should be DportWriteInst."""
         d = {"CMD": "DPORT_WR", "DST": "0", "DATA": "1"}
         inst = Instruction.from_dict(d)
         assert isinstance(inst, DportWriteInst)
         assert inst.dst == "0"
         assert inst.data == "1"
-
-    def test_generic_roundtrip(self):
-        original = {"CMD": "SOME_OP", "ARG1": "val1", "ARG2": "val2", "LINE": 5}
-        inst = Instruction.from_dict(original)
-        recovered = inst.to_dict()
-        assert recovered == original
 
 
 class TestWaitInstruction:

@@ -3,9 +3,9 @@ from __future__ import annotations
 from typing import cast
 
 from zcu_tools.program.v2.ir.instructions import (
-    GenericInst,
     JumpInst,
     LabelInst,
+    NopInst,
     RegWriteInst,
     TestInst,
     TimeInst,
@@ -75,7 +75,7 @@ def test_dead_write_elimination_removes_overwritten_write():
         insts=[
             InstNode(RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#1"})),
             InstNode(RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#2"})),
-            InstNode(GenericInst(cmd="NOP")),
+            InstNode(NopInst()),
         ]
     )
 
@@ -88,7 +88,7 @@ def test_dead_write_elimination_removes_overwritten_write():
     assert isinstance(cast(InstNode, out.insts[0]).inst, RegWriteInst)
     assert getattr(cast(InstNode, out.insts[0]).inst, "extra_args")["LIT"] == "#2"
     assert isinstance(out.insts[1], InstNode)
-    assert isinstance(cast(InstNode, out.insts[1]).inst, GenericInst)
+    assert isinstance(cast(InstNode, out.insts[1]).inst, NopInst)
 
 
 def test_dead_write_elimination_keeps_write_before_read():
@@ -119,7 +119,7 @@ def test_dead_label_elimination_removes_unreferenced_label():
     root = RootNode(
         insts=[
             InstNode(LabelInst(name=Label("dead"))),
-            InstNode(GenericInst(cmd="NOP")),
+            InstNode(NopInst()),
         ]
     )
 
@@ -129,7 +129,7 @@ def test_dead_label_elimination_removes_unreferenced_label():
 
     assert len(out.insts) == 1
     assert isinstance(out.insts[0], InstNode)
-    assert isinstance(cast(InstNode, out.insts[0]).inst, GenericInst)
+    assert isinstance(cast(InstNode, out.insts[0]).inst, NopInst)
 
 
 def test_dead_label_elimination_keeps_referenced_label():

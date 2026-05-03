@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from zcu_tools.program.v2.ir.analysis import instruction_reads, instruction_writes
 from zcu_tools.program.v2.ir.instructions import (
-    GenericInst,
     JumpInst,
     PortWriteInst,
     RegWriteInst,
@@ -66,11 +65,6 @@ def test_port_write_inst_analysis():
     assert instruction_reads(inst) == {"s1", "s2"}
 
 
-def test_generic_inst_analysis():
-    inst = GenericInst(cmd="UNKNOWN", args={"DST": "s1", "R1": "s2", "OP": "s3+s4"})
-    assert instruction_writes(inst) == {"s1"}
-    assert instruction_reads(inst) == {"s2", "s3", "s4"}
-
 
 def test_strip_write_modifier():
     # Test DST with modifiers (though not common in REG_WR DST, good for robustness)
@@ -105,6 +99,3 @@ def test_need_label():
     inst = RegWriteInst(dst="s1", src="imm", label=Label("data_table"))
     assert str(inst.need_label) == "data_table"
 
-    # GenericInst with label
-    inst = GenericInst(cmd="WR_ADDR", args={"LABEL": Label("my_label")})
-    assert str(inst.need_label) == "my_label"

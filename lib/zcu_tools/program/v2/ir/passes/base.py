@@ -4,7 +4,6 @@ from typing import cast
 
 from ..instructions import (
     DmemReadInst,
-    GenericInst,
     Instruction,
     JumpInst,
     LabelInst,
@@ -40,11 +39,7 @@ def is_label_or_branching_inst(inst: Instruction) -> bool:
 
 
 def is_safe_linear_inst(inst: Instruction) -> bool:
-    if isinstance(inst, (TimeInst, WaitInst, RegWriteInst, DmemReadInst, NopInst)):
-        return True
-    if isinstance(inst, GenericInst) and inst.cmd == "NOP":
-        return True
-    return False
+    return isinstance(inst, (TimeInst, WaitInst, RegWriteInst, DmemReadInst, NopInst))
 
 
 def block_contains_structural_node(block: BlockNode) -> bool:

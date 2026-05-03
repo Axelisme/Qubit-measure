@@ -286,16 +286,7 @@ class Instruction:
                 annotations=annotations,
             )
 
-        # Default to GenericInst for unmapped opcodes
-        args = {k: v for k, v in clean_d.items() if k not in ("CMD", "LINE", "P_ADDR")}
-        if "LABEL" in args:
-            args["LABEL"] = get_label(args["LABEL"])
-        return GenericInst(
-            cmd=cmd,
-            args=args,
-            line=clean_d.get("LINE"),
-            annotations=annotations,
-        )
+        raise ValueError(f"Unknown instruction opcode: {cmd!r}")
 
     def to_dict(self) -> dict[str, Any]:
         """Convert back to QICK prog_list dict format."""
@@ -303,55 +294,6 @@ class Instruction:
 
     def __str__(self) -> str:
         return f"{self.__class__.__name__}({', '.join([f'{k}={v}' for k, v in self.to_dict().items() if v and k not in ('CMD')])})"
-
-
-@dataclass(frozen=True)
-class GenericInst(Instruction):
-    """Fallback for instructions without a specific model."""
-
-    cmd: str = ""
-    args: dict[str, Any] = field(default_factory=dict)
-
-    @property
-    def reg_read(self) -> list[str]:
-        reads: set[str] = set()
-        for key in ("R1", "R2", "R3", "ADDR"):
-            value = self.args.get(key)
-            if isinstance(value, str) and not value.startswith("#"):
-                reads.add(value)
-
-        for key in ("SRC", "OP", "TIME"):
-            reads.update(regs_from_value(self.args.get(key)))
-        return sorted(list(reads))
-
-    @property
-    def reg_write(self) -> list[str]:
-        writes: set[str] = set()
-        for key in ("DST", "WR"):
-            value = self.args.get(key)
-            if isinstance(value, str):
-                writes.add(strip_write_modifier(value))
-        return sorted(list(writes))
-
-    @property
-    def need_label(self) -> Optional["Label"]:
-        from .labels import Label
-
-        label = self.args.get("LABEL")
-
-        if isinstance(label, Label) and not _is_pseudo_label(label):
-            return label
-        return None
-
-    def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"CMD": self.cmd}
-        d.update(self.args)
-        if "LABEL" in d and d["LABEL"] is not None:
-            d["LABEL"] = str(d["LABEL"])
-        d.update(self.annotations)
-        if self.line is not None:
-            d["LINE"] = self.line
-        return d
 
 
 @dataclass(frozen=True)

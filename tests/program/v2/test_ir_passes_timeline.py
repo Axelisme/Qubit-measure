@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import cast
 
-from zcu_tools.program.v2.ir.instructions import GenericInst, TimeInst, WaitInst
+from zcu_tools.program.v2.ir.instructions import NopInst, TimeInst, WaitInst
 from zcu_tools.program.v2.ir.node import InstNode, RootNode
 from zcu_tools.program.v2.ir.passes.timeline import (
     TimedInstructionMergePass,
@@ -16,7 +16,7 @@ def test_zero_delay_dce_removes_plain_zero_increment():
         insts=[
             InstNode(TimeInst(c_op="inc_ref", lit="#0")),
             InstNode(TimeInst(c_op="inc_ref", lit="#4")),
-            InstNode(GenericInst(cmd="NOP")),
+            InstNode(NopInst()),
         ]
     )
 
@@ -27,14 +27,14 @@ def test_zero_delay_dce_removes_plain_zero_increment():
     assert isinstance(cast(InstNode, out.insts[0]).inst, TimeInst)
     assert getattr(cast(InstNode, out.insts[0]).inst, "lit") == "#4"
     assert isinstance(out.insts[1], InstNode)
-    assert isinstance(cast(InstNode, out.insts[1]).inst, GenericInst)
+    assert isinstance(cast(InstNode, out.insts[1]).inst, NopInst)
 
 
 def test_zero_delay_dce_removes_annotated_zero_increment():
     root = RootNode(
         insts=[
             InstNode(TimeInst(c_op="inc_ref", lit="#0", annotations={"IR_X": 1})),
-            InstNode(GenericInst(cmd="NOP")),
+            InstNode(NopInst()),
         ]
     )
 
@@ -42,7 +42,7 @@ def test_zero_delay_dce_removes_annotated_zero_increment():
 
     assert len(out.insts) == 1
     assert isinstance(out.insts[0], InstNode)
-    assert isinstance(cast(InstNode, out.insts[0]).inst, GenericInst)
+    assert isinstance(cast(InstNode, out.insts[0]).inst, NopInst)
 
 
 def test_timed_instruction_merge_merges_plain_adjacent_increments():
@@ -50,7 +50,7 @@ def test_timed_instruction_merge_merges_plain_adjacent_increments():
         insts=[
             InstNode(TimeInst(c_op="inc_ref", lit="#2")),
             InstNode(TimeInst(c_op="inc_ref", lit="#3")),
-            InstNode(GenericInst(cmd="NOP")),
+            InstNode(NopInst()),
         ]
     )
 
@@ -63,7 +63,7 @@ def test_timed_instruction_merge_merges_plain_adjacent_increments():
     assert isinstance(cast(InstNode, out.insts[0]).inst, TimeInst)
     assert getattr(cast(InstNode, out.insts[0]).inst, "lit") == "#5"
     assert isinstance(out.insts[1], InstNode)
-    assert isinstance(cast(InstNode, out.insts[1]).inst, GenericInst)
+    assert isinstance(cast(InstNode, out.insts[1]).inst, NopInst)
 
 
 def test_timed_instruction_merge_merges_annotated_adjacent_increments():
