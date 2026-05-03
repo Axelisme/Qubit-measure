@@ -83,9 +83,9 @@ def parse_loop(stream: InstructionStream) -> IRLoop:
 
     loop_node = IRLoop(
         name=start_meta.name,
-        counter_reg=start_meta.args["counter_reg"],
-        n=start_meta.args["n"],
-        range_hint=start_meta.args.get("range_hint"),
+        counter_reg=start_meta.info["counter_reg"],
+        n=start_meta.info["n"],
+        range_hint=start_meta.info.get("range_hint"),
         start_label=start_label,
     )
 
@@ -119,7 +119,7 @@ def parse_loop(stream: InstructionStream) -> IRLoop:
 
 def parse_branch(stream: InstructionStream) -> IRBranch:
     start_meta = stream.consume_meta("BRANCH_START")
-    compare_reg = start_meta.args["compare_reg"]
+    compare_reg = start_meta.info["compare_reg"]
 
     branch_node = IRBranch(name=start_meta.name, compare_reg=compare_reg)
 

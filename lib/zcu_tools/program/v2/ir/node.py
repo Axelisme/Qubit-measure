@@ -89,7 +89,7 @@ class IRLoop(IRNode):
             MetaInst(
                 type="LOOP_START",
                 name=self.name,
-                args=dict(
+                info=dict(
                     counter_reg=self.counter_reg,
                     n=self.n,
                     range_hint=self.range_hint,

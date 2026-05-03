@@ -390,33 +390,10 @@ class TestMetaInstruction:
     """Tests for MetaInst."""
 
     def test_meta_construction(self):
-        inst = MetaInst(type="loop", name="loop_1", args={"n": 10})
+        inst = MetaInst(type="loop", name="loop_1", info={"n": 10})
         assert inst.type == "loop"
         assert str(inst.name) == "loop_1"
-        assert inst.args["n"] == 10
-
-    def test_meta_roundtrip(self):
-        original = {"CMD": "__META__", "TYPE": "loop", "NAME": "L1", "ARGS": {"n": 5}}
-        inst = Instruction.from_dict(original)
-        assert isinstance(inst, MetaInst)
-        recovered = inst.to_dict()
-        # to_dict includes LINE and P_ADDR even if None
-        assert recovered["CMD"] == "__META__"
-        assert recovered["TYPE"] == "loop"
-        assert recovered["NAME"] == "L1"
-        assert recovered["ARGS"] == {"n": 5}
-
-    def test_meta_dispatch(self):
-        d = {"CMD": "__META__", "TYPE": "loop", "NAME": "L2", "ARGS": {}}
-        inst = Instruction.from_dict(d)
-        assert isinstance(inst, MetaInst)
-
-    def test_meta_optional_args(self):
-        """MetaInst should handle missing ARGS field."""
-        d = {"CMD": "__META__", "TYPE": "branch", "NAME": "B1"}
-        inst = Instruction.from_dict(d)
-        assert isinstance(inst, MetaInst)
-        assert inst.args == {}
+        assert inst.info["n"] == 10
 
 
 class TestConditionalJumpPattern:

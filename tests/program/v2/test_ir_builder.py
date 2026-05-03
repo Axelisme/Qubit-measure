@@ -39,7 +39,7 @@ def test_branch_roundtrip_preserves_cases():
     patched = []
     for inst in inst_list:
         if isinstance(inst, MetaInst) and inst.type == "BRANCH_START":
-            inst = dataclasses.replace(inst, args={"compare_reg": branch.compare_reg})
+            inst = dataclasses.replace(inst, info=dict(compare_reg=branch.compare_reg))
         patched.append(inst)
 
     stream = InstructionStream(patched)

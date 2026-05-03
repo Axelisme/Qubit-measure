@@ -39,7 +39,7 @@ class IRLinker:
                         "kind": "meta",
                         "type": inst.type,
                         "name": inst.name,
-                        "info": inst.args,
+                        "info": inst.info,
                         "p_addr": p_addr,
                     }
                 )
@@ -96,7 +96,7 @@ class IRLinker:
                     logical_insts.append(LabelInst(name=get_label(m["name"])))
                 elif m["kind"] == "meta":
                     logical_insts.append(
-                        MetaInst(type=m["type"], name=m["name"], args=m.get("info", {}))
+                        MetaInst(type=m["type"], name=m["name"], info=m.get("info", {}))
                     )
 
             # Remove from markers_by_addr so we don't process it again for trailing
@@ -118,7 +118,7 @@ class IRLinker:
                     logical_insts.append(LabelInst(name=get_label(m["name"])))
                 elif m["kind"] == "meta":
                     logical_insts.append(
-                        MetaInst(type=m["type"], name=m["name"], args=m.get("info", {}))
+                        MetaInst(type=m["type"], name=m["name"], info=m.get("info", {}))
                     )
 
         # Handle trailing fallback labels

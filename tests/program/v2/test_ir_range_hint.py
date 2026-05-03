@@ -18,7 +18,7 @@ def test_parse_loop_restores_range_hint():
         MetaInst(
             type="LOOP_START",
             name="loop",
-            args={"counter_reg": "r0", "n": "r_count", "range_hint": (5, 5)},
+            info=dict(counter_reg="r0", n="r_count", range_hint=(5, 5)),
         ),
         MetaInst(type="LOOP_BODY_START", name="loop"),
         RegWriteInst(dst="r1", src="imm", lit="#1"),
@@ -47,4 +47,4 @@ def test_emit_loop_preserves_range_hint_in_meta():
         for inst in inst_list
         if isinstance(inst, MetaInst) and inst.type == "LOOP_START"
     )
-    assert start_meta.args["range_hint"] == (100, 100)
+    assert start_meta.info["range_hint"] == (100, 100)

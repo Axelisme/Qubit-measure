@@ -1,15 +1,8 @@
 from typing import Any
 
-import pytest
 from zcu_tools.program.v2.ir.builder import IRBuilder
-from zcu_tools.program.v2.ir.instructions import (
-    GenericInst,
-    JumpInst,
-    RegWriteInst,
-    TestInst,
-)
-from zcu_tools.program.v2.ir.node import BlockNode, IRLoop, RootNode
-from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, make_default_pipeline
+from zcu_tools.program.v2.ir.node import IRLoop, RootNode
+from zcu_tools.program.v2.ir.pipeline import make_default_pipeline
 
 
 def test_structural_loop_roundtrip():
@@ -50,7 +43,6 @@ def test_structural_loop_roundtrip():
             "info": {},
             "p_addr": 4,
         },
-
         {"kind": "label", "name": "loop1_end", "p_addr": 6},
         {
             "kind": "meta",
@@ -75,7 +67,7 @@ def test_structural_loop_roundtrip():
     assert str(loop.end_label) == "loop1_end"
 
     # Unbuild (emits instructions)
-    opt_insts, opt_labels, opt_meta_infos, cursor = builder.unbuild(root)
+    opt_insts, *_, cursor = builder.unbuild(root)
 
     # Verify emitted instructions (no markers)
     # The new IRLoop.emit() outputs:
@@ -104,11 +96,10 @@ def test_pipeline_roundtrip_with_normalization():
         insts=[loop],
     )
 
-    config = PipeLineConfig(pmem_budget=8192, enable_unroll_loop=False)
     pipeline = make_default_pipeline(pmem_capacity=8192)
     # Actually wait, make_default_pipeline takes pmem_capacity, not config.
     pipeline.config.enable_unroll_loop = False
-    
+
     out_ir, _ctx = pipeline(root)
 
     # Check that it's still well-formed

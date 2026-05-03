@@ -95,15 +95,6 @@ class Instruction:
         if not cmd:
             raise ValueError(f"Unknown instruction format: {d}")
 
-        if cmd == "__META__":
-            return MetaInst(
-                type=clean_d["TYPE"],
-                name=clean_d["NAME"],
-                line=clean_d.get("LINE"),
-                args=clean_d.get("ARGS", {}),
-                annotations=annotations,
-            )
-
         # Dispatch to structured types for known opcodes
         if cmd == "TIME":
             extra_args = _residual_fields(clean_d, {"C_OP", "LIT", "R1"})
@@ -383,7 +374,7 @@ class MetaInst(Instruction):
 
     type: str = ""
     name: str = ""
-    args: dict[str, Any] = field(default_factory=dict)
+    info: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -391,7 +382,7 @@ class MetaInst(Instruction):
             "TYPE": self.type,
             "NAME": self.name,
             "LINE": self.line,
-            "ARGS": self.args,
+            "INFO": self.info,
         }
         d.update(self.annotations)
         return d

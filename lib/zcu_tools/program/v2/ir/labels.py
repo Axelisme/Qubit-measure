@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any
+from typing_extensions import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .instructions import Instruction
@@ -22,7 +22,7 @@ class Label:
         return self._name
 
     @classmethod
-    def make_new(cls, base_name: str) -> "Label":
+    def make_new(cls, base_name: str) -> Label:
         """Create a new logical label, ensuring the name is unique."""
         name = base_name
         counter = 0
@@ -32,7 +32,7 @@ class Label:
         cls.label_set.add(name)
         return cls(name)
 
-    def clone_new(self) -> "Label":
+    def clone_new(self) -> Label:
         """Create a new label derived from this one's name."""
         return Label.make_new(self._name)
 
@@ -61,7 +61,7 @@ class Label:
         return self is other
 
 
-def iter_label_references(inst: "Instruction") -> Iterable["Label"]:
+def iter_label_references(inst: Instruction) -> Iterable[Label]:
     label = inst.need_label
     if label:
         return (label,)
