@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import dataclasses
 import math
 from typing import TYPE_CHECKING
 
@@ -26,21 +25,6 @@ def instruction_reads(inst: Instruction) -> set[str]:
 def instruction_writes(inst: Instruction) -> set[str]:
     """Extract all registers written by an instruction."""
     return set(inst.reg_write)
-
-
-def is_marked_hoistable(inst: Instruction) -> bool:
-    return inst.annotations.get("IR_HOISTABLE") is True
-
-
-def strip_internal_annotations(inst: Instruction) -> Instruction:
-    if not inst.annotations:
-        return inst
-
-    # annotations already contains only IR_ fields (extracted in from_dict)
-    # So to "strip" them, we just need to return a new instance with empty annotations.
-    # However, since Instruction is frozen, we must use replace() or similar.
-    # Actually, using dataclasses.replace is best.
-    return dataclasses.replace(inst, annotations={})
 
 
 def estimate_body_cost(body: list["IRNode"], config: PipeLineConfig) -> int:

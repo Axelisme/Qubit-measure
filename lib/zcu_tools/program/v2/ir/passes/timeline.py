@@ -74,12 +74,10 @@ def _merged_time_run(run: list[TimeInst]) -> InstNode:
         return InstNode(run[0])
 
     total = sum(int(inst.lit[1:]) for inst in run if inst.lit is not None)
-    first = run[0]
     return InstNode(
         TimeInst(
             c_op="inc_ref",
             lit=f"#{total}",
-            line=first.line,
         )
     )
 

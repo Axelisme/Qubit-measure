@@ -30,10 +30,10 @@ def test_zero_delay_dce_removes_plain_zero_increment():
     assert isinstance(cast(InstNode, out.insts[1]).inst, NopInst)
 
 
-def test_zero_delay_dce_removes_annotated_zero_increment():
+def test_zero_delay_dce_removes_zero_increment_with_extra_args():
     root = RootNode(
         insts=[
-            InstNode(TimeInst(c_op="inc_ref", lit="#0", annotations={"IR_X": 1})),
+            InstNode(TimeInst(c_op="inc_ref", lit="#0", extra_args={"IR_X": 1})),
             InstNode(NopInst()),
         ]
     )
@@ -66,11 +66,11 @@ def test_timed_instruction_merge_merges_plain_adjacent_increments():
     assert isinstance(cast(InstNode, out.insts[1]).inst, NopInst)
 
 
-def test_timed_instruction_merge_merges_annotated_adjacent_increments():
+def test_timed_instruction_merge_merges_adjacent_increments_with_extra_args():
     root = RootNode(
         insts=[
-            InstNode(TimeInst(c_op="inc_ref", lit="#2", annotations={"IR_X": 1})),
-            InstNode(TimeInst(c_op="inc_ref", lit="#3", annotations={"IR_Y": 2})),
+            InstNode(TimeInst(c_op="inc_ref", lit="#2", extra_args={"IR_X": 1})),
+            InstNode(TimeInst(c_op="inc_ref", lit="#3", extra_args={"IR_Y": 2})),
         ]
     )
 

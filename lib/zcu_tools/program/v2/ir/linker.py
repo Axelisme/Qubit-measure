@@ -27,6 +27,7 @@ class IRLinker:
         meta_infos: list[dict[str, Any]] = []
 
         p_addr = 0
+        line = 0
         for inst in inst_list:
             if isinstance(inst, LabelInst):
                 labels[str(inst.name)] = f"&{p_addr}"
@@ -46,8 +47,10 @@ class IRLinker:
             else:
                 d = inst.to_dict()
                 d["P_ADDR"] = p_addr
+                d["LINE"] = line
                 prog_list.append(d)
                 p_addr += inst.addr_inc
+                line += 1
 
         return prog_list, labels, meta_infos, self.compute_cursors(inst_list)
 

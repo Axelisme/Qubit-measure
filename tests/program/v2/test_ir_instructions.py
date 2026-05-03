@@ -33,18 +33,16 @@ class TestTimeInstruction:
     """Tests for TimeInst (TIME opcode)."""
 
     def test_construction_with_all_fields(self):
-        inst = TimeInst(c_op="inc_ref", lit="#10", r1="r0", line=5)
+        inst = TimeInst(c_op="inc_ref", lit="#10", r1="r0")
         assert inst.c_op == "inc_ref"
         assert getattr(inst, "lit") == "#10"
         assert inst.r1 == "r0"
-        assert inst.line == 5
 
     def test_construction_with_defaults(self):
         inst = TimeInst()
         assert inst.c_op == ""
         assert inst.lit is None
         assert inst.r1 is None
-        assert inst.line is None
 
     def test_dispatch_time_to_timeinst(self):
         d = {"CMD": "TIME", "C_OP": "inc_ref", "LIT": "#5", "R1": "r1"}
@@ -55,13 +53,7 @@ class TestTimeInstruction:
         assert inst.r1 == "r1"
 
     def test_roundtrip_time_full(self):
-        original = {
-            "CMD": "TIME",
-            "C_OP": "inc_ref",
-            "LIT": "#10",
-            "R1": "r1",
-            "LINE": 5,
-        }
+        original = {"CMD": "TIME", "C_OP": "inc_ref", "LIT": "#10", "R1": "r1"}
         inst = Instruction.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
@@ -82,10 +74,9 @@ class TestTestInstruction:
     """Tests for TestInst (TEST opcode)."""
 
     def test_construction(self):
-        inst = TestInst(op="r1-r2", uf="1", line=7)
+        inst = TestInst(op="r1-r2", uf="1")
         assert inst.op == "r1-r2"
         assert inst.uf == "1"
-        assert inst.line == 7
 
     def test_dispatch_test_to_testinst(self):
         d = {"CMD": "TEST", "OP": "r1==r2", "UF": "1"}
@@ -95,7 +86,7 @@ class TestTestInstruction:
         assert inst.uf == "1"
 
     def test_roundtrip_test_full(self):
-        original = {"CMD": "TEST", "OP": "r3 & #255", "UF": "1", "LINE": 15}
+        original = {"CMD": "TEST", "OP": "r3 & #255", "UF": "1"}
         inst = Instruction.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
@@ -116,13 +107,13 @@ class TestJumpInstruction:
     """Tests for JumpInst (JUMP opcode)."""
 
     def test_construction_unconditional(self):
-        inst = JumpInst(label=Label("loop"), line=10)
+        inst = JumpInst(label=Label("loop"))
         assert str(inst.label) == "loop"
         assert inst.if_cond is None
         assert inst.addr is None
 
     def test_construction_conditional(self):
-        inst = JumpInst(label=Label("exit"), if_cond="eq", line=12)
+        inst = JumpInst(label=Label("exit"), if_cond="eq")
         assert str(inst.label) == "exit"
         assert inst.if_cond == "eq"
 
@@ -153,13 +144,13 @@ class TestJumpInstruction:
         assert inst.if_cond == "eq"
 
     def test_roundtrip_jump_unconditional(self):
-        original = {"CMD": "JUMP", "LABEL": "loop", "LINE": 20}
+        original = {"CMD": "JUMP", "LABEL": "loop"}
         inst = Instruction.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
 
     def test_roundtrip_jump_conditional(self):
-        original = {"CMD": "JUMP", "LABEL": "end", "IF": "eq", "LINE": 21}
+        original = {"CMD": "JUMP", "LABEL": "end", "IF": "eq"}
         inst = Instruction.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
@@ -368,7 +359,7 @@ class TestLabelInstruction:
         assert inst.args["EXTRA"] == "data"
 
     def test_label_roundtrip(self):
-        original = {"LABEL": "end_loop", "LINE": 30}
+        original = {"LABEL": "end_loop"}
         inst = Instruction.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
@@ -438,8 +429,7 @@ class TestEdgeCases:
 
     def test_mixed_optional_fields(self):
         """Instructions with selective optional fields."""
-        d = {"CMD": "TIME", "C_OP": "inc_ref", "LINE": 5}
+        d = {"CMD": "TIME", "C_OP": "inc_ref"}
         inst = Instruction.from_dict(d)
         assert getattr(inst, "lit") is None
         assert getattr(inst, "r1") is None
-        assert inst.line == 5

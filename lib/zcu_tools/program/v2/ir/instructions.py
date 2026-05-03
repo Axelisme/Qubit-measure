@@ -29,10 +29,6 @@ def _residual_fields(source: dict[str, Any], handled: set[str]) -> dict[str, Any
 class Instruction:
     """Base class for all IR instructions."""
 
-    # Optional metadata from QICK assembler
-    line: Optional[int] = None
-    annotations: dict[str, Any] = field(default_factory=dict)
-
     @property
     def addr_inc(self) -> int:
         """Number of machine-code words this instruction will occupy."""
@@ -76,214 +72,180 @@ class Instruction:
                 return Label(name)
             return None
 
-        # Extract internal annotations (starting with IR_)
-        annotations = {k: v for k, v in d.items() if k.startswith("IR_")}
-        clean_d = {k: v for k, v in d.items() if not k.startswith("IR_")}
-
-        if "LABEL" in clean_d and "CMD" not in clean_d:
-            args = {
-                k: v for k, v in clean_d.items() if k not in ("LABEL", "LINE", "P_ADDR")
-            }
+        if "LABEL" in d and "CMD" not in d:
+            args = {k: v for k, v in d.items() if k not in ("LABEL", "LINE", "P_ADDR")}
             return LabelInst(
-                name=get_label(clean_d["LABEL"]),
+                name=get_label(d["LABEL"]),
                 args=args,
-                line=clean_d.get("LINE"),
-                annotations=annotations,
             )
 
-        cmd = clean_d.get("CMD")
+        cmd = d.get("CMD")
         if not cmd:
             raise ValueError(f"Unknown instruction format: {d}")
 
         # Dispatch to structured types for known opcodes
         if cmd == "TIME":
-            extra_args = _residual_fields(clean_d, {"C_OP", "LIT", "R1"})
+            extra_args = _residual_fields(d, {"C_OP", "LIT", "R1"})
             return TimeInst(
-                c_op=clean_d.get("C_OP", ""),
-                lit=clean_d.get("LIT"),
-                r1=clean_d.get("R1"),
+                c_op=d.get("C_OP", ""),
+                lit=d.get("LIT"),
+                r1=d.get("R1"),
                 extra_args=extra_args,
-                line=clean_d.get("LINE"),
-                annotations=annotations,
             )
         elif cmd == "TEST":
-            extra_args = _residual_fields(clean_d, {"OP", "UF"})
+            extra_args = _residual_fields(d, {"OP", "UF"})
             return TestInst(
-                op=clean_d.get("OP", ""),
-                uf=clean_d.get("UF"),
+                op=d.get("OP", ""),
+                uf=d.get("UF"),
                 extra_args=extra_args,
-                line=clean_d.get("LINE"),
-                annotations=annotations,
             )
         elif cmd == "JUMP":
-            raw_addr = clean_d.get("ADDR")
+            raw_addr = d.get("ADDR")
             resolved_addr: Optional[Union[str, Label]] = raw_addr
             if isinstance(raw_addr, str) and raw_addr.startswith("&"):
                 resolved_addr = get_label(raw_addr)
 
-            extra_args = _residual_fields(
-                clean_d, {"LABEL", "IF", "ADDR", "WR", "OP", "UF"}
-            )
+            extra_args = _residual_fields(d, {"LABEL", "IF", "ADDR", "WR", "OP", "UF"})
             return JumpInst(
-                label=get_label(clean_d.get("LABEL")),
-                if_cond=clean_d.get("IF"),
+                label=get_label(d.get("LABEL")),
+                if_cond=d.get("IF"),
                 addr=resolved_addr,
-                wr=clean_d.get("WR"),
-                op=clean_d.get("OP"),
-                uf=clean_d.get("UF"),
+                wr=d.get("WR"),
+                op=d.get("OP"),
+                uf=d.get("UF"),
                 extra_args=extra_args,
-                line=clean_d.get("LINE"),
-                annotations=annotations,
             )
         elif cmd == "REG_WR":
-            src = clean_d.get("SRC", "")
-            wr = clean_d.get("WR")
-            if not clean_d.get("DST") and wr:
+            src = d.get("SRC", "")
+            wr = d.get("WR")
+            if not d.get("DST") and wr:
                 wr_parts = wr.split()
                 if wr_parts:
-                    clean_d["DST"] = wr_parts[0]
+                    d["DST"] = wr_parts[0]
                 if len(wr_parts) > 1 and not src:
-                    clean_d["SRC"] = wr_parts[1]
+                    d["SRC"] = wr_parts[1]
                     src = wr_parts[1]
 
-            raw_addr = clean_d.get("ADDR")
+            raw_addr = d.get("ADDR")
             resolved_addr = raw_addr
             if isinstance(raw_addr, str) and raw_addr.startswith("&"):
                 resolved_addr = get_label(raw_addr)
 
             if src == "dmem":
                 extra_args = _residual_fields(
-                    clean_d,
+                    d,
                     {"DST", "SRC", "ADDR", "WR", "OP", "LIT", "UF", "IF", "LABEL"},
                 )
                 return DmemReadInst(
-                    dst=clean_d.get("DST", ""),
+                    dst=d.get("DST", ""),
                     src="dmem",
                     addr=resolved_addr,
                     wr=wr,
-                    op=clean_d.get("OP"),
-                    lit=clean_d.get("LIT"),
-                    uf=clean_d.get("UF"),
-                    if_cond=clean_d.get("IF"),
-                    label=get_label(clean_d.get("LABEL")),
+                    op=d.get("OP"),
+                    lit=d.get("LIT"),
+                    uf=d.get("UF"),
+                    if_cond=d.get("IF"),
+                    label=get_label(d.get("LABEL")),
                     extra_args=extra_args,
-                    line=clean_d.get("LINE"),
-                    annotations=annotations,
                 )
             extra_args = _residual_fields(
-                clean_d,
+                d,
                 {"DST", "SRC", "WR", "OP", "LIT", "ADDR", "UF", "IF", "LABEL"},
             )
             return RegWriteInst(
-                dst=clean_d.get("DST", ""),
-                src=clean_d.get("SRC", ""),
+                dst=d.get("DST", ""),
+                src=d.get("SRC", ""),
                 wr=wr,
-                op=clean_d.get("OP"),
-                lit=clean_d.get("LIT"),
+                op=d.get("OP"),
+                lit=d.get("LIT"),
                 addr=resolved_addr,
-                uf=clean_d.get("UF"),
-                if_cond=clean_d.get("IF"),
-                label=get_label(clean_d.get("LABEL")),
+                uf=d.get("UF"),
+                if_cond=d.get("IF"),
+                label=get_label(d.get("LABEL")),
                 extra_args=extra_args,
-                line=clean_d.get("LINE"),
-                annotations=annotations,
             )
         elif cmd == "WPORT_WR":
             extra_args = _residual_fields(
-                clean_d, {"DST", "SRC", "ADDR", "TIME", "WR", "OP", "UF", "IF"}
+                d, {"DST", "SRC", "ADDR", "TIME", "WR", "OP", "UF", "IF"}
             )
             return PortWriteInst(
-                dst=clean_d.get("DST", ""),
-                src=clean_d.get("SRC"),
-                addr=clean_d.get("ADDR"),
-                time=clean_d.get("TIME"),
-                wr=clean_d.get("WR"),
-                op=clean_d.get("OP"),
-                uf=clean_d.get("UF"),
-                if_cond=clean_d.get("IF"),
+                dst=d.get("DST", ""),
+                src=d.get("SRC"),
+                addr=d.get("ADDR"),
+                time=d.get("TIME"),
+                wr=d.get("WR"),
+                op=d.get("OP"),
+                uf=d.get("UF"),
+                if_cond=d.get("IF"),
                 extra_args=extra_args,
-                line=clean_d.get("LINE"),
-                annotations=annotations,
             )
         elif cmd == "NOP":
-            extra_args = _residual_fields(clean_d, set())
-            return NopInst(
-                extra_args=extra_args,
-                line=clean_d.get("LINE"),
-                annotations=annotations,
-            )
+            extra_args = _residual_fields(d, set())
+            return NopInst(extra_args=extra_args)
         elif cmd == "DMEM_RD":
-            raw_addr = clean_d.get("ADDR")
+            raw_addr = d.get("ADDR")
             resolved_addr = raw_addr
             if isinstance(raw_addr, str) and raw_addr.startswith("&"):
                 resolved_addr = get_label(raw_addr)
 
             extra_args = _residual_fields(
-                clean_d, {"DST", "SRC", "ADDR", "WR", "OP", "LIT", "UF", "IF", "LABEL"}
+                d, {"DST", "SRC", "ADDR", "WR", "OP", "LIT", "UF", "IF", "LABEL"}
             )
             return DmemReadInst(
-                dst=clean_d.get("DST", ""),
-                src=clean_d.get("SRC", "dmem"),
+                dst=d.get("DST", ""),
+                src=d.get("SRC", "dmem"),
                 addr=resolved_addr,
-                wr=clean_d.get("WR"),
-                op=clean_d.get("OP"),
-                lit=clean_d.get("LIT"),
-                uf=clean_d.get("UF"),
-                if_cond=clean_d.get("IF"),
-                label=get_label(clean_d.get("LABEL")),
+                wr=d.get("WR"),
+                op=d.get("OP"),
+                lit=d.get("LIT"),
+                uf=d.get("UF"),
+                if_cond=d.get("IF"),
+                label=get_label(d.get("LABEL")),
                 extra_args=extra_args,
-                line=clean_d.get("LINE"),
-                annotations=annotations,
             )
         elif cmd == "DMEM_WR":
             extra_args = _residual_fields(
-                clean_d,
+                d,
                 {"DST", "SRC", "WR", "OP", "LIT", "UF", "IF"},
             )
             return DmemWriteInst(
-                dst=clean_d.get("DST", ""),
-                src=clean_d.get("SRC", ""),
-                wr=clean_d.get("WR"),
-                op=clean_d.get("OP"),
-                lit=clean_d.get("LIT"),
-                uf=clean_d.get("UF"),
-                if_cond=clean_d.get("IF"),
+                dst=d.get("DST", ""),
+                src=d.get("SRC", ""),
+                wr=d.get("WR"),
+                op=d.get("OP"),
+                lit=d.get("LIT"),
+                uf=d.get("UF"),
+                if_cond=d.get("IF"),
                 extra_args=extra_args,
-                line=clean_d.get("LINE"),
-                annotations=annotations,
             )
         elif cmd == "DPORT_WR":
             extra_args = _residual_fields(
-                clean_d,
+                d,
                 {"DST", "SRC", "DATA", "TIME", "WR", "OP", "UF", "IF"},
             )
             return DportWriteInst(
-                dst=clean_d.get("DST", ""),
-                src=clean_d.get("SRC"),
-                data=clean_d.get("DATA", ""),
-                time=clean_d.get("TIME"),
-                wr=clean_d.get("WR"),
-                op=clean_d.get("OP"),
-                uf=clean_d.get("UF"),
-                if_cond=clean_d.get("IF"),
+                dst=d.get("DST", ""),
+                src=d.get("SRC"),
+                data=d.get("DATA", ""),
+                time=d.get("TIME"),
+                wr=d.get("WR"),
+                op=d.get("OP"),
+                uf=d.get("UF"),
+                if_cond=d.get("IF"),
                 extra_args=extra_args,
-                line=clean_d.get("LINE"),
-                annotations=annotations,
             )
         elif cmd == "WAIT":
-            raw_addr = clean_d.get("ADDR")
+            raw_addr = d.get("ADDR")
             resolved_addr = raw_addr
             if isinstance(raw_addr, str) and raw_addr.startswith("&"):
                 resolved_addr = get_label(raw_addr)
 
-            extra_args = _residual_fields(clean_d, {"C_OP", "TIME", "ADDR"})
+            extra_args = _residual_fields(d, {"C_OP", "TIME", "ADDR"})
             return WaitInst(
-                c_op=clean_d.get("C_OP", "time"),
-                time=clean_d.get("TIME"),
+                c_op=d.get("C_OP", "time"),
+                time=d.get("TIME"),
                 addr=resolved_addr,
                 extra_args=extra_args,
-                line=clean_d.get("LINE"),
-                annotations=annotations,
             )
 
         raise ValueError(f"Unknown instruction opcode: {cmd!r}")
@@ -304,9 +266,6 @@ class LabelInst(Instruction):
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"LABEL": str(self.name)}
         d.update(self.args)
-        d.update(self.annotations)
-        if self.line is not None:
-            d["LINE"] = self.line
         return d
 
 
@@ -323,15 +282,12 @@ class MetaInst(Instruction):
         return 0  # MetaInst occupies no program memory
 
     def to_dict(self) -> dict[str, Any]:
-        d = {
+        return {
             "CMD": "__META__",
             "TYPE": self.type,
             "NAME": self.name,
-            "LINE": self.line,
             "INFO": self.info,
         }
-        d.update(self.annotations)
-        return d
 
 
 @dataclass(frozen=True)
@@ -354,9 +310,6 @@ class TimeInst(Instruction):
         if self.r1 is not None:
             d["R1"] = self.r1
         d.update(self.extra_args)
-        d.update(self.annotations)
-        if self.line is not None:
-            d["LINE"] = self.line
         return d
 
 
@@ -378,9 +331,6 @@ class TestInst(Instruction):
         if self.uf is not None:
             d["UF"] = self.uf
         d.update(self.extra_args)
-        d.update(self.annotations)
-        if self.line is not None:
-            d["LINE"] = self.line
         return d
 
 
@@ -441,9 +391,6 @@ class JumpInst(Instruction):
         if self.uf is not None:
             d["UF"] = self.uf
         d.update(self.extra_args)
-        d.update(self.annotations)
-        if self.line is not None:
-            d["LINE"] = self.line
         return d
 
 
@@ -511,9 +458,6 @@ class RegWriteInst(Instruction):
         if self.label is not None:
             d["LABEL"] = str(self.label)
         d.update(self.extra_args)
-        d.update(self.annotations)
-        if self.line is not None:
-            d["LINE"] = self.line
         return d
 
 
@@ -567,9 +511,6 @@ class PortWriteInst(Instruction):
         if self.if_cond is not None:
             d["IF"] = self.if_cond
         d.update(self.extra_args)
-        d.update(self.annotations)
-        if self.line is not None:
-            d["LINE"] = self.line
         return d
 
 
@@ -582,9 +523,6 @@ class NopInst(Instruction):
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"CMD": "NOP"}
         d.update(self.extra_args)
-        d.update(self.annotations)
-        if self.line is not None:
-            d["LINE"] = self.line
         return d
 
 
@@ -648,9 +586,6 @@ class DmemReadInst(Instruction):
         if self.label is not None:
             d["LABEL"] = str(self.label)
         d.update(self.extra_args)
-        d.update(self.annotations)
-        if self.line is not None:
-            d["LINE"] = self.line
         return d
 
 
@@ -689,9 +624,6 @@ class DmemWriteInst(Instruction):
         if self.if_cond is not None:
             d["IF"] = self.if_cond
         d.update(self.extra_args)
-        d.update(self.annotations)
-        if self.line is not None:
-            d["LINE"] = self.line
         return d
 
 
@@ -743,9 +675,6 @@ class DportWriteInst(Instruction):
         if self.if_cond is not None:
             d["IF"] = self.if_cond
         d.update(self.extra_args)
-        d.update(self.annotations)
-        if self.line is not None:
-            d["LINE"] = self.line
         return d
 
 
@@ -786,9 +715,6 @@ class WaitInst(Instruction):
         if self.addr is not None:
             d["ADDR"] = f"&{self.addr}" if isinstance(self.addr, Label) else self.addr
         d.update(self.extra_args)
-        d.update(self.annotations)
-        if self.line is not None:
-            d["LINE"] = self.line
         return d
 
     @property
