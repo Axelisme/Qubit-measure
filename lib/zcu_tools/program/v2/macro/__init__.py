@@ -105,9 +105,11 @@ class AdditionalMacroMixin(AsmV2):
         """Insert a debug macro that prints the current time (cycle count) with a name."""
         self.append_macro(PrintTimeStamp(name, t, prefix=prefix))
 
-    def meta_macro(self, type: str, name: str) -> None:
+    def meta_macro(
+        self, type: str, name: str, info: Optional[dict] = None
+    ) -> None:
         """Insert a meta macro that emits a meta instruction for the IR builder."""
-        self.append_macro(MetaMacro(type=type, name=name))
+        self.append_macro(MetaMacro(type=type, name=name, info=info))
 
     @contextmanager
     def acquire_temp_reg(self, num: int = 1) -> Generator[list[str]]:

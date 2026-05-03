@@ -18,21 +18,40 @@ def test_instruction_parses_jump_label_to_jumpinst():
 
 
 def test_branch_roundtrip_preserves_cases():
-    """Verify IRBranch.emit() includes dispatch + cases in order."""
+    """Verify IRBranch.emit() + parse_branch() round-trips correctly."""
+    import dataclasses
+
+    from zcu_tools.program.v2.ir.factory import InstructionStream, parse_branch
+    from zcu_tools.program.v2.ir.instructions import MetaInst
+
     case_0_inst = RegWriteInst(dst="r0", src="imm", lit="#1")
     case_1_inst = RegWriteInst(dst="r0", src="imm", lit="#2")
 
     case_0 = IRBranchCase(name="0", insts=[InstNode(case_0_inst)])
     case_1 = IRBranchCase(name="1", insts=[InstNode(case_1_inst)])
 
-    branch = IRBranch(name="sel", cases=[case_0, case_1])
+    branch = IRBranch(name="sel", compare_reg="r_sel", cases=[case_0, case_1])
 
-    # Emit to Instruction list
     inst_list: list[Instruction] = []
     branch.emit(inst_list)
 
-    # TODO: compare with expected instruction list instead of just checking the cases are present
-    raise AssertionError("\n" + "\n".join(str(inst) for inst in inst_list) + "\n")
+    # Patch BRANCH_START args to carry compare_reg (as the linker does from info dict)
+    patched = []
+    for inst in inst_list:
+        if isinstance(inst, MetaInst) and inst.type == "BRANCH_START":
+            inst = dataclasses.replace(inst, args={"compare_reg": branch.compare_reg})
+        patched.append(inst)
+
+    stream = InstructionStream(patched)
+    b2 = parse_branch(stream)
+
+    assert stream.peek() is None, "Stream should be fully consumed"
+    assert b2.name == "sel"
+    assert b2.compare_reg == "r_sel"
+    assert len(b2.cases) == 2
+    # Binary dispatch emits right half before left half, so case "1" appears first
+    case_names = {c.name for c in b2.cases}
+    assert case_names == {"0", "1"}
 
 
 def test_unlink_inserts_labels_and_strips_p_addr():

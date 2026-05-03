@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+import dataclasses
+import math
 from typing import TYPE_CHECKING
 
-from .instructions import Instruction
+from .node import InstNode, IRBranch, IRLoop, IRNode
+from .instructions import (
+    Instruction,
+    DmemReadInst,
+    DmemWriteInst,
+    LabelInst,
+    MetaInst,
+    PortWriteInst,
+)
+
 
 if TYPE_CHECKING:
-    from .node import IRNode
     from .pipeline import PipeLineConfig
 
 
@@ -31,21 +41,11 @@ def strip_internal_annotations(inst: Instruction) -> Instruction:
     # So to "strip" them, we just need to return a new instance with empty annotations.
     # However, since Instruction is frozen, we must use replace() or similar.
     # Actually, using dataclasses.replace is best.
-    import dataclasses
-
     return dataclasses.replace(inst, annotations={})
 
 
 def estimate_body_cost(body: list["IRNode"], config: PipeLineConfig) -> int:
     """Estimate the cycle cost of executing a sequence of IR nodes."""
-    from .instructions import (
-        DmemReadInst,
-        DmemWriteInst,
-        LabelInst,
-        MetaInst,
-        PortWriteInst,
-    )
-    from .node import InstNode, IRBranch, IRLoop
 
     cost = 0
     for node in body:
@@ -60,24 +60,31 @@ def estimate_body_cost(body: list["IRNode"], config: PipeLineConfig) -> int:
             else:
                 cost += config.cost_default
         elif isinstance(node, IRLoop):
+            # Loop iteration takes: testing counter (default), jump back (jump_flush), and body
+
+            loop_overhead = 2 * config.cost_default + config.cost_jump_flush
             # If nested loop has constant n, multiply inner cost + loop overhead
+            inner_cost = estimate_body_cost(node.body.insts, config)
+
             if isinstance(node.n, int):
-                inner_cost = estimate_body_cost(node.body.insts, config)
-                # Loop iteration takes: testing counter (default), jump back (jump_flush), and body
-                loop_overhead = 2 * config.cost_default + config.cost_jump_flush
                 cost += node.n * (inner_cost + loop_overhead)
+            elif node.range_hint is not None:
+                cost += node.range_hint[1] * (inner_cost + loop_overhead)
             else:
-                # Unknown bounds, assume heavily conservative cost
-                cost += 100 * config.cost_default
+                cost += inner_cost + loop_overhead
         elif isinstance(node, IRBranch):
-            # Base cost for dispatch plus average case cost
-            dispatch_cost = config.cost_default * len(node.dispatch.insts)
-            if node.cases:
-                avg_case_cost = sum(
-                    estimate_body_cost(c.insts, config) for c in node.cases
-                ) // len(node.cases)
-            else:
-                avg_case_cost = 0
-            cost += dispatch_cost + config.cost_jump_flush + avg_case_cost
+            # Dispatch overhead: binary tree depth is ceil(log2(n)), each level costs
+            # one TEST + one JUMP (2 * cost_default) plus a final unconditional JUMP.
+
+            n_cases = len(node.cases)
+            dispatch_depth = math.ceil(math.log2(n_cases)) if n_cases > 1 else 0
+            dispatch_overhead = dispatch_depth * (
+                2 * config.cost_default + config.cost_jump_flush
+            )
+            case_cost = max(
+                (estimate_body_cost(case.insts, config) for case in node.cases),
+                default=0,
+            )
+            cost += dispatch_overhead + case_cost
 
     return cost

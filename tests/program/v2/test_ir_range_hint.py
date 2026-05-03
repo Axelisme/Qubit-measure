@@ -1,7 +1,8 @@
 from __future__ import annotations
-from zcu_tools.program.v2.ir.node import IRLoop
+
 from zcu_tools.program.v2.ir.factory import InstructionStream, parse_root
 from zcu_tools.program.v2.ir.instructions import MetaInst, RegWriteInst
+from zcu_tools.program.v2.ir.node import IRLoop
 
 
 def test_loop_range_hint_preservation():

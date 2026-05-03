@@ -167,7 +167,11 @@ class Branch(Module):
 
         n = len(self.branches)
 
-        prog.meta_macro(type="BRANCH_START", name=self.name)
+        prog.meta_macro(
+            type="BRANCH_START",
+            name=self.name,
+            info={"compare_reg": self.compare_reg},
+        )
         emit_dispatch(0, n)
         prog.meta_macro(type="BRANCH_END", name=self.name)
 

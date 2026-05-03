@@ -1,11 +1,12 @@
 from __future__ import annotations
-from zcu_tools.program.v2.ir.labels import Label
+
 import pytest
 from zcu_tools.program.v2.ir.instructions import (
     LabelInst,
     RegWriteInst,
     WaitInst,
 )
+from zcu_tools.program.v2.ir.labels import Label
 from zcu_tools.program.v2.ir.linker import IRLinker
 from zcu_tools.program.v2.ir.node import InstNode, RootNode
 

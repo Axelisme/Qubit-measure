@@ -5,11 +5,11 @@ from dataclasses import dataclass, field
 from typing_extensions import Iterator, Optional, Union
 
 from .instructions import (
+    Instruction,
     JumpInst,
     LabelInst,
     MetaInst,
     RegWriteInst,
-    Instruction,
     TestInst,
 )
 from .labels import Label
@@ -153,14 +153,33 @@ class IRBranch(IRNode):
     """A branch node containing multiple cases."""
 
     name: str = ""
+    compare_reg: str = ""
     cases: list[IRBranchCase] = field(default_factory=list)
 
     def children(self) -> Iterator[IRNode]:
         yield from self.cases
 
     def emit(self, inst_list: list[Instruction]) -> None:
-        # TODO: currently it is wrong, implementing dispatch logic later
+        n = len(self.cases)
+
+        def emit_dispatch(lo: int, hi: int) -> None:
+            if hi - lo == 1:
+                self.cases[lo].emit(inst_list)
+                return
+
+            mid = (lo + hi) // 2
+            left_label = Label.make_new(f"{self.name}_branch_l_{lo}_{mid}")
+            end_label = Label.make_new(f"{self.name}_branch_e_{lo}_{hi}")
+
+            # compare_reg - mid < 0  (i.e. compare_reg < mid) → jump to left half
+            inst_list.append(TestInst(op=f"{self.compare_reg} - #{mid}", uf="0"))
+            inst_list.append(JumpInst(label=left_label, if_cond="S"))
+            emit_dispatch(mid, hi)
+            inst_list.append(JumpInst(label=end_label))
+            inst_list.append(LabelInst(name=left_label))
+            emit_dispatch(lo, mid)
+            inst_list.append(LabelInst(name=end_label))
+
         inst_list.append(MetaInst(type="BRANCH_START", name=self.name))
-        for case in self.cases:
-            case.emit(inst_list)
+        emit_dispatch(0, n)
         inst_list.append(MetaInst(type="BRANCH_END", name=self.name))

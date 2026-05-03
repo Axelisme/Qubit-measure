@@ -119,30 +119,22 @@ def parse_loop(stream: InstructionStream) -> IRLoop:
 
 def parse_branch(stream: InstructionStream) -> IRBranch:
     start_meta = stream.consume_meta("BRANCH_START")
-    branch_node = IRBranch(name=start_meta.name)
+    compare_reg = start_meta.args["compare_reg"]
 
-    # 1. Parse dispatch block until we hit cases or the end
-    parse_block(
-        stream,
-        branch_node.dispatch,
-        end_markers={"BRANCH_CASE_START", "BRANCH_END"},
-    )
+    branch_node = IRBranch(name=start_meta.name, compare_reg=compare_reg)
 
-    # 2. Parse cases and any intervening dispatch instructions
+    # Parse cases and dispatch control instructions until BRANCH_END.
+    # Non-META instructions are dispatch control flow (TEST/JUMP/LABEL) — skip them.
     while True:
         inst = stream.peek()
         if inst is None:
-            raise ValueError("Unexpected end of stream while parsing branch cases")
-
+            raise ValueError("Unexpected end of stream while parsing BRANCH")
         if isinstance(inst, MetaInst) and inst.type == "BRANCH_END":
             break
-
         if isinstance(inst, MetaInst) and inst.type == "BRANCH_CASE_START":
             branch_node.cases.append(parse_branch_case(stream))
-        elif isinstance(inst, MetaInst):
-            raise ValueError(f"Unexpected MetaInst between branch cases: {inst}")
         else:
-            branch_node.dispatch.append(InstNode(stream.consume()))
+            stream.consume()  # dispatch control instruction (TEST/JUMP/LABEL)
 
     end_meta = stream.consume_meta("BRANCH_END")
     if end_meta.name != branch_node.name:

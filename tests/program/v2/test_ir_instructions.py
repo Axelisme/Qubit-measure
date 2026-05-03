@@ -11,8 +11,8 @@ Tests include:
 """
 
 from __future__ import annotations
+
 import pytest
-from zcu_tools.program.v2.ir.labels import Label
 from zcu_tools.program.v2.ir.instructions import (
     DmemReadInst,
     DportWriteInst,
@@ -27,6 +27,7 @@ from zcu_tools.program.v2.ir.instructions import (
     TimeInst,
     WaitInst,
 )
+from zcu_tools.program.v2.ir.labels import Label
 
 
 class TestTimeInstruction:

@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from typing import cast
 
 from zcu_tools.program.v2.ir.instructions import GenericInst, TimeInst, WaitInst
