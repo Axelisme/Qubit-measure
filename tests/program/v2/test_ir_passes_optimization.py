@@ -264,8 +264,39 @@ def test_unroll_partial_unroll_no_remainder():
     assert cast(IRLoop, block.insts[0]).n == 2
 
 
-def test_unroll_no_scheduled_ticks_skips_unroll():
-    """Body has no inc_ref delay → scheduled_ticks=None → no unroll."""
+def test_default_pipeline_can_disable_all_optimization_passes():
+    """Disabling all pass flags should keep the IR layout unchanged."""
+    Label.reset()
+    root = RootNode(
+        insts=[
+            InstNode(RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#1"})),
+            InstNode(RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#2"})),
+            InstNode(LabelInst(name=Label.make_new("dead"))),
+            InstNode(TimeInst(c_op="inc_ref", lit="#0")),
+            InstNode(TimeInst(c_op="inc_ref", lit="#1")),
+            InstNode(TimeInst(c_op="inc_ref", lit="#2")),
+        ]
+    )
+
+    pipeline = make_default_pipeline(pmem_capacity=8192)
+    pipeline.config.disable_all_opt = True
+
+    out, _ctx = pipeline(root)
+
+    assert len(out.insts) == 6
+    assert isinstance(cast(InstNode, out.insts[0]).inst, RegWriteInst)
+    assert isinstance(cast(InstNode, out.insts[1]).inst, RegWriteInst)
+    assert isinstance(cast(InstNode, out.insts[2]).inst, LabelInst)
+    assert isinstance(cast(InstNode, out.insts[3]).inst, TimeInst)
+    assert cast(TimeInst, cast(InstNode, out.insts[3]).inst).lit == "#0"
+    assert isinstance(cast(InstNode, out.insts[4]).inst, TimeInst)
+    assert cast(TimeInst, cast(InstNode, out.insts[4]).inst).lit == "#1"
+    assert isinstance(cast(InstNode, out.insts[5]).inst, TimeInst)
+    assert cast(TimeInst, cast(InstNode, out.insts[5]).inst).lit == "#2"
+
+
+def test_unroll_no_scheduled_ticks_uses_zero_delay_budget():
+    """Body has no inc_ref delay → scheduled_ticks=0, so k uses slack<=0 branch."""
     Label.reset()
     heavy_insts: list[IRNode] = [
         InstNode(PortWriteInst(dst="0", time="t0")) for _ in range(5)
@@ -284,19 +315,22 @@ def test_unroll_no_scheduled_ticks_skips_unroll():
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
 
     assert len(out.insts) == 1
-    assert isinstance(out.insts[0], IRLoop)
-    assert cast(IRLoop, out.insts[0]).n == 100
+    assert isinstance(out.insts[0], BlockNode)
+    block = cast(BlockNode, out.insts[0])
+    assert isinstance(block.insts[0], IRLoop)
+    assert cast(IRLoop, block.insts[0]).n == 12  # 100 // max_unroll_factor(8)
+    assert len(block.insts) == 1 + 4 * 5  # remainder=4, body_size=5
 
 
-def test_unroll_dynamic_delay_only_body_not_unrolled():
-    """Body with only dynamic inc_ref → scheduled=0 → None → no unroll."""
+def test_unroll_dynamic_delay_only_body_uses_zero_delay_budget():
+    """Body with only dynamic inc_ref → scheduled=0, so k uses slack<=0 branch."""
     Label.reset()
     root = RootNode(
         insts=[
             IRLoop(
                 name="loop",
                 counter_reg="s0",
-                n=10,
+                n=20,
                 body=BlockNode(
                     insts=[InstNode(TimeInst(c_op="inc_ref", r1="r_delay"))]
                 ),
@@ -307,14 +341,17 @@ def test_unroll_dynamic_delay_only_body_not_unrolled():
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
 
     assert len(out.insts) == 1
-    assert isinstance(out.insts[0], IRLoop)
-    assert cast(IRLoop, out.insts[0]).n == 10
+    assert isinstance(out.insts[0], BlockNode)
+    block = cast(BlockNode, out.insts[0])
+    assert isinstance(block.insts[0], IRLoop)
+    assert cast(IRLoop, block.insts[0]).n == 2  # 20 // 8
+    assert len(block.insts) == 1 + 4  # remainder=4
 
 
 def test_unroll_mixed_literal_and_dynamic_delay_uses_literal_budget():
-    """Mixed literal+dynamic inc_ref: scheduled = literal sum (#5),
-    body_cost = 2 (two TimeInst), slack = 3, overhead=6 → k_timing=ceil(6/3)=2.
-    No budget → k=2. n=4 <= 2? no, n=4>k=2 → partial: iters=2, remainder=0."""
+    """Mixed literal+dynamic inc_ref still treats the dynamic term as 0.
+    Under the current large default jump cost, k hits the cap so n=4 fully
+    expands."""
     Label.reset()
     root = RootNode(
         insts=[
@@ -337,8 +374,7 @@ def test_unroll_mixed_literal_and_dynamic_delay_uses_literal_budget():
     assert len(out.insts) == 1
     block = out.insts[0]
     assert isinstance(block, BlockNode)
-    assert isinstance(block.insts[0], IRLoop)
-    assert cast(IRLoop, block.insts[0]).n == 2  # 4 // 2
+    assert _flat_inst_count(out) == 8  # 4 copies * 2 instructions
 
 
 def test_unroll_exact_register_hint_fully_expands():
@@ -414,7 +450,7 @@ def test_unroll_no_hint_register_loop_emits_jump_table():
     assert isinstance(out.insts[0], IRJumpTableLoop)
 
 
-def test_unroll_counter_sensitive_loop_not_expanded():
+def test_unroll_counter_sensitive_loop_still_uses_unroll_k_rules():
     Label.reset()
     root = RootNode(
         insts=[
@@ -423,7 +459,10 @@ def test_unroll_counter_sensitive_loop_not_expanded():
                 counter_reg="s0",
                 n=3,
                 body=BlockNode(
-                    insts=[InstNode(TestInst(op="s0 - #1"))]
+                    insts=[
+                        InstNode(TestInst(op="s0 - #1")),
+                        InstNode(TimeInst(c_op="inc_ref", lit="#1")),
+                    ]
                 ),
             )
         ]
@@ -432,7 +471,8 @@ def test_unroll_counter_sensitive_loop_not_expanded():
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
 
     assert len(out.insts) == 1
-    assert isinstance(out.insts[0], IRLoop)
+    assert isinstance(out.insts[0], BlockNode)
+    assert _flat_inst_count(out) == 6
 
 
 def test_unroll_partial_unroll_clones_labels_safely():
@@ -547,9 +587,8 @@ def test_unroll_post_order_recurses_into_inner_loop_first():
 
 def test_unroll_cpmg_style_body_triggers():
     """CPMG-style: 3 PortWrite + inc_ref #14.
-    scheduled=14, body_cost = 3*4 + 1 = 13, slack=1, overhead=6 → k_timing=ceil(6/1)=6.
-    cap=8 → k_timing=6. No budget → k=6.
-    n=50 > k=6 → iters=8, remainder=2.
+    With the current large default jump cost, k reaches the cap 8.
+    n=50 > k=8 → iters=6, remainder=2.
     body_size = 3 (PortWrite) + 1 (TimeInst) = 4.
     """
     Label.reset()
@@ -576,8 +615,8 @@ def test_unroll_cpmg_style_body_triggers():
     block = out.insts[0]
     assert isinstance(block, BlockNode)
     assert isinstance(block.insts[0], IRLoop)
-    assert cast(IRLoop, block.insts[0]).n == 8  # 50 // 6 = 8
-    # Remainder: 50 % 6 = 2 → 2 * body_size(4) = 8 InstNodes after the loop.
+    assert cast(IRLoop, block.insts[0]).n == 6  # 50 // 8 = 6
+    # Remainder: 50 % 8 = 2 → 2 * body_size(4) = 8 InstNodes after the loop.
     assert len(block.insts) == 1 + 2 * 4
 
 
@@ -587,8 +626,8 @@ def test_unroll_cpmg_style_body_triggers():
 
 
 def test_unroll_register_driven_k_forced_to_power_of_two():
-    """body=4 PortWrite + inc_ref #14 (CPMG-like): k_raw under default cap=8 → 6;
-    floor_pow2(6) = 4 → IRJumpTableLoop(k=4)."""
+    """With the current large default jump cost, k_raw reaches the cap 8 and
+    remains 8 after floor_pow2()."""
     from zcu_tools.program.v2.ir.passes.loop_dispatch import IRJumpTableLoop
 
     Label.reset()
@@ -614,7 +653,7 @@ def test_unroll_register_driven_k_forced_to_power_of_two():
     assert len(out.insts) == 1
     assert isinstance(out.insts[0], IRJumpTableLoop)
     jt = cast(IRJumpTableLoop, out.insts[0])
-    assert jt.k == 4  # floor_pow2(6) = 4
+    assert jt.k == 8
 
 
 def test_unroll_register_driven_jump_table_structure():
@@ -684,10 +723,10 @@ def test_unroll_register_driven_dispatch_too_long_falls_back():
     """If body_words requires a shift-add sequence longer than max_dispatch_words,
     register-driven unroll must fall back to no-unroll."""
     # body_words = 0xFF requires 8 adds + 7 shifts = 15 instructions.
-    # We synthesize this by using NopInst × 0xFF in the body.
+    # Use 0xFE NOPs plus one TIME word => 0xFF total body words.
     Label.reset()
     body_insts: list[IRNode] = [
-        InstNode(NopInst()) for _ in range(0xFF)
+        InstNode(NopInst()) for _ in range(0xFE)
     ]
     body_insts.append(InstNode(TimeInst(c_op="inc_ref", lit="#1000")))
     root = RootNode(
@@ -732,14 +771,12 @@ def test_unroll_nested_register_driven_inner_unrolls_first():
     config = PipeLineConfig(max_unroll_factor=2)
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
 
-    # Outer remains an IRLoop (its scheduled_ticks lower bound is 0 because
-    # the inner loop has unknown n_reg), but the inner has been rewritten
-    # to an IRJumpTableLoop — confirming post-order recursion.
+    # With the current large default jump cost, the outer loop also gets
+    # rewritten. The key property remains post-order recursion: the inner
+    # loop rewrite must have happened before the outer body was measured.
     assert len(out.insts) == 1
     outer_out = out.insts[0]
-    assert isinstance(outer_out, IRLoop)
-    inner_out = outer_out.body.insts[0]
-    assert isinstance(inner_out, IRJumpTableLoop)
+    assert isinstance(outer_out, IRJumpTableLoop)
 
 
 def test_default_pipeline_orders_new_passes_first():

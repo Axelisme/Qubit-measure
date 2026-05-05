@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from .instructions import (
     DmemReadInst,
@@ -11,6 +11,7 @@ from .instructions import (
     MetaInst,
     PortWriteInst,
     TimeInst,
+    WmemWriteInst,
 )
 from .node import BlockNode, InstNode, IRBranch, IRJumpTableLoop, IRLoop, IRNode
 
@@ -18,23 +19,18 @@ if TYPE_CHECKING:
     from .pipeline import PipeLineConfig
 
 
-def estimate_body_scheduled_ticks(body: list["IRNode"]) -> Optional[int]:
-    """Lower-bound on literal inc_ref delay ticks in a body sequence.
+def estimate_body_scheduled_ticks(body: list["IRNode"]) -> int:
+    """Lower-bound on inc_ref delay ticks in a body sequence.
 
     Dynamic (register-driven) `inc_ref` contributes 0 to the total — the
     estimate represents the *guaranteed* scheduled IO window, not the
     expected one. This lets loops with mixed literal + dynamic delays still
     be analyzed for unroll based on their literal budget.
-
-    Returns None only when the body has zero total scheduled ticks (no
-    benefit from unrolling) or when iteration count is unknown.
     """
     total = 0
     for node in body:
         if isinstance(node, BlockNode):
-            inner = estimate_body_scheduled_ticks(node.insts)
-            if inner is not None:
-                total += inner
+            total += estimate_body_scheduled_ticks(node.insts)
         elif isinstance(node, InstNode):
             inst = node.inst
             if isinstance(inst, TimeInst) and inst.c_op == "inc_ref":
@@ -47,8 +43,6 @@ def estimate_body_scheduled_ticks(body: list["IRNode"]) -> Optional[int]:
                         continue
         elif isinstance(node, IRLoop):
             inner = estimate_body_scheduled_ticks(node.body.insts)
-            if inner is None:
-                continue  # nested loop has no scheduled IO — contributes 0
             if isinstance(node.n, int):
                 multiplier = node.n
             elif node.range_hint is not None:
@@ -61,13 +55,12 @@ def estimate_body_scheduled_ticks(body: list["IRNode"]) -> Optional[int]:
             case_ticks = [
                 estimate_body_scheduled_ticks(case.insts) for case in node.cases
             ]
-            resolved = [t if t is not None else 0 for t in case_ticks]
-            if resolved:
-                total += min(resolved)
+            if case_ticks:
+                total += min(case_ticks)
         elif isinstance(node, IRJumpTableLoop):
             # n_reg is dynamic; lower bound on guaranteed scheduled IO is 0.
             pass
-    return total if total > 0 else None
+    return total
 
 
 def estimate_flat_size(nodes: list["IRNode"]) -> int:
@@ -104,13 +97,13 @@ def estimate_flat_size(nodes: list["IRNode"]) -> int:
         elif isinstance(node, IRJumpTableLoop):
             # See passes.loop_dispatch.emit_jump_table_loop for the exact
             # shape. Approximate count (labels and meta are 0 words):
-            #   prologue (3) + k * (body_words + i++) + back-edge (5)
+            #   prologue (3) + k * body_words + back-edge (5)
             #   + dispatch (3 + shift_add(<= max_words)) + JUMP s15 (1)
             #   + fast_path (2)
             # We use a generous cap of 16 dispatch words as a reasonable
             # upper bound; budgets here are advisory.
             per_body = sum(estimate_flat_size(b.insts) for b in node.bodies)
-            size += 3 + per_body + node.k + 5 + 16 + 2
+            size += 3 + per_body + 5 + 16 + 2
     return size
 
 
@@ -133,7 +126,7 @@ def estimate_body_cost(body: list["IRNode"], config: PipeLineConfig) -> int:
             cost += estimate_body_cost(node.insts, config)
         elif isinstance(node, InstNode):
             inst = node.inst
-            if isinstance(inst, PortWriteInst):
+            if isinstance(inst, (PortWriteInst, WmemWriteInst)):
                 cost += config.cost_wmem
             elif isinstance(inst, (DmemReadInst, DmemWriteInst)):
                 cost += config.cost_dmem

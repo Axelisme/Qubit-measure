@@ -16,7 +16,6 @@ from zcu_tools.program.v2.ir.passes.loop_dispatch import (
     shift_add_multiply,
 )
 
-
 # ---------------------------------------------------------------------------
 # shift_add_multiply
 # ---------------------------------------------------------------------------
@@ -81,7 +80,12 @@ def _make_jt_loop(k: int, body_words: int) -> IRJumpTableLoop:
     entry_labels = [Label.make_new(f"e_{i}") for i in range(k)]
     exit_label = Label.make_new("jt_exit")
     bodies = [
-        BlockNode(insts=[InstNode(TimeInst(c_op="inc_ref", lit="#1"))])
+        BlockNode(
+            insts=[
+                InstNode(TimeInst(c_op="inc_ref", lit="#1")),
+                InstNode(RegWriteInst(dst="r_i", src="op", op="r_i + #1")),
+            ]
+        )
         for _ in range(k)
     ]
     return IRJumpTableLoop(
@@ -110,10 +114,10 @@ def test_irjumptableloop_emit_structure_k2_pow2_body():
     #   REG_WR i imm #0
     #   LABEL e_0
     #   TimeInst inc_ref #1   (body 0)
-    #   REG_WR i op (i + #1)
+    #   REG_WR i op (i + #1)  (from body 0)
     #   LABEL e_1
     #   TimeInst inc_ref #1   (body 1)
-    #   REG_WR i op (i + #1)
+    #   REG_WR i op (i + #1)  (from body 1)
     #   TEST i - n
     #   JUMP exit -if(NS)
     #   REG_WR i op (n - i)

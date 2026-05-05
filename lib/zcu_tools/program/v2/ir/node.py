@@ -118,11 +118,6 @@ class IRLoop(IRNode):
 
         self.body.emit(inst_list)
 
-        # Increment counter
-        inst_list.append(
-            RegWriteInst(dst=self.counter_reg, src="op", op=f"{self.counter_reg} + #1")
-        )
-
         # META: LOOP_BODY_END
         inst_list.append(MetaInst(type="LOOP_BODY_END", name=self.name))
 

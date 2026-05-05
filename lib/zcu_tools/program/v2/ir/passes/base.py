@@ -14,9 +14,9 @@ from ..instructions import (
     TimeInst,
     WaitInst,
 )
-from ..node import BlockNode, InstNode, IRLoop, RootNode
+from ..node import BlockNode, InstNode, RootNode
 from ..pipeline import AbsPipeLinePass, PipeLineContext
-from ..traversal import IRTransformer, walk_instructions
+from ..traversal import IRTransformer
 
 
 class OptimizationPassBase(AbsPipeLinePass, IRTransformer):
@@ -47,14 +47,5 @@ def block_contains_structural_node(block: BlockNode) -> bool:
         if not isinstance(item, InstNode):
             return True
         if is_label_or_branching_inst(item.inst):
-            return True
-    return False
-
-
-def loop_is_counter_sensitive(loop: IRLoop) -> bool:
-    for inst in walk_instructions(loop.body):
-        if loop.counter_reg in inst.reg_read:
-            return True
-        if loop.counter_reg in inst.reg_write:
             return True
     return False

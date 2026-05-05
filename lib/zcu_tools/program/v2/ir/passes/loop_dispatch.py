@@ -10,10 +10,10 @@ Emitted shape (k = unroll factor, body_words = pmem words per body copy):
       TEST   n_reg - #0
       JUMP   exit -if(Z)
       REG_WR i imm #0                       ; i := 0
-    entry_0: <body copy 0>; REG_WR i op (i + #1)
-    entry_1: <body copy 1>; REG_WR i op (i + #1)
+    entry_0: <body copy 0>
+    entry_1: <body copy 1>
     ...
-    entry_{k-1}: <body copy k-1>; REG_WR i op (i + #1)
+    entry_{k-1}: <body copy k-1>
     back_edge:
       TEST   i - n_reg
       JUMP   exit -if(NS)                    ; i >= n: done
@@ -36,7 +36,9 @@ Constraints:
 * tProc v2 ALU is binary (`A op B`); first operand must be a register;
   every binary op needs its own REG_WR word.
 * Shift amount in `SL` is capped at 15 by the assembler.
-* The counter register is reused as scratch in the dispatch block.
+* The counter register update is assumed to already live inside each body
+  copy (coming from the macro-expanded loop body). The counter register is
+  reused as scratch only after the k body copies have completed.
   Body copies have already executed by then so the runtime value of
   the counter is no longer observed.
 * `s15` is the only legal big-jump target (`JUMP s15`) and is treated
@@ -93,18 +95,14 @@ def shift_add_multiply(
                 RegWriteInst(dst=src_reg, src="op", op=f"{src_reg} << #{delta}")
             )
             prev_bit = bit
-        insts.append(
-            RegWriteInst(dst=dst_reg, src="op", op=f"{dst_reg} + {src_reg}")
-        )
+        insts.append(RegWriteInst(dst=dst_reg, src="op", op=f"{dst_reg} + {src_reg}"))
         if len(insts) > max_words:
             return None
 
     return insts
 
 
-def emit_jump_table_loop(
-    node: "IRJumpTableLoop", inst_list: list[Instruction]
-) -> None:
+def emit_jump_table_loop(node: "IRJumpTableLoop", inst_list: list[Instruction]) -> None:
     """Codegen for IRJumpTableLoop.emit(). See module docstring for shape."""
     if (
         node.k < 2
@@ -147,7 +145,6 @@ def emit_jump_table_loop(
     for idx in range(node.k):
         inst_list.append(LabelInst(name=node.entry_labels[idx]))
         node.bodies[idx].emit(inst_list)
-        inst_list.append(RegWriteInst(dst=i, src="op", op=f"{i} + #1"))
 
     # ── back edge ──
     inst_list.append(TestInst(op=f"{i} - {n}"))

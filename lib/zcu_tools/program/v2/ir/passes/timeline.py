@@ -41,6 +41,11 @@ def _is_zero_ref_increment(inst: Instruction) -> bool:
 class ZeroDelayDCEPass(TimelinePassBase):
     """Remove lower-level zero reference-time increments."""
 
+    def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:
+        if not ctx.config.enable_zero_delay_dce:
+            return ir
+        return super().process(ir, ctx)
+
     def visit_TimeInst(self, inst: TimeInst) -> Optional[Instruction]:
         if _is_zero_ref_increment(inst):
             return None
@@ -84,6 +89,11 @@ def _merged_time_run(run: list[TimeInst]) -> InstNode:
 
 class TimedInstructionMergePass(TimelinePassBase):
     """Merge adjacent reference-time increments with identical semantics."""
+
+    def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:
+        if not ctx.config.enable_timed_instruction_merge:
+            return ir
+        return super().process(ir, ctx)
 
     def visit_BlockNode(self, node: BlockNode) -> Optional[IRNode]:
         self.generic_visit(node)

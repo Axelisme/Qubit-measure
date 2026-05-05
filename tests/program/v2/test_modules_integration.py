@@ -340,38 +340,45 @@ class TestControlIntegration:
         assert prog.binprog is not None
 
     def test_repeat_register_driven_loop_roundtrip_shape(self):
-        r = Repeat("r_cnt", "n_count")
-        r.add_content(SoftDelay("d", 0.1))
-        prog = _make_prog(modules=[r], sweep=[("n_count", 4)])
+        from zcu_tools.program.v2.ir.pipeline import DEFAULT_PIPELINE_CONFIG
+        
+        old_val = DEFAULT_PIPELINE_CONFIG.enable_unroll_loop
+        DEFAULT_PIPELINE_CONFIG.enable_unroll_loop = False
+        try:
+            r = Repeat("r_cnt", "n_count")
+            r.add_content(SoftDelay("d", 0.1))
+            prog = _make_prog(modules=[r], sweep=[("n_count", 4)])
 
-        start_addr = _label_addr(prog.labels, "r_cnt_start")
-        end_addr = _label_addr(prog.labels, "r_cnt_end")
+            start_addr = _label_addr(prog.labels, "r_cnt_start")
+            end_addr = _label_addr(prog.labels, "r_cnt_end")
 
-        init_inst = max(
-            (
+            init_inst = max(
+                (
+                    inst
+                    for inst in prog.prog_list
+                    if inst.get("CMD") == "REG_WR"
+                    and inst.get("SRC") == "imm"
+                    and inst.get("LIT") == "#0"
+                    and inst["P_ADDR"] < start_addr
+                ),
+                key=lambda inst: inst["P_ADDR"],
+            )
+            back_jump = next(
                 inst
                 for inst in prog.prog_list
-                if inst.get("CMD") == "REG_WR"
-                and inst.get("SRC") == "imm"
-                and inst.get("LIT") == "#0"
-                and inst["P_ADDR"] < start_addr
-            ),
-            key=lambda inst: inst["P_ADDR"],
-        )
-        back_jump = next(
-            inst
-            for inst in prog.prog_list
-            if inst.get("CMD") == "JUMP"
-            and inst.get("LABEL") == "r_cnt_start"
-            and "IF" not in inst
-        )
+                if inst.get("CMD") == "JUMP"
+                and inst.get("LABEL") == "r_cnt_start"
+                and "IF" not in inst
+            )
 
-        assert init_inst["P_ADDR"] < start_addr
-        assert (
-            next(inst for inst in prog.prog_list if inst["P_ADDR"] == start_addr)["CMD"]
-            == "TEST"
-        )
-        assert back_jump["P_ADDR"] < end_addr
+            assert init_inst["P_ADDR"] < start_addr
+            assert (
+                next(inst for inst in prog.prog_list if inst["P_ADDR"] == start_addr)["CMD"]
+                == "TEST"
+            )
+            assert back_jump["P_ADDR"] < end_addr
+        finally:
+            DEFAULT_PIPELINE_CONFIG.enable_unroll_loop = old_val
 
     def test_nested_repeat_compiles(self):
         inner = Repeat("inner", 2)

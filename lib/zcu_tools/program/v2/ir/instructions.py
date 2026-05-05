@@ -1,7 +1,15 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Optional, Union
+
+
+def _is_register_addr(addr: str) -> bool:
+    if not addr.startswith("&"):
+        return False
+    return bool(re.match(r"^[rswp]\d{1,2}$", addr[1:]))
+
 
 if TYPE_CHECKING:
     from .labels import Label
@@ -102,7 +110,7 @@ class Instruction:
         elif cmd == "JUMP":
             raw_addr = d.get("ADDR")
             resolved_addr: Optional[Union[str, Label]] = raw_addr
-            if isinstance(raw_addr, str) and raw_addr.startswith("&"):
+            if isinstance(raw_addr, str) and raw_addr.startswith("&") and not _is_register_addr(raw_addr):
                 resolved_addr = get_label(raw_addr)
 
             extra_args = _residual_fields(d, {"LABEL", "IF", "ADDR", "WR", "OP", "UF"})
@@ -128,7 +136,7 @@ class Instruction:
 
             raw_addr = d.get("ADDR")
             resolved_addr = raw_addr
-            if isinstance(raw_addr, str) and raw_addr.startswith("&"):
+            if isinstance(raw_addr, str) and raw_addr.startswith("&") and not _is_register_addr(raw_addr):
                 resolved_addr = get_label(raw_addr)
 
             if src == "dmem":
@@ -185,7 +193,7 @@ class Instruction:
         elif cmd == "DMEM_RD":
             raw_addr = d.get("ADDR")
             resolved_addr = raw_addr
-            if isinstance(raw_addr, str) and raw_addr.startswith("&"):
+            if isinstance(raw_addr, str) and raw_addr.startswith("&") and not _is_register_addr(raw_addr):
                 resolved_addr = get_label(raw_addr)
 
             extra_args = _residual_fields(
@@ -218,6 +226,20 @@ class Instruction:
                 if_cond=d.get("IF"),
                 extra_args=extra_args,
             )
+        elif cmd == "WMEM_WR":
+            extra_args = _residual_fields(
+                d,
+                {"ADDR", "TIME", "WR", "OP", "UF", "IF"},
+            )
+            return WmemWriteInst(
+                addr=d.get("ADDR"),
+                time=d.get("TIME"),
+                wr=d.get("WR"),
+                op=d.get("OP"),
+                uf=d.get("UF"),
+                if_cond=d.get("IF"),
+                extra_args=extra_args,
+            )
         elif cmd == "DPORT_WR":
             extra_args = _residual_fields(
                 d,
@@ -237,7 +259,7 @@ class Instruction:
         elif cmd == "WAIT":
             raw_addr = d.get("ADDR")
             resolved_addr = raw_addr
-            if isinstance(raw_addr, str) and raw_addr.startswith("&"):
+            if isinstance(raw_addr, str) and raw_addr.startswith("&") and not _is_register_addr(raw_addr):
                 resolved_addr = get_label(raw_addr)
 
             extra_args = _residual_fields(d, {"C_OP", "TIME", "ADDR"})
@@ -619,6 +641,47 @@ class DmemWriteInst(Instruction):
             d["LIT"] = self.lit
         if self.wr is not None:
             d["WR"] = self.wr
+        if self.uf is not None:
+            d["UF"] = self.uf
+        if self.if_cond is not None:
+            d["IF"] = self.if_cond
+        d.update(self.extra_args)
+        return d
+
+
+@dataclass(frozen=True)
+class WmemWriteInst(Instruction):
+    """WMEM_WR instruction: write wave registers into wave memory."""
+
+    addr: Optional[str] = None
+    time: Optional[str] = None
+    wr: Optional[str] = None
+    op: Optional[str] = None
+    uf: Optional[str] = None
+    if_cond: Optional[str] = None
+    extra_args: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def reg_read(self) -> list[str]:
+        reads: set[str] = set()
+        reads.update(regs_from_value(self.addr))
+        reads.update(regs_from_value(self.time))
+        reads.update(regs_from_value(self.op))
+        reads.update(regs_from_value(self.wr))
+        for val in self.extra_args.values():
+            reads.update(regs_from_value(val))
+        return sorted(list(reads))
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"CMD": "WMEM_WR"}
+        if self.addr is not None:
+            d["ADDR"] = self.addr
+        if self.time is not None:
+            d["TIME"] = self.time
+        if self.wr is not None:
+            d["WR"] = self.wr
+        if self.op is not None:
+            d["OP"] = self.op
         if self.uf is not None:
             d["UF"] = self.uf
         if self.if_cond is not None:

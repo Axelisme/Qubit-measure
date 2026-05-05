@@ -10,9 +10,12 @@ from .node import RootNode
 
 @dataclass
 class PipeLineConfig:
+    disable_all_opt: bool = False
     enable_unroll_loop: bool = True
     enable_dead_write: bool = True
     enable_dead_label: bool = True
+    enable_zero_delay_dce: bool = True
+    enable_timed_instruction_merge: bool = True
     pmem_budget: int | None = None
 
     # Hard cap on the unroll factor k. For register-driven loops k is also
@@ -28,7 +31,7 @@ class PipeLineConfig:
     cost_default: int = 1
     cost_wmem: int = 4
     cost_dmem: int = 4
-    cost_jump_flush: int = 4
+    cost_jump_flush: int = 1000
 
 
 # Global default configuration for quick debugging and toggling optimization options.
@@ -54,6 +57,8 @@ class PipeLine:
 
     def __call__(self, ir: RootNode) -> tuple[RootNode, PipeLineContext]:
         ctx = PipeLineContext(config=self.config)
+        if self.config.disable_all_opt:
+            return ir, ctx
         for _pass in self.passes:
             ir = _pass.process(ir, ctx)
         return ir, ctx

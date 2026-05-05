@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 import math
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Optional
 
 from ..analysis import (
@@ -11,8 +13,21 @@ from ..analysis import (
 )
 from ..labels import Label
 from ..node import BlockNode, IRJumpTableLoop, IRLoop, IRNode
-from .base import OptimizationPassBase, loop_is_counter_sensitive
+from .base import OptimizationPassBase
 from .loop_dispatch import shift_add_multiply
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class UnrollAnalysis:
+    scheduled_ticks: Optional[int]
+    body_cost: int
+    slack: Optional[int]
+    body_size: int
+    k_timing: int
+    k_budget: int
+    k_final: int
 
 
 def _clone_nodes(nodes: list[IRNode], repeat: int) -> list[IRNode]:
@@ -32,11 +47,11 @@ def _floor_pow2(x: int) -> int:
     return p
 
 
-def _select_unroll_k(
+def _analyze_unroll(
     body_insts: list[IRNode],
     loop_overhead: int,
     config,
-) -> int:
+) -> UnrollAnalysis:
     """Joint k selection (Phase 8 design).
 
     slack       = scheduled_ticks - body_cost
@@ -50,26 +65,41 @@ def _select_unroll_k(
     k        = min(k_timing, k_budget)
     """
     scheduled_ticks = estimate_body_scheduled_ticks(body_insts)
-    if scheduled_ticks is None:
-        return 1  # no scheduled IO at all → no benefit from unroll
-
     body_cost = estimate_body_cost(body_insts, config)
+    body_size = estimate_flat_size(body_insts)
+
+    if scheduled_ticks is None:
+        return UnrollAnalysis(
+            scheduled_ticks=None,
+            body_cost=body_cost,
+            slack=None,
+            body_size=body_size,
+            k_timing=1,
+            k_budget=1,
+            k_final=1,
+        )
+
     slack = scheduled_ticks - body_cost
 
     if slack <= 0:
         k_timing = config.max_unroll_factor
     else:
-        k_timing = min(
-            math.ceil(loop_overhead / slack), config.max_unroll_factor
-        )
+        k_timing = min(math.ceil(loop_overhead / slack), config.max_unroll_factor)
 
-    body_size = estimate_flat_size(body_insts)
     if body_size > 0 and config.pmem_budget is not None:
         k_budget = config.pmem_budget // body_size
     else:
         k_budget = k_timing
 
-    return max(1, min(k_timing, k_budget))
+    return UnrollAnalysis(
+        scheduled_ticks=scheduled_ticks,
+        body_cost=body_cost,
+        slack=slack,
+        body_size=body_size,
+        k_timing=k_timing,
+        k_budget=k_budget,
+        k_final=max(1, min(k_timing, k_budget)),
+    )
 
 
 class UnrollSmallLoopPass(OptimizationPassBase):
@@ -91,9 +121,6 @@ class UnrollSmallLoopPass(OptimizationPassBase):
         assert isinstance(visited, IRLoop)
         node = visited
 
-        if loop_is_counter_sensitive(node):
-            return node
-
         cfg = self.ctx.config
         loop_overhead = 2 * cfg.cost_default + cfg.cost_jump_flush  # TEST + JUMP_back
 
@@ -106,16 +133,52 @@ class UnrollSmallLoopPass(OptimizationPassBase):
             is_runtime_exact = True
 
         if n is not None and n <= 0:
+            logger.debug(
+                "UnrollSmallLoopPass: skip loop name=%s because n=%s <= 0",
+                node.name,
+                n,
+            )
             return node
 
         # ── Constant / exact-hint path ─────────────────────────────
         if n is not None:
-            k = _select_unroll_k(node.body.insts, loop_overhead, cfg)
+            analysis = _analyze_unroll(node.body.insts, loop_overhead, cfg)
+            logger.debug(
+                "UnrollSmallLoopPass: analyze constant/exact loop name=%s n=%s exact=%s "
+                "scheduled_ticks=%s body_cost=%s slack=%s body_size=%s "
+                "k_timing=%s k_budget=%s k_final=%s",
+                node.name,
+                n,
+                is_runtime_exact,
+                analysis.scheduled_ticks,
+                analysis.body_cost,
+                analysis.slack,
+                analysis.body_size,
+                analysis.k_timing,
+                analysis.k_budget,
+                analysis.k_final,
+            )
+            k = analysis.k_final
             if k <= 1:
+                logger.debug(
+                    "UnrollSmallLoopPass: skip loop name=%s because k_final=%s <= 1",
+                    node.name,
+                    k,
+                )
                 return node
 
-            # Full expansion: all n copies fit inline.
-            if n <= k:
+            iters = n // k
+            remainder = n % k
+
+            # Full expansion: n // k <= 1. A 1-iteration loop + remainder uses
+            # more pmem (2 overhead words) than just fully expanding n copies inline.
+            if iters <= 1:
+                logger.debug(
+                    "UnrollSmallLoopPass: fully expand loop name=%s n=%s k=%s (iters <= 1)",
+                    node.name,
+                    n,
+                    k,
+                )
                 self._bump_stat("unroll_loop.removed")
                 return BlockNode(insts=_clone_nodes(node.body.insts, n))
 
@@ -123,25 +186,38 @@ class UnrollSmallLoopPass(OptimizationPassBase):
             # iteration count is only known at runtime — the register
             # value would have to be divided by k at execution time.
             if is_runtime_exact:
+                logger.debug(
+                    "UnrollSmallLoopPass: skip partial unroll for loop name=%s because "
+                    "range_hint is exact runtime-only n=%s and n > k=%s",
+                    node.name,
+                    n,
+                    k,
+                )
                 return node
 
-            iters = n // k
-            remainder = n % k
+            logger.debug(
+                "UnrollSmallLoopPass: partially expand loop name=%s n=%s k=%s "
+                "iters=%s remainder=%s",
+                node.name,
+                n,
+                k,
+                iters,
+                remainder,
+            )
             self._bump_stat("unroll_loop.partial")
 
             result: list[IRNode] = []
-            if iters > 0:
-                unrolled_body = _clone_nodes(node.body.insts, k)
-                new_loop = IRLoop(
-                    name=f"{node.name}_unrolled",
-                    counter_reg=node.counter_reg,
-                    n=iters,
-                    range_hint=(iters, iters),
-                    start_label=Label.make_new(f"{node.name}_unrolled_start"),
-                    end_label=Label.make_new(f"{node.name}_unrolled_end"),
-                    body=BlockNode(insts=unrolled_body),
-                )
-                result.append(new_loop)
+            unrolled_body = _clone_nodes(node.body.insts, k)
+            new_loop = IRLoop(
+                name=f"{node.name}_unrolled",
+                counter_reg=node.counter_reg,
+                n=iters,
+                range_hint=(iters, iters),
+                start_label=Label.make_new(f"{node.name}_unrolled_start"),
+                end_label=Label.make_new(f"{node.name}_unrolled_end"),
+                body=BlockNode(insts=unrolled_body),
+            )
+            result.append(new_loop)
             if remainder > 0:
                 result.extend(_clone_nodes(node.body.insts, remainder))
             return BlockNode(insts=result)
@@ -160,16 +236,47 @@ class UnrollSmallLoopPass(OptimizationPassBase):
         rounding, body_words == 0, dispatch shift-add too long, etc.) so
         the caller falls back to no-unroll.
         """
-        body_size = estimate_flat_size(node.body.insts)
+        analysis = _analyze_unroll(node.body.insts, loop_overhead, cfg)
+        body_size = analysis.body_size
+        logger.debug(
+            "UnrollSmallLoopPass: analyze register-driven loop name=%s n_reg=%s "
+            "scheduled_ticks=%s body_cost=%s slack=%s body_size=%s "
+            "k_timing=%s k_budget=%s k_raw=%s",
+            node.name,
+            node.n,
+            analysis.scheduled_ticks,
+            analysis.body_cost,
+            analysis.slack,
+            analysis.body_size,
+            analysis.k_timing,
+            analysis.k_budget,
+            analysis.k_final,
+        )
         if body_size <= 0:
+            logger.debug(
+                "UnrollSmallLoopPass: skip jump-table loop name=%s because body_size=%s <= 0",
+                node.name,
+                body_size,
+            )
             return None
 
-        k_raw = _select_unroll_k(node.body.insts, loop_overhead, cfg)
+        k_raw = analysis.k_final
         if k_raw <= 1:
+            logger.debug(
+                "UnrollSmallLoopPass: skip jump-table loop name=%s because k_raw=%s <= 1",
+                node.name,
+                k_raw,
+            )
             return None
 
         k = _floor_pow2(k_raw)
         if k <= 1:
+            logger.debug(
+                "UnrollSmallLoopPass: skip jump-table loop name=%s because floor_pow2(%s)=%s <= 1",
+                node.name,
+                k_raw,
+                k,
+            )
             return None
 
         # Probe the dispatch shift-add — if body_words can't be encoded
@@ -181,15 +288,28 @@ class UnrollSmallLoopPass(OptimizationPassBase):
             max_words=cfg.max_dispatch_words,
         )
         if probe is None:
+            logger.debug(
+                "UnrollSmallLoopPass: skip jump-table loop name=%s because "
+                "shift_add_multiply(body_size=%s, max_dispatch_words=%s) failed",
+                node.name,
+                body_size,
+                cfg.max_dispatch_words,
+            )
             return None
 
-        entry_labels = [
-            Label.make_new(f"{node.name}_jt_entry_{i}") for i in range(k)
-        ]
+        logger.debug(
+            "UnrollSmallLoopPass: build jump-table loop name=%s n_reg=%s "
+            "k_raw=%s k_pow2=%s body_words=%s dispatch_words=%s",
+            node.name,
+            node.n,
+            k_raw,
+            k,
+            body_size,
+            len(probe),
+        )
+        entry_labels = [Label.make_new(f"{node.name}_jt_entry_{i}") for i in range(k)]
         exit_label = Label.make_new(f"{node.name}_jt_exit")
-        bodies = [
-            BlockNode(insts=deepcopy(node.body.insts)) for _ in range(k)
-        ]
+        bodies = [BlockNode(insts=deepcopy(node.body.insts)) for _ in range(k)]
 
         self._bump_stat("unroll_loop.register_partial")
         return IRJumpTableLoop(

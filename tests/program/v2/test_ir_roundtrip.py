@@ -77,14 +77,13 @@ def test_structural_loop_roundtrip():
     expected_cmds.append("TEST")  # Stop check
     expected_cmds.append("JUMP")  # CondJump out
     expected_cmds.append("NOP")  # Body
-    expected_cmds.append("REG_WR")  # Body
     expected_cmds.append("JUMP")  # Jump back
 
     # Note: Labels are extracted into a dictionary when creating binprog, but `emit()` outputs them as LabelInst dicts.
     cmds = [inst.get("CMD") for inst in opt_insts if "CMD" in inst]
     assert cmds == expected_cmds
-    assert cursor.final_p_addr == 6
-    assert cursor.final_line == 8
+    assert cursor.final_p_addr == 5
+    assert cursor.final_line == 7
 
 
 def test_pipeline_roundtrip_with_normalization():

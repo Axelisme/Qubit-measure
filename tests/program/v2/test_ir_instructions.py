@@ -15,6 +15,7 @@ from __future__ import annotations
 import pytest
 from zcu_tools.program.v2.ir.instructions import (
     DmemReadInst,
+    DmemWriteInst,
     DportWriteInst,
     Instruction,
     JumpInst,
@@ -25,6 +26,7 @@ from zcu_tools.program.v2.ir.instructions import (
     TestInst,
     TimeInst,
     WaitInst,
+    WmemWriteInst,
 )
 from zcu_tools.program.v2.ir.labels import Label
 
@@ -323,6 +325,30 @@ class TestUnknownOpcode:
         assert isinstance(inst, DportWriteInst)
         assert inst.dst == "0"
         assert inst.data == "1"
+
+
+class TestWmemWriteInstruction:
+    """Tests for WMEM_WR."""
+
+    def test_dispatch_wmem_wr(self):
+        d = {"CMD": "WMEM_WR", "ADDR": "&5", "TIME": "@10", "WP": "r_wave p0"}
+        inst = Instruction.from_dict(d)
+        assert isinstance(inst, WmemWriteInst)
+        assert inst.addr == "&5"
+        assert inst.time == "@10"
+        assert inst.extra_args["WP"] == "r_wave p0"
+
+    def test_roundtrip_wmem_wr(self):
+        original = {
+            "CMD": "WMEM_WR",
+            "ADDR": "&7",
+            "TIME": "@12",
+            "WR": "r_wave",
+            "OP": "s1 + #1",
+        }
+        inst = Instruction.from_dict(original)
+        recovered = inst.to_dict()
+        assert recovered == original
 
 
 class TestWaitInstruction:
