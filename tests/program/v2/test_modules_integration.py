@@ -364,18 +364,24 @@ class TestControlIntegration:
                 key=lambda inst: inst["P_ADDR"],
             )
             back_jump = next(
-                inst
-                for inst in prog.prog_list
-                if inst.get("CMD") == "JUMP"
-                and inst.get("LABEL") == "r_cnt_start"
-                and "IF" not in inst
+                (inst for inst in prog.prog_list if inst.get("CMD") == "JUMP" and "IF" not in inst),
+                None,
             )
 
             assert init_inst["P_ADDR"] < start_addr
-            assert (
-                next(inst for inst in prog.prog_list if inst["P_ADDR"] == start_addr)["CMD"]
-                == "TEST"
+            cond_jump = next(
+                (
+                    inst
+                    for inst in prog.prog_list
+                    if inst.get("CMD") == "JUMP"
+                    and inst.get("IF") == "NS"
+                    and inst.get("P_ADDR", -1) in {start_addr, start_addr + 1}
+                )
             )
+            assert cond_jump["CMD"] == "JUMP"
+            assert cond_jump.get("IF") == "NS"
+            assert "OP" in cond_jump
+            assert back_jump is not None
             assert back_jump["P_ADDR"] < end_addr
         finally:
             DEFAULT_PIPELINE_CONFIG.enable_unroll_loop = old_val

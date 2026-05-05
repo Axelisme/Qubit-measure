@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import Any, Optional, Union
 
-if TYPE_CHECKING:
-    from .labels import Label
-
-from .labels import PSEUDO_LABELS, is_pseudo_label_name, is_register_addr
+from .labels import Label, is_pseudo_label_name, is_register_addr
 from .utils import regs_from_value, strip_write_modifier
 
 
@@ -18,8 +14,6 @@ def _is_pseudo_label(value: Optional["Label"]) -> bool:
 
 
 def _serialize_addr(value: Optional[Union[str, "Label"]]) -> Optional[str]:
-    from .labels import Label
-
     if value is None:
         return None
     if isinstance(value, Label):
@@ -32,9 +26,9 @@ def _serialize_addr(value: Optional[Union[str, "Label"]]) -> Optional[str]:
     return value
 
 
-def _validate_addr_value(value: Optional[Union[str, "Label"]], *, field_name: str) -> None:
-    from .labels import Label
-
+def _validate_addr_value(
+    value: Optional[Union[str, "Label"]], *, field_name: str
+) -> None:
     if value is None or isinstance(value, Label):
         return
     if isinstance(value, str) and is_register_addr(value):
@@ -44,21 +38,15 @@ def _validate_addr_value(value: Optional[Union[str, "Label"]], *, field_name: st
             f"{field_name} string address must be a register address, got {value!r}. "
             "Use Label(...) for symbolic addresses."
         )
-    raise TypeError(
-        f"{field_name} must be str register address, Label, or None, got {type(value).__name__}."
-    )
 
 
 def _validate_jump_addr_target(value: Optional[Union[str, "Label"]]) -> None:
-    from .labels import Label
-
     if value is None or isinstance(value, Label):
         return
     if value == "s15":
         return
-    raise ValueError(
-        f"JumpInst.addr must be 's15' or Label, got {value!r}."
-    )
+    raise ValueError(f"JumpInst.addr must be 's15' or Label, got {value!r}.")
+
 
 def _residual_fields(source: dict[str, Any], handled: set[str]) -> dict[str, Any]:
     return {
@@ -96,8 +84,6 @@ class Instruction:
     def from_dict(
         cls, d: dict[str, Any], label_map: Optional[dict[str, "Label"]] = None
     ) -> "Instruction":
-        from .labels import Label
-
         def get_label(name: Any) -> Optional["Label"]:
             if not name:
                 return None
@@ -428,8 +414,6 @@ class JumpInst(Instruction):
 
     @property
     def need_label(self) -> Optional["Label"]:
-        from .labels import Label
-
         if self.label and not _is_pseudo_label(self.label):
             return self.label
 
@@ -491,8 +475,6 @@ class RegWriteInst(Instruction):
 
     @property
     def need_label(self) -> Optional["Label"]:
-        from .labels import Label
-
         if self.label and not _is_pseudo_label(self.label):
             return self.label
 
@@ -623,8 +605,6 @@ class DmemReadInst(Instruction):
 
     @property
     def need_label(self) -> Optional["Label"]:
-        from .labels import Label
-
         if self.label and not _is_pseudo_label(self.label):
             return self.label
 
@@ -807,8 +787,6 @@ class WaitInst(Instruction):
 
     @property
     def need_label(self) -> Optional["Label"]:
-        from .labels import Label
-
         if isinstance(self.addr, Label) and not _is_pseudo_label(self.addr):
             return self.addr
         return None

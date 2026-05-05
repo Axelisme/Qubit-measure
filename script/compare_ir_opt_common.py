@@ -225,7 +225,7 @@ def run_allxy(soc: Any, soccfg: QickConfig, cfg: Any, _ml: ModuleLibrary) -> Any
 
 
 def build_cpmg_cfg(ml: ModuleLibrary, md: MetaDict) -> ze.twotone.time_domain.CPMG_Cfg:
-    times = list(range(10, 0, -5))
+    times = list(range(100, 0, -25))
     exp_cfg = {
         "modules": {
             "pi_pulse": "pi_len",

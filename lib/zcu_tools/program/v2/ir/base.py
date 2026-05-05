@@ -41,7 +41,9 @@ class IRCompileMixin(QickProgramV2):
 
         opt_ir, _ctx = pipeline(ir)
 
-        opt_insts, opt_labels, opt_meta_infos, cursor = builder.unbuild(opt_ir)
+        opt_insts, opt_labels, opt_meta_infos, cursor = builder.unbuild(
+            opt_ir, pmem_size=self.tproccfg["pmem_size"]
+        )
 
         self.prog_list = opt_insts
         self.labels = opt_labels

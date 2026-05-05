@@ -159,7 +159,8 @@ def test_dead_label_elimination_keeps_pseudo_labels():
 
 def test_unroll_full_expansion_when_n_le_k():
     """n=3 body=inc_ref #1: scheduled=1, body_cost=1, slack=0 → k_timing=8;
-    no budget → k=8. n(=3) <= k → fully expand into BlockNode of 3 copies."""
+    no budget → k=8. n(=3) <= k → fully expand into BlockNode of 3 copies
+    plus one loop-counter init write."""
     Label.reset()
     root = RootNode(
         insts=[
@@ -176,17 +177,49 @@ def test_unroll_full_expansion_when_n_le_k():
 
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
 
-    # Expansion is wrapped in a single BlockNode; flatten count should be 3.
-    assert _flat_inst_count(out) == 3
-    assert all(
-        isinstance(item, InstNode) and isinstance(item.inst, TimeInst)
+    # Expansion is wrapped in a single BlockNode; include counter init + 3 body insts.
+    assert _flat_inst_count(out) == 4
+    flat_items = [
+        item
         for blk in out.insts
         for item in (blk.insts if isinstance(blk, BlockNode) else [blk])
+        if isinstance(item, InstNode)
+    ]
+    assert isinstance(flat_items[0].inst, RegWriteInst)
+    assert all(isinstance(item.inst, TimeInst) for item in flat_items[1:])
+
+
+def test_unroll_full_expansion_keeps_counter_init_for_counter_dependent_body():
+    """When body reads/increments loop counter, full expansion must still emit
+    the counter init (`REG_WR counter imm #0`) before the first body copy."""
+    Label.reset()
+    root = RootNode(
+        insts=[
+            IRLoop(
+                name="loop",
+                counter_reg="r0",
+                n=1,
+                body=BlockNode(insts=[InstNode(RegWriteInst(dst="r1", src="op", op="r0"))]),
+            )
+        ]
     )
+
+    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
+
+    assert len(out.insts) == 1
+    block = out.insts[0]
+    assert isinstance(block, BlockNode)
+    assert isinstance(block.insts[0], InstNode)
+    assert isinstance(cast(InstNode, block.insts[0]).inst, RegWriteInst)
+    init = cast(RegWriteInst, cast(InstNode, block.insts[0]).inst)
+    assert init.dst == "r0"
+    assert init.src == "imm"
+    assert init.lit == "#0"
 
 
 def test_unroll_full_expansion_preserves_internal_label():
-    """Internal labels are deepcopied per body copy with unique names."""
+    """Internal labels are deepcopied per body copy with unique names.
+    Full expansion also keeps one counter-init write."""
     Label.reset()
     inner = Label.make_new("inner")
     root = RootNode(
@@ -207,13 +240,13 @@ def test_unroll_full_expansion_preserves_internal_label():
 
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
 
-    assert _flat_inst_count(out) == 6
+    assert _flat_inst_count(out) == 7
 
 
 def test_unroll_partial_unroll_produces_loop_plus_remainder():
     """body=inc_ref #1: scheduled=1, body_cost=1, slack=0 → k_timing=cap=8.
     pmem_budget=8, body_size=1 → k_budget=8 → k=8.
-    n=20: iters=2, remainder=4 → BlockNode containing IRLoop(n=2) + 4 copies."""
+    n=20: iters=2, remainder=4 → BlockNode containing IRLoop(n=16) + 4 copies."""
     Label.reset()
     root = RootNode(
         insts=[
@@ -235,12 +268,12 @@ def test_unroll_partial_unroll_produces_loop_plus_remainder():
     assert isinstance(block, BlockNode)
     assert len(block.insts) == 5
     assert isinstance(block.insts[0], IRLoop)
-    assert cast(IRLoop, block.insts[0]).n == 2  # 20 // 8
+    assert cast(IRLoop, block.insts[0]).n == 16  # (20 // 8) * 8
     assert all(isinstance(item, InstNode) for item in block.insts[1:])
 
 
 def test_unroll_partial_unroll_no_remainder():
-    """n=16, k=8 → IRLoop(n=2) wrapped in BlockNode, no remainder."""
+    """n=16, k=8 → IRLoop(n=16) wrapped in BlockNode, no remainder."""
     Label.reset()
     root = RootNode(
         insts=[
@@ -261,7 +294,33 @@ def test_unroll_partial_unroll_no_remainder():
     assert isinstance(block, BlockNode)
     assert len(block.insts) == 1
     assert isinstance(block.insts[0], IRLoop)
-    assert cast(IRLoop, block.insts[0]).n == 2
+    assert cast(IRLoop, block.insts[0]).n == 16
+
+
+def test_unroll_partial_unroll_loop_bound_uses_full_unrolled_iterations():
+    """For n=99 and k=8, the generated partial-unroll loop must stop at 96,
+    then execute 3 remainder copies inline."""
+    Label.reset()
+    root = RootNode(
+        insts=[
+            IRLoop(
+                name="loop",
+                counter_reg="r0",
+                n=99,
+                body=BlockNode(insts=[InstNode(TimeInst(c_op="inc_ref", lit="#1"))]),
+            )
+        ]
+    )
+
+    config = PipeLineConfig(pmem_budget=8)
+    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
+
+    assert len(out.insts) == 1
+    block = out.insts[0]
+    assert isinstance(block, BlockNode)
+    assert isinstance(block.insts[0], IRLoop)
+    assert cast(IRLoop, block.insts[0]).n == 96
+    assert len(block.insts[1:]) == 3
 
 
 def test_default_pipeline_can_disable_all_optimization_passes():
@@ -318,7 +377,7 @@ def test_unroll_no_scheduled_ticks_uses_zero_delay_budget():
     assert isinstance(out.insts[0], BlockNode)
     block = cast(BlockNode, out.insts[0])
     assert isinstance(block.insts[0], IRLoop)
-    assert cast(IRLoop, block.insts[0]).n == 12  # 100 // max_unroll_factor(8)
+    assert cast(IRLoop, block.insts[0]).n == 96  # (100 // 8) * 8
     assert len(block.insts) == 1 + 4 * 5  # remainder=4, body_size=5
 
 
@@ -344,7 +403,7 @@ def test_unroll_dynamic_delay_only_body_uses_zero_delay_budget():
     assert isinstance(out.insts[0], BlockNode)
     block = cast(BlockNode, out.insts[0])
     assert isinstance(block.insts[0], IRLoop)
-    assert cast(IRLoop, block.insts[0]).n == 2  # 20 // 8
+    assert cast(IRLoop, block.insts[0]).n == 16  # (20 // 8) * 8
     assert len(block.insts) == 1 + 4  # remainder=4
 
 
@@ -374,11 +433,12 @@ def test_unroll_mixed_literal_and_dynamic_delay_uses_literal_budget():
     assert len(out.insts) == 1
     block = out.insts[0]
     assert isinstance(block, BlockNode)
-    assert _flat_inst_count(out) == 8  # 4 copies * 2 instructions
+    assert _flat_inst_count(out) == 9  # counter init + (4 copies * 2 instructions)
 
 
 def test_unroll_exact_register_hint_fully_expands():
-    """range_hint=(3,3) → treated as constant 3, fully expand into BlockNode."""
+    """range_hint=(3,3) → treated as constant 3, fully expand into BlockNode
+    with one counter-init write."""
     Label.reset()
     root = RootNode(
         insts=[
@@ -394,7 +454,7 @@ def test_unroll_exact_register_hint_fully_expands():
 
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
 
-    assert _flat_inst_count(out) == 3
+    assert _flat_inst_count(out) == 4
 
 
 def test_unroll_non_exact_register_hint_emits_jump_table():
@@ -472,7 +532,7 @@ def test_unroll_counter_sensitive_loop_still_uses_unroll_k_rules():
 
     assert len(out.insts) == 1
     assert isinstance(out.insts[0], BlockNode)
-    assert _flat_inst_count(out) == 6
+    assert _flat_inst_count(out) == 7
 
 
 def test_unroll_partial_unroll_clones_labels_safely():
@@ -514,7 +574,7 @@ def test_unroll_partial_unroll_clones_labels_safely():
 
 def test_unroll_budget_caps_k_below_timing():
     """body_size=1, pmem_budget=3 → k_budget=3. k_timing would be 8 (cap).
-    k=min(8,3)=3. n=9 → iters=3, remainder=0 → IRLoop(n=3)."""
+    k=min(8,3)=3. n=9 → iters=3, remainder=0 → IRLoop(n=9)."""
     Label.reset()
     root = RootNode(
         insts=[
@@ -534,11 +594,12 @@ def test_unroll_budget_caps_k_below_timing():
     block = out.insts[0]
     assert isinstance(block, BlockNode)
     assert isinstance(block.insts[0], IRLoop)
-    assert cast(IRLoop, block.insts[0]).n == 3
+    assert cast(IRLoop, block.insts[0]).n == 9
 
 
 def test_unroll_max_factor_caps_k():
-    """max_unroll_factor=2 caps k regardless of slack/budget. n=10 → iters=5."""
+    """max_unroll_factor=2 caps k regardless of slack/budget. n=10 → iters=5
+    and unrolled loop stop bound stays at 10."""
     Label.reset()
     root = RootNode(
         insts=[
@@ -558,7 +619,7 @@ def test_unroll_max_factor_caps_k():
     block = out.insts[0]
     assert isinstance(block, BlockNode)
     assert isinstance(block.insts[0], IRLoop)
-    assert cast(IRLoop, block.insts[0]).n == 5
+    assert cast(IRLoop, block.insts[0]).n == 10
 
 
 def test_unroll_post_order_recurses_into_inner_loop_first():
@@ -581,8 +642,9 @@ def test_unroll_post_order_recurses_into_inner_loop_first():
 
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
 
-    # Both loops should be fully expanded → 4 inc_ref TimeInst.
-    assert _flat_inst_count(out) == 4
+    # Inner + outer full expansion now preserves loop counter init writes:
+    # outer init + 2 * (inner init + 2 TimeInst) = 7 InstNodes total.
+    assert _flat_inst_count(out) == 7
 
 
 def test_unroll_cpmg_style_body_triggers():
@@ -615,7 +677,7 @@ def test_unroll_cpmg_style_body_triggers():
     block = out.insts[0]
     assert isinstance(block, BlockNode)
     assert isinstance(block.insts[0], IRLoop)
-    assert cast(IRLoop, block.insts[0]).n == 6  # 50 // 8 = 6
+    assert cast(IRLoop, block.insts[0]).n == 48  # (50 // 8) * 8
     # Remainder: 50 % 8 = 2 → 2 * body_size(4) = 8 InstNodes after the loop.
     assert len(block.insts) == 1 + 2 * 4
 
@@ -687,11 +749,13 @@ def test_unroll_register_driven_jump_table_structure():
 
     emit: list[_Inst] = []
     out.emit(emit)
-    # n==0 guard: TEST n - #0
-    test_insts = [inst for inst in emit if isinstance(inst, TestInst)]
-    assert any(t.op == "r_n - #0" for t in test_insts)
-    # Back-edge dispatch test against literal #2 (k):
-    assert any(t.op == "r_i - #2" for t in test_insts)
+    cond_jumps = [
+        inst for inst in emit if isinstance(inst, JumpInst) and inst.if_cond is not None
+    ]
+    # n==0 guard: JUMP -if(Z) -op(n - #0)
+    assert any(j.if_cond == "Z" and j.op == "r_n - #0" for j in cond_jumps)
+    # Back-edge dispatch test against literal #2 (k)
+    assert any(j.if_cond == "NS" and j.op == "r_i - #2" for j in cond_jumps)
 
 
 def test_unroll_register_driven_body_with_no_words_falls_back():

@@ -7,19 +7,16 @@ recognize it without circular imports. This module owns the codegen
 Emitted shape (k = unroll factor, body_words = pmem words per body copy):
 
     prologue:
-      TEST   n_reg - #0
-      JUMP   exit -if(Z)
+      JUMP   exit -if(Z) -op(n_reg - #0)
       REG_WR i imm #0                       ; i := 0
     entry_0: <body copy 0>
     entry_1: <body copy 1>
     ...
     entry_{k-1}: <body copy k-1>
     back_edge:
-      TEST   i - n_reg
-      JUMP   exit -if(NS)                    ; i >= n: done
+      JUMP   exit -if(NS) -op(i - n_reg)     ; i >= n: done
       REG_WR i op (n_reg - i)               ; i := r = n - i  (destroys counter)
-      TEST   i - #k
-      JUMP   fast_path -if(NS)              ; r >= k: take fast path
+      JUMP   fast_path -if(NS) -op(i - #k)   ; r >= k: take fast path
       ; ── dispatch (last partial round, 0 < r < k) ────────────────
       REG_WR i op (i - #k)                  ; i := r - k  (negative)
       REG_WR i op (ABS i)                   ; i := k - r  (entry offset)
@@ -49,18 +46,32 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
-from ..instructions import (
-    Instruction,
-    JumpInst,
-    LabelInst,
-    MetaInst,
-    RegWriteInst,
-    TestInst,
-)
+from ..instructions import Instruction, JumpInst, LabelInst, MetaInst, RegWriteInst
 from ..labels import Label
 
 if TYPE_CHECKING:
     from ..node import IRJumpTableLoop
+
+_BIG_JUMP_PMEM_THRESHOLD = 2**11
+
+
+def _needs_big_jump(pmem_size: Optional[int]) -> bool:
+    return pmem_size is not None and pmem_size > _BIG_JUMP_PMEM_THRESHOLD
+
+
+def _emit_label_jump(
+    inst_list: list[Instruction],
+    *,
+    target: Label,
+    pmem_size: Optional[int],
+    if_cond: Optional[str] = None,
+    op: Optional[str] = None,
+) -> None:
+    if _needs_big_jump(pmem_size):
+        inst_list.append(RegWriteInst(dst="s15", src="label", label=target))
+        inst_list.append(JumpInst(addr="s15", if_cond=if_cond, op=op))
+        return
+    inst_list.append(JumpInst(label=target, if_cond=if_cond, op=op))
 
 
 def shift_add_multiply(
@@ -102,7 +113,9 @@ def shift_add_multiply(
     return insts
 
 
-def emit_jump_table_loop(node: "IRJumpTableLoop", inst_list: list[Instruction]) -> None:
+def emit_jump_table_loop(
+    node: "IRJumpTableLoop", inst_list: list[Instruction], *, pmem_size: Optional[int] = None
+) -> None:
     """Codegen for IRJumpTableLoop.emit(). See module docstring for shape."""
     if (
         node.k < 2
@@ -137,21 +150,24 @@ def emit_jump_table_loop(node: "IRJumpTableLoop", inst_list: list[Instruction]) 
     )
 
     # ── prologue ──
-    inst_list.append(TestInst(op=f"{n} - #0"))
-    inst_list.append(JumpInst(label=exit_label, if_cond="Z"))
+    _emit_label_jump(
+        inst_list, target=exit_label, pmem_size=pmem_size, if_cond="Z", op=f"{n} - #0"
+    )
     inst_list.append(RegWriteInst(dst=i, src="imm", lit="#0"))
 
     # ── k body copies ──
     for idx in range(node.k):
         inst_list.append(LabelInst(name=node.entry_labels[idx]))
-        node.bodies[idx].emit(inst_list)
+        node.bodies[idx].emit(inst_list, pmem_size=pmem_size)
 
     # ── back edge ──
-    inst_list.append(TestInst(op=f"{i} - {n}"))
-    inst_list.append(JumpInst(label=exit_label, if_cond="NS"))
+    _emit_label_jump(
+        inst_list, target=exit_label, pmem_size=pmem_size, if_cond="NS", op=f"{i} - {n}"
+    )
     inst_list.append(RegWriteInst(dst=i, src="op", op=f"{n} - {i}"))
-    inst_list.append(TestInst(op=f"{i} - #{node.k}"))
-    inst_list.append(JumpInst(label=fast_path, if_cond="NS"))
+    _emit_label_jump(
+        inst_list, target=fast_path, pmem_size=pmem_size, if_cond="NS", op=f"{i} - #{node.k}"
+    )
 
     # ── dispatch (0 < r < k) ──
     inst_list.append(RegWriteInst(dst=i, src="op", op=f"{i} - #{node.k}"))
@@ -172,7 +188,7 @@ def emit_jump_table_loop(node: "IRJumpTableLoop", inst_list: list[Instruction]) 
     # ── fast path: r >= k, restore i and continue ──
     inst_list.append(LabelInst(name=fast_path))
     inst_list.append(RegWriteInst(dst=i, src="op", op=f"{n} - {i}"))
-    inst_list.append(JumpInst(label=entry0))
+    _emit_label_jump(inst_list, target=entry0, pmem_size=pmem_size)
 
     # ── exit ──
     inst_list.append(LabelInst(name=exit_label))

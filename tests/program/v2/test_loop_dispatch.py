@@ -6,7 +6,6 @@ from zcu_tools.program.v2.ir.instructions import (
     JumpInst,
     MetaInst,
     RegWriteInst,
-    TestInst,
     TimeInst,
 )
 from zcu_tools.program.v2.ir.labels import Label
@@ -109,8 +108,7 @@ def test_irjumptableloop_emit_structure_k2_pow2_body():
     real = [inst for inst in out if not isinstance(inst, MetaInst)]
 
     # Expected sequence:
-    #   TEST n - #0
-    #   JUMP exit -if(Z)
+    #   JUMP exit -if(Z) -op(n - #0)
     #   REG_WR i imm #0
     #   LABEL e_0
     #   TimeInst inc_ref #1   (body 0)
@@ -118,11 +116,9 @@ def test_irjumptableloop_emit_structure_k2_pow2_body():
     #   LABEL e_1
     #   TimeInst inc_ref #1   (body 1)
     #   REG_WR i op (i + #1)  (from body 1)
-    #   TEST i - n
-    #   JUMP exit -if(NS)
+    #   JUMP exit -if(NS) -op(i - n)
     #   REG_WR i op (n - i)
-    #   TEST i - #2
-    #   JUMP fast_path -if(NS)
+    #   JUMP fast_path -if(NS) -op(i - #2)
     #   REG_WR i op (i - #2)            ; dispatch
     #   REG_WR i op (ABS i)
     #   REG_WR s15 label e_0
@@ -134,11 +130,11 @@ def test_irjumptableloop_emit_structure_k2_pow2_body():
     #   LABEL exit
     types = [type(inst).__name__ for inst in real]
     assert types == [
-        "TestInst", "JumpInst", "RegWriteInst",
+        "JumpInst", "RegWriteInst",
         "LabelInst", "TimeInst", "RegWriteInst",
         "LabelInst", "TimeInst", "RegWriteInst",
-        "TestInst", "JumpInst",
-        "RegWriteInst", "TestInst", "JumpInst",
+        "JumpInst",
+        "RegWriteInst", "JumpInst",
         "RegWriteInst", "RegWriteInst", "RegWriteInst",
         "RegWriteInst", "JumpInst",
         "LabelInst", "RegWriteInst", "JumpInst",
@@ -146,11 +142,12 @@ def test_irjumptableloop_emit_structure_k2_pow2_body():
     ]
 
     # Spot-check key operands.
-    prologue_test = real[0]
-    assert isinstance(prologue_test, TestInst)
-    assert prologue_test.op == "r_n - #0"
+    prologue_jump = real[0]
+    assert isinstance(prologue_jump, JumpInst)
+    assert prologue_jump.op == "r_n - #0"
+    assert prologue_jump.if_cond == "Z"
 
-    init_i = real[2]
+    init_i = real[1]
     assert isinstance(init_i, RegWriteInst)
     assert init_i.dst == "r_i" and init_i.lit == "#0"
 
@@ -184,6 +181,26 @@ def test_irjumptableloop_emit_body_words_5_uses_shift_add_seq():
     ]
     assert len(s15_op_writes) == 2
     assert all(w.op == "s15 + r_i" for w in s15_op_writes)
+
+
+def test_irjumptableloop_emit_uses_s15_label_jumps_for_large_pmem():
+    jt = _make_jt_loop(k=2, body_words=1)
+    out: list[Instruction] = []
+    jt.emit(out, pmem_size=4096)
+
+    # All label-based control jumps in this node should become ADDR=s15.
+    cond_jumps = [
+        inst for inst in out if isinstance(inst, JumpInst) and inst.if_cond is not None
+    ]
+    assert cond_jumps
+    assert all(j.addr == "s15" for j in cond_jumps)
+    assert all(j.label is None for j in cond_jumps)
+
+    # Label materializations should include exit/fast/entry targets.
+    label_writes = [
+        inst for inst in out if isinstance(inst, RegWriteInst) and inst.src == "label"
+    ]
+    assert len(label_writes) >= 5
 
 
 def test_irjumptableloop_malformed_k_raises():

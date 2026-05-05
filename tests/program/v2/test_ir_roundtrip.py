@@ -1,7 +1,8 @@
 from typing import Any
 
 from zcu_tools.program.v2.ir.builder import IRBuilder
-from zcu_tools.program.v2.ir.node import IRLoop, RootNode
+from zcu_tools.program.v2.ir.instructions import NopInst
+from zcu_tools.program.v2.ir.node import BlockNode, InstNode, IRLoop, RootNode
 from zcu_tools.program.v2.ir.pipeline import make_default_pipeline
 
 
@@ -71,19 +72,18 @@ def test_structural_loop_roundtrip():
 
     # Verify emitted instructions (no markers)
     # The new IRLoop.emit() outputs:
-    # REG_WR(init), Label(start), TEST, JUMP(end), [BODY...], JUMP(start), Label(end)
+    # REG_WR(init), Label(start), JUMP(end, IF+OP), [BODY...], JUMP(start), Label(end)
 
     expected_cmds = ["REG_WR"]  # Init counter
-    expected_cmds.append("TEST")  # Stop check
-    expected_cmds.append("JUMP")  # CondJump out
+    expected_cmds.append("JUMP")  # CondJump out (with IF+OP)
     expected_cmds.append("NOP")  # Body
     expected_cmds.append("JUMP")  # Jump back
 
     # Note: Labels are extracted into a dictionary when creating binprog, but `emit()` outputs them as LabelInst dicts.
     cmds = [inst.get("CMD") for inst in opt_insts if "CMD" in inst]
     assert cmds == expected_cmds
-    assert cursor.final_p_addr == 5
-    assert cursor.final_line == 7
+    assert cursor.final_p_addr == 4
+    assert cursor.final_line == 6
 
 
 def test_pipeline_roundtrip_with_normalization():
@@ -106,3 +106,35 @@ def test_pipeline_roundtrip_with_normalization():
     out_loop = out_ir.insts[0]
     assert out_loop.counter_reg == "c"
     assert out_loop.n == 100
+
+
+def test_irloop_emit_uses_s15_jump_for_large_pmem():
+    root = RootNode(
+        insts=[
+            IRLoop(
+                name="big",
+                counter_reg="r1",
+                n=5,
+                body=BlockNode(insts=[InstNode(NopInst())]),
+            )
+        ]
+    )
+
+    builder = IRBuilder()
+    prog_list, _labels, _meta, cursor = builder.unbuild(root, pmem_size=4096)
+
+    cmds = [inst.get("CMD") for inst in prog_list]
+    assert cmds == ["REG_WR", "REG_WR", "JUMP", "NOP", "REG_WR", "JUMP"]
+
+    cond_jump = prog_list[2]
+    assert cond_jump["CMD"] == "JUMP"
+    assert cond_jump["ADDR"] == "s15"
+    assert cond_jump["IF"] == "NS"
+    assert cond_jump["OP"] == "r1 - #5"
+
+    back_jump = prog_list[5]
+    assert back_jump["CMD"] == "JUMP"
+    assert back_jump["ADDR"] == "s15"
+    assert "LABEL" not in back_jump
+
+    assert cursor.final_p_addr == 6

@@ -92,7 +92,9 @@ def estimate_flat_size(nodes: list["IRNode"]) -> int:
             n_cases = len(node.cases)
             dispatch_depth = math.ceil(math.log2(n_cases)) if n_cases > 1 else 0
             dispatch_words = dispatch_depth * 2  # TEST + JUMP per level
-            case_size = max((estimate_flat_size(case.insts) for case in node.cases), default=0)
+            case_size = max(
+                (estimate_flat_size(case.insts) for case in node.cases), default=0
+            )
             size += dispatch_words + case_size
         elif isinstance(node, IRJumpTableLoop):
             # See passes.loop_dispatch.emit_jump_table_loop for the exact

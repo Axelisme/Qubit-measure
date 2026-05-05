@@ -11,8 +11,9 @@ from ..analysis import (
     estimate_body_scheduled_ticks,
     estimate_flat_size,
 )
+from ..instructions import RegWriteInst
 from ..labels import Label
-from ..node import BlockNode, IRJumpTableLoop, IRLoop, IRNode
+from ..node import BlockNode, InstNode, IRJumpTableLoop, IRLoop, IRNode
 from .base import OptimizationPassBase
 from .loop_dispatch import shift_add_multiply
 
@@ -180,7 +181,16 @@ class UnrollSmallLoopPass(OptimizationPassBase):
                     k,
                 )
                 self._bump_stat("unroll_loop.removed")
-                return BlockNode(insts=_clone_nodes(node.body.insts, n))
+                # Preserve loop semantics: even for full expansion, the logical
+                # loop counter starts from zero before the first body execution.
+                return BlockNode(
+                    insts=[
+                        InstNode(
+                            RegWriteInst(dst=node.counter_reg, src="imm", lit="#0")
+                        ),
+                        *_clone_nodes(node.body.insts, n),
+                    ]
+                )
 
             # Partial unroll cannot use a constant remainder when the
             # iteration count is only known at runtime — the register
@@ -208,11 +218,15 @@ class UnrollSmallLoopPass(OptimizationPassBase):
 
             result: list[IRNode] = []
             unrolled_body = _clone_nodes(node.body.insts, k)
+            full_iters = iters * k
             new_loop = IRLoop(
                 name=f"{node.name}_unrolled",
                 counter_reg=node.counter_reg,
-                n=iters,
-                range_hint=(iters, iters),
+                # Keep the original counter semantics: this loop body now
+                # executes k original iterations per loop-round, so stop at
+                # `iters * k` before appending remainder copies.
+                n=full_iters,
+                range_hint=(full_iters, full_iters),
                 start_label=Label.make_new(f"{node.name}_unrolled_start"),
                 end_label=Label.make_new(f"{node.name}_unrolled_end"),
                 body=BlockNode(insts=unrolled_body),

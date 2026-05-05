@@ -4,6 +4,7 @@ from typing_extensions import Any
 
 from .factory import InstructionStream, parse_root
 from .instructions import Instruction
+from .labels import Label
 from .linker import IRCursor, IRLinker
 from .node import RootNode
 
@@ -18,8 +19,6 @@ class IRBuilder:
         labels: dict[str, Any],
         meta_infos: list[dict[str, Any]],
     ) -> RootNode:
-        from .labels import Label
-
         Label.reset()  # Must precede all Label.make_new() calls; see Label.label_set docstring
         inst_list = self.linker.unlink(prog_list, labels, meta_infos)
 
@@ -32,8 +31,8 @@ class IRBuilder:
         return root
 
     def unbuild(
-        self, ir: RootNode
+        self, ir: RootNode, *, pmem_size: int | None = None
     ) -> tuple[list[dict], dict[str, str], list[dict[str, Any]], IRCursor]:
         inst_list: list[Instruction] = []
-        ir.emit(inst_list)
+        ir.emit(inst_list, pmem_size=pmem_size)
         return self.linker.link(inst_list)
