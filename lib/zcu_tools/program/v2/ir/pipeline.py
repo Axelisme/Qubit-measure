@@ -15,9 +15,14 @@ class PipeLineConfig:
     enable_dead_label: bool = True
     pmem_budget: int | None = None
 
-    # Unroll decision: trigger when loop overhead / scheduled_ticks >= this ratio.
-    # Default 0.1 means unroll if overhead eats ≥ 10% of the available IO window.
-    unroll_overhead_threshold: float = 0.8
+    # Hard cap on the unroll factor k. For register-driven loops k is also
+    # rounded down to the nearest power of 2 (Phase 8D).
+    max_unroll_factor: int = 8
+
+    # Maximum number of REG_WR words allowed in the dispatch shift-add
+    # sequence. If the body_words multiply cannot fit, register-driven
+    # unroll falls back to no-unroll.
+    max_dispatch_words: int = 8
 
     # Unified cycle cost model
     cost_default: int = 1

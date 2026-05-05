@@ -12,7 +12,7 @@ from .instructions import (
     PortWriteInst,
     TimeInst,
 )
-from .node import InstNode, IRBranch, IRLoop, IRNode
+from .node import BlockNode, InstNode, IRBranch, IRLoop, IRNode
 
 if TYPE_CHECKING:
     from .pipeline import PipeLineConfig
@@ -31,7 +31,11 @@ def estimate_body_scheduled_ticks(body: list["IRNode"]) -> Optional[int]:
     """
     total = 0
     for node in body:
-        if isinstance(node, InstNode):
+        if isinstance(node, BlockNode):
+            inner = estimate_body_scheduled_ticks(node.insts)
+            if inner is not None:
+                total += inner
+        elif isinstance(node, InstNode):
             inst = node.inst
             if isinstance(inst, TimeInst) and inst.c_op == "inc_ref":
                 if inst.r1 is not None:
@@ -71,7 +75,9 @@ def estimate_flat_size(nodes: list["IRNode"]) -> int:
     """
     size = 0
     for node in nodes:
-        if isinstance(node, InstNode):
+        if isinstance(node, BlockNode):
+            size += estimate_flat_size(node.insts)
+        elif isinstance(node, InstNode):
             inst = node.inst
             if isinstance(inst, LabelInst):
                 pass  # labels occupy no pmem slot
@@ -110,7 +116,9 @@ def estimate_body_cost(body: list["IRNode"], config: PipeLineConfig) -> int:
 
     cost = 0
     for node in body:
-        if isinstance(node, InstNode):
+        if isinstance(node, BlockNode):
+            cost += estimate_body_cost(node.insts, config)
+        elif isinstance(node, InstNode):
             inst = node.inst
             if isinstance(inst, PortWriteInst):
                 cost += config.cost_wmem
