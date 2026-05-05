@@ -361,8 +361,14 @@ def test_unroll_exact_register_hint_fully_expands():
     assert _flat_inst_count(out) == 3
 
 
-def test_unroll_non_exact_register_hint_not_expanded_in_8b():
-    """range_hint=(2,5): handled by Phase 8D jump-table; in 8B stays as IRLoop."""
+def test_unroll_non_exact_register_hint_emits_jump_table():
+    """range_hint=(2,5): non-exact register loop now goes through Phase 8D jump table.
+
+    body=inc_ref #1 → scheduled=1, body_cost=1, slack=0 → k_timing=cap=8.
+    body_size=1; floor_pow2(8) = 8 → IRJumpTableLoop(k=8).
+    """
+    from zcu_tools.program.v2.ir.passes.loop_dispatch import IRJumpTableLoop
+
     Label.reset()
     root = RootNode(
         insts=[
@@ -379,11 +385,17 @@ def test_unroll_non_exact_register_hint_not_expanded_in_8b():
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
 
     assert len(out.insts) == 1
-    assert isinstance(out.insts[0], IRLoop)
+    assert isinstance(out.insts[0], IRJumpTableLoop)
+    jt = cast(IRJumpTableLoop, out.insts[0])
+    assert jt.k == 8
+    assert jt.n_reg == "r_count"
+    assert jt.body_words == 1
 
 
-def test_unroll_no_hint_register_loop_not_expanded_in_8b():
-    """Register-driven loop with no hint: handled by Phase 8D."""
+def test_unroll_no_hint_register_loop_emits_jump_table():
+    """Register-driven loop with no hint also goes to jump-table dispatch."""
+    from zcu_tools.program.v2.ir.passes.loop_dispatch import IRJumpTableLoop
+
     Label.reset()
     root = RootNode(
         insts=[
@@ -399,7 +411,7 @@ def test_unroll_no_hint_register_loop_not_expanded_in_8b():
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
 
     assert len(out.insts) == 1
-    assert isinstance(out.insts[0], IRLoop)
+    assert isinstance(out.insts[0], IRJumpTableLoop)
 
 
 def test_unroll_counter_sensitive_loop_not_expanded():
