@@ -19,11 +19,15 @@ if TYPE_CHECKING:
 
 
 def estimate_body_scheduled_ticks(body: list["IRNode"]) -> Optional[int]:
-    """Sum of literal inc_ref delay ticks in a body sequence.
+    """Lower-bound on literal inc_ref delay ticks in a body sequence.
 
-    Returns the total tProc clock cycles reserved for scheduled IO per loop
-    iteration, or None if any dynamic (register-driven) delay is encountered
-    at any depth — caller should fallback to no-unroll in that case.
+    Dynamic (register-driven) `inc_ref` contributes 0 to the total — the
+    estimate represents the *guaranteed* scheduled IO window, not the
+    expected one. This lets loops with mixed literal + dynamic delays still
+    be analyzed for unroll based on their literal budget.
+
+    Returns None only when the body has zero total scheduled ticks (no
+    benefit from unrolling) or when iteration count is unknown.
     """
     total = 0
     for node in body:
@@ -31,29 +35,31 @@ def estimate_body_scheduled_ticks(body: list["IRNode"]) -> Optional[int]:
             inst = node.inst
             if isinstance(inst, TimeInst) and inst.c_op == "inc_ref":
                 if inst.r1 is not None:
-                    return None  # dynamic delay — cannot analyze statically
+                    continue  # dynamic delay contributes 0 (lower bound)
                 if inst.lit is not None and inst.lit.startswith("#"):
                     try:
                         total += int(inst.lit[1:])
                     except ValueError:
-                        return None
+                        continue
         elif isinstance(node, IRLoop):
             inner = estimate_body_scheduled_ticks(node.body.insts)
             if inner is None:
-                return None
+                continue  # nested loop has no scheduled IO — contributes 0
             if isinstance(node.n, int):
                 multiplier = node.n
             elif node.range_hint is not None:
-                multiplier = node.range_hint[1]  # upper bound (conservative)
+                multiplier = node.range_hint[0]  # lower bound (guaranteed)
             else:
-                return None  # unknown iteration count
+                continue  # unknown iteration count — contributes 0
             total += multiplier * inner
         elif isinstance(node, IRBranch):
             # Pessimistic: shortest IO window across all cases
-            case_ticks = [estimate_body_scheduled_ticks(case.insts) for case in node.cases]
-            if any(t is None for t in case_ticks):
-                return None
-            total += min(t for t in case_ticks)  # type: ignore[type-var]
+            case_ticks = [
+                estimate_body_scheduled_ticks(case.insts) for case in node.cases
+            ]
+            resolved = [t if t is not None else 0 for t in case_ticks]
+            if resolved:
+                total += min(resolved)
     return total if total > 0 else None
 
 
