@@ -4,26 +4,61 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Optional, Union
 
-
-def _is_register_addr(addr: str) -> bool:
-    if not addr.startswith("&"):
-        return False
-    return bool(re.match(r"^[rswp]\d{1,2}$", addr[1:]))
-
-
 if TYPE_CHECKING:
     from .labels import Label
 
+from .labels import PSEUDO_LABELS, is_pseudo_label_name, is_register_addr
 from .utils import regs_from_value, strip_write_modifier
-
-SPECIAL_LABELS = frozenset({"HERE", "NEXT", "PREV", "SKIP"})
 
 
 def _is_pseudo_label(value: Optional["Label"]) -> bool:
     if value is None:
         return False
-    return value.name in SPECIAL_LABELS
+    return is_pseudo_label_name(value.name)
 
+
+def _serialize_addr(value: Optional[Union[str, "Label"]]) -> Optional[str]:
+    from .labels import Label
+
+    if value is None:
+        return None
+    if isinstance(value, Label):
+        return value.name if is_pseudo_label_name(value.name) else f"&{value.name}"
+    if not is_register_addr(value):
+        raise ValueError(
+            f"ADDR string must be a register address, got {value!r}. "
+            "Use Label(...) for symbolic addresses."
+        )
+    return value
+
+
+def _validate_addr_value(value: Optional[Union[str, "Label"]], *, field_name: str) -> None:
+    from .labels import Label
+
+    if value is None or isinstance(value, Label):
+        return
+    if isinstance(value, str) and is_register_addr(value):
+        return
+    if isinstance(value, str):
+        raise ValueError(
+            f"{field_name} string address must be a register address, got {value!r}. "
+            "Use Label(...) for symbolic addresses."
+        )
+    raise TypeError(
+        f"{field_name} must be str register address, Label, or None, got {type(value).__name__}."
+    )
+
+
+def _validate_jump_addr_target(value: Optional[Union[str, "Label"]]) -> None:
+    from .labels import Label
+
+    if value is None or isinstance(value, Label):
+        return
+    if value == "s15":
+        return
+    raise ValueError(
+        f"JumpInst.addr must be 's15' or Label, got {value!r}."
+    )
 
 def _residual_fields(source: dict[str, Any], handled: set[str]) -> dict[str, Any]:
     return {
@@ -71,14 +106,30 @@ class Instruction:
             if isinstance(name, str):
                 if name.startswith("&"):
                     name = name[1:]
-                if name in SPECIAL_LABELS:
-                    return Label(name)
                 if label_map is not None:
-                    if name not in label_map:
+                    if name not in label_map and not is_pseudo_label_name(name):
                         label_map[name] = Label.make_new(name)
-                    return label_map[name]
+                    return label_map.get(name, Label(name))
                 return Label(name)
             return None
+
+        def resolve_addr(raw_addr: Any) -> Optional[Union[str, "Label"]]:
+            if raw_addr is None:
+                return None
+            if isinstance(raw_addr, Label):
+                return raw_addr
+            if isinstance(raw_addr, str):
+                if is_register_addr(raw_addr):
+                    return raw_addr
+                if raw_addr.startswith("&"):
+                    return get_label(raw_addr)
+                raise ValueError(
+                    f"Invalid ADDR {raw_addr!r}: plain string labels are not supported. "
+                    "Use register address (e.g. 's15') or '&label'."
+                )
+            raise ValueError(
+                f"Invalid ADDR type {type(raw_addr).__name__}: expected register string, '&label', or Label."
+            )
 
         if "LABEL" in d and "CMD" not in d:
             args = {k: v for k, v in d.items() if k not in ("LABEL", "LINE", "P_ADDR")}
@@ -108,12 +159,9 @@ class Instruction:
                 extra_args=extra_args,
             )
         elif cmd == "JUMP":
-            raw_addr = d.get("ADDR")
-            resolved_addr: Optional[Union[str, Label]] = raw_addr
-            if isinstance(raw_addr, str) and raw_addr.startswith("&") and not _is_register_addr(raw_addr):
-                resolved_addr = get_label(raw_addr)
-
             extra_args = _residual_fields(d, {"LABEL", "IF", "ADDR", "WR", "OP", "UF"})
+            resolved_addr = resolve_addr(d.get("ADDR"))
+            _validate_jump_addr_target(resolved_addr)
             return JumpInst(
                 label=get_label(d.get("LABEL")),
                 if_cond=d.get("IF"),
@@ -134,10 +182,7 @@ class Instruction:
                     d["SRC"] = wr_parts[1]
                     src = wr_parts[1]
 
-            raw_addr = d.get("ADDR")
-            resolved_addr = raw_addr
-            if isinstance(raw_addr, str) and raw_addr.startswith("&") and not _is_register_addr(raw_addr):
-                resolved_addr = get_label(raw_addr)
+            resolved_addr = resolve_addr(d.get("ADDR"))
 
             if src == "dmem":
                 extra_args = _residual_fields(
@@ -191,10 +236,7 @@ class Instruction:
             extra_args = _residual_fields(d, set())
             return NopInst(extra_args=extra_args)
         elif cmd == "DMEM_RD":
-            raw_addr = d.get("ADDR")
-            resolved_addr = raw_addr
-            if isinstance(raw_addr, str) and raw_addr.startswith("&") and not _is_register_addr(raw_addr):
-                resolved_addr = get_label(raw_addr)
+            resolved_addr = resolve_addr(d.get("ADDR"))
 
             extra_args = _residual_fields(
                 d, {"DST", "SRC", "ADDR", "WR", "OP", "LIT", "UF", "IF", "LABEL"}
@@ -257,16 +299,11 @@ class Instruction:
                 extra_args=extra_args,
             )
         elif cmd == "WAIT":
-            raw_addr = d.get("ADDR")
-            resolved_addr = raw_addr
-            if isinstance(raw_addr, str) and raw_addr.startswith("&") and not _is_register_addr(raw_addr):
-                resolved_addr = get_label(raw_addr)
-
             extra_args = _residual_fields(d, {"C_OP", "TIME", "ADDR"})
             return WaitInst(
                 c_op=d.get("C_OP", "time"),
                 time=d.get("TIME"),
-                addr=resolved_addr,
+                addr=resolve_addr(d.get("ADDR")),
                 extra_args=extra_args,
             )
 
@@ -370,6 +407,10 @@ class JumpInst(Instruction):
     uf: Optional[str] = None  # Optional flag update control
     extra_args: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        _validate_addr_value(self.addr, field_name="JumpInst.addr")
+        _validate_jump_addr_target(self.addr)
+
     @property
     def reg_read(self) -> list[str]:
         reads: set[str] = set()
@@ -397,13 +438,11 @@ class JumpInst(Instruction):
         return None
 
     def to_dict(self) -> dict[str, Any]:
-        from .labels import Label
-
         d: dict[str, Any] = {"CMD": "JUMP"}
         if self.label:
             d["LABEL"] = str(self.label)
         if self.addr is not None:
-            d["ADDR"] = f"&{self.addr}" if isinstance(self.addr, Label) else self.addr
+            d["ADDR"] = _serialize_addr(self.addr)
         if self.if_cond is not None:
             d["IF"] = self.if_cond
         if self.wr is not None:
@@ -430,6 +469,9 @@ class RegWriteInst(Instruction):
     if_cond: Optional[str] = None
     label: Optional["Label"] = None
     extra_args: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        _validate_addr_value(self.addr, field_name="RegWriteInst.addr")
 
     @property
     def reg_read(self) -> list[str]:
@@ -459,8 +501,6 @@ class RegWriteInst(Instruction):
         return None
 
     def to_dict(self) -> dict[str, Any]:
-        from .labels import Label
-
         d: dict[str, Any] = {"CMD": "REG_WR"}
         if self.wr is not None:
             d["WR"] = self.wr
@@ -472,7 +512,7 @@ class RegWriteInst(Instruction):
         if self.lit is not None:
             d["LIT"] = self.lit
         if self.addr is not None:
-            d["ADDR"] = f"&{self.addr}" if isinstance(self.addr, Label) else self.addr
+            d["ADDR"] = _serialize_addr(self.addr)
         if self.uf is not None:
             d["UF"] = self.uf
         if self.if_cond is not None:
@@ -563,6 +603,9 @@ class DmemReadInst(Instruction):
     label: Optional["Label"] = None
     extra_args: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        _validate_addr_value(self.addr, field_name="DmemReadInst.addr")
+
     @property
     def reg_read(self) -> list[str]:
         reads: set[str] = set()
@@ -590,11 +633,9 @@ class DmemReadInst(Instruction):
         return None
 
     def to_dict(self) -> dict[str, Any]:
-        from .labels import Label
-
         d: dict[str, Any] = {"CMD": "REG_WR", "DST": self.dst, "SRC": self.src}
         if self.addr is not None:
-            d["ADDR"] = f"&{self.addr}" if isinstance(self.addr, Label) else self.addr
+            d["ADDR"] = _serialize_addr(self.addr)
         if self.wr is not None:
             d["WR"] = self.wr
         if self.op is not None:
@@ -750,6 +791,9 @@ class WaitInst(Instruction):
     addr: Optional[Union[str, "Label"]] = None
     extra_args: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        _validate_addr_value(self.addr, field_name="WaitInst.addr")
+
     @property
     def reg_read(self) -> list[str]:
         reads: set[str] = set()
@@ -770,13 +814,11 @@ class WaitInst(Instruction):
         return None
 
     def to_dict(self) -> dict[str, Any]:
-        from .labels import Label
-
         d: dict[str, Any] = {"CMD": "WAIT", "C_OP": self.c_op}
         if self.time is not None:
             d["TIME"] = self.time
         if self.addr is not None:
-            d["ADDR"] = f"&{self.addr}" if isinstance(self.addr, Label) else self.addr
+            d["ADDR"] = _serialize_addr(self.addr)
         d.update(self.extra_args)
         return d
 

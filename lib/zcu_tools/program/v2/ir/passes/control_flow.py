@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Optional, cast
 
-from ..instructions import SPECIAL_LABELS, Instruction, LabelInst
+from ..instructions import Instruction, LabelInst
+from ..labels import PSEUDO_LABELS
 from ..node import RootNode
 from ..pipeline import PipeLineContext
 from ..traversal import walk_instructions
@@ -28,7 +29,7 @@ class DeadLabelEliminationPass(OptimizationPassBase):
         return cast(RootNode, res or ir)
 
     def visit_LabelInst(self, inst: LabelInst) -> Optional[Instruction]:
-        if str(inst.name) in SPECIAL_LABELS:
+        if str(inst.name) in PSEUDO_LABELS:
             return inst
 
         if inst.name not in self._referenced_labels:

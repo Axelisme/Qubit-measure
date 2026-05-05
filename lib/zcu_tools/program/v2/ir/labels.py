@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 
 from typing_extensions import TYPE_CHECKING, Any
@@ -8,6 +9,15 @@ if TYPE_CHECKING:
     from .instructions import Instruction
 
 PSEUDO_LABELS = frozenset({"PREV", "HERE", "NEXT", "SKIP"})
+
+
+def is_pseudo_label_name(name: str) -> bool:
+    return name in PSEUDO_LABELS
+
+
+def is_register_addr(name: str) -> bool:
+    core_name = name[1:] if name.startswith("&") else name
+    return bool(re.match(r"^[rswp]\d{1,2}$", core_name))
 
 
 class Label:
@@ -29,6 +39,9 @@ class Label:
     @classmethod
     def make_new(cls, base_name: str) -> Label:
         """Create a new logical label, ensuring the name is unique."""
+        if is_pseudo_label_name(base_name):
+            return cls(base_name)
+
         name = base_name
         counter = 0
         while name in cls.label_set:
@@ -39,9 +52,15 @@ class Label:
 
     def clone_new(self) -> Label:
         """Create a new label derived from this one's name."""
+        if is_pseudo_label_name(self._name):
+            return self
         return Label.make_new(self._name)
 
     def __deepcopy__(self, memo: dict[int, Any]) -> "Label":
+        if is_pseudo_label_name(self._name):
+            memo[id(self)] = self
+            return self
+
         # Ensure deepcopy preserves shared references within the cloned subtree
         # while creating a fresh unique label identity overall.
         new_label = self.clone_new()

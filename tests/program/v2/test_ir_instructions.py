@@ -12,6 +12,8 @@ Tests include:
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 import pytest
 from zcu_tools.program.v2.ir.instructions import (
     DmemReadInst,
@@ -181,6 +183,32 @@ class TestJumpInstruction:
             recovered = inst.to_dict()
             assert recovered == original
 
+    def test_dispatch_jump_with_label_addr(self):
+        d = {"CMD": "JUMP", "ADDR": "&loop"}
+        inst = Instruction.from_dict(d)
+        assert isinstance(inst, JumpInst)
+        assert isinstance(inst.addr, Label)
+        assert str(inst.addr) == "loop"
+        assert inst.to_dict() == d
+
+    def test_dispatch_jump_rejects_plain_string_label_addr(self):
+        d = {"CMD": "JUMP", "ADDR": "loop"}
+        with pytest.raises(ValueError, match="plain string labels are not supported"):
+            Instruction.from_dict(d)
+
+    def test_jump_constructor_rejects_plain_string_label_addr(self):
+        with pytest.raises(ValueError, match="register address"):
+            JumpInst(addr="loop")
+
+    def test_dispatch_jump_rejects_non_s15_register_addr(self):
+        d = {"CMD": "JUMP", "ADDR": "r0"}
+        with pytest.raises(ValueError, match="must be 's15'"):
+            Instruction.from_dict(d)
+
+    def test_jump_constructor_rejects_non_s15_register_addr(self):
+        with pytest.raises(ValueError, match="must be 's15'"):
+            JumpInst(addr="r0")
+
     def test_jump_immutable(self):
         inst = JumpInst(label=Label("loop"))
         with pytest.raises(Exception):
@@ -247,6 +275,11 @@ class TestRegWriteInstruction:
         inst = Instruction.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
+
+    def test_dispatch_regwr_rejects_plain_string_label_addr(self):
+        d = {"CMD": "REG_WR", "DST": "r0", "SRC": "dmem", "ADDR": "table_base"}
+        with pytest.raises(ValueError, match="plain string labels are not supported"):
+            Instruction.from_dict(d)
 
     def test_regwr_immutable(self):
         inst = RegWriteInst(dst="s1", src="imm")
@@ -366,6 +399,10 @@ class TestWaitInstruction:
         assert inst.addr == "s15"
         assert inst.to_dict() == original
 
+    def test_wait_rejects_plain_string_label_addr(self):
+        with pytest.raises(ValueError, match="register address"):
+            WaitInst(c_op="time", addr="wait_target")
+
 
 class TestLabelInstruction:
     """Tests for LabelInst."""
@@ -389,6 +426,20 @@ class TestLabelInstruction:
         inst = Instruction.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
+
+
+class TestLabelCloneSemantics:
+    def test_deepcopy_preserves_pseudo_label_identity(self):
+        label = Label("HERE")
+        cloned = deepcopy(label)
+        assert cloned is label
+
+    def test_deepcopy_renames_normal_label(self):
+        Label.reset()
+        label = Label.make_new("loop")
+        cloned = deepcopy(label)
+        assert cloned is not label
+        assert cloned.name != label.name
 
 
 class TestMetaInstruction:
