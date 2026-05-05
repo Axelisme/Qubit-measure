@@ -12,7 +12,7 @@ from .instructions import (
     PortWriteInst,
     TimeInst,
 )
-from .node import BlockNode, InstNode, IRBranch, IRLoop, IRNode
+from .node import BlockNode, InstNode, IRBranch, IRJumpTableLoop, IRLoop, IRNode
 
 if TYPE_CHECKING:
     from .pipeline import PipeLineConfig
@@ -64,6 +64,9 @@ def estimate_body_scheduled_ticks(body: list["IRNode"]) -> Optional[int]:
             resolved = [t if t is not None else 0 for t in case_ticks]
             if resolved:
                 total += min(resolved)
+        elif isinstance(node, IRJumpTableLoop):
+            # n_reg is dynamic; lower bound on guaranteed scheduled IO is 0.
+            pass
     return total if total > 0 else None
 
 
@@ -98,6 +101,16 @@ def estimate_flat_size(nodes: list["IRNode"]) -> int:
             dispatch_words = dispatch_depth * 2  # TEST + JUMP per level
             case_size = max((estimate_flat_size(case.insts) for case in node.cases), default=0)
             size += dispatch_words + case_size
+        elif isinstance(node, IRJumpTableLoop):
+            # See passes.loop_dispatch.emit_jump_table_loop for the exact
+            # shape. Approximate count (labels and meta are 0 words):
+            #   prologue (3) + k * (body_words + i++) + back-edge (5)
+            #   + dispatch (3 + shift_add(<= max_words)) + JUMP s15 (1)
+            #   + fast_path (2)
+            # We use a generous cap of 16 dispatch words as a reasonable
+            # upper bound; budgets here are advisory.
+            per_body = sum(estimate_flat_size(b.insts) for b in node.bodies)
+            size += 3 + per_body + node.k + 5 + 16 + 2
     return size
 
 
@@ -155,5 +168,15 @@ def estimate_body_cost(body: list["IRNode"], config: PipeLineConfig) -> int:
                 default=0,
             )
             cost += dispatch_overhead + case_cost
+        elif isinstance(node, IRJumpTableLoop):
+            # Conservative lower bound on JT loop cost: one body execution
+            # plus the jump-table back-edge / dispatch (a constant ~10
+            # cycles). The runtime n is unknown so we cannot project a
+            # better estimate.
+            body_cost = max(
+                (estimate_body_cost(b.insts, config) for b in node.bodies),
+                default=0,
+            )
+            cost += body_cost + 10
 
     return cost

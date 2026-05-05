@@ -10,9 +10,9 @@ from ..analysis import (
     estimate_flat_size,
 )
 from ..labels import Label
-from ..node import BlockNode, IRLoop, IRNode
+from ..node import BlockNode, IRJumpTableLoop, IRLoop, IRNode
 from .base import OptimizationPassBase, loop_is_counter_sensitive
-from .loop_dispatch import IRJumpTableLoop, shift_add_multiply
+from .loop_dispatch import shift_add_multiply
 
 
 def _clone_nodes(nodes: list[IRNode], repeat: int) -> list[IRNode]:

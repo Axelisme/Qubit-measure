@@ -581,6 +581,167 @@ def test_unroll_cpmg_style_body_triggers():
     assert len(block.insts) == 1 + 2 * 4
 
 
+# ---------------------------------------------------------------------------
+# Phase 8E integration tests
+# ---------------------------------------------------------------------------
+
+
+def test_unroll_register_driven_k_forced_to_power_of_two():
+    """body=4 PortWrite + inc_ref #14 (CPMG-like): k_raw under default cap=8 → 6;
+    floor_pow2(6) = 4 → IRJumpTableLoop(k=4)."""
+    from zcu_tools.program.v2.ir.passes.loop_dispatch import IRJumpTableLoop
+
+    Label.reset()
+    body_insts: list[IRNode] = [
+        InstNode(PortWriteInst(dst="0", time="t0")),
+        InstNode(PortWriteInst(dst="1", time="t0")),
+        InstNode(PortWriteInst(dst="2", time="t0")),
+        InstNode(TimeInst(c_op="inc_ref", lit="#14")),
+    ]
+    root = RootNode(
+        insts=[
+            IRLoop(
+                name="loop",
+                counter_reg="r_i",
+                n="r_n",
+                body=BlockNode(insts=body_insts),
+            )
+        ]
+    )
+
+    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
+
+    assert len(out.insts) == 1
+    assert isinstance(out.insts[0], IRJumpTableLoop)
+    jt = cast(IRJumpTableLoop, out.insts[0])
+    assert jt.k == 4  # floor_pow2(6) = 4
+
+
+def test_unroll_register_driven_jump_table_structure():
+    """Verify the IRJumpTableLoop has the expected k entries, k bodies, and
+    the back-edge dispatch when emitted."""
+    from zcu_tools.program.v2.ir.passes.loop_dispatch import IRJumpTableLoop
+
+    Label.reset()
+    root = RootNode(
+        insts=[
+            IRLoop(
+                name="loop",
+                counter_reg="r_i",
+                n="r_n",
+                body=BlockNode(insts=[InstNode(TimeInst(c_op="inc_ref", lit="#1"))]),
+            )
+        ]
+    )
+
+    config = PipeLineConfig(max_unroll_factor=2)
+    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
+
+    assert isinstance(out.insts[0], IRJumpTableLoop)
+    jt = cast(IRJumpTableLoop, out.insts[0])
+    assert jt.k == 2
+    assert len(jt.entry_labels) == 2
+    assert len(jt.bodies) == 2
+    assert jt.body_words == 1
+
+    from zcu_tools.program.v2.ir.instructions import Instruction as _Inst
+
+    emit: list[_Inst] = []
+    out.emit(emit)
+    # n==0 guard: TEST n - #0
+    test_insts = [inst for inst in emit if isinstance(inst, TestInst)]
+    assert any(t.op == "r_n - #0" for t in test_insts)
+    # Back-edge dispatch test against literal #2 (k):
+    assert any(t.op == "r_i - #2" for t in test_insts)
+
+
+def test_unroll_register_driven_body_with_no_words_falls_back():
+    """A body that flattens to body_words == 0 must fall back to no-unroll.
+
+    Bare LabelInst contributes 0 to flat size and 0 to body_cost.
+    """
+    Label.reset()
+    inner = Label.make_new("inner")
+    root = RootNode(
+        insts=[
+            IRLoop(
+                name="loop",
+                counter_reg="r_i",
+                n="r_n",
+                body=BlockNode(insts=[InstNode(LabelInst(name=inner))]),
+            )
+        ]
+    )
+
+    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
+
+    # Falls back: original IRLoop unchanged.
+    assert len(out.insts) == 1
+    assert isinstance(out.insts[0], IRLoop)
+
+
+def test_unroll_register_driven_dispatch_too_long_falls_back():
+    """If body_words requires a shift-add sequence longer than max_dispatch_words,
+    register-driven unroll must fall back to no-unroll."""
+    # body_words = 0xFF requires 8 adds + 7 shifts = 15 instructions.
+    # We synthesize this by using NopInst × 0xFF in the body.
+    Label.reset()
+    body_insts: list[IRNode] = [
+        InstNode(NopInst()) for _ in range(0xFF)
+    ]
+    body_insts.append(InstNode(TimeInst(c_op="inc_ref", lit="#1000")))
+    root = RootNode(
+        insts=[
+            IRLoop(
+                name="loop",
+                counter_reg="r_i",
+                n="r_n",
+                body=BlockNode(insts=body_insts),
+            )
+        ]
+    )
+
+    config = PipeLineConfig(max_dispatch_words=4)
+    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
+
+    assert len(out.insts) == 1
+    assert isinstance(out.insts[0], IRLoop)
+
+
+def test_unroll_nested_register_driven_inner_unrolls_first():
+    """Post-order recursion: the inner register-driven loop is rewritten to
+    an IRJumpTableLoop before the outer loop is evaluated.
+    """
+    from zcu_tools.program.v2.ir.passes.loop_dispatch import IRJumpTableLoop
+
+    Label.reset()
+    inner = IRLoop(
+        name="inner",
+        counter_reg="r_j",
+        n="r_m",
+        body=BlockNode(insts=[InstNode(TimeInst(c_op="inc_ref", lit="#1"))]),
+    )
+    outer = IRLoop(
+        name="outer",
+        counter_reg="r_i",
+        n="r_n",
+        body=BlockNode(insts=[inner]),
+    )
+    root = RootNode(insts=[outer])
+
+    config = PipeLineConfig(max_unroll_factor=2)
+    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
+
+    # Outer remains an IRLoop (its scheduled_ticks lower bound is 0 because
+    # the inner loop has unknown n_reg), but the inner has been rewritten
+    # to an IRJumpTableLoop — confirming post-order recursion.
+    assert len(out.insts) == 1
+    outer_out = out.insts[0]
+    assert isinstance(outer_out, IRLoop)
+    inner_out = outer_out.body.insts[0]
+    assert isinstance(inner_out, IRJumpTableLoop)
+
+
 def test_default_pipeline_orders_new_passes_first():
     pipeline = make_default_pipeline(pmem_capacity=8192)
 

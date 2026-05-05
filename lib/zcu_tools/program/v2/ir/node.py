@@ -137,6 +137,35 @@ class IRLoop(IRNode):
 
 
 @dataclass
+class IRJumpTableLoop(IRNode):
+    """Register-driven loop unrolled to k body copies with last-round dispatch.
+
+    See `passes.loop_dispatch` for the emit() implementation and the full
+    asm shape. This node lives in `node.py` so analysis helpers can
+    recognize it without importing from the passes package.
+    """
+
+    n_reg: str = ""
+    counter_reg: str = ""
+    k: int = 0
+    body_words: int = 0
+    entry_labels: list["Label"] = field(default_factory=list)
+    exit_label: Optional["Label"] = None
+    bodies: list[BlockNode] = field(default_factory=list)
+    name: str = ""
+
+    def children(self) -> Iterator[IRNode]:
+        yield from self.bodies
+
+    def emit(self, inst_list: list[Instruction]) -> None:
+        # Implementation lives in passes.loop_dispatch to avoid pulling
+        # codegen helpers into the core node module. Imported lazily.
+        from .passes.loop_dispatch import emit_jump_table_loop
+
+        emit_jump_table_loop(self, inst_list)
+
+
+@dataclass
 class IRBranchCase(BlockNode):
     """A branch case with a stable logical identity."""
 
