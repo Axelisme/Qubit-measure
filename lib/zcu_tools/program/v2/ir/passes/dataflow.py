@@ -63,7 +63,6 @@ class DeadWriteEliminationPass(OptimizationPassBase):
                 if prev_idx is not None and 0 <= prev_idx < len(rewritten):
                     if rewritten[prev_idx] is not None:
                         rewritten[prev_idx] = None
-                        self._bump_stat("dead_write.removed")
                 pending_writes[dst] = len(rewritten)
 
             rewritten.append(item)

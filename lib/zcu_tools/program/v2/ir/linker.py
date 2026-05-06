@@ -5,8 +5,8 @@ from dataclasses import dataclass
 
 from typing_extensions import Any
 
-from .labels import Label
 from .instructions import Instruction, LabelInst, MetaInst
+from .labels import Label
 
 
 @dataclass(frozen=True)

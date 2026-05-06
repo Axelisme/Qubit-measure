@@ -29,11 +29,6 @@ class OptimizationPassBase(AbsPipeLinePass, IRTransformer):
             raise ValueError("Unexpected list returned from visit")
         return cast(RootNode, res or ir)
 
-    def _bump_stat(self, key: str, delta: int = 1) -> None:
-        stats = self.ctx.pass_stats
-        stats[key] = stats.get(key, 0) + delta
-
-
 def is_label_or_branching_inst(inst: Instruction) -> bool:
     return isinstance(inst, (LabelInst, JumpInst, TestInst, MetaInst))
 

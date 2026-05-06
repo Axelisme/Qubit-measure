@@ -190,7 +190,6 @@ class UnrollSmallLoopPass(OptimizationPassBase):
                     n,
                     k,
                 )
-                self._bump_stat("unroll_loop.removed")
                 # Preserve loop semantics: counter starts at 0, increments after
                 # each body copy. No surrounding IRLoop, so we emit all increments.
                 return BlockNode(
@@ -224,7 +223,6 @@ class UnrollSmallLoopPass(OptimizationPassBase):
                 iters,
                 remainder,
             )
-            self._bump_stat("unroll_loop.partial")
 
             result: list[IRNode] = []
             # Each of the k body copies needs its own counter increment.
@@ -345,7 +343,6 @@ class UnrollSmallLoopPass(OptimizationPassBase):
         exit_label = Label.make_new(f"{node.name}_jt_exit")
         bodies = [BlockNode(insts=deepcopy(node.body.insts)) for _ in range(k)]
 
-        self._bump_stat("unroll_loop.register_partial")
         return IRJumpTableLoop(
             n_reg=str(node.n),
             counter_reg=node.counter_reg,

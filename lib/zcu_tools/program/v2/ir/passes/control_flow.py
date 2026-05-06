@@ -33,6 +33,5 @@ class DeadLabelEliminationPass(OptimizationPassBase):
             return inst
 
         if inst.name not in self._referenced_labels:
-            self._bump_stat("dead_label.removed")
             return None
         return inst

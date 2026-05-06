@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from qick.asm_v2 import QickProgramV2
 from typing_extensions import Any, Optional
 
 from .builder import IRBuilder
 from .pipeline import make_default_pipeline
+
+logger = logging.getLogger(__name__)
 
 
 class IRCompileMixin(QickProgramV2):
@@ -36,9 +39,13 @@ class IRCompileMixin(QickProgramV2):
         builder = IRBuilder(self)
         ir = builder.build(insts, labels, meta_infos)
 
+        logger.debug("Initial IR:\n%s", ir)
+
         pipeline = make_default_pipeline(pmem_capacity=self.tproccfg["pmem_size"])
 
         opt_ir, _ctx = pipeline(ir)
+
+        logger.debug("Optimized IR:\n%s", opt_ir)
 
         opt_insts, opt_labels, opt_meta_infos, cursor = builder.unbuild(opt_ir)
 

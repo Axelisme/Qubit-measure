@@ -3,7 +3,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any
 
 from .node import RootNode
 
@@ -42,8 +41,6 @@ DEFAULT_PIPELINE_CONFIG = PipeLineConfig()
 @dataclass
 class PipeLineContext:
     config: PipeLineConfig = field(default_factory=PipeLineConfig)
-    pass_stats: dict[str, int] = field(default_factory=dict)
-    analysis_cache: dict[str, Any] = field(default_factory=dict)
 
 
 class AbsPipeLinePass(ABC):

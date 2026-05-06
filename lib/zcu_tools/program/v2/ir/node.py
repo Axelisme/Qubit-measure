@@ -30,6 +30,13 @@ class IRNode:
             f"{self.__class__.__name__} does not implement emit()"
         )
 
+    def _into_str(self, indent: int = 0) -> str:
+        """Helper for __str__ that takes an indent level."""
+        return f"{'    ' * indent}{self.__class__.__name__}()"
+
+    def __str__(self) -> str:
+        return self._into_str()
+
 
 @dataclass
 class InstNode(IRNode):
@@ -41,6 +48,9 @@ class InstNode(IRNode):
         self, inst_list: list[Instruction], *, pmem_size: Optional[int] = None
     ) -> None:
         inst_list.append(self.inst)
+
+    def _into_str(self, indent: int = 0) -> str:
+        return "    " * indent + str(self.inst)
 
 
 @dataclass
@@ -60,6 +70,14 @@ class BlockNode(IRNode):
     ) -> None:
         for item in self.insts:
             item.emit(inst_list, pmem_size=pmem_size)
+
+    def _into_str(self, indent: int = 0) -> str:
+        prefix = "    " * indent
+        return (
+            f"{prefix}{self.__class__.__name__}()\n"
+            + "\n".join(i._into_str(indent + 1) for i in self.insts)
+            + "\n"
+        )
 
 
 @dataclass
@@ -180,6 +198,14 @@ class IRLoop(IRNode):
         # META: LOOP_END
         inst_list.append(MetaInst(type="LOOP_END", name=self.name))
 
+    def _into_str(self, indent: int = 0) -> str:
+        prefix = "    " * indent
+        return (
+            f"{prefix}IRLoop(name={self.name}, n={self.n}, range_hint={self.range_hint})\n"
+            + "\n".join(i._into_str(indent + 1) for i in self.body.insts)
+            + "\n"
+        )
+
 
 @dataclass
 class IRJumpTableLoop(IRNode):
@@ -190,6 +216,7 @@ class IRJumpTableLoop(IRNode):
     recognize it without importing from the passes package.
     """
 
+    name: str = ""
     n_reg: str = ""
     counter_reg: str = ""
     k: int = 0
@@ -197,7 +224,6 @@ class IRJumpTableLoop(IRNode):
     entry_labels: list["Label"] = field(default_factory=list)
     exit_label: Optional["Label"] = None
     bodies: list[BlockNode] = field(default_factory=list)
-    name: str = ""
 
     def children(self) -> Iterator[IRNode]:
         yield from self.bodies
@@ -210,6 +236,14 @@ class IRJumpTableLoop(IRNode):
         from .passes.loop_dispatch import emit_jump_table_loop
 
         emit_jump_table_loop(self, inst_list, pmem_size=pmem_size)
+
+    def _into_str(self, indent: int = 0) -> str:
+        prefix = "    " * indent
+        return (
+            f"{prefix}IRLoop(name={self.name}, n={self.n_reg})\n"
+            + "\n".join(i._into_str(indent + 1) for i in self.bodies[0].insts)
+            + "\n"
+        )
 
 
 @dataclass
@@ -224,6 +258,14 @@ class IRBranchCase(BlockNode):
         inst_list.append(MetaInst(type="BRANCH_CASE_START", name=self.name))
         super().emit(inst_list, pmem_size=pmem_size)
         inst_list.append(MetaInst(type="BRANCH_CASE_END", name=self.name))
+
+    def __str__(self, indent: int = 0) -> str:
+        prefix = "    " * indent
+        return (
+            f"{prefix}IRBranchCase(name={self.name})\n"
+            + "\n".join(i._into_str(indent + 1) for i in self.insts)
+            + "\n"
+        )
 
 
 @dataclass
@@ -269,3 +311,11 @@ class IRBranch(IRNode):
         )
         emit_dispatch(0, n)
         inst_list.append(MetaInst(type="BRANCH_END", name=self.name))
+
+    def _into_str(self, indent: int = 0) -> str:
+        prefix = "    " * indent
+        return (
+            f"{prefix}IRBranch(name={self.name}, compare_reg={self.compare_reg})\n"
+            + "\n".join(i._into_str(indent + 1) for i in self.cases)
+            + "\n"
+        )
