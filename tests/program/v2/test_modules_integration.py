@@ -341,7 +341,7 @@ class TestControlIntegration:
 
     def test_repeat_register_driven_loop_roundtrip_shape(self):
         from zcu_tools.program.v2.ir.pipeline import DEFAULT_PIPELINE_CONFIG
-        
+
         old_val = DEFAULT_PIPELINE_CONFIG.enable_unroll_loop
         DEFAULT_PIPELINE_CONFIG.enable_unroll_loop = False
         try:
@@ -352,6 +352,8 @@ class TestControlIntegration:
             start_addr = _label_addr(prog.labels, "r_cnt_start")
             end_addr = _label_addr(prog.labels, "r_cnt_end")
 
+            # Counter init (REG_WR imm #0) sits between the runtime guard and
+            # the start label.
             init_inst = max(
                 (
                     inst
@@ -363,26 +365,54 @@ class TestControlIntegration:
                 ),
                 key=lambda inst: inst["P_ADDR"],
             )
-            back_jump = next(
-                (inst for inst in prog.prog_list if inst.get("CMD") == "JUMP" and "IF" not in inst),
-                None,
-            )
-
             assert init_inst["P_ADDR"] < start_addr
-            cond_jump = next(
-                (
-                    inst
-                    for inst in prog.prog_list
-                    if inst.get("CMD") == "JUMP"
-                    and inst.get("IF") == "NS"
-                    and inst.get("P_ADDR", -1) in {start_addr, start_addr + 1}
-                )
+
+            # Runtime guard: cond-jump with IF=Z over the loop, sitting before
+            # init (so `n_count == 0` skips the entire body).
+            guard_jump = next(
+                inst
+                for inst in prog.prog_list
+                if inst.get("CMD") == "JUMP"
+                and inst.get("IF") == "Z"
+                and inst["P_ADDR"] < init_inst["P_ADDR"]
             )
-            assert cond_jump["CMD"] == "JUMP"
-            assert cond_jump.get("IF") == "NS"
-            assert "OP" in cond_jump
-            assert back_jump is not None
-            assert back_jump["P_ADDR"] < end_addr
+            assert "OP" in guard_jump
+
+            # Back-edge: condensed cond-jump with IF=NS sitting just before
+            # end_addr (replaces the old TEST + unconditional JUMP pair).
+            back_jump = next(
+                inst
+                for inst in prog.prog_list
+                if inst.get("CMD") == "JUMP"
+                and inst.get("IF") == "NS"
+                and inst["P_ADDR"] < end_addr
+                and inst["P_ADDR"] > start_addr
+            )
+            assert "OP" in back_jump
+
+            # No unconditional JUMP back to start any more — increment +
+            # cond-jump combined into one back-edge.
+            unconditional_jumps = [
+                inst
+                for inst in prog.prog_list
+                if inst.get("CMD") == "JUMP"
+                and "IF" not in inst
+                and inst["P_ADDR"] < end_addr
+                and inst["P_ADDR"] > start_addr
+            ]
+            assert unconditional_jumps == []
+
+            # Per-iteration counter increment lives just before the back-edge.
+            incr_inst = next(
+                inst
+                for inst in prog.prog_list
+                if inst.get("CMD") == "REG_WR"
+                and inst.get("SRC") == "op"
+                and inst.get("OP", "").endswith(" + #1")
+                and inst["P_ADDR"] < back_jump["P_ADDR"]
+                and inst["P_ADDR"] > start_addr
+            )
+            assert incr_inst["P_ADDR"] < back_jump["P_ADDR"]
         finally:
             DEFAULT_PIPELINE_CONFIG.enable_unroll_loop = old_val
 

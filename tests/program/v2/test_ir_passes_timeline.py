@@ -4,10 +4,7 @@ from typing import cast
 
 from zcu_tools.program.v2.ir.instructions import NopInst, TimeInst, WaitInst
 from zcu_tools.program.v2.ir.node import InstNode, RootNode
-from zcu_tools.program.v2.ir.passes.timeline import (
-    TimedInstructionMergePass,
-    ZeroDelayDCEPass,
-)
+from zcu_tools.program.v2.ir.passes.timeline import TimedMergePass, ZeroDelayDCEPass
 from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
 
 
@@ -54,9 +51,7 @@ def test_timed_instruction_merge_merges_plain_adjacent_increments():
         ]
     )
 
-    out = TimedInstructionMergePass().process(
-        root, PipeLineContext(config=PipeLineConfig())
-    )
+    out = TimedMergePass().process(root, PipeLineContext(config=PipeLineConfig()))
 
     assert len(out.insts) == 2
     assert isinstance(out.insts[0], InstNode)
@@ -74,9 +69,7 @@ def test_timed_instruction_merge_merges_adjacent_increments_with_extra_args():
         ]
     )
 
-    out = TimedInstructionMergePass().process(
-        root, PipeLineContext(config=PipeLineConfig())
-    )
+    out = TimedMergePass().process(root, PipeLineContext(config=PipeLineConfig()))
 
     assert len(out.insts) == 1
     assert isinstance(out.insts[0], InstNode)
@@ -93,12 +86,14 @@ def test_timed_instruction_merge_keeps_zero_increment_as_boundary():
         ]
     )
 
-    out = TimedInstructionMergePass().process(
-        root, PipeLineContext(config=PipeLineConfig())
-    )
+    out = TimedMergePass().process(root, PipeLineContext(config=PipeLineConfig()))
 
     assert len(out.insts) == 3
-    assert [getattr(cast(InstNode, item).inst, "lit", None) for item in out.insts] == ["#2", "#0", "#3"]
+    assert [getattr(cast(InstNode, item).inst, "lit", None) for item in out.insts] == [
+        "#2",
+        "#0",
+        "#3",
+    ]
 
 
 def test_timed_instruction_merge_does_not_cross_wait():
@@ -110,9 +105,11 @@ def test_timed_instruction_merge_does_not_cross_wait():
         ]
     )
 
-    out = TimedInstructionMergePass().process(
-        root, PipeLineContext(config=PipeLineConfig())
-    )
+    out = TimedMergePass().process(root, PipeLineContext(config=PipeLineConfig()))
 
     assert len(out.insts) == 3
-    assert [getattr(cast(InstNode, item).inst, "lit", None) for item in out.insts] == ["#2", None, "#3"]
+    assert [getattr(cast(InstNode, item).inst, "lit", None) for item in out.insts] == [
+        "#2",
+        None,
+        "#3",
+    ]

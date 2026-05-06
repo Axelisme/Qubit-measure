@@ -4,40 +4,48 @@
 recognize it without circular imports. This module owns the codegen
 (`emit_jump_table_loop`) and the `shift_add_multiply` helper.
 
-Emitted shape (k = unroll factor, body_words = pmem words per body copy):
+Emitted shape (k = unroll factor, must be a power of 2;
+               body_words = pmem words per pure body):
 
     prologue:
-      JUMP   exit -if(Z) -op(n_reg - #0)
-      REG_WR i imm #0                       ; i := 0
+      JUMP   exit    -if(Z)   -op(n_reg - #0)   ; skip if n == 0
+      REG_WR i       op  (n_reg AND #(k-1))       ; i := n % k  (remainder r; i is scratch)
+      JUMP   entry_0 -if(Z)   -op(i - #0)        ; r == 0: run full rounds from entry_0
+      ; dispatch: compute entry offset = k - r, jump to entry_{k-r}
+      REG_WR i       op  (i - #k)                ; i := r - k  (< 0)
+      REG_WR i       op  (ABS i)                 ; i := k - r  (entry offset)
+      REG_WR s15     label  entry_0              ; s15 := base address of entry_0
+      <shift-add: s15 += i * stride>              ; stride = body_words + 1
+      REG_WR i       imm  #0                     ; i := 0  (reset counter before first entry)
+      JUMP   s15                                  ; jump to entry_{k-r}
     entry_0: <body copy 0>
+              REG_WR i op (i + #1)
     entry_1: <body copy 1>
+              REG_WR i op (i + #1)
     ...
     entry_{k-1}: <body copy k-1>
+              REG_WR i op (i + #1)
     back_edge:
-      JUMP   exit -if(NS) -op(i - n_reg)     ; i >= n: done
-      REG_WR i op (n_reg - i)               ; i := r = n - i  (destroys counter)
-      JUMP   fast_path -if(NS) -op(i - #k)   ; r >= k: take fast path
-      ; ── dispatch (last partial round, 0 < r < k) ────────────────
-      REG_WR i op (i - #k)                  ; i := r - k  (negative)
-      REG_WR i op (ABS i)                   ; i := k - r  (entry offset)
-      REG_WR s15 label entry_0              ; s15 := base
-      <shift-add multiply: s15 += i * body_words>
-      JUMP s15
-    fast_path:
-      REG_WR i op (n_reg - i)               ; restore i = original counter
-      JUMP entry_0
+      JUMP   exit    -if(NS)  -op(i - n_reg)     ; i >= n: done
+      JUMP   entry_0                              ; continue next full round
     exit:
+
+Correctness argument (k is a power of 2, so n AND #(k-1) == n % k):
+  * n == 0: guard exits immediately.
+  * n % k == 0: jump straight to entry_0; run n/k full rounds of k bodies;
+    back_edge fires when i == n.
+  * n % k == r > 0: dispatch jumps to entry_{k-r}; first partial round
+    executes r bodies so i == r at back_edge; each subsequent full round
+    adds k; i reaches n after exactly (n-r)/k more rounds.
 
 Constraints:
 
+* k MUST be a power of 2 so that `n AND #(k-1)` equals `n % k`.
 * tProc v2 ALU is binary (`A op B`); first operand must be a register;
   every binary op needs its own REG_WR word.
 * Shift amount in `SL` is capped at 15 by the assembler.
-* The counter register update is assumed to already live inside each body
-  copy (coming from the macro-expanded loop body). The counter register is
-  reused as scratch only after the k body copies have completed.
-  Body copies have already executed by then so the runtime value of
-  the counter is no longer observed.
+* Counter `i` is reused as scratch during prologue dispatch and is reset
+  to 0 before the dispatch JUMP, so every entry sees i == 0 on entry.
 * `s15` is the only legal big-jump target (`JUMP s15`) and is treated
   by QICK as a scratch big-jump register.
 """
@@ -114,7 +122,10 @@ def shift_add_multiply(
 
 
 def emit_jump_table_loop(
-    node: "IRJumpTableLoop", inst_list: list[Instruction], *, pmem_size: Optional[int] = None
+    node: "IRJumpTableLoop",
+    inst_list: list[Instruction],
+    *,
+    pmem_size: Optional[int] = None,
 ) -> None:
     """Codegen for IRJumpTableLoop.emit(). See module docstring for shape."""
     if (
@@ -132,9 +143,9 @@ def emit_jump_table_loop(
 
     i = node.counter_reg
     n = node.n_reg
+    k = node.k
     entry0 = node.entry_labels[0]
     exit_label = node.exit_label
-    fast_path = Label.make_new(f"{node.name}_jt_fast")
 
     inst_list.append(
         MetaInst(
@@ -143,51 +154,55 @@ def emit_jump_table_loop(
             info=dict(
                 n_reg=n,
                 counter_reg=i,
-                k=node.k,
+                k=k,
                 body_words=node.body_words,
             ),
         )
     )
 
+    stride = node.body_words + 1  # body + per-iteration counter increment
+    shift_add = shift_add_multiply(
+        src_reg=i, dst_reg="s15", constant=stride, max_words=64
+    )
+    if shift_add is None:
+        raise ValueError(
+            f"IRJumpTableLoop: shift-add for stride={stride} "
+            f"(body_words={node.body_words} + 1) failed at emit time"
+        )
+
     # ── prologue ──
+    # Guard: skip entire loop when n == 0.
     _emit_label_jump(
         inst_list, target=exit_label, pmem_size=pmem_size, if_cond="Z", op=f"{n} - #0"
     )
-    inst_list.append(RegWriteInst(dst=i, src="imm", lit="#0"))
+    # Compute remainder r = n % k into i (k is a power of 2, so AND is exact).
+    # i is used as scratch here and reset to 0 before the dispatch JUMP.
+    # Critically, i (not s15) holds the remainder so that _emit_label_jump
+    # below can use -op(i - #0) without touching s15 — a big-pmem cond-jump
+    # would overwrite s15 with the label address before the test fires.
+    inst_list.append(RegWriteInst(dst=i, src="op", op=f"{n} AND #{k - 1}"))  # i = n % k
+    # If r == 0 the loop is perfectly divisible; jump straight to entry_0.
+    _emit_label_jump(
+        inst_list, target=entry0, pmem_size=pmem_size, if_cond="Z", op=f"{i} - #0"
+    )
+    # Compute entry offset = k - r, still in i.
+    inst_list.append(RegWriteInst(dst=i, src="op", op=f"{i} - #{k}"))  # i = r - k (< 0)
+    inst_list.append(RegWriteInst(dst=i, src="op", op=f"ABS {i}"))     # i = k - r (offset)
+    inst_list.append(RegWriteInst(dst="s15", src="label", label=entry0))
+    inst_list.extend(shift_add)                                          # s15 += i * stride
+    inst_list.append(RegWriteInst(dst=i, src="imm", lit="#0"))           # reset counter
+    inst_list.append(JumpInst(addr="s15"))                               # → entry_{k-r}
 
-    # ── k body copies ──
-    for idx in range(node.k):
+    # ── k body copies (each followed by counter += 1) ──
+    for idx in range(k):
         inst_list.append(LabelInst(name=node.entry_labels[idx]))
         node.bodies[idx].emit(inst_list, pmem_size=pmem_size)
+        inst_list.append(RegWriteInst(dst=i, src="op", op=f"{i} + #1"))
 
     # ── back edge ──
     _emit_label_jump(
         inst_list, target=exit_label, pmem_size=pmem_size, if_cond="NS", op=f"{i} - {n}"
     )
-    inst_list.append(RegWriteInst(dst=i, src="op", op=f"{n} - {i}"))
-    _emit_label_jump(
-        inst_list, target=fast_path, pmem_size=pmem_size, if_cond="NS", op=f"{i} - #{node.k}"
-    )
-
-    # ── dispatch (0 < r < k) ──
-    inst_list.append(RegWriteInst(dst=i, src="op", op=f"{i} - #{node.k}"))
-    inst_list.append(RegWriteInst(dst=i, src="op", op=f"ABS {i}"))
-    inst_list.append(RegWriteInst(dst="s15", src="label", label=entry0))
-
-    shift_add = shift_add_multiply(
-        src_reg=i, dst_reg="s15", constant=node.body_words, max_words=64
-    )
-    if shift_add is None:
-        raise ValueError(
-            f"IRJumpTableLoop: shift-add for body_words={node.body_words} "
-            "failed at emit time"
-        )
-    inst_list.extend(shift_add)
-    inst_list.append(JumpInst(addr="s15"))
-
-    # ── fast path: r >= k, restore i and continue ──
-    inst_list.append(LabelInst(name=fast_path))
-    inst_list.append(RegWriteInst(dst=i, src="op", op=f"{n} - {i}"))
     _emit_label_jump(inst_list, target=entry0, pmem_size=pmem_size)
 
     # ── exit ──

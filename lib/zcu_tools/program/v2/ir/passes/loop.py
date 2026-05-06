@@ -31,11 +31,21 @@ class UnrollAnalysis:
     k_final: int
 
 
-def _clone_nodes(nodes: list[IRNode], repeat: int) -> list[IRNode]:
-    cloned: list[IRNode] = []
-    for _ in range(repeat):
-        cloned.extend(deepcopy(nodes))
-    return cloned
+def _clone_nodes_with_incr(
+    nodes: list[IRNode], repeat: int, counter_reg: str, final_incr: bool = True
+) -> list[IRNode]:
+    """Clone nodes `repeat` times, inserting a counter increment after each copy.
+
+    If final_incr is False, the last copy does NOT get an increment appended
+    (useful when the caller's IRLoop.emit() will add the final one).
+    """
+    incr = InstNode(RegWriteInst(dst=counter_reg, src="op", op=f"{counter_reg} + #1"))
+    result: list[IRNode] = []
+    for i in range(repeat):
+        result.extend(deepcopy(nodes))
+        if final_incr or i < repeat - 1:
+            result.append(deepcopy(incr))
+    return result
 
 
 def _floor_pow2(x: int) -> int:
@@ -181,14 +191,14 @@ class UnrollSmallLoopPass(OptimizationPassBase):
                     k,
                 )
                 self._bump_stat("unroll_loop.removed")
-                # Preserve loop semantics: even for full expansion, the logical
-                # loop counter starts from zero before the first body execution.
+                # Preserve loop semantics: counter starts at 0, increments after
+                # each body copy. No surrounding IRLoop, so we emit all increments.
                 return BlockNode(
                     insts=[
                         InstNode(
                             RegWriteInst(dst=node.counter_reg, src="imm", lit="#0")
                         ),
-                        *_clone_nodes(node.body.insts, n),
+                        *_clone_nodes_with_incr(node.body.insts, n, node.counter_reg),
                     ]
                 )
 
@@ -217,7 +227,12 @@ class UnrollSmallLoopPass(OptimizationPassBase):
             self._bump_stat("unroll_loop.partial")
 
             result: list[IRNode] = []
-            unrolled_body = _clone_nodes(node.body.insts, k)
+            # Each of the k body copies needs its own counter increment.
+            # IRLoop.emit() will append the final increment after all k copies,
+            # so we omit it from the last copy (final_incr=False).
+            unrolled_body = _clone_nodes_with_incr(
+                node.body.insts, k, node.counter_reg, final_incr=False
+            )
             full_iters = iters * k
             new_loop = IRLoop(
                 name=f"{node.name}_unrolled",
@@ -233,7 +248,9 @@ class UnrollSmallLoopPass(OptimizationPassBase):
             )
             result.append(new_loop)
             if remainder > 0:
-                result.extend(_clone_nodes(node.body.insts, remainder))
+                result.extend(
+                    _clone_nodes_with_incr(node.body.insts, remainder, node.counter_reg)
+                )
             return BlockNode(insts=result)
 
         # ── Register-driven (no exact hint) → jump-table dispatch ──
@@ -293,20 +310,23 @@ class UnrollSmallLoopPass(OptimizationPassBase):
             )
             return None
 
-        # Probe the dispatch shift-add — if body_words can't be encoded
-        # within the word budget, abort before constructing the node.
+        # Probe the dispatch shift-add — stride is body_size + 1 because
+        # emit_jump_table_loop appends a per-iteration counter increment after
+        # each body copy. If the stride can't be encoded within the word
+        # budget, abort before constructing the node.
+        stride = body_size + 1
         probe = shift_add_multiply(
             src_reg=node.counter_reg,
             dst_reg="s15",
-            constant=body_size,
+            constant=stride,
             max_words=cfg.max_dispatch_words,
         )
         if probe is None:
             logger.debug(
                 "UnrollSmallLoopPass: skip jump-table loop name=%s because "
-                "shift_add_multiply(body_size=%s, max_dispatch_words=%s) failed",
+                "shift_add_multiply(stride=%s, max_dispatch_words=%s) failed",
                 node.name,
-                body_size,
+                stride,
                 cfg.max_dispatch_words,
             )
             return None

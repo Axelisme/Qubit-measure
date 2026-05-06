@@ -87,7 +87,10 @@ def estimate_flat_size(nodes: list["IRNode"]) -> int:
                 n = node.range_hint[1]
             else:
                 n = 1  # unknown: underestimate to keep budget safe
-            size += 2 + n * inner  # TEST + JUMP_back + n * body
+            # Shape: [guard? 2] + init 1 + n * (inner + i++ 1) + cond-back 1.
+            # Guard only emitted for runtime-driven n; ignored here for the
+            # constant case that drives most budgets.
+            size += 2 + n * (inner + 1)
         elif isinstance(node, IRBranch):
             n_cases = len(node.cases)
             dispatch_depth = math.ceil(math.log2(n_cases)) if n_cases > 1 else 0
@@ -99,13 +102,13 @@ def estimate_flat_size(nodes: list["IRNode"]) -> int:
         elif isinstance(node, IRJumpTableLoop):
             # See passes.loop_dispatch.emit_jump_table_loop for the exact
             # shape. Approximate count (labels and meta are 0 words):
-            #   prologue (3) + k * body_words + back-edge (5)
+            #   prologue (2) + k * (body_words + 1 i++) + back-edge (3)
             #   + dispatch (3 + shift_add(<= max_words)) + JUMP s15 (1)
             #   + fast_path (2)
             # We use a generous cap of 16 dispatch words as a reasonable
             # upper bound; budgets here are advisory.
             per_body = sum(estimate_flat_size(b.insts) for b in node.bodies)
-            size += 3 + per_body + 5 + 16 + 2
+            size += 2 + per_body + node.k + 3 + 16 + 1 + 2
     return size
 
 

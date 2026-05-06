@@ -87,7 +87,7 @@ def _merged_time_run(run: list[TimeInst]) -> InstNode:
     )
 
 
-class TimedInstructionMergePass(TimelinePassBase):
+class TimedMergePass(TimelinePassBase):
     """Merge adjacent reference-time increments with identical semantics."""
 
     def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:

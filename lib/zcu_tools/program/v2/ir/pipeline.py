@@ -68,7 +68,7 @@ def make_default_pipeline(pmem_capacity: int) -> PipeLine:
     from .passes import (
         DeadLabelEliminationPass,
         DeadWriteEliminationPass,
-        TimedInstructionMergePass,
+        TimedMergePass,
         UnrollSmallLoopPass,
         ZeroDelayDCEPass,
     )
@@ -80,10 +80,18 @@ def make_default_pipeline(pmem_capacity: int) -> PipeLine:
     return PipeLine(
         config,
         [
-            UnrollSmallLoopPass(),
-            DeadWriteEliminationPass(),
-            DeadLabelEliminationPass(),
+            # Cleaning passes run before Unroll so that body_size estimates
+            # (used for k selection and jump-table stride) reflect the true
+            # post-cleanup word count:
+            #   • ZeroDelayDCE   — removes TIME #0 words that inflate body_size
+            #   • TimedMerge     — collapses adjacent TIME #N into one word
+            #   • DeadWriteElim  — removes overwritten register writes
+            # DeadLabelElimination runs after Unroll because unrolling
+            # introduces new label references that must be visible first.
             ZeroDelayDCEPass(),
-            TimedInstructionMergePass(),
+            TimedMergePass(),
+            DeadWriteEliminationPass(),
+            UnrollSmallLoopPass(),
+            DeadLabelEliminationPass(),
         ],
     )

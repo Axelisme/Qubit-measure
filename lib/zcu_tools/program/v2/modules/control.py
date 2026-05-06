@@ -76,7 +76,7 @@ class Repeat(Module):
         prog.delay(t=cur_t)
         prog.delay_auto(t=0.0)
 
-        prog.close_inner_loop(self.name, self.counter_reg)
+        prog.close_inner_loop(self.name, self.counter_reg, self.n)
 
         return 0.0  # prog.delay will modify ref time
 

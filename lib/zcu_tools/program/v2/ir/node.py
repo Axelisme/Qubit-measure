@@ -14,27 +14,6 @@ from .instructions import (
 )
 from .labels import Label
 
-_BIG_JUMP_PMEM_THRESHOLD = 2**11
-
-
-def _needs_big_jump(pmem_size: Optional[int]) -> bool:
-    return pmem_size is not None and pmem_size > _BIG_JUMP_PMEM_THRESHOLD
-
-
-def _emit_label_jump(
-    inst_list: list[Instruction],
-    *,
-    target: "Label",
-    pmem_size: Optional[int],
-    if_cond: Optional[str] = None,
-    op: Optional[str] = None,
-) -> None:
-    if _needs_big_jump(pmem_size):
-        inst_list.append(RegWriteInst(dst="s15", src="label", label=target))
-        inst_list.append(JumpInst(addr="s15", if_cond=if_cond, op=op))
-        return
-    inst_list.append(JumpInst(label=target, if_cond=if_cond, op=op))
-
 
 class IRNode:
     """Base class for all IR nodes."""
@@ -43,7 +22,9 @@ class IRNode:
         """Yield all immediate child nodes."""
         return iter([])
 
-    def emit(self, inst_list: list[Instruction], *, pmem_size: Optional[int] = None) -> None:
+    def emit(
+        self, inst_list: list[Instruction], *, pmem_size: Optional[int] = None
+    ) -> None:
         """Flatten this node into a list of Instruction objects."""
         raise NotImplementedError(
             f"{self.__class__.__name__} does not implement emit()"
@@ -56,7 +37,9 @@ class InstNode(IRNode):
 
     inst: Instruction
 
-    def emit(self, inst_list: list[Instruction], *, pmem_size: Optional[int] = None) -> None:
+    def emit(
+        self, inst_list: list[Instruction], *, pmem_size: Optional[int] = None
+    ) -> None:
         inst_list.append(self.inst)
 
 
@@ -72,7 +55,9 @@ class BlockNode(IRNode):
     def children(self) -> Iterator[IRNode]:
         yield from self.insts
 
-    def emit(self, inst_list: list[Instruction], *, pmem_size: Optional[int] = None) -> None:
+    def emit(
+        self, inst_list: list[Instruction], *, pmem_size: Optional[int] = None
+    ) -> None:
         for item in self.insts:
             item.emit(inst_list, pmem_size=pmem_size)
 
@@ -80,6 +65,25 @@ class BlockNode(IRNode):
 @dataclass
 class RootNode(BlockNode):
     """The root of the IR tree."""
+
+
+def _needs_big_jump(pmem_size: Optional[int]) -> bool:
+    return pmem_size is not None and pmem_size > 2**11
+
+
+def _emit_label_jump(
+    inst_list: list[Instruction],
+    *,
+    target: "Label",
+    pmem_size: Optional[int],
+    if_cond: Optional[str] = None,
+    op: Optional[str] = None,
+) -> None:
+    if _needs_big_jump(pmem_size):
+        inst_list.append(RegWriteInst(dst="s15", src="label", label=target))
+        inst_list.append(JumpInst(addr="s15", if_cond=if_cond, op=op))
+        return
+    inst_list.append(JumpInst(label=target, if_cond=if_cond, op=op))
 
 
 @dataclass
@@ -100,7 +104,9 @@ class IRLoop(IRNode):
     def children(self) -> Iterator[IRNode]:
         yield self.body
 
-    def emit(self, inst_list: list[Instruction], *, pmem_size: Optional[int] = None) -> None:
+    def emit(
+        self, inst_list: list[Instruction], *, pmem_size: Optional[int] = None
+    ) -> None:
 
         start = self.start_label or Label.make_new(f"{self.name}_start")
         end = self.end_label or Label.make_new(f"{self.name}_end")
@@ -118,27 +124,23 @@ class IRLoop(IRNode):
             )
         )
 
+        # Guard: skip the loop when runtime n == 0. Constant n is assumed
+        # positive by upstream passes.
+        if isinstance(self.n, str):
+            _emit_label_jump(
+                inst_list,
+                target=end,
+                pmem_size=pmem_size,
+                if_cond="Z",
+                op=f"{self.n} - #0",
+            )
+
         # Initialize counter
         inst_list.append(RegWriteInst(dst=self.counter_reg, src="imm", lit="#0"))
 
-        # Loop start label
+        # Loop start label sits at the top of the body so the back-edge jumps
+        # straight into the next body iteration.
         inst_list.append(LabelInst(name=start))
-
-        # Stop check
-        op_str = (
-            f"{self.counter_reg} - #{self.n}"
-            if isinstance(self.n, int)
-            else f"{self.counter_reg} - {self.n}"
-        )
-        # Emit condensed conditional jump (OP + IF in one JUMP), aligned with
-        # qick macro CondJump lowering.
-        _emit_label_jump(
-            inst_list,
-            target=end,
-            pmem_size=pmem_size,
-            if_cond="NS",
-            op=op_str,
-        )
 
         # META: LOOP_BODY_START
         inst_list.append(MetaInst(type="LOOP_BODY_START", name=self.name))
@@ -148,8 +150,29 @@ class IRLoop(IRNode):
         # META: LOOP_BODY_END
         inst_list.append(MetaInst(type="LOOP_BODY_END", name=self.name))
 
-        # Jump back
-        _emit_label_jump(inst_list, target=start, pmem_size=pmem_size)
+        # counter += 1
+        inst_list.append(
+            RegWriteInst(
+                dst=self.counter_reg,
+                src="op",
+                op=f"{self.counter_reg} + #1",
+            )
+        )
+
+        # Back-edge: continue while counter < n (signed). Combined cond-jump
+        # replaces the prior stop-check + unconditional jump-back pair.
+        op_str = (
+            f"{self.counter_reg} - #{self.n}"
+            if isinstance(self.n, int)
+            else f"{self.counter_reg} - {self.n}"
+        )
+        _emit_label_jump(
+            inst_list,
+            target=start,
+            pmem_size=pmem_size,
+            if_cond="NS",
+            op=op_str,
+        )
 
         # Loop end label
         inst_list.append(LabelInst(name=end))
@@ -179,7 +202,9 @@ class IRJumpTableLoop(IRNode):
     def children(self) -> Iterator[IRNode]:
         yield from self.bodies
 
-    def emit(self, inst_list: list[Instruction], *, pmem_size: Optional[int] = None) -> None:
+    def emit(
+        self, inst_list: list[Instruction], *, pmem_size: Optional[int] = None
+    ) -> None:
         # Implementation lives in passes.loop_dispatch to avoid pulling
         # codegen helpers into the core node module. Imported lazily.
         from .passes.loop_dispatch import emit_jump_table_loop
@@ -193,7 +218,9 @@ class IRBranchCase(BlockNode):
 
     name: str = ""
 
-    def emit(self, inst_list: list[Instruction], *, pmem_size: Optional[int] = None) -> None:
+    def emit(
+        self, inst_list: list[Instruction], *, pmem_size: Optional[int] = None
+    ) -> None:
         inst_list.append(MetaInst(type="BRANCH_CASE_START", name=self.name))
         super().emit(inst_list, pmem_size=pmem_size)
         inst_list.append(MetaInst(type="BRANCH_CASE_END", name=self.name))
@@ -210,7 +237,9 @@ class IRBranch(IRNode):
     def children(self) -> Iterator[IRNode]:
         yield from self.cases
 
-    def emit(self, inst_list: list[Instruction], *, pmem_size: Optional[int] = None) -> None:
+    def emit(
+        self, inst_list: list[Instruction], *, pmem_size: Optional[int] = None
+    ) -> None:
         n = len(self.cases)
 
         def emit_dispatch(lo: int, hi: int) -> None:
@@ -231,6 +260,12 @@ class IRBranch(IRNode):
             emit_dispatch(lo, mid)
             inst_list.append(LabelInst(name=end_label))
 
-        inst_list.append(MetaInst(type="BRANCH_START", name=self.name, info=dict(compare_reg=self.compare_reg)))
+        inst_list.append(
+            MetaInst(
+                type="BRANCH_START",
+                name=self.name,
+                info=dict(compare_reg=self.compare_reg),
+            )
+        )
         emit_dispatch(0, n)
         inst_list.append(MetaInst(type="BRANCH_END", name=self.name))

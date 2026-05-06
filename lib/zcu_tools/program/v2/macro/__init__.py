@@ -41,8 +41,10 @@ class AdditionalMacroMixin(AsmV2):
             )
         )
 
-    def close_inner_loop(self, name: str, counter_reg: str) -> None:
-        self.append_macro(CloseInnerLoop(name=name, counter_reg=counter_reg))
+    def close_inner_loop(
+        self, name: str, counter_reg: str, n: Union[str, int]
+    ) -> None:
+        self.append_macro(CloseInnerLoop(name=name, counter_reg=counter_reg, n=n))
 
     # ---- delay macro ----
 

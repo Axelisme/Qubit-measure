@@ -78,11 +78,12 @@ def _make_jt_loop(k: int, body_words: int) -> IRJumpTableLoop:
     Label.reset()
     entry_labels = [Label.make_new(f"e_{i}") for i in range(k)]
     exit_label = Label.make_new("jt_exit")
+    # Pure body (1 word). emit_jump_table_loop appends `i += 1` after each
+    # copy, so body_words tracks only the body itself.
     bodies = [
         BlockNode(
             insts=[
                 InstNode(TimeInst(c_op="inc_ref", lit="#1")),
-                InstNode(RegWriteInst(dst="r_i", src="op", op="r_i + #1")),
             ]
         )
         for _ in range(k)
@@ -107,38 +108,36 @@ def test_irjumptableloop_emit_structure_k2_pow2_body():
     # Filter to non-meta for structural inspection.
     real = [inst for inst in out if not isinstance(inst, MetaInst)]
 
-    # Expected sequence:
-    #   JUMP exit -if(Z) -op(n - #0)
-    #   REG_WR i imm #0
-    #   LABEL e_0
-    #   TimeInst inc_ref #1   (body 0)
-    #   REG_WR i op (i + #1)  (from body 0)
-    #   LABEL e_1
-    #   TimeInst inc_ref #1   (body 1)
-    #   REG_WR i op (i + #1)  (from body 1)
-    #   JUMP exit -if(NS) -op(i - n)
-    #   REG_WR i op (n - i)
-    #   JUMP fast_path -if(NS) -op(i - #2)
-    #   REG_WR i op (i - #2)            ; dispatch
-    #   REG_WR i op (ABS i)
-    #   REG_WR s15 label e_0
-    #   REG_WR s15 op (s15 + i)         ; body_words=1 → single add
-    #   JUMP s15
-    #   LABEL fast_path
-    #   REG_WR i op (n - i)
+    # Expected sequence (k=2, body_words=1, stride=2=0b10):
+    # prologue:
+    #   JUMP exit -if(Z) -op(r_n - #0)
+    #   REG_WR r_i op (r_n AND #1)          ; i = n % 2 (remainder into i directly)
+    #   JUMP e_0 -if(Z) -op(r_i - #0)       ; r==0: start full round
+    #   REG_WR r_i op (r_i - #2)            ; i = r - k (< 0)
+    #   REG_WR r_i op (ABS r_i)             ; i = k - r (offset)
+    #   REG_WR s15 label e_0                ; s15 = base addr
+    #   REG_WR r_i op (r_i << #1)           ; shift-add for stride=2
+    #   REG_WR s15 op (s15 + r_i)
+    #   REG_WR r_i imm #0                   ; reset counter
+    #   JUMP s15                             ; → entry_{k-r}
+    # entry_0: TimeInst; REG_WR i+1
+    # entry_1: TimeInst; REG_WR i+1
+    # back_edge:
+    #   JUMP exit -if(NS) -op(r_i - r_n)
     #   JUMP e_0
-    #   LABEL exit
+    # LABEL exit
     types = [type(inst).__name__ for inst in real]
     assert types == [
-        "JumpInst", "RegWriteInst",
-        "LabelInst", "TimeInst", "RegWriteInst",
-        "LabelInst", "TimeInst", "RegWriteInst",
-        "JumpInst",
-        "RegWriteInst", "JumpInst",
-        "RegWriteInst", "RegWriteInst", "RegWriteInst",
-        "RegWriteInst", "JumpInst",
-        "LabelInst", "RegWriteInst", "JumpInst",
-        "LabelInst",
+        "JumpInst",                                        # n==0 guard
+        "RegWriteInst", "JumpInst",                        # i=n%k, jump if r==0
+        "RegWriteInst", "RegWriteInst",                    # i=i-#k, i=ABS i
+        "RegWriteInst",                                    # s15=label entry_0
+        "RegWriteInst", "RegWriteInst",                    # shift-add: i<<=1, s15+=i
+        "RegWriteInst", "JumpInst",                        # i:=0, JUMP s15
+        "LabelInst", "TimeInst", "RegWriteInst",           # entry_0: body, i++
+        "LabelInst", "TimeInst", "RegWriteInst",           # entry_1: body, i++
+        "JumpInst", "JumpInst",                            # back_edge: exit check, → entry_0
+        "LabelInst",                                       # exit
     ]
 
     # Spot-check key operands.
@@ -147,11 +146,12 @@ def test_irjumptableloop_emit_structure_k2_pow2_body():
     assert prologue_jump.op == "r_n - #0"
     assert prologue_jump.if_cond == "Z"
 
-    init_i = real[1]
-    assert isinstance(init_i, RegWriteInst)
-    assert init_i.dst == "r_i" and init_i.lit == "#0"
+    # real[1]: REG_WR r_i op (r_n AND #1) — remainder into i
+    remainder_inst = real[1]
+    assert isinstance(remainder_inst, RegWriteInst)
+    assert remainder_inst.dst == "r_i" and remainder_inst.src == "op"
 
-    # The "REG_WR s15 label e_0" instruction: find it by SRC.
+    # The "REG_WR s15 label e_0" instruction in the prologue dispatch.
     label_writes = [
         inst for inst in real if isinstance(inst, RegWriteInst) and inst.src == "label"
     ]
@@ -159,7 +159,7 @@ def test_irjumptableloop_emit_structure_k2_pow2_body():
     assert label_writes[0].dst == "s15"
     assert label_writes[0].label is jt.entry_labels[0]
 
-    # Final dispatch jump uses s15.
+    # Dispatch jump uses s15.
     dispatch_jumps = [
         inst for inst in real if isinstance(inst, JumpInst) and inst.addr == "s15"
     ]
@@ -167,20 +167,20 @@ def test_irjumptableloop_emit_structure_k2_pow2_body():
 
 
 def test_irjumptableloop_emit_body_words_5_uses_shift_add_seq():
-    jt = _make_jt_loop(k=2, body_words=5)
+    # stride = body_words + 1 = 5 → helper emits two `s15 += r_i` adds
+    # separated by an `r_i <<= 2` shift on r_i.
+    jt = _make_jt_loop(k=2, body_words=4)
     out: list[Instruction] = []
     jt.emit(out)
 
-    # Among REG_WR with dst=s15: one is `label`, then the shift-add seq
-    # contributes 2 adds (`s15 + r_i`). For body_words=5 the helper emits
-    # `s15+=src; src<<=2; s15+=src` so two REG_WR-to-s15 with op form.
-    s15_op_writes = [
+    # shift-add for stride=5=0b101 emits: s15+=src; src<<=2; s15+=src
+    # so exactly two REG_WR with dst=s15 and op="s15 + r_i".
+    s15_add_writes = [
         inst
         for inst in out
-        if isinstance(inst, RegWriteInst) and inst.dst == "s15" and inst.src == "op"
+        if isinstance(inst, RegWriteInst) and inst.dst == "s15" and inst.op == "s15 + r_i"
     ]
-    assert len(s15_op_writes) == 2
-    assert all(w.op == "s15 + r_i" for w in s15_op_writes)
+    assert len(s15_add_writes) == 2
 
 
 def test_irjumptableloop_emit_uses_s15_label_jumps_for_large_pmem():

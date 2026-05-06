@@ -70,14 +70,14 @@ def test_structural_loop_roundtrip():
     # Unbuild (emits instructions)
     opt_insts, *_, cursor = builder.unbuild(root)
 
-    # Verify emitted instructions (no markers)
-    # The new IRLoop.emit() outputs:
-    # REG_WR(init), Label(start), JUMP(end, IF+OP), [BODY...], JUMP(start), Label(end)
+    # Verify emitted instructions (no markers).
+    # IRLoop.emit() (do-while + guard, constant n: no guard) outputs:
+    # REG_WR(init), Label(start), [BODY...], REG_WR(i+1), JUMP(start, IF+OP), Label(end)
 
     expected_cmds = ["REG_WR"]  # Init counter
-    expected_cmds.append("JUMP")  # CondJump out (with IF+OP)
     expected_cmds.append("NOP")  # Body
-    expected_cmds.append("JUMP")  # Jump back
+    expected_cmds.append("REG_WR")  # counter += 1
+    expected_cmds.append("JUMP")  # Cond back-edge (IF=NS, OP=counter-n)
 
     # Note: Labels are extracted into a dictionary when creating binprog, but `emit()` outputs them as LabelInst dicts.
     cmds = [inst.get("CMD") for inst in opt_insts if "CMD" in inst]
@@ -123,18 +123,30 @@ def test_irloop_emit_uses_s15_jump_for_large_pmem():
     builder = IRBuilder()
     prog_list, _labels, _meta, cursor = builder.unbuild(root, pmem_size=4096)
 
+    # Constant n: no guard. Body executes; counter += 1; cond back-edge.
+    # Big-pmem path: back-edge target loaded into s15, then JUMP s15.
     cmds = [inst.get("CMD") for inst in prog_list]
-    assert cmds == ["REG_WR", "REG_WR", "JUMP", "NOP", "REG_WR", "JUMP"]
+    assert cmds == ["REG_WR", "NOP", "REG_WR", "REG_WR", "JUMP"]
 
-    cond_jump = prog_list[2]
-    assert cond_jump["CMD"] == "JUMP"
-    assert cond_jump["ADDR"] == "s15"
-    assert cond_jump["IF"] == "NS"
-    assert cond_jump["OP"] == "r1 - #5"
+    init = prog_list[0]
+    assert init["DST"] == "r1"
+    assert init["LIT"] == "#0"
 
-    back_jump = prog_list[5]
+    incr = prog_list[2]
+    assert incr["DST"] == "r1"
+    assert incr["OP"] == "r1 + #1"
+
+    write_label = prog_list[3]
+    assert write_label["CMD"] == "REG_WR"
+    assert write_label["DST"] == "s15"
+    assert write_label["SRC"] == "label"
+    assert write_label["LABEL"] == "big_start"
+
+    back_jump = prog_list[4]
     assert back_jump["CMD"] == "JUMP"
     assert back_jump["ADDR"] == "s15"
+    assert back_jump["IF"] == "NS"
+    assert back_jump["OP"] == "r1 - #5"
     assert "LABEL" not in back_jump
 
-    assert cursor.final_p_addr == 6
+    assert cursor.final_p_addr == 5

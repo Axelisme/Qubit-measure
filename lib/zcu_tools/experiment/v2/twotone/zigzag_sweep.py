@@ -82,19 +82,20 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
         repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse",
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> ZigZagScanResult:
+        original_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
         times = np.arange(cfg.n_times)
 
-        sweep_items = {k: v for k, v in cfg.sweep.model_dump().items() if v is not None}
-        if len(sweep_items) != 1:
-            raise ValueError("Expected exactly one sweep key")
-
-        x_key, x_sweep = next(iter(sweep_items.items()))
-        assert x_sweep is not None
-        if x_key not in ZigZagScanExp.SWEEP_MAP:
-            raise ValueError(f"Unsupported sweep key: {x_key}")
+        if cfg.sweep.freq is not None:
+            x_key = "freq"
+            x_sweep = cfg.sweep.freq
+        elif cfg.sweep.gain is not None:
+            x_key = "gain"
+            x_sweep = cfg.sweep.gain
+        else:
+            raise ValueError("No sweep parameter found in cfg")
         x_info = ZigZagScanExp.SWEEP_MAP[x_key]
 
         repeat_pulse = getattr(modules, repeat_on)
@@ -167,7 +168,7 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
             signals = np.asarray(signals, dtype=np.complex128)
 
         # record last cfg and result
-        self.last_cfg = deepcopy(cfg)
+        self.last_cfg = original_cfg
         self.last_result = (times, values, signals)
 
         return times, values, signals
