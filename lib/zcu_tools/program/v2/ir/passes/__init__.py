@@ -1,5 +1,13 @@
-from .base import LinearPassAdapter, OptimizationPassBase, block_contains_structural_node
-from .control_flow import BlockMergePass, BranchEliminationPass, DeadLabelEliminationPass
+from .base import (
+    LinearPassAdapter,
+    OptimizationPassBase,
+    block_contains_structural_node,
+)
+from .control_flow import (
+    BlockMergePass,
+    BranchEliminationPass,
+    DeadLabelEliminationPass,
+)
 from .dataflow import (
     DeadWriteEliminationLegacyPass,
     DeadWriteEliminationLinear,

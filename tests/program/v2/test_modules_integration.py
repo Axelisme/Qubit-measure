@@ -349,8 +349,8 @@ class TestControlIntegration:
             r.add_content(SoftDelay("d", 0.1))
             prog = _make_prog(modules=[r], sweep=[("n_count", 4)])
 
-            start_addr = _label_addr(prog.labels, "r_cnt_start")
-            end_addr = _label_addr(prog.labels, "r_cnt_end")
+            start_addr = _label_addr(prog.labels, "r_cnt_start_0")
+            end_addr = _label_addr(prog.labels, "r_cnt_end_0")
 
             # Counter init (REG_WR imm #0) sits between the runtime guard and
             # the start label.

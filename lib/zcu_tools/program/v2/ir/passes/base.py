@@ -15,11 +15,14 @@ from ..instructions import (
     WaitInst,
 )
 from ..node import BlockNode, InstNode, RootNode
-from ..pipeline import AbsIRPass, PipeLineContext
-from ..traversal import IRTransformer
 
 # Re-export for callers that import LinearPassAdapter from here.
-from ..pipeline import LinearPassAdapter  # noqa: F401
+from ..pipeline import (
+    AbsIRPass,
+    LinearPassAdapter,  # noqa: F401
+    PipeLineContext,
+)
+from ..traversal import IRTransformer
 
 
 class OptimizationPassBase(AbsIRPass, IRTransformer):

@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from typing import cast
 
-from zcu_tools.program.v2.ir.instructions import NopInst, RegWriteInst, TimeInst, WaitInst
+from zcu_tools.program.v2.ir.instructions import (
+    NopInst,
+    RegWriteInst,
+    TimeInst,
+    WaitInst,
+)
 from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, InstNode, RootNode
 from zcu_tools.program.v2.ir.passes.timeline import TimedMergePass, ZeroDelayDCEPass
 from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext

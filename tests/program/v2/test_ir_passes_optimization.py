@@ -14,7 +14,14 @@ from zcu_tools.program.v2.ir.instructions import (
     TimeInst,
 )
 from zcu_tools.program.v2.ir.labels import Label
-from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, InstNode, IRLoop, IRNode, RootNode
+from zcu_tools.program.v2.ir.node import (
+    BasicBlockNode,
+    BlockNode,
+    InstNode,
+    IRLoop,
+    IRNode,
+    RootNode,
+)
 from zcu_tools.program.v2.ir.passes import (
     DeadLabelEliminationPass,
     DeadWriteEliminationPass,

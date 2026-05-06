@@ -22,7 +22,14 @@ from zcu_tools.program.v2.ir.instructions import (
     RegWriteInst,
 )
 from zcu_tools.program.v2.ir.labels import Label
-from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, InstNode, IRLoop, IRNode, RootNode
+from zcu_tools.program.v2.ir.node import (
+    BasicBlockNode,
+    BlockNode,
+    InstNode,
+    IRLoop,
+    IRNode,
+    RootNode,
+)
 from zcu_tools.program.v2.ir.passes import BranchEliminationPass, UnrollSmallLoopPass
 from zcu_tools.program.v2.ir.passes.loop_dispatch import build_jump_table_blocks
 from zcu_tools.program.v2.ir.pipeline import (
@@ -30,7 +37,6 @@ from zcu_tools.program.v2.ir.pipeline import (
     PipeLineContext,
     make_default_pipeline,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -219,13 +219,13 @@ def make_default_pipeline(pmem_capacity: int) -> IRPipeLine:
         BlockMergePass,
         BranchEliminationPass,
         DeadLabelEliminationPass,
-        DeadWriteEliminationLinear,
         DeadWriteEliminationLegacyPass,
-        TimedMergeLinear,
+        DeadWriteEliminationLinear,
         TimedMergeLegacyPass,
+        TimedMergeLinear,
         UnrollSmallLoopPass,
-        ZeroDelayDCELinear,
         ZeroDelayDCELegacyPass,
+        ZeroDelayDCELinear,
     )
 
     config = deepcopy(DEFAULT_PIPELINE_CONFIG)

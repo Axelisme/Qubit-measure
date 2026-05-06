@@ -6,10 +6,10 @@
 from __future__ import annotations
 
 from zcu_tools.program.v2.ir.instructions import (
+    JumpInst,
     LabelInst,
     NopInst,
     RegWriteInst,
-    JumpInst,
 )
 from zcu_tools.program.v2.ir.labels import Label
 from zcu_tools.program.v2.ir.node import BasicBlockNode, RootNode
@@ -19,7 +19,11 @@ from zcu_tools.program.v2.ir.passes.control_flow import (
     DeadLabelEliminationPass,
 )
 from zcu_tools.program.v2.ir.passes.dataflow import DeadWriteEliminationLinear
-from zcu_tools.program.v2.ir.pipeline import LinearPipeline, PipeLineConfig, PipeLineContext
+from zcu_tools.program.v2.ir.pipeline import (
+    LinearPipeline,
+    PipeLineConfig,
+    PipeLineContext,
+)
 
 
 def _ctx() -> PipeLineContext:
