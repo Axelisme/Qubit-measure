@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from qick.asm_v2 import QickProgramV2
-from typing_extensions import Any
+from typing_extensions import Any, Optional
 
 from .builder import IRBuilder
 from .pipeline import make_default_pipeline
@@ -32,18 +30,17 @@ class IRCompileMixin(QickProgramV2):
 
     def optimize_asm(self) -> None:
         insts: list[dict[str, Any]] = self.prog_list
+        labels = self.labels
         meta_infos = self.meta_infos
 
-        builder = IRBuilder()
-        ir = builder.build(insts, self.labels, meta_infos)
+        builder = IRBuilder(self)
+        ir = builder.build(insts, labels, meta_infos)
 
         pipeline = make_default_pipeline(pmem_capacity=self.tproccfg["pmem_size"])
 
         opt_ir, _ctx = pipeline(ir)
 
-        opt_insts, opt_labels, opt_meta_infos, cursor = builder.unbuild(
-            opt_ir, pmem_size=self.tproccfg["pmem_size"]
-        )
+        opt_insts, opt_labels, opt_meta_infos, cursor = builder.unbuild(opt_ir)
 
         self.prog_list = opt_insts
         self.labels = opt_labels

@@ -16,6 +16,7 @@ class PipeLineConfig:
     enable_dead_label: bool = True
     enable_zero_delay_dce: bool = True
     enable_timed_instruction_merge: bool = True
+    pmem_capacity: int | None = None
     pmem_budget: int | None = None
 
     # Hard cap on the unroll factor k. For register-driven loops k is also
@@ -74,6 +75,8 @@ def make_default_pipeline(pmem_capacity: int) -> PipeLine:
     )
 
     config = deepcopy(DEFAULT_PIPELINE_CONFIG)
+    if config.pmem_capacity is None:
+        config.pmem_capacity = pmem_capacity
     if config.pmem_budget is None:
         config.pmem_budget = int(0.8 * pmem_capacity)
 

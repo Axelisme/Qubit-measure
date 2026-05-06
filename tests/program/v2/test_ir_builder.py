@@ -62,7 +62,14 @@ def test_unlink_inserts_labels_and_strips_p_addr():
     ]
     labels = {"start": "&0", "end": "&2"}
 
-    logical_insts = linker.unlink(prog_list, labels, meta_infos=[])
+    logical_insts = linker.unlink(
+        prog_list,
+        labels,
+        meta_infos=[
+            {"kind": "label", "name": "start", "p_addr": 0},
+            {"kind": "label", "name": "end", "p_addr": 2},
+        ],
+    )
 
     # Compare CMD/LABEL
     actual = []
@@ -85,7 +92,14 @@ def test_unlink_supports_multiple_labels_same_address():
     prog_list = [{"CMD": "NOP", "P_ADDR": 0}]
     labels = {"first": "&0", "second": "&0"}
 
-    logical_insts = linker.unlink(prog_list, labels, meta_infos=[])
+    logical_insts = linker.unlink(
+        prog_list,
+        labels,
+        meta_infos=[
+            {"kind": "label", "name": "first", "p_addr": 0},
+            {"kind": "label", "name": "second", "p_addr": 0},
+        ],
+    )
 
     actual = []
     for inst in logical_insts:
@@ -102,7 +116,7 @@ def test_unlink_supports_multiple_labels_same_address():
 
 
 def test_builder_build_accepts_qick_labels_map():
-    builder = IRBuilder()
+    builder = IRBuilder(None)  # type: ignore
     prog_list = [
         {"CMD": "REG_WR", "DST": "r1", "SRC": "imm", "LIT": "#0", "P_ADDR": 1},
         {"CMD": "TEST", "OP": "r1 - #5", "UF": "0", "P_ADDR": 2},

@@ -11,6 +11,19 @@ from .node import BlockNode, InstNode, IRNode
 class IRTransformer:
     """Base class for IR transformations with automatic recursion."""
 
+    @staticmethod
+    def _normalize_inst_visit_result(
+        res: Union[Instruction, IRNode, List[Union[Instruction, IRNode]], None],
+    ) -> Union[IRNode, List[IRNode], None]:
+        if res is None:
+            return None
+        if isinstance(res, list):
+            return [
+                InstNode(item) if isinstance(item, Instruction) else item
+                for item in res
+            ]
+        return InstNode(res) if isinstance(res, Instruction) else res
+
     def visit(self, node: IRNode) -> Union[IRNode, List[IRNode], None]:
         """Visit a node, returning a new node, a list of nodes, the same node, or None to delete."""
         # Dynamic dispatch based on class name
@@ -24,19 +37,7 @@ class IRTransformer:
         method_name = f"visit_{inst.__class__.__name__}"
         visitor = getattr(self, method_name, None)
         if visitor:
-            # If the visitor returns an Instruction, wrap it back in an InstNode
-            # If it returns an IRNode or list[IRNode], return it as is.
-            res = visitor(inst)
-            if res is None:
-                return None
-            if isinstance(res, list):
-                return [
-                    (InstNode(item) if isinstance(item, Instruction) else item)
-                    for item in res
-                ]
-            if isinstance(res, Instruction):
-                return InstNode(res)
-            return res
+            return self._normalize_inst_visit_result(visitor(inst))
 
         return self.generic_visit(node)
 
@@ -79,11 +80,6 @@ class IRTransformer:
         return node
 
 
-def iter_child_nodes(node: IRNode) -> Iterator[IRNode]:
-    """Yield structural child nodes."""
-    return node.children()
-
-
 def walk_nodes(node: IRNode) -> Iterator[IRNode]:
     seen: set[int] = set()
 
@@ -93,7 +89,7 @@ def walk_nodes(node: IRNode) -> Iterator[IRNode]:
             return
         seen.add(ident)
         yield current
-        for child in iter_child_nodes(current):
+        for child in current.children():
             yield from _walk(child)
 
     yield from _walk(node)

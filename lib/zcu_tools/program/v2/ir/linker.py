@@ -5,13 +5,12 @@ from dataclasses import dataclass
 
 from typing_extensions import Any
 
+from .labels import Label
 from .instructions import Instruction, LabelInst, MetaInst
 
 
 @dataclass(frozen=True)
 class IRCursor:
-    """Compile cursors aligned with QICK assembler semantics."""
-
     final_p_addr: int
     final_line: int
 
@@ -29,12 +28,7 @@ class IRLinker:
         p_addr = 0
         line = 0
         for inst in inst_list:
-            if isinstance(inst, LabelInst):
-                labels[str(inst.name)] = f"&{p_addr}"
-                meta_infos.append(
-                    dict(kind="label", name=str(inst.name), p_addr=p_addr)
-                )
-            elif isinstance(inst, MetaInst):
+            if isinstance(inst, MetaInst):
                 meta_infos.append(
                     dict(
                         kind="meta",
@@ -44,15 +38,26 @@ class IRLinker:
                         p_addr=p_addr,
                     )
                 )
+                continue
+            line += 1
+            if isinstance(inst, LabelInst):
+                labels[str(inst.name)] = f"&{p_addr}"
+                meta_infos.append(
+                    dict(kind="label", name=str(inst.name), p_addr=p_addr)
+                )
             else:
                 d = inst.to_dict()
                 d["P_ADDR"] = p_addr
                 d["LINE"] = line
                 prog_list.append(d)
                 p_addr += inst.addr_inc
-                line += 1
 
-        return prog_list, labels, meta_infos, self.compute_cursors(inst_list)
+        return (
+            prog_list,
+            labels,
+            meta_infos,
+            IRCursor(final_p_addr=p_addr, final_line=line),
+        )
 
     def unlink(
         self,
@@ -60,25 +65,20 @@ class IRLinker:
         labels: dict[str, Any],
         meta_infos: list[dict[str, Any]],
     ) -> list[Instruction]:
-        from .labels import Label
+        # Parse fallback labels (labels added manually without calling _add_label)
+        labels_by_addr: dict[int, list[str]] = defaultdict(list)
+        tracked_labels = {m["name"] for m in meta_infos if m.get("kind") == "label"}
+        for label_name in labels.keys():
+            if label_name not in tracked_labels:
+                raise ValueError(f"Untracked label {label_name!r} in labels dict")
 
+        logical_insts: list[Instruction] = []
         label_map: dict[str, Label] = {}
 
         def get_label(name: str) -> Label:
             if name not in label_map:
                 label_map[name] = Label.make_new(name)
             return label_map[name]
-
-        logical_insts: list[Instruction] = []
-
-        # Parse fallback labels (labels added manually without calling _add_label)
-        labels_by_addr: dict[int, list[str]] = defaultdict(list)
-        tracked_labels = {m["name"] for m in meta_infos if m.get("kind") == "label"}
-
-        for label_name, label_addr in labels.items():
-            if label_name not in tracked_labels:
-                p_addr = self._parse_label_addr(label_name, label_addr)
-                labels_by_addr[p_addr].append(label_name)
 
         # Group tracked markers by p_addr
         markers_by_addr: dict[int, list[dict]] = defaultdict(list)
@@ -146,20 +146,3 @@ class IRLinker:
         raise ValueError(
             f"Invalid label address type for {label_name!r}: {label_addr!r}"
         )
-
-    @staticmethod
-    def compute_cursors(inst_list: list[Instruction]) -> IRCursor:
-        """Recompute QICK-compatible cursors from the emitted IR sequence."""
-
-        p_addr = 0
-        line = 0
-
-        for inst in inst_list:
-            if isinstance(inst, MetaInst):
-                continue
-
-            line += 1
-            if not isinstance(inst, LabelInst):
-                p_addr += inst.addr_inc
-
-        return IRCursor(final_p_addr=p_addr, final_line=line)

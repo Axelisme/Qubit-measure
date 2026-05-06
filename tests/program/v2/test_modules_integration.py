@@ -14,7 +14,7 @@ from qick.asm_v2 import Label, WriteReg
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.macro.loop import OpenInnerLoop
 from zcu_tools.program.v2.modular import ModularProgramV2
-from zcu_tools.program.v2.modules.control import Branch, Repeat
+from zcu_tools.program.v2.modules.control import Repeat
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, Join, SoftDelay
 from zcu_tools.program.v2.modules.dmem import LoadValue, ScanWith
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg

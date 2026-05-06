@@ -1,4 +1,5 @@
 from typing import Any
+from unittest.mock import MagicMock
 
 from zcu_tools.program.v2.ir.builder import IRBuilder
 from zcu_tools.program.v2.ir.instructions import NopInst
@@ -54,7 +55,9 @@ def test_structural_loop_roundtrip():
         },
     ]
 
-    builder = IRBuilder()
+    prog = MagicMock()
+    prog.tproccfg = {"pmem_size": 1024}
+    builder = IRBuilder(prog)
     root = builder.build(prog_list, {}, meta_infos)
 
     # Verify IR structure
@@ -90,10 +93,7 @@ def test_pipeline_roundtrip_with_normalization():
     # Test that the pipeline preserves well-formed loops
     # Use a large trip count to avoid automatic unrolling (default max is 16)
     loop = IRLoop(name="r", counter_reg="c", n=100)
-
-    root = RootNode(
-        insts=[loop],
-    )
+    root = RootNode(insts=[loop])
 
     pipeline = make_default_pipeline(pmem_capacity=8192)
     # Actually wait, make_default_pipeline takes pmem_capacity, not config.
@@ -120,8 +120,10 @@ def test_irloop_emit_uses_s15_jump_for_large_pmem():
         ]
     )
 
-    builder = IRBuilder()
-    prog_list, _labels, _meta, cursor = builder.unbuild(root, pmem_size=4096)
+    prog = MagicMock()
+    prog.tproccfg = {"pmem_size": 4096}
+    builder = IRBuilder(prog)
+    prog_list, *_, cursor = builder.unbuild(root)
 
     # Constant n: no guard. Body executes; counter += 1; cond back-edge.
     # Big-pmem path: back-edge target loaded into s15, then JUMP s15.
