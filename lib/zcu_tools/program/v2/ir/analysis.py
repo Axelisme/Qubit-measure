@@ -13,7 +13,7 @@ from .instructions import (
     TimeInst,
     WmemWriteInst,
 )
-from .node import BlockNode, InstNode, IRBranch, IRJumpTableLoop, IRLoop, IRNode
+from .node import BasicBlockNode, BlockNode, InstNode, IRBranch, IRLoop, IRNode
 
 if TYPE_CHECKING:
     from .pipeline import PipeLineConfig
@@ -29,7 +29,17 @@ def estimate_body_scheduled_ticks(body: list["IRNode"]) -> int:
     """
     total = 0
     for node in body:
-        if isinstance(node, BlockNode):
+        if isinstance(node, BasicBlockNode):
+            for inst in node.insts:
+                if isinstance(inst, TimeInst) and inst.c_op == "inc_ref":
+                    if inst.r1 is not None:
+                        continue
+                    if inst.lit is not None and inst.lit.startswith("#"):
+                        try:
+                            total += int(inst.lit[1:])
+                        except ValueError:
+                            continue
+        elif isinstance(node, BlockNode):
             total += estimate_body_scheduled_ticks(node.insts)
         elif isinstance(node, InstNode):
             inst = node.inst
@@ -57,9 +67,6 @@ def estimate_body_scheduled_ticks(body: list["IRNode"]) -> int:
             ]
             if case_ticks:
                 total += min(case_ticks)
-        elif isinstance(node, IRJumpTableLoop):
-            # n_reg is dynamic; lower bound on guaranteed scheduled IO is 0.
-            pass
     return total
 
 
@@ -71,13 +78,17 @@ def estimate_flat_size(nodes: list["IRNode"]) -> int:
     """
     size = 0
     for node in nodes:
-        if isinstance(node, BlockNode):
+        if isinstance(node, BasicBlockNode):
+            for inst in node.insts:
+                if not isinstance(inst, (LabelInst, MetaInst)):
+                    size += inst.addr_inc
+            if node.branch is not None:
+                size += node.branch.addr_inc
+        elif isinstance(node, BlockNode):
             size += estimate_flat_size(node.insts)
         elif isinstance(node, InstNode):
             inst = node.inst
-            if isinstance(inst, LabelInst):
-                pass  # labels occupy no pmem slot
-            else:
+            if not isinstance(inst, LabelInst):
                 size += inst.addr_inc
         elif isinstance(node, IRLoop):
             inner = estimate_flat_size(node.body.insts)
@@ -99,16 +110,6 @@ def estimate_flat_size(nodes: list["IRNode"]) -> int:
                 (estimate_flat_size(case.insts) for case in node.cases), default=0
             )
             size += dispatch_words + case_size
-        elif isinstance(node, IRJumpTableLoop):
-            # See passes.loop_dispatch.emit_jump_table_loop for the exact
-            # shape. Approximate count (labels and meta are 0 words):
-            #   prologue (2) + k * (body_words + 1 i++) + back-edge (3)
-            #   + dispatch (3 + shift_add(<= max_words)) + JUMP s15 (1)
-            #   + fast_path (2)
-            # We use a generous cap of 16 dispatch words as a reasonable
-            # upper bound; budgets here are advisory.
-            per_body = sum(estimate_flat_size(b.insts) for b in node.bodies)
-            size += 2 + per_body + node.k + 3 + 16 + 1 + 2
     return size
 
 
@@ -122,12 +123,24 @@ def instruction_writes(inst: Instruction) -> set[str]:
     return set(inst.reg_write)
 
 
-def estimate_body_cost(body: list["IRNode"], config: PipeLineConfig) -> int:
+def estimate_body_cost(body: list["IRNode"], config: "PipeLineConfig") -> int:
     """Estimate the cycle cost of executing a sequence of IR nodes."""
 
     cost = 0
     for node in body:
-        if isinstance(node, BlockNode):
+        if isinstance(node, BasicBlockNode):
+            for inst in node.insts:
+                if isinstance(inst, (PortWriteInst, WmemWriteInst)):
+                    cost += config.cost_wmem
+                elif isinstance(inst, (DmemReadInst, DmemWriteInst)):
+                    cost += config.cost_dmem
+                elif isinstance(inst, (MetaInst, LabelInst)):
+                    pass
+                else:
+                    cost += config.cost_default
+            if node.branch is not None:
+                cost += config.cost_default
+        elif isinstance(node, BlockNode):
             cost += estimate_body_cost(node.insts, config)
         elif isinstance(node, InstNode):
             inst = node.inst
@@ -136,14 +149,11 @@ def estimate_body_cost(body: list["IRNode"], config: PipeLineConfig) -> int:
             elif isinstance(inst, (DmemReadInst, DmemWriteInst)):
                 cost += config.cost_dmem
             elif isinstance(inst, (MetaInst, LabelInst)):
-                pass  # No runtime cycle cost
+                pass
             else:
                 cost += config.cost_default
         elif isinstance(node, IRLoop):
-            # Loop iteration takes: testing counter (default), jump back (jump_flush), and body
-
             loop_overhead = 2 * config.cost_default + config.cost_jump_flush
-            # If nested loop has constant n, multiply inner cost + loop overhead
             inner_cost = estimate_body_cost(node.body.insts, config)
 
             if isinstance(node.n, int):
@@ -153,9 +163,6 @@ def estimate_body_cost(body: list["IRNode"], config: PipeLineConfig) -> int:
             else:
                 cost += inner_cost + loop_overhead
         elif isinstance(node, IRBranch):
-            # Dispatch overhead: binary tree depth is ceil(log2(n)), each level costs
-            # one TEST + one JUMP (2 * cost_default) plus a final unconditional JUMP.
-
             n_cases = len(node.cases)
             dispatch_depth = math.ceil(math.log2(n_cases)) if n_cases > 1 else 0
             dispatch_overhead = dispatch_depth * (
@@ -166,15 +173,5 @@ def estimate_body_cost(body: list["IRNode"], config: PipeLineConfig) -> int:
                 default=0,
             )
             cost += dispatch_overhead + case_cost
-        elif isinstance(node, IRJumpTableLoop):
-            # Conservative lower bound on JT loop cost: one body execution
-            # plus the jump-table back-edge / dispatch (a constant ~10
-            # cycles). The runtime n is unknown so we cannot project a
-            # better estimate.
-            body_cost = max(
-                (estimate_body_cost(b.insts, config) for b in node.bodies),
-                default=0,
-            )
-            cost += body_cost + 10
 
     return cost

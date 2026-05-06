@@ -13,9 +13,9 @@ from ..analysis import (
 )
 from ..instructions import RegWriteInst
 from ..labels import Label
-from ..node import BlockNode, InstNode, IRJumpTableLoop, IRLoop, IRNode
+from ..node import BasicBlockNode, BlockNode, InstNode, IRLoop, IRNode
 from .base import OptimizationPassBase
-from .loop_dispatch import shift_add_multiply
+from .loop_dispatch import build_jump_table_blocks, shift_add_multiply
 
 logger = logging.getLogger(__name__)
 
@@ -254,12 +254,15 @@ class UnrollSmallLoopPass(OptimizationPassBase):
         # ── Register-driven (no exact hint) → jump-table dispatch ──
         if not isinstance(node.n, str):
             return node  # unexpected n type
-        return self._maybe_build_jump_table(node, loop_overhead, cfg) or node
+        jt_blocks = self._maybe_build_jump_table(node, loop_overhead, cfg)
+        if jt_blocks is None:
+            return node
+        return list(jt_blocks)  # list[BasicBlockNode] → list[IRNode] (coercion)
 
     def _maybe_build_jump_table(
         self, node: IRLoop, loop_overhead: int, cfg
-    ) -> Optional[IRNode]:
-        """Try to build an IRJumpTableLoop for a register-driven loop.
+    ) -> Optional[list[BasicBlockNode]]:
+        """Try to build jump-table BasicBlockNodes for a register-driven loop.
 
         Returns None when any precondition fails (k <= 1 after pow2
         rounding, body_words == 0, dispatch shift-add too long, etc.) so
@@ -343,7 +346,8 @@ class UnrollSmallLoopPass(OptimizationPassBase):
         exit_label = Label.make_new(f"{node.name}_jt_exit")
         bodies = [BlockNode(insts=deepcopy(node.body.insts)) for _ in range(k)]
 
-        return IRJumpTableLoop(
+        return build_jump_table_blocks(
+            name=node.name,
             n_reg=str(node.n),
             counter_reg=node.counter_reg,
             k=k,
@@ -351,5 +355,4 @@ class UnrollSmallLoopPass(OptimizationPassBase):
             entry_labels=entry_labels,
             exit_label=exit_label,
             bodies=bodies,
-            name=node.name,
         )

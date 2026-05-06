@@ -6,7 +6,7 @@ from zcu_tools.program.v2.ir.instructions import (
     RegWriteInst,
 )
 from zcu_tools.program.v2.ir.linker import IRLinker
-from zcu_tools.program.v2.ir.node import InstNode, IRBranch, IRBranchCase, IRLoop
+from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRBranch, IRLoop
 
 
 def test_instruction_parses_jump_label_to_jumpinst():
@@ -17,41 +17,39 @@ def test_instruction_parses_jump_label_to_jumpinst():
     assert inst.if_cond is None
 
 
-def test_branch_roundtrip_preserves_cases():
-    """Verify IRBranch.emit() + parse_branch() round-trips correctly."""
-    import dataclasses
-
-    from zcu_tools.program.v2.ir.factory import InstructionStream, parse_branch
+def test_branch_lower_produces_basic_blocks():
+    """Verify IRBranch.lower() produces a well-formed BasicBlockNode sequence."""
     from zcu_tools.program.v2.ir.instructions import MetaInst
+    from zcu_tools.program.v2.ir.labels import Label
+
+    Label.reset()
 
     case_0_inst = RegWriteInst(dst="r0", src="imm", lit="#1")
     case_1_inst = RegWriteInst(dst="r0", src="imm", lit="#2")
 
-    case_0 = IRBranchCase(name="0", insts=[InstNode(case_0_inst)])
-    case_1 = IRBranchCase(name="1", insts=[InstNode(case_1_inst)])
+    case_0 = BlockNode(insts=[BasicBlockNode(insts=[case_0_inst])])
+    case_1 = BlockNode(insts=[BasicBlockNode(insts=[case_1_inst])])
 
     branch = IRBranch(name="sel", compare_reg="r_sel", cases=[case_0, case_1])
+    blocks = branch.lower()
 
-    inst_list: list[Instruction] = []
-    branch.emit(inst_list)
+    assert all(isinstance(b, BasicBlockNode) for b in blocks)
 
-    # Patch BRANCH_START args to carry compare_reg (as the linker does from info dict)
-    patched = []
-    for inst in inst_list:
-        if isinstance(inst, MetaInst) and inst.type == "BRANCH_START":
-            inst = dataclasses.replace(inst, info=dict(compare_reg=branch.compare_reg))
-        patched.append(inst)
+    # First block carries BRANCH_START meta with compare_reg.
+    first_metas = [i for i in blocks[0].insts if isinstance(i, MetaInst)]
+    assert any(m.type == "BRANCH_START" and m.info.get("compare_reg") == "r_sel"
+               for m in first_metas)
 
-    stream = InstructionStream(patched)
-    b2 = parse_branch(stream)
+    # Last block carries BRANCH_END meta.
+    last_metas = [i for i in blocks[-1].insts if isinstance(i, MetaInst)]
+    assert any(m.type == "BRANCH_END" for m in last_metas)
 
-    assert stream.peek() is None, "Stream should be fully consumed"
-    assert b2.name == "sel"
-    assert b2.compare_reg == "r_sel"
-    assert len(b2.cases) == 2
-    # Binary dispatch emits right half before left half, so case "1" appears first
-    case_names = {c.name for c in b2.cases}
-    assert case_names == {"0", "1"}
+    # Both case instructions should appear in the flattened output.
+    all_insts = []
+    for bb in blocks:
+        all_insts.extend(bb.insts)
+    assert case_0_inst in all_insts
+    assert case_1_inst in all_insts
 
 
 def test_unlink_inserts_labels_and_strips_p_addr():
@@ -164,5 +162,6 @@ def test_builder_build_accepts_qick_labels_map():
     assert len(root.insts) == 1
     loop = root.insts[0]
     assert isinstance(loop, IRLoop)
-    assert str(loop.start_label) == "loop1_start"
-    assert str(loop.end_label) == "loop1_end"
+    assert loop.name == "loop1"
+    assert loop.counter_reg == "r1"
+    assert loop.n == 5

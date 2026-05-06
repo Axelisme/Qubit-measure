@@ -67,8 +67,7 @@ def test_structural_loop_roundtrip():
     assert loop.name == "loop1"
     assert loop.counter_reg == "r1"
     assert loop.n == 5
-    assert str(loop.start_label) == "loop1_start"
-    assert str(loop.end_label) == "loop1_end"
+    # start_label / end_label are no longer captured during parse (generated at lower() time).
 
     # Unbuild (emits instructions)
     opt_insts, *_, cursor = builder.unbuild(root)

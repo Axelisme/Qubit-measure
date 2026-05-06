@@ -36,15 +36,19 @@ def test_parse_loop_restores_range_hint():
 
 
 def test_emit_loop_preserves_range_hint_in_meta():
-    """Verify that emitting IRLoop puts range_hint back into MetaInst."""
+    """Verify that lowering IRLoop puts range_hint back into MetaInst."""
     loop = IRLoop(name="test", counter_reg="r0", n=100, range_hint=(100, 100))
-    inst_list = []
-    loop.emit(inst_list)
+    blocks = loop.lower()
+
+    # Collect all instructions from all blocks.
+    all_insts = []
+    for bb in blocks:
+        all_insts.extend(bb.insts)
 
     # Find LOOP_START meta
     start_meta = next(
         inst
-        for inst in inst_list
+        for inst in all_insts
         if isinstance(inst, MetaInst) and inst.type == "LOOP_START"
     )
     assert start_meta.info["range_hint"] == (100, 100)

@@ -3,8 +3,10 @@ from __future__ import annotations
 from typing import cast
 
 from zcu_tools.program.v2.ir.instructions import (
+    Instruction,
     JumpInst,
     LabelInst,
+    MetaInst,
     NopInst,
     PortWriteInst,
     RegWriteInst,
@@ -12,7 +14,7 @@ from zcu_tools.program.v2.ir.instructions import (
     TimeInst,
 )
 from zcu_tools.program.v2.ir.labels import Label
-from zcu_tools.program.v2.ir.node import BlockNode, InstNode, IRLoop, IRNode, RootNode
+from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, InstNode, IRLoop, IRNode, RootNode
 from zcu_tools.program.v2.ir.passes import (
     DeadLabelEliminationPass,
     DeadWriteEliminationPass,
@@ -26,14 +28,55 @@ from zcu_tools.program.v2.ir.pipeline import (
 
 
 def _flat_inst_count(root: RootNode) -> int:
-    """Count InstNodes after flattening BlockNodes recursively."""
+    """Count non-meta instructions after flattening BlockNodes and BasicBlockNodes."""
     count = 0
     stack: list[IRNode] = list(root.insts)
     while stack:
         node = stack.pop()
-        if isinstance(node, InstNode):
-            count += 1
+        if isinstance(node, BasicBlockNode):
+            for inst in node.insts:
+                if not isinstance(inst, (LabelInst, MetaInst)):
+                    count += 1
+            if node.branch is not None:
+                count += 1
+        elif isinstance(node, InstNode):
+            if not isinstance(node.inst, (LabelInst, MetaInst)):
+                count += 1
         elif isinstance(node, BlockNode):
+            stack.extend(node.insts)
+    return count
+
+
+def _flatten_root(root: RootNode) -> list[Instruction]:
+    """Flatten a RootNode into a flat instruction list via the linker."""
+    from zcu_tools.program.v2.ir.linker import IRLinker
+    linker = IRLinker()
+    prog_list, labels, meta_infos, _ = linker.link(root)
+    logical = linker.unlink(prog_list, labels, meta_infos)
+    return logical
+
+
+def _has_jump_table_blocks(root: RootNode) -> bool:
+    """Check if the root contains BasicBlockNode(s) with fix_inst_num=True."""
+    stack: list[IRNode] = list(root.insts)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, BasicBlockNode) and node.fix_inst_num:
+            return True
+        if isinstance(node, BlockNode):
+            stack.extend(node.insts)
+    return False
+
+
+def _count_fixed_blocks(root: RootNode) -> int:
+    """Count BasicBlockNodes with fix_inst_num=True."""
+    count = 0
+    stack: list[IRNode] = list(root.insts)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, BasicBlockNode) and node.fix_inst_num:
+            count += 1
+        if isinstance(node, BlockNode):
             stack.extend(node.insts)
     return count
 
@@ -248,8 +291,9 @@ def test_unroll_full_expansion_preserves_internal_label():
 
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
 
-    # init + 3*(LabelInst + TimeInst + increment) = 1 + 3*3 = 10
-    assert _flat_inst_count(out) == 10
+    # init(1) + 3*(TimeInst + increment)(2 each) = 1 + 3*2 = 7
+    # LabelInsts are not counted (they occupy no pmem).
+    assert _flat_inst_count(out) == 7
 
 
 def test_unroll_partial_unroll_produces_loop_plus_remainder():
@@ -477,10 +521,8 @@ def test_unroll_non_exact_register_hint_emits_jump_table():
     """range_hint=(2,5): non-exact register loop now goes through Phase 8D jump table.
 
     body=inc_ref #1 → scheduled=1, body_cost=1, slack=0 → k_timing=cap=8.
-    body_size=1; floor_pow2(8) = 8 → IRJumpTableLoop(k=8).
+    body_size=1; floor_pow2(8) = 8 → 8 fixed BasicBlockNodes (one per entry).
     """
-    from zcu_tools.program.v2.ir.passes.loop_dispatch import IRJumpTableLoop
-
     Label.reset()
     root = RootNode(
         insts=[
@@ -496,18 +538,14 @@ def test_unroll_non_exact_register_hint_emits_jump_table():
 
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
 
-    assert len(out.insts) == 1
-    assert isinstance(out.insts[0], IRJumpTableLoop)
-    jt = cast(IRJumpTableLoop, out.insts[0])
-    assert jt.k == 8
-    assert jt.n_reg == "r_count"
-    assert jt.body_words == 1
+    # Should produce BasicBlockNode sequence with fix_inst_num=True.
+    # k=8 entry blocks + 2 back-edge blocks = 10 fixed blocks.
+    assert _has_jump_table_blocks(out)
+    assert _count_fixed_blocks(out) == 10
 
 
 def test_unroll_no_hint_register_loop_emits_jump_table():
     """Register-driven loop with no hint also goes to jump-table dispatch."""
-    from zcu_tools.program.v2.ir.passes.loop_dispatch import IRJumpTableLoop
-
     Label.reset()
     root = RootNode(
         insts=[
@@ -522,8 +560,7 @@ def test_unroll_no_hint_register_loop_emits_jump_table():
 
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
 
-    assert len(out.insts) == 1
-    assert isinstance(out.insts[0], IRJumpTableLoop)
+    assert _has_jump_table_blocks(out)
 
 
 def test_unroll_counter_sensitive_loop_still_uses_unroll_k_rules():
@@ -575,10 +612,7 @@ def test_unroll_partial_unroll_clones_labels_safely():
     config = PipeLineConfig(pmem_budget=8)
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
 
-    from zcu_tools.program.v2.ir.instructions import Instruction
-
-    emit: list[Instruction] = []
-    out.emit(emit)
+    emit = _flatten_root(out)
 
     defined = {str(inst.name) for inst in emit if isinstance(inst, LabelInst)}
     targets = {
@@ -707,8 +741,6 @@ def test_unroll_cpmg_style_body_triggers():
 def test_unroll_register_driven_k_forced_to_power_of_two():
     """With the current large default jump cost, k_raw reaches the cap 8 and
     remains 8 after floor_pow2()."""
-    from zcu_tools.program.v2.ir.passes.loop_dispatch import IRJumpTableLoop
-
     Label.reset()
     body_insts: list[IRNode] = [
         InstNode(PortWriteInst(dst="0", time="t0")),
@@ -729,17 +761,13 @@ def test_unroll_register_driven_k_forced_to_power_of_two():
 
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
 
-    assert len(out.insts) == 1
-    assert isinstance(out.insts[0], IRJumpTableLoop)
-    jt = cast(IRJumpTableLoop, out.insts[0])
-    assert jt.k == 8
+    # k=8 entry blocks + 2 back-edge blocks = 10 fixed blocks.
+    assert _has_jump_table_blocks(out)
+    assert _count_fixed_blocks(out) == 10
 
 
 def test_unroll_register_driven_jump_table_structure():
-    """Verify the IRJumpTableLoop has the expected k entries, k bodies, and
-    the back-edge dispatch when emitted."""
-    from zcu_tools.program.v2.ir.passes.loop_dispatch import IRJumpTableLoop
-
+    """Verify the jump-table blocks have correct structure and conditional jumps."""
     Label.reset()
     root = RootNode(
         insts=[
@@ -755,17 +783,10 @@ def test_unroll_register_driven_jump_table_structure():
     config = PipeLineConfig(max_unroll_factor=2)
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
 
-    assert isinstance(out.insts[0], IRJumpTableLoop)
-    jt = cast(IRJumpTableLoop, out.insts[0])
-    assert jt.k == 2
-    assert len(jt.entry_labels) == 2
-    assert len(jt.bodies) == 2
-    assert jt.body_words == 1
+    # k=2: 2 entry blocks + 2 back-edge blocks = 4 fixed blocks.
+    assert _count_fixed_blocks(out) == 4
 
-    from zcu_tools.program.v2.ir.instructions import Instruction as _Inst
-
-    emit: list[_Inst] = []
-    out.emit(emit)
+    emit = _flatten_root(out)
     cond_jumps = [
         inst for inst in emit if isinstance(inst, JumpInst) and inst.if_cond is not None
     ]
@@ -830,10 +851,8 @@ def test_unroll_register_driven_dispatch_too_long_falls_back():
 
 def test_unroll_nested_register_driven_inner_unrolls_first():
     """Post-order recursion: the inner register-driven loop is rewritten to
-    an IRJumpTableLoop before the outer loop is evaluated.
+    jump-table blocks before the outer loop is evaluated.
     """
-    from zcu_tools.program.v2.ir.passes.loop_dispatch import IRJumpTableLoop
-
     Label.reset()
     inner = IRLoop(
         name="inner",
@@ -852,12 +871,9 @@ def test_unroll_nested_register_driven_inner_unrolls_first():
     config = PipeLineConfig(max_unroll_factor=2)
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
 
-    # With the current large default jump cost, the outer loop also gets
-    # rewritten. The key property remains post-order recursion: the inner
-    # loop rewrite must have happened before the outer body was measured.
-    assert len(out.insts) == 1
-    outer_out = out.insts[0]
-    assert isinstance(outer_out, IRJumpTableLoop)
+    # With the current large default jump cost, both inner and outer loops get
+    # rewritten to jump-table blocks (post-order ensures inner first).
+    assert _has_jump_table_blocks(out)
 
 
 def test_default_pipeline_orders_new_passes_first():

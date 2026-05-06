@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing_extensions import TYPE_CHECKING, Any
 
 from .factory import InstructionStream, parse_root
-from .instructions import Instruction
 from .labels import Label
 from .linker import IRCursor, IRLinker
 from .node import RootNode
@@ -37,6 +36,5 @@ class IRBuilder:
     def unbuild(
         self, ir: RootNode
     ) -> tuple[list[dict], dict[str, str], list[dict[str, Any]], IRCursor]:
-        inst_list: list[Instruction] = []
-        ir.emit(inst_list, pmem_size=self.prog.tproccfg["pmem_size"])
-        return self.linker.link(inst_list)
+        pmem_size = self.prog.tproccfg["pmem_size"]
+        return self.linker.link(ir, pmem_size=pmem_size)

@@ -36,9 +36,7 @@ def test_linker_wait_address_calculation():
     )
 
     linker = IRLinker()
-    inst_list = []
-    ir.emit(inst_list)
-    prog_list, labels, meta_infos, cursor = linker.link(inst_list)
+    prog_list, labels, meta_infos, cursor = linker.link(ir)
 
     # Expected addresses:
     # L1: 0
@@ -72,9 +70,7 @@ def test_linker_cursor_counts_wait_and_trailing_labels():
     )
 
     linker = IRLinker()
-    inst_list = []
-    ir.emit(inst_list)
-    prog_list, labels, _meta_infos, cursor = linker.link(inst_list)
+    prog_list, labels, _meta_infos, cursor = linker.link(ir)
 
     assert labels == {"L1": "&0", "L2": "&2"}
     assert [inst["P_ADDR"] for inst in prog_list] == [0, 2]
@@ -94,9 +90,7 @@ def test_linker_wait_roundtrip():
     )
 
     linker = IRLinker()
-    inst_list = []
-    ir.emit(inst_list)
-    prog_list, labels, meta_infos, _cursor = linker.link(inst_list)
+    prog_list, labels, meta_infos, _cursor = linker.link(ir)
 
     # Roundtrip: unlink
     logical_insts = linker.unlink(prog_list, labels, meta_infos)

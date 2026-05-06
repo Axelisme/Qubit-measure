@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from typing import Optional
 
 from typing_extensions import Any
 
 from .instructions import Instruction, LabelInst, MetaInst
 from .labels import Label
+from .node import RootNode, _lower_block_node
 
 
 @dataclass(frozen=True)
@@ -18,9 +20,42 @@ class IRCursor:
 class IRLinker:
     """Responsible for flattening the IR tree, assigning physical addresses, and resolving labels."""
 
+    def _flatten_ir(
+        self, ir: RootNode, pmem_size: Optional[int] = None
+    ) -> list[Instruction]:
+        """Lower a RootNode into a flat list of Instructions.
+
+        Walks the IR tree recursively:
+        - RootNode / BlockNode  → recurse into children
+        - BasicBlockNode        → emit labels, insts, branch
+        - IRLoop                → call .lower() then recurse the resulting blocks
+        - IRBranch              → call .lower() then recurse the resulting blocks
+        - anything else         → raise TypeError
+        """
+        blocks = _lower_block_node(ir, pmem_size)
+        inst_list: list[Instruction] = []
+        for block in blocks:
+            inst_list.extend(block.labels)
+            inst_list.extend(block.insts)
+            if block.branch is not None:
+                inst_list.append(block.branch)
+        return inst_list
+
     def link(
-        self, inst_list: list[Instruction]
+        self,
+        inst_list_or_ir,
+        pmem_size: Optional[int] = None,
     ) -> tuple[list[dict], dict[str, str], list[dict[str, Any]], IRCursor]:
+        """Flatten and link IR into QICK-compatible dicts.
+
+        Accepts either:
+        - a RootNode  (new path): lowered via _flatten_ir first
+        - list[Instruction] (legacy path): used as-is
+        """
+        if isinstance(inst_list_or_ir, RootNode):
+            inst_list = self._flatten_ir(inst_list_or_ir, pmem_size)
+        else:
+            inst_list = inst_list_or_ir
         prog_list: list[dict] = []
         labels: dict[str, str] = {}
         meta_infos: list[dict[str, Any]] = []
