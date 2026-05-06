@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional, cast
 
-from ..instructions import Instruction, TimeInst
+from ..instructions import Instruction, NopInst, TimeInst
 from ..node import BasicBlockNode, BlockNode, InstNode, IRNode, RootNode
 from ..pipeline import AbsIRPass, AbsLinearPass, PipeLineContext
 from ..traversal import IRTransformer
@@ -50,16 +50,40 @@ def _is_mergeable_time_increment(inst: Instruction) -> bool:
 # ---------------------------------------------------------------------------
 
 class ZeroDelayDCELinear(AbsLinearPass):
-    """Remove TIME inc_ref #0 instructions from a flat instruction list."""
+    """Remove TIME inc_ref #0 instructions from a BasicBlockNode.
 
-    def process_linear(self, insts: list[Instruction]) -> list[Instruction]:
-        return [inst for inst in insts if not _is_zero_ref_increment(inst)]
+    fix_inst_num=False: removes zero-delay TIME instructions.
+    fix_inst_num=True:  replaces them with NopInst to preserve stride.
+    """
+
+    def process_block(self, block: BasicBlockNode) -> None:
+        if block.fix_inst_num:
+            block.insts = [
+                NopInst() if _is_zero_ref_increment(inst) else inst
+                for inst in block.insts
+            ]
+        else:
+            block.insts = [
+                inst for inst in block.insts if not _is_zero_ref_increment(inst)
+            ]
 
 
 class TimedMergeLinear(AbsLinearPass):
-    """Merge adjacent TIME inc_ref #N instructions in a flat instruction list."""
+    """Merge adjacent TIME inc_ref #N instructions in a BasicBlockNode.
 
-    def process_linear(self, insts: list[Instruction]) -> list[Instruction]:
+    fix_inst_num=False: merges adjacent runs into a single instruction.
+    fix_inst_num=True:  merges the value into the first instruction of each
+                        run, then replaces the remaining instructions with
+                        NopInst to preserve stride.
+    """
+
+    def process_block(self, block: BasicBlockNode) -> None:
+        if block.fix_inst_num:
+            self._merge_fixed(block)
+        else:
+            self._merge_free(block)
+
+    def _merge_free(self, block: BasicBlockNode) -> None:
         result: list[Instruction] = []
         pending_run: list[TimeInst] = []
 
@@ -73,7 +97,7 @@ class TimedMergeLinear(AbsLinearPass):
                 result.append(TimeInst(c_op="inc_ref", lit=f"#{total}"))
             pending_run.clear()
 
-        for inst in insts:
+        for inst in block.insts:
             if _is_mergeable_time_increment(inst):
                 pending_run.append(cast(TimeInst, inst))
             else:
@@ -81,7 +105,33 @@ class TimedMergeLinear(AbsLinearPass):
                 result.append(inst)
 
         flush()
-        return result
+        block.insts = result
+
+    def _merge_fixed(self, block: BasicBlockNode) -> None:
+        # Merge run values into the first slot; fill the rest with NOP.
+        result: list[Instruction] = list(block.insts)
+        i = 0
+        while i < len(result):
+            if not _is_mergeable_time_increment(result[i]):
+                i += 1
+                continue
+            # Start of a run — find its extent.
+            j = i + 1
+            while j < len(result) and _is_mergeable_time_increment(result[j]):
+                j += 1
+            if j == i + 1:
+                i += 1
+                continue
+            # Run from i to j-1: sum values into slot i, NOP out i+1..j-1.
+            total = sum(
+                int(cast(TimeInst, result[k]).lit[1:])  # type: ignore[union-attr]
+                for k in range(i, j)
+            )
+            result[i] = TimeInst(c_op="inc_ref", lit=f"#{total}")
+            for k in range(i + 1, j):
+                result[k] = NopInst()
+            i = j
+        block.insts = result
 
 
 # ---------------------------------------------------------------------------

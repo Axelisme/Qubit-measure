@@ -4,7 +4,6 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass, field
 
-from .instructions import Instruction
 from .node import BasicBlockNode, IRNode, RootNode
 from .traversal import walk_basic_blocks
 
@@ -62,15 +61,20 @@ AbsPipeLinePass = AbsIRPass
 
 
 class AbsLinearPass(ABC):
-    """Straight-line instruction-list pass.
+    """Straight-line optimization pass that operates on a single BasicBlockNode.
 
-    Operates on a flat list[Instruction] (the `insts` field of a
-    BasicBlockNode).  Must NOT inspect or modify labels or the branch field —
-    those belong to the structural level.
+    Implementations receive the whole block and must modify ``block.insts``
+    in-place.  The ``block.labels`` and ``block.branch`` fields must NOT be
+    touched — those belong to the structural level.
+
+    When ``block.fix_inst_num`` is True the total length of ``block.insts``
+    must be preserved.  Passes that normally delete instructions must replace
+    removed instructions with ``NopInst`` instead.  Passes that merge N
+    instructions into 1 must pad with N-1 ``NopInst``s.
     """
 
     @abstractmethod
-    def process_linear(self, insts: list[Instruction]) -> list[Instruction]: ...
+    def process_block(self, block: BasicBlockNode) -> None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -80,19 +84,17 @@ class AbsLinearPass(ABC):
 class LinearPipeline:
     """A pipeline of AbsLinearPass instances applied to every BasicBlockNode.
 
-    Iterates every BasicBlockNode reachable from an IRNode and applies each
-    linear pass in order.  Blocks with fix_inst_num=True are skipped to
-    preserve jump-table stride accuracy.
+    Iterates every BasicBlockNode reachable from an IRNode and calls each
+    pass's ``process_block`` in order.  Each pass is responsible for
+    respecting ``fix_inst_num`` on the block it receives.
     """
 
     def __init__(self, *passes: AbsLinearPass) -> None:
         self.passes: list[AbsLinearPass] = list(passes)
 
     def process_block(self, block: BasicBlockNode) -> None:
-        if block.fix_inst_num:
-            return
         for lp in self.passes:
-            block.insts = lp.process_linear(block.insts)
+            lp.process_block(block)
 
     def process(self, ir: IRNode) -> None:
         for block in walk_basic_blocks(ir):

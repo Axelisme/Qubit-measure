@@ -140,7 +140,7 @@ def test_zero_delay_dce_removes_from_basic_block():
     assert isinstance(bb.insts[0], NopInst)
 
 
-def test_zero_delay_dce_skips_fixed_basic_block():
+def test_zero_delay_dce_nop_pads_fixed_basic_block():
     t0 = TimeInst(c_op="inc_ref", lit="#0")
     root = RootNode(
         insts=[
@@ -152,7 +152,9 @@ def test_zero_delay_dce_skips_fixed_basic_block():
 
     bb = out.insts[0]
     assert isinstance(bb, BasicBlockNode)
-    assert len(bb.insts) == 2  # untouched
+    assert len(bb.insts) == 2  # stride preserved
+    assert isinstance(bb.insts[0], NopInst)  # TIME#0 replaced with NOP
+    assert isinstance(bb.insts[1], NopInst)
 
 
 def test_timed_merge_merges_in_basic_block():
@@ -176,7 +178,7 @@ def test_timed_merge_merges_in_basic_block():
     assert isinstance(bb.insts[1], NopInst)
 
 
-def test_timed_merge_skips_fixed_basic_block():
+def test_timed_merge_nop_pads_fixed_basic_block():
     t2 = TimeInst(c_op="inc_ref", lit="#2")
     t3 = TimeInst(c_op="inc_ref", lit="#3")
     root = RootNode(
@@ -189,4 +191,7 @@ def test_timed_merge_skips_fixed_basic_block():
 
     bb = out.insts[0]
     assert isinstance(bb, BasicBlockNode)
-    assert len(bb.insts) == 2  # untouched
+    assert len(bb.insts) == 2  # stride preserved
+    assert isinstance(bb.insts[0], TimeInst)
+    assert bb.insts[0].lit == "#5"  # merged value
+    assert isinstance(bb.insts[1], NopInst)  # padding

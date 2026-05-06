@@ -928,7 +928,7 @@ def test_dead_write_elimination_removes_overwritten_write_in_basic_block():
     assert bb.insts[0].extra_args.get("LIT") == "#2"
 
 
-def test_dead_write_elimination_skips_fixed_basic_block():
+def test_dead_write_elimination_nop_pads_fixed_basic_block():
     r1 = RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#1"})
     r2 = RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#2"})
     root = RootNode(
@@ -941,4 +941,6 @@ def test_dead_write_elimination_skips_fixed_basic_block():
 
     bb = out.insts[0]
     assert isinstance(bb, BasicBlockNode)
-    assert len(bb.insts) == 2  # untouched
+    assert len(bb.insts) == 2  # stride preserved
+    assert isinstance(bb.insts[0], NopInst)  # dead write replaced with NOP
+    assert isinstance(bb.insts[1], RegWriteInst)

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from ..analysis import instruction_reads, instruction_writes
-from ..instructions import Instruction
+from ..instructions import Instruction, NopInst
 from ..node import BasicBlockNode, BlockNode, InstNode, IRNode, RootNode
 from ..pipeline import AbsIRPass, AbsLinearPass, LinearPipeline, PipeLineContext
 from ..traversal import IRTransformer
@@ -11,21 +11,35 @@ from .base import OptimizationPassBase, is_safe_linear_inst
 
 
 class DeadWriteEliminationLinear(AbsLinearPass):
-    """Remove overwritten register writes in a flat instruction list.
+    """Remove overwritten register writes in a BasicBlockNode.
 
-    Only operates on instructions that pass `is_safe_linear_inst` — control
-    flow and memory-mapped instructions are left in place and flush the
-    pending-write tracking.
+    fix_inst_num=False: removes dead-write instructions from the list.
+    fix_inst_num=True:  replaces dead-write instructions with NopInst to
+                        preserve jump-table stride.
     """
 
-    def process_linear(self, insts: list[Instruction]) -> list[Instruction]:
-        result: list[Instruction | None] = []
-        pending: dict[str, int] = {}  # reg -> index in result
+    def process_block(self, block: BasicBlockNode) -> None:
+        insts = block.insts
+        dead: set[int] = self._find_dead_indices(insts)
+        if not dead:
+            return
+        if block.fix_inst_num:
+            block.insts = [
+                NopInst() if i in dead else inst
+                for i, inst in enumerate(insts)
+            ]
+        else:
+            block.insts = [
+                inst for i, inst in enumerate(insts) if i not in dead
+            ]
 
-        for inst in insts:
+    def _find_dead_indices(self, insts: list[Instruction]) -> set[int]:
+        pending: dict[str, int] = {}  # reg -> index of last pending write
+        dead: set[int] = set()
+
+        for idx, inst in enumerate(insts):
             if not is_safe_linear_inst(inst):
                 pending.clear()
-                result.append(inst)
                 continue
 
             reads = instruction_reads(inst)
@@ -33,7 +47,6 @@ class DeadWriteEliminationLinear(AbsLinearPass):
 
             if len(writes) > 1:
                 pending.clear()
-                result.append(inst)
                 continue
 
             for reg in reads:
@@ -42,13 +55,11 @@ class DeadWriteEliminationLinear(AbsLinearPass):
             if len(writes) == 1:
                 dst = writes[0]
                 prev_idx = pending.get(dst)
-                if prev_idx is not None and result[prev_idx] is not None:
-                    result[prev_idx] = None
-                pending[dst] = len(result)
+                if prev_idx is not None:
+                    dead.add(prev_idx)
+                pending[dst] = idx
 
-            result.append(inst)
-
-        return [inst for inst in result if inst is not None]
+        return dead
 
 
 class DeadWriteEliminationLegacyPass(AbsIRPass, IRTransformer):
