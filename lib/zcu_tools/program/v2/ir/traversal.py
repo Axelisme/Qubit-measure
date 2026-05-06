@@ -99,7 +99,24 @@ def walk_nodes(node: IRNode) -> Iterator[IRNode]:
     yield from _walk(node)
 
 
+def walk_basic_blocks(node: IRNode) -> Iterator[BasicBlockNode]:
+    """Yield every BasicBlockNode reachable from node (depth-first)."""
+    for current in walk_nodes(node):
+        if isinstance(current, BasicBlockNode):
+            yield current
+
+
 def walk_instructions(node: IRNode) -> Iterator[Instruction]:
+    """Yield every Instruction reachable from node.
+
+    Covers both legacy InstNode wrappers and the new BasicBlockNode path
+    (labels, insts, and branch fields).
+    """
     for current in walk_nodes(node):
         if isinstance(current, InstNode):
             yield current.inst
+        elif isinstance(current, BasicBlockNode):
+            yield from current.labels
+            yield from current.insts
+            if current.branch is not None:
+                yield current.branch

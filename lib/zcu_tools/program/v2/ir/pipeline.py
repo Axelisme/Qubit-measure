@@ -65,7 +65,10 @@ class PipeLine:
 
 def make_default_pipeline(pmem_capacity: int) -> PipeLine:
     from .passes import (
+        BlockMergePass,
+        BranchEliminationPass,
         DeadLabelEliminationPass,
+        DeadWriteEliminationLinear,
         DeadWriteEliminationPass,
         TimedMergePass,
         UnrollSmallLoopPass,
@@ -81,18 +84,22 @@ def make_default_pipeline(pmem_capacity: int) -> PipeLine:
     return PipeLine(
         config,
         [
-            # Cleaning passes run before Unroll so that body_size estimates
+            # Pre-LIR: clean up before structural analysis so body_size estimates
             # (used for k selection and jump-table stride) reflect the true
-            # post-cleanup word count:
-            #   • ZeroDelayDCE   — removes TIME #0 words that inflate body_size
-            #   • TimedMerge     — collapses adjacent TIME #N into one word
-            #   • DeadWriteElim  — removes overwritten register writes
-            # DeadLabelElimination runs after Unroll because unrolling
-            # introduces new label references that must be visible first.
+            # post-cleanup word count.
             ZeroDelayDCEPass(),
             TimedMergePass(),
             DeadWriteEliminationPass(),
+            # HIR: structural loop unrolling.
             UnrollSmallLoopPass(),
+            # Post-LIR: clean up the lowered CFG.
+            #   1. DeadLabelElimination — must run before BranchElimination and
+            #      BlockMerge so those passes see correct alive-label sets.
             DeadLabelEliminationPass(),
+            #   2. BranchElimination — removes/NOPs unconditional fall-through jumps.
+            BranchEliminationPass(),
+            #   3. BlockMerge — fuses adjacent blocks exposed by step 2, then
+            #      re-runs DeadWriteElimination across the new merged boundaries.
+            BlockMergePass(DeadWriteEliminationLinear()),
         ],
     )

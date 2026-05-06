@@ -1,5 +1,5 @@
 from .base import AbsLinearPass, LinearPassAdapter
-from .control_flow import DeadLabelEliminationPass
+from .control_flow import BlockMergePass, BranchEliminationPass, DeadLabelEliminationPass
 from .dataflow import DeadWriteEliminationLinear, DeadWriteEliminationPass
 from .loop import UnrollSmallLoopPass
 from .timeline import TimedMergeLinear, TimedMergePass, ZeroDelayDCELinear, ZeroDelayDCEPass
@@ -7,6 +7,8 @@ from .timeline import TimedMergeLinear, TimedMergePass, ZeroDelayDCELinear, Zero
 __all__ = [
     "AbsLinearPass",
     "LinearPassAdapter",
+    "BlockMergePass",
+    "BranchEliminationPass",
     "DeadLabelEliminationPass",
     "DeadWriteEliminationLinear",
     "DeadWriteEliminationPass",
