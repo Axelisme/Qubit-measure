@@ -93,13 +93,17 @@ def make_default_pipeline(pmem_capacity: int) -> PipeLine:
             # HIR: structural loop unrolling.
             UnrollSmallLoopPass(),
             # Post-LIR: clean up the lowered CFG.
-            #   1. DeadLabelElimination — must run before BranchElimination and
+            #   1. DeadWriteElimination again — catches dead writes exposed by
+            #      unrolling (fully-expanded loops produce flat InstNode sequences
+            #      that the Pre-LIR pass could not see across loop boundaries).
+            DeadWriteEliminationPass(),
+            #   2. DeadLabelElimination — must run before BranchElimination and
             #      BlockMerge so those passes see correct alive-label sets.
             DeadLabelEliminationPass(),
-            #   2. BranchElimination — removes/NOPs unconditional fall-through jumps.
+            #   3. BranchElimination — removes/NOPs unconditional fall-through jumps.
             BranchEliminationPass(),
-            #   3. BlockMerge — fuses adjacent blocks exposed by step 2, then
-            #      re-runs DeadWriteElimination across the new merged boundaries.
+            #   4. BlockMerge — fuses adjacent BasicBlockNodes exposed by step 3,
+            #      then re-runs DeadWriteElimination across merged boundaries.
             BlockMergePass(DeadWriteEliminationLinear()),
         ],
     )

@@ -884,6 +884,7 @@ def test_default_pipeline_orders_new_passes_first():
         "TimedMergePass",
         "DeadWriteEliminationPass",
         "UnrollSmallLoopPass",
+        "DeadWriteEliminationPass",
         "DeadLabelEliminationPass",
         "BranchEliminationPass",
         "BlockMergePass",
