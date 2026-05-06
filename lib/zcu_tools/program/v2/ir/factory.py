@@ -127,9 +127,7 @@ def parse_loop(stream: InstructionStream) -> IRLoop:
     start_meta = stream.consume_meta("LOOP_START")
 
     # Skip over physical loop control logic until LOOP_BODY_START.
-    # We no longer capture the start_label from the instruction stream;
-    # it will be regenerated from `name` at lower() time.
-    # TODO: start_label / end_label fields on IRLoop will be removed later.
+    # Labels are regenerated from `name` at lower() time.
     while True:
         inst = stream.peek()
         if inst is None:

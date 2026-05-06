@@ -125,6 +125,12 @@ class UnrollSmallLoopPass(OptimizationPassBase):
         if not self.ctx.config.enable_unroll_loop:
             return self.generic_visit(node)
 
+        # Hierarchical lock: if this loop is inside a fix_inst_num region,
+        # unrolling would change the physical instruction count and break
+        # jump-table stride calculations.
+        if node.fix_inst_num:
+            return self.generic_visit(node)
+
         # Post-order: recurse into the body first so any inner loops are
         # rewritten before we measure this loop's body size. generic_visit
         # mutates and returns the same IRLoop instance.
@@ -240,8 +246,6 @@ class UnrollSmallLoopPass(OptimizationPassBase):
                 # `iters * k` before appending remainder copies.
                 n=full_iters,
                 range_hint=(full_iters, full_iters),
-                start_label=Label.make_new(f"{node.name}_unrolled_start"),
-                end_label=Label.make_new(f"{node.name}_unrolled_end"),
                 body=BlockNode(insts=unrolled_body),
             )
             result.append(new_loop)
@@ -355,4 +359,5 @@ class UnrollSmallLoopPass(OptimizationPassBase):
             entry_labels=entry_labels,
             exit_label=exit_label,
             bodies=bodies,
+            pmem_size=self.ctx.pmem_size,
         )

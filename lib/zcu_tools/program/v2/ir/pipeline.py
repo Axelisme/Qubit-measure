@@ -41,6 +41,7 @@ DEFAULT_PIPELINE_CONFIG = PipeLineConfig()
 @dataclass
 class PipeLineContext:
     config: PipeLineConfig = field(default_factory=PipeLineConfig)
+    pmem_size: int | None = None
 
 
 class AbsPipeLinePass(ABC):
@@ -54,7 +55,7 @@ class PipeLine:
         self.passes = passes
 
     def __call__(self, ir: RootNode) -> tuple[RootNode, PipeLineContext]:
-        ctx = PipeLineContext(config=self.config)
+        ctx = PipeLineContext(config=self.config, pmem_size=self.config.pmem_capacity)
         if self.config.disable_all_opt:
             return ir, ctx
         for _pass in self.passes:

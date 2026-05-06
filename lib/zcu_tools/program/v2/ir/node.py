@@ -116,23 +116,12 @@ def _needs_big_jump(pmem_size: Optional[int]) -> bool:
 
 @dataclass
 class IRLoop(IRNode):
-    """A loop node.
-
-    NOTE: start_label / end_label are no longer stored on the node; they are
-    generated from `name` at lower() time. The fields are kept as Optional for
-    now during the migration so that existing parse_loop() code keeps working.
-    TODO: remove start_label / end_label once parse_loop() is updated.
-    """
+    """A loop node."""
 
     name: str = ""
     counter_reg: str = ""
     n: Union[int, str] = 0
     range_hint: Optional[tuple[int, int]] = None
-
-    # TODO: remove after parse_loop() migration
-    start_label: Optional[Label] = None
-    end_label: Optional[Label] = None
-
     body: BlockNode = field(default_factory=BlockNode)
     fix_inst_num: bool = False
 
@@ -151,8 +140,8 @@ class IRLoop(IRNode):
             back_edge block -- counter++ then cond JUMP start
             end_label block
         """
-        start = self.start_label or Label.make_new(f"{self.name}_start")
-        end = self.end_label or Label.make_new(f"{self.name}_end")
+        start = Label.make_new(f"{self.name}_start")
+        end = Label.make_new(f"{self.name}_end")
 
         result: list[BasicBlockNode] = []
 
