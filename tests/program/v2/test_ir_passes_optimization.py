@@ -876,15 +876,30 @@ def test_unroll_nested_register_driven_inner_unrolls_first():
     assert _has_jump_table_blocks(out)
 
 
-def test_default_pipeline_orders_new_passes_first():
+def test_default_pipeline_structure():
+    from zcu_tools.program.v2.ir.pipeline import IRPipeLine, LinearPipeline
     pipeline = make_default_pipeline(pmem_capacity=8192)
 
-    assert [type(pass_).__name__ for pass_ in pipeline.passes] == [
-        "ZeroDelayDCEPass",
-        "TimedMergePass",
-        "DeadWriteEliminationPass",
+    assert isinstance(pipeline, IRPipeLine)
+    # Pre-LIR linear pipeline: ZeroDCE + TimedMerge + DeadWrite
+    assert isinstance(pipeline.pre_linear, LinearPipeline)
+    assert len(pipeline.pre_linear.passes) == 3
+    assert [type(p).__name__ for p in pipeline.pre_linear.passes] == [
+        "ZeroDelayDCELinear",
+        "TimedMergeLinear",
+        "DeadWriteEliminationLinear",
+    ]
+    # Post-LIR linear pipeline: DeadWrite
+    assert isinstance(pipeline.post_linear, LinearPipeline)
+    assert len(pipeline.post_linear.passes) == 1
+    assert type(pipeline.post_linear.passes[0]).__name__ == "DeadWriteEliminationLinear"
+    # IR passes
+    assert [type(p).__name__ for p in pipeline.ir_passes] == [
+        "ZeroDelayDCELegacyPass",
+        "TimedMergeLegacyPass",
+        "DeadWriteEliminationLegacyPass",
         "UnrollSmallLoopPass",
-        "DeadWriteEliminationPass",
+        "DeadWriteEliminationLegacyPass",
         "DeadLabelEliminationPass",
         "BranchEliminationPass",
         "BlockMergePass",

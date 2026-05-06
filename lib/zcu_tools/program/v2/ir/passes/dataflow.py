@@ -4,8 +4,10 @@ from typing import Optional
 
 from ..analysis import instruction_reads, instruction_writes
 from ..instructions import Instruction
-from ..node import BasicBlockNode, BlockNode, InstNode, IRNode
-from .base import AbsLinearPass, LinearPassAdapter, OptimizationPassBase, is_safe_linear_inst
+from ..node import BasicBlockNode, BlockNode, InstNode, IRNode, RootNode
+from ..pipeline import AbsIRPass, AbsLinearPass, LinearPipeline, PipeLineContext
+from ..traversal import IRTransformer
+from .base import OptimizationPassBase, is_safe_linear_inst
 
 
 class DeadWriteEliminationLinear(AbsLinearPass):
@@ -49,24 +51,24 @@ class DeadWriteEliminationLinear(AbsLinearPass):
         return [inst for inst in result if inst is not None]
 
 
-class DeadWriteEliminationPass(OptimizationPassBase):
-    """Pipeline pass: remove overwritten writes in straight-line blocks.
+class DeadWriteEliminationLegacyPass(AbsIRPass, IRTransformer):
+    """Remove overwritten writes in legacy InstNode-based BlockNodes.
 
-    Applies DeadWriteEliminationLinear to every BasicBlockNode.insts via
-    LinearPassAdapter (skips fix_inst_num blocks), then falls back to the
-    legacy IRTransformer path for any remaining InstNode / BlockNode content.
+    The BasicBlockNode path is handled by LinearPipeline(DeadWriteEliminationLinear).
+    This pass only touches InstNode content inside BlockNode / RootNode.
     """
 
-    def process(self, ir, ctx):
+    def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:
         if not ctx.config.enable_dead_write:
             return ir
         self.ctx = ctx
-        LinearPassAdapter(DeadWriteEliminationLinear()).process(ir, ctx)
-        # Legacy: also clean up old InstNode-based BlockNodes.
-        return super().process(ir, ctx)
+        res = self.visit(ir)
+        if isinstance(res, list):
+            raise ValueError("Unexpected list returned from visit")
+        return res or ir  # type: ignore[return-value]
 
     def visit_BasicBlockNode(self, node: BasicBlockNode) -> Optional[IRNode]:
-        return node  # already handled by LinearPassAdapter
+        return node  # handled by LinearPipeline
 
     def visit_BlockNode(self, node: BlockNode) -> Optional[IRNode | list[IRNode]]:
         rewritten: list[IRNode | None] = []
@@ -126,3 +128,19 @@ class DeadWriteEliminationPass(OptimizationPassBase):
 
     visit_RootNode = visit_BlockNode
     visit_IRBranchCase = visit_BlockNode
+
+
+class DeadWriteEliminationPass(AbsIRPass):
+    """Compatibility wrapper: run DeadWriteEliminationLinear + Legacy pass.
+
+    Kept so existing code that imports DeadWriteEliminationPass still works.
+    New code should use DeadWriteEliminationLinear inside a LinearPipeline
+    and DeadWriteEliminationLegacyPass as an AbsIRPass.
+    """
+
+    def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:
+        if not ctx.config.enable_dead_write:
+            return ir
+        LinearPipeline(DeadWriteEliminationLinear()).process(ir)
+        DeadWriteEliminationLegacyPass().process(ir, ctx)
+        return ir

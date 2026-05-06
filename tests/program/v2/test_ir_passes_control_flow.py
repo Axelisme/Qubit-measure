@@ -19,7 +19,7 @@ from zcu_tools.program.v2.ir.passes.control_flow import (
     DeadLabelEliminationPass,
 )
 from zcu_tools.program.v2.ir.passes.dataflow import DeadWriteEliminationLinear
-from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
+from zcu_tools.program.v2.ir.pipeline import LinearPipeline, PipeLineConfig, PipeLineContext
 
 
 def _ctx() -> PipeLineContext:
@@ -199,7 +199,7 @@ def test_block_merge_reruns_linear_pass_after_merge():
         BasicBlockNode(insts=[RegWriteInst(dst="r0", src="imm", lit="#2")]),
     ])
 
-    out = BlockMergePass(DeadWriteEliminationLinear()).process(root, _ctx())
+    out = BlockMergePass(LinearPipeline(DeadWriteEliminationLinear())).process(root, _ctx())
 
     assert len(out.insts) == 1
     merged = out.insts[0]

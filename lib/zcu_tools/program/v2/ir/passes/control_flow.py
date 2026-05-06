@@ -5,9 +5,9 @@ from typing import Optional, cast
 from ..instructions import Instruction, LabelInst, NopInst
 from ..labels import PSEUDO_LABELS, Label
 from ..node import BasicBlockNode, BlockNode, IRNode, RootNode
-from ..pipeline import PipeLineContext
+from ..pipeline import LinearPipeline, PipeLineContext
 from ..traversal import walk_instructions
-from .base import AbsLinearPass, LinearPassAdapter, OptimizationPassBase
+from .base import OptimizationPassBase
 
 
 def _collect_referenced_labels(ir: RootNode) -> set[Label]:
@@ -137,19 +137,19 @@ class BlockMergePass(OptimizationPassBase):
       - Block A has no branch (falls through).
       - Block B has no alive labels (not a jump target).
 
-    After merging, re-run linear passes to eliminate dead writes exposed
-    across old block boundaries.
+    After merging, re-runs ``post_linear`` across merged boundaries to
+    eliminate dead writes exposed by the merge.
     """
 
-    def __init__(self, *linear_passes: AbsLinearPass) -> None:
-        self._linear_passes = list(linear_passes)
+    def __init__(self, post_linear: Optional[LinearPipeline] = None) -> None:
+        self._post_linear = post_linear
 
     def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:
         self.ctx = ctx
         referenced = _collect_referenced_labels(ir)
         self._merge_block(ir, referenced)
-        if self._linear_passes:
-            LinearPassAdapter(*self._linear_passes).process(ir, ctx)
+        if self._post_linear is not None:
+            self._post_linear.process(ir)
         return ir
 
     def _merge_block(self, node: IRNode, referenced: set[Label]) -> None:
