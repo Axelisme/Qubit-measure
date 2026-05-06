@@ -886,3 +886,41 @@ def test_default_pipeline_orders_new_passes_first():
         "UnrollSmallLoopPass",
         "DeadLabelEliminationPass",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: DeadWriteElimination on BasicBlockNode path
+# ---------------------------------------------------------------------------
+
+def test_dead_write_elimination_removes_overwritten_write_in_basic_block():
+    root = RootNode(
+        insts=[
+            BasicBlockNode(insts=[
+                RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#1"}),
+                RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#2"}),
+            ]),
+        ]
+    )
+
+    out = DeadWriteEliminationPass().process(root, PipeLineContext(config=PipeLineConfig()))
+
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 1
+    assert bb.insts[0].extra_args.get("LIT") == "#2"
+
+
+def test_dead_write_elimination_skips_fixed_basic_block():
+    r1 = RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#1"})
+    r2 = RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#2"})
+    root = RootNode(
+        insts=[
+            BasicBlockNode(insts=[r1, r2], fix_inst_num=True),
+        ]
+    )
+
+    out = DeadWriteEliminationPass().process(root, PipeLineContext(config=PipeLineConfig()))
+
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 2  # untouched

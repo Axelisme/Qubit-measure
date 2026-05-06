@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import cast
 
-from zcu_tools.program.v2.ir.instructions import NopInst, TimeInst, WaitInst
-from zcu_tools.program.v2.ir.node import InstNode, RootNode
+from zcu_tools.program.v2.ir.instructions import NopInst, RegWriteInst, TimeInst, WaitInst
+from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, InstNode, RootNode
 from zcu_tools.program.v2.ir.passes.timeline import TimedMergePass, ZeroDelayDCEPass
 from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
 
@@ -113,3 +113,80 @@ def test_timed_instruction_merge_does_not_cross_wait():
         None,
         "#3",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: BasicBlockNode path and fix_inst_num skip behaviour
+# ---------------------------------------------------------------------------
+
+def test_zero_delay_dce_removes_from_basic_block():
+    root = RootNode(
+        insts=[
+            BlockNode(insts=[
+                BasicBlockNode(insts=[
+                    TimeInst(c_op="inc_ref", lit="#0"),
+                    NopInst(),
+                    TimeInst(c_op="inc_ref", lit="#0"),
+                ]),
+            ])
+        ]
+    )
+
+    out = ZeroDelayDCEPass().process(root, PipeLineContext(config=PipeLineConfig()))
+
+    bb = out.insts[0].insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 1
+    assert isinstance(bb.insts[0], NopInst)
+
+
+def test_zero_delay_dce_skips_fixed_basic_block():
+    t0 = TimeInst(c_op="inc_ref", lit="#0")
+    root = RootNode(
+        insts=[
+            BasicBlockNode(insts=[t0, NopInst()], fix_inst_num=True),
+        ]
+    )
+
+    out = ZeroDelayDCEPass().process(root, PipeLineContext(config=PipeLineConfig()))
+
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 2  # untouched
+
+
+def test_timed_merge_merges_in_basic_block():
+    root = RootNode(
+        insts=[
+            BasicBlockNode(insts=[
+                TimeInst(c_op="inc_ref", lit="#2"),
+                TimeInst(c_op="inc_ref", lit="#3"),
+                NopInst(),
+            ]),
+        ]
+    )
+
+    out = TimedMergePass().process(root, PipeLineContext(config=PipeLineConfig()))
+
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 2
+    assert isinstance(bb.insts[0], TimeInst)
+    assert bb.insts[0].lit == "#5"
+    assert isinstance(bb.insts[1], NopInst)
+
+
+def test_timed_merge_skips_fixed_basic_block():
+    t2 = TimeInst(c_op="inc_ref", lit="#2")
+    t3 = TimeInst(c_op="inc_ref", lit="#3")
+    root = RootNode(
+        insts=[
+            BasicBlockNode(insts=[t2, t3], fix_inst_num=True),
+        ]
+    )
+
+    out = TimedMergePass().process(root, PipeLineContext(config=PipeLineConfig()))
+
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 2  # untouched
