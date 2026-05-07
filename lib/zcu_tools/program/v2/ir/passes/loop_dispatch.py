@@ -193,8 +193,8 @@ def build_jump_table_blocks(
         for bb in body_blocks:
             if bb.fix_addr_size:
                 raise ValueError(
-                    f"build_jump_table_blocks: body block already has fix_addr_size=True "
-                    f"before jump-table lowering; nested fix_addr_size is not supported."
+                    "build_jump_table_blocks: body block already has fix_addr_size=True "
+                    "before jump-table lowering; nested fix_addr_size is not supported."
                 )
         # Each body block becomes an independent fix_addr_size=True block.
         # entry label is attached to the first block of each copy.

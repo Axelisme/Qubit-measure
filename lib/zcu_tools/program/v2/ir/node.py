@@ -5,11 +5,7 @@ from typing import Optional, Union
 
 from typing_extensions import Iterator
 
-from .instructions import (
-    Instruction,
-    JumpInst,
-    LabelInst,
-)
+from .instructions import Instruction, JumpInst, LabelInst
 
 
 class IRNode:

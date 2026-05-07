@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+
 from typing_extensions import Any
 
 from .instructions import Instruction, LabelInst, MetaInst

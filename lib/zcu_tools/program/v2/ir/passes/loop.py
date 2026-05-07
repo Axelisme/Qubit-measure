@@ -50,7 +50,9 @@ def _clone_nodes_with_incr(
     )
     result: list[BasicBlockNode] = []
     for i in range(repeat):
-        lowered = IRParser(pmem_size=pmem_size).lower_block(BlockNode(insts=deepcopy(nodes)))
+        lowered = IRParser(pmem_size=pmem_size).lower_block(
+            BlockNode(insts=deepcopy(nodes))
+        )
         result.extend(lowered)
         if final_incr or i < repeat - 1:
             result.append(deepcopy(incr_bb))
@@ -260,7 +262,6 @@ class UnrollSmallLoopPass(OptimizationPassBase):
                 # executes k original iterations per loop-round, so stop at
                 # `iters * k` before appending remainder copies.
                 n=full_iters,
-                range_hint=(full_iters, full_iters),
                 body=BlockNode(insts=list(unrolled_body)),
             )
             result: list[IRNode] = [new_loop]
@@ -368,7 +369,9 @@ class UnrollSmallLoopPass(OptimizationPassBase):
             len(probe),
         )
         # Validate: body must not already be addr-locked before jump-table lowering.
-        probe_blocks = IRParser(pmem_size=self.ctx.pmem_size).lower_block(BlockNode(insts=deepcopy(node.body.insts)))
+        probe_blocks = IRParser(pmem_size=self.ctx.pmem_size).lower_block(
+            BlockNode(insts=deepcopy(node.body.insts))
+        )
         for bb in probe_blocks:
             if bb.fix_addr_size:
                 logger.debug(
