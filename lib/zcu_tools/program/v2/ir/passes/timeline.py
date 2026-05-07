@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import dataclasses
 from typing import cast
 
 from ..instructions import Instruction, NopInst, TimeInst
 from ..node import BasicBlockNode
 from ..pipeline import AbsLinearPass
+from ..utils import regs_from_value
 
 
 def _is_zero_ref_increment(inst: Instruction) -> bool:
@@ -25,23 +27,45 @@ def _is_zero_ref_increment(inst: Instruction) -> bool:
         return False
 
 
-def _is_mergeable_time_increment(inst: Instruction) -> bool:
+def _is_lit_time(inst: Instruction) -> bool:
+    """True for TIME inc_ref #N with N > 0 (no register operand)."""
     if not isinstance(inst, TimeInst):
         return False
-    if inst.c_op != "inc_ref":
+    if inst.c_op != "inc_ref" or inst.r1 is not None or inst.lit is None:
         return False
-    if inst.r1 is not None:
-        return False
-    if inst.lit is None:
-        return False
-    lit = inst.lit
-    if not lit.startswith("#"):
+    if not inst.lit.startswith("#"):
         return False
     try:
-        value = int(lit[1:])
+        return int(inst.lit[1:]) > 0
     except ValueError:
         return False
-    return value > 0
+
+
+def _get_lit_time_value(inst: TimeInst) -> int:
+    return int(cast(str, inst.lit)[1:])
+
+
+def _is_reg_time(inst: Instruction) -> bool:
+    """True for TIME inc_ref rX (register-driven increment)."""
+    return (
+        isinstance(inst, TimeInst)
+        and inst.c_op == "inc_ref"
+        and inst.r1 is not None
+    )
+
+
+def _is_anchored_timed(inst: Instruction) -> bool:
+    """True when inst has a time field of the form '@N' with N a plain integer."""
+    t = getattr(inst, "time", None)
+    if not isinstance(t, str) or not t.startswith("@"):
+        return False
+    return not regs_from_value(t)  # empty set → no register token → pure integer
+
+
+def _adjust_time_field(inst: Instruction, delta: int) -> Instruction:
+    """Return a copy of inst with time adjusted by +delta (precondition: _is_anchored_timed)."""
+    old = int(cast(str, getattr(inst, "time"))[1:])
+    return dataclasses.replace(inst, time=f"@{old + delta}")  # type: ignore[call-overload]
 
 
 class ZeroDelayDCELinear(AbsLinearPass):
@@ -64,12 +88,18 @@ class ZeroDelayDCELinear(AbsLinearPass):
 
 
 class TimedMergeLinear(AbsLinearPass):
-    """Merge adjacent TIME inc_ref #N instructions in a BasicBlockNode.
+    """Aggressive TIME inc_ref optimisation pass.
 
-    fix_addr_size=False: merges adjacent runs into a single instruction.
-    fix_addr_size=True:  merges the value into the first instruction of each
-                        run, then replaces the remaining instructions with
-                        NopInst to preserve stride.
+    For free blocks (fix_addr_size=False):
+      - Sinks lit-TIME instructions (#N, N>0) forward past non-timed instructions.
+      - When a lit-TIME meets a timed instruction (@M), absorbs the accumulated
+        delta into its timestamp (@M → @(M+delta)) and places the TIME after it.
+      - Multiple lit-TIMEs are accumulated (equivalent to merging them).
+      - reg-TIME (register-driven) acts as a conservative flush-and-barrier:
+        flushes pending_lit before it, then is emitted in-place.
+
+    For fixed blocks (fix_addr_size=True):
+      - Falls back to adjacent-only merge with NopInst padding to preserve stride.
     """
 
     def process_block(self, block: BasicBlockNode) -> None:
@@ -79,27 +109,36 @@ class TimedMergeLinear(AbsLinearPass):
             self._merge_free(block)
 
     def _merge_free(self, block: BasicBlockNode) -> None:
+        pending_lit: int = 0
         result: list[Instruction] = []
-        pending_run: list[TimeInst] = []
-
-        def flush() -> None:
-            if not pending_run:
-                return
-            if len(pending_run) == 1:
-                result.append(pending_run[0])
-            else:
-                total = sum(int(t.lit[1:]) for t in pending_run if t.lit is not None)
-                result.append(TimeInst(c_op="inc_ref", lit=f"#{total}"))
-            pending_run.clear()
 
         for inst in block.insts:
-            if _is_mergeable_time_increment(inst):
-                pending_run.append(cast(TimeInst, inst))
-            else:
-                flush()
+            if _is_lit_time(inst):
+                pending_lit += _get_lit_time_value(cast(TimeInst, inst))
+
+            elif _is_anchored_timed(inst):
+                if pending_lit > 0:
+                    result.append(_adjust_time_field(inst, pending_lit))
+                    result.append(TimeInst(c_op="inc_ref", lit=f"#{pending_lit}"))
+                    pending_lit = 0
+                else:
+                    result.append(inst)
+
+            elif _is_reg_time(inst):
+                # Conservative barrier: flush accumulated lit-TIME before reg-TIME.
+                if pending_lit > 0:
+                    result.append(TimeInst(c_op="inc_ref", lit=f"#{pending_lit}"))
+                    pending_lit = 0
                 result.append(inst)
 
-        flush()
+            else:
+                # Non-time, non-anchored instruction: emit as-is.
+                # pending_lit silently sinks past it.
+                result.append(inst)
+
+        if pending_lit > 0:
+            result.append(TimeInst(c_op="inc_ref", lit=f"#{pending_lit}"))
+
         block.insts = result
 
     def _merge_fixed(self, block: BasicBlockNode) -> None:
@@ -107,20 +146,19 @@ class TimedMergeLinear(AbsLinearPass):
         result: list[Instruction] = list(block.insts)
         i = 0
         while i < len(result):
-            if not _is_mergeable_time_increment(result[i]):
+            if not _is_lit_time(result[i]):
                 i += 1
                 continue
             # Start of a run — find its extent.
             j = i + 1
-            while j < len(result) and _is_mergeable_time_increment(result[j]):
+            while j < len(result) and _is_lit_time(result[j]):
                 j += 1
             if j == i + 1:
                 i += 1
                 continue
             # Run from i to j-1: sum values into slot i, NOP out i+1..j-1.
             total = sum(
-                int(cast(TimeInst, result[k]).lit[1:])  # type: ignore[union-attr]
-                for k in range(i, j)
+                _get_lit_time_value(cast(TimeInst, result[k])) for k in range(i, j)
             )
             result[i] = TimeInst(c_op="inc_ref", lit=f"#{total}")
             for k in range(i + 1, j):
