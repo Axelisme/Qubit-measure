@@ -21,7 +21,7 @@ class PipeLineConfig:
 
     # Hard cap on the unroll factor k. For register-driven loops k is also
     # rounded down to the nearest power of 2 (Phase 8D).
-    max_unroll_factor: int = 8
+    max_unroll_factor: int = 32
 
     # Maximum number of REG_WR words allowed in the dispatch shift-add
     # sequence. If the body_words multiply cannot fit, register-driven
@@ -30,9 +30,9 @@ class PipeLineConfig:
 
     # Unified cycle cost model
     cost_default: int = 1
-    cost_wmem: int = 4
-    cost_dmem: int = 4
-    cost_jump_flush: int = 1000
+    cost_wmem: int = 2
+    cost_dmem: int = 2
+    cost_jump_flush: int = 40
 
 
 # Global default configuration for quick debugging and toggling optimization options.
