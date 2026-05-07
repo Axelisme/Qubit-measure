@@ -14,10 +14,9 @@ if TYPE_CHECKING:
 class IRBuilder:
     def __init__(self, prog: IRCompileMixin):
         self.prog = prog
-        self.pmem_size: int = prog.tproccfg["pmem_size"]
         self.linker = IRLinker()
         self.lexer = IRLexer()
-        self.parser = IRParser()
+        self.parser = IRParser(pmem_size=prog.tproccfg["pmem_size"])
 
     def build(
         self,
@@ -33,7 +32,6 @@ class IRBuilder:
     def unbuild(
         self, ir: RootNode
     ) -> tuple[list[dict], dict[str, str], list[dict[str, Any]], IRCursor]:
-        unparser = IRParser(pmem_size=self.pmem_size)
-        blocks = unparser.unparse(ir)
+        blocks = self.parser.unparse(ir)
         inst_list = self.lexer.flatten(blocks)
         return self.linker.link(inst_list)
