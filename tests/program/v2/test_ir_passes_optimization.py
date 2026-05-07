@@ -23,6 +23,7 @@ from zcu_tools.program.v2.ir.node import (
 )
 from zcu_tools.program.v2.ir.passes import (
     DeadLabelEliminationPass,
+    DeadTestEliminationLinear,
     DeadWriteEliminationLinear,
     UnrollSmallLoopPass,
 )
@@ -920,6 +921,7 @@ def test_default_pipeline_structure():
         "ZeroDelayDCELinear",
         "TimedMergeLinear",
         "DeadWriteEliminationLinear",
+        "DeadTestEliminationLinear",
     ]
     # IR passes
     assert [type(p).__name__ for p in pipeline.ir_passes] == [
@@ -969,3 +971,120 @@ def test_dead_write_elimination_nop_pads_fixed_basic_block():
     assert len(bb.insts) == 2  # stride preserved
     assert isinstance(bb.insts[0], NopInst)  # dead write replaced with NOP
     assert isinstance(bb.insts[1], RegWriteInst)
+
+
+# ---------------------------------------------------------------------------
+# DeadTestEliminationLinear
+# ---------------------------------------------------------------------------
+
+def test_dead_test_elim_removes_overwritten_test():
+    """Second TEST replaces the first before any conditional jump consumes the flag."""
+    lbl = Label("target")
+    t1 = TestInst(op="s0 - #0")
+    t2 = TestInst(op="s1 - #0")
+    root = RootNode(insts=[
+        BasicBlockNode(
+            insts=[t1, t2],
+            branch=JumpInst(label=lbl, if_cond="nz"),
+        ),
+    ])
+
+    _run_linear_passes([DeadTestEliminationLinear()], root)
+
+    bb = root.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 1
+    assert bb.insts[0] is t2
+
+
+def test_dead_test_elim_keeps_consumed_test():
+    """TEST followed by a conditional jump — flag is consumed, must not be removed."""
+    lbl = Label("target2")
+    t = TestInst(op="s0 - #0")
+    root = RootNode(insts=[
+        BasicBlockNode(
+            insts=[t],
+            branch=JumpInst(label=lbl, if_cond="nz"),
+        ),
+    ])
+
+    _run_linear_passes([DeadTestEliminationLinear()], root)
+
+    bb = root.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 1
+    assert bb.insts[0] is t
+
+
+def test_dead_test_elim_removes_test_before_unconditional_branch():
+    """TEST whose block ends with an unconditional jump — flag is never consumed."""
+    lbl = Label("unc")
+    t = TestInst(op="s0 - #0")
+    root = RootNode(insts=[
+        BasicBlockNode(
+            insts=[t],
+            branch=JumpInst(label=lbl),  # unconditional
+        ),
+    ])
+
+    _run_linear_passes([DeadTestEliminationLinear()], root)
+
+    bb = root.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 0
+
+
+def test_dead_test_elim_removes_test_with_no_branch():
+    """TEST in a block with no outgoing branch — flag is never consumed."""
+    t = TestInst(op="s0 - #0")
+    root = RootNode(insts=[
+        BasicBlockNode(insts=[t]),
+    ])
+
+    _run_linear_passes([DeadTestEliminationLinear()], root)
+
+    bb = root.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 0
+
+
+def test_dead_test_elim_branch_field_consumes_flag():
+    """TEST whose block ends with a conditional branch (branch field) is kept."""
+    lbl = Label("cond_branch")
+    t = TestInst(op="s0 - #0")
+    nop = NopInst()
+    root = RootNode(insts=[
+        BasicBlockNode(
+            insts=[nop, t],
+            branch=JumpInst(label=lbl, if_cond="nz"),
+        ),
+    ])
+
+    _run_linear_passes([DeadTestEliminationLinear()], root)
+
+    bb = root.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 2
+    assert bb.insts[1] is t  # not removed
+
+
+def test_dead_test_elim_nop_pads_fixed_block():
+    """fix_addr_size=True: dead TEST replaced with NopInst, not removed."""
+    lbl = Label("fixed_lbl")
+    t1 = TestInst(op="s0 - #0")
+    t2 = TestInst(op="s1 - #0")
+    root = RootNode(insts=[
+        BasicBlockNode(
+            insts=[t1, t2],
+            branch=JumpInst(label=lbl, if_cond="nz"),
+            fix_addr_size=True,
+        ),
+    ])
+
+    _run_linear_passes([DeadTestEliminationLinear()], root)
+
+    bb = root.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 2  # stride preserved
+    assert isinstance(bb.insts[0], NopInst)
+    assert bb.insts[1] is t2

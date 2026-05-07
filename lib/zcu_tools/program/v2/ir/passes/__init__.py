@@ -4,7 +4,7 @@ from .control_flow import (
     BranchEliminationPass,
     DeadLabelEliminationPass,
 )
-from .dataflow import DeadWriteEliminationLinear
+from .dataflow import DeadTestEliminationLinear, DeadWriteEliminationLinear
 from .loop import UnrollSmallLoopPass
 from .timeline import TimedMergeLinear, ZeroDelayDCELinear
 
@@ -16,6 +16,7 @@ __all__ = [
     "BranchEliminationPass",
     "DeadLabelEliminationPass",
     # dataflow
+    "DeadTestEliminationLinear",
     "DeadWriteEliminationLinear",
     # loop
     "UnrollSmallLoopPass",

@@ -138,6 +138,7 @@ def make_default_pipeline(pmem_capacity: int) -> IRPipeLine:
         BlockMergePass,
         BranchEliminationPass,
         DeadLabelEliminationPass,
+        DeadTestEliminationLinear,
         DeadWriteEliminationLinear,
         TimedMergeLinear,
         UnrollSmallLoopPass,
@@ -156,6 +157,7 @@ def make_default_pipeline(pmem_capacity: int) -> IRPipeLine:
             ZeroDelayDCELinear(),
             TimedMergeLinear(),
             DeadWriteEliminationLinear(),
+            DeadTestEliminationLinear(),
         ],
         ir_passes=[
             UnrollSmallLoopPass(),
