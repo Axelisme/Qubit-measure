@@ -4,7 +4,7 @@ from typing import Optional, cast
 
 from ..instructions import Instruction, LabelInst, NopInst
 from ..labels import PSEUDO_LABELS, Label
-from ..node import BasicBlockNode, BlockNode, IRNode, RootNode
+from ..node import BasicBlockNode, BlockNode, IRBranch, IRLoop, IRNode, RootNode
 from ..pipeline import PipeLineContext
 from ..traversal import walk_instructions
 from .base import OptimizationPassBase
@@ -150,15 +150,17 @@ class BlockMergePass(OptimizationPassBase):
         return ir
 
     def _merge_block(self, node: IRNode, referenced: set[Label]) -> None:
-        if not isinstance(node, BlockNode):
-            return
-        changed = True
-        while changed:
-            changed = self._merge_pass(node.insts, referenced)
-        # Recurse into remaining structural nodes.
-        for child in node.insts:
-            if isinstance(child, BlockNode):
+        if isinstance(node, BlockNode):
+            changed = True
+            while changed:
+                changed = self._merge_pass(node.insts, referenced)
+            for child in node.insts:
                 self._merge_block(child, referenced)
+        elif isinstance(node, IRLoop):
+            self._merge_block(node.body, referenced)
+        elif isinstance(node, IRBranch):
+            for case in node.cases:
+                self._merge_block(case, referenced)
 
     def _merge_pass(self, items: list[IRNode], referenced: set[Label]) -> bool:
         i = 0
