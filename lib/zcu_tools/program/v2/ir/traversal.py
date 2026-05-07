@@ -62,7 +62,7 @@ class IRTransformer:
         return node
 
 
-def walk_nodes(node: IRNode) -> Iterator[IRNode]:
+def _walk_nodes(node: IRNode) -> Iterator[IRNode]:
     seen: set[int] = set()
 
     def _walk(current: IRNode) -> Iterator[IRNode]:
@@ -79,14 +79,14 @@ def walk_nodes(node: IRNode) -> Iterator[IRNode]:
 
 def walk_basic_blocks(node: IRNode) -> Iterator[BasicBlockNode]:
     """Yield every BasicBlockNode reachable from node (depth-first)."""
-    for current in walk_nodes(node):
+    for current in _walk_nodes(node):
         if isinstance(current, BasicBlockNode):
             yield current
 
 
 def walk_instructions(node: IRNode) -> Iterator[Instruction]:
     """Yield every Instruction reachable from node (labels, insts, branch)."""
-    for current in walk_nodes(node):
+    for current in _walk_nodes(node):
         if isinstance(current, BasicBlockNode):
             yield from current.labels
             yield from current.insts

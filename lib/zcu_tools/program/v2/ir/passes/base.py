@@ -5,12 +5,8 @@ from typing import cast
 from ..instructions import (
     DmemReadInst,
     Instruction,
-    JumpInst,
-    LabelInst,
-    MetaInst,
     NopInst,
     RegWriteInst,
-    TestInst,
     TimeInst,
     WaitInst,
 )
@@ -28,10 +24,6 @@ class OptimizationPassBase(AbsIRPass, IRTransformer):
         if isinstance(res, list):
             raise ValueError("Unexpected list returned from visit")
         return cast(RootNode, res or ir)
-
-
-def is_label_or_branching_inst(inst: Instruction) -> bool:
-    return isinstance(inst, (LabelInst, JumpInst, TestInst, MetaInst))
 
 
 def is_safe_linear_inst(inst: Instruction) -> bool:
