@@ -12,7 +12,7 @@ from zcu_tools.program.v2.ir.instructions import (
     RegWriteInst,
 )
 from zcu_tools.program.v2.ir.labels import Label
-from zcu_tools.program.v2.ir.node import BasicBlockNode, RootNode
+from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRBranch, IRLoop, RootNode
 from zcu_tools.program.v2.ir.passes.control_flow import (
     BlockMergePass,
     BranchEliminationPass,
@@ -227,3 +227,93 @@ def test_block_merge_chains_three_blocks():
 
     assert len(out.insts) == 1
     assert len(out.insts[0].insts) == 3  # type: ignore[union-attr]
+
+
+# ---------------------------------------------------------------------------
+# BlockMergePass / BranchEliminationPass — recursion into IRLoop / IRBranch
+# ---------------------------------------------------------------------------
+
+def test_block_merge_inside_irloop_body():
+    """BlockMergePass must recurse into IRLoop bodies."""
+    body = BlockNode(insts=[
+        BasicBlockNode(insts=[NopInst()]),   # no branch
+        BasicBlockNode(insts=[NopInst()]),   # no labels → should be merged
+    ])
+    insts: list = [IRLoop(body=body, n=4)]
+    root = RootNode(insts=insts)
+
+    out = BlockMergePass().process(root, _ctx())
+
+    loop = out.insts[0]
+    assert isinstance(loop, IRLoop)
+    assert len(loop.body.insts) == 1
+    merged = loop.body.insts[0]
+    assert isinstance(merged, BasicBlockNode)
+    assert len(merged.insts) == 2
+
+
+def test_block_merge_inside_irbranch_cases():
+    """BlockMergePass must recurse into every IRBranch case."""
+    case = BlockNode(insts=[
+        BasicBlockNode(insts=[NopInst()]),
+        BasicBlockNode(insts=[NopInst()]),
+    ])
+    insts: list = [IRBranch(cases=[case])]
+    root = RootNode(insts=insts)
+
+    out = BlockMergePass().process(root, _ctx())
+
+    branch = out.insts[0]
+    assert isinstance(branch, IRBranch)
+    assert len(branch.cases[0].insts) == 1
+    assert len(branch.cases[0].insts[0].insts) == 2  # type: ignore[union-attr]
+
+
+def test_branch_elim_inside_irloop_body():
+    """BranchEliminationPass must recurse into IRLoop bodies."""
+    lbl = _label("loop_next")
+    body = BlockNode(insts=[
+        BasicBlockNode(
+            insts=[NopInst()],
+            branch=JumpInst(label=lbl),
+        ),
+        BasicBlockNode(
+            labels=[LabelInst(name=lbl)],
+            insts=[NopInst()],
+        ),
+    ])
+    insts: list = [IRLoop(body=body, n=4)]
+    root = RootNode(insts=insts)
+
+    out = BranchEliminationPass().process(root, _ctx())
+
+    loop = out.insts[0]
+    assert isinstance(loop, IRLoop)
+    first_block = loop.body.insts[0]
+    assert isinstance(first_block, BasicBlockNode)
+    assert first_block.branch is None
+
+
+def test_branch_elim_inside_irbranch_cases():
+    """BranchEliminationPass must recurse into every IRBranch case."""
+    lbl = _label("branch_next")
+    case = BlockNode(insts=[
+        BasicBlockNode(
+            insts=[NopInst()],
+            branch=JumpInst(label=lbl),
+        ),
+        BasicBlockNode(
+            labels=[LabelInst(name=lbl)],
+            insts=[NopInst()],
+        ),
+    ])
+    insts: list = [IRBranch(cases=[case])]
+    root = RootNode(insts=insts)
+
+    out = BranchEliminationPass().process(root, _ctx())
+
+    branch = out.insts[0]
+    assert isinstance(branch, IRBranch)
+    first_block = branch.cases[0].insts[0]
+    assert isinstance(first_block, BasicBlockNode)
+    assert first_block.branch is None

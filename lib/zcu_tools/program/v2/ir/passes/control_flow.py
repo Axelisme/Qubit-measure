@@ -71,14 +71,18 @@ class BranchEliminationPass(OptimizationPassBase):
         return ir
 
     def _process_block(self, node: IRNode) -> None:
-        if not isinstance(node, BlockNode):
-            return
-        blocks = node.insts
-        for i, item in enumerate(blocks):
-            if isinstance(item, BasicBlockNode):
-                self._try_eliminate_branch(item, blocks, i)
-            elif isinstance(item, BlockNode):
-                self._process_block(item)
+        if isinstance(node, BlockNode):
+            blocks = node.insts
+            for i, item in enumerate(blocks):
+                if isinstance(item, BasicBlockNode):
+                    self._try_eliminate_branch(item, blocks, i)
+                else:
+                    self._process_block(item)
+        elif isinstance(node, IRLoop):
+            self._process_block(node.body)
+        elif isinstance(node, IRBranch):
+            for case in node.cases:
+                self._process_block(case)
 
     def _try_eliminate_branch(
         self, block: BasicBlockNode, siblings: list[IRNode], idx: int
