@@ -61,15 +61,14 @@ class BasicBlockNode(IRNode):
             lines.append(f"{prefix}  {inst}")
         if self.branch is not None:
             lines.append(f"{prefix}  -> {self.branch}")
-        return "\n".join(lines)
+        return "\n".join(lines) + "\n"
 
 
 @dataclass
 class BlockNode(IRNode):
     """A sequence of IR nodes (structural container).
 
-    After Phase 1 refactoring, children should be BasicBlockNode | IRLoop | IRBranch.
-    InstNode is kept only as a legacy shim during migration.
+    Children must be BasicBlockNode | IRLoop | IRBranch | BlockNode.
     """
 
     insts: list[IRNode] = field(default_factory=list)
@@ -83,31 +82,14 @@ class BlockNode(IRNode):
 
     def _into_str(self, indent: int = 0) -> str:
         prefix = "    " * indent
-        return (
-            f"{prefix}{self.__class__.__name__}()\n"
-            + "\n".join(i._into_str(indent + 1) for i in self.insts)
-            + "\n"
+        return f"{prefix}{self.__class__.__name__}()\n" + "\n".join(
+            i._into_str(indent + 1) for i in self.insts
         )
 
 
 @dataclass
 class RootNode(BlockNode):
     """The root of the IR tree."""
-
-
-# ---------------------------------------------------------------------------
-# Legacy shim: InstNode is kept only so existing code that imports it does not
-# immediately break. New code must use BasicBlockNode instead.
-# TODO: remove InstNode once all callers are migrated.
-# ---------------------------------------------------------------------------
-@dataclass
-class InstNode(IRNode):
-    """DEPRECATED: use BasicBlockNode. A wrapper for a single linear instruction."""
-
-    inst: Instruction
-
-    def _into_str(self, indent: int = 0) -> str:
-        return "    " * indent + str(self.inst)
 
 
 def _needs_big_jump(pmem_size: Optional[int]) -> bool:
@@ -232,9 +214,8 @@ class IRLoop(IRNode):
     def _into_str(self, indent: int = 0) -> str:
         prefix = "    " * indent
         return (
-            f"{prefix}IRLoop(name={self.name}, n={self.n}, range_hint={self.range_hint})\n"
+            f"{prefix}IRLoop(name={self.name}, n={self.n}, counter={self.counter_reg}, range_hint={self.range_hint})\n"
             + "\n".join(i._into_str(indent + 1) for i in self.body.insts)
-            + "\n"
         )
 
 
@@ -300,57 +281,14 @@ class IRBranch(IRNode):
         return (
             f"{prefix}IRBranch(name={self.name}, compare_reg={self.compare_reg})\n"
             + "\n".join(i._into_str(indent + 1) for i in self.cases)
-            + "\n"
         )
-
-
-# ---------------------------------------------------------------------------
-# Legacy shims for removed node types.
-# TODO: remove once all callers are migrated.
-# ---------------------------------------------------------------------------
-
-@dataclass
-class IRBranchCase(BlockNode):
-    """DEPRECATED: use plain BlockNode. Kept for import compatibility."""
-
-    name: str = ""
-
-
-@dataclass
-class IRJumpTableLoop(IRNode):
-    """DEPRECATED: jump-table lowering is now done inside UnrollSmallLoopPass.
-
-    This stub is kept so that existing imports do not immediately break.
-    TODO: remove once all callers are migrated.
-    """
-
-    name: str = ""
-    n_reg: str = ""
-    counter_reg: str = ""
-    k: int = 0
-    body_words: int = 0
-    entry_labels: list[Label] = field(default_factory=list)
-    exit_label: Optional[Label] = None
-    bodies: list[BlockNode] = field(default_factory=list)
-
-    def children(self) -> Iterator[IRNode]:
-        yield from self.bodies
-
-    def lower(self, pmem_size: Optional[int] = None) -> list[BasicBlockNode]:  # noqa: ARG002
-        raise NotImplementedError(
-            "IRJumpTableLoop is deprecated. "
-            "Jump-table lowering is handled by UnrollSmallLoopPass."
-        )
-
-    def _into_str(self, indent: int = 0) -> str:
-        prefix = "    " * indent
-        return f"{prefix}IRJumpTableLoop(name={self.name}, n={self.n_reg}) [DEPRECATED]\n"
 
 
 # ---------------------------------------------------------------------------
 # Helper: recursively lower a BlockNode into list[BasicBlockNode].
-# Used by IRLoop.lower() and IRBranch.lower(), and by IRLinker.
+# Used by IRLoop.lower(), IRBranch.lower(), loop.py, and IRLinker.
 # ---------------------------------------------------------------------------
+
 
 def _lower_block_node(
     block: BlockNode, pmem_size: Optional[int] = None
@@ -361,7 +299,6 @@ def _lower_block_node(
     - IRLoop          → call .lower()
     - IRBranch        → call .lower()
     - BlockNode       → recurse
-    - InstNode        → wrap in a single-instruction BasicBlockNode (legacy)
     - anything else   → raise TypeError
     """
     result: list[BasicBlockNode] = []
@@ -374,18 +311,9 @@ def _lower_block_node(
             result.extend(child.lower(pmem_size))
         elif isinstance(child, BlockNode):
             result.extend(_lower_block_node(child, pmem_size))
-        elif isinstance(child, InstNode):
-            inst = child.inst
-            if isinstance(inst, JumpInst):
-                result.append(BasicBlockNode(branch=inst))
-            elif isinstance(inst, LabelInst):
-                result.append(BasicBlockNode(labels=[inst]))
-            else:
-                result.append(BasicBlockNode(insts=[inst]))
         else:
             raise TypeError(
                 f"_lower_block_node: unexpected node type {type(child).__name__}. "
-                f"Only BasicBlockNode, IRLoop, IRBranch, and BlockNode are allowed "
-                f"after Phase 1 refactoring."
+                f"Only BasicBlockNode, IRLoop, IRBranch, and BlockNode are allowed."
             )
     return result

@@ -25,7 +25,6 @@ from zcu_tools.program.v2.ir.labels import Label
 from zcu_tools.program.v2.ir.node import (
     BasicBlockNode,
     BlockNode,
-    InstNode,
     IRLoop,
     IRNode,
     RootNode,
@@ -83,7 +82,7 @@ def test_v1_jump_table_entry_blocks_have_uniform_stride():
     body_words = 3
     entry_labels = [Label.make_new(f"jt_entry_{i}") for i in range(k)]
     exit_label = Label.make_new("jt_exit")
-    body = BlockNode(insts=[InstNode(NopInst()) for _ in range(body_words)])
+    body = BlockNode(insts=[BasicBlockNode(insts=[NopInst()]) for _ in range(body_words)])
     bodies = [deepcopy(body) for _ in range(k)]
 
     blocks = build_jump_table_blocks(
@@ -121,7 +120,7 @@ def test_v1_jump_table_stride_equals_body_words_plus_one():
                 name="loop",
                 counter_reg="r_i",
                 n="r_n",
-                body=BlockNode(insts=[InstNode(NopInst()) for _ in range(body_nops)]),
+                body=BlockNode(insts=[BasicBlockNode(insts=[NopInst()]) for _ in range(body_nops)]),
             )
         ]
     )
@@ -155,8 +154,8 @@ def test_v1_jump_table_entry_blocks_not_modified_by_pipeline():
                 counter_reg="r_i",
                 n="r_n",
                 body=BlockNode(insts=[
-                    InstNode(NopInst()),
-                    InstNode(NopInst()),
+                    BasicBlockNode(insts=[NopInst()]),
+                    BasicBlockNode(insts=[NopInst()]),
                 ]),
             )
         ]
@@ -197,7 +196,7 @@ def test_v2_fully_unrolled_loop_produces_single_fused_block():
                 counter_reg="r_cnt",
                 n=3,
                 body=BlockNode(insts=[
-                    InstNode(RegWriteInst(dst="r1", src="imm", lit="#1")),
+                    BasicBlockNode(insts=[RegWriteInst(dst="r1", src="imm", lit="#1")]),
                 ]),
             )
         ]
@@ -227,7 +226,7 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
 
     After full unroll + DeadWriteElimination only the last write should
     survive (the first two are dead: overwritten before being read).
-    Uses walk_instructions to cover both legacy InstNode and BasicBlockNode paths.
+    Uses walk_instructions to cover all BasicBlockNode paths.
     """
     from zcu_tools.program.v2.ir.traversal import walk_instructions
 
@@ -239,7 +238,7 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
                 counter_reg="r_cnt",
                 n=3,
                 body=BlockNode(insts=[
-                    InstNode(RegWriteInst(dst="r_out", src="imm", lit="#42")),
+                    BasicBlockNode(insts=[RegWriteInst(dst="r_out", src="imm", lit="#42")]),
                 ]),
             )
         ]
@@ -309,8 +308,8 @@ def test_v3_fixed_block_instruction_count_preserved_after_pipeline():
                 counter_reg="r_i",
                 n="r_n",
                 body=BlockNode(insts=[
-                    InstNode(NopInst()),
-                    InstNode(NopInst()),
+                    BasicBlockNode(insts=[NopInst()]),
+                    BasicBlockNode(insts=[NopInst()]),
                 ]),
             )
         ]

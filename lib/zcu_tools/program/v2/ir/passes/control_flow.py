@@ -5,7 +5,7 @@ from typing import Optional, cast
 from ..instructions import Instruction, LabelInst, NopInst
 from ..labels import PSEUDO_LABELS, Label
 from ..node import BasicBlockNode, BlockNode, IRNode, RootNode
-from ..pipeline import LinearPipeline, PipeLineContext
+from ..pipeline import PipeLineContext
 from ..traversal import walk_instructions
 from .base import OptimizationPassBase
 
@@ -41,7 +41,8 @@ class DeadLabelEliminationPass(OptimizationPassBase):
 
     def visit_BasicBlockNode(self, node: BasicBlockNode) -> IRNode:
         node.labels = [
-            lbl for lbl in node.labels
+            lbl
+            for lbl in node.labels
             if str(lbl.name) in PSEUDO_LABELS or lbl.name in self._referenced_labels
         ]
         return node
@@ -109,7 +110,7 @@ def _next_basic_block(
     siblings: list[IRNode], from_idx: int
 ) -> Optional[BasicBlockNode]:
     """Return the first BasicBlockNode after from_idx in the sibling list."""
-    for item in siblings[from_idx + 1:]:
+    for item in siblings[from_idx + 1 :]:
         if isinstance(item, BasicBlockNode):
             return item
         if isinstance(item, BlockNode):
@@ -136,20 +137,12 @@ class BlockMergePass(OptimizationPassBase):
     Block A and Block B can be merged when:
       - Block A has no branch (falls through).
       - Block B has no alive labels (not a jump target).
-
-    After merging, re-runs ``post_linear`` across merged boundaries to
-    eliminate dead writes exposed by the merge.
     """
-
-    def __init__(self, post_linear: Optional[LinearPipeline] = None) -> None:
-        self._post_linear = post_linear
 
     def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:
         self.ctx = ctx
         referenced = _collect_referenced_labels(ir)
         self._merge_block(ir, referenced)
-        if self._post_linear is not None:
-            self._post_linear.process(ir)
         return ir
 
     def _merge_block(self, node: IRNode, referenced: set[Label]) -> None:

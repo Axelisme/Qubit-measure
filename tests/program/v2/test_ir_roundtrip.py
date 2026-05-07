@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 from zcu_tools.program.v2.ir.builder import IRBuilder
 from zcu_tools.program.v2.ir.instructions import NopInst
-from zcu_tools.program.v2.ir.node import BlockNode, InstNode, IRLoop, RootNode
+from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRLoop, RootNode
 from zcu_tools.program.v2.ir.pipeline import make_default_pipeline
 
 
@@ -114,7 +114,7 @@ def test_irloop_emit_uses_s15_jump_for_large_pmem():
                 name="big",
                 counter_reg="r1",
                 n=5,
-                body=BlockNode(insts=[InstNode(NopInst())]),
+                body=BlockNode(insts=[BasicBlockNode(insts=[NopInst()])]),
             )
         ]
     )

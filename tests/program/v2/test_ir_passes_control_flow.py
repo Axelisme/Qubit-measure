@@ -20,9 +20,9 @@ from zcu_tools.program.v2.ir.passes.control_flow import (
 )
 from zcu_tools.program.v2.ir.passes.dataflow import DeadWriteEliminationLinear
 from zcu_tools.program.v2.ir.pipeline import (
-    LinearPipeline,
     PipeLineConfig,
     PipeLineContext,
+    _run_linear_passes,
 )
 
 
@@ -196,19 +196,22 @@ def test_block_merge_does_not_merge_fixed_blocks():
     assert len(out.insts) == 2
 
 
-def test_block_merge_reruns_linear_pass_after_merge():
-    """After merging, a dead write crossing the old boundary should be eliminated."""
+def test_block_merge_cross_boundary_dead_write_cleared_by_post_linear():
+    """A dead write crossing the merge boundary is cleared when post_linear runs after BlockMergePass."""
     root = RootNode(insts=[
         BasicBlockNode(insts=[RegWriteInst(dst="r0", src="imm", lit="#1")]),
         BasicBlockNode(insts=[RegWriteInst(dst="r0", src="imm", lit="#2")]),
     ])
 
-    out = BlockMergePass(LinearPipeline(DeadWriteEliminationLinear())).process(root, _ctx())
+    BlockMergePass().process(root, _ctx())
+    # After merge: one block with two writes — dead write still present.
+    assert len(root.insts) == 1
+    assert len(root.insts[0].insts) == 2  # type: ignore[union-attr]
 
-    assert len(out.insts) == 1
-    merged = out.insts[0]
+    # Post-linear clears the dead write.
+    _run_linear_passes([DeadWriteEliminationLinear()], root)
+    merged = root.insts[0]
     assert isinstance(merged, BasicBlockNode)
-    # First write to r0 should be eliminated as dead.
     assert len(merged.insts) == 1
     assert merged.insts[0].lit == "#2"  # type: ignore[attr-defined]
 

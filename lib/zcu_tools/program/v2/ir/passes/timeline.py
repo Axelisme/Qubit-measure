@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import Optional, cast
+from typing import cast
 
 from ..instructions import Instruction, NopInst, TimeInst
-from ..node import BasicBlockNode, BlockNode, InstNode, IRNode, RootNode
-from ..pipeline import AbsIRPass, AbsLinearPass, PipeLineContext
-from ..traversal import IRTransformer
+from ..node import BasicBlockNode
+from ..pipeline import AbsLinearPass
 
 
 def _is_zero_ref_increment(inst: Instruction) -> bool:
@@ -44,10 +43,6 @@ def _is_mergeable_time_increment(inst: Instruction) -> bool:
         return False
     return value > 0
 
-
-# ---------------------------------------------------------------------------
-# AbsLinearPass implementations
-# ---------------------------------------------------------------------------
 
 class ZeroDelayDCELinear(AbsLinearPass):
     """Remove TIME inc_ref #0 instructions from a BasicBlockNode.
@@ -132,100 +127,3 @@ class TimedMergeLinear(AbsLinearPass):
                 result[k] = NopInst()
             i = j
         block.insts = result
-
-
-# ---------------------------------------------------------------------------
-# Legacy IRTransformer passes for InstNode / BlockNode content
-# ---------------------------------------------------------------------------
-
-class _LegacyBase(AbsIRPass, IRTransformer):
-    def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:  # noqa: ARG002
-        res = self.visit(ir)
-        if isinstance(res, list):
-            raise ValueError("Unexpected list returned from visit")
-        return cast(RootNode, res or ir)
-
-    def visit_BasicBlockNode(self, node: BasicBlockNode) -> Optional[IRNode]:
-        return node  # BasicBlockNode path handled by LinearPipeline
-
-
-class ZeroDelayDCELegacyPass(_LegacyBase):
-    """Remove TIME inc_ref #0 from legacy InstNode-based BlockNodes."""
-
-    def visit_TimeInst(self, inst: TimeInst) -> Optional[Instruction]:
-        if _is_zero_ref_increment(inst):
-            return None
-        return inst
-
-
-class TimedMergeLegacyPass(_LegacyBase):
-    """Merge adjacent TIME inc_ref in legacy InstNode-based BlockNodes."""
-
-    def visit_BlockNode(self, node: BlockNode) -> Optional[IRNode]:
-        self.generic_visit(node)
-
-        rewritten: list[IRNode] = []
-        pending_run: list[TimeInst] = []
-
-        def flush_pending() -> None:
-            if not pending_run:
-                return
-            if len(pending_run) == 1:
-                rewritten.append(InstNode(pending_run[0]))
-            else:
-                total = sum(int(t.lit[1:]) for t in pending_run if t.lit is not None)
-                rewritten.append(InstNode(TimeInst(c_op="inc_ref", lit=f"#{total}")))
-            pending_run.clear()
-
-        for item in node.insts:
-            if not isinstance(item, InstNode):
-                flush_pending()
-                rewritten.append(item)
-                continue
-            if not _is_mergeable_time_increment(item.inst):
-                flush_pending()
-                rewritten.append(item)
-            else:
-                pending_run.append(cast(TimeInst, item.inst))
-
-        flush_pending()
-        node.insts = rewritten
-        return node
-
-    def visit_RootNode(self, node: RootNode) -> Optional[IRNode]:
-        return self.visit_BlockNode(node)
-
-    def visit_IRBranchCase(self, node: BlockNode) -> Optional[IRNode]:
-        return self.visit_BlockNode(node)
-
-
-# ---------------------------------------------------------------------------
-# Pipeline pass wrappers (backwards-compatible: check enable flag, run both
-# BasicBlockNode via LinearPipeline and legacy InstNode via Legacy pass).
-# These are kept so existing code that imports ZeroDelayDCEPass / TimedMergePass
-# still works; new code should use ZeroDelayDCELinear / TimedMergeLinear
-# directly inside a LinearPipeline.
-# ---------------------------------------------------------------------------
-
-class ZeroDelayDCEPass(AbsIRPass):
-    """Compatibility wrapper: run ZeroDelayDCELinear + ZeroDelayDCELegacyPass."""
-
-    def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:
-        if not ctx.config.enable_zero_delay_dce:
-            return ir
-        from ..pipeline import LinearPipeline
-        LinearPipeline(ZeroDelayDCELinear()).process(ir)
-        ZeroDelayDCELegacyPass().process(ir, ctx)
-        return ir
-
-
-class TimedMergePass(AbsIRPass):
-    """Compatibility wrapper: run TimedMergeLinear + TimedMergeLegacyPass."""
-
-    def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:
-        if not ctx.config.enable_timed_instruction_merge:
-            return ir
-        from ..pipeline import LinearPipeline
-        LinearPipeline(TimedMergeLinear()).process(ir)
-        TimedMergeLegacyPass().process(ir, ctx)
-        return ir

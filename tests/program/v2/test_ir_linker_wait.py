@@ -8,7 +8,7 @@ from zcu_tools.program.v2.ir.instructions import (
 )
 from zcu_tools.program.v2.ir.labels import Label
 from zcu_tools.program.v2.ir.linker import IRLinker
-from zcu_tools.program.v2.ir.node import InstNode, RootNode
+from zcu_tools.program.v2.ir.node import BasicBlockNode, RootNode
 
 
 def test_linker_wait_address_calculation():
@@ -25,13 +25,19 @@ def test_linker_wait_address_calculation():
 
     ir = RootNode(
         insts=[
-            InstNode(LabelInst(name=Label("L1"))),
-            InstNode(RegWriteInst(dst="r1", src="imm", extra_args={"LIT": "#1"})),
-            InstNode(LabelInst(name=Label("L2"))),
-            InstNode(WaitInst()),
-            InstNode(LabelInst(name=Label("L3"))),
-            InstNode(RegWriteInst(dst="r2", src="imm", extra_args={"LIT": "#2"})),
-            InstNode(LabelInst(name=Label("L4"))),
+            BasicBlockNode(
+                labels=[LabelInst(name=Label("L1"))],
+                insts=[RegWriteInst(dst="r1", src="imm", extra_args={"LIT": "#1"})],
+            ),
+            BasicBlockNode(
+                labels=[LabelInst(name=Label("L2"))],
+                insts=[WaitInst()],
+            ),
+            BasicBlockNode(
+                labels=[LabelInst(name=Label("L3"))],
+                insts=[RegWriteInst(dst="r2", src="imm", extra_args={"LIT": "#2"})],
+            ),
+            BasicBlockNode(labels=[LabelInst(name=Label("L4"))]),
         ]
     )
 
@@ -62,10 +68,14 @@ def test_linker_wait_address_calculation():
 def test_linker_cursor_counts_wait_and_trailing_labels():
     ir = RootNode(
         insts=[
-            InstNode(LabelInst(name=Label("L1"))),
-            InstNode(WaitInst()),
-            InstNode(LabelInst(name=Label("L2"))),
-            InstNode(RegWriteInst(dst="r0", src="imm", extra_args={"LIT": "#0"})),
+            BasicBlockNode(
+                labels=[LabelInst(name=Label("L1"))],
+                insts=[WaitInst()],
+            ),
+            BasicBlockNode(
+                labels=[LabelInst(name=Label("L2"))],
+                insts=[RegWriteInst(dst="r0", src="imm", extra_args={"LIT": "#0"})],
+            ),
         ]
     )
 
@@ -83,9 +93,8 @@ def test_linker_wait_roundtrip():
 
     ir = RootNode(
         insts=[
-            InstNode(LabelInst(name=Label("L1"))),
-            InstNode(WaitInst()),
-            InstNode(LabelInst(name=Label("L2"))),
+            BasicBlockNode(labels=[LabelInst(name=Label("L1"))], insts=[WaitInst()]),
+            BasicBlockNode(labels=[LabelInst(name=Label("L2"))]),
         ]
     )
 

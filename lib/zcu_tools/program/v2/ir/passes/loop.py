@@ -13,7 +13,7 @@ from ..analysis import (
 )
 from ..instructions import RegWriteInst
 from ..labels import Label
-from ..node import BasicBlockNode, BlockNode, InstNode, IRLoop, IRNode
+from ..node import BasicBlockNode, BlockNode, IRLoop, IRNode, _lower_block_node
 from .base import OptimizationPassBase
 from .loop_dispatch import build_jump_table_blocks, shift_add_multiply
 
@@ -32,19 +32,27 @@ class UnrollAnalysis:
 
 
 def _clone_nodes_with_incr(
-    nodes: list[IRNode], repeat: int, counter_reg: str, final_incr: bool = True
-) -> list[IRNode]:
+    nodes: list[IRNode],
+    repeat: int,
+    counter_reg: str,
+    final_incr: bool = True,
+    pmem_size: int | None = None,
+) -> list[BasicBlockNode]:
     """Clone nodes `repeat` times, inserting a counter increment after each copy.
 
     If final_incr is False, the last copy does NOT get an increment appended
-    (useful when the caller's IRLoop.emit() will add the final one).
+    (useful when the caller adds the final one externally).
+    Returns a flat list of BasicBlockNode.
     """
-    incr = InstNode(RegWriteInst(dst=counter_reg, src="op", op=f"{counter_reg} + #1"))
-    result: list[IRNode] = []
+    incr_bb = BasicBlockNode(
+        insts=[RegWriteInst(dst=counter_reg, src="op", op=f"{counter_reg} + #1")]
+    )
+    result: list[BasicBlockNode] = []
     for i in range(repeat):
-        result.extend(deepcopy(nodes))
+        lowered = _lower_block_node(BlockNode(insts=deepcopy(nodes)), pmem_size)
+        result.extend(lowered)
         if final_incr or i < repeat - 1:
-            result.append(deepcopy(incr))
+            result.append(deepcopy(incr_bb))
     return result
 
 
@@ -198,14 +206,16 @@ class UnrollSmallLoopPass(OptimizationPassBase):
                 )
                 # Preserve loop semantics: counter starts at 0, increments after
                 # each body copy. No surrounding IRLoop, so we emit all increments.
-                return BlockNode(
-                    insts=[
-                        InstNode(
-                            RegWriteInst(dst=node.counter_reg, src="imm", lit="#0")
-                        ),
-                        *_clone_nodes_with_incr(node.body.insts, n, node.counter_reg),
-                    ]
+                pmem_size = self.ctx.pmem_size
+                init_bb = BasicBlockNode(
+                    insts=[RegWriteInst(dst=node.counter_reg, src="imm", lit="#0")]
                 )
+                return [
+                    init_bb,
+                    *_clone_nodes_with_incr(
+                        node.body.insts, n, node.counter_reg, pmem_size=pmem_size
+                    ),
+                ]
 
             # Partial unroll cannot use a constant remainder when the
             # iteration count is only known at runtime — the register
@@ -230,12 +240,16 @@ class UnrollSmallLoopPass(OptimizationPassBase):
                 remainder,
             )
 
-            result: list[IRNode] = []
+            pmem_size = self.ctx.pmem_size
             # Each of the k body copies needs its own counter increment.
-            # IRLoop.emit() will append the final increment after all k copies,
-            # so we omit it from the last copy (final_incr=False).
+            # The loop's back-edge will append the final increment after all k
+            # copies, so we omit it from the last copy (final_incr=False).
             unrolled_body = _clone_nodes_with_incr(
-                node.body.insts, k, node.counter_reg, final_incr=False
+                node.body.insts,
+                k,
+                node.counter_reg,
+                final_incr=False,
+                pmem_size=pmem_size,
             )
             full_iters = iters * k
             new_loop = IRLoop(
@@ -246,12 +260,17 @@ class UnrollSmallLoopPass(OptimizationPassBase):
                 # `iters * k` before appending remainder copies.
                 n=full_iters,
                 range_hint=(full_iters, full_iters),
-                body=BlockNode(insts=unrolled_body),
+                body=BlockNode(insts=list(unrolled_body)),
             )
-            result.append(new_loop)
+            result: list[IRNode] = [new_loop]
             if remainder > 0:
                 result.extend(
-                    _clone_nodes_with_incr(node.body.insts, remainder, node.counter_reg)
+                    _clone_nodes_with_incr(
+                        node.body.insts,
+                        remainder,
+                        node.counter_reg,
+                        pmem_size=pmem_size,
+                    )
                 )
             return BlockNode(insts=result)
 

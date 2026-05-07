@@ -40,7 +40,7 @@ class IRCompileMixin(QickProgramV2):
         builder = IRBuilder(self)
         ir = builder.build(insts, labels, meta_infos)
 
-        logger.debug("Initial IR:\n%s", ir)
+        logger.debug(f"Initial IR:\n{ir}")
 
         pipeline = make_default_pipeline(pmem_capacity=self.tproccfg["pmem_size"])
 

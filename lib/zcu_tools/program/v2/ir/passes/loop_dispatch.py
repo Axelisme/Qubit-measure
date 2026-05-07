@@ -100,12 +100,7 @@ def build_jump_table_blocks(
 
     See module docstring for the full emitted shape.
     """
-    if (
-        k < 2
-        or len(entry_labels) != k
-        or len(bodies) != k
-        or body_words <= 0
-    ):
+    if k < 2 or len(entry_labels) != k or len(bodies) != k or body_words <= 0:
         raise ValueError(
             f"build_jump_table_blocks: invalid args k={k}, "
             f"entries={len(entry_labels)}, bodies={len(bodies)}, "
@@ -181,11 +176,11 @@ def build_jump_table_blocks(
 
     # Compute entry offset and jump.
     offset_insts: list[Instruction] = [
-        RegWriteInst(dst=i, src="op", op=f"{i} - #{k}"),   # i = r - k (< 0)
-        RegWriteInst(dst=i, src="op", op=f"ABS {i}"),      # i = k - r (offset)
+        RegWriteInst(dst=i, src="op", op=f"{i} - #{k}"),  # i = r - k (< 0)
+        RegWriteInst(dst=i, src="op", op=f"ABS {i}"),  # i = k - r (offset)
         RegWriteInst(dst="s15", src="label", label=entry0),
-        *shift_add,                                          # s15 += i * stride
-        RegWriteInst(dst=i, src="imm", lit="#0"),            # reset counter
+        *shift_add,  # s15 += i * stride
+        RegWriteInst(dst=i, src="imm", lit="#0"),  # reset counter
     ]
     result.append(
         BasicBlockNode(
@@ -203,7 +198,7 @@ def build_jump_table_blocks(
         # Flatten all body insts into one BasicBlockNode so stride is exact.
         entry_insts = []
         for bb in body_blocks:
-            entry_insts.extend(bb.labels)   # labels become inline (not entry labels)
+            entry_insts.extend(bb.labels)  # labels become inline (not entry labels)
             entry_insts.extend(bb.insts)
             if bb.branch is not None:
                 entry_insts.append(bb.branch)
@@ -219,7 +214,9 @@ def build_jump_table_blocks(
 
     # ── back edge (fix_inst_num=True) ──
     if _needs_big_jump(pmem_size):
-        back_insts: list[Instruction] = [RegWriteInst(dst="s15", src="label", label=exit_label)]
+        back_insts: list[Instruction] = [
+            RegWriteInst(dst="s15", src="label", label=exit_label)
+        ]
         result.append(
             BasicBlockNode(
                 insts=back_insts,

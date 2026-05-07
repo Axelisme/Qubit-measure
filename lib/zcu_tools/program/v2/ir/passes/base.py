@@ -14,14 +14,8 @@ from ..instructions import (
     TimeInst,
     WaitInst,
 )
-from ..node import BlockNode, InstNode, RootNode
-
-# Re-export for callers that import LinearPassAdapter from here.
-from ..pipeline import (
-    AbsIRPass,
-    LinearPassAdapter,  # noqa: F401
-    PipeLineContext,
-)
+from ..node import RootNode
+from ..pipeline import AbsIRPass, PipeLineContext
 from ..traversal import IRTransformer
 
 
@@ -42,12 +36,3 @@ def is_label_or_branching_inst(inst: Instruction) -> bool:
 
 def is_safe_linear_inst(inst: Instruction) -> bool:
     return isinstance(inst, (TimeInst, WaitInst, RegWriteInst, DmemReadInst, NopInst))
-
-
-def block_contains_structural_node(block: BlockNode) -> bool:
-    for item in block.insts:
-        if not isinstance(item, InstNode):
-            return True
-        if is_label_or_branching_inst(item.inst):
-            return True
-    return False

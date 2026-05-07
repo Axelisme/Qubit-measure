@@ -13,7 +13,7 @@ from .instructions import (
     TimeInst,
     WmemWriteInst,
 )
-from .node import BasicBlockNode, BlockNode, InstNode, IRBranch, IRLoop, IRNode
+from .node import BasicBlockNode, BlockNode, IRBranch, IRLoop, IRNode
 
 if TYPE_CHECKING:
     from .pipeline import PipeLineConfig
@@ -41,16 +41,6 @@ def estimate_body_scheduled_ticks(body: list["IRNode"]) -> int:
                             continue
         elif isinstance(node, BlockNode):
             total += estimate_body_scheduled_ticks(node.insts)
-        elif isinstance(node, InstNode):
-            inst = node.inst
-            if isinstance(inst, TimeInst) and inst.c_op == "inc_ref":
-                if inst.r1 is not None:
-                    continue  # dynamic delay contributes 0 (lower bound)
-                if inst.lit is not None and inst.lit.startswith("#"):
-                    try:
-                        total += int(inst.lit[1:])
-                    except ValueError:
-                        continue
         elif isinstance(node, IRLoop):
             inner = estimate_body_scheduled_ticks(node.body.insts)
             if isinstance(node.n, int):
@@ -86,10 +76,6 @@ def estimate_flat_size(nodes: list["IRNode"]) -> int:
                 size += node.branch.addr_inc
         elif isinstance(node, BlockNode):
             size += estimate_flat_size(node.insts)
-        elif isinstance(node, InstNode):
-            inst = node.inst
-            if not isinstance(inst, LabelInst):
-                size += inst.addr_inc
         elif isinstance(node, IRLoop):
             inner = estimate_flat_size(node.body.insts)
             if isinstance(node.n, int):
@@ -142,16 +128,6 @@ def estimate_body_cost(body: list["IRNode"], config: "PipeLineConfig") -> int:
                 cost += config.cost_default
         elif isinstance(node, BlockNode):
             cost += estimate_body_cost(node.insts, config)
-        elif isinstance(node, InstNode):
-            inst = node.inst
-            if isinstance(inst, (PortWriteInst, WmemWriteInst)):
-                cost += config.cost_wmem
-            elif isinstance(inst, (DmemReadInst, DmemWriteInst)):
-                cost += config.cost_dmem
-            elif isinstance(inst, (MetaInst, LabelInst)):
-                pass
-            else:
-                cost += config.cost_default
         elif isinstance(node, IRLoop):
             loop_overhead = 2 * config.cost_default + config.cost_jump_flush
             inner_cost = estimate_body_cost(node.body.insts, config)

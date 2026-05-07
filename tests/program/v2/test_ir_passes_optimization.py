@@ -17,19 +17,19 @@ from zcu_tools.program.v2.ir.labels import Label
 from zcu_tools.program.v2.ir.node import (
     BasicBlockNode,
     BlockNode,
-    InstNode,
     IRLoop,
     IRNode,
     RootNode,
 )
 from zcu_tools.program.v2.ir.passes import (
     DeadLabelEliminationPass,
-    DeadWriteEliminationPass,
+    DeadWriteEliminationLinear,
     UnrollSmallLoopPass,
 )
 from zcu_tools.program.v2.ir.pipeline import (
     PipeLineConfig,
     PipeLineContext,
+    _run_linear_passes,
     make_default_pipeline,
 )
 
@@ -45,9 +45,6 @@ def _flat_inst_count(root: RootNode) -> int:
                 if not isinstance(inst, (LabelInst, MetaInst)):
                     count += 1
             if node.branch is not None:
-                count += 1
-        elif isinstance(node, InstNode):
-            if not isinstance(node.inst, (LabelInst, MetaInst)):
                 count += 1
         elif isinstance(node, BlockNode):
             stack.extend(node.insts)
@@ -96,42 +93,44 @@ def _count_fixed_blocks(root: RootNode) -> int:
 def test_dead_write_elimination_removes_overwritten_write():
     root = RootNode(
         insts=[
-            InstNode(RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#1"})),
-            InstNode(RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#2"})),
-            InstNode(NopInst()),
+            BasicBlockNode(insts=[
+                RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#1"}),
+                RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#2"}),
+                NopInst(),
+            ]),
         ]
     )
 
-    out = DeadWriteEliminationPass().process(
-        root, PipeLineContext(config=PipeLineConfig())
-    )
+    _run_linear_passes([DeadWriteEliminationLinear()], root)
 
-    assert len(out.insts) == 2
-    assert isinstance(out.insts[0], InstNode)
-    assert isinstance(cast(InstNode, out.insts[0]).inst, RegWriteInst)
-    assert getattr(cast(InstNode, out.insts[0]).inst, "extra_args")["LIT"] == "#2"
-    assert isinstance(out.insts[1], InstNode)
-    assert isinstance(cast(InstNode, out.insts[1]).inst, NopInst)
+    bb = root.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 2
+    assert isinstance(bb.insts[0], RegWriteInst)
+    assert cast(RegWriteInst, bb.insts[0]).extra_args["LIT"] == "#2"
+    assert isinstance(bb.insts[1], NopInst)
 
 
 def test_dead_write_elimination_keeps_write_before_read():
     root = RootNode(
         insts=[
-            InstNode(RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#1"})),
-            InstNode(TestInst(op="s1 - #1")),
-            InstNode(RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#2"})),
+            BasicBlockNode(insts=[
+                RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#1"}),
+                TestInst(op="s1 - #1"),
+                RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#2"}),
+            ]),
         ]
     )
 
-    out = DeadWriteEliminationPass().process(
-        root, PipeLineContext(config=PipeLineConfig())
-    )
+    _run_linear_passes([DeadWriteEliminationLinear()], root)
 
-    assert len(out.insts) == 3
+    bb = root.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 3
     assert [
-        getattr(cast(InstNode, item).inst, "extra_args").get("LIT")
-        for item in out.insts
-        if isinstance(item, InstNode) and isinstance(item.inst, RegWriteInst)
+        cast(RegWriteInst, item).extra_args.get("LIT")
+        for item in bb.insts
+        if isinstance(item, RegWriteInst)
     ] == [
         "#1",
         "#2",
@@ -141,8 +140,7 @@ def test_dead_write_elimination_keeps_write_before_read():
 def test_dead_label_elimination_removes_unreferenced_label():
     root = RootNode(
         insts=[
-            InstNode(LabelInst(name=Label("dead"))),
-            InstNode(NopInst()),
+            BasicBlockNode(labels=[LabelInst(name=Label("dead"))], insts=[NopInst()]),
         ]
     )
 
@@ -151,16 +149,17 @@ def test_dead_label_elimination_removes_unreferenced_label():
     )
 
     assert len(out.insts) == 1
-    assert isinstance(out.insts[0], InstNode)
-    assert isinstance(cast(InstNode, out.insts[0]).inst, NopInst)
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.labels) == 0
+    assert isinstance(bb.insts[0], NopInst)
 
 
 def test_dead_label_elimination_keeps_referenced_label():
     label = Label("keep")
     root = RootNode(
         insts=[
-            InstNode(LabelInst(name=label)),
-            InstNode(JumpInst(label=label)),
+            BasicBlockNode(labels=[LabelInst(name=label)], branch=JumpInst(label=label)),
         ]
     )
 
@@ -168,9 +167,12 @@ def test_dead_label_elimination_keeps_referenced_label():
         root, PipeLineContext(config=PipeLineConfig())
     )
 
-    assert len(out.insts) == 2
-    assert isinstance(cast(InstNode, out.insts[0]).inst, LabelInst)
-    assert isinstance(cast(InstNode, out.insts[1]).inst, JumpInst)
+    assert len(out.insts) == 1
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.labels) == 1
+    assert isinstance(bb.labels[0], LabelInst)
+    assert isinstance(bb.branch, JumpInst)
 
 
 def test_dead_label_elimination_keeps_pseudo_labels():
@@ -178,8 +180,7 @@ def test_dead_label_elimination_keeps_pseudo_labels():
     for pseudo in ("HERE", "NEXT", "PREV", "SKIP"):
         root = RootNode(
             insts=[
-                InstNode(LabelInst(name=Label(pseudo))),
-                InstNode(NopInst()),
+                BasicBlockNode(labels=[LabelInst(name=Label(pseudo))], insts=[NopInst()]),
             ]
         )
 
@@ -187,8 +188,11 @@ def test_dead_label_elimination_keeps_pseudo_labels():
             root, PipeLineContext(config=PipeLineConfig())
         )
 
-        assert len(out.insts) == 2, f"pseudo label {pseudo!r} was incorrectly removed"
-        assert isinstance(cast(InstNode, out.insts[0]).inst, LabelInst)
+        assert len(out.insts) == 1, f"pseudo label {pseudo!r} was incorrectly removed"
+        bb = out.insts[0]
+        assert isinstance(bb, BasicBlockNode)
+        assert len(bb.labels) == 1, f"pseudo label {pseudo!r} was incorrectly removed"
+        assert isinstance(bb.labels[0], LabelInst)
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +222,7 @@ def test_unroll_full_expansion_when_n_le_k():
                 name="loop",
                 counter_reg="s0",
                 n=3,
-                body=BlockNode(insts=[InstNode(TimeInst(c_op="inc_ref", lit="#1"))]),
+                body=BlockNode(insts=[BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")])]),
             )
         ]
     )
@@ -227,22 +231,25 @@ def test_unroll_full_expansion_when_n_le_k():
 
     # Expansion: counter init + 3*(body + increment) = 1 + 3*2 = 7 insts.
     assert _flat_inst_count(out) == 7
-    flat_items = [
-        item
-        for blk in out.insts
-        for item in (blk.insts if isinstance(blk, BlockNode) else [blk])
-        if isinstance(item, InstNode)
-    ]
+    # Flatten all BasicBlockNode insts from the output
+    flat_insts: list[Instruction] = []
+    for node in out.insts:
+        if isinstance(node, BlockNode):
+            for child in node.insts:
+                if isinstance(child, BasicBlockNode):
+                    flat_insts.extend(child.insts)
+        elif isinstance(node, BasicBlockNode):
+            flat_insts.extend(node.insts)
     # [0]: REG_WR counter imm #0 (init)
-    assert isinstance(flat_items[0].inst, RegWriteInst)
-    assert cast(RegWriteInst, flat_items[0].inst).src == "imm"
+    assert isinstance(flat_insts[0], RegWriteInst)
+    assert cast(RegWriteInst, flat_insts[0]).src == "imm"
     # Remaining: alternating TimeInst(body) and RegWriteInst(increment)
-    assert isinstance(flat_items[1].inst, TimeInst)
-    assert isinstance(flat_items[2].inst, RegWriteInst)  # counter += 1
-    assert isinstance(flat_items[3].inst, TimeInst)
-    assert isinstance(flat_items[4].inst, RegWriteInst)
-    assert isinstance(flat_items[5].inst, TimeInst)
-    assert isinstance(flat_items[6].inst, RegWriteInst)
+    assert isinstance(flat_insts[1], TimeInst)
+    assert isinstance(flat_insts[2], RegWriteInst)  # counter += 1
+    assert isinstance(flat_insts[3], TimeInst)
+    assert isinstance(flat_insts[4], RegWriteInst)
+    assert isinstance(flat_insts[5], TimeInst)
+    assert isinstance(flat_insts[6], RegWriteInst)
 
 
 def test_unroll_full_expansion_keeps_counter_init_for_counter_dependent_body():
@@ -256,7 +263,7 @@ def test_unroll_full_expansion_keeps_counter_init_for_counter_dependent_body():
                 counter_reg="r0",
                 n=1,
                 body=BlockNode(
-                    insts=[InstNode(RegWriteInst(dst="r1", src="op", op="r0"))]
+                    insts=[BasicBlockNode(insts=[RegWriteInst(dst="r1", src="op", op="r0")])]
                 ),
             )
         ]
@@ -264,12 +271,13 @@ def test_unroll_full_expansion_keeps_counter_init_for_counter_dependent_body():
 
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
 
-    assert len(out.insts) == 1
-    block = out.insts[0]
-    assert isinstance(block, BlockNode)
-    assert isinstance(block.insts[0], InstNode)
-    assert isinstance(cast(InstNode, block.insts[0]).inst, RegWriteInst)
-    init = cast(RegWriteInst, cast(InstNode, block.insts[0]).inst)
+    # Full expansion: counter init BB + body BB + increment BB = 3 BasicBlockNodes
+    assert len(out.insts) == 3
+    init_bb = out.insts[0]
+    assert isinstance(init_bb, BasicBlockNode)
+    assert len(init_bb.insts) > 0
+    assert isinstance(init_bb.insts[0], RegWriteInst)
+    init = cast(RegWriteInst, init_bb.insts[0])
     assert init.dst == "r0"
     assert init.src == "imm"
     assert init.lit == "#0"
@@ -288,8 +296,10 @@ def test_unroll_full_expansion_preserves_internal_label():
                 n=3,
                 body=BlockNode(
                     insts=[
-                        InstNode(LabelInst(name=inner)),
-                        InstNode(TimeInst(c_op="inc_ref", lit="#1")),
+                        BasicBlockNode(
+                            labels=[LabelInst(name=inner)],
+                            insts=[TimeInst(c_op="inc_ref", lit="#1")],
+                        ),
                     ]
                 ),
             )
@@ -314,7 +324,7 @@ def test_unroll_partial_unroll_produces_loop_plus_remainder():
                 name="loop",
                 counter_reg="s0",
                 n=20,
-                body=BlockNode(insts=[InstNode(TimeInst(c_op="inc_ref", lit="#1"))]),
+                body=BlockNode(insts=[BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")])]),
             )
         ]
     )
@@ -330,8 +340,8 @@ def test_unroll_partial_unroll_produces_loop_plus_remainder():
     assert len(block.insts) == 9
     assert isinstance(block.insts[0], IRLoop)
     assert cast(IRLoop, block.insts[0]).n == 16  # (20 // 8) * 8
-    # Remainder: alternating TimeInst(body) and RegWriteInst(increment)
-    assert all(isinstance(item, InstNode) for item in block.insts[1:])
+    # Remainder: each copy is a BasicBlockNode
+    assert all(isinstance(item, BasicBlockNode) for item in block.insts[1:])
 
 
 def test_unroll_partial_unroll_no_remainder():
@@ -343,7 +353,7 @@ def test_unroll_partial_unroll_no_remainder():
                 name="loop",
                 counter_reg="s0",
                 n=16,
-                body=BlockNode(insts=[InstNode(TimeInst(c_op="inc_ref", lit="#1"))]),
+                body=BlockNode(insts=[BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")])]),
             )
         ]
     )
@@ -369,7 +379,7 @@ def test_unroll_partial_unroll_loop_bound_uses_full_unrolled_iterations():
                 name="loop",
                 counter_reg="r0",
                 n=99,
-                body=BlockNode(insts=[InstNode(TimeInst(c_op="inc_ref", lit="#1"))]),
+                body=BlockNode(insts=[BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")])]),
             )
         ]
     )
@@ -391,12 +401,15 @@ def test_default_pipeline_can_disable_all_optimization_passes():
     Label.reset()
     root = RootNode(
         insts=[
-            InstNode(RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#1"})),
-            InstNode(RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#2"})),
-            InstNode(LabelInst(name=Label.make_new("dead"))),
-            InstNode(TimeInst(c_op="inc_ref", lit="#0")),
-            InstNode(TimeInst(c_op="inc_ref", lit="#1")),
-            InstNode(TimeInst(c_op="inc_ref", lit="#2")),
+            BasicBlockNode(insts=[
+                RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#1"}),
+                RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#2"}),
+            ]),
+            BasicBlockNode(labels=[LabelInst(name=Label.make_new("dead"))], insts=[
+                TimeInst(c_op="inc_ref", lit="#0"),
+                TimeInst(c_op="inc_ref", lit="#1"),
+                TimeInst(c_op="inc_ref", lit="#2"),
+            ]),
         ]
     )
 
@@ -405,23 +418,26 @@ def test_default_pipeline_can_disable_all_optimization_passes():
 
     out, _ctx = pipeline(root)
 
-    assert len(out.insts) == 6
-    assert isinstance(cast(InstNode, out.insts[0]).inst, RegWriteInst)
-    assert isinstance(cast(InstNode, out.insts[1]).inst, RegWriteInst)
-    assert isinstance(cast(InstNode, out.insts[2]).inst, LabelInst)
-    assert isinstance(cast(InstNode, out.insts[3]).inst, TimeInst)
-    assert cast(TimeInst, cast(InstNode, out.insts[3]).inst).lit == "#0"
-    assert isinstance(cast(InstNode, out.insts[4]).inst, TimeInst)
-    assert cast(TimeInst, cast(InstNode, out.insts[4]).inst).lit == "#1"
-    assert isinstance(cast(InstNode, out.insts[5]).inst, TimeInst)
-    assert cast(TimeInst, cast(InstNode, out.insts[5]).inst).lit == "#2"
+    assert len(out.insts) == 2
+    bb0 = cast(BasicBlockNode, out.insts[0])
+    assert isinstance(bb0.insts[0], RegWriteInst)
+    assert isinstance(bb0.insts[1], RegWriteInst)
+    bb1 = cast(BasicBlockNode, out.insts[1])
+    assert len(bb1.labels) == 1
+    assert isinstance(bb1.labels[0], LabelInst)
+    assert isinstance(bb1.insts[0], TimeInst)
+    assert cast(TimeInst, bb1.insts[0]).lit == "#0"
+    assert isinstance(bb1.insts[1], TimeInst)
+    assert cast(TimeInst, bb1.insts[1]).lit == "#1"
+    assert isinstance(bb1.insts[2], TimeInst)
+    assert cast(TimeInst, bb1.insts[2]).lit == "#2"
 
 
 def test_unroll_no_scheduled_ticks_uses_zero_delay_budget():
     """Body has no inc_ref delay → scheduled_ticks=0, so k uses slack<=0 branch."""
     Label.reset()
     heavy_insts: list[IRNode] = [
-        InstNode(PortWriteInst(dst="0", time="t0")) for _ in range(5)
+        BasicBlockNode(insts=[PortWriteInst(dst="0", time="t0")]) for _ in range(5)
     ]
     root = RootNode(
         insts=[
@@ -455,7 +471,7 @@ def test_unroll_dynamic_delay_only_body_uses_zero_delay_budget():
                 counter_reg="s0",
                 n=20,
                 body=BlockNode(
-                    insts=[InstNode(TimeInst(c_op="inc_ref", r1="r_delay"))]
+                    insts=[BasicBlockNode(insts=[TimeInst(c_op="inc_ref", r1="r_delay")])]
                 ),
             )
         ]
@@ -484,10 +500,10 @@ def test_unroll_mixed_literal_and_dynamic_delay_uses_literal_budget():
                 counter_reg="s0",
                 n=4,
                 body=BlockNode(
-                    insts=[
-                        InstNode(TimeInst(c_op="inc_ref", lit="#5")),
-                        InstNode(TimeInst(c_op="inc_ref", r1="r_dyn")),
-                    ]
+                    insts=[BasicBlockNode(insts=[
+                        TimeInst(c_op="inc_ref", lit="#5"),
+                        TimeInst(c_op="inc_ref", r1="r_dyn"),
+                    ])]
                 ),
             )
         ]
@@ -495,10 +511,8 @@ def test_unroll_mixed_literal_and_dynamic_delay_uses_literal_budget():
 
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
 
-    assert len(out.insts) == 1
-    block = out.insts[0]
-    assert isinstance(block, BlockNode)
-    # counter init + 4 copies * (2 body + 1 increment) = 1 + 4*3 = 13
+    # counter init + 4 copies * (1 body_bb + 1 increment_bb) = 1 + 4*2 = 9 BasicBlockNodes
+    # body_bb has 2 insts (TimeInst x2); total flat inst count = 1 + 4*(2+1) = 13
     assert _flat_inst_count(out) == 13
 
 
@@ -513,7 +527,7 @@ def test_unroll_exact_register_hint_fully_expands():
                 counter_reg="s0",
                 n="r_count",
                 range_hint=(3, 3),
-                body=BlockNode(insts=[InstNode(TimeInst(c_op="inc_ref", lit="#1"))]),
+                body=BlockNode(insts=[BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")])]),
             )
         ]
     )
@@ -538,7 +552,7 @@ def test_unroll_non_exact_register_hint_emits_jump_table():
                 counter_reg="s0",
                 n="r_count",
                 range_hint=(2, 5),
-                body=BlockNode(insts=[InstNode(TimeInst(c_op="inc_ref", lit="#1"))]),
+                body=BlockNode(insts=[BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")])]),
             )
         ]
     )
@@ -560,7 +574,7 @@ def test_unroll_no_hint_register_loop_emits_jump_table():
                 name="loop",
                 counter_reg="s0",
                 n="r_count",
-                body=BlockNode(insts=[InstNode(TimeInst(c_op="inc_ref", lit="#1"))]),
+                body=BlockNode(insts=[BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")])]),
             )
         ]
     )
@@ -579,10 +593,10 @@ def test_unroll_counter_sensitive_loop_still_uses_unroll_k_rules():
                 counter_reg="s0",
                 n=3,
                 body=BlockNode(
-                    insts=[
-                        InstNode(TestInst(op="s0 - #1")),
-                        InstNode(TimeInst(c_op="inc_ref", lit="#1")),
-                    ]
+                    insts=[BasicBlockNode(insts=[
+                        TestInst(op="s0 - #1"),
+                        TimeInst(c_op="inc_ref", lit="#1"),
+                    ])]
                 ),
             )
         ]
@@ -590,9 +604,8 @@ def test_unroll_counter_sensitive_loop_still_uses_unroll_k_rules():
 
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
 
-    assert len(out.insts) == 1
-    assert isinstance(out.insts[0], BlockNode)
-    # counter init + 3*(2 body + 1 increment) = 1 + 9 = 10
+    # Full expansion: counter init BB + 3*(body BB + increment BB) = 1 + 3*2 = 7 BasicBlockNodes
+    # body BB has 2 insts (TestInst + TimeInst); flat inst count = 1 + 3*(2+1) = 10
     assert _flat_inst_count(out) == 10
 
 
@@ -607,9 +620,11 @@ def test_unroll_partial_unroll_clones_labels_safely():
                 n=20,
                 body=BlockNode(
                     insts=[
-                        InstNode(LabelInst(name=inner)),
-                        InstNode(JumpInst(label=inner)),
-                        InstNode(TimeInst(c_op="inc_ref", lit="#1")),
+                        BasicBlockNode(
+                            labels=[LabelInst(name=inner)],
+                            branch=JumpInst(label=inner),
+                        ),
+                        BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")]),
                     ]
                 ),
             )
@@ -640,7 +655,7 @@ def test_unroll_budget_caps_k_below_timing():
                 name="loop",
                 counter_reg="s0",
                 n=9,
-                body=BlockNode(insts=[InstNode(TimeInst(c_op="inc_ref", lit="#1"))]),
+                body=BlockNode(insts=[BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")])]),
             )
         ]
     )
@@ -665,7 +680,7 @@ def test_unroll_max_factor_caps_k():
                 name="loop",
                 counter_reg="s0",
                 n=10,
-                body=BlockNode(insts=[InstNode(TimeInst(c_op="inc_ref", lit="#1"))]),
+                body=BlockNode(insts=[BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")])]),
             )
         ]
     )
@@ -688,7 +703,7 @@ def test_unroll_post_order_recurses_into_inner_loop_first():
         name="inner",
         counter_reg="s1",
         n=2,
-        body=BlockNode(insts=[InstNode(TimeInst(c_op="inc_ref", lit="#1"))]),
+        body=BlockNode(insts=[BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")])]),
     )
     outer = IRLoop(
         name="outer",
@@ -713,10 +728,10 @@ def test_unroll_cpmg_style_body_triggers():
     """
     Label.reset()
     body_insts: list[IRNode] = [
-        InstNode(PortWriteInst(dst="0", time="t0")),
-        InstNode(PortWriteInst(dst="1", time="t0")),
-        InstNode(PortWriteInst(dst="2", time="t0")),
-        InstNode(TimeInst(c_op="inc_ref", lit="#14")),
+        BasicBlockNode(insts=[PortWriteInst(dst="0", time="t0")]),
+        BasicBlockNode(insts=[PortWriteInst(dst="1", time="t0")]),
+        BasicBlockNode(insts=[PortWriteInst(dst="2", time="t0")]),
+        BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#14")]),
     ]
     root = RootNode(
         insts=[
@@ -736,7 +751,7 @@ def test_unroll_cpmg_style_body_triggers():
     assert isinstance(block, BlockNode)
     assert isinstance(block.insts[0], IRLoop)
     assert cast(IRLoop, block.insts[0]).n == 48  # (50 // 8) * 8
-    # Remainder: 50 % 8 = 2, each copy: body(4) + increment(1) = 5 items.
+    # Remainder: 50 % 8 = 2, each copy: body(4 BasicBlockNodes) + increment(1) = 5 items.
     assert len(block.insts) == 1 + 2 * 5
 
 
@@ -750,10 +765,10 @@ def test_unroll_register_driven_k_forced_to_power_of_two():
     remains 8 after floor_pow2()."""
     Label.reset()
     body_insts: list[IRNode] = [
-        InstNode(PortWriteInst(dst="0", time="t0")),
-        InstNode(PortWriteInst(dst="1", time="t0")),
-        InstNode(PortWriteInst(dst="2", time="t0")),
-        InstNode(TimeInst(c_op="inc_ref", lit="#14")),
+        BasicBlockNode(insts=[PortWriteInst(dst="0", time="t0")]),
+        BasicBlockNode(insts=[PortWriteInst(dst="1", time="t0")]),
+        BasicBlockNode(insts=[PortWriteInst(dst="2", time="t0")]),
+        BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#14")]),
     ]
     root = RootNode(
         insts=[
@@ -782,7 +797,7 @@ def test_unroll_register_driven_jump_table_structure():
                 name="loop",
                 counter_reg="r_i",
                 n="r_n",
-                body=BlockNode(insts=[InstNode(TimeInst(c_op="inc_ref", lit="#1"))]),
+                body=BlockNode(insts=[BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")])]),
             )
         ]
     )
@@ -818,7 +833,7 @@ def test_unroll_register_driven_body_with_no_words_falls_back():
                 name="loop",
                 counter_reg="r_i",
                 n="r_n",
-                body=BlockNode(insts=[InstNode(LabelInst(name=inner))]),
+                body=BlockNode(insts=[BasicBlockNode(labels=[LabelInst(name=inner)])]),
             )
         ]
     )
@@ -836,8 +851,8 @@ def test_unroll_register_driven_dispatch_too_long_falls_back():
     # stride = body_words + 1 = 0xFF requires 8 adds + 7 shifts = 15 ops.
     # Use 0xFD NOPs plus one TIME word => body_words = 0xFE => stride = 0xFF.
     Label.reset()
-    body_insts: list[IRNode] = [InstNode(NopInst()) for _ in range(0xFD)]
-    body_insts.append(InstNode(TimeInst(c_op="inc_ref", lit="#1000")))
+    body_insts: list[IRNode] = [BasicBlockNode(insts=[NopInst()]) for _ in range(0xFD)]
+    body_insts.append(BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1000")]))
     root = RootNode(
         insts=[
             IRLoop(
@@ -865,7 +880,7 @@ def test_unroll_nested_register_driven_inner_unrolls_first():
         name="inner",
         counter_reg="r_j",
         n="r_m",
-        body=BlockNode(insts=[InstNode(TimeInst(c_op="inc_ref", lit="#1"))]),
+        body=BlockNode(insts=[BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")])]),
     )
     outer = IRLoop(
         name="outer",
@@ -884,33 +899,25 @@ def test_unroll_nested_register_driven_inner_unrolls_first():
 
 
 def test_default_pipeline_structure():
-    from zcu_tools.program.v2.ir.pipeline import IRPipeLine, LinearPipeline
+    from zcu_tools.program.v2.ir.pipeline import IRPipeLine
     pipeline = make_default_pipeline(pmem_capacity=8192)
 
     assert isinstance(pipeline, IRPipeLine)
-    # Pre-LIR linear pipeline: ZeroDCE + TimedMerge + DeadWrite
-    assert isinstance(pipeline.pre_linear, LinearPipeline)
-    assert len(pipeline.pre_linear.passes) == 3
-    assert [type(p).__name__ for p in pipeline.pre_linear.passes] == [
+    # Shared linear passes: ZeroDCE + TimedMerge + DeadWrite
+    assert isinstance(pipeline.linear_passes, list)
+    assert [type(p).__name__ for p in pipeline.linear_passes] == [
         "ZeroDelayDCELinear",
         "TimedMergeLinear",
         "DeadWriteEliminationLinear",
     ]
-    # Post-LIR linear pipeline: DeadWrite
-    assert isinstance(pipeline.post_linear, LinearPipeline)
-    assert len(pipeline.post_linear.passes) == 1
-    assert type(pipeline.post_linear.passes[0]).__name__ == "DeadWriteEliminationLinear"
     # IR passes
     assert [type(p).__name__ for p in pipeline.ir_passes] == [
-        "ZeroDelayDCELegacyPass",
-        "TimedMergeLegacyPass",
-        "DeadWriteEliminationLegacyPass",
         "UnrollSmallLoopPass",
-        "DeadWriteEliminationLegacyPass",
         "DeadLabelEliminationPass",
         "BranchEliminationPass",
         "BlockMergePass",
     ]
+
 
 
 # ---------------------------------------------------------------------------
@@ -927,9 +934,9 @@ def test_dead_write_elimination_removes_overwritten_write_in_basic_block():
         ]
     )
 
-    out = DeadWriteEliminationPass().process(root, PipeLineContext(config=PipeLineConfig()))
+    _run_linear_passes([DeadWriteEliminationLinear()], root)
 
-    bb = out.insts[0]
+    bb = root.insts[0]
     assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 1
     assert bb.insts[0].extra_args.get("LIT") == "#2"
@@ -944,9 +951,9 @@ def test_dead_write_elimination_nop_pads_fixed_basic_block():
         ]
     )
 
-    out = DeadWriteEliminationPass().process(root, PipeLineContext(config=PipeLineConfig()))
+    _run_linear_passes([DeadWriteEliminationLinear()], root)
 
-    bb = out.insts[0]
+    bb = root.insts[0]
     assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 2  # stride preserved
     assert isinstance(bb.insts[0], NopInst)  # dead write replaced with NOP
