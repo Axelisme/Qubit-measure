@@ -118,7 +118,10 @@ def test_unlink_supports_multiple_labels_same_address():
 
 
 def test_builder_build_accepts_qick_labels_map():
-    builder = IRBuilder(None)  # type: ignore
+    from unittest.mock import MagicMock
+    mock_prog = MagicMock()
+    mock_prog.tproccfg = {"pmem_size": 2048}
+    builder = IRBuilder(mock_prog)
     prog_list = [
         {"CMD": "REG_WR", "DST": "r1", "SRC": "imm", "LIT": "#0", "P_ADDR": 1},
         {"CMD": "TEST", "OP": "r1 - #5", "UF": "0", "P_ADDR": 2},

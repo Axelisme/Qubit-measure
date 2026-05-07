@@ -129,10 +129,105 @@ class IRParser:
     def parse(
         self, items: list[Union[BasicBlockNode, MetaInst]]
     ) -> RootNode:
+        self._check_sese(items)
         root = RootNode()
         pos = [0]
         self._parse_block(items, pos, root, end_markers=frozenset())
         return root
+
+    # -----------------------------------------------------------------------
+    # SESE validation
+    # -----------------------------------------------------------------------
+
+    def _check_sese(
+        self, items: list[Union[BasicBlockNode, MetaInst]]
+    ) -> None:
+        """Verify that no jump from outside a structural region targets a label
+        defined inside the region's control skeleton (the skip-segments between
+        LOOP_START and LOOP_BODY_START, or between any BRANCH meta markers and
+        BRANCH_CASE_START).  Violations break the SESE assumption that lets
+        IRParser reconstruct IRLoop / IRBranch from a flat block list.
+        """
+        # Pass 1: collect control labels (defined in skip-segments) and record
+        # which item indices belong to skip-segments.
+        control_labels: set[str] = set()
+        skip_indices: set[int] = set()
+
+        depth = 0  # nesting depth of structural regions
+        skip_active = False  # inside a skip-segment right now
+
+        # We need to scan MetaInsts that appear *inside* BasicBlockNodes
+        # (e.g. LOOP_START sits in a BasicBlockNode.insts).  We also need
+        # LabelInsts from BasicBlockNode.labels in skip-segments.
+        # Strategy: walk item by item; use MetaInst.type transitions to track
+        # skip vs. body regions; harvest labels from skip-region items.
+
+        # Build a flat timeline of (item_index, event) where event is either
+        # a MetaInst type string or None (plain BasicBlockNode).
+        def meta_types_in(bb: BasicBlockNode) -> list[str]:
+            return [i.type for i in bb.insts if isinstance(i, MetaInst)]
+
+        i = 0
+        while i < len(items):
+            item = items[i]
+            if isinstance(item, MetaInst):
+                # Top-level MetaInst (should not occur in well-formed input,
+                # but handle gracefully by treating as skip content if active).
+                if skip_active:
+                    skip_indices.add(i)
+                i += 1
+                continue
+
+            # BasicBlockNode: check MetaInst markers inside its insts
+            assert isinstance(item, BasicBlockNode)
+            metas = meta_types_in(item)
+
+            # Determine if this whole block is part of a skip-segment
+            # before processing its internal transitions.
+            was_skip = skip_active
+
+            for mt in metas:
+                if mt in ("LOOP_START", "BRANCH_START"):
+                    depth += 1
+                    skip_active = True
+                elif mt == "LOOP_BODY_START":
+                    skip_active = False  # body begins; skip ends
+                elif mt in ("BRANCH_CASE_START",):
+                    skip_active = False
+                elif mt in ("LOOP_BODY_END",):
+                    skip_active = True  # back to skip (back-edge region)
+                elif mt in ("LOOP_END", "BRANCH_END"):
+                    depth -= 1
+                    if depth == 0:
+                        skip_active = False
+
+            # The block is in skip-territory if it was skip before *or*
+            # the MetaInst transition in this block initiates skip.
+            in_skip = was_skip or (skip_active and depth > 0)
+            if in_skip:
+                skip_indices.add(i)
+                for lbl in item.labels:
+                    if lbl.name is not None:
+                        control_labels.add(str(lbl.name))
+
+            i += 1
+
+        if not control_labels:
+            return  # nothing to check
+
+        # Pass 2: collect all jump targets from non-skip items.
+        for idx, item in enumerate(items):
+            if idx in skip_indices:
+                continue
+            if not isinstance(item, BasicBlockNode):
+                continue
+            for jump in ([item.branch] if item.branch else []):
+                if jump.label is not None and str(jump.label) in control_labels:
+                    raise ValueError(
+                        f"IRParser: jump to control label {str(jump.label)!r} from "
+                        f"outside its structural region violates SESE assumption. "
+                        f"Block index {idx}: {item}"
+                    )
 
     def _parse_block(
         self,
