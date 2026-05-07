@@ -1,7 +1,7 @@
 """Phase 8C/8D: Register-driven partial unroll via jump-table dispatch.
 
 Emitted shape (k = unroll factor, must be a power of 2;
-               body_words = pmem words per pure body):
+               body_words = pmem words per full logical body iteration):
 
     prologue:
       JUMP   exit    -if(Z)   -op(n_reg - #0)   ; skip if n == 0
@@ -10,14 +10,12 @@ Emitted shape (k = unroll factor, must be a power of 2;
       REG_WR i       op  (i - #k)                ; i := r - k  (< 0)
       REG_WR i       op  (ABS i)                 ; i := k - r  (entry offset)
       REG_WR s15     label  entry_0
-      <shift-add: s15 += i * stride>              ; stride = body_words + 1
+      <shift-add: s15 += i * stride>              ; stride = body_words
       REG_WR i       imm  #0                     ; reset counter
       JUMP   s15
     entry_0: <body copy 0>
-              REG_WR i op (i + #1)
     ...
     entry_{k-1}: <body copy k-1>
-              REG_WR i op (i + #1)
     back_edge:
       JUMP   exit    -if(NS)  -op(i - n_reg)
       JUMP   entry_0
@@ -105,14 +103,17 @@ def build_jump_table_blocks(
     n = n_reg
     entry0 = entry_labels[0]
 
-    stride = body_words + 1
+    # The body is trusted to already include the loop-carried counter update
+    # as part of one logical iteration. Later peephole passes may move or
+    # merge that write, so stride must follow the whole lowered body size.
+    stride = body_words
     shift_add = shift_add_multiply(
         src_reg=i, dst_reg="s15", constant=stride, max_words=64
     )
     if shift_add is None:
         raise ValueError(
             f"build_jump_table_blocks: shift-add for stride={stride} "
-            f"(body_words={body_words} + 1) failed"
+            f"(body_words={body_words}) failed"
         )
 
     result: list[BasicBlockNode] = []
@@ -171,7 +172,6 @@ def build_jump_table_blocks(
     )
 
     # ── k body copies (fix_addr_size=True to lock stride) ──
-    inc_inst = RegWriteInst(dst=i, src="op", op=f"{i} + #1")
     for idx in range(k):
         entry_label = entry_labels[idx]
         body_blocks = IRParser(pmem_size=pmem_size).lower_block(bodies[idx])
@@ -183,17 +183,14 @@ def build_jump_table_blocks(
                     "before jump-table lowering; nested fix_addr_size is not supported."
                 )
         # Each body block becomes an independent fix_addr_size=True block.
-        # entry label is attached to the first block of each copy.
-        # inc is appended into the last block's insts.
+        # entry label is attached to the first block of each copy. The loop
+        # body is trusted to already carry the counter update semantically.
         for bb_idx, bb in enumerate(body_blocks):
             labels = [LabelInst(name=entry_label)] if bb_idx == 0 else []
-            insts = list(bb.insts)
-            if bb_idx == len(body_blocks) - 1:
-                insts.append(inc_inst)
             result.append(
                 BasicBlockNode(
                     labels=labels,
-                    insts=insts,
+                    insts=list(bb.insts),
                     branch=bb.branch,
                     fix_addr_size=True,
                 )

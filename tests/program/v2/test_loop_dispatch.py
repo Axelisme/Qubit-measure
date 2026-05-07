@@ -118,7 +118,7 @@ def test_build_jump_table_blocks_structure_k2():
 
     real = [inst for inst in flat if not isinstance(inst, MetaInst)]
 
-    # Expected structure (k=2, body_words=1, stride=2=0b10):
+    # Expected structure (k=2, body_words=1, stride=1):
     # prologue:
     #   JUMP exit -if(Z) -op(r_n - #0)
     #   REG_WR r_i op (r_n AND #1)
@@ -126,12 +126,11 @@ def test_build_jump_table_blocks_structure_k2():
     #   REG_WR r_i op (r_i - #2)
     #   REG_WR r_i op (ABS r_i)
     #   REG_WR s15 label e_0
-    #   REG_WR r_i op (r_i << #1)   } shift-add
-    #   REG_WR s15 op (s15 + r_i)   }
+    #   REG_WR s15 op (s15 + r_i)   } shift-add
     #   REG_WR r_i imm #0
     #   JUMP s15
-    # LABEL e_0: TimeInst; REG_WR r_i +1
-    # LABEL e_1: TimeInst; REG_WR r_i +1
+    # LABEL e_0: TimeInst
+    # LABEL e_1: TimeInst
     # back_edge:
     #   JUMP exit -if(NS) -op(r_i - r_n)
     #   JUMP e_0
@@ -142,10 +141,10 @@ def test_build_jump_table_blocks_structure_k2():
         "RegWriteInst", "JumpInst",                        # i=n%k, jump if r==0
         "RegWriteInst", "RegWriteInst",                    # i=i-#k, i=ABS i
         "RegWriteInst",                                    # s15=label entry_0
-        "RegWriteInst", "RegWriteInst",                    # shift-add: i<<=1, s15+=i
-        "RegWriteInst", "JumpInst",                        # i:=0, JUMP s15
-        "LabelInst", "TimeInst", "RegWriteInst",           # entry_0: body, i++
-        "LabelInst", "TimeInst", "RegWriteInst",           # entry_1: body, i++
+        "RegWriteInst", "RegWriteInst",                    # shift-add: s15+=i, i:=0
+        "JumpInst",                                        # JUMP s15
+        "LabelInst", "TimeInst",                           # entry_0: body
+        "LabelInst", "TimeInst",                           # entry_1: body
         "JumpInst", "JumpInst",                            # back_edge: exit check, → entry_0
         "LabelInst",                                       # exit
     ]
@@ -174,8 +173,8 @@ def test_build_jump_table_blocks_structure_k2():
 
 
 def test_build_jump_table_blocks_body_words_5_uses_shift_add_seq():
-    # stride = body_words + 1 = 5 → helper emits two `s15 += r_i` adds
-    blocks = _make_jt_blocks(k=2, body_words=4)
+    # stride = body_words = 5 → helper emits two `s15 += r_i` adds
+    blocks = _make_jt_blocks(k=2, body_words=5)
     flat = _flatten_blocks(blocks)
 
     s15_add_writes = [

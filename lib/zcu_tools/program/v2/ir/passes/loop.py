@@ -32,30 +32,24 @@ class UnrollAnalysis:
     k_final: int
 
 
-def _clone_nodes_with_incr(
+def _clone_body_nodes(
     nodes: list[IRNode],
     repeat: int,
-    counter_reg: str,
-    final_incr: bool = True,
     pmem_size: int | None = None,
 ) -> list[BasicBlockNode]:
-    """Clone nodes `repeat` times, inserting a counter increment after each copy.
+    """Clone `repeat` full loop-body copies as BasicBlockNodes.
 
-    If final_incr is False, the last copy does NOT get an increment appended
-    (useful when the caller adds the final one externally).
-    Returns a flat list of BasicBlockNode.
+    The loop body is trusted to already include the loop-carried counter
+    update. Later linear passes may merge or reorder that write, so unroll
+    logic must clone the body as a semantic unit instead of trying to append
+    a structural increment block.
     """
-    incr_bb = BasicBlockNode(
-        insts=[RegWriteInst(dst=counter_reg, src="op", op=f"{counter_reg} + #1")]
-    )
     result: list[BasicBlockNode] = []
-    for i in range(repeat):
+    for _ in range(repeat):
         lowered = IRParser(pmem_size=pmem_size).lower_block(
             BlockNode(insts=deepcopy(nodes))
         )
         result.extend(lowered)
-        if final_incr or i < repeat - 1:
-            result.append(deepcopy(incr_bb))
     return result
 
 
@@ -150,7 +144,10 @@ class UnrollSmallLoopPass(OptimizationPassBase):
         node = visited
 
         cfg = self.ctx.config
-        loop_overhead = 2 * cfg.cost_default + cfg.cost_jump_flush  # TEST + JUMP_back
+        # Counter update cost stays inside body_cost because it exists in both
+        # the rolled and unrolled forms. This overhead models only the single
+        # condensed back-edge JUMP plus its control-flow flush penalty.
+        loop_overhead = cfg.cost_default + cfg.cost_jump_flush
 
         n: Optional[int] = None
         is_runtime_exact = False
@@ -207,17 +204,15 @@ class UnrollSmallLoopPass(OptimizationPassBase):
                     n,
                     k,
                 )
-                # Preserve loop semantics: counter starts at 0, increments after
-                # each body copy. No surrounding IRLoop, so we emit all increments.
+                # Preserve loop semantics: counter starts at 0. The cloned body
+                # already contains the loop-carried update as a semantic unit.
                 pmem_size = self.ctx.pmem_size
                 init_bb = BasicBlockNode(
                     insts=[RegWriteInst(dst=node.counter_reg, src="imm", lit="#0")]
                 )
                 return [
                     init_bb,
-                    *_clone_nodes_with_incr(
-                        node.body.insts, n, node.counter_reg, pmem_size=pmem_size
-                    ),
+                    *_clone_body_nodes(node.body.insts, n, pmem_size=pmem_size),
                 ]
 
             # Partial unroll cannot use a constant remainder when the
@@ -244,35 +239,22 @@ class UnrollSmallLoopPass(OptimizationPassBase):
             )
 
             pmem_size = self.ctx.pmem_size
-            # Each of the k body copies needs its own counter increment.
-            # The loop's back-edge will append the final increment after all k
-            # copies, so we omit it from the last copy (final_incr=False).
-            unrolled_body = _clone_nodes_with_incr(
-                node.body.insts,
-                k,
-                node.counter_reg,
-                final_incr=False,
-                pmem_size=pmem_size,
-            )
+            # IRLoop.body already represents a full iteration, including the
+            # counter update even if later peephole passes moved it physically.
+            unrolled_body = _clone_body_nodes(node.body.insts, k, pmem_size=pmem_size)
             full_iters = iters * k
             new_loop = IRLoop(
                 name=f"{node.name}_unrolled",
                 counter_reg=node.counter_reg,
-                # Keep the original counter semantics: this loop body now
-                # executes k original iterations per loop-round, so stop at
-                # `iters * k` before appending remainder copies.
+                # This unrolled loop body now executes k full logical
+                # iterations per loop-round, so it stops at `iters * k`.
                 n=full_iters,
                 body=BlockNode(insts=list(unrolled_body)),
             )
             result: list[IRNode] = [new_loop]
             if remainder > 0:
                 result.extend(
-                    _clone_nodes_with_incr(
-                        node.body.insts,
-                        remainder,
-                        node.counter_reg,
-                        pmem_size=pmem_size,
-                    )
+                    _clone_body_nodes(node.body.insts, remainder, pmem_size=pmem_size)
                 )
             return BlockNode(insts=result)
 
@@ -337,11 +319,10 @@ class UnrollSmallLoopPass(OptimizationPassBase):
             )
             return None
 
-        # Probe the dispatch shift-add — stride is body_size + 1 because
-        # emit_jump_table_loop appends a per-iteration counter increment after
-        # each body copy. If the stride can't be encoded within the word
-        # budget, abort before constructing the node.
-        stride = body_size + 1
+        # IRLoop.body is treated as one full logical iteration, including the
+        # counter update even if a linear pass later folds it into the branch.
+        # Jump-table stride therefore equals body_size directly.
+        stride = body_size
         probe = shift_add_multiply(
             src_reg=node.counter_reg,
             dst_reg="s15",

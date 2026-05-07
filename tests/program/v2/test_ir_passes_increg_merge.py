@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from zcu_tools.program.v2.ir.instructions import NopInst, RegWriteInst, TimeInst
+from zcu_tools.program.v2.ir.instructions import (
+    NopInst,
+    PortWriteInst,
+    RegWriteInst,
+    TimeInst,
+)
 from zcu_tools.program.v2.ir.node import BasicBlockNode, RootNode
 from zcu_tools.program.v2.ir.passes.dataflow import IncRegMergeLinear
 from zcu_tools.program.v2.ir.pipeline import _run_linear_passes
@@ -22,7 +27,9 @@ def test_inc_reg_merge_free_basic():
     )
     
     _run_linear_passes([IncRegMergeLinear()], root)
-    insts = root.insts[0].insts
+    block = root.insts[0]
+    assert isinstance(block, BasicBlockNode)
+    insts = block.insts
     
     assert len(insts) == 3
     assert insts[0] == NopInst()
@@ -47,7 +54,9 @@ def test_inc_reg_merge_free_flush_on_read():
     )
     
     _run_linear_passes([IncRegMergeLinear()], root)
-    insts = root.insts[0].insts
+    block = root.insts[0]
+    assert isinstance(block, BasicBlockNode)
+    insts = block.insts
     
     assert len(insts) == 3
     assert isinstance(insts[0], RegWriteInst)
@@ -55,6 +64,67 @@ def test_inc_reg_merge_free_flush_on_read():
     assert isinstance(insts[1], TimeInst)
     assert isinstance(insts[2], RegWriteInst)
     assert insts[2].op == "r1 + #3"
+
+
+def test_inc_reg_merge_free_can_cross_port_write():
+    root = RootNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    RegWriteInst(dst="r0", src="op", op="r0 + #1"),
+                    PortWriteInst(dst="2", src="wmem", addr="&1", time="@0"),
+                    TimeInst(c_op="inc_ref", r1="r4"),
+                    RegWriteInst(dst="r0", src="op", op="r0 + #1"),
+                ]
+            )
+        ]
+    )
+
+    _run_linear_passes([IncRegMergeLinear()], root)
+    block = root.insts[0]
+    assert isinstance(block, BasicBlockNode)
+    insts = block.insts
+
+    assert len(insts) == 3
+    assert isinstance(insts[0], PortWriteInst)
+    assert isinstance(insts[1], TimeInst)
+    assert isinstance(insts[2], RegWriteInst)
+    assert insts[2].op == "r0 + #2"
+
+
+def test_inc_reg_merge_free_cpmg_like_unrolled_body():
+    root = RootNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    PortWriteInst(dst="2", src="wmem", addr="&1", time="@0"),
+                    TimeInst(c_op="inc_ref", r1="r4"),
+                    RegWriteInst(dst="r0", src="op", op="r0 + #1"),
+                    PortWriteInst(dst="2", src="wmem", addr="&1", time="@0"),
+                    TimeInst(c_op="inc_ref", r1="r4"),
+                    RegWriteInst(dst="r0", src="op", op="r0 + #1"),
+                    PortWriteInst(dst="2", src="wmem", addr="&1", time="@0"),
+                    TimeInst(c_op="inc_ref", r1="r4"),
+                    RegWriteInst(dst="r0", src="op", op="r0 + #1"),
+                ]
+            )
+        ]
+    )
+
+    _run_linear_passes([IncRegMergeLinear()], root)
+    block = root.insts[0]
+    assert isinstance(block, BasicBlockNode)
+    insts = block.insts
+
+    assert len(insts) == 7
+    assert isinstance(insts[0], PortWriteInst)
+    assert isinstance(insts[1], TimeInst)
+    assert isinstance(insts[2], PortWriteInst)
+    assert isinstance(insts[3], TimeInst)
+    assert isinstance(insts[4], PortWriteInst)
+    assert isinstance(insts[5], TimeInst)
+    assert isinstance(insts[6], RegWriteInst)
+    assert insts[6].op == "r0 + #3"
 
 def test_inc_reg_merge_fixed_basic():
     root = RootNode(
@@ -73,7 +143,9 @@ def test_inc_reg_merge_fixed_basic():
     )
     
     _run_linear_passes([IncRegMergeLinear()], root)
-    insts = root.insts[0].insts
+    block = root.insts[0]
+    assert isinstance(block, BasicBlockNode)
+    insts = block.insts
     
     assert len(insts) == 5
     assert isinstance(insts[0], RegWriteInst)
@@ -98,9 +170,13 @@ def test_inc_reg_merge_fixed_non_adjacent():
     )
     
     _run_linear_passes([IncRegMergeLinear()], root)
-    insts = root.insts[0].insts
+    block = root.insts[0]
+    assert isinstance(block, BasicBlockNode)
+    insts = block.insts
     
     assert len(insts) == 3
+    assert isinstance(insts[0], RegWriteInst)
     assert insts[0].op == "r1 + #2"
     assert insts[1] == NopInst()
+    assert isinstance(insts[2], RegWriteInst)
     assert insts[2].op == "r1 + #3"

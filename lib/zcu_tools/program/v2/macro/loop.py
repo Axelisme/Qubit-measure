@@ -128,6 +128,7 @@ class CloseInnerLoop(Macro):
         ...
         <body>
         REG_WR counter op (counter + #1)               ; counter += 1
+        LOOP_BODY_END
         JUMP start -if(S) -op(counter - n)             ; counter < n: loop back
         end:
 
@@ -146,8 +147,8 @@ class CloseInnerLoop(Macro):
         op_str = _format_op(prog, self.counter_reg, "-", self.n)
 
         return [
-            MetaMacro(type="LOOP_BODY_END", name=self.name),
             WriteRegOp(dst=self.counter_reg, lhs=self.counter_reg, op="+", rhs=1),
+            MetaMacro(type="LOOP_BODY_END", name=self.name),
             *_emit_cond_jump(prog, label=start, if_cond="S", op=op_str),
             Label(label=end),
             MetaMacro(type="LOOP_END", name=self.name),

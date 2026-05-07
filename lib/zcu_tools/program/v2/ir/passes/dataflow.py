@@ -3,10 +3,21 @@ from __future__ import annotations
 import re
 
 from ..analysis import instruction_reads, instruction_writes
-from ..instructions import Instruction, JumpInst, NopInst, RegWriteInst, TestInst
+from ..instructions import (
+    DmemReadInst,
+    DmemWriteInst,
+    Instruction,
+    JumpInst,
+    NopInst,
+    PortWriteInst,
+    RegWriteInst,
+    TestInst,
+    TimeInst,
+    WaitInst,
+    WmemWriteInst,
+)
 from ..node import BasicBlockNode
 from ..pipeline import AbsLinearPass
-from .base import is_safe_linear_inst
 
 
 class DeadWriteEliminationLinear(AbsLinearPass):
@@ -34,7 +45,7 @@ class DeadWriteEliminationLinear(AbsLinearPass):
         dead: set[int] = set()
 
         for idx, inst in enumerate(insts):
-            if not is_safe_linear_inst(inst):
+            if self._is_write_tracking_barrier(inst):
                 pending.clear()
                 continue
 
@@ -56,6 +67,11 @@ class DeadWriteEliminationLinear(AbsLinearPass):
                 pending[dst] = idx
 
         return dead
+
+    def _is_write_tracking_barrier(self, inst: Instruction) -> bool:
+        return not isinstance(
+            inst, (TimeInst, WaitInst, RegWriteInst, DmemReadInst, NopInst)
+        )
 
 
 class DeadTestEliminationLinear(AbsLinearPass):
@@ -151,7 +167,7 @@ class IncRegMergeLinear(AbsLinearPass):
         result: list[Instruction] = []
 
         for inst in block.insts:
-            if not is_safe_linear_inst(inst):
+            if self._is_increment_motion_barrier(inst):
                 # Flush ALL pending before unsafe instruction
                 for reg, val in pending.items():
                     if val != 0:
@@ -183,6 +199,21 @@ class IncRegMergeLinear(AbsLinearPass):
                 result.append(_make_increment_inst(reg, val))
 
         block.insts = result
+
+    def _is_increment_motion_barrier(self, inst: Instruction) -> bool:
+        return not isinstance(
+            inst,
+            (
+                TimeInst,
+                WaitInst,
+                RegWriteInst,
+                DmemReadInst,
+                DmemWriteInst,
+                PortWriteInst,
+                WmemWriteInst,
+                NopInst,
+            ),
+        )
 
     def _merge_fixed(self, block: BasicBlockNode) -> None:
         result: list[Instruction] = list(block.insts)

@@ -99,6 +99,12 @@ def _config(**kwargs) -> PipeLineConfig:
     return PipeLineConfig(**defaults)
 
 
+def _counter_update(counter_reg: str) -> BasicBlockNode:
+    return BasicBlockNode(
+        insts=[RegWriteInst(dst=counter_reg, src="op", op=f"{counter_reg} + #1")]
+    )
+
+
 # ---------------------------------------------------------------------------
 # Dead write / dead label tests (unchanged from prior phases)
 # ---------------------------------------------------------------------------
@@ -222,7 +228,7 @@ def test_dead_label_elimination_keeps_pseudo_labels():
 #
 # Default config: cost_default=1, cost_wmem=4, cost_dmem=4, cost_jump_flush=4,
 #                 max_unroll_factor=8, pmem_budget=None.
-# loop_overhead = 2*cost_default + cost_jump_flush = 6.
+# loop_overhead = cost_default + cost_jump_flush = 5.
 
 
 def test_unroll_full_expansion_when_n_le_k():
@@ -236,7 +242,12 @@ def test_unroll_full_expansion_when_n_le_k():
                 name="loop",
                 counter_reg="s0",
                 n=3,
-                body=BlockNode(insts=[BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")])]),
+                body=BlockNode(
+                    insts=[
+                        BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")]),
+                        _counter_update("s0"),
+                    ]
+                ),
             )
         ]
     )
@@ -277,7 +288,10 @@ def test_unroll_full_expansion_keeps_counter_init_for_counter_dependent_body():
                 counter_reg="r0",
                 n=1,
                 body=BlockNode(
-                    insts=[BasicBlockNode(insts=[RegWriteInst(dst="r1", src="op", op="r0")])]
+                    insts=[
+                        BasicBlockNode(insts=[RegWriteInst(dst="r1", src="op", op="r0")]),
+                        _counter_update("r0"),
+                    ]
                 ),
             )
         ]
@@ -314,6 +328,7 @@ def test_unroll_full_expansion_preserves_internal_label():
                             labels=[LabelInst(name=inner)],
                             insts=[TimeInst(c_op="inc_ref", lit="#1")],
                         ),
+                        _counter_update("s0"),
                     ]
                 ),
             )
@@ -338,7 +353,12 @@ def test_unroll_partial_unroll_produces_loop_plus_remainder():
                 name="loop",
                 counter_reg="s0",
                 n=20,
-                body=BlockNode(insts=[BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")])]),
+                body=BlockNode(
+                    insts=[
+                        BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")]),
+                        _counter_update("s0"),
+                    ]
+                ),
             )
         ]
     )
@@ -350,12 +370,11 @@ def test_unroll_partial_unroll_produces_loop_plus_remainder():
     assert len(out.insts) == 1
     block = out.insts[0]
     assert isinstance(block, BlockNode)
-    # IRLoop(n=16) + 4 remainder copies, each with body+increment = 2 insts → 1 + 4*2 = 9
-    assert len(block.insts) == 9
+    # body_size=2, pmem_budget=8 → k_budget=4, so n=20 becomes IRLoop(n=20)
+    # with no inline remainder copies.
+    assert len(block.insts) == 1
     assert isinstance(block.insts[0], IRLoop)
-    assert cast(IRLoop, block.insts[0]).n == 16  # (20 // 8) * 8
-    # Remainder: each copy is a BasicBlockNode
-    assert all(isinstance(item, BasicBlockNode) for item in block.insts[1:])
+    assert cast(IRLoop, block.insts[0]).n == 20
 
 
 def test_unroll_partial_unroll_no_remainder():
@@ -393,7 +412,12 @@ def test_unroll_partial_unroll_loop_bound_uses_full_unrolled_iterations():
                 name="loop",
                 counter_reg="r0",
                 n=99,
-                body=BlockNode(insts=[BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")])]),
+                body=BlockNode(
+                    insts=[
+                        BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")]),
+                        _counter_update("r0"),
+                    ]
+                ),
             )
         ]
     )
@@ -459,7 +483,7 @@ def test_unroll_no_scheduled_ticks_uses_zero_delay_budget():
                 name="loop",
                 counter_reg="s0",
                 n=100,
-                body=BlockNode(insts=heavy_insts),
+                body=BlockNode(insts=[*heavy_insts, _counter_update("s0")]),
             )
         ]
     )
@@ -485,7 +509,10 @@ def test_unroll_dynamic_delay_only_body_uses_zero_delay_budget():
                 counter_reg="s0",
                 n=20,
                 body=BlockNode(
-                    insts=[BasicBlockNode(insts=[TimeInst(c_op="inc_ref", r1="r_delay")])]
+                    insts=[
+                        BasicBlockNode(insts=[TimeInst(c_op="inc_ref", r1="r_delay")]),
+                        _counter_update("s0"),
+                    ]
                 ),
             )
         ]
@@ -514,10 +541,13 @@ def test_unroll_mixed_literal_and_dynamic_delay_uses_literal_budget():
                 counter_reg="s0",
                 n=4,
                 body=BlockNode(
-                    insts=[BasicBlockNode(insts=[
-                        TimeInst(c_op="inc_ref", lit="#5"),
-                        TimeInst(c_op="inc_ref", r1="r_dyn"),
-                    ])]
+                    insts=[
+                        BasicBlockNode(insts=[
+                            TimeInst(c_op="inc_ref", lit="#5"),
+                            TimeInst(c_op="inc_ref", r1="r_dyn"),
+                        ]),
+                        _counter_update("s0"),
+                    ]
                 ),
             )
         ]
@@ -541,7 +571,12 @@ def test_unroll_exact_register_hint_fully_expands():
                 counter_reg="s0",
                 n="r_count",
                 range_hint=(3, 3),
-                body=BlockNode(insts=[BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")])]),
+                body=BlockNode(
+                    insts=[
+                        BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")]),
+                        _counter_update("s0"),
+                    ]
+                ),
             )
         ]
     )
@@ -607,10 +642,13 @@ def test_unroll_counter_sensitive_loop_still_uses_unroll_k_rules():
                 counter_reg="s0",
                 n=3,
                 body=BlockNode(
-                    insts=[BasicBlockNode(insts=[
-                        TestInst(op="s0 - #1"),
-                        TimeInst(c_op="inc_ref", lit="#1"),
-                    ])]
+                    insts=[
+                        BasicBlockNode(insts=[
+                            TestInst(op="s0 - #1"),
+                            TimeInst(c_op="inc_ref", lit="#1"),
+                        ]),
+                        _counter_update("s0"),
+                    ]
                 ),
             )
         ]
@@ -717,13 +755,18 @@ def test_unroll_post_order_recurses_into_inner_loop_first():
         name="inner",
         counter_reg="s1",
         n=2,
-        body=BlockNode(insts=[BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")])]),
+        body=BlockNode(
+            insts=[
+                BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#1")]),
+                _counter_update("s1"),
+            ]
+        ),
     )
     outer = IRLoop(
         name="outer",
         counter_reg="s0",
         n=2,
-        body=BlockNode(insts=[inner]),
+        body=BlockNode(insts=[inner, _counter_update("s0")]),
     )
     root = RootNode(insts=[outer])
 
@@ -746,6 +789,7 @@ def test_unroll_cpmg_style_body_triggers():
         BasicBlockNode(insts=[PortWriteInst(dst="1", time="t0")]),
         BasicBlockNode(insts=[PortWriteInst(dst="2", time="t0")]),
         BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#14")]),
+        _counter_update("s0"),
     ]
     root = RootNode(
         insts=[

@@ -1,8 +1,8 @@
 """Phase 6 Validation tests for the Two-Tier Optimization Pipeline.
 
 Validation 1: Jump-table stride alignment
-  Assert that every entry block in an IRJumpTableLoop output has exactly
-  `body_words + 1` instructions so the dispatcher's stride calculation
+  Assert that every entry block in a jump-table output has exactly
+  `body_words` instructions so the dispatcher's stride calculation
   never drifts.
 
 Validation 2: Fully-unrolled loops produce a single fused block with zero
@@ -112,7 +112,7 @@ def _collect_all_basic_blocks(root: RootNode) -> list[BasicBlockNode]:
 # ---------------------------------------------------------------------------
 
 def test_v1_jump_table_entry_blocks_have_uniform_stride():
-    """All k entry blocks must have identical instruction counts (= body_words + 1).
+    """All k entry blocks must have identical instruction counts (= body_words).
 
     This guarantees the dispatch arithmetic `entry_0 + i * stride` always
     lands on a valid entry label, regardless of which entry point is chosen.
@@ -139,7 +139,7 @@ def test_v1_jump_table_entry_blocks_have_uniform_stride():
     groups = _collect_entry_groups(root)
     assert len(groups) == k, f"expected {k} entry groups, got {len(groups)}"
 
-    expected_addr = body_words + 1  # body addr words + counter increment
+    expected_addr = body_words
     for i, group in enumerate(groups):
         actual = _entry_addr_size(group)
         assert actual == expected_addr, (
@@ -147,11 +147,11 @@ def test_v1_jump_table_entry_blocks_have_uniform_stride():
         )
 
 
-def test_v1_jump_table_stride_equals_body_words_plus_one():
-    """After UnrollSmallLoopPass, entry block instruction count == body_words + 1.
+def test_v1_jump_table_stride_equals_body_words():
+    """After UnrollSmallLoopPass, entry block instruction count == body_words.
 
     body_words is measured by estimate_flat_size, which counts non-meta
-    instructions. The +1 is the per-iteration counter increment.
+    instructions in one full logical body iteration.
     """
     Label.reset()
     body_nops = 5  # body_words == 5
@@ -172,11 +172,11 @@ def test_v1_jump_table_stride_equals_body_words_plus_one():
     groups = _collect_entry_groups(out)
     assert len(groups) > 0, "no entry groups produced"
 
-    expected_addr = body_nops + 1
+    expected_addr = body_nops
     for i, group in enumerate(groups):
         actual = _entry_addr_size(group)
         assert actual == expected_addr, (
-            f"entry {i}: expected addr size {expected_addr} (body_words={body_nops}+1), "
+            f"entry {i}: expected addr size {expected_addr} (body_words={body_nops}), "
             f"got {actual}"
         )
 
@@ -186,7 +186,7 @@ def test_v1_jump_table_entry_blocks_not_modified_by_pipeline():
     (fix_addr_size=True guards them from Post-LIR peephole passes).
 
     body: two NOPs. Pre-LIR passes leave NOPs untouched, so body_words=2
-    and each entry block should have exactly 3 instructions after unrolling.
+    and each entry block should have exactly 2 instructions after unrolling.
     """
     Label.reset()
     root = RootNode(
@@ -209,8 +209,8 @@ def test_v1_jump_table_entry_blocks_not_modified_by_pipeline():
     groups = _collect_entry_groups(out)
     assert len(groups) > 0, "no entry groups produced"
 
-    # body_words = 2 (NOP + NOP), counter increment = 1 → addr size 3 per entry
-    expected_addr = 3
+    # body_words = 2 (NOP + NOP) → addr size 2 per entry
+    expected_addr = 2
     for i, group in enumerate(groups):
         actual = _entry_addr_size(group)
         assert actual == expected_addr, (
@@ -338,9 +338,9 @@ def test_v3_fixed_block_branch_elim_produces_nop():
 
 def test_v3_fixed_block_instruction_count_preserved_after_pipeline():
     """After the full pipeline, no fix_addr_size=True entry block should have
-    fewer instructions than body_words + 1.
+    fewer instructions than body_words.
 
-    body: two NOPs → body_words=2, each entry block expects exactly 3 insts.
+    body: two NOPs → body_words=2, each entry block expects exactly 2 insts.
     BranchEliminationPass must not strip any instructions from these blocks.
     """
     Label.reset()
@@ -365,9 +365,9 @@ def test_v3_fixed_block_instruction_count_preserved_after_pipeline():
     assert len(groups) > 0, "no entry groups produced"
 
     for i, group in enumerate(groups):
-        # addr size must be exactly body_words(2) + 1 = 3.
+        # addr size must be exactly body_words(2).
         actual = _entry_addr_size(group)
-        assert actual == 3, (
+        assert actual == 2, (
             f"entry {i} has addr size {actual} — "
             f"fix_addr_size was not respected by the pipeline"
         )

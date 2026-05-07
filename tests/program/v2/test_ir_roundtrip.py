@@ -2,7 +2,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 from zcu_tools.program.v2.ir.builder import IRBuilder
-from zcu_tools.program.v2.ir.instructions import NopInst
+from zcu_tools.program.v2.ir.instructions import NopInst, RegWriteInst
 from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRLoop, RootNode
 from zcu_tools.program.v2.ir.pipeline import make_default_pipeline
 
@@ -43,7 +43,7 @@ def test_structural_loop_roundtrip():
             "type": "LOOP_BODY_END",
             "name": "loop1",
             "info": {},
-            "p_addr": 4,
+            "p_addr": 5,
         },
         {"kind": "label", "name": "loop1_end", "p_addr": 6},
         {
@@ -74,7 +74,7 @@ def test_structural_loop_roundtrip():
 
     # Verify emitted instructions (no markers).
     # IRLoop.emit() (do-while + guard, constant n: no guard) outputs:
-    # REG_WR(init), Label(start), [BODY...], REG_WR(i+1), JUMP(start, IF+OP), Label(end)
+    # REG_WR(init), Label(start), [BODY... including i+1], JUMP(start, IF+OP), Label(end)
 
     expected_cmds = ["REG_WR"]  # Init counter
     expected_cmds.append("NOP")  # Body
@@ -114,7 +114,20 @@ def test_irloop_emit_uses_s15_jump_for_large_pmem():
                 name="big",
                 counter_reg="r1",
                 n=5,
-                body=BlockNode(insts=[BasicBlockNode(insts=[NopInst()])]),
+                body=BlockNode(
+                    insts=[
+                        BasicBlockNode(insts=[NopInst()]),
+                        BasicBlockNode(
+                            insts=[
+                                RegWriteInst(
+                                    dst="r1",
+                                    src="op",
+                                    op="r1 + #1",
+                                )
+                            ]
+                        ),
+                    ]
+                ),
             )
         ]
     )
@@ -124,7 +137,7 @@ def test_irloop_emit_uses_s15_jump_for_large_pmem():
     builder = IRBuilder(prog)
     prog_list, *_, cursor = builder.unbuild(root)
 
-    # Constant n: no guard. Body executes; counter += 1; cond back-edge.
+    # Constant n: no guard. Body already contains counter += 1; then cond back-edge.
     # Big-pmem path: back-edge target loaded into s15, then JUMP s15.
     cmds = [inst.get("CMD") for inst in prog_list]
     assert cmds == ["REG_WR", "NOP", "REG_WR", "REG_WR", "JUMP"]

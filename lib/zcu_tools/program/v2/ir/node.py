@@ -99,7 +99,12 @@ class RootNode(BlockNode):
 
 @dataclass
 class IRLoop(IRNode):
-    """A loop node (pure data — lowering is handled by IRParser.unparse)."""
+    """A loop node (pure data — lowering is handled by IRParser.unparse).
+
+    `body` is treated as one full logical iteration, including the loop-carried
+    counter update. Later linear passes may merge or reorder that update, so
+    callers must not assume it remains the final instruction physically.
+    """
 
     name: str = ""
     counter_reg: str = ""

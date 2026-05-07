@@ -84,10 +84,10 @@ def estimate_flat_size(nodes: list["IRNode"]) -> int:
                 n = node.range_hint[1]
             else:
                 n = 1  # unknown: underestimate to keep budget safe
-            # Shape: [guard? 2] + init 1 + n * (inner + i++ 1) + cond-back 1.
-            # Guard only emitted for runtime-driven n; ignored here for the
-            # constant case that drives most budgets.
-            size += 2 + n * (inner + 1)
+            # IRLoop.body is treated as one full logical iteration, including
+            # the counter update even if later optimizers move or merge it.
+            # Shape: [guard? 1] + init 1 + n * inner + cond-back 1.
+            size += 2 + n * inner
         elif isinstance(node, IRBranch):
             n_cases = len(node.cases)
             dispatch_depth = math.ceil(math.log2(n_cases)) if n_cases > 1 else 0
@@ -129,7 +129,10 @@ def estimate_body_cost(body: list["IRNode"], config: "PipeLineConfig") -> int:
         elif isinstance(node, BlockNode):
             cost += estimate_body_cost(node.insts, config)
         elif isinstance(node, IRLoop):
-            loop_overhead = 2 * config.cost_default + config.cost_jump_flush
+            # Counter update cost stays inside inner_cost because it exists
+            # regardless of whether the loop is unrolled. loop_overhead models
+            # only the single condensed back-edge JUMP plus its flush penalty.
+            loop_overhead = config.cost_default + config.cost_jump_flush
             inner_cost = estimate_body_cost(node.body.insts, config)
 
             if isinstance(node.n, int):

@@ -407,7 +407,7 @@ class IRParser:
             REG_WR counter imm #0
             start_label + MetaInst(LOOP_BODY_START)
             <body blocks>
-            MetaInst(LOOP_BODY_END) + REG_WR counter++ + back-edge jump
+            MetaInst(LOOP_BODY_END) + back-edge jump
             end_label + MetaInst(LOOP_END)
         """
         lexer = IRLexer()
@@ -445,10 +445,12 @@ class IRParser:
             MetaInst(type="LOOP_BODY_START", name=node.name),
         ]
 
-        # ── post-body: back-edge increment + conditional jump, end label ──
+        # IRLoop.body is trusted to already contain the loop-carried counter
+        # update. Optimizers may merge or reorder that write, so lowering must
+        # not try to rediscover it structurally here.
+        # ── post-body: conditional jump, end label ──
         post: list[Instruction] = [
             MetaInst(type="LOOP_BODY_END", name=node.name),
-            RegWriteInst(dst=node.counter_reg, src="op", op=f"{node.counter_reg} + #1"),
         ]
         if _needs_big_jump(self.pmem_size):
             post += [
@@ -514,4 +516,3 @@ class IRParser:
             BasicBlockNode(insts=[MetaInst(type="BRANCH_END", name=node.name)])
         )
         return result
-

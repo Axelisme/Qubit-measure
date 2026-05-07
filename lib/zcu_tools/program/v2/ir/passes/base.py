@@ -2,14 +2,6 @@ from __future__ import annotations
 
 from typing import cast
 
-from ..instructions import (
-    DmemReadInst,
-    Instruction,
-    NopInst,
-    RegWriteInst,
-    TimeInst,
-    WaitInst,
-)
 from ..node import RootNode
 from ..pipeline import AbsIRPass, PipeLineContext
 from ..traversal import IRTransformer
@@ -24,7 +16,3 @@ class OptimizationPassBase(AbsIRPass, IRTransformer):
         if isinstance(res, list):
             raise ValueError("Unexpected list returned from visit")
         return cast(RootNode, res or ir)
-
-
-def is_safe_linear_inst(inst: Instruction) -> bool:
-    return isinstance(inst, (TimeInst, WaitInst, RegWriteInst, DmemReadInst, NopInst))
