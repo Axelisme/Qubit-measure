@@ -402,104 +402,67 @@ class IRParser:
         """Lower IRLoop into BasicBlockNodes + MetaInst markers.
 
         Shape:
-            MetaInst(LOOP_START)  [inside a BasicBlockNode.insts]
-            [guard block]         -- only when n is a register string
-            init block            -- REG_WR counter imm #0
-            start_label block + MetaInst(LOOP_BODY_START)
+            MetaInst(LOOP_START)
+            [guard]               -- only when n is a register string
+            REG_WR counter imm #0
+            start_label + MetaInst(LOOP_BODY_START)
             <body blocks>
-            back_edge block + MetaInst(LOOP_BODY_END)
-            end_label block + MetaInst(LOOP_END)
+            MetaInst(LOOP_BODY_END) + REG_WR counter++ + back-edge jump
+            end_label + MetaInst(LOOP_END)
         """
+        lexer = IRLexer()
         start = Label.make_new(f"{node.name}_start")
         end = Label.make_new(f"{node.name}_end")
-
-        result: list[Union[BasicBlockNode, MetaInst]] = []
-
-        result.append(
-            BasicBlockNode(
-                insts=[
-                    MetaInst(
-                        type="LOOP_START",
-                        name=node.name,
-                        info=dict(
-                            counter_reg=node.counter_reg,
-                            n=node.n,
-                            range_hint=node.range_hint,
-                        ),
-                    )
-                ]
-            )
-        )
-
-        # Guard block (runtime n only)
-        if isinstance(node.n, str):
-            if _needs_big_jump(self.pmem_size):
-                result.append(
-                    BasicBlockNode(
-                        insts=[RegWriteInst(dst="s15", src="label", label=end)],
-                        branch=JumpInst(addr="s15", if_cond="Z", op=f"{node.n} - #0"),
-                    )
-                )
-            else:
-                result.append(
-                    BasicBlockNode(
-                        branch=JumpInst(label=end, if_cond="Z", op=f"{node.n} - #0"),
-                    )
-                )
-
-        # Counter init
-        result.append(
-            BasicBlockNode(
-                insts=[RegWriteInst(dst=node.counter_reg, src="imm", lit="#0")]
-            )
-        )
-
-        # Start label + LOOP_BODY_START
-        result.append(
-            BasicBlockNode(
-                labels=[LabelInst(name=start, can_remove=True)],
-                insts=[MetaInst(type="LOOP_BODY_START", name=node.name)],
-            )
-        )
-
-        # Body
-        result.extend(self._unparse_block_node(node.body))
-
-        # Back-edge: counter++ then conditional jump to start
         op_str = (
             f"{node.counter_reg} - #{node.n}"
             if isinstance(node.n, int)
             else f"{node.counter_reg} - {node.n}"
         )
-        back_insts: list[Instruction] = [
+
+        # ── pre-body: LOOP_START marker, optional guard, counter init, body entry ──
+        pre: list[Instruction] = [
+            MetaInst(
+                type="LOOP_START",
+                name=node.name,
+                info=dict(
+                    counter_reg=node.counter_reg,
+                    n=node.n,
+                    range_hint=node.range_hint,
+                ),
+            ),
+        ]
+        if isinstance(node.n, str):  # runtime guard: skip when n == 0
+            if _needs_big_jump(self.pmem_size):
+                pre += [
+                    RegWriteInst(dst="s15", src="label", label=end),
+                    JumpInst(addr="s15", if_cond="Z", op=f"{node.n} - #0"),
+                ]
+            else:
+                pre.append(JumpInst(label=end, if_cond="Z", op=f"{node.n} - #0"))
+        pre += [
+            RegWriteInst(dst=node.counter_reg, src="imm", lit="#0"),
+            LabelInst(name=start, can_remove=True),
+            MetaInst(type="LOOP_BODY_START", name=node.name),
+        ]
+
+        # ── post-body: back-edge increment + conditional jump, end label ──
+        post: list[Instruction] = [
             MetaInst(type="LOOP_BODY_END", name=node.name),
             RegWriteInst(dst=node.counter_reg, src="op", op=f"{node.counter_reg} + #1"),
         ]
         if _needs_big_jump(self.pmem_size):
-            back_insts.append(RegWriteInst(dst="s15", src="label", label=start))
-            result.append(
-                BasicBlockNode(
-                    insts=back_insts,
-                    branch=JumpInst(addr="s15", if_cond="NS", op=op_str),
-                )
-            )
+            post += [
+                RegWriteInst(dst="s15", src="label", label=start),
+                JumpInst(addr="s15", if_cond="NS", op=op_str),
+            ]
         else:
-            result.append(
-                BasicBlockNode(
-                    insts=back_insts,
-                    branch=JumpInst(label=start, if_cond="NS", op=op_str),
-                )
-            )
+            post.append(JumpInst(label=start, if_cond="NS", op=op_str))
+        post += [
+            LabelInst(name=end, can_remove=True),
+            MetaInst(type="LOOP_END", name=node.name),
+        ]
 
-        # End label + LOOP_END
-        result.append(
-            BasicBlockNode(
-                labels=[LabelInst(name=end, can_remove=True)],
-                insts=[MetaInst(type="LOOP_END", name=node.name)],
-            )
-        )
-
-        return result
+        return lexer.lex(pre) + self._unparse_block_node(node.body) + lexer.lex(post)
 
     def _lower_branch(
         self, node: IRBranch
