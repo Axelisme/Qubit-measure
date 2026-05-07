@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
 from zcu_tools.program.v2.ir.instructions import (
     LabelInst,
     RegWriteInst,
@@ -9,6 +10,11 @@ from zcu_tools.program.v2.ir.instructions import (
 from zcu_tools.program.v2.ir.labels import Label
 from zcu_tools.program.v2.ir.linker import IRLinker
 from zcu_tools.program.v2.ir.node import BasicBlockNode, RootNode
+
+
+def _link_root(linker: IRLinker, root: RootNode):
+    inst_list = IRLexer().flatten(IRParser().unparse(root))
+    return linker.link(inst_list)
 
 
 def test_linker_wait_address_calculation():
@@ -42,7 +48,7 @@ def test_linker_wait_address_calculation():
     )
 
     linker = IRLinker()
-    prog_list, labels, meta_infos, cursor = linker.link(ir)
+    prog_list, labels, meta_infos, cursor = _link_root(linker, ir)
 
     # Expected addresses:
     # L1: 0
@@ -80,7 +86,7 @@ def test_linker_cursor_counts_wait_and_trailing_labels():
     )
 
     linker = IRLinker()
-    prog_list, labels, _meta_infos, cursor = linker.link(ir)
+    prog_list, labels, _meta_infos, cursor = _link_root(linker, ir)
 
     assert labels == {"L1": "&0", "L2": "&2"}
     assert [inst["P_ADDR"] for inst in prog_list] == [0, 2]
@@ -99,7 +105,7 @@ def test_linker_wait_roundtrip():
     )
 
     linker = IRLinker()
-    prog_list, labels, meta_infos, _cursor = linker.link(ir)
+    prog_list, labels, meta_infos, _cursor = _link_root(linker, ir)
 
     # Roundtrip: unlink
     logical_insts = linker.unlink(prog_list, labels, meta_infos)

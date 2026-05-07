@@ -465,37 +465,3 @@ class IRParser:
         )
         return result
 
-
-# ---------------------------------------------------------------------------
-# Legacy free-function shims (used by builder.py and tests)
-# ---------------------------------------------------------------------------
-
-_default_lexer = IRLexer()
-
-
-class InstructionStream:
-    """Shim: wraps IRLexer.lex output as a positional stream for builder.py."""
-
-    def __init__(self, insts: list[Instruction]):
-        self._items = _default_lexer.lex(insts)
-        self._pos = 0
-
-    def is_empty(self) -> bool:
-        return self._pos >= len(self._items)
-
-    def peek(self) -> Optional[Union[BasicBlockNode, MetaInst]]:
-        if self._pos < len(self._items):
-            return self._items[self._pos]
-        return None
-
-    def get_items(self) -> list[Union[BasicBlockNode, MetaInst]]:
-        return self._items[self._pos:]
-
-
-def parse_root(stream: InstructionStream) -> RootNode:
-    """Legacy shim: parse all remaining items in stream into a RootNode."""
-    parser = IRParser()
-    root = parser.parse(stream.get_items())
-    # Advance stream to end so caller's "remaining check" passes
-    stream._pos = len(stream._items)
-    return root

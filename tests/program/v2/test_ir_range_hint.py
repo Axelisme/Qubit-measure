@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from zcu_tools.program.v2.ir.factory import InstructionStream, parse_root
+from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
 from zcu_tools.program.v2.ir.instructions import MetaInst, RegWriteInst
 from zcu_tools.program.v2.ir.node import IRLoop
 
@@ -26,8 +26,8 @@ def test_parse_loop_restores_range_hint():
         MetaInst(type="LOOP_END", name="loop"),
     ]
 
-    stream = InstructionStream(insts)
-    root = parse_root(stream)
+    items = IRLexer().lex(insts)
+    root = IRParser().parse(items)
 
     assert isinstance(root.insts[0], IRLoop)
     loop = root.insts[0]

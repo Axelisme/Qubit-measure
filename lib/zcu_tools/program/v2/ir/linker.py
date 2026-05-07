@@ -2,13 +2,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Optional
-
 from typing_extensions import Any
 
 from .instructions import Instruction, LabelInst, MetaInst
 from .labels import Label
-from .node import RootNode
 
 
 @dataclass(frozen=True)
@@ -18,33 +15,13 @@ class IRCursor:
 
 
 class IRLinker:
-    """Responsible for flattening the IR tree, assigning physical addresses, and resolving labels."""
-
-    def _flatten_ir(
-        self, ir: RootNode, pmem_size: Optional[int] = None
-    ) -> list[Instruction]:
-        """Lower a RootNode into a flat list of Instructions via IRParser."""
-        from .factory import IRLexer, IRParser
-
-        parser = IRParser(pmem_size=pmem_size)
-        blocks = parser.unparse(ir)
-        return IRLexer().flatten(blocks)
+    """Assigns physical addresses to a flat instruction list and resolves labels."""
 
     def link(
         self,
-        inst_list_or_ir,
-        pmem_size: Optional[int] = None,
+        inst_list: list[Instruction],
     ) -> tuple[list[dict], dict[str, str], list[dict[str, Any]], IRCursor]:
-        """Flatten and link IR into QICK-compatible dicts.
-
-        Accepts either:
-        - a RootNode  (new path): lowered via _flatten_ir first
-        - list[Instruction] (legacy path): used as-is
-        """
-        if isinstance(inst_list_or_ir, RootNode):
-            inst_list = self._flatten_ir(inst_list_or_ir, pmem_size)
-        else:
-            inst_list = inst_list_or_ir
+        """Link a flat instruction list into QICK-compatible dicts."""
         prog_list: list[dict] = []
         labels: dict[str, str] = {}
         meta_infos: list[dict[str, Any]] = []

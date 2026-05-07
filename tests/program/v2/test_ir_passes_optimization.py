@@ -53,9 +53,11 @@ def _flat_inst_count(root: RootNode) -> int:
 
 def _flatten_root(root: RootNode) -> list[Instruction]:
     """Flatten a RootNode into a flat instruction list via the linker."""
+    from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
     from zcu_tools.program.v2.ir.linker import IRLinker
     linker = IRLinker()
-    prog_list, labels, meta_infos, _ = linker.link(root)
+    inst_list = IRLexer().flatten(IRParser().unparse(root))
+    prog_list, labels, meta_infos, _ = linker.link(inst_list)
     logical = linker.unlink(prog_list, labels, meta_infos)
     return logical
 
