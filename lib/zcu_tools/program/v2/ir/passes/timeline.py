@@ -47,12 +47,12 @@ def _is_mergeable_time_increment(inst: Instruction) -> bool:
 class ZeroDelayDCELinear(AbsLinearPass):
     """Remove TIME inc_ref #0 instructions from a BasicBlockNode.
 
-    fix_inst_num=False: removes zero-delay TIME instructions.
-    fix_inst_num=True:  replaces them with NopInst to preserve stride.
+    fix_addr_size=False: removes zero-delay TIME instructions.
+    fix_addr_size=True:  replaces them with NopInst to preserve stride.
     """
 
     def process_block(self, block: BasicBlockNode) -> None:
-        if block.fix_inst_num:
+        if block.fix_addr_size:
             block.insts = [
                 NopInst() if _is_zero_ref_increment(inst) else inst
                 for inst in block.insts
@@ -66,14 +66,14 @@ class ZeroDelayDCELinear(AbsLinearPass):
 class TimedMergeLinear(AbsLinearPass):
     """Merge adjacent TIME inc_ref #N instructions in a BasicBlockNode.
 
-    fix_inst_num=False: merges adjacent runs into a single instruction.
-    fix_inst_num=True:  merges the value into the first instruction of each
+    fix_addr_size=False: merges adjacent runs into a single instruction.
+    fix_addr_size=True:  merges the value into the first instruction of each
                         run, then replaces the remaining instructions with
                         NopInst to preserve stride.
     """
 
     def process_block(self, block: BasicBlockNode) -> None:
-        if block.fix_inst_num:
+        if block.fix_addr_size:
             self._merge_fixed(block)
         else:
             self._merge_free(block)

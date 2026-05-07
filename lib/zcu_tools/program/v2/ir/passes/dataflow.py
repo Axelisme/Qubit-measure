@@ -10,8 +10,8 @@ from .base import is_safe_linear_inst
 class DeadWriteEliminationLinear(AbsLinearPass):
     """Remove overwritten register writes in a BasicBlockNode.
 
-    fix_inst_num=False: removes dead-write instructions from the list.
-    fix_inst_num=True:  replaces dead-write instructions with NopInst to
+    fix_addr_size=False: removes dead-write instructions from the list.
+    fix_addr_size=True:  replaces dead-write instructions with NopInst to
                         preserve jump-table stride.
     """
 
@@ -20,7 +20,7 @@ class DeadWriteEliminationLinear(AbsLinearPass):
         dead: set[int] = self._find_dead_indices(insts)
         if not dead:
             return
-        if block.fix_inst_num:
+        if block.fix_addr_size:
             block.insts = [
                 NopInst() if i in dead else inst for i, inst in enumerate(insts)
             ]

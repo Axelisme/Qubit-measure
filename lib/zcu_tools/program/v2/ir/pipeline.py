@@ -67,7 +67,7 @@ class AbsLinearPass(ABC):
     in-place.  The ``block.labels`` and ``block.branch`` fields must NOT be
     touched — those belong to the structural level.
 
-    When ``block.fix_inst_num`` is True the total length of ``block.insts``
+    When ``block.fix_addr_size`` is True the total length of ``block.insts``
     must be preserved.  Passes that normally delete instructions must replace
     removed instructions with ``NopInst`` instead.  Passes that merge N
     instructions into 1 must pad with N-1 ``NopInst``s.
@@ -98,7 +98,7 @@ class IRPipeLine:
     Stage 3 — Post-LIR : same ``linear_passes`` re-applied after all
                           structural passes.
 
-    Each AbsLinearPass handles fix_inst_num internally, so the same pass list
+    Each AbsLinearPass handles fix_addr_size internally, so the same pass list
     is safe to run both before and after structural changes.
     """
 

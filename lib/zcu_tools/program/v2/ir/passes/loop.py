@@ -133,10 +133,10 @@ class UnrollSmallLoopPass(OptimizationPassBase):
         if not self.ctx.config.enable_unroll_loop:
             return self.generic_visit(node)
 
-        # Hierarchical lock: if this loop is inside a fix_inst_num region,
+        # Hierarchical lock: if this loop is inside a fix_addr_size region,
         # unrolling would change the physical instruction count and break
         # jump-table stride calculations.
-        if node.fix_inst_num:
+        if node.fix_addr_size:
             return self.generic_visit(node)
 
         # Post-order: recurse into the body first so any inner loops are
@@ -288,8 +288,9 @@ class UnrollSmallLoopPass(OptimizationPassBase):
         """Try to build jump-table BasicBlockNodes for a register-driven loop.
 
         Returns None when any precondition fails (k <= 1 after pow2
-        rounding, body_words == 0, dispatch shift-add too long, etc.) so
-        the caller falls back to no-unroll.
+        rounding, body_words == 0, dispatch shift-add too long, body already
+        addr-locked, body contains branches, etc.) so the caller falls back
+        to no-unroll.
         """
         analysis = _analyze_unroll(node.body.insts, loop_overhead, cfg)
         body_size = analysis.body_size
@@ -365,6 +366,17 @@ class UnrollSmallLoopPass(OptimizationPassBase):
             body_size,
             len(probe),
         )
+        # Validate: body must not already be addr-locked before jump-table lowering.
+        probe_blocks = _lower_block_node(BlockNode(insts=deepcopy(node.body.insts)), self.ctx.pmem_size)
+        for bb in probe_blocks:
+            if bb.fix_addr_size:
+                logger.debug(
+                    "UnrollSmallLoopPass: skip jump-table loop name=%s because "
+                    "lowered body contains fix_addr_size=True block",
+                    node.name,
+                )
+                return None
+
         entry_labels = [Label.make_new(f"{node.name}_jt_entry_{i}") for i in range(k)]
         exit_label = Label.make_new(f"{node.name}_jt_exit")
         bodies = [BlockNode(insts=deepcopy(node.body.insts)) for _ in range(k)]

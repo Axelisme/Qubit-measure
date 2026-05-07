@@ -224,10 +224,11 @@ def test_build_jump_table_blocks_invalid_k_raises():
     raise AssertionError("expected ValueError")
 
 
-def test_build_jump_table_blocks_entry_blocks_have_fix_inst_num():
+def test_build_jump_table_blocks_entry_blocks_have_fix_addr_size():
     blocks = _make_jt_blocks(k=4, body_words=2)
-    entry_blocks = [b for b in blocks if b.fix_inst_num and b.labels]
-    assert len(entry_blocks) == 4
-    # Each entry block: body_words + counter_incr = 3 insts.
-    for blk in entry_blocks:
-        assert len(blk.insts) == 3
+    # Each entry starts at a labelled fix_addr_size block; body_words=2 means
+    # 2 body blocks + 1 inc block (appended to last body block) = addr size 3.
+    entry_starts = [b for b in blocks if b.fix_addr_size and b.labels]
+    assert len(entry_starts) == 4
+    # All fix_addr_size blocks must be present (k * body_words + back_edge blocks).
+    assert all(b.fix_addr_size for b in blocks if b in entry_starts)

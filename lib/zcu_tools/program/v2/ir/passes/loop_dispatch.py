@@ -24,7 +24,7 @@ Emitted shape (k = unroll factor, must be a power of 2;
     exit:
 
 All blocks belonging to the jump-table loop body (entries + back-edge) have
-`fix_inst_num=True` so that Post-LIR passes preserve stride accuracy.
+`fix_addr_size=True` so that Post-LIR passes preserve stride accuracy.
 """
 
 from __future__ import annotations
@@ -35,11 +35,11 @@ from ..instructions import Instruction, JumpInst, LabelInst, MetaInst, RegWriteI
 from ..labels import Label
 from ..node import BasicBlockNode, BlockNode, _lower_block_node
 
-_BIG_JUMP_PMEM_THRESHOLD = 2**11
+BIG_JUMP_PMEM_THRESHOLD = 2**11
 
 
 def _needs_big_jump(pmem_size: Optional[int]) -> bool:
-    return pmem_size is not None and pmem_size > _BIG_JUMP_PMEM_THRESHOLD
+    return pmem_size is not None and pmem_size > BIG_JUMP_PMEM_THRESHOLD
 
 
 def shift_add_multiply(
@@ -95,7 +95,7 @@ def build_jump_table_blocks(
 ) -> list[BasicBlockNode]:
     """Build the BasicBlockNode list for a jump-table loop.
 
-    All blocks that form the loop body and back-edge have `fix_inst_num=True`
+    All blocks that form the loop body and back-edge have `fix_addr_size=True`
     to preserve stride accuracy during Post-LIR optimisation.
 
     See module docstring for the full emitted shape.
@@ -189,30 +189,36 @@ def build_jump_table_blocks(
         )
     )
 
-    # ── k body copies (fix_inst_num=True to lock stride) ──
+    # ── k body copies (fix_addr_size=True to lock stride) ──
+    inc_inst = RegWriteInst(dst=i, src="op", op=f"{i} + #1")
     for idx in range(k):
         entry_label = entry_labels[idx]
-        # Lower the body BlockNode into BasicBlockNodes, then wrap with fix_inst_num.
         body_blocks = _lower_block_node(bodies[idx], pmem_size)
-        # Merge into a single fixed block per entry: label + body insts + counter++.
-        # Flatten all body insts into one BasicBlockNode so stride is exact.
-        entry_insts = []
+        # Validate: body must not already be addr-locked.
         for bb in body_blocks:
-            entry_insts.extend(bb.labels)  # labels become inline (not entry labels)
-            entry_insts.extend(bb.insts)
-            if bb.branch is not None:
-                entry_insts.append(bb.branch)
-        entry_insts.append(RegWriteInst(dst=i, src="op", op=f"{i} + #1"))
-
-        result.append(
-            BasicBlockNode(
-                labels=[LabelInst(name=entry_label)],
-                insts=entry_insts,
-                fix_inst_num=True,
+            if bb.fix_addr_size:
+                raise ValueError(
+                    f"build_jump_table_blocks: body block already has fix_addr_size=True "
+                    f"before jump-table lowering; nested fix_addr_size is not supported."
+                )
+        # Each body block becomes an independent fix_addr_size=True block.
+        # entry label is attached to the first block of each copy.
+        # inc is appended into the last block's insts.
+        for bb_idx, bb in enumerate(body_blocks):
+            labels = [LabelInst(name=entry_label)] if bb_idx == 0 else []
+            insts = list(bb.insts)
+            if bb_idx == len(body_blocks) - 1:
+                insts.append(inc_inst)
+            result.append(
+                BasicBlockNode(
+                    labels=labels,
+                    insts=insts,
+                    branch=bb.branch,
+                    fix_addr_size=True,
+                )
             )
-        )
 
-    # ── back edge (fix_inst_num=True) ──
+    # ── back edge (fix_addr_size=True) ──
     if _needs_big_jump(pmem_size):
         back_insts: list[Instruction] = [
             RegWriteInst(dst="s15", src="label", label=exit_label)
@@ -221,34 +227,34 @@ def build_jump_table_blocks(
             BasicBlockNode(
                 insts=back_insts,
                 branch=JumpInst(addr="s15", if_cond="NS", op=f"{i} - {n}"),
-                fix_inst_num=True,
+                fix_addr_size=True,
             )
         )
         result.append(
             BasicBlockNode(
                 insts=[RegWriteInst(dst="s15", src="label", label=entry0)],
                 branch=JumpInst(addr="s15"),
-                fix_inst_num=True,
+                fix_addr_size=True,
             )
         )
     else:
         result.append(
             BasicBlockNode(
                 branch=JumpInst(label=exit_label, if_cond="NS", op=f"{i} - {n}"),
-                fix_inst_num=True,
+                fix_addr_size=True,
             )
         )
         result.append(
             BasicBlockNode(
                 branch=JumpInst(label=entry0),
-                fix_inst_num=True,
+                fix_addr_size=True,
             )
         )
 
     # ── exit ──
     result.append(
         BasicBlockNode(
-            labels=[LabelInst(name=exit_label)],
+            labels=[LabelInst(name=exit_label, can_remove=True)],
             insts=[MetaInst(type="JUMP_TABLE_LOOP_END", name=name)],
         )
     )

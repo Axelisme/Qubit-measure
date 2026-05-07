@@ -19,7 +19,7 @@ from .labels import Label
 class IRNode:
     """Base class for all IR nodes."""
 
-    fix_inst_num: bool = False
+    fix_addr_size: bool = False
 
     def children(self) -> Iterator[IRNode]:
         """Yield all immediate child nodes."""
@@ -40,14 +40,27 @@ class BasicBlockNode(IRNode):
     labels: LabelInst(s) that mark the entry point of this block.
     insts:  Linear instructions (no labels, no jumps except TestInst).
     branch: Optional terminal JumpInst that ends this block.
-    fix_inst_num: When True, the instruction count is frozen (set by jump-table
+    fix_addr_size: When True, the instruction count is frozen (set by jump-table
                   lowering). Post-LIR passes must NOP-pad instead of removing.
     """
 
     labels: list[LabelInst] = field(default_factory=list)
     insts: list[Instruction] = field(default_factory=list)
     branch: Optional[JumpInst] = None
-    fix_inst_num: bool = False
+    fix_addr_size: bool = False
+
+    def __post_init__(self) -> None:
+        for inst in self.insts:
+            if isinstance(inst, LabelInst):
+                raise ValueError(
+                    f"BasicBlockNode.insts must not contain LabelInst; "
+                    f"use BasicBlockNode.labels instead. Got: {inst}"
+                )
+            if isinstance(inst, JumpInst):
+                raise ValueError(
+                    f"BasicBlockNode.insts must not contain JumpInst; "
+                    f"use BasicBlockNode.branch instead. Got: {inst}"
+                )
 
     def children(self) -> Iterator[IRNode]:
         return iter([])
@@ -72,7 +85,7 @@ class BlockNode(IRNode):
     """
 
     insts: list[IRNode] = field(default_factory=list)
-    fix_inst_num: bool = False
+    fix_addr_size: bool = False
 
     def append(self, item: IRNode) -> None:
         self.insts.append(item)
@@ -105,7 +118,7 @@ class IRLoop(IRNode):
     n: Union[int, str] = 0
     range_hint: Optional[tuple[int, int]] = None
     body: BlockNode = field(default_factory=BlockNode)
-    fix_inst_num: bool = False
+    fix_addr_size: bool = False
 
     def children(self) -> Iterator[IRNode]:
         yield self.body
@@ -166,7 +179,7 @@ class IRLoop(IRNode):
         # Start label + LOOP_BODY_START meta.
         result.append(
             BasicBlockNode(
-                labels=[LabelInst(name=start)],
+                labels=[LabelInst(name=start, can_remove=True)],
                 insts=[MetaInst(type="LOOP_BODY_START", name=self.name)],
             )
         )
@@ -204,7 +217,7 @@ class IRLoop(IRNode):
         # End label + LOOP_END meta.
         result.append(
             BasicBlockNode(
-                labels=[LabelInst(name=end)],
+                labels=[LabelInst(name=end, can_remove=True)],
                 insts=[MetaInst(type="LOOP_END", name=self.name)],
             )
         )
@@ -226,7 +239,7 @@ class IRBranch(IRNode):
     name: str = ""
     compare_reg: str = ""
     cases: list[BlockNode] = field(default_factory=list)
-    fix_inst_num: bool = False
+    fix_addr_size: bool = False
 
     def children(self) -> Iterator[IRNode]:
         yield from self.cases
@@ -265,9 +278,9 @@ class IRBranch(IRNode):
             )
             emit_dispatch(mid, hi)
             result.append(BasicBlockNode(branch=JumpInst(label=end_label)))
-            result.append(BasicBlockNode(labels=[LabelInst(name=left_label)]))
+            result.append(BasicBlockNode(labels=[LabelInst(name=left_label, can_remove=True)]))
             emit_dispatch(lo, mid)
-            result.append(BasicBlockNode(labels=[LabelInst(name=end_label)]))
+            result.append(BasicBlockNode(labels=[LabelInst(name=end_label, can_remove=True)]))
 
         emit_dispatch(0, n)
 

@@ -307,6 +307,7 @@ class Instruction:
 class LabelInst(Instruction):
     name: Optional["Label"] = None
     args: dict[str, Any] = field(default_factory=dict)
+    can_remove: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"LABEL": str(self.name)}

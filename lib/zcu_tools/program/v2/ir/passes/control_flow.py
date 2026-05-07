@@ -35,6 +35,8 @@ class DeadLabelEliminationPass(OptimizationPassBase):
     def visit_LabelInst(self, inst: LabelInst) -> Optional[Instruction]:
         if str(inst.name) in PSEUDO_LABELS:
             return inst
+        if not inst.can_remove:
+            return inst
         if inst.name not in self._referenced_labels:
             return None
         return inst
@@ -43,7 +45,9 @@ class DeadLabelEliminationPass(OptimizationPassBase):
         node.labels = [
             lbl
             for lbl in node.labels
-            if str(lbl.name) in PSEUDO_LABELS or lbl.name in self._referenced_labels
+            if str(lbl.name) in PSEUDO_LABELS
+            or not lbl.can_remove
+            or lbl.name in self._referenced_labels
         ]
         return node
 
@@ -54,8 +58,8 @@ class BranchEliminationPass(OptimizationPassBase):
     A branch from Block A to Block B is redundant when Block B immediately
     follows Block A in the flat block list.
 
-    - fix_inst_num=False: remove the branch entirely (shrinks the block).
-    - fix_inst_num=True : replace the branch with a NopInst to preserve stride.
+    - fix_addr_size=False: remove the branch entirely (shrinks the block).
+    - fix_addr_size=True : replace the branch with a NopInst to preserve stride.
 
     Only unconditional jumps (if_cond is None, op is None) that target a
     plain Label (not a register address) are considered for elimination.
@@ -98,7 +102,7 @@ class BranchEliminationPass(OptimizationPassBase):
         if not any(lbl.name == target for lbl in next_block.labels):
             return
 
-        if block.fix_inst_num:
+        if block.fix_addr_size:
             # Preserve instruction count: replace branch with NOP.
             block.insts.append(NopInst())
             block.branch = None
@@ -167,8 +171,8 @@ class BlockMergePass(OptimizationPassBase):
                 and isinstance(b, BasicBlockNode)
                 and a.branch is None
                 and not _has_alive_labels(b, referenced)
-                and not a.fix_inst_num
-                and not b.fix_inst_num
+                and not a.fix_addr_size
+                and not b.fix_addr_size
             ):
                 # Merge b into a.
                 a.insts.extend(b.insts)

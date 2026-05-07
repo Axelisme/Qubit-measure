@@ -41,7 +41,7 @@ def _label(name: str) -> Label:
 def test_dead_label_elim_removes_unreferenced_label_from_basic_block():
     lbl = _label("unused")
     root = RootNode(insts=[
-        BasicBlockNode(labels=[LabelInst(name=lbl)], insts=[NopInst()]),
+        BasicBlockNode(labels=[LabelInst(name=lbl, can_remove=True)], insts=[NopInst()]),
     ])
 
     out = DeadLabelEliminationPass().process(root, _ctx())
@@ -98,7 +98,7 @@ def test_branch_elim_nop_pads_fixed_block():
         BasicBlockNode(
             insts=[],
             branch=JumpInst(label=lbl),
-            fix_inst_num=True,
+            fix_addr_size=True,
         ),
         BasicBlockNode(
             labels=[LabelInst(name=lbl)],
@@ -187,7 +187,7 @@ def test_block_merge_does_not_merge_labeled_block():
 
 def test_block_merge_does_not_merge_fixed_blocks():
     root = RootNode(insts=[
-        BasicBlockNode(insts=[NopInst()], fix_inst_num=True),
+        BasicBlockNode(insts=[NopInst()], fix_addr_size=True),
         BasicBlockNode(insts=[NopInst()]),
     ])
 

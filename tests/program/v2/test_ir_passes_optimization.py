@@ -61,27 +61,31 @@ def _flatten_root(root: RootNode) -> list[Instruction]:
 
 
 def _has_jump_table_blocks(root: RootNode) -> bool:
-    """Check if the root contains BasicBlockNode(s) with fix_inst_num=True."""
+    """Check if the root contains BasicBlockNode(s) with fix_addr_size=True."""
     stack: list[IRNode] = list(root.insts)
     while stack:
         node = stack.pop()
-        if isinstance(node, BasicBlockNode) and node.fix_inst_num:
+        if isinstance(node, BasicBlockNode) and node.fix_addr_size:
             return True
         if isinstance(node, BlockNode):
             stack.extend(node.insts)
+        elif isinstance(node, IRLoop):
+            stack.extend(node.body.insts)
     return False
 
 
 def _count_fixed_blocks(root: RootNode) -> int:
-    """Count BasicBlockNodes with fix_inst_num=True."""
+    """Count BasicBlockNodes with fix_addr_size=True."""
     count = 0
     stack: list[IRNode] = list(root.insts)
     while stack:
         node = stack.pop()
-        if isinstance(node, BasicBlockNode) and node.fix_inst_num:
+        if isinstance(node, BasicBlockNode) and node.fix_addr_size:
             count += 1
         if isinstance(node, BlockNode):
             stack.extend(node.insts)
+        elif isinstance(node, IRLoop):
+            stack.extend(node.body.insts)
     return count
 
 
@@ -140,7 +144,7 @@ def test_dead_write_elimination_keeps_write_before_read():
 def test_dead_label_elimination_removes_unreferenced_label():
     root = RootNode(
         insts=[
-            BasicBlockNode(labels=[LabelInst(name=Label("dead"))], insts=[NopInst()]),
+            BasicBlockNode(labels=[LabelInst(name=Label("dead"), can_remove=True)], insts=[NopInst()]),
         ]
     )
 
@@ -559,7 +563,7 @@ def test_unroll_non_exact_register_hint_emits_jump_table():
 
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
 
-    # Should produce BasicBlockNode sequence with fix_inst_num=True.
+    # Should produce BasicBlockNode sequence with fix_addr_size=True.
     # k=8 entry blocks + 2 back-edge blocks = 10 fixed blocks.
     assert _has_jump_table_blocks(out)
     assert _count_fixed_blocks(out) == 10
@@ -783,9 +787,9 @@ def test_unroll_register_driven_k_forced_to_power_of_two():
 
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=PipeLineConfig()))
 
-    # k=8 entry blocks + 2 back-edge blocks = 10 fixed blocks.
+    # k=8, body has 4 blocks each → 8*4=32 entry blocks + 2 back-edge blocks = 34 fixed blocks.
     assert _has_jump_table_blocks(out)
-    assert _count_fixed_blocks(out) == 10
+    assert _count_fixed_blocks(out) == 34
 
 
 def test_unroll_register_driven_jump_table_structure():
@@ -874,6 +878,10 @@ def test_unroll_register_driven_dispatch_too_long_falls_back():
 def test_unroll_nested_register_driven_inner_unrolls_first():
     """Post-order recursion: the inner register-driven loop is rewritten to
     jump-table blocks before the outer loop is evaluated.
+
+    After inner is rewritten, its body blocks include branches (loop guard,
+    back-edge), so the outer loop cannot be jump-table unrolled (branches in
+    body disqualify it). The inner unroll is still confirmed via fix_addr_size.
     """
     Label.reset()
     inner = IRLoop(
@@ -893,8 +901,9 @@ def test_unroll_nested_register_driven_inner_unrolls_first():
     config = PipeLineConfig(max_unroll_factor=2)
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
 
-    # With the current large default jump cost, both inner and outer loops get
-    # rewritten to jump-table blocks (post-order ensures inner first).
+    # Inner loop is rewritten to jump-table blocks (fix_addr_size=True present).
+    # Outer loop falls back to no-unroll because inner's lowered blocks contain
+    # branches (guard, back-edge) which disqualify jump-table body merging.
     assert _has_jump_table_blocks(out)
 
 
@@ -947,7 +956,7 @@ def test_dead_write_elimination_nop_pads_fixed_basic_block():
     r2 = RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#2"})
     root = RootNode(
         insts=[
-            BasicBlockNode(insts=[r1, r2], fix_inst_num=True),
+            BasicBlockNode(insts=[r1, r2], fix_addr_size=True),
         ]
     )
 

@@ -137,7 +137,7 @@ def test_timed_instruction_merge_does_not_cross_block_boundary():
 
 
 # ---------------------------------------------------------------------------
-# BasicBlockNode path and fix_inst_num behaviour
+# BasicBlockNode path and fix_addr_size behaviour
 # ---------------------------------------------------------------------------
 
 def test_zero_delay_dce_removes_from_basic_block():
@@ -164,7 +164,7 @@ def test_zero_delay_dce_removes_from_basic_block():
 def test_zero_delay_dce_nop_pads_fixed_basic_block():
     root = RootNode(
         insts=[
-            BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#0"), NopInst()], fix_inst_num=True),
+            BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit="#0"), NopInst()], fix_addr_size=True),
         ]
     )
 
@@ -204,7 +204,7 @@ def test_timed_merge_nop_pads_fixed_basic_block():
             BasicBlockNode(insts=[
                 TimeInst(c_op="inc_ref", lit="#2"),
                 TimeInst(c_op="inc_ref", lit="#3"),
-            ], fix_inst_num=True),
+            ], fix_addr_size=True),
         ]
     )
 

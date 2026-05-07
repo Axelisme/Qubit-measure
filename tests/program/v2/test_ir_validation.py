@@ -8,7 +8,7 @@ Validation 1: Jump-table stride alignment
 Validation 2: Fully-unrolled loops produce a single fused block with zero
   internal dead writes after the full pipeline runs.
 
-Validation 3: fix_inst_num=True blocks receive NopInst padding instead of
+Validation 3: fix_addr_size=True blocks receive NopInst padding instead of
   branch deletion when BranchEliminationPass runs.
 """
 from __future__ import annotations
@@ -42,17 +42,57 @@ from zcu_tools.program.v2.ir.pipeline import (
 # ---------------------------------------------------------------------------
 
 def _collect_fixed_entry_blocks(root: RootNode) -> list[BasicBlockNode]:
-    """Collect BasicBlockNodes that are fix_inst_num=True AND have labels."""
+    """Collect BasicBlockNodes that are fix_addr_size=True AND have labels."""
     result: list[BasicBlockNode] = []
     stack: list[IRNode] = list(root.insts)
     while stack:
         node = stack.pop()
         if isinstance(node, BasicBlockNode):
-            if node.fix_inst_num and node.labels:
+            if node.fix_addr_size and node.labels:
                 result.append(node)
         elif isinstance(node, BlockNode):
             stack.extend(node.insts)
     return result
+
+
+def _collect_entry_groups(root: RootNode) -> list[list[BasicBlockNode]]:
+    """Group fix_addr_size=True blocks into per-entry groups.
+
+    A new group starts at each fix_addr_size block that has labels.
+    Groups end (and are not continued) when a fix_addr_size block that has
+    no labels AND has a branch is encountered — that signals the back-edge,
+    which is not part of any body entry.
+    """
+    groups: list[list[BasicBlockNode]] = []
+    current: list[BasicBlockNode] = []
+    for node in root.insts:
+        if not isinstance(node, BasicBlockNode) or not node.fix_addr_size:
+            continue
+        # Back-edge blocks: no labels, has branch → end of entries.
+        if not node.labels and node.branch is not None:
+            if current:
+                groups.append(current)
+                current = []
+            break
+        # New entry starts when a labelled block is encountered.
+        if node.labels and current:
+            groups.append(current)
+            current = []
+        current.append(node)
+    if current:
+        groups.append(current)
+    return groups
+
+
+def _entry_addr_size(group: list[BasicBlockNode]) -> int:
+    """Total addr words occupied by an entry group."""
+    total = 0
+    for bb in group:
+        for inst in bb.insts:
+            total += inst.addr_inc
+        if bb.branch is not None:
+            total += bb.branch.addr_inc
+    return total
 
 
 def _collect_all_basic_blocks(root: RootNode) -> list[BasicBlockNode]:
@@ -96,13 +136,15 @@ def test_v1_jump_table_entry_blocks_have_uniform_stride():
         bodies=bodies,
     )
 
-    entry_blocks = [b for b in blocks if b.fix_inst_num and b.labels]
-    assert len(entry_blocks) == k, f"expected {k} entry blocks, got {len(entry_blocks)}"
+    root = RootNode(insts=list(blocks))
+    groups = _collect_entry_groups(root)
+    assert len(groups) == k, f"expected {k} entry groups, got {len(groups)}"
 
-    expected_inst_count = body_words + 1  # body + counter increment
-    for i, blk in enumerate(entry_blocks):
-        assert len(blk.insts) == expected_inst_count, (
-            f"entry block {i}: expected {expected_inst_count} insts, got {len(blk.insts)}"
+    expected_addr = body_words + 1  # body addr words + counter increment
+    for i, group in enumerate(groups):
+        actual = _entry_addr_size(group)
+        assert actual == expected_addr, (
+            f"entry {i}: expected addr size {expected_addr}, got {actual}"
         )
 
 
@@ -128,20 +170,21 @@ def test_v1_jump_table_stride_equals_body_words_plus_one():
     config = PipeLineConfig(max_unroll_factor=4)
     out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
 
-    entry_blocks = _collect_fixed_entry_blocks(out)
-    assert len(entry_blocks) > 0, "no entry blocks produced"
+    groups = _collect_entry_groups(out)
+    assert len(groups) > 0, "no entry groups produced"
 
-    expected = body_nops + 1
-    for i, blk in enumerate(entry_blocks):
-        assert len(blk.insts) == expected, (
-            f"entry block {i}: expected {expected} insts (body_words={body_nops}+1), "
-            f"got {len(blk.insts)}"
+    expected_addr = body_nops + 1
+    for i, group in enumerate(groups):
+        actual = _entry_addr_size(group)
+        assert actual == expected_addr, (
+            f"entry {i}: expected addr size {expected_addr} (body_words={body_nops}+1), "
+            f"got {actual}"
         )
 
 
 def test_v1_jump_table_entry_blocks_not_modified_by_pipeline():
     """The full pipeline must not alter the instruction count of entry blocks
-    (fix_inst_num=True guards them from Post-LIR peephole passes).
+    (fix_addr_size=True guards them from Post-LIR peephole passes).
 
     body: two NOPs. Pre-LIR passes leave NOPs untouched, so body_words=2
     and each entry block should have exactly 3 instructions after unrolling.
@@ -164,15 +207,16 @@ def test_v1_jump_table_entry_blocks_not_modified_by_pipeline():
     pipeline = make_default_pipeline(pmem_capacity=512)
     out, _ = pipeline(root)
 
-    entry_blocks = _collect_fixed_entry_blocks(out)
-    assert len(entry_blocks) > 0, "no entry blocks produced"
+    groups = _collect_entry_groups(out)
+    assert len(groups) > 0, "no entry groups produced"
 
-    # body_words = 2 (NOP + NOP), counter increment = 1 → 3 each
-    expected = 3
-    for i, blk in enumerate(entry_blocks):
-        assert len(blk.insts) == expected, (
-            f"entry block {i}: pipeline altered instruction count "
-            f"(expected {expected}, got {len(blk.insts)})"
+    # body_words = 2 (NOP + NOP), counter increment = 1 → addr size 3 per entry
+    expected_addr = 3
+    for i, group in enumerate(groups):
+        actual = _entry_addr_size(group)
+        assert actual == expected_addr, (
+            f"entry {i}: pipeline altered addr size "
+            f"(expected {expected_addr}, got {actual})"
         )
 
 
@@ -211,7 +255,7 @@ def test_v2_fully_unrolled_loop_produces_single_fused_block():
     # been fused into a minimal set. Specifically, no two adjacent non-fixed
     # blocks should be mergeable (i.e., one without branch followed by one
     # without alive labels).
-    plain_blocks = [b for b in bbs if not b.fix_inst_num]
+    plain_blocks = [b for b in bbs if not b.fix_addr_size]
     for i in range(len(plain_blocks) - 1):
         a, b = plain_blocks[i], plain_blocks[i + 1]
         if a.branch is None and not b.labels:
@@ -257,11 +301,11 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
 
 
 # ---------------------------------------------------------------------------
-# Validation 3: fix_inst_num=True blocks use NOP padding, not branch deletion
+# Validation 3: fix_addr_size=True blocks use NOP padding, not branch deletion
 # ---------------------------------------------------------------------------
 
 def test_v3_fixed_block_branch_elim_produces_nop():
-    """When a fix_inst_num=True block's unconditional branch targets the
+    """When a fix_addr_size=True block's unconditional branch targets the
     immediately following block, BranchEliminationPass must replace the
     branch with a NopInst (not remove it).
     """
@@ -270,7 +314,7 @@ def test_v3_fixed_block_branch_elim_produces_nop():
         BasicBlockNode(
             insts=[NopInst()],
             branch=JumpInst(label=lbl),
-            fix_inst_num=True,
+            fix_addr_size=True,
         ),
         BasicBlockNode(
             labels=[LabelInst(name=lbl)],
@@ -285,7 +329,7 @@ def test_v3_fixed_block_branch_elim_produces_nop():
     assert fixed.branch is None, "branch should have been removed"
     # The former branch word must be replaced by a NopInst to keep stride.
     assert any(isinstance(i, NopInst) for i in fixed.insts), (
-        "fix_inst_num=True block must receive NOP padding when branch is eliminated"
+        "fix_addr_size=True block must receive NOP padding when branch is eliminated"
     )
     # Total instruction count must not shrink (stride preserved).
     assert len(fixed.insts) == 2, (
@@ -294,7 +338,7 @@ def test_v3_fixed_block_branch_elim_produces_nop():
 
 
 def test_v3_fixed_block_instruction_count_preserved_after_pipeline():
-    """After the full pipeline, no fix_inst_num=True entry block should have
+    """After the full pipeline, no fix_addr_size=True entry block should have
     fewer instructions than body_words + 1.
 
     body: two NOPs → body_words=2, each entry block expects exactly 3 insts.
@@ -318,25 +362,26 @@ def test_v3_fixed_block_instruction_count_preserved_after_pipeline():
     pipeline = make_default_pipeline(pmem_capacity=512)
     out, _ = pipeline(root)
 
-    entry_blocks = _collect_fixed_entry_blocks(out)
-    assert len(entry_blocks) > 0, "no entry blocks produced"
+    groups = _collect_entry_groups(out)
+    assert len(groups) > 0, "no entry groups produced"
 
-    for i, blk in enumerate(entry_blocks):
-        # Instruction count must be exactly body_words(2) + 1 = 3.
-        assert len(blk.insts) == 3, (
-            f"entry block {i} has {len(blk.insts)} insts — "
-            f"fix_inst_num was not respected by the pipeline"
+    for i, group in enumerate(groups):
+        # addr size must be exactly body_words(2) + 1 = 3.
+        actual = _entry_addr_size(group)
+        assert actual == 3, (
+            f"entry {i} has addr size {actual} — "
+            f"fix_addr_size was not respected by the pipeline"
         )
 
 
 def test_v3_non_fixed_block_branch_elim_removes_branch():
-    """Sanity check: fix_inst_num=False block loses its branch (no NOP added)."""
+    """Sanity check: fix_addr_size=False block loses its branch (no NOP added)."""
     lbl = Label.make_new("next_free")
     root = RootNode(insts=[
         BasicBlockNode(
             insts=[NopInst()],
             branch=JumpInst(label=lbl),
-            fix_inst_num=False,
+            fix_addr_size=False,
         ),
         BasicBlockNode(
             labels=[LabelInst(name=lbl)],
