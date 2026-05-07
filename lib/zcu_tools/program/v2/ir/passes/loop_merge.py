@@ -5,6 +5,33 @@ from ..node import BasicBlockNode
 from ..pipeline import AbsLinearPass
 
 
+def _is_pure_regwrite_op(inst: RegWriteInst) -> bool:
+    """True only for a plain REG_WR dst op <expr> with no extra semantics."""
+    return (
+        inst.src == "op"
+        and inst.op is not None
+        and inst.lit is None
+        and inst.if_cond is None
+        and inst.uf is None
+        and inst.wr is None
+        and inst.label is None
+        and inst.addr is None
+        and not inst.extra_args
+    )
+
+
+def _make_merged_branch(branch: JumpInst, inst: RegWriteInst) -> JumpInst:
+    return JumpInst(
+        label=branch.label,
+        if_cond=branch.if_cond,
+        addr=branch.addr,
+        wr=f"{inst.dst} op",
+        op=inst.op,
+        uf=branch.uf,
+        extra_args=branch.extra_args,
+    )
+
+
 class LoopConditionMergeLinear(AbsLinearPass):
     """Linear pass to merge register increments and conditional jumps.
 
@@ -48,25 +75,16 @@ class LoopConditionMergeLinear(AbsLinearPass):
 
         if (
             isinstance(last_inst, RegWriteInst)
-            and last_inst.src == "op"
-            and last_inst.op is not None
+            and _is_pure_regwrite_op(last_inst)
             and branch is not None
+            and branch.if_cond is not None
             and branch.op is not None
+            and branch.wr is None
         ):
             # Target pattern: branch.op is "reg - #0" and last_inst.dst is "reg"
             reg = last_inst.dst
             if branch.op == f"{reg} - #0":
-                # Merge: move last_inst's op into branch.op and use side-data wr
-                new_branch = JumpInst(
-                    label=branch.label,
-                    if_cond=branch.if_cond,
-                    addr=branch.addr,
-                    wr=f"{reg} op",
-                    op=last_inst.op,
-                    uf=branch.uf,
-                    extra_args=branch.extra_args,
-                )
-                block.branch = new_branch
+                block.branch = _make_merged_branch(branch, last_inst)
 
                 if block.fix_addr_size:
                     block.insts[last_idx] = NopInst()
@@ -80,7 +98,13 @@ class LoopConditionMergeLinear(AbsLinearPass):
 
         # Need branch to have NO op/wr/uf already
         branch = block.branch
-        if branch is None or branch.op is not None or branch.wr is not None:
+        if (
+            branch is None
+            or branch.if_cond is None
+            or branch.op is not None
+            or branch.wr is not None
+            or branch.uf is not None
+        ):
             return
 
         last_idx = len(block.insts) - 1
@@ -90,18 +114,12 @@ class LoopConditionMergeLinear(AbsLinearPass):
         # We look for a REG_WR preceded by something (usually a TEST, but could be anything
         # that doesn't use the ALU in a way that conflicts, though hardware flags are safe).
         # To be conservative and match the plan: TEST + REG_WR + JUMP.
-        if isinstance(last_inst, RegWriteInst) and last_inst.src == "op" and isinstance(prev_inst, TestInst):
-            reg = last_inst.dst
-            new_branch = JumpInst(
-                label=branch.label,
-                if_cond=branch.if_cond,
-                addr=branch.addr,
-                wr=f"{reg} op",
-                op=last_inst.op,
-                uf=branch.uf,
-                extra_args=branch.extra_args,
-            )
-            block.branch = new_branch
+        if (
+            isinstance(last_inst, RegWriteInst)
+            and _is_pure_regwrite_op(last_inst)
+            and isinstance(prev_inst, TestInst)
+        ):
+            block.branch = _make_merged_branch(branch, last_inst)
 
             if block.fix_addr_size:
                 block.insts[last_idx] = NopInst()

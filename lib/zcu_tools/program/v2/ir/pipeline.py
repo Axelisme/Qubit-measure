@@ -12,10 +12,7 @@ from .traversal import walk_basic_blocks
 class PipeLineConfig:
     disable_all_opt: bool = False
     enable_unroll_loop: bool = True
-    enable_dead_write: bool = True
     enable_dead_label: bool = True
-    enable_zero_delay_dce: bool = True
-    enable_timed_instruction_merge: bool = True
     pmem_capacity: int | None = None
     pmem_budget: int | None = None
 
@@ -63,14 +60,18 @@ AbsPipeLinePass = AbsIRPass  # backwards-compatible alias
 class AbsLinearPass(ABC):
     """Straight-line optimization pass that operates on a single BasicBlockNode.
 
-    Implementations receive the whole block and must modify ``block.insts``
-    in-place.  The ``block.labels`` and ``block.branch`` fields must NOT be
-    touched — those belong to the structural level.
+    Implementations receive the whole block and may modify any field of the
+    ``BasicBlockNode`` in-place, as long as the result still represents a
+    valid basic block:
 
-    When ``block.fix_addr_size`` is True the total length of ``block.insts``
-    must be preserved.  Passes that normally delete instructions must replace
-    removed instructions with ``NopInst`` instead.  Passes that merge N
-    instructions into 1 must pad with N-1 ``NopInst``s.
+    - ``block.insts`` must not contain ``LabelInst`` or ``JumpInst``.
+    - ``block.branch`` must remain either ``None`` or a terminal ``JumpInst``.
+    - Block-local transformations must not depend on neighboring blocks.
+
+    When ``block.fix_addr_size`` is True the total emitted program-memory word
+    count of the block (``insts`` plus optional ``branch``) must be preserved.
+    Passes that normally delete instructions must replace removed words with
+    ``NopInst`` padding instead.
     """
 
     @abstractmethod
@@ -82,10 +83,30 @@ class AbsLinearPass(ABC):
 # ---------------------------------------------------------------------------
 
 
+def _block_addr_words(block: BasicBlockNode) -> int:
+    total = sum(inst.addr_inc for inst in block.insts)
+    if block.branch is not None:
+        total += block.branch.addr_inc
+    return total
+
+
+def _validate_linear_pass_result(
+    block: BasicBlockNode, *, before_addr_words: int | None
+) -> None:
+    block.__post_init__()
+    if before_addr_words is not None and _block_addr_words(block) != before_addr_words:
+        raise ValueError(
+            "AbsLinearPass violated fix_addr_size invariant: "
+            "block program-memory word count changed."
+        )
+
+
 def _run_linear_passes(passes: list[AbsLinearPass], ir: RootNode) -> None:
     for block in walk_basic_blocks(ir):
         for lp in passes:
+            before_addr_words = _block_addr_words(block) if block.fix_addr_size else None
             lp.process_block(block)
+            _validate_linear_pass_result(block, before_addr_words=before_addr_words)
 
 
 class IRPipeLine:
@@ -140,6 +161,7 @@ def make_default_pipeline(pmem_capacity: int) -> IRPipeLine:
         DeadLabelEliminationPass,
         DeadTestEliminationLinear,
         DeadWriteEliminationLinear,
+        IncRegMergeLinear,
         LoopConditionMergeLinear,
         TimedMergeLinear,
         UnrollSmallLoopPass,
@@ -157,6 +179,7 @@ def make_default_pipeline(pmem_capacity: int) -> IRPipeLine:
         linear_passes=[
             ZeroDelayDCELinear(),
             TimedMergeLinear(),
+            IncRegMergeLinear(),
             LoopConditionMergeLinear(),
             DeadWriteEliminationLinear(),
             DeadTestEliminationLinear(),
