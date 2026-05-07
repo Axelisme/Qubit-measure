@@ -920,6 +920,7 @@ def test_default_pipeline_structure():
     assert [type(p).__name__ for p in pipeline.linear_passes] == [
         "ZeroDelayDCELinear",
         "TimedMergeLinear",
+        "LoopConditionMergeLinear",
         "DeadWriteEliminationLinear",
         "DeadTestEliminationLinear",
     ]
