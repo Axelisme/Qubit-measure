@@ -87,7 +87,7 @@ class BlockNode(IRNode):
 
     def _into_str(self, indent: int = 0) -> str:
         prefix = "    " * indent
-        return f"{prefix}{self.__class__.__name__}()\n" + "\n".join(
+        return f"{prefix} {self.__class__.__name__}()\n" + "\n".join(
             i._into_str(indent + 1) for i in self.insts
         )
 
@@ -114,7 +114,7 @@ class IRLoop(IRNode):
     def _into_str(self, indent: int = 0) -> str:
         prefix = "    " * indent
         return (
-            f"{prefix}IRLoop(name={self.name}, n={self.n}, counter={self.counter_reg}, range_hint={self.range_hint})\n"
+            f"{prefix} IRLoop(name={self.name}, n={self.n}, counter={self.counter_reg}, range_hint={self.range_hint})\n"
             + "\n".join(i._into_str(indent + 1) for i in self.body.insts)
         )
 
@@ -134,6 +134,6 @@ class IRBranch(IRNode):
     def _into_str(self, indent: int = 0) -> str:
         prefix = "    " * indent
         return (
-            f"{prefix}IRBranch(name={self.name}, compare_reg={self.compare_reg})\n"
+            f"{prefix} IRBranch(name={self.name}, compare_reg={self.compare_reg})\n"
             + "\n".join(i._into_str(indent + 1) for i in self.cases)
         )
