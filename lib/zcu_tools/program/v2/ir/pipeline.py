@@ -120,12 +120,10 @@ class IRPipeLine:
         # Stage 1: Pre-LIR
         _run_linear_passes(self.linear_passes, ir)
 
-        # Stage 2: HIR structural passes
+        # Stage 2: HIR structural passes, with linear passes around each
         for _pass in self.ir_passes:
             ir = _pass.process(ir, ctx)
-
-        # Stage 3: Post-LIR
-        _run_linear_passes(self.linear_passes, ir)
+            _run_linear_passes(self.linear_passes, ir)
 
         return ir, ctx
 
