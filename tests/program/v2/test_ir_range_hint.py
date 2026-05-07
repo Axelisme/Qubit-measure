@@ -36,14 +36,18 @@ def test_parse_loop_restores_range_hint():
 
 
 def test_emit_loop_preserves_range_hint_in_meta():
-    """Verify that lowering IRLoop puts range_hint back into MetaInst."""
-    loop = IRLoop(name="test", counter_reg="r0", n=100, range_hint=(100, 100))
-    blocks = loop.lower()
+    """Verify that IRParser lowers IRLoop with range_hint into MetaInst."""
+    from zcu_tools.program.v2.ir.factory import IRParser
+    from zcu_tools.program.v2.ir.node import BasicBlockNode, RootNode
 
-    # Collect all instructions from all blocks.
+    loop = IRLoop(name="test", counter_reg="r0", n=100, range_hint=(100, 100))
+    blocks = IRParser().unparse(RootNode(insts=[loop]))
+
+    # Collect all instructions from all BasicBlockNode blocks.
     all_insts = []
     for bb in blocks:
-        all_insts.extend(bb.insts)
+        if isinstance(bb, BasicBlockNode):
+            all_insts.extend(bb.insts)
 
     # Find LOOP_START meta
     start_meta = next(

@@ -31,15 +31,10 @@ from __future__ import annotations
 
 from typing import Optional
 
+from ..factory import IRParser, _needs_big_jump
 from ..instructions import Instruction, JumpInst, LabelInst, MetaInst, RegWriteInst
 from ..labels import Label
-from ..node import BasicBlockNode, BlockNode, _lower_block_node
-
-BIG_JUMP_PMEM_THRESHOLD = 2**11
-
-
-def _needs_big_jump(pmem_size: Optional[int]) -> bool:
-    return pmem_size is not None and pmem_size > BIG_JUMP_PMEM_THRESHOLD
+from ..node import BasicBlockNode, BlockNode
 
 
 def shift_add_multiply(
@@ -193,7 +188,7 @@ def build_jump_table_blocks(
     inc_inst = RegWriteInst(dst=i, src="op", op=f"{i} + #1")
     for idx in range(k):
         entry_label = entry_labels[idx]
-        body_blocks = _lower_block_node(bodies[idx], pmem_size)
+        body_blocks = IRParser(pmem_size=pmem_size).lower_block(bodies[idx])
         # Validate: body must not already be addr-locked.
         for bb in body_blocks:
             if bb.fix_addr_size:

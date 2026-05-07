@@ -18,9 +18,11 @@ def test_instruction_parses_jump_label_to_jumpinst():
 
 
 def test_branch_lower_produces_basic_blocks():
-    """Verify IRBranch.lower() produces a well-formed BasicBlockNode sequence."""
+    """Verify IRParser lowers IRBranch to a well-formed BasicBlockNode sequence."""
+    from zcu_tools.program.v2.ir.factory import IRParser
     from zcu_tools.program.v2.ir.instructions import MetaInst
     from zcu_tools.program.v2.ir.labels import Label
+    from zcu_tools.program.v2.ir.node import RootNode
 
     Label.reset()
 
@@ -31,22 +33,24 @@ def test_branch_lower_produces_basic_blocks():
     case_1 = BlockNode(insts=[BasicBlockNode(insts=[case_1_inst])])
 
     branch = IRBranch(name="sel", compare_reg="r_sel", cases=[case_0, case_1])
-    blocks = branch.lower()
+    blocks = IRParser().unparse(RootNode(insts=[branch]))
 
     assert all(isinstance(b, BasicBlockNode) for b in blocks)
 
+    bb_blocks = [b for b in blocks if isinstance(b, BasicBlockNode)]
+
     # First block carries BRANCH_START meta with compare_reg.
-    first_metas = [i for i in blocks[0].insts if isinstance(i, MetaInst)]
+    first_metas = [i for i in bb_blocks[0].insts if isinstance(i, MetaInst)]
     assert any(m.type == "BRANCH_START" and m.info.get("compare_reg") == "r_sel"
                for m in first_metas)
 
     # Last block carries BRANCH_END meta.
-    last_metas = [i for i in blocks[-1].insts if isinstance(i, MetaInst)]
+    last_metas = [i for i in bb_blocks[-1].insts if isinstance(i, MetaInst)]
     assert any(m.type == "BRANCH_END" for m in last_metas)
 
     # Both case instructions should appear in the flattened output.
     all_insts = []
-    for bb in blocks:
+    for bb in bb_blocks:
         all_insts.extend(bb.insts)
     assert case_0_inst in all_insts
     assert case_1_inst in all_insts

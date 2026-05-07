@@ -8,7 +8,7 @@ from typing_extensions import Any
 
 from .instructions import Instruction, LabelInst, MetaInst
 from .labels import Label
-from .node import RootNode, _lower_block_node
+from .node import RootNode
 
 
 @dataclass(frozen=True)
@@ -23,23 +23,12 @@ class IRLinker:
     def _flatten_ir(
         self, ir: RootNode, pmem_size: Optional[int] = None
     ) -> list[Instruction]:
-        """Lower a RootNode into a flat list of Instructions.
+        """Lower a RootNode into a flat list of Instructions via IRParser."""
+        from .factory import IRLexer, IRParser
 
-        Walks the IR tree recursively:
-        - RootNode / BlockNode  → recurse into children
-        - BasicBlockNode        → emit labels, insts, branch
-        - IRLoop                → call .lower() then recurse the resulting blocks
-        - IRBranch              → call .lower() then recurse the resulting blocks
-        - anything else         → raise TypeError
-        """
-        blocks = _lower_block_node(ir, pmem_size)
-        inst_list: list[Instruction] = []
-        for block in blocks:
-            inst_list.extend(block.labels)
-            inst_list.extend(block.insts)
-            if block.branch is not None:
-                inst_list.append(block.branch)
-        return inst_list
+        parser = IRParser(pmem_size=pmem_size)
+        blocks = parser.unparse(ir)
+        return IRLexer().flatten(blocks)
 
     def link(
         self,
@@ -78,7 +67,12 @@ class IRLinker:
             if isinstance(inst, LabelInst):
                 labels[str(inst.name)] = f"&{p_addr}"
                 meta_infos.append(
-                    dict(kind="label", name=str(inst.name), p_addr=p_addr)
+                    dict(
+                        kind="label",
+                        name=str(inst.name),
+                        p_addr=p_addr,
+                        can_remove=inst.can_remove,
+                    )
                 )
             else:
                 d = inst.to_dict()
@@ -126,7 +120,12 @@ class IRLinker:
             # 1. Insert tracked markers from meta_infos for this index
             for m in markers_by_addr.get(p_addr, []):
                 if m["kind"] == "label":
-                    logical_insts.append(LabelInst(name=get_label(m["name"])))
+                    logical_insts.append(
+                        LabelInst(
+                            name=get_label(m["name"]),
+                            can_remove=m.get("can_remove", False),
+                        )
+                    )
                 elif m["kind"] == "meta":
                     logical_insts.append(
                         MetaInst(type=m["type"], name=m["name"], info=m.get("info", {}))
@@ -144,11 +143,15 @@ class IRLinker:
             logical_insts.append(Instruction.from_dict(d, label_map=label_map))
 
         # Handle trailing markers from meta_infos
-        # Any markers left in markers_by_addr are trailing
         for p_addr, markers in sorted(markers_by_addr.items()):
             for m in markers:
                 if m["kind"] == "label":
-                    logical_insts.append(LabelInst(name=get_label(m["name"])))
+                    logical_insts.append(
+                        LabelInst(
+                            name=get_label(m["name"]),
+                            can_remove=m.get("can_remove", False),
+                        )
+                    )
                 elif m["kind"] == "meta":
                     logical_insts.append(
                         MetaInst(type=m["type"], name=m["name"], info=m.get("info", {}))
