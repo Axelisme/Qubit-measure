@@ -32,7 +32,7 @@ from __future__ import annotations
 from typing import Optional
 
 from ..factory import IRParser, _needs_big_jump
-from ..instructions import Instruction, JumpInst, LabelInst, MetaInst, RegWriteInst
+from ..instructions import Instruction, JumpInst, LabelInst, RegWriteInst
 from ..labels import Label
 from ..node import BasicBlockNode, BlockNode
 
@@ -78,7 +78,6 @@ def shift_add_multiply(
 
 def build_jump_table_blocks(
     *,
-    name: str,
     n_reg: str,
     counter_reg: str,
     k: int,
@@ -117,19 +116,6 @@ def build_jump_table_blocks(
         )
 
     result: list[BasicBlockNode] = []
-
-    # ── meta marker ──
-    result.append(
-        BasicBlockNode(
-            insts=[
-                MetaInst(
-                    type="JUMP_TABLE_LOOP_START",
-                    name=name,
-                    info=dict(n_reg=n, counter_reg=i, k=k, body_words=body_words),
-                )
-            ]
-        )
-    )
 
     # ── prologue ──
     # Guard: skip when n == 0.
@@ -250,7 +236,6 @@ def build_jump_table_blocks(
     result.append(
         BasicBlockNode(
             labels=[LabelInst(name=exit_label, can_remove=True)],
-            insts=[MetaInst(type="JUMP_TABLE_LOOP_END", name=name)],
         )
     )
 

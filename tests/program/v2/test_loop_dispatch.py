@@ -85,7 +85,6 @@ def _make_jt_blocks(
         for _ in range(k)
     ]
     return build_jump_table_blocks(
-        name="jt",
         n_reg="r_n",
         counter_reg="r_i",
         k=k,
@@ -210,7 +209,6 @@ def test_build_jump_table_blocks_invalid_k_raises():
     Label.reset()
     try:
         build_jump_table_blocks(
-            name="jt",
             n_reg="r_n",
             counter_reg="r_i",
             k=1,  # < 2

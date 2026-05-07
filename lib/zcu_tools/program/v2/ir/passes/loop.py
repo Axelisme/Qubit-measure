@@ -386,7 +386,6 @@ class UnrollSmallLoopPass(OptimizationPassBase):
         bodies = [BlockNode(insts=deepcopy(node.body.insts)) for _ in range(k)]
 
         return build_jump_table_blocks(
-            name=node.name,
             n_reg=str(node.n),
             counter_reg=node.counter_reg,
             k=k,

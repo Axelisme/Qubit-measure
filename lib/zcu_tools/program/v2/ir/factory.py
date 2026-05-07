@@ -113,7 +113,6 @@ class IRParser:
 
     parse() recognises LOOP_START/END, BRANCH_START/END, BRANCH_CASE_START/END
     MetaInst pairs and folds them into IRLoop / IRBranch nodes.
-    JUMP_TABLE_LOOP_START/END are opaque pass-throughs (post-HIR artifacts).
 
     unparse() lowers IRLoop and IRBranch back to flat BasicBlockNode lists,
     embedding MetaInst markers for round-trip fidelity.
@@ -247,13 +246,6 @@ class IRParser:
                     block.append(self._parse_loop(items, pos))
                 elif item.type == "BRANCH_START":
                     block.append(self._parse_branch(items, pos))
-                elif item.type in (
-                    "JUMP_TABLE_LOOP_START",
-                    "JUMP_TABLE_LOOP_END",
-                ):
-                    # Opaque post-HIR artifact: wrap in a bare BasicBlockNode
-                    pos[0] += 1
-                    block.append(BasicBlockNode(insts=[item]))
                 else:
                     raise ValueError(f"IRParser.parse: unexpected MetaInst: {item}")
             else:

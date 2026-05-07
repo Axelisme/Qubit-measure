@@ -126,7 +126,6 @@ def test_v1_jump_table_entry_blocks_have_uniform_stride():
     bodies = [deepcopy(body) for _ in range(k)]
 
     blocks = build_jump_table_blocks(
-        name="test_loop",
         n_reg="r_n",
         counter_reg="r_i",
         k=k,
