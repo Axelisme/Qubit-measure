@@ -114,15 +114,16 @@ class TimedMergeLinear(AbsLinearPass):
 
         for inst in block.insts:
             if _is_lit_time(inst):
+                # Accumulate without emitting; the TIME will be placed later.
                 pending_lit += _get_lit_time_value(cast(TimeInst, inst))
 
             elif _is_anchored_timed(inst):
-                if pending_lit > 0:
-                    result.append(_adjust_time_field(inst, pending_lit))
-                    result.append(TimeInst(c_op="inc_ref", lit=f"#{pending_lit}"))
-                    pending_lit = 0
-                else:
-                    result.append(inst)
+                # Absorb pending_lit into the timestamp; do NOT reset pending_lit.
+                # All subsequent timed instructions in the same baseline segment
+                # must be adjusted by the same amount.
+                result.append(
+                    _adjust_time_field(inst, pending_lit) if pending_lit > 0 else inst
+                )
 
             elif _is_reg_time(inst):
                 # Conservative barrier: flush accumulated lit-TIME before reg-TIME.

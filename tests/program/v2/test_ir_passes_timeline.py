@@ -263,6 +263,7 @@ def test_lit_time_sinks_past_multiple_non_timed():
 
 
 def test_lit_time_absorbed_into_port_write():
+    # TIME sinks to end; PortWrite's @N is adjusted.
     root = RootNode(insts=[BasicBlockNode(insts=[
         TimeInst(c_op="inc_ref", lit="#43"),
         PortWriteInst(dst="2", src="wmem", addr="&12", time="@0"),
@@ -322,7 +323,9 @@ def test_time_and_non_timed_then_port_write():
     assert bb.insts[2].lit == "#30"
 
 
-def test_delta_resets_after_absorption():
+def test_all_timed_adjusted_with_same_delta():
+    # pending_lit is NOT reset after absorption; all timed insts in the same
+    # baseline segment receive the same delta adjustment.
     root = RootNode(insts=[BasicBlockNode(insts=[
         TimeInst(c_op="inc_ref", lit="#10"),
         PortWriteInst(dst="2", src="wmem", addr="&0", time="@0"),
@@ -332,11 +335,11 @@ def test_delta_resets_after_absorption():
     bb = out.insts[0]
     assert len(bb.insts) == 3
     assert isinstance(bb.insts[0], PortWriteInst)
-    assert bb.insts[0].time == "@10"
-    assert isinstance(bb.insts[1], TimeInst)
-    assert bb.insts[1].lit == "#10"
-    assert isinstance(bb.insts[2], PortWriteInst)
-    assert bb.insts[2].time == "@5"  # delta reset; second port write unchanged
+    assert bb.insts[0].time == "@10"   # 0 + 10
+    assert isinstance(bb.insts[1], PortWriteInst)
+    assert bb.insts[1].time == "@15"   # 5 + 10 — same delta applied
+    assert isinstance(bb.insts[2], TimeInst)
+    assert bb.insts[2].lit == "#10"    # single TIME at end
 
 
 def test_port_write_no_time_not_anchor():
