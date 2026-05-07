@@ -378,13 +378,13 @@ class TestControlIntegration:
             )
             assert "OP" in guard_jump
 
-            # Back-edge: condensed cond-jump with IF=NS sitting just before
+            # Back-edge: condensed cond-jump with IF=S sitting just before
             # end_addr (replaces the old TEST + unconditional JUMP pair).
             back_jump = next(
                 inst
                 for inst in prog.prog_list
                 if inst.get("CMD") == "JUMP"
-                and inst.get("IF") == "NS"
+                and inst.get("IF") == "S"
                 and inst["P_ADDR"] < end_addr
                 and inst["P_ADDR"] > start_addr
             )

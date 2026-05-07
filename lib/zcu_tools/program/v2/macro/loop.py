@@ -128,7 +128,7 @@ class CloseInnerLoop(Macro):
         ...
         <body>
         REG_WR counter op (counter + #1)               ; counter += 1
-        JUMP start -if(NS) -op(counter - n)            ; counter < n: loop back
+        JUMP start -if(S) -op(counter - n)             ; counter < n: loop back
         end:
 
     Must be paired with an :class:`OpenInnerLoop` sharing the same ``name``.
@@ -148,7 +148,7 @@ class CloseInnerLoop(Macro):
         return [
             MetaMacro(type="LOOP_BODY_END", name=self.name),
             WriteRegOp(dst=self.counter_reg, lhs=self.counter_reg, op="+", rhs=1),
-            *_emit_cond_jump(prog, label=start, if_cond="NS", op=op_str),
+            *_emit_cond_jump(prog, label=start, if_cond="S", op=op_str),
             Label(label=end),
             MetaMacro(type="LOOP_END", name=self.name),
         ]

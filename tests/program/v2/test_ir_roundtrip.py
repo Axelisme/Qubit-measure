@@ -146,7 +146,7 @@ def test_irloop_emit_uses_s15_jump_for_large_pmem():
     back_jump = prog_list[4]
     assert back_jump["CMD"] == "JUMP"
     assert back_jump["ADDR"] == "s15"
-    assert back_jump["IF"] == "NS"
+    assert back_jump["IF"] == "S"
     assert back_jump["OP"] == "r1 - #5"
     assert "LABEL" not in back_jump
 

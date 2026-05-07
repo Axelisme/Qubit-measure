@@ -12,7 +12,13 @@ from zcu_tools.program.v2.ir.instructions import (
     RegWriteInst,
 )
 from zcu_tools.program.v2.ir.labels import Label
-from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRBranch, IRLoop, RootNode
+from zcu_tools.program.v2.ir.node import (
+    BasicBlockNode,
+    BlockNode,
+    IRBranch,
+    IRLoop,
+    RootNode,
+)
 from zcu_tools.program.v2.ir.passes.control_flow import (
     BlockMergePass,
     BranchEliminationPass,

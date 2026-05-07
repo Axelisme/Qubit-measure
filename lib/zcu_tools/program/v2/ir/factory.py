@@ -453,10 +453,10 @@ class IRParser:
         if _needs_big_jump(self.pmem_size):
             post += [
                 RegWriteInst(dst="s15", src="label", label=start),
-                JumpInst(addr="s15", if_cond="NS", op=op_str),
+                JumpInst(addr="s15", if_cond="S", op=op_str),
             ]
         else:
-            post.append(JumpInst(label=start, if_cond="NS", op=op_str))
+            post.append(JumpInst(label=start, if_cond="S", op=op_str))
         post += [
             LabelInst(name=end, can_remove=True),
             MetaInst(type="LOOP_END", name=node.name),
