@@ -50,25 +50,33 @@ class IRLexer:
         pending_labels: list[LabelInst] = []
         pending_insts: list[Instruction] = []
         pending_branch: Optional[JumpInst] = None
+        in_fix_addr = False
 
         def flush() -> None:
             nonlocal pending_labels, pending_insts, pending_branch
             if pending_labels or pending_insts or pending_branch is not None:
-                result.append(
-                    BasicBlockNode(
+                bb = BasicBlockNode(
                         labels=pending_labels,
                         insts=pending_insts,
                         branch=pending_branch,
                     )
-                )
+                bb.fix_addr_size = in_fix_addr
+                result.append(bb)
             pending_labels = []
             pending_insts = []
             pending_branch = None
 
         for inst in insts:
             if isinstance(inst, MetaInst):
-                flush()
-                result.append(inst)
+                if inst.type == "FIX_ADDR_START":
+                    flush()
+                    in_fix_addr = True
+                elif inst.type == "FIX_ADDR_END":
+                    flush()
+                    in_fix_addr = False
+                else:
+                    flush()
+                    result.append(inst)
             elif isinstance(inst, LabelInst):
                 flush()
                 pending_labels = [inst]
@@ -93,10 +101,14 @@ class IRLexer:
             if isinstance(item, MetaInst):
                 result.append(item)
             else:
+                if item.fix_addr_size:
+                    result.append(MetaInst(type="FIX_ADDR_START", name=""))
                 result.extend(item.labels)
                 result.extend(item.insts)
                 if item.branch is not None:
                     result.append(item.branch)
+                if item.fix_addr_size:
+                    result.append(MetaInst(type="FIX_ADDR_END", name=""))
         return result
 
 

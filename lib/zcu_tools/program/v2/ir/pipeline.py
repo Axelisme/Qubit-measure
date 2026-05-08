@@ -138,8 +138,9 @@ class IRPipeLine:
     def __call__(
         self, insts: list[Instruction]
     ) -> tuple[list[Instruction], PipeLineContext]:
-
         ctx = PipeLineContext(config=self.config, pmem_size=self.config.pmem_capacity)
+        if self.config.disable_all_opt:
+            return insts, ctx
 
         lexer = IRLexer()
         parser = IRParser(pmem_size=self.config.pmem_capacity)
@@ -147,14 +148,13 @@ class IRPipeLine:
         blocks = lexer.lex(insts)
         ir = parser.parse(blocks)
 
-        if not self.config.disable_all_opt:
-            # Stage 1: Pre-LIR
-            _run_linear_passes(self.linear_passes, ir)
+        # Stage 1: Pre-LIR
+        _run_linear_passes(self.linear_passes, ir)
 
-            # Stage 2: HIR structural passes, with linear passes around each
-            for _pass in self.ir_passes:
-                ir = _pass.process(ir, ctx)
-                _run_linear_passes(self.linear_passes, ir)
+        # Stage 2: HIR structural passes, with linear passes around each
+        for _pass in self.ir_passes:
+            ir = _pass.process(ir, ctx)
+            _run_linear_passes(self.linear_passes, ir)
 
         opt_blocks = parser.unparse(ir)
         opt_insts = lexer.flatten(opt_blocks)
