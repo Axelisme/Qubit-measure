@@ -25,7 +25,7 @@ from zcu_tools.program.v2.ir.passes import (
     DeadLabelEliminationPass,
     DeadTestEliminationLinear,
     DeadWriteEliminationLinear,
-    UnrollSmallLoopPass,
+    UnrollLoopPass,
 )
 from zcu_tools.program.v2.ir.pipeline import (
     PipeLineConfig,
@@ -252,7 +252,7 @@ def test_unroll_full_expansion_when_n_le_k():
         ]
     )
 
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=_config()))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=_config()))
 
     # Expansion: counter init + 3*(body + increment) = 1 + 3*2 = 7 insts.
     assert _flat_inst_count(out) == 7
@@ -297,7 +297,7 @@ def test_unroll_full_expansion_keeps_counter_init_for_counter_dependent_body():
         ]
     )
 
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=_config()))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=_config()))
 
     # Full expansion: counter init BB + body BB + increment BB = 3 BasicBlockNodes
     assert len(out.insts) == 3
@@ -335,7 +335,7 @@ def test_unroll_full_expansion_preserves_internal_label():
         ]
     )
 
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=_config()))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=_config()))
 
     # init(1) + 3*(TimeInst + increment)(2 each) = 1 + 3*2 = 7
     # LabelInsts are not counted (they occupy no pmem).
@@ -364,7 +364,7 @@ def test_unroll_partial_unroll_produces_loop_plus_remainder():
     )
 
     config = _config(pmem_budget=8)
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=config))
 
     # Top level should contain a single BlockNode
     assert len(out.insts) == 1
@@ -392,7 +392,7 @@ def test_unroll_partial_unroll_no_remainder():
     )
 
     config = _config(pmem_budget=8)
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=config))
 
     assert len(out.insts) == 1
     block = out.insts[0]
@@ -423,7 +423,7 @@ def test_unroll_partial_unroll_loop_bound_uses_full_unrolled_iterations():
     )
 
     config = _config(pmem_budget=8)
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=config))
 
     assert len(out.insts) == 1
     block = out.insts[0]
@@ -493,7 +493,7 @@ def test_unroll_no_scheduled_ticks_uses_zero_delay_budget():
         ]
     )
 
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=_config()))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=_config()))
 
     assert len(out.insts) == 1
     assert isinstance(out.insts[0], BlockNode)
@@ -523,7 +523,7 @@ def test_unroll_dynamic_delay_only_body_uses_zero_delay_budget():
         ]
     )
 
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=_config()))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=_config()))
 
     assert len(out.insts) == 1
     assert isinstance(out.insts[0], BlockNode)
@@ -558,7 +558,7 @@ def test_unroll_mixed_literal_and_dynamic_delay_uses_literal_budget():
         ]
     )
 
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=_config()))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=_config()))
 
     # counter init + 4 copies * (1 body_bb + 1 increment_bb) = 1 + 4*2 = 9 BasicBlockNodes
     # body_bb has 2 insts (TimeInst x2); total flat inst count = 1 + 4*(2+1) = 13
@@ -586,7 +586,7 @@ def test_unroll_exact_register_hint_fully_expands():
         ]
     )
 
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=_config()))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=_config()))
 
     # counter init + 3*(body + increment) = 1 + 3*2 = 7
     assert _flat_inst_count(out) == 7
@@ -611,7 +611,7 @@ def test_unroll_non_exact_register_hint_emits_jump_table():
         ]
     )
 
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=_config()))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=_config()))
 
     # Should produce BasicBlockNode sequence with fix_addr_size=True.
     # k=8 entry blocks + 2 back-edge blocks = 10 fixed blocks.
@@ -633,7 +633,7 @@ def test_unroll_no_hint_register_loop_emits_jump_table():
         ]
     )
 
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=_config()))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=_config()))
 
     assert _has_jump_table_blocks(out)
 
@@ -659,7 +659,7 @@ def test_unroll_counter_sensitive_loop_still_uses_unroll_k_rules():
         ]
     )
 
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=_config()))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=_config()))
 
     # Full expansion: counter init BB + 3*(body BB + increment BB) = 1 + 3*2 = 7 BasicBlockNodes
     # body BB has 2 insts (TestInst + TimeInst); flat inst count = 1 + 3*(2+1) = 10
@@ -689,7 +689,7 @@ def test_unroll_partial_unroll_clones_labels_safely():
     )
 
     config = _config(pmem_budget=8)
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=config))
 
     emit = _flatten_root(out)
 
@@ -718,7 +718,7 @@ def test_unroll_budget_caps_k_below_timing():
     )
 
     config = _config(pmem_budget=3)
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=config))
 
     assert len(out.insts) == 1
     block = out.insts[0]
@@ -743,7 +743,7 @@ def test_unroll_max_factor_caps_k():
     )
 
     config = _config(max_unroll_factor=2)
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=config))
 
     assert len(out.insts) == 1
     block = out.insts[0]
@@ -775,7 +775,7 @@ def test_unroll_post_order_recurses_into_inner_loop_first():
     )
     root = RootNode(insts=[outer])
 
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=_config()))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=_config()))
 
     # Inner full expansion: init_inner + 2*(body + incr) = 1 + 4 = 5
     # Outer full expansion: init_outer + 2*(inner_block + incr_outer) = 1 + 2*6 = 13
@@ -807,7 +807,7 @@ def test_unroll_cpmg_style_body_triggers():
         ]
     )
 
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=_config()))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=_config()))
 
     assert len(out.insts) == 1
     block = out.insts[0]
@@ -844,7 +844,7 @@ def test_unroll_register_driven_k_forced_to_power_of_two():
         ]
     )
 
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=_config()))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=_config()))
 
     # k=8, body has 4 blocks each → 8*4=32 entry blocks + 2 back-edge blocks = 34 fixed blocks.
     assert _has_jump_table_blocks(out)
@@ -866,7 +866,7 @@ def test_unroll_register_driven_jump_table_structure():
     )
 
     config = _config(max_unroll_factor=2)
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=config))
 
     # k=2: 2 entry blocks + 2 back-edge blocks = 4 fixed blocks.
     assert _count_fixed_blocks(out) == 4
@@ -901,7 +901,7 @@ def test_unroll_register_driven_body_with_no_words_falls_back():
         ]
     )
 
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=_config()))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=_config()))
 
     # Falls back: original IRLoop unchanged.
     assert len(out.insts) == 1
@@ -928,7 +928,7 @@ def test_unroll_register_driven_dispatch_too_long_falls_back():
     )
 
     config = _config(max_dispatch_words=4)
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=config))
 
     assert len(out.insts) == 1
     assert isinstance(out.insts[0], IRLoop)
@@ -958,7 +958,7 @@ def test_unroll_nested_register_driven_inner_unrolls_first():
     root = RootNode(insts=[outer])
 
     config = _config(max_unroll_factor=2)
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=config))
 
     # Inner loop is rewritten to jump-table blocks (fix_addr_size=True present).
     # Outer loop falls back to no-unroll because inner's lowered blocks contain
@@ -983,7 +983,7 @@ def test_default_pipeline_structure():
     ]
     # IR passes
     assert [type(p).__name__ for p in pipeline.ir_passes] == [
-        "UnrollSmallLoopPass",
+        "UnrollLoopPass",
         "DeadLabelEliminationPass",
         "BranchEliminationPass",
         "BlockMergePass",

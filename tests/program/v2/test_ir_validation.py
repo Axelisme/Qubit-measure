@@ -29,7 +29,7 @@ from zcu_tools.program.v2.ir.node import (
     IRNode,
     RootNode,
 )
-from zcu_tools.program.v2.ir.passes import BranchEliminationPass, UnrollSmallLoopPass
+from zcu_tools.program.v2.ir.passes import BranchEliminationPass, UnrollLoopPass
 from zcu_tools.program.v2.ir.passes.loop_dispatch import build_jump_table_blocks
 from zcu_tools.program.v2.ir.pipeline import (
     PipeLineConfig,
@@ -148,7 +148,7 @@ def test_v1_jump_table_entry_blocks_have_uniform_stride():
 
 
 def test_v1_jump_table_stride_equals_body_words():
-    """After UnrollSmallLoopPass, entry block instruction count == body_words.
+    """After UnrollLoopPass, entry block instruction count == body_words.
 
     body_words is measured by estimate_flat_size, which counts non-meta
     instructions in one full logical body iteration.
@@ -167,7 +167,7 @@ def test_v1_jump_table_stride_equals_body_words():
     )
 
     config = PipeLineConfig(max_unroll_factor=4)
-    out = UnrollSmallLoopPass().process(root, PipeLineContext(config=config))
+    out = UnrollLoopPass().process(root, PipeLineContext(config=config))
 
     groups = _collect_entry_groups(out)
     assert len(groups) > 0, "no entry groups produced"

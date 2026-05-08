@@ -9,7 +9,7 @@ from .dataflow import (
     DeadWriteEliminationLinear,
     IncRegMergeLinear,
 )
-from .loop import UnrollSmallLoopPass
+from .loop import UnrollLoopPass
 from .loop_merge import LoopConditionMergeLinear
 from .timeline import TimedMergeLinear, ZeroDelayDCELinear
 
@@ -25,7 +25,7 @@ __all__ = [
     "DeadWriteEliminationLinear",
     "IncRegMergeLinear",
     # loop
-    "UnrollSmallLoopPass",
+    "UnrollLoopPass",
     "LoopConditionMergeLinear",
     # timeline
     "TimedMergeLinear",

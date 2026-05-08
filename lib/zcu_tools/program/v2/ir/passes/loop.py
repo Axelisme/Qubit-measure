@@ -118,7 +118,7 @@ def _analyze_unroll(
     )
 
 
-class UnrollSmallLoopPass(OptimizationPassBase):
+class UnrollLoopPass(OptimizationPassBase):
     """Scheduled-window-driven loop unrolling (Phase 8).
 
     k is chosen jointly from per-iteration timing slack and pmem budget.
@@ -159,7 +159,7 @@ class UnrollSmallLoopPass(OptimizationPassBase):
 
         if n is not None and n <= 0:
             logger.debug(
-                "UnrollSmallLoopPass: skip loop name=%s because n=%s <= 0",
+                "UnrollLoopPass: skip loop name=%s because n=%s <= 0",
                 node.name,
                 n,
             )
@@ -169,7 +169,7 @@ class UnrollSmallLoopPass(OptimizationPassBase):
         if n is not None:
             analysis = _analyze_unroll(node.body.insts, loop_overhead, cfg)
             logger.debug(
-                "UnrollSmallLoopPass: analyze constant/exact loop name=%s n=%s exact=%s "
+                "UnrollLoopPass: analyze constant/exact loop name=%s n=%s exact=%s "
                 "scheduled_ticks=%s body_cost=%s slack=%s body_size=%s "
                 "k_timing=%s k_budget=%s k_final=%s",
                 node.name,
@@ -186,7 +186,7 @@ class UnrollSmallLoopPass(OptimizationPassBase):
             k = analysis.k_final
             if k <= 1:
                 logger.debug(
-                    "UnrollSmallLoopPass: skip loop name=%s because k_final=%s <= 1",
+                    "UnrollLoopPass: skip loop name=%s because k_final=%s <= 1",
                     node.name,
                     k,
                 )
@@ -199,7 +199,7 @@ class UnrollSmallLoopPass(OptimizationPassBase):
             # which is our unroll limit anyway. Fully expanding saves loop overhead.
             if n <= k:
                 logger.debug(
-                    "UnrollSmallLoopPass: fully expand loop name=%s n=%s k=%s (n <= k)",
+                    "UnrollLoopPass: fully expand loop name=%s n=%s k=%s (n <= k)",
                     node.name,
                     n,
                     k,
@@ -220,7 +220,7 @@ class UnrollSmallLoopPass(OptimizationPassBase):
             # value would have to be divided by k at execution time.
             if is_runtime_exact:
                 logger.debug(
-                    "UnrollSmallLoopPass: skip partial unroll for loop name=%s because "
+                    "UnrollLoopPass: skip partial unroll for loop name=%s because "
                     "range_hint is exact runtime-only n=%s and n > k=%s",
                     node.name,
                     n,
@@ -229,7 +229,7 @@ class UnrollSmallLoopPass(OptimizationPassBase):
                 return node
 
             logger.debug(
-                "UnrollSmallLoopPass: partially expand loop name=%s n=%s k=%s "
+                "UnrollLoopPass: partially expand loop name=%s n=%s k=%s "
                 "iters=%s remainder=%s",
                 node.name,
                 n,
@@ -304,7 +304,7 @@ class UnrollSmallLoopPass(OptimizationPassBase):
         analysis = _analyze_unroll(node.body.insts, loop_overhead, cfg)
         body_size = analysis.body_size
         logger.debug(
-            "UnrollSmallLoopPass: analyze register-driven loop name=%s n_reg=%s "
+            "UnrollLoopPass: analyze register-driven loop name=%s n_reg=%s "
             "scheduled_ticks=%s body_cost=%s slack=%s body_size=%s "
             "k_timing=%s k_budget=%s k_raw=%s",
             node.name,
@@ -319,7 +319,7 @@ class UnrollSmallLoopPass(OptimizationPassBase):
         )
         if body_size <= 0:
             logger.debug(
-                "UnrollSmallLoopPass: skip jump-table loop name=%s because body_size=%s <= 0",
+                "UnrollLoopPass: skip jump-table loop name=%s because body_size=%s <= 0",
                 node.name,
                 body_size,
             )
@@ -328,7 +328,7 @@ class UnrollSmallLoopPass(OptimizationPassBase):
         k_raw = analysis.k_final
         if k_raw <= 1:
             logger.debug(
-                "UnrollSmallLoopPass: skip jump-table loop name=%s because k_raw=%s <= 1",
+                "UnrollLoopPass: skip jump-table loop name=%s because k_raw=%s <= 1",
                 node.name,
                 k_raw,
             )
@@ -337,7 +337,7 @@ class UnrollSmallLoopPass(OptimizationPassBase):
         k = _floor_pow2(k_raw)
         if k <= 1:
             logger.debug(
-                "UnrollSmallLoopPass: skip jump-table loop name=%s because floor_pow2(%s)=%s <= 1",
+                "UnrollLoopPass: skip jump-table loop name=%s because floor_pow2(%s)=%s <= 1",
                 node.name,
                 k_raw,
                 k,
@@ -356,7 +356,7 @@ class UnrollSmallLoopPass(OptimizationPassBase):
         )
         if probe is None:
             logger.debug(
-                "UnrollSmallLoopPass: skip jump-table loop name=%s because "
+                "UnrollLoopPass: skip jump-table loop name=%s because "
                 "shift_add_multiply(stride=%s, max_dispatch_words=%s) failed",
                 node.name,
                 stride,
@@ -365,7 +365,7 @@ class UnrollSmallLoopPass(OptimizationPassBase):
             return None
 
         logger.debug(
-            "UnrollSmallLoopPass: build jump-table loop name=%s n_reg=%s "
+            "UnrollLoopPass: build jump-table loop name=%s n_reg=%s "
             "k_raw=%s k_pow2=%s body_words=%s dispatch_words=%s",
             node.name,
             node.n,
@@ -381,7 +381,7 @@ class UnrollSmallLoopPass(OptimizationPassBase):
         for bb in probe_blocks:
             if bb.fix_addr_size:
                 logger.debug(
-                    "UnrollSmallLoopPass: skip jump-table loop name=%s because "
+                    "UnrollLoopPass: skip jump-table loop name=%s because "
                     "lowered body contains fix_addr_size=True block",
                     node.name,
                 )

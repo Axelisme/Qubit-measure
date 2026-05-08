@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 
 from .factory import IRLexer, IRParser
 from .instructions import Instruction
-from .labels import Label
 from .node import BasicBlockNode, RootNode
 from .traversal import walk_basic_blocks
 
@@ -154,6 +153,8 @@ class IRPipeLine:
         # Stage 2: HIR structural passes, with linear passes around each
         for _pass in self.ir_passes:
             ir = _pass.process(ir, ctx)
+
+            # Stage 3: Post-LIR
             _run_linear_passes(self.linear_passes, ir)
 
         opt_blocks = parser.unparse(ir)
@@ -177,7 +178,7 @@ def make_default_pipeline(pmem_capacity: int) -> IRPipeLine:
         IncRegMergeLinear,
         LoopConditionMergeLinear,
         TimedMergeLinear,
-        UnrollSmallLoopPass,
+        UnrollLoopPass,
         ZeroDelayDCELinear,
     )
 
@@ -198,7 +199,7 @@ def make_default_pipeline(pmem_capacity: int) -> IRPipeLine:
             DeadTestEliminationLinear(),
         ],
         ir_passes=[
-            UnrollSmallLoopPass(),
+            UnrollLoopPass(),
             DeadLabelEliminationPass(),
             BranchEliminationPass(),
             BlockMergePass(),
