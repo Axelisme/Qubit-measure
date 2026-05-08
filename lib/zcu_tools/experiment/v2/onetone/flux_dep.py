@@ -100,9 +100,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         ) as viewer:
             signals = run_task(
                 task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(len(freqs),),
-                    pbar_n=cfg.rounds,
+                    measure_fn=measure_fn, result_shape=(len(freqs),), pbar_n=cfg.rounds
                 ).scan(
                     "flux",
                     dev_values.tolist(),

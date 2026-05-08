@@ -12,7 +12,7 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import Task, run_task
+from zcu_tools.experiment.v2.runner import Task, run_task, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import SweepCfg, TwoToneCfg, TwoToneProgram, sweep2param
@@ -44,33 +44,35 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> FreqResult:
+        original_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
         # predicted sweep points before FPGA coercion
         freqs = sweep2array(
-            cfg.sweep.freq,
-            "freq",
-            {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
+            cfg.sweep.freq, "freq", {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch}
         )
 
-        # bind sweep parameter as *QickParam* so it is executed by FPGA
-        freq_param = sweep2param("freq", cfg.sweep.freq)
-        modules.qub_pulse.set_param("freq", freq_param)
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any, FreqCfg], update_hook
+        ):
+            cfg = ctx.cfg
+            modules = cfg.modules
+
+            freq_sweep = cfg.sweep.freq
+            freq_param = sweep2param("freq", freq_sweep)
+            modules.qub_pulse.set_param("freq", freq_param)
+
+            return TwoToneProgram(
+                soccfg, cfg, sweep=[("freq", cfg.sweep.freq)]
+            ).acquire(
+                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
+            )
 
         with LivePlot1D("Frequency (MHz)", "Amplitude") as viewer:
             signals = run_task(
                 task=Task(
-                    measure_fn=lambda ctx, update_hook: TwoToneProgram(
-                        soccfg, ctx.cfg, sweep=[("freq", ctx.cfg.sweep.freq)]
-                    ).acquire(
-                        soc,
-                        progress=False,
-                        round_hook=update_hook,
-                        **(acquire_kwargs or {}),
-                    ),
-                    result_shape=(len(freqs),),
-                    pbar_n=cfg.rounds,
+                    measure_fn=measure_fn, result_shape=(len(freqs),), pbar_n=cfg.rounds
                 ),
                 init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
@@ -79,7 +81,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             )
 
         # cache
-        self.last_cfg = deepcopy(cfg)
+        self.last_cfg = original_cfg
         self.last_result = (freqs, signals)
 
         return freqs, signals

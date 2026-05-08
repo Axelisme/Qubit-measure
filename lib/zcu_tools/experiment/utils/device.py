@@ -34,9 +34,6 @@ def set_flux_in_dev_cfg(
     flux_cfg = get_labeled_device_cfg(devs_cfg, label)
 
     if flux_cfg.type == "YOKOGS200":
-        from zcu_tools.device.yoko import YOKOGS200Info
-
-        flux_cfg = YOKOGS200Info.model_validate(flux_cfg.to_dict())
         flux_cfg.value = value
     else:
         raise NotImplementedError(f"Flux device type {flux_cfg.type} not supported yet")
@@ -50,9 +47,6 @@ def set_freq_in_dev_cfg(
     rf_cfg = get_labeled_device_cfg(devs_cfg, label)
 
     if rf_cfg.type == "RohdeSchwarzSGS100A":
-        from zcu_tools.device.sgs100a import RohdeSchwarzSGS100AInfo
-
-        rf_cfg = RohdeSchwarzSGS100AInfo.model_validate(rf_cfg.to_dict())
         rf_cfg.freq_Hz = freq_Hz
     else:
         raise NotImplementedError(f"RF device type {rf_cfg.type} not supported yet")
@@ -66,9 +60,6 @@ def set_power_in_dev_cfg(
     rf_cfg = get_labeled_device_cfg(devs_cfg, label)
 
     if rf_cfg.type == "RohdeSchwarzSGS100A":
-        from zcu_tools.device.sgs100a import RohdeSchwarzSGS100AInfo
-
-        rf_cfg = RohdeSchwarzSGS100AInfo.model_validate(rf_cfg.to_dict())
         rf_cfg.power_dBm = power_dBm
     else:
         raise NotImplementedError(f"RF device type {rf_cfg.type} not supported yet")
@@ -84,9 +75,6 @@ def set_output_in_dev_cfg(
     rf_cfg = get_labeled_device_cfg(devs_cfg, label)
 
     if rf_cfg.type == "RohdeSchwarzSGS100A":
-        from zcu_tools.device.sgs100a import RohdeSchwarzSGS100AInfo
-
-        rf_cfg = RohdeSchwarzSGS100AInfo.model_validate(rf_cfg.to_dict())
         rf_cfg.output = output
     else:
         raise NotImplementedError(f"RF device type {rf_cfg.type} not supported yet")

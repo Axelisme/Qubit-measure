@@ -80,6 +80,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         cfg: T1Cfg,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> T1Result:
+        original_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
 
         length_sweep = cfg.sweep.length
@@ -139,7 +140,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             )
 
         # record last cfg and result
-        self.last_cfg = deepcopy(cfg)
+        self.last_cfg = original_cfg
         self.last_result = (lengths, signals)
 
         return lengths, signals
@@ -151,6 +152,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         cfg: T1Cfg,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> T1Result:
+        original_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
 
         lengths = sweep2array(cfg.sweep.length, "time", {"soccfg": soccfg})
@@ -199,7 +201,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             )
 
         # record last cfg and result
-        self.last_cfg = deepcopy(cfg)
+        self.last_cfg = original_cfg
         self.last_result = (lengths, signals)
 
         return lengths, signals
@@ -221,13 +223,20 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             )
 
     def analyze(
-        self, result: Optional[T1Result] = None, *, dual_exp: bool = False
+        self,
+        result: Optional[T1Result] = None,
+        *,
+        dual_exp: bool = False,
+        skip: int = 0,
     ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
         xs, signals = result
+
+        xs = xs[skip:]
+        signals = signals[skip:]
 
         real_signals = rotate2real(signals).real
 

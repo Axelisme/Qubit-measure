@@ -7,7 +7,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
-from typing_extensions import Any, Optional, TypeAlias
+from typing_extensions import Any, Optional, TypeAlias, Callable
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -50,6 +50,9 @@ class PowerCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: PowerSweepCfg
 
 
+RawResult: TypeAlias = list[MomentTracker]
+
+
 class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
     def run(
         self,
@@ -59,6 +62,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> PowerResult:
+        original_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -68,9 +72,14 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
-        def measure_fn(ctx: TaskState[NDArray[np.float64], Any, PowerCfg], update_hook):
+        def measure_fn(
+            ctx: TaskState[NDArray[np.float64], Any, PowerCfg],
+            update_hook: Optional[Callable[[int, RawResult], None]],
+        ) -> RawResult:
             cfg = ctx.cfg
             modules = cfg.modules
+
+            assert update_hook is not None, "update_hook is required for measure_fn"
 
             gain_sweep = cfg.sweep.gain
             gain_param = sweep2param("gain", gain_sweep)
@@ -84,10 +93,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                     Branch("ge", [], Pulse("qub_pulse", modules.qub_pulse)),
                     Readout("readout", modules.readout),
                 ],
-                sweep=[
-                    ("ge", 2),
-                    ("gain", gain_sweep),
-                ],
+                sweep=[("ge", 2), ("gain", gain_sweep)],
             )
             tracker = MomentTracker()
             prog.acquire(
@@ -103,7 +109,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn,
-                    raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
+                    raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=1),
                     result_shape=(len(gains),),
                     dtype=np.float64,
                     pbar_n=cfg.rounds,
@@ -113,7 +119,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             )
 
         # record the last cfg and result
-        self.last_cfg = deepcopy(cfg)
+        self.last_cfg = original_cfg
         self.last_result = (gains, signals)
 
         return gains, signals

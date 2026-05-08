@@ -100,7 +100,9 @@ def snr_as_signal(
     cov_d = tracker.covariance
     m3_d = tracker.third_moment
     assert mean_d is not None
-    assert mean_d.shape[ge_axis] == 2
+    assert mean_d.shape[ge_axis] == 2, (
+        f"Expected dim=2 along ge_axis, got shape {mean_d.shape} with ge_axis={ge_axis}"
+    )
     return calc_snr(mean_d, cov_d, m3_d, ge_axis=ge_axis)
 
 

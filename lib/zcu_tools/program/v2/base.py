@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 class ProgramV2Cfg(ConfigBase):
     reps: int = 1
     rounds: int = 1
-    initial_delay: float = 0.0
-    relax_delay: float = 0.0
+    initial_delay: float = 1.0
+    relax_delay: float = 1.0
 
 
 class MyProgramV2(ImproveAcquireMixin, ImproveAsmV2, AveragerProgramV2):  # type: ignore

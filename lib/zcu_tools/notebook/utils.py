@@ -65,15 +65,7 @@ def make_sweep(
             )
             expts = 1
         else:
-            expts_float = (stop - start) / step + 1
-            expts = int(round(expts_float))
-            assert expts > 0, f"expts must be greater than 0, but got {expts}"
-            assert abs(expts_float - expts) < 1e-9, (
-                "Inconsistent sweep settings: stop must satisfy "
-                "start + step * (expts - 1). "
-                f"got start={start}, stop={stop}, step={step}, "
-                f"derived_expts={expts_float}"
-            )
+            expts = int((stop - start) / step + 1)
     elif step is None:
         assert expts is not None, err_str
         if expts == 1:

@@ -7,7 +7,7 @@ import IPython
 import psutil
 import Pyro4
 import Pyro4.naming
-from qick import QickConfig, QickSoc
+from qick import QickConfig
 from typing_extensions import Any, Literal
 
 from zcu_tools.bitfiles import get_bitfile
@@ -56,6 +56,7 @@ def start_nameserver(ns_port: int) -> None:
 def start_server(
     port: int, ns_port: int, version: Literal["v1", "v2"] = "v1", iface="eth0", **kwargs
 ) -> None:
+    from qick import QickSoc
 
     print("looking for nameserver . . .")
     ns = Pyro4.locateNS(host="0.0.0.0", port=ns_port)

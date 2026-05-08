@@ -33,7 +33,7 @@ class InteractiveOneTone:
 
         # 創建控制元件
         self.threshold_slider = widgets.FloatSlider(
-            value=threshold, min=0.0, max=3.0, step=0.01, description="Threshold:"
+            value=threshold, min=0.0, max=5.0, step=0.01, description="Threshold:"
         )
         self.threshold_slider.observe(self.on_threshold_change, names="value")
 

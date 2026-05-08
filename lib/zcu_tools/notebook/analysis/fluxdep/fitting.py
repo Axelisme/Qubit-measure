@@ -86,7 +86,12 @@ def search_in_database(
 
     # Load data from database
     with File(datapath, "r") as file:
-        f_fluxs = file["fluxs"][:]  # (f_fluxs, ) # type: ignore[index]
+        if "fluxs" in file:
+            f_fluxs = file["fluxs"][:]  # (f_fluxs, ) # type: ignore[index]
+        elif "flxs" in file:  # legacy typo
+            f_fluxs = file["flxs"][:]  # (f_fluxs, ) # type: ignore[index]
+        else:
+            raise KeyError("Database file must contain 'fluxs' or 'flxs' dataset.")
         f_params = file["params"][:]  # (N, 3) # type: ignore[index]
         f_energies = file["energies"][:]  # (N, f_fluxs, M) # type: ignore[index]
     assert isinstance(f_fluxs, np.ndarray)

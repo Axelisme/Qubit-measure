@@ -23,13 +23,7 @@ from zcu_tools.notebook.analysis.fluxdep.interactive import (
     InteractiveFindPoints,
     InteractiveLines,
 )
-from zcu_tools.program.v2 import (
-    Pulse,
-    SweepCfg,
-    TwoToneCfg,
-    TwoToneProgram,
-    sweep2param,
-)
+from zcu_tools.program.v2 import SweepCfg, TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background
 
@@ -48,7 +42,7 @@ class FreqFluxSweepCfg(ConfigBase):
 
 
 class FreqFluxCfg(TwoToneCfg, ExpCfgModel):
-    dev: Optional[Mapping[str, DeviceInfo]] = None
+    dev: Mapping[str, DeviceInfo]  # type: ignore[dict-item]
     sweep: FreqFluxSweepCfg
 
 
@@ -62,6 +56,7 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
         fail_retry: int = 0,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> FreqFluxResult:
+        original_cfg = deepcopy(cfg)
         modules = cfg.modules
 
         value_sweep = cfg.sweep.flux
@@ -72,23 +67,20 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
             freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch}
         )
 
-        # Frequency is swept by FPGA (hard sweep)
-        freq_param = sweep2param("freq", freq_sweep)
-        modules.qub_pulse.set_param("freq", freq_param)
-
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, FreqFluxCfg], update_hook
         ):
-            setup_devices(ctx.cfg, progress=False)
-            return TwoToneProgram(
-                soccfg,
-                ctx.cfg,
-                sweep=[("freq", ctx.cfg.sweep.freq)],
-            ).acquire(
-                soc,
-                progress=False,
-                round_hook=update_hook,
-                **(acquire_kwargs or {}),
+            cfg = ctx.cfg
+            modules = cfg.modules
+            setup_devices(cfg, progress=False)
+
+            # Frequency is swept by FPGA (hard sweep)
+            freq_sweep = cfg.sweep.freq
+            freq_param = sweep2param("freq", freq_sweep)
+            modules.qub_pulse.set_param("freq", freq_param)
+
+            return TwoToneProgram(soccfg, cfg, sweep=[("freq", freq_sweep)]).acquire(
+                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
             )
 
         with LivePlot2DwithLine(
@@ -96,17 +88,14 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
         ) as viewer:
             signals = run_task(
                 task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(len(freqs),),
-                    pbar_n=cfg.rounds,
+                    measure_fn=measure_fn, result_shape=(len(freqs),), pbar_n=cfg.rounds
                 )
                 .auto_retry(max_retries=fail_retry)
                 .scan(
                     "flux",
                     dev_values.tolist(),
-                    before_each=lambda _, ctx, flux: (
-                        ctx.cfg.dev is not None
-                        and set_flux_in_dev_cfg(ctx.cfg.dev, flux)
+                    before_each=lambda _, ctx, flux: set_flux_in_dev_cfg(
+                        ctx.cfg.dev, flux
                     ),
                 ),
                 init_cfg=cfg,
@@ -117,7 +106,7 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
             signals = np.asarray(signals)
 
         # Cache results
-        self.last_cfg = deepcopy(cfg)
+        self.last_cfg = original_cfg
         self.last_result = (dev_values, freqs, signals)
 
         return dev_values, freqs, signals
