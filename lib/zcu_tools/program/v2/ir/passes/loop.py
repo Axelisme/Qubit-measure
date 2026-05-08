@@ -4,7 +4,7 @@ import logging
 import math
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from ..analysis import (
     estimate_body_cost,
@@ -17,6 +17,9 @@ from ..labels import Label
 from ..node import BasicBlockNode, BlockNode, IRLoop, IRNode
 from .base import OptimizationPassBase
 from .loop_dispatch import build_jump_table_blocks, shift_add_multiply
+
+if TYPE_CHECKING:
+    from ..pipeline import PipeLineConfig
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +69,7 @@ def _floor_pow2(x: int) -> int:
 def _analyze_unroll(
     body_insts: list[IRNode],
     loop_overhead: int,
-    config,
+    config: PipeLineConfig,
 ) -> UnrollAnalysis:
     """Joint k selection (Phase 8 design).
 
@@ -127,9 +130,6 @@ class UnrollLoopPass(OptimizationPassBase):
     """
 
     def visit_IRLoop(self, node: IRLoop) -> Optional[IRNode | list[IRNode]]:
-        if not self.ctx.config.enable_unroll_loop:
-            return self.generic_visit(node)
-
         # Hierarchical lock: if this loop is inside a fix_addr_size region,
         # unrolling would change the physical instruction count and break
         # jump-table stride calculations.
@@ -244,8 +244,12 @@ class UnrollLoopPass(OptimizationPassBase):
             if remainder > 0:
                 entry_label = Label.make_new(f"{node.name}_remainder_entry")
 
-                part1 = _clone_body_nodes(node.body.insts, k - remainder, pmem_size=pmem_size)
-                part2 = _clone_body_nodes(node.body.insts, remainder, pmem_size=pmem_size)
+                part1 = _clone_body_nodes(
+                    node.body.insts, k - remainder, pmem_size=pmem_size
+                )
+                part2 = _clone_body_nodes(
+                    node.body.insts, remainder, pmem_size=pmem_size
+                )
 
                 if not part2:
                     part2 = [BasicBlockNode(labels=[LabelInst(name=entry_label)])]
@@ -260,16 +264,18 @@ class UnrollLoopPass(OptimizationPassBase):
                             RegWriteInst(dst=node.counter_reg, src="imm", lit="#0"),
                             RegWriteInst(dst="s15", src="label", label=entry_label),
                         ],
-                        branch=JumpInst(addr="s15")
+                        branch=JumpInst(addr="s15"),
                     )
                 else:
                     init_bb = BasicBlockNode(
                         insts=[RegWriteInst(dst=node.counter_reg, src="imm", lit="#0")],
-                        branch=JumpInst(label=entry_label)
+                        branch=JumpInst(label=entry_label),
                     )
                 result.append(init_bb)
             else:
-                unrolled_body = _clone_body_nodes(node.body.insts, k, pmem_size=pmem_size)
+                unrolled_body = _clone_body_nodes(
+                    node.body.insts, k, pmem_size=pmem_size
+                )
 
             # IRLoop.body already represents a full iteration, including the
             # counter update even if later peephole passes moved it physically.

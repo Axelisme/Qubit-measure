@@ -1,4 +1,6 @@
-from unittest.mock import MagicMock
+from __future__ import annotations
+
+from typing_extensions import Any
 
 from zcu_tools.program.v2.ir.instructions import NopInst, RegWriteInst
 from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRLoop, RootNode
@@ -92,34 +94,6 @@ def test_structural_loop_roundtrip():
     assert cmds == expected_cmds
     assert cursor.final_p_addr == 4
     assert cursor.final_line == 6
-
-
-def test_pipeline_roundtrip_with_normalization():
-    from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
-
-    # Test that the pipeline preserves well-formed loops
-    # Use a large trip count to avoid automatic unrolling (default max is 16)
-    loop = IRLoop(name="r", counter_reg="c", n=100)
-    root = RootNode(insts=[loop])
-
-    lexer = IRLexer()
-    parser = IRParser(pmem_size=8192)
-
-    insts = lexer.flatten(parser.unparse(root))
-
-    pipeline = make_default_pipeline(pmem_capacity=8192)
-    # Actually wait, make_default_pipeline takes pmem_capacity, not config.
-    pipeline.config.enable_unroll_loop = False
-
-    opt_insts, _ctx = pipeline(insts)
-
-    out_ir = parser.parse(lexer.lex(opt_insts))
-
-    # Check that it's still well-formed
-    assert isinstance(out_ir.insts[0], IRLoop)
-    out_loop = out_ir.insts[0]
-    assert out_loop.counter_reg == "c"
-    assert out_loop.n == 100
 
 
 def test_irloop_emit_uses_s15_jump_for_large_pmem():

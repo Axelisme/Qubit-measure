@@ -23,8 +23,6 @@ class DeadLabelEliminationPass(OptimizationPassBase):
 
     def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:
         self.ctx = ctx
-        if not self.ctx.config.enable_dead_label:
-            return ir
 
         self._referenced_labels = _collect_referenced_labels(ir)
         res = self.visit(ir)

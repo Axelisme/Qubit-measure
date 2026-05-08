@@ -13,8 +13,6 @@ from .traversal import walk_basic_blocks
 @dataclass
 class PipeLineConfig:
     disable_all_opt: bool = False
-    enable_unroll_loop: bool = True
-    enable_dead_label: bool = True
     pmem_capacity: int | None = None
     pmem_budget: int | None = None
 
