@@ -138,30 +138,6 @@ def test_pattern_2_rejects_conditional_regwrite():
     assert block.branch.op is None
 
 
-def test_pattern_2_rejects_regwrite_with_extra_args():
-    block = BasicBlockNode(
-        insts=[
-            TestInst(op="r1 - #10"),
-            RegWriteInst(
-                dst="r2",
-                src="op",
-                op="r2 + #1",
-                extra_args={"COMMENT": "side effect"},
-            ),
-        ],
-        branch=JumpInst(label=Label("loop"), if_cond="S"),
-    )
-
-    LoopConditionMergeLinear().process_block(block)
-
-    assert len(block.insts) == 2
-    assert isinstance(block.insts[0], TestInst)
-    assert isinstance(block.insts[1], RegWriteInst)
-    assert block.branch is not None
-    assert block.branch.wr is None
-    assert block.branch.op is None
-
-
 def test_pattern_2_rejects_branch_with_uf():
     block = BasicBlockNode(
         insts=[
@@ -179,3 +155,4 @@ def test_pattern_2_rejects_branch_with_uf():
     assert block.branch is not None
     assert block.branch.wr is None
     assert block.branch.op is None
+

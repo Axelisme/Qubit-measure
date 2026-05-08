@@ -33,7 +33,7 @@ def test_linker_wait_address_calculation():
         insts=[
             BasicBlockNode(
                 labels=[LabelInst(name=Label("L1"))],
-                insts=[RegWriteInst(dst="r1", src="imm", extra_args={"LIT": "#1"})],
+                insts=[RegWriteInst(dst="r1", src="imm", lit="#1")],
             ),
             BasicBlockNode(
                 labels=[LabelInst(name=Label("L2"))],
@@ -41,7 +41,7 @@ def test_linker_wait_address_calculation():
             ),
             BasicBlockNode(
                 labels=[LabelInst(name=Label("L3"))],
-                insts=[RegWriteInst(dst="r2", src="imm", extra_args={"LIT": "#2"})],
+                insts=[RegWriteInst(dst="r2", src="imm", lit="#2")],
             ),
             BasicBlockNode(labels=[LabelInst(name=Label("L4"))]),
         ]
@@ -80,7 +80,7 @@ def test_linker_cursor_counts_wait_and_trailing_labels():
             ),
             BasicBlockNode(
                 labels=[LabelInst(name=Label("L2"))],
-                insts=[RegWriteInst(dst="r0", src="imm", extra_args={"LIT": "#0"})],
+                insts=[RegWriteInst(dst="r0", src="imm", lit="#0")],
             ),
         ]
     )

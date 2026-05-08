@@ -43,7 +43,7 @@ def test_jump_inst_analysis():
 
 def test_reg_write_inst_analysis():
     # imm src: no reads
-    inst = RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#42"})
+    inst = RegWriteInst(dst="s1", src="imm", lit="#42")
     assert instruction_writes(inst) == {"s1"}
     assert instruction_reads(inst) == set()
 
@@ -53,7 +53,7 @@ def test_reg_write_inst_analysis():
     assert instruction_reads(inst) == {"s2"}
 
     # op src: reads registers in OP
-    inst = RegWriteInst(dst="s1", src="op", extra_args={"OP": "s2+s3"})
+    inst = RegWriteInst(dst="s1", src="op", op="s2+s3")
     assert instruction_writes(inst) == {"s1"}
     assert instruction_reads(inst) == {"s2", "s3"}
 
@@ -61,7 +61,7 @@ def test_reg_write_inst_analysis():
 def test_port_write_inst_analysis():
     # DST is a plain port-channel number (e.g. "2"), not a register.
     # QICK always stores DST as str(tproc_ch); the "p" prefix is added by the assembler.
-    inst = PortWriteInst(dst="2", time="s1", extra_args={"PHASE": "s2"})
+    inst = PortWriteInst(dst="2", time="s1", phase="s2")
     assert instruction_writes(inst) == set()
     assert instruction_reads(inst) == {"s1", "s2"}
 
@@ -69,7 +69,7 @@ def test_port_write_inst_analysis():
 
 def test_strip_write_modifier():
     # Test DST with modifiers (though not common in REG_WR DST, good for robustness)
-    inst = RegWriteInst(dst="s1 << 16", src="imm", extra_args={"LIT": "#1"})
+    inst = RegWriteInst(dst="s1 << 16", src="imm", lit="#1")
     assert instruction_writes(inst) == {"s1"}
 
 
@@ -80,7 +80,7 @@ def test_mixed_registers():
 
 
 def test_property_types():
-    inst = RegWriteInst(dst="s1", src="op", extra_args={"OP": "s2+s3"})
+    inst = RegWriteInst(dst="s1", src="op", op="s2+s3")
     assert isinstance(inst.reg_read, list)
     assert isinstance(inst.reg_write, list)
     assert inst.reg_read == ["s2", "s3"]

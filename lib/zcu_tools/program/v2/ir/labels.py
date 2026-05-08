@@ -25,9 +25,8 @@ class Label:
 
     # Global allocator: tracks all allocated label names to guarantee uniqueness.
     # INVARIANT: Label.reset() must be called before each top-level build pass
-    # (i.e., before IRBuilder.build()). Failing to do so causes make_new() to
-    # append ever-increasing numeric suffixes across compilations.
-    label_set: set[str] = set()
+    # (i.e., before IRBuilder.build()).
+    _instances: dict[str, Label] = {}
 
     def __init__(self, name: str):
         self._name = name
@@ -44,11 +43,26 @@ class Label:
 
         name = base_name
         counter = 0
-        while name in cls.label_set:
+        while name in cls._instances:
             name = f"{base_name}_{counter}"
             counter += 1
-        cls.label_set.add(name)
-        return cls(name)
+        inst = cls(name)
+        cls._instances[name] = inst
+        return inst
+
+    @classmethod
+    def use_existing(cls, name: str) -> Label:
+        """Use an existing label by name, without guaranteeing uniqueness."""
+        if is_pseudo_label_name(name):
+            return cls(name)
+        if name not in cls._instances:
+            raise ValueError(f"Label name '{name}' has not been allocated yet.")
+        return cls._instances[name]
+
+    @property
+    def label_set(self) -> set[str]:
+        # Keep as property for backward compatibility if needed by other modules
+        return set(self._instances.keys())
 
     def clone_new(self) -> Label:
         """Create a new label derived from this one's name."""
@@ -70,19 +84,13 @@ class Label:
     @classmethod
     def reset(cls) -> None:
         """Clear the allocated label set. Must be called before each top-level build."""
-        cls.label_set.clear()
+        cls._instances.clear()
 
     def __str__(self) -> str:
         return self._name
 
     def __repr__(self) -> str:
         return f"Label({self._name})"
-
-    def __hash__(self):
-        return hash(id(self))
-
-    def __eq__(self, other):
-        return self is other
 
 
 def iter_label_references(inst: BaseInst) -> Iterable[Label]:

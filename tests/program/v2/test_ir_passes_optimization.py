@@ -114,8 +114,8 @@ def test_dead_write_elimination_removes_overwritten_write():
     root = RootNode(
         insts=[
             BasicBlockNode(insts=[
-                RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#1"}),
-                RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#2"}),
+                RegWriteInst(dst="s1", src="imm", lit="#1"),
+                RegWriteInst(dst="s1", src="imm", lit="#2"),
                 NopInst(),
             ]),
         ]
@@ -127,7 +127,7 @@ def test_dead_write_elimination_removes_overwritten_write():
     assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 2
     assert isinstance(bb.insts[0], RegWriteInst)
-    assert cast(RegWriteInst, bb.insts[0]).extra_args["LIT"] == "#2"
+    assert cast(RegWriteInst, bb.insts[0]).lit == "#2"
     assert isinstance(bb.insts[1], NopInst)
 
 
@@ -135,9 +135,9 @@ def test_dead_write_elimination_keeps_write_before_read():
     root = RootNode(
         insts=[
             BasicBlockNode(insts=[
-                RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#1"}),
+                RegWriteInst(dst="s1", src="imm", lit="#1"),
                 TestInst(op="s1 - #1"),
-                RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#2"}),
+                RegWriteInst(dst="s1", src="imm", lit="#2"),
             ]),
         ]
     )
@@ -148,7 +148,7 @@ def test_dead_write_elimination_keeps_write_before_read():
     assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 3
     assert [
-        cast(RegWriteInst, item).extra_args.get("LIT")
+        cast(RegWriteInst, item).lit
         for item in bb.insts
         if isinstance(item, RegWriteInst)
     ] == [
@@ -441,8 +441,8 @@ def test_default_pipeline_can_disable_all_optimization_passes():
     root = RootNode(
         insts=[
             BasicBlockNode(insts=[
-                RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#1"}),
-                RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#2"}),
+                RegWriteInst(dst="s1", src="imm", lit="#1"),
+                RegWriteInst(dst="s1", src="imm", lit="#2"),
             ]),
             BasicBlockNode(labels=[LabelInst(name=Label.make_new("dead"))], insts=[
                 TimeInst(c_op="inc_ref", lit="#0"),
@@ -999,8 +999,8 @@ def test_dead_write_elimination_removes_overwritten_write_in_basic_block():
     root = RootNode(
         insts=[
             BasicBlockNode(insts=[
-                RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#1"}),
-                RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#2"}),
+                RegWriteInst(dst="s1", src="imm", lit="#1"),
+                RegWriteInst(dst="s1", src="imm", lit="#2"),
             ]),
         ]
     )
@@ -1010,12 +1010,12 @@ def test_dead_write_elimination_removes_overwritten_write_in_basic_block():
     bb = root.insts[0]
     assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 1
-    assert bb.insts[0].extra_args.get("LIT") == "#2"
+    assert bb.insts[0].lit == "#2"
 
 
 def test_dead_write_elimination_nop_pads_fixed_basic_block():
-    r1 = RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#1"})
-    r2 = RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#2"})
+    r1 = RegWriteInst(dst="s1", src="imm", lit="#1")
+    r2 = RegWriteInst(dst="s1", src="imm", lit="#2")
     root = RootNode(
         insts=[
             BasicBlockNode(insts=[r1, r2], fix_addr_size=True),

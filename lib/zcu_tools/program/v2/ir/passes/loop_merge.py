@@ -16,7 +16,6 @@ def _is_pure_regwrite_op(inst: RegWriteInst) -> bool:
         and inst.wr is None
         and inst.label is None
         and inst.addr is None
-        and not inst.extra_args
     )
 
 
@@ -28,7 +27,6 @@ def _make_merged_branch(branch: JumpInst, inst: RegWriteInst) -> JumpInst:
         wr=f"{inst.dst} op",
         op=inst.op,
         uf=branch.uf,
-        extra_args=branch.extra_args,
     )
 
 

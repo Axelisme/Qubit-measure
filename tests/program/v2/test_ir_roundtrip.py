@@ -62,7 +62,8 @@ def test_structural_loop_roundtrip():
     lexer = IRLexer()
     parser = IRParser(pmem_size=1024)
 
-    insts = linker.unlink(prog_list, {}, meta_infos)
+    labels = {"loop1_start": "&0", "loop1_end": "&6"}
+    insts = linker.unlink(prog_list, labels, meta_infos)
     blocks = lexer.lex(insts)
     root = parser.parse(blocks)
 

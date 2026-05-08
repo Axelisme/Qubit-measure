@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from .pipeline import PipeLineConfig
 
 
-def estimate_body_scheduled_ticks(body: list["IRNode"]) -> int:
+def estimate_body_scheduled_ticks(body: list[IRNode]) -> int:
     """Lower-bound on inc_ref delay ticks in a body sequence.
 
     Dynamic (register-driven) `inc_ref` contributes 0 to the total — the
@@ -60,7 +60,7 @@ def estimate_body_scheduled_ticks(body: list["IRNode"]) -> int:
     return total
 
 
-def estimate_flat_size(nodes: list["IRNode"]) -> int:
+def estimate_flat_size(nodes: list[IRNode]) -> int:
     """Estimate the number of pmem words emitted by a node sequence.
 
     Used to check how many unrolled copies fit within the pmem budget before
@@ -109,7 +109,7 @@ def instruction_writes(inst: BaseInst) -> set[str]:
     return set(inst.reg_write)
 
 
-def estimate_body_cost(body: list["IRNode"], config: "PipeLineConfig") -> int:
+def estimate_body_cost(body: list[IRNode], config: PipeLineConfig) -> int:
     """Estimate the cycle cost of executing a sequence of IR nodes."""
 
     cost = 0

@@ -1,5 +1,5 @@
 from zcu_tools.program.v2.ir.instructions import (
-    Instruction,
+    BaseInst,
     JumpInst,
     LabelInst,
     RegWriteInst,
@@ -9,7 +9,10 @@ from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRBranch, IR
 
 
 def test_instruction_parses_jump_label_to_jumpinst():
-    inst = Instruction.from_dict({"CMD": "JUMP", "LABEL": "target"})
+    from zcu_tools.program.v2.ir.labels import Label
+    Label.reset()
+    Label.make_new("target")
+    inst = BaseInst.from_dict({"CMD": "JUMP", "LABEL": "target"})
 
     assert isinstance(inst, JumpInst)
     assert str(inst.label) == "target"

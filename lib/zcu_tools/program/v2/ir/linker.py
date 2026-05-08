@@ -63,25 +63,34 @@ class IRLinker:
     ) -> list[Instruction]:
         Label.reset()
 
-        # Parse fallback labels (labels added manually without calling _add_label)
-        labels_by_addr: dict[int, list[str]] = defaultdict(list)
-        tracked_labels = {m["name"] for m in meta_infos if m.get("kind") == "label"}
-        for label_name in labels.keys():
-            if label_name not in tracked_labels:
-                raise ValueError(f"Untracked label {label_name!r} in labels dict")
+        # 1. Strict Validation: Compare labels.keys() with labels tracked in meta_infos
+        tracked_label_names = {
+            m["name"] for m in meta_infos if m.get("kind") == "label"
+        }
+        provided_label_names = set(labels.keys())
 
-        logical_insts: list[Instruction] = []
-        label_map: dict[str, Label] = {}
+        if tracked_label_names != provided_label_names:
+            only_in_tracked = tracked_label_names - provided_label_names
+            only_in_provided = provided_label_names - tracked_label_names
+            msg = "Mismatch between tracked labels in meta_infos and provided labels dict."
+            if only_in_tracked:
+                msg += f" Missing in labels dict: {sorted(list(only_in_tracked))}."
+            if only_in_provided:
+                msg += f" Not found in meta_infos: {sorted(list(only_in_provided))}."
+            raise ValueError(msg)
 
-        def get_label(name: str) -> Label:
-            if name not in label_map:
-                label_map[name] = Label.make_new(name)
-            return label_map[name]
+        # 2. Pre-allocation: Initialize Label identities based on meta_infos
+        # We sort to ensure deterministic behavior if suffixes are ever needed,
+        # though since we just reset, they will match exactly.
+        for name in sorted(list(tracked_label_names)):
+            Label.make_new(name)
 
         # Group tracked markers by p_addr
         markers_by_addr: dict[int, list[dict]] = defaultdict(list)
         for m in meta_infos:
             markers_by_addr[m["p_addr"]].append(m)
+
+        logical_insts: list[Instruction] = []
 
         for d in prog_list:
             p_addr = d["P_ADDR"]
@@ -90,50 +99,57 @@ class IRLinker:
             for m in markers_by_addr.get(p_addr, []):
                 if m["kind"] == "label":
                     logical_insts.append(
-                        LabelInst(
-                            name=get_label(m["name"]),
-                            can_remove=m.get("can_remove", False),
+                        LabelInst.from_dict(
+                            {
+                                "kind": "label",
+                                "name": m["name"],
+                                "can_remove": m.get("can_remove", False),
+                            }
                         )
                     )
                 elif m["kind"] == "meta":
                     logical_insts.append(
-                        MetaInst(type=m["type"], name=m["name"], info=m.get("info", {}))
+                        MetaInst.from_dict(
+                            {
+                                "kind": "meta",
+                                "type": m["type"],
+                                "name": m["name"],
+                                "info": m.get("info", {}),
+                            }
+                        )
                     )
 
             # Remove from markers_by_addr so we don't process it again for trailing
             if p_addr in markers_by_addr:
                 del markers_by_addr[p_addr]
 
-            # 2. Insert untracked fallback labels pointing to this P_ADDR
-            for name in labels_by_addr.get(p_addr, []):
-                logical_insts.append(LabelInst(name=get_label(name)))
-
-            # 3. Insert the instruction itself
-            logical_insts.append(Instruction.from_dict(d, label_map=label_map))
+            # 2. Insert the instruction itself
+            logical_insts.append(BaseInst.from_dict(d))
 
         # Handle trailing markers from meta_infos
         for p_addr, markers in sorted(markers_by_addr.items()):
             for m in markers:
                 if m["kind"] == "label":
                     logical_insts.append(
-                        LabelInst(
-                            name=get_label(m["name"]),
-                            can_remove=m.get("can_remove", False),
+                        LabelInst.from_dict(
+                            {
+                                "kind": "label",
+                                "name": m["name"],
+                                "can_remove": m.get("can_remove", False),
+                            }
                         )
                     )
                 elif m["kind"] == "meta":
                     logical_insts.append(
-                        MetaInst(type=m["type"], name=m["name"], info=m.get("info", {}))
+                        MetaInst.from_dict(
+                            {
+                                "kind": "meta",
+                                "type": m["type"],
+                                "name": m["name"],
+                                "info": m.get("info", {}),
+                            }
+                        )
                     )
-
-        # Handle trailing fallback labels
-        if prog_list:
-            last_dict = prog_list[-1]
-            last_inst = Instruction.from_dict(last_dict, label_map=label_map)
-            assert isinstance(last_inst, BaseInst)
-            max_addr = last_dict["P_ADDR"] + last_inst.addr_inc
-            for name in labels_by_addr.get(max_addr, []):
-                logical_insts.append(LabelInst(name=get_label(name)))
 
         return logical_insts
 

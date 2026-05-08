@@ -41,18 +41,12 @@ class TestTimeInstruction:
     def test_construction_with_all_fields(self):
         inst = TimeInst(c_op="inc_ref", lit="#10", r1="r0")
         assert inst.c_op == "inc_ref"
-        assert getattr(inst, "lit") == "#10"
+        assert inst.lit == "#10"
         assert inst.r1 == "r0"
-
-    def test_construction_with_defaults(self):
-        inst = TimeInst()
-        assert inst.c_op == ""
-        assert inst.lit is None
-        assert inst.r1 is None
 
     def test_dispatch_time_to_timeinst(self):
         d = {"CMD": "TIME", "C_OP": "inc_ref", "LIT": "#5", "R1": "r1"}
-        inst = Instruction.from_dict(d)
+        inst = BaseInst.from_dict(d)
         assert isinstance(inst, TimeInst)
         assert inst.c_op == "inc_ref"
         assert inst.lit == "#5"
@@ -60,13 +54,13 @@ class TestTimeInstruction:
 
     def test_roundtrip_time_full(self):
         original = {"CMD": "TIME", "C_OP": "inc_ref", "LIT": "#10", "R1": "r1"}
-        inst = Instruction.from_dict(original)
+        inst = BaseInst.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
 
     def test_roundtrip_time_minimal(self):
         original = {"CMD": "TIME", "C_OP": "trigger"}
-        inst = Instruction.from_dict(original)
+        inst = BaseInst.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
 
@@ -86,20 +80,20 @@ class TestTestInstruction:
 
     def test_dispatch_test_to_testinst(self):
         d = {"CMD": "TEST", "OP": "r1==r2", "UF": "1"}
-        inst = Instruction.from_dict(d)
+        inst = BaseInst.from_dict(d)
         assert isinstance(inst, TestInst)
         assert inst.op == "r1==r2"
         assert inst.uf == "1"
 
     def test_roundtrip_test_full(self):
         original = {"CMD": "TEST", "OP": "r3 & #255", "UF": "1"}
-        inst = Instruction.from_dict(original)
+        inst = BaseInst.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
 
     def test_roundtrip_test_minimal(self):
         original = {"CMD": "TEST", "OP": "r1"}
-        inst = Instruction.from_dict(original)
+        inst = BaseInst.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
 
@@ -129,39 +123,49 @@ class TestJumpInstruction:
         assert inst.addr == "s15"
 
     def test_dispatch_jump_unconditional(self):
+        Label.reset()
+        Label.make_new("loop")
         d = {"CMD": "JUMP", "LABEL": "loop"}
-        inst = Instruction.from_dict(d)
+        inst = BaseInst.from_dict(d)
         assert isinstance(inst, JumpInst)
         assert str(inst.label) == "loop"
         assert inst.if_cond is None
 
     def test_dispatch_jump_conditional(self):
+        Label.reset()
+        Label.make_new("end")
         d = {"CMD": "JUMP", "LABEL": "end", "IF": "nz"}
-        inst = Instruction.from_dict(d)
+        inst = BaseInst.from_dict(d)
         assert isinstance(inst, JumpInst)
         assert str(inst.label) == "end"
         assert inst.if_cond == "nz"
 
     def test_dispatch_jump_with_addr(self):
         d = {"CMD": "JUMP", "ADDR": "s15", "IF": "eq"}
-        inst = Instruction.from_dict(d)
+        inst = BaseInst.from_dict(d)
         assert isinstance(inst, JumpInst)
         assert inst.addr == "s15"
         assert inst.if_cond == "eq"
 
     def test_roundtrip_jump_unconditional(self):
+        Label.reset()
+        Label.make_new("loop")
         original = {"CMD": "JUMP", "LABEL": "loop"}
-        inst = Instruction.from_dict(original)
+        inst = BaseInst.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
 
     def test_roundtrip_jump_conditional(self):
+        Label.reset()
+        Label.make_new("end")
         original = {"CMD": "JUMP", "LABEL": "end", "IF": "eq"}
-        inst = Instruction.from_dict(original)
+        inst = BaseInst.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
 
     def test_roundtrip_jump_with_raw_control_fields(self):
+        Label.reset()
+        Label.make_new("loop")
         original = {
             "CMD": "JUMP",
             "LABEL": "loop",
@@ -170,33 +174,37 @@ class TestJumpInstruction:
             "OP": "s1 + #1",
             "UF": "1",
         }
-        inst = Instruction.from_dict(original)
+        inst = BaseInst.from_dict(original)
         assert isinstance(inst, JumpInst)
         assert inst.wr == "s1 op"
         assert inst.op == "s1 + #1"
         assert inst.uf == "1"
+
         assert inst.to_dict() == original
 
     def test_roundtrip_jump_special_labels(self):
         """Test QICK special labels: NEXT, PREV, HERE, SKIP."""
         for label in ["NEXT", "PREV", "HERE", "SKIP"]:
             original = {"CMD": "JUMP", "LABEL": label}
-            inst = Instruction.from_dict(original)
+            inst = BaseInst.from_dict(original)
             recovered = inst.to_dict()
             assert recovered == original
 
     def test_dispatch_jump_with_label_addr(self):
+        Label.reset()
+        Label.make_new("loop")
         d = {"CMD": "JUMP", "ADDR": "&loop"}
-        inst = Instruction.from_dict(d)
+        inst = BaseInst.from_dict(d)
         assert isinstance(inst, JumpInst)
         assert isinstance(inst.addr, Label)
         assert str(inst.addr) == "loop"
+
         assert inst.to_dict() == d
 
     def test_dispatch_jump_rejects_plain_string_label_addr(self):
         d = {"CMD": "JUMP", "ADDR": "loop"}
         with pytest.raises(ValueError, match="plain string labels are not supported"):
-            Instruction.from_dict(d)
+            BaseInst.from_dict(d)
 
     def test_jump_constructor_rejects_plain_string_label_addr(self):
         with pytest.raises(ValueError, match="register address"):
@@ -205,7 +213,7 @@ class TestJumpInstruction:
     def test_dispatch_jump_rejects_non_s15_register_addr(self):
         d = {"CMD": "JUMP", "ADDR": "r0"}
         with pytest.raises(ValueError, match="must be 's15'"):
-            Instruction.from_dict(d)
+            BaseInst.from_dict(d)
 
     def test_jump_constructor_rejects_non_s15_register_addr(self):
         with pytest.raises(ValueError, match="must be 's15'"):
@@ -219,40 +227,40 @@ class TestJumpInstruction:
     def test_jump_minimal(self):
         """Empty JUMP should work (no label, no addr)."""
         d = {"CMD": "JUMP"}
-        inst = Instruction.from_dict(d)
+        inst = BaseInst.from_dict(d)
         assert isinstance(inst, JumpInst)
         assert inst.label is None
         assert inst.addr is None
+        assert inst.to_dict() == d
 
 
 class TestRegWriteInstruction:
     """Tests for RegWriteInst (REG_WR opcode)."""
 
     def test_construction_imm_source(self):
-        inst = RegWriteInst(dst="s1", src="imm", extra_args={"LIT": "#10"})
+        inst = RegWriteInst(dst="s1", src="imm", lit="#10")
         assert inst.dst == "s1"
         assert inst.src == "imm"
-        assert inst.extra_args == {"LIT": "#10"}
+        assert inst.lit == "#10"
 
     def test_construction_op_source(self):
-        inst = RegWriteInst(dst="s2", src="op", extra_args={"OP": "s1+#1", "UF": "0"})
+        inst = RegWriteInst(dst="s2", src="op", op="s1+#1", uf="0")
         assert inst.dst == "s2"
         assert inst.src == "op"
-        assert inst.op is None
-        assert inst.extra_args["OP"] == "s1+#1"
+        assert inst.op == "s1+#1"
+        assert inst.uf == "0"
 
     def test_dispatch_regwr_imm(self):
         d = {"CMD": "REG_WR", "DST": "s1", "SRC": "imm", "LIT": "#0"}
-        inst = Instruction.from_dict(d)
+        inst = BaseInst.from_dict(d)
         assert isinstance(inst, RegWriteInst)
         assert inst.dst == "s1"
         assert inst.src == "imm"
         assert inst.lit == "#0"
-        assert inst.extra_args == {}
 
     def test_dispatch_regwr_op(self):
         d = {"CMD": "REG_WR", "DST": "s2", "SRC": "op", "OP": "s1+#1", "UF": "1"}
-        inst = Instruction.from_dict(d)
+        inst = BaseInst.from_dict(d)
         assert isinstance(inst, RegWriteInst)
         assert inst.src == "op"
         assert inst.op == "s1+#1"
@@ -260,28 +268,29 @@ class TestRegWriteInstruction:
     def test_dispatch_regwr_dmem_lowering(self):
         """REG_WR src=dmem is recognized as DmemReadInst."""
         d = {"CMD": "REG_WR", "DST": "r0", "SRC": "dmem", "ADDR": "&123"}
-        inst = Instruction.from_dict(d)
+        Label.reset()
+        Label.make_new("123")
+        inst = BaseInst.from_dict(d)
         assert isinstance(inst, DmemReadInst)
         assert inst.src == "dmem"
         assert inst.dst == "r0"
 
-    def test_dispatch_legacy_dmem_rd_lowering(self):
-        """DMEM_RD opcode is also recognized as DmemReadInst."""
+    def test_dispatch_legacy_dmem_rd_raises(self):
+        """DMEM_RD opcode is NO LONGER recognized."""
         d = {"CMD": "DMEM_RD", "DST": "r1", "ADDR": "s15"}
-        inst = Instruction.from_dict(d)
-        assert isinstance(inst, DmemReadInst)
-        assert inst.dst == "r1"
+        with pytest.raises(ValueError, match="Unknown instruction opcode"):
+            BaseInst.from_dict(d)
 
     def test_roundtrip_regwr(self):
         original = {"CMD": "REG_WR", "DST": "s1", "SRC": "imm", "LIT": "#100"}
-        inst = Instruction.from_dict(original)
+        inst = BaseInst.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
 
     def test_dispatch_regwr_rejects_plain_string_label_addr(self):
         d = {"CMD": "REG_WR", "DST": "r0", "SRC": "dmem", "ADDR": "table_base"}
         with pytest.raises(ValueError, match="plain string labels are not supported"):
-            Instruction.from_dict(d)
+            BaseInst.from_dict(d)
 
     def test_regwr_immutable(self):
         inst = RegWriteInst(dst="s1", src="imm")
@@ -292,25 +301,24 @@ class TestRegWriteInstruction:
 class TestPortWriteInstruction:
     """Tests for PortWriteInst (WPORT_WR opcode)."""
 
-    def test_construction_with_extra_args(self):
-        inst = PortWriteInst(
-            dst="0", time="t0", extra_args={"DATA": "0x1234", "PHASE": "#0"}
-        )
+    def test_construction_with_specific_fields(self):
+        inst = PortWriteInst(dst="0", time="t0", data="0x1234", phase="#0")
         assert inst.dst == "0"
         assert inst.time == "t0"
-        assert inst.extra_args["DATA"] == "0x1234"
+        assert inst.data == "0x1234"
+        assert inst.phase == "#0"
 
     def test_dispatch_wport_wr(self):
         d = {"CMD": "WPORT_WR", "DST": "1", "TIME": "t1", "DATA": "0xABCD"}
-        inst = Instruction.from_dict(d)
+        inst = BaseInst.from_dict(d)
         assert isinstance(inst, PortWriteInst)
         assert inst.dst == "1"
         assert inst.time == "t1"
-        assert inst.extra_args["DATA"] == "0xABCD"
+        assert inst.data == "0xABCD"
 
     def test_roundtrip_wport_wr(self):
         original = {"CMD": "WPORT_WR", "DST": "0", "TIME": "t0", "DATA": "0x5678"}
-        inst = Instruction.from_dict(original)
+        inst = BaseInst.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
 
@@ -322,14 +330,14 @@ class TestPortWriteInstruction:
             "ADDR": "&12",
             "TIME": "@10",
         }
-        inst = Instruction.from_dict(original)
+        inst = BaseInst.from_dict(original)
         assert isinstance(inst, PortWriteInst)
         assert inst.src == "wmem"
         assert inst.addr == "&12"
-        assert inst.extra_args == {}
-        assert inst.to_dict() == original
+        recovered = inst.to_dict()
+        assert recovered == original
 
-    def test_wport_wr_preserves_unknown_fields(self):
+    def test_wport_wr_preserves_specific_fields(self):
         """WPORT_WR can have various data fields that must be preserved."""
         original = {
             "CMD": "WPORT_WR",
@@ -338,12 +346,12 @@ class TestPortWriteInstruction:
             "PHASE": "#45",
             "FREQ": "#100",
         }
-        inst = Instruction.from_dict(original)
+        inst = BaseInst.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
 
     def test_wport_wr_immutable(self):
-        inst = PortWriteInst(dst="0", time="t0")
+        inst = PortWriteInst(dst="0")
         with pytest.raises(Exception):
             inst.dst = "1"  # type: ignore
 
@@ -351,12 +359,12 @@ class TestPortWriteInstruction:
 class TestUnknownOpcode:
     def test_dispatch_unknown_opcode_raises(self):
         with pytest.raises(ValueError, match="Unknown instruction opcode"):
-            Instruction.from_dict({"CMD": "UNKNOWN_OP", "FIELD1": "value1"})
+            BaseInst.from_dict({"CMD": "UNKNOWN_OP", "FIELD1": "value1"})
 
     def test_dispatch_dport_wr_to_specific(self):
         """DPORT_WR is specially handled; should be DportWriteInst."""
         d = {"CMD": "DPORT_WR", "DST": "0", "DATA": "1"}
-        inst = Instruction.from_dict(d)
+        inst = BaseInst.from_dict(d)
         assert isinstance(inst, DportWriteInst)
         assert inst.dst == "0"
         assert inst.data == "1"
@@ -367,11 +375,11 @@ class TestWmemWriteInstruction:
 
     def test_dispatch_wmem_wr(self):
         d = {"CMD": "WMEM_WR", "ADDR": "&5", "TIME": "@10", "WP": "r_wave p0"}
-        inst = Instruction.from_dict(d)
+        inst = BaseInst.from_dict(d)
         assert isinstance(inst, WmemWriteInst)
         assert inst.addr == "&5"
         assert inst.time == "@10"
-        assert inst.extra_args["WP"] == "r_wave p0"
+        assert inst.wp == "r_wave p0"
 
     def test_roundtrip_wmem_wr(self):
         original = {
@@ -381,7 +389,7 @@ class TestWmemWriteInstruction:
             "WR": "r_wave",
             "OP": "s1 + #1",
         }
-        inst = Instruction.from_dict(original)
+        inst = BaseInst.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
 
@@ -395,7 +403,7 @@ class TestWaitInstruction:
 
     def test_wait_roundtrip(self):
         original = {"CMD": "WAIT", "C_OP": "time", "TIME": "@10", "ADDR": "s15"}
-        inst = Instruction.from_dict(original)
+        inst = BaseInst.from_dict(original)
         assert isinstance(inst, WaitInst)
         assert inst.time == "@10"
         assert inst.addr == "s15"
@@ -410,30 +418,29 @@ class TestLabelInstruction:
     """Tests for LabelInst."""
 
     def test_label_only(self):
-        d = {"LABEL": "my_label"}
-        inst = Instruction.from_dict(d)
+        Label.reset()
+        Label.make_new("my_label")
+        d = {"kind": "label", "name": "my_label"}
+        inst = LabelInst.from_dict(d)
         assert isinstance(inst, LabelInst)
         assert str(inst.name) == "my_label"
-        assert inst.args == {}
 
-    def test_label_with_extra_args(self):
-        d = {"LABEL": "loop_start", "EXTRA": "data"}
-        inst = Instruction.from_dict(d)
+    def test_label_with_can_remove(self):
+        Label.reset()
+        Label.make_new("loop_start")
+        d = {"kind": "label", "name": "loop_start", "can_remove": True}
+        inst = LabelInst.from_dict(d)
         assert isinstance(inst, LabelInst)
         assert str(inst.name) == "loop_start"
-        assert inst.args["EXTRA"] == "data"
+        assert inst.can_remove is True
 
     def test_label_roundtrip(self):
-        original = {"LABEL": "end_loop"}
-        inst = Instruction.from_dict(original)
+        Label.reset()
+        Label.make_new("end_loop")
+        original = {"kind": "label", "name": "end_loop", "can_remove": False}
+        inst = LabelInst.from_dict(original)
         recovered = inst.to_dict()
-        expected = {
-            "LABEL": "end_loop",
-            "kind": "label",
-            "name": "end_loop",
-            "can_remove": False,
-        }
-        assert recovered == expected
+        assert recovered == original
 
 
 class TestLabelCloneSemantics:
@@ -442,12 +449,19 @@ class TestLabelCloneSemantics:
         cloned = deepcopy(label)
         assert cloned is label
 
-    def test_deepcopy_renames_normal_label(self):
+    def test_deepcopy_preserves_normal_label_identity_by_shared_mapping(self):
+        # NOTE: Label identity management ensures that labels with the same name
+        # refer to the same object within a compilation scope.
         Label.reset()
-        label = Label.make_new("loop")
-        cloned = deepcopy(label)
-        assert cloned is not label
-        assert cloned.name != label.name
+        l1 = Label.make_new("loop")
+        l2 = Label.use_existing("loop")
+        assert l1 is l2
+        
+        cloned = deepcopy(l1)
+        # Deepcopy of Label now calls clone_new() which calls make_new().
+        # Since 'loop' already exists, make_new('loop') will return 'loop_0'.
+        assert cloned.name == "loop_0"
+        assert cloned is not l1
 
 
 class TestMetaInstruction:
@@ -456,7 +470,7 @@ class TestMetaInstruction:
     def test_meta_construction(self):
         inst = MetaInst(type="loop", name="loop_1", info={"n": 10})
         assert inst.type == "loop"
-        assert str(inst.name) == "loop_1"
+        assert inst.name == "loop_1"
         assert inst.info["n"] == 10
 
 
@@ -471,11 +485,13 @@ class TestConditionalJumpPattern:
 
     def test_test_then_jump_pattern(self):
         """Simulate conditional jump as TEST + JUMP sequence."""
+        Label.reset()
+        Label.make_new("end")
         test_dict = {"CMD": "TEST", "OP": "r1-#10", "UF": "1"}
         jump_dict = {"CMD": "JUMP", "LABEL": "end", "IF": "eq"}
 
-        test_inst = Instruction.from_dict(test_dict)
-        jump_inst = Instruction.from_dict(jump_dict)
+        test_inst = BaseInst.from_dict(test_dict)
+        jump_inst = BaseInst.from_dict(jump_dict)
 
         assert isinstance(test_inst, TestInst)
         assert isinstance(jump_inst, JumpInst)
@@ -486,10 +502,12 @@ class TestConditionalJumpPattern:
 
     def test_conditional_jump_conditions(self):
         """Test various condition codes for conditional jumps."""
+        Label.reset()
+        Label.make_new("target")
         conditions = ["eq", "nz", "z", "f", "s", "ns"]
         for cond in conditions:
             d = {"CMD": "JUMP", "LABEL": "target", "IF": cond}
-            inst = Instruction.from_dict(d)
+            inst = BaseInst.from_dict(d)
             assert isinstance(inst, JumpInst)
             assert inst.if_cond == cond
             assert inst.to_dict() == d
@@ -500,76 +518,21 @@ class TestEdgeCases:
 
     def test_missing_cmd_raises_error(self):
         with pytest.raises(ValueError):
-            Instruction.from_dict({"FIELD": "value"})
+            BaseInst.from_dict({"FIELD": "value"})
 
     def test_empty_cmd_raises_error(self):
         with pytest.raises(ValueError):
-            Instruction.from_dict({"CMD": ""})
+            BaseInst.from_dict({"CMD": ""})
 
-    def test_label_without_cmd_recognized(self):
-        """LABEL-only dicts are recognized even without CMD."""
+    def test_label_dict_without_kind_raises_error(self):
+        """Strict IR: only kind='label' is supported."""
         d = {"LABEL": "test_label"}
-        inst = Instruction.from_dict(d)
-        assert isinstance(inst, LabelInst)
+        with pytest.raises(ValueError, match="Invalid LabelInst format"):
+            LabelInst.from_dict(d)
 
     def test_mixed_optional_fields(self):
         """Instructions with selective optional fields."""
         d = {"CMD": "TIME", "C_OP": "inc_ref"}
-        inst = Instruction.from_dict(d)
-        assert getattr(inst, "lit") is None
-        assert getattr(inst, "r1") is None
-
-
-class TestInstructionHierarchy:
-    """Verify the three-layer inheritance structure."""
-
-    CONCRETE_INSTS = [
-        TimeInst(),
-        TestInst(),
-        JumpInst(),
-        RegWriteInst(),
-        PortWriteInst(),
-        NopInst(),
-        DmemReadInst(),
-        DmemWriteInst(),
-        WmemWriteInst(),
-        DportWriteInst(),
-        WaitInst(),
-    ]
-
-    def test_concrete_insts_are_base_inst(self):
-        for inst in self.CONCRETE_INSTS:
-            assert isinstance(inst, BaseInst), f"{type(inst).__name__} should be BaseInst"
-
-    def test_concrete_insts_are_instruction(self):
-        for inst in self.CONCRETE_INSTS:
-            assert isinstance(inst, Instruction), f"{type(inst).__name__} should be Instruction"
-
-    def test_label_inst_is_not_base_inst(self):
-        inst = LabelInst()
-        assert isinstance(inst, Instruction)
-        assert not isinstance(inst, BaseInst)
-        assert not hasattr(inst, "addr_inc")
-        assert not hasattr(inst, "reg_read")
-        assert not hasattr(inst, "reg_write")
-        assert not hasattr(inst, "need_label")
-
-    def test_meta_inst_is_not_base_inst(self):
-        inst = MetaInst()
-        assert isinstance(inst, Instruction)
-        assert not isinstance(inst, BaseInst)
-        assert not hasattr(inst, "addr_inc")
-        assert not hasattr(inst, "reg_read")
-        assert not hasattr(inst, "reg_write")
-        assert not hasattr(inst, "need_label")
-
-    def test_base_inst_default_properties(self):
-        """BaseInst subclasses with no overrides return the correct defaults."""
-        inst = NopInst()
-        assert inst.addr_inc == 1
-        assert inst.reg_read == []
-        assert inst.reg_write == []
-        assert inst.need_label is None
-
-    def test_wait_inst_addr_inc_override(self):
-        assert WaitInst().addr_inc == 2
+        inst = BaseInst.from_dict(d)
+        assert inst.lit is None
+        assert inst.r1 is None

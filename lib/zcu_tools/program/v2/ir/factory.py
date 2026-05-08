@@ -35,9 +35,7 @@ class IRLexer:
 
     # -- lex -----------------------------------------------------------------
 
-    def lex(
-        self, insts: list[Instruction]
-    ) -> list[Union[BasicBlockNode, MetaInst]]:
+    def lex(self, insts: list[Instruction]) -> list[Union[BasicBlockNode, MetaInst]]:
         """Chunk a flat instruction list into BasicBlockNodes and MetaInsts.
 
         Splitting rules:
@@ -57,10 +55,10 @@ class IRLexer:
             nonlocal pending_labels, pending_insts, pending_branch
             if pending_labels or pending_insts or pending_branch is not None:
                 bb = BasicBlockNode(
-                        labels=pending_labels,
-                        insts=pending_insts,
-                        branch=pending_branch,
-                    )
+                    labels=pending_labels,
+                    insts=pending_insts,
+                    branch=pending_branch,
+                )
                 bb.fix_addr_size = in_fix_addr
                 result.append(bb)
             pending_labels = []
@@ -139,9 +137,7 @@ class IRParser:
     # parse
     # -----------------------------------------------------------------------
 
-    def parse(
-        self, items: list[Union[BasicBlockNode, MetaInst]]
-    ) -> RootNode:
+    def parse(self, items: list[Union[BasicBlockNode, MetaInst]]) -> RootNode:
         self._check_sese(items)
         root = RootNode()
         pos = [0]
@@ -152,9 +148,7 @@ class IRParser:
     # SESE validation
     # -----------------------------------------------------------------------
 
-    def _check_sese(
-        self, items: list[Union[BasicBlockNode, MetaInst]]
-    ) -> None:
+    def _check_sese(self, items: list[Union[BasicBlockNode, MetaInst]]) -> None:
         """Verify that no jump from outside a structural region targets a label
         defined inside the region's control skeleton (the skip-segments between
         LOOP_START and LOOP_BODY_START, or between any BRANCH meta markers and
@@ -234,7 +228,7 @@ class IRParser:
                 continue
             if not isinstance(item, BasicBlockNode):
                 continue
-            for jump in ([item.branch] if item.branch else []):
+            for jump in [item.branch] if item.branch else []:
                 if jump.label is not None and str(jump.label) in control_labels:
                     raise ValueError(
                         f"IRParser: jump to control label {str(jump.label)!r} from "
@@ -278,9 +272,7 @@ class IRParser:
             )
         item = items[pos[0]]
         if not isinstance(item, MetaInst) or item.type != expected_type:
-            raise ValueError(
-                f"IRParser: expected META {expected_type!r}, got {item!r}"
-            )
+            raise ValueError(f"IRParser: expected META {expected_type!r}, got {item!r}")
         pos[0] += 1
         return item
 
@@ -306,7 +298,9 @@ class IRParser:
             n=start_meta.info["n"],
             range_hint=start_meta.info.get("range_hint"),
         )
-        self._parse_block(items, pos, loop.body, end_markers=frozenset({"LOOP_BODY_END"}))
+        self._parse_block(
+            items, pos, loop.body, end_markers=frozenset({"LOOP_BODY_END"})
+        )
         self._consume_meta(items, pos, "LOOP_BODY_END")
 
         # Skip physical back-edge / end-label blocks up to LOOP_END
@@ -370,9 +364,7 @@ class IRParser:
     # unparse
     # -----------------------------------------------------------------------
 
-    def unparse(
-        self, root: RootNode
-    ) -> list[Union[BasicBlockNode, MetaInst]]:
+    def unparse(self, root: RootNode) -> list[Union[BasicBlockNode, MetaInst]]:
         """Lower an IR tree back to a flat list of BasicBlockNode / MetaInst.
 
         IRLoop and IRBranch are lowered here (logic moved from node.py).
@@ -410,9 +402,7 @@ class IRParser:
                 )
         return result
 
-    def _lower_loop(
-        self, node: IRLoop
-    ) -> list[Union[BasicBlockNode, MetaInst]]:
+    def _lower_loop(self, node: IRLoop) -> list[Union[BasicBlockNode, MetaInst]]:
         """Lower IRLoop into BasicBlockNodes + MetaInst markers.
 
         Shape:
@@ -480,9 +470,7 @@ class IRParser:
 
         return lexer.lex(pre) + self._unparse_block_node(node.body) + lexer.lex(post)
 
-    def _lower_branch(
-        self, node: IRBranch
-    ) -> list[Union[BasicBlockNode, MetaInst]]:
+    def _lower_branch(self, node: IRBranch) -> list[Union[BasicBlockNode, MetaInst]]:
         """Lower IRBranch into BasicBlockNodes using binary dispatch."""
         n = len(node.cases)
         result: list[Union[BasicBlockNode, MetaInst]] = []

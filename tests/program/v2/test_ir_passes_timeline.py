@@ -43,24 +43,6 @@ def test_zero_delay_dce_removes_plain_zero_increment():
     assert isinstance(bb.insts[1], NopInst)
 
 
-def test_zero_delay_dce_removes_zero_increment_with_extra_args():
-    root = RootNode(
-        insts=[
-            BasicBlockNode(insts=[
-                TimeInst(c_op="inc_ref", lit="#0", extra_args={"IR_X": 1}),
-                NopInst(),
-            ])
-        ]
-    )
-
-    out = _run_dce(root)
-
-    bb = out.insts[0]
-    assert isinstance(bb, BasicBlockNode)
-    assert len(bb.insts) == 1
-    assert isinstance(bb.insts[0], NopInst)
-
-
 def test_timed_instruction_merge_merges_plain_adjacent_increments():
     # New aggressive behavior: TIME sinks past NopInst, merges at end.
     root = RootNode(
@@ -81,25 +63,6 @@ def test_timed_instruction_merge_merges_plain_adjacent_increments():
     assert isinstance(bb.insts[0], NopInst)
     assert isinstance(bb.insts[1], TimeInst)
     assert bb.insts[1].lit == "#5"
-
-
-def test_timed_instruction_merge_merges_adjacent_increments_with_extra_args():
-    root = RootNode(
-        insts=[
-            BasicBlockNode(insts=[
-                TimeInst(c_op="inc_ref", lit="#2", extra_args={"IR_X": 1}),
-                TimeInst(c_op="inc_ref", lit="#3", extra_args={"IR_Y": 2}),
-            ])
-        ]
-    )
-
-    out = _run_merge(root)
-
-    bb = out.insts[0]
-    assert isinstance(bb, BasicBlockNode)
-    assert len(bb.insts) == 1
-    assert isinstance(bb.insts[0], TimeInst)
-    assert bb.insts[0].lit == "#5"
 
 
 def test_timed_instruction_merge_sinks_past_zero_increment():
