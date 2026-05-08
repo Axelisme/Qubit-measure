@@ -428,10 +428,10 @@ def test_unroll_partial_unroll_loop_bound_uses_full_unrolled_iterations():
     assert len(out.insts) == 1
     block = out.insts[0]
     assert isinstance(block, BlockNode)
-    assert isinstance(block.insts[0], IRLoop)
-    assert cast(IRLoop, block.insts[0]).n == 96
-    # 3 remainder copies, each with body + increment = 2 insts
-    assert len(block.insts[1:]) == 6
+    assert isinstance(block.insts[0], BasicBlockNode)  # init_bb
+    assert isinstance(block.insts[1], IRLoop)
+    assert cast(IRLoop, block.insts[1]).n == 99
+    assert len(block.insts) == 2
 
 
 def test_default_pipeline_can_disable_all_optimization_passes():
@@ -493,10 +493,10 @@ def test_unroll_no_scheduled_ticks_uses_zero_delay_budget():
     assert len(out.insts) == 1
     assert isinstance(out.insts[0], BlockNode)
     block = cast(BlockNode, out.insts[0])
-    assert isinstance(block.insts[0], IRLoop)
-    assert cast(IRLoop, block.insts[0]).n == 96  # (100 // 8) * 8
-    # remainder=4, body_size=5, each copy has body+increment → 4*(5+1)
-    assert len(block.insts) == 1 + 4 * 6
+    assert isinstance(block.insts[0], BasicBlockNode)
+    assert isinstance(block.insts[1], IRLoop)
+    assert cast(IRLoop, block.insts[1]).n == 100
+    assert len(block.insts) == 2
 
 
 def test_unroll_dynamic_delay_only_body_uses_zero_delay_budget():
@@ -523,10 +523,10 @@ def test_unroll_dynamic_delay_only_body_uses_zero_delay_budget():
     assert len(out.insts) == 1
     assert isinstance(out.insts[0], BlockNode)
     block = cast(BlockNode, out.insts[0])
-    assert isinstance(block.insts[0], IRLoop)
-    assert cast(IRLoop, block.insts[0]).n == 16  # (20 // 8) * 8
-    # remainder=4, each copy has body+increment = 2 insts
-    assert len(block.insts) == 1 + 4 * 2  # remainder=4
+    assert isinstance(block.insts[0], BasicBlockNode)
+    assert isinstance(block.insts[1], IRLoop)
+    assert cast(IRLoop, block.insts[1]).n == 20
+    assert len(block.insts) == 2
 
 
 def test_unroll_mixed_literal_and_dynamic_delay_uses_literal_budget():
@@ -807,10 +807,10 @@ def test_unroll_cpmg_style_body_triggers():
     assert len(out.insts) == 1
     block = out.insts[0]
     assert isinstance(block, BlockNode)
-    assert isinstance(block.insts[0], IRLoop)
-    assert cast(IRLoop, block.insts[0]).n == 48  # (50 // 8) * 8
-    # Remainder: 50 % 8 = 2, each copy: body(4 BasicBlockNodes) + increment(1) = 5 items.
-    assert len(block.insts) == 1 + 2 * 5
+    assert isinstance(block.insts[0], BasicBlockNode)
+    assert isinstance(block.insts[1], IRLoop)
+    assert cast(IRLoop, block.insts[1]).n == 50
+    assert len(block.insts) == 2
 
 
 # ---------------------------------------------------------------------------

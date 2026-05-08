@@ -11,8 +11,8 @@ from ..analysis import (
     estimate_body_scheduled_ticks,
     estimate_flat_size,
 )
-from ..factory import IRParser
-from ..instructions import RegWriteInst
+from ..factory import IRParser, _needs_big_jump
+from ..instructions import JumpInst, LabelInst, RegWriteInst
 from ..labels import Label
 from ..node import BasicBlockNode, BlockNode, IRLoop, IRNode
 from .base import OptimizationPassBase
@@ -195,11 +195,11 @@ class UnrollSmallLoopPass(OptimizationPassBase):
             iters = n // k
             remainder = n % k
 
-            # Full expansion: n // k <= 1. A 1-iteration loop + remainder uses
-            # more pmem (2 overhead words) than just fully expanding n copies inline.
-            if iters <= 1:
+            # Full expansion: n <= k. A loop of n copies is at most k copies,
+            # which is our unroll limit anyway. Fully expanding saves loop overhead.
+            if n <= k:
                 logger.debug(
-                    "UnrollSmallLoopPass: fully expand loop name=%s n=%s k=%s (iters <= 1)",
+                    "UnrollSmallLoopPass: fully expand loop name=%s n=%s k=%s (n <= k)",
                     node.name,
                     n,
                     k,
@@ -239,23 +239,48 @@ class UnrollSmallLoopPass(OptimizationPassBase):
             )
 
             pmem_size = self.ctx.pmem_size
+            result: list[IRNode] = []
+
+            if remainder > 0:
+                entry_label = Label.make_new(f"{node.name}_remainder_entry")
+
+                part1 = _clone_body_nodes(node.body.insts, k - remainder, pmem_size=pmem_size)
+                part2 = _clone_body_nodes(node.body.insts, remainder, pmem_size=pmem_size)
+
+                if not part2:
+                    part2 = [BasicBlockNode(labels=[LabelInst(name=entry_label)])]
+                else:
+                    part2[0].labels.append(LabelInst(name=entry_label))
+
+                unrolled_body = part1 + part2
+
+                if _needs_big_jump(pmem_size):
+                    init_bb = BasicBlockNode(
+                        insts=[
+                            RegWriteInst(dst=node.counter_reg, src="imm", lit="#0"),
+                            RegWriteInst(dst="s15", src="label", label=entry_label),
+                        ],
+                        branch=JumpInst(addr="s15")
+                    )
+                else:
+                    init_bb = BasicBlockNode(
+                        insts=[RegWriteInst(dst=node.counter_reg, src="imm", lit="#0")],
+                        branch=JumpInst(label=entry_label)
+                    )
+                result.append(init_bb)
+            else:
+                unrolled_body = _clone_body_nodes(node.body.insts, k, pmem_size=pmem_size)
+
             # IRLoop.body already represents a full iteration, including the
             # counter update even if later peephole passes moved it physically.
-            unrolled_body = _clone_body_nodes(node.body.insts, k, pmem_size=pmem_size)
-            full_iters = iters * k
             new_loop = IRLoop(
                 name=f"{node.name}_unrolled",
                 counter_reg=node.counter_reg,
-                # This unrolled loop body now executes k full logical
-                # iterations per loop-round, so it stops at `iters * k`.
-                n=full_iters,
+                n=n,
                 body=BlockNode(insts=list(unrolled_body)),
             )
-            result: list[IRNode] = [new_loop]
-            if remainder > 0:
-                result.extend(
-                    _clone_body_nodes(node.body.insts, remainder, pmem_size=pmem_size)
-                )
+            result.append(new_loop)
+
             return BlockNode(insts=result)
 
         # ── Register-driven (no exact hint) → jump-table dispatch ──
