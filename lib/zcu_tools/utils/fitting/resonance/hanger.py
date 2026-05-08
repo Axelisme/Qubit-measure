@@ -68,8 +68,10 @@ class HangerModel:
     ) -> NDArray[np.complex128]:
         dx = Ql * (freqs / freq - 1)
         center = a0 * (1 - np.exp(1j * phi) * (Ql / abs(Qc)) / 2)
-        vector = -a0 * np.exp(1j * phi) * (Ql / abs(Qc)) / 2 * (1 - 2j * dx) / (1 + 2j * dx)
-        S_rot = center + vector * np.exp(1j * bg_slope * freqs)
+        vector = (
+            -a0 * np.exp(1j * phi) * (Ql / abs(Qc)) / 2 * (1 - 2j * dx) / (1 + 2j * dx)
+        )
+        S_rot = center + vector * np.exp(1j * bg_slope * (freqs - freq))
         return S_rot * np.exp(-1j * 2 * np.pi * freqs * edelay)
 
     @classmethod
@@ -86,7 +88,9 @@ class HangerModel:
 
         rot_signals = remove_edelay(freqs, signals, edelay)
         circle_params = fit_circle_params(rot_signals.real, rot_signals.imag)
-        freq, Ql, theta0, bg_slope = fit_resonant_params(freqs, rot_signals, circle_params, fit_bg_slope=fit_bg_slope)
+        freq, Ql, theta0, bg_slope = fit_resonant_params(
+            freqs, rot_signals, circle_params, fit_bg_slope=fit_bg_slope
+        )
         a0 = calc_background_signals(circle_params, theta0)
         _, (norm_xc, norm_yc, norm_r0) = normalize_signal(
             rot_signals, circle_params, a0
@@ -131,6 +135,8 @@ class HangerModel:
         xc, yc, r0 = circle_params
         norm_xc, norm_yc, norm_r0 = norm_circle_params
 
+        bg_phases = theta0 + bg_slope * (freqs - freq)
+
         fig = plt.figure(figsize=(9, 8))
         spec = fig.add_gridspec(2, 2)
         ax1 = fig.add_subplot(spec[0, 0])
@@ -156,6 +162,7 @@ class HangerModel:
         ax1.set_xlabel(r"$Re(S_{21})$")
         ax1.set_ylabel(r"$Im(S_{21})$")
 
+        ax2.plot(freqs, bg_phases, "k--", label="background", alpha=0.5)
         ax2.plot(freqs, calc_phase(rot_signals, xc, yc), ".", label="data")
         ax2.plot(freqs, phase_func(freqs, freq, Ql, theta0, bg_slope), label="fit")
         ax2.axvline(freq, color="k", linestyle="--")

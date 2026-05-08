@@ -91,11 +91,7 @@ def fit_edelay(freqs: NDArray[np.float64], signals: NDArray[np.complex128]) -> f
         xc, yc, r0 = fit_circle_params(rot_signals.real, rot_signals.imag)
         norm_signals = rot_signals - (xc + 1j * yc)
 
-        circle_loss = np.sum((r0 - np.abs(norm_signals)) ** 2).item()
-        phase_loss = np.maximum(
-            2 * np.pi, np.ptp(np.unwrap(np.angle(norm_signals)))
-        ).item()
-        return circle_loss + phase_loss
+        return np.sum((r0 - np.abs(norm_signals)) ** 2).item()
 
     fit_range = 5.0 / np.ptp(freqs)
     edelays = np.linspace(-fit_range, fit_range, 1000)
@@ -112,9 +108,17 @@ def calc_phase(
 
 
 def phase_func(
-    freqs: NDArray[np.float64], resonant_f: float, Ql: float, theta0: float, bg_slope: float = 0.0
+    freqs: NDArray[np.float64],
+    resonant_f: float,
+    Ql: float,
+    theta0: float,
+    bg_slope: float = 0.0,
 ) -> NDArray[np.float64]:
-    return theta0 + 2 * np.arctan(2 * Ql * (1 - freqs / resonant_f)) + bg_slope * freqs
+    return (
+        theta0
+        + 2 * np.arctan(2 * Ql * (1 - freqs / resonant_f))
+        + bg_slope * (freqs - resonant_f)
+    )
 
 
 def fit_resonant_params(
@@ -134,6 +138,8 @@ def fit_resonant_params(
     init_Ql = 2 * init_freq / fwhm
     init_theta0 = 0.5 * float(np.max(phases) + np.min(phases))
 
+    bg_slope_est = abs((phases[-1] - phases[0]) / (freqs[-1] - freqs[0]))
+
     fixedparams: list[Union[float, None]] = [None] * 4
     if not fit_theta0:
         init_theta0 = np.angle(circle_params[0] + 1j * circle_params[1]).item()
@@ -151,13 +157,13 @@ def fit_resonant_params(
         phase_func,
         init_p=[init_freq, init_Ql, init_theta0, 0.0],
         bounds=(
-            [np.min(freqs), 0, init_theta0 - np.pi, -np.inf],
-            [np.max(freqs), 5 * init_Ql, init_theta0 + np.pi, np.inf],
+            [np.min(freqs), 0, init_theta0 - np.pi, -1.1 * bg_slope_est],
+            [np.max(freqs), 5 * init_Ql, init_theta0 + np.pi, 1.1 * bg_slope_est],
         ),
         fixedparams=fixedparams,
     )
 
-    return cast(tuple[float, float, float, float], tuple(pOpt))
+    return (pOpt[0], pOpt[1], pOpt[2], pOpt[3])
 
 
 def normalize_signal(

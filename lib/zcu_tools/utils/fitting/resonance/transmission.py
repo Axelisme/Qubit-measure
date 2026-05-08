@@ -52,7 +52,7 @@ class TransmissionModel:
         dx = Ql * (freqs / freq - 1)
         center = a0 / 2
         vector = (a0 / 2) * (1 - 2j * dx) / (1 + 2j * dx)
-        S_rot = center + vector * np.exp(1j * bg_slope * freqs)
+        S_rot = center + vector * np.exp(1j * bg_slope * (freqs - freq))
         return S_rot * np.exp(-1j * 2 * np.pi * freqs * edelay)
 
     @classmethod
@@ -70,7 +70,11 @@ class TransmissionModel:
         rot_signals = remove_edelay(freqs, signals, edelay)
         circle_params = fit_circle_params(rot_signals.real, rot_signals.imag)
         freq, Ql, theta0, bg_slope = fit_resonant_params(
-            freqs, rot_signals, circle_params, fit_theta0=False, fit_bg_slope=fit_bg_slope
+            freqs,
+            rot_signals,
+            circle_params,
+            fit_theta0=False,
+            fit_bg_slope=fit_bg_slope,
         )
         a0 = calc_peak_signals(circle_params, theta0)
 
@@ -110,6 +114,8 @@ class TransmissionModel:
         )
         norm_xc, norm_yc, norm_r0 = norm_circle_params
 
+        bg_phases = theta0 + bg_slope * (freqs - freq)
+
         fig = plt.figure(figsize=(9, 8))
         spec = fig.add_gridspec(2, 2)
         ax1 = fig.add_subplot(spec[0, 0])
@@ -127,6 +133,7 @@ class TransmissionModel:
         ax1.set_xlabel(r"$Re(S_{21})$")
         ax1.set_ylabel(r"$Im(S_{21})$")
 
+        ax2.plot(freqs, bg_phases, "k--", label="background", alpha=0.5)
         ax2.plot(freqs, calc_phase(rot_signals, xc, yc), ".", label="data")
         ax2.plot(freqs, phase_func(freqs, freq, Ql, theta0, bg_slope), label="fit")
         ax2.axvline(freq, color="k", linestyle="--")
