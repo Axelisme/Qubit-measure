@@ -435,6 +435,7 @@ def test_unroll_partial_unroll_loop_bound_uses_full_unrolled_iterations():
 
 
 def test_default_pipeline_can_disable_all_optimization_passes():
+    from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
     """Disabling all pass flags should keep the IR layout unchanged."""
     Label.reset()
     root = RootNode(
@@ -454,8 +455,12 @@ def test_default_pipeline_can_disable_all_optimization_passes():
     pipeline = make_default_pipeline(pmem_capacity=8192)
     pipeline.config.disable_all_opt = True
 
-    out, _ctx = pipeline(root)
+    lexer = IRLexer()
+    parser = IRParser(pmem_size=8192)
+    insts = lexer.flatten(parser.unparse(root))
 
+    out_insts, _ctx = pipeline(insts)
+    out = parser.parse(lexer.lex(out_insts))
     assert len(out.insts) == 2
     bb0 = cast(BasicBlockNode, out.insts[0])
     assert isinstance(bb0.insts[0], RegWriteInst)

@@ -1,4 +1,3 @@
-from zcu_tools.program.v2.ir.builder import IRBuilder
 from zcu_tools.program.v2.ir.instructions import (
     Instruction,
     JumpInst,
@@ -118,10 +117,10 @@ def test_unlink_supports_multiple_labels_same_address():
 
 
 def test_builder_build_accepts_qick_labels_map():
-    from unittest.mock import MagicMock
-    mock_prog = MagicMock()
-    mock_prog.tproccfg = {"pmem_size": 2048}
-    builder = IRBuilder(mock_prog)
+    from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
+    from zcu_tools.program.v2.ir.linker import IRLinker
+    
+    linker = IRLinker()
     prog_list = [
         {"CMD": "REG_WR", "DST": "r1", "SRC": "imm", "LIT": "#0", "P_ADDR": 1},
         {"CMD": "TEST", "OP": "r1 - #5", "UF": "0", "P_ADDR": 2},
@@ -164,7 +163,11 @@ def test_builder_build_accepts_qick_labels_map():
         },
     ]
 
-    root = builder.build(prog_list, labels, meta_infos)
+    insts = linker.unlink(prog_list, labels, meta_infos)
+    lexer = IRLexer()
+    parser = IRParser(pmem_size=2048)
+    blocks = lexer.lex(insts)
+    root = parser.parse(blocks)
 
     assert len(root.insts) == 1
     loop = root.insts[0]

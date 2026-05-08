@@ -5,7 +5,7 @@ import logging
 from qick.asm_v2 import QickProgramV2
 from typing_extensions import Any, Optional
 
-from .builder import IRBuilder
+from .linker import IRLinker
 from .pipeline import make_default_pipeline
 
 logger = logging.getLogger(__name__)
@@ -37,20 +37,16 @@ class IRCompileMixin(QickProgramV2):
         labels = self.labels
         meta_infos = self.meta_infos
 
-        builder = IRBuilder(self)
-        ir = builder.build(insts, labels, meta_infos)
-
-        logger.debug(f"Initial IR:\n{ir}")
+        linker = IRLinker()
+        logical_insts = linker.unlink(insts, labels, meta_infos)
 
         pipeline = make_default_pipeline(pmem_capacity=self.tproccfg["pmem_size"])
 
-        opt_ir, _ctx = pipeline(ir)
+        opt_insts, _ctx = pipeline(logical_insts)
 
-        logger.debug("Optimized IR:\n%s", opt_ir)
+        opt_prog_list, opt_labels, opt_meta_infos, cursor = linker.link(opt_insts)
 
-        opt_insts, opt_labels, opt_meta_infos, cursor = builder.unbuild(opt_ir)
-
-        self.prog_list = opt_insts
+        self.prog_list = opt_prog_list
         self.labels = opt_labels
         self.meta_infos = opt_meta_infos
 

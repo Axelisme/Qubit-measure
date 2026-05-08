@@ -203,8 +203,14 @@ def test_v1_jump_table_entry_blocks_not_modified_by_pipeline():
         ]
     )
 
+    from zcu_tools.program.v2.ir.pipeline import PipeLineContext, _run_linear_passes
     pipeline = make_default_pipeline(pmem_capacity=512)
-    out, _ = pipeline(root)
+    ctx = PipeLineContext(config=pipeline.config, pmem_size=512)
+    out = root
+    _run_linear_passes(pipeline.linear_passes, out)
+    for p in pipeline.ir_passes:
+        out = p.process(out, ctx)
+        _run_linear_passes(pipeline.linear_passes, out)
 
     groups = _collect_entry_groups(out)
     assert len(groups) > 0, "no entry groups produced"
@@ -245,11 +251,16 @@ def test_v2_fully_unrolled_loop_produces_single_fused_block():
         ]
     )
 
+    from zcu_tools.program.v2.ir.pipeline import PipeLineContext, _run_linear_passes
     pipeline = make_default_pipeline(pmem_capacity=512)
-    out, _ = pipeline(root)
+    ctx = PipeLineContext(config=pipeline.config, pmem_size=512)
+    out = root
+    _run_linear_passes(pipeline.linear_passes, out)
+    for p in pipeline.ir_passes:
+        out = p.process(out, ctx)
+        _run_linear_passes(pipeline.linear_passes, out)
 
     bbs = _collect_all_basic_blocks(out)
-
     # After merge, all non-fixed BasicBlockNodes with plain insts should have
     # been fused into a minimal set. Specifically, no two adjacent non-fixed
     # blocks should be mergeable (i.e., one without branch followed by one
@@ -287,8 +298,14 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
         ]
     )
 
+    from zcu_tools.program.v2.ir.pipeline import PipeLineContext, _run_linear_passes
     pipeline = make_default_pipeline(pmem_capacity=512)
-    out, _ = pipeline(root)
+    ctx = PipeLineContext(config=pipeline.config, pmem_size=512)
+    out = root
+    _run_linear_passes(pipeline.linear_passes, out)
+    for p in pipeline.ir_passes:
+        out = p.process(out, ctx)
+        _run_linear_passes(pipeline.linear_passes, out)
 
     writes_to_r_out = [
         inst for inst in walk_instructions(out)
@@ -297,7 +314,6 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
     assert len(writes_to_r_out) == 1, (
         f"expected 1 surviving write to r_out, got {len(writes_to_r_out)}"
     )
-
 
 # ---------------------------------------------------------------------------
 # Validation 3: fix_addr_size=True blocks use NOP padding, not branch deletion
@@ -358,8 +374,14 @@ def test_v3_fixed_block_instruction_count_preserved_after_pipeline():
         ]
     )
 
+    from zcu_tools.program.v2.ir.pipeline import PipeLineContext, _run_linear_passes
     pipeline = make_default_pipeline(pmem_capacity=512)
-    out, _ = pipeline(root)
+    ctx = PipeLineContext(config=pipeline.config, pmem_size=512)
+    out = root
+    _run_linear_passes(pipeline.linear_passes, out)
+    for p in pipeline.ir_passes:
+        out = p.process(out, ctx)
+        _run_linear_passes(pipeline.linear_passes, out)
 
     groups = _collect_entry_groups(out)
     assert len(groups) > 0, "no entry groups produced"

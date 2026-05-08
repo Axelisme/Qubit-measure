@@ -4,8 +4,11 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass, field
 
+from .factory import IRLexer, IRParser
+from .instructions import Instruction
 from .node import BasicBlockNode, RootNode
 from .traversal import walk_basic_blocks
+from .labels import Label
 
 
 @dataclass
@@ -52,9 +55,6 @@ class AbsIRPass(ABC):
 
     @abstractmethod
     def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode: ...
-
-
-AbsPipeLinePass = AbsIRPass  # backwards-compatible alias
 
 
 class AbsLinearPass(ABC):
@@ -104,7 +104,9 @@ def _validate_linear_pass_result(
 def _run_linear_passes(passes: list[AbsLinearPass], ir: RootNode) -> None:
     for block in walk_basic_blocks(ir):
         for lp in passes:
-            before_addr_words = _block_addr_words(block) if block.fix_addr_size else None
+            before_addr_words = (
+                _block_addr_words(block) if block.fix_addr_size else None
+            )
             lp.process_block(block)
             _validate_linear_pass_result(block, before_addr_words=before_addr_words)
 
@@ -133,20 +135,31 @@ class IRPipeLine:
         self.linear_passes = linear_passes
         self.ir_passes = ir_passes
 
-    def __call__(self, ir: RootNode) -> tuple[RootNode, PipeLineContext]:
+    def __call__(
+        self, insts: list[Instruction]
+    ) -> tuple[list[Instruction], PipeLineContext]:
+
         ctx = PipeLineContext(config=self.config, pmem_size=self.config.pmem_capacity)
-        if self.config.disable_all_opt:
-            return ir, ctx
 
-        # Stage 1: Pre-LIR
-        _run_linear_passes(self.linear_passes, ir)
+        lexer = IRLexer()
+        parser = IRParser(pmem_size=self.config.pmem_capacity)
 
-        # Stage 2: HIR structural passes, with linear passes around each
-        for _pass in self.ir_passes:
-            ir = _pass.process(ir, ctx)
+        blocks = lexer.lex(insts)
+        ir = parser.parse(blocks)
+
+        if not self.config.disable_all_opt:
+            # Stage 1: Pre-LIR
             _run_linear_passes(self.linear_passes, ir)
 
-        return ir, ctx
+            # Stage 2: HIR structural passes, with linear passes around each
+            for _pass in self.ir_passes:
+                ir = _pass.process(ir, ctx)
+                _run_linear_passes(self.linear_passes, ir)
+
+        opt_blocks = parser.unparse(ir)
+        opt_insts = lexer.flatten(opt_blocks)
+
+        return opt_insts, ctx
 
 
 # ---------------------------------------------------------------------------

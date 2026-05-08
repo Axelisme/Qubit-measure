@@ -1,13 +1,14 @@
-from typing import Any
 from unittest.mock import MagicMock
 
-from zcu_tools.program.v2.ir.builder import IRBuilder
 from zcu_tools.program.v2.ir.instructions import NopInst, RegWriteInst
 from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRLoop, RootNode
 from zcu_tools.program.v2.ir.pipeline import make_default_pipeline
 
 
 def test_structural_loop_roundtrip():
+    from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
+    from zcu_tools.program.v2.ir.linker import IRLinker
+
     # This test verifies that we can build a structural IR from instructions,
     # and unbuild it back to instructions.
 
@@ -55,10 +56,13 @@ def test_structural_loop_roundtrip():
         },
     ]
 
-    prog = MagicMock()
-    prog.tproccfg = {"pmem_size": 1024}
-    builder = IRBuilder(prog)
-    root = builder.build(prog_list, {}, meta_infos)
+    linker = IRLinker()
+    lexer = IRLexer()
+    parser = IRParser(pmem_size=1024)
+
+    insts = linker.unlink(prog_list, {}, meta_infos)
+    blocks = lexer.lex(insts)
+    root = parser.parse(blocks)
 
     # Verify IR structure
     assert len(root.insts) == 1
@@ -70,7 +74,9 @@ def test_structural_loop_roundtrip():
     # start_label / end_label are no longer captured during parse (generated at lower() time).
 
     # Unbuild (emits instructions)
-    opt_insts, *_, cursor = builder.unbuild(root)
+    opt_blocks = parser.unparse(root)
+    opt_insts = lexer.flatten(opt_blocks)
+    opt_prog_list, *_, cursor = linker.link(opt_insts)
 
     # Verify emitted instructions (no markers).
     # IRLoop.emit() (do-while + guard, constant n: no guard) outputs:
@@ -79,26 +85,35 @@ def test_structural_loop_roundtrip():
     expected_cmds = ["REG_WR"]  # Init counter
     expected_cmds.append("NOP")  # Body
     expected_cmds.append("REG_WR")  # counter += 1
-    expected_cmds.append("JUMP")  # Cond back-edge (IF=NS, OP=counter-n)
+    expected_cmds.append("JUMP")  # Cond back-edge (IF=S, OP=counter-n)
 
     # Note: Labels are extracted into a dictionary when creating binprog, but `emit()` outputs them as LabelInst dicts.
-    cmds = [inst.get("CMD") for inst in opt_insts if "CMD" in inst]
+    cmds = [inst.get("CMD") for inst in opt_prog_list if "CMD" in inst]
     assert cmds == expected_cmds
     assert cursor.final_p_addr == 4
     assert cursor.final_line == 6
 
 
 def test_pipeline_roundtrip_with_normalization():
+    from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
+
     # Test that the pipeline preserves well-formed loops
     # Use a large trip count to avoid automatic unrolling (default max is 16)
     loop = IRLoop(name="r", counter_reg="c", n=100)
     root = RootNode(insts=[loop])
 
+    lexer = IRLexer()
+    parser = IRParser(pmem_size=8192)
+
+    insts = lexer.flatten(parser.unparse(root))
+
     pipeline = make_default_pipeline(pmem_capacity=8192)
     # Actually wait, make_default_pipeline takes pmem_capacity, not config.
     pipeline.config.enable_unroll_loop = False
 
-    out_ir, _ctx = pipeline(root)
+    opt_insts, _ctx = pipeline(insts)
+
+    out_ir = parser.parse(lexer.lex(opt_insts))
 
     # Check that it's still well-formed
     assert isinstance(out_ir.insts[0], IRLoop)
@@ -108,6 +123,9 @@ def test_pipeline_roundtrip_with_normalization():
 
 
 def test_irloop_emit_uses_s15_jump_for_large_pmem():
+    from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
+    from zcu_tools.program.v2.ir.linker import IRLinker
+
     root = RootNode(
         insts=[
             IRLoop(
@@ -132,10 +150,12 @@ def test_irloop_emit_uses_s15_jump_for_large_pmem():
         ]
     )
 
-    prog = MagicMock()
-    prog.tproccfg = {"pmem_size": 4096}
-    builder = IRBuilder(prog)
-    prog_list, *_, cursor = builder.unbuild(root)
+    lexer = IRLexer()
+    parser = IRParser(pmem_size=4096)
+    linker = IRLinker()
+
+    insts = lexer.flatten(parser.unparse(root))
+    prog_list, *_, cursor = linker.link(insts)
 
     # Constant n: no guard. Body already contains counter += 1; then cond back-edge.
     # Big-pmem path: back-edge target loaded into s15, then JUMP s15.

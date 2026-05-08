@@ -72,6 +72,7 @@ class IRLinker:
         labels: dict[str, Any],
         meta_infos: list[dict[str, Any]],
     ) -> list[Instruction]:
+        Label.reset()
         # Parse fallback labels (labels added manually without calling _add_label)
         labels_by_addr: dict[int, list[str]] = defaultdict(list)
         tracked_labels = {m["name"] for m in meta_infos if m.get("kind") == "label"}
