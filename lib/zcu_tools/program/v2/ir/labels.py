@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from typing_extensions import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .instructions import Instruction
+    from .instructions import BaseInst
 
 PSEUDO_LABELS = frozenset({"PREV", "HERE", "NEXT", "SKIP"})
 
@@ -85,7 +85,7 @@ class Label:
         return self is other
 
 
-def iter_label_references(inst: Instruction) -> Iterable[Label]:
+def iter_label_references(inst: BaseInst) -> Iterable[Label]:
     label = inst.need_label
     if label:
         return (label,)

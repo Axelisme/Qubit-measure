@@ -7,13 +7,13 @@ from .labels import Label, is_pseudo_label_name, is_register_addr
 from .utils import regs_from_value, strip_write_modifier
 
 
-def _is_pseudo_label(value: Optional["Label"]) -> bool:
+def _is_pseudo_label(value: Optional[Label]) -> bool:
     if value is None:
         return False
     return is_pseudo_label_name(value.name)
 
 
-def _serialize_addr(value: Optional[Union[str, "Label"]]) -> Optional[str]:
+def _serialize_addr(value: Optional[Union[str, Label]]) -> Optional[str]:
     if value is None:
         return None
     if isinstance(value, Label):
@@ -27,7 +27,7 @@ def _serialize_addr(value: Optional[Union[str, "Label"]]) -> Optional[str]:
 
 
 def _validate_addr_value(
-    value: Optional[Union[str, "Label"]], *, field_name: str
+    value: Optional[Union[str, Label]], *, field_name: str
 ) -> None:
     if value is None or isinstance(value, Label):
         return
@@ -40,7 +40,7 @@ def _validate_addr_value(
         )
 
 
-def _validate_jump_addr_target(value: Optional[Union[str, "Label"]]) -> None:
+def _validate_jump_addr_target(value: Optional[Union[str, Label]]) -> None:
     if value is None or isinstance(value, Label):
         return
     if value == "s15":
@@ -60,31 +60,11 @@ def _residual_fields(source: dict[str, Any], handled: set[str]) -> dict[str, Any
 class Instruction:
     """Base class for all IR instructions."""
 
-    @property
-    def addr_inc(self) -> int:
-        """Number of machine-code words this instruction will occupy."""
-        return 1
-
-    @property
-    def reg_read(self) -> list[str]:
-        """Registers read by this instruction."""
-        return []
-
-    @property
-    def reg_write(self) -> list[str]:
-        """Registers written by this instruction."""
-        return []
-
-    @property
-    def need_label(self) -> Optional["Label"]:
-        """Label name this instruction depends on (e.g. for JUMP or WR_ADDR)."""
-        return None
-
     @classmethod
     def from_dict(
-        cls, d: dict[str, Any], label_map: Optional[dict[str, "Label"]] = None
-    ) -> "Instruction":
-        def get_label(name: Any) -> Optional["Label"]:
+        cls, d: dict[str, Any], label_map: Optional[dict[str, Label]] = None
+    ) -> Instruction:
+        def get_label(name: Any) -> Optional[Label]:
             if not name:
                 return None
             if isinstance(name, Label):
@@ -99,7 +79,7 @@ class Instruction:
                 return Label(name)
             return None
 
-        def resolve_addr(raw_addr: Any) -> Optional[Union[str, "Label"]]:
+        def resolve_addr(raw_addr: Any) -> Optional[Union[str, Label]]:
             if raw_addr is None:
                 return None
             if isinstance(raw_addr, Label):
@@ -304,13 +284,43 @@ class Instruction:
 
 
 @dataclass(frozen=True)
+class BaseInst(Instruction):
+    """Base class for real machine instructions that occupy program memory."""
+
+    @property
+    def addr_inc(self) -> int:
+        """Number of machine-code words this instruction will occupy."""
+        return 1
+
+    @property
+    def reg_read(self) -> list[str]:
+        """Registers read by this instruction."""
+        return []
+
+    @property
+    def reg_write(self) -> list[str]:
+        """Registers written by this instruction."""
+        return []
+
+    @property
+    def need_label(self) -> Optional[Label]:
+        """Label name this instruction depends on (e.g. for JUMP or WR_ADDR)."""
+        return None
+
+
+@dataclass(frozen=True)
 class LabelInst(Instruction):
-    name: Optional["Label"] = None
+    name: Optional[Label] = None
     args: dict[str, Any] = field(default_factory=dict)
     can_remove: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"LABEL": str(self.name)}
+        d: dict[str, Any] = {
+            "LABEL": str(self.name),
+            "kind": "label",
+            "name": str(self.name),
+            "can_remove": self.can_remove,
+        }
         d.update(self.args)
         return d
 
@@ -323,21 +333,17 @@ class MetaInst(Instruction):
     name: str = ""
     info: dict[str, Any] = field(default_factory=dict)
 
-    @property
-    def addr_inc(self) -> int:
-        return 0  # MetaInst occupies no program memory
-
     def to_dict(self) -> dict[str, Any]:
         return {
-            "CMD": "__META__",
-            "TYPE": self.type,
-            "NAME": self.name,
-            "INFO": self.info,
+            "kind": "meta",
+            "type": self.type,
+            "name": self.name,
+            "info": self.info,
         }
 
 
 @dataclass(frozen=True)
-class TimeInst(Instruction):
+class TimeInst(BaseInst):
     """TIME instruction: advance timing counter."""
 
     c_op: str = ""  # inc_ref, trigger, etc.
@@ -360,7 +366,7 @@ class TimeInst(Instruction):
 
 
 @dataclass(frozen=True)
-class TestInst(Instruction):
+class TestInst(BaseInst):
     """TEST instruction: evaluate condition for conditional branch."""
 
     __test__ = False
@@ -381,12 +387,12 @@ class TestInst(Instruction):
 
 
 @dataclass(frozen=True)
-class JumpInst(Instruction):
+class JumpInst(BaseInst):
     """JUMP instruction: unconditional or conditional jump."""
 
-    label: Optional["Label"] = None  # Target label
+    label: Optional[Label] = None  # Target label
     if_cond: Optional[str] = None  # Condition for conditional jump (e.g., "eq", "nz")
-    addr: Optional[Union[str, "Label"]] = (
+    addr: Optional[Union[str, Label]] = (
         None  # Direct address for large jumps (e.g., "s15" or label)
     )
     wr: Optional[str] = None  # Optional register write control string
@@ -414,7 +420,7 @@ class JumpInst(Instruction):
         return []
 
     @property
-    def need_label(self) -> Optional["Label"]:
+    def need_label(self) -> Optional[Label]:
         if self.label and not _is_pseudo_label(self.label):
             return self.label
 
@@ -441,18 +447,18 @@ class JumpInst(Instruction):
 
 
 @dataclass(frozen=True)
-class RegWriteInst(Instruction):
+class RegWriteInst(BaseInst):
     """REG_WR instruction: write to register."""
 
     dst: str = ""  # Destination register
     src: str = ""  # Source: 'op' (ALU operation), 'imm' (immediate), 'reg' (register), 'dmem' (memory)
     op: Optional[str] = None
     lit: Optional[str] = None
-    addr: Optional[Union[str, "Label"]] = None
+    addr: Optional[Union[str, Label]] = None
     uf: Optional[str] = None
     wr: Optional[str] = None
     if_cond: Optional[str] = None
-    label: Optional["Label"] = None
+    label: Optional[Label] = None
     extra_args: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -475,7 +481,7 @@ class RegWriteInst(Instruction):
         return [strip_write_modifier(self.dst)]
 
     @property
-    def need_label(self) -> Optional["Label"]:
+    def need_label(self) -> Optional[Label]:
         if self.label and not _is_pseudo_label(self.label):
             return self.label
 
@@ -507,7 +513,7 @@ class RegWriteInst(Instruction):
 
 
 @dataclass(frozen=True)
-class PortWriteInst(Instruction):
+class PortWriteInst(BaseInst):
     """WPORT_WR instruction: write to output port."""
 
     dst: str = ""  # Destination (output port)
@@ -560,7 +566,7 @@ class PortWriteInst(Instruction):
 
 
 @dataclass(frozen=True)
-class NopInst(Instruction):
+class NopInst(BaseInst):
     """NOP instruction: no operation."""
 
     extra_args: dict[str, Any] = field(default_factory=dict)
@@ -572,18 +578,18 @@ class NopInst(Instruction):
 
 
 @dataclass(frozen=True)
-class DmemReadInst(Instruction):
+class DmemReadInst(BaseInst):
     """DMEM read lowered to the native REG_WR form."""
 
     dst: str = ""  # Destination register
     src: str = "dmem"
-    addr: Optional[Union[str, "Label"]] = None  # Memory address (register or label)
+    addr: Optional[Union[str, Label]] = None  # Memory address (register or label)
     wr: Optional[str] = None
     op: Optional[str] = None
     lit: Optional[str] = None
     uf: Optional[str] = None
     if_cond: Optional[str] = None
-    label: Optional["Label"] = None
+    label: Optional[Label] = None
     extra_args: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -605,7 +611,7 @@ class DmemReadInst(Instruction):
         return [strip_write_modifier(self.dst)]
 
     @property
-    def need_label(self) -> Optional["Label"]:
+    def need_label(self) -> Optional[Label]:
         if self.label and not _is_pseudo_label(self.label):
             return self.label
 
@@ -634,7 +640,7 @@ class DmemReadInst(Instruction):
 
 
 @dataclass(frozen=True)
-class DmemWriteInst(Instruction):
+class DmemWriteInst(BaseInst):
     """DMEM_WR instruction: write to data memory."""
 
     dst: str = ""  # Memory destination
@@ -672,7 +678,7 @@ class DmemWriteInst(Instruction):
 
 
 @dataclass(frozen=True)
-class WmemWriteInst(Instruction):
+class WmemWriteInst(BaseInst):
     """WMEM_WR instruction: write wave registers into wave memory."""
 
     addr: Optional[str] = None
@@ -713,7 +719,7 @@ class WmemWriteInst(Instruction):
 
 
 @dataclass(frozen=True)
-class DportWriteInst(Instruction):
+class DportWriteInst(BaseInst):
     """DPORT_WR instruction: write to data port."""
 
     dst: str = ""  # Destination (port)
@@ -764,12 +770,12 @@ class DportWriteInst(Instruction):
 
 
 @dataclass(frozen=True)
-class WaitInst(Instruction):
+class WaitInst(BaseInst):
     """WAIT instruction: wait for sync/trigger."""
 
     c_op: str = "time"
     time: Optional[str] = None
-    addr: Optional[Union[str, "Label"]] = None
+    addr: Optional[Union[str, Label]] = None
     extra_args: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -787,7 +793,7 @@ class WaitInst(Instruction):
         return sorted(list(reads))
 
     @property
-    def need_label(self) -> Optional["Label"]:
+    def need_label(self) -> Optional[Label]:
         if isinstance(self.addr, Label) and not _is_pseudo_label(self.addr):
             return self.addr
         return None

@@ -16,6 +16,7 @@ from copy import deepcopy
 
 import pytest
 from zcu_tools.program.v2.ir.instructions import (
+    BaseInst,
     DmemReadInst,
     DmemWriteInst,
     DportWriteInst,
@@ -23,6 +24,7 @@ from zcu_tools.program.v2.ir.instructions import (
     JumpInst,
     LabelInst,
     MetaInst,
+    NopInst,
     PortWriteInst,
     RegWriteInst,
     TestInst,
@@ -425,7 +427,13 @@ class TestLabelInstruction:
         original = {"LABEL": "end_loop"}
         inst = Instruction.from_dict(original)
         recovered = inst.to_dict()
-        assert recovered == original
+        expected = {
+            "LABEL": "end_loop",
+            "kind": "label",
+            "name": "end_loop",
+            "can_remove": False,
+        }
+        assert recovered == expected
 
 
 class TestLabelCloneSemantics:
@@ -510,3 +518,58 @@ class TestEdgeCases:
         inst = Instruction.from_dict(d)
         assert getattr(inst, "lit") is None
         assert getattr(inst, "r1") is None
+
+
+class TestInstructionHierarchy:
+    """Verify the three-layer inheritance structure."""
+
+    CONCRETE_INSTS = [
+        TimeInst(),
+        TestInst(),
+        JumpInst(),
+        RegWriteInst(),
+        PortWriteInst(),
+        NopInst(),
+        DmemReadInst(),
+        DmemWriteInst(),
+        WmemWriteInst(),
+        DportWriteInst(),
+        WaitInst(),
+    ]
+
+    def test_concrete_insts_are_base_inst(self):
+        for inst in self.CONCRETE_INSTS:
+            assert isinstance(inst, BaseInst), f"{type(inst).__name__} should be BaseInst"
+
+    def test_concrete_insts_are_instruction(self):
+        for inst in self.CONCRETE_INSTS:
+            assert isinstance(inst, Instruction), f"{type(inst).__name__} should be Instruction"
+
+    def test_label_inst_is_not_base_inst(self):
+        inst = LabelInst()
+        assert isinstance(inst, Instruction)
+        assert not isinstance(inst, BaseInst)
+        assert not hasattr(inst, "addr_inc")
+        assert not hasattr(inst, "reg_read")
+        assert not hasattr(inst, "reg_write")
+        assert not hasattr(inst, "need_label")
+
+    def test_meta_inst_is_not_base_inst(self):
+        inst = MetaInst()
+        assert isinstance(inst, Instruction)
+        assert not isinstance(inst, BaseInst)
+        assert not hasattr(inst, "addr_inc")
+        assert not hasattr(inst, "reg_read")
+        assert not hasattr(inst, "reg_write")
+        assert not hasattr(inst, "need_label")
+
+    def test_base_inst_default_properties(self):
+        """BaseInst subclasses with no overrides return the correct defaults."""
+        inst = NopInst()
+        assert inst.addr_inc == 1
+        assert inst.reg_read == []
+        assert inst.reg_write == []
+        assert inst.need_label is None
+
+    def test_wait_inst_addr_inc_override(self):
+        assert WaitInst().addr_inc == 2

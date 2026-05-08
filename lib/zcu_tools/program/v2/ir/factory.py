@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Optional, Union
 
 from .instructions import (
+    BaseInst,
     Instruction,
     JumpInst,
     LabelInst,
@@ -48,7 +49,7 @@ class IRLexer:
         """
         result: list[Union[BasicBlockNode, MetaInst]] = []
         pending_labels: list[LabelInst] = []
-        pending_insts: list[Instruction] = []
+        pending_insts: list[BaseInst] = []
         pending_branch: Optional[JumpInst] = None
         in_fix_addr = False
 
@@ -84,6 +85,7 @@ class IRLexer:
                 pending_branch = inst
                 flush()
             else:
+                assert isinstance(inst, BaseInst)
                 pending_insts.append(inst)
 
         flush()
@@ -486,14 +488,10 @@ class IRParser:
         result: list[Union[BasicBlockNode, MetaInst]] = []
 
         result.append(
-            BasicBlockNode(
-                insts=[
-                    MetaInst(
-                        type="BRANCH_START",
-                        name=node.name,
-                        info=dict(compare_reg=node.compare_reg),
-                    )
-                ]
+            MetaInst(
+                type="BRANCH_START",
+                name=node.name,
+                info=dict(compare_reg=node.compare_reg),
             )
         )
 
@@ -524,7 +522,5 @@ class IRParser:
 
         emit_dispatch(0, n)
 
-        result.append(
-            BasicBlockNode(insts=[MetaInst(type="BRANCH_END", name=node.name)])
-        )
+        result.append(MetaInst(type="BRANCH_END", name=node.name))
         return result

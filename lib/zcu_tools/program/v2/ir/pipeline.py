@@ -6,9 +6,9 @@ from dataclasses import dataclass, field
 
 from .factory import IRLexer, IRParser
 from .instructions import Instruction
+from .labels import Label
 from .node import BasicBlockNode, RootNode
 from .traversal import walk_basic_blocks
-from .labels import Label
 
 
 @dataclass

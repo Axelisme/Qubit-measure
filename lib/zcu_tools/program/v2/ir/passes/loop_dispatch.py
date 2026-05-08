@@ -30,14 +30,14 @@ from __future__ import annotations
 from typing import Optional
 
 from ..factory import IRParser, _needs_big_jump
-from ..instructions import Instruction, JumpInst, LabelInst, RegWriteInst
+from ..instructions import BaseInst, JumpInst, LabelInst, RegWriteInst
 from ..labels import Label
 from ..node import BasicBlockNode, BlockNode
 
 
 def shift_add_multiply(
     src_reg: str, dst_reg: str, constant: int, max_words: int
-) -> Optional[list[Instruction]]:
+) -> Optional[list[BaseInst]]:
     """Emit a shift-add sequence so that `dst_reg += src_reg * constant`.
 
     `src_reg` is treated as a scratch register (shifted in place). Returns
@@ -47,7 +47,7 @@ def shift_add_multiply(
     if constant <= 0:
         return None
 
-    insts: list[Instruction] = []
+    insts: list[BaseInst] = []
     bits: list[int] = []
     b = 0
     c = constant
@@ -137,7 +137,7 @@ def build_jump_table_blocks(
     # Compute remainder + dispatch into entry_{k-r}.
     # Uses i as scratch; reset to 0 before the dispatch JUMP.
     if _needs_big_jump(pmem_size):
-        dispatch_insts: list[Instruction] = [
+        dispatch_insts: list[BaseInst] = [
             RegWriteInst(dst=i, src="op", op=f"{n} AND #{k - 1}"),
         ]
         # r == 0: jump straight to entry_0
@@ -157,7 +157,7 @@ def build_jump_table_blocks(
         )
 
     # Compute entry offset and jump.
-    offset_insts: list[Instruction] = [
+    offset_insts: list[BaseInst] = [
         RegWriteInst(dst=i, src="op", op=f"{i} - #{k}"),  # i = r - k (< 0)
         RegWriteInst(dst=i, src="op", op=f"ABS {i}"),  # i = k - r (offset)
         RegWriteInst(dst="s15", src="label", label=entry0),
@@ -198,7 +198,7 @@ def build_jump_table_blocks(
 
     # ── back edge (fix_addr_size=True) ──
     if _needs_big_jump(pmem_size):
-        back_insts: list[Instruction] = [
+        back_insts: list[BaseInst] = [
             RegWriteInst(dst="s15", src="label", label=exit_label)
         ]
         result.append(

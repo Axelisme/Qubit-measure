@@ -3,13 +3,13 @@ from __future__ import annotations
 import dataclasses
 from typing import cast
 
-from ..instructions import Instruction, NopInst, TimeInst
+from ..instructions import BaseInst, NopInst, TimeInst
 from ..node import BasicBlockNode
 from ..pipeline import AbsLinearPass
 from ..utils import regs_from_value
 
 
-def _is_zero_ref_increment(inst: Instruction) -> bool:
+def _is_zero_ref_increment(inst: BaseInst) -> bool:
     if not isinstance(inst, TimeInst):
         return False
     if inst.c_op != "inc_ref":
@@ -27,7 +27,7 @@ def _is_zero_ref_increment(inst: Instruction) -> bool:
         return False
 
 
-def _is_lit_time(inst: Instruction) -> bool:
+def _is_lit_time(inst: BaseInst) -> bool:
     """True for TIME inc_ref #N with N > 0 (no register operand)."""
     if not isinstance(inst, TimeInst):
         return False
@@ -45,7 +45,7 @@ def _get_lit_time_value(inst: TimeInst) -> int:
     return int(cast(str, inst.lit)[1:])
 
 
-def _is_reg_time(inst: Instruction) -> bool:
+def _is_reg_time(inst: BaseInst) -> bool:
     """True for TIME inc_ref rX (register-driven increment)."""
     return (
         isinstance(inst, TimeInst)
@@ -54,7 +54,7 @@ def _is_reg_time(inst: Instruction) -> bool:
     )
 
 
-def _is_anchored_timed(inst: Instruction) -> bool:
+def _is_anchored_timed(inst: BaseInst) -> bool:
     """True when inst has a time field of the form '@N' with N a plain integer."""
     t = getattr(inst, "time", None)
     if not isinstance(t, str) or not t.startswith("@"):
@@ -62,7 +62,7 @@ def _is_anchored_timed(inst: Instruction) -> bool:
     return not regs_from_value(t)  # empty set → no register token → pure integer
 
 
-def _adjust_time_field(inst: Instruction, delta: int) -> Instruction:
+def _adjust_time_field(inst: BaseInst, delta: int) -> BaseInst:
     """Return a copy of inst with time adjusted by +delta (precondition: _is_anchored_timed)."""
     old = int(cast(str, getattr(inst, "time"))[1:])
     return dataclasses.replace(inst, time=f"@{old + delta}")  # type: ignore[call-overload]
@@ -110,7 +110,7 @@ class TimedMergeLinear(AbsLinearPass):
 
     def _merge_free(self, block: BasicBlockNode) -> None:
         pending_lit: int = 0
-        result: list[Instruction] = []
+        result: list[BaseInst] = []
 
         for inst in block.insts:
             if _is_lit_time(inst):
@@ -144,7 +144,7 @@ class TimedMergeLinear(AbsLinearPass):
 
     def _merge_fixed(self, block: BasicBlockNode) -> None:
         # Merge run values into the first slot; fill the rest with NOP.
-        result: list[Instruction] = list(block.insts)
+        result: list[BaseInst] = list(block.insts)
         i = 0
         while i < len(result):
             if not _is_lit_time(result[i]):

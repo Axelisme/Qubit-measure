@@ -5,7 +5,7 @@ from typing import Optional, Union
 
 from typing_extensions import Iterator
 
-from .instructions import Instruction, JumpInst, LabelInst
+from .instructions import BaseInst, JumpInst, LabelInst
 
 
 class IRNode:
@@ -37,7 +37,7 @@ class BasicBlockNode(IRNode):
     """
 
     labels: list[LabelInst] = field(default_factory=list)
-    insts: list[Instruction] = field(default_factory=list)
+    insts: list[BaseInst] = field(default_factory=list)
     branch: Optional[JumpInst] = None
     fix_addr_size: bool = False
 

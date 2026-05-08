@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional, cast
 
-from ..instructions import Instruction, LabelInst, NopInst
+from ..instructions import BaseInst, Instruction, LabelInst, NopInst
 from ..labels import PSEUDO_LABELS, Label
 from ..node import BasicBlockNode, BlockNode, IRBranch, IRLoop, IRNode, RootNode
 from ..pipeline import PipeLineContext
@@ -14,7 +14,7 @@ def _collect_referenced_labels(ir: RootNode) -> set[Label]:
     return {
         label
         for inst in walk_instructions(ir)
-        if (label := inst.need_label) is not None
+        if isinstance(inst, BaseInst) and (label := inst.need_label) is not None
     }
 
 

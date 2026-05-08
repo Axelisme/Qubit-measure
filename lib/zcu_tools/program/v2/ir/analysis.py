@@ -4,9 +4,9 @@ import math
 from typing import TYPE_CHECKING
 
 from .instructions import (
+    BaseInst,
     DmemReadInst,
     DmemWriteInst,
-    Instruction,
     LabelInst,
     MetaInst,
     PortWriteInst,
@@ -70,7 +70,7 @@ def estimate_flat_size(nodes: list["IRNode"]) -> int:
     for node in nodes:
         if isinstance(node, BasicBlockNode):
             for inst in node.insts:
-                if not isinstance(inst, (LabelInst, MetaInst)):
+                if isinstance(inst, BaseInst):
                     size += inst.addr_inc
             if node.branch is not None:
                 size += node.branch.addr_inc
@@ -99,12 +99,12 @@ def estimate_flat_size(nodes: list["IRNode"]) -> int:
     return size
 
 
-def instruction_reads(inst: Instruction) -> set[str]:
+def instruction_reads(inst: BaseInst) -> set[str]:
     """Extract all registers read by an instruction."""
     return set(inst.reg_read)
 
 
-def instruction_writes(inst: Instruction) -> set[str]:
+def instruction_writes(inst: BaseInst) -> set[str]:
     """Extract all registers written by an instruction."""
     return set(inst.reg_write)
 

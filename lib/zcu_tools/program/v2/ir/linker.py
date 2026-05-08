@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from typing_extensions import Any
 
-from .instructions import Instruction, LabelInst, MetaInst
+from .instructions import BaseInst, Instruction, LabelInst, MetaInst
 from .labels import Label
 
 
@@ -19,8 +19,7 @@ class IRLinker:
     """Assigns physical addresses to a flat instruction list and resolves labels."""
 
     def link(
-        self,
-        inst_list: list[Instruction],
+        self, inst_list: list[Instruction]
     ) -> tuple[list[dict], dict[str, str], list[dict[str, Any]], IRCursor]:
         """Link a flat instruction list into QICK-compatible dicts."""
         prog_list: list[dict] = []
@@ -31,28 +30,18 @@ class IRLinker:
         line = 0
         for inst in inst_list:
             if isinstance(inst, MetaInst):
-                meta_infos.append(
-                    dict(
-                        kind="meta",
-                        type=inst.type,
-                        name=inst.name,
-                        info=inst.info,
-                        p_addr=p_addr,
-                    )
-                )
+                d = inst.to_dict()
+                d["p_addr"] = p_addr
+                meta_infos.append(d)
                 continue
             line += 1
             if isinstance(inst, LabelInst):
                 labels[str(inst.name)] = f"&{p_addr}"
-                meta_infos.append(
-                    dict(
-                        kind="label",
-                        name=str(inst.name),
-                        p_addr=p_addr,
-                        can_remove=inst.can_remove,
-                    )
-                )
+                d = inst.to_dict()
+                d["p_addr"] = p_addr
+                meta_infos.append(d)
             else:
+                assert isinstance(inst, BaseInst)
                 d = inst.to_dict()
                 d["P_ADDR"] = p_addr
                 d["LINE"] = line
@@ -73,6 +62,7 @@ class IRLinker:
         meta_infos: list[dict[str, Any]],
     ) -> list[Instruction]:
         Label.reset()
+
         # Parse fallback labels (labels added manually without calling _add_label)
         labels_by_addr: dict[int, list[str]] = defaultdict(list)
         tracked_labels = {m["name"] for m in meta_infos if m.get("kind") == "label"}
@@ -140,6 +130,7 @@ class IRLinker:
         if prog_list:
             last_dict = prog_list[-1]
             last_inst = Instruction.from_dict(last_dict, label_map=label_map)
+            assert isinstance(last_inst, BaseInst)
             max_addr = last_dict["P_ADDR"] + last_inst.addr_inc
             for name in labels_by_addr.get(max_addr, []):
                 logical_insts.append(LabelInst(name=get_label(name)))

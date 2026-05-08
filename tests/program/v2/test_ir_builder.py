@@ -34,18 +34,20 @@ def test_branch_lower_produces_basic_blocks():
     branch = IRBranch(name="sel", compare_reg="r_sel", cases=[case_0, case_1])
     blocks = IRParser().unparse(RootNode(insts=[branch]))
 
-    assert all(isinstance(b, BasicBlockNode) for b in blocks)
-
+    meta_blocks = [b for b in blocks if isinstance(b, MetaInst)]
     bb_blocks = [b for b in blocks if isinstance(b, BasicBlockNode)]
 
-    # First block carries BRANCH_START meta with compare_reg.
-    first_metas = [i for i in bb_blocks[0].insts if isinstance(i, MetaInst)]
+    # BRANCH_START and BRANCH_END are standalone MetaInsts (not inside BasicBlockNode.insts).
     assert any(m.type == "BRANCH_START" and m.info.get("compare_reg") == "r_sel"
-               for m in first_metas)
+               for m in meta_blocks)
+    assert any(m.type == "BRANCH_END" for m in meta_blocks)
 
-    # Last block carries BRANCH_END meta.
-    last_metas = [i for i in bb_blocks[-1].insts if isinstance(i, MetaInst)]
-    assert any(m.type == "BRANCH_END" for m in last_metas)
+    # All non-meta elements are BasicBlockNodes.
+    assert all(isinstance(b, (BasicBlockNode, MetaInst)) for b in blocks)
+    assert len(bb_blocks) > 0
+
+    # No BasicBlockNode.insts should contain MetaInst.
+    assert all(not any(isinstance(i, MetaInst) for i in bb.insts) for bb in bb_blocks)
 
     # Both case instructions should appear in the flattened output.
     all_insts = []

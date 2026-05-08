@@ -4,6 +4,7 @@ import re
 
 from ..analysis import instruction_reads, instruction_writes
 from ..instructions import (
+    BaseInst,
     DmemReadInst,
     DmemWriteInst,
     Instruction,
@@ -40,7 +41,7 @@ class DeadWriteEliminationLinear(AbsLinearPass):
         else:
             block.insts = [inst for i, inst in enumerate(insts) if i not in dead]
 
-    def _find_dead_indices(self, insts: list[Instruction]) -> set[int]:
+    def _find_dead_indices(self, insts: list[BaseInst]) -> set[int]:
         pending: dict[str, int] = {}  # reg -> index of last pending write
         dead: set[int] = set()
 
@@ -68,7 +69,7 @@ class DeadWriteEliminationLinear(AbsLinearPass):
 
         return dead
 
-    def _is_write_tracking_barrier(self, inst: Instruction) -> bool:
+    def _is_write_tracking_barrier(self, inst: BaseInst) -> bool:
         return not isinstance(
             inst, (TimeInst, WaitInst, RegWriteInst, DmemReadInst, NopInst)
         )
@@ -96,7 +97,7 @@ class DeadTestEliminationLinear(AbsLinearPass):
             block.insts = [inst for i, inst in enumerate(block.insts) if i not in dead]
 
     def _find_dead_indices(
-        self, insts: list[Instruction], branch: JumpInst | None
+        self, insts: list[BaseInst], branch: JumpInst | None
     ) -> set[int]:
         pending: int | None = None  # index of the last TestInst not yet consumed
         dead: set[int] = set()
@@ -164,7 +165,7 @@ class IncRegMergeLinear(AbsLinearPass):
 
     def _merge_free(self, block: BasicBlockNode) -> None:
         pending: dict[str, int] = {}
-        result: list[Instruction] = []
+        result: list[BaseInst] = []
 
         for inst in block.insts:
             if self._is_increment_motion_barrier(inst):
@@ -200,7 +201,7 @@ class IncRegMergeLinear(AbsLinearPass):
 
         block.insts = result
 
-    def _is_increment_motion_barrier(self, inst: Instruction) -> bool:
+    def _is_increment_motion_barrier(self, inst: BaseInst) -> bool:
         return not isinstance(
             inst,
             (
@@ -216,7 +217,7 @@ class IncRegMergeLinear(AbsLinearPass):
         )
 
     def _merge_fixed(self, block: BasicBlockNode) -> None:
-        result: list[Instruction] = list(block.insts)
+        result: list[BaseInst] = list(block.insts)
         i = 0
         while i < len(result):
             inst = result[i]
