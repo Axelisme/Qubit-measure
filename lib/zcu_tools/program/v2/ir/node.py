@@ -5,7 +5,7 @@ from typing import Optional, Union
 
 from typing_extensions import Iterator
 
-from .instructions import BaseInst, JumpInst, LabelInst
+from .instructions import BaseInst, JumpInst, LabelInst, MetaInst
 
 
 class IRNode:
@@ -43,6 +43,11 @@ class BasicBlockNode(IRNode):
 
     def __post_init__(self) -> None:
         for inst in self.insts:
+            if isinstance(inst, MetaInst):
+                raise ValueError(
+                    f"BasicBlockNode.insts must not contain MetaInst; "
+                    f"use standalone MetaInst entries in the chunked stream instead. Got: {inst}"
+                )
             if isinstance(inst, LabelInst):
                 raise ValueError(
                     f"BasicBlockNode.insts must not contain LabelInst; "

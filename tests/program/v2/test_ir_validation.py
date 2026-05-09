@@ -15,9 +15,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+import pytest
+from zcu_tools.program.v2.ir.factory import IRParser
 from zcu_tools.program.v2.ir.instructions import (
     JumpInst,
     LabelInst,
+    MetaInst,
     NopInst,
     RegWriteInst,
 )
@@ -224,6 +227,57 @@ def test_v1_jump_table_entry_blocks_not_modified_by_pipeline():
             f"entry {i}: pipeline altered addr size "
             f"(expected {expected_addr}, got {actual})"
         )
+
+
+def test_branch_parse_rejects_missing_case_end():
+    items = [
+        MetaInst(type="BRANCH_START", name="sel", info={"compare_reg": "r_sel"}),
+        MetaInst(type="BRANCH_CASE_START", name="0"),
+        BasicBlockNode(insts=[NopInst()]),
+        MetaInst(type="BRANCH_END", name="sel"),
+    ]
+
+    with pytest.raises(ValueError, match="BRANCH_CASE_END"):
+        IRParser().parse(items)
+
+
+def test_branch_parse_rejects_branch_without_cases():
+    items = [
+        MetaInst(type="BRANCH_START", name="sel", info={"compare_reg": "r_sel"}),
+        BasicBlockNode(insts=[NopInst()]),
+        MetaInst(type="BRANCH_END", name="sel"),
+    ]
+
+    with pytest.raises(ValueError, match="does not contain any cases"):
+        IRParser().parse(items)
+
+
+def test_sese_rejects_jump_into_loop_control_region():
+    Label.reset()
+    loop_start = Label.make_new("loop_start")
+    loop_end = Label.make_new("loop_end")
+    outside = Label.make_new("outside")
+
+    items = [
+        BasicBlockNode(
+            labels=[LabelInst(name=outside)],
+            branch=JumpInst(label=loop_end),
+        ),
+        MetaInst(
+            type="LOOP_START",
+            name="L",
+            info={"counter_reg": "r0", "n": 2},
+        ),
+        BasicBlockNode(labels=[LabelInst(name=loop_start, can_remove=True)]),
+        MetaInst(type="LOOP_BODY_START", name="L"),
+        BasicBlockNode(insts=[NopInst()]),
+        MetaInst(type="LOOP_BODY_END", name="L"),
+        BasicBlockNode(labels=[LabelInst(name=loop_end, can_remove=True)]),
+        MetaInst(type="LOOP_END", name="L"),
+    ]
+
+    with pytest.raises(ValueError, match="violates SESE assumption"):
+        IRParser().parse(items)
 
 
 # ---------------------------------------------------------------------------

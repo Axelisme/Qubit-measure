@@ -113,45 +113,38 @@ class IRParser:
         depth = 0
         skip_active = False
 
-        def meta_types_in(bb: BasicBlockNode) -> list[str]:
-            return [i.type for i in bb.insts if isinstance(i, MetaInst)]
-
         i = 0
         while i < len(items):
             item = items[i]
             if isinstance(item, MetaInst):
-                if skip_active:
-                    skip_indices.add(i)
-                i += 1
-                continue
-
-            assert isinstance(item, BasicBlockNode)
-            metas = meta_types_in(item)
-            was_skip = skip_active
-
-            for mt in metas:
+                mt = item.type
                 if mt in ("LOOP_START", "BRANCH_START"):
                     depth += 1
                     skip_active = True
-                elif mt == "LOOP_BODY_START":
+                elif mt in ("LOOP_BODY_START", "BRANCH_CASE_START"):
                     skip_active = False
-                elif mt in ("BRANCH_CASE_START",):
-                    skip_active = False
-                elif mt in ("LOOP_BODY_END",):
+                elif mt == "LOOP_BODY_END":
                     skip_active = True
+                elif mt == "BRANCH_CASE_END":
+                    if depth > 0:
+                        skip_active = True
                 elif mt in ("LOOP_END", "BRANCH_END"):
                     depth -= 1
-                    if depth == 0:
-                        skip_active = False
-
-            in_skip = was_skip or (skip_active and depth > 0)
-            if in_skip:
-                skip_indices.add(i)
-                for lbl in item.labels:
-                    if lbl.name is not None:
+                    if depth < 0:
+                        raise ValueError(
+                            f"IRParser: unexpected META {mt!r} without matching start"
+                        )
+                    skip_active = depth > 0
+            else:
+                assert isinstance(item, BasicBlockNode)
+                if skip_active and depth > 0:
+                    skip_indices.add(i)
+                    for lbl in item.labels:
                         control_labels.add(str(lbl.name))
-
             i += 1
+
+        if depth != 0:
+            raise ValueError("IRParser: unbalanced structural META markers")
 
         if not control_labels:
             return
@@ -258,15 +251,25 @@ class IRParser:
             name=start_meta.name,
             compare_reg=start_meta.info["compare_reg"],
         )
+        parsed_cases: list[tuple[str, BlockNode]] = []
 
         while pos[0] < len(items):
             item = items[pos[0]]
             if isinstance(item, MetaInst) and item.type == "BRANCH_END":
                 break
             if isinstance(item, MetaInst) and item.type == "BRANCH_CASE_START":
-                branch.cases.append(self._parse_branch_case(items, pos))
+                parsed_cases.append(self._parse_branch_case(items, pos))
             else:
                 pos[0] += 1
+
+        if not parsed_cases:
+            raise ValueError(
+                f"IRParser: BRANCH {branch.name!r} does not contain any cases"
+            )
+
+        if all(case_name.isdigit() for case_name, _case in parsed_cases):
+            parsed_cases.sort(key=lambda pair: int(pair[0]))
+        branch.cases = [case for _case_name, case in parsed_cases]
 
         end_meta = self._consume_meta(items, pos, "BRANCH_END")
         if end_meta.name != branch.name:
@@ -279,17 +282,22 @@ class IRParser:
         self,
         items: list[Union[BasicBlockNode, MetaInst]],
         pos: list[int],
-    ) -> BlockNode:
+    ) -> tuple[str, BlockNode]:
         start_meta = self._consume_meta(items, pos, "BRANCH_CASE_START")
         case = BlockNode()
-        self._parse_block(items, pos, case, end_markers=frozenset({"BRANCH_CASE_END"}))
+        self._parse_block(
+            items,
+            pos,
+            case,
+            end_markers=frozenset({"BRANCH_CASE_END", "BRANCH_END"}),
+        )
         end_meta = self._consume_meta(items, pos, "BRANCH_CASE_END")
         if end_meta.name != start_meta.name:
             raise ValueError(
                 f"IRParser: mismatched BRANCH_CASE_END expected {start_meta.name!r}, "
                 f"got {end_meta.name!r}"
             )
-        return case
+        return start_meta.name, case
 
     def unparse(self, root: RootNode) -> list[Union[BasicBlockNode, MetaInst]]:
         return self._unparse_block_node(root)
@@ -387,7 +395,10 @@ class IRParser:
 
         def emit_dispatch(lo: int, hi: int) -> None:
             if hi - lo == 1:
+                case_name = str(lo)
+                result.append(MetaInst(type="BRANCH_CASE_START", name=case_name))
                 result.extend(self._unparse_block_node(node.cases[lo]))
+                result.append(MetaInst(type="BRANCH_CASE_END", name=case_name))
                 return
 
             mid = (lo + hi) // 2

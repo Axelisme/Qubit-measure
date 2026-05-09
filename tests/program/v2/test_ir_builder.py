@@ -1,11 +1,14 @@
+import pytest
 from zcu_tools.program.v2.ir.instructions import (
     BaseInst,
     JumpInst,
     LabelInst,
+    MetaInst,
     RegWriteInst,
 )
 from zcu_tools.program.v2.ir.linker import IRLinker
 from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRBranch, IRLoop
+from zcu_tools.program.v2.ir.operands import Literal
 
 
 def test_instruction_parses_jump_label_to_jumpinst():
@@ -22,7 +25,6 @@ def test_instruction_parses_jump_label_to_jumpinst():
 def test_branch_lower_produces_basic_blocks():
     """Verify IRParser lowers IRBranch to a well-formed BasicBlockNode sequence."""
     from zcu_tools.program.v2.ir.factory import IRParser
-    from zcu_tools.program.v2.ir.instructions import MetaInst
     from zcu_tools.program.v2.ir.labels import Label
     from zcu_tools.program.v2.ir.node import RootNode
 
@@ -58,6 +60,56 @@ def test_branch_lower_produces_basic_blocks():
         all_insts.extend(bb.insts)
     assert case_0_inst in all_insts
     assert case_1_inst in all_insts
+
+    case_meta = [m for m in meta_blocks if m.type.startswith("BRANCH_CASE_")]
+    assert [m.type for m in case_meta] == [
+        "BRANCH_CASE_START",
+        "BRANCH_CASE_END",
+        "BRANCH_CASE_START",
+        "BRANCH_CASE_END",
+    ]
+    assert [m.name for m in case_meta] == ["1", "1", "0", "0"]
+
+
+def test_branch_roundtrip_preserves_cases():
+    from zcu_tools.program.v2.ir.factory import IRParser
+    from zcu_tools.program.v2.ir.labels import Label
+    from zcu_tools.program.v2.ir.node import RootNode
+
+    Label.reset()
+
+    case_0 = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[RegWriteInst(dst="r0", src="imm", lit=Literal("#1"))]
+            )
+        ]
+    )
+    case_1 = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[RegWriteInst(dst="r0", src="imm", lit=Literal("#2"))]
+            )
+        ]
+    )
+    root = RootNode(
+        insts=[IRBranch(name="sel", compare_reg="r_sel", cases=[case_0, case_1])]
+    )
+
+    parser = IRParser()
+    rebuilt = parser.parse(parser.unparse(root))
+
+    branch = rebuilt.insts[0]
+    assert isinstance(branch, IRBranch)
+    assert branch.compare_reg == "r_sel"
+    assert len(branch.cases) == 2
+    assert branch.cases[0].insts[0].insts[0].lit.value == "#1"  # type: ignore[union-attr, attr-defined]
+    assert branch.cases[1].insts[0].insts[0].lit.value == "#2"  # type: ignore[union-attr, attr-defined]
+
+
+def test_basic_block_rejects_metainst_in_insts():
+    with pytest.raises(ValueError, match="MetaInst"):
+        BasicBlockNode(insts=[MetaInst(type="BRANCH_START", name="bad")])  # type: ignore[list-item]
 
 
 def test_unlink_inserts_labels_and_strips_p_addr():
