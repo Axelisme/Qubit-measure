@@ -11,8 +11,6 @@ from .instructions import BaseInst, JumpInst, LabelInst, MetaInst
 class IRNode:
     """Base class for all IR nodes."""
 
-    fix_addr_size: bool = False
-
     def children(self) -> Iterator[IRNode]:
         """Yield all immediate child nodes."""
         return iter([])
@@ -82,7 +80,6 @@ class BlockNode(IRNode):
     """
 
     insts: list[IRNode] = field(default_factory=list)
-    fix_addr_size: bool = False
 
     def append(self, item: IRNode) -> None:
         self.insts.append(item)
@@ -116,7 +113,6 @@ class IRLoop(IRNode):
     n: Union[int, str] = 0
     range_hint: Optional[tuple[int, int]] = None
     body: BlockNode = field(default_factory=BlockNode)
-    fix_addr_size: bool = False
 
     def children(self) -> Iterator[IRNode]:
         yield self.body
@@ -136,7 +132,6 @@ class IRBranch(IRNode):
     name: str = ""
     compare_reg: str = ""
     cases: list[BlockNode] = field(default_factory=list)
-    fix_addr_size: bool = False
 
     def children(self) -> Iterator[IRNode]:
         yield from self.cases

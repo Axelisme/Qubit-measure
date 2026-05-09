@@ -306,22 +306,21 @@ class TestPortWriteInstruction:
     """Tests for PortWriteInst (WPORT_WR opcode)."""
 
     def test_construction_with_specific_fields(self):
-        inst = PortWriteInst(dst=Literal("0"), time=Register("t0"), data=Literal("0x1234"), phase=Literal("#0"))
+        inst = PortWriteInst(dst=Literal("0"), time=Register("t0"), ww="1")
         assert inst.dst.value == "0"
         assert inst.time.name == "t0"
-        assert inst.data.value == "0x1234"
-        assert inst.phase.value == "#0"
+        assert inst.ww == "1"
 
     def test_dispatch_wport_wr(self):
-        d = {"CMD": "WPORT_WR", "DST": "1", "TIME": "t1", "DATA": "0xABCD"}
+        d = {"CMD": "WPORT_WR", "DST": "1", "TIME": "t1", "WW": "1"}
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, PortWriteInst)
         assert inst.dst.value == "1"
         assert inst.time.name == "t1"
-        assert inst.data.value == "0xABCD"
+        assert inst.ww == "1"
 
     def test_roundtrip_wport_wr(self):
-        original = {"CMD": "WPORT_WR", "DST": "0", "TIME": "t0", "DATA": "0x5678"}
+        original = {"CMD": "WPORT_WR", "DST": "0", "TIME": "t0", "WW": "1"}
         inst = BaseInst.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
@@ -347,8 +346,7 @@ class TestPortWriteInstruction:
             "CMD": "WPORT_WR",
             "DST": "2",
             "TIME": "t2",
-            "PHASE": "#45",
-            "FREQ": "#100",
+            "WW": "1",
         }
         inst = BaseInst.from_dict(original)
         recovered = inst.to_dict()
@@ -388,7 +386,7 @@ class TestWmemWriteInstruction:
     def test_roundtrip_wmem_wr(self):
         original = {
             "CMD": "WMEM_WR",
-            "ADDR": "&7",
+            "DST": "&7",
             "TIME": "@12",
             "WR": "r_wave op",
             "OP": "s1 + #1",

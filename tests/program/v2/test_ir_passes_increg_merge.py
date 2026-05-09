@@ -108,7 +108,7 @@ def test_inc_reg_merge_free_cpmg_like_unrolled_body():
     assert isinstance(insts[-1], RegWriteInst)
     assert insts[-1].op.rhs.value == "#3"
 
-def test_inc_reg_merge_fixed_basic():
+def test_inc_reg_merge_fixed_basic_is_skipped():
     root = RootNode(
         insts=[
             BasicBlockNode(
@@ -130,11 +130,11 @@ def test_inc_reg_merge_fixed_basic():
 
     assert len(insts) == 5
     assert isinstance(insts[0], RegWriteInst)
-    assert insts[0].op.rhs.value == "#5"
-    assert isinstance(insts[1], NopInst)
+    assert insts[0].op.rhs.value == "#2"
+    assert isinstance(insts[1], RegWriteInst)
     assert isinstance(insts[2], NopInst)
-    assert isinstance(insts[3], NopInst) # cancelled out to 0
-    assert isinstance(insts[4], NopInst)
+    assert isinstance(insts[3], RegWriteInst)
+    assert isinstance(insts[4], RegWriteInst)
 
 def test_inc_reg_merge_fixed_barrier():
     root = RootNode(

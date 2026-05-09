@@ -74,14 +74,10 @@ class ZeroDelayDCELinear(AbsLinearPass):
 
     def process_block(self, block: BasicBlockNode) -> None:
         if block.fix_addr_size:
-            block.insts = [
-                NopInst() if _is_zero_ref_increment(inst) else inst
-                for inst in block.insts
-            ]
-        else:
-            block.insts = [
-                inst for inst in block.insts if not _is_zero_ref_increment(inst)
-            ]
+            return
+        block.insts = [
+            inst for inst in block.insts if not _is_zero_ref_increment(inst)
+        ]
 
 
 class TimedMergeLinear(AbsLinearPass):
@@ -89,9 +85,8 @@ class TimedMergeLinear(AbsLinearPass):
 
     def process_block(self, block: BasicBlockNode) -> None:
         if block.fix_addr_size:
-            self._merge_fixed(block)
-        else:
-            self._merge_free(block)
+            return
+        self._merge_free(block)
 
     def _merge_free(self, block: BasicBlockNode) -> None:
         pending_lit: int = 0
@@ -117,26 +112,4 @@ class TimedMergeLinear(AbsLinearPass):
         if pending_lit > 0:
             result.append(TimeInst(c_op="inc_ref", lit=Literal(f"#{pending_lit}")))
 
-        block.insts = result
-
-    def _merge_fixed(self, block: BasicBlockNode) -> None:
-        result: list[BaseInst] = list(block.insts)
-        i = 0
-        while i < len(result):
-            if not _is_lit_time(result[i]):
-                i += 1
-                continue
-            j = i + 1
-            while j < len(result) and _is_lit_time(result[j]):
-                j += 1
-            if j == i + 1:
-                i += 1
-                continue
-            total = sum(
-                _get_lit_time_value(cast(TimeInst, result[k])) for k in range(i, j)
-            )
-            result[i] = TimeInst(c_op="inc_ref", lit=Literal(f"#{total}"))
-            for k in range(i + 1, j):
-                result[k] = NopInst()
-            i = j
         block.insts = result

@@ -51,13 +51,10 @@ class DeadLabelEliminationPass(OptimizationPassBase):
 
 
 class BranchEliminationPass(OptimizationPassBase):
-    """Remove or NOP-pad redundant unconditional branches to the next block.
+    """Remove redundant unconditional branches to the next block.
 
     A branch from Block A to Block B is redundant when Block B immediately
     follows Block A in the flat block list.
-
-    - fix_addr_size=False: remove the branch entirely (shrinks the block).
-    - fix_addr_size=True : replace the branch with a NopInst to preserve stride.
 
     Only unconditional jumps (if_cond is None, op is None) that target a
     plain Label (not a register address) are considered for elimination.
@@ -85,6 +82,8 @@ class BranchEliminationPass(OptimizationPassBase):
     def _try_eliminate_branch(
         self, block: BasicBlockNode, siblings: list[IRNode], idx: int
     ) -> None:
+        if block.fix_addr_size:
+            return
         branch = block.branch
         if branch is None:
             return
@@ -104,12 +103,7 @@ class BranchEliminationPass(OptimizationPassBase):
         if not any(lbl.name == target for lbl in next_block.labels):
             return
 
-        if block.fix_addr_size:
-            # Preserve instruction count: replace branch with NOP.
-            block.insts.append(NopInst())
-            block.branch = None
-        else:
-            block.branch = None
+        block.branch = None
 
 
 def _next_basic_block(

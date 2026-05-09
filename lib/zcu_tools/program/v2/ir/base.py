@@ -30,7 +30,13 @@ class IRCompileMixin(QickProgramV2):
     def compile(self):
         self._make_asm()
         self.optimize_asm()
-        self._make_binprog()
+        try:
+            self._make_binprog()
+        except Exception as e:
+            for inst in self.prog_list:
+                if inst.get("CMD") == "WMEM_WR":
+                    print(f"FAILED WMEM_WR: {inst}")
+            raise e
 
     def optimize_asm(self) -> None:
         insts: list[dict[str, Any]] = self.prog_list

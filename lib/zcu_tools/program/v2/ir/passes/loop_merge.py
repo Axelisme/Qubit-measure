@@ -39,7 +39,6 @@ class LoopConditionMergeLinear(AbsLinearPass):
         REG_WR r1 op r1 - #1
         JUMP label -if(NZ) -op(r1 - #0)
     - After:
-        NOP (if fix_addr_size else removed)
         JUMP label -if(NZ) -wr(r1 op) -op(r1 - #1)
 
     Pattern 2: Generic Side-Data Injection
@@ -49,11 +48,12 @@ class LoopConditionMergeLinear(AbsLinearPass):
         JUMP label -if(COND)  (no internal -op)
     - After:
         TEST op(...)
-        NOP (if fix_addr_size else removed)
         JUMP label -if(COND) -wr(r1 op) -op(r1 + #1)
     """
 
     def process_block(self, block: BasicBlockNode) -> None:
+        if block.fix_addr_size:
+            return
         if block.branch is None or not block.insts:
             return
 
@@ -91,11 +91,7 @@ class LoopConditionMergeLinear(AbsLinearPass):
                 and op.rhs.value == "#0"
             ):
                 block.branch = _make_merged_branch(branch, last_inst)
-
-                if block.fix_addr_size:
-                    block.insts[last_idx] = NopInst()
-                else:
-                    block.insts.pop(last_idx)
+                block.insts.pop(last_idx)
 
     def _merge_side_data_injection(self, block: BasicBlockNode) -> None:
         """Pattern 2: TEST + REG_WR + JUMP -> TEST + JUMP wr."""
@@ -126,8 +122,4 @@ class LoopConditionMergeLinear(AbsLinearPass):
             and isinstance(prev_inst, TestInst)
         ):
             block.branch = _make_merged_branch(branch, last_inst)
-
-            if block.fix_addr_size:
-                block.insts[last_idx] = NopInst()
-            else:
-                block.insts.pop(last_idx)
+            block.insts.pop(last_idx)

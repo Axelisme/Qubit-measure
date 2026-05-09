@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Optional, Union
 
+from .dispatch import build_dispatch_table_island, emit_dispatch_address_setup
 from .instructions import (
     BaseInst,
     Instruction,
@@ -9,7 +10,6 @@ from .instructions import (
     LabelInst,
     MetaInst,
     RegWriteInst,
-    TestInst,
 )
 from .labels import Label
 from .node import BasicBlockNode, BlockNode, IRBranch, IRLoop, RootNode
@@ -383,6 +383,8 @@ class IRParser:
     def _lower_branch(self, node: IRBranch) -> list[Union[BasicBlockNode, MetaInst]]:
         n = len(node.cases)
         result: list[Union[BasicBlockNode, MetaInst]] = []
+        case_entry_labels = [Label.make_new(f"{node.name}_case_entry_{i}") for i in range(n)]
+        table_labels = [Label.make_new(f"{node.name}_dispatch_{i}") for i in range(n)]
 
         result.append(
             MetaInst(
@@ -391,37 +393,48 @@ class IRParser:
                 info=dict(compare_reg=node.compare_reg),
             )
         )
-        comp_reg = Register(node.compare_reg)
+        result.append(
+            BasicBlockNode(
+                insts=emit_dispatch_address_setup(
+                    index_reg=node.compare_reg,
+                    table_base=table_labels[0],
+                    pmem_size=self.pmem_size,
+                ),
+                branch=JumpInst(addr=Register("s15")),
+            )
+        )
+        result.extend(
+            build_dispatch_table_island(
+                table_labels=table_labels,
+                target_labels=case_entry_labels,
+                pmem_size=self.pmem_size,
+            )
+        )
 
-        def emit_dispatch(lo: int, hi: int) -> None:
-            if hi - lo == 1:
-                case_name = str(lo)
-                result.append(MetaInst(type="BRANCH_CASE_START", name=case_name))
-                result.extend(self._unparse_block_node(node.cases[lo]))
-                result.append(MetaInst(type="BRANCH_CASE_END", name=case_name))
-                return
-
-            mid = (lo + hi) // 2
-            left_label = Label.make_new(f"{node.name}_branch_l_{lo}_{mid}")
-            end_label = Label.make_new(f"{node.name}_branch_e_{lo}_{hi}")
-
-            result.append(
-                BasicBlockNode(
-                    insts=[TestInst(op=AluExpr(comp_reg, "-", Literal(f"#{mid}")))],
-                    branch=JumpInst(label=left_label, if_cond="S"),
+        for idx, case in enumerate(node.cases):
+            case_name = str(idx)
+            result.append(MetaInst(type="BRANCH_CASE_START", name=case_name))
+            case_items = self._unparse_block_node(case)
+            first_block_attached = False
+            for item in case_items:
+                if (
+                    not first_block_attached
+                    and isinstance(item, BasicBlockNode)
+                ):
+                    item.labels.insert(
+                        0, LabelInst(name=case_entry_labels[idx], can_remove=True)
+                    )
+                    first_block_attached = True
+                result.append(item)
+            if not first_block_attached:
+                result.append(
+                    BasicBlockNode(
+                        labels=[
+                            LabelInst(name=case_entry_labels[idx], can_remove=True)
+                        ]
+                    )
                 )
-            )
-            emit_dispatch(mid, hi)
-            result.append(BasicBlockNode(branch=JumpInst(label=end_label)))
-            result.append(
-                BasicBlockNode(labels=[LabelInst(name=left_label, can_remove=True)])
-            )
-            emit_dispatch(lo, mid)
-            result.append(
-                BasicBlockNode(labels=[LabelInst(name=end_label, can_remove=True)])
-            )
-
-        emit_dispatch(0, n)
+            result.append(MetaInst(type="BRANCH_CASE_END", name=case_name))
 
         result.append(MetaInst(type="BRANCH_END", name=node.name))
         return result

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from typing import TYPE_CHECKING
 
 from .instructions import (
@@ -92,13 +91,14 @@ def estimate_flat_size(nodes: list[IRNode]) -> int:
             # Shape: [guard? 1] + init 1 + n * inner + cond-back 1.
             size += 2 + n * inner
         elif isinstance(node, IRBranch):
-            n_cases = len(node.cases)
-            dispatch_depth = math.ceil(math.log2(n_cases)) if n_cases > 1 else 0
-            dispatch_words = dispatch_depth * 2  # TEST + JUMP per level
-            case_size = max(
-                (estimate_flat_size(case.insts) for case in node.cases), default=0
-            )
-            size += dispatch_words + case_size
+            # Conservative PMEM estimate for dispatch-table lowering:
+            # - setup: REG_WR s15 label table_0 + up to two adds + JUMP s15
+            # - table: worst-case 2 words per entry (big-PMEM mode)
+            # - bodies: all cases are emitted physically, so sum their sizes
+            setup_words = 4
+            table_words = 2 * len(node.cases)
+            case_words = sum(estimate_flat_size(case.insts) for case in node.cases)
+            size += setup_words + table_words + case_words
     return size
 
 
@@ -145,10 +145,11 @@ def estimate_body_cost(body: list[IRNode], config: PipeLineConfig) -> int:
             else:
                 cost += inner_cost + loop_overhead
         elif isinstance(node, IRBranch):
-            n_cases = len(node.cases)
-            dispatch_depth = math.ceil(math.log2(n_cases)) if n_cases > 1 else 0
-            dispatch_overhead = dispatch_depth * (
-                2 * config.cost_default + config.cost_jump_flush
+            # Constant-depth dispatch-table runtime cost:
+            # setup (REG_WR/ALU ops) + indirect jump + stub jump.
+            dispatch_overhead = (
+                4 * config.cost_default
+                + 2 * (config.cost_default + config.cost_jump_flush)
             )
             case_cost = max(
                 (estimate_body_cost(case.insts, config) for case in node.cases),

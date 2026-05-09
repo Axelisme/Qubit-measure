@@ -20,11 +20,6 @@ class PipeLineConfig:
     # rounded down to the nearest power of 2 (Phase 8D).
     max_unroll_factor: int = 32
 
-    # Maximum number of REG_WR words allowed in the dispatch shift-add
-    # sequence. If the body_words multiply cannot fit, register-driven
-    # unroll falls back to no-unroll.
-    max_dispatch_words: int = 8
-
     # Unified cycle cost model
     cost_default: int = 1
     cost_wmem: int = 2

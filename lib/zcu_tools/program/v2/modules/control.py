@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from qick.asm_v2 import QickParam
+from qick.asm_v2 import AsmInst, QickParam, WriteLabel
 from typing_extensions import Optional, Self, TypeAlias, Union
 
 from zcu_tools.program.v2.modular import ModularProgramV2
@@ -12,6 +12,22 @@ from .base import Module
 logger = logging.getLogger(__name__)
 
 SubModule: TypeAlias = Union[Module, list[Module]]
+
+
+def _needs_big_jump(prog) -> bool:
+    tproccfg = getattr(prog, "tproccfg", None)
+    if not isinstance(tproccfg, dict):
+        return False
+    pmem_size = tproccfg.get("pmem_size")
+    return isinstance(pmem_size, int) and pmem_size > 2**11
+
+
+def _emit_jump_s15(prog) -> None:
+    prog.append_macro(AsmInst(inst={"CMD": "JUMP", "ADDR": "s15"}, addr_inc=1))
+
+
+def _emit_write_label(prog, label: str) -> None:
+    prog.append_macro(WriteLabel(label=label))
 
 
 class Repeat(Module):
@@ -89,11 +105,16 @@ class Branch(Module):
     iteration of that outer loop the counter selects the corresponding branch,
     so branch *i* runs exactly once (at iteration *i*).
 
-    Branch selection uses a binary cond_jump dispatch tree. For non-power-of-two
-    branch counts, shorter paths are padded with NOP so each branch starts after
-    the same number of control instructions. Each branch is wrapped with delay /
-    delay_auto to flush timing, so branches may have different durations. The
-    module always returns 0.0.
+    Branch selection uses a dispatch-table island:
+
+    1. compute ``s15 = &table_0 + compare_reg * entry_words``
+    2. indirect jump into the table
+    3. table stub performs one more jump to the real case entry
+
+    This keeps dispatch depth constant while allowing each case body to be
+    independently optimised. Each branch is wrapped with delay / delay_auto to
+    flush timing, so branches may have different durations. The module always
+    returns 0.0.
     """
 
     def __init__(
@@ -127,40 +148,24 @@ class Branch(Module):
 
         def run_branch(i: int) -> None:
             prog.meta_macro(type="BRANCH_CASE_START", name=str(i))
+            prog.label(f"{self.name}_case_entry_{i}")
 
-            with prog.disable_delay():
-                cur_t: Union[float, QickParam] = 0.0
-                for mod in self.branches[i]:
-                    if logger.isEnabledFor(logging.DEBUG):
-                        prog.debug_macro(
-                            f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
-                        )
-                    cur_t = mod.run(prog, cur_t)
+            cur_t: Union[float, QickParam] = 0.0
+            for mod in self.branches[i]:
+                if logger.isEnabledFor(logging.DEBUG):
+                    prog.debug_macro(
+                        f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
+                    )
+                cur_t = mod.run(prog, cur_t)
 
             # TODO: support branch with swept duration
             if isinstance(cur_t, QickParam):
                 raise NotImplementedError("Branch with swept duration is not supported")
 
             prog.delay(t=cur_t)
+            prog.delay_auto()
 
             prog.meta_macro(type="BRANCH_CASE_END", name=str(i))
-
-        def emit_dispatch(lo: int, hi: int) -> None:
-            if hi - lo == 1:
-                run_branch(lo)
-                return
-
-            mid = (lo + hi) // 2
-            left_label = f"{self.name}_branch_l_{lo}_{mid}"
-            end_label = f"{self.name}_branch_e_{lo}_{hi}"
-
-            # compare_reg < mid -> left half, else right half
-            prog.cond_jump(left_label, self.compare_reg, "S", "-", mid)
-            emit_dispatch(mid, hi)
-            prog.jump(end_label)
-            prog.label(left_label)
-            emit_dispatch(lo, mid)
-            prog.label(end_label)
 
         prog.delay(t=t)
         prog.delay_auto(t=0)
@@ -172,7 +177,23 @@ class Branch(Module):
             name=self.name,
             info={"compare_reg": self.compare_reg},
         )
-        emit_dispatch(0, n)
+        table_base = f"{self.name}_dispatch_0"
+        _emit_write_label(prog, table_base)
+        prog.write_reg_op("s15", "s15", "+", self.compare_reg)
+        if _needs_big_jump(prog):
+            prog.write_reg_op("s15", "s15", "+", self.compare_reg)
+        _emit_jump_s15(prog)
+
+        for i in range(n):
+            prog.label(f"{self.name}_dispatch_{i}")
+            if _needs_big_jump(prog):
+                _emit_write_label(prog, f"{self.name}_case_entry_{i}")
+                _emit_jump_s15(prog)
+            else:
+                prog.jump(f"{self.name}_case_entry_{i}")
+
+        for i in range(n):
+            run_branch(i)
         prog.meta_macro(type="BRANCH_END", name=self.name)
 
         return 0.0

@@ -99,7 +99,7 @@ def test_branch_elim_removes_unconditional_fallthrough():
     assert len(a.insts) == 1  # NopInst still present
 
 
-def test_branch_elim_nop_pads_fixed_block():
+def test_branch_elim_skips_fixed_block():
     lbl = _label("next_fixed")
     root = RootNode(insts=[
         BasicBlockNode(
@@ -117,9 +117,8 @@ def test_branch_elim_nop_pads_fixed_block():
 
     a = out.insts[0]
     assert isinstance(a, BasicBlockNode)
-    assert a.branch is None
-    assert len(a.insts) == 1
-    assert isinstance(a.insts[0], NopInst)
+    assert a.branch is not None
+    assert len(a.insts) == 0
 
 
 def test_branch_elim_keeps_conditional_branch():

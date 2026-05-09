@@ -20,24 +20,16 @@ from ..pipeline import AbsLinearPass
 
 
 class DeadWriteEliminationLinear(AbsLinearPass):
-    """Remove overwritten register writes in a BasicBlockNode.
-
-    fix_addr_size=False: removes dead-write instructions from the list.
-    fix_addr_size=True:  replaces dead-write instructions with NopInst to
-                        preserve jump-table stride.
-    """
+    """Remove overwritten register writes in a free BasicBlockNode."""
 
     def process_block(self, block: BasicBlockNode) -> None:
+        if block.fix_addr_size:
+            return
         insts = block.insts
         dead: set[int] = self._find_dead_indices(insts)
         if not dead:
             return
-        if block.fix_addr_size:
-            block.insts = [
-                NopInst() if i in dead else inst for i, inst in enumerate(insts)
-            ]
-        else:
-            block.insts = [inst for i, inst in enumerate(insts) if i not in dead]
+        block.insts = [inst for i, inst in enumerate(insts) if i not in dead]
 
     def _find_dead_indices(self, insts: list[BaseInst]) -> set[int]:
         pending: dict[str, int] = {}  # reg -> index of last pending write
@@ -74,25 +66,15 @@ class DeadWriteEliminationLinear(AbsLinearPass):
 
 
 class DeadTestEliminationLinear(AbsLinearPass):
-    """Remove TestInst whose result (flag) is never consumed by a conditional jump.
-
-    A TestInst is dead when, before the next conditional JumpInst reads the flag,
-    either another TestInst overwrites it, or the block ends without a conditional jump.
-
-    fix_addr_size=False: removes dead TestInst from the list.
-    fix_addr_size=True:  replaces dead TestInst with NopInst.
-    """
+    """Remove dead TestInst from a free BasicBlockNode."""
 
     def process_block(self, block: BasicBlockNode) -> None:
+        if block.fix_addr_size:
+            return
         dead = self._find_dead_indices(block.insts, block.branch)
         if not dead:
             return
-        if block.fix_addr_size:
-            block.insts = [
-                NopInst() if i in dead else inst for i, inst in enumerate(block.insts)
-            ]
-        else:
-            block.insts = [inst for i, inst in enumerate(block.insts) if i not in dead]
+        block.insts = [inst for i, inst in enumerate(block.insts) if i not in dead]
 
     def _find_dead_indices(
         self, insts: list[BaseInst], branch: JumpInst | None
@@ -169,16 +151,12 @@ class IncRegMergeLinear(AbsLinearPass):
         that do not read or write rX.
       - Accumulates multiple increments into a single increment.
       - Drops the increment if the accumulated value is 0.
-
-    For fixed blocks (fix_addr_size=True):
-      - Only merges strictly adjacent increments for the same register to preserve stride.
     """
 
     def process_block(self, block: BasicBlockNode) -> None:
         if block.fix_addr_size:
-            self._merge_fixed(block)
-        else:
-            self._merge_free(block)
+            return
+        self._merge_free(block)
 
     def _merge_free(self, block: BasicBlockNode) -> None:
         pending: dict[str, int] = {}
@@ -232,40 +210,3 @@ class IncRegMergeLinear(AbsLinearPass):
                 NopInst,
             ),
         )
-
-    def _merge_fixed(self, block: BasicBlockNode) -> None:
-        result: list[BaseInst] = list(block.insts)
-        i = 0
-        while i < len(result):
-            inst = result[i]
-            inc_info = _is_const_increment(inst)
-            if inc_info is None:
-                i += 1
-                continue
-
-            reg, val = inc_info
-            # Find run of increments for the SAME register
-            j = i + 1
-            while j < len(result):
-                next_info = _is_const_increment(result[j])
-                if next_info is not None and next_info[0] == reg:
-                    val += next_info[1]
-                    j += 1
-                else:
-                    break
-
-            if j == i + 1:
-                i += 1
-                continue
-
-            # Merge run
-            if val != 0:
-                result[i] = _make_increment_inst(reg, val)
-            else:
-                result[i] = NopInst()
-
-            for k in range(i + 1, j):
-                result[k] = NopInst()
-            i = j
-
-        block.insts = result

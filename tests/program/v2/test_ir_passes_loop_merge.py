@@ -25,7 +25,7 @@ def test_pattern_1_merge_zero_comparison():
     assert block.branch.op.rhs.value == "#1"
     assert block.branch.if_cond == "NZ"
 
-def test_pattern_1_merge_zero_comparison_fix_addr():
+def test_pattern_1_merge_zero_comparison_fix_addr_is_skipped():
     block = BasicBlockNode(
         insts=[RegWriteInst(dst=Register("r1"), src="op", op=AluExpr(Register("r1"), "-", Literal("#1")))],
         branch=JumpInst(label=Label("loop"), if_cond="NZ", op=AluExpr(Register("r1"), "-", Literal("#0"))),
@@ -35,9 +35,9 @@ def test_pattern_1_merge_zero_comparison_fix_addr():
     pass_.process_block(block)
 
     assert len(block.insts) == 1
-    assert isinstance(block.insts[0], NopInst)
+    assert isinstance(block.insts[0], RegWriteInst)
     assert block.branch is not None
-    assert block.branch.wr == SideWrite(Register("r1"), "op")
+    assert block.branch.wr is None
 
 def test_pattern_2_merge_side_data_injection():
     block = BasicBlockNode(
@@ -57,7 +57,7 @@ def test_pattern_2_merge_side_data_injection():
     assert block.branch.op.rhs.value == "#1"
     assert block.branch.if_cond == "S"
 
-def test_pattern_2_merge_side_data_injection_fix_addr():
+def test_pattern_2_merge_side_data_injection_fix_addr_is_skipped():
     block = BasicBlockNode(
         insts=[
             TestInst(op=AluExpr(Register("r1"), "-", Literal("#10"))),
@@ -71,9 +71,9 @@ def test_pattern_2_merge_side_data_injection_fix_addr():
 
     assert len(block.insts) == 2
     assert isinstance(block.insts[0], TestInst)
-    assert isinstance(block.insts[1], NopInst)
+    assert isinstance(block.insts[1], RegWriteInst)
     assert block.branch is not None
-    assert block.branch.wr == SideWrite(Register("r2"), "op")
+    assert block.branch.wr is None
 
 def test_pattern_1_rejects_regwrite_with_uf():
     block = BasicBlockNode(

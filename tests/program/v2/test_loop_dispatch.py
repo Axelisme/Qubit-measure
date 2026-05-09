@@ -1,4 +1,4 @@
-"""Unit tests for shift_add_multiply and build_jump_table_blocks."""
+"""Unit tests for build_jump_table_blocks."""
 from __future__ import annotations
 
 from zcu_tools.program.v2.ir.instructions import (
@@ -13,62 +13,7 @@ from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode
 from zcu_tools.program.v2.ir.operands import AluExpr, Literal, Register
 from zcu_tools.program.v2.ir.passes.loop_dispatch import (
     build_jump_table_blocks,
-    shift_add_multiply,
 )
-
-# ---------------------------------------------------------------------------
-# shift_add_multiply
-# ---------------------------------------------------------------------------
-
-
-def test_shift_add_multiply_power_of_two():
-    """body_words=4 → shift src by 2, then add once."""
-    seq = shift_add_multiply(src_reg="r1", dst_reg="s15", constant=4, max_words=8)
-    assert seq is not None
-    ops = [(inst.dst.name, str(inst.op)) for inst in seq if isinstance(inst, RegWriteInst)]
-    assert ops == [
-        ("r1", "r1 << #2"),
-        ("s15", "s15 + r1"),
-    ]
-
-
-def test_shift_add_multiply_one_is_single_add():
-    seq = shift_add_multiply(src_reg="r1", dst_reg="s15", constant=1, max_words=8)
-    assert seq is not None
-    assert len(seq) == 1
-    assert isinstance(seq[0], RegWriteInst)
-    assert str(seq[0].op) == "s15 + r1"
-
-
-def test_shift_add_multiply_five():
-    """5 = 0b101 → add at bit 0, shift to bit 2, add."""
-    seq = shift_add_multiply(src_reg="r1", dst_reg="s15", constant=5, max_words=8)
-    assert seq is not None
-    ops = [(inst.dst.name, str(inst.op)) for inst in seq if isinstance(inst, RegWriteInst)]
-    assert ops == [
-        ("s15", "s15 + r1"),    # bit 0
-        ("r1", "r1 << #2"),     # accumulate shift to bit 2
-        ("s15", "s15 + r1"),    # bit 2
-    ]
-
-
-def test_shift_add_multiply_zero_returns_none():
-    assert shift_add_multiply(src_reg="r1", dst_reg="s15", constant=0, max_words=8) is None
-    assert shift_add_multiply(src_reg="r1", dst_reg="s15", constant=-1, max_words=8) is None
-
-
-def test_shift_add_multiply_exceeds_word_budget():
-    """0xFF = 8 set bits → 8 adds + 7 shifts = 15 instructions; budget 4 → None."""
-    assert shift_add_multiply(src_reg="r1", dst_reg="s15", constant=0xFF, max_words=4) is None
-
-
-def test_shift_add_multiply_shift_amount_too_large():
-    """bit 17 requires shift > 15; must return None."""
-    assert (
-        shift_add_multiply(src_reg="r1", dst_reg="s15", constant=1 << 17, max_words=64)
-        is None
-    )
-
 
 # ---------------------------------------------------------------------------
 # build_jump_table_blocks helpers
@@ -89,7 +34,6 @@ def _make_jt_blocks(
         n_reg="r_n",
         counter_reg="r_i",
         k=k,
-        body_words=body_words,
         entry_labels=entry_labels,
         exit_label=exit_label,
         bodies=bodies,
@@ -119,19 +63,23 @@ def test_build_jump_table_blocks_structure_k2():
 
     real = [inst for inst in flat if not isinstance(inst, MetaInst)]
 
-    # Expected structure (k=2, body_words=1, stride=1):
+    # New dispatch-table shape:
     # prologue:
     #   JUMP exit -if(Z) -op(r_n - #0)
     #   REG_WR r_i op (r_n AND #1)
     #   JUMP e_0 -if(Z) -op(r_i - #0)
     #   REG_WR r_i op (r_i - #2)
     #   REG_WR r_i op (ABS r_i)
-    #   REG_WR s15 label e_0
-    #   REG_WR s15 op (s15 + r_i)   } shift-add
+    #   REG_WR s15 label dispatch_0
+    #   REG_WR s15 op (s15 + r_i)
     #   REG_WR r_i imm #0
     #   JUMP s15
-    # LABEL e_0: TimeInst
-    # LABEL e_1: TimeInst
+    # table:
+    #   LABEL dispatch_0; JUMP e_0
+    #   LABEL dispatch_1; JUMP e_1
+    # bodies:
+    #   LABEL e_0; TimeInst
+    #   LABEL e_1; TimeInst
     # back_edge:
     #   JUMP exit -if(NS) -op(r_i - r_n)
     #   JUMP e_0
@@ -141,9 +89,11 @@ def test_build_jump_table_blocks_structure_k2():
         "JumpInst",                                        # n==0 guard
         "RegWriteInst", "JumpInst",                        # i=n%k, jump if r==0
         "RegWriteInst", "RegWriteInst",                    # i=i-#k, i=ABS i
-        "RegWriteInst",                                    # s15=label entry_0
-        "RegWriteInst", "RegWriteInst",                    # shift-add: s15+=i, i:=0
+        "RegWriteInst",                                    # s15=label dispatch_0
+        "RegWriteInst", "RegWriteInst",                    # s15+=i, i:=0
         "JumpInst",                                        # JUMP s15
+        "LabelInst", "JumpInst",                           # dispatch_0 stub
+        "LabelInst", "JumpInst",                           # dispatch_1 stub
         "LabelInst", "TimeInst",                           # entry_0: body
         "LabelInst", "TimeInst",                           # entry_1: body
         "JumpInst", "JumpInst",                            # back_edge: exit check, → entry_0
@@ -174,7 +124,7 @@ def test_build_jump_table_blocks_structure_k2():
 
 
 def test_build_jump_table_blocks_body_words_5_uses_shift_add_seq():
-    # stride = body_words = 5 → helper emits two `s15 += r_i` adds
+    # body width no longer affects dispatch arithmetic.
     blocks = _make_jt_blocks(k=2, body_words=5)
     flat = _flatten_blocks(blocks)
 
@@ -183,7 +133,7 @@ def test_build_jump_table_blocks_body_words_5_uses_shift_add_seq():
         for inst in flat
         if isinstance(inst, RegWriteInst) and inst.dst.name == "s15" and str(inst.op) == "s15 + r_i"
     ]
-    assert len(s15_add_writes) == 2
+    assert len(s15_add_writes) == 1
 
 
 def test_build_jump_table_blocks_large_pmem_uses_s15_jumps():
@@ -212,7 +162,6 @@ def test_build_jump_table_blocks_invalid_k_raises():
             n_reg="r_n",
             counter_reg="r_i",
             k=1,  # < 2
-            body_words=1,
             entry_labels=[],
             exit_label=Label("x"),
             bodies=[],
@@ -224,9 +173,10 @@ def test_build_jump_table_blocks_invalid_k_raises():
 
 def test_build_jump_table_blocks_entry_blocks_have_fix_addr_size():
     blocks = _make_jt_blocks(k=4, body_words=2)
-    # Each entry starts at a labelled fix_addr_size block; body_words=2 means
-    # 2 body blocks + 1 inc block (appended to last body block) = addr size 3.
-    entry_starts = [b for b in blocks if b.fix_addr_size and b.labels]
-    assert len(entry_starts) == 4
-    # All fix_addr_size blocks must be present (k * body_words + back_edge blocks).
-    assert all(b.fix_addr_size for b in blocks if b in entry_starts)
+    fixed_blocks = [b for b in blocks if b.fix_addr_size]
+    assert len(fixed_blocks) == 4
+    assert all(b.labels for b in fixed_blocks)
+    assert all(b.branch is not None for b in fixed_blocks)
+    # Body copies and back-edge blocks must remain free-form.
+    free_blocks = [b for b in blocks if not b.fix_addr_size]
+    assert any(any(str(lbl.name).startswith("e_") for lbl in b.labels) for b in free_blocks)

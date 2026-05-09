@@ -22,7 +22,7 @@ class _FixedDurationModule(Module):
         return True
 
 
-def test_branch_uses_binary_dispatch_cond_jump(mock_prog):
+def test_branch_uses_dispatch_table_jumps(mock_prog):
     b = Branch(
         "sel",
         [_FixedDurationModule("b0", 0.1)],
@@ -33,13 +33,11 @@ def test_branch_uses_binary_dispatch_cond_jump(mock_prog):
     out = b.run(mock_prog, t=0.25)
 
     assert out == 0.0
-    assert mock_prog.cond_jump.call_count == 2
-
-    mids = sorted(call.args[4] for call in mock_prog.cond_jump.call_args_list)
-    assert mids == [1, 2]
-    assert all(call.args[1] == "sel" for call in mock_prog.cond_jump.call_args_list)
-    assert all(call.args[2] == "S" for call in mock_prog.cond_jump.call_args_list)
-    assert all(call.args[3] == "-" for call in mock_prog.cond_jump.call_args_list)
+    assert mock_prog.cond_jump.call_count == 0
+    assert mock_prog.write_reg_op.call_count == 1
+    assert mock_prog.write_reg_op.call_args_list[0].args == ("s15", "s15", "+", "sel")
+    # 1 indirect jump into table + 3 direct jumps from table stubs.
+    assert mock_prog.jump.call_count == 3
 
 
 def test_branch_power_of_two_has_no_nop_padding(mock_prog):
@@ -54,6 +52,7 @@ def test_branch_power_of_two_has_no_nop_padding(mock_prog):
     b.run(mock_prog)
 
     assert mock_prog.nop.call_count == 0
+    assert mock_prog.cond_jump.call_count == 0
 
 
 def test_branch_rejects_qickparam_duration(mock_prog):

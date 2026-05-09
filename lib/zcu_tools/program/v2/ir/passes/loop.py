@@ -11,13 +11,14 @@ from ..analysis import (
     estimate_body_scheduled_ticks,
     estimate_flat_size,
 )
+from ..dispatch import dispatch_entry_words
 from ..factory import IRParser, _needs_big_jump
 from ..instructions import JumpInst, LabelInst, RegWriteInst
 from ..labels import Label
 from ..node import BasicBlockNode, BlockNode, IRLoop, IRNode
 from ..operands import Literal, Register
 from .base import OptimizationPassBase
-from .loop_dispatch import build_jump_table_blocks, shift_add_multiply
+from .loop_dispatch import build_jump_table_blocks
 
 if TYPE_CHECKING:
     from ..pipeline import PipeLineConfig
@@ -131,12 +132,6 @@ class UnrollLoopPass(OptimizationPassBase):
     """
 
     def visit_IRLoop(self, node: IRLoop) -> Optional[IRNode | list[IRNode]]:
-        # Hierarchical lock: if this loop is inside a fix_addr_size region,
-        # unrolling would change the physical instruction count and break
-        # jump-table stride calculations.
-        if node.fix_addr_size:
-            return self.generic_visit(node)
-
         # Post-order: recurse into the body first so any inner loops are
         # rewritten before we measure this loop's body size. generic_visit
         # mutates and returns the same IRLoop instance.
@@ -319,10 +314,8 @@ class UnrollLoopPass(OptimizationPassBase):
     ) -> Optional[list[BasicBlockNode]]:
         """Try to build jump-table BasicBlockNodes for a register-driven loop.
 
-        Returns None when any precondition fails (k <= 1 after pow2
-        rounding, body_words == 0, dispatch shift-add too long, body already
-        addr-locked, body contains branches, etc.) so the caller falls back
-        to no-unroll.
+        Returns None when any precondition fails (k <= 1 after pow2 rounding,
+        body_words == 0, etc.) so the caller falls back to no-unroll.
         """
         analysis = _analyze_unroll(node.body.insts, loop_overhead, cfg)
         body_size = analysis.body_size
@@ -367,48 +360,16 @@ class UnrollLoopPass(OptimizationPassBase):
             )
             return None
 
-        # IRLoop.body is treated as one full logical iteration, including the
-        # counter update even if a linear pass later folds it into the branch.
-        # Jump-table stride therefore equals body_size directly.
-        stride = body_size
-        probe = shift_add_multiply(
-            src_reg=node.counter_reg,
-            dst_reg="s15",
-            constant=stride,
-            max_words=cfg.max_dispatch_words,
-        )
-        if probe is None:
-            logger.debug(
-                "UnrollLoopPass: skip jump-table loop name=%s because "
-                "shift_add_multiply(stride=%s, max_dispatch_words=%s) failed",
-                node.name,
-                stride,
-                cfg.max_dispatch_words,
-            )
-            return None
-
         logger.debug(
             "UnrollLoopPass: build jump-table loop name=%s n_reg=%s "
-            "k_raw=%s k_pow2=%s body_words=%s dispatch_words=%s",
+            "k_raw=%s k_pow2=%s body_words=%s entry_words=%s",
             node.name,
             node.n,
             k_raw,
             k,
             body_size,
-            len(probe),
+            dispatch_entry_words(self.ctx.pmem_size),
         )
-        # Validate: body must not already be addr-locked before jump-table lowering.
-        probe_blocks = IRParser(pmem_size=self.ctx.pmem_size).lower_block(
-            BlockNode(insts=deepcopy(node.body.insts))
-        )
-        for bb in probe_blocks:
-            if bb.fix_addr_size:
-                logger.debug(
-                    "UnrollLoopPass: skip jump-table loop name=%s because "
-                    "lowered body contains fix_addr_size=True block",
-                    node.name,
-                )
-                return None
 
         entry_labels = [Label.make_new(f"{node.name}_jt_entry_{i}") for i in range(k)]
         exit_label = Label.make_new(f"{node.name}_jt_exit")
@@ -418,7 +379,6 @@ class UnrollLoopPass(OptimizationPassBase):
             n_reg=str(node.n),
             counter_reg=node.counter_reg,
             k=k,
-            body_words=body_size,
             entry_labels=entry_labels,
             exit_label=exit_label,
             bodies=bodies,

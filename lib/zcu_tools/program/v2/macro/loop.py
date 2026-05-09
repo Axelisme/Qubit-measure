@@ -4,7 +4,7 @@ import logging
 from numbers import Integral
 from typing import Union
 
-from qick.asm_v2 import AsmInst, Label, Macro, WriteLabel, WriteReg
+from qick.asm_v2 import AsmInst, Label, Macro, WriteLabel, WriteReg, AcquireProgramV2
 
 from .meta import MetaMacro
 from .write_reg import WriteRegOp
@@ -12,12 +12,8 @@ from .write_reg import WriteRegOp
 logger = logging.getLogger(__name__)
 
 
-def _needs_big_jump(prog) -> bool:
-    tproccfg = getattr(prog, "tproccfg", None)
-    if not isinstance(tproccfg, dict):
-        return False
-    pmem_size = tproccfg.get("pmem_size")
-    return isinstance(pmem_size, int) and pmem_size > 2**11
+def _needs_big_jump(prog: AcquireProgramV2) -> bool:
+    return prog.tproccfg["pmem_size"] > 2**11
 
 
 def _emit_cond_jump(
@@ -49,7 +45,9 @@ def _emit_cond_jump(
     ]
 
 
-def _format_op(prog, lhs_reg: str, op: str, rhs: Union[int, str]) -> str:
+def _format_op(
+    prog: AcquireProgramV2, lhs_reg: str, op: str, rhs: Union[int, str]
+) -> str:
     lhs = prog._get_reg(lhs_reg)
     if isinstance(rhs, Integral):
         return f"{lhs} {op} #{int(rhs)}"

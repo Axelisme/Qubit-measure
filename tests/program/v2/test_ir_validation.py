@@ -1,15 +1,13 @@
 """Phase 6 Validation tests for the Two-Tier Optimization Pipeline.
 
-Validation 1: Jump-table stride alignment
-  Assert that every entry block in a jump-table output has exactly
-  `body_words` instructions so the dispatcher's stride calculation
-  never drifts.
+Validation 1: Dispatch-table island invariants
+  Assert that only dispatch-table stubs are fixed-width, while body copies
+  remain free-form.
 
 Validation 2: Fully-unrolled loops produce a single fused block with zero
   internal dead writes after the full pipeline runs.
 
-Validation 3: fix_addr_size=True blocks receive NopInst padding instead of
-  branch deletion when BranchEliminationPass runs.
+Validation 3: fix_addr_size=True blocks are conservatively skipped by passes.
 """
 from __future__ import annotations
 
@@ -115,12 +113,8 @@ def _collect_all_basic_blocks(root: RootNode) -> list[BasicBlockNode]:
 # Validation 1: Jump-table stride alignment
 # ---------------------------------------------------------------------------
 
-def test_v1_jump_table_entry_blocks_have_uniform_stride():
-    """All k entry blocks must have identical instruction counts (= body_words).
-
-    This guarantees the dispatch arithmetic `entry_0 + i * stride` always
-    lands on a valid entry label, regardless of which entry point is chosen.
-    """
+def test_v1_jump_table_only_dispatch_stubs_are_fixed():
+    """Dispatch-table lowering should freeze only the table island."""
     Label.reset()
     k = 4
     body_words = 3
@@ -133,30 +127,31 @@ def test_v1_jump_table_entry_blocks_have_uniform_stride():
         n_reg="r_n",
         counter_reg="r_i",
         k=k,
-        body_words=body_words,
         entry_labels=entry_labels,
         exit_label=exit_label,
         bodies=bodies,
     )
 
     root = RootNode(insts=list(blocks))
-    groups = _collect_entry_groups(root)
-    assert len(groups) == k, f"expected {k} entry groups, got {len(groups)}"
+    fixed_blocks = _collect_fixed_entry_blocks(root)
+    assert len(fixed_blocks) == k
+    assert all(block.branch is not None for block in fixed_blocks)
 
-    expected_addr = body_words
-    for i, group in enumerate(groups):
-        actual = _entry_addr_size(group)
-        assert actual == expected_addr, (
-            f"entry {i}: expected addr size {expected_addr}, got {actual}"
+    plain_entry_blocks = [
+        block
+        for block in _collect_all_basic_blocks(root)
+        if any(
+            str(lbl.name).startswith("jt_entry_")
+            and "_dispatch_" not in str(lbl.name)
+            for lbl in block.labels
         )
+    ]
+    assert plain_entry_blocks
+    assert all(not block.fix_addr_size for block in plain_entry_blocks)
 
 
-def test_v1_jump_table_stride_equals_body_words():
-    """After UnrollLoopPass, entry block instruction count == body_words.
-
-    body_words is measured by estimate_flat_size, which counts non-meta
-    instructions in one full logical body iteration.
-    """
+def test_v1_jump_table_stub_width_is_uniform():
+    """Every dispatch-table entry stub must keep the same physical width."""
     Label.reset()
     body_nops = 5  # body_words == 5
     root = RootNode(
@@ -173,25 +168,15 @@ def test_v1_jump_table_stride_equals_body_words():
     config = PipeLineConfig(max_unroll_factor=4)
     out = UnrollLoopPass().process(root, PipeLineContext(config=config))
 
-    groups = _collect_entry_groups(out)
-    assert len(groups) > 0, "no entry groups produced"
-
-    expected_addr = body_nops
-    for i, group in enumerate(groups):
-        actual = _entry_addr_size(group)
-        assert actual == expected_addr, (
-            f"entry {i}: expected addr size {expected_addr} (body_words={body_nops}), "
-            f"got {actual}"
-        )
+    stubs = _collect_fixed_entry_blocks(out)
+    assert stubs
+    stub_sizes = [_entry_addr_size([stub]) for stub in stubs]
+    assert len(set(stub_sizes)) == 1
+    assert stub_sizes[0] == 1
 
 
-def test_v1_jump_table_entry_blocks_not_modified_by_pipeline():
-    """The full pipeline must not alter the instruction count of entry blocks
-    (fix_addr_size=True guards them from Post-LIR peephole passes).
-
-    body: two NOPs. Pre-LIR passes leave NOPs untouched, so body_words=2
-    and each entry block should have exactly 2 instructions after unrolling.
-    """
+def test_v1_pipeline_keeps_body_blocks_free_after_unroll():
+    """After the full pipeline, body entry blocks must remain non-fixed."""
     Label.reset()
     root = RootNode(
         insts=[
@@ -216,17 +201,17 @@ def test_v1_jump_table_entry_blocks_not_modified_by_pipeline():
         out = p.process(out, ctx)
         _run_linear_passes(pipeline.linear_passes, out)
 
-    groups = _collect_entry_groups(out)
-    assert len(groups) > 0, "no entry groups produced"
-
-    # body_words = 2 (NOP + NOP) → addr size 2 per entry
-    expected_addr = 2
-    for i, group in enumerate(groups):
-        actual = _entry_addr_size(group)
-        assert actual == expected_addr, (
-            f"entry {i}: pipeline altered addr size "
-            f"(expected {expected_addr}, got {actual})"
+    body_entry_blocks = [
+        block
+        for block in _collect_all_basic_blocks(out)
+        if any(
+            str(lbl.name).startswith("loop_jt_entry_")
+            and "_dispatch_" not in str(lbl.name)
+            for lbl in block.labels
         )
+    ]
+    assert body_entry_blocks
+    assert all(not block.fix_addr_size for block in body_entry_blocks)
 
 
 def test_branch_parse_rejects_missing_case_end():
@@ -371,14 +356,11 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
     )
 
 # ---------------------------------------------------------------------------
-# Validation 3: fix_addr_size=True blocks use NOP padding, not branch deletion
+# Validation 3: fix_addr_size=True blocks are skipped conservatively
 # ---------------------------------------------------------------------------
 
-def test_v3_fixed_block_branch_elim_produces_nop():
-    """When a fix_addr_size=True block's unconditional branch targets the
-    immediately following block, BranchEliminationPass must replace the
-    branch with a NopInst (not remove it).
-    """
+def test_v3_fixed_block_branch_elim_skips_block():
+    """BranchEliminationPass should leave fixed-width stubs unchanged."""
     lbl = Label.make_new("next")
     root = RootNode(insts=[
         BasicBlockNode(
@@ -396,24 +378,12 @@ def test_v3_fixed_block_branch_elim_produces_nop():
 
     fixed = out.insts[0]
     assert isinstance(fixed, BasicBlockNode)
-    assert fixed.branch is None, "branch should have been removed"
-    # The former branch word must be replaced by a NopInst to keep stride.
-    assert any(isinstance(i, NopInst) for i in fixed.insts), (
-        "fix_addr_size=True block must receive NOP padding when branch is eliminated"
-    )
-    # Total instruction count must not shrink (stride preserved).
-    assert len(fixed.insts) == 2, (
-        f"expected 2 insts (original NOP + padding NOP), got {len(fixed.insts)}"
-    )
+    assert fixed.branch is not None
+    assert len(fixed.insts) == 1
 
 
-def test_v3_fixed_block_instruction_count_preserved_after_pipeline():
-    """After the full pipeline, no fix_addr_size=True entry block should have
-    fewer instructions than body_words.
-
-    body: two NOPs → body_words=2, each entry block expects exactly 2 insts.
-    BranchEliminationPass must not strip any instructions from these blocks.
-    """
+def test_v3_fixed_blocks_are_only_dispatch_stubs_after_pipeline():
+    """After the full pipeline, fixed blocks should be limited to dispatch stubs."""
     Label.reset()
     root = RootNode(
         insts=[
@@ -438,16 +408,10 @@ def test_v3_fixed_block_instruction_count_preserved_after_pipeline():
         out = p.process(out, ctx)
         _run_linear_passes(pipeline.linear_passes, out)
 
-    groups = _collect_entry_groups(out)
-    assert len(groups) > 0, "no entry groups produced"
-
-    for i, group in enumerate(groups):
-        # addr size must be exactly body_words(2).
-        actual = _entry_addr_size(group)
-        assert actual == 2, (
-            f"entry {i} has addr size {actual} — "
-            f"fix_addr_size was not respected by the pipeline"
-        )
+    fixed_blocks = _collect_fixed_entry_blocks(out)
+    assert fixed_blocks
+    assert all(block.branch is not None for block in fixed_blocks)
+    assert all(len(block.insts) == 0 for block in fixed_blocks)
 
 
 def test_v3_non_fixed_block_branch_elim_removes_branch():

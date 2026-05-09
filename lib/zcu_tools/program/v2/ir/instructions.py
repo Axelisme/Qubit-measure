@@ -65,10 +65,14 @@ def _resolve_addr(raw_addr: Any) -> Optional[Union[Register, Literal, Label]]:
         return None
     if isinstance(raw_addr, Label):
         return raw_addr
+    if isinstance(raw_addr, int):
+        return Literal(f"&{raw_addr}")
     if isinstance(raw_addr, str):
         if is_register_addr(raw_addr):
             return Register(raw_addr)
         if raw_addr.startswith("&"):
+            if raw_addr[1:].isdigit():
+                return Literal(raw_addr)
             return _get_label(raw_addr)
         # It might be a direct literal address
         if raw_addr.startswith("@") or raw_addr.lstrip("-").isdigit():
@@ -358,6 +362,8 @@ class RegWriteInst(BaseInst):
     wr: Optional[SideWrite] = None
     if_cond: Optional[str] = None
     label: Optional[Label] = None
+    ww: Optional[str] = None
+    wp: Optional[str] = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> RegWriteInst:
@@ -372,6 +378,8 @@ class RegWriteInst(BaseInst):
             uf=norm_d.get("UF"),
             if_cond=norm_d.get("IF"),
             label=_get_label(norm_d.get("LABEL")),
+            ww=norm_d.get("WW"),
+            wp=norm_d.get("WP"),
         )
 
     def __post_init__(self) -> None:
@@ -386,6 +394,7 @@ class RegWriteInst(BaseInst):
             reads.update(self.op.get_read_regs())
         if isinstance(self.addr, Register):
             reads.update(self.addr.get_read_regs())
+        # wp often looks like "r_wave p0" or just port num, skip adding port names to reads
         return sorted(list(reads))
 
     @property
@@ -412,6 +421,8 @@ class RegWriteInst(BaseInst):
             "UF": self.uf,
             "IF": self.if_cond,
             "LABEL": str(self.label) if self.label else None,
+            "WW": self.ww,
+            "WP": self.wp,
         }
         return {k: v for k, v in d.items() if v is not None}
 
@@ -428,9 +439,7 @@ class PortWriteInst(BaseInst):
     op: Optional[AluExpr] = None
     uf: Optional[str] = None
     if_cond: Optional[str] = None
-    data: Optional[Union[Register, Literal]] = None
-    phase: Optional[Union[Register, Literal]] = None
-    freq: Optional[Union[Register, Literal]] = None
+    ww: Optional[str] = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> PortWriteInst:
@@ -443,9 +452,7 @@ class PortWriteInst(BaseInst):
             op=parse_alu_expr(d["OP"]) if "OP" in d else None,
             uf=d.get("UF"),
             if_cond=d.get("IF"),
-            data=parse_register_or_literal(d["DATA"]) if "DATA" in d else None,
-            phase=parse_register_or_literal(d["PHASE"]) if "PHASE" in d else None,
-            freq=parse_register_or_literal(d["FREQ"]) if "FREQ" in d else None,
+            ww=d.get("WW"),
         )
 
     @property
@@ -461,12 +468,6 @@ class PortWriteInst(BaseInst):
             reads.update(self.op.get_read_regs())
         if self.wr:
             reads.update(self.wr.get_read_regs())
-        if isinstance(self.data, Register):
-            reads.update(self.data.get_read_regs())
-        if isinstance(self.phase, Register):
-            reads.update(self.phase.get_read_regs())
-        if isinstance(self.freq, Register):
-            reads.update(self.freq.get_read_regs())
         return sorted(list(reads))
 
     @property
@@ -486,9 +487,7 @@ class PortWriteInst(BaseInst):
             "OP": str(self.op) if self.op else None,
             "UF": self.uf,
             "IF": self.if_cond,
-            "DATA": str(self.data) if self.data else None,
-            "PHASE": str(self.phase) if self.phase else None,
-            "FREQ": str(self.freq) if self.freq else None,
+            "WW": self.ww,
         }
         # In QICK, DST for port is often just integer, so we check and restore that format.
         # Handle string serialization for others
@@ -637,8 +636,10 @@ class WmemWriteInst(BaseInst):
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> WmemWriteInst:
+        # QICK uses 'DST' for WMEM_WR address
+        addr_raw = d.get("DST", d.get("ADDR"))
         return cls(
-            addr=parse_register_or_literal(str(d["ADDR"])) if "ADDR" in d else None,
+            addr=parse_register_or_literal(str(addr_raw)) if addr_raw is not None else None,
             time=parse_register_or_literal(str(d["TIME"])) if "TIME" in d else None,
             wr=parse_side_write(d["WR"]) if "WR" in d else None,
             op=parse_alu_expr(d["OP"]) if "OP" in d else None,
@@ -663,7 +664,7 @@ class WmemWriteInst(BaseInst):
     def to_dict(self) -> dict[str, Any]:
         d = {
             "CMD": "WMEM_WR",
-            "ADDR": str(self.addr) if self.addr else None,
+            "DST": str(self.addr) if self.addr else None,
             "TIME": str(self.time) if self.time else None,
             "WR": str(self.wr) if self.wr else None,
             "OP": str(self.op) if self.op else None,

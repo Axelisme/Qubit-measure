@@ -290,7 +290,7 @@ def _collect_all_basic_blocks(root: RootNode) -> list[BasicBlockNode]:
 
 
 def test_unroll_register_driven_jump_table_structure():
-    """Verify the jump-table blocks have correct structure and conditional jumps."""
+    """Verify the dispatch-table loop has the expected fixed/free split."""
     Label.reset()
     root = RootNode(
         insts=[
@@ -306,8 +306,8 @@ def test_unroll_register_driven_jump_table_structure():
     config = _config(max_unroll_factor=2)
     out = UnrollLoopPass().process(root, PipeLineContext(config=config))
 
-    # k=2: 2 entry blocks + 2 back-edge blocks = 4 fixed blocks.
-    assert _count_fixed_blocks(out) == 4
+    # Only the dispatch-table stubs remain fixed.
+    assert _count_fixed_blocks(out) == 2
 
     emit = _flatten_root(out)
     cond_jumps = [

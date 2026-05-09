@@ -68,7 +68,7 @@ def test_branch_lower_produces_basic_blocks():
         "BRANCH_CASE_START",
         "BRANCH_CASE_END",
     ]
-    assert [m.name for m in case_meta] == ["1", "1", "0", "0"]
+    assert [m.name for m in case_meta] == ["0", "0", "1", "1"]
 
 
 def test_branch_roundtrip_preserves_cases():
