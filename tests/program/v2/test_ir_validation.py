@@ -29,6 +29,7 @@ from zcu_tools.program.v2.ir.node import (
     IRNode,
     RootNode,
 )
+from zcu_tools.program.v2.ir.operands import AluExpr, Literal, Register
 from zcu_tools.program.v2.ir.passes import BranchEliminationPass, UnrollLoopPass
 from zcu_tools.program.v2.ir.passes.loop_dispatch import build_jump_table_blocks
 from zcu_tools.program.v2.ir.pipeline import (
@@ -245,7 +246,7 @@ def test_v2_fully_unrolled_loop_produces_single_fused_block():
                 counter_reg="r_cnt",
                 n=3,
                 body=BlockNode(insts=[
-                    BasicBlockNode(insts=[RegWriteInst(dst="r1", src="imm", lit="#1")]),
+                    BasicBlockNode(insts=[RegWriteInst(dst=Register("r1"), src="imm", lit=Literal("#1"))]),
                 ]),
             )
         ]
@@ -292,7 +293,7 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
                 counter_reg="r_cnt",
                 n=3,
                 body=BlockNode(insts=[
-                    BasicBlockNode(insts=[RegWriteInst(dst="r_out", src="imm", lit="#42")]),
+                    BasicBlockNode(insts=[RegWriteInst(dst=Register("r_out"), src="imm", lit=Literal("#42"))]),
                 ]),
             )
         ]
@@ -309,7 +310,7 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
 
     writes_to_r_out = [
         inst for inst in walk_instructions(out)
-        if isinstance(inst, RegWriteInst) and inst.dst == "r_out"
+        if isinstance(inst, RegWriteInst) and inst.dst.name == "r_out"
     ]
     assert len(writes_to_r_out) == 1, (
         f"expected 1 surviving write to r_out, got {len(writes_to_r_out)}"

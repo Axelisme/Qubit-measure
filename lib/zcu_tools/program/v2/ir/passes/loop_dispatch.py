@@ -33,6 +33,7 @@ from ..factory import IRParser, _needs_big_jump
 from ..instructions import BaseInst, JumpInst, LabelInst, RegWriteInst
 from ..labels import Label
 from ..node import BasicBlockNode, BlockNode
+from ..operands import AluExpr, Literal, Register
 
 
 def shift_add_multiply(
@@ -64,10 +65,20 @@ def shift_add_multiply(
             if delta > 15:
                 return None
             insts.append(
-                RegWriteInst(dst=src_reg, src="op", op=f"{src_reg} << #{delta}")
+                RegWriteInst(
+                    dst=Register(src_reg),
+                    src="op",
+                    op=AluExpr(Register(src_reg), "<<", Literal(f"#{delta}")),
+                )
             )
             prev_bit = bit
-        insts.append(RegWriteInst(dst=dst_reg, src="op", op=f"{dst_reg} + {src_reg}"))
+        insts.append(
+            RegWriteInst(
+                dst=Register(dst_reg),
+                src="op",
+                op=AluExpr(Register(dst_reg), "+", Register(src_reg)),
+            )
+        )
         if len(insts) > max_words:
             return None
 
@@ -99,8 +110,8 @@ def build_jump_table_blocks(
             f"body_words={body_words}"
         )
 
-    i = counter_reg
-    n = n_reg
+    i = Register(counter_reg)
+    n = Register(n_reg)
     entry0 = entry_labels[0]
 
     # The body is trusted to already include the loop-carried counter update
@@ -108,7 +119,7 @@ def build_jump_table_blocks(
     # merge that write, so stride must follow the whole lowered body size.
     stride = body_words
     shift_add = shift_add_multiply(
-        src_reg=i, dst_reg="s15", constant=stride, max_words=64
+        src_reg=counter_reg, dst_reg="s15", constant=stride, max_words=64
     )
     if shift_add is None:
         raise ValueError(
@@ -123,14 +134,20 @@ def build_jump_table_blocks(
     if _needs_big_jump(pmem_size):
         result.append(
             BasicBlockNode(
-                insts=[RegWriteInst(dst="s15", src="label", label=exit_label)],
-                branch=JumpInst(addr="s15", if_cond="Z", op=f"{n} - #0"),
+                insts=[
+                    RegWriteInst(dst=Register("s15"), src="label", label=exit_label)
+                ],
+                branch=JumpInst(
+                    addr=Register("s15"), if_cond="Z", op=AluExpr(n, "-", Literal("#0"))
+                ),
             )
         )
     else:
         result.append(
             BasicBlockNode(
-                branch=JumpInst(label=exit_label, if_cond="Z", op=f"{n} - #0"),
+                branch=JumpInst(
+                    label=exit_label, if_cond="Z", op=AluExpr(n, "-", Literal("#0"))
+                ),
             )
         )
 
@@ -138,36 +155,46 @@ def build_jump_table_blocks(
     # Uses i as scratch; reset to 0 before the dispatch JUMP.
     if _needs_big_jump(pmem_size):
         dispatch_insts: list[BaseInst] = [
-            RegWriteInst(dst=i, src="op", op=f"{n} AND #{k - 1}"),
+            RegWriteInst(dst=i, src="op", op=AluExpr(n, "AND", Literal(f"#{k - 1}"))),
         ]
         # r == 0: jump straight to entry_0
         result.append(BasicBlockNode(insts=dispatch_insts))
         result.append(
             BasicBlockNode(
-                insts=[RegWriteInst(dst="s15", src="label", label=entry0)],
-                branch=JumpInst(addr="s15", if_cond="Z", op=f"{i} - #0"),
+                insts=[RegWriteInst(dst=Register("s15"), src="label", label=entry0)],
+                branch=JumpInst(
+                    addr=Register("s15"), if_cond="Z", op=AluExpr(i, "-", Literal("#0"))
+                ),
             )
         )
     else:
         result.append(
             BasicBlockNode(
-                insts=[RegWriteInst(dst=i, src="op", op=f"{n} AND #{k - 1}")],
-                branch=JumpInst(label=entry0, if_cond="Z", op=f"{i} - #0"),
+                insts=[
+                    RegWriteInst(
+                        dst=i, src="op", op=AluExpr(n, "AND", Literal(f"#{k - 1}"))
+                    )
+                ],
+                branch=JumpInst(
+                    label=entry0, if_cond="Z", op=AluExpr(i, "-", Literal("#0"))
+                ),
             )
         )
 
     # Compute entry offset and jump.
     offset_insts: list[BaseInst] = [
-        RegWriteInst(dst=i, src="op", op=f"{i} - #{k}"),  # i = r - k (< 0)
-        RegWriteInst(dst=i, src="op", op=f"ABS {i}"),  # i = k - r (offset)
-        RegWriteInst(dst="s15", src="label", label=entry0),
+        RegWriteInst(
+            dst=i, src="op", op=AluExpr(i, "-", Literal(f"#{k}"))
+        ),  # i = r - k (< 0)
+        RegWriteInst(dst=i, src="op", op=AluExpr(i, "ABS")),  # i = k - r (offset)
+        RegWriteInst(dst=Register("s15"), src="label", label=entry0),
         *shift_add,  # s15 += i * stride
-        RegWriteInst(dst=i, src="imm", lit="#0"),  # reset counter
+        RegWriteInst(dst=i, src="imm", lit=Literal("#0")),  # reset counter
     ]
     result.append(
         BasicBlockNode(
             insts=offset_insts,
-            branch=JumpInst(addr="s15"),
+            branch=JumpInst(addr=Register("s15")),
         )
     )
 
@@ -199,26 +226,28 @@ def build_jump_table_blocks(
     # ── back edge (fix_addr_size=True) ──
     if _needs_big_jump(pmem_size):
         back_insts: list[BaseInst] = [
-            RegWriteInst(dst="s15", src="label", label=exit_label)
+            RegWriteInst(dst=Register("s15"), src="label", label=exit_label)
         ]
         result.append(
             BasicBlockNode(
                 insts=back_insts,
-                branch=JumpInst(addr="s15", if_cond="NS", op=f"{i} - {n}"),
+                branch=JumpInst(
+                    addr=Register("s15"), if_cond="NS", op=AluExpr(i, "-", n)
+                ),
                 fix_addr_size=True,
             )
         )
         result.append(
             BasicBlockNode(
-                insts=[RegWriteInst(dst="s15", src="label", label=entry0)],
-                branch=JumpInst(addr="s15"),
+                insts=[RegWriteInst(dst=Register("s15"), src="label", label=entry0)],
+                branch=JumpInst(addr=Register("s15")),
                 fix_addr_size=True,
             )
         )
     else:
         result.append(
             BasicBlockNode(
-                branch=JumpInst(label=exit_label, if_cond="NS", op=f"{i} - {n}"),
+                branch=JumpInst(label=exit_label, if_cond="NS", op=AluExpr(i, "-", n)),
                 fix_addr_size=True,
             )
         )
@@ -237,3 +266,4 @@ def build_jump_table_blocks(
     )
 
     return result
+

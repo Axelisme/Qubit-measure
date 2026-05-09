@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ..instructions import JumpInst, NopInst, RegWriteInst, TestInst
 from ..node import BasicBlockNode
+from ..operands import AluExpr, Literal, SideWrite
 from ..pipeline import AbsLinearPass
 
 
@@ -24,7 +25,7 @@ def _make_merged_branch(branch: JumpInst, inst: RegWriteInst) -> JumpInst:
         label=branch.label,
         if_cond=branch.if_cond,
         addr=branch.addr,
-        wr=f"{inst.dst} op",
+        wr=SideWrite(inst.dst, "op"),
         op=inst.op,
         uf=branch.uf,
     )
@@ -80,8 +81,15 @@ class LoopConditionMergeLinear(AbsLinearPass):
             and branch.wr is None
         ):
             # Target pattern: branch.op is "reg - #0" and last_inst.dst is "reg"
-            reg = last_inst.dst
-            if branch.op == f"{reg} - #0":
+            reg = last_inst.dst.name
+            op = branch.op
+            if (
+                isinstance(op, AluExpr)
+                and op.lhs.name == reg
+                and op.op == "-"
+                and isinstance(op.rhs, Literal)
+                and op.rhs.value == "#0"
+            ):
                 block.branch = _make_merged_branch(branch, last_inst)
 
                 if block.fix_addr_size:

@@ -4,7 +4,7 @@ import logging
 import math
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from ..analysis import (
     estimate_body_cost,
@@ -15,6 +15,7 @@ from ..factory import IRParser, _needs_big_jump
 from ..instructions import JumpInst, LabelInst, RegWriteInst
 from ..labels import Label
 from ..node import BasicBlockNode, BlockNode, IRLoop, IRNode
+from ..operands import Literal, Register
 from .base import OptimizationPassBase
 from .loop_dispatch import build_jump_table_blocks, shift_add_multiply
 
@@ -208,7 +209,11 @@ class UnrollLoopPass(OptimizationPassBase):
                 # already contains the loop-carried update as a semantic unit.
                 pmem_size = self.ctx.pmem_size
                 init_bb = BasicBlockNode(
-                    insts=[RegWriteInst(dst=node.counter_reg, src="imm", lit="#0")]
+                    insts=[
+                        RegWriteInst(
+                            dst=Register(node.counter_reg), src="imm", lit=Literal("#0")
+                        )
+                    ]
                 )
                 return [
                     init_bb,
@@ -261,14 +266,26 @@ class UnrollLoopPass(OptimizationPassBase):
                 if _needs_big_jump(pmem_size):
                     init_bb = BasicBlockNode(
                         insts=[
-                            RegWriteInst(dst=node.counter_reg, src="imm", lit="#0"),
-                            RegWriteInst(dst="s15", src="label", label=entry_label),
+                            RegWriteInst(
+                                dst=Register(node.counter_reg),
+                                src="imm",
+                                lit=Literal("#0"),
+                            ),
+                            RegWriteInst(
+                                dst=Register("s15"), src="label", label=entry_label
+                            ),
                         ],
-                        branch=JumpInst(addr="s15"),
+                        branch=JumpInst(addr=Register("s15")),
                     )
                 else:
                     init_bb = BasicBlockNode(
-                        insts=[RegWriteInst(dst=node.counter_reg, src="imm", lit="#0")],
+                        insts=[
+                            RegWriteInst(
+                                dst=Register(node.counter_reg),
+                                src="imm",
+                                lit=Literal("#0"),
+                            )
+                        ],
                         branch=JumpInst(label=entry_label),
                     )
                 result.append(init_bb)

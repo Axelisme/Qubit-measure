@@ -19,6 +19,7 @@ from zcu_tools.program.v2.ir.node import (
     IRLoop,
     RootNode,
 )
+from zcu_tools.program.v2.ir.operands import AluExpr, Literal, Register
 from zcu_tools.program.v2.ir.passes.control_flow import (
     BlockMergePass,
     BranchEliminationPass,
@@ -126,7 +127,7 @@ def test_branch_elim_keeps_conditional_branch():
     root = RootNode(insts=[
         BasicBlockNode(
             insts=[NopInst()],
-            branch=JumpInst(label=lbl, if_cond="Z", op="r0 - #0"),
+            branch=JumpInst(label=lbl, if_cond="Z", op=AluExpr(Register("r0"), "-", Literal("#0"))),
         ),
         BasicBlockNode(
             labels=[LabelInst(name=lbl)],
@@ -205,8 +206,8 @@ def test_block_merge_does_not_merge_fixed_blocks():
 def test_block_merge_cross_boundary_dead_write_cleared_by_post_linear():
     """A dead write crossing the merge boundary is cleared when post_linear runs after BlockMergePass."""
     root = RootNode(insts=[
-        BasicBlockNode(insts=[RegWriteInst(dst="r0", src="imm", lit="#1")]),
-        BasicBlockNode(insts=[RegWriteInst(dst="r0", src="imm", lit="#2")]),
+        BasicBlockNode(insts=[RegWriteInst(dst=Register("r0"), src="imm", lit=Literal("#1"))]),
+        BasicBlockNode(insts=[RegWriteInst(dst=Register("r0"), src="imm", lit=Literal("#2"))]),
     ])
 
     BlockMergePass().process(root, _ctx())
@@ -219,7 +220,7 @@ def test_block_merge_cross_boundary_dead_write_cleared_by_post_linear():
     merged = root.insts[0]
     assert isinstance(merged, BasicBlockNode)
     assert len(merged.insts) == 1
-    assert merged.insts[0].lit == "#2"  # type: ignore[attr-defined]
+    assert merged.insts[0].lit.value == "#2"  # type: ignore[attr-defined]
 
 
 def test_block_merge_chains_three_blocks():
@@ -245,7 +246,7 @@ def test_block_merge_inside_irloop_body():
         BasicBlockNode(insts=[NopInst()]),   # no branch
         BasicBlockNode(insts=[NopInst()]),   # no labels → should be merged
     ])
-    insts: list = [IRLoop(body=body, n=4)]
+    insts: list = [IRLoop(name="L", counter_reg="c", body=body, n=4)]
     root = RootNode(insts=insts)
 
     out = BlockMergePass().process(root, _ctx())
@@ -264,7 +265,7 @@ def test_block_merge_inside_irbranch_cases():
         BasicBlockNode(insts=[NopInst()]),
         BasicBlockNode(insts=[NopInst()]),
     ])
-    insts: list = [IRBranch(cases=[case])]
+    insts: list = [IRBranch(name="B", compare_reg="c", cases=[case])]
     root = RootNode(insts=insts)
 
     out = BlockMergePass().process(root, _ctx())
@@ -288,7 +289,7 @@ def test_branch_elim_inside_irloop_body():
             insts=[NopInst()],
         ),
     ])
-    insts: list = [IRLoop(body=body, n=4)]
+    insts: list = [IRLoop(name="L", counter_reg="c", body=body, n=4)]
     root = RootNode(insts=insts)
 
     out = BranchEliminationPass().process(root, _ctx())
@@ -313,7 +314,7 @@ def test_branch_elim_inside_irbranch_cases():
             insts=[NopInst()],
         ),
     ])
-    insts: list = [IRBranch(cases=[case])]
+    insts: list = [IRBranch(name="B", compare_reg="c", cases=[case])]
     root = RootNode(insts=insts)
 
     out = BranchEliminationPass().process(root, _ctx())

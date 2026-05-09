@@ -33,24 +33,25 @@ from zcu_tools.program.v2.ir.instructions import (
     WmemWriteInst,
 )
 from zcu_tools.program.v2.ir.labels import Label
+from zcu_tools.program.v2.ir.operands import AluExpr, Literal, Register, SideWrite
 
 
 class TestTimeInstruction:
     """Tests for TimeInst (TIME opcode)."""
 
     def test_construction_with_all_fields(self):
-        inst = TimeInst(c_op="inc_ref", lit="#10", r1="r0")
+        inst = TimeInst(c_op="inc_ref", lit=Literal("#10"), r1=Register("r0"))
         assert inst.c_op == "inc_ref"
-        assert inst.lit == "#10"
-        assert inst.r1 == "r0"
+        assert inst.lit.value == "#10"
+        assert inst.r1.name == "r0"
 
     def test_dispatch_time_to_timeinst(self):
         d = {"CMD": "TIME", "C_OP": "inc_ref", "LIT": "#5", "R1": "r1"}
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, TimeInst)
         assert inst.c_op == "inc_ref"
-        assert inst.lit == "#5"
-        assert inst.r1 == "r1"
+        assert inst.lit.value == "#5"
+        assert inst.r1.name == "r1"
 
     def test_roundtrip_time_full(self):
         original = {"CMD": "TIME", "C_OP": "inc_ref", "LIT": "#10", "R1": "r1"}
@@ -74,33 +75,35 @@ class TestTestInstruction:
     """Tests for TestInst (TEST opcode)."""
 
     def test_construction(self):
-        inst = TestInst(op="r1-r2", uf="1")
-        assert inst.op == "r1-r2"
+        inst = TestInst(op=AluExpr(Register("r1"), "-", Register("r2")), uf="1")
+        assert inst.op.op == "-"
         assert inst.uf == "1"
 
     def test_dispatch_test_to_testinst(self):
-        d = {"CMD": "TEST", "OP": "r1==r2", "UF": "1"}
+        d = {"CMD": "TEST", "OP": "r1 - r2", "UF": "1"}
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, TestInst)
-        assert inst.op == "r1==r2"
+        assert inst.op.op == "-"
+        assert inst.op.lhs.name == "r1"
+        assert inst.op.rhs.name == "r2"
         assert inst.uf == "1"
 
     def test_roundtrip_test_full(self):
-        original = {"CMD": "TEST", "OP": "r3 & #255", "UF": "1"}
+        original = {"CMD": "TEST", "OP": "r3 AND #255", "UF": "1"}
         inst = BaseInst.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
 
     def test_roundtrip_test_minimal(self):
-        original = {"CMD": "TEST", "OP": "r1"}
+        original = {"CMD": "TEST", "OP": "ABS r1"}
         inst = BaseInst.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
 
     def test_test_immutable(self):
-        inst = TestInst(op="r1-r2")
+        inst = TestInst(op=AluExpr(Register("r1"), "-", Register("r2")))
         with pytest.raises(Exception):
-            inst.op = "r1+r2"  # type: ignore
+            inst.op = AluExpr(Register("r1"), "+", Register("r2"))  # type: ignore
 
 
 class TestJumpInstruction:
@@ -118,9 +121,9 @@ class TestJumpInstruction:
         assert inst.if_cond == "eq"
 
     def test_construction_with_addr(self):
-        inst = JumpInst(addr="s15")
+        inst = JumpInst(addr=Register("s15"))
         assert inst.label is None
-        assert inst.addr == "s15"
+        assert inst.addr.name == "s15"
 
     def test_dispatch_jump_unconditional(self):
         Label.reset()
@@ -144,7 +147,7 @@ class TestJumpInstruction:
         d = {"CMD": "JUMP", "ADDR": "s15", "IF": "eq"}
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, JumpInst)
-        assert inst.addr == "s15"
+        assert inst.addr.name == "s15"
         assert inst.if_cond == "eq"
 
     def test_roundtrip_jump_unconditional(self):
@@ -176,8 +179,9 @@ class TestJumpInstruction:
         }
         inst = BaseInst.from_dict(original)
         assert isinstance(inst, JumpInst)
-        assert inst.wr == "s1 op"
-        assert inst.op == "s1 + #1"
+        assert inst.wr.dst.name == "s1"
+        assert inst.wr.src_type == "op"
+        assert inst.op.lhs.name == "s1"
         assert inst.uf == "1"
 
         assert inst.to_dict() == original
@@ -207,7 +211,7 @@ class TestJumpInstruction:
             BaseInst.from_dict(d)
 
     def test_jump_constructor_rejects_plain_string_label_addr(self):
-        with pytest.raises(ValueError, match="register address"):
+        with pytest.raises(ValueError, match="must be a Register, Literal, or Label"):
             JumpInst(addr="loop")
 
     def test_dispatch_jump_rejects_non_s15_register_addr(self):
@@ -217,7 +221,7 @@ class TestJumpInstruction:
 
     def test_jump_constructor_rejects_non_s15_register_addr(self):
         with pytest.raises(ValueError, match="must be 's15'"):
-            JumpInst(addr="r0")
+            JumpInst(addr=Register("r0"))
 
     def test_jump_immutable(self):
         inst = JumpInst(label=Label("loop"))
@@ -238,32 +242,32 @@ class TestRegWriteInstruction:
     """Tests for RegWriteInst (REG_WR opcode)."""
 
     def test_construction_imm_source(self):
-        inst = RegWriteInst(dst="s1", src="imm", lit="#10")
-        assert inst.dst == "s1"
+        inst = RegWriteInst(dst=Register("s1"), src="imm", lit=Literal("#10"))
+        assert inst.dst.name == "s1"
         assert inst.src == "imm"
-        assert inst.lit == "#10"
+        assert inst.lit.value == "#10"
 
     def test_construction_op_source(self):
-        inst = RegWriteInst(dst="s2", src="op", op="s1+#1", uf="0")
-        assert inst.dst == "s2"
+        inst = RegWriteInst(dst=Register("s2"), src="op", op=AluExpr(Register("s1"), "+", Literal("#1")), uf="0")
+        assert inst.dst.name == "s2"
         assert inst.src == "op"
-        assert inst.op == "s1+#1"
+        assert inst.op.lhs.name == "s1"
         assert inst.uf == "0"
 
     def test_dispatch_regwr_imm(self):
         d = {"CMD": "REG_WR", "DST": "s1", "SRC": "imm", "LIT": "#0"}
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, RegWriteInst)
-        assert inst.dst == "s1"
+        assert inst.dst.name == "s1"
         assert inst.src == "imm"
-        assert inst.lit == "#0"
+        assert inst.lit.value == "#0"
 
     def test_dispatch_regwr_op(self):
-        d = {"CMD": "REG_WR", "DST": "s2", "SRC": "op", "OP": "s1+#1", "UF": "1"}
+        d = {"CMD": "REG_WR", "DST": "s2", "SRC": "op", "OP": "s1 + #1", "UF": "1"}
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, RegWriteInst)
         assert inst.src == "op"
-        assert inst.op == "s1+#1"
+        assert inst.op.op == "+"
 
     def test_dispatch_regwr_dmem_lowering(self):
         """REG_WR src=dmem is recognized as DmemReadInst."""
@@ -273,7 +277,7 @@ class TestRegWriteInstruction:
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, DmemReadInst)
         assert inst.src == "dmem"
-        assert inst.dst == "r0"
+        assert inst.dst.name == "r0"
 
     def test_dispatch_legacy_dmem_rd_raises(self):
         """DMEM_RD opcode is NO LONGER recognized."""
@@ -293,7 +297,7 @@ class TestRegWriteInstruction:
             BaseInst.from_dict(d)
 
     def test_regwr_immutable(self):
-        inst = RegWriteInst(dst="s1", src="imm")
+        inst = RegWriteInst(dst=Register("s1"), src="imm")
         with pytest.raises(Exception):
             inst.dst = "s2"  # type: ignore
 
@@ -302,19 +306,19 @@ class TestPortWriteInstruction:
     """Tests for PortWriteInst (WPORT_WR opcode)."""
 
     def test_construction_with_specific_fields(self):
-        inst = PortWriteInst(dst="0", time="t0", data="0x1234", phase="#0")
-        assert inst.dst == "0"
-        assert inst.time == "t0"
-        assert inst.data == "0x1234"
-        assert inst.phase == "#0"
+        inst = PortWriteInst(dst=Literal("0"), time=Register("t0"), data=Literal("0x1234"), phase=Literal("#0"))
+        assert inst.dst.value == "0"
+        assert inst.time.name == "t0"
+        assert inst.data.value == "0x1234"
+        assert inst.phase.value == "#0"
 
     def test_dispatch_wport_wr(self):
         d = {"CMD": "WPORT_WR", "DST": "1", "TIME": "t1", "DATA": "0xABCD"}
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, PortWriteInst)
-        assert inst.dst == "1"
-        assert inst.time == "t1"
-        assert inst.data == "0xABCD"
+        assert inst.dst.value == "1"
+        assert inst.time.name == "t1"
+        assert inst.data.value == "0xABCD"
 
     def test_roundtrip_wport_wr(self):
         original = {"CMD": "WPORT_WR", "DST": "0", "TIME": "t0", "DATA": "0x5678"}
@@ -333,7 +337,7 @@ class TestPortWriteInstruction:
         inst = BaseInst.from_dict(original)
         assert isinstance(inst, PortWriteInst)
         assert inst.src == "wmem"
-        assert inst.addr == "&12"
+        assert inst.addr.value == "&12"
         recovered = inst.to_dict()
         assert recovered == original
 
@@ -351,7 +355,7 @@ class TestPortWriteInstruction:
         assert recovered == original
 
     def test_wport_wr_immutable(self):
-        inst = PortWriteInst(dst="0")
+        inst = PortWriteInst(dst=Literal("0"))
         with pytest.raises(Exception):
             inst.dst = "1"  # type: ignore
 
@@ -366,8 +370,8 @@ class TestUnknownOpcode:
         d = {"CMD": "DPORT_WR", "DST": "0", "DATA": "1"}
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, DportWriteInst)
-        assert inst.dst == "0"
-        assert inst.data == "1"
+        assert inst.dst.value == "0"
+        assert inst.data.value == "1"
 
 
 class TestWmemWriteInstruction:
@@ -377,8 +381,8 @@ class TestWmemWriteInstruction:
         d = {"CMD": "WMEM_WR", "ADDR": "&5", "TIME": "@10", "WP": "r_wave p0"}
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, WmemWriteInst)
-        assert inst.addr == "&5"
-        assert inst.time == "@10"
+        assert inst.addr.value == "&5"
+        assert inst.time.value == "@10"
         assert inst.wp == "r_wave p0"
 
     def test_roundtrip_wmem_wr(self):
@@ -386,7 +390,7 @@ class TestWmemWriteInstruction:
             "CMD": "WMEM_WR",
             "ADDR": "&7",
             "TIME": "@12",
-            "WR": "r_wave",
+            "WR": "r_wave op",
             "OP": "s1 + #1",
         }
         inst = BaseInst.from_dict(original)
@@ -405,12 +409,12 @@ class TestWaitInstruction:
         original = {"CMD": "WAIT", "C_OP": "time", "TIME": "@10", "ADDR": "s15"}
         inst = BaseInst.from_dict(original)
         assert isinstance(inst, WaitInst)
-        assert inst.time == "@10"
-        assert inst.addr == "s15"
+        assert inst.time.value == "@10"
+        assert inst.addr.name == "s15"
         assert inst.to_dict() == original
 
     def test_wait_rejects_plain_string_label_addr(self):
-        with pytest.raises(ValueError, match="register address"):
+        with pytest.raises(ValueError, match="must be a Register, Literal, or Label"):
             WaitInst(c_op="time", addr="wait_target")
 
 
@@ -487,7 +491,7 @@ class TestConditionalJumpPattern:
         """Simulate conditional jump as TEST + JUMP sequence."""
         Label.reset()
         Label.make_new("end")
-        test_dict = {"CMD": "TEST", "OP": "r1-#10", "UF": "1"}
+        test_dict = {"CMD": "TEST", "OP": "r1 - #10", "UF": "1"}
         jump_dict = {"CMD": "JUMP", "LABEL": "end", "IF": "eq"}
 
         test_inst = BaseInst.from_dict(test_dict)

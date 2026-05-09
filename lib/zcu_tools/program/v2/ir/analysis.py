@@ -19,6 +19,9 @@ if TYPE_CHECKING:
     from .pipeline import PipeLineConfig
 
 
+from .operands import Literal
+
+
 def estimate_body_scheduled_ticks(body: list[IRNode]) -> int:
     """Lower-bound on inc_ref delay ticks in a body sequence.
 
@@ -34,9 +37,9 @@ def estimate_body_scheduled_ticks(body: list[IRNode]) -> int:
                 if isinstance(inst, TimeInst) and inst.c_op == "inc_ref":
                     if inst.r1 is not None:
                         continue
-                    if inst.lit is not None and inst.lit.startswith("#"):
+                    if isinstance(inst.lit, Literal) and inst.lit.value.startswith("#"):
                         try:
-                            total += int(inst.lit[1:])
+                            total += int(inst.lit.value[1:])
                         except ValueError:
                             continue
         elif isinstance(node, BlockNode):

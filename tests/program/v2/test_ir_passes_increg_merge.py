@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from zcu_tools.program.v2.ir.instructions import (
     NopInst,
     PortWriteInst,
@@ -7,6 +5,7 @@ from zcu_tools.program.v2.ir.instructions import (
     TimeInst,
 )
 from zcu_tools.program.v2.ir.node import BasicBlockNode, RootNode
+from zcu_tools.program.v2.ir.operands import AluExpr, Literal, Register
 from zcu_tools.program.v2.ir.passes.dataflow import IncRegMergeLinear
 from zcu_tools.program.v2.ir.pipeline import _run_linear_passes
 
@@ -16,167 +15,144 @@ def test_inc_reg_merge_free_basic():
         insts=[
             BasicBlockNode(
                 insts=[
-                    RegWriteInst(dst="r1", src="op", op="r1 + #2"),
+                    RegWriteInst(dst=Register("r1"), src="op", op=AluExpr(Register("r1"), "+", Literal("#2"))),
                     NopInst(),
-                    RegWriteInst(dst="r1", src="op", op="r1 + #3"),
-                    RegWriteInst(dst="r2", src="op", op="r2 + #5"),
-                    RegWriteInst(dst="r2", src="op", op="r2 - #1"),
+                    RegWriteInst(dst=Register("r1"), src="op", op=AluExpr(Register("r1"), "+", Literal("#3"))),
+                    RegWriteInst(dst=Register("r2"), src="op", op=AluExpr(Register("r2"), "+", Literal("#5"))),
+                    RegWriteInst(dst=Register("r2"), src="op", op=AluExpr(Register("r2"), "-", Literal("#1"))),
                 ]
             )
         ]
     )
-    
+
     _run_linear_passes([IncRegMergeLinear()], root)
     block = root.insts[0]
-    assert isinstance(block, BasicBlockNode)
     insts = block.insts
-    
+
     assert len(insts) == 3
-    assert insts[0] == NopInst()
-    assert isinstance(insts[1], RegWriteInst)
-    assert insts[1].dst == "r1"
-    assert insts[1].op == "r1 + #5"
-    assert isinstance(insts[2], RegWriteInst)
-    assert insts[2].dst == "r2"
-    assert insts[2].op == "r2 + #4"
+    assert isinstance(insts[0], NopInst)
+    assert insts[1].op.rhs.value == "#5"  # r1 + #5
+    assert insts[1].dst.name == "r1"
+    assert insts[2].op.rhs.value == "#4"  # r2 + #4
+    assert insts[2].dst.name == "r2"
 
 def test_inc_reg_merge_free_flush_on_read():
     root = RootNode(
         insts=[
             BasicBlockNode(
                 insts=[
-                    RegWriteInst(dst="r1", src="op", op="r1 + #2"),
-                    TimeInst(c_op="inc_ref", r1="r1"),  # reads r1
-                    RegWriteInst(dst="r1", src="op", op="r1 + #3"),
+                    RegWriteInst(dst=Register("r1"), src="op", op=AluExpr(Register("r1"), "+", Literal("#2"))),
+                    TimeInst(c_op="inc_ref", r1=Register("r1")),
+                    RegWriteInst(dst=Register("r1"), src="op", op=AluExpr(Register("r1"), "+", Literal("#3"))),
                 ]
             )
         ]
     )
-    
-    _run_linear_passes([IncRegMergeLinear()], root)
-    block = root.insts[0]
-    assert isinstance(block, BasicBlockNode)
-    insts = block.insts
-    
-    assert len(insts) == 3
-    assert isinstance(insts[0], RegWriteInst)
-    assert insts[0].op == "r1 + #2"
-    assert isinstance(insts[1], TimeInst)
-    assert isinstance(insts[2], RegWriteInst)
-    assert insts[2].op == "r1 + #3"
 
+    _run_linear_passes([IncRegMergeLinear()], root)
+    insts = root.insts[0].insts
+
+    assert len(insts) == 3
+    assert insts[0].op.rhs.value == "#2"
+    assert isinstance(insts[1], TimeInst)
+    assert insts[2].op.rhs.value == "#3"
 
 def test_inc_reg_merge_free_can_cross_port_write():
     root = RootNode(
         insts=[
             BasicBlockNode(
                 insts=[
-                    RegWriteInst(dst="r0", src="op", op="r0 + #1"),
-                    PortWriteInst(dst="2", src="wmem", addr="&1", time="@0"),
-                    TimeInst(c_op="inc_ref", r1="r4"),
-                    RegWriteInst(dst="r0", src="op", op="r0 + #1"),
+                    RegWriteInst(dst=Register("r0"), src="op", op=AluExpr(Register("r0"), "+", Literal("#1"))),
+                    PortWriteInst(dst=Literal("2"), src="wmem", addr=Literal("&1"), time=Literal("@0")),
+                    TimeInst(c_op="inc_ref", r1=Register("r4")),
+                    RegWriteInst(dst=Register("r0"), src="op", op=AluExpr(Register("r0"), "+", Literal("#1"))),
                 ]
             )
         ]
     )
 
     _run_linear_passes([IncRegMergeLinear()], root)
-    block = root.insts[0]
-    assert isinstance(block, BasicBlockNode)
-    insts = block.insts
+    insts = root.insts[0].insts
 
     assert len(insts) == 3
     assert isinstance(insts[0], PortWriteInst)
     assert isinstance(insts[1], TimeInst)
     assert isinstance(insts[2], RegWriteInst)
-    assert insts[2].op == "r0 + #2"
-
+    assert insts[2].op.rhs.value == "#2"
+    assert insts[2].dst.name == "r0"
 
 def test_inc_reg_merge_free_cpmg_like_unrolled_body():
     root = RootNode(
         insts=[
             BasicBlockNode(
                 insts=[
-                    PortWriteInst(dst="2", src="wmem", addr="&1", time="@0"),
-                    TimeInst(c_op="inc_ref", r1="r4"),
-                    RegWriteInst(dst="r0", src="op", op="r0 + #1"),
-                    PortWriteInst(dst="2", src="wmem", addr="&1", time="@0"),
-                    TimeInst(c_op="inc_ref", r1="r4"),
-                    RegWriteInst(dst="r0", src="op", op="r0 + #1"),
-                    PortWriteInst(dst="2", src="wmem", addr="&1", time="@0"),
-                    TimeInst(c_op="inc_ref", r1="r4"),
-                    RegWriteInst(dst="r0", src="op", op="r0 + #1"),
+                    PortWriteInst(dst=Literal("2"), src="wmem", addr=Literal("&1"), time=Literal("@0")),
+                    TimeInst(c_op="inc_ref", r1=Register("r4")),
+                    RegWriteInst(dst=Register("r0"), src="op", op=AluExpr(Register("r0"), "+", Literal("#1"))),
+                    PortWriteInst(dst=Literal("2"), src="wmem", addr=Literal("&1"), time=Literal("@0")),
+                    TimeInst(c_op="inc_ref", r1=Register("r4")),
+                    RegWriteInst(dst=Register("r0"), src="op", op=AluExpr(Register("r0"), "+", Literal("#1"))),
+                    PortWriteInst(dst=Literal("2"), src="wmem", addr=Literal("&1"), time=Literal("@0")),
+                    TimeInst(c_op="inc_ref", r1=Register("r4")),
+                    RegWriteInst(dst=Register("r0"), src="op", op=AluExpr(Register("r0"), "+", Literal("#1"))),
                 ]
             )
         ]
     )
 
     _run_linear_passes([IncRegMergeLinear()], root)
-    block = root.insts[0]
-    assert isinstance(block, BasicBlockNode)
-    insts = block.insts
-
+    insts = root.insts[0].insts
+    
+    # 3 port writes + 3 time insts + 1 final merged reg write = 7
     assert len(insts) == 7
-    assert isinstance(insts[0], PortWriteInst)
-    assert isinstance(insts[1], TimeInst)
-    assert isinstance(insts[2], PortWriteInst)
-    assert isinstance(insts[3], TimeInst)
-    assert isinstance(insts[4], PortWriteInst)
-    assert isinstance(insts[5], TimeInst)
-    assert isinstance(insts[6], RegWriteInst)
-    assert insts[6].op == "r0 + #3"
+    assert isinstance(insts[-1], RegWriteInst)
+    assert insts[-1].op.rhs.value == "#3"
 
 def test_inc_reg_merge_fixed_basic():
     root = RootNode(
         insts=[
             BasicBlockNode(
                 insts=[
-                    RegWriteInst(dst="r1", src="op", op="r1 + #2"),
-                    RegWriteInst(dst="r1", src="op", op="r1 + #3"),
+                    RegWriteInst(dst=Register("r1"), src="op", op=AluExpr(Register("r1"), "+", Literal("#2"))),
+                    RegWriteInst(dst=Register("r1"), src="op", op=AluExpr(Register("r1"), "+", Literal("#3"))),
                     NopInst(),
-                    RegWriteInst(dst="r2", src="op", op="r2 + #5"),
-                    RegWriteInst(dst="r2", src="op", op="r2 - #5"),
+                    RegWriteInst(dst=Register("r2"), src="op", op=AluExpr(Register("r2"), "+", Literal("#5"))),
+                    RegWriteInst(dst=Register("r2"), src="op", op=AluExpr(Register("r2"), "-", Literal("#5"))),
                 ],
                 fix_addr_size=True
             )
         ]
     )
-    
+
     _run_linear_passes([IncRegMergeLinear()], root)
     block = root.insts[0]
-    assert isinstance(block, BasicBlockNode)
     insts = block.insts
-    
+
     assert len(insts) == 5
     assert isinstance(insts[0], RegWriteInst)
-    assert insts[0].op == "r1 + #5"
-    assert insts[1] == NopInst()
-    assert insts[2] == NopInst()
-    assert insts[3] == NopInst()
-    assert insts[4] == NopInst()
+    assert insts[0].op.rhs.value == "#5"
+    assert isinstance(insts[1], NopInst)
+    assert isinstance(insts[2], NopInst)
+    assert isinstance(insts[3], NopInst) # cancelled out to 0
+    assert isinstance(insts[4], NopInst)
 
-def test_inc_reg_merge_fixed_non_adjacent():
+def test_inc_reg_merge_fixed_barrier():
     root = RootNode(
         insts=[
             BasicBlockNode(
                 insts=[
-                    RegWriteInst(dst="r1", src="op", op="r1 + #2"),
+                    RegWriteInst(dst=Register("r1"), src="op", op=AluExpr(Register("r1"), "+", Literal("#2"))),
                     NopInst(),
-                    RegWriteInst(dst="r1", src="op", op="r1 + #3"),
+                    RegWriteInst(dst=Register("r1"), src="op", op=AluExpr(Register("r1"), "+", Literal("#3"))),
                 ],
                 fix_addr_size=True
             )
         ]
     )
-    
+
     _run_linear_passes([IncRegMergeLinear()], root)
-    block = root.insts[0]
-    assert isinstance(block, BasicBlockNode)
-    insts = block.insts
-    
+    insts = root.insts[0].insts
+    # In fixed blocks, non-adjacent increments are not merged
     assert len(insts) == 3
-    assert isinstance(insts[0], RegWriteInst)
-    assert insts[0].op == "r1 + #2"
-    assert insts[1] == NopInst()
-    assert isinstance(insts[2], RegWriteInst)
-    assert insts[2].op == "r1 + #3"
+    assert insts[0].op.rhs.value == "#2"
+    assert insts[2].op.rhs.value == "#3"

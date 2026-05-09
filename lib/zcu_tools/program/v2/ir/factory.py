@@ -13,17 +13,13 @@ from .instructions import (
 )
 from .labels import Label
 from .node import BasicBlockNode, BlockNode, IRBranch, IRLoop, RootNode
+from .operands import AluExpr, Literal, Register
 
 BIG_JUMP_PMEM_THRESHOLD = 2**11
 
 
 def _needs_big_jump(pmem_size: Optional[int]) -> bool:
     return pmem_size is not None and pmem_size > BIG_JUMP_PMEM_THRESHOLD
-
-
-# ---------------------------------------------------------------------------
-# IRLexer: flat Instruction list  <->  list[BasicBlockNode | MetaInst]
-# ---------------------------------------------------------------------------
 
 
 class IRLexer:
@@ -33,18 +29,7 @@ class IRLexer:
     flatten() : list[BasicBlockNode | MetaInst] -> list[Instruction]
     """
 
-    # -- lex -----------------------------------------------------------------
-
     def lex(self, insts: list[Instruction]) -> list[Union[BasicBlockNode, MetaInst]]:
-        """Chunk a flat instruction list into BasicBlockNodes and MetaInsts.
-
-        Splitting rules:
-        - LabelInst  : flushes current accumulation, then starts a new block
-                       with the label as entry.
-        - JumpInst   : terminates the current block (stored as branch), flushes.
-        - MetaInst   : flushes current accumulation, emitted as-is.
-        - everything else: accumulated into current block's insts.
-        """
         result: list[Union[BasicBlockNode, MetaInst]] = []
         pending_labels: list[LabelInst] = []
         pending_insts: list[BaseInst] = []
@@ -89,13 +74,9 @@ class IRLexer:
         flush()
         return result
 
-    # -- flatten -------------------------------------------------------------
-
     def flatten(
         self, items: list[Union[BasicBlockNode, MetaInst]]
     ) -> list[Instruction]:
-        """Inverse of lex(): emit labels + insts + branch for each BasicBlockNode;
-        pass MetaInst through unchanged."""
         result: list[Instruction] = []
         for item in items:
             if isinstance(item, MetaInst):
@@ -112,30 +93,11 @@ class IRLexer:
         return result
 
 
-# ---------------------------------------------------------------------------
-# IRParser: list[BasicBlockNode | MetaInst]  <->  RootNode
-# ---------------------------------------------------------------------------
-
-
 class IRParser:
-    """Converts between a chunked block list and a structured IR tree.
-
-    parse()   : list[BasicBlockNode | MetaInst] -> RootNode
-    unparse() : RootNode                        -> list[BasicBlockNode | MetaInst]
-
-    parse() recognises LOOP_START/END, BRANCH_START/END, BRANCH_CASE_START/END
-    MetaInst pairs and folds them into IRLoop / IRBranch nodes.
-
-    unparse() lowers IRLoop and IRBranch back to flat BasicBlockNode lists,
-    embedding MetaInst markers for round-trip fidelity.
-    """
+    """Converts between a chunked block list and a structured IR tree."""
 
     def __init__(self, pmem_size: Optional[int] = None) -> None:
         self.pmem_size = pmem_size
-
-    # -----------------------------------------------------------------------
-    # parse
-    # -----------------------------------------------------------------------
 
     def parse(self, items: list[Union[BasicBlockNode, MetaInst]]) -> RootNode:
         self._check_sese(items)
@@ -144,33 +106,13 @@ class IRParser:
         self._parse_block(items, pos, root, end_markers=frozenset())
         return root
 
-    # -----------------------------------------------------------------------
-    # SESE validation
-    # -----------------------------------------------------------------------
-
     def _check_sese(self, items: list[Union[BasicBlockNode, MetaInst]]) -> None:
-        """Verify that no jump from outside a structural region targets a label
-        defined inside the region's control skeleton (the skip-segments between
-        LOOP_START and LOOP_BODY_START, or between any BRANCH meta markers and
-        BRANCH_CASE_START).  Violations break the SESE assumption that lets
-        IRParser reconstruct IRLoop / IRBranch from a flat block list.
-        """
-        # Pass 1: collect control labels (defined in skip-segments) and record
-        # which item indices belong to skip-segments.
         control_labels: set[str] = set()
         skip_indices: set[int] = set()
 
-        depth = 0  # nesting depth of structural regions
-        skip_active = False  # inside a skip-segment right now
+        depth = 0
+        skip_active = False
 
-        # We need to scan MetaInsts that appear *inside* BasicBlockNodes
-        # (e.g. LOOP_START sits in a BasicBlockNode.insts).  We also need
-        # LabelInsts from BasicBlockNode.labels in skip-segments.
-        # Strategy: walk item by item; use MetaInst.type transitions to track
-        # skip vs. body regions; harvest labels from skip-region items.
-
-        # Build a flat timeline of (item_index, event) where event is either
-        # a MetaInst type string or None (plain BasicBlockNode).
         def meta_types_in(bb: BasicBlockNode) -> list[str]:
             return [i.type for i in bb.insts if isinstance(i, MetaInst)]
 
@@ -178,19 +120,13 @@ class IRParser:
         while i < len(items):
             item = items[i]
             if isinstance(item, MetaInst):
-                # Top-level MetaInst (should not occur in well-formed input,
-                # but handle gracefully by treating as skip content if active).
                 if skip_active:
                     skip_indices.add(i)
                 i += 1
                 continue
 
-            # BasicBlockNode: check MetaInst markers inside its insts
             assert isinstance(item, BasicBlockNode)
             metas = meta_types_in(item)
-
-            # Determine if this whole block is part of a skip-segment
-            # before processing its internal transitions.
             was_skip = skip_active
 
             for mt in metas:
@@ -198,18 +134,16 @@ class IRParser:
                     depth += 1
                     skip_active = True
                 elif mt == "LOOP_BODY_START":
-                    skip_active = False  # body begins; skip ends
+                    skip_active = False
                 elif mt in ("BRANCH_CASE_START",):
                     skip_active = False
                 elif mt in ("LOOP_BODY_END",):
-                    skip_active = True  # back to skip (back-edge region)
+                    skip_active = True
                 elif mt in ("LOOP_END", "BRANCH_END"):
                     depth -= 1
                     if depth == 0:
                         skip_active = False
 
-            # The block is in skip-territory if it was skip before *or*
-            # the MetaInst transition in this block initiates skip.
             in_skip = was_skip or (skip_active and depth > 0)
             if in_skip:
                 skip_indices.add(i)
@@ -220,9 +154,8 @@ class IRParser:
             i += 1
 
         if not control_labels:
-            return  # nothing to check
+            return
 
-        # Pass 2: collect all jump targets from non-skip items.
         for idx, item in enumerate(items):
             if idx in skip_indices:
                 continue
@@ -247,7 +180,7 @@ class IRParser:
             item = items[pos[0]]
 
             if isinstance(item, MetaInst) and item.type in end_markers:
-                return  # do NOT consume — caller consumes the end marker
+                return
 
             if isinstance(item, MetaInst):
                 if item.type == "LOOP_START":
@@ -283,7 +216,6 @@ class IRParser:
     ) -> IRLoop:
         start_meta = self._consume_meta(items, pos, "LOOP_START")
 
-        # Skip physical control blocks up to LOOP_BODY_START
         while pos[0] < len(items):
             item = items[pos[0]]
             if isinstance(item, MetaInst) and item.type == "LOOP_BODY_START":
@@ -303,7 +235,6 @@ class IRParser:
         )
         self._consume_meta(items, pos, "LOOP_BODY_END")
 
-        # Skip physical back-edge / end-label blocks up to LOOP_END
         while pos[0] < len(items):
             item = items[pos[0]]
             if isinstance(item, MetaInst) and item.type == "LOOP_END":
@@ -335,7 +266,7 @@ class IRParser:
             if isinstance(item, MetaInst) and item.type == "BRANCH_CASE_START":
                 branch.cases.append(self._parse_branch_case(items, pos))
             else:
-                pos[0] += 1  # discard dispatch control
+                pos[0] += 1
 
         end_meta = self._consume_meta(items, pos, "BRANCH_END")
         if end_meta.name != branch.name:
@@ -360,26 +291,10 @@ class IRParser:
             )
         return case
 
-    # -----------------------------------------------------------------------
-    # unparse
-    # -----------------------------------------------------------------------
-
     def unparse(self, root: RootNode) -> list[Union[BasicBlockNode, MetaInst]]:
-        """Lower an IR tree back to a flat list of BasicBlockNode / MetaInst.
-
-        IRLoop and IRBranch are lowered here (logic moved from node.py).
-        """
         return self._unparse_block_node(root)
 
     def lower_block(self, block: BlockNode) -> list[BasicBlockNode]:
-        """Flatten a BlockNode into BasicBlockNodes only (no MetaInst wrappers).
-
-        Use this when the block contains only BasicBlockNode / IRLoop / IRBranch
-        children that do not need structural MetaInst markers (e.g. loop bodies
-        being cloned for unrolling).  MetaInst items emitted by nested lowering
-        are silently dropped — callers that need round-trip fidelity should use
-        unparse() instead.
-        """
         items = self._unparse_block_node(block)
         return [item for item in items if isinstance(item, BasicBlockNode)]
 
@@ -403,27 +318,18 @@ class IRParser:
         return result
 
     def _lower_loop(self, node: IRLoop) -> list[Union[BasicBlockNode, MetaInst]]:
-        """Lower IRLoop into BasicBlockNodes + MetaInst markers.
-
-        Shape:
-            MetaInst(LOOP_START)
-            [guard]               -- only when n is a register string
-            REG_WR counter imm #0
-            start_label + MetaInst(LOOP_BODY_START)
-            <body blocks>
-            MetaInst(LOOP_BODY_END) + back-edge jump
-            end_label + MetaInst(LOOP_END)
-        """
         lexer = IRLexer()
         start = Label.make_new(f"{node.name}_start")
         end = Label.make_new(f"{node.name}_end")
-        op_str = (
-            f"{node.counter_reg} - #{node.n}"
-            if isinstance(node.n, int)
-            else f"{node.counter_reg} - {node.n}"
-        )
+        
+        counter = Register(node.counter_reg)
+        if isinstance(node.n, int):
+            n_val = Literal(f"#{node.n}")
+        else:
+            n_val = Register(node.n)
+            
+        op_str = AluExpr(counter, "-", n_val)
 
-        # ── pre-body: LOOP_START marker, optional guard, counter init, body entry ──
         pre: list[Instruction] = [
             MetaInst(
                 type="LOOP_START",
@@ -435,31 +341,27 @@ class IRParser:
                 ),
             ),
         ]
-        if isinstance(node.n, str):  # runtime guard: skip when n == 0
+        if isinstance(node.n, str):
             if _needs_big_jump(self.pmem_size):
                 pre += [
-                    RegWriteInst(dst="s15", src="label", label=end),
-                    JumpInst(addr="s15", if_cond="Z", op=f"{node.n} - #0"),
+                    RegWriteInst(dst=Register("s15"), src="label", label=end),
+                    JumpInst(addr=Register("s15"), if_cond="Z", op=AluExpr(Register(node.n), "-", Literal("#0"))),
                 ]
             else:
-                pre.append(JumpInst(label=end, if_cond="Z", op=f"{node.n} - #0"))
+                pre.append(JumpInst(label=end, if_cond="Z", op=AluExpr(Register(node.n), "-", Literal("#0"))))
         pre += [
-            RegWriteInst(dst=node.counter_reg, src="imm", lit="#0"),
+            RegWriteInst(dst=counter, src="imm", lit=Literal("#0")),
             LabelInst(name=start, can_remove=True),
             MetaInst(type="LOOP_BODY_START", name=node.name),
         ]
 
-        # IRLoop.body is trusted to already contain the loop-carried counter
-        # update. Optimizers may merge or reorder that write, so lowering must
-        # not try to rediscover it structurally here.
-        # ── post-body: conditional jump, end label ──
         post: list[Instruction] = [
             MetaInst(type="LOOP_BODY_END", name=node.name),
         ]
         if _needs_big_jump(self.pmem_size):
             post += [
-                RegWriteInst(dst="s15", src="label", label=start),
-                JumpInst(addr="s15", if_cond="S", op=op_str),
+                RegWriteInst(dst=Register("s15"), src="label", label=start),
+                JumpInst(addr=Register("s15"), if_cond="S", op=op_str),
             ]
         else:
             post.append(JumpInst(label=start, if_cond="S", op=op_str))
@@ -471,7 +373,6 @@ class IRParser:
         return lexer.lex(pre) + self._unparse_block_node(node.body) + lexer.lex(post)
 
     def _lower_branch(self, node: IRBranch) -> list[Union[BasicBlockNode, MetaInst]]:
-        """Lower IRBranch into BasicBlockNodes using binary dispatch."""
         n = len(node.cases)
         result: list[Union[BasicBlockNode, MetaInst]] = []
 
@@ -482,6 +383,7 @@ class IRParser:
                 info=dict(compare_reg=node.compare_reg),
             )
         )
+        comp_reg = Register(node.compare_reg)
 
         def emit_dispatch(lo: int, hi: int) -> None:
             if hi - lo == 1:
@@ -494,7 +396,7 @@ class IRParser:
 
             result.append(
                 BasicBlockNode(
-                    insts=[TestInst(op=f"{node.compare_reg} - #{mid}")],
+                    insts=[TestInst(op=AluExpr(comp_reg, "-", Literal(f"#{mid}")))],
                     branch=JumpInst(label=left_label, if_cond="S"),
                 )
             )

@@ -17,7 +17,11 @@ def is_pseudo_label_name(name: str) -> bool:
 
 def is_register_addr(name: str) -> bool:
     core_name = name[1:] if name.startswith("&") else name
-    return bool(re.match(r"^[rswp]\d{1,2}$", core_name))
+    # Using a simple check to keep labels.py free of complex regex if possible.
+    # Actually, we can just use the standard checks.
+    if core_name.startswith("r_wave") or core_name.startswith("s_"):
+        return True
+    return bool(core_name) and core_name[0] in "rswp" and core_name[1:].isdigit()
 
 
 class Label:
