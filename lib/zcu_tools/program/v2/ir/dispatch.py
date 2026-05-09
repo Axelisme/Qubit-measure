@@ -64,7 +64,7 @@ def build_dispatch_table_island(
         if _needs_big_jump(pmem_size):
             blocks.append(
                 BasicBlockNode(
-                    labels=[LabelInst(name=table_label, can_remove=True)],
+                    labels=[LabelInst(name=table_label, can_remove=False)],
                     insts=[
                         RegWriteInst(
                             dst=Register("s15"), src="label", label=target_label
@@ -77,7 +77,7 @@ def build_dispatch_table_island(
         else:
             blocks.append(
                 BasicBlockNode(
-                    labels=[LabelInst(name=table_label, can_remove=True)],
+                    labels=[LabelInst(name=table_label, can_remove=False)],
                     branch=JumpInst(label=target_label),
                     fix_addr_size=True,
                 )

@@ -153,8 +153,27 @@ class IRPipeLine:
         opt_blocks = parser.unparse(ir)
         opt_insts = lexer.flatten(opt_blocks)
 
-        return opt_insts, ctx
+        # Stage 4: Flat-list unreachable code elimination
+        from .instructions import JumpInst, LabelInst, MetaInst
 
+        final_insts = []
+        dead_mode = False
+        for inst in opt_insts:
+            if dead_mode:
+                if isinstance(inst, LabelInst):
+                    dead_mode = False
+                elif isinstance(inst, MetaInst):
+                    final_insts.append(inst)
+                    continue
+                else:
+                    continue
+
+            final_insts.append(inst)
+
+            if isinstance(inst, JumpInst) and inst.if_cond is None:
+                dead_mode = True
+
+        return final_insts, ctx
 
 # ---------------------------------------------------------------------------
 # Default pipeline factory

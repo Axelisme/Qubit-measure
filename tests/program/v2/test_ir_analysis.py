@@ -49,7 +49,7 @@ def test_reg_write_inst_analysis():
     assert instruction_reads(inst) == {"s2", "s3"}
 
 def test_port_write_inst_analysis():
-    inst = PortWriteInst(dst=Literal("2"), time=Register("s1"), phase=Register("s2"))
+    inst = PortWriteInst(dst=Literal("2"), time=Register("s1"), addr=Register("s2"))
     assert instruction_writes(inst) == set()
     assert instruction_reads(inst) == {"s1", "s2"}
 
