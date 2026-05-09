@@ -247,7 +247,14 @@ class TimeInst(BaseInst):
 
     @property
     def reg_read(self) -> list[str]:
-        return sorted(list(self.r1.get_read_regs())) if self.r1 else []
+        reads = set(self.r1.get_read_regs()) if self.r1 else set()
+        if self.c_op == "updt":
+            reads.add("s11")
+        return sorted(list(reads))
+
+    @property
+    def reg_write(self) -> list[str]:
+        return ["s14"]
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -390,12 +397,14 @@ class RegWriteInst(BaseInst):
     @property
     def reg_read(self) -> list[str]:
         reads: set[str] = set()
+        if self.src == "wmem":
+            reads.add("s14")
         if (
             self.src
             and not self.src.startswith("#")
             and self.src not in ("op", "imm", "label", "dmem", "wmem")
         ):
-            reads.add(self.src)
+            reads.update(Register(self.src).get_read_regs())
         if self.op:
             reads.update(self.op.get_read_regs())
         if isinstance(self.addr, Register):
@@ -405,7 +414,7 @@ class RegWriteInst(BaseInst):
 
     @property
     def reg_write(self) -> list[str]:
-        return [self.dst.name]
+        return sorted(list(self.dst.get_write_regs()))
 
     @property
     def need_label(self) -> Optional[Label]:
@@ -463,13 +472,13 @@ class PortWriteInst(BaseInst):
 
     @property
     def reg_read(self) -> list[str]:
-        reads: set[str] = set()
+        reads: set[str] = {"s14"}
         if (
             self.src
             and not self.src.startswith("#")
             and self.src not in ("op", "imm", "wmem", "r_wave")
         ):
-            reads.add(self.src)
+            reads.update(Register(self.src).get_read_regs())
         if isinstance(self.addr, Register):
             reads.update(self.addr.get_read_regs())
         if isinstance(self.time, Register):
@@ -483,7 +492,7 @@ class PortWriteInst(BaseInst):
     @property
     def reg_write(self) -> list[str]:
         if isinstance(self.dst, Register):
-            return [self.dst.name]
+            return sorted(list(self.dst.get_write_regs()))
         return []
 
     def to_dict(self) -> dict[str, Any]:
@@ -559,7 +568,7 @@ class DmemReadInst(BaseInst):
 
     @property
     def reg_write(self) -> list[str]:
-        return [self.dst.name]
+        return sorted(list(self.dst.get_write_regs()))
 
     @property
     def need_label(self) -> Optional[Label]:
@@ -659,10 +668,9 @@ class WmemWriteInst(BaseInst):
             if_cond=d.get("IF"),
             wp=d.get("WP"),
         )
-
     @property
     def reg_read(self) -> list[str]:
-        reads: set[str] = set()
+        reads: set[str] = {"w0", "w1", "w2", "w3", "w4", "w5", "r_wave", "s14"}
         if isinstance(self.addr, Register):
             reads.update(self.addr.get_read_regs())
         if isinstance(self.time, Register):
@@ -672,7 +680,6 @@ class WmemWriteInst(BaseInst):
         if self.wr:
             reads.update(self.wr.get_read_regs())
         return sorted(list(reads))
-
     def to_dict(self) -> dict[str, Any]:
         d = {
             "CMD": "WMEM_WR",
@@ -715,9 +722,9 @@ class DportWriteInst(BaseInst):
 
     @property
     def reg_read(self) -> list[str]:
-        reads: set[str] = set()
+        reads: set[str] = {"s14"}
         if self.src and not self.src.startswith("#"):
-            reads.add(self.src)
+            reads.update(Register(self.src).get_read_regs())
         if isinstance(self.dst, Register):
             reads.update(self.dst.get_read_regs())
         if isinstance(self.data, Register):
@@ -772,7 +779,7 @@ class WaitInst(BaseInst):
 
     @property
     def reg_read(self) -> list[str]:
-        reads: set[str] = set()
+        reads: set[str] = {"s11", "s14"}
         if isinstance(self.time, Register):
             reads.update(self.time.get_read_regs())
         if isinstance(self.addr, Register):

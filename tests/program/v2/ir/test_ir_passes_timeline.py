@@ -10,9 +10,9 @@ from zcu_tools.program.v2.ir.instructions import (
 )
 from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, RootNode
 from zcu_tools.program.v2.ir.operands import Literal, Register
+from zcu_tools.program.v2.ir.passes import walk_basic_blocks
 from zcu_tools.program.v2.ir.passes.timeline import TimedMergePass, ZeroDelayDCEPass
 from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
-from zcu_tools.program.v2.ir.passes import walk_basic_blocks
 
 
 def _run_dce(root: RootNode) -> RootNode:

@@ -15,11 +15,11 @@ from zcu_tools.program.v2.ir.operands import AluExpr, Literal, Register
 def test_time_inst_analysis():
     inst = TimeInst(c_op="inc_ref", lit=Literal("#100"))
     assert instruction_reads(inst) == set()
-    assert instruction_writes(inst) == set()
+    assert instruction_writes(inst) == {"s14"}
 
     inst = TimeInst(c_op="inc_ref", r1=Register("s1"))
     assert instruction_reads(inst) == {"s1"}
-    assert instruction_writes(inst) == set()
+    assert instruction_writes(inst) == {"s14"}
 
 
 def test_test_inst_analysis():
@@ -57,7 +57,7 @@ def test_reg_write_inst_analysis():
 def test_port_write_inst_analysis():
     inst = PortWriteInst(dst=Literal("2"), time=Register("s1"), addr=Register("s2"))
     assert instruction_writes(inst) == set()
-    assert instruction_reads(inst) == {"s1", "s2"}
+    assert instruction_reads(inst) == {"s1", "s2", "s14"}
 
 
 def test_mixed_registers():

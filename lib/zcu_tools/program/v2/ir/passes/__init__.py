@@ -1,6 +1,6 @@
 from .base import (
-    OptimizationPassBase,
     IRTransformer,
+    OptimizationPassBase,
     walk_basic_blocks,
     walk_instructions,
 )

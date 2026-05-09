@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.ir import base as ir_base
-from zcu_tools.program.v2.ir.pipeline import PipeLineContext, PipeLineConfig
+from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules import Delay, SoftDelay
 from zcu_tools.program.v2.sweep import SweepCfg

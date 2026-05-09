@@ -30,9 +30,20 @@ class Register(Operand):
     name: str
 
     def get_read_regs(self) -> set[str]:
-        # 'r_wave' is special, but 'p1' or 's14' etc. are standard regs
+        # 'r_wave' is special, it aliases with w0-w5
         if self.name.startswith("#"):
             return set()
+        if self.name == "r_wave":
+            return {"r_wave", "w0", "w1", "w2", "w3", "w4", "w5"}
+        if self.name in {"w0", "w1", "w2", "w3", "w4", "w5"}:
+            return {self.name, "r_wave"}
+        return {self.name}
+
+    def get_write_regs(self) -> set[str]:
+        if self.name == "r_wave":
+            return {"r_wave", "w0", "w1", "w2", "w3", "w4", "w5"}
+        if self.name in {"w0", "w1", "w2", "w3", "w4", "w5"}:
+            return {self.name, "r_wave"}
         return {self.name}
 
     def __str__(self) -> str:
@@ -84,7 +95,7 @@ class SideWrite(Operand):
         return set()
 
     def get_write_regs(self) -> set[str]:
-        return {self.dst.name}
+        return self.dst.get_write_regs()
 
     def __str__(self) -> str:
         return f"{self.dst} {self.src_type}"

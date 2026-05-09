@@ -20,6 +20,7 @@ from zcu_tools.program.v2.ir.node import (
     RootNode,
 )
 from zcu_tools.program.v2.ir.operands import AluExpr, Literal, Register
+from zcu_tools.program.v2.ir.passes import walk_basic_blocks
 from zcu_tools.program.v2.ir.passes.dataflow import (
     DeadTestEliminationPass,
     DeadWriteEliminationPass,
@@ -30,7 +31,6 @@ from zcu_tools.program.v2.ir.pipeline import (
     PipeLineContext,
     make_default_pipeline,
 )
-from zcu_tools.program.v2.ir.passes import walk_basic_blocks
 
 
 def _config(**kwargs) -> PipeLineConfig:
@@ -81,8 +81,8 @@ def test_dead_write_elimination_removes_overwritten_write():
         insts=[
             BasicBlockNode(
                 insts=[
-                    RegWriteInst(dst=Register("s1"), src="imm", lit=Literal("#1")),
-                    RegWriteInst(dst=Register("s1"), src="imm", lit=Literal("#2")),
+                    RegWriteInst(dst=Register("r1"), src="imm", lit=Literal("#1")),
+                    RegWriteInst(dst=Register("r1"), src="imm", lit=Literal("#2")),
                     NopInst(),
                 ]
             ),
@@ -103,9 +103,9 @@ def test_dead_write_elimination_keeps_write_before_read():
         insts=[
             BasicBlockNode(
                 insts=[
-                    RegWriteInst(dst=Register("s1"), src="imm", lit=Literal("#1")),
-                    TestInst(op=AluExpr(Register("s1"), "-", Literal("#1"))),
-                    RegWriteInst(dst=Register("s1"), src="imm", lit=Literal("#2")),
+                    RegWriteInst(dst=Register("r1"), src="imm", lit=Literal("#1")),
+                    TestInst(op=AluExpr(Register("r1"), "-", Literal("#1"))),
+                    RegWriteInst(dst=Register("r1"), src="imm", lit=Literal("#2")),
                 ]
             ),
         ]
@@ -131,8 +131,8 @@ def test_dead_write_elimination_removes_overwritten_write_in_basic_block():
         insts=[
             BasicBlockNode(
                 insts=[
-                    RegWriteInst(dst=Register("s1"), src="imm", lit=Literal("#1")),
-                    RegWriteInst(dst=Register("s1"), src="imm", lit=Literal("#2")),
+                    RegWriteInst(dst=Register("r1"), src="imm", lit=Literal("#1")),
+                    RegWriteInst(dst=Register("r1"), src="imm", lit=Literal("#2")),
                 ]
             ),
         ]
@@ -301,8 +301,8 @@ def test_default_pipeline_can_disable_all_optimization_passes():
         insts=[
             BasicBlockNode(
                 insts=[
-                    RegWriteInst(dst=Register("s1"), src="imm", lit=Literal("#1")),
-                    RegWriteInst(dst=Register("s1"), src="imm", lit=Literal("#2")),
+                    RegWriteInst(dst=Register("r1"), src="imm", lit=Literal("#1")),
+                    RegWriteInst(dst=Register("r1"), src="imm", lit=Literal("#2")),
                 ]
             ),
             BasicBlockNode(

@@ -23,6 +23,25 @@ def is_register_addr(name: str) -> bool:
     return bool(core_name) and core_name[0] in "rswp" and core_name[1:].isdigit()
 
 
+def is_system_reg_name(name: str) -> bool:
+    """Returns True if the register name is a system register (s0-s15, w0-w5, or aliases)."""
+    if name.startswith("s_") or name.startswith("w_") or name == "r_wave":
+        return True
+    if name.startswith("s") or name.startswith("w"):
+        return name[1:].isdigit()
+    return False
+
+
+def is_volatile_reg_name(name: str) -> bool:
+    """Returns True if writes to this register have hardware/external side effects (s0-s14)."""
+    if not is_system_reg_name(name):
+        return False
+    if name.startswith("w") or name == "r_wave":
+        return False
+    # s15 is the only system register whose side effects are purely local to program flow.
+    return name != "s15" and name != "s_addr"
+
+
 class Label:
     """A first-class logical label identity."""
 

@@ -7,6 +7,8 @@ from ..instructions import (
     DmemWriteInst,
     Instruction,
     JumpInst,
+    LabelInst,
+    MetaInst,
     NopInst,
     PortWriteInst,
     RegWriteInst,
@@ -15,6 +17,7 @@ from ..instructions import (
     WaitInst,
     WmemWriteInst,
 )
+from ..labels import is_volatile_reg_name
 from ..node import BasicBlockNode
 from ..pipeline import AbsChunkPass, ChunkList, PipeLineContext
 
@@ -55,19 +58,32 @@ class DeadWriteEliminationPass(AbsChunkPass):
             reads = instruction_reads(inst)
             writes = list(instruction_writes(inst))
 
-            if len(writes) > 1:
-                pending.clear()
-                continue
-
             for reg in reads:
                 pending.pop(reg, None)
 
+            # Do not eliminate instructions with hardware side effects:
+            # 1. Flag updates (-uf)
+            # 2. Volatile registers (s0-s14)
+            # 3. Multiple writes (usually aliasing like r_wave, treat as barrier for simplicity)
+            if getattr(inst, "uf", None) is not None:
+                pending.clear()
+                continue
+
             if len(writes) == 1:
                 dst = writes[0]
+                if is_volatile_reg_name(dst):
+                    continue
                 prev_idx = pending.get(dst)
                 if prev_idx is not None:
                     dead.add(prev_idx)
                 pending[dst] = idx
+            elif len(writes) > 1:
+                # Aliasing write (e.g. r_wave). Clear all shadowed registers from pending.
+                for dst in writes:
+                    prev_idx = pending.get(dst)
+                    if prev_idx is not None:
+                        dead.add(prev_idx)
+                    pending.pop(dst, None)
 
         return dead
 
@@ -147,6 +163,11 @@ def _is_const_increment(inst: Instruction) -> tuple[str, int] | None:
 
     lhs_name = op.lhs.name
     if lhs_name != inst.dst.name:
+        return None
+
+    # Do not merge or move system registers (s0-s15) for safety, as they often
+    # represent hardware state or IO that should remain at its original position.
+    if lhs_name.startswith("s"):
         return None
 
     try:

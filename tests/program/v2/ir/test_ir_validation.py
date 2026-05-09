@@ -32,14 +32,17 @@ from zcu_tools.program.v2.ir.node import (
     RootNode,
 )
 from zcu_tools.program.v2.ir.operands import Literal, Register
-from zcu_tools.program.v2.ir.passes import BranchEliminationPass, UnrollLoopPass
+from zcu_tools.program.v2.ir.passes import (
+    BranchEliminationPass,
+    UnrollLoopPass,
+    walk_instructions,
+)
 from zcu_tools.program.v2.ir.passes.loop_dispatch import build_jump_table_blocks
 from zcu_tools.program.v2.ir.pipeline import (
     PipeLineConfig,
     PipeLineContext,
     make_default_pipeline,
 )
-from zcu_tools.program.v2.ir.passes import walk_instructions
 
 # ---------------------------------------------------------------------------
 # Helpers
