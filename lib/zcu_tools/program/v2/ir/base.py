@@ -16,7 +16,7 @@ class IRCompileMixin(QickProgramV2):
         self.meta_infos: list[dict[str, Any]] = []
         super().__init__(*args, **kwargs)
 
-    def _add_label(self, label: str):
+    def _add_label(self, label: str) -> None:
         self.meta_infos.append(dict(kind="label", name=label, p_addr=self.p_addr))
         super()._add_label(label)  # type: ignore
 
@@ -27,16 +27,18 @@ class IRCompileMixin(QickProgramV2):
             dict(kind="meta", type=type, name=name, info=info or {}, p_addr=self.p_addr)
         )
 
-    def compile(self):
+    def compile(self) -> None:
+        # Reset structural metadata on each compile to avoid stale markers.
+        self.meta_infos = []
         self._make_asm()
         self.optimize_asm()
         try:
             self._make_binprog()
-        except Exception as e:
+        except Exception:
             for inst in self.prog_list:
-                if inst.get("CMD") == "WMEM_WR":
-                    print(f"FAILED WMEM_WR: {inst}")
-            raise e
+                if isinstance(inst, dict) and inst.get("CMD") == "WMEM_WR":
+                    logger.error("FAILED WMEM_WR: %s", inst)
+            raise
 
     def optimize_asm(self) -> None:
         insts: list[dict[str, Any]] = self.prog_list
