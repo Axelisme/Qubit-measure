@@ -4,7 +4,7 @@ import logging
 from numbers import Integral
 from typing import Union
 
-from qick.asm_v2 import AsmInst, Label, Macro, WriteLabel, WriteReg, AcquireProgramV2
+from qick.asm_v2 import AcquireProgramV2, AsmInst, Label, Macro, WriteLabel, WriteReg
 
 from .meta import MetaMacro
 from .write_reg import WriteRegOp

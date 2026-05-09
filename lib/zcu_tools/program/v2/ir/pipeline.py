@@ -2,19 +2,22 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from typing import Union
 
 from .factory import IRLexer, IRParser
-from .instructions import Instruction
+from .instructions import Instruction, MetaInst
 from .node import BasicBlockNode, RootNode
-from .traversal import walk_basic_blocks
+
+ChunkList = list[Union[BasicBlockNode, MetaInst]]
 
 
 @dataclass
 class PipeLineConfig:
     disable_all_opt: bool = False
-    pmem_capacity: int | None = None
-    pmem_budget: int | None = None
+    pmem_capacity: int = 4096
+
+    max_opt_iterations: int = 8
 
     # Hard cap on the unroll factor k. For register-driven loops k is also
     # rounded down to the nearest power of 2 (Phase 8D).
@@ -33,8 +36,8 @@ DEFAULT_PIPELINE_CONFIG = PipeLineConfig()
 
 @dataclass
 class PipeLineContext:
-    config: PipeLineConfig = field(default_factory=PipeLineConfig)
-    pmem_size: int | None = None
+    config: PipeLineConfig
+    pmem_budget: int
 
 
 # ---------------------------------------------------------------------------
@@ -42,138 +45,158 @@ class PipeLineContext:
 # ---------------------------------------------------------------------------
 
 
+class AbsFlatPass(ABC):
+    """Optimization pass on flat instruction list."""
+
+    @abstractmethod
+    def process(
+        self, insts: list[Instruction], ctx: PipeLineContext
+    ) -> tuple[list[Instruction], bool]: ...
+
+
+class AbsChunkPass(ABC):
+    """Optimization pass on chunk layer: list[BasicBlockNode | MetaInst]."""
+
+    @abstractmethod
+    def process(
+        self, chunks: ChunkList, ctx: PipeLineContext
+    ) -> tuple[ChunkList, bool]: ...
+
+
 class AbsIRPass(ABC):
     """Structural IR pass: transforms a whole RootNode tree."""
 
     @abstractmethod
-    def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode: ...
-
-
-class AbsLinearPass(ABC):
-    """Straight-line optimization pass that operates on a single BasicBlockNode.
-
-    Implementations receive the whole block and may modify any field of the
-    ``BasicBlockNode`` in-place, as long as the result still represents a
-    valid basic block:
-
-    - ``block.insts`` must not contain ``LabelInst`` or ``JumpInst``.
-    - ``block.branch`` must remain either ``None`` or a terminal ``JumpInst``.
-    - Block-local transformations must not depend on neighboring blocks.
-
-    When ``block.fix_addr_size`` is True the total emitted program-memory word
-    count of the block (``insts`` plus optional ``branch``) must be preserved.
-    Passes that normally delete instructions must replace removed words with
-    ``NopInst`` padding instead.
-    """
-
-    @abstractmethod
-    def process_block(self, block: BasicBlockNode) -> None: ...
+    def process(self, ir: RootNode, ctx: PipeLineContext) -> tuple[RootNode, bool]: ...
 
 
 # ---------------------------------------------------------------------------
-# IRPipeLine: three-stage structural pipeline
+# Pipeline helpers
 # ---------------------------------------------------------------------------
 
 
-def _block_addr_words(block: BasicBlockNode) -> int:
-    total = sum(inst.addr_inc for inst in block.insts)
-    if block.branch is not None:
-        total += block.branch.addr_inc
-    return total
-
-
-def _validate_linear_pass_result(
-    block: BasicBlockNode, *, before_addr_words: int | None
+def _validate_fixed_block_words(
+    block: BasicBlockNode, *, before_addr_size: int | None
 ) -> None:
     block.__post_init__()
-    if before_addr_words is not None and _block_addr_words(block) != before_addr_words:
+    if before_addr_size is not None and block.addr_size != before_addr_size:
         raise ValueError(
-            "AbsLinearPass violated fix_addr_size invariant: "
+            "AbsChunkPass violated fix_addr_size invariant: "
             "block program-memory word count changed."
         )
 
 
-def _run_linear_passes(passes: list[AbsLinearPass], ir: RootNode) -> None:
-    for block in walk_basic_blocks(ir):
-        for lp in passes:
-            before_addr_words = (
-                _block_addr_words(block) if block.fix_addr_size else None
+def _run_chunk_passes(
+    passes: list[AbsChunkPass], chunks: ChunkList, ctx: PipeLineContext
+) -> tuple[ChunkList, bool]:
+    changed = False
+    for chunk_pass in passes:
+        fixed_before = {
+            id(chunk): chunk.addr_size
+            for chunk in chunks
+            if isinstance(chunk, BasicBlockNode) and chunk.fix_addr_size
+        }
+        chunks, pass_changed = chunk_pass.process(chunks, ctx)
+        for chunk in chunks:
+            if not isinstance(chunk, BasicBlockNode):
+                continue
+            _validate_fixed_block_words(
+                chunk,
+                before_addr_size=fixed_before.get(id(chunk)),
             )
-            lp.process_block(block)
-            _validate_linear_pass_result(block, before_addr_words=before_addr_words)
+        changed |= pass_changed
+    return chunks, changed
+
+
+def _run_ir_passes(
+    passes: list[AbsIRPass], ir: RootNode, ctx: PipeLineContext
+) -> tuple[RootNode, bool]:
+    changed = False
+    for ir_pass in passes:
+        ir, pass_changed = ir_pass.process(ir, ctx)
+        changed |= pass_changed
+    return ir, changed
+
+
+def _run_flat_passes(
+    passes: list[AbsFlatPass], insts: list[Instruction], ctx: PipeLineContext
+) -> tuple[list[Instruction], bool]:
+    changed = False
+    for flat_pass in passes:
+        insts, pass_changed = flat_pass.process(insts, ctx)
+        changed |= pass_changed
+    return insts, changed
 
 
 class IRPipeLine:
-    """Three-stage IR optimization pipeline.
+    """U-shaped multi-layer optimization pipeline.
 
-    Stage 1 — Pre-LIR  : ``linear_passes`` applied to every BasicBlockNode
-                          before any structural pass.
-    Stage 2 — HIR       : sequence of ``AbsIRPass`` instances that may
-                          restructure the tree (e.g. loop unrolling).
-    Stage 3 — Post-LIR : same ``linear_passes`` re-applied after all
-                          structural passes.
+    Per iteration:
+      Flat-up -> Chunk-up -> Tree -> Chunk-down -> Flat-down
 
-    Each AbsLinearPass handles fix_addr_size internally, so the same pass list
-    is safe to run both before and after structural changes.
+    If any pass reports changed=True, run another full U iteration until
+    convergence or `config.max_opt_iterations`.
     """
 
     def __init__(
         self,
         config: PipeLineConfig,
-        linear_passes: list[AbsLinearPass],
+        flat_passes: list[AbsFlatPass],
+        chunk_passes: list[AbsChunkPass],
         ir_passes: list[AbsIRPass],
     ) -> None:
         self.config = config
-        self.linear_passes = linear_passes
+        self.flat_passes = flat_passes
+        self.chunk_passes = chunk_passes
         self.ir_passes = ir_passes
 
     def __call__(
         self, insts: list[Instruction]
     ) -> tuple[list[Instruction], PipeLineContext]:
-        ctx = PipeLineContext(config=self.config, pmem_size=self.config.pmem_capacity)
+        ctx = PipeLineContext(
+            config=self.config,
+            pmem_budget=int(0.8 * self.config.pmem_capacity),
+        )
         if self.config.disable_all_opt:
             return insts, ctx
 
         lexer = IRLexer()
         parser = IRParser(pmem_size=self.config.pmem_capacity)
+        curr_insts = insts
 
-        blocks = lexer.lex(insts)
-        ir = parser.parse(blocks)
+        max_iters = max(1, self.config.max_opt_iterations)
+        for _ in range(max_iters):
+            iter_changed = False
 
-        # Stage 1: Pre-LIR
-        _run_linear_passes(self.linear_passes, ir)
+            # Flat Optimization
+            curr_insts, changed = _run_flat_passes(self.flat_passes, curr_insts, ctx)
+            iter_changed |= changed
 
-        # Stage 2: HIR structural passes, with linear passes around each
-        for _pass in self.ir_passes:
-            ir = _pass.process(ir, ctx)
+            # Chunk Optimization
+            chunks = lexer.lex(curr_insts)
+            chunks, changed = _run_chunk_passes(self.chunk_passes, chunks, ctx)
+            iter_changed |= changed
 
-            # Stage 3: Post-LIR
-            _run_linear_passes(self.linear_passes, ir)
+            # IR Tree Optimization
+            ir = parser.parse(chunks)
+            ir, changed = _run_ir_passes(self.ir_passes, ir, ctx)
+            iter_changed |= changed
 
-        opt_blocks = parser.unparse(ir)
-        opt_insts = lexer.flatten(opt_blocks)
+            # Chunk Optimization
+            chunks = parser.unparse(ir)
+            chunks, changed = _run_chunk_passes(self.chunk_passes, chunks, ctx)
+            iter_changed |= changed
 
-        # Stage 4: Flat-list unreachable code elimination
-        from .instructions import JumpInst, LabelInst, MetaInst
+            # Flat Optimization
+            curr_insts = lexer.flatten(chunks)
+            curr_insts, changed = _run_flat_passes(self.flat_passes, curr_insts, ctx)
+            iter_changed |= changed
 
-        final_insts = []
-        dead_mode = False
-        for inst in opt_insts:
-            if dead_mode:
-                if isinstance(inst, LabelInst):
-                    dead_mode = False
-                elif isinstance(inst, MetaInst):
-                    final_insts.append(inst)
-                    continue
-                else:
-                    continue
+            if not iter_changed:
+                break
 
-            final_insts.append(inst)
+        return curr_insts, ctx
 
-            if isinstance(inst, JumpInst) and inst.if_cond is None:
-                dead_mode = True
-
-        return final_insts, ctx
 
 # ---------------------------------------------------------------------------
 # Default pipeline factory
@@ -185,35 +208,35 @@ def make_default_pipeline(pmem_capacity: int) -> IRPipeLine:
         BlockMergePass,
         BranchEliminationPass,
         DeadLabelEliminationPass,
-        DeadTestEliminationLinear,
-        DeadWriteEliminationLinear,
-        IncRegMergeLinear,
-        LoopConditionMergeLinear,
-        TimedMergeLinear,
+        DeadTestEliminationPass,
+        DeadWriteEliminationPass,
+        IncRegMergePass,
+        LoopConditionMergePass,
+        TimedMergePass,
+        UnreachableEliminationPass,
         UnrollLoopPass,
-        ZeroDelayDCELinear,
+        ZeroDelayDCEPass,
     )
 
     config = deepcopy(DEFAULT_PIPELINE_CONFIG)
     if config.pmem_capacity is None:
         config.pmem_capacity = pmem_capacity
-    if config.pmem_budget is None:
-        config.pmem_budget = int(0.8 * pmem_capacity)
 
     return IRPipeLine(
         config=config,
-        linear_passes=[
-            ZeroDelayDCELinear(),
-            TimedMergeLinear(),
-            IncRegMergeLinear(),
-            LoopConditionMergeLinear(),
-            DeadWriteEliminationLinear(),
-            DeadTestEliminationLinear(),
+        flat_passes=[UnreachableEliminationPass()],
+        chunk_passes=[
+            IncRegMergePass(),
+            TimedMergePass(),
+            ZeroDelayDCEPass(),
+            LoopConditionMergePass(),
+            DeadTestEliminationPass(),
+            DeadWriteEliminationPass(),
         ],
         ir_passes=[
             UnrollLoopPass(),
-            DeadLabelEliminationPass(),
             BranchEliminationPass(),
             BlockMergePass(),
+            DeadLabelEliminationPass(),
         ],
     )

@@ -4,7 +4,7 @@ import logging
 import math
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, cast
 
 from ..analysis import (
     estimate_body_cost,
@@ -15,13 +15,11 @@ from ..dispatch import dispatch_entry_words
 from ..factory import IRParser, _needs_big_jump
 from ..instructions import JumpInst, LabelInst, RegWriteInst
 from ..labels import Label
-from ..node import BasicBlockNode, BlockNode, IRLoop, IRNode
+from ..node import BasicBlockNode, BlockNode, IRLoop, IRNode, RootNode
 from ..operands import Literal, Register
+from ..pipeline import PipeLineContext
 from .base import OptimizationPassBase
 from .loop_dispatch import build_jump_table_blocks
-
-if TYPE_CHECKING:
-    from ..pipeline import PipeLineConfig
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +67,7 @@ def _floor_pow2(x: int) -> int:
 
 
 def _analyze_unroll(
-    body_insts: list[IRNode],
-    loop_overhead: int,
-    config: PipeLineConfig,
+    body_insts: list[IRNode], loop_overhead: int, ctx: PipeLineContext
 ) -> UnrollAnalysis:
     """Joint k selection (Phase 8 design).
 
@@ -86,7 +82,7 @@ def _analyze_unroll(
     k        = min(k_timing, k_budget)
     """
     scheduled_ticks = estimate_body_scheduled_ticks(body_insts)
-    body_cost = estimate_body_cost(body_insts, config)
+    body_cost = estimate_body_cost(body_insts, ctx.config)
     body_size = estimate_flat_size(body_insts)
 
     if scheduled_ticks is None:
@@ -103,12 +99,12 @@ def _analyze_unroll(
     slack = scheduled_ticks - body_cost
 
     if slack <= 0:
-        k_timing = config.max_unroll_factor
+        k_timing = ctx.config.max_unroll_factor
     else:
-        k_timing = min(math.ceil(loop_overhead / slack), config.max_unroll_factor)
+        k_timing = min(math.ceil(loop_overhead / slack), ctx.config.max_unroll_factor)
 
-    if body_size > 0 and config.pmem_budget is not None:
-        k_budget = config.pmem_budget // body_size
+    if body_size > 0 and ctx.pmem_budget is not None:
+        k_budget = ctx.pmem_budget // body_size
     else:
         k_budget = k_timing
 
@@ -131,6 +127,15 @@ class UnrollLoopPass(OptimizationPassBase):
     before the outer loop's body_words is measured.
     """
 
+    def process(self, ir: RootNode, ctx: PipeLineContext) -> tuple[RootNode, bool]:
+        self.ctx = ctx
+        self._changed = False
+        res = self.visit(ir)
+        if isinstance(res, list):
+            raise ValueError("Unexpected list returned from visit")
+        out = cast(RootNode, res or ir)
+        return out, self._changed
+
     def visit_IRLoop(self, node: IRLoop) -> Optional[IRNode | list[IRNode]]:
         # Post-order: recurse into the body first so any inner loops are
         # rewritten before we measure this loop's body size. generic_visit
@@ -138,6 +143,11 @@ class UnrollLoopPass(OptimizationPassBase):
         visited = self.generic_visit(node)
         assert isinstance(visited, IRLoop)
         node = visited
+
+        # U-shape pipeline may revisit Tree passes across iterations.
+        # Skip loops that were already produced by this pass.
+        if node.name.endswith("_unrolled"):
+            return node
 
         cfg = self.ctx.config
         # Counter update cost stays inside body_cost because it exists in both
@@ -163,7 +173,7 @@ class UnrollLoopPass(OptimizationPassBase):
 
         # ── Constant / exact-hint path ─────────────────────────────
         if n is not None:
-            analysis = _analyze_unroll(node.body.insts, loop_overhead, cfg)
+            analysis = _analyze_unroll(node.body.insts, loop_overhead, self.ctx)
             logger.debug(
                 "UnrollLoopPass: analyze constant/exact loop name=%s n=%s exact=%s "
                 "scheduled_ticks=%s body_cost=%s slack=%s body_size=%s "
@@ -202,7 +212,7 @@ class UnrollLoopPass(OptimizationPassBase):
                 )
                 # Preserve loop semantics: counter starts at 0. The cloned body
                 # already contains the loop-carried update as a semantic unit.
-                pmem_size = self.ctx.pmem_size
+                pmem_size = self.ctx.config.pmem_capacity
                 init_bb = BasicBlockNode(
                     insts=[
                         RegWriteInst(
@@ -210,6 +220,7 @@ class UnrollLoopPass(OptimizationPassBase):
                         )
                     ]
                 )
+                self._changed = True
                 return [
                     init_bb,
                     *_clone_body_nodes(node.body.insts, n, pmem_size=pmem_size),
@@ -238,7 +249,7 @@ class UnrollLoopPass(OptimizationPassBase):
                 remainder,
             )
 
-            pmem_size = self.ctx.pmem_size
+            pmem_size = self.ctx.config.pmem_capacity
             result: list[IRNode] = []
 
             if remainder > 0:
@@ -298,26 +309,27 @@ class UnrollLoopPass(OptimizationPassBase):
                 body=BlockNode(insts=list(unrolled_body)),
             )
             result.append(new_loop)
-
+            self._changed = True
             return BlockNode(insts=result)
 
         # ── Register-driven (no exact hint) → jump-table dispatch ──
         if not isinstance(node.n, str):
             return node  # unexpected n type
-        jt_blocks = self._maybe_build_jump_table(node, loop_overhead, cfg)
+        jt_blocks = self._maybe_build_jump_table(node, loop_overhead, self.ctx)
         if jt_blocks is None:
             return node
+        self._changed = True
         return list(jt_blocks)  # list[BasicBlockNode] → list[IRNode] (coercion)
 
     def _maybe_build_jump_table(
-        self, node: IRLoop, loop_overhead: int, cfg
+        self, node: IRLoop, loop_overhead: int, ctx: PipeLineContext
     ) -> Optional[list[BasicBlockNode]]:
         """Try to build jump-table BasicBlockNodes for a register-driven loop.
 
         Returns None when any precondition fails (k <= 1 after pow2 rounding,
         body_words == 0, etc.) so the caller falls back to no-unroll.
         """
-        analysis = _analyze_unroll(node.body.insts, loop_overhead, cfg)
+        analysis = _analyze_unroll(node.body.insts, loop_overhead, ctx)
         body_size = analysis.body_size
         logger.debug(
             "UnrollLoopPass: analyze register-driven loop name=%s n_reg=%s "
@@ -368,7 +380,7 @@ class UnrollLoopPass(OptimizationPassBase):
             k_raw,
             k,
             body_size,
-            dispatch_entry_words(self.ctx.pmem_size),
+            dispatch_entry_words(self.ctx.config.pmem_capacity),
         )
 
         entry_labels = [Label.make_new(f"{node.name}_jt_entry_{i}") for i in range(k)]
@@ -382,5 +394,5 @@ class UnrollLoopPass(OptimizationPassBase):
             entry_labels=entry_labels,
             exit_label=exit_label,
             bodies=bodies,
-            pmem_size=self.ctx.pmem_size,
+            pmem_size=self.ctx.config.pmem_capacity,
         )

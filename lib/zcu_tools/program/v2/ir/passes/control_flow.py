@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from typing import Optional, cast
 
-from ..instructions import BaseInst, Instruction, LabelInst, NopInst
+from ..instructions import BaseInst, Instruction, JumpInst, LabelInst, MetaInst
 from ..labels import PSEUDO_LABELS, Label
 from ..node import BasicBlockNode, BlockNode, IRBranch, IRLoop, IRNode, RootNode
-from ..pipeline import PipeLineContext
-from ..traversal import walk_instructions
-from .base import OptimizationPassBase
+from ..pipeline import AbsFlatPass, PipeLineContext
+from .base import OptimizationPassBase, walk_basic_blocks, walk_instructions
 
 
 def _collect_referenced_labels(ir: RootNode) -> set[Label]:
@@ -21,14 +20,16 @@ def _collect_referenced_labels(ir: RootNode) -> set[Label]:
 class DeadLabelEliminationPass(OptimizationPassBase):
     """Remove labels that are never referenced by any instruction."""
 
-    def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:
+    def process(self, ir: RootNode, ctx: PipeLineContext) -> tuple[RootNode, bool]:
         self.ctx = ctx
-
+        before = sum(len(block.labels) for block in walk_basic_blocks(ir))
         self._referenced_labels = _collect_referenced_labels(ir)
         res = self.visit(ir)
         if isinstance(res, list):
             raise ValueError("Unexpected list returned from visit")
-        return cast(RootNode, res or ir)
+        out = cast(RootNode, res or ir)
+        after = sum(len(block.labels) for block in walk_basic_blocks(out))
+        return out, before != after
 
     def visit_LabelInst(self, inst: LabelInst) -> Optional[Instruction]:
         if str(inst.name) in PSEUDO_LABELS:
@@ -60,10 +61,11 @@ class BranchEliminationPass(OptimizationPassBase):
     plain Label (not a register address) are considered for elimination.
     """
 
-    def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:
+    def process(self, ir: RootNode, ctx: PipeLineContext) -> tuple[RootNode, bool]:
         self.ctx = ctx
+        self._changed = False
         self._process_block(ir)
-        return ir
+        return ir, self._changed
 
     def _process_block(self, node: IRNode) -> None:
         if isinstance(node, BlockNode):
@@ -104,6 +106,7 @@ class BranchEliminationPass(OptimizationPassBase):
             return
 
         block.branch = None
+        self._changed = True
 
 
 def _next_basic_block(
@@ -139,24 +142,27 @@ class BlockMergePass(OptimizationPassBase):
       - Block B has no alive labels (not a jump target).
     """
 
-    def process(self, ir: RootNode, ctx: PipeLineContext) -> RootNode:
+    def process(self, ir: RootNode, ctx: PipeLineContext) -> tuple[RootNode, bool]:
         self.ctx = ctx
         referenced = _collect_referenced_labels(ir)
-        self._merge_block(ir, referenced)
-        return ir
+        changed = self._merge_block(ir, referenced)
+        return ir, changed
 
-    def _merge_block(self, node: IRNode, referenced: set[Label]) -> None:
+    def _merge_block(self, node: IRNode, referenced: set[Label]) -> bool:
+        changed_any = False
         if isinstance(node, BlockNode):
             changed = True
             while changed:
                 changed = self._merge_pass(node.insts, referenced)
+                changed_any |= changed
             for child in node.insts:
-                self._merge_block(child, referenced)
+                changed_any |= self._merge_block(child, referenced)
         elif isinstance(node, IRLoop):
-            self._merge_block(node.body, referenced)
+            changed_any |= self._merge_block(node.body, referenced)
         elif isinstance(node, IRBranch):
             for case in node.cases:
-                self._merge_block(case, referenced)
+                changed_any |= self._merge_block(case, referenced)
+        return changed_any
 
     def _merge_pass(self, items: list[IRNode], referenced: set[Label]) -> bool:
         i = 0
@@ -187,3 +193,36 @@ def _has_alive_labels(block: BasicBlockNode, referenced: set[Label]) -> bool:
         lbl.name in referenced and str(lbl.name) not in PSEUDO_LABELS
         for lbl in block.labels
     )
+
+
+class UnreachableEliminationPass(AbsFlatPass):
+    """Remove unreachable instructions after unconditional jumps.
+
+    Keep structural metadata (`MetaInst`) even in dead regions.
+    """
+
+    def process(
+        self, insts: list[Instruction], ctx: PipeLineContext
+    ) -> tuple[list[Instruction], bool]:
+        _ = ctx
+        final_insts: list[Instruction] = []
+        dead_mode = False
+        changed = False
+
+        for inst in insts:
+            if dead_mode:
+                if isinstance(inst, LabelInst):
+                    dead_mode = False
+                elif isinstance(inst, MetaInst):
+                    final_insts.append(inst)
+                    continue
+                else:
+                    changed = True
+                    continue
+
+            final_insts.append(inst)
+
+            if isinstance(inst, JumpInst) and inst.if_cond is None:
+                dead_mode = True
+
+        return final_insts, changed

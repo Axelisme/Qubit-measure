@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, Union
+from typing_extensions import Optional, Union
 
 from .dispatch import build_dispatch_table_island, emit_dispatch_address_setup
 from .instructions import (
@@ -329,13 +329,13 @@ class IRParser:
         lexer = IRLexer()
         start = Label.make_new(f"{node.name}_start")
         end = Label.make_new(f"{node.name}_end")
-        
+
         counter = Register(node.counter_reg)
         if isinstance(node.n, int):
             n_val = Literal(f"#{node.n}")
         else:
             n_val = Register(node.n)
-            
+
         op_str = AluExpr(counter, "-", n_val)
 
         pre: list[Instruction] = [
@@ -353,10 +353,20 @@ class IRParser:
             if _needs_big_jump(self.pmem_size):
                 pre += [
                     RegWriteInst(dst=Register("s15"), src="label", label=end),
-                    JumpInst(addr=Register("s15"), if_cond="Z", op=AluExpr(Register(node.n), "-", Literal("#0"))),
+                    JumpInst(
+                        addr=Register("s15"),
+                        if_cond="Z",
+                        op=AluExpr(Register(node.n), "-", Literal("#0")),
+                    ),
                 ]
             else:
-                pre.append(JumpInst(label=end, if_cond="Z", op=AluExpr(Register(node.n), "-", Literal("#0"))))
+                pre.append(
+                    JumpInst(
+                        label=end,
+                        if_cond="Z",
+                        op=AluExpr(Register(node.n), "-", Literal("#0")),
+                    )
+                )
         pre += [
             RegWriteInst(dst=counter, src="imm", lit=Literal("#0")),
             LabelInst(name=start, can_remove=True),
@@ -383,7 +393,9 @@ class IRParser:
     def _lower_branch(self, node: IRBranch) -> list[Union[BasicBlockNode, MetaInst]]:
         n = len(node.cases)
         result: list[Union[BasicBlockNode, MetaInst]] = []
-        case_entry_labels = [Label.make_new(f"{node.name}_case_entry_{i}") for i in range(n)]
+        case_entry_labels = [
+            Label.make_new(f"{node.name}_case_entry_{i}") for i in range(n)
+        ]
         table_labels = [Label.make_new(f"{node.name}_dispatch_{i}") for i in range(n)]
 
         result.append(
@@ -417,10 +429,7 @@ class IRParser:
             case_items = self._unparse_block_node(case)
             first_block_attached = False
             for item in case_items:
-                if (
-                    not first_block_attached
-                    and isinstance(item, BasicBlockNode)
-                ):
+                if not first_block_attached and isinstance(item, BasicBlockNode):
                     item.labels.insert(
                         0, LabelInst(name=case_entry_labels[idx], can_remove=True)
                     )
@@ -429,9 +438,7 @@ class IRParser:
             if not first_block_attached:
                 result.append(
                     BasicBlockNode(
-                        labels=[
-                            LabelInst(name=case_entry_labels[idx], can_remove=True)
-                        ]
+                        labels=[LabelInst(name=case_entry_labels[idx], can_remove=True)]
                     )
                 )
             result.append(MetaInst(type="BRANCH_CASE_END", name=case_name))

@@ -3,10 +3,10 @@ from __future__ import annotations
 import dataclasses
 from typing import cast
 
-from ..instructions import BaseInst, NopInst, TimeInst
+from ..instructions import BaseInst, TimeInst
 from ..node import BasicBlockNode
 from ..operands import Literal
-from ..pipeline import AbsLinearPass
+from ..pipeline import AbsChunkPass, ChunkList, PipeLineContext
 
 
 def _is_zero_ref_increment(inst: BaseInst) -> bool:
@@ -69,24 +69,48 @@ def _adjust_time_field(inst: BaseInst, delta: int) -> BaseInst:
     return dataclasses.replace(inst, time=Literal(f"@{old + delta}"))  # type: ignore[call-overload]
 
 
-class ZeroDelayDCELinear(AbsLinearPass):
-    """Remove TIME inc_ref #0 instructions from a BasicBlockNode."""
+class ZeroDelayDCEPass(AbsChunkPass):
+    """Remove TIME inc_ref #0 instructions from BasicBlockNode chunks."""
 
-    def process_block(self, block: BasicBlockNode) -> None:
+    def process(
+        self, chunks: ChunkList, ctx: PipeLineContext
+    ) -> tuple[ChunkList, bool]:
+        _ = ctx
+        changed = False
+        for chunk in chunks:
+            if not isinstance(chunk, BasicBlockNode):
+                continue
+            changed |= self._process_block(chunk)
+        return chunks, changed
+
+    def _process_block(self, block: BasicBlockNode) -> bool:
         if block.fix_addr_size:
-            return
-        block.insts = [
-            inst for inst in block.insts if not _is_zero_ref_increment(inst)
-        ]
+            return False
+        before = list(block.insts)
+        block.insts = [inst for inst in block.insts if not _is_zero_ref_increment(inst)]
+        return before != block.insts
 
 
-class TimedMergeLinear(AbsLinearPass):
+class TimedMergePass(AbsChunkPass):
     """Aggressive TIME inc_ref optimisation pass."""
 
-    def process_block(self, block: BasicBlockNode) -> None:
+    def process(
+        self, chunks: ChunkList, ctx: PipeLineContext
+    ) -> tuple[ChunkList, bool]:
+        _ = ctx
+        changed = False
+        for chunk in chunks:
+            if not isinstance(chunk, BasicBlockNode):
+                continue
+            changed |= self._process_block(chunk)
+        return chunks, changed
+
+    def _process_block(self, block: BasicBlockNode) -> bool:
         if block.fix_addr_size:
-            return
+            return False
+        before = list(block.insts)
         self._merge_free(block)
+        return before != block.insts
 
     def _merge_free(self, block: BasicBlockNode) -> None:
         pending_lit: int = 0

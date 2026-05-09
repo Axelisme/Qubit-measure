@@ -16,20 +16,32 @@ from ..instructions import (
     WmemWriteInst,
 )
 from ..node import BasicBlockNode
-from ..pipeline import AbsLinearPass
+from ..pipeline import AbsChunkPass, ChunkList, PipeLineContext
 
 
-class DeadWriteEliminationLinear(AbsLinearPass):
-    """Remove overwritten register writes in a free BasicBlockNode."""
+class DeadWriteEliminationPass(AbsChunkPass):
+    """Remove overwritten register writes in free BasicBlockNode chunks."""
 
-    def process_block(self, block: BasicBlockNode) -> None:
+    def process(
+        self, chunks: ChunkList, ctx: PipeLineContext
+    ) -> tuple[ChunkList, bool]:
+        _ = ctx
+        changed = False
+        for chunk in chunks:
+            if not isinstance(chunk, BasicBlockNode):
+                continue
+            changed |= self._process_block(chunk)
+        return chunks, changed
+
+    def _process_block(self, block: BasicBlockNode) -> bool:
         if block.fix_addr_size:
-            return
+            return False
         insts = block.insts
         dead: set[int] = self._find_dead_indices(insts)
         if not dead:
-            return
+            return False
         block.insts = [inst for i, inst in enumerate(insts) if i not in dead]
+        return True
 
     def _find_dead_indices(self, insts: list[BaseInst]) -> set[int]:
         pending: dict[str, int] = {}  # reg -> index of last pending write
@@ -65,16 +77,28 @@ class DeadWriteEliminationLinear(AbsLinearPass):
         )
 
 
-class DeadTestEliminationLinear(AbsLinearPass):
-    """Remove dead TestInst from a free BasicBlockNode."""
+class DeadTestEliminationPass(AbsChunkPass):
+    """Remove dead TestInst from free BasicBlockNode chunks."""
 
-    def process_block(self, block: BasicBlockNode) -> None:
+    def process(
+        self, chunks: ChunkList, ctx: PipeLineContext
+    ) -> tuple[ChunkList, bool]:
+        _ = ctx
+        changed = False
+        for chunk in chunks:
+            if not isinstance(chunk, BasicBlockNode):
+                continue
+            changed |= self._process_block(chunk)
+        return chunks, changed
+
+    def _process_block(self, block: BasicBlockNode) -> bool:
         if block.fix_addr_size:
-            return
+            return False
         dead = self._find_dead_indices(block.insts, block.branch)
         if not dead:
-            return
+            return False
         block.insts = [inst for i, inst in enumerate(block.insts) if i not in dead]
+        return True
 
     def _find_dead_indices(
         self, insts: list[BaseInst], branch: JumpInst | None
@@ -143,7 +167,7 @@ def _make_increment_inst(reg: str, val: int) -> RegWriteInst:
     return RegWriteInst(dst=Register(reg), src="op", op=op)
 
 
-class IncRegMergeLinear(AbsLinearPass):
+class IncRegMergePass(AbsChunkPass):
     """Merge adjacent constant register increments.
 
     For free blocks (fix_addr_size=False):
@@ -153,10 +177,23 @@ class IncRegMergeLinear(AbsLinearPass):
       - Drops the increment if the accumulated value is 0.
     """
 
-    def process_block(self, block: BasicBlockNode) -> None:
+    def process(
+        self, chunks: ChunkList, ctx: PipeLineContext
+    ) -> tuple[ChunkList, bool]:
+        _ = ctx
+        changed = False
+        for chunk in chunks:
+            if not isinstance(chunk, BasicBlockNode):
+                continue
+            changed |= self._process_block(chunk)
+        return chunks, changed
+
+    def _process_block(self, block: BasicBlockNode) -> bool:
         if block.fix_addr_size:
-            return
+            return False
+        before = list(block.insts)
         self._merge_free(block)
+        return before != block.insts
 
     def _merge_free(self, block: BasicBlockNode) -> None:
         pending: dict[str, int] = {}

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from ..instructions import JumpInst, NopInst, RegWriteInst, TestInst
+from ..instructions import JumpInst, RegWriteInst, TestInst
 from ..node import BasicBlockNode
 from ..operands import AluExpr, Literal, SideWrite
-from ..pipeline import AbsLinearPass
+from ..pipeline import AbsChunkPass, ChunkList, PipeLineContext
 
 
 def _is_pure_regwrite_op(inst: RegWriteInst) -> bool:
@@ -31,8 +31,8 @@ def _make_merged_branch(branch: JumpInst, inst: RegWriteInst) -> JumpInst:
     )
 
 
-class LoopConditionMergeLinear(AbsLinearPass):
-    """Linear pass to merge register increments and conditional jumps.
+class LoopConditionMergePass(AbsChunkPass):
+    """Chunk pass to merge register increments and conditional jumps.
 
     Pattern 1: 1-Word Compression (Zero-based Comparison)
     - Before:
@@ -51,22 +51,34 @@ class LoopConditionMergeLinear(AbsLinearPass):
         JUMP label -if(COND) -wr(r1 op) -op(r1 + #1)
     """
 
-    def process_block(self, block: BasicBlockNode) -> None:
+    def process(
+        self, chunks: ChunkList, ctx: PipeLineContext
+    ) -> tuple[ChunkList, bool]:
+        _ = ctx
+        changed = False
+        for chunk in chunks:
+            if not isinstance(chunk, BasicBlockNode):
+                continue
+            changed |= self._process_block(chunk)
+        return chunks, changed
+
+    def _process_block(self, block: BasicBlockNode) -> bool:
         if block.fix_addr_size:
-            return
+            return False
         if block.branch is None or not block.insts:
-            return
+            return False
 
         # Pattern 1: Merge Dec+JumpZ
-        self._merge_zero_comparison(block)
+        changed = self._merge_zero_comparison(block)
 
         # Pattern 2: Merge Inc into empty Jump
-        self._merge_side_data_injection(block)
+        changed |= self._merge_side_data_injection(block)
+        return changed
 
-    def _merge_zero_comparison(self, block: BasicBlockNode) -> None:
+    def _merge_zero_comparison(self, block: BasicBlockNode) -> bool:
         """Pattern 1: REG_WR r1 op r1-1 + JUMP op(r1-0) -> JUMP wr(r1) op(r1-1)."""
         if not block.insts:
-            return
+            return False
 
         last_idx = len(block.insts) - 1
         last_inst = block.insts[last_idx]
@@ -92,11 +104,13 @@ class LoopConditionMergeLinear(AbsLinearPass):
             ):
                 block.branch = _make_merged_branch(branch, last_inst)
                 block.insts.pop(last_idx)
+                return True
+        return False
 
-    def _merge_side_data_injection(self, block: BasicBlockNode) -> None:
+    def _merge_side_data_injection(self, block: BasicBlockNode) -> bool:
         """Pattern 2: TEST + REG_WR + JUMP -> TEST + JUMP wr."""
         if len(block.insts) < 2:
-            return
+            return False
 
         # Need branch to have NO op/wr/uf already
         branch = block.branch
@@ -107,7 +121,7 @@ class LoopConditionMergeLinear(AbsLinearPass):
             or branch.wr is not None
             or branch.uf is not None
         ):
-            return
+            return False
 
         last_idx = len(block.insts) - 1
         last_inst = block.insts[last_idx]
@@ -123,3 +137,5 @@ class LoopConditionMergeLinear(AbsLinearPass):
         ):
             block.branch = _make_merged_branch(branch, last_inst)
             block.insts.pop(last_idx)
+            return True
+        return False

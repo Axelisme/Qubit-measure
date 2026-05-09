@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing_extensions import TYPE_CHECKING
 
 from .instructions import (
     BaseInst,
@@ -147,9 +147,8 @@ def estimate_body_cost(body: list[IRNode], config: PipeLineConfig) -> int:
         elif isinstance(node, IRBranch):
             # Constant-depth dispatch-table runtime cost:
             # setup (REG_WR/ALU ops) + indirect jump + stub jump.
-            dispatch_overhead = (
-                4 * config.cost_default
-                + 2 * (config.cost_default + config.cost_jump_flush)
+            dispatch_overhead = 4 * config.cost_default + 2 * (
+                config.cost_default + config.cost_jump_flush
             )
             case_cost = max(
                 (estimate_body_cost(case.insts, config) for case in node.cases),

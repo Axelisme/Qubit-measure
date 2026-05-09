@@ -21,6 +21,7 @@ def test_time_inst_analysis():
     assert instruction_reads(inst) == {"s1"}
     assert instruction_writes(inst) == set()
 
+
 def test_test_inst_analysis():
     inst = TestInst(op=AluExpr(Register("s1"), "-", Register("s2")))
     assert instruction_reads(inst) == {"s1", "s2"}
@@ -30,10 +31,12 @@ def test_test_inst_analysis():
     assert instruction_reads(inst) == {"r5"}
     assert instruction_writes(inst) == set()
 
+
 def test_jump_inst_analysis():
     inst = JumpInst(label=Label("loop"), if_cond="eq")
     assert instruction_reads(inst) == set()
     assert instruction_writes(inst) == set()
+
 
 def test_reg_write_inst_analysis():
     inst = RegWriteInst(dst=Register("s1"), src="imm", lit=Literal("#42"))
@@ -44,25 +47,33 @@ def test_reg_write_inst_analysis():
     assert instruction_writes(inst) == {"s1"}
     assert instruction_reads(inst) == {"s2"}
 
-    inst = RegWriteInst(dst=Register("s1"), src="op", op=AluExpr(Register("s2"), "+", Register("s3")))
+    inst = RegWriteInst(
+        dst=Register("s1"), src="op", op=AluExpr(Register("s2"), "+", Register("s3"))
+    )
     assert instruction_writes(inst) == {"s1"}
     assert instruction_reads(inst) == {"s2", "s3"}
+
 
 def test_port_write_inst_analysis():
     inst = PortWriteInst(dst=Literal("2"), time=Register("s1"), addr=Register("s2"))
     assert instruction_writes(inst) == set()
     assert instruction_reads(inst) == {"s1", "s2"}
 
+
 def test_mixed_registers():
     inst = TestInst(op=AluExpr(Register("s_test"), "+", Register("temp_reg_1")))
     assert instruction_reads(inst) == {"s_test", "temp_reg_1"}
 
+
 def test_property_types():
-    inst = RegWriteInst(dst=Register("s1"), src="op", op=AluExpr(Register("s2"), "+", Register("s3")))
+    inst = RegWriteInst(
+        dst=Register("s1"), src="op", op=AluExpr(Register("s2"), "+", Register("s3"))
+    )
     assert isinstance(inst.reg_read, list)
     assert isinstance(inst.reg_write, list)
     assert inst.reg_read == ["s2", "s3"]
     assert inst.reg_write == ["s1"]
+
 
 def test_need_label():
     inst = JumpInst(label=Label("target"))

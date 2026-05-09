@@ -1,33 +1,43 @@
-from .base import OptimizationPassBase
+from .base import (
+    OptimizationPassBase,
+    IRTransformer,
+    walk_basic_blocks,
+    walk_instructions,
+)
 from .control_flow import (
     BlockMergePass,
     BranchEliminationPass,
     DeadLabelEliminationPass,
+    UnreachableEliminationPass,
 )
 from .dataflow import (
-    DeadTestEliminationLinear,
-    DeadWriteEliminationLinear,
-    IncRegMergeLinear,
+    DeadTestEliminationPass,
+    DeadWriteEliminationPass,
+    IncRegMergePass,
 )
 from .loop import UnrollLoopPass
-from .loop_merge import LoopConditionMergeLinear
-from .timeline import TimedMergeLinear, ZeroDelayDCELinear
+from .loop_merge import LoopConditionMergePass
+from .timeline import TimedMergePass, ZeroDelayDCEPass
 
 __all__ = [
     # base
     "OptimizationPassBase",
+    "IRTransformer",
+    "walk_basic_blocks",
+    "walk_instructions",
     # control_flow
     "BlockMergePass",
     "BranchEliminationPass",
     "DeadLabelEliminationPass",
+    "UnreachableEliminationPass",
     # dataflow
-    "DeadTestEliminationLinear",
-    "DeadWriteEliminationLinear",
-    "IncRegMergeLinear",
+    "DeadTestEliminationPass",
+    "DeadWriteEliminationPass",
+    "IncRegMergePass",
     # loop
     "UnrollLoopPass",
-    "LoopConditionMergeLinear",
+    "LoopConditionMergePass",
     # timeline
-    "TimedMergeLinear",
-    "ZeroDelayDCELinear",
+    "TimedMergePass",
+    "ZeroDelayDCEPass",
 ]

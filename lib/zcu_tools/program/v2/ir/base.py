@@ -30,15 +30,10 @@ class IRCompileMixin(QickProgramV2):
     def compile(self) -> None:
         # Reset structural metadata on each compile to avoid stale markers.
         self.meta_infos = []
+
         self._make_asm()
         self.optimize_asm()
-        try:
-            self._make_binprog()
-        except Exception:
-            for inst in self.prog_list:
-                if isinstance(inst, dict) and inst.get("CMD") == "WMEM_WR":
-                    logger.error("FAILED WMEM_WR: %s", inst)
-            raise
+        self._make_binprog()
 
     def optimize_asm(self) -> None:
         insts: list[dict[str, Any]] = self.prog_list
@@ -49,7 +44,6 @@ class IRCompileMixin(QickProgramV2):
         logical_insts = linker.unlink(insts, labels, meta_infos)
 
         pipeline = make_default_pipeline(pmem_capacity=self.tproccfg["pmem_size"])
-
         opt_insts, _ctx = pipeline(logical_insts)
 
         opt_prog_list, opt_labels, opt_meta_infos, cursor = linker.link(opt_insts)

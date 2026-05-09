@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Optional, Union
+
+from typing_extensions import Any, Optional, Union
 
 from .labels import Label, is_pseudo_label_name, is_register_addr
 from .operands import (
     AluExpr,
     Literal,
-    Operand,
     Register,
     SideWrite,
     parse_alu_expr,
@@ -45,7 +45,9 @@ def _validate_addr_value(
     )
 
 
-def _validate_jump_addr_target(value: Optional[Union[Register, Literal, Label]]) -> None:
+def _validate_jump_addr_target(
+    value: Optional[Union[Register, Literal, Label]],
+) -> None:
     if value is None or isinstance(value, Label):
         return
     if isinstance(value, Register) and value.name == "s15":
@@ -76,7 +78,7 @@ def _resolve_addr(raw_addr: Any) -> Optional[Union[Register, Literal, Label]]:
             return _get_label(raw_addr)
         # It might be a direct literal address
         if raw_addr.startswith("@") or raw_addr.lstrip("-").isdigit():
-             return Literal(raw_addr)
+            return Literal(raw_addr)
         raise ValueError(
             f"Invalid ADDR {raw_addr!r}: plain string labels are not supported. "
             "Use register address (e.g. 's15') or '&label'."
@@ -388,7 +390,11 @@ class RegWriteInst(BaseInst):
     @property
     def reg_read(self) -> list[str]:
         reads: set[str] = set()
-        if self.src and not self.src.startswith("#") and self.src not in ("op", "imm", "label", "dmem", "wmem"):
+        if (
+            self.src
+            and not self.src.startswith("#")
+            and self.src not in ("op", "imm", "label", "dmem", "wmem")
+        ):
             reads.add(self.src)
         if self.op:
             reads.update(self.op.get_read_regs())
@@ -458,7 +464,11 @@ class PortWriteInst(BaseInst):
     @property
     def reg_read(self) -> list[str]:
         reads: set[str] = set()
-        if self.src and not self.src.startswith("#") and self.src not in ("op", "imm", "wmem", "r_wave"):
+        if (
+            self.src
+            and not self.src.startswith("#")
+            and self.src not in ("op", "imm", "wmem", "r_wave")
+        ):
             reads.add(self.src)
         if isinstance(self.addr, Register):
             reads.update(self.addr.get_read_regs())
@@ -639,7 +649,9 @@ class WmemWriteInst(BaseInst):
         # QICK uses 'DST' for WMEM_WR address
         addr_raw = d.get("DST", d.get("ADDR"))
         return cls(
-            addr=parse_register_or_literal(str(addr_raw)) if addr_raw is not None else None,
+            addr=parse_register_or_literal(str(addr_raw))
+            if addr_raw is not None
+            else None,
             time=parse_register_or_literal(str(d["TIME"])) if "TIME" in d else None,
             wr=parse_side_write(d["WR"]) if "WR" in d else None,
             op=parse_alu_expr(d["OP"]) if "OP" in d else None,

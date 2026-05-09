@@ -60,9 +60,18 @@ class BasicBlockNode(IRNode):
     def children(self) -> Iterator[IRNode]:
         return iter([])
 
+    @property
+    def addr_size(self) -> int:
+        size = sum(inst.addr_inc for inst in self.insts)
+        if self.branch is not None:
+            size += self.branch.addr_inc
+        return size
+
     def _into_str(self, indent: int = 0) -> str:
         prefix = "    " * indent
         lines = []
+        if self.fix_addr_size:
+            lines.append(f"{prefix}BasicBlockNode(fix_addr_size={self.addr_size}):")
         for lbl in self.labels:
             lines.append(f"{prefix}{lbl}:")
         for inst in self.insts:

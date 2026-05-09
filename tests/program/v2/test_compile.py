@@ -4,12 +4,13 @@ These tests verify that the program class can be constructed and compiled
 using a mock QickConfig built from a plain dict, exercising the real
 _initialize / _body / compile pipeline.
 """
+
 from __future__ import annotations
 
 import pytest
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.ir import base as ir_base
-from zcu_tools.program.v2.ir.pipeline import PipeLineContext
+from zcu_tools.program.v2.ir.pipeline import PipeLineContext, PipeLineConfig
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules import Delay, SoftDelay
 from zcu_tools.program.v2.sweep import SweepCfg
@@ -136,7 +137,7 @@ def test_compile_passes_pmem_budget_into_pipeline(monkeypatch):
 
     class _NoopPipeline:
         def __call__(self, ir):
-            return ir, PipeLineContext()
+            return ir, PipeLineContext(config=PipeLineConfig(), pmem_budget=1024)
 
     def fake_make_default_pipeline(pmem_capacity):
         seen["pmem_capacity"] = pmem_capacity

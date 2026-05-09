@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from typing import Optional, Union
 
 # Pattern to extract registers, literals and operators
-_OP_TOKEN_RE = re.compile(r"([a-zA-Z_]\w*|#u?\-?[0-9A-Fa-f]+|&[a-zA-Z0-9_]+|@[0-9\-]+|<<|>>|AND|OR|XOR|ASR|SR|SL|ABS|MSH|LSH|SWP|CAT|::|NOT|!|PAR|[\+\-\*&\|\^=<>]+)")
+_OP_TOKEN_RE = re.compile(
+    r"([a-zA-Z_]\w*|#u?\-?[0-9A-Fa-f]+|&[a-zA-Z0-9_]+|@[0-9\-]+|<<|>>|AND|OR|XOR|ASR|SR|SL|ABS|MSH|LSH|SWP|CAT|::|NOT|!|PAR|[\+\-\*&\|\^=<>]+)"
+)
 
 
 class Operand(ABC):
@@ -92,7 +94,12 @@ class SideWrite(Operand):
 
 
 def parse_register_or_literal(val: str) -> Union[Register, Literal]:
-    if val.startswith("#") or val.startswith("&") or val.startswith("@") or val.startswith("0x"):
+    if (
+        val.startswith("#")
+        or val.startswith("&")
+        or val.startswith("@")
+        or val.startswith("0x")
+    ):
         return Literal(val)
     # Some numbers without '#' might sneak in depending on context,
     # but QICK literals usually have prefixes. If it's a raw number, treat as literal.

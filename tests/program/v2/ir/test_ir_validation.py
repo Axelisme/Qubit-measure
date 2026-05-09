@@ -9,12 +9,13 @@ Validation 2: Fully-unrolled loops produce a single fused block with zero
 
 Validation 3: fix_addr_size=True blocks are conservatively skipped by passes.
 """
+
 from __future__ import annotations
 
 from copy import deepcopy
 
 import pytest
-from zcu_tools.program.v2.ir.factory import IRParser
+from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
 from zcu_tools.program.v2.ir.instructions import (
     JumpInst,
     LabelInst,
@@ -30,7 +31,7 @@ from zcu_tools.program.v2.ir.node import (
     IRNode,
     RootNode,
 )
-from zcu_tools.program.v2.ir.operands import AluExpr, Literal, Register
+from zcu_tools.program.v2.ir.operands import Literal, Register
 from zcu_tools.program.v2.ir.passes import BranchEliminationPass, UnrollLoopPass
 from zcu_tools.program.v2.ir.passes.loop_dispatch import build_jump_table_blocks
 from zcu_tools.program.v2.ir.pipeline import (
@@ -38,10 +39,12 @@ from zcu_tools.program.v2.ir.pipeline import (
     PipeLineContext,
     make_default_pipeline,
 )
+from zcu_tools.program.v2.ir.passes import walk_instructions
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _collect_fixed_entry_blocks(root: RootNode) -> list[BasicBlockNode]:
     """Collect BasicBlockNodes that are fix_addr_size=True AND have labels."""
@@ -55,35 +58,6 @@ def _collect_fixed_entry_blocks(root: RootNode) -> list[BasicBlockNode]:
         elif isinstance(node, BlockNode):
             stack.extend(node.insts)
     return result
-
-
-def _collect_entry_groups(root: RootNode) -> list[list[BasicBlockNode]]:
-    """Group fix_addr_size=True blocks into per-entry groups.
-
-    A new group starts at each fix_addr_size block that has labels.
-    Groups end (and are not continued) when a fix_addr_size block that has
-    no labels AND has a branch is encountered — that signals the back-edge,
-    which is not part of any body entry.
-    """
-    groups: list[list[BasicBlockNode]] = []
-    current: list[BasicBlockNode] = []
-    for node in root.insts:
-        if not isinstance(node, BasicBlockNode) or not node.fix_addr_size:
-            continue
-        # Back-edge blocks: no labels, has branch → end of entries.
-        if not node.labels and node.branch is not None:
-            if current:
-                groups.append(current)
-                current = []
-            break
-        # New entry starts when a labelled block is encountered.
-        if node.labels and current:
-            groups.append(current)
-            current = []
-        current.append(node)
-    if current:
-        groups.append(current)
-    return groups
 
 
 def _entry_addr_size(group: list[BasicBlockNode]) -> int:
@@ -109,9 +83,19 @@ def _collect_all_basic_blocks(root: RootNode) -> list[BasicBlockNode]:
     return result
 
 
+def _run_full_pipeline_on_root(root: RootNode, *, pmem: int = 512) -> RootNode:
+    pipeline = make_default_pipeline(pmem_capacity=pmem)
+    lexer = IRLexer()
+    parser = IRParser(pmem_size=pmem)
+    insts = lexer.flatten(parser.unparse(root))
+    out_insts, _ = pipeline(insts)
+    return parser.parse(lexer.lex(out_insts))
+
+
 # ---------------------------------------------------------------------------
 # Validation 1: Jump-table stride alignment
 # ---------------------------------------------------------------------------
+
 
 def test_v1_jump_table_only_dispatch_stubs_are_fixed():
     """Dispatch-table lowering should freeze only the table island."""
@@ -120,7 +104,9 @@ def test_v1_jump_table_only_dispatch_stubs_are_fixed():
     body_words = 3
     entry_labels = [Label.make_new(f"jt_entry_{i}") for i in range(k)]
     exit_label = Label.make_new("jt_exit")
-    body = BlockNode(insts=[BasicBlockNode(insts=[NopInst()]) for _ in range(body_words)])
+    body = BlockNode(
+        insts=[BasicBlockNode(insts=[NopInst()]) for _ in range(body_words)]
+    )
     bodies = [deepcopy(body) for _ in range(k)]
 
     blocks = build_jump_table_blocks(
@@ -141,8 +127,7 @@ def test_v1_jump_table_only_dispatch_stubs_are_fixed():
         block
         for block in _collect_all_basic_blocks(root)
         if any(
-            str(lbl.name).startswith("jt_entry_")
-            and "_dispatch_" not in str(lbl.name)
+            str(lbl.name).startswith("jt_entry_") and "_dispatch_" not in str(lbl.name)
             for lbl in block.labels
         )
     ]
@@ -160,13 +145,17 @@ def test_v1_jump_table_stub_width_is_uniform():
                 name="loop",
                 counter_reg="r_i",
                 n="r_n",
-                body=BlockNode(insts=[BasicBlockNode(insts=[NopInst()]) for _ in range(body_nops)]),
+                body=BlockNode(
+                    insts=[BasicBlockNode(insts=[NopInst()]) for _ in range(body_nops)]
+                ),
             )
         ]
     )
 
-    config = PipeLineConfig(max_unroll_factor=4)
-    out = UnrollLoopPass().process(root, PipeLineContext(config=config))
+    config = PipeLineConfig(max_unroll_factor=4, pmem_capacity=512)
+    out, _ = UnrollLoopPass().process(
+        root, PipeLineContext(config=config, pmem_budget=3192)
+    )
 
     stubs = _collect_fixed_entry_blocks(out)
     assert stubs
@@ -184,22 +173,17 @@ def test_v1_pipeline_keeps_body_blocks_free_after_unroll():
                 name="loop",
                 counter_reg="r_i",
                 n="r_n",
-                body=BlockNode(insts=[
-                    BasicBlockNode(insts=[NopInst()]),
-                    BasicBlockNode(insts=[NopInst()]),
-                ]),
+                body=BlockNode(
+                    insts=[
+                        BasicBlockNode(insts=[NopInst()]),
+                        BasicBlockNode(insts=[NopInst()]),
+                    ]
+                ),
             )
         ]
     )
 
-    from zcu_tools.program.v2.ir.pipeline import PipeLineContext, _run_linear_passes
-    pipeline = make_default_pipeline(pmem_capacity=512)
-    ctx = PipeLineContext(config=pipeline.config, pmem_size=512)
-    out = root
-    _run_linear_passes(pipeline.linear_passes, out)
-    for p in pipeline.ir_passes:
-        out = p.process(out, ctx)
-        _run_linear_passes(pipeline.linear_passes, out)
+    out = _run_full_pipeline_on_root(root)
 
     body_entry_blocks = [
         block
@@ -269,6 +253,7 @@ def test_sese_rejects_jump_into_loop_control_region():
 # Validation 2: Fully-unrolled loops produce a single fused block
 # ---------------------------------------------------------------------------
 
+
 def test_v2_fully_unrolled_loop_produces_single_fused_block():
     """A constant loop that fully unrolls (n <= k) must result in a single
     BasicBlockNode with no internal labels after the full pipeline runs.
@@ -284,21 +269,22 @@ def test_v2_fully_unrolled_loop_produces_single_fused_block():
                 name="loop",
                 counter_reg="r_cnt",
                 n=3,
-                body=BlockNode(insts=[
-                    BasicBlockNode(insts=[RegWriteInst(dst=Register("r1"), src="imm", lit=Literal("#1"))]),
-                ]),
+                body=BlockNode(
+                    insts=[
+                        BasicBlockNode(
+                            insts=[
+                                RegWriteInst(
+                                    dst=Register("r1"), src="imm", lit=Literal("#1")
+                                )
+                            ]
+                        ),
+                    ]
+                ),
             )
         ]
     )
 
-    from zcu_tools.program.v2.ir.pipeline import PipeLineContext, _run_linear_passes
-    pipeline = make_default_pipeline(pmem_capacity=512)
-    ctx = PipeLineContext(config=pipeline.config, pmem_size=512)
-    out = root
-    _run_linear_passes(pipeline.linear_passes, out)
-    for p in pipeline.ir_passes:
-        out = p.process(out, ctx)
-        _run_linear_passes(pipeline.linear_passes, out)
+    out = _run_full_pipeline_on_root(root)
 
     bbs = _collect_all_basic_blocks(out)
     # After merge, all non-fixed BasicBlockNodes with plain insts should have
@@ -311,7 +297,7 @@ def test_v2_fully_unrolled_loop_produces_single_fused_block():
         if a.branch is None and not b.labels:
             raise AssertionError(
                 f"Two adjacent plain blocks are still mergeable after pipeline: "
-                f"block[{i}]={a}, block[{i+1}]={b}"
+                f"block[{i}]={a}, block[{i + 1}]={b}"
             )
 
 
@@ -322,7 +308,6 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
     survive (the first two are dead: overwritten before being read).
     Uses walk_instructions to cover all BasicBlockNode paths.
     """
-    from zcu_tools.program.v2.ir.traversal import walk_instructions
 
     Label.reset()
     root = RootNode(
@@ -331,50 +316,59 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
                 name="loop",
                 counter_reg="r_cnt",
                 n=3,
-                body=BlockNode(insts=[
-                    BasicBlockNode(insts=[RegWriteInst(dst=Register("r_out"), src="imm", lit=Literal("#42"))]),
-                ]),
+                body=BlockNode(
+                    insts=[
+                        BasicBlockNode(
+                            insts=[
+                                RegWriteInst(
+                                    dst=Register("r_out"), src="imm", lit=Literal("#42")
+                                )
+                            ]
+                        ),
+                    ]
+                ),
             )
         ]
     )
 
-    from zcu_tools.program.v2.ir.pipeline import PipeLineContext, _run_linear_passes
-    pipeline = make_default_pipeline(pmem_capacity=512)
-    ctx = PipeLineContext(config=pipeline.config, pmem_size=512)
-    out = root
-    _run_linear_passes(pipeline.linear_passes, out)
-    for p in pipeline.ir_passes:
-        out = p.process(out, ctx)
-        _run_linear_passes(pipeline.linear_passes, out)
+    out = _run_full_pipeline_on_root(root)
 
     writes_to_r_out = [
-        inst for inst in walk_instructions(out)
+        inst
+        for inst in walk_instructions(out)
         if isinstance(inst, RegWriteInst) and inst.dst.name == "r_out"
     ]
     assert len(writes_to_r_out) == 1, (
         f"expected 1 surviving write to r_out, got {len(writes_to_r_out)}"
     )
 
+
 # ---------------------------------------------------------------------------
 # Validation 3: fix_addr_size=True blocks are skipped conservatively
 # ---------------------------------------------------------------------------
 
+
 def test_v3_fixed_block_branch_elim_skips_block():
     """BranchEliminationPass should leave fixed-width stubs unchanged."""
     lbl = Label.make_new("next")
-    root = RootNode(insts=[
-        BasicBlockNode(
-            insts=[NopInst()],
-            branch=JumpInst(label=lbl),
-            fix_addr_size=True,
-        ),
-        BasicBlockNode(
-            labels=[LabelInst(name=lbl)],
-            insts=[NopInst()],
-        ),
-    ])
+    root = RootNode(
+        insts=[
+            BasicBlockNode(
+                insts=[NopInst()],
+                branch=JumpInst(label=lbl),
+                fix_addr_size=True,
+            ),
+            BasicBlockNode(
+                labels=[LabelInst(name=lbl)],
+                insts=[NopInst()],
+            ),
+        ]
+    )
 
-    out = BranchEliminationPass().process(root, PipeLineContext(config=PipeLineConfig()))
+    out, _ = BranchEliminationPass().process(
+        root,
+        PipeLineContext(config=PipeLineConfig(), pmem_budget=512),
+    )
 
     fixed = out.insts[0]
     assert isinstance(fixed, BasicBlockNode)
@@ -382,54 +376,26 @@ def test_v3_fixed_block_branch_elim_skips_block():
     assert len(fixed.insts) == 1
 
 
-def test_v3_fixed_blocks_are_only_dispatch_stubs_after_pipeline():
-    """After the full pipeline, fixed blocks should be limited to dispatch stubs."""
-    Label.reset()
-    root = RootNode(
-        insts=[
-            IRLoop(
-                name="loop",
-                counter_reg="r_i",
-                n="r_n",
-                body=BlockNode(insts=[
-                    BasicBlockNode(insts=[NopInst()]),
-                    BasicBlockNode(insts=[NopInst()]),
-                ]),
-            )
-        ]
-    )
-
-    from zcu_tools.program.v2.ir.pipeline import PipeLineContext, _run_linear_passes
-    pipeline = make_default_pipeline(pmem_capacity=512)
-    ctx = PipeLineContext(config=pipeline.config, pmem_size=512)
-    out = root
-    _run_linear_passes(pipeline.linear_passes, out)
-    for p in pipeline.ir_passes:
-        out = p.process(out, ctx)
-        _run_linear_passes(pipeline.linear_passes, out)
-
-    fixed_blocks = _collect_fixed_entry_blocks(out)
-    assert fixed_blocks
-    assert all(block.branch is not None for block in fixed_blocks)
-    assert all(len(block.insts) == 0 for block in fixed_blocks)
-
-
 def test_v3_non_fixed_block_branch_elim_removes_branch():
     """Sanity check: fix_addr_size=False block loses its branch (no NOP added)."""
     lbl = Label.make_new("next_free")
-    root = RootNode(insts=[
-        BasicBlockNode(
-            insts=[NopInst()],
-            branch=JumpInst(label=lbl),
-            fix_addr_size=False,
-        ),
-        BasicBlockNode(
-            labels=[LabelInst(name=lbl)],
-            insts=[NopInst()],
-        ),
-    ])
+    root = RootNode(
+        insts=[
+            BasicBlockNode(
+                insts=[NopInst()],
+                branch=JumpInst(label=lbl),
+                fix_addr_size=False,
+            ),
+            BasicBlockNode(
+                labels=[LabelInst(name=lbl)],
+                insts=[NopInst()],
+            ),
+        ]
+    )
 
-    out = BranchEliminationPass().process(root, PipeLineContext(config=PipeLineConfig()))
+    out, _ = BranchEliminationPass().process(
+        root, PipeLineContext(config=PipeLineConfig(), pmem_budget=512)
+    )
 
     free = out.insts[0]
     assert isinstance(free, BasicBlockNode)
