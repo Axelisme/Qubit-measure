@@ -188,9 +188,11 @@ def _is_const_increment(inst: Instruction) -> tuple[str, int] | None:
         return None
 
     canon = canonical_reg(lhs_name)
-    # Do not merge or move system registers (s0-s15) for safety, as they often
-    # represent hardware state or IO that should remain at its original position.
-    if canon.startswith("s"):
+    # Only optimize general-purpose user registers (r0, r1, ...).
+    # System registers (sN) and wave registers (wN/r_wave) are excluded for safety,
+    # as they often represent hardware state or pulse parameters that should
+    # remain at their original program positions.
+    if not (canon.startswith("r") and canon[1:].isdigit()):
         return None
 
     try:

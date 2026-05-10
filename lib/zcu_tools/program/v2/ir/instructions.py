@@ -671,6 +671,7 @@ class WmemWriteInst(BaseInst):
             if_cond=d.get("IF"),
             wp=d.get("WP"),
         )
+
     @property
     def reg_read(self) -> list[str]:
         reads: set[str] = {"w0", "w1", "w2", "w3", "w4", "w5", "r_wave", "s14"}
@@ -683,6 +684,7 @@ class WmemWriteInst(BaseInst):
         if self.wr:
             reads.update(self.wr.get_read_regs())
         return sorted(list(reads))
+
     def to_dict(self) -> dict[str, Any]:
         d = {
             "CMD": "WMEM_WR",
