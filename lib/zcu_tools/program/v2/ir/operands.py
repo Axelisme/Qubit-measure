@@ -33,21 +33,70 @@ class Register(Operand):
         # 'r_wave' is special, it aliases with w0-w5
         if self.name.startswith("#"):
             return set()
-        if self.name == "r_wave":
+        canon = _REG_ALIAS.get(self.name, self.name)
+        if canon == "r_wave":
             return {"r_wave", "w0", "w1", "w2", "w3", "w4", "w5"}
-        if self.name in {"w0", "w1", "w2", "w3", "w4", "w5"}:
-            return {self.name, "r_wave"}
+        if canon in {"w0", "w1", "w2", "w3", "w4", "w5"}:
+            return {canon, "r_wave"}
+        # Always include both alias and canonical so callers using either name
+        # see the same set (mirrors how the assembler resolves aliases).
+        if canon != self.name:
+            return {self.name, canon}
         return {self.name}
 
     def get_write_regs(self) -> set[str]:
-        if self.name == "r_wave":
+        canon = _REG_ALIAS.get(self.name, self.name)
+        if canon == "r_wave":
             return {"r_wave", "w0", "w1", "w2", "w3", "w4", "w5"}
-        if self.name in {"w0", "w1", "w2", "w3", "w4", "w5"}:
-            return {self.name, "r_wave"}
+        if canon in {"w0", "w1", "w2", "w3", "w4", "w5"}:
+            return {canon, "r_wave"}
+        if canon != self.name:
+            return {self.name, canon}
         return {self.name}
 
     def __str__(self) -> str:
         return self.name
+
+
+def canonical_reg(name: str) -> str:
+    """Resolve a register alias (e.g. 'w_freq' -> 'w0') to its canonical name.
+
+    Names not present in the alias table are returned unchanged.  Use this
+    whenever a pass compares a stored register name against a set of
+    read/written regs, since some passes record the alias while others
+    record the canonical form.
+    """
+    return _REG_ALIAS.get(name, name)
+
+
+# QICK register aliases (e.g. w_freq -> w0, s_zero -> s0).  Mirrors
+# QickProgramV2.REG_ALIASES; declared here so IR analysis stays
+# self-contained.
+_REG_ALIAS: dict[str, str] = {
+    "w_freq": "w0",
+    "w_phase": "w1",
+    "w_env": "w2",
+    "w_gain": "w3",
+    "w_length": "w4",
+    "w_conf": "w5",
+    "s_zero": "s0",
+    "s_rand": "s1",
+    "s_cfg": "s2",
+    "s_ctrl": "s2",
+    "s_arith_l": "s3",
+    "s_div_q": "s4",
+    "s_div_r": "s5",
+    "s_core_r1": "s6",
+    "s_core_r2": "s7",
+    "s_port_l": "s8",
+    "s_port_h": "s9",
+    "s_status": "s10",
+    "s_usr_time": "s11",
+    "s_core_w1": "s12",
+    "s_core_w2": "s13",
+    "s_out_time": "s14",
+    "s_addr": "s15",
+}
 
 
 @dataclass(frozen=True)

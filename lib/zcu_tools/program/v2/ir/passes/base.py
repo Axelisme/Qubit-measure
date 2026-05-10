@@ -11,7 +11,15 @@ from ..pipeline import AbsIRPass, PipeLineContext
 
 
 class IRTransformer:
-    """Base class for IR transformations with automatic recursion."""
+    """Base class for IR transformations with automatic recursion.
+
+    Subclasses (or callers wrapping ``visit``) should reset ``_changed`` to
+    ``False`` before a top-level traversal and read it afterwards to learn
+    whether any in-place mutation occurred.  ``generic_visit`` sets the flag
+    whenever it inserts, removes, or replaces a child node by identity.
+    """
+
+    _changed: bool = False
 
     def visit(self, node: IRNode) -> Union[IRNode, List[IRNode], None]:
         """Visit a node, returning a new node, a list of nodes, the same node, or None to delete."""
@@ -35,18 +43,25 @@ class IRTransformer:
 
             # 1. Handle lists of IRNodes (e.g., BlockNode.insts, IRBranch.cases)
             if isinstance(old_value, list):
-                new_values = []
+                new_values: list = []
+                list_changed = False
                 for item in old_value:
                     if isinstance(item, IRNode):
                         res = self.visit(item)
                         if res is None:
+                            list_changed = True
                             continue
                         elif isinstance(res, list):
+                            list_changed = True
                             new_values.extend(res)
                         else:
+                            if res is not item:
+                                list_changed = True
                             new_values.append(res)
                     else:
                         new_values.append(item)
+                if list_changed or len(new_values) != len(old_value):
+                    self._changed = True
                 setattr(node, field.name, new_values)
 
             # 2. Handle single IRNode fields (e.g., IRLoop.body, IRBranch.dispatch)
@@ -55,10 +70,14 @@ class IRTransformer:
 
                 # Protection: Structural fields expecting a BlockNode shouldn't be destroyed
                 if res is None:
+                    self._changed = True
                     setattr(node, field.name, BlockNode())
                 elif isinstance(res, list):
+                    self._changed = True
                     setattr(node, field.name, BlockNode(insts=res))
                 else:
+                    if res is not old_value:
+                        self._changed = True
                     setattr(node, field.name, res)
 
         return node
@@ -101,8 +120,10 @@ class OptimizationPassBase(AbsIRPass, IRTransformer):
 
     def process(self, ir: RootNode, ctx: PipeLineContext) -> tuple[RootNode, bool]:
         self.ctx = ctx
+        self._changed = False
         res = self.visit(ir)
         if isinstance(res, list):
             raise ValueError("Unexpected list returned from visit")
         out = cast(RootNode, res or ir)
-        return out, out is not ir
+        changed = self._changed or out is not ir
+        return out, changed

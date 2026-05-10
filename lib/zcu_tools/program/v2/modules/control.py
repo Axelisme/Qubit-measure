@@ -177,23 +177,42 @@ class Branch(Module):
             name=self.name,
             info={"compare_reg": self.compare_reg},
         )
-        table_base = f"{self.name}_dispatch_0"
-        _emit_write_label(prog, table_base)
-        prog.write_reg_op("s15", "s15", "+", self.compare_reg)
-        if _needs_big_jump(prog):
+
+        if n == 2:
+            # Single cond_jump shape, matching IRParser._lower_branch_binary:
+            #   compare_reg == 0  → fallthrough to case 0
+            #   compare_reg != 0  → jump to case 1 entry
+            # No dispatch table is emitted here; IR will not need to lower one.
+            prog.cond_jump(
+                label=f"{self.name}_case_entry_1",
+                arg1=self.compare_reg,
+                test="NZ",
+                op="-",
+                arg2=0,
+            )
+            run_branch(0)
+            prog.jump(f"{self.name}_end")
+            run_branch(1)
+            prog.meta_macro(type="BRANCH_END", name=self.name)
+            prog.label(f"{self.name}_end")
+        else:
+            table_base = f"{self.name}_dispatch_0"
+            _emit_write_label(prog, table_base)
             prog.write_reg_op("s15", "s15", "+", self.compare_reg)
-        _emit_jump_s15(prog)
-
-        for i in range(n):
-            prog.label(f"{self.name}_dispatch_{i}")
             if _needs_big_jump(prog):
-                _emit_write_label(prog, f"{self.name}_case_entry_{i}")
-                _emit_jump_s15(prog)
-            else:
-                prog.jump(f"{self.name}_case_entry_{i}")
+                prog.write_reg_op("s15", "s15", "+", self.compare_reg)
+            _emit_jump_s15(prog)
 
-        for i in range(n):
-            run_branch(i)
-        prog.meta_macro(type="BRANCH_END", name=self.name)
+            for i in range(n):
+                prog.label(f"{self.name}_dispatch_{i}")
+                if _needs_big_jump(prog):
+                    _emit_write_label(prog, f"{self.name}_case_entry_{i}")
+                    _emit_jump_s15(prog)
+                else:
+                    prog.jump(f"{self.name}_case_entry_{i}")
+
+            for i in range(n):
+                run_branch(i)
+            prog.meta_macro(type="BRANCH_END", name=self.name)
 
         return 0.0

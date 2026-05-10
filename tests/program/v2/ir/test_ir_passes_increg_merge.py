@@ -4,6 +4,7 @@ from zcu_tools.program.v2.ir.instructions import (
     PortWriteInst,
     RegWriteInst,
     TimeInst,
+    WmemWriteInst,
 )
 from zcu_tools.program.v2.ir.node import BasicBlockNode, RootNode
 from zcu_tools.program.v2.ir.operands import AluExpr, Literal, Register
@@ -259,3 +260,43 @@ def test_inc_reg_merge_fixed_barrier():
     assert len(insts) == 3
     assert insts[0].op.rhs.value == "#2"
     assert insts[2].op.rhs.value == "#3"
+
+
+def test_inc_reg_merge_does_not_cross_wmem_write_via_alias():
+    # Regression: REG_WR w_freq op (w_freq + #5) ; WMEM_WR ; REG_WR w_freq op
+    # (w_freq + #3).  WMEM_WR reads {w0..w5, r_wave, s14}; w_freq is an alias
+    # of w0.  Without alias-aware read tracking, the pending +5 increment on
+    # w_freq would be sunk past WMEM_WR and merged with +3, so the WMEM_WR
+    # would observe the un-incremented value.
+    root = RootNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    RegWriteInst(
+                        dst=Register("w_freq"),
+                        src="op",
+                        op=AluExpr(Register("w_freq"), "+", Literal("#5")),
+                    ),
+                    WmemWriteInst(addr=Literal("&0")),
+                    RegWriteInst(
+                        dst=Register("w_freq"),
+                        src="op",
+                        op=AluExpr(Register("w_freq"), "+", Literal("#3")),
+                    ),
+                ]
+            )
+        ]
+    )
+
+    out = _run_chunk_pass(root)
+    insts = out.insts[0].insts
+    # The first +5 must remain before WMEM_WR; only the +3 may sit afterward.
+    assert isinstance(insts[0], RegWriteInst)
+    assert insts[0].op.rhs.value == "#5"
+    assert isinstance(insts[1], WmemWriteInst)
+    # Whether the trailing +3 stays adjacent or merges into a #3 inc is an
+    # implementation detail; what matters is that #5 never crosses WMEM_WR.
+    assert any(
+        isinstance(inst, RegWriteInst) and inst.op.rhs.value == "#3"
+        for inst in insts[2:]
+    )

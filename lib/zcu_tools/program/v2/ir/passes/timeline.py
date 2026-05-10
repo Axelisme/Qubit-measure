@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 from typing import cast
 
+from ..analysis import instruction_reads
 from ..instructions import BaseInst, TimeInst
 from ..node import BasicBlockNode
 from ..operands import Literal
@@ -61,6 +62,18 @@ def _is_anchored_timed(inst: BaseInst) -> bool:
         return False
     # If it's a Literal, it doesn't contain registers by definition of get_read_regs()
     return not t.get_read_regs()
+
+
+def _reads_s14(inst: BaseInst) -> bool:
+    """True if inst implicitly reads s14 (out_usr_time).
+
+    Timed writes (WPORT_WR / WMEM_WR / DPORT_WR / TRIG) and WAIT time always
+    use s14 as their time reference, even when no explicit ``@T`` is present.
+    Moving a TIME inc_ref past such an instruction would shift the actual
+    emission time, so they must act as a flush barrier when their time field
+    is not a literal we can fold into.
+    """
+    return "s14" in instruction_reads(inst)
 
 
 def _adjust_time_field(inst: BaseInst, delta: int) -> BaseInst:
@@ -124,6 +137,16 @@ class TimedMergePass(AbsChunkPass):
                     _adjust_time_field(inst, pending_lit) if pending_lit > 0 else inst
                 )
             elif _is_reg_time(inst):
+                if pending_lit > 0:
+                    result.append(
+                        TimeInst(c_op="inc_ref", lit=Literal(f"#{pending_lit}"))
+                    )
+                    pending_lit = 0
+                result.append(inst)
+            elif _reads_s14(inst):
+                # s14-reading instruction that we cannot fold into (no literal
+                # @T, or @T is a register).  Flush pending TIME inc_ref before
+                # the instruction so its emission time stays anchored.
                 if pending_lit > 0:
                     result.append(
                         TimeInst(c_op="inc_ref", lit=Literal(f"#{pending_lit}"))

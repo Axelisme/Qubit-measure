@@ -21,6 +21,16 @@ class AdditionalMacroMixin(AsmV2):
 
         super().__init__(*args, **kwargs)
 
+    def _make_asm(self) -> None:
+        # QICK resets its low-level program (registers, prog_list) at the
+        # start of _make_asm via _init_instructions; mirror that here so our
+        # scratch register names are not retained across compiles.  Without
+        # this, a second compile would skip add_reg() while QICK has already
+        # forgotten the name, causing _get_reg() lookups to fail.
+        self._temp_regs = []
+        self._reg_num_stack = []
+        super()._make_asm()  # type: ignore[misc]
+
     def write_reg_op(
         self, dst: str, lhs: str, op: str, rhs: Union[int, str, None] = None
     ) -> None:
@@ -92,6 +102,17 @@ class AdditionalMacroMixin(AsmV2):
         TIME. The +1/+2 addresses are pre-computed into nested temp regs
         """
         if flat_top_pulse:
+            # axis_sg_int4_v1/v2 generators emit a 4-entry stride for flat_top
+            # (extra dummy entry); the +1/+2 stride assumed below would land
+            # on the wrong entry, so reject explicitly rather than corrupt
+            # the pulse silently.
+            gen_type = self.soccfg["gens"][ch].get("type")  # type: ignore[attr-defined]
+            if gen_type in ("axis_sg_int4_v1", "axis_sg_int4_v2"):
+                raise NotImplementedError(
+                    f"pulse_by_reg(flat_top_pulse=True) is not supported on "
+                    f"generator type {gen_type!r}: int4 flat_top uses a "
+                    f"4-entry wmem stride, not 3. ch={ch}"
+                )
             with self.acquire_temp_reg(2) as (addr_reg2, addr_reg3):
                 self.write_reg_op(addr_reg2, addr_reg, "+", 1)
                 self.write_reg_op(addr_reg3, addr_reg, "+", 2)

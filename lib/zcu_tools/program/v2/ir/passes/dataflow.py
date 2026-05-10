@@ -47,7 +47,10 @@ class DeadWriteEliminationPass(AbsChunkPass):
         return True
 
     def _find_dead_indices(self, insts: list[BaseInst]) -> set[int]:
-        pending: dict[str, int] = {}  # reg -> index of last pending write
+        # pending: canonical reg name -> index of last pending write.  Using
+        # canonical names ensures that an alias (e.g. w_freq) and the
+        # underlying register (w0) collide correctly when checking shadows.
+        pending: dict[str, int] = {}
         dead: set[int] = set()
 
         for idx, inst in enumerate(insts):
@@ -55,8 +58,17 @@ class DeadWriteEliminationPass(AbsChunkPass):
                 pending.clear()
                 continue
 
-            reads = instruction_reads(inst)
-            writes = list(instruction_writes(inst))
+            # REG_WR <dst> wmem reads from wave memory (a non-register side
+            # effect) and writes to r_wave / w0..w5 as an aliased group.  Treat
+            # it as an opaque read barrier: clear pending and skip shadow
+            # tracking so the wmem read is never eliminated and its writes
+            # cannot be shadowed by later wN writes.
+            if isinstance(inst, RegWriteInst) and inst.src == "wmem":
+                pending.clear()
+                continue
+
+            reads = {canonical_reg(r) for r in instruction_reads(inst)}
+            writes = [canonical_reg(w) for w in instruction_writes(inst)]
 
             for reg in reads:
                 pending.pop(reg, None)
@@ -148,7 +160,7 @@ class DeadTestEliminationPass(AbsChunkPass):
         return dead
 
 
-from ..operands import AluExpr, Literal, Register
+from ..operands import AluExpr, Literal, Register, canonical_reg
 
 
 def _is_const_increment(inst: Instruction) -> tuple[str, int] | None:
@@ -175,9 +187,10 @@ def _is_const_increment(inst: Instruction) -> tuple[str, int] | None:
     if lhs_name != inst.dst.name:
         return None
 
+    canon = canonical_reg(lhs_name)
     # Do not merge or move system registers (s0-s15) for safety, as they often
     # represent hardware state or IO that should remain at its original position.
-    if lhs_name.startswith("s"):
+    if canon.startswith("s"):
         return None
 
     try:
@@ -187,7 +200,10 @@ def _is_const_increment(inst: Instruction) -> tuple[str, int] | None:
 
     if op.op == "-":
         val = -val
-    return inst.dst.name, val
+    # Pending entries are keyed by canonical name so that aliased writes
+    # (e.g. w_freq -> w0) are flushed when *any* alias appears in another
+    # instruction's reads or writes.
+    return canon, val
 
 
 def _make_increment_inst(reg: str, val: int) -> RegWriteInst:
@@ -227,6 +243,9 @@ class IncRegMergePass(AbsChunkPass):
         return before != block.insts
 
     def _merge_free(self, block: BasicBlockNode) -> None:
+        # Pending entries are keyed by canonical register name (see
+        # _is_const_increment), so any alias appearing in another
+        # instruction's reads/writes can be flushed correctly.
         pending: dict[str, int] = {}
         result: list[BaseInst] = []
 
@@ -245,10 +264,11 @@ class IncRegMergePass(AbsChunkPass):
                 reg, val = inc_info
                 pending[reg] = pending.get(reg, 0) + val
             else:
-                reads = instruction_reads(inst)
-                writes = instruction_writes(inst)
+                reads = {canonical_reg(r) for r in instruction_reads(inst)}
+                writes = {canonical_reg(w) for w in instruction_writes(inst)}
 
-                # Flush pending increments if their register is read or written
+                # Flush pending increments if their register (or any alias of
+                # it) is read or written by this instruction.
                 for reg in list(pending.keys()):
                     if reg in reads or reg in writes:
                         val = pending.pop(reg)

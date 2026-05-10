@@ -404,7 +404,12 @@ def test_all_timed_adjusted_with_same_delta():
     assert bb.insts[2].lit == Literal("#10")  # single TIME at end
 
 
-def test_port_write_no_time_not_anchor():
+def test_port_write_no_time_acts_as_barrier():
+    # WPORT_WR with no explicit @T still emits at s14 (out_usr_time), so a
+    # pending TIME inc_ref must be flushed *before* it — moving the inc_ref
+    # to the other side would shift the actual emission time by the
+    # accumulated delta. PortWriteInst.reg_read declares s14, which the pass
+    # uses as its barrier signal.
     root = RootNode(
         insts=[
             BasicBlockNode(
@@ -420,13 +425,16 @@ def test_port_write_no_time_not_anchor():
     out = _run_merge(root)
     bb = out.insts[0]
     assert len(bb.insts) == 2
-    assert isinstance(bb.insts[0], PortWriteInst)
-    assert bb.insts[0].time is None
-    assert isinstance(bb.insts[1], TimeInst)
-    assert bb.insts[1].lit == Literal("#10")
+    assert isinstance(bb.insts[0], TimeInst)
+    assert bb.insts[0].lit == Literal("#10")
+    assert isinstance(bb.insts[1], PortWriteInst)
+    assert bb.insts[1].time is None
 
 
-def test_port_write_reg_time_not_adjusted():
+def test_port_write_reg_time_acts_as_barrier():
+    # Register-driven @T (time=Register) cannot be folded by adjusting a
+    # literal offset, and the WPORT_WR still reads s14 implicitly, so the
+    # pending TIME inc_ref must remain before the WPORT_WR.
     root = RootNode(
         insts=[
             BasicBlockNode(
@@ -445,10 +453,10 @@ def test_port_write_reg_time_not_adjusted():
     out = _run_merge(root)
     bb = out.insts[0]
     assert len(bb.insts) == 2
-    assert isinstance(bb.insts[0], PortWriteInst)
-    assert bb.insts[0].time == Register("s14")  # register ref: not adjusted
-    assert isinstance(bb.insts[1], TimeInst)
-    assert bb.insts[1].lit == Literal("#10")
+    assert isinstance(bb.insts[0], TimeInst)
+    assert bb.insts[0].lit == Literal("#10")
+    assert isinstance(bb.insts[1], PortWriteInst)
+    assert bb.insts[1].time == Register("s14")
 
 
 def test_reg_time_flushes_pending_lit():

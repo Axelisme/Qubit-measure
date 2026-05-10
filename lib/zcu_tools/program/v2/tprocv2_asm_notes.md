@@ -261,7 +261,7 @@
 | `NOT` / `!` | 位元非 |
 | `PAR` | 同位（parity） |
 
-> 移位量最大 15；`ASR`/`SR`/`SL` 的移位量用立即數指定（`#N`）。
+> `ASR`/`SR`/`SL` 的移位量同時支援立即數（`#N`，上限 15）與 register 形式（assembler `df=01`，無 15 上限）。
 
 ### 精簡 ALU（`-wr()` side-data injection 專用）
 
