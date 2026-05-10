@@ -30,29 +30,32 @@ class Register(Operand):
     name: str
 
     def get_read_regs(self) -> set[str]:
+        # Strip '&' prefix if present for dependency tracking
+        name = self.name[1:] if self.name.startswith("&") else self.name
         # 'r_wave' is special, it aliases with w0-w5
-        if self.name.startswith("#"):
+        if name.startswith("#"):
             return set()
-        canon = _REG_ALIAS.get(self.name, self.name)
+        canon = _REG_ALIAS.get(name, name)
         if canon == "r_wave":
             return {"r_wave", "w0", "w1", "w2", "w3", "w4", "w5"}
         if canon in {"w0", "w1", "w2", "w3", "w4", "w5"}:
             return {canon, "r_wave"}
         # Always include both alias and canonical so callers using either name
         # see the same set (mirrors how the assembler resolves aliases).
-        if canon != self.name:
-            return {self.name, canon}
-        return {self.name}
+        if canon != name:
+            return {name, canon}
+        return {name}
 
     def get_write_regs(self) -> set[str]:
-        canon = _REG_ALIAS.get(self.name, self.name)
+        name = self.name[1:] if self.name.startswith("&") else self.name
+        canon = _REG_ALIAS.get(name, name)
         if canon == "r_wave":
             return {"r_wave", "w0", "w1", "w2", "w3", "w4", "w5"}
         if canon in {"w0", "w1", "w2", "w3", "w4", "w5"}:
             return {canon, "r_wave"}
-        if canon != self.name:
-            return {self.name, canon}
-        return {self.name}
+        if canon != name:
+            return {name, canon}
+        return {name}
 
     def __str__(self) -> str:
         return self.name
@@ -66,6 +69,7 @@ def canonical_reg(name: str) -> str:
     read/written regs, since some passes record the alias while others
     record the canonical form.
     """
+    name = name[1:] if name.startswith("&") else name
     return _REG_ALIAS.get(name, name)
 
 
@@ -154,6 +158,15 @@ class SideWrite(Operand):
 
 
 def parse_register_or_literal(val: str) -> Union[Register, Literal]:
+    # Check if it looks like a register (including &rN pointer syntax)
+    # We can't import is_register_addr from labels.py due to circularity,
+    # so we use a compatible check here.
+    core_name = val[1:] if val.startswith("&") else val
+    if core_name.startswith("r_wave") or core_name.startswith("s_") or (
+        core_name and core_name[0] in "rswp" and core_name[1:].isdigit()
+    ):
+        return Register(val)
+
     if (
         val.startswith("#")
         or val.startswith("&")
