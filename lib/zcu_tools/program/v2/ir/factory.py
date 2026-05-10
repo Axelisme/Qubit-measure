@@ -391,6 +391,123 @@ class IRParser:
         return lexer.lex(pre) + self._unparse_block_node(node.body) + lexer.lex(post)
 
     def _lower_branch(self, node: IRBranch) -> list[Union[BasicBlockNode, MetaInst]]:
+        if len(node.cases) == 2:
+            return self._lower_branch_binary(node)
+        return self._lower_branch_dispatch(node)
+
+    def _lower_branch_binary(
+        self, node: IRBranch
+    ) -> list[Union[BasicBlockNode, MetaInst]]:
+        """Lower a 2-case IRBranch using a single conditional jump.
+
+        Shape (small and big PMEM alike — no dispatch table needed):
+
+            BRANCH_START
+            BasicBlockNode(branch=JUMP else_label -if(NZ) -op(compare_reg - #0))
+            BRANCH_CASE_START("0")
+              [case 0 body]
+              BasicBlockNode(branch=JUMP end_label)   # eliminated by BranchEliminationPass
+            BRANCH_CASE_END("0")
+            BRANCH_CASE_START("1")
+              BasicBlockNode(labels=[else_label], ...)  # case 1 body
+            BRANCH_CASE_END("1")
+            BasicBlockNode(labels=[end_label])
+            BRANCH_END
+
+        compare_reg == 0  → Z flag set, NZ not taken → fallthrough to case 0
+        compare_reg != 0  → NZ taken → jump to case 1 (else)
+        """
+        result: list[Union[BasicBlockNode, MetaInst]] = []
+
+        else_label = Label.make_new(f"{node.name}_case_entry_1")
+        end_label = Label.make_new(f"{node.name}_end")
+        case0_entry_label = Label.make_new(f"{node.name}_case_entry_0")
+
+        result.append(
+            MetaInst(
+                type="BRANCH_START",
+                name=node.name,
+                info=dict(compare_reg=node.compare_reg),
+            )
+        )
+
+        # Dispatch: single cond jump — no dispatch table, no s15 manipulation.
+        result.append(
+            BasicBlockNode(
+                branch=JumpInst(
+                    label=else_label,
+                    if_cond="NZ",
+                    op=AluExpr(Register(node.compare_reg), "-", Literal("#0")),
+                )
+            )
+        )
+
+        def _emit_case(
+            idx: int,
+            entry_label: Label,
+            case_items: list[Union[BasicBlockNode, MetaInst]],
+        ) -> None:
+            result.append(MetaInst(type="BRANCH_CASE_START", name=str(idx)))
+            first_block_attached = False
+            for item in case_items:
+                if not first_block_attached and isinstance(item, BasicBlockNode):
+                    item.labels.insert(
+                        0, LabelInst(name=entry_label, can_remove=True)
+                    )
+                    first_block_attached = True
+                result.append(item)
+            if not first_block_attached:
+                result.append(
+                    BasicBlockNode(
+                        labels=[LabelInst(name=entry_label, can_remove=True)]
+                    )
+                )
+            result.append(MetaInst(type="BRANCH_CASE_END", name=str(idx)))
+
+        # Case 0: emit body, then add an unconditional jump to end_label so
+        # control does not fall into case 1.  BranchEliminationPass will remove
+        # this jump if end_label immediately follows.
+        case0_items = self._unparse_block_node(node.cases[0])
+
+        # Find the last BasicBlockNode produced by case 0 before _emit_case
+        # appends the BRANCH_CASE_END marker.  If it has no branch we attach
+        # the end jump directly; otherwise we append a new stub block.
+        last_case0_bb: Optional[BasicBlockNode] = None
+        for item in reversed(case0_items):
+            if isinstance(item, BasicBlockNode):
+                last_case0_bb = item
+                break
+
+        if (
+            last_case0_bb is not None
+            and last_case0_bb.branch is None
+            and not last_case0_bb.fix_addr_size
+        ):
+            last_case0_bb.branch = JumpInst(label=end_label)
+            _emit_case(0, case0_entry_label, case0_items)
+        else:
+            _emit_case(0, case0_entry_label, case0_items)
+            # Insert end-jump stub before the BRANCH_CASE_END marker.
+            case_end_idx = next(
+                i
+                for i in range(len(result) - 1, -1, -1)
+                if isinstance(result[i], MetaInst) and result[i].type == "BRANCH_CASE_END"  # type: ignore[union-attr]
+            )
+            result.insert(case_end_idx, BasicBlockNode(branch=JumpInst(label=end_label)))
+
+        # Case 1: else branch.
+        case1_items = self._unparse_block_node(node.cases[1])
+        _emit_case(1, else_label, case1_items)
+
+        # End landing pad is placed AFTER BRANCH_END so _check_sese does not
+        # classify it as a dispatch-region control label.
+        result.append(MetaInst(type="BRANCH_END", name=node.name))
+        result.append(BasicBlockNode(labels=[LabelInst(name=end_label, can_remove=True)]))
+        return result
+
+    def _lower_branch_dispatch(
+        self, node: IRBranch
+    ) -> list[Union[BasicBlockNode, MetaInst]]:
         n = len(node.cases)
         result: list[Union[BasicBlockNode, MetaInst]] = []
         case_entry_labels = [

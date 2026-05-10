@@ -4,6 +4,7 @@ import logging
 import math
 from copy import deepcopy
 from dataclasses import dataclass
+
 from typing_extensions import Optional, cast
 
 from ..analysis import (
@@ -16,7 +17,7 @@ from ..factory import IRParser, _needs_big_jump
 from ..instructions import JumpInst, LabelInst, RegWriteInst
 from ..labels import Label
 from ..node import BasicBlockNode, BlockNode, IRLoop, IRNode, RootNode
-from ..operands import Literal, Register
+from ..operands import AluExpr, Literal, Register
 from ..pipeline import PipeLineContext
 from .base import OptimizationPassBase
 from .loop_dispatch import build_jump_table_blocks
@@ -54,6 +55,15 @@ def _clone_body_nodes(
         )
         result.extend(lowered)
     return result
+
+
+def _prepend_label_to_body(body: list, label: Label) -> None:
+    """Insert a LabelInst for `label` at the front of the first BasicBlockNode.
+    If body is empty or the first item is not a BasicBlockNode, prepend a new one."""
+    if body and isinstance(body[0], BasicBlockNode):
+        body[0].labels.insert(0, LabelInst(name=label))
+    else:
+        body.insert(0, BasicBlockNode(labels=[LabelInst(name=label)]))
 
 
 def _floor_pow2(x: int) -> int:
@@ -143,11 +153,6 @@ class UnrollLoopPass(OptimizationPassBase):
         visited = self.generic_visit(node)
         assert isinstance(visited, IRLoop)
         node = visited
-
-        # U-shape pipeline may revisit Tree passes across iterations.
-        # Skip loops that were already produced by this pass.
-        if node.already_unrolled:
-            return node
 
         cfg = self.ctx.config
         # Counter update cost stays inside body_cost because it exists in both
@@ -300,16 +305,46 @@ class UnrollLoopPass(OptimizationPassBase):
                     node.body.insts, k, pmem_size=pmem_size
                 )
 
-            # IRLoop.body already represents a full iteration, including the
-            # counter update even if later peephole passes moved it physically.
-            new_loop = IRLoop(
-                name=f"{node.name}_unrolled",
-                counter_reg=node.counter_reg,
-                n=n,
-                body=BlockNode(insts=list(unrolled_body)),
-                already_unrolled=True,
-            )
-            result.append(new_loop)
+            # Build flat loop structure: start label → unrolled body → back-edge → end label.
+            # Do not wrap in IRLoop because the body is no longer a single canonical
+            # iteration; wrapping would cause parse/unparse to reconstruct an IRLoop
+            # that gets unrolled again on the next pipeline iteration.
+            start = Label.make_new(f"{node.name}_unrolled_start")
+            end = Label.make_new(f"{node.name}_unrolled_end")
+
+            if remainder == 0:
+                # No init_bb yet: insert counter init before start label.
+                result.append(
+                    BasicBlockNode(
+                        insts=[
+                            RegWriteInst(
+                                dst=Register(node.counter_reg),
+                                src="imm",
+                                lit=Literal("#0"),
+                            )
+                        ]
+                    )
+                )
+
+            _prepend_label_to_body(unrolled_body, start)
+            result.extend(unrolled_body)
+
+            # Back-edge: jump back to start while counter < n.
+            counter = Register(node.counter_reg)
+            n_val = Literal(f"#{n}")
+            op_str = AluExpr(counter, "-", n_val)
+            if _needs_big_jump(pmem_size):
+                back_bb = BasicBlockNode(
+                    insts=[RegWriteInst(dst=Register("s15"), src="label", label=start)],
+                    branch=JumpInst(addr=Register("s15"), if_cond="S", op=op_str),
+                )
+            else:
+                back_bb = BasicBlockNode(
+                    branch=JumpInst(label=start, if_cond="S", op=op_str)
+                )
+            result.append(back_bb)
+            result.append(BasicBlockNode(labels=[LabelInst(name=end)]))
+
             self._changed = True
             return BlockNode(insts=result)
 
