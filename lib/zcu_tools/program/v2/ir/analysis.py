@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing_extensions import TYPE_CHECKING
 
+from .hw_semantics import TIMED_BASE_REG
 from .instructions import (
     BaseInst,
     DmemReadInst,
@@ -9,6 +10,7 @@ from .instructions import (
     LabelInst,
     MetaInst,
     PortWriteInst,
+    RegWriteInst,
     TimeInst,
     WmemWriteInst,
 )
@@ -110,6 +112,25 @@ def instruction_reads(inst: BaseInst) -> set[str]:
 def instruction_writes(inst: BaseInst) -> set[str]:
     """Extract all registers written by an instruction."""
     return set(inst.reg_write)
+
+
+def reads_register(inst: BaseInst, reg: str) -> bool:
+    """True if `reg` appears in inst.reg_read."""
+    return reg in instruction_reads(inst)
+
+
+def reads_implicit_time_base(inst: BaseInst) -> bool:
+    """True if inst implicitly depends on s14 (timed writes, WAIT time, …).
+
+    Use this in passes that move/insert TIME inc_ref to avoid crossing a
+    timed-write barrier, instead of listing isinstance whitelists.
+    """
+    return TIMED_BASE_REG in instruction_reads(inst)
+
+
+def is_wmem_load(inst: BaseInst) -> bool:
+    """True for `REG_WR r_wave wmem [&addr]` — has dmem read side effect."""
+    return isinstance(inst, RegWriteInst) and inst.src == "wmem"
 
 
 def estimate_body_cost(body: list[IRNode], config: PipeLineConfig) -> int:

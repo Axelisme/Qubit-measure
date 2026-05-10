@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from ..analysis import instruction_reads, instruction_writes
+from ..analysis import instruction_reads, instruction_writes, is_wmem_load
 from ..instructions import (
     BaseInst,
     DmemReadInst,
     DmemWriteInst,
     Instruction,
     JumpInst,
-    LabelInst,
-    MetaInst,
     NopInst,
     PortWriteInst,
     RegWriteInst,
@@ -63,7 +61,7 @@ class DeadWriteEliminationPass(AbsChunkPass):
             # it as an opaque read barrier: clear pending and skip shadow
             # tracking so the wmem read is never eliminated and its writes
             # cannot be shadowed by later wN writes.
-            if isinstance(inst, RegWriteInst) and inst.src == "wmem":
+            if is_wmem_load(inst):
                 pending.clear()
                 continue
 

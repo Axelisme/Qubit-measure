@@ -5,6 +5,12 @@ from dataclasses import dataclass, field
 
 from typing_extensions import Any, Optional, Union
 
+from .hw_semantics import (
+    STATUS_REG,
+    TIMED_BASE_REG,
+    USR_TIME_REG,
+    WAVE_BUNDLE,
+)
 from .labels import Label, is_pseudo_label_name, is_register_addr
 from .operands import (
     AluExpr,
@@ -15,6 +21,15 @@ from .operands import (
     parse_register_or_literal,
     parse_side_write,
 )
+
+_SRC_KEYWORDS = frozenset({"op", "imm", "label", "dmem", "wmem"})
+
+
+def _src_register_reads(src: Optional[str]) -> set[str]:
+    """If `src` names a register (not a keyword/literal), return its read regs."""
+    if not src or src in _SRC_KEYWORDS or src.startswith("#"):
+        return set()
+    return Register(src).get_read_regs()
 
 
 def _is_pseudo_label(value: Optional[Label]) -> bool:
@@ -249,12 +264,12 @@ class TimeInst(BaseInst):
     def reg_read(self) -> list[str]:
         reads = set(self.r1.get_read_regs()) if self.r1 else set()
         if self.c_op == "updt":
-            reads.add("s11")
+            reads.add(USR_TIME_REG)
         return sorted(list(reads))
 
     @property
     def reg_write(self) -> list[str]:
-        return ["s14"]
+        return [TIMED_BASE_REG]
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -398,13 +413,8 @@ class RegWriteInst(BaseInst):
     def reg_read(self) -> list[str]:
         reads: set[str] = set()
         if self.src == "wmem":
-            reads.add("s14")
-        if (
-            self.src
-            and not self.src.startswith("#")
-            and self.src not in ("op", "imm", "label", "dmem", "wmem")
-        ):
-            reads.update(Register(self.src).get_read_regs())
+            reads.add(TIMED_BASE_REG)
+        reads |= _src_register_reads(self.src)
         if self.op:
             reads.update(self.op.get_read_regs())
         if isinstance(self.addr, Register):
@@ -472,20 +482,17 @@ class PortWriteInst(BaseInst):
 
     @property
     def reg_read(self) -> list[str]:
-        reads: set[str] = {"s14"}
+        reads: set[str] = {TIMED_BASE_REG}
         if self.src == "r_wave":
             # WPORT_WR r_wave reads all wave registers (w0-w5 aliased by r_wave)
-            reads.update({"r_wave", "w0", "w1", "w2", "w3", "w4", "w5"})
-        elif (
-            self.src
-            and not self.src.startswith("#")
-            and self.src not in ("op", "imm", "wmem")
-        ):
-            reads.update(Register(self.src).get_read_regs())
-        if isinstance(self.addr, Register):
-            reads.update(self.addr.get_read_regs())
-        if isinstance(self.time, Register):
-            reads.update(self.time.get_read_regs())
+            reads |= WAVE_BUNDLE
+        else:
+            reads |= _src_register_reads(self.src)
+
+        # All operands contribute to read dependencies
+        for op in [self.dst, self.addr, self.time]:
+            if isinstance(op, Register):
+                reads.update(op.get_read_regs())
         if self.op:
             reads.update(self.op.get_read_regs())
         if self.wr:
@@ -494,8 +501,7 @@ class PortWriteInst(BaseInst):
 
     @property
     def reg_write(self) -> list[str]:
-        if isinstance(self.dst, Register):
-            return sorted(list(self.dst.get_write_regs()))
+        # WPORT_WR does not write to its DST register; it uses its value as a port number.
         return []
 
     def to_dict(self) -> dict[str, Any]:
@@ -624,8 +630,8 @@ class DmemWriteInst(BaseInst):
     @property
     def reg_read(self) -> list[str]:
         reads: set[str] = set()
-        if isinstance(self.src, Register):
-            reads.update(self.src.get_read_regs())
+        for op in [self.dst, self.src]:
+            reads.update(op.get_read_regs())
         if self.op:
             reads.update(self.op.get_read_regs())
         return sorted(list(reads))
@@ -674,10 +680,10 @@ class WmemWriteInst(BaseInst):
 
     @property
     def reg_read(self) -> list[str]:
-        reads: set[str] = {"w0", "w1", "w2", "w3", "w4", "w5", "r_wave", "s14"}
-        if isinstance(self.addr, Register):
+        reads: set[str] = set(WAVE_BUNDLE) | {TIMED_BASE_REG}
+        if self.addr:
             reads.update(self.addr.get_read_regs())
-        if isinstance(self.time, Register):
+        if self.time:
             reads.update(self.time.get_read_regs())
         if self.op:
             reads.update(self.op.get_read_regs())
@@ -727,15 +733,12 @@ class DportWriteInst(BaseInst):
 
     @property
     def reg_read(self) -> list[str]:
-        reads: set[str] = {"s14"}
-        if self.src and not self.src.startswith("#"):
-            reads.update(Register(self.src).get_read_regs())
-        if isinstance(self.dst, Register):
-            reads.update(self.dst.get_read_regs())
-        if isinstance(self.data, Register):
-            reads.update(self.data.get_read_regs())
-        if isinstance(self.time, Register):
-            reads.update(self.time.get_read_regs())
+        reads: set[str] = {TIMED_BASE_REG}
+        reads |= _src_register_reads(self.src)
+
+        for op in [self.dst, self.data, self.time]:
+            if op:
+                reads.update(op.get_read_regs())
         if self.op:
             reads.update(self.op.get_read_regs())
         if self.wr:
@@ -744,8 +747,7 @@ class DportWriteInst(BaseInst):
 
     @property
     def reg_write(self) -> list[str]:
-        if isinstance(self.dst, Register):
-            return sorted(list(self.dst.get_write_regs()))
+        # DPORT_WR does not write to its DST register.
         return []
 
     def to_dict(self) -> dict[str, Any]:
@@ -787,9 +789,9 @@ class WaitInst(BaseInst):
         # WAIT time: TEST (s11 - (TIME - OFFSET)), reads s11 and implicitly uses s14
         # WAIT port_dt/div_rdy/div_dt/qpa_*: TEST (s10 AND #mask), reads s10 only
         if self.c_op == "time":
-            reads: set[str] = {"s11", "s14"}
+            reads: set[str] = {USR_TIME_REG, TIMED_BASE_REG}
         else:
-            reads = {"s10"}
+            reads = {STATUS_REG}
         if isinstance(self.time, Register):
             reads.update(self.time.get_read_regs())
         if isinstance(self.addr, Register):
