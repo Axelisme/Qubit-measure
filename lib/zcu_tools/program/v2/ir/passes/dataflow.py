@@ -89,7 +89,17 @@ class DeadWriteEliminationPass(AbsChunkPass):
 
     def _is_write_tracking_barrier(self, inst: BaseInst) -> bool:
         return not isinstance(
-            inst, (TimeInst, WaitInst, RegWriteInst, DmemReadInst, NopInst)
+            inst,
+            (
+                TimeInst,
+                WaitInst,
+                RegWriteInst,
+                DmemReadInst,
+                DmemWriteInst,
+                PortWriteInst,
+                WmemWriteInst,
+                NopInst,
+            ),
         )
 
 

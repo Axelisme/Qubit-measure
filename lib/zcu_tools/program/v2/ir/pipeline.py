@@ -219,8 +219,7 @@ def make_default_pipeline(pmem_capacity: int) -> IRPipeLine:
     )
 
     config = deepcopy(DEFAULT_PIPELINE_CONFIG)
-    if config.pmem_capacity is None:
-        config.pmem_capacity = pmem_capacity
+    config.pmem_capacity = pmem_capacity
 
     return IRPipeLine(
         config=config,

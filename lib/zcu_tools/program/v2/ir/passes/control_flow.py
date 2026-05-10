@@ -89,8 +89,8 @@ class BranchEliminationPass(OptimizationPassBase):
         branch = block.branch
         if branch is None:
             return
-        # Only eliminate plain unconditional label jumps.
-        if branch.if_cond is not None or branch.op is not None:
+        # Only eliminate plain unconditional label jumps with no side effects.
+        if branch.if_cond is not None or branch.op is not None or branch.wr is not None:
             return
         if not isinstance(branch.label, Label):
             return

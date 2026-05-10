@@ -126,6 +126,8 @@ def parse_alu_expr(op_str: str) -> AluExpr:
 
     # Binary op: <lhs> <op> <rhs>
     if len(tokens) >= 3:
+        if len(tokens) > 3:
+            raise ValueError(f"ALU expression has too many tokens: {op_str!r}")
         lhs = Register(tokens[0])
         op = tokens[1]
         rhs = parse_register_or_literal(tokens[2])

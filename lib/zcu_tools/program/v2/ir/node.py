@@ -122,6 +122,7 @@ class IRLoop(IRNode):
     n: Union[int, str] = 0
     range_hint: Optional[tuple[int, int]] = None
     body: BlockNode = field(default_factory=BlockNode)
+    already_unrolled: bool = False
 
     def children(self) -> Iterator[IRNode]:
         yield self.body

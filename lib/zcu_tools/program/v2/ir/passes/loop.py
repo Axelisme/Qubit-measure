@@ -4,7 +4,7 @@ import logging
 import math
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional, cast
+from typing_extensions import Optional, cast
 
 from ..analysis import (
     estimate_body_cost,
@@ -146,7 +146,7 @@ class UnrollLoopPass(OptimizationPassBase):
 
         # U-shape pipeline may revisit Tree passes across iterations.
         # Skip loops that were already produced by this pass.
-        if node.name.endswith("_unrolled"):
+        if node.already_unrolled:
             return node
 
         cfg = self.ctx.config
@@ -307,6 +307,7 @@ class UnrollLoopPass(OptimizationPassBase):
                 counter_reg=node.counter_reg,
                 n=n,
                 body=BlockNode(insts=list(unrolled_body)),
+                already_unrolled=True,
             )
             result.append(new_loop)
             self._changed = True

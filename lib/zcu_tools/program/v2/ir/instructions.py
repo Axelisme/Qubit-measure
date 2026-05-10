@@ -473,10 +473,13 @@ class PortWriteInst(BaseInst):
     @property
     def reg_read(self) -> list[str]:
         reads: set[str] = {"s14"}
-        if (
+        if self.src == "r_wave":
+            # WPORT_WR r_wave reads all wave registers (w0-w5 aliased by r_wave)
+            reads.update({"r_wave", "w0", "w1", "w2", "w3", "w4", "w5"})
+        elif (
             self.src
             and not self.src.startswith("#")
-            and self.src not in ("op", "imm", "wmem", "r_wave")
+            and self.src not in ("op", "imm", "wmem")
         ):
             reads.update(Register(self.src).get_read_regs())
         if isinstance(self.addr, Register):
@@ -740,7 +743,7 @@ class DportWriteInst(BaseInst):
     @property
     def reg_write(self) -> list[str]:
         if isinstance(self.dst, Register):
-            return [self.dst.name]
+            return sorted(list(self.dst.get_write_regs()))
         return []
 
     def to_dict(self) -> dict[str, Any]:
@@ -779,7 +782,12 @@ class WaitInst(BaseInst):
 
     @property
     def reg_read(self) -> list[str]:
-        reads: set[str] = {"s11", "s14"}
+        # WAIT time: TEST (s11 - (TIME - OFFSET)), reads s11 and implicitly uses s14
+        # WAIT port_dt/div_rdy/div_dt/qpa_*: TEST (s10 AND #mask), reads s10 only
+        if self.c_op == "time":
+            reads: set[str] = {"s11", "s14"}
+        else:
+            reads = {"s10"}
         if isinstance(self.time, Register):
             reads.update(self.time.get_read_regs())
         if isinstance(self.addr, Register):
