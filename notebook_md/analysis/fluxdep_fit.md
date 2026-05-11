@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.19.1
   kernelspec:
-    display_name: zcu-tools
+    display_name: zcu-tools (3.9.25)
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.9.23
+    version: 3.9.25
 ---
 
 ```python
@@ -40,7 +40,7 @@ import zcu_tools.experiment.v2 as ze
 ```
 
 ```python
-chip_name = "Q12_2D[5]"
+chip_name = "Q5_2D"
 qub_name = "Q1"
 
 flux_half = None
@@ -71,11 +71,16 @@ flux_period = fluxdep_result["flux_period"]
 
 ```python
 # spect_path = r"..\..\Database\Si001\2025\10\Data_1028\Si001_flux_1.hdf5"
-spect_path = r"../../Database/Q12_2D[5]/Q1/Q1_flux_1.hdf5"
-# spect_path = r"..\..\Database\Q3_2D[2]\Q1\2026\03\Data_0316\R1_flux_6.hdf5"
+# spect_path = r"..\..\Database\Q5_2D\Q1\2026\05\Data_0504\Q1_flux_1534.hdf5"
+spect_path = r"..\..\Database\Q5_2D\Q1\2026\05\Data_0504\R1_flux_2.hdf5"
 
-# exp = ze.onetone.FluxDepExp()
-exp = ze.twotone.FreqFluxExp()
+type = "OneTone"  # or "TwoTone"
+# type = "TwoTone"  # or "OneTone"
+
+if type == "OneTone":
+    exp = ze.onetone.FluxDepExp()
+else:
+    exp = ze.twotone.FreqFluxExp()
 dev_values, freqs, signals = exp.load(spect_path)
 freqs *= 1e-3  # MHz -> GHz
 ```
@@ -96,8 +101,10 @@ flux_half, flux_int, flux_period
 
 ```python
 %matplotlib widget
-# actSel = zf.InteractiveOneTone(signals, dev_values, freqs, threshold=2.5)
-actSel = zf.InteractiveFindPoints(signals, dev_values, freqs, threshold=6.0)
+if type == "OneTone":
+    actSel = zf.InteractiveOneTone(signals, dev_values, freqs, threshold=2.5)
+else:
+    actSel = zf.InteractiveFindPoints(signals, dev_values, freqs, threshold=6.0)
 ```
 
 ```python
@@ -110,6 +117,7 @@ name = os.path.basename(spect_path)
 spectrums.update(
     {
         name: {
+            "type": type,
             "flux_half": flux_half,
             "flux_int": flux_int,
             "flux_period": flux_period,
@@ -194,7 +202,7 @@ transitions = zp.TransitionDict(
         "transitions": [(0, 1), (0, 2), (1, 2), (1, 3)],
         # "red side": [(0, 1)],
         "mirror": [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3)],
-        "r_f": 5.351,  # GHz
+        "r_f": 5.551,  # GHz
         "sample_f": 9.584640,  # GHz
         # "sample_f": 6.881280,
     }
