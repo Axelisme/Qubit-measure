@@ -161,14 +161,12 @@ def reconnect_devices(dev_info: Mapping[str, DeviceInfo]) -> ResourceManager:
 
     resource_manager = ResourceManager()
     for name, info in dev_info.items():
-        device_type = info.type if isinstance(info, DeviceInfo) else info["type"]
-        address = info.address if isinstance(info, DeviceInfo) else info["address"]
-        if device_type == "YOKOGS200":
-            device = YOKOGS200(address, resource_manager)
-        elif device_type == "RohdeSchwarzSGS100A":
-            device = RohdeSchwarzSGS100A(address, resource_manager)
+        if info.type == "YOKOGS200":
+            device = YOKOGS200(info.address, resource_manager)
+        elif info.type == "RohdeSchwarzSGS100A":
+            device = RohdeSchwarzSGS100A(info.address, resource_manager)
         else:
-            raise ValueError(f"Not supported device type: {device_type}")
+            raise ValueError(f"Not supported device type: {info.type}")
         GlobalDeviceManager.register_device(name, device)
 
     return resource_manager

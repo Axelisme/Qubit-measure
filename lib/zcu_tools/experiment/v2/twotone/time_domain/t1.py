@@ -8,13 +8,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
-from typing_extensions import (
-    Any,
-    Callable,
-    Optional,
-    TypeAlias,
-    Union,
-)
+from typing_extensions import Any, Callable, Optional, TypeAlias, Union
 
 import zcu_tools.utils.fitting as ft
 from zcu_tools.cfg_model import ConfigBase

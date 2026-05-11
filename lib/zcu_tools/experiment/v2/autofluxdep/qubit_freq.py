@@ -157,7 +157,12 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
         center_freq = cast(float, modules.qub_pulse.freq)
 
         self.detunes = sweep2array(
-            cfg.sweep.detune,
+            SweepCfg(
+                start=cfg.sweep.detune.start + center_freq,
+                stop=cfg.sweep.detune.stop + center_freq,
+                expts=cfg.sweep.detune.expts,
+                step=cfg.sweep.detune.step,
+            ),
             "freq",
             {"soccfg": state.env["soccfg"], "gen_ch": modules.qub_pulse.ch},
         )

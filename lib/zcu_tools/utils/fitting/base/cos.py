@@ -101,7 +101,13 @@ def fitdecaycos(
         phase = np.angle(fft[max_id], deg=True) % 360
         decay_time = xdata[-1] - xdata[0]
 
+        freq_bound = (np.min(fft_freqs), np.max(fft_freqs))
+
         assign_init_p(fitparams, [y0, yscale, freq, phase, decay_time])  # type: ignore
+    else:
+        freq = fitparams[2]
+        assert freq is not None
+        freq_bound = (0.2 * freq, 5 * freq)
     fitparams = cast(list[float], fitparams)
 
     # bounds
@@ -109,8 +115,8 @@ def fitdecaycos(
     freq = fitparams[2]
     decay_time = fitparams[4]
     bounds = (
-        [-np.inf, -1.1 * np.abs(yscale), 0.2 * freq, -360, 0],
-        [np.inf, 1.1 * np.abs(yscale), 5 * freq, 360, np.inf],
+        [-np.inf, -1.1 * np.abs(yscale), freq_bound[0], -360, 0],
+        [np.inf, 1.1 * np.abs(yscale), freq_bound[1], 360, np.inf],
     )
 
     pOpt, pCov = fit_func(xdata, ydata, decaycos, fitparams, bounds, fixedparams)

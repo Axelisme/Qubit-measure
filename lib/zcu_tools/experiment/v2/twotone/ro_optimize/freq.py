@@ -24,7 +24,7 @@ from zcu_tools.program.v2 import (
     Pulse,
     PulseCfg,
     Readout,
-    ReadoutCfg,
+    PulseReadoutCfg,
     Reset,
     ResetCfg,
     SweepCfg,
@@ -38,7 +38,7 @@ FreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 class FreqModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     qub_pulse: PulseCfg
-    readout: ReadoutCfg
+    readout: PulseReadoutCfg
 
 
 class FreqSweepCfg(ConfigBase):
@@ -69,7 +69,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         freqs = sweep2array(
             cfg.sweep.freq,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": modules.readout.pulse_cfg.ch},
         )
 
         def measure_fn(

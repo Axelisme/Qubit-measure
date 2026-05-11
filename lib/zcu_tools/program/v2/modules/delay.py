@@ -27,7 +27,7 @@ class Delay(Module):
     def run(
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-        prog.delay(t=round_timestamp(prog, self.delay), tag=self.tag)
+        prog.delay(t=round_timestamp(prog, t + self.delay), tag=self.tag)
 
         return 0.0  # reset reference time
 
@@ -46,8 +46,7 @@ class SoftDelay(Module):
     def run(
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-
-        return round_timestamp(prog, self.delay)
+        return round_timestamp(prog, t + self.delay)
 
     def allow_rerun(self) -> bool:
         return True

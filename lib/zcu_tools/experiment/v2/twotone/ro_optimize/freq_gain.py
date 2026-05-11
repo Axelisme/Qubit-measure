@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from scipy.ndimage import gaussian_filter1d
+from scipy.ndimage import gaussian_filter
 from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.cfg_model import ConfigBase
@@ -16,7 +16,7 @@ from zcu_tools.experiment.utils import make_comment, parse_comment, setup_device
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
-from zcu_tools.liveplot import LivePlot1D
+from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program.v2 import (
     Branch,
     ModularProgramV2,
@@ -32,40 +32,48 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-PowerResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
+FreqGainResult: TypeAlias = tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]
+]
 
 
-class PowerModuleCfg(ConfigBase):
+class FreqGainModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     qub_pulse: PulseCfg
     readout: PulseReadoutCfg
 
 
-class PowerSweepCfg(ConfigBase):
+class FreqGainSweepCfg(ConfigBase):
+    freq: SweepCfg
     gain: SweepCfg
 
 
-class PowerCfg(ProgramV2Cfg, ExpCfgModel):
-    modules: PowerModuleCfg
-    sweep: PowerSweepCfg
+class FreqGainCfg(ProgramV2Cfg, ExpCfgModel):
+    modules: FreqGainModuleCfg
+    sweep: FreqGainSweepCfg
 
 
 RawResult: TypeAlias = list[MomentTracker]
 
 
-class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
+class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
     def run(
         self,
         soc,
         soccfg,
-        cfg: PowerCfg,
+        cfg: FreqGainCfg,
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
-    ) -> PowerResult:
+    ) -> FreqGainResult:
         original_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
+        freqs = sweep2array(
+            cfg.sweep.freq,
+            "freq",
+            {"soccfg": soccfg, "gen_ch": modules.readout.pulse_cfg.ch},
+        )
         gains = sweep2array(
             cfg.sweep.gain,
             "gain",
@@ -73,13 +81,17 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         )
 
         def measure_fn(
-            ctx: TaskState[NDArray[np.float64], Any, PowerCfg],
+            ctx: TaskState[NDArray[np.float64], Any, FreqGainCfg],
             update_hook: Optional[Callable[[int, RawResult], None]],
         ) -> RawResult:
             cfg = ctx.cfg
             modules = cfg.modules
 
             assert update_hook is not None, "update_hook is required for measure_fn"
+
+            freq_sweep = cfg.sweep.freq
+            freq_param = sweep2param("freq", freq_sweep)
+            modules.readout.set_param("freq", freq_param)
 
             gain_sweep = cfg.sweep.gain
             gain_param = sweep2param("gain", gain_sweep)
@@ -93,7 +105,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                     Branch("ge", [], Pulse("qub_pulse", modules.qub_pulse)),
                     Readout("readout", modules.readout),
                 ],
-                sweep=[("ge", 2), ("gain", gain_sweep)],
+                sweep=[("ge", 2), ("freq", freq_sweep), ("gain", gain_sweep)],
             )
             tracker = MomentTracker()
             prog.acquire(
@@ -105,69 +117,77 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             )
             return [tracker]
 
-        with LivePlot1D("Readout Power", "SNR") as viewer:
+        with LivePlot2D("Frequency (MHz)", "Gain (a.u.)") as viewer:
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=1),
-                    result_shape=(len(gains),),
+                    result_shape=(len(freqs), len(gains)),
                     dtype=np.float64,
                     pbar_n=cfg.rounds,
                 ),
                 init_cfg=cfg,
-                on_update=lambda ctx: viewer.update(gains, np.abs(ctx.root_data)),
+                on_update=lambda ctx: viewer.update(
+                    freqs, gains, np.abs(ctx.root_data)
+                ),
             )
 
         # record the last cfg and result
         self.last_cfg = original_cfg
-        self.last_result = (gains, signals)
+        self.last_result = (freqs, gains, signals)
 
-        return gains, signals
+        return freqs, gains, signals
 
     def analyze(
-        self, result: Optional[PowerResult] = None, penalty_ratio: float = 0.0
-    ) -> tuple[float, Figure]:
+        self, result: Optional[FreqGainResult] = None, *, smooth: float = 1.0
+    ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        powers, snrs = result
-        snrs = np.abs(snrs)
+        freqs, gains, signals = result
+
+        snrs = np.abs(signals)
 
         # fill NaNs with zeros
         snrs[np.isnan(snrs)] = 0.0
 
-        snrs = gaussian_filter1d(snrs, 1)
-        penaltized_snrs = snrs * np.exp(-powers * penalty_ratio)
+        snrs = gaussian_filter(snrs, smooth)
 
-        max_id = np.argmax(penaltized_snrs)
-        max_power = float(powers[max_id])
-        max_snr = float(snrs[max_id])
+        max_freq_id, max_gain_id = np.unravel_index(np.argmax(snrs), snrs.shape)
+        max_freq = float(freqs[max_freq_id])
+        max_gain = float(gains[max_gain_id])
+        max_snr = float(snrs[max_freq_id, max_gain_id])
 
         fig, ax = plt.subplots(figsize=config.figsize)
 
-        ax.plot(powers, snrs)
-        ax.axvline(max_power, color="r", ls="--", label=f"max SNR = {max_snr:.2f}")
-        ax.set_xlabel("Readout Power")
-        ax.set_ylabel("SNR (a.u.)")
+        ax.imshow(
+            snrs.T,
+            extent=(freqs[0], freqs[-1], gains[0], gains[-1]),
+            aspect="auto",
+            origin="lower",
+            interpolation="none",
+        )
+        ax.scatter(max_freq, max_gain, color="r", label=f"max SNR = {max_snr:.2f}")
+        ax.set_xlabel("Frequency (MHz)")
+        ax.set_ylabel("Gain (a.u.)")
         ax.legend()
-        ax.grid(True)
 
-        return max_power, fig
+        return max_freq, max_gain, fig
 
     def save(
         self,
         filepath: str,
-        result: Optional[PowerResult] = None,
+        result: Optional[FreqGainResult] = None,
         comment: Optional[str] = None,
-        tag: str = "twotone/ge/ro_optimize/gain",
+        tag: str = "twotone/ge/ro_optimize/freq",
         **kwargs,
     ) -> None:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, signals = result
+        freqs, gains, singals = result
 
         cfg = self.last_cfg
         assert cfg is not None
@@ -175,27 +195,32 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Probe Power", "unit": "a.u.", "values": gains},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
+            x_info={"name": "Frequency", "unit": "Hz", "values": freqs * 1e6},
+            y_info={"name": "Gain", "unit": "a.u.", "values": gains},
+            z_info={"name": "Signal", "unit": "a.u.", "values": singals.T},
             comment=comment,
             tag=tag,
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> PowerResult:
-        signals, gains, _, comment = load_data(filepath, return_comment=True, **kwargs)
+    def load(self, filepath: str, **kwargs) -> FreqGainResult:
+        signals, freqs, gains, comment = load_data(
+            filepath, return_comment=True, **kwargs
+        )
         assert gains is not None
-        assert len(gains.shape) == 1 and len(signals.shape) == 1
-        assert gains.shape == signals.shape
+        assert len(freqs.shape) == 1 and len(signals.shape) == 1
+        assert signals.shape == (len(freqs), len(gains))
 
-        gains = gains.astype(np.float64)
-        signals = signals.astype(np.float64)
+        freqs = freqs * 1e-6  # Hz -> MHz
+
+        freqs = freqs.astype(np.float64)
+        signals = signals.astype(np.float64).T
 
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-                self.last_cfg = PowerCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (gains, signals)
+                self.last_cfg = FreqGainCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = (freqs, gains, signals)
 
-        return gains, signals
+        return freqs, gains, signals
