@@ -3,6 +3,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
+from typing import Literal
+
 from typing_extensions import Any, Optional, Union
 
 from .hw_semantics import STATUS_REG, TIMED_BASE_REG, USR_TIME_REG, WAVE_BUNDLE
@@ -32,8 +34,16 @@ from .operands import (
     parse_value,
 )
 
-CondCode = str
-UpdateFlag = str
+CondCode = Literal["Z", "S", "NZ", "NS"]
+_VALID_COND_CODES = frozenset({"Z", "S", "NZ", "NS"})
+
+
+def _parse_cond_code(val: Optional[str]) -> Optional[CondCode]:
+    if val is None:
+        return None
+    if val not in _VALID_COND_CODES:
+        raise ValueError(f"IF: {val!r} is not a valid condition code, expected one of {sorted(_VALID_COND_CODES)}")
+    return val  # type: ignore[return-value]
 
 
 def _require_register(val: str, field: str) -> Register:
@@ -81,18 +91,6 @@ def _parse_dmem_src(val: str) -> Union[Register, Immediate]:
     if imm is not None:
         return imm
     raise ValueError(f"SRC: {val!r} is not a register or immediate value")
-
-
-
-def _src_register_reads(src: Optional[SrcType]) -> set[str]:
-    """If `src` names a register (not a keyword/literal), return its read regs."""
-    if not src or isinstance(src, SrcKeyword):
-        return set()
-    if isinstance(src, Register):
-        return src.get_read_regs()
-    return set()
-
-
 
 
 
@@ -262,13 +260,13 @@ class TestInst(BaseInst):
 
     __test__ = False
     op: ExprType
-    uf: Optional[UpdateFlag] = None
+    uf: bool = False
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> TestInst:
         return cls(
             op=_require_alu_expr(d["OP"], "OP"),
-            uf=d.get("UF") or None,
+            uf="UF" in d,
         )
 
     @property
@@ -279,7 +277,7 @@ class TestInst(BaseInst):
         d = {
             "CMD": "TEST",
             "OP": str(self.op) if self.op else None,
-            "UF": self.uf if self.uf else None,
+            "UF": "1" if self.uf else None,
         }
         return {k: v for k, v in d.items() if v is not None}
 
@@ -293,17 +291,17 @@ class JumpInst(BaseInst):
     addr: Optional[AddrType] = None
     wr: Optional[SideWrite] = None
     op: Optional[ExprType] = None
-    uf: Optional[UpdateFlag] = None
+    uf: bool = False
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> JumpInst:
         return cls(
             label=parse_label(d.get("LABEL")),
-            if_cond=d.get("IF") or None,
+            if_cond=_parse_cond_code(d.get("IF")),
             addr=parse_addr(d.get("ADDR")),
             wr=parse_side_write(d["WR"]) if "WR" in d else None,
             op=parse_alu_expr(d["OP"]) if "OP" in d else None,
-            uf=d.get("UF") or None,
+            uf="UF" in d,
         )
 
     def __post_init__(self) -> None:
@@ -346,7 +344,7 @@ class JumpInst(BaseInst):
             "IF": self.if_cond if self.if_cond else None,
             "WR": str(self.wr) if self.wr else None,
             "OP": str(self.op) if self.op else None,
-            "UF": self.uf if self.uf else None,
+            "UF": "1" if self.uf else None,
         }
         return {k: v for k, v in d.items() if v is not None}
 
@@ -360,7 +358,7 @@ class RegWriteInst(BaseInst):
     op: Optional[ExprType] = None
     lit: Optional[Immediate] = None
     addr: Optional[AddrType] = None
-    uf: Optional[UpdateFlag] = None
+    uf: bool = False
     wr: Optional[SideWrite] = None
     if_cond: Optional[CondCode] = None
     label: Optional[Label] = None
@@ -376,8 +374,8 @@ class RegWriteInst(BaseInst):
             op=parse_alu_expr(d["OP"]) if "OP" in d else None,
             lit=parse_immediate(d["LIT"]) if "LIT" in d else None,
             addr=parse_addr(d.get("ADDR")),
-            uf=d.get("UF") or None,
-            if_cond=d.get("IF") or None,
+            uf="UF" in d,
+            if_cond=_parse_cond_code(d.get("IF")),
             label=parse_label(d.get("LABEL")),
             ww=d.get("WW"),
             wp=d.get("WP"),
@@ -388,7 +386,8 @@ class RegWriteInst(BaseInst):
         reads: set[str] = set()
         if self.src == SrcKeyword.WMEM:
             reads.add(TIMED_BASE_REG)
-        reads |= _src_register_reads(self.src)
+        if isinstance(self.src, Register):
+            reads |= self.src.get_read_regs()
         if self.op:
             reads.update(self.op.get_read_regs())
         if isinstance(self.addr, Register):
@@ -423,7 +422,7 @@ class RegWriteInst(BaseInst):
             "OP": str(self.op) if self.op else None,
             "LIT": str(self.lit) if self.lit else None,
             "ADDR": str(self.addr) if self.addr else None,
-            "UF": self.uf if self.uf else None,
+            "UF": "1" if self.uf else None,
             "IF": self.if_cond if self.if_cond else None,
             "LABEL": self.label.name if self.label else None,
             "WW": self.ww,
@@ -442,7 +441,7 @@ class PortWriteInst(BaseInst):
     time: Optional[TimeType] = None
     wr: Optional[SideWrite] = None
     op: Optional[ExprType] = None
-    uf: Optional[UpdateFlag] = None
+    uf: bool = False
     if_cond: Optional[CondCode] = None
     ww: Optional[str] = None
 
@@ -455,8 +454,8 @@ class PortWriteInst(BaseInst):
             time=parse_time(d["TIME"]) if "TIME" in d else None,
             wr=parse_side_write(d["WR"]) if "WR" in d else None,
             op=parse_alu_expr(d["OP"]) if "OP" in d else None,
-            uf=d.get("UF") or None,
-            if_cond=d.get("IF") or None,
+            uf="UF" in d,
+            if_cond=_parse_cond_code(d.get("IF")),
             ww=d.get("WW"),
         )
 
@@ -465,8 +464,8 @@ class PortWriteInst(BaseInst):
         reads: set[str] = {TIMED_BASE_REG}
         if isinstance(self.src, Register) and self.src.name == "r_wave":
             reads |= WAVE_BUNDLE
-        else:
-            reads |= _src_register_reads(self.src)
+        elif isinstance(self.src, Register):
+            reads |= self.src.get_read_regs()
 
         for op in [self.dst, self.addr, self.time]:
             if isinstance(op, Register):
@@ -497,7 +496,7 @@ class PortWriteInst(BaseInst):
             "TIME": str(self.time) if self.time else None,
             "WR": str(self.wr) if self.wr else None,
             "OP": str(self.op) if self.op else None,
-            "UF": self.uf if self.uf else None,
+            "UF": "1" if self.uf else None,
             "IF": self.if_cond if self.if_cond else None,
             "WW": self.ww,
         }
@@ -526,7 +525,7 @@ class DmemReadInst(BaseInst):
     wr: Optional[SideWrite] = None
     op: Optional[ExprType] = None
     lit: Optional[Immediate] = None
-    uf: Optional[UpdateFlag] = None
+    uf: bool = False
     if_cond: Optional[CondCode] = None
     label: Optional[Label] = None
 
@@ -539,8 +538,8 @@ class DmemReadInst(BaseInst):
             wr=parse_side_write(d["WR"]) if "WR" in d else None,
             op=parse_alu_expr(d["OP"]) if "OP" in d else None,
             lit=parse_immediate(d["LIT"]) if "LIT" in d else None,
-            uf=d.get("UF") or None,
-            if_cond=d.get("IF") or None,
+            uf="UF" in d,
+            if_cond=_parse_cond_code(d.get("IF")),
             label=parse_label(d.get("LABEL")),
         )
 
@@ -574,7 +573,7 @@ class DmemReadInst(BaseInst):
             "WR": str(self.wr) if self.wr else None,
             "OP": str(self.op) if self.op else None,
             "LIT": str(self.lit) if self.lit else None,
-            "UF": self.uf if self.uf else None,
+            "UF": "1" if self.uf else None,
             "IF": self.if_cond if self.if_cond else None,
             "LABEL": self.label.name if self.label else None,
         }
@@ -590,7 +589,7 @@ class DmemWriteInst(BaseInst):
     op: Optional[ExprType] = None
     lit: Optional[Immediate] = None
     wr: Optional[SideWrite] = None
-    uf: Optional[UpdateFlag] = None
+    uf: bool = False
     if_cond: Optional[CondCode] = None
 
     @classmethod
@@ -601,8 +600,8 @@ class DmemWriteInst(BaseInst):
             wr=parse_side_write(d["WR"]) if "WR" in d else None,
             op=parse_alu_expr(d["OP"]) if "OP" in d else None,
             lit=parse_immediate(d["LIT"]) if "LIT" in d else None,
-            uf=d.get("UF") or None,
-            if_cond=d.get("IF") or None,
+            uf="UF" in d,
+            if_cond=_parse_cond_code(d.get("IF")),
         )
 
     @property
@@ -623,7 +622,7 @@ class DmemWriteInst(BaseInst):
             "OP": str(self.op) if self.op else None,
             "LIT": str(self.lit) if self.lit else None,
             "WR": str(self.wr) if self.wr else None,
-            "UF": self.uf if self.uf else None,
+            "UF": "1" if self.uf else None,
             "IF": self.if_cond if self.if_cond else None,
         }
         return {k: v for k, v in d.items() if v is not None}
@@ -637,7 +636,7 @@ class WmemWriteInst(BaseInst):
     time: Optional[TimeType] = None
     wr: Optional[SideWrite] = None
     op: Optional[ExprType] = None
-    uf: Optional[UpdateFlag] = None
+    uf: bool = False
     if_cond: Optional[CondCode] = None
     wp: Optional[str] = None
 
@@ -648,8 +647,8 @@ class WmemWriteInst(BaseInst):
             time=parse_time(str(d["TIME"])) if "TIME" in d else None,
             wr=parse_side_write(d["WR"]) if "WR" in d else None,
             op=parse_alu_expr(d["OP"]) if "OP" in d else None,
-            uf=d.get("UF") or None,
-            if_cond=d.get("IF") or None,
+            uf="UF" in d,
+            if_cond=_parse_cond_code(d.get("IF")),
             wp=d.get("WP"),
         )
 
@@ -673,7 +672,7 @@ class WmemWriteInst(BaseInst):
             "TIME": str(self.time) if self.time else None,
             "WR": str(self.wr) if self.wr else None,
             "OP": str(self.op) if self.op else None,
-            "UF": self.uf if self.uf else None,
+            "UF": "1" if self.uf else None,
             "IF": self.if_cond if self.if_cond else None,
             "WP": self.wp,
         }
@@ -690,7 +689,7 @@ class DportWriteInst(BaseInst):
     time: Optional[TimeType] = None
     wr: Optional[SideWrite] = None
     op: Optional[ExprType] = None
-    uf: Optional[UpdateFlag] = None
+    uf: bool = False
     if_cond: Optional[CondCode] = None
 
     @classmethod
@@ -711,14 +710,15 @@ class DportWriteInst(BaseInst):
             time=parse_time(str(d["TIME"])) if "TIME" in d else None,
             wr=parse_side_write(d["WR"]) if "WR" in d else None,
             op=parse_alu_expr(d["OP"]) if "OP" in d else None,
-            uf=d.get("UF") or None,
-            if_cond=d.get("IF") or None,
+            uf="UF" in d,
+            if_cond=_parse_cond_code(d.get("IF")),
         )
 
     @property
     def reg_read(self) -> list[str]:
         reads: set[str] = {TIMED_BASE_REG}
-        reads |= _src_register_reads(self.src)
+        if isinstance(self.src, Register):
+            reads |= self.src.get_read_regs()
 
         for op in [self.dst, self.data, self.time]:
             if isinstance(op, Register):
@@ -749,7 +749,7 @@ class DportWriteInst(BaseInst):
             "TIME": str(self.time) if self.time else None,
             "WR": str(self.wr) if self.wr else None,
             "OP": str(self.op) if self.op else None,
-            "UF": self.uf if self.uf else None,
+            "UF": "1" if self.uf else None,
             "IF": self.if_cond if self.if_cond else None,
         }
         return {k: v for k, v in d.items() if v is not None}

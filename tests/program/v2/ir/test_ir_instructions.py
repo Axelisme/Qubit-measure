@@ -83,9 +83,9 @@ class TestTestInstruction:
     """Tests for TestInst (TEST opcode)."""
 
     def test_construction(self):
-        inst = TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Register("r2")), uf="1")
+        inst = TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Register("r2")), uf=True)
         assert inst.op.op == AluOp.SUB
-        assert inst.uf == "1"
+        assert inst.uf is True
 
     def test_dispatch_test_to_testinst(self):
         d = {"CMD": "TEST", "OP": "r1 - r2", "UF": "1"}
@@ -94,7 +94,7 @@ class TestTestInstruction:
         assert inst.op.op == AluOp.SUB
         assert inst.op.lhs.name == "r1"
         assert inst.op.rhs.name == "r2"
-        assert inst.uf == "1"
+        assert inst.uf is True
 
     def test_roundtrip_test_full(self):
         original = {"CMD": "TEST", "OP": "r3 AND #255", "UF": "1"}
@@ -124,9 +124,9 @@ class TestJumpInstruction:
         assert inst.addr is None
 
     def test_construction_conditional(self):
-        inst = JumpInst(label=Label("exit"), if_cond="eq")
+        inst = JumpInst(label=Label("exit"), if_cond="Z")
         assert str(inst.label) == "&exit"
-        assert inst.if_cond == "eq"
+        assert inst.if_cond == "Z"
 
     def test_construction_with_addr(self):
         inst = JumpInst(addr=Register("s15"))
@@ -145,18 +145,18 @@ class TestJumpInstruction:
     def test_dispatch_jump_conditional(self):
         Label.reset()
         Label.make_new("end")
-        d = {"CMD": "JUMP", "LABEL": "end", "IF": "nz"}
+        d = {"CMD": "JUMP", "LABEL": "end", "IF": "NZ"}
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, JumpInst)
         assert str(inst.label) == "&end"
-        assert inst.if_cond == "nz"
+        assert inst.if_cond == "NZ"
 
     def test_dispatch_jump_with_addr(self):
-        d = {"CMD": "JUMP", "ADDR": "s15", "IF": "eq"}
+        d = {"CMD": "JUMP", "ADDR": "s15", "IF": "Z"}
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, JumpInst)
         assert inst.addr.name == "s15"
-        assert inst.if_cond == "eq"
+        assert inst.if_cond == "Z"
 
     def test_roundtrip_jump_unconditional(self):
         Label.reset()
@@ -169,7 +169,7 @@ class TestJumpInstruction:
     def test_roundtrip_jump_conditional(self):
         Label.reset()
         Label.make_new("end")
-        original = {"CMD": "JUMP", "LABEL": "end", "IF": "eq"}
+        original = {"CMD": "JUMP", "LABEL": "end", "IF": "Z"}
         inst = BaseInst.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
@@ -180,7 +180,7 @@ class TestJumpInstruction:
         original = {
             "CMD": "JUMP",
             "LABEL": "loop",
-            "IF": "nz",
+            "IF": "NZ",
             "WR": "s1 op",
             "OP": "s1 + #1",
             "UF": "1",
@@ -190,7 +190,7 @@ class TestJumpInstruction:
         assert inst.wr.dst.name == "s1"
         assert inst.wr.src_type == "op"
         assert inst.op.lhs.name == "s1"
-        assert inst.uf == "1"
+        assert inst.uf is True
 
         assert inst.to_dict() == original
 
@@ -259,11 +259,11 @@ class TestRegWriteInstruction:
         assert str(inst.lit) == "#10"
 
     def test_construction_op_source(self):
-        inst = RegWriteInst(dst=Register("s2"), src=SrcKeyword.OP, op=AluExpr(Register("s1"), AluOp.ADD, Immediate(1)), uf="0")
+        inst = RegWriteInst(dst=Register("s2"), src=SrcKeyword.OP, op=AluExpr(Register("s1"), AluOp.ADD, Immediate(1)), uf=False)
         assert inst.dst.name == "s2"
         assert inst.src == "op"
         assert inst.op.lhs.name == "s1"
-        assert inst.uf == "0"
+        assert inst.uf is False
 
     def test_dispatch_regwr_imm(self):
         d = {"CMD": "REG_WR", "DST": "s1", "SRC": "imm", "LIT": "#0"}
@@ -497,7 +497,7 @@ class TestConditionalJumpPattern:
         Label.reset()
         Label.make_new("end")
         test_dict = {"CMD": "TEST", "OP": "r1 - #10", "UF": "1"}
-        jump_dict = {"CMD": "JUMP", "LABEL": "end", "IF": "eq"}
+        jump_dict = {"CMD": "JUMP", "LABEL": "end", "IF": "Z"}
 
         test_inst = BaseInst.from_dict(test_dict)
         jump_inst = BaseInst.from_dict(jump_dict)
@@ -513,7 +513,7 @@ class TestConditionalJumpPattern:
         """Test various condition codes for conditional jumps."""
         Label.reset()
         Label.make_new("target")
-        conditions = ["eq", "nz", "z", "f", "s", "ns"]
+        conditions = ["Z", "NZ", "S", "NS"]
         for cond in conditions:
             d = {"CMD": "JUMP", "LABEL": "target", "IF": cond}
             inst = BaseInst.from_dict(d)

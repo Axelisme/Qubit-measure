@@ -13,7 +13,7 @@ def _is_pure_regwrite_op(inst: RegWriteInst) -> bool:
         and inst.op is not None
         and inst.lit is None
         and inst.if_cond is None
-        and inst.uf is None
+        and not inst.uf
         and inst.wr is None
         and inst.label is None
         and inst.addr is None
@@ -119,7 +119,7 @@ class LoopConditionMergePass(AbsChunkPass):
             or branch.if_cond is None
             or branch.op is not None
             or branch.wr is not None
-            or branch.uf is not None
+            or branch.uf
         ):
             return False
 

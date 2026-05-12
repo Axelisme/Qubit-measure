@@ -75,7 +75,7 @@ class DeadWriteEliminationPass(AbsChunkPass):
             # 1. Flag updates (-uf)
             # 2. Volatile registers (s0-s14)
             # 3. Multiple writes (usually aliasing like r_wave, treat as barrier for simplicity)
-            if getattr(inst, "uf", None) is not None:
+            if getattr(inst, "uf", False):
                 pending.clear()
                 continue
 
@@ -167,7 +167,7 @@ def _is_const_increment(inst: Instruction) -> tuple[str, int] | None:
     if inst.src != "op" or not isinstance(inst.op, AluExpr):
         return None
     if (
-        inst.uf is not None
+        inst.uf
         or inst.if_cond is not None
         or inst.wr is not None
         or inst.label is not None
