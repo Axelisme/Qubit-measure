@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional, cast
 
 from ..instructions import BaseInst, Instruction, LabelInst, MetaInst
-from ..labels import PSEUDO_LABELS, Label
+from ..labels import Label
 from ..node import BasicBlockNode, BlockNode, IRBranch, IRLoop, IRNode, RootNode
 from ..pipeline import AbsChunkPass, ChunkList, PipeLineContext
 from .base import OptimizationPassBase, walk_basic_blocks, walk_instructions
@@ -32,7 +32,7 @@ class DeadLabelEliminationPass(OptimizationPassBase):
         return out, before != after
 
     def visit_LabelInst(self, inst: LabelInst) -> Optional[Instruction]:
-        if str(inst.name) in PSEUDO_LABELS:
+        if inst.name.is_pseudo_name():
             return inst
         if not inst.can_remove:
             return inst
@@ -44,7 +44,7 @@ class DeadLabelEliminationPass(OptimizationPassBase):
         node.labels = [
             lbl
             for lbl in node.labels
-            if str(lbl.name) in PSEUDO_LABELS
+            if lbl.name.is_pseudo_name()
             or not lbl.can_remove
             or lbl.name in self._referenced_labels
         ]
@@ -190,7 +190,7 @@ class BlockMergePass(OptimizationPassBase):
 
 def _has_alive_labels(block: BasicBlockNode, referenced: set[Label]) -> bool:
     return any(
-        lbl.name in referenced and str(lbl.name) not in PSEUDO_LABELS
+        lbl.name in referenced and not lbl.name.is_pseudo_name()
         for lbl in block.labels
     )
 
