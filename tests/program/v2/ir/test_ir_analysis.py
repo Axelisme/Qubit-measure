@@ -75,10 +75,10 @@ def test_property_types():
     inst = RegWriteInst(
         dst=Register("s1"), src=SrcKeyword.OP, op=AluExpr(Register("s2"), AluOp.ADD, Register("s3"))
     )
-    assert isinstance(inst.reg_read, list)
-    assert isinstance(inst.reg_write, list)
-    assert inst.reg_read == ["s2", "s3"]
-    assert inst.reg_write == ["s1"]
+    assert isinstance(inst.reg_read, frozenset)
+    assert isinstance(inst.reg_write, frozenset)
+    assert inst.reg_read == frozenset({"s2", "s3"})
+    assert inst.reg_write == frozenset({"s1"})
 
 
 def test_need_label():

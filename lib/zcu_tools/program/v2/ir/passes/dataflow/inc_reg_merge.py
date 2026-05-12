@@ -95,7 +95,7 @@ def _is_const_increment(inst: BaseInst) -> tuple[str, int] | None:
     if not lhs.is_general_reg():
         return None
 
-    canon = lhs.canonical()
+    canon = lhs.canonical_name
     val = op.rhs.value
     if op.op == AluOp.SUB:
         val = -val
@@ -163,8 +163,8 @@ class IncRegMergePass(AbsChunkPass):
                 reg, val = inc_info
                 pending[reg] = pending.get(reg, 0) + val
             else:
-                reads = set(inst.reg_read)
-                writes = set(inst.reg_write)
+                reads = inst.reg_read
+                writes = inst.reg_write
 
                 # Flush pending increments if their register (or any alias of
                 # it) is read or written by this instruction.

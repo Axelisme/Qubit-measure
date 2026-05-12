@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 
 from typing_extensions import Optional, TypeAlias, Union
 
+from .hw_semantics import VOLATILE_REGS, WAVE_REGS, GENERAL_REGS
+
 if TYPE_CHECKING:
     from .labels import Label
 
@@ -64,8 +66,12 @@ class Operand(ABC):
     """Base class for all instruction operands."""
 
     @abstractmethod
-    def get_read_regs(self) -> set[str]:
-        """Return the names of all registers read by this operand."""
+    def regs(self) -> frozenset[str]:
+        """Return canonical names of all registers referenced by this operand.
+
+        This is register-neutral: whether the operand is a read source or write
+        destination is determined by the instruction that holds it, not here.
+        """
         ...
 
     @abstractmethod
@@ -104,69 +110,41 @@ _REG_ALIAS: dict[str, str] = {
 
 def canonical_reg(name: str) -> str:
     """Resolve a register alias (e.g. 'w_freq' -> 'w0') to its canonical name."""
-    name = name[1:] if name.startswith("&") else name
     return _REG_ALIAS.get(name, name)
 
 
-@dataclass(frozen=True)
+@dataclass
 class Register(Operand):
     name: str
 
-    def canonical(self) -> str:
-        """Return the canonical register name (resolves aliases)."""
-        return canonical_reg(self.name)
+    def __post_init__(self):
+        if self.name.startswith("&"):
+            self.name = self.name[1:]
+
+    @property
+    def canonical_name(self) -> str:
+        """Single canonical name after alias resolution (e.g. 'w_freq' → 'w0')."""
+        return _REG_ALIAS.get(self.name, self.name)
+
+    def regs(self) -> frozenset[str]:
+        """Expand 'r_wave' to all wave registers; otherwise return {canonical_name}."""
+        c = self.canonical_name
+        if c == "r_wave":
+            return frozenset(WAVE_REGS)
+        return frozenset({c})
 
     def is_general_reg(self) -> bool:
         """Return True if this is a general-purpose 'r' register."""
-        canon = canonical_reg(self.name)
-        return canon.startswith("r") and canon[1:].isdigit()
+        return self.canonical_name in GENERAL_REGS
 
     def is_wave_reg(self) -> bool:
         """Return True if this is a wave register ('w0'-'w5') or 'r_wave'."""
-        canon = canonical_reg(self.name)
-        return canon == "r_wave" or (canon.startswith("w") and canon[1:].isdigit())
+        c = self.canonical_name
+        return c == "r_wave" or c in WAVE_REGS
 
-    def is_system(self) -> bool:
-        """True if this is a system register (s0-s15, w0-w5, or their aliases)."""
-        canon = canonical_reg(self.name)
-        if canon == "r_wave":
-            return True
-        if canon.startswith("s") or canon.startswith("w"):
-            return canon[1:].isdigit()
-        return False
-
-    def is_volatile(self) -> bool:
-        """True if writes have hardware side effects (s0-s14, excludes s15/w*/r_wave)."""
-        if not self.is_system():
-            return False
-        canon = canonical_reg(self.name)
-        if canon.startswith("w") or canon == "r_wave":
-            return False
-        return canon != "s15"
-
-    def get_read_regs(self) -> set[str]:
-        name = self.name[1:] if self.name.startswith("&") else self.name
-        if name.startswith("#"):
-            return set()
-        canon = _REG_ALIAS.get(name, name)
-        if canon == "r_wave":
-            return {"r_wave", "w0", "w1", "w2", "w3", "w4", "w5"}
-        if canon in {"w0", "w1", "w2", "w3", "w4", "w5"}:
-            return {canon, "r_wave"}
-        if canon != name:
-            return {canon}
-        return {name}
-
-    def get_write_regs(self) -> set[str]:
-        name = self.name[1:] if self.name.startswith("&") else self.name
-        canon = _REG_ALIAS.get(name, name)
-        if canon == "r_wave":
-            return {"r_wave", "w0", "w1", "w2", "w3", "w4", "w5"}
-        if canon in {"w0", "w1", "w2", "w3", "w4", "w5"}:
-            return {canon, "r_wave"}
-        if canon != name:
-            return {canon}
-        return {name}
+    def is_volatile_reg(self) -> bool:
+        """True if writes have hardware side effects (s0-s14)."""
+        return self.canonical_name in VOLATILE_REGS
 
     def __str__(self) -> str:
         return self.name
@@ -178,8 +156,8 @@ class ImmValue(Operand):
 
     value: int
 
-    def get_read_regs(self) -> set[str]:
-        return set()
+    def regs(self) -> frozenset[str]:
+        return frozenset()
 
     def __str__(self) -> str:
         return str(self.value)
@@ -191,8 +169,8 @@ class Immediate(Operand):
 
     value: int
 
-    def get_read_regs(self) -> set[str]:
-        return set()
+    def regs(self) -> frozenset[str]:
+        return frozenset()
 
     def __str__(self) -> str:
         return f"#{self.value}"
@@ -204,8 +182,8 @@ class TimeOffset(Operand):
 
     value: int
 
-    def get_read_regs(self) -> set[str]:
-        return set()
+    def regs(self) -> frozenset[str]:
+        return frozenset()
 
     def __str__(self) -> str:
         return f"@{self.value}"
@@ -217,8 +195,8 @@ class MemAddr(Operand):
 
     value: int
 
-    def get_read_regs(self) -> set[str]:
-        return set()
+    def regs(self) -> frozenset[str]:
+        return frozenset()
 
     def __str__(self) -> str:
         return f"&{self.value}"
@@ -239,11 +217,11 @@ class AluExpr(Operand):
     op: AluOp
     rhs: Optional[Union[Register, Immediate]] = None
 
-    def get_read_regs(self) -> set[str]:
-        regs = self.lhs.get_read_regs()
-        if self.rhs:
-            regs.update(self.rhs.get_read_regs())
-        return regs
+    def regs(self) -> frozenset[str]:
+        result = self.lhs.regs()
+        if self.rhs is not None:
+            result = result | self.rhs.regs()
+        return result
 
     def __str__(self) -> str:
         if self.rhs is None:
@@ -263,11 +241,8 @@ class SideWrite(Operand):
     dst: Register
     src_type: str
 
-    def get_read_regs(self) -> set[str]:
-        return set()
-
-    def get_write_regs(self) -> set[str]:
-        return self.dst.get_write_regs()
+    def regs(self) -> frozenset[str]:
+        return self.dst.regs()
 
     def __str__(self) -> str:
         return f"{self.dst} {self.src_type}"

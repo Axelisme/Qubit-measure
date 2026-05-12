@@ -14,7 +14,9 @@ STATUS_REG = "s10"  # read by WAIT port_dt / div_rdy / div_dt / qpa_*
 ADDR_REG = "s15"  # big-PMEM jump target / dispatch base
 
 WAVE_REGS = frozenset({"w0", "w1", "w2", "w3", "w4", "w5"})
-WAVE_BUNDLE = WAVE_REGS | {"r_wave"}  # full alias set including r_wave
 
 # Volatile system regs (s0..s14). Mirrors labels.is_volatile_reg_name as a set.
 VOLATILE_REGS = frozenset({f"s{i}" for i in range(15)})
+
+# General regs
+GENERAL_REGS = frozenset({f"r{i}" for i in range(15)})

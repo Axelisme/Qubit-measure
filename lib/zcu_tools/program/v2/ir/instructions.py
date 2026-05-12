@@ -6,7 +6,7 @@ from typing import Literal
 
 from typing_extensions import Any, Optional, Union
 
-from .hw_semantics import STATUS_REG, TIMED_BASE_REG, USR_TIME_REG, WAVE_BUNDLE
+from .hw_semantics import STATUS_REG, TIMED_BASE_REG, USR_TIME_REG
 from .labels import Label
 from .operands import (
     AddrType,
@@ -152,14 +152,14 @@ class BaseInst(Instruction):
         return 1
 
     @property
-    def reg_read(self) -> list[str]:
+    def reg_read(self) -> frozenset[str]:
         """Registers read by this instruction."""
-        return []
+        return frozenset()
 
     @property
-    def reg_write(self) -> list[str]:
+    def reg_write(self) -> frozenset[str]:
         """Registers written by this instruction."""
-        return []
+        return frozenset()
 
     @property
     def need_label(self) -> Optional[Label]:
@@ -234,15 +234,15 @@ class TimeInst(BaseInst):
         )
 
     @property
-    def reg_read(self) -> list[str]:
-        reads = set(self.r1.get_read_regs()) if self.r1 else set()
+    def reg_read(self) -> frozenset[str]:
+        reads = self.r1.regs() if self.r1 else frozenset()
         if self.c_op == "updt":
-            reads.add(USR_TIME_REG)
-        return sorted(list(reads))
+            reads = reads | {USR_TIME_REG}
+        return reads
 
     @property
-    def reg_write(self) -> list[str]:
-        return [TIMED_BASE_REG]
+    def reg_write(self) -> frozenset[str]:
+        return frozenset({TIMED_BASE_REG})
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -270,8 +270,8 @@ class TestInst(BaseInst):
         )
 
     @property
-    def reg_read(self) -> list[str]:
-        return sorted(list(self.op.get_read_regs())) if self.op else []
+    def reg_read(self) -> frozenset[str]:
+        return self.op.regs() if self.op else frozenset()
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -312,21 +312,17 @@ class JumpInst(BaseInst):
                 )
 
     @property
-    def reg_read(self) -> list[str]:
-        reads: set[str] = set()
+    def reg_read(self) -> frozenset[str]:
+        reads = frozenset[str]()
         if isinstance(self.addr, Register):
-            reads.update(self.addr.get_read_regs())
+            reads = reads | self.addr.regs()
         if self.op:
-            reads.update(self.op.get_read_regs())
-        if self.wr:
-            reads.update(self.wr.get_read_regs())
-        return sorted(list(reads))
+            reads = reads | self.op.regs()
+        return reads
 
     @property
-    def reg_write(self) -> list[str]:
-        if self.wr:
-            return sorted(list(self.wr.get_write_regs()))
-        return []
+    def reg_write(self) -> frozenset[str]:
+        return self.wr.regs() if self.wr else frozenset()
 
     @property
     def need_label(self) -> Optional[Label]:
@@ -382,21 +378,21 @@ class RegWriteInst(BaseInst):
         )
 
     @property
-    def reg_read(self) -> list[str]:
-        reads: set[str] = set()
+    def reg_read(self) -> frozenset[str]:
+        reads: frozenset[str] = frozenset()
         if self.src == SrcKeyword.WMEM:
-            reads.add(TIMED_BASE_REG)
+            reads = reads | {TIMED_BASE_REG}
         if isinstance(self.src, Register):
-            reads |= self.src.get_read_regs()
+            reads = reads | self.src.regs()
         if self.op:
-            reads.update(self.op.get_read_regs())
+            reads = reads | self.op.regs()
         if isinstance(self.addr, Register):
-            reads.update(self.addr.get_read_regs())
-        return sorted(list(reads))
+            reads = reads | self.addr.regs()
+        return reads
 
     @property
-    def reg_write(self) -> list[str]:
-        return sorted(list(self.dst.get_write_regs())) if self.dst else []
+    def reg_write(self) -> frozenset[str]:
+        return self.dst.regs() if self.dst else frozenset()
 
     @property
     def need_label(self) -> Optional[Label]:
@@ -460,25 +456,20 @@ class PortWriteInst(BaseInst):
         )
 
     @property
-    def reg_read(self) -> list[str]:
-        reads: set[str] = {TIMED_BASE_REG}
-        if self.src == Register("r_wave"):
-            reads |= WAVE_BUNDLE
-        elif isinstance(self.src, Register):
-            reads |= self.src.get_read_regs()
-
+    def reg_read(self) -> frozenset[str]:
+        reads: frozenset[str] = frozenset({TIMED_BASE_REG})
+        if isinstance(self.src, Register):
+            reads = reads | self.src.regs()
         for op in [self.dst, self.addr, self.time]:
             if isinstance(op, Register):
-                reads.update(op.get_read_regs())
+                reads = reads | op.regs()
         if self.op:
-            reads.update(self.op.get_read_regs())
-        if self.wr:
-            reads.update(self.wr.get_read_regs())
-        return sorted(list(reads))
+            reads = reads | self.op.regs()
+        return reads
 
     @property
-    def reg_write(self) -> list[str]:
-        return []
+    def reg_write(self) -> frozenset[str]:
+        return frozenset()
 
     def to_dict(self) -> dict[str, Any]:
         src_val = (
@@ -544,17 +535,17 @@ class DmemReadInst(BaseInst):
         )
 
     @property
-    def reg_read(self) -> list[str]:
-        reads: set[str] = set()
+    def reg_read(self) -> frozenset[str]:
+        reads: frozenset[str] = frozenset()
         if isinstance(self.addr, Register):
-            reads.update(self.addr.get_read_regs())
+            reads = reads | self.addr.regs()
         if self.op:
-            reads.update(self.op.get_read_regs())
-        return sorted(list(reads))
+            reads = reads | self.op.regs()
+        return reads
 
     @property
-    def reg_write(self) -> list[str]:
-        return sorted(list(self.dst.get_write_regs())) if self.dst else []
+    def reg_write(self) -> frozenset[str]:
+        return self.dst.regs() if self.dst else frozenset()
 
     @property
     def need_label(self) -> Optional[Label]:
@@ -605,14 +596,14 @@ class DmemWriteInst(BaseInst):
         )
 
     @property
-    def reg_read(self) -> list[str]:
-        reads: set[str] = set()
+    def reg_read(self) -> frozenset[str]:
+        reads: frozenset[str] = frozenset()
         for op in [self.dst, self.src]:
             if isinstance(op, Register):
-                reads.update(op.get_read_regs())
+                reads = reads | op.regs()
         if self.op:
-            reads.update(self.op.get_read_regs())
-        return sorted(list(reads))
+            reads = reads | self.op.regs()
+        return reads
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -653,17 +644,15 @@ class WmemWriteInst(BaseInst):
         )
 
     @property
-    def reg_read(self) -> list[str]:
-        reads: set[str] = set(WAVE_BUNDLE) | {TIMED_BASE_REG}
+    def reg_read(self) -> frozenset[str]:
+        reads = Register("r_wave").regs() | frozenset({TIMED_BASE_REG})
         if isinstance(self.addr, Register):
-            reads.update(self.addr.get_read_regs())
+            reads = reads | self.addr.regs()
         if isinstance(self.time, Register):
-            reads.update(self.time.get_read_regs())
+            reads = reads | self.time.regs()
         if self.op:
-            reads.update(self.op.get_read_regs())
-        if self.wr:
-            reads.update(self.wr.get_read_regs())
-        return sorted(list(reads))
+            reads = reads | self.op.regs()
+        return reads
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -715,23 +704,20 @@ class DportWriteInst(BaseInst):
         )
 
     @property
-    def reg_read(self) -> list[str]:
-        reads: set[str] = {TIMED_BASE_REG}
+    def reg_read(self) -> frozenset[str]:
+        reads: frozenset[str] = frozenset({TIMED_BASE_REG})
         if isinstance(self.src, Register):
-            reads |= self.src.get_read_regs()
-
+            reads = reads | self.src.regs()
         for op in [self.dst, self.data, self.time]:
             if isinstance(op, Register):
-                reads.update(op.get_read_regs())
+                reads = reads | op.regs()
         if self.op:
-            reads.update(self.op.get_read_regs())
-        if self.wr:
-            reads.update(self.wr.get_read_regs())
-        return sorted(list(reads))
+            reads = reads | self.op.regs()
+        return reads
 
     @property
-    def reg_write(self) -> list[str]:
-        return []
+    def reg_write(self) -> frozenset[str]:
+        return frozenset()
 
     def to_dict(self) -> dict[str, Any]:
         src_val = (
@@ -772,16 +758,16 @@ class WaitInst(BaseInst):
         )
 
     @property
-    def reg_read(self) -> list[str]:
+    def reg_read(self) -> frozenset[str]:
         if self.c_op == "time":
-            reads: set[str] = {USR_TIME_REG, TIMED_BASE_REG}
+            reads: frozenset[str] = frozenset({USR_TIME_REG, TIMED_BASE_REG})
         else:
-            reads = {STATUS_REG}
+            reads = frozenset({STATUS_REG})
         if isinstance(self.time, Register):
-            reads.update(self.time.get_read_regs())
+            reads = reads | self.time.regs()
         if isinstance(self.addr, Register):
-            reads.update(self.addr.get_read_regs())
-        return sorted(list(reads))
+            reads = reads | self.addr.regs()
+        return reads
 
     @property
     def need_label(self) -> Optional[Label]:

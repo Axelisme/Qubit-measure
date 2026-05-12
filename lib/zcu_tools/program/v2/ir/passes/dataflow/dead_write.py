@@ -32,20 +32,22 @@ QICK Hardware Notes
   and simultaneously writes the entire ``w0–w5`` / ``r_wave`` alias group.
   It is treated as an opaque read+write barrier: pending tracking is cleared
   and the wmem read itself is never eliminated.
-- The ``r_wave`` bundle reference: because ``wN.get_write_regs()`` returns
-  ``{wN, r_wave}``, a shadow entry for ``r_wave`` acts as a DCE-level sentinel
-  that flushes when *any* ``wN`` alias appears in a read or write.
+- The ``r_wave`` bundle reference: because ``WmemWriteInst.reg_read`` includes
+  the full wave-register bundle, a shadow entry for ``r_wave`` acts as a
+  DCE-level sentinel that flushes when *any* ``wN`` alias appears in a read or write.
 - JumpInst and other non-data instructions with control-flow semantics are
   treated as barriers (``_is_write_tracking_barrier``): all pending entries
   are conservatively flushed.
 
 Decision Notes
 --------------
-Tracking uses canonical register names (``inst.reg_write`` already returns
-canonicals after the operands refactor).  Aliased writes (``len(writes) > 1``,
-e.g., ``r_wave`` expanding to ``{r_wave, w0, …, w5}``) are treated as a group
-flush rather than shadow tracking to avoid incorrectly marking one alias as
-dead when another alias is later read.
+Tracking uses canonical register names. Instructions with multiple destinations
+(like ``r_wave`` expanding to ``{w0, …, w5}``) are tracked precisely: the
+instruction is only marked dead if *all* of its destinations are shadowed by
+subsequent writes before any intervening reads. If any destination is read,
+the entire instruction is marked live. Hardware side-effects (volatile
+registers, status flag updates, or wave memory reads) always protect an
+instruction from elimination.
 """
 
 from __future__ import annotations
@@ -91,55 +93,62 @@ class DeadWriteEliminationPass(AbsChunkPass):
         return True
 
     def _find_dead_indices(self, insts: list[BaseInst]) -> set[int]:
-        # pending: canonical reg name -> index of last pending write.  Using
-        # canonical names ensures that an alias (e.g. w_freq) and the
-        # underlying register (w0) collide correctly when checking shadows.
-        pending: dict[str, int] = {}
+        # inst_pending_regs: index -> set of registers written by this instruction
+        # that are still pending (not read and not yet shadowed).
+        inst_pending_regs: dict[int, set[str]] = {}
+        # reg_to_inst: canonical reg name -> index of the latest instruction that wrote to it.
+        reg_to_inst: dict[str, int] = {}
         dead: set[int] = set()
 
         for idx, inst in enumerate(insts):
             if self._is_write_tracking_barrier(inst):
-                pending.clear()
+                inst_pending_regs.clear()
+                reg_to_inst.clear()
                 continue
 
-            # REG_WR <dst> wmem reads from wave memory (a non-register side
-            # effect) and writes to r_wave / w0..w5 as an aliased group.  Treat
-            # it as an opaque read barrier: clear pending and skip shadow
-            # tracking so the wmem read is never eliminated and its writes
-            # cannot be shadowed by later wN writes.
-            if isinstance(inst, RegWriteInst) and inst.src == SrcKeyword.WMEM:
-                pending.clear()
-                continue
+            # Special case: instructions that read from external state (wmem)
+            # are never dead, but they do shadow previous writes to wave registers.
+            is_wmem_read = (
+                isinstance(inst, RegWriteInst) and inst.src == SrcKeyword.WMEM
+            )
 
-            reads = set(inst.reg_read)
-            writes = list(inst.reg_write)
+            reads = inst.reg_read
+            writes = inst.reg_write
 
+            # 1. Process Reads: any read makes the source instruction "not dead".
             for reg in reads:
-                pending.pop(reg, None)
+                if reg in reg_to_inst:
+                    prev_idx = reg_to_inst[reg]
+                    if prev_idx in inst_pending_regs:
+                        # This instruction is now "live" because at least one of
+                        # its outputs is read. Remove it from tracking.
+                        for r in inst_pending_regs.pop(prev_idx):
+                            reg_to_inst.pop(r, None)
 
-            # Do not eliminate instructions with hardware side effects:
-            # 1. Flag updates (-uf)
-            # 2. Volatile registers (s0-s14)
-            # 3. Multiple writes (usually aliasing like r_wave, treat as barrier for simplicity)
-            if getattr(inst, "uf", False):
-                pending.clear()
-                continue
+            # 2. Process Side-effects: instructions with hardware side effects
+            # (volatile regs, -uf, or wmem read) are never candidates for removal.
+            can_be_dead = not (
+                getattr(inst, "uf", False)
+                or is_wmem_read
+                or any(Register(w).is_volatile_reg() for w in writes)
+            )
 
-            if len(writes) == 1:
-                dst = writes[0]
-                if Register(dst).is_volatile():
-                    continue
-                prev_idx = pending.get(dst)
-                if prev_idx is not None:
-                    dead.add(prev_idx)
-                pending[dst] = idx
-            elif len(writes) > 1:
-                # Aliasing write (e.g. r_wave). Clear all shadowed registers from pending.
-                for dst in writes:
-                    prev_idx = pending.get(dst)
-                    if prev_idx is not None:
-                        dead.add(prev_idx)
-                    pending.pop(dst, None)
+            # 3. Process Writes: shadowing previous writes.
+            for reg in writes:
+                if reg in reg_to_inst:
+                    prev_idx = reg_to_inst[reg]
+                    if prev_idx in inst_pending_regs:
+                        inst_pending_regs[prev_idx].remove(reg)
+                        if not inst_pending_regs[prev_idx]:
+                            # ALL outputs of prev_idx are now shadowed.
+                            dead.add(prev_idx)
+                            del inst_pending_regs[prev_idx]
+
+            # 4. Track this instruction if it's a candidate for DCE.
+            if can_be_dead and writes:
+                inst_pending_regs[idx] = set(writes)
+                for reg in writes:
+                    reg_to_inst[reg] = idx
 
         return dead
 
