@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pydantic import ConfigDict
-
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 
 

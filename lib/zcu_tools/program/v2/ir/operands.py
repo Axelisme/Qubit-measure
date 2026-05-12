@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from typing_extensions import Optional, TypeAlias, Union
 
-from .hw_semantics import VOLATILE_REGS, WAVE_REGS, GENERAL_REGS
+from .hw_semantics import GENERAL_REGS, VOLATILE_REGS, WAVE_REGS
 
 if TYPE_CHECKING:
     from .labels import Label

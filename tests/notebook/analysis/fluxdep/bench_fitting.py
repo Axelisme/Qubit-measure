@@ -32,19 +32,18 @@ if _LIB not in sys.path:
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from zcu_tools.notebook.analysis.fluxdep.fitting import (  # noqa: E402
+from zcu_tools.notebook.analysis.fluxdep.fitting import (
     fit_spectrum,
     search_in_database,
 )
-from zcu_tools.notebook.persistance import TransitionDict  # noqa: E402
-from zcu_tools.notebook.analysis.fluxdep.njit import (  # noqa: E402
+from zcu_tools.notebook.analysis.fluxdep.njit import (
     candidate_breakpoint_search,
     eval_dist_bounded,
     smart_fuzzy_search,
 )
-from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux  # noqa: E402
+from zcu_tools.notebook.persistance import TransitionDict
 
-from tests.notebook.analysis.fluxdep._synthetic import synth_ABC  # noqa: E402
+from tests.notebook.analysis.fluxdep._synthetic import synth_ABC
 
 
 def _timed(fn, *, repeat=5):
@@ -167,8 +166,15 @@ def macro_benches(db_path: str, quick: bool, n_fluxs: int | None = None) -> dict
     for name, n_jobs, fuzzy in cases:
         t0 = time.perf_counter()
         best_params, fig = search_in_database(
-            fluxs, freqs, db_path, transitions, EJb, ECb, ELb,
-            n_jobs=n_jobs, fuzzy=fuzzy,
+            fluxs,
+            freqs,
+            db_path,
+            transitions,
+            EJb,
+            ECb,
+            ELb,
+            n_jobs=n_jobs,
+            fuzzy=fuzzy,
         )
         dt = time.perf_counter() - t0
         plt.close(fig)
