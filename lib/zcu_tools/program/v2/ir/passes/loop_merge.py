@@ -93,14 +93,12 @@ class LoopConditionMergePass(AbsChunkPass):
             and branch.wr is None
         ):
             # Target pattern: branch.op is "reg - #0" and last_inst.dst is "reg"
-            reg = last_inst.dst.name
             op = branch.op
             if (
                 isinstance(op, AluExpr)
-                and op.lhs.name == reg
+                and op.lhs == last_inst.dst
                 and op.op == AluOp.SUB
-                and isinstance(op.rhs, Immediate)
-                and op.rhs.value == 0
+                and op.rhs == Immediate(0)
             ):
                 block.branch = _make_merged_branch(branch, last_inst)
                 block.insts.pop(last_idx)

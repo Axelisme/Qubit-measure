@@ -305,7 +305,7 @@ class JumpInst(BaseInst):
 
     def __post_init__(self) -> None:
         if self.addr is not None and not isinstance(self.addr, Label):
-            if not (isinstance(self.addr, Register) and self.addr.name == "s15"):
+            if self.addr != Register("s15"):
                 raise ValueError(
                     f"JumpInst.addr must be 's15' or Label, got {self.addr!r}."
                 )
@@ -461,7 +461,7 @@ class PortWriteInst(BaseInst):
     @property
     def reg_read(self) -> list[str]:
         reads: set[str] = {TIMED_BASE_REG}
-        if isinstance(self.src, Register) and self.src.name == "r_wave":
+        if self.src == Register("r_wave"):
             reads |= WAVE_BUNDLE
         elif isinstance(self.src, Register):
             reads |= self.src.get_read_regs()

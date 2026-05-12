@@ -18,9 +18,7 @@ def _is_zero_ref_increment(inst: BaseInst) -> bool:
         return False
     if inst.r1 is not None:
         return False
-    if not isinstance(inst.lit, Immediate):
-        return False
-    return inst.lit.value == 0
+    return inst.lit == Immediate(0)
 
 
 def _is_lit_time(inst: BaseInst) -> bool:
