@@ -21,7 +21,7 @@ from zcu_tools.program.v2.ir.node import (
     IRLoop,
     RootNode,
 )
-from zcu_tools.program.v2.ir.operands import AluExpr, Literal, Register
+from zcu_tools.program.v2.ir.operands import AluExpr, ImmValue, Register, AluOp
 from zcu_tools.program.v2.ir.passes.control_flow import (
     BlockMergePass,
     BranchEliminationPass,
@@ -152,7 +152,7 @@ def test_branch_elim_keeps_conditional_branch():
                 branch=JumpInst(
                     label=lbl,
                     if_cond="Z",
-                    op=AluExpr(Register("r0"), "-", Literal("#0")),
+                    op=AluExpr(Register("r0"), AluOp.SUB, ImmValue(0, prefix="#")),
                 ),
             ),
             BasicBlockNode(
@@ -244,10 +244,10 @@ def test_block_merge_cross_boundary_dead_write_cleared_by_post_linear():
     root = RootNode(
         insts=[
             BasicBlockNode(
-                insts=[RegWriteInst(dst=Register("r0"), src="imm", lit=Literal("#1"))]
+                insts=[RegWriteInst(dst=Register("r0"), src="imm", lit=ImmValue(1, prefix="#"))]
             ),
             BasicBlockNode(
-                insts=[RegWriteInst(dst=Register("r0"), src="imm", lit=Literal("#2"))]
+                insts=[RegWriteInst(dst=Register("r0"), src="imm", lit=ImmValue(2, prefix="#"))]
             ),
         ]
     )
@@ -262,7 +262,7 @@ def test_block_merge_cross_boundary_dead_write_cleared_by_post_linear():
     merged = root.insts[0]
     assert isinstance(merged, BasicBlockNode)
     assert len(merged.insts) == 1
-    assert merged.insts[0].lit.value == "#2"  # type: ignore[attr-defined]
+    assert str(merged.insts[0].lit) == "#2"  # type: ignore[attr-defined]
 
 
 def test_block_merge_chains_three_blocks():

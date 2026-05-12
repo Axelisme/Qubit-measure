@@ -38,7 +38,7 @@ from ..factory import IRParser, _needs_big_jump
 from ..instructions import BaseInst, JumpInst, LabelInst, RegWriteInst
 from ..labels import Label
 from ..node import BasicBlockNode, BlockNode
-from ..operands import AluExpr, Literal, Register
+from ..operands import AluExpr, ImmValue, Register, AluOp
 
 
 def build_jump_table_blocks(
@@ -75,7 +75,7 @@ def build_jump_table_blocks(
                     RegWriteInst(dst=Register("s15"), src="label", label=exit_label)
                 ],
                 branch=JumpInst(
-                    addr=Register("s15"), if_cond="Z", op=AluExpr(n, "-", Literal("#0"))
+                    addr=Register("s15"), if_cond="Z", op=AluExpr(n, AluOp.SUB, ImmValue(0, prefix="#"))
                 ),
             )
         )
@@ -83,7 +83,7 @@ def build_jump_table_blocks(
         result.append(
             BasicBlockNode(
                 branch=JumpInst(
-                    label=exit_label, if_cond="Z", op=AluExpr(n, "-", Literal("#0"))
+                    label=exit_label, if_cond="Z", op=AluExpr(n, AluOp.SUB, ImmValue(0, prefix="#"))
                 ),
             )
         )
@@ -92,7 +92,7 @@ def build_jump_table_blocks(
     # Uses counter_reg as scratch only until it is reset to 0.
     if _needs_big_jump(pmem_size):
         dispatch_insts: list[BaseInst] = [
-            RegWriteInst(dst=i, src="op", op=AluExpr(n, "AND", Literal(f"#{k - 1}"))),
+            RegWriteInst(dst=i, src="op", op=AluExpr(n, AluOp.AND, ImmValue(k - 1, prefix="#"))),
         ]
         # r == 0: jump straight to entry_0
         result.append(BasicBlockNode(insts=dispatch_insts))
@@ -100,7 +100,7 @@ def build_jump_table_blocks(
             BasicBlockNode(
                 insts=[RegWriteInst(dst=Register("s15"), src="label", label=entry0)],
                 branch=JumpInst(
-                    addr=Register("s15"), if_cond="Z", op=AluExpr(i, "-", Literal("#0"))
+                    addr=Register("s15"), if_cond="Z", op=AluExpr(i, AluOp.SUB, ImmValue(0, prefix="#"))
                 ),
             )
         )
@@ -109,11 +109,11 @@ def build_jump_table_blocks(
             BasicBlockNode(
                 insts=[
                     RegWriteInst(
-                        dst=i, src="op", op=AluExpr(n, "AND", Literal(f"#{k - 1}"))
+                        dst=i, src="op", op=AluExpr(n, AluOp.AND, ImmValue(k - 1, prefix="#"))
                     )
                 ],
                 branch=JumpInst(
-                    label=entry0, if_cond="Z", op=AluExpr(i, "-", Literal("#0"))
+                    label=entry0, if_cond="Z", op=AluExpr(i, AluOp.SUB, ImmValue(0, prefix="#"))
                 ),
             )
         )
@@ -121,15 +121,15 @@ def build_jump_table_blocks(
     # Compute entry offset and jump.
     offset_insts: list[BaseInst] = [
         RegWriteInst(
-            dst=i, src="op", op=AluExpr(i, "-", Literal(f"#{k}"))
+            dst=i, src="op", op=AluExpr(i, AluOp.SUB, ImmValue(k, prefix="#"))
         ),  # i = r - k (< 0)
-        RegWriteInst(dst=i, src="op", op=AluExpr(i, "ABS")),  # i = k - r (offset)
+        RegWriteInst(dst=i, src="op", op=AluExpr(i, AluOp.ABS)),  # i = k - r (offset)
         *emit_dispatch_address_setup(
             index_reg=counter_reg,
             table_base=table_labels[0],
             pmem_size=pmem_size,
         ),
-        RegWriteInst(dst=i, src="imm", lit=Literal("#0")),  # reset counter
+        RegWriteInst(dst=i, src="imm", lit=ImmValue(0, prefix="#")),  # reset counter
     ]
     result.append(
         BasicBlockNode(
@@ -166,7 +166,7 @@ def build_jump_table_blocks(
             BasicBlockNode(
                 insts=back_insts,
                 branch=JumpInst(
-                    addr=Register("s15"), if_cond="NS", op=AluExpr(i, "-", n)
+                    addr=Register("s15"), if_cond="NS", op=AluExpr(i, AluOp.SUB, n)
                 ),
             )
         )
@@ -179,7 +179,7 @@ def build_jump_table_blocks(
     else:
         result.append(
             BasicBlockNode(
-                branch=JumpInst(label=exit_label, if_cond="NS", op=AluExpr(i, "-", n)),
+                branch=JumpInst(label=exit_label, if_cond="NS", op=AluExpr(i, AluOp.SUB, n)),
             )
         )
         result.append(

@@ -31,7 +31,7 @@ from zcu_tools.program.v2.ir.node import (
     IRNode,
     RootNode,
 )
-from zcu_tools.program.v2.ir.operands import Literal, Register
+from zcu_tools.program.v2.ir.operands import ImmValue, Register
 from zcu_tools.program.v2.ir.passes import (
     BranchEliminationPass,
     UnrollLoopPass,
@@ -130,7 +130,7 @@ def test_v1_jump_table_only_dispatch_stubs_are_fixed():
         block
         for block in _collect_all_basic_blocks(root)
         if any(
-            str(lbl.name).startswith("jt_entry_") and "_dispatch_" not in str(lbl.name)
+            lbl.name.name.startswith("jt_entry_") and "_dispatch_" not in lbl.name.name
             for lbl in block.labels
         )
     ]
@@ -192,8 +192,8 @@ def test_v1_pipeline_keeps_body_blocks_free_after_unroll():
         block
         for block in _collect_all_basic_blocks(out)
         if any(
-            str(lbl.name).startswith("loop_jt_entry_")
-            and "_dispatch_" not in str(lbl.name)
+            lbl.name.name.startswith("loop_jt_entry_")
+            and "_dispatch_" not in lbl.name.name
             for lbl in block.labels
         )
     ]
@@ -277,7 +277,7 @@ def test_v2_fully_unrolled_loop_produces_single_fused_block():
                         BasicBlockNode(
                             insts=[
                                 RegWriteInst(
-                                    dst=Register("r1"), src="imm", lit=Literal("#1")
+                                    dst=Register("r1"), src="imm", lit=ImmValue(1, prefix="#")
                                 )
                             ]
                         ),
@@ -324,7 +324,7 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
                         BasicBlockNode(
                             insts=[
                                 RegWriteInst(
-                                    dst=Register("r_out"), src="imm", lit=Literal("#42")
+                                    dst=Register("r_out"), src="imm", lit=ImmValue(42, prefix="#")
                                 )
                             ]
                         ),

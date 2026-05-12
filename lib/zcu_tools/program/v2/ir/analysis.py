@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .pipeline import PipeLineConfig
 
 
-from .operands import Literal
+from .operands import ImmValue, SrcKeyword
 
 
 def estimate_body_scheduled_ticks(body: list[IRNode]) -> int:
@@ -38,11 +38,8 @@ def estimate_body_scheduled_ticks(body: list[IRNode]) -> int:
                 if isinstance(inst, TimeInst) and inst.c_op == "inc_ref":
                     if inst.r1 is not None:
                         continue
-                    if isinstance(inst.lit, Literal) and inst.lit.value.startswith("#"):
-                        try:
-                            total += int(inst.lit.value[1:])
-                        except ValueError:
-                            continue
+                    if isinstance(inst.lit, ImmValue) and inst.lit.prefix == "#":
+                        total += inst.lit.value
         elif isinstance(node, BlockNode):
             total += estimate_body_scheduled_ticks(node.insts)
         elif isinstance(node, IRLoop):
@@ -130,7 +127,7 @@ def reads_implicit_time_base(inst: BaseInst) -> bool:
 
 def is_wmem_load(inst: BaseInst) -> bool:
     """True for `REG_WR r_wave wmem [&addr]` — has dmem read side effect."""
-    return isinstance(inst, RegWriteInst) and inst.src == "wmem"
+    return isinstance(inst, RegWriteInst) and inst.src == SrcKeyword.WMEM
 
 
 def estimate_body_cost(body: list[IRNode], config: PipeLineConfig) -> int:

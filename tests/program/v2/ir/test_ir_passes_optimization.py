@@ -19,7 +19,7 @@ from zcu_tools.program.v2.ir.node import (
     IRLoop,
     RootNode,
 )
-from zcu_tools.program.v2.ir.operands import AluExpr, Literal, Register
+from zcu_tools.program.v2.ir.operands import AluExpr, ImmValue, Register, AluOp
 from zcu_tools.program.v2.ir.passes import walk_basic_blocks
 from zcu_tools.program.v2.ir.passes.dataflow import (
     DeadTestEliminationPass,
@@ -65,7 +65,7 @@ def _counter_update(reg: str) -> BasicBlockNode:
             RegWriteInst(
                 dst=Register(reg),
                 src="op",
-                op=AluExpr(Register(reg), "+", Literal("#1")),
+                op=AluExpr(Register(reg), AluOp.ADD, ImmValue(1, prefix="#")),
             )
         ]
     )
@@ -81,8 +81,8 @@ def test_dead_write_elimination_removes_overwritten_write():
         insts=[
             BasicBlockNode(
                 insts=[
-                    RegWriteInst(dst=Register("r1"), src="imm", lit=Literal("#1")),
-                    RegWriteInst(dst=Register("r1"), src="imm", lit=Literal("#2")),
+                    RegWriteInst(dst=Register("r1"), src="imm", lit=ImmValue(1, prefix="#")),
+                    RegWriteInst(dst=Register("r1"), src="imm", lit=ImmValue(2, prefix="#")),
                     NopInst(),
                 ]
             ),
@@ -95,7 +95,7 @@ def test_dead_write_elimination_removes_overwritten_write():
     assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 2
     assert isinstance(bb.insts[0], RegWriteInst)
-    assert cast(RegWriteInst, bb.insts[0]).lit.value == "#2"
+    assert str(cast(RegWriteInst, bb.insts[0]).lit) == "#2"
 
 
 def test_dead_write_elimination_keeps_write_before_read():
@@ -103,9 +103,9 @@ def test_dead_write_elimination_keeps_write_before_read():
         insts=[
             BasicBlockNode(
                 insts=[
-                    RegWriteInst(dst=Register("r1"), src="imm", lit=Literal("#1")),
-                    TestInst(op=AluExpr(Register("r1"), "-", Literal("#1"))),
-                    RegWriteInst(dst=Register("r1"), src="imm", lit=Literal("#2")),
+                    RegWriteInst(dst=Register("r1"), src="imm", lit=ImmValue(1, prefix="#")),
+                    TestInst(op=AluExpr(Register("r1"), AluOp.SUB, ImmValue(1, prefix="#"))),
+                    RegWriteInst(dst=Register("r1"), src="imm", lit=ImmValue(2, prefix="#")),
                 ]
             ),
         ]
@@ -117,7 +117,7 @@ def test_dead_write_elimination_keeps_write_before_read():
     assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 3
     assert [
-        cast(RegWriteInst, item).lit.value
+        str(cast(RegWriteInst, item).lit)
         for item in bb.insts
         if isinstance(item, RegWriteInst)
     ] == [
@@ -131,8 +131,8 @@ def test_dead_write_elimination_removes_overwritten_write_in_basic_block():
         insts=[
             BasicBlockNode(
                 insts=[
-                    RegWriteInst(dst=Register("r1"), src="imm", lit=Literal("#1")),
-                    RegWriteInst(dst=Register("r1"), src="imm", lit=Literal("#2")),
+                    RegWriteInst(dst=Register("r1"), src="imm", lit=ImmValue(1, prefix="#")),
+                    RegWriteInst(dst=Register("r1"), src="imm", lit=ImmValue(2, prefix="#")),
                 ]
             ),
         ]
@@ -143,7 +143,7 @@ def test_dead_write_elimination_removes_overwritten_write_in_basic_block():
     bb = root.insts[0]
     assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 1
-    assert bb.insts[0].lit.value == "#2"
+    assert str(cast(RegWriteInst, bb.insts[0]).lit) == "#2"
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +156,7 @@ def test_dead_test_elimination_removes_unused_test():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TestInst(op=AluExpr(Register("r1"), "-", Literal("#10"))),
+                    TestInst(op=AluExpr(Register("r1"), AluOp.SUB, ImmValue(10, prefix="#"))),
                     NopInst(),
                 ]
             ),
@@ -176,7 +176,7 @@ def test_dead_test_elimination_keeps_used_test():
     root = RootNode(
         insts=[
             BasicBlockNode(
-                insts=[TestInst(op=AluExpr(Register("r1"), "-", Literal("#10")))],
+                insts=[TestInst(op=AluExpr(Register("r1"), AluOp.SUB, ImmValue(10, prefix="#")))],
                 branch=JumpInst(label=lbl, if_cond="NZ"),
             ),
         ]
@@ -210,7 +210,7 @@ def test_unroll_full_expansion_removes_overwritten_writes_in_body():
                         BasicBlockNode(
                             insts=[
                                 RegWriteInst(
-                                    dst=Register("r1"), src="imm", lit=Literal("#1")
+                                    dst=Register("r1"), src="imm", lit=ImmValue(1, prefix="#")
                                 )
                             ]
                         ),
@@ -262,7 +262,7 @@ def test_unroll_full_expansion_keeps_counter_init_for_counter_dependent_body():
                                 RegWriteInst(
                                     dst=Register("r1"),
                                     src="op",
-                                    op=AluExpr(Register("r0"), ""),
+                                    op=AluExpr(Register("r0"), AluOp.NONE),
                                 )
                             ]
                         ),
@@ -301,16 +301,16 @@ def test_default_pipeline_can_disable_all_optimization_passes():
         insts=[
             BasicBlockNode(
                 insts=[
-                    RegWriteInst(dst=Register("r1"), src="imm", lit=Literal("#1")),
-                    RegWriteInst(dst=Register("r1"), src="imm", lit=Literal("#2")),
+                    RegWriteInst(dst=Register("r1"), src="imm", lit=ImmValue(1, prefix="#")),
+                    RegWriteInst(dst=Register("r1"), src="imm", lit=ImmValue(2, prefix="#")),
                 ]
             ),
             BasicBlockNode(
                 labels=[LabelInst(name=Label.make_new("dead"))],
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=Literal("#0")),
-                    TimeInst(c_op="inc_ref", lit=Literal("#1")),
-                    TimeInst(c_op="inc_ref", lit=Literal("#2")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(0, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(1, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(2, prefix="#")),
                 ],
             ),
         ]
@@ -333,7 +333,7 @@ def test_default_pipeline_can_disable_all_optimization_passes():
     assert len(bb1.labels) == 1
     assert isinstance(bb1.labels[0], LabelInst)
     assert isinstance(bb1.insts[0], TimeInst)
-    assert cast(TimeInst, bb1.insts[0]).lit.value == "#0"  # type: ignore
+    assert str(cast(TimeInst, bb1.insts[0]).lit) == "#0"  # type: ignore
 
 
 def _collect_all_basic_blocks(root: RootNode) -> list[BasicBlockNode]:
@@ -352,7 +352,7 @@ def test_unroll_register_driven_jump_table_structure():
                 body=BlockNode(
                     insts=[
                         BasicBlockNode(
-                            insts=[TimeInst(c_op="inc_ref", lit=Literal("#1"))]
+                            insts=[TimeInst(c_op="inc_ref", lit=ImmValue(1, prefix="#"))]
                         )
                     ]
                 ),

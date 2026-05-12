@@ -13,7 +13,7 @@ from .instructions import (
 )
 from .labels import Label
 from .node import BasicBlockNode, BlockNode, IRBranch, IRLoop, RootNode
-from .operands import AluExpr, Literal, Register
+from .operands import AluExpr, ImmValue, Register, AluOp
 
 BIG_JUMP_PMEM_THRESHOLD = 2**11
 
@@ -332,11 +332,11 @@ class IRParser:
 
         counter = Register(node.counter_reg)
         if isinstance(node.n, int):
-            n_val = Literal(f"#{node.n}")
+            n_val = ImmValue(node.n, prefix="#")
         else:
             n_val = Register(node.n)
 
-        op_str = AluExpr(counter, "-", n_val)
+        op_str = AluExpr(counter, AluOp.SUB, n_val)
 
         pre: list[Instruction] = [
             MetaInst(
@@ -356,7 +356,7 @@ class IRParser:
                     JumpInst(
                         addr=Register("s15"),
                         if_cond="Z",
-                        op=AluExpr(Register(node.n), "-", Literal("#0")),
+                        op=AluExpr(Register(node.n), AluOp.SUB, ImmValue(0, prefix="#")),
                     ),
                 ]
             else:
@@ -364,11 +364,11 @@ class IRParser:
                     JumpInst(
                         label=end,
                         if_cond="Z",
-                        op=AluExpr(Register(node.n), "-", Literal("#0")),
+                        op=AluExpr(Register(node.n), AluOp.SUB, ImmValue(0, prefix="#")),
                     )
                 )
         pre += [
-            RegWriteInst(dst=counter, src="imm", lit=Literal("#0")),
+            RegWriteInst(dst=counter, src="imm", lit=ImmValue(0, prefix="#")),
             LabelInst(name=start, can_remove=True),
             MetaInst(type="LOOP_BODY_START", name=node.name),
         ]
@@ -437,7 +437,7 @@ class IRParser:
                 branch=JumpInst(
                     label=else_label,
                     if_cond="NZ",
-                    op=AluExpr(Register(node.compare_reg), "-", Literal("#0")),
+                    op=AluExpr(Register(node.compare_reg), AluOp.SUB, ImmValue(0, prefix="#")),
                 )
             )
         )

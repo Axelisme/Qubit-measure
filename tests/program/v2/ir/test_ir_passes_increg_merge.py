@@ -7,7 +7,7 @@ from zcu_tools.program.v2.ir.instructions import (
     WmemWriteInst,
 )
 from zcu_tools.program.v2.ir.node import BasicBlockNode, RootNode
-from zcu_tools.program.v2.ir.operands import AluExpr, Literal, Register
+from zcu_tools.program.v2.ir.operands import AluExpr, ImmValue, Register, AluOp
 from zcu_tools.program.v2.ir.passes.dataflow import IncRegMergePass
 from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
 
@@ -29,23 +29,23 @@ def test_inc_reg_merge_free_basic():
                     RegWriteInst(
                         dst=Register("r1"),
                         src="op",
-                        op=AluExpr(Register("r1"), "+", Literal("#2")),
+                        op=AluExpr(Register("r1"), AluOp.ADD, ImmValue(2, prefix="#")),
                     ),
                     NopInst(),
                     RegWriteInst(
                         dst=Register("r1"),
                         src="op",
-                        op=AluExpr(Register("r1"), "+", Literal("#3")),
+                        op=AluExpr(Register("r1"), AluOp.ADD, ImmValue(3, prefix="#")),
                     ),
                     RegWriteInst(
                         dst=Register("r2"),
                         src="op",
-                        op=AluExpr(Register("r2"), "+", Literal("#5")),
+                        op=AluExpr(Register("r2"), AluOp.ADD, ImmValue(5, prefix="#")),
                     ),
                     RegWriteInst(
                         dst=Register("r2"),
                         src="op",
-                        op=AluExpr(Register("r2"), "-", Literal("#1")),
+                        op=AluExpr(Register("r2"), AluOp.SUB, ImmValue(1, prefix="#")),
                     ),
                 ]
             )
@@ -58,9 +58,9 @@ def test_inc_reg_merge_free_basic():
 
     assert len(insts) == 3
     assert isinstance(insts[0], NopInst)
-    assert insts[1].op.rhs.value == "#5"  # r1 + #5
+    assert str(insts[1].op.rhs) == "#5"  # r1 + #5
     assert insts[1].dst.name == "r1"
-    assert insts[2].op.rhs.value == "#4"  # r2 + #4
+    assert str(insts[2].op.rhs) == "#4"  # r2 + #4
     assert insts[2].dst.name == "r2"
 
 
@@ -72,13 +72,13 @@ def test_inc_reg_merge_free_flush_on_read():
                     RegWriteInst(
                         dst=Register("r1"),
                         src="op",
-                        op=AluExpr(Register("r1"), "+", Literal("#2")),
+                        op=AluExpr(Register("r1"), AluOp.ADD, ImmValue(2, prefix="#")),
                     ),
                     TimeInst(c_op="inc_ref", r1=Register("r1")),
                     RegWriteInst(
                         dst=Register("r1"),
                         src="op",
-                        op=AluExpr(Register("r1"), "+", Literal("#3")),
+                        op=AluExpr(Register("r1"), AluOp.ADD, ImmValue(3, prefix="#")),
                     ),
                 ]
             )
@@ -89,9 +89,9 @@ def test_inc_reg_merge_free_flush_on_read():
     insts = root.insts[0].insts
 
     assert len(insts) == 3
-    assert insts[0].op.rhs.value == "#2"
+    assert str(insts[0].op.rhs) == "#2"
     assert isinstance(insts[1], TimeInst)
-    assert insts[2].op.rhs.value == "#3"
+    assert str(insts[2].op.rhs) == "#3"
 
 
 def test_inc_reg_merge_free_can_cross_port_write():
@@ -102,19 +102,19 @@ def test_inc_reg_merge_free_can_cross_port_write():
                     RegWriteInst(
                         dst=Register("r0"),
                         src="op",
-                        op=AluExpr(Register("r0"), "+", Literal("#1")),
+                        op=AluExpr(Register("r0"), AluOp.ADD, ImmValue(1, prefix="#")),
                     ),
                     PortWriteInst(
-                        dst=Literal("2"),
+                        dst=ImmValue(2, prefix=""),
                         src="wmem",
-                        addr=Literal("&1"),
-                        time=Literal("@0"),
+                        addr=ImmValue(1, prefix="&"),
+                        time=ImmValue(0, prefix="@"),
                     ),
                     TimeInst(c_op="inc_ref", r1=Register("r4")),
                     RegWriteInst(
                         dst=Register("r0"),
                         src="op",
-                        op=AluExpr(Register("r0"), "+", Literal("#1")),
+                        op=AluExpr(Register("r0"), AluOp.ADD, ImmValue(1, prefix="#")),
                     ),
                 ]
             )
@@ -128,7 +128,7 @@ def test_inc_reg_merge_free_can_cross_port_write():
     assert isinstance(insts[0], PortWriteInst)
     assert isinstance(insts[1], TimeInst)
     assert isinstance(insts[2], RegWriteInst)
-    assert insts[2].op.rhs.value == "#2"
+    assert str(insts[2].op.rhs) == "#2"
     assert insts[2].dst.name == "r0"
 
 
@@ -138,40 +138,40 @@ def test_inc_reg_merge_free_cpmg_like_unrolled_body():
             BasicBlockNode(
                 insts=[
                     PortWriteInst(
-                        dst=Literal("2"),
+                        dst=ImmValue(2, prefix=""),
                         src="wmem",
-                        addr=Literal("&1"),
-                        time=Literal("@0"),
+                        addr=ImmValue(1, prefix="&"),
+                        time=ImmValue(0, prefix="@"),
                     ),
                     TimeInst(c_op="inc_ref", r1=Register("r4")),
                     RegWriteInst(
                         dst=Register("r0"),
                         src="op",
-                        op=AluExpr(Register("r0"), "+", Literal("#1")),
+                        op=AluExpr(Register("r0"), AluOp.ADD, ImmValue(1, prefix="#")),
                     ),
                     PortWriteInst(
-                        dst=Literal("2"),
+                        dst=ImmValue(2, prefix=""),
                         src="wmem",
-                        addr=Literal("&1"),
-                        time=Literal("@0"),
+                        addr=ImmValue(1, prefix="&"),
+                        time=ImmValue(0, prefix="@"),
                     ),
                     TimeInst(c_op="inc_ref", r1=Register("r4")),
                     RegWriteInst(
                         dst=Register("r0"),
                         src="op",
-                        op=AluExpr(Register("r0"), "+", Literal("#1")),
+                        op=AluExpr(Register("r0"), AluOp.ADD, ImmValue(1, prefix="#")),
                     ),
                     PortWriteInst(
-                        dst=Literal("2"),
+                        dst=ImmValue(2, prefix=""),
                         src="wmem",
-                        addr=Literal("&1"),
-                        time=Literal("@0"),
+                        addr=ImmValue(1, prefix="&"),
+                        time=ImmValue(0, prefix="@"),
                     ),
                     TimeInst(c_op="inc_ref", r1=Register("r4")),
                     RegWriteInst(
                         dst=Register("r0"),
                         src="op",
-                        op=AluExpr(Register("r0"), "+", Literal("#1")),
+                        op=AluExpr(Register("r0"), AluOp.ADD, ImmValue(1, prefix="#")),
                     ),
                 ]
             )
@@ -184,7 +184,7 @@ def test_inc_reg_merge_free_cpmg_like_unrolled_body():
     # 3 port writes + 3 time insts + 1 final merged reg write = 7
     assert len(insts) == 7
     assert isinstance(insts[-1], RegWriteInst)
-    assert insts[-1].op.rhs.value == "#3"
+    assert str(insts[-1].op.rhs) == "#3"
 
 
 def test_inc_reg_merge_fixed_basic_is_skipped():
@@ -195,23 +195,23 @@ def test_inc_reg_merge_fixed_basic_is_skipped():
                     RegWriteInst(
                         dst=Register("r1"),
                         src="op",
-                        op=AluExpr(Register("r1"), "+", Literal("#2")),
+                        op=AluExpr(Register("r1"), AluOp.ADD, ImmValue(2, prefix="#")),
                     ),
                     RegWriteInst(
                         dst=Register("r1"),
                         src="op",
-                        op=AluExpr(Register("r1"), "+", Literal("#3")),
+                        op=AluExpr(Register("r1"), AluOp.ADD, ImmValue(3, prefix="#")),
                     ),
                     NopInst(),
                     RegWriteInst(
                         dst=Register("r2"),
                         src="op",
-                        op=AluExpr(Register("r2"), "+", Literal("#5")),
+                        op=AluExpr(Register("r2"), AluOp.ADD, ImmValue(5, prefix="#")),
                     ),
                     RegWriteInst(
                         dst=Register("r2"),
                         src="op",
-                        op=AluExpr(Register("r2"), "-", Literal("#5")),
+                        op=AluExpr(Register("r2"), AluOp.SUB, ImmValue(5, prefix="#")),
                     ),
                 ],
                 fix_addr_size=True,
@@ -225,7 +225,7 @@ def test_inc_reg_merge_fixed_basic_is_skipped():
 
     assert len(insts) == 5
     assert isinstance(insts[0], RegWriteInst)
-    assert insts[0].op.rhs.value == "#2"
+    assert str(insts[0].op.rhs) == "#2"
     assert isinstance(insts[1], RegWriteInst)
     assert isinstance(insts[2], NopInst)
     assert isinstance(insts[3], RegWriteInst)
@@ -240,13 +240,13 @@ def test_inc_reg_merge_fixed_barrier():
                     RegWriteInst(
                         dst=Register("r1"),
                         src="op",
-                        op=AluExpr(Register("r1"), "+", Literal("#2")),
+                        op=AluExpr(Register("r1"), AluOp.ADD, ImmValue(2, prefix="#")),
                     ),
                     NopInst(),
                     RegWriteInst(
                         dst=Register("r1"),
                         src="op",
-                        op=AluExpr(Register("r1"), "+", Literal("#3")),
+                        op=AluExpr(Register("r1"), AluOp.ADD, ImmValue(3, prefix="#")),
                     ),
                 ],
                 fix_addr_size=True,
@@ -258,8 +258,8 @@ def test_inc_reg_merge_fixed_barrier():
     insts = root.insts[0].insts
     # In fixed blocks, non-adjacent increments are not merged
     assert len(insts) == 3
-    assert insts[0].op.rhs.value == "#2"
-    assert insts[2].op.rhs.value == "#3"
+    assert str(insts[0].op.rhs) == "#2"
+    assert str(insts[2].op.rhs) == "#3"
 
 
 def test_inc_reg_merge_does_not_cross_wmem_write_via_alias():
@@ -275,13 +275,13 @@ def test_inc_reg_merge_does_not_cross_wmem_write_via_alias():
                     RegWriteInst(
                         dst=Register("w_freq"),
                         src="op",
-                        op=AluExpr(Register("w_freq"), "+", Literal("#5")),
+                        op=AluExpr(Register("w_freq"), AluOp.ADD, ImmValue(5, prefix="#")),
                     ),
-                    WmemWriteInst(addr=Literal("&0")),
+                    WmemWriteInst(addr=ImmValue(0, prefix="&")),
                     RegWriteInst(
                         dst=Register("w_freq"),
                         src="op",
-                        op=AluExpr(Register("w_freq"), "+", Literal("#3")),
+                        op=AluExpr(Register("w_freq"), AluOp.ADD, ImmValue(3, prefix="#")),
                     ),
                 ]
             )
@@ -292,11 +292,11 @@ def test_inc_reg_merge_does_not_cross_wmem_write_via_alias():
     insts = out.insts[0].insts
     # The first +5 must remain before WMEM_WR; only the +3 may sit afterward.
     assert isinstance(insts[0], RegWriteInst)
-    assert insts[0].op.rhs.value == "#5"
+    assert str(insts[0].op.rhs) == "#5"
     assert isinstance(insts[1], WmemWriteInst)
     # Whether the trailing +3 stays adjacent or merges into a #3 inc is an
     # implementation detail; what matters is that #5 never crosses WMEM_WR.
     assert any(
-        isinstance(inst, RegWriteInst) and inst.op.rhs.value == "#3"
+        isinstance(inst, RegWriteInst) and str(inst.op.rhs) == "#3"
         for inst in insts[2:]
     )

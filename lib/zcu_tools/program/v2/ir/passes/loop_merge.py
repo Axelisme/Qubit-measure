@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ..instructions import JumpInst, RegWriteInst, TestInst
 from ..node import BasicBlockNode
-from ..operands import AluExpr, Literal, SideWrite
+from ..operands import AluExpr, ImmValue, SideWrite, AluOp
 from ..pipeline import AbsChunkPass, ChunkList, PipeLineContext
 
 
@@ -98,9 +98,10 @@ class LoopConditionMergePass(AbsChunkPass):
             if (
                 isinstance(op, AluExpr)
                 and op.lhs.name == reg
-                and op.op == "-"
-                and isinstance(op.rhs, Literal)
-                and op.rhs.value == "#0"
+                and op.op == AluOp.SUB
+                and isinstance(op.rhs, ImmValue)
+                and op.rhs.prefix == "#"
+                and op.rhs.value == 0
             ):
                 block.branch = _make_merged_branch(branch, last_inst)
                 block.insts.pop(last_idx)

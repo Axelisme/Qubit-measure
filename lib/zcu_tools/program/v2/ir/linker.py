@@ -36,7 +36,7 @@ class IRLinker:
                 continue
             line += 1
             if isinstance(inst, LabelInst):
-                labels[str(inst.name)] = f"&{p_addr}"
+                labels[inst.name.name] = f"&{p_addr}"
                 d = inst.to_dict()
                 d["p_addr"] = p_addr
                 meta_infos.append(d)

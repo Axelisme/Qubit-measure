@@ -158,7 +158,7 @@ class DeadTestEliminationPass(AbsChunkPass):
         return dead
 
 
-from ..operands import AluExpr, Literal, Register, canonical_reg
+from ..operands import AluExpr, ImmValue, Register, canonical_reg, AluOp
 
 
 def _is_const_increment(inst: Instruction) -> tuple[str, int] | None:
@@ -176,9 +176,9 @@ def _is_const_increment(inst: Instruction) -> tuple[str, int] | None:
         return None
 
     op = inst.op
-    if op.op not in ("+", "-"):
+    if op.op not in (AluOp.ADD, AluOp.SUB):
         return None
-    if not isinstance(op.rhs, Literal) or not op.rhs.value.startswith("#"):
+    if not isinstance(op.rhs, ImmValue) or op.rhs.prefix != "#":
         return None
 
     lhs_name = op.lhs.name
@@ -193,12 +193,9 @@ def _is_const_increment(inst: Instruction) -> tuple[str, int] | None:
     if not (canon.startswith("r") and canon[1:].isdigit()):
         return None
 
-    try:
-        val = int(op.rhs.value[1:])
-    except ValueError:
-        return None
+    val = op.rhs.value
 
-    if op.op == "-":
+    if op.op == AluOp.SUB:
         val = -val
     # Pending entries are keyed by canonical name so that aliased writes
     # (e.g. w_freq -> w0) are flushed when *any* alias appears in another
@@ -208,9 +205,9 @@ def _is_const_increment(inst: Instruction) -> tuple[str, int] | None:
 
 def _make_increment_inst(reg: str, val: int) -> RegWriteInst:
     if val >= 0:
-        op = AluExpr(Register(reg), "+", Literal(f"#{val}"))
+        op = AluExpr(Register(reg), AluOp.ADD, ImmValue(val, prefix="#"))
     else:
-        op = AluExpr(Register(reg), "-", Literal(f"#{-val}"))
+        op = AluExpr(Register(reg), AluOp.SUB, ImmValue(-val, prefix="#"))
     return RegWriteInst(dst=Register(reg), src="op", op=op)
 
 

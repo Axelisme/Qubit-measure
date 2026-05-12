@@ -5,7 +5,7 @@ from typing_extensions import Optional
 from .instructions import BaseInst, JumpInst, LabelInst, RegWriteInst
 from .labels import Label
 from .node import BasicBlockNode
-from .operands import AluExpr, Register
+from .operands import AluExpr, AluOp, Register
 
 BIG_JUMP_PMEM_THRESHOLD = 2**11
 
@@ -35,7 +35,7 @@ def emit_dispatch_address_setup(
         RegWriteInst(dst=s15, src="label", label=table_base),
     ]
     for _ in range(dispatch_entry_words(pmem_size)):
-        insts.append(RegWriteInst(dst=s15, src="op", op=AluExpr(s15, "+", index)))
+        insts.append(RegWriteInst(dst=s15, src="op", op=AluExpr(s15, AluOp.ADD, index)))
     return insts
 
 

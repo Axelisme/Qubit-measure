@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from typing_extensions import TYPE_CHECKING, Any
+from typing_extensions import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from .instructions import BaseInst
@@ -104,12 +104,28 @@ class Label:
         return new_label
 
     @classmethod
+    def parse(cls, val: Any) -> Optional[Label]:
+        if isinstance(val, Label):
+            return val
+        if not isinstance(val, str):
+            return None
+        name = val[1:] if val.startswith("&") else val
+        if not name:
+            return None
+        try:
+            return cls.use_existing(name)
+        except ValueError:
+            return cls.use_existing(name)
+
+    @classmethod
     def reset(cls) -> None:
         """Clear the allocated label set. Must be called before each top-level build."""
         cls._instances.clear()
 
     def __str__(self) -> str:
-        return self._name
+        if is_pseudo_label_name(self._name):
+            return self._name
+        return f"&{self._name}"
 
     def __repr__(self) -> str:
         return f"Label({self._name})"

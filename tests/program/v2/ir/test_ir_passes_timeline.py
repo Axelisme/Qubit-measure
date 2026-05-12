@@ -9,7 +9,7 @@ from zcu_tools.program.v2.ir.instructions import (
     WaitInst,
 )
 from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, RootNode
-from zcu_tools.program.v2.ir.operands import Literal, Register
+from zcu_tools.program.v2.ir.operands import ImmValue, Register
 from zcu_tools.program.v2.ir.passes import walk_basic_blocks
 from zcu_tools.program.v2.ir.passes.timeline import TimedMergePass, ZeroDelayDCEPass
 from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
@@ -38,8 +38,8 @@ def test_zero_delay_dce_removes_plain_zero_increment():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=Literal("#0")),
-                    TimeInst(c_op="inc_ref", lit=Literal("#4")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(0, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(4, prefix="#")),
                     NopInst(),
                 ]
             )
@@ -52,7 +52,7 @@ def test_zero_delay_dce_removes_plain_zero_increment():
     assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 2
     assert isinstance(bb.insts[0], TimeInst)
-    assert bb.insts[0].lit == Literal("#4")
+    assert str(bb.insts[0].lit) == "#4"
     assert isinstance(bb.insts[1], NopInst)
 
 
@@ -62,8 +62,8 @@ def test_timed_instruction_merge_merges_plain_adjacent_increments():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=Literal("#2")),
-                    TimeInst(c_op="inc_ref", lit=Literal("#3")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(2, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(3, prefix="#")),
                     NopInst(),
                 ]
             )
@@ -77,7 +77,7 @@ def test_timed_instruction_merge_merges_plain_adjacent_increments():
     assert len(bb.insts) == 2
     assert isinstance(bb.insts[0], NopInst)
     assert isinstance(bb.insts[1], TimeInst)
-    assert bb.insts[1].lit == Literal("#5")
+    assert str(bb.insts[1].lit) == "#5"
 
 
 def test_timed_instruction_merge_sinks_past_zero_increment():
@@ -87,9 +87,9 @@ def test_timed_instruction_merge_sinks_past_zero_increment():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=Literal("#2")),
-                    TimeInst(c_op="inc_ref", lit=Literal("#0")),
-                    TimeInst(c_op="inc_ref", lit=Literal("#3")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(2, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(0, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(3, prefix="#")),
                 ]
             )
         ]
@@ -101,17 +101,17 @@ def test_timed_instruction_merge_sinks_past_zero_increment():
     assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 2
     assert isinstance(bb.insts[0], TimeInst)
-    assert bb.insts[0].lit == Literal("#0")
+    assert str(bb.insts[0].lit) == "#0"
     assert isinstance(bb.insts[1], TimeInst)
-    assert bb.insts[1].lit == Literal("#5")
+    assert str(bb.insts[1].lit) == "#5"
 
 
 def test_timed_instruction_merge_does_not_cross_block_boundary():
     root = RootNode(
         insts=[
-            BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit=Literal("#2"))]),
+            BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit=ImmValue(2, prefix="#"))]),
             BasicBlockNode(insts=[WaitInst(c_op="time")]),
-            BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit=Literal("#3"))]),
+            BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit=ImmValue(3, prefix="#"))]),
         ]
     )
 
@@ -119,9 +119,9 @@ def test_timed_instruction_merge_does_not_cross_block_boundary():
 
     assert len(out.insts) == 3
     assert isinstance(out.insts[0].insts[0], TimeInst)  # type: ignore
-    assert out.insts[0].insts[0].lit == Literal("#2")  # type: ignore
+    assert str(out.insts[0].insts[0].lit) == "#2"  # type: ignore
     assert isinstance(out.insts[2].insts[0], TimeInst)  # type: ignore
-    assert out.insts[2].insts[0].lit == Literal("#3")  # type: ignore
+    assert str(out.insts[2].insts[0].lit) == "#3"  # type: ignore
 
 
 # ---------------------------------------------------------------------------
@@ -136,9 +136,9 @@ def test_zero_delay_dce_removes_from_basic_block():
                 insts=[
                     BasicBlockNode(
                         insts=[
-                            TimeInst(c_op="inc_ref", lit=Literal("#0")),
+                            TimeInst(c_op="inc_ref", lit=ImmValue(0, prefix="#")),
                             NopInst(),
-                            TimeInst(c_op="inc_ref", lit=Literal("#0")),
+                            TimeInst(c_op="inc_ref", lit=ImmValue(0, prefix="#")),
                         ]
                     ),
                 ]
@@ -158,7 +158,7 @@ def test_zero_delay_dce_skips_fixed_basic_block():
     root = RootNode(
         insts=[
             BasicBlockNode(
-                insts=[TimeInst(c_op="inc_ref", lit=Literal("#0")), NopInst()],
+                insts=[TimeInst(c_op="inc_ref", lit=ImmValue(0, prefix="#")), NopInst()],
                 fix_addr_size=True,
             ),
         ]
@@ -179,8 +179,8 @@ def test_timed_merge_merges_in_basic_block():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=Literal("#2")),
-                    TimeInst(c_op="inc_ref", lit=Literal("#3")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(2, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(3, prefix="#")),
                     NopInst(),
                 ]
             ),
@@ -194,7 +194,7 @@ def test_timed_merge_merges_in_basic_block():
     assert len(bb.insts) == 2
     assert isinstance(bb.insts[0], NopInst)
     assert isinstance(bb.insts[1], TimeInst)
-    assert bb.insts[1].lit == Literal("#5")
+    assert str(bb.insts[1].lit) == "#5"
 
 
 def test_timed_merge_skips_fixed_basic_block():
@@ -202,8 +202,8 @@ def test_timed_merge_skips_fixed_basic_block():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=Literal("#2")),
-                    TimeInst(c_op="inc_ref", lit=Literal("#3")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(2, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(3, prefix="#")),
                 ],
                 fix_addr_size=True,
             ),
@@ -216,9 +216,9 @@ def test_timed_merge_skips_fixed_basic_block():
     assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 2
     assert isinstance(bb.insts[0], TimeInst)
-    assert bb.insts[0].lit == Literal("#2")
+    assert str(bb.insts[0].lit) == "#2"
     assert isinstance(bb.insts[1], TimeInst)
-    assert bb.insts[1].lit == Literal("#3")
+    assert str(bb.insts[1].lit) == "#3"
 
 
 # ---------------------------------------------------------------------------
@@ -231,8 +231,8 @@ def test_lit_time_sinks_past_reg_write():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=Literal("#10")),
-                    RegWriteInst(dst=Register("r0"), src="imm", lit=Literal("#1")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(10, prefix="#")),
+                    RegWriteInst(dst=Register("r0"), src="imm", lit=ImmValue(1, prefix="#")),
                 ]
             )
         ]
@@ -243,7 +243,7 @@ def test_lit_time_sinks_past_reg_write():
     assert len(bb.insts) == 2
     assert isinstance(bb.insts[0], RegWriteInst)
     assert isinstance(bb.insts[1], TimeInst)
-    assert bb.insts[1].lit == Literal("#10")
+    assert str(bb.insts[1].lit) == "#10"
 
 
 def test_lit_time_sinks_past_multiple_non_timed():
@@ -251,9 +251,9 @@ def test_lit_time_sinks_past_multiple_non_timed():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=Literal("#5")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(5, prefix="#")),
                     NopInst(),
-                    RegWriteInst(dst=Register("r0"), src="imm", lit=Literal("#1")),
+                    RegWriteInst(dst=Register("r0"), src="imm", lit=ImmValue(1, prefix="#")),
                     NopInst(),
                 ]
             )
@@ -266,7 +266,7 @@ def test_lit_time_sinks_past_multiple_non_timed():
     assert isinstance(bb.insts[1], RegWriteInst)
     assert isinstance(bb.insts[2], NopInst)
     assert isinstance(bb.insts[3], TimeInst)
-    assert bb.insts[3].lit == Literal("#5")
+    assert str(bb.insts[3].lit) == "#5"
 
 
 def test_lit_time_absorbed_into_port_write():
@@ -275,12 +275,12 @@ def test_lit_time_absorbed_into_port_write():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=Literal("#43")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(43, prefix="#")),
                     PortWriteInst(
-                        dst=Literal("2"),
+                        dst=ImmValue(2, prefix=""),
                         src="wmem",
-                        addr=Literal("&12"),
-                        time=Literal("@0"),
+                        addr=ImmValue(12, prefix="&"),
+                        time=ImmValue(0, prefix="@"),
                     ),
                 ]
             )
@@ -290,9 +290,9 @@ def test_lit_time_absorbed_into_port_write():
     bb = out.insts[0]
     assert len(bb.insts) == 2
     assert isinstance(bb.insts[0], PortWriteInst)
-    assert bb.insts[0].time == Literal("@43")
+    assert str(bb.insts[0].time) == "@43"
     assert isinstance(bb.insts[1], TimeInst)
-    assert bb.insts[1].lit == Literal("#43")
+    assert str(bb.insts[1].lit) == "#43"
 
 
 def test_lit_time_absorbed_into_wait_inst():
@@ -300,8 +300,8 @@ def test_lit_time_absorbed_into_wait_inst():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=Literal("#83")),
-                    WaitInst(c_op="time", time=Literal("@0")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(83, prefix="#")),
+                    WaitInst(c_op="time", time=ImmValue(0, prefix="@")),
                 ]
             )
         ]
@@ -310,9 +310,9 @@ def test_lit_time_absorbed_into_wait_inst():
     bb = out.insts[0]
     assert len(bb.insts) == 2
     assert isinstance(bb.insts[0], WaitInst)
-    assert bb.insts[0].time == Literal("@83")
+    assert str(bb.insts[0].time) == "@83"
     assert isinstance(bb.insts[1], TimeInst)
-    assert bb.insts[1].lit == Literal("#83")
+    assert str(bb.insts[1].lit) == "#83"
 
 
 def test_accumulated_time_absorbed():
@@ -320,13 +320,13 @@ def test_accumulated_time_absorbed():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=Literal("#10")),
-                    TimeInst(c_op="inc_ref", lit=Literal("#20")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(10, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(20, prefix="#")),
                     PortWriteInst(
-                        dst=Literal("2"),
+                        dst=ImmValue(2, prefix=""),
                         src="wmem",
-                        addr=Literal("&0"),
-                        time=Literal("@0"),
+                        addr=ImmValue(0, prefix="&"),
+                        time=ImmValue(0, prefix="@"),
                     ),
                 ]
             )
@@ -336,9 +336,9 @@ def test_accumulated_time_absorbed():
     bb = out.insts[0]
     assert len(bb.insts) == 2
     assert isinstance(bb.insts[0], PortWriteInst)
-    assert bb.insts[0].time == Literal("@30")
+    assert str(bb.insts[0].time) == "@30"
     assert isinstance(bb.insts[1], TimeInst)
-    assert bb.insts[1].lit == Literal("#30")
+    assert str(bb.insts[1].lit) == "#30"
 
 
 def test_time_and_non_timed_then_port_write():
@@ -346,14 +346,14 @@ def test_time_and_non_timed_then_port_write():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=Literal("#10")),
-                    RegWriteInst(dst=Register("r0"), src="imm", lit=Literal("#1")),
-                    TimeInst(c_op="inc_ref", lit=Literal("#20")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(10, prefix="#")),
+                    RegWriteInst(dst=Register("r0"), src="imm", lit=ImmValue(1, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(20, prefix="#")),
                     PortWriteInst(
-                        dst=Literal("2"),
+                        dst=ImmValue(2, prefix=""),
                         src="wmem",
-                        addr=Literal("&0"),
-                        time=Literal("@0"),
+                        addr=ImmValue(0, prefix="&"),
+                        time=ImmValue(0, prefix="@"),
                     ),
                 ]
             )
@@ -364,9 +364,9 @@ def test_time_and_non_timed_then_port_write():
     assert len(bb.insts) == 3
     assert isinstance(bb.insts[0], RegWriteInst)
     assert isinstance(bb.insts[1], PortWriteInst)
-    assert bb.insts[1].time == Literal("@30")
+    assert str(bb.insts[1].time) == "@30"
     assert isinstance(bb.insts[2], TimeInst)
-    assert bb.insts[2].lit == Literal("#30")
+    assert str(bb.insts[2].lit) == "#30"
 
 
 def test_all_timed_adjusted_with_same_delta():
@@ -376,18 +376,18 @@ def test_all_timed_adjusted_with_same_delta():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=Literal("#10")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(10, prefix="#")),
                     PortWriteInst(
-                        dst=Literal("2"),
+                        dst=ImmValue(2, prefix=""),
                         src="wmem",
-                        addr=Literal("&0"),
-                        time=Literal("@0"),
+                        addr=ImmValue(0, prefix="&"),
+                        time=ImmValue(0, prefix="@"),
                     ),
                     PortWriteInst(
-                        dst=Literal("2"),
+                        dst=ImmValue(2, prefix=""),
                         src="wmem",
-                        addr=Literal("&1"),
-                        time=Literal("@5"),
+                        addr=ImmValue(1, prefix="&"),
+                        time=ImmValue(5, prefix="@"),
                     ),
                 ]
             )
@@ -397,11 +397,11 @@ def test_all_timed_adjusted_with_same_delta():
     bb = out.insts[0]
     assert len(bb.insts) == 3
     assert isinstance(bb.insts[0], PortWriteInst)
-    assert bb.insts[0].time == Literal("@10")  # 0 + 10
+    assert str(bb.insts[0].time) == "@10"  # 0 + 10
     assert isinstance(bb.insts[1], PortWriteInst)
-    assert bb.insts[1].time == Literal("@15")  # 5 + 10 — same delta applied
+    assert str(bb.insts[1].time) == "@15"  # 5 + 10 — same delta applied
     assert isinstance(bb.insts[2], TimeInst)
-    assert bb.insts[2].lit == Literal("#10")  # single TIME at end
+    assert str(bb.insts[2].lit) == "#10"  # single TIME at end
 
 
 def test_port_write_no_time_acts_as_barrier():
@@ -414,9 +414,9 @@ def test_port_write_no_time_acts_as_barrier():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=Literal("#10")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(10, prefix="#")),
                     PortWriteInst(
-                        dst=Literal("2"), src="wmem", addr=Literal("&0"), time=None
+                        dst=ImmValue(2, prefix=""), src="wmem", addr=ImmValue(0, prefix="&"), time=None
                     ),
                 ]
             )
@@ -426,7 +426,7 @@ def test_port_write_no_time_acts_as_barrier():
     bb = out.insts[0]
     assert len(bb.insts) == 2
     assert isinstance(bb.insts[0], TimeInst)
-    assert bb.insts[0].lit == Literal("#10")
+    assert str(bb.insts[0].lit) == "#10"
     assert isinstance(bb.insts[1], PortWriteInst)
     assert bb.insts[1].time is None
 
@@ -439,11 +439,11 @@ def test_port_write_reg_time_acts_as_barrier():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=Literal("#10")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(10, prefix="#")),
                     PortWriteInst(
-                        dst=Literal("2"),
+                        dst=ImmValue(2, prefix=""),
                         src="wmem",
-                        addr=Literal("&0"),
+                        addr=ImmValue(0, prefix="&"),
                         time=Register("s14"),
                     ),
                 ]
@@ -454,7 +454,7 @@ def test_port_write_reg_time_acts_as_barrier():
     bb = out.insts[0]
     assert len(bb.insts) == 2
     assert isinstance(bb.insts[0], TimeInst)
-    assert bb.insts[0].lit == Literal("#10")
+    assert str(bb.insts[0].lit) == "#10"
     assert isinstance(bb.insts[1], PortWriteInst)
     assert bb.insts[1].time == Register("s14")
 
@@ -464,14 +464,14 @@ def test_reg_time_flushes_pending_lit():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=Literal("#10")),
-                    RegWriteInst(dst=Register("r0"), src="imm", lit=Literal("#1")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(10, prefix="#")),
+                    RegWriteInst(dst=Register("r0"), src="imm", lit=ImmValue(1, prefix="#")),
                     TimeInst(c_op="inc_ref", r1=Register("r1")),  # reg-TIME barrier
                     PortWriteInst(
-                        dst=Literal("2"),
+                        dst=ImmValue(2, prefix=""),
                         src="wmem",
-                        addr=Literal("&0"),
-                        time=Literal("@5"),
+                        addr=ImmValue(0, prefix="&"),
+                        time=ImmValue(5, prefix="@"),
                     ),
                 ]
             )
@@ -481,9 +481,9 @@ def test_reg_time_flushes_pending_lit():
     bb = out.insts[0]
     assert len(bb.insts) == 4
     assert isinstance(bb.insts[0], RegWriteInst)
-    assert isinstance(bb.insts[1], TimeInst) and bb.insts[1].lit == Literal("#10")
+    assert isinstance(bb.insts[1], TimeInst) and str(bb.insts[1].lit) == "#10"
     assert isinstance(bb.insts[2], TimeInst) and bb.insts[2].r1 == Register("r1")
-    assert isinstance(bb.insts[3], PortWriteInst) and bb.insts[3].time == Literal("@5")
+    assert isinstance(bb.insts[3], PortWriteInst) and str(bb.insts[3].time) == "@5"
 
 
 def test_pending_lit_flushed_at_end_of_block():
@@ -491,8 +491,8 @@ def test_pending_lit_flushed_at_end_of_block():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=Literal("#15")),
-                    RegWriteInst(dst=Register("r0"), src="imm", lit=Literal("#1")),
+                    TimeInst(c_op="inc_ref", lit=ImmValue(15, prefix="#")),
+                    RegWriteInst(dst=Register("r0"), src="imm", lit=ImmValue(1, prefix="#")),
                 ]
             )
         ]
@@ -502,4 +502,4 @@ def test_pending_lit_flushed_at_end_of_block():
     assert len(bb.insts) == 2
     assert isinstance(bb.insts[0], RegWriteInst)
     assert isinstance(bb.insts[1], TimeInst)
-    assert bb.insts[1].lit == Literal("#15")
+    assert str(bb.insts[1].lit) == "#15"

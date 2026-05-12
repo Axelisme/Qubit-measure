@@ -6,7 +6,7 @@ from typing import cast
 from ..analysis import reads_implicit_time_base
 from ..instructions import BaseInst, TimeInst
 from ..node import BasicBlockNode
-from ..operands import Literal
+from ..operands import ImmValue
 from ..pipeline import AbsChunkPass, ChunkList, PipeLineContext
 
 
@@ -17,15 +17,11 @@ def _is_zero_ref_increment(inst: BaseInst) -> bool:
         return False
     if inst.r1 is not None:
         return False
-    if not isinstance(inst.lit, Literal):
+    if not isinstance(inst.lit, ImmValue):
         return False
-    lit = inst.lit.value
-    if not lit.startswith("#"):
+    if inst.lit.prefix != "#":
         return False
-    try:
-        return int(lit[1:]) == 0
-    except ValueError:
-        return False
+    return inst.lit.value == 0
 
 
 def _is_lit_time(inst: BaseInst) -> bool:
@@ -35,19 +31,15 @@ def _is_lit_time(inst: BaseInst) -> bool:
     if (
         inst.c_op != "inc_ref"
         or inst.r1 is not None
-        or not isinstance(inst.lit, Literal)
+        or not isinstance(inst.lit, ImmValue)
     ):
         return False
-    if not inst.lit.value.startswith("#"):
+    if inst.lit.prefix != "#":
         return False
-    try:
-        return int(inst.lit.value[1:]) > 0
-    except ValueError:
-        return False
-
+    return inst.lit.value > 0
 
 def _get_lit_time_value(inst: TimeInst) -> int:
-    return int(cast(Literal, inst.lit).value[1:])
+    return cast(ImmValue, inst.lit).value
 
 
 def _is_reg_time(inst: BaseInst) -> bool:
@@ -58,16 +50,16 @@ def _is_reg_time(inst: BaseInst) -> bool:
 def _is_anchored_timed(inst: BaseInst) -> bool:
     """True when inst has a time field of the form '@N' with N a plain integer."""
     t = getattr(inst, "time", None)
-    if not isinstance(t, Literal) or not t.value.startswith("@"):
+    if not isinstance(t, ImmValue) or t.prefix != "@":
         return False
-    # If it's a Literal, it doesn't contain registers by definition of get_read_regs()
+    # If it's a ImmValue, it doesn't contain registers by definition of get_read_regs()
     return not t.get_read_regs()
 
 
 def _adjust_time_field(inst: BaseInst, delta: int) -> BaseInst:
     """Return a copy of inst with time adjusted by +delta (precondition: _is_anchored_timed)."""
-    old = int(cast(Literal, getattr(inst, "time")).value[1:])
-    return dataclasses.replace(inst, time=Literal(f"@{old + delta}"))  # type: ignore[call-overload]
+    old = cast(ImmValue, getattr(inst, "time")).value
+    return dataclasses.replace(inst, time=ImmValue(old + delta, prefix="@"))  # type: ignore[call-overload]
 
 
 class ZeroDelayDCEPass(AbsChunkPass):
@@ -127,7 +119,7 @@ class TimedMergePass(AbsChunkPass):
             elif _is_reg_time(inst):
                 if pending_lit > 0:
                     result.append(
-                        TimeInst(c_op="inc_ref", lit=Literal(f"#{pending_lit}"))
+                        TimeInst(c_op="inc_ref", lit=ImmValue(pending_lit, prefix="#"))
                     )
                     pending_lit = 0
                 result.append(inst)
@@ -137,7 +129,7 @@ class TimedMergePass(AbsChunkPass):
                 # the instruction so its emission time stays anchored.
                 if pending_lit > 0:
                     result.append(
-                        TimeInst(c_op="inc_ref", lit=Literal(f"#{pending_lit}"))
+                        TimeInst(c_op="inc_ref", lit=ImmValue(pending_lit, prefix="#"))
                     )
                     pending_lit = 0
                 result.append(inst)
@@ -145,6 +137,6 @@ class TimedMergePass(AbsChunkPass):
                 result.append(inst)
 
         if pending_lit > 0:
-            result.append(TimeInst(c_op="inc_ref", lit=Literal(f"#{pending_lit}")))
+            result.append(TimeInst(c_op="inc_ref", lit=ImmValue(pending_lit, prefix="#")))
 
         block.insts = result
