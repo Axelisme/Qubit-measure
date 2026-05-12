@@ -223,10 +223,11 @@ def make_default_pipeline(pmem_capacity: int) -> IRPipeLine:
 
     return IRPipeLine(
         config=config,
-        flat_passes=[UnreachableEliminationPass()],
+        flat_passes=[],
         chunk_passes=[
             IncRegMergePass(),
             TimedMergePass(),
+            UnreachableEliminationPass(),
             ZeroDelayDCEPass(),
             LoopConditionMergePass(),
             DeadTestEliminationPass(),

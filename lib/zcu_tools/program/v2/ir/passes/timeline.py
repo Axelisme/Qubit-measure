@@ -10,6 +10,7 @@ from ..operands import Immediate, TimeOffset
 from ..pipeline import AbsChunkPass, ChunkList, PipeLineContext
 
 
+
 def _is_zero_ref_increment(inst: BaseInst) -> bool:
     if not isinstance(inst, TimeInst):
         return False

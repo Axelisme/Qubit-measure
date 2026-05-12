@@ -72,10 +72,14 @@ def build_jump_table_blocks(
         result.append(
             BasicBlockNode(
                 insts=[
-                    RegWriteInst(dst=Register("s15"), src=SrcKeyword.LABEL, label=exit_label)
+                    RegWriteInst(
+                        dst=Register("s15"), src=SrcKeyword.LABEL, label=exit_label
+                    )
                 ],
                 branch=JumpInst(
-                    addr=Register("s15"), if_cond="Z", op=AluExpr(n, AluOp.SUB, Immediate(0))
+                    addr=Register("s15"),
+                    if_cond="Z",
+                    op=AluExpr(n, AluOp.SUB, Immediate(0)),
                 ),
             )
         )
@@ -83,7 +87,9 @@ def build_jump_table_blocks(
         result.append(
             BasicBlockNode(
                 branch=JumpInst(
-                    label=exit_label, if_cond="Z", op=AluExpr(n, AluOp.SUB, Immediate(0))
+                    label=exit_label,
+                    if_cond="Z",
+                    op=AluExpr(n, AluOp.SUB, Immediate(0)),
                 ),
             )
         )
@@ -92,15 +98,23 @@ def build_jump_table_blocks(
     # Uses counter_reg as scratch only until it is reset to 0.
     if _needs_big_jump(pmem_size):
         dispatch_insts: list[BaseInst] = [
-            RegWriteInst(dst=i, src=SrcKeyword.OP, op=AluExpr(n, AluOp.AND, Immediate(k - 1))),
+            RegWriteInst(
+                dst=i, src=SrcKeyword.OP, op=AluExpr(n, AluOp.AND, Immediate(k - 1))
+            ),
         ]
         # r == 0: jump straight to entry_0
         result.append(BasicBlockNode(insts=dispatch_insts))
         result.append(
             BasicBlockNode(
-                insts=[RegWriteInst(dst=Register("s15"), src=SrcKeyword.LABEL, label=entry0)],
+                insts=[
+                    RegWriteInst(
+                        dst=Register("s15"), src=SrcKeyword.LABEL, label=entry0
+                    )
+                ],
                 branch=JumpInst(
-                    addr=Register("s15"), if_cond="Z", op=AluExpr(i, AluOp.SUB, Immediate(0))
+                    addr=Register("s15"),
+                    if_cond="Z",
+                    op=AluExpr(i, AluOp.SUB, Immediate(0)),
                 ),
             )
         )
@@ -109,7 +123,9 @@ def build_jump_table_blocks(
             BasicBlockNode(
                 insts=[
                     RegWriteInst(
-                        dst=i, src=SrcKeyword.OP, op=AluExpr(n, AluOp.AND, Immediate(k - 1))
+                        dst=i,
+                        src=SrcKeyword.OP,
+                        op=AluExpr(n, AluOp.AND, Immediate(k - 1)),
                     )
                 ],
                 branch=JumpInst(
@@ -123,7 +139,9 @@ def build_jump_table_blocks(
         RegWriteInst(
             dst=i, src=SrcKeyword.OP, op=AluExpr(i, AluOp.SUB, Immediate(k))
         ),  # i = r - k (< 0)
-        RegWriteInst(dst=i, src=SrcKeyword.OP, op=AluExpr(i, AluOp.ABS)),  # i = k - r (offset)
+        RegWriteInst(
+            dst=i, src=SrcKeyword.OP, op=AluExpr(i, AluOp.ABS)
+        ),  # i = k - r (offset)
         *emit_dispatch_address_setup(
             index_reg=counter_reg,
             table_base=table_labels[0],
@@ -172,14 +190,20 @@ def build_jump_table_blocks(
         )
         result.append(
             BasicBlockNode(
-                insts=[RegWriteInst(dst=Register("s15"), src=SrcKeyword.LABEL, label=entry0)],
+                insts=[
+                    RegWriteInst(
+                        dst=Register("s15"), src=SrcKeyword.LABEL, label=entry0
+                    )
+                ],
                 branch=JumpInst(addr=Register("s15")),
             )
         )
     else:
         result.append(
             BasicBlockNode(
-                branch=JumpInst(label=exit_label, if_cond="NS", op=AluExpr(i, AluOp.SUB, n)),
+                branch=JumpInst(
+                    label=exit_label, if_cond="NS", op=AluExpr(i, AluOp.SUB, n)
+                ),
             )
         )
         result.append(

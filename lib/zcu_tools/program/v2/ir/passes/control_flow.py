@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Optional, cast
 
-from ..instructions import BaseInst, Instruction, JumpInst, LabelInst, MetaInst
+from ..instructions import BaseInst, Instruction, LabelInst, MetaInst
 from ..labels import PSEUDO_LABELS, Label
 from ..node import BasicBlockNode, BlockNode, IRBranch, IRLoop, IRNode, RootNode
-from ..pipeline import AbsFlatPass, PipeLineContext
+from ..pipeline import AbsChunkPass, ChunkList, PipeLineContext
 from .base import OptimizationPassBase, walk_basic_blocks, walk_instructions
 
 
@@ -195,34 +195,39 @@ def _has_alive_labels(block: BasicBlockNode, referenced: set[Label]) -> bool:
     )
 
 
-class UnreachableEliminationPass(AbsFlatPass):
-    """Remove unreachable instructions after unconditional jumps.
+class UnreachableEliminationPass(AbsChunkPass):
+    """Remove unreachable BasicBlockNodes after unconditional jumps.
 
-    Keep structural metadata (`MetaInst`) even in dead regions.
+    Keep MetaInst even in dead regions (structural markers must not be dropped).
+    A block is unreachable when the preceding block ends with an unconditional
+    branch and the block itself has no labels (i.e., not a jump target).
     """
 
     def process(
-        self, insts: list[Instruction], ctx: PipeLineContext
-    ) -> tuple[list[Instruction], bool]:
+        self, chunks: ChunkList, ctx: PipeLineContext
+    ) -> tuple[ChunkList, bool]:
         _ = ctx
-        final_insts: list[Instruction] = []
+        result: ChunkList = []
         dead_mode = False
         changed = False
 
-        for inst in insts:
+        for chunk in chunks:
             if dead_mode:
-                if isinstance(inst, LabelInst):
+                if isinstance(chunk, MetaInst):
+                    result.append(chunk)
+                elif isinstance(chunk, BasicBlockNode) and chunk.labels:
                     dead_mode = False
-                elif isinstance(inst, MetaInst):
-                    final_insts.append(inst)
-                    continue
+                    result.append(chunk)
                 else:
                     changed = True
                     continue
+            else:
+                result.append(chunk)
+                if (
+                    isinstance(chunk, BasicBlockNode)
+                    and chunk.branch is not None
+                    and chunk.branch.if_cond is None
+                ):
+                    dead_mode = True
 
-            final_insts.append(inst)
-
-            if isinstance(inst, JumpInst) and inst.if_cond is None:
-                dead_mode = True
-
-        return final_insts, changed
+        return result, changed
