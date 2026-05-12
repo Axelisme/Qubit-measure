@@ -19,7 +19,13 @@ from zcu_tools.program.v2.ir.node import (
     IRLoop,
     RootNode,
 )
-from zcu_tools.program.v2.ir.operands import AluExpr, Immediate, Register, SrcKeyword, AluOp
+from zcu_tools.program.v2.ir.operands import (
+    AluExpr,
+    AluOp,
+    Immediate,
+    Register,
+    SrcKeyword,
+)
 from zcu_tools.program.v2.ir.passes import walk_basic_blocks
 from zcu_tools.program.v2.ir.passes.dataflow import (
     DeadTestEliminationPass,

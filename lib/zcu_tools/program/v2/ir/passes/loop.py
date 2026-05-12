@@ -17,7 +17,7 @@ from ..factory import IRParser, _needs_big_jump
 from ..instructions import JumpInst, LabelInst, RegWriteInst
 from ..labels import Label
 from ..node import BasicBlockNode, BlockNode, IRLoop, IRNode, RootNode
-from ..operands import AluExpr, Immediate, Register, AluOp, SrcKeyword
+from ..operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
 from ..pipeline import PipeLineContext
 from .base import OptimizationPassBase
 from .loop_dispatch import build_jump_table_blocks

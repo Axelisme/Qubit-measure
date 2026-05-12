@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
 from zcu_tools.program.v2.ir.instructions import MetaInst, RegWriteInst
-from zcu_tools.program.v2.ir.operands import Immediate, SrcKeyword
 from zcu_tools.program.v2.ir.node import IRLoop
+from zcu_tools.program.v2.ir.operands import Immediate, SrcKeyword
 
 
 def test_loop_range_hint_preservation():

@@ -13,7 +13,7 @@ from .instructions import (
 )
 from .labels import Label
 from .node import BasicBlockNode, BlockNode, IRBranch, IRLoop, RootNode
-from .operands import AluExpr, Immediate, Register, AluOp, SrcKeyword
+from .operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
 
 BIG_JUMP_PMEM_THRESHOLD = 2**11
 

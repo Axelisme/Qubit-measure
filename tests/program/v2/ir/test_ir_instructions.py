@@ -33,7 +33,15 @@ from zcu_tools.program.v2.ir.instructions import (
     WmemWriteInst,
 )
 from zcu_tools.program.v2.ir.labels import Label
-from zcu_tools.program.v2.ir.operands import AluExpr, Immediate, ImmValue, Register, SideWrite, SrcKeyword, AluOp
+from zcu_tools.program.v2.ir.operands import (
+    AluExpr,
+    AluOp,
+    Immediate,
+    ImmValue,
+    Register,
+    SideWrite,
+    SrcKeyword,
+)
 
 
 class TestTimeInstruction:
@@ -374,7 +382,7 @@ class TestWmemWriteInstruction:
     """Tests for WMEM_WR."""
 
     def test_dispatch_wmem_wr(self):
-        d = {"CMD": "WMEM_WR", "ADDR": "&5", "TIME": "@10", "WP": "r_wave p0"}
+        d = {"CMD": "WMEM_WR", "DST": "&5", "TIME": "@10", "WP": "r_wave p0"}
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, WmemWriteInst)
         assert str(inst.addr) == "&5"

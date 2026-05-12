@@ -10,7 +10,13 @@ from zcu_tools.program.v2.ir.instructions import (
 )
 from zcu_tools.program.v2.ir.labels import Label
 from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode
-from zcu_tools.program.v2.ir.operands import AluExpr, Immediate, ImmValue, Register, SrcKeyword
+from zcu_tools.program.v2.ir.operands import (
+    AluExpr,
+    Immediate,
+    ImmValue,
+    Register,
+    SrcKeyword,
+)
 from zcu_tools.program.v2.ir.passes.loop_dispatch import (
     build_jump_table_blocks,
 )

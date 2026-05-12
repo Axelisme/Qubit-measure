@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing_extensions import Any, Optional, Union
 
 from .hw_semantics import STATUS_REG, TIMED_BASE_REG, USR_TIME_REG, WAVE_BUNDLE
-from .labels import Label, is_pseudo_label_name
+from .labels import Label
 from .operands import (
     AddrType,
     AluExpr,
@@ -83,17 +83,6 @@ def _parse_dmem_src(val: str) -> Union[Register, Immediate]:
     raise ValueError(f"SRC: {val!r} is not a register or immediate value")
 
 
-def _parse_cond_code(val: Optional[str]) -> Optional[CondCode]:
-    if not val:
-        return None
-    return str(val)
-
-
-def _parse_update_flag(val: Optional[str]) -> Optional[UpdateFlag]:
-    if not val:
-        return None
-    return str(val)
-
 
 def _src_register_reads(src: Optional[SrcType]) -> set[str]:
     """If `src` names a register (not a keyword/literal), return its read regs."""
@@ -104,23 +93,7 @@ def _src_register_reads(src: Optional[SrcType]) -> set[str]:
     return set()
 
 
-def _is_pseudo_label(value: Optional[Label]) -> bool:
-    if value is None:
-        return False
-    return is_pseudo_label_name(value.name)
 
-
-def _normalize_reg_wr_fields(source: dict[str, Any]) -> dict[str, Any]:
-    d = dict(source)
-    src = d.get("SRC", "")
-    wr = d.get("WR")
-    if not d.get("DST") and wr:
-        wr_parts = wr.split()
-        if wr_parts:
-            d["DST"] = wr_parts[0]
-        if len(wr_parts) > 1 and not src:
-            d["SRC"] = wr_parts[1]
-    return d
 
 
 @dataclass(frozen=True)
@@ -155,10 +128,9 @@ class BaseInst(Instruction):
             raise ValueError(f"Unknown instruction format: {d}")
 
         if cmd == "REG_WR":
-            norm_d = _normalize_reg_wr_fields(d)
-            if norm_d.get("SRC", "") == "dmem":
-                return DmemReadInst.from_dict(norm_d)
-            return RegWriteInst.from_dict(norm_d)
+            if d.get("SRC") == "dmem":
+                return DmemReadInst.from_dict(d)
+            return RegWriteInst.from_dict(d)
 
         dispatch: dict[str, type[BaseInst]] = {
             "TIME": TimeInst,
@@ -230,19 +202,13 @@ class MetaInst(Instruction):
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> MetaInst:
-        if d.get("kind") == "meta":
-            return cls(
-                type=d.get("type", ""),
-                name=d.get("name", ""),
-                info=d.get("info", {}),
-            )
-        if d.get("CMD") == "__META__":
-            return cls(
-                type=d.get("TYPE", ""),
-                name=d.get("NAME", ""),
-                info=d.get("INFO", {}),
-            )
-        raise ValueError(f"Invalid MetaInst format: {d}")
+        if d.get("kind") != "meta":
+            raise ValueError(f"Invalid MetaInst format: {d}")
+        return cls(
+            type=d["type"],
+            name=d["name"],
+            info=d.get("info", {}),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -264,7 +230,7 @@ class TimeInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> TimeInst:
         return cls(
-            c_op=d.get("C_OP", ""),
+            c_op=d["C_OP"],
             lit=parse_immediate(d["LIT"]) if "LIT" in d else None,
             r1=parse_register(d["R1"]) if "R1" in d else None,
         )
@@ -302,7 +268,7 @@ class TestInst(BaseInst):
     def from_dict(cls, d: dict[str, Any]) -> TestInst:
         return cls(
             op=_require_alu_expr(d["OP"], "OP"),
-            uf=_parse_update_flag(d.get("UF")),
+            uf=d.get("UF") or None,
         )
 
     @property
@@ -333,11 +299,11 @@ class JumpInst(BaseInst):
     def from_dict(cls, d: dict[str, Any]) -> JumpInst:
         return cls(
             label=parse_label(d.get("LABEL")),
-            if_cond=_parse_cond_code(d.get("IF")),
+            if_cond=d.get("IF") or None,
             addr=parse_addr(d.get("ADDR")),
             wr=parse_side_write(d["WR"]) if "WR" in d else None,
             op=parse_alu_expr(d["OP"]) if "OP" in d else None,
-            uf=_parse_update_flag(d.get("UF")),
+            uf=d.get("UF") or None,
         )
 
     def __post_init__(self) -> None:
@@ -366,9 +332,9 @@ class JumpInst(BaseInst):
 
     @property
     def need_label(self) -> Optional[Label]:
-        if self.label and not _is_pseudo_label(self.label):
+        if self.label and not self.label.is_pseudo_name():
             return self.label
-        if isinstance(self.addr, Label) and not _is_pseudo_label(self.addr):
+        if isinstance(self.addr, Label) and not self.addr.is_pseudo_name():
             return self.addr
         return None
 
@@ -403,19 +369,18 @@ class RegWriteInst(BaseInst):
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> RegWriteInst:
-        norm_d = _normalize_reg_wr_fields(d)
         return cls(
-            dst=_require_register(norm_d["DST"], "DST"),
-            src=parse_src(norm_d.get("SRC")),
-            wr=parse_side_write(norm_d["WR"]) if "WR" in norm_d else None,
-            op=parse_alu_expr(norm_d["OP"]) if "OP" in norm_d else None,
-            lit=parse_immediate(norm_d["LIT"]) if "LIT" in norm_d else None,
-            addr=parse_addr(norm_d.get("ADDR")),
-            uf=_parse_update_flag(norm_d.get("UF")),
-            if_cond=_parse_cond_code(norm_d.get("IF")),
-            label=parse_label(norm_d.get("LABEL")),
-            ww=norm_d.get("WW"),
-            wp=norm_d.get("WP"),
+            dst=_require_register(d["DST"], "DST"),
+            src=parse_src(d.get("SRC")),
+            wr=parse_side_write(d["WR"]) if "WR" in d else None,
+            op=parse_alu_expr(d["OP"]) if "OP" in d else None,
+            lit=parse_immediate(d["LIT"]) if "LIT" in d else None,
+            addr=parse_addr(d.get("ADDR")),
+            uf=d.get("UF") or None,
+            if_cond=d.get("IF") or None,
+            label=parse_label(d.get("LABEL")),
+            ww=d.get("WW"),
+            wp=d.get("WP"),
         )
 
     @property
@@ -436,9 +401,9 @@ class RegWriteInst(BaseInst):
 
     @property
     def need_label(self) -> Optional[Label]:
-        if self.label and not _is_pseudo_label(self.label):
+        if self.label and not self.label.is_pseudo_name():
             return self.label
-        if isinstance(self.addr, Label) and not _is_pseudo_label(self.addr):
+        if isinstance(self.addr, Label) and not self.addr.is_pseudo_name():
             return self.addr
         return None
 
@@ -490,8 +455,8 @@ class PortWriteInst(BaseInst):
             time=parse_time(d["TIME"]) if "TIME" in d else None,
             wr=parse_side_write(d["WR"]) if "WR" in d else None,
             op=parse_alu_expr(d["OP"]) if "OP" in d else None,
-            uf=_parse_update_flag(d.get("UF")),
-            if_cond=_parse_cond_code(d.get("IF")),
+            uf=d.get("UF") or None,
+            if_cond=d.get("IF") or None,
             ww=d.get("WW"),
         )
 
@@ -567,20 +532,16 @@ class DmemReadInst(BaseInst):
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> DmemReadInst:
-        norm_d = _normalize_reg_wr_fields(d)
-        src_val = parse_src(norm_d.get("SRC", "dmem"))
-        if not isinstance(src_val, SrcKeyword):
-            src_val = SrcKeyword.DMEM
         return cls(
-            dst=_require_register(norm_d["DST"], "DST"),
-            src=src_val,
-            addr=parse_addr(norm_d.get("ADDR")),
-            wr=parse_side_write(norm_d["WR"]) if "WR" in norm_d else None,
-            op=parse_alu_expr(norm_d["OP"]) if "OP" in norm_d else None,
-            lit=parse_immediate(norm_d["LIT"]) if "LIT" in norm_d else None,
-            uf=_parse_update_flag(norm_d.get("UF")),
-            if_cond=_parse_cond_code(norm_d.get("IF")),
-            label=parse_label(norm_d.get("LABEL")),
+            dst=_require_register(d["DST"], "DST"),
+            src=SrcKeyword.DMEM,
+            addr=parse_addr(d.get("ADDR")),
+            wr=parse_side_write(d["WR"]) if "WR" in d else None,
+            op=parse_alu_expr(d["OP"]) if "OP" in d else None,
+            lit=parse_immediate(d["LIT"]) if "LIT" in d else None,
+            uf=d.get("UF") or None,
+            if_cond=d.get("IF") or None,
+            label=parse_label(d.get("LABEL")),
         )
 
     @property
@@ -598,9 +559,9 @@ class DmemReadInst(BaseInst):
 
     @property
     def need_label(self) -> Optional[Label]:
-        if self.label and not _is_pseudo_label(self.label):
+        if self.label and not self.label.is_pseudo_name():
             return self.label
-        if isinstance(self.addr, Label) and not _is_pseudo_label(self.addr):
+        if isinstance(self.addr, Label) and not self.addr.is_pseudo_name():
             return self.addr
         return None
 
@@ -640,8 +601,8 @@ class DmemWriteInst(BaseInst):
             wr=parse_side_write(d["WR"]) if "WR" in d else None,
             op=parse_alu_expr(d["OP"]) if "OP" in d else None,
             lit=parse_immediate(d["LIT"]) if "LIT" in d else None,
-            uf=_parse_update_flag(d.get("UF")),
-            if_cond=_parse_cond_code(d.get("IF")),
+            uf=d.get("UF") or None,
+            if_cond=d.get("IF") or None,
         )
 
     @property
@@ -682,14 +643,13 @@ class WmemWriteInst(BaseInst):
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> WmemWriteInst:
-        addr_raw = d.get("DST", d.get("ADDR"))
         return cls(
-            addr=_parse_mem_addr_field(str(addr_raw), "ADDR") if addr_raw is not None else None,
+            addr=_parse_mem_addr_field(str(d["DST"]), "DST") if "DST" in d else None,
             time=parse_time(str(d["TIME"])) if "TIME" in d else None,
             wr=parse_side_write(d["WR"]) if "WR" in d else None,
             op=parse_alu_expr(d["OP"]) if "OP" in d else None,
-            uf=_parse_update_flag(d.get("UF")),
-            if_cond=_parse_cond_code(d.get("IF")),
+            uf=d.get("UF") or None,
+            if_cond=d.get("IF") or None,
             wp=d.get("WP"),
         )
 
@@ -751,8 +711,8 @@ class DportWriteInst(BaseInst):
             time=parse_time(str(d["TIME"])) if "TIME" in d else None,
             wr=parse_side_write(d["WR"]) if "WR" in d else None,
             op=parse_alu_expr(d["OP"]) if "OP" in d else None,
-            uf=_parse_update_flag(d.get("UF")),
-            if_cond=_parse_cond_code(d.get("IF")),
+            uf=d.get("UF") or None,
+            if_cond=d.get("IF") or None,
         )
 
     @property
@@ -806,7 +766,7 @@ class WaitInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> WaitInst:
         return cls(
-            c_op=d.get("C_OP", "time"),
+            c_op=d["C_OP"],
             time=parse_time(str(d["TIME"])) if "TIME" in d else None,
             addr=parse_addr(d.get("ADDR")),
         )
@@ -825,7 +785,7 @@ class WaitInst(BaseInst):
 
     @property
     def need_label(self) -> Optional[Label]:
-        if isinstance(self.addr, Label) and not _is_pseudo_label(self.addr):
+        if isinstance(self.addr, Label) and not self.addr.is_pseudo_name():
             return self.addr
         return None
 

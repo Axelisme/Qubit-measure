@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing_extensions import Any
 from zcu_tools.program.v2.ir.instructions import NopInst, RegWriteInst
-from zcu_tools.program.v2.ir.operands import SrcKeyword
 from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRLoop, RootNode
+from zcu_tools.program.v2.ir.operands import SrcKeyword
 from zcu_tools.program.v2.ir.pipeline import make_default_pipeline
 
 

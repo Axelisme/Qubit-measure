@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ..instructions import JumpInst, RegWriteInst, TestInst
 from ..node import BasicBlockNode
-from ..operands import AluExpr, Immediate, SideWrite, AluOp, SrcKeyword
+from ..operands import AluExpr, AluOp, Immediate, SideWrite, SrcKeyword
 from ..pipeline import AbsChunkPass, ChunkList, PipeLineContext
 
 

@@ -21,7 +21,13 @@ from zcu_tools.program.v2.ir.node import (
     IRLoop,
     RootNode,
 )
-from zcu_tools.program.v2.ir.operands import AluExpr, Immediate, Register, SrcKeyword, AluOp
+from zcu_tools.program.v2.ir.operands import (
+    AluExpr,
+    AluOp,
+    Immediate,
+    Register,
+    SrcKeyword,
+)
 from zcu_tools.program.v2.ir.passes.control_flow import (
     BlockMergePass,
     BranchEliminationPass,

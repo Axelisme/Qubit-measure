@@ -9,7 +9,14 @@ from zcu_tools.program.v2.ir.instructions import (
     TimeInst,
 )
 from zcu_tools.program.v2.ir.labels import Label
-from zcu_tools.program.v2.ir.operands import AluExpr, Immediate, ImmValue, Register, SrcKeyword, AluOp
+from zcu_tools.program.v2.ir.operands import (
+    AluExpr,
+    AluOp,
+    Immediate,
+    ImmValue,
+    Register,
+    SrcKeyword,
+)
 
 
 def test_time_inst_analysis():

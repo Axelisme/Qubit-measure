@@ -158,7 +158,7 @@ class DeadTestEliminationPass(AbsChunkPass):
         return dead
 
 
-from ..operands import AluExpr, Immediate, Register, SrcKeyword, canonical_reg, AluOp
+from ..operands import AluExpr, AluOp, Immediate, Register, SrcKeyword, canonical_reg
 
 
 def _is_const_increment(inst: Instruction) -> tuple[str, int] | None:

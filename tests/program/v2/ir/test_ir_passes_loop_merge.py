@@ -1,7 +1,14 @@
 from zcu_tools.program.v2.ir.instructions import JumpInst, RegWriteInst, TestInst
 from zcu_tools.program.v2.ir.labels import Label
 from zcu_tools.program.v2.ir.node import BasicBlockNode
-from zcu_tools.program.v2.ir.operands import AluExpr, Immediate, Register, SideWrite, AluOp, SrcKeyword
+from zcu_tools.program.v2.ir.operands import (
+    AluExpr,
+    AluOp,
+    Immediate,
+    Register,
+    SideWrite,
+    SrcKeyword,
+)
 from zcu_tools.program.v2.ir.passes.loop_merge import LoopConditionMergePass
 from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
 

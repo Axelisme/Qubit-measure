@@ -38,7 +38,7 @@ from ..factory import IRParser, _needs_big_jump
 from ..instructions import BaseInst, JumpInst, LabelInst, RegWriteInst
 from ..labels import Label
 from ..node import BasicBlockNode, BlockNode
-from ..operands import AluExpr, Immediate, Register, AluOp, SrcKeyword
+from ..operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
 
 
 def build_jump_table_blocks(

@@ -9,7 +9,14 @@ from zcu_tools.program.v2.ir.instructions import (
     WaitInst,
 )
 from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, RootNode
-from zcu_tools.program.v2.ir.operands import Immediate, ImmValue, MemAddr, Register, SrcKeyword, TimeOffset
+from zcu_tools.program.v2.ir.operands import (
+    Immediate,
+    ImmValue,
+    MemAddr,
+    Register,
+    SrcKeyword,
+    TimeOffset,
+)
 from zcu_tools.program.v2.ir.passes import walk_basic_blocks
 from zcu_tools.program.v2.ir.passes.timeline import TimedMergePass, ZeroDelayDCEPass
 from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext

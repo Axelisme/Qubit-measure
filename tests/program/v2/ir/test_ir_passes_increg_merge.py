@@ -7,7 +7,16 @@ from zcu_tools.program.v2.ir.instructions import (
     WmemWriteInst,
 )
 from zcu_tools.program.v2.ir.node import BasicBlockNode, RootNode
-from zcu_tools.program.v2.ir.operands import AluExpr, Immediate, ImmValue, MemAddr, Register, TimeOffset, SrcKeyword, AluOp
+from zcu_tools.program.v2.ir.operands import (
+    AluExpr,
+    AluOp,
+    Immediate,
+    ImmValue,
+    MemAddr,
+    Register,
+    SrcKeyword,
+    TimeOffset,
+)
 from zcu_tools.program.v2.ir.passes.dataflow import IncRegMergePass
 from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
 

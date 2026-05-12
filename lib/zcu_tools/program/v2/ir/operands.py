@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from typing_extensions import Optional, Union, TypeAlias
+from typing_extensions import Optional, TypeAlias, Union
 
 if TYPE_CHECKING:
     from .labels import Label

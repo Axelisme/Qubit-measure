@@ -86,6 +86,9 @@ class Label:
         # Keep as property for backward compatibility if needed by other modules
         return set(self._instances.keys())
 
+    def is_pseudo_name(self) -> bool:
+        return is_pseudo_label_name(self._name)
+
     def clone_new(self) -> Label:
         """Create a new label derived from this one's name."""
         if is_pseudo_label_name(self._name):
