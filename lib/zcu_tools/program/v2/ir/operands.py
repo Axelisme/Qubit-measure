@@ -117,10 +117,6 @@ def canonical_reg(name: str) -> str:
 class Register(Operand):
     name: str
 
-    def __post_init__(self):
-        if self.name.startswith("&"):
-            self.name = self.name[1:]
-
     @property
     def canonical_name(self) -> str:
         """Single canonical name after alias resolution (e.g. 'w_freq' → 'w0')."""
@@ -258,15 +254,16 @@ def parse_register(val: Union[Register, str, None]) -> Optional[Register]:
         return val
     if not isinstance(val, str):
         return None
-    core_name = val[1:] if val.startswith("&") else val
+    # asm_v2.py encodes dmem register addresses as '&rN'; strip the leading '&'
+    core = val[1:] if val.startswith("&") else val
     if (
-        core_name.startswith("r_wave")
-        or core_name.startswith("s_")
-        or core_name.startswith("w_")
-        or (bool(core_name) and core_name[0] in "rswp" and core_name[1:].isdigit())
-        or core_name in _REG_ALIAS
+        core.startswith("r_wave")
+        or core.startswith("s_")
+        or core.startswith("w_")
+        or (bool(core) and core[0] in "rswp" and core[1:].isdigit())
+        or core in _REG_ALIAS
     ):
-        return Register(name=val)
+        return Register(name=core)
     return None
 
 
@@ -355,10 +352,7 @@ def parse_label(val: Union["Label", str, None]) -> Optional["Label"]:
     name = val[1:] if val.startswith("&") else val
     if not name:
         return None
-    try:
-        return Label.use_existing(name)
-    except ValueError:
-        return Label.make_new(name)
+    return Label.use_existing(name)
 
 
 def parse_alu_expr(val: Union[AluExpr, str, None]) -> Optional[AluExpr]:
@@ -472,14 +466,15 @@ def parse_addr(val: Union[Register, MemAddr, str, None]) -> Optional[AddrType]:
         mem = parse_mem_addr(val_s)
         if mem is not None:
             return mem
+        # &rN / &sN / &r_wave → Register (asm_v2 encodes dmem reg addresses as '&rN')
+        reg = parse_register(val_s)
+        if reg is not None:
+            return reg
         # &name → Label
         if val_s.startswith("&"):
             lbl = parse_label(val_s)
             if lbl is not None:
                 return lbl
-        reg = parse_register(val_s)
-        if reg is not None:
-            return reg
     return None
 
 
