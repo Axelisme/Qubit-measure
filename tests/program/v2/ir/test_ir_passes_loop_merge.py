@@ -1,7 +1,7 @@
 from zcu_tools.program.v2.ir.instructions import JumpInst, RegWriteInst, TestInst
 from zcu_tools.program.v2.ir.labels import Label
 from zcu_tools.program.v2.ir.node import BasicBlockNode
-from zcu_tools.program.v2.ir.operands import AluExpr, ImmValue, Register, SideWrite, AluOp
+from zcu_tools.program.v2.ir.operands import AluExpr, Immediate, Register, SideWrite, AluOp, SrcKeyword
 from zcu_tools.program.v2.ir.passes.loop_merge import LoopConditionMergePass
 from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
 
@@ -17,14 +17,14 @@ def test_pattern_1_merge_zero_comparison():
         insts=[
             RegWriteInst(
                 dst=Register("r1"),
-                src="op",
-                op=AluExpr(Register("r1"), AluOp.SUB, ImmValue(1, prefix="#")),
+                src=SrcKeyword.OP,
+                op=AluExpr(Register("r1"), AluOp.SUB, Immediate(1)),
             )
         ],
         branch=JumpInst(
             label=Label("loop"),
             if_cond="NZ",
-            op=AluExpr(Register("r1"), AluOp.SUB, ImmValue(0, prefix="#")),        ),
+            op=AluExpr(Register("r1"), AluOp.SUB, Immediate(0)),        ),
     )
     _run_pass(block)
 
@@ -41,14 +41,14 @@ def test_pattern_1_merge_zero_comparison_fix_addr_is_skipped():
         insts=[
             RegWriteInst(
                 dst=Register("r1"),
-                src="op",
-                op=AluExpr(Register("r1"), AluOp.SUB, ImmValue(1, prefix="#")),
+                src=SrcKeyword.OP,
+                op=AluExpr(Register("r1"), AluOp.SUB, Immediate(1)),
             )
         ],
         branch=JumpInst(
             label=Label("loop"),
             if_cond="NZ",
-            op=AluExpr(Register("r1"), AluOp.SUB, ImmValue(0, prefix="#")),        ),
+            op=AluExpr(Register("r1"), AluOp.SUB, Immediate(0)),        ),
         fix_addr_size=True,
     )
     _run_pass(block)
@@ -62,11 +62,11 @@ def test_pattern_1_merge_zero_comparison_fix_addr_is_skipped():
 def test_pattern_2_merge_side_data_injection():
     block = BasicBlockNode(
         insts=[
-            TestInst(op=AluExpr(Register("r1"), AluOp.SUB, ImmValue(10, prefix="#"))),
+            TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Immediate(10))),
             RegWriteInst(
                 dst=Register("r2"),
-                src="op",
-                op=AluExpr(Register("r2"), AluOp.ADD, ImmValue(1, prefix="#")),
+                src=SrcKeyword.OP,
+                op=AluExpr(Register("r2"), AluOp.ADD, Immediate(1)),
             ),
         ],
         branch=JumpInst(label=Label("loop"), if_cond="S"),
@@ -84,11 +84,11 @@ def test_pattern_2_merge_side_data_injection():
 def test_pattern_2_merge_side_data_injection_fix_addr_is_skipped():
     block = BasicBlockNode(
         insts=[
-            TestInst(op=AluExpr(Register("r1"), AluOp.SUB, ImmValue(10, prefix="#"))),
+            TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Immediate(10))),
             RegWriteInst(
                 dst=Register("r2"),
-                src="op",
-                op=AluExpr(Register("r2"), AluOp.ADD, ImmValue(1, prefix="#")),
+                src=SrcKeyword.OP,
+                op=AluExpr(Register("r2"), AluOp.ADD, Immediate(1)),
             ),
         ],
         branch=JumpInst(label=Label("loop"), if_cond="S"),
@@ -108,15 +108,15 @@ def test_pattern_1_rejects_regwrite_with_uf():
         insts=[
             RegWriteInst(
                 dst=Register("r1"),
-                src="op",
-                op=AluExpr(Register("r1"), AluOp.SUB, ImmValue(1, prefix="#")),
+                src=SrcKeyword.OP,
+                op=AluExpr(Register("r1"), AluOp.SUB, Immediate(1)),
                 uf="1",
             )
         ],
         branch=JumpInst(
             label=Label("loop"),
             if_cond="NZ",
-            op=AluExpr(Register("r1"), AluOp.SUB, ImmValue(0, prefix="#")),        ),
+            op=AluExpr(Register("r1"), AluOp.SUB, Immediate(0)),        ),
     )
 
     _run_pass(block)
@@ -133,14 +133,14 @@ def test_pattern_1_rejects_branch_with_existing_wr():
         insts=[
             RegWriteInst(
                 dst=Register("r1"),
-                src="op",
-                op=AluExpr(Register("r1"), AluOp.SUB, ImmValue(1, prefix="#")),
+                src=SrcKeyword.OP,
+                op=AluExpr(Register("r1"), AluOp.SUB, Immediate(1)),
             )
         ],
         branch=JumpInst(
             label=Label("loop"),
             if_cond="NZ",
-            op=AluExpr(Register("r1"), AluOp.SUB, ImmValue(0, prefix="#")),            wr=SideWrite(Register("r7"), "op"),
+            op=AluExpr(Register("r1"), AluOp.SUB, Immediate(0)),            wr=SideWrite(Register("r7"), "op"),
         ),
     )
 
@@ -156,11 +156,11 @@ def test_pattern_1_rejects_branch_with_existing_wr():
 def test_pattern_2_rejects_conditional_regwrite():
     block = BasicBlockNode(
         insts=[
-            TestInst(op=AluExpr(Register("r1"), AluOp.SUB, ImmValue(10, prefix="#"))),
+            TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Immediate(10))),
             RegWriteInst(
                 dst=Register("r2"),
-                src="op",
-                op=AluExpr(Register("r2"), AluOp.ADD, ImmValue(1, prefix="#")),
+                src=SrcKeyword.OP,
+                op=AluExpr(Register("r2"), AluOp.ADD, Immediate(1)),
                 if_cond="NZ",
             ),
         ],
@@ -180,11 +180,11 @@ def test_pattern_2_rejects_conditional_regwrite():
 def test_pattern_2_rejects_branch_with_uf():
     block = BasicBlockNode(
         insts=[
-            TestInst(op=AluExpr(Register("r1"), AluOp.SUB, ImmValue(10, prefix="#"))),
+            TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Immediate(10))),
             RegWriteInst(
                 dst=Register("r2"),
-                src="op",
-                op=AluExpr(Register("r2"), AluOp.ADD, ImmValue(1, prefix="#")),
+                src=SrcKeyword.OP,
+                op=AluExpr(Register("r2"), AluOp.ADD, Immediate(1)),
             ),
         ],
         branch=JumpInst(label=Label("loop"), if_cond="S", uf="1"),

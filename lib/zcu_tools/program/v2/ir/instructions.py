@@ -11,14 +11,24 @@ from .operands import (
     AddrType,
     AluExpr,
     ExprType,
+    Immediate,
     ImmValue,
+    MemAddr,
     Register,
     SideWrite,
     SrcKeyword,
     SrcType,
-    ValueType,
+    TimeType,
     parse_addr,
+    parse_alu_expr,
+    parse_imm_value,
+    parse_immediate,
+    parse_label,
+    parse_mem_addr,
+    parse_register,
+    parse_side_write,
     parse_src,
+    parse_time,
     parse_value,
 )
 
@@ -26,13 +36,60 @@ CondCode = str
 UpdateFlag = str
 
 
-def _parse_cond_code(val: Any) -> Optional[CondCode]:
+def _require_register(val: str, field: str) -> Register:
+    reg = parse_register(val)
+    if reg is None:
+        raise ValueError(f"{field}: {val!r} is not a valid register name")
+    return reg
+
+
+def _require_alu_expr(val: str, field: str) -> AluExpr:
+    expr = parse_alu_expr(val)
+    if expr is None:
+        raise ValueError(f"{field}: {val!r} is not a valid ALU expression")
+    return expr
+
+
+def _parse_port_dst(val: str) -> Union[Register, ImmValue]:
+    """Parse a port DST: either a register or a bare integer (port number)."""
+    reg = parse_register(val)
+    if reg is not None:
+        return reg
+    imm = parse_imm_value(val)
+    if imm is not None:
+        return imm
+    raise ValueError(f"DST: {val!r} is not a register or port number")
+
+
+def _parse_mem_addr_field(val: str, field: str) -> Union[Register, MemAddr]:
+    """Parse an address field: register or &N numeric address."""
+    reg = parse_register(val)
+    if reg is not None:
+        return reg
+    addr = parse_mem_addr(val)
+    if addr is not None:
+        return addr
+    raise ValueError(f"{field}: {val!r} is not a register or memory address")
+
+
+def _parse_dmem_src(val: str) -> Union[Register, Immediate]:
+    """Parse a DMEM_WR SRC: register or #N immediate."""
+    reg = parse_register(val)
+    if reg is not None:
+        return reg
+    imm = parse_immediate(val)
+    if imm is not None:
+        return imm
+    raise ValueError(f"SRC: {val!r} is not a register or immediate value")
+
+
+def _parse_cond_code(val: Optional[str]) -> Optional[CondCode]:
     if not val:
         return None
     return str(val)
 
 
-def _parse_update_flag(val: Any) -> Optional[UpdateFlag]:
+def _parse_update_flag(val: Optional[str]) -> Optional[UpdateFlag]:
     if not val:
         return None
     return str(val)
@@ -201,15 +258,15 @@ class TimeInst(BaseInst):
     """TIME instruction: advance timing counter."""
 
     c_op: str
-    lit: Optional[ImmValue] = None
+    lit: Optional[Immediate] = None
     r1: Optional[Register] = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> TimeInst:
         return cls(
             c_op=d.get("C_OP", ""),
-            lit=ImmValue.parse(d["LIT"]) if "LIT" in d else None,
-            r1=Register.parse(d["R1"]) if "R1" in d else None,
+            lit=parse_immediate(d["LIT"]) if "LIT" in d else None,
+            r1=parse_register(d["R1"]) if "R1" in d else None,
         )
 
     @property
@@ -244,7 +301,7 @@ class TestInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> TestInst:
         return cls(
-            op=AluExpr.parse(d.get("OP", "")),
+            op=_require_alu_expr(d["OP"], "OP"),
             uf=_parse_update_flag(d.get("UF")),
         )
 
@@ -275,11 +332,11 @@ class JumpInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> JumpInst:
         return cls(
-            label=Label.parse(d.get("LABEL")),
+            label=parse_label(d.get("LABEL")),
             if_cond=_parse_cond_code(d.get("IF")),
             addr=parse_addr(d.get("ADDR")),
-            wr=SideWrite.parse(d["WR"]) if "WR" in d else None,
-            op=AluExpr.parse(d["OP"]) if "OP" in d else None,
+            wr=parse_side_write(d["WR"]) if "WR" in d else None,
+            op=parse_alu_expr(d["OP"]) if "OP" in d else None,
             uf=_parse_update_flag(d.get("UF")),
         )
 
@@ -335,7 +392,7 @@ class RegWriteInst(BaseInst):
     dst: Register
     src: Optional[SrcType] = None
     op: Optional[ExprType] = None
-    lit: Optional[ImmValue] = None
+    lit: Optional[Immediate] = None
     addr: Optional[AddrType] = None
     uf: Optional[UpdateFlag] = None
     wr: Optional[SideWrite] = None
@@ -348,15 +405,15 @@ class RegWriteInst(BaseInst):
     def from_dict(cls, d: dict[str, Any]) -> RegWriteInst:
         norm_d = _normalize_reg_wr_fields(d)
         return cls(
-            dst=Register.parse(norm_d.get("DST", "")),
+            dst=_require_register(norm_d["DST"], "DST"),
             src=parse_src(norm_d.get("SRC")),
-            wr=SideWrite.parse(norm_d["WR"]) if "WR" in norm_d else None,
-            op=AluExpr.parse(norm_d["OP"]) if "OP" in norm_d else None,
-            lit=ImmValue.parse(norm_d["LIT"]) if "LIT" in norm_d else None,
+            wr=parse_side_write(norm_d["WR"]) if "WR" in norm_d else None,
+            op=parse_alu_expr(norm_d["OP"]) if "OP" in norm_d else None,
+            lit=parse_immediate(norm_d["LIT"]) if "LIT" in norm_d else None,
             addr=parse_addr(norm_d.get("ADDR")),
             uf=_parse_update_flag(norm_d.get("UF")),
             if_cond=_parse_cond_code(norm_d.get("IF")),
-            label=Label.parse(norm_d.get("LABEL")),
+            label=parse_label(norm_d.get("LABEL")),
             ww=norm_d.get("WW"),
             wp=norm_d.get("WP"),
         )
@@ -414,10 +471,10 @@ class RegWriteInst(BaseInst):
 class PortWriteInst(BaseInst):
     """WPORT_WR instruction: write to output port."""
 
-    dst: ValueType
+    dst: Union[Register, ImmValue]
     src: Optional[SrcType] = None
-    addr: Optional[ValueType] = None
-    time: Optional[ValueType] = None
+    addr: Optional[Union[Register, MemAddr]] = None
+    time: Optional[TimeType] = None
     wr: Optional[SideWrite] = None
     op: Optional[ExprType] = None
     uf: Optional[UpdateFlag] = None
@@ -427,12 +484,12 @@ class PortWriteInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> PortWriteInst:
         return cls(
-            dst=parse_value(str(d.get("DST", ""))),
+            dst=_parse_port_dst(str(d["DST"])),
             src=parse_src(d.get("SRC")),
-            addr=parse_value(d["ADDR"]) if "ADDR" in d else None,
-            time=parse_value(d["TIME"]) if "TIME" in d else None,
-            wr=SideWrite.parse(d["WR"]) if "WR" in d else None,
-            op=AluExpr.parse(d["OP"]) if "OP" in d else None,
+            addr=_parse_mem_addr_field(str(d["ADDR"]), "ADDR") if "ADDR" in d else None,
+            time=parse_time(d["TIME"]) if "TIME" in d else None,
+            wr=parse_side_write(d["WR"]) if "WR" in d else None,
+            op=parse_alu_expr(d["OP"]) if "OP" in d else None,
             uf=_parse_update_flag(d.get("UF")),
             if_cond=_parse_cond_code(d.get("IF")),
             ww=d.get("WW"),
@@ -503,7 +560,7 @@ class DmemReadInst(BaseInst):
     addr: Optional[AddrType] = None
     wr: Optional[SideWrite] = None
     op: Optional[ExprType] = None
-    lit: Optional[ImmValue] = None
+    lit: Optional[Immediate] = None
     uf: Optional[UpdateFlag] = None
     if_cond: Optional[CondCode] = None
     label: Optional[Label] = None
@@ -515,15 +572,15 @@ class DmemReadInst(BaseInst):
         if not isinstance(src_val, SrcKeyword):
             src_val = SrcKeyword.DMEM
         return cls(
-            dst=Register.parse(norm_d.get("DST", "")),
+            dst=_require_register(norm_d["DST"], "DST"),
             src=src_val,
             addr=parse_addr(norm_d.get("ADDR")),
-            wr=SideWrite.parse(norm_d["WR"]) if "WR" in norm_d else None,
-            op=AluExpr.parse(norm_d["OP"]) if "OP" in norm_d else None,
-            lit=ImmValue.parse(norm_d["LIT"]) if "LIT" in norm_d else None,
+            wr=parse_side_write(norm_d["WR"]) if "WR" in norm_d else None,
+            op=parse_alu_expr(norm_d["OP"]) if "OP" in norm_d else None,
+            lit=parse_immediate(norm_d["LIT"]) if "LIT" in norm_d else None,
             uf=_parse_update_flag(norm_d.get("UF")),
             if_cond=_parse_cond_code(norm_d.get("IF")),
-            label=Label.parse(norm_d.get("LABEL")),
+            label=parse_label(norm_d.get("LABEL")),
         )
 
     @property
@@ -567,10 +624,10 @@ class DmemReadInst(BaseInst):
 class DmemWriteInst(BaseInst):
     """DMEM_WR instruction: write to data memory."""
 
-    dst: ValueType
-    src: ValueType
+    dst: Union[Register, MemAddr]
+    src: Union[Register, Immediate]
     op: Optional[ExprType] = None
-    lit: Optional[ImmValue] = None
+    lit: Optional[Immediate] = None
     wr: Optional[SideWrite] = None
     uf: Optional[UpdateFlag] = None
     if_cond: Optional[CondCode] = None
@@ -578,11 +635,11 @@ class DmemWriteInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> DmemWriteInst:
         return cls(
-            dst=parse_value(str(d.get("DST", ""))),
-            src=parse_value(str(d.get("SRC", ""))),
-            wr=SideWrite.parse(d["WR"]) if "WR" in d else None,
-            op=AluExpr.parse(d["OP"]) if "OP" in d else None,
-            lit=ImmValue.parse(d["LIT"]) if "LIT" in d else None,
+            dst=_parse_mem_addr_field(str(d["DST"]), "DST"),
+            src=_parse_dmem_src(str(d["SRC"])),
+            wr=parse_side_write(d["WR"]) if "WR" in d else None,
+            op=parse_alu_expr(d["OP"]) if "OP" in d else None,
+            lit=parse_immediate(d["LIT"]) if "LIT" in d else None,
             uf=_parse_update_flag(d.get("UF")),
             if_cond=_parse_cond_code(d.get("IF")),
         )
@@ -615,8 +672,8 @@ class DmemWriteInst(BaseInst):
 class WmemWriteInst(BaseInst):
     """WMEM_WR instruction: write wave registers into wave memory."""
 
-    addr: Optional[ValueType] = None
-    time: Optional[ValueType] = None
+    addr: Optional[Union[Register, MemAddr]] = None
+    time: Optional[TimeType] = None
     wr: Optional[SideWrite] = None
     op: Optional[ExprType] = None
     uf: Optional[UpdateFlag] = None
@@ -627,10 +684,10 @@ class WmemWriteInst(BaseInst):
     def from_dict(cls, d: dict[str, Any]) -> WmemWriteInst:
         addr_raw = d.get("DST", d.get("ADDR"))
         return cls(
-            addr=parse_value(str(addr_raw)) if addr_raw is not None else None,
-            time=parse_value(str(d["TIME"])) if "TIME" in d else None,
-            wr=SideWrite.parse(d["WR"]) if "WR" in d else None,
-            op=AluExpr.parse(d["OP"]) if "OP" in d else None,
+            addr=_parse_mem_addr_field(str(addr_raw), "ADDR") if addr_raw is not None else None,
+            time=parse_time(str(d["TIME"])) if "TIME" in d else None,
+            wr=parse_side_write(d["WR"]) if "WR" in d else None,
+            op=parse_alu_expr(d["OP"]) if "OP" in d else None,
             uf=_parse_update_flag(d.get("UF")),
             if_cond=_parse_cond_code(d.get("IF")),
             wp=d.get("WP"),
@@ -667,10 +724,10 @@ class WmemWriteInst(BaseInst):
 class DportWriteInst(BaseInst):
     """DPORT_WR instruction: write to data port."""
 
-    dst: ValueType
+    dst: Union[Register, ImmValue]
     src: Optional[SrcType] = None
-    data: ValueType = ImmValue(0, prefix="")
-    time: Optional[ValueType] = None
+    data: Union[Register, Immediate, ImmValue] = ImmValue(0)
+    time: Optional[TimeType] = None
     wr: Optional[SideWrite] = None
     op: Optional[ExprType] = None
     uf: Optional[UpdateFlag] = None
@@ -678,19 +735,22 @@ class DportWriteInst(BaseInst):
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> DportWriteInst:
-        data_val = d.get("DATA", "")
-        parsed_data = (
-            parse_value(str(data_val)) if data_val != "" else ImmValue(0, prefix="")
-        )
-        if parsed_data is None:
-            parsed_data = ImmValue(0, prefix="")
+        data_raw = d.get("DATA")
+        parsed_data: Union[Register, Immediate, ImmValue]
+        if data_raw is None:
+            parsed_data = ImmValue(0)
+        else:
+            result = parse_value(str(data_raw))
+            if result is None:
+                raise ValueError(f"DATA: {data_raw!r} is not a valid value")
+            parsed_data = result
         return cls(
-            dst=parse_value(str(d.get("DST", ""))),
+            dst=_parse_port_dst(str(d["DST"])),
             src=parse_src(d.get("SRC")),
             data=parsed_data,
-            time=parse_value(str(d["TIME"])) if "TIME" in d else None,
-            wr=SideWrite.parse(d["WR"]) if "WR" in d else None,
-            op=AluExpr.parse(d["OP"]) if "OP" in d else None,
+            time=parse_time(str(d["TIME"])) if "TIME" in d else None,
+            wr=parse_side_write(d["WR"]) if "WR" in d else None,
+            op=parse_alu_expr(d["OP"]) if "OP" in d else None,
             uf=_parse_update_flag(d.get("UF")),
             if_cond=_parse_cond_code(d.get("IF")),
         )
@@ -740,14 +800,14 @@ class WaitInst(BaseInst):
     """WAIT instruction: wait for sync/trigger."""
 
     c_op: str = "time"
-    time: Optional[ValueType] = None
+    time: Optional[TimeType] = None
     addr: Optional[AddrType] = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> WaitInst:
         return cls(
             c_op=d.get("C_OP", "time"),
-            time=parse_value(str(d["TIME"])) if "TIME" in d else None,
+            time=parse_time(str(d["TIME"])) if "TIME" in d else None,
             addr=parse_addr(d.get("ADDR")),
         )
 

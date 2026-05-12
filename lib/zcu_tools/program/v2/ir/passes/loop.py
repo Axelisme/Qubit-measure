@@ -17,7 +17,7 @@ from ..factory import IRParser, _needs_big_jump
 from ..instructions import JumpInst, LabelInst, RegWriteInst
 from ..labels import Label
 from ..node import BasicBlockNode, BlockNode, IRLoop, IRNode, RootNode
-from ..operands import AluExpr, ImmValue, Register, AluOp
+from ..operands import AluExpr, Immediate, Register, AluOp, SrcKeyword
 from ..pipeline import PipeLineContext
 from .base import OptimizationPassBase
 from .loop_dispatch import build_jump_table_blocks
@@ -221,7 +221,7 @@ class UnrollLoopPass(OptimizationPassBase):
                 init_bb = BasicBlockNode(
                     insts=[
                         RegWriteInst(
-                            dst=Register(node.counter_reg), src="imm", lit=ImmValue(0, prefix="#")
+                            dst=Register(node.counter_reg), src=SrcKeyword.IMM, lit=Immediate(0)
                         )
                     ]
                 )
@@ -279,11 +279,11 @@ class UnrollLoopPass(OptimizationPassBase):
                         insts=[
                             RegWriteInst(
                                 dst=Register(node.counter_reg),
-                                src="imm",
-                                lit=ImmValue(0, prefix="#"),
+                                src=SrcKeyword.IMM,
+                                lit=Immediate(0),
                             ),
                             RegWriteInst(
-                                dst=Register("s15"), src="label", label=entry_label
+                                dst=Register("s15"), src=SrcKeyword.LABEL, label=entry_label
                             ),
                         ],
                         branch=JumpInst(addr=Register("s15")),
@@ -293,8 +293,8 @@ class UnrollLoopPass(OptimizationPassBase):
                         insts=[
                             RegWriteInst(
                                 dst=Register(node.counter_reg),
-                                src="imm",
-                                lit=ImmValue(0, prefix="#"),
+                                src=SrcKeyword.IMM,
+                                lit=Immediate(0),
                             )
                         ],
                         branch=JumpInst(label=entry_label),
@@ -319,8 +319,8 @@ class UnrollLoopPass(OptimizationPassBase):
                         insts=[
                             RegWriteInst(
                                 dst=Register(node.counter_reg),
-                                src="imm",
-                                lit=ImmValue(0, prefix="#"),
+                                src=SrcKeyword.IMM,
+                                lit=Immediate(0),
                             )
                         ]
                     )
@@ -331,11 +331,11 @@ class UnrollLoopPass(OptimizationPassBase):
 
             # Back-edge: jump back to start while counter < n.
             counter = Register(node.counter_reg)
-            n_val = ImmValue(n, prefix="#")
+            n_val = Immediate(n)
             op_str = AluExpr(counter, AluOp.SUB, n_val)
             if _needs_big_jump(pmem_size):
                 back_bb = BasicBlockNode(
-                    insts=[RegWriteInst(dst=Register("s15"), src="label", label=start)],
+                    insts=[RegWriteInst(dst=Register("s15"), src=SrcKeyword.LABEL, label=start)],
                     branch=JumpInst(addr=Register("s15"), if_cond="S", op=op_str),
                 )
             else:

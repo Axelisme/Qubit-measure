@@ -8,7 +8,7 @@ from zcu_tools.program.v2.ir.instructions import (
 )
 from zcu_tools.program.v2.ir.linker import IRLinker
 from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRBranch, IRLoop
-from zcu_tools.program.v2.ir.operands import ImmValue
+from zcu_tools.program.v2.ir.operands import Immediate, SrcKeyword
 
 
 def test_instruction_parses_jump_label_to_jumpinst():
@@ -30,8 +30,8 @@ def test_branch_lower_produces_basic_blocks():
 
     Label.reset()
 
-    case_0_inst = RegWriteInst(dst="r0", src="imm", lit=ImmValue(1, prefix="#"))
-    case_1_inst = RegWriteInst(dst="r0", src="imm", lit=ImmValue(2, prefix="#"))
+    case_0_inst = RegWriteInst(dst="r0", src=SrcKeyword.IMM, lit=Immediate(1))
+    case_1_inst = RegWriteInst(dst="r0", src=SrcKeyword.IMM, lit=Immediate(2))
 
     case_0 = BlockNode(insts=[BasicBlockNode(insts=[case_0_inst])])
     case_1 = BlockNode(insts=[BasicBlockNode(insts=[case_1_inst])])
@@ -81,14 +81,14 @@ def test_branch_roundtrip_preserves_cases():
     case_0 = BlockNode(
         insts=[
             BasicBlockNode(
-                insts=[RegWriteInst(dst="r0", src="imm", lit=ImmValue(1, prefix="#"))]
+                insts=[RegWriteInst(dst="r0", src=SrcKeyword.IMM, lit=Immediate(1))]
             )
         ]
     )
     case_1 = BlockNode(
         insts=[
             BasicBlockNode(
-                insts=[RegWriteInst(dst="r0", src="imm", lit=ImmValue(2, prefix="#"))]
+                insts=[RegWriteInst(dst="r0", src=SrcKeyword.IMM, lit=Immediate(2))]
             )
         ]
     )

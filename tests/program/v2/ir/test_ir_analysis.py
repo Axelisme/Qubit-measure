@@ -9,11 +9,11 @@ from zcu_tools.program.v2.ir.instructions import (
     TimeInst,
 )
 from zcu_tools.program.v2.ir.labels import Label
-from zcu_tools.program.v2.ir.operands import AluExpr, ImmValue, Register, AluOp
+from zcu_tools.program.v2.ir.operands import AluExpr, Immediate, ImmValue, Register, SrcKeyword, AluOp
 
 
 def test_time_inst_analysis():
-    inst = TimeInst(c_op="inc_ref", lit=ImmValue(100, prefix="#"))
+    inst = TimeInst(c_op="inc_ref", lit=Immediate(100))
     assert instruction_reads(inst) == set()
     assert instruction_writes(inst) == {"s14"}
 
@@ -27,7 +27,7 @@ def test_test_inst_analysis():
     assert instruction_reads(inst) == {"s1", "s2"}
     assert instruction_writes(inst) == set()
 
-    inst = TestInst(op=AluExpr(Register("r5"), AluOp.ADD, ImmValue(10, prefix="#")))
+    inst = TestInst(op=AluExpr(Register("r5"), AluOp.ADD, Immediate(10)))
     assert instruction_reads(inst) == {"r5"}
     assert instruction_writes(inst) == set()
 
@@ -39,7 +39,7 @@ def test_jump_inst_analysis():
 
 
 def test_reg_write_inst_analysis():
-    inst = RegWriteInst(dst=Register("s1"), src="imm", lit=ImmValue(42, prefix="#"))
+    inst = RegWriteInst(dst=Register("s1"), src=SrcKeyword.IMM, lit=Immediate(42))
     assert instruction_writes(inst) == {"s1"}
     assert instruction_reads(inst) == set()
 
@@ -48,14 +48,14 @@ def test_reg_write_inst_analysis():
     assert instruction_reads(inst) == {"s2"}
 
     inst = RegWriteInst(
-        dst=Register("s1"), src="op", op=AluExpr(Register("s2"), AluOp.ADD, Register("s3"))
+        dst=Register("s1"), src=SrcKeyword.OP, op=AluExpr(Register("s2"), AluOp.ADD, Register("s3"))
     )
     assert instruction_writes(inst) == {"s1"}
     assert instruction_reads(inst) == {"s2", "s3"}
 
 
 def test_port_write_inst_analysis():
-    inst = PortWriteInst(dst=ImmValue(2, prefix=""), time=Register("s1"), addr=Register("s2"))
+    inst = PortWriteInst(dst=ImmValue(2), time=Register("s1"), addr=Register("s2"))
     assert instruction_writes(inst) == set()
     assert instruction_reads(inst) == {"s1", "s2", "s14"}
 
@@ -67,7 +67,7 @@ def test_mixed_registers():
 
 def test_property_types():
     inst = RegWriteInst(
-        dst=Register("s1"), src="op", op=AluExpr(Register("s2"), AluOp.ADD, Register("s3"))
+        dst=Register("s1"), src=SrcKeyword.OP, op=AluExpr(Register("s2"), AluOp.ADD, Register("s3"))
     )
     assert isinstance(inst.reg_read, list)
     assert isinstance(inst.reg_write, list)
@@ -82,5 +82,5 @@ def test_need_label():
     assert JumpInst(label=Label("HERE")).need_label is None
     assert JumpInst(label=Label("NEXT")).need_label is None
 
-    inst = RegWriteInst(dst=Register("s1"), src="imm", label=Label("data_table"))
+    inst = RegWriteInst(dst=Register("s1"), src=SrcKeyword.IMM, label=Label("data_table"))
     assert str(inst.need_label) == "&data_table"

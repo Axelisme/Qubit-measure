@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .pipeline import PipeLineConfig
 
 
-from .operands import ImmValue, SrcKeyword
+from .operands import Immediate, SrcKeyword
 
 
 def estimate_body_scheduled_ticks(body: list[IRNode]) -> int:
@@ -38,7 +38,7 @@ def estimate_body_scheduled_ticks(body: list[IRNode]) -> int:
                 if isinstance(inst, TimeInst) and inst.c_op == "inc_ref":
                     if inst.r1 is not None:
                         continue
-                    if isinstance(inst.lit, ImmValue) and inst.lit.prefix == "#":
+                    if isinstance(inst.lit, Immediate):
                         total += inst.lit.value
         elif isinstance(node, BlockNode):
             total += estimate_body_scheduled_ticks(node.insts)

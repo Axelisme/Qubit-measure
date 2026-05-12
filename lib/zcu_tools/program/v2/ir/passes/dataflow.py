@@ -158,7 +158,7 @@ class DeadTestEliminationPass(AbsChunkPass):
         return dead
 
 
-from ..operands import AluExpr, ImmValue, Register, canonical_reg, AluOp
+from ..operands import AluExpr, Immediate, Register, SrcKeyword, canonical_reg, AluOp
 
 
 def _is_const_increment(inst: Instruction) -> tuple[str, int] | None:
@@ -178,7 +178,7 @@ def _is_const_increment(inst: Instruction) -> tuple[str, int] | None:
     op = inst.op
     if op.op not in (AluOp.ADD, AluOp.SUB):
         return None
-    if not isinstance(op.rhs, ImmValue) or op.rhs.prefix != "#":
+    if not isinstance(op.rhs, Immediate):
         return None
 
     lhs_name = op.lhs.name
@@ -205,10 +205,10 @@ def _is_const_increment(inst: Instruction) -> tuple[str, int] | None:
 
 def _make_increment_inst(reg: str, val: int) -> RegWriteInst:
     if val >= 0:
-        op = AluExpr(Register(reg), AluOp.ADD, ImmValue(val, prefix="#"))
+        op = AluExpr(Register(reg), AluOp.ADD, Immediate(val))
     else:
-        op = AluExpr(Register(reg), AluOp.SUB, ImmValue(-val, prefix="#"))
-    return RegWriteInst(dst=Register(reg), src="op", op=op)
+        op = AluExpr(Register(reg), AluOp.SUB, Immediate(-val))
+    return RegWriteInst(dst=Register(reg), src=SrcKeyword.OP, op=op)
 
 
 class IncRegMergePass(AbsChunkPass):

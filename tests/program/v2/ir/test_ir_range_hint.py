@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
 from zcu_tools.program.v2.ir.instructions import MetaInst, RegWriteInst
+from zcu_tools.program.v2.ir.operands import Immediate, SrcKeyword
 from zcu_tools.program.v2.ir.node import IRLoop
 
 
@@ -21,7 +22,7 @@ def test_parse_loop_restores_range_hint():
             info=dict(counter_reg="r0", n="r_count", range_hint=(5, 5)),
         ),
         MetaInst(type="LOOP_BODY_START", name="loop"),
-        RegWriteInst(dst="r1", src="imm", lit="#1"),
+        RegWriteInst(dst="r1", src=SrcKeyword.IMM, lit=Immediate(1)),
         MetaInst(type="LOOP_BODY_END", name="loop"),
         MetaInst(type="LOOP_END", name="loop"),
     ]

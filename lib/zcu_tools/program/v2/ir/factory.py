@@ -13,7 +13,7 @@ from .instructions import (
 )
 from .labels import Label
 from .node import BasicBlockNode, BlockNode, IRBranch, IRLoop, RootNode
-from .operands import AluExpr, ImmValue, Register, AluOp
+from .operands import AluExpr, Immediate, Register, AluOp, SrcKeyword
 
 BIG_JUMP_PMEM_THRESHOLD = 2**11
 
@@ -332,7 +332,7 @@ class IRParser:
 
         counter = Register(node.counter_reg)
         if isinstance(node.n, int):
-            n_val = ImmValue(node.n, prefix="#")
+            n_val = Immediate(node.n)
         else:
             n_val = Register(node.n)
 
@@ -352,11 +352,11 @@ class IRParser:
         if isinstance(node.n, str):
             if _needs_big_jump(self.pmem_size):
                 pre += [
-                    RegWriteInst(dst=Register("s15"), src="label", label=end),
+                    RegWriteInst(dst=Register("s15"), src=SrcKeyword.LABEL, label=end),
                     JumpInst(
                         addr=Register("s15"),
                         if_cond="Z",
-                        op=AluExpr(Register(node.n), AluOp.SUB, ImmValue(0, prefix="#")),
+                        op=AluExpr(Register(node.n), AluOp.SUB, Immediate(0)),
                     ),
                 ]
             else:
@@ -364,11 +364,11 @@ class IRParser:
                     JumpInst(
                         label=end,
                         if_cond="Z",
-                        op=AluExpr(Register(node.n), AluOp.SUB, ImmValue(0, prefix="#")),
+                        op=AluExpr(Register(node.n), AluOp.SUB, Immediate(0)),
                     )
                 )
         pre += [
-            RegWriteInst(dst=counter, src="imm", lit=ImmValue(0, prefix="#")),
+            RegWriteInst(dst=counter, src=SrcKeyword.IMM, lit=Immediate(0)),
             LabelInst(name=start, can_remove=True),
             MetaInst(type="LOOP_BODY_START", name=node.name),
         ]
@@ -378,7 +378,7 @@ class IRParser:
         ]
         if _needs_big_jump(self.pmem_size):
             post += [
-                RegWriteInst(dst=Register("s15"), src="label", label=start),
+                RegWriteInst(dst=Register("s15"), src=SrcKeyword.LABEL, label=start),
                 JumpInst(addr=Register("s15"), if_cond="S", op=op_str),
             ]
         else:
@@ -437,7 +437,7 @@ class IRParser:
                 branch=JumpInst(
                     label=else_label,
                     if_cond="NZ",
-                    op=AluExpr(Register(node.compare_reg), AluOp.SUB, ImmValue(0, prefix="#")),
+                    op=AluExpr(Register(node.compare_reg), AluOp.SUB, Immediate(0)),
                 )
             )
         )

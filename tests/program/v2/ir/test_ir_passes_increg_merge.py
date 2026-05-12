@@ -7,7 +7,7 @@ from zcu_tools.program.v2.ir.instructions import (
     WmemWriteInst,
 )
 from zcu_tools.program.v2.ir.node import BasicBlockNode, RootNode
-from zcu_tools.program.v2.ir.operands import AluExpr, ImmValue, Register, AluOp
+from zcu_tools.program.v2.ir.operands import AluExpr, Immediate, ImmValue, MemAddr, Register, TimeOffset, SrcKeyword, AluOp
 from zcu_tools.program.v2.ir.passes.dataflow import IncRegMergePass
 from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
 
@@ -28,24 +28,24 @@ def test_inc_reg_merge_free_basic():
                 insts=[
                     RegWriteInst(
                         dst=Register("r1"),
-                        src="op",
-                        op=AluExpr(Register("r1"), AluOp.ADD, ImmValue(2, prefix="#")),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r1"), AluOp.ADD, Immediate(2)),
                     ),
                     NopInst(),
                     RegWriteInst(
                         dst=Register("r1"),
-                        src="op",
-                        op=AluExpr(Register("r1"), AluOp.ADD, ImmValue(3, prefix="#")),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r1"), AluOp.ADD, Immediate(3)),
                     ),
                     RegWriteInst(
                         dst=Register("r2"),
-                        src="op",
-                        op=AluExpr(Register("r2"), AluOp.ADD, ImmValue(5, prefix="#")),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r2"), AluOp.ADD, Immediate(5)),
                     ),
                     RegWriteInst(
                         dst=Register("r2"),
-                        src="op",
-                        op=AluExpr(Register("r2"), AluOp.SUB, ImmValue(1, prefix="#")),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r2"), AluOp.SUB, Immediate(1)),
                     ),
                 ]
             )
@@ -71,14 +71,14 @@ def test_inc_reg_merge_free_flush_on_read():
                 insts=[
                     RegWriteInst(
                         dst=Register("r1"),
-                        src="op",
-                        op=AluExpr(Register("r1"), AluOp.ADD, ImmValue(2, prefix="#")),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r1"), AluOp.ADD, Immediate(2)),
                     ),
                     TimeInst(c_op="inc_ref", r1=Register("r1")),
                     RegWriteInst(
                         dst=Register("r1"),
-                        src="op",
-                        op=AluExpr(Register("r1"), AluOp.ADD, ImmValue(3, prefix="#")),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r1"), AluOp.ADD, Immediate(3)),
                     ),
                 ]
             )
@@ -101,20 +101,20 @@ def test_inc_reg_merge_free_can_cross_port_write():
                 insts=[
                     RegWriteInst(
                         dst=Register("r0"),
-                        src="op",
-                        op=AluExpr(Register("r0"), AluOp.ADD, ImmValue(1, prefix="#")),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r0"), AluOp.ADD, Immediate(1)),
                     ),
                     PortWriteInst(
-                        dst=ImmValue(2, prefix=""),
-                        src="wmem",
-                        addr=ImmValue(1, prefix="&"),
-                        time=ImmValue(0, prefix="@"),
+                        dst=ImmValue(2),
+                        src=SrcKeyword.WMEM,
+                        addr=MemAddr(1),
+                        time=TimeOffset(0),
                     ),
                     TimeInst(c_op="inc_ref", r1=Register("r4")),
                     RegWriteInst(
                         dst=Register("r0"),
-                        src="op",
-                        op=AluExpr(Register("r0"), AluOp.ADD, ImmValue(1, prefix="#")),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r0"), AluOp.ADD, Immediate(1)),
                     ),
                 ]
             )
@@ -138,40 +138,40 @@ def test_inc_reg_merge_free_cpmg_like_unrolled_body():
             BasicBlockNode(
                 insts=[
                     PortWriteInst(
-                        dst=ImmValue(2, prefix=""),
-                        src="wmem",
-                        addr=ImmValue(1, prefix="&"),
-                        time=ImmValue(0, prefix="@"),
+                        dst=ImmValue(2),
+                        src=SrcKeyword.WMEM,
+                        addr=MemAddr(1),
+                        time=TimeOffset(0),
                     ),
                     TimeInst(c_op="inc_ref", r1=Register("r4")),
                     RegWriteInst(
                         dst=Register("r0"),
-                        src="op",
-                        op=AluExpr(Register("r0"), AluOp.ADD, ImmValue(1, prefix="#")),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r0"), AluOp.ADD, Immediate(1)),
                     ),
                     PortWriteInst(
-                        dst=ImmValue(2, prefix=""),
-                        src="wmem",
-                        addr=ImmValue(1, prefix="&"),
-                        time=ImmValue(0, prefix="@"),
+                        dst=ImmValue(2),
+                        src=SrcKeyword.WMEM,
+                        addr=MemAddr(1),
+                        time=TimeOffset(0),
                     ),
                     TimeInst(c_op="inc_ref", r1=Register("r4")),
                     RegWriteInst(
                         dst=Register("r0"),
-                        src="op",
-                        op=AluExpr(Register("r0"), AluOp.ADD, ImmValue(1, prefix="#")),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r0"), AluOp.ADD, Immediate(1)),
                     ),
                     PortWriteInst(
-                        dst=ImmValue(2, prefix=""),
-                        src="wmem",
-                        addr=ImmValue(1, prefix="&"),
-                        time=ImmValue(0, prefix="@"),
+                        dst=ImmValue(2),
+                        src=SrcKeyword.WMEM,
+                        addr=MemAddr(1),
+                        time=TimeOffset(0),
                     ),
                     TimeInst(c_op="inc_ref", r1=Register("r4")),
                     RegWriteInst(
                         dst=Register("r0"),
-                        src="op",
-                        op=AluExpr(Register("r0"), AluOp.ADD, ImmValue(1, prefix="#")),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r0"), AluOp.ADD, Immediate(1)),
                     ),
                 ]
             )
@@ -194,24 +194,24 @@ def test_inc_reg_merge_fixed_basic_is_skipped():
                 insts=[
                     RegWriteInst(
                         dst=Register("r1"),
-                        src="op",
-                        op=AluExpr(Register("r1"), AluOp.ADD, ImmValue(2, prefix="#")),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r1"), AluOp.ADD, Immediate(2)),
                     ),
                     RegWriteInst(
                         dst=Register("r1"),
-                        src="op",
-                        op=AluExpr(Register("r1"), AluOp.ADD, ImmValue(3, prefix="#")),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r1"), AluOp.ADD, Immediate(3)),
                     ),
                     NopInst(),
                     RegWriteInst(
                         dst=Register("r2"),
-                        src="op",
-                        op=AluExpr(Register("r2"), AluOp.ADD, ImmValue(5, prefix="#")),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r2"), AluOp.ADD, Immediate(5)),
                     ),
                     RegWriteInst(
                         dst=Register("r2"),
-                        src="op",
-                        op=AluExpr(Register("r2"), AluOp.SUB, ImmValue(5, prefix="#")),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r2"), AluOp.SUB, Immediate(5)),
                     ),
                 ],
                 fix_addr_size=True,
@@ -239,14 +239,14 @@ def test_inc_reg_merge_fixed_barrier():
                 insts=[
                     RegWriteInst(
                         dst=Register("r1"),
-                        src="op",
-                        op=AluExpr(Register("r1"), AluOp.ADD, ImmValue(2, prefix="#")),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r1"), AluOp.ADD, Immediate(2)),
                     ),
                     NopInst(),
                     RegWriteInst(
                         dst=Register("r1"),
-                        src="op",
-                        op=AluExpr(Register("r1"), AluOp.ADD, ImmValue(3, prefix="#")),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r1"), AluOp.ADD, Immediate(3)),
                     ),
                 ],
                 fix_addr_size=True,
@@ -274,14 +274,14 @@ def test_inc_reg_merge_does_not_cross_wmem_write_via_alias():
                 insts=[
                     RegWriteInst(
                         dst=Register("w_freq"),
-                        src="op",
-                        op=AluExpr(Register("w_freq"), AluOp.ADD, ImmValue(5, prefix="#")),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("w_freq"), AluOp.ADD, Immediate(5)),
                     ),
-                    WmemWriteInst(addr=ImmValue(0, prefix="&")),
+                    WmemWriteInst(addr=MemAddr(0)),
                     RegWriteInst(
                         dst=Register("w_freq"),
-                        src="op",
-                        op=AluExpr(Register("w_freq"), AluOp.ADD, ImmValue(3, prefix="#")),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("w_freq"), AluOp.ADD, Immediate(3)),
                     ),
                 ]
             )

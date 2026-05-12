@@ -10,7 +10,7 @@ from zcu_tools.program.v2.ir.instructions import (
 )
 from zcu_tools.program.v2.ir.labels import Label
 from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode
-from zcu_tools.program.v2.ir.operands import AluExpr, ImmValue, Register
+from zcu_tools.program.v2.ir.operands import AluExpr, Immediate, ImmValue, Register, SrcKeyword
 from zcu_tools.program.v2.ir.passes.loop_dispatch import (
     build_jump_table_blocks,
 )
@@ -27,7 +27,7 @@ def _make_jt_blocks(
     entry_labels = [Label.make_new(f"e_{i}") for i in range(k)]
     exit_label = Label.make_new("jt_exit")
     bodies = [
-        BlockNode(insts=[BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit=ImmValue(1, prefix="#"))]) for _ in range(body_words)])
+        BlockNode(insts=[BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit=Immediate(1))]) for _ in range(body_words)])
         for _ in range(k)
     ]
     return build_jump_table_blocks(

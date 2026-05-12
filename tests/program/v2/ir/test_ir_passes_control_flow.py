@@ -21,7 +21,7 @@ from zcu_tools.program.v2.ir.node import (
     IRLoop,
     RootNode,
 )
-from zcu_tools.program.v2.ir.operands import AluExpr, ImmValue, Register, AluOp
+from zcu_tools.program.v2.ir.operands import AluExpr, Immediate, Register, SrcKeyword, AluOp
 from zcu_tools.program.v2.ir.passes.control_flow import (
     BlockMergePass,
     BranchEliminationPass,
@@ -152,7 +152,7 @@ def test_branch_elim_keeps_conditional_branch():
                 branch=JumpInst(
                     label=lbl,
                     if_cond="Z",
-                    op=AluExpr(Register("r0"), AluOp.SUB, ImmValue(0, prefix="#")),
+                    op=AluExpr(Register("r0"), AluOp.SUB, Immediate(0)),
                 ),
             ),
             BasicBlockNode(
@@ -244,10 +244,10 @@ def test_block_merge_cross_boundary_dead_write_cleared_by_post_linear():
     root = RootNode(
         insts=[
             BasicBlockNode(
-                insts=[RegWriteInst(dst=Register("r0"), src="imm", lit=ImmValue(1, prefix="#"))]
+                insts=[RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1))]
             ),
             BasicBlockNode(
-                insts=[RegWriteInst(dst=Register("r0"), src="imm", lit=ImmValue(2, prefix="#"))]
+                insts=[RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(2))]
             ),
         ]
     )

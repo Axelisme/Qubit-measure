@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from typing_extensions import TYPE_CHECKING, Any, Optional
+from typing_extensions import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .instructions import BaseInst
@@ -102,20 +102,6 @@ class Label:
         new_label = self.clone_new()
         memo[id(self)] = new_label
         return new_label
-
-    @classmethod
-    def parse(cls, val: Any) -> Optional[Label]:
-        if isinstance(val, Label):
-            return val
-        if not isinstance(val, str):
-            return None
-        name = val[1:] if val.startswith("&") else val
-        if not name:
-            return None
-        try:
-            return cls.use_existing(name)
-        except ValueError:
-            return cls.use_existing(name)
 
     @classmethod
     def reset(cls) -> None:

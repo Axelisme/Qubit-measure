@@ -33,14 +33,14 @@ from zcu_tools.program.v2.ir.instructions import (
     WmemWriteInst,
 )
 from zcu_tools.program.v2.ir.labels import Label
-from zcu_tools.program.v2.ir.operands import AluExpr, ImmValue, Register, SideWrite, AluOp
+from zcu_tools.program.v2.ir.operands import AluExpr, Immediate, ImmValue, Register, SideWrite, SrcKeyword, AluOp
 
 
 class TestTimeInstruction:
     """Tests for TimeInst (TIME opcode)."""
 
     def test_construction_with_all_fields(self):
-        inst = TimeInst(c_op="inc_ref", lit=ImmValue(10, prefix="#"), r1=Register("r0"))
+        inst = TimeInst(c_op="inc_ref", lit=Immediate(10), r1=Register("r0"))
         assert inst.c_op == "inc_ref"
         assert str(inst.lit) == "#10"
         assert inst.r1.name == "r0"
@@ -245,13 +245,13 @@ class TestRegWriteInstruction:
     """Tests for RegWriteInst (REG_WR opcode)."""
 
     def test_construction_imm_source(self):
-        inst = RegWriteInst(dst=Register("s1"), src="imm", lit=ImmValue(10, prefix="#"))
+        inst = RegWriteInst(dst=Register("s1"), src=SrcKeyword.IMM, lit=Immediate(10))
         assert inst.dst.name == "s1"
         assert inst.src == "imm"
         assert str(inst.lit) == "#10"
 
     def test_construction_op_source(self):
-        inst = RegWriteInst(dst=Register("s2"), src="op", op=AluExpr(Register("s1"), AluOp.ADD, ImmValue(1, prefix="#")), uf="0")
+        inst = RegWriteInst(dst=Register("s2"), src=SrcKeyword.OP, op=AluExpr(Register("s1"), AluOp.ADD, Immediate(1)), uf="0")
         assert inst.dst.name == "s2"
         assert inst.src == "op"
         assert inst.op.lhs.name == "s1"
@@ -295,7 +295,7 @@ class TestRegWriteInstruction:
         assert recovered == original
 
     def test_regwr_immutable(self):
-        inst = RegWriteInst(dst=Register("s1"), src="imm")
+        inst = RegWriteInst(dst=Register("s1"), src=SrcKeyword.IMM)
         with pytest.raises(Exception):
             inst.dst = "s2"  # type: ignore
 
@@ -304,7 +304,7 @@ class TestPortWriteInstruction:
     """Tests for PortWriteInst (WPORT_WR opcode)."""
 
     def test_construction_with_specific_fields(self):
-        inst = PortWriteInst(dst=ImmValue(0, prefix=""), time=Register("t0"), ww="1")
+        inst = PortWriteInst(dst=ImmValue(0), time=Register("t0"), ww="1")
         assert str(inst.dst) == "0"
         assert inst.time.name == "t0"
         assert inst.ww == "1"
@@ -351,7 +351,7 @@ class TestPortWriteInstruction:
         assert recovered == original
 
     def test_wport_wr_immutable(self):
-        inst = PortWriteInst(dst=ImmValue(0, prefix=""))
+        inst = PortWriteInst(dst=ImmValue(0))
         with pytest.raises(Exception):
             inst.dst = "1"  # type: ignore
 

@@ -31,7 +31,7 @@ from zcu_tools.program.v2.ir.node import (
     IRNode,
     RootNode,
 )
-from zcu_tools.program.v2.ir.operands import ImmValue, Register
+from zcu_tools.program.v2.ir.operands import Immediate, Register, SrcKeyword
 from zcu_tools.program.v2.ir.passes import (
     BranchEliminationPass,
     UnrollLoopPass,
@@ -277,7 +277,7 @@ def test_v2_fully_unrolled_loop_produces_single_fused_block():
                         BasicBlockNode(
                             insts=[
                                 RegWriteInst(
-                                    dst=Register("r1"), src="imm", lit=ImmValue(1, prefix="#")
+                                    dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(1)
                                 )
                             ]
                         ),
@@ -324,7 +324,7 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
                         BasicBlockNode(
                             insts=[
                                 RegWriteInst(
-                                    dst=Register("r_out"), src="imm", lit=ImmValue(42, prefix="#")
+                                    dst=Register("r_out"), src=SrcKeyword.IMM, lit=Immediate(42)
                                 )
                             ]
                         ),

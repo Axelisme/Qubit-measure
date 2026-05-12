@@ -5,7 +5,7 @@ from typing_extensions import Optional
 from .instructions import BaseInst, JumpInst, LabelInst, RegWriteInst
 from .labels import Label
 from .node import BasicBlockNode
-from .operands import AluExpr, AluOp, Register
+from .operands import AluExpr, AluOp, Register, SrcKeyword
 
 BIG_JUMP_PMEM_THRESHOLD = 2**11
 
@@ -32,10 +32,10 @@ def emit_dispatch_address_setup(
     s15 = Register("s15")
 
     insts: list[BaseInst] = [
-        RegWriteInst(dst=s15, src="label", label=table_base),
+        RegWriteInst(dst=s15, src=SrcKeyword.LABEL, label=table_base),
     ]
     for _ in range(dispatch_entry_words(pmem_size)):
-        insts.append(RegWriteInst(dst=s15, src="op", op=AluExpr(s15, AluOp.ADD, index)))
+        insts.append(RegWriteInst(dst=s15, src=SrcKeyword.OP, op=AluExpr(s15, AluOp.ADD, index)))
     return insts
 
 
@@ -67,7 +67,7 @@ def build_dispatch_table_island(
                     labels=[LabelInst(name=table_label, can_remove=False)],
                     insts=[
                         RegWriteInst(
-                            dst=Register("s15"), src="label", label=target_label
+                            dst=Register("s15"), src=SrcKeyword.LABEL, label=target_label
                         )
                     ],
                     branch=JumpInst(addr=Register("s15")),

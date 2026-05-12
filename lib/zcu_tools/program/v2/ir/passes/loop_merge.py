@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from ..instructions import JumpInst, RegWriteInst, TestInst
 from ..node import BasicBlockNode
-from ..operands import AluExpr, ImmValue, SideWrite, AluOp
+from ..operands import AluExpr, Immediate, SideWrite, AluOp, SrcKeyword
 from ..pipeline import AbsChunkPass, ChunkList, PipeLineContext
 
 
 def _is_pure_regwrite_op(inst: RegWriteInst) -> bool:
     """True only for a plain REG_WR dst op <expr> with no extra semantics."""
     return (
-        inst.src == "op"
+        inst.src == SrcKeyword.OP
         and inst.op is not None
         and inst.lit is None
         and inst.if_cond is None
@@ -99,8 +99,7 @@ class LoopConditionMergePass(AbsChunkPass):
                 isinstance(op, AluExpr)
                 and op.lhs.name == reg
                 and op.op == AluOp.SUB
-                and isinstance(op.rhs, ImmValue)
-                and op.rhs.prefix == "#"
+                and isinstance(op.rhs, Immediate)
                 and op.rhs.value == 0
             ):
                 block.branch = _make_merged_branch(branch, last_inst)

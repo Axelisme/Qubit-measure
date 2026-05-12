@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing_extensions import Any
 from zcu_tools.program.v2.ir.instructions import NopInst, RegWriteInst
+from zcu_tools.program.v2.ir.operands import SrcKeyword
 from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRLoop, RootNode
 from zcu_tools.program.v2.ir.pipeline import make_default_pipeline
 
@@ -113,7 +114,7 @@ def test_irloop_emit_uses_s15_jump_for_large_pmem():
                             insts=[
                                 RegWriteInst(
                                     dst="r1",
-                                    src="op",
+                                    src=SrcKeyword.OP,
                                     op="r1 + #1",
                                 )
                             ]

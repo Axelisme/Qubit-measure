@@ -9,7 +9,7 @@ from zcu_tools.program.v2.ir.instructions import (
     WaitInst,
 )
 from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, RootNode
-from zcu_tools.program.v2.ir.operands import ImmValue, Register
+from zcu_tools.program.v2.ir.operands import Immediate, ImmValue, MemAddr, Register, SrcKeyword, TimeOffset
 from zcu_tools.program.v2.ir.passes import walk_basic_blocks
 from zcu_tools.program.v2.ir.passes.timeline import TimedMergePass, ZeroDelayDCEPass
 from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
@@ -38,8 +38,8 @@ def test_zero_delay_dce_removes_plain_zero_increment():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=ImmValue(0, prefix="#")),
-                    TimeInst(c_op="inc_ref", lit=ImmValue(4, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=Immediate(0)),
+                    TimeInst(c_op="inc_ref", lit=Immediate(4)),
                     NopInst(),
                 ]
             )
@@ -62,8 +62,8 @@ def test_timed_instruction_merge_merges_plain_adjacent_increments():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=ImmValue(2, prefix="#")),
-                    TimeInst(c_op="inc_ref", lit=ImmValue(3, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=Immediate(2)),
+                    TimeInst(c_op="inc_ref", lit=Immediate(3)),
                     NopInst(),
                 ]
             )
@@ -87,9 +87,9 @@ def test_timed_instruction_merge_sinks_past_zero_increment():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=ImmValue(2, prefix="#")),
-                    TimeInst(c_op="inc_ref", lit=ImmValue(0, prefix="#")),
-                    TimeInst(c_op="inc_ref", lit=ImmValue(3, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=Immediate(2)),
+                    TimeInst(c_op="inc_ref", lit=Immediate(0)),
+                    TimeInst(c_op="inc_ref", lit=Immediate(3)),
                 ]
             )
         ]
@@ -109,9 +109,9 @@ def test_timed_instruction_merge_sinks_past_zero_increment():
 def test_timed_instruction_merge_does_not_cross_block_boundary():
     root = RootNode(
         insts=[
-            BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit=ImmValue(2, prefix="#"))]),
+            BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit=Immediate(2))]),
             BasicBlockNode(insts=[WaitInst(c_op="time")]),
-            BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit=ImmValue(3, prefix="#"))]),
+            BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit=Immediate(3))]),
         ]
     )
 
@@ -136,9 +136,9 @@ def test_zero_delay_dce_removes_from_basic_block():
                 insts=[
                     BasicBlockNode(
                         insts=[
-                            TimeInst(c_op="inc_ref", lit=ImmValue(0, prefix="#")),
+                            TimeInst(c_op="inc_ref", lit=Immediate(0)),
                             NopInst(),
-                            TimeInst(c_op="inc_ref", lit=ImmValue(0, prefix="#")),
+                            TimeInst(c_op="inc_ref", lit=Immediate(0)),
                         ]
                     ),
                 ]
@@ -158,7 +158,7 @@ def test_zero_delay_dce_skips_fixed_basic_block():
     root = RootNode(
         insts=[
             BasicBlockNode(
-                insts=[TimeInst(c_op="inc_ref", lit=ImmValue(0, prefix="#")), NopInst()],
+                insts=[TimeInst(c_op="inc_ref", lit=Immediate(0)), NopInst()],
                 fix_addr_size=True,
             ),
         ]
@@ -179,8 +179,8 @@ def test_timed_merge_merges_in_basic_block():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=ImmValue(2, prefix="#")),
-                    TimeInst(c_op="inc_ref", lit=ImmValue(3, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=Immediate(2)),
+                    TimeInst(c_op="inc_ref", lit=Immediate(3)),
                     NopInst(),
                 ]
             ),
@@ -202,8 +202,8 @@ def test_timed_merge_skips_fixed_basic_block():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=ImmValue(2, prefix="#")),
-                    TimeInst(c_op="inc_ref", lit=ImmValue(3, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=Immediate(2)),
+                    TimeInst(c_op="inc_ref", lit=Immediate(3)),
                 ],
                 fix_addr_size=True,
             ),
@@ -231,8 +231,8 @@ def test_lit_time_sinks_past_reg_write():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=ImmValue(10, prefix="#")),
-                    RegWriteInst(dst=Register("r0"), src="imm", lit=ImmValue(1, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=Immediate(10)),
+                    RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)),
                 ]
             )
         ]
@@ -251,9 +251,9 @@ def test_lit_time_sinks_past_multiple_non_timed():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=ImmValue(5, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=Immediate(5)),
                     NopInst(),
-                    RegWriteInst(dst=Register("r0"), src="imm", lit=ImmValue(1, prefix="#")),
+                    RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)),
                     NopInst(),
                 ]
             )
@@ -275,12 +275,12 @@ def test_lit_time_absorbed_into_port_write():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=ImmValue(43, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=Immediate(43)),
                     PortWriteInst(
-                        dst=ImmValue(2, prefix=""),
-                        src="wmem",
-                        addr=ImmValue(12, prefix="&"),
-                        time=ImmValue(0, prefix="@"),
+                        dst=ImmValue(2),
+                        src=SrcKeyword.WMEM,
+                        addr=MemAddr(12),
+                        time=TimeOffset(0),
                     ),
                 ]
             )
@@ -300,8 +300,8 @@ def test_lit_time_absorbed_into_wait_inst():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=ImmValue(83, prefix="#")),
-                    WaitInst(c_op="time", time=ImmValue(0, prefix="@")),
+                    TimeInst(c_op="inc_ref", lit=Immediate(83)),
+                    WaitInst(c_op="time", time=TimeOffset(0)),
                 ]
             )
         ]
@@ -320,13 +320,13 @@ def test_accumulated_time_absorbed():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=ImmValue(10, prefix="#")),
-                    TimeInst(c_op="inc_ref", lit=ImmValue(20, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=Immediate(10)),
+                    TimeInst(c_op="inc_ref", lit=Immediate(20)),
                     PortWriteInst(
-                        dst=ImmValue(2, prefix=""),
-                        src="wmem",
-                        addr=ImmValue(0, prefix="&"),
-                        time=ImmValue(0, prefix="@"),
+                        dst=ImmValue(2),
+                        src=SrcKeyword.WMEM,
+                        addr=MemAddr(0),
+                        time=TimeOffset(0),
                     ),
                 ]
             )
@@ -346,14 +346,14 @@ def test_time_and_non_timed_then_port_write():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=ImmValue(10, prefix="#")),
-                    RegWriteInst(dst=Register("r0"), src="imm", lit=ImmValue(1, prefix="#")),
-                    TimeInst(c_op="inc_ref", lit=ImmValue(20, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=Immediate(10)),
+                    RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)),
+                    TimeInst(c_op="inc_ref", lit=Immediate(20)),
                     PortWriteInst(
-                        dst=ImmValue(2, prefix=""),
-                        src="wmem",
-                        addr=ImmValue(0, prefix="&"),
-                        time=ImmValue(0, prefix="@"),
+                        dst=ImmValue(2),
+                        src=SrcKeyword.WMEM,
+                        addr=MemAddr(0),
+                        time=TimeOffset(0),
                     ),
                 ]
             )
@@ -376,18 +376,18 @@ def test_all_timed_adjusted_with_same_delta():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=ImmValue(10, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=Immediate(10)),
                     PortWriteInst(
-                        dst=ImmValue(2, prefix=""),
-                        src="wmem",
-                        addr=ImmValue(0, prefix="&"),
-                        time=ImmValue(0, prefix="@"),
+                        dst=ImmValue(2),
+                        src=SrcKeyword.WMEM,
+                        addr=MemAddr(0),
+                        time=TimeOffset(0),
                     ),
                     PortWriteInst(
-                        dst=ImmValue(2, prefix=""),
-                        src="wmem",
-                        addr=ImmValue(1, prefix="&"),
-                        time=ImmValue(5, prefix="@"),
+                        dst=ImmValue(2),
+                        src=SrcKeyword.WMEM,
+                        addr=MemAddr(1),
+                        time=TimeOffset(5),
                     ),
                 ]
             )
@@ -414,9 +414,9 @@ def test_port_write_no_time_acts_as_barrier():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=ImmValue(10, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=Immediate(10)),
                     PortWriteInst(
-                        dst=ImmValue(2, prefix=""), src="wmem", addr=ImmValue(0, prefix="&"), time=None
+                        dst=ImmValue(2), src=SrcKeyword.WMEM, addr=MemAddr(0), time=None
                     ),
                 ]
             )
@@ -439,11 +439,11 @@ def test_port_write_reg_time_acts_as_barrier():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=ImmValue(10, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=Immediate(10)),
                     PortWriteInst(
-                        dst=ImmValue(2, prefix=""),
-                        src="wmem",
-                        addr=ImmValue(0, prefix="&"),
+                        dst=ImmValue(2),
+                        src=SrcKeyword.WMEM,
+                        addr=MemAddr(0),
                         time=Register("s14"),
                     ),
                 ]
@@ -464,14 +464,14 @@ def test_reg_time_flushes_pending_lit():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=ImmValue(10, prefix="#")),
-                    RegWriteInst(dst=Register("r0"), src="imm", lit=ImmValue(1, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=Immediate(10)),
+                    RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)),
                     TimeInst(c_op="inc_ref", r1=Register("r1")),  # reg-TIME barrier
                     PortWriteInst(
-                        dst=ImmValue(2, prefix=""),
-                        src="wmem",
-                        addr=ImmValue(0, prefix="&"),
-                        time=ImmValue(5, prefix="@"),
+                        dst=ImmValue(2),
+                        src=SrcKeyword.WMEM,
+                        addr=MemAddr(0),
+                        time=TimeOffset(5),
                     ),
                 ]
             )
@@ -491,8 +491,8 @@ def test_pending_lit_flushed_at_end_of_block():
         insts=[
             BasicBlockNode(
                 insts=[
-                    TimeInst(c_op="inc_ref", lit=ImmValue(15, prefix="#")),
-                    RegWriteInst(dst=Register("r0"), src="imm", lit=ImmValue(1, prefix="#")),
+                    TimeInst(c_op="inc_ref", lit=Immediate(15)),
+                    RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)),
                 ]
             )
         ]
