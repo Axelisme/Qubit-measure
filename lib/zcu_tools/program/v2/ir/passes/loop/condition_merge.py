@@ -1,9 +1,64 @@
+"""LoopConditionMergePass: merge register increments into conditional jump side-writes.
+
+Purpose
+-------
+The tProc v2 ``JUMP`` instruction supports a ``-wr`` side-write field that
+atomically writes a register as part of the jump.  This pass exploits that
+feature to collapse a counter-decrement + conditional-jump pair (2 words)
+into a single jump with embedded side-write (1 word), saving pmem space and
+a pipeline slot.
+
+Example (Pattern 1)
+-------------------
+Before::
+
+    REG_WR r1 op r1 - #1         ; counter decrement
+    JUMP loop -if(NZ) -op(r1 - #0)   ; zero-check
+
+After::
+
+    JUMP loop -if(NZ) -wr(r1 op) -op(r1 - #1)   ; merged: decrement + check in one word
+
+Example (Pattern 2)
+-------------------
+Before::
+
+    TEST op(r2 - #5)
+    REG_WR r1 op r1 + #1
+    JUMP done -if(Z)             ; no -op field
+
+After::
+
+    TEST op(r2 - #5)
+    JUMP done -if(Z) -wr(r1 op) -op(r1 + #1)    ; merged side-write injection
+
+QICK Hardware Notes
+-------------------
+- The ``-wr`` side-write field executes the ALU expression and writes the
+  result to the destination register *unconditionally*, even if the branch
+  is not taken.  Pattern 1 relies on this: the counter is always decremented,
+  and the branch checks whether the decremented value is zero.
+- Pattern 1 specifically targets the ``-op(reg - #0)`` zero-comparison form
+  because subtracting zero is the conventional way to set the NZ flag without
+  a separate TEST, and the merged form uses the *same* decrement expression
+  as both the side-write and the implicit flag update.
+- Pattern 2 requires that the branch has no existing ``-op``, ``-wr``, or
+  ``-uf`` field, and that the REG_WR is a pure ALU operation (no label, addr,
+  if_cond, or uf).
+
+Decision Notes
+--------------
+Both patterns are applied within a single block pass (pattern 1 first, then
+pattern 2) so they can be composed without re-scanning.  The pass is
+conservative: it only merges when the structural match is exact.
+"""
+
 from __future__ import annotations
 
-from ..instructions import JumpInst, RegWriteInst, TestInst
-from ..node import BasicBlockNode
-from ..operands import AluExpr, AluOp, Immediate, SideWrite, SrcKeyword
-from ..pipeline import AbsChunkPass, ChunkList, PipeLineContext
+from ...instructions import JumpInst, RegWriteInst, TestInst
+from ...node import BasicBlockNode
+from ...operands import AluExpr, AluOp, Immediate, SideWrite, SrcKeyword
+from ...pipeline import AbsChunkPass, ChunkList, PipeLineContext
 
 
 def _is_pure_regwrite_op(inst: RegWriteInst) -> bool:

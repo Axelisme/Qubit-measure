@@ -17,7 +17,7 @@ from zcu_tools.program.v2.ir.operands import (
     Register,
     SrcKeyword,
 )
-from zcu_tools.program.v2.ir.passes.loop_dispatch import (
+from zcu_tools.program.v2.ir.passes.loop.dispatch_island import (
     build_jump_table_blocks,
 )
 

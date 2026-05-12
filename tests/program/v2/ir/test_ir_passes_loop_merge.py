@@ -9,7 +9,7 @@ from zcu_tools.program.v2.ir.operands import (
     SideWrite,
     SrcKeyword,
 )
-from zcu_tools.program.v2.ir.passes.loop_merge import LoopConditionMergePass
+from zcu_tools.program.v2.ir.passes.loop import LoopConditionMergePass
 from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
 
 

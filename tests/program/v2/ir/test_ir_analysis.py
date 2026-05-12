@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from zcu_tools.program.v2.ir.analysis import instruction_reads, instruction_writes
 from zcu_tools.program.v2.ir.instructions import (
     JumpInst,
     PortWriteInst,
@@ -21,55 +20,55 @@ from zcu_tools.program.v2.ir.operands import (
 
 def test_time_inst_analysis():
     inst = TimeInst(c_op="inc_ref", lit=Immediate(100))
-    assert instruction_reads(inst) == set()
-    assert instruction_writes(inst) == {"s14"}
+    assert set(inst.reg_read) == set()
+    assert set(inst.reg_write) == {"s14"}
 
     inst = TimeInst(c_op="inc_ref", r1=Register("s1"))
-    assert instruction_reads(inst) == {"s1"}
-    assert instruction_writes(inst) == {"s14"}
+    assert set(inst.reg_read) == {"s1"}
+    assert set(inst.reg_write) == {"s14"}
 
 
 def test_test_inst_analysis():
     inst = TestInst(op=AluExpr(Register("s1"), AluOp.SUB, Register("s2")))
-    assert instruction_reads(inst) == {"s1", "s2"}
-    assert instruction_writes(inst) == set()
+    assert set(inst.reg_read) == {"s1", "s2"}
+    assert set(inst.reg_write) == set()
 
     inst = TestInst(op=AluExpr(Register("r5"), AluOp.ADD, Immediate(10)))
-    assert instruction_reads(inst) == {"r5"}
-    assert instruction_writes(inst) == set()
+    assert set(inst.reg_read) == {"r5"}
+    assert set(inst.reg_write) == set()
 
 
 def test_jump_inst_analysis():
-    inst = JumpInst(label=Label("loop"), if_cond="eq")
-    assert instruction_reads(inst) == set()
-    assert instruction_writes(inst) == set()
+    inst = JumpInst(label=Label("loop"), if_cond="Z")
+    assert set(inst.reg_read) == set()
+    assert set(inst.reg_write) == set()
 
 
 def test_reg_write_inst_analysis():
     inst = RegWriteInst(dst=Register("s1"), src=SrcKeyword.IMM, lit=Immediate(42))
-    assert instruction_writes(inst) == {"s1"}
-    assert instruction_reads(inst) == set()
+    assert set(inst.reg_write) == {"s1"}
+    assert set(inst.reg_read) == set()
 
     inst = RegWriteInst(dst=Register("s1"), src=Register("s2"))
-    assert instruction_writes(inst) == {"s1"}
-    assert instruction_reads(inst) == {"s2"}
+    assert set(inst.reg_write) == {"s1"}
+    assert set(inst.reg_read) == {"s2"}
 
     inst = RegWriteInst(
         dst=Register("s1"), src=SrcKeyword.OP, op=AluExpr(Register("s2"), AluOp.ADD, Register("s3"))
     )
-    assert instruction_writes(inst) == {"s1"}
-    assert instruction_reads(inst) == {"s2", "s3"}
+    assert set(inst.reg_write) == {"s1"}
+    assert set(inst.reg_read) == {"s2", "s3"}
 
 
 def test_port_write_inst_analysis():
     inst = PortWriteInst(dst=ImmValue(2), time=Register("s1"), addr=Register("s2"))
-    assert instruction_writes(inst) == set()
-    assert instruction_reads(inst) == {"s1", "s2", "s14"}
+    assert set(inst.reg_write) == set()
+    assert set(inst.reg_read) == {"s1", "s2", "s14"}
 
 
 def test_mixed_registers():
     inst = TestInst(op=AluExpr(Register("s_test"), AluOp.ADD, Register("temp_reg_1")))
-    assert instruction_reads(inst) == {"s_test", "temp_reg_1"}
+    assert set(inst.reg_read) == {"s_test", "temp_reg_1"}
 
 
 def test_property_types():

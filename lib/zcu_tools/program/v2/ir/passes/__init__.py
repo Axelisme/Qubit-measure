@@ -15,8 +15,7 @@ from .dataflow import (
     DeadWriteEliminationPass,
     IncRegMergePass,
 )
-from .loop import UnrollLoopPass
-from .loop_merge import LoopConditionMergePass
+from .loop import LoopConditionMergePass, UnrollLoopPass
 from .timeline import TimedMergePass, ZeroDelayDCEPass
 
 __all__ = [

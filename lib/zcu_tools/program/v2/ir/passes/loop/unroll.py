@@ -1,3 +1,67 @@
+"""UnrollLoopPass: scheduled-window-driven loop unrolling (Phase 8).
+
+Purpose
+-------
+Tight loops in QICK programs often have a large IO scheduling window (TIME
+inc_ref delay) relative to the actual instruction execution cost.  Unrolling
+k copies of the body amortises the loop overhead (one back-edge JUMP + its
+pipeline flush penalty) across k iterations, freeing more time for the
+scheduler to do useful work.
+
+Example
+-------
+Before (k=2, n=4)::
+
+    counter = 0
+    loop (4 times):
+      PORT_WR ...
+      REG_WR r1 op r1 + #1
+      TIME inc_ref #200
+
+After (partial unroll, k=2)::
+
+    counter = 0
+    loop_unrolled_start:
+      PORT_WR ...          ; copy 0
+      REG_WR r1 op r1 + #1
+      TIME inc_ref #200
+      PORT_WR ...          ; copy 1
+      REG_WR r1 op r1 + #1
+      TIME inc_ref #200
+      JUMP loop_unrolled_start -if(S) -op(counter - 4)
+
+QICK Hardware Notes
+-------------------
+- Loop overhead is modelled as ``cost_default + cost_jump_flush``: one JUMP
+  instruction plus the pipeline flush penalty when the branch is taken.
+- ``k`` is bounded by both timing slack and pmem budget simultaneously:
+  - ``k_timing`` = ceil(loop_overhead / slack); body already overloaded → max_unroll_factor
+  - ``k_budget``  = pmem_budget // body_size (words)
+  - ``k_final``   = min(k_timing, k_budget)
+- For register-driven loops (iteration count unknown at compile time), ``k``
+  is rounded down to the nearest power of 2 so that ``n AND (k-1)`` computes
+  the remainder with a single AND instruction.
+- In big-PMEM mode (``_needs_big_jump``), all cross-section jumps use an
+  indirect ``REG_WR s15 label / JUMP s15`` pair (2 words) instead of a
+  direct 1-word ``JUMP label``.
+
+Decision Notes
+--------------
+Post-order traversal: inner loops are unrolled first so their expanded body
+size is already measured when the outer loop's pmem budget is computed.
+
+Three unrolling strategies:
+1. Full expansion (``n ≤ k``): emit n body copies, drop the loop entirely.
+   Counter init is prepended; the cloned body already contains the
+   loop-carried update.
+2. Partial unroll (``n > k``, compile-time constant): emit a loop of
+   ``n // k`` iterations over a k-copy body, plus a remainder prefix.
+   Not applicable when n is only known at runtime (``is_runtime_exact``).
+3. Register-driven (n unknown): build a dispatch-table island (see
+   ``dispatch_island.py``) that dispatches to the correct entry copy based
+   on ``n % k``.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -7,20 +71,20 @@ from dataclasses import dataclass
 
 from typing_extensions import Optional, cast
 
-from ..analysis import (
+from ...analysis import (
     estimate_body_cost,
     estimate_body_scheduled_ticks,
     estimate_flat_size,
 )
-from ..dispatch import _needs_big_jump, dispatch_entry_words
-from ..factory import IRParser
-from ..instructions import JumpInst, LabelInst, RegWriteInst
-from ..labels import Label
-from ..node import BasicBlockNode, BlockNode, IRLoop, IRNode, RootNode
-from ..operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
-from ..pipeline import PipeLineContext
-from .base import OptimizationPassBase
-from .loop_dispatch import build_jump_table_blocks
+from ...dispatch import _needs_big_jump, dispatch_entry_words
+from ...factory import IRParser
+from ...instructions import JumpInst, LabelInst, RegWriteInst
+from ...labels import Label
+from ...node import BasicBlockNode, BlockNode, IRLoop, IRNode, RootNode
+from ...operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
+from ...pipeline import PipeLineContext
+from ..base import OptimizationPassBase
+from .dispatch_island import build_jump_table_blocks
 
 logger = logging.getLogger(__name__)
 

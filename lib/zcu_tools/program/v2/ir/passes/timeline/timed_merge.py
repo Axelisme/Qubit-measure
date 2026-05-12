@@ -1,23 +1,59 @@
+"""TimedMergePass: fold TIME inc_ref increments into anchored timestamps.
+
+Purpose
+-------
+The tProc v2 hardware supports two ways to schedule port writes: via an
+explicit ``TIME inc_ref #N`` that advances the reference clock, and via an
+``@T`` anchored timestamp field on instructions that encode an absolute
+offset from the current reference.  This pass absorbs pending literal
+``TIME inc_ref #N`` delays into downstream ``@T`` fields, eliminating the
+separate TIME instruction and reducing pmem usage.
+
+Example
+-------
+Before::
+
+    TIME inc_ref #100
+    PORT_WR 2 @50 ...    ; @50 relative to current ref
+
+After::
+
+    PORT_WR 2 @150 ...   ; @50 + 100 absorbed; no separate TIME needed
+
+QICK Hardware Notes
+-------------------
+- ``s14`` is the implicit time base register (``TIMED_BASE_REG``).  Any
+  instruction that *reads* ``s14`` observes the current accumulated reference.
+  Before such an instruction, all pending literal ``TIME inc_ref`` must be
+  flushed to ensure the instruction sees the correct reference value.
+- ``@N`` (``TimeOffset``) is an *anchored* absolute offset from the current
+  reference.  A pending ``TIME inc_ref #P`` can be absorbed by replacing
+  ``@N`` with ``@(N + P)`` on the instruction.
+- Register-driven ``TIME inc_ref rX`` cannot be folded into ``@N`` because the
+  increment amount is unknown at compile time.  A pending literal delay is
+  flushed before a register-driven increment.
+- Only ``TIME inc_ref`` (``c_op == "inc_ref"``) instructions are handled.
+  Other ``TIME`` variants are not affected.
+
+Decision Notes
+--------------
+Folding is greedy: the pass accumulates all contiguous literal increments
+into ``pending_lit`` and applies them at the first opportunity (next anchored
+instruction or end of block).  This is correct because ``TIME inc_ref`` is
+the only instruction that modifies ``s14`` in the literal path, so the
+accumulated delta is always the exact pending advance.
+"""
+
 from __future__ import annotations
 
 import dataclasses
 from typing import cast
 
-from ..analysis import reads_implicit_time_base
-from ..instructions import BaseInst, TimeInst
-from ..node import BasicBlockNode
-from ..operands import Immediate, TimeOffset
-from ..pipeline import AbsChunkPass, ChunkList, PipeLineContext
-
-
-def _is_zero_ref_increment(inst: BaseInst) -> bool:
-    if not isinstance(inst, TimeInst):
-        return False
-    if inst.c_op != "inc_ref":
-        return False
-    if inst.r1 is not None:
-        return False
-    return inst.lit == Immediate(0)
+from ...hw_semantics import TIMED_BASE_REG
+from ...instructions import BaseInst, TimeInst
+from ...node import BasicBlockNode
+from ...operands import Immediate, TimeOffset
+from ...pipeline import AbsChunkPass, ChunkList, PipeLineContext
 
 
 def _is_lit_time(inst: BaseInst) -> bool:
@@ -52,28 +88,6 @@ def _adjust_time_field(inst: BaseInst, delta: int) -> BaseInst:
     """Return a copy of inst with time adjusted by +delta (precondition: _is_anchored_timed)."""
     old = cast(TimeOffset, getattr(inst, "time")).value
     return dataclasses.replace(inst, time=TimeOffset(old + delta))  # type: ignore[call-overload]
-
-
-class ZeroDelayDCEPass(AbsChunkPass):
-    """Remove TIME inc_ref #0 instructions from BasicBlockNode chunks."""
-
-    def process(
-        self, chunks: ChunkList, ctx: PipeLineContext
-    ) -> tuple[ChunkList, bool]:
-        _ = ctx
-        changed = False
-        for chunk in chunks:
-            if not isinstance(chunk, BasicBlockNode):
-                continue
-            changed |= self._process_block(chunk)
-        return chunks, changed
-
-    def _process_block(self, block: BasicBlockNode) -> bool:
-        if block.fix_addr_size:
-            return False
-        before = list(block.insts)
-        block.insts = [inst for inst in block.insts if not _is_zero_ref_increment(inst)]
-        return before != block.insts
 
 
 class TimedMergePass(AbsChunkPass):
@@ -113,7 +127,7 @@ class TimedMergePass(AbsChunkPass):
                     result.append(TimeInst(c_op="inc_ref", lit=Immediate(pending_lit)))
                     pending_lit = 0
                 result.append(inst)
-            elif reads_implicit_time_base(inst):
+            elif TIMED_BASE_REG in inst.reg_read:
                 # s14-reading instruction that we cannot fold into (no literal
                 # @T, or @T is a register).  Flush pending TIME inc_ref before
                 # the instruction so its emission time stays anchored.

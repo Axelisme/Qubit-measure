@@ -1,4 +1,4 @@
-"""Register-driven partial unroll via dispatch-table island.
+"""build_jump_table_blocks: register-driven partial unroll via dispatch-table island.
 
 The old "calculated stride" scheme required every body copy to keep the same
 physical width. The new shape keeps only the tiny dispatch-table stubs fixed:
@@ -27,22 +27,41 @@ physical width. The new shape keeps only the tiny dispatch-table stubs fixed:
       JUMP entry_0
 
 Only the dispatch-table stub blocks have ``fix_addr_size=True``.
+
+QICK Hardware Notes
+-------------------
+- ``k`` must be a power of 2 so that ``n AND (k-1)`` computes ``n % k``
+  using a single AND instruction (no division available in tProc v2).
+- The dispatch-table stubs are the only ``fix_addr_size=True`` blocks.
+  All body copies are free-form so linear passes can further optimise them.
+- In big-PMEM mode (``_needs_big_jump``), each stub is 2 words (REG_WR s15
+  label + JUMP s15) instead of 1 word.  The address offset computation must
+  scale by ``entry_words`` accordingly.
+- The counter register (``i``) is used as scratch during the prologue to
+  compute the remainder offset.  It is reset to 0 before entering the body
+  copies so the loop body sees the expected initial value.
+
+Decision Notes
+--------------
+``build_jump_table_blocks`` returns a flat ``list[BasicBlockNode]`` (not an
+IRLoop) so it does not get re-processed by UnrollLoopPass on the next
+pipeline iteration.  Wrapping in IRLoop would cause infinite re-unrolling.
 """
 
 from __future__ import annotations
 
 from typing import Optional
 
-from ..dispatch import (
+from ...dispatch import (
     _needs_big_jump,
     build_dispatch_table_island,
     emit_dispatch_address_setup,
 )
-from ..factory import IRParser
-from ..instructions import BaseInst, JumpInst, LabelInst, RegWriteInst
-from ..labels import Label
-from ..node import BasicBlockNode, BlockNode
-from ..operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
+from ...factory import IRParser
+from ...instructions import BaseInst, JumpInst, LabelInst, RegWriteInst
+from ...labels import Label
+from ...node import BasicBlockNode, BlockNode
+from ...operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
 
 
 def build_jump_table_blocks(

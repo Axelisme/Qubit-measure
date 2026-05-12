@@ -37,7 +37,7 @@ from zcu_tools.program.v2.ir.passes import (
     UnrollLoopPass,
     walk_instructions,
 )
-from zcu_tools.program.v2.ir.passes.loop_dispatch import build_jump_table_blocks
+from zcu_tools.program.v2.ir.passes.loop.dispatch_island import build_jump_table_blocks
 from zcu_tools.program.v2.ir.pipeline import (
     PipeLineConfig,
     PipeLineContext,
