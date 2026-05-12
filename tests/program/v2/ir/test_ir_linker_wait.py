@@ -10,7 +10,7 @@ from zcu_tools.program.v2.ir.instructions import (
 from zcu_tools.program.v2.ir.labels import Label
 from zcu_tools.program.v2.ir.linker import IRLinker
 from zcu_tools.program.v2.ir.node import BasicBlockNode, RootNode
-from zcu_tools.program.v2.ir.operands import Immediate, SrcKeyword
+from zcu_tools.program.v2.ir.operands import Immediate, Register, SrcKeyword
 
 
 def _link_root(linker: IRLinker, root: RootNode):
@@ -30,23 +30,20 @@ def test_linker_wait_address_calculation():
     #   REG_WR
     # L4:
 
-    ir = RootNode(
-        insts=[
-            BasicBlockNode(
-                labels=[LabelInst(name=Label("L1"))],
-                insts=[RegWriteInst(dst="r1", src=SrcKeyword.IMM, lit=Immediate(1))],
-            ),
-            BasicBlockNode(
-                labels=[LabelInst(name=Label("L2"))],
-                insts=[WaitInst()],
-            ),
-            BasicBlockNode(
-                labels=[LabelInst(name=Label("L3"))],
-                insts=[RegWriteInst(dst="r2", src=SrcKeyword.IMM, lit=Immediate(2))],
-            ),
-            BasicBlockNode(labels=[LabelInst(name=Label("L4"))]),
-        ]
+    bb_l1: BasicBlockNode = BasicBlockNode(
+        labels=[LabelInst(name=Label("L1"))],
+        insts=[RegWriteInst(dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(1))],
     )
+    bb_l2: BasicBlockNode = BasicBlockNode(
+        labels=[LabelInst(name=Label("L2"))],
+        insts=[WaitInst()],
+    )
+    bb_l3: BasicBlockNode = BasicBlockNode(
+        labels=[LabelInst(name=Label("L3"))],
+        insts=[RegWriteInst(dst=Register("r2"), src=SrcKeyword.IMM, lit=Immediate(2))],
+    )
+    bb_l4: BasicBlockNode = BasicBlockNode(labels=[LabelInst(name=Label("L4"))])
+    ir = RootNode(insts=[bb_l1, bb_l2, bb_l3, bb_l4])
 
     linker = IRLinker()
     prog_list, labels, meta_infos, cursor = _link_root(linker, ir)
@@ -73,18 +70,15 @@ def test_linker_wait_address_calculation():
 
 
 def test_linker_cursor_counts_wait_and_trailing_labels():
-    ir = RootNode(
-        insts=[
-            BasicBlockNode(
-                labels=[LabelInst(name=Label("L1"))],
-                insts=[WaitInst()],
-            ),
-            BasicBlockNode(
-                labels=[LabelInst(name=Label("L2"))],
-                insts=[RegWriteInst(dst="r0", src=SrcKeyword.IMM, lit=Immediate(0))],
-            ),
-        ]
+    bb2_l1: BasicBlockNode = BasicBlockNode(
+        labels=[LabelInst(name=Label("L1"))],
+        insts=[WaitInst()],
     )
+    bb2_l2: BasicBlockNode = BasicBlockNode(
+        labels=[LabelInst(name=Label("L2"))],
+        insts=[RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(0))],
+    )
+    ir = RootNode(insts=[bb2_l1, bb2_l2])
 
     linker = IRLinker()
     prog_list, labels, _meta_infos, cursor = _link_root(linker, ir)

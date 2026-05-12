@@ -268,6 +268,7 @@ def test_lit_time_sinks_past_multiple_non_timed():
     )
     out = _run_merge(root)
     bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 4
     assert isinstance(bb.insts[0], NopInst)
     assert isinstance(bb.insts[1], RegWriteInst)
@@ -295,6 +296,7 @@ def test_lit_time_absorbed_into_port_write():
     )
     out = _run_merge(root)
     bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 2
     assert isinstance(bb.insts[0], PortWriteInst)
     assert str(bb.insts[0].time) == "@43"
@@ -315,6 +317,7 @@ def test_lit_time_absorbed_into_wait_inst():
     )
     out = _run_merge(root)
     bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 2
     assert isinstance(bb.insts[0], WaitInst)
     assert str(bb.insts[0].time) == "@83"
@@ -341,6 +344,7 @@ def test_accumulated_time_absorbed():
     )
     out = _run_merge(root)
     bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 2
     assert isinstance(bb.insts[0], PortWriteInst)
     assert str(bb.insts[0].time) == "@30"
@@ -368,6 +372,7 @@ def test_time_and_non_timed_then_port_write():
     )
     out = _run_merge(root)
     bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 3
     assert isinstance(bb.insts[0], RegWriteInst)
     assert isinstance(bb.insts[1], PortWriteInst)
@@ -402,6 +407,7 @@ def test_all_timed_adjusted_with_same_delta():
     )
     out = _run_merge(root)
     bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 3
     assert isinstance(bb.insts[0], PortWriteInst)
     assert str(bb.insts[0].time) == "@10"  # 0 + 10
@@ -431,6 +437,7 @@ def test_port_write_no_time_acts_as_barrier():
     )
     out = _run_merge(root)
     bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 2
     assert isinstance(bb.insts[0], TimeInst)
     assert str(bb.insts[0].lit) == "#10"
@@ -459,6 +466,7 @@ def test_port_write_reg_time_acts_as_barrier():
     )
     out = _run_merge(root)
     bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 2
     assert isinstance(bb.insts[0], TimeInst)
     assert str(bb.insts[0].lit) == "#10"
@@ -486,6 +494,7 @@ def test_reg_time_flushes_pending_lit():
     )
     out = _run_merge(root)
     bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 4
     assert isinstance(bb.insts[0], RegWriteInst)
     assert isinstance(bb.insts[1], TimeInst) and str(bb.insts[1].lit) == "#10"
@@ -506,6 +515,7 @@ def test_pending_lit_flushed_at_end_of_block():
     )
     out = _run_merge(root)
     bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 2
     assert isinstance(bb.insts[0], RegWriteInst)
     assert isinstance(bb.insts[1], TimeInst)

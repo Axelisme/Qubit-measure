@@ -8,7 +8,7 @@ from zcu_tools.program.v2.ir.instructions import (
 )
 from zcu_tools.program.v2.ir.linker import IRLinker
 from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRBranch, IRLoop
-from zcu_tools.program.v2.ir.operands import Immediate, SrcKeyword
+from zcu_tools.program.v2.ir.operands import Immediate, Register, SrcKeyword
 
 
 def test_instruction_parses_jump_label_to_jumpinst():
@@ -30,8 +30,8 @@ def test_branch_lower_produces_basic_blocks():
 
     Label.reset()
 
-    case_0_inst = RegWriteInst(dst="r0", src=SrcKeyword.IMM, lit=Immediate(1))
-    case_1_inst = RegWriteInst(dst="r0", src=SrcKeyword.IMM, lit=Immediate(2))
+    case_0_inst = RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1))
+    case_1_inst = RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(2))
 
     case_0 = BlockNode(insts=[BasicBlockNode(insts=[case_0_inst])])
     case_1 = BlockNode(insts=[BasicBlockNode(insts=[case_1_inst])])
@@ -78,20 +78,14 @@ def test_branch_roundtrip_preserves_cases():
 
     Label.reset()
 
-    case_0 = BlockNode(
-        insts=[
-            BasicBlockNode(
-                insts=[RegWriteInst(dst="r0", src=SrcKeyword.IMM, lit=Immediate(1))]
-            )
-        ]
+    bb_0: BasicBlockNode = BasicBlockNode(
+        insts=[RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1))]
     )
-    case_1 = BlockNode(
-        insts=[
-            BasicBlockNode(
-                insts=[RegWriteInst(dst="r0", src=SrcKeyword.IMM, lit=Immediate(2))]
-            )
-        ]
+    bb_1: BasicBlockNode = BasicBlockNode(
+        insts=[RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(2))]
     )
+    case_0 = BlockNode(insts=[bb_0])
+    case_1 = BlockNode(insts=[bb_1])
     root = RootNode(
         insts=[IRBranch(name="sel", compare_reg="r_sel", cases=[case_0, case_1])]
     )
@@ -103,8 +97,16 @@ def test_branch_roundtrip_preserves_cases():
     assert isinstance(branch, IRBranch)
     assert branch.compare_reg == "r_sel"
     assert len(branch.cases) == 2
-    assert str(branch.cases[0].insts[0].insts[0].lit) == "#1"
-    assert str(branch.cases[1].insts[0].insts[0].lit) == "#2"
+    c0_bb = branch.cases[0].insts[0]
+    assert isinstance(c0_bb, BasicBlockNode)
+    c0_inst = c0_bb.insts[0]
+    assert isinstance(c0_inst, RegWriteInst)
+    assert str(c0_inst.lit) == "#1"
+    c1_bb = branch.cases[1].insts[0]
+    assert isinstance(c1_bb, BasicBlockNode)
+    c1_inst = c1_bb.insts[0]
+    assert isinstance(c1_inst, RegWriteInst)
+    assert str(c1_inst.lit) == "#2"
 
 
 def test_basic_block_rejects_metainst_in_insts():

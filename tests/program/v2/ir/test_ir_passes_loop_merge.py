@@ -38,6 +38,7 @@ def test_pattern_1_merge_zero_comparison():
     assert len(block.insts) == 0
     assert block.branch is not None
     assert block.branch.wr == SideWrite(Register("r1"), "op")
+    assert isinstance(block.branch.op, AluExpr)
     assert block.branch.op.op == AluOp.SUB
     assert str(block.branch.op.rhs) == "#1"
     assert block.branch.if_cond == "NZ"
@@ -84,6 +85,7 @@ def test_pattern_2_merge_side_data_injection():
     assert isinstance(block.insts[0], TestInst)
     assert block.branch is not None
     assert block.branch.wr == SideWrite(Register("r2"), "op")
+    assert isinstance(block.branch.op, AluExpr)
     assert str(block.branch.op.rhs) == "#1"
     assert block.branch.if_cond == "S"
 
@@ -117,7 +119,7 @@ def test_pattern_1_rejects_regwrite_with_uf():
                 dst=Register("r1"),
                 src=SrcKeyword.OP,
                 op=AluExpr(Register("r1"), AluOp.SUB, Immediate(1)),
-                uf="1",
+                uf=True,
             )
         ],
         branch=JumpInst(
@@ -132,6 +134,7 @@ def test_pattern_1_rejects_regwrite_with_uf():
     assert isinstance(block.insts[0], RegWriteInst)
     assert block.branch is not None
     assert block.branch.wr is None
+    assert isinstance(block.branch.op, AluExpr)
     assert str(block.branch.op.rhs) == "#0"
 
 
@@ -157,6 +160,7 @@ def test_pattern_1_rejects_branch_with_existing_wr():
     assert isinstance(block.insts[0], RegWriteInst)
     assert block.branch is not None
     assert block.branch.wr == SideWrite(Register("r7"), "op")
+    assert isinstance(block.branch.op, AluExpr)
     assert str(block.branch.op.rhs) == "#0"
 
 
@@ -194,7 +198,7 @@ def test_pattern_2_rejects_branch_with_uf():
                 op=AluExpr(Register("r2"), AluOp.ADD, Immediate(1)),
             ),
         ],
-        branch=JumpInst(label=Label("loop"), if_cond="S", uf="1"),
+        branch=JumpInst(label=Label("loop"), if_cond="S", uf=True),
     )
 
     _run_pass(block)

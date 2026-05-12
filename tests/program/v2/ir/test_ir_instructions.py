@@ -51,6 +51,7 @@ class TestTimeInstruction:
         inst = TimeInst(c_op="inc_ref", lit=Immediate(10), r1=Register("r0"))
         assert inst.c_op == "inc_ref"
         assert str(inst.lit) == "#10"
+        assert inst.r1 is not None
         assert inst.r1.name == "r0"
 
     def test_dispatch_time_to_timeinst(self):
@@ -59,6 +60,7 @@ class TestTimeInstruction:
         assert isinstance(inst, TimeInst)
         assert inst.c_op == "inc_ref"
         assert str(inst.lit) == "#5"
+        assert inst.r1 is not None
         assert inst.r1.name == "r1"
 
     def test_roundtrip_time_full(self):
@@ -91,8 +93,11 @@ class TestTestInstruction:
         d = {"CMD": "TEST", "OP": "r1 - r2", "UF": "1"}
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, TestInst)
+        assert inst.op is not None
         assert inst.op.op == AluOp.SUB
+        assert isinstance(inst.op.lhs, Register)
         assert inst.op.lhs.name == "r1"
+        assert isinstance(inst.op.rhs, Register)
         assert inst.op.rhs.name == "r2"
         assert inst.uf is True
 
@@ -131,6 +136,7 @@ class TestJumpInstruction:
     def test_construction_with_addr(self):
         inst = JumpInst(addr=Register("s15"))
         assert inst.label is None
+        assert isinstance(inst.addr, Register)
         assert inst.addr.name == "s15"
 
     def test_dispatch_jump_unconditional(self):
@@ -155,6 +161,7 @@ class TestJumpInstruction:
         d = {"CMD": "JUMP", "ADDR": "s15", "IF": "Z"}
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, JumpInst)
+        assert isinstance(inst.addr, Register)
         assert inst.addr.name == "s15"
         assert inst.if_cond == "Z"
 
@@ -187,8 +194,11 @@ class TestJumpInstruction:
         }
         inst = BaseInst.from_dict(original)
         assert isinstance(inst, JumpInst)
+        assert inst.wr is not None
         assert inst.wr.dst.name == "s1"
         assert inst.wr.src_type == "op"
+        assert inst.op is not None
+        assert isinstance(inst.op.lhs, Register)
         assert inst.op.lhs.name == "s1"
         assert inst.uf is True
 
@@ -262,6 +272,8 @@ class TestRegWriteInstruction:
         inst = RegWriteInst(dst=Register("s2"), src=SrcKeyword.OP, op=AluExpr(Register("s1"), AluOp.ADD, Immediate(1)), uf=False)
         assert inst.dst.name == "s2"
         assert inst.src == "op"
+        assert inst.op is not None
+        assert isinstance(inst.op.lhs, Register)
         assert inst.op.lhs.name == "s1"
         assert inst.uf is False
 
@@ -278,6 +290,7 @@ class TestRegWriteInstruction:
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, RegWriteInst)
         assert inst.src == "op"
+        assert inst.op is not None
         assert inst.op.op == AluOp.ADD
 
     def test_dispatch_regwr_dmem_lowering(self):
@@ -314,6 +327,7 @@ class TestPortWriteInstruction:
     def test_construction_with_specific_fields(self):
         inst = PortWriteInst(dst=ImmValue(0), time=Register("t0"), ww="1")
         assert str(inst.dst) == "0"
+        assert isinstance(inst.time, Register)
         assert inst.time.name == "t0"
         assert inst.ww == "1"
 
@@ -322,6 +336,7 @@ class TestPortWriteInstruction:
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, PortWriteInst)
         assert str(inst.dst) == "1"
+        assert isinstance(inst.time, Register)
         assert inst.time.name == "t1"
         assert inst.ww == "1"
 
@@ -414,6 +429,7 @@ class TestWaitInstruction:
         inst = BaseInst.from_dict(original)
         assert isinstance(inst, WaitInst)
         assert str(inst.time) == "@10"
+        assert isinstance(inst.addr, Register)
         assert inst.addr.name == "s15"
         assert inst.to_dict() == original
 
@@ -543,5 +559,6 @@ class TestEdgeCases:
         """Instructions with selective optional fields."""
         d = {"CMD": "TIME", "C_OP": "inc_ref"}
         inst = BaseInst.from_dict(d)
+        assert isinstance(inst, TimeInst)
         assert inst.lit is None
         assert inst.r1 is None

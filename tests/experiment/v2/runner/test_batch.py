@@ -3,7 +3,9 @@ from unittest.mock import MagicMock
 import numpy as np
 from zcu_tools.experiment.v2.runner.base import AbsTask
 from zcu_tools.experiment.v2.runner.batch import BatchTask
-from zcu_tools.experiment.v2.runner.state import TaskState
+from zcu_tools.experiment.v2.runner.state import Result, TaskState
+
+from .conftest import DictCfg
 
 
 def _mock_subtask(default):
@@ -28,9 +30,11 @@ def test_batch_run_dispatches_to_children():
     bt = BatchTask({"a": a, "b": b})
 
     root = bt.get_default_result()
-    state = TaskState(root_data=root, cfg={})
+    state: TaskState[dict[str, Result], dict[str, Result], DictCfg] = TaskState(
+        root_data=root, cfg=DictCfg()
+    )
 
-    bt.init(state)
+    bt.init()
     bt.run(state)
     bt.cleanup()
 

@@ -63,13 +63,15 @@ def test_inc_reg_merge_free_basic():
 
     root = _run_chunk_pass(root)
     block = root.insts[0]
+    assert isinstance(block, BasicBlockNode)
     insts = block.insts
 
     assert len(insts) == 3
     assert isinstance(insts[0], NopInst)
-    assert str(insts[1].op.rhs) == "#5"  # r1 + #5
+    assert isinstance(insts[1], RegWriteInst) and isinstance(insts[2], RegWriteInst)
+    assert insts[1].op is not None and str(insts[1].op.rhs) == "#5"  # r1 + #5
     assert insts[1].dst.name == "r1"
-    assert str(insts[2].op.rhs) == "#4"  # r2 + #4
+    assert insts[2].op is not None and str(insts[2].op.rhs) == "#4"  # r2 + #4
     assert insts[2].dst.name == "r2"
 
 
@@ -95,11 +97,17 @@ def test_inc_reg_merge_free_flush_on_read():
     )
 
     root = _run_chunk_pass(root)
-    insts = root.insts[0].insts
+    _bb = root.insts[0]
+
+    assert isinstance(_bb, BasicBlockNode)
+
+    insts = _bb.insts
 
     assert len(insts) == 3
+    assert isinstance(insts[0], RegWriteInst) and insts[0].op is not None
     assert str(insts[0].op.rhs) == "#2"
     assert isinstance(insts[1], TimeInst)
+    assert isinstance(insts[2], RegWriteInst) and insts[2].op is not None
     assert str(insts[2].op.rhs) == "#3"
 
 
@@ -131,13 +139,17 @@ def test_inc_reg_merge_free_can_cross_port_write():
     )
 
     root = _run_chunk_pass(root)
-    insts = root.insts[0].insts
+    _bb = root.insts[0]
+
+    assert isinstance(_bb, BasicBlockNode)
+
+    insts = _bb.insts
 
     assert len(insts) == 3
     assert isinstance(insts[0], PortWriteInst)
     assert isinstance(insts[1], TimeInst)
     assert isinstance(insts[2], RegWriteInst)
-    assert str(insts[2].op.rhs) == "#2"
+    assert insts[2].op is not None and str(insts[2].op.rhs) == "#2"
     assert insts[2].dst.name == "r0"
 
 
@@ -188,12 +200,16 @@ def test_inc_reg_merge_free_cpmg_like_unrolled_body():
     )
 
     root = _run_chunk_pass(root)
-    insts = root.insts[0].insts
+    _bb = root.insts[0]
+
+    assert isinstance(_bb, BasicBlockNode)
+
+    insts = _bb.insts
 
     # 3 port writes + 3 time insts + 1 final merged reg write = 7
     assert len(insts) == 7
     assert isinstance(insts[-1], RegWriteInst)
-    assert str(insts[-1].op.rhs) == "#3"
+    assert insts[-1].op is not None and str(insts[-1].op.rhs) == "#3"
 
 
 def test_inc_reg_merge_fixed_basic_is_skipped():
@@ -230,11 +246,12 @@ def test_inc_reg_merge_fixed_basic_is_skipped():
 
     root = _run_chunk_pass(root)
     block = root.insts[0]
+    assert isinstance(block, BasicBlockNode)
     insts = block.insts
 
     assert len(insts) == 5
     assert isinstance(insts[0], RegWriteInst)
-    assert str(insts[0].op.rhs) == "#2"
+    assert insts[0].op is not None and str(insts[0].op.rhs) == "#2"
     assert isinstance(insts[1], RegWriteInst)
     assert isinstance(insts[2], NopInst)
     assert isinstance(insts[3], RegWriteInst)
@@ -264,10 +281,16 @@ def test_inc_reg_merge_fixed_barrier():
     )
 
     root = _run_chunk_pass(root)
-    insts = root.insts[0].insts
+    _bb = root.insts[0]
+
+    assert isinstance(_bb, BasicBlockNode)
+
+    insts = _bb.insts
     # In fixed blocks, non-adjacent increments are not merged
     assert len(insts) == 3
+    assert isinstance(insts[0], RegWriteInst) and insts[0].op is not None
     assert str(insts[0].op.rhs) == "#2"
+    assert isinstance(insts[2], RegWriteInst) and insts[2].op is not None
     assert str(insts[2].op.rhs) == "#3"
 
 
@@ -298,14 +321,18 @@ def test_inc_reg_merge_does_not_cross_wmem_write_via_alias():
     )
 
     out = _run_chunk_pass(root)
-    insts = out.insts[0].insts
+    _bb = out.insts[0]
+
+    assert isinstance(_bb, BasicBlockNode)
+
+    insts = _bb.insts
     # The first +5 must remain before WMEM_WR; only the +3 may sit afterward.
     assert isinstance(insts[0], RegWriteInst)
-    assert str(insts[0].op.rhs) == "#5"
+    assert insts[0].op is not None and str(insts[0].op.rhs) == "#5"
     assert isinstance(insts[1], WmemWriteInst)
     # Whether the trailing +3 stays adjacent or merges into a #3 inc is an
     # implementation detail; what matters is that #5 never crosses WMEM_WR.
     assert any(
-        isinstance(inst, RegWriteInst) and str(inst.op.rhs) == "#3"
+        isinstance(inst, RegWriteInst) and inst.op is not None and str(inst.op.rhs) == "#3"
         for inst in insts[2:]
     )

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing_extensions import Any
 from zcu_tools.program.v2.ir.instructions import NopInst, RegWriteInst
 from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRLoop, RootNode
-from zcu_tools.program.v2.ir.operands import SrcKeyword
+from zcu_tools.program.v2.ir.operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
 from zcu_tools.program.v2.ir.pipeline import make_default_pipeline
 
 
@@ -101,29 +101,23 @@ def test_irloop_emit_uses_s15_jump_for_large_pmem():
     from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
     from zcu_tools.program.v2.ir.linker import IRLinker
 
-    root = RootNode(
+    bb_nop: BasicBlockNode = BasicBlockNode(insts=[NopInst()])
+    bb_inc: BasicBlockNode = BasicBlockNode(
         insts=[
-            IRLoop(
-                name="big",
-                counter_reg="r1",
-                n=5,
-                body=BlockNode(
-                    insts=[
-                        BasicBlockNode(insts=[NopInst()]),
-                        BasicBlockNode(
-                            insts=[
-                                RegWriteInst(
-                                    dst="r1",
-                                    src=SrcKeyword.OP,
-                                    op="r1 + #1",
-                                )
-                            ]
-                        ),
-                    ]
-                ),
+            RegWriteInst(
+                dst=Register("r1"),
+                src=SrcKeyword.OP,
+                op=AluExpr(Register("r1"), AluOp.ADD, Immediate(1)),
             )
         ]
     )
+    loop_node: IRLoop = IRLoop(
+        name="big",
+        counter_reg="r1",
+        n=5,
+        body=BlockNode(insts=[bb_nop, bb_inc]),
+    )
+    root = RootNode(insts=[loop_node])
 
     lexer = IRLexer()
     parser = IRParser(pmem_size=4096)
