@@ -10,7 +10,6 @@ from ..operands import Immediate, TimeOffset
 from ..pipeline import AbsChunkPass, ChunkList, PipeLineContext
 
 
-
 def _is_zero_ref_increment(inst: BaseInst) -> bool:
     if not isinstance(inst, TimeInst):
         return False
@@ -25,7 +24,11 @@ def _is_lit_time(inst: BaseInst) -> bool:
     """True for TIME inc_ref #N with N > 0 (no register operand)."""
     if not isinstance(inst, TimeInst):
         return False
-    if inst.c_op != "inc_ref" or inst.r1 is not None or not isinstance(inst.lit, Immediate):
+    if (
+        inst.c_op != "inc_ref"
+        or inst.r1 is not None
+        or not isinstance(inst.lit, Immediate)
+    ):
         return False
     return inst.lit.value > 0
 
@@ -107,9 +110,7 @@ class TimedMergePass(AbsChunkPass):
                 )
             elif _is_reg_time(inst):
                 if pending_lit > 0:
-                    result.append(
-                        TimeInst(c_op="inc_ref", lit=Immediate(pending_lit))
-                    )
+                    result.append(TimeInst(c_op="inc_ref", lit=Immediate(pending_lit)))
                     pending_lit = 0
                 result.append(inst)
             elif reads_implicit_time_base(inst):
@@ -117,9 +118,7 @@ class TimedMergePass(AbsChunkPass):
                 # @T, or @T is a register).  Flush pending TIME inc_ref before
                 # the instruction so its emission time stays anchored.
                 if pending_lit > 0:
-                    result.append(
-                        TimeInst(c_op="inc_ref", lit=Immediate(pending_lit))
-                    )
+                    result.append(TimeInst(c_op="inc_ref", lit=Immediate(pending_lit)))
                     pending_lit = 0
                 result.append(inst)
             else:

@@ -15,7 +15,6 @@ from ..instructions import (
     WaitInst,
     WmemWriteInst,
 )
-from ..labels import is_volatile_reg_name
 from ..node import BasicBlockNode
 from ..pipeline import AbsChunkPass, ChunkList, PipeLineContext
 
@@ -65,8 +64,8 @@ class DeadWriteEliminationPass(AbsChunkPass):
                 pending.clear()
                 continue
 
-            reads = {canonical_reg(r) for r in instruction_reads(inst)}
-            writes = [canonical_reg(w) for w in instruction_writes(inst)]
+            reads = instruction_reads(inst)
+            writes = list(instruction_writes(inst))
 
             for reg in reads:
                 pending.pop(reg, None)
@@ -81,7 +80,7 @@ class DeadWriteEliminationPass(AbsChunkPass):
 
             if len(writes) == 1:
                 dst = writes[0]
-                if is_volatile_reg_name(dst):
+                if Register(dst).is_volatile():
                     continue
                 prev_idx = pending.get(dst)
                 if prev_idx is not None:
@@ -158,7 +157,7 @@ class DeadTestEliminationPass(AbsChunkPass):
         return dead
 
 
-from ..operands import AluExpr, AluOp, Immediate, Register, SrcKeyword, canonical_reg
+from ..operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
 
 
 def _is_const_increment(inst: Instruction) -> tuple[str, int] | None:
@@ -181,17 +180,18 @@ def _is_const_increment(inst: Instruction) -> tuple[str, int] | None:
     if not isinstance(op.rhs, Immediate):
         return None
 
-    lhs_name = op.lhs.name
-    if lhs_name != inst.dst.name:
+    lhs = op.lhs
+    if lhs != inst.dst:
         return None
 
-    canon = canonical_reg(lhs_name)
     # Only optimize general-purpose user registers (r0, r1, ...).
     # System registers (sN) and wave registers (wN/r_wave) are excluded for safety,
     # as they often represent hardware state or pulse parameters that should
     # remain at their original program positions.
-    if not (canon.startswith("r") and canon[1:].isdigit()):
+    if not lhs.is_general_reg():
         return None
+
+    canon = lhs.canonical()
 
     val = op.rhs.value
 
@@ -261,8 +261,8 @@ class IncRegMergePass(AbsChunkPass):
                 reg, val = inc_info
                 pending[reg] = pending.get(reg, 0) + val
             else:
-                reads = {canonical_reg(r) for r in instruction_reads(inst)}
-                writes = {canonical_reg(w) for w in instruction_writes(inst)}
+                reads = instruction_reads(inst)
+                writes = instruction_writes(inst)
 
                 # Flush pending increments if their register (or any alias of
                 # it) is read or written by this instruction.

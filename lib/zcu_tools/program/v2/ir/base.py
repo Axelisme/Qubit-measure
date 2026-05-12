@@ -44,7 +44,7 @@ class IRCompileMixin(QickProgramV2):
         logical_insts = linker.unlink(insts, labels, meta_infos)
 
         pipeline = make_default_pipeline(pmem_capacity=self.tproccfg["pmem_size"])
-        opt_insts, _ctx = pipeline(logical_insts)
+        opt_insts, _ = pipeline(logical_insts)
 
         opt_prog_list, opt_labels, opt_meta_infos, cursor = linker.link(opt_insts)
 

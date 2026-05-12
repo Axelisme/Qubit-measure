@@ -35,7 +35,9 @@ def emit_dispatch_address_setup(
         RegWriteInst(dst=s15, src=SrcKeyword.LABEL, label=table_base),
     ]
     for _ in range(dispatch_entry_words(pmem_size)):
-        insts.append(RegWriteInst(dst=s15, src=SrcKeyword.OP, op=AluExpr(s15, AluOp.ADD, index)))
+        insts.append(
+            RegWriteInst(dst=s15, src=SrcKeyword.OP, op=AluExpr(s15, AluOp.ADD, index))
+        )
     return insts
 
 
@@ -67,7 +69,9 @@ def build_dispatch_table_island(
                     labels=[LabelInst(name=table_label, can_remove=False)],
                     insts=[
                         RegWriteInst(
-                            dst=Register("s15"), src=SrcKeyword.LABEL, label=target_label
+                            dst=Register("s15"),
+                            src=SrcKeyword.LABEL,
+                            label=target_label,
                         )
                     ],
                     branch=JumpInst(addr=Register("s15")),

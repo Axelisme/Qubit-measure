@@ -1,45 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from typing_extensions import Any
 
-from typing_extensions import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from .instructions import BaseInst
-
-PSEUDO_LABELS = frozenset({"PREV", "HERE", "NEXT", "SKIP"})
-
-
-def is_pseudo_label_name(name: str) -> bool:
-    return name in PSEUDO_LABELS
-
-
-def is_register_addr(name: str) -> bool:
-    core_name = name[1:] if name.startswith("&") else name
-    # Using a simple check to keep labels.py free of complex regex if possible.
-    # Actually, we can just use the standard checks.
-    if core_name.startswith("r_wave") or core_name.startswith("s_"):
-        return True
-    return bool(core_name) and core_name[0] in "rswp" and core_name[1:].isdigit()
-
-
-def is_system_reg_name(name: str) -> bool:
-    """Returns True if the register name is a system register (s0-s15, w0-w5, or aliases)."""
-    if name.startswith("s_") or name.startswith("w_") or name == "r_wave":
-        return True
-    if name.startswith("s") or name.startswith("w"):
-        return name[1:].isdigit()
-    return False
-
-
-def is_volatile_reg_name(name: str) -> bool:
-    """Returns True if writes to this register have hardware/external side effects (s0-s14)."""
-    if not is_system_reg_name(name):
-        return False
-    if name.startswith("w") or name == "r_wave":
-        return False
-    # s15 is the only system register whose side effects are purely local to program flow.
-    return name != "s15" and name != "s_addr"
+PSEUDO_LABELS = {"PREV", "HERE", "NEXT", "SKIP"}
 
 
 class Label:
@@ -60,7 +23,7 @@ class Label:
     @classmethod
     def make_new(cls, base_name: str) -> Label:
         """Create a new logical label, ensuring the name is unique."""
-        if is_pseudo_label_name(base_name):
+        if base_name in PSEUDO_LABELS:
             return cls(base_name)
 
         name = base_name
@@ -75,7 +38,7 @@ class Label:
     @classmethod
     def use_existing(cls, name: str) -> Label:
         """Use an existing label by name, without guaranteeing uniqueness."""
-        if is_pseudo_label_name(name):
+        if name in PSEUDO_LABELS:
             return cls(name)
         if name not in cls._instances:
             raise ValueError(f"Label name '{name}' has not been allocated yet.")
@@ -87,16 +50,16 @@ class Label:
         return set(self._instances.keys())
 
     def is_pseudo_name(self) -> bool:
-        return is_pseudo_label_name(self._name)
+        return self._name in PSEUDO_LABELS
 
     def clone_new(self) -> Label:
         """Create a new label derived from this one's name."""
-        if is_pseudo_label_name(self._name):
+        if self.is_pseudo_name():
             return self
         return Label.make_new(self._name)
 
     def __deepcopy__(self, memo: dict[int, Any]) -> "Label":
-        if is_pseudo_label_name(self._name):
+        if self.is_pseudo_name():
             memo[id(self)] = self
             return self
 
@@ -112,16 +75,9 @@ class Label:
         cls._instances.clear()
 
     def __str__(self) -> str:
-        if is_pseudo_label_name(self._name):
+        if self.is_pseudo_name():
             return self._name
         return f"&{self._name}"
 
     def __repr__(self) -> str:
         return f"Label({self._name})"
-
-
-def iter_label_references(inst: BaseInst) -> Iterable[Label]:
-    label = inst.need_label
-    if label:
-        return (label,)
-    return ()

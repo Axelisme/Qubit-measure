@@ -112,6 +112,10 @@ def canonical_reg(name: str) -> str:
 class Register(Operand):
     name: str
 
+    def canonical(self) -> str:
+        """Return the canonical register name (resolves aliases)."""
+        return canonical_reg(self.name)
+
     def is_general_reg(self) -> bool:
         """Return True if this is a general-purpose 'r' register."""
         canon = canonical_reg(self.name)
@@ -121,6 +125,24 @@ class Register(Operand):
         """Return True if this is a wave register ('w0'-'w5') or 'r_wave'."""
         canon = canonical_reg(self.name)
         return canon == "r_wave" or (canon.startswith("w") and canon[1:].isdigit())
+
+    def is_system(self) -> bool:
+        """True if this is a system register (s0-s15, w0-w5, or their aliases)."""
+        canon = canonical_reg(self.name)
+        if canon == "r_wave":
+            return True
+        if canon.startswith("s") or canon.startswith("w"):
+            return canon[1:].isdigit()
+        return False
+
+    def is_volatile(self) -> bool:
+        """True if writes have hardware side effects (s0-s14, excludes s15/w*/r_wave)."""
+        if not self.is_system():
+            return False
+        canon = canonical_reg(self.name)
+        if canon.startswith("w") or canon == "r_wave":
+            return False
+        return canon != "s15"
 
     def get_read_regs(self) -> set[str]:
         name = self.name[1:] if self.name.startswith("&") else self.name
@@ -132,7 +154,7 @@ class Register(Operand):
         if canon in {"w0", "w1", "w2", "w3", "w4", "w5"}:
             return {canon, "r_wave"}
         if canon != name:
-            return {name, canon}
+            return {canon}
         return {name}
 
     def get_write_regs(self) -> set[str]:
@@ -143,7 +165,7 @@ class Register(Operand):
         if canon in {"w0", "w1", "w2", "w3", "w4", "w5"}:
             return {canon, "r_wave"}
         if canon != name:
-            return {name, canon}
+            return {canon}
         return {name}
 
     def __str__(self) -> str:
@@ -337,7 +359,11 @@ def parse_imm_value(val: Union[ImmValue, str, int, None]) -> Optional[ImmValue]:
         return None
     val = val.strip()
     try:
-        if val.isdigit() or (val.startswith("-") and val[1:].isdigit()) or val.startswith("0x"):
+        if (
+            val.isdigit()
+            or (val.startswith("-") and val[1:].isdigit())
+            or val.startswith("0x")
+        ):
             return ImmValue(value=int(val, 0))
     except ValueError:
         pass
@@ -426,7 +452,9 @@ def parse_side_write(val: Union[SideWrite, str, None]) -> Optional[SideWrite]:
     return SideWrite(dst, "op")
 
 
-def parse_value(val: Union[Register, Immediate, ImmValue, str, int, None]) -> Optional[ValueType]:
+def parse_value(
+    val: Union[Register, Immediate, ImmValue, str, int, None],
+) -> Optional[ValueType]:
     """Parse into ValueType: Register | Immediate | ImmValue.
 
     Priority: Immediate (#N) > Register > ImmValue (bare int).
@@ -437,8 +465,7 @@ def parse_value(val: Union[Register, Immediate, ImmValue, str, int, None]) -> Op
         return val
     if isinstance(val, int):
         return ImmValue(value=val)
-    if not isinstance(val, str):
-        return None
+
     val_s = val.strip()
     imm = parse_immediate(val_s)
     if imm is not None:
@@ -489,8 +516,7 @@ def parse_time(val: Union[Register, TimeOffset, str, int, None]) -> Optional[Tim
         return val
     if isinstance(val, int):
         return TimeOffset(value=val)
-    if not isinstance(val, str):
-        return None
+
     val_s = val.strip()
     t = parse_time_offset(val_s)
     if t is not None:

@@ -33,8 +33,12 @@ from __future__ import annotations
 
 from typing import Optional
 
-from ..dispatch import build_dispatch_table_island, emit_dispatch_address_setup
-from ..factory import IRParser, _needs_big_jump
+from ..dispatch import (
+    _needs_big_jump,
+    build_dispatch_table_island,
+    emit_dispatch_address_setup,
+)
+from ..factory import IRParser
 from ..instructions import BaseInst, JumpInst, LabelInst, RegWriteInst
 from ..labels import Label
 from ..node import BasicBlockNode, BlockNode

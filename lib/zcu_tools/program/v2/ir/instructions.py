@@ -41,7 +41,9 @@ def _parse_cond_code(val: Optional[str]) -> Optional[CondCode]:
     if val is None:
         return None
     if val not in _VALID_COND_CODES:
-        raise ValueError(f"IF: {val!r} is not a valid condition code, expected one of {sorted(_VALID_COND_CODES)}")
+        raise ValueError(
+            f"IF: {val!r} is not a valid condition code, expected one of {sorted(_VALID_COND_CODES)}"
+        )
     return val  # type: ignore[return-value]
 
 
@@ -90,7 +92,6 @@ def _parse_dmem_src(val: str) -> Union[Register, Immediate]:
     if imm is not None:
         return imm
     raise ValueError(f"SRC: {val!r} is not a register or immediate value")
-
 
 
 @dataclass(frozen=True)

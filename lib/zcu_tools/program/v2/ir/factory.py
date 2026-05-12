@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing_extensions import Optional, Union
 
-from .dispatch import build_dispatch_table_island, emit_dispatch_address_setup
+from .dispatch import (
+    _needs_big_jump,
+    build_dispatch_table_island,
+    emit_dispatch_address_setup,
+)
 from .instructions import (
     BaseInst,
     Instruction,
@@ -14,12 +18,6 @@ from .instructions import (
 from .labels import Label
 from .node import BasicBlockNode, BlockNode, IRBranch, IRLoop, RootNode
 from .operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
-
-BIG_JUMP_PMEM_THRESHOLD = 2**11
-
-
-def _needs_big_jump(pmem_size: Optional[int]) -> bool:
-    return pmem_size is not None and pmem_size > BIG_JUMP_PMEM_THRESHOLD
 
 
 class IRLexer:
@@ -451,9 +449,7 @@ class IRParser:
             first_block_attached = False
             for item in case_items:
                 if not first_block_attached and isinstance(item, BasicBlockNode):
-                    item.labels.insert(
-                        0, LabelInst(name=entry_label, can_remove=True)
-                    )
+                    item.labels.insert(0, LabelInst(name=entry_label, can_remove=True))
                     first_block_attached = True
                 result.append(item)
             if not first_block_attached:
@@ -491,9 +487,12 @@ class IRParser:
             case_end_idx = next(
                 i
                 for i in range(len(result) - 1, -1, -1)
-                if isinstance(result[i], MetaInst) and result[i].type == "BRANCH_CASE_END"  # type: ignore[union-attr]
+                if isinstance(result[i], MetaInst)
+                and result[i].type == "BRANCH_CASE_END"  # type: ignore[union-attr]
             )
-            result.insert(case_end_idx, BasicBlockNode(branch=JumpInst(label=end_label)))
+            result.insert(
+                case_end_idx, BasicBlockNode(branch=JumpInst(label=end_label))
+            )
 
         # Case 1: else branch.
         case1_items = self._unparse_block_node(node.cases[1])
@@ -502,7 +501,9 @@ class IRParser:
         # End landing pad is placed AFTER BRANCH_END so _check_sese does not
         # classify it as a dispatch-region control label.
         result.append(MetaInst(type="BRANCH_END", name=node.name))
-        result.append(BasicBlockNode(labels=[LabelInst(name=end_label, can_remove=True)]))
+        result.append(
+            BasicBlockNode(labels=[LabelInst(name=end_label, can_remove=True)])
+        )
         return result
 
     def _lower_branch_dispatch(

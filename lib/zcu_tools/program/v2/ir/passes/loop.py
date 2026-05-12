@@ -12,8 +12,8 @@ from ..analysis import (
     estimate_body_scheduled_ticks,
     estimate_flat_size,
 )
-from ..dispatch import dispatch_entry_words
-from ..factory import IRParser, _needs_big_jump
+from ..dispatch import _needs_big_jump, dispatch_entry_words
+from ..factory import IRParser
 from ..instructions import JumpInst, LabelInst, RegWriteInst
 from ..labels import Label
 from ..node import BasicBlockNode, BlockNode, IRLoop, IRNode, RootNode
