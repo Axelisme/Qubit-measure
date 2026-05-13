@@ -10,13 +10,13 @@ from .operands import AluExpr, AluOp, Register, SrcKeyword
 BIG_JUMP_PMEM_THRESHOLD = 2**11
 
 
-def _needs_big_jump(pmem_size: Optional[int]) -> bool:
+def needs_big_jump(pmem_size: Optional[int]) -> bool:
     return pmem_size is not None and pmem_size > BIG_JUMP_PMEM_THRESHOLD
 
 
 def dispatch_entry_words(pmem_size: Optional[int]) -> int:
     """Program-memory words per dispatch-table entry stub."""
-    return 2 if _needs_big_jump(pmem_size) else 1
+    return 2 if needs_big_jump(pmem_size) else 1
 
 
 def emit_dispatch_address_setup(
@@ -63,7 +63,7 @@ def build_dispatch_table_island(
 
     blocks: list[BasicBlockNode] = []
     for table_label, target_label in zip(table_labels, target_labels):
-        if _needs_big_jump(pmem_size):
+        if needs_big_jump(pmem_size):
             blocks.append(
                 BasicBlockNode(
                     labels=[LabelInst(name=table_label, can_remove=False)],

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing_extensions import Optional, Union
 
 from .dispatch import (
-    _needs_big_jump,
+    needs_big_jump,
     build_dispatch_table_island,
     emit_dispatch_address_setup,
 )
@@ -348,7 +348,7 @@ class IRParser:
             ),
         ]
         if isinstance(node.n, str):
-            if _needs_big_jump(self.pmem_size):
+            if needs_big_jump(self.pmem_size):
                 pre += [
                     RegWriteInst(dst=Register("s15"), src=SrcKeyword.LABEL, label=end),
                     JumpInst(
@@ -374,7 +374,7 @@ class IRParser:
         post: list[Instruction] = [
             MetaInst(type="LOOP_BODY_END", name=node.name),
         ]
-        if _needs_big_jump(self.pmem_size):
+        if needs_big_jump(self.pmem_size):
             post += [
                 RegWriteInst(dst=Register("s15"), src=SrcKeyword.LABEL, label=start),
                 JumpInst(addr=Register("s15"), if_cond="S", op=op_str),

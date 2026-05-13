@@ -76,7 +76,7 @@ from ...analysis import (
     estimate_body_scheduled_ticks,
     estimate_flat_size,
 )
-from ...dispatch import _needs_big_jump, dispatch_entry_words
+from ...dispatch import needs_big_jump, dispatch_entry_words
 from ...factory import IRParser
 from ...instructions import JumpInst, LabelInst, RegWriteInst
 from ...labels import Label
@@ -340,7 +340,7 @@ class UnrollLoopPass(OptimizationPassBase):
 
                 unrolled_body = part1 + part2
 
-                if _needs_big_jump(pmem_size):
+                if needs_big_jump(pmem_size):
                     init_bb = BasicBlockNode(
                         insts=[
                             RegWriteInst(
@@ -401,7 +401,7 @@ class UnrollLoopPass(OptimizationPassBase):
             counter = Register(node.counter_reg)
             n_val = Immediate(n)
             op_str = AluExpr(counter, AluOp.SUB, n_val)
-            if _needs_big_jump(pmem_size):
+            if needs_big_jump(pmem_size):
                 back_bb = BasicBlockNode(
                     insts=[
                         RegWriteInst(

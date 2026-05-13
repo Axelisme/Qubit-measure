@@ -53,7 +53,7 @@ from __future__ import annotations
 from typing import Optional
 
 from ...dispatch import (
-    _needs_big_jump,
+    needs_big_jump,
     build_dispatch_table_island,
     emit_dispatch_address_setup,
 )
@@ -91,7 +91,7 @@ def build_jump_table_blocks(
 
     # ── prologue ──
     # Guard: skip when n == 0.
-    if _needs_big_jump(pmem_size):
+    if needs_big_jump(pmem_size):
         result.append(
             BasicBlockNode(
                 insts=[
@@ -119,7 +119,7 @@ def build_jump_table_blocks(
 
     # Compute remainder + dispatch into entry_{k-r}.
     # Uses counter_reg as scratch only until it is reset to 0.
-    if _needs_big_jump(pmem_size):
+    if needs_big_jump(pmem_size):
         dispatch_insts: list[BaseInst] = [
             RegWriteInst(
                 dst=i, src=SrcKeyword.OP, op=AluExpr(n, AluOp.AND, Immediate(k - 1))
@@ -199,7 +199,7 @@ def build_jump_table_blocks(
         result.extend(body_blocks)
 
     # ── back edge (free-form) ──
-    if _needs_big_jump(pmem_size):
+    if needs_big_jump(pmem_size):
         back_insts: list[BaseInst] = [
             RegWriteInst(dst=Register("s15"), src=SrcKeyword.LABEL, label=exit_label)
         ]

@@ -22,4 +22,5 @@ def mock_prog():
         "gens": [_make_ch_entry() for _ in range(5)],
         "readouts": [_make_ro_entry() for _ in range(5)],
     }
+    prog.tproccfg = {"pmem_size": 512}
     return prog

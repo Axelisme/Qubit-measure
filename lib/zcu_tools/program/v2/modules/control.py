@@ -8,18 +8,11 @@ from typing_extensions import Optional, Self, TypeAlias, Union
 from zcu_tools.program.v2.modular import ModularProgramV2
 
 from .base import Module
+from ..ir.dispatch import needs_big_jump
 
 logger = logging.getLogger(__name__)
 
 SubModule: TypeAlias = Union[Module, list[Module]]
-
-
-def _needs_big_jump(prog) -> bool:
-    tproccfg = getattr(prog, "tproccfg", None)
-    if not isinstance(tproccfg, dict):
-        return False
-    pmem_size = tproccfg.get("pmem_size")
-    return isinstance(pmem_size, int) and pmem_size > 2**11
 
 
 def _emit_jump_s15(prog) -> None:
@@ -196,16 +189,18 @@ class Branch(Module):
             prog.meta_macro(type="BRANCH_END", name=self.name)
             prog.label(f"{self.name}_end")
         else:
+            big_jump = needs_big_jump(prog.tproccfg["pmem_size"])
+
             table_base = f"{self.name}_dispatch_0"
             _emit_write_label(prog, table_base)
             prog.write_reg_op("s15", "s15", "+", self.compare_reg)
-            if _needs_big_jump(prog):
+            if big_jump:
                 prog.write_reg_op("s15", "s15", "+", self.compare_reg)
             _emit_jump_s15(prog)
 
             for i in range(n):
                 prog.label(f"{self.name}_dispatch_{i}")
-                if _needs_big_jump(prog):
+                if big_jump:
                     _emit_write_label(prog, f"{self.name}_case_entry_{i}")
                     _emit_jump_s15(prog)
                 else:
