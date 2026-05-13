@@ -21,11 +21,7 @@ class Label:
         return cls._allocated[name]
 
     def __init__(self, name: str):
-        self._name = name
-
-    @property
-    def name(self) -> str:
-        return self._name
+        self.name = name
 
     @classmethod
     def make_new(cls, base_name: str) -> Label:
@@ -38,7 +34,7 @@ class Label:
         while name in cls._allocated:
             name = f"{base_name}_{counter}"
             counter += 1
-            
+
         inst = super().__new__(cls)
         inst.__init__(name)
         cls._allocated[name] = inst
@@ -50,13 +46,13 @@ class Label:
         return set(self._allocated.keys())
 
     def is_pseudo_name(self) -> bool:
-        return self._name in PSEUDO_LABELS
+        return self.name in PSEUDO_LABELS
 
     def clone_new(self) -> Label:
         """Create a new label derived from this one's name."""
         if self.is_pseudo_name():
             return self
-        return Label.make_new(self._name)
+        return Label.make_new(self.name)
 
     def __deepcopy__(self, memo: dict[int, Any]) -> "Label":
         if self.is_pseudo_name():
@@ -76,8 +72,8 @@ class Label:
 
     def __str__(self) -> str:
         if self.is_pseudo_name():
-            return self._name
-        return f"&{self._name}"
+            return self.name
+        return f"&{self.name}"
 
     def __repr__(self) -> str:
-        return f"Label({self._name})"
+        return f"Label({self.name})"
