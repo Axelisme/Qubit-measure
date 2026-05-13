@@ -76,12 +76,12 @@ from ...analysis import (
     estimate_body_scheduled_ticks,
     estimate_flat_size,
 )
-from ...dispatch import needs_big_jump, dispatch_entry_words
+from ...dispatch import dispatch_entry_words, needs_big_jump
 from ...factory import IRParser
 from ...instructions import JumpInst, LabelInst, RegWriteInst
 from ...labels import Label
 from ...node import BasicBlockNode, BlockNode, IRLoop, IRNode, RootNode
-from ...operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
+from ...operands import AluExpr, AluOp, Immediate, SrcKeyword
 from ...pipeline import PipeLineContext
 from ..base import OptimizationPassBase
 from .dispatch_island import build_jump_table_blocks
@@ -211,6 +211,30 @@ class UnrollLoopPass(OptimizationPassBase):
         return out, self._changed
 
     def visit_IRLoop(self, node: IRLoop) -> Optional[IRNode | list[IRNode]]:
+        # Validation: check register safety for unrolling.
+        from ...hw_semantics import ADDR_REG
+        from ...operands import Register
+
+        counter = Register(node.counter_reg)
+        if not counter.is_general_reg():
+            raise ValueError(
+                f"UnrollLoopPass: loop {node.name!r} counter_reg {node.counter_reg!r} "
+                f"is not a general-purpose register (r0-r14)."
+            )
+
+        if isinstance(node.n, str):
+            n_reg = Register(node.n)
+            if n_reg.canonical_name == counter.canonical_name:
+                raise ValueError(
+                    f"UnrollLoopPass: loop {node.name!r} n_reg and counter_reg "
+                    f"are the same register: {node.n!r}."
+                )
+            if n_reg.canonical_name == ADDR_REG:
+                raise ValueError(
+                    f"UnrollLoopPass: loop {node.name!r} n_reg {node.n!r} "
+                    f"conflicts with reserved address register {ADDR_REG}."
+                )
+
         # Post-order: recurse into the body first so any inner loops are
         # rewritten before we measure this loop's body size. generic_visit
         # mutates and returns the same IRLoop instance.

@@ -209,7 +209,7 @@ def test_unroll_full_expansion_removes_overwritten_writes_in_body():
         insts=[
             IRLoop(
                 name="L",
-                counter_reg="r_cnt",
+                counter_reg="r0",
                 n=2,
                 body=BlockNode(
                     insts=[
@@ -353,8 +353,8 @@ def test_unroll_register_driven_jump_table_structure():
         insts=[
             IRLoop(
                 name="loop",
-                counter_reg="r_i",
-                n="r_n",
+                counter_reg="r0",
+                n="r1",
                 body=BlockNode(
                     insts=[
                         BasicBlockNode(
@@ -379,4 +379,4 @@ def test_unroll_register_driven_jump_table_structure():
         inst for inst in emit if isinstance(inst, JumpInst) and inst.if_cond is not None
     ]
     # n==0 guard: JUMP -if(Z) -op(n - #0)
-    assert any(j.if_cond == "Z" and str(j.op) == "r_n - #0" for j in cond_jumps)
+    assert any(j.if_cond == "Z" and str(j.op) == "r1 - #0" for j in cond_jumps)

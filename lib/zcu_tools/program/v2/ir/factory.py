@@ -3,9 +3,9 @@ from __future__ import annotations
 from typing_extensions import Optional, Union
 
 from .dispatch import (
-    needs_big_jump,
     build_dispatch_table_island,
     emit_dispatch_address_setup,
+    needs_big_jump,
 )
 from .instructions import (
     BaseInst,

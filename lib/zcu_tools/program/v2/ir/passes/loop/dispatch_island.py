@@ -53,9 +53,9 @@ from __future__ import annotations
 from typing import Optional
 
 from ...dispatch import (
-    needs_big_jump,
     build_dispatch_table_island,
     emit_dispatch_address_setup,
+    needs_big_jump,
 )
 from ...factory import IRParser
 from ...instructions import BaseInst, JumpInst, LabelInst, RegWriteInst

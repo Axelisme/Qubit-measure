@@ -7,8 +7,8 @@ from typing_extensions import Optional, Self, TypeAlias, Union
 
 from zcu_tools.program.v2.modular import ModularProgramV2
 
-from .base import Module
 from ..ir.dispatch import needs_big_jump
+from .base import Module
 
 logger = logging.getLogger(__name__)
 

@@ -113,8 +113,8 @@ def test_v1_jump_table_only_dispatch_stubs_are_fixed():
     bodies = [deepcopy(body) for _ in range(k)]
 
     blocks = build_jump_table_blocks(
-        n_reg="r_n",
-        counter_reg="r_i",
+        n_reg="r1",
+        counter_reg="r0",
         k=k,
         entry_labels=entry_labels,
         exit_label=exit_label,
@@ -146,8 +146,8 @@ def test_v1_jump_table_stub_width_is_uniform():
         insts=[
             IRLoop(
                 name="loop",
-                counter_reg="r_i",
-                n="r_n",
+                counter_reg="r0",
+                n="r1",
                 body=BlockNode(
                     insts=[BasicBlockNode(insts=[NopInst()]) for _ in range(body_nops)]
                 ),
@@ -174,8 +174,8 @@ def test_v1_pipeline_keeps_body_blocks_free_after_unroll():
         insts=[
             IRLoop(
                 name="loop",
-                counter_reg="r_i",
-                n="r_n",
+                counter_reg="r0",
+                n="r1",
                 body=BlockNode(
                     insts=[
                         BasicBlockNode(insts=[NopInst()]),
@@ -203,7 +203,7 @@ def test_v1_pipeline_keeps_body_blocks_free_after_unroll():
 
 def test_branch_parse_rejects_missing_case_end():
     items = [
-        MetaInst(type="BRANCH_START", name="sel", info={"compare_reg": "r_sel"}),
+        MetaInst(type="BRANCH_START", name="sel", info={"compare_reg": "r3"}),
         MetaInst(type="BRANCH_CASE_START", name="0"),
         BasicBlockNode(insts=[NopInst()]),
         MetaInst(type="BRANCH_END", name="sel"),
@@ -215,7 +215,7 @@ def test_branch_parse_rejects_missing_case_end():
 
 def test_branch_parse_rejects_branch_without_cases():
     items = [
-        MetaInst(type="BRANCH_START", name="sel", info={"compare_reg": "r_sel"}),
+        MetaInst(type="BRANCH_START", name="sel", info={"compare_reg": "r3"}),
         BasicBlockNode(insts=[NopInst()]),
         MetaInst(type="BRANCH_END", name="sel"),
     ]
@@ -270,7 +270,7 @@ def test_v2_fully_unrolled_loop_produces_single_fused_block():
         insts=[
             IRLoop(
                 name="loop",
-                counter_reg="r_cnt",
+                counter_reg="r0",
                 n=3,
                 body=BlockNode(
                     insts=[
@@ -305,7 +305,7 @@ def test_v2_fully_unrolled_loop_produces_single_fused_block():
 
 
 def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
-    """n=3 loop with body writing r_out=imm #42 each iteration.
+    """n=3 loop with body writing r2=imm #42 each iteration.
 
     After full unroll + DeadWriteElimination only the last write should
     survive (the first two are dead: overwritten before being read).
@@ -317,14 +317,14 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
         insts=[
             IRLoop(
                 name="loop",
-                counter_reg="r_cnt",
+                counter_reg="r0",
                 n=3,
                 body=BlockNode(
                     insts=[
                         BasicBlockNode(
                             insts=[
                                 RegWriteInst(
-                                    dst=Register("r_out"), src=SrcKeyword.IMM, lit=Immediate(42)
+                                    dst=Register("r2"), src=SrcKeyword.IMM, lit=Immediate(42)
                                 )
                             ]
                         ),
@@ -339,10 +339,10 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
     writes_to_r_out = [
         inst
         for inst in walk_instructions(out)
-        if isinstance(inst, RegWriteInst) and inst.dst.name == "r_out"
+        if isinstance(inst, RegWriteInst) and inst.dst.name == "r2"
     ]
     assert len(writes_to_r_out) == 1, (
-        f"expected 1 surviving write to r_out, got {len(writes_to_r_out)}"
+        f"expected 1 surviving write to r2, got {len(writes_to_r_out)}"
     )
 
 
