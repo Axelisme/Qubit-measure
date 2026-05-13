@@ -6,6 +6,7 @@ from typing import Optional, Union
 from typing_extensions import Iterator
 
 from .instructions import BaseInst, JumpInst, LabelInst, MetaInst
+from .operands import Register
 
 
 class IRNode:
@@ -117,11 +118,11 @@ class IRLoop(IRNode):
     callers must not assume it remains the final instruction physically.
     """
 
-    name: str = ""
-    counter_reg: str = ""
-    n: Union[int, str] = 0
+    name: str
+    counter_reg: Register
+    n: Union[int, Register]
+    body: BlockNode
     range_hint: Optional[tuple[int, int]] = None
-    body: BlockNode = field(default_factory=BlockNode)
 
     def children(self) -> Iterator[IRNode]:
         yield self.body
@@ -129,7 +130,7 @@ class IRLoop(IRNode):
     def _into_str(self, indent: int = 0) -> str:
         prefix = "    " * indent
         return (
-            f"{prefix} IRLoop(name={self.name}, n={self.n}, counter={self.counter_reg}, range_hint={self.range_hint})\n"
+            f"{prefix} IRLoop(name={self.name}, n={self.n}, counter={str(self.counter_reg)}, range_hint={self.range_hint})\n"
             + "\n".join(i._into_str(indent + 1) for i in self.body.insts)
         )
 
@@ -138,9 +139,9 @@ class IRLoop(IRNode):
 class IRBranch(IRNode):
     """A branch node (pure data — lowering is handled by IRParser.unparse)."""
 
-    name: str = ""
-    compare_reg: str = ""
-    cases: list[BlockNode] = field(default_factory=list)
+    name: str
+    compare_reg: Register
+    cases: list[BlockNode]
 
     def children(self) -> Iterator[IRNode]:
         yield from self.cases
@@ -148,6 +149,6 @@ class IRBranch(IRNode):
     def _into_str(self, indent: int = 0) -> str:
         prefix = "    " * indent
         return (
-            f"{prefix} IRBranch(name={self.name}, compare_reg={self.compare_reg})\n"
+            f"{prefix} IRBranch(name={self.name}, compare_reg={str(self.compare_reg)})\n"
             + "\n".join(i._into_str(indent + 1) for i in self.cases)
         )

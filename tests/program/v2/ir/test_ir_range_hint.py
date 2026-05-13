@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
 from zcu_tools.program.v2.ir.instructions import MetaInst, RegWriteInst
-from zcu_tools.program.v2.ir.node import IRLoop
+from zcu_tools.program.v2.ir.node import BlockNode, IRLoop
 from zcu_tools.program.v2.ir.operands import Immediate, Register, SrcKeyword
 
 
 def test_loop_range_hint_preservation():
     """Verify that range_hint is preserved through IRLoop construction and emission."""
     # 1. Manually create a loop with range_hint
-    loop = IRLoop(name="test_loop", counter_reg="r0", n="r_count", range_hint=(10, 10))
+    loop = IRLoop(name="test_loop", counter_reg=Register("r0"), n=Register("r_count"), body=BlockNode(), range_hint=(10, 10))
     assert loop.range_hint == (10, 10)
 
 
@@ -41,7 +41,7 @@ def test_emit_loop_preserves_range_hint_in_meta():
     from zcu_tools.program.v2.ir.factory import IRParser
     from zcu_tools.program.v2.ir.node import RootNode
 
-    loop = IRLoop(name="test", counter_reg="r0", n=100, range_hint=(100, 100))
+    loop = IRLoop(name="test", counter_reg=Register("r0"), n=100, body=BlockNode(), range_hint=(100, 100))
     blocks = IRParser().unparse(RootNode(insts=[loop]))
 
     # Find LOOP_START meta (now a top-level MetaInst after lex())

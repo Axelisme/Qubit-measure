@@ -146,8 +146,8 @@ def test_v1_jump_table_stub_width_is_uniform():
         insts=[
             IRLoop(
                 name="loop",
-                counter_reg="r0",
-                n="r1",
+                counter_reg=Register("r0"),
+                n=Register("r1"),
                 body=BlockNode(
                     insts=[BasicBlockNode(insts=[NopInst()]) for _ in range(body_nops)]
                 ),
@@ -174,8 +174,8 @@ def test_v1_pipeline_keeps_body_blocks_free_after_unroll():
         insts=[
             IRLoop(
                 name="loop",
-                counter_reg="r0",
-                n="r1",
+                counter_reg=Register("r0"),
+                n=Register("r1"),
                 body=BlockNode(
                     insts=[
                         BasicBlockNode(insts=[NopInst()]),
@@ -270,7 +270,7 @@ def test_v2_fully_unrolled_loop_produces_single_fused_block():
         insts=[
             IRLoop(
                 name="loop",
-                counter_reg="r0",
+                counter_reg=Register("r0"),
                 n=3,
                 body=BlockNode(
                     insts=[
@@ -317,7 +317,7 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
         insts=[
             IRLoop(
                 name="loop",
-                counter_reg="r0",
+                counter_reg=Register("r0"),
                 n=3,
                 body=BlockNode(
                     insts=[

@@ -209,7 +209,7 @@ def test_unroll_full_expansion_removes_overwritten_writes_in_body():
         insts=[
             IRLoop(
                 name="L",
-                counter_reg="r0",
+                counter_reg=Register("r0"),
                 n=2,
                 body=BlockNode(
                     insts=[
@@ -259,7 +259,7 @@ def test_unroll_full_expansion_keeps_counter_init_for_counter_dependent_body():
         insts=[
             IRLoop(
                 name="loop",
-                counter_reg="r0",
+                counter_reg=Register("r0"),
                 n=1,
                 body=BlockNode(
                     insts=[
@@ -353,8 +353,8 @@ def test_unroll_register_driven_jump_table_structure():
         insts=[
             IRLoop(
                 name="loop",
-                counter_reg="r0",
-                n="r1",
+                counter_reg=Register("r0"),
+                n=Register("r1"),
                 body=BlockNode(
                     insts=[
                         BasicBlockNode(

@@ -78,7 +78,7 @@ def test_structural_loop_roundtrip():
     loop = root.insts[0]
     assert isinstance(loop, IRLoop)
     assert loop.name == "loop1"
-    assert loop.counter_reg == "r1"
+    assert loop.counter_reg == Register("r1")
     assert loop.n == 5
     # start_label / end_label are no longer captured during parse (generated at lower() time).
 
@@ -119,7 +119,7 @@ def test_irloop_emit_uses_s15_jump_for_large_pmem():
     )
     loop_node: IRLoop = IRLoop(
         name="big",
-        counter_reg="r1",
+        counter_reg=Register("r1"),
         n=5,
         body=BlockNode(insts=[bb_nop, bb_inc]),
     )

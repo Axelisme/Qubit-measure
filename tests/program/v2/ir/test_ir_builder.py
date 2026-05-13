@@ -36,7 +36,7 @@ def test_branch_lower_produces_basic_blocks():
     case_0 = BlockNode(insts=[BasicBlockNode(insts=[case_0_inst])])
     case_1 = BlockNode(insts=[BasicBlockNode(insts=[case_1_inst])])
 
-    branch = IRBranch(name="sel", compare_reg="r_sel", cases=[case_0, case_1])
+    branch = IRBranch(name="sel", compare_reg=Register("r_sel"), cases=[case_0, case_1])
     blocks = IRParser().unparse(RootNode(insts=[branch]))
 
     meta_blocks = [b for b in blocks if isinstance(b, MetaInst)]
@@ -87,7 +87,7 @@ def test_branch_roundtrip_preserves_cases():
     case_0 = BlockNode(insts=[bb_0])
     case_1 = BlockNode(insts=[bb_1])
     root = RootNode(
-        insts=[IRBranch(name="sel", compare_reg="r_sel", cases=[case_0, case_1])]
+        insts=[IRBranch(name="sel", compare_reg=Register("r_sel"), cases=[case_0, case_1])]
     )
 
     parser = IRParser()
@@ -95,7 +95,7 @@ def test_branch_roundtrip_preserves_cases():
 
     branch = rebuilt.insts[0]
     assert isinstance(branch, IRBranch)
-    assert branch.compare_reg == "r_sel"
+    assert branch.compare_reg == Register("r_sel")
     assert len(branch.cases) == 2
     c0_bb = branch.cases[0].insts[0]
     assert isinstance(c0_bb, BasicBlockNode)
@@ -232,5 +232,5 @@ def test_builder_build_accepts_qick_labels_map():
     loop = root.insts[0]
     assert isinstance(loop, IRLoop)
     assert loop.name == "loop1"
-    assert loop.counter_reg == "r1"
+    assert loop.counter_reg == Register("r1")
     assert loop.n == 5

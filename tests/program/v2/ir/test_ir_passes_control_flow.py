@@ -299,7 +299,7 @@ def test_block_merge_inside_irloop_body():
             BasicBlockNode(insts=[NopInst()]),  # no labels → should be merged
         ]
     )
-    insts: list = [IRLoop(name="L", counter_reg="c", body=body, n=4)]
+    insts: list = [IRLoop(name="L", counter_reg=Register("c"), body=body, n=4)]
     root = RootNode(insts=insts)
 
     out, _ = BlockMergePass().process(root, _ctx())
@@ -320,7 +320,7 @@ def test_block_merge_inside_irbranch_cases():
             BasicBlockNode(insts=[NopInst()]),
         ]
     )
-    insts: list = [IRBranch(name="B", compare_reg="c", cases=[case])]
+    insts: list = [IRBranch(name="B", compare_reg=Register("c"), cases=[case])]
     root = RootNode(insts=insts)
 
     out, _ = BlockMergePass().process(root, _ctx())
@@ -346,7 +346,7 @@ def test_branch_elim_inside_irloop_body():
             ),
         ]
     )
-    insts: list = [IRLoop(name="L", counter_reg="c", body=body, n=4)]
+    insts: list = [IRLoop(name="L", counter_reg=Register("c"), body=body, n=4)]
     root = RootNode(insts=insts)
 
     out, _ = BranchEliminationPass().process(root, _ctx())
@@ -373,7 +373,7 @@ def test_branch_elim_inside_irbranch_cases():
             ),
         ]
     )
-    insts: list = [IRBranch(name="B", compare_reg="c", cases=[case])]
+    insts: list = [IRBranch(name="B", compare_reg=Register("c"), cases=[case])]
     root = RootNode(insts=insts)
 
     out, _ = BranchEliminationPass().process(root, _ctx())

@@ -215,10 +215,12 @@ class IRParser:
 
         self._consume_meta(items, pos, "LOOP_BODY_START")
 
+        n_raw = start_meta.info["n"]
         loop = IRLoop(
             name=start_meta.name,
-            counter_reg=start_meta.info["counter_reg"],
-            n=start_meta.info["n"],
+            counter_reg=Register(start_meta.info["counter_reg"]),
+            n=Register(n_raw) if isinstance(n_raw, str) else n_raw,
+            body=BlockNode(),
             range_hint=start_meta.info.get("range_hint"),
         )
         self._parse_block(
@@ -247,7 +249,8 @@ class IRParser:
         start_meta = self._consume_meta(items, pos, "BRANCH_START")
         branch = IRBranch(
             name=start_meta.name,
-            compare_reg=start_meta.info["compare_reg"],
+            compare_reg=Register(start_meta.info["compare_reg"]),
+            cases=[],
         )
         parsed_cases: list[tuple[str, BlockNode]] = []
 
@@ -328,11 +331,11 @@ class IRParser:
         start = Label.make_new(f"{node.name}_start")
         end = Label.make_new(f"{node.name}_end")
 
-        counter = Register(node.counter_reg)
+        counter = node.counter_reg
         if isinstance(node.n, int):
             n_val = Immediate(node.n)
         else:
-            n_val = Register(node.n)
+            n_val = node.n
 
         op_str = AluExpr(counter, AluOp.SUB, n_val)
 
@@ -341,20 +344,20 @@ class IRParser:
                 type="LOOP_START",
                 name=node.name,
                 info=dict(
-                    counter_reg=node.counter_reg,
-                    n=node.n,
+                    counter_reg=node.counter_reg.name,
+                    n=node.n.name if isinstance(node.n, Register) else node.n,
                     range_hint=node.range_hint,
                 ),
             ),
         ]
-        if isinstance(node.n, str):
+        if isinstance(node.n, Register):
             if needs_big_jump(self.pmem_size):
                 pre += [
                     RegWriteInst(dst=Register("s15"), src=SrcKeyword.LABEL, label=end),
                     JumpInst(
                         addr=Register("s15"),
                         if_cond="Z",
-                        op=AluExpr(Register(node.n), AluOp.SUB, Immediate(0)),
+                        op=AluExpr(node.n, AluOp.SUB, Immediate(0)),
                     ),
                 ]
             else:
@@ -362,7 +365,7 @@ class IRParser:
                     JumpInst(
                         label=end,
                         if_cond="Z",
-                        op=AluExpr(Register(node.n), AluOp.SUB, Immediate(0)),
+                        op=AluExpr(node.n, AluOp.SUB, Immediate(0)),
                     )
                 )
         pre += [
@@ -425,7 +428,7 @@ class IRParser:
             MetaInst(
                 type="BRANCH_START",
                 name=node.name,
-                info=dict(compare_reg=node.compare_reg),
+                info=dict(compare_reg=node.compare_reg.name),
             )
         )
 
@@ -435,7 +438,7 @@ class IRParser:
                 branch=JumpInst(
                     label=else_label,
                     if_cond="NZ",
-                    op=AluExpr(Register(node.compare_reg), AluOp.SUB, Immediate(0)),
+                    op=AluExpr(node.compare_reg, AluOp.SUB, Immediate(0)),
                 )
             )
         )
@@ -520,13 +523,13 @@ class IRParser:
             MetaInst(
                 type="BRANCH_START",
                 name=node.name,
-                info=dict(compare_reg=node.compare_reg),
+                info=dict(compare_reg=node.compare_reg.name),
             )
         )
         result.append(
             BasicBlockNode(
                 insts=emit_dispatch_address_setup(
-                    index_reg=node.compare_reg,
+                    index_reg=node.compare_reg.name,
                     table_base=table_labels[0],
                     pmem_size=self.pmem_size,
                 ),

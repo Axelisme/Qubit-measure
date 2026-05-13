@@ -81,7 +81,7 @@ from ...factory import IRParser
 from ...instructions import JumpInst, LabelInst, RegWriteInst
 from ...labels import Label
 from ...node import BasicBlockNode, BlockNode, IRLoop, IRNode, RootNode
-from ...operands import AluExpr, AluOp, Immediate, SrcKeyword
+from ...operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
 from ...pipeline import PipeLineContext
 from ..base import OptimizationPassBase
 from .dispatch_island import build_jump_table_blocks
@@ -213,25 +213,24 @@ class UnrollLoopPass(OptimizationPassBase):
     def visit_IRLoop(self, node: IRLoop) -> Optional[IRNode | list[IRNode]]:
         # Validation: check register safety for unrolling.
         from ...hw_semantics import ADDR_REG
-        from ...operands import Register
 
-        counter = Register(node.counter_reg)
+        counter = node.counter_reg
         if not counter.is_general_reg():
             raise ValueError(
-                f"UnrollLoopPass: loop {node.name!r} counter_reg {node.counter_reg!r} "
+                f"UnrollLoopPass: loop {node.name!r} counter_reg {str(counter)!r} "
                 f"is not a general-purpose register (r0-r14)."
             )
 
-        if isinstance(node.n, str):
-            n_reg = Register(node.n)
+        if isinstance(node.n, Register):
+            n_reg = node.n
             if n_reg.canonical_name == counter.canonical_name:
                 raise ValueError(
                     f"UnrollLoopPass: loop {node.name!r} n_reg and counter_reg "
-                    f"are the same register: {node.n!r}."
+                    f"are the same register: {str(n_reg)!r}."
                 )
             if n_reg.canonical_name == ADDR_REG:
                 raise ValueError(
-                    f"UnrollLoopPass: loop {node.name!r} n_reg {node.n!r} "
+                    f"UnrollLoopPass: loop {node.name!r} n_reg {str(n_reg)!r} "
                     f"conflicts with reserved address register {ADDR_REG}."
                 )
 
@@ -309,7 +308,7 @@ class UnrollLoopPass(OptimizationPassBase):
                 init_bb = BasicBlockNode(
                     insts=[
                         RegWriteInst(
-                            dst=Register(node.counter_reg),
+                            dst=node.counter_reg,
                             src=SrcKeyword.IMM,
                             lit=Immediate(0),
                         )
@@ -368,7 +367,7 @@ class UnrollLoopPass(OptimizationPassBase):
                     init_bb = BasicBlockNode(
                         insts=[
                             RegWriteInst(
-                                dst=Register(node.counter_reg),
+                                dst=node.counter_reg,
                                 src=SrcKeyword.IMM,
                                 lit=Immediate(0),
                             ),
@@ -384,7 +383,7 @@ class UnrollLoopPass(OptimizationPassBase):
                     init_bb = BasicBlockNode(
                         insts=[
                             RegWriteInst(
-                                dst=Register(node.counter_reg),
+                                dst=node.counter_reg,
                                 src=SrcKeyword.IMM,
                                 lit=Immediate(0),
                             )
@@ -410,7 +409,7 @@ class UnrollLoopPass(OptimizationPassBase):
                     BasicBlockNode(
                         insts=[
                             RegWriteInst(
-                                dst=Register(node.counter_reg),
+                                dst=node.counter_reg,
                                 src=SrcKeyword.IMM,
                                 lit=Immediate(0),
                             )
@@ -422,7 +421,7 @@ class UnrollLoopPass(OptimizationPassBase):
             result.extend(unrolled_body)
 
             # Back-edge: jump back to start while counter < n.
-            counter = Register(node.counter_reg)
+            counter = node.counter_reg
             n_val = Immediate(n)
             op_str = AluExpr(counter, AluOp.SUB, n_val)
             if needs_big_jump(pmem_size):
@@ -445,7 +444,7 @@ class UnrollLoopPass(OptimizationPassBase):
             return BlockNode(insts=result)
 
         # ── Register-driven (no exact hint) → jump-table dispatch ──
-        if not isinstance(node.n, str):
+        if not isinstance(node.n, Register):
             return node  # unexpected n type
         jt_blocks = self._maybe_build_jump_table(node, loop_overhead, self.ctx)
         if jt_blocks is None:
@@ -519,9 +518,10 @@ class UnrollLoopPass(OptimizationPassBase):
         exit_label = Label.make_new(f"{node.name}_jt_exit")
         bodies = [BlockNode(insts=deepcopy(node.body.insts)) for _ in range(k)]
 
+        assert isinstance(node.n, Register)
         return build_jump_table_blocks(
-            n_reg=str(node.n),
-            counter_reg=node.counter_reg,
+            n_reg=node.n.name,
+            counter_reg=node.counter_reg.name,
             k=k,
             entry_labels=entry_labels,
             exit_label=exit_label,
