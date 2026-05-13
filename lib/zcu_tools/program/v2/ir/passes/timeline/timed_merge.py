@@ -125,9 +125,12 @@ class TimedMergePass(AbsChunkPass):
                         result.append(
                             dataclasses.replace(
                                 inst, time=TimeOffset(time.value + pending_lit)
-                            )  # type: ignore[call-overload]
+                            )
                         )
-                        pending_lit = 0
+                        # pending_lit is NOT reset: subsequent timed insts in
+                        # the same baseline segment receive the same delta, and
+                        # the TIME must still be emitted at end of block so the
+                        # hardware reference clock actually advances.
                 else:
                     result.append(inst)
             elif (

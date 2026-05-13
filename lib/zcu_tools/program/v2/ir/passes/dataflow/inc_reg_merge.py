@@ -63,6 +63,11 @@ from ...node import BasicBlockNode
 from ...operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
 from ...pipeline import AbsChunkPass, ChunkList, PipeLineContext
 
+# REG_WR rd op (rs +/- #N) encodes the immediate in a 24-bit signed field.
+# Use a conservative safe limit well within that range (same policy as
+# TIMED_LIT_MAX in TimedMergePass).
+INC_REG_IMM_MAX: int = (1 << 20) - 1
+
 
 def _is_const_increment(inst: BaseInst) -> tuple[str, int] | None:
     if not isinstance(inst, RegWriteInst):
@@ -161,7 +166,20 @@ class IncRegMergePass(AbsChunkPass):
             inc_info = _is_const_increment(inst)
             if inc_info is not None:
                 reg, val = inc_info
-                pending[reg] = pending.get(reg, 0) + val
+                new_total = pending.get(reg, 0) + val
+                if abs(new_total) > INC_REG_IMM_MAX:
+                    # Flush the old accumulation before it overflows the
+                    # 24-bit signed immediate field, then start fresh.
+                    old = pending.pop(reg, 0)
+                    if old != 0:
+                        result.append(_make_increment_inst(reg, old))
+                    if abs(val) > INC_REG_IMM_MAX:
+                        # Single step already exceeds the limit; emit as-is.
+                        result.append(inst)
+                    else:
+                        pending[reg] = val
+                else:
+                    pending[reg] = new_total
             else:
                 reads = inst.reg_read
                 writes = inst.reg_write

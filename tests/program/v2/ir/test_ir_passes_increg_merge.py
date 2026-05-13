@@ -18,6 +18,7 @@ from zcu_tools.program.v2.ir.operands import (
     TimeOffset,
 )
 from zcu_tools.program.v2.ir.passes.dataflow import IncRegMergePass
+from zcu_tools.program.v2.ir.passes.dataflow.inc_reg_merge import INC_REG_IMM_MAX
 from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
 
 
@@ -336,3 +337,76 @@ def test_inc_reg_merge_does_not_cross_wmem_write_via_alias():
         isinstance(inst, RegWriteInst) and inst.op is not None and str(inst.op.rhs) == "#3"
         for inst in insts[2:]
     )
+
+
+def test_inc_reg_merge_overflow_flushes_before_accumulating():
+    # Two increments whose sum exceeds INC_REG_IMM_MAX must NOT be merged.
+    # The first must be flushed, the second starts a new accumulation.
+    big = INC_REG_IMM_MAX  # exactly at the limit — still OK to merge with 0
+    step = 1               # big + step = INC_REG_IMM_MAX + 1 → overflow
+
+    root = RootNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    RegWriteInst(
+                        dst=Register("r1"),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r1"), AluOp.ADD, Immediate(big)),
+                    ),
+                    RegWriteInst(
+                        dst=Register("r1"),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r1"), AluOp.ADD, Immediate(step)),
+                    ),
+                ]
+            )
+        ]
+    )
+
+    root = _run_chunk_pass(root)
+    block = root.insts[0]
+    assert isinstance(block, BasicBlockNode)
+    insts = block.insts
+
+    # Must be two separate increments; merged value would overflow.
+    assert len(insts) == 2
+    assert isinstance(insts[0], RegWriteInst) and insts[0].op is not None
+    assert insts[0].op.rhs == Immediate(big)
+    assert isinstance(insts[1], RegWriteInst) and insts[1].op is not None
+    assert insts[1].op.rhs == Immediate(step)
+
+
+def test_inc_reg_merge_single_oversized_step_emitted_as_is():
+    # A single increment already exceeding INC_REG_IMM_MAX must pass through
+    # unchanged (no crash, no silent truncation).
+    huge = INC_REG_IMM_MAX + 1
+
+    root = RootNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    RegWriteInst(
+                        dst=Register("r1"),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r1"), AluOp.ADD, Immediate(huge)),
+                    ),
+                    RegWriteInst(
+                        dst=Register("r1"),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r1"), AluOp.ADD, Immediate(1)),
+                    ),
+                ]
+            )
+        ]
+    )
+
+    root = _run_chunk_pass(root)
+    block = root.insts[0]
+    assert isinstance(block, BasicBlockNode)
+    insts = block.insts
+
+    # The oversized step must be emitted as-is; the trailing +1 may merge or not.
+    assert len(insts) >= 2
+    assert isinstance(insts[0], RegWriteInst) and insts[0].op is not None
+    assert insts[0].op.rhs == Immediate(huge)
