@@ -140,10 +140,13 @@ class TimedMergePass(AbsChunkPass):
             ):
                 pending_lit = _flush(result, pending_lit)
                 result.append(inst)
-            elif TIMED_BASE_REG in inst.reg_read:
-                # s14-reading instruction that we cannot fold into (no literal
-                # @T, or @T is a register).  Flush pending TIME inc_ref before
-                # the instruction so its emission time stays anchored.
+            elif TIMED_BASE_REG in inst.reg_read or (
+                TIMED_BASE_REG in inst.reg_write and not isinstance(inst, TimeInst)
+            ):
+                # s14-reading or non-TIME s14-writing instruction: flush pending
+                # TIME inc_ref before it.  A non-TIME write to s14 would
+                # invalidate the accumulated delta.
+                # TimeInst cases (inc_ref lit/reg) are all handled above.
                 pending_lit = _flush(result, pending_lit)
                 result.append(inst)
             else:
