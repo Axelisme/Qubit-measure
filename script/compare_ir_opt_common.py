@@ -8,7 +8,7 @@ import os
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterator, Optional
+from typing import Any, Callable, Generator
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 os.environ.setdefault("MPLCONFIGDIR", str(ROOT_DIR / ".tmp" / "matplotlib"))
@@ -100,22 +100,13 @@ def _config_to_dict(config: PipeLineConfig) -> dict[str, Any]:
 
 
 @contextmanager
-def pipeline_config_scope(*, enable_opt: bool) -> Iterator[PipeLineConfig]:
-    original = PipeLineConfig(**_config_to_dict(DEFAULT_PIPELINE_CONFIG))
+def pipeline_config_scope(*, enable_opt: bool) -> Generator[PipeLineConfig]:
+    original = DEFAULT_PIPELINE_CONFIG.disable_all_opt
     try:
-        if enable_opt:
-            DEFAULT_PIPELINE_CONFIG.disable_all_opt = False
-            DEFAULT_PIPELINE_CONFIG.enable_unroll_loop = True
-            DEFAULT_PIPELINE_CONFIG.enable_dead_write = True
-            DEFAULT_PIPELINE_CONFIG.enable_dead_label = True
-            DEFAULT_PIPELINE_CONFIG.enable_zero_delay_dce = True
-            DEFAULT_PIPELINE_CONFIG.enable_timed_instruction_merge = True
-        else:
-            DEFAULT_PIPELINE_CONFIG.disable_all_opt = True
+        DEFAULT_PIPELINE_CONFIG.disable_all_opt = not enable_opt
         yield PipeLineConfig(**_config_to_dict(DEFAULT_PIPELINE_CONFIG))
     finally:
-        for key, value in _config_to_dict(original).items():
-            setattr(DEFAULT_PIPELINE_CONFIG, key, value)
+        DEFAULT_PIPELINE_CONFIG.disable_all_opt = original
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:

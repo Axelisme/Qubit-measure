@@ -14,8 +14,8 @@ ChunkList = list[Union[BasicBlockNode, MetaInst]]
 
 @dataclass
 class PipeLineConfig:
-    disable_all_opt: bool = False
     pmem_capacity: int = 4096
+    disable_all_opt: bool = False
 
     max_opt_iterations: int = 8
 
