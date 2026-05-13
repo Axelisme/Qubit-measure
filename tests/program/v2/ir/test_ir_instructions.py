@@ -123,13 +123,13 @@ class TestJumpInstruction:
     """Tests for JumpInst (JUMP opcode)."""
 
     def test_construction_unconditional(self):
-        inst = JumpInst(label=Label("loop"))
+        inst = JumpInst(label=Label.make_new("loop"))
         assert str(inst.label) == "&loop"
         assert inst.if_cond is None
         assert inst.addr is None
 
     def test_construction_conditional(self):
-        inst = JumpInst(label=Label("exit"), if_cond="Z")
+        inst = JumpInst(label=Label.make_new("exit"), if_cond="Z")
         assert str(inst.label) == "&exit"
         assert inst.if_cond == "Z"
 
@@ -245,7 +245,7 @@ class TestJumpInstruction:
             JumpInst(addr=Register("r0"))
 
     def test_jump_immutable(self):
-        inst = JumpInst(label=Label("loop"))
+        inst = JumpInst(label=Label.make_new("loop"))
         with pytest.raises(Exception):
             inst.label = Label("exit")  # type: ignore
 
@@ -479,7 +479,7 @@ class TestLabelCloneSemantics:
         # refer to the same object within a compilation scope.
         Label.reset()
         l1 = Label.make_new("loop")
-        l2 = Label.use_existing("loop")
+        l2 = Label("loop")
         assert l1 is l2
         
         cloned = deepcopy(l1)

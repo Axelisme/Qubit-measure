@@ -352,7 +352,7 @@ def parse_label(val: Union["Label", str, None]) -> Optional["Label"]:
     name = val[1:] if val.startswith("&") else val
     if not name:
         return None
-    return Label.use_existing(name)
+    return Label(name)
 
 
 def parse_alu_expr(val: Union[AluExpr, str, None]) -> Optional[AluExpr]:

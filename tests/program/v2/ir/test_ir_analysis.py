@@ -39,7 +39,7 @@ def test_test_inst_analysis():
 
 
 def test_jump_inst_analysis():
-    inst = JumpInst(label=Label("loop"), if_cond="Z")
+    inst = JumpInst(label=Label.make_new("loop"), if_cond="Z")
     assert set(inst.reg_read) == set()
     assert set(inst.reg_write) == set()
 
@@ -82,11 +82,11 @@ def test_property_types():
 
 
 def test_need_label():
-    inst = JumpInst(label=Label("target"))
+    inst = JumpInst(label=Label.make_new("target"))
     assert str(inst.need_label) == "&target"
 
     assert JumpInst(label=Label("HERE")).need_label is None
     assert JumpInst(label=Label("NEXT")).need_label is None
 
-    inst = RegWriteInst(dst=Register("s1"), src=SrcKeyword.IMM, label=Label("data_table"))
+    inst = RegWriteInst(dst=Register("s1"), src=SrcKeyword.IMM, label=Label.make_new("data_table"))
     assert str(inst.need_label) == "&data_table"

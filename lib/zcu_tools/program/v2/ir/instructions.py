@@ -178,7 +178,7 @@ class LabelInst(Instruction):
             raise ValueError(f"Invalid LabelInst format: {d}")
 
         return cls(
-            name=Label.use_existing(d["name"]),
+            name=Label(d["name"]),
             can_remove=bool(d.get("can_remove", False)),
         )
 

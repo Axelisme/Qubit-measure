@@ -45,7 +45,7 @@ def _ctx() -> PipeLineContext:
 
 
 def _label(name: str) -> Label:
-    return Label(name)
+    return Label.make_new(name)
 
 
 def _run_chunk_passes_on_root(root: RootNode, passes: list) -> RootNode:

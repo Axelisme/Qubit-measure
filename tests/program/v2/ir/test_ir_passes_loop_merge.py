@@ -29,8 +29,7 @@ def test_pattern_1_merge_zero_comparison():
             )
         ],
         branch=JumpInst(
-            label=Label("loop"),
-            if_cond="NZ",
+            label=Label.make_new("loop"),            if_cond="NZ",
             op=AluExpr(Register("r1"), AluOp.SUB, Immediate(0)),        ),
     )
     _run_pass(block)
@@ -54,8 +53,7 @@ def test_pattern_1_merge_zero_comparison_fix_addr_is_skipped():
             )
         ],
         branch=JumpInst(
-            label=Label("loop"),
-            if_cond="NZ",
+            label=Label.make_new("loop"),            if_cond="NZ",
             op=AluExpr(Register("r1"), AluOp.SUB, Immediate(0)),        ),
         fix_addr_size=True,
     )
@@ -123,8 +121,7 @@ def test_pattern_1_rejects_regwrite_with_uf():
             )
         ],
         branch=JumpInst(
-            label=Label("loop"),
-            if_cond="NZ",
+            label=Label.make_new("loop"),            if_cond="NZ",
             op=AluExpr(Register("r1"), AluOp.SUB, Immediate(0)),        ),
     )
 
@@ -148,8 +145,7 @@ def test_pattern_1_rejects_branch_with_existing_wr():
             )
         ],
         branch=JumpInst(
-            label=Label("loop"),
-            if_cond="NZ",
+            label=Label.make_new("loop"),            if_cond="NZ",
             op=AluExpr(Register("r1"), AluOp.SUB, Immediate(0)),            wr=SideWrite(Register("r7"), "op"),
         ),
     )

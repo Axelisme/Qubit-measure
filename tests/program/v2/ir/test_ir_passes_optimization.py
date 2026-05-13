@@ -178,7 +178,7 @@ def test_dead_test_elimination_removes_unused_test():
 
 
 def test_dead_test_elimination_keeps_used_test():
-    lbl = Label("loop")
+    lbl = Label.make_new("loop")
     root = RootNode(
         insts=[
             BasicBlockNode(

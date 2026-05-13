@@ -11,7 +11,14 @@ class Label:
     # Global allocator: tracks all allocated label names to guarantee uniqueness.
     # INVARIANT: Label.reset() must be called before each top-level build pass
     # (i.e., before IRBuilder.build()).
-    _instances: dict[str, Label] = {}
+    _allocated: dict[str, Label] = {}
+
+    def __new__(cls, name: str):
+        if name in PSEUDO_LABELS:
+            return super().__new__(cls)
+        if name not in cls._allocated:
+            raise ValueError(f"Label name '{name}' has not been allocated yet.")
+        return cls._allocated[name]
 
     def __init__(self, name: str):
         self._name = name
@@ -28,26 +35,19 @@ class Label:
 
         name = base_name
         counter = 0
-        while name in cls._instances:
+        while name in cls._allocated:
             name = f"{base_name}_{counter}"
             counter += 1
-        inst = cls(name)
-        cls._instances[name] = inst
+            
+        inst = super().__new__(cls)
+        inst.__init__(name)
+        cls._allocated[name] = inst
         return inst
-
-    @classmethod
-    def use_existing(cls, name: str) -> Label:
-        """Use an existing label by name, without guaranteeing uniqueness."""
-        if name in PSEUDO_LABELS:
-            return cls(name)
-        if name not in cls._instances:
-            raise ValueError(f"Label name '{name}' has not been allocated yet.")
-        return cls._instances[name]
 
     @property
     def label_set(self) -> set[str]:
         # Keep as property for backward compatibility if needed by other modules
-        return set(self._instances.keys())
+        return set(self._allocated.keys())
 
     def is_pseudo_name(self) -> bool:
         return self._name in PSEUDO_LABELS
@@ -72,7 +72,7 @@ class Label:
     @classmethod
     def reset(cls) -> None:
         """Clear the allocated label set. Must be called before each top-level build."""
-        cls._instances.clear()
+        cls._allocated.clear()
 
     def __str__(self) -> str:
         if self.is_pseudo_name():
