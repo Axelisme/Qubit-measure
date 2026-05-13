@@ -51,9 +51,7 @@ class AdditionalMacroMixin(AsmV2):
             )
         )
 
-    def close_inner_loop(
-        self, name: str, counter_reg: str, n: Union[str, int]
-    ) -> None:
+    def close_inner_loop(self, name: str, counter_reg: str, n: Union[str, int]) -> None:
         self.append_macro(CloseInnerLoop(name=name, counter_reg=counter_reg, n=n))
 
     # ---- delay macro ----
@@ -163,7 +161,6 @@ class AdditionalMacroMixin(AsmV2):
                 raise RuntimeError("temp register scope stack is already empty")
             self._reg_num_stack.pop()
 
-
     def wait(self, t: Union[float, QickParam], tag: Optional[str] = None) -> None:
         self.meta_macro("FIX_ADDR_START", "")
         super().wait(t=t, tag=tag)  # type: ignore
@@ -181,7 +178,13 @@ class AdditionalMacroMixin(AsmV2):
         super().wait_auto(t=t, gens=gens, ros=ros, tag=tag, no_warn=no_warn)  # type: ignore
         self.meta_macro("FIX_ADDR_END", "")
 
+    def end(self) -> None:
+        self.meta_macro("FIX_ADDR_START", "")
+        super().end()  # type: ignore
+        self.meta_macro("FIX_ADDR_END", "")
+
+
 class ImproveAsmV2(AdditionalMacroMixin, AsmV2): ...
 
-__all__ = ["ImproveAsmV2"]
 
+__all__ = ["ImproveAsmV2"]
