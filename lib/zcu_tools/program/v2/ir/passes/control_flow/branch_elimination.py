@@ -35,7 +35,7 @@ QICK Hardware Notes
   hardware side effect and cannot be removed even if they appear unconditional.
 - Register-address jumps (``addr`` is a Register rather than a Label) cannot
   be statically resolved to the next block, so they are also left untouched.
-- Blocks with ``fix_addr_size=True`` (dispatch-table stubs) must not be
+- Blocks with ``disable_opt=True`` (dispatch-table stubs) must not be
   modified — their branch is part of the fixed-width encoding.
 
 Decision Notes
@@ -88,7 +88,7 @@ class BranchEliminationPass(OptimizationPassBase):
     def _try_eliminate_branch(
         self, block: BasicBlockNode, siblings: list[IRNode], idx: int
     ) -> None:
-        if block.fix_addr_size:
+        if block.disable_opt:
             return
         branch = block.branch
         if branch is None:

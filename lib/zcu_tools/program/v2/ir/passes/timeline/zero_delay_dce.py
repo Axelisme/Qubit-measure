@@ -24,7 +24,7 @@ QICK Hardware Notes
 -------------------
 - ``TIME inc_ref #0`` is semantically a no-op: ``s14 += 0`` leaves the time
   reference unchanged.  No downstream instruction observes any difference.
-- Blocks with ``fix_addr_size=True`` (dispatch-table stubs) are skipped
+- Blocks with ``disable_opt=True`` (dispatch-table stubs) are skipped
   because their pmem word count is fixed by the jump-table encoding.
 
 Decision Notes
@@ -67,7 +67,7 @@ class ZeroDelayDCEPass(AbsChunkPass):
         return chunks, changed
 
     def _process_block(self, block: BasicBlockNode) -> bool:
-        if block.fix_addr_size:
+        if block.disable_opt:
             return False
         before = list(block.insts)
         block.insts = [inst for inst in block.insts if not _is_zero_ref_increment(inst)]

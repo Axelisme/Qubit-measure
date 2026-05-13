@@ -121,7 +121,7 @@ def _make_increment_inst(reg: str, val: int) -> RegWriteInst:
 class IncRegMergePass(AbsChunkPass):
     """Merge adjacent constant register increments.
 
-    For free blocks (fix_addr_size=False):
+    For free blocks (disable_opt=False):
       - Sinks constant increments (REG_WR rX op (rX + #C)) forward past instructions
         that do not read or write rX.
       - Accumulates multiple increments into a single increment.
@@ -140,7 +140,7 @@ class IncRegMergePass(AbsChunkPass):
         return chunks, changed
 
     def _process_block(self, block: BasicBlockNode) -> bool:
-        if block.fix_addr_size:
+        if block.disable_opt:
             return False
         before = list(block.insts)
         self._merge_free(block)

@@ -132,7 +132,7 @@ def test_timed_instruction_merge_does_not_cross_block_boundary():
 
 
 # ---------------------------------------------------------------------------
-# BasicBlockNode path and fix_addr_size behaviour
+# BasicBlockNode path and disable_opt behaviour
 # ---------------------------------------------------------------------------
 
 
@@ -166,7 +166,7 @@ def test_zero_delay_dce_skips_fixed_basic_block():
         insts=[
             BasicBlockNode(
                 insts=[TimeInst(c_op="inc_ref", lit=Immediate(0)), NopInst()],
-                fix_addr_size=True,
+                disable_opt=True,
             ),
         ]
     )
@@ -212,7 +212,7 @@ def test_timed_merge_skips_fixed_basic_block():
                     TimeInst(c_op="inc_ref", lit=Immediate(2)),
                     TimeInst(c_op="inc_ref", lit=Immediate(3)),
                 ],
-                fix_addr_size=True,
+                disable_opt=True,
             ),
         ]
     )

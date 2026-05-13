@@ -132,7 +132,7 @@ def test_branch_elim_skips_fixed_block():
             BasicBlockNode(
                 insts=[],
                 branch=JumpInst(label=lbl),
-                fix_addr_size=True,
+                disable_opt=True,
             ),
             BasicBlockNode(
                 labels=[LabelInst(name=lbl)],
@@ -235,7 +235,7 @@ def test_block_merge_does_not_merge_labeled_block():
 def test_block_merge_does_not_merge_fixed_blocks():
     root = RootNode(
         insts=[
-            BasicBlockNode(insts=[NopInst()], fix_addr_size=True),
+            BasicBlockNode(insts=[NopInst()], disable_opt=True),
             BasicBlockNode(insts=[NopInst()]),
         ]
     )

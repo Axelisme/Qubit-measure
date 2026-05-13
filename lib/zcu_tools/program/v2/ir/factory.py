@@ -32,7 +32,7 @@ class IRLexer:
         pending_labels: list[LabelInst] = []
         pending_insts: list[BaseInst] = []
         pending_branch: Optional[JumpInst] = None
-        in_fix_addr = False
+        in_disable_opt = False
 
         def flush() -> None:
             nonlocal pending_labels, pending_insts, pending_branch
@@ -42,7 +42,7 @@ class IRLexer:
                     insts=pending_insts,
                     branch=pending_branch,
                 )
-                bb.fix_addr_size = in_fix_addr
+                bb.disable_opt = in_disable_opt
                 result.append(bb)
             pending_labels = []
             pending_insts = []
@@ -50,12 +50,12 @@ class IRLexer:
 
         for inst in insts:
             if isinstance(inst, MetaInst):
-                if inst.type == "FIX_ADDR_START":
+                if inst.type == "DISABLE_OPT_START":
                     flush()
-                    in_fix_addr = True
-                elif inst.type == "FIX_ADDR_END":
+                    in_disable_opt = True
+                elif inst.type == "DISABLE_OPT_END":
                     flush()
-                    in_fix_addr = False
+                    in_disable_opt = False
                 else:
                     flush()
                     result.append(inst)
@@ -80,14 +80,14 @@ class IRLexer:
             if isinstance(item, MetaInst):
                 result.append(item)
             else:
-                if item.fix_addr_size:
-                    result.append(MetaInst(type="FIX_ADDR_START", name=""))
+                if item.disable_opt:
+                    result.append(MetaInst(type="DISABLE_OPT_START", name=""))
                 result.extend(item.labels)
                 result.extend(item.insts)
                 if item.branch is not None:
                     result.append(item.branch)
-                if item.fix_addr_size:
-                    result.append(MetaInst(type="FIX_ADDR_END", name=""))
+                if item.disable_opt:
+                    result.append(MetaInst(type="DISABLE_OPT_END", name=""))
         return result
 
 
@@ -480,7 +480,7 @@ class IRParser:
         if (
             last_case0_bb is not None
             and last_case0_bb.branch is None
-            and not last_case0_bb.fix_addr_size
+            and not last_case0_bb.disable_opt
         ):
             last_case0_bb.branch = JumpInst(label=end_label)
             _emit_case(0, case0_entry_label, case0_items)

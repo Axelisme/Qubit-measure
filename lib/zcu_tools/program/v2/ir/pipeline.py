@@ -81,7 +81,7 @@ def _validate_fixed_block_words(
     block.__post_init__()
     if before_addr_size is not None and block.addr_size != before_addr_size:
         raise ValueError(
-            "AbsChunkPass violated fix_addr_size invariant: "
+            "AbsChunkPass violated disable_opt invariant: "
             "block program-memory word count changed."
         )
 
@@ -94,7 +94,7 @@ def _run_chunk_passes(
         fixed_before = {
             id(chunk): chunk.addr_size
             for chunk in chunks
-            if isinstance(chunk, BasicBlockNode) and chunk.fix_addr_size
+            if isinstance(chunk, BasicBlockNode) and chunk.disable_opt
         }
         chunks, pass_changed = chunk_pass.process(chunks, ctx)
         for chunk in chunks:

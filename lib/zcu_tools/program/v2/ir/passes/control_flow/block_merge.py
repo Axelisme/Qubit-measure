@@ -25,7 +25,7 @@ After::
 
 QICK Hardware Notes
 -------------------
-- A block with ``fix_addr_size=True`` is a dispatch-table stub whose pmem
+- A block with ``disable_opt=True`` is a dispatch-table stub whose pmem
   word count is fixed by the jump-table encoding.  Such blocks must not be
   merged with neighbours even if the structural conditions are met.
 - A block that has any alive label (referenced by a jump, not pseudo) is a
@@ -89,8 +89,8 @@ class BlockMergePass(OptimizationPassBase):
                 and isinstance(b, BasicBlockNode)
                 and a.branch is None
                 and not _has_alive_labels(b, referenced)
-                and not a.fix_addr_size
-                and not b.fix_addr_size
+                and not a.disable_opt
+                and not b.disable_opt
             ):
                 # Merge b into a.
                 a.insts.extend(b.insts)

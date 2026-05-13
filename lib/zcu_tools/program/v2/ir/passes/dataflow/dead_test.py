@@ -61,7 +61,7 @@ class DeadTestEliminationPass(AbsChunkPass):
         return chunks, changed
 
     def _process_block(self, block: BasicBlockNode) -> bool:
-        if block.fix_addr_size:
+        if block.disable_opt:
             return False
         dead = self._find_dead_indices(block.insts, block.branch)
         if not dead:

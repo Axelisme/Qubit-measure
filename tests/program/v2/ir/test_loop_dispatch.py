@@ -177,12 +177,12 @@ def test_build_jump_table_blocks_invalid_k_raises():
     raise AssertionError("expected ValueError")
 
 
-def test_build_jump_table_blocks_entry_blocks_have_fix_addr_size():
+def test_build_jump_table_blocks_entry_blocks_have_disable_opt():
     blocks = _make_jt_blocks(k=4, body_words=2)
-    fixed_blocks = [b for b in blocks if b.fix_addr_size]
+    fixed_blocks = [b for b in blocks if b.disable_opt]
     assert len(fixed_blocks) == 4
     assert all(b.labels for b in fixed_blocks)
     assert all(b.branch is not None for b in fixed_blocks)
     # Body copies and back-edge blocks must remain free-form.
-    free_blocks = [b for b in blocks if not b.fix_addr_size]
+    free_blocks = [b for b in blocks if not b.disable_opt]
     assert any(any(lbl.name.name.startswith("e_") for lbl in b.labels) for b in free_blocks)

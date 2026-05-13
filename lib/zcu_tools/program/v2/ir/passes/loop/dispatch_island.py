@@ -26,13 +26,13 @@ physical width. The new shape keeps only the tiny dispatch-table stubs fixed:
       JUMP exit -if(NS) -op(i - n_reg)
       JUMP entry_0
 
-Only the dispatch-table stub blocks have ``fix_addr_size=True``.
+Only the dispatch-table stub blocks have ``disable_opt=True``.
 
 QICK Hardware Notes
 -------------------
 - ``k`` must be a power of 2 so that ``n AND (k-1)`` computes ``n % k``
   using a single AND instruction (no division available in tProc v2).
-- The dispatch-table stubs are the only ``fix_addr_size=True`` blocks.
+- The dispatch-table stubs are the only ``disable_opt=True`` blocks.
   All body copies are free-form so linear passes can further optimise them.
 - In big-PMEM mode (``_needs_big_jump``), each stub is 2 words (REG_WR s15
   label + JUMP s15) instead of 1 word.  The address offset computation must
@@ -188,7 +188,7 @@ def build_jump_table_blocks(
         )
     )
 
-    # ── k body copies (free-form; no fix_addr_size requirement) ──
+    # ── k body copies (free-form; no disable_opt requirement) ──
     for idx in range(k):
         entry_label = entry_labels[idx]
         body_blocks = IRParser(pmem_size=pmem_size).lower_block(bodies[idx])

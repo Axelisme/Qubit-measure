@@ -240,7 +240,7 @@ def test_inc_reg_merge_fixed_basic_is_skipped():
                         op=AluExpr(Register("r2"), AluOp.SUB, Immediate(5)),
                     ),
                 ],
-                fix_addr_size=True,
+                disable_opt=True,
             )
         ]
     )
@@ -276,7 +276,7 @@ def test_inc_reg_merge_fixed_barrier():
                         op=AluExpr(Register("r1"), AluOp.ADD, Immediate(3)),
                     ),
                 ],
-                fix_addr_size=True,
+                disable_opt=True,
             )
         ]
     )

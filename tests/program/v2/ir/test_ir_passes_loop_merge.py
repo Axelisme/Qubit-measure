@@ -43,7 +43,7 @@ def test_pattern_1_merge_zero_comparison():
     assert block.branch.if_cond == "NZ"
 
 
-def test_pattern_1_merge_zero_comparison_fix_addr_is_skipped():
+def test_pattern_1_merge_zero_comparison_disable_opt_is_skipped():
     block = BasicBlockNode(
         insts=[
             RegWriteInst(
@@ -55,7 +55,7 @@ def test_pattern_1_merge_zero_comparison_fix_addr_is_skipped():
         branch=JumpInst(
             label=Label.make_new("loop"),            if_cond="NZ",
             op=AluExpr(Register("r1"), AluOp.SUB, Immediate(0)),        ),
-        fix_addr_size=True,
+        disable_opt=True,
     )
     _run_pass(block)
 
@@ -88,7 +88,7 @@ def test_pattern_2_merge_side_data_injection():
     assert block.branch.if_cond == "S"
 
 
-def test_pattern_2_merge_side_data_injection_fix_addr_is_skipped():
+def test_pattern_2_merge_side_data_injection_disable_opt_is_skipped():
     block = BasicBlockNode(
         insts=[
             TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Immediate(10))),
@@ -99,7 +99,7 @@ def test_pattern_2_merge_side_data_injection_fix_addr_is_skipped():
             ),
         ],
         branch=JumpInst(label=Label("loop"), if_cond="S"),
-        fix_addr_size=True,
+        disable_opt=True,
     )
     _run_pass(block)
 

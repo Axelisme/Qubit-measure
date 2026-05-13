@@ -49,7 +49,7 @@ def build_dispatch_table_island(
 ) -> list[BasicBlockNode]:
     """Build fixed-width dispatch-table entry stubs.
 
-    The table is the only place that still requires ``fix_addr_size=True``:
+    The table is the only place that still requires ``disable_opt=True``:
     every entry must keep the same physical width so computed jumps land on a
     valid stub, while the real target bodies remain completely free-form.
     """
@@ -75,7 +75,7 @@ def build_dispatch_table_island(
                         )
                     ],
                     branch=JumpInst(addr=Register("s15")),
-                    fix_addr_size=True,
+                    disable_opt=True,
                 )
             )
         else:
@@ -83,7 +83,7 @@ def build_dispatch_table_island(
                 BasicBlockNode(
                     labels=[LabelInst(name=table_label, can_remove=False)],
                     branch=JumpInst(label=target_label),
-                    fix_addr_size=True,
+                    disable_opt=True,
                 )
             )
 

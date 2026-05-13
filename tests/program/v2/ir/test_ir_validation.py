@@ -7,7 +7,7 @@ Validation 1: Dispatch-table island invariants
 Validation 2: Fully-unrolled loops produce a single fused block with zero
   internal dead writes after the full pipeline runs.
 
-Validation 3: fix_addr_size=True blocks are conservatively skipped by passes.
+Validation 3: disable_opt=True blocks are conservatively skipped by passes.
 """
 
 from __future__ import annotations
@@ -50,13 +50,13 @@ from zcu_tools.program.v2.ir.pipeline import (
 
 
 def _collect_fixed_entry_blocks(root: RootNode) -> list[BasicBlockNode]:
-    """Collect BasicBlockNodes that are fix_addr_size=True AND have labels."""
+    """Collect BasicBlockNodes that are disable_opt=True AND have labels."""
     result: list[BasicBlockNode] = []
     stack: list[IRNode] = list(root.insts)
     while stack:
         node = stack.pop()
         if isinstance(node, BasicBlockNode):
-            if node.fix_addr_size and node.labels:
+            if node.disable_opt and node.labels:
                 result.append(node)
         elif isinstance(node, BlockNode):
             stack.extend(node.insts)
@@ -135,7 +135,7 @@ def test_v1_jump_table_only_dispatch_stubs_are_fixed():
         )
     ]
     assert plain_entry_blocks
-    assert all(not block.fix_addr_size for block in plain_entry_blocks)
+    assert all(not block.disable_opt for block in plain_entry_blocks)
 
 
 def test_v1_jump_table_stub_width_is_uniform():
@@ -198,7 +198,7 @@ def test_v1_pipeline_keeps_body_blocks_free_after_unroll():
         )
     ]
     assert body_entry_blocks
-    assert all(not block.fix_addr_size for block in body_entry_blocks)
+    assert all(not block.disable_opt for block in body_entry_blocks)
 
 
 def test_branch_parse_rejects_missing_case_end():
@@ -294,7 +294,7 @@ def test_v2_fully_unrolled_loop_produces_single_fused_block():
     # been fused into a minimal set. Specifically, no two adjacent non-fixed
     # blocks should be mergeable (i.e., one without branch followed by one
     # without alive labels).
-    plain_blocks = [b for b in bbs if not b.fix_addr_size]
+    plain_blocks = [b for b in bbs if not b.disable_opt]
     for i in range(len(plain_blocks) - 1):
         a, b = plain_blocks[i], plain_blocks[i + 1]
         if a.branch is None and not b.labels:
@@ -347,7 +347,7 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
 
 
 # ---------------------------------------------------------------------------
-# Validation 3: fix_addr_size=True blocks are skipped conservatively
+# Validation 3: disable_opt=True blocks are skipped conservatively
 # ---------------------------------------------------------------------------
 
 
@@ -359,7 +359,7 @@ def test_v3_fixed_block_branch_elim_skips_block():
             BasicBlockNode(
                 insts=[NopInst()],
                 branch=JumpInst(label=lbl),
-                fix_addr_size=True,
+                disable_opt=True,
             ),
             BasicBlockNode(
                 labels=[LabelInst(name=lbl)],
@@ -380,14 +380,14 @@ def test_v3_fixed_block_branch_elim_skips_block():
 
 
 def test_v3_non_fixed_block_branch_elim_removes_branch():
-    """Sanity check: fix_addr_size=False block loses its branch (no NOP added)."""
+    """Sanity check: disable_opt=False block loses its branch (no NOP added)."""
     lbl = Label.make_new("next_free")
     root = RootNode(
         insts=[
             BasicBlockNode(
                 insts=[NopInst()],
                 branch=JumpInst(label=lbl),
-                fix_addr_size=False,
+                disable_opt=False,
             ),
             BasicBlockNode(
                 labels=[LabelInst(name=lbl)],

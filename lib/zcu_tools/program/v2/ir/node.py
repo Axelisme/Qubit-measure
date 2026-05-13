@@ -31,14 +31,14 @@ class BasicBlockNode(IRNode):
     labels: LabelInst(s) that mark the entry point of this block.
     insts:  Linear instructions (no labels, no jumps except TestInst).
     branch: Optional terminal JumpInst that ends this block.
-    fix_addr_size: When True, the instruction count is frozen (set by jump-table
+    disable_opt: When True, the instruction count is frozen (set by jump-table
                   lowering). Post-LIR passes must NOP-pad instead of removing.
     """
 
     labels: list[LabelInst] = field(default_factory=list)
     insts: list[BaseInst] = field(default_factory=list)
     branch: Optional[JumpInst] = None
-    fix_addr_size: bool = False
+    disable_opt: bool = False
 
     def __post_init__(self) -> None:
         for inst in self.insts:
@@ -71,8 +71,8 @@ class BasicBlockNode(IRNode):
     def _into_str(self, indent: int = 0) -> str:
         prefix = "    " * indent
         lines = []
-        if self.fix_addr_size:
-            lines.append(f"{prefix}BasicBlockNode(fix_addr_size={self.addr_size}):")
+        if self.disable_opt:
+            lines.append(f"{prefix}BasicBlockNode(disable_opt={self.addr_size}):")
         for lbl in self.labels:
             lines.append(f"{prefix}{lbl}:")
         for inst in self.insts:

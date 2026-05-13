@@ -61,7 +61,7 @@ def _flatten_root(root: RootNode) -> list[Instruction]:
 
 
 def _count_fixed_blocks(root: RootNode) -> int:
-    return sum(1 for bb in walk_basic_blocks(root) if bb.fix_addr_size)
+    return sum(1 for bb in walk_basic_blocks(root) if bb.disable_opt)
 
 
 def _counter_update(reg: str) -> BasicBlockNode:
