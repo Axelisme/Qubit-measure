@@ -308,9 +308,7 @@ class UnrollLoopPass(OptimizationPassBase):
                 init_bb = BasicBlockNode(
                     insts=[
                         RegWriteInst(
-                            dst=node.counter_reg,
-                            src=SrcKeyword.IMM,
-                            lit=Immediate(0),
+                            dst=node.counter_reg, src=SrcKeyword.IMM, lit=Immediate(0)
                         )
                     ]
                 )

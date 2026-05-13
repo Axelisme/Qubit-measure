@@ -164,7 +164,24 @@ class AdditionalMacroMixin(AsmV2):
             self._reg_num_stack.pop()
 
 
+    def wait(self, t: Union[float, QickParam], tag: Optional[str] = None) -> None:
+        self.meta_macro("FIX_ADDR_START", "")
+        super().wait(t=t, tag=tag)  # type: ignore
+        self.meta_macro("FIX_ADDR_END", "")
+
+    def wait_auto(
+        self,
+        t: Union[float, QickParam] = 0,
+        gens: bool = False,
+        ros: bool = True,
+        tag: Optional[str] = None,
+        no_warn: bool = False,
+    ) -> None:
+        self.meta_macro("FIX_ADDR_START", "")
+        super().wait_auto(t=t, gens=gens, ros=ros, tag=tag, no_warn=no_warn)  # type: ignore
+        self.meta_macro("FIX_ADDR_END", "")
+
 class ImproveAsmV2(AdditionalMacroMixin, AsmV2): ...
 
-
 __all__ = ["ImproveAsmV2"]
+
