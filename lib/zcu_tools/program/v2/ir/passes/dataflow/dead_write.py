@@ -53,13 +53,24 @@ instruction from elimination.
 from __future__ import annotations
 
 from ...instructions import (
+    ArithInst,
     BaseInst,
+    CallInst,
+    ClearInst,
+    ComInst,
+    CustomPeripheralInst,
+    DivInst,
     DmemReadInst,
     DmemWriteInst,
+    DportReadInst,
+    FlagInst,
+    NetInst,
     NopInst,
     PortWriteInst,
     RegWriteInst,
+    RetInst,
     TimeInst,
+    TrigInst,
     WaitInst,
     WmemWriteInst,
 )
@@ -101,7 +112,12 @@ class DeadWriteEliminationPass(AbsChunkPass):
         dead: set[int] = set()
 
         for idx, inst in enumerate(insts):
-            if self._is_write_tracking_barrier(inst):
+            # Treat conditionally executed writes as barriers: they do not
+            # reliably shadow previous writes because they may be skipped.
+            if (
+                self._is_write_tracking_barrier(inst)
+                or getattr(inst, "if_cond", None) is not None
+            ):
                 inst_pending_regs.clear()
                 reg_to_inst.clear()
                 continue
@@ -164,5 +180,20 @@ class DeadWriteEliminationPass(AbsChunkPass):
                 PortWriteInst,
                 WmemWriteInst,
                 NopInst,
+            ),
+        ) and not isinstance(
+            inst,
+            (
+                ArithInst,
+                CallInst,
+                ClearInst,
+                ComInst,
+                CustomPeripheralInst,
+                DivInst,
+                DportReadInst,
+                FlagInst,
+                NetInst,
+                RetInst,
+                TrigInst,
             ),
         )

@@ -140,13 +140,21 @@ class TimedMergePass(AbsChunkPass):
             ):
                 pending_lit = _flush(result, pending_lit)
                 result.append(inst)
+            elif isinstance(inst, TimeInst) and inst.c_op in (
+                "set_ref",
+                "updt",
+                "rst",
+            ):
+                # TIME set_ref/updt/rst writes s14 to an absolute value —
+                # the accumulated pending delta is invalidated.
+                pending_lit = _flush(result, pending_lit)
+                result.append(inst)
             elif TIMED_BASE_REG in inst.reg_read or (
                 TIMED_BASE_REG in inst.reg_write and not isinstance(inst, TimeInst)
             ):
-                # s14-reading or non-TIME s14-writing instruction: flush pending
-                # TIME inc_ref before it.  A non-TIME write to s14 would
-                # invalidate the accumulated delta.
-                # TimeInst cases (inc_ref lit/reg) are all handled above.
+                # s14-reading or non-TIME s14-writing instruction: flush
+                # pending TIME inc_ref before it.
+                # inc_ref lit/reg and set_ref/updt/rst cases are handled above.
                 pending_lit = _flush(result, pending_lit)
                 result.append(inst)
             else:

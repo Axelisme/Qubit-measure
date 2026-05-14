@@ -8,8 +8,8 @@ feature to collapse a counter-decrement + conditional-jump pair (2 words)
 into a single jump with embedded side-write (1 word), saving pmem space and
 a pipeline slot.
 
-Example (Pattern 1)
--------------------
+Example
+-------
 Before::
 
     REG_WR r1 op r1 - #1         ; counter decrement
@@ -19,60 +19,38 @@ After::
 
     JUMP loop -if(NZ) -wr(r1 op) -op(r1 - #1)   ; merged: decrement + check in one word
 
-Example (Pattern 2)
--------------------
-Before::
-
-    TEST op(r2 - #5)
-    REG_WR r1 op r1 + #1
-    JUMP done -if(Z)             ; no -op field
-
-After::
-
-    TEST op(r2 - #5)
-    JUMP done -if(Z) -wr(r1 op) -op(r1 + #1)    ; merged side-write injection
-
 QICK Hardware Notes
 -------------------
 - The ``-wr`` side-write field executes the ALU expression and writes the
   result to the destination register *unconditionally*, even if the branch
-  is not taken.  Pattern 1 relies on this: the counter is always decremented,
-  and the branch checks whether the decremented value is zero.
-- Pattern 1 specifically targets the ``-op(reg - #0)`` zero-comparison form
-  because subtracting zero is the conventional way to set the NZ flag without
-  a separate TEST, and the merged form uses the *same* decrement expression
+  is not taken.  The counter is always decremented, and the branch checks
+  whether the decremented value is zero.
+- This pass only targets the ``-op(reg - #0)`` zero-comparison form because
+  subtracting zero is the conventional way to set the NZ flag without a
+  separate TEST, and the merged form uses the *same* decrement expression
   as both the side-write and the implicit flag update.
-- Pattern 2 requires that the branch has no existing ``-op``, ``-wr``, or
-  ``-uf`` field, and that the REG_WR is a pure ALU operation (no label, addr,
-  if_cond, or uf).
+- A separate TEST instruction (e.g. ``TEST op(r2 - #5)``) followed by
+  ``REG_WR + JUMP`` CANNOT be safely absorbed into the JUMP's ``-op``
+  field because the tProc v2 JUMP only has one ``-op`` expression, which
+  must serve as both the condition test AND the ``-wr`` data source.  When
+  the TEST checks a different register or a different expression, the
+  combined form would alter the branch condition.  Such patterns are left
+  untouched.
 
 Decision Notes
 --------------
-Both patterns are applied within a single block pass (pattern 1 first, then
-pattern 2) so they can be composed without re-scanning.  The pass is
-conservative: it only merges when the structural match is exact.
+Only the ``REG_WR dst op (dst +/- #C)`` + ``JUMP -if(COND) -op(dst - #0)``
+pattern is merged.  TEST-based patterns are not handled because they require
+two independent ALU expressions (one for the condition, one for the
+side-write) which cannot coexist in a single JUMP instruction.
 """
 
 from __future__ import annotations
 
-from ...instructions import JumpInst, RegWriteInst, TestInst
+from ...instructions import JumpInst, RegWriteInst
 from ...node import BasicBlockNode
 from ...operands import AluExpr, AluOp, Immediate, SideWrite, SrcKeyword
 from ...pipeline import AbsChunkPass, ChunkList, PipeLineContext
-
-
-def _is_pure_regwrite_op(inst: RegWriteInst) -> bool:
-    """True only for a plain REG_WR dst op <expr> with no extra semantics."""
-    return (
-        inst.src == SrcKeyword.OP
-        and inst.op is not None
-        and inst.lit is None
-        and inst.if_cond is None
-        and not inst.uf
-        and inst.wr is None
-        and inst.label is None
-        and inst.addr is None
-    )
 
 
 def _make_merged_branch(branch: JumpInst, inst: RegWriteInst) -> JumpInst:
@@ -89,21 +67,14 @@ def _make_merged_branch(branch: JumpInst, inst: RegWriteInst) -> JumpInst:
 class LoopConditionMergePass(AbsChunkPass):
     """Chunk pass to merge register increments and conditional jumps.
 
-    Pattern 1: 1-Word Compression (Zero-based Comparison)
-    - Before:
+    Before:
         REG_WR r1 op r1 - #1
         JUMP label -if(NZ) -op(r1 - #0)
-    - After:
+    After:
         JUMP label -if(NZ) -wr(r1 op) -op(r1 - #1)
 
-    Pattern 2: Generic Side-Data Injection
-    - Before:
-        TEST op(...)
-        REG_WR r1 op r1 + #1
-        JUMP label -if(COND)  (no internal -op)
-    - After:
-        TEST op(...)
-        JUMP label -if(COND) -wr(r1 op) -op(r1 + #1)
+    Only the REG_WR + JUMP zero-comparison form is merged.  TEST-based
+    patterns are not handled (see module docstring for rationale).
     """
 
     def process(
@@ -123,12 +94,8 @@ class LoopConditionMergePass(AbsChunkPass):
         if block.branch is None or not block.insts:
             return False
 
-        # Pattern 1: Merge Dec+JumpZ
-        changed = self._merge_zero_comparison(block)
-
-        # Pattern 2: Merge Inc into empty Jump
-        changed |= self._merge_side_data_injection(block)
-        return changed
+        # Merge counter decrement/increment into conditional jump.
+        return self._merge_zero_comparison(block)
 
     def _merge_zero_comparison(self, block: BasicBlockNode) -> bool:
         """Pattern 1: REG_WR r1 op r1-1 + JUMP op(r1-0) -> JUMP wr(r1) op(r1-1)."""
@@ -141,7 +108,14 @@ class LoopConditionMergePass(AbsChunkPass):
 
         if (
             isinstance(last_inst, RegWriteInst)
-            and _is_pure_regwrite_op(last_inst)
+            and last_inst.src == SrcKeyword.OP
+            and last_inst.op is not None
+            and last_inst.lit is None
+            and last_inst.if_cond is None
+            and not last_inst.uf
+            and last_inst.wr is None
+            and last_inst.label is None
+            and last_inst.addr is None
             and branch is not None
             and branch.if_cond is not None
             and branch.op is not None
@@ -160,35 +134,3 @@ class LoopConditionMergePass(AbsChunkPass):
                 return True
         return False
 
-    def _merge_side_data_injection(self, block: BasicBlockNode) -> bool:
-        """Pattern 2: TEST + REG_WR + JUMP -> TEST + JUMP wr."""
-        if len(block.insts) < 2:
-            return False
-
-        # Need branch to have NO op/wr/uf already
-        branch = block.branch
-        if (
-            branch is None
-            or branch.if_cond is None
-            or branch.op is not None
-            or branch.wr is not None
-            or branch.uf
-        ):
-            return False
-
-        last_idx = len(block.insts) - 1
-        last_inst = block.insts[last_idx]
-        prev_inst = block.insts[last_idx - 1]
-
-        # We look for a REG_WR preceded by something (usually a TEST, but could be anything
-        # that doesn't use the ALU in a way that conflicts, though hardware flags are safe).
-        # To be conservative and match the plan: TEST + REG_WR + JUMP.
-        if (
-            isinstance(last_inst, RegWriteInst)
-            and _is_pure_regwrite_op(last_inst)
-            and isinstance(prev_inst, TestInst)
-        ):
-            block.branch = _make_merged_branch(branch, last_inst)
-            block.insts.pop(last_idx)
-            return True
-        return False

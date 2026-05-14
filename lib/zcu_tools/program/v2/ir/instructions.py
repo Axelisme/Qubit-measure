@@ -83,17 +83,6 @@ def _parse_mem_addr_field(val: str, field: str) -> Union[Register, MemAddr]:
     raise ValueError(f"{field}: {val!r} is not a register or memory address")
 
 
-def _parse_dmem_src(val: str) -> Union[Register, Immediate]:
-    """Parse a DMEM_WR SRC: register or #N immediate."""
-    reg = parse_register(val)
-    if reg is not None:
-        return reg
-    imm = parse_immediate(val)
-    if imm is not None:
-        return imm
-    raise ValueError(f"SRC: {val!r} is not a register or immediate value")
-
-
 @dataclass(frozen=True)
 class Instruction(ABC):
     """Base class for all IR instructions."""
@@ -140,6 +129,18 @@ class BaseInst(Instruction):
             "WMEM_WR": WmemWriteInst,
             "DPORT_WR": DportWriteInst,
             "WAIT": WaitInst,
+            "DPORT_RD": DportReadInst,
+            "TRIG": TrigInst,
+            "CALL": CallInst,
+            "RET": RetInst,
+            "FLAG": FlagInst,
+            "ARITH": ArithInst,
+            "DIV": DivInst,
+            "NET": NetInst,
+            "COM": ComInst,
+            "PA": CustomPeripheralInst,
+            "PB": CustomPeripheralInst,
+            "CLEAR": ClearInst,
         }
         inst_cls = dispatch.get(cmd)
         if inst_cls is None:
@@ -571,12 +572,21 @@ class DmemReadInst(BaseInst):
         return {k: v for k, v in d.items() if v is not None}
 
 
+DmemSrc = Literal["imm", "op"]
+
+
+def _parse_dmem_src_keyword(val: str) -> DmemSrc:
+    if val not in ("imm", "op"):
+        raise ValueError(f"DMEM_WR.SRC must be 'imm' or 'op', got {val!r}")
+    return val  # type: ignore[return-value]
+
+
 @dataclass(frozen=True)
 class DmemWriteInst(BaseInst):
     """DMEM_WR instruction: write to data memory."""
 
     dst: Union[Register, MemAddr]
-    src: Union[Register, Immediate]
+    src: DmemSrc = "imm"
     op: Optional[ExprType] = None
     lit: Optional[Immediate] = None
     wr: Optional[SideWrite] = None
@@ -585,9 +595,12 @@ class DmemWriteInst(BaseInst):
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> DmemWriteInst:
+        dst_raw = str(d["DST"])
+        if dst_raw.startswith("[") and dst_raw.endswith("]"):
+            dst_raw = dst_raw[1:-1]
         return cls(
-            dst=_parse_mem_addr_field(str(d["DST"]), "DST"),
-            src=_parse_dmem_src(str(d["SRC"])),
+            dst=_parse_mem_addr_field(dst_raw, "DST"),
+            src=_parse_dmem_src_keyword(str(d["SRC"])),
             wr=parse_side_write(d["WR"]) if "WR" in d else None,
             op=parse_alu_expr(d["OP"]) if "OP" in d else None,
             lit=parse_immediate(d["LIT"]) if "LIT" in d else None,
@@ -598,18 +611,20 @@ class DmemWriteInst(BaseInst):
     @property
     def reg_read(self) -> frozenset[str]:
         reads: frozenset[str] = frozenset()
-        for op in [self.dst, self.src]:
-            if isinstance(op, Register):
-                reads = reads | op.regs()
+        if isinstance(self.dst, Register):
+            reads = reads | self.dst.regs()
         if self.op:
             reads = reads | self.op.regs()
         return reads
 
     def to_dict(self) -> dict[str, Any]:
+        dst_str = str(self.dst)
+        if isinstance(self.dst, MemAddr):
+            dst_str = f"[{dst_str}]"
         d = {
             "CMD": "DMEM_WR",
-            "DST": str(self.dst) if self.dst else None,
-            "SRC": str(self.src) if self.src else None,
+            "DST": dst_str,
+            "SRC": self.src,
             "OP": str(self.op) if self.op else None,
             "LIT": str(self.lit) if self.lit else None,
             "WR": str(self.wr) if self.wr else None,
@@ -737,6 +752,382 @@ class DportWriteInst(BaseInst):
             "OP": str(self.op) if self.op else None,
             "UF": "1" if self.uf else None,
             "IF": self.if_cond if self.if_cond else None,
+        }
+        return {k: v for k, v in d.items() if v is not None}
+
+
+@dataclass(frozen=True)
+class DportReadInst(BaseInst):
+    """DPORT_RD instruction: read I/Q result from a data port."""
+
+    dst: Union[Register, ImmValue]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> DportReadInst:
+        return cls(dst=_parse_port_dst(str(d["DST"])))
+
+    @property
+    def reg_read(self) -> frozenset[str]:
+        reads: frozenset[str] = frozenset({STATUS_REG})
+        if isinstance(self.dst, Register):
+            reads = reads | self.dst.regs()
+        return reads
+
+    @property
+    def reg_write(self) -> frozenset[str]:
+        return frozenset({"s8", "s9"})
+
+    def to_dict(self) -> dict[str, Any]:
+        d = {
+            "CMD": "DPORT_RD",
+            "DST": str(self.dst) if self.dst else None,
+        }
+        return {k: v for k, v in d.items() if v is not None}
+
+
+@dataclass(frozen=True)
+class TrigInst(BaseInst):
+    """TRIG instruction: set or clear a trigger port."""
+
+    dst: Union[Register, ImmValue]
+    src: str  # "set" or "clr"
+    time: Optional[TimeType] = None
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> TrigInst:
+        return cls(
+            dst=_parse_port_dst(str(d["DST"])),
+            src=str(d["SRC"]),
+            time=parse_time(d["TIME"]) if "TIME" in d else None,
+        )
+
+    @property
+    def reg_read(self) -> frozenset[str]:
+        reads: frozenset[str] = frozenset({TIMED_BASE_REG})
+        if isinstance(self.dst, Register):
+            reads = reads | self.dst.regs()
+        if isinstance(self.time, Register):
+            reads = reads | self.time.regs()
+        return reads
+
+    def to_dict(self) -> dict[str, Any]:
+        d = {
+            "CMD": "TRIG",
+            "DST": str(self.dst) if self.dst else None,
+            "SRC": self.src,
+            "TIME": str(self.time) if self.time else None,
+        }
+        return {k: v for k, v in d.items() if v is not None}
+
+
+@dataclass(frozen=True)
+class CallInst(BaseInst):
+    """CALL instruction: call a subroutine (stores return address before jumping)."""
+
+    label: Optional[Label] = None
+    addr: Optional[AddrType] = None
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> CallInst:
+        return cls(
+            label=parse_label(d.get("LABEL")),
+            addr=parse_addr(d.get("ADDR")),
+        )
+
+    def __post_init__(self) -> None:
+        if self.addr is not None and not isinstance(self.addr, Label):
+            if self.addr != Register("s15"):
+                raise ValueError(
+                    f"CallInst.addr must be 's15' or Label, got {self.addr!r}."
+                )
+
+    @property
+    def reg_read(self) -> frozenset[str]:
+        if isinstance(self.addr, Register):
+            return self.addr.regs()
+        return frozenset()
+
+    @property
+    def need_label(self) -> Optional[Label]:
+        if self.label and not self.label.is_pseudo_name():
+            return self.label
+        if isinstance(self.addr, Label) and not self.addr.is_pseudo_name():
+            return self.addr
+        return None
+
+    def to_dict(self) -> dict[str, Any]:
+        d = {
+            "CMD": "CALL",
+            "LABEL": self.label.name if self.label else None,
+            "ADDR": str(self.addr) if self.addr else None,
+        }
+        return {k: v for k, v in d.items() if v is not None}
+
+
+@dataclass(frozen=True)
+class RetInst(BaseInst):
+    """RET instruction: return from a subroutine call."""
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> RetInst:
+        return cls()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"CMD": "RET"}
+
+
+@dataclass(frozen=True)
+class FlagInst(BaseInst):
+    """FLAG instruction: manipulate the external flag."""
+
+    c_op: str = "set"  # "set", "clr", or "inv"
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> FlagInst:
+        return cls(c_op=str(d["C_OP"]))
+
+    def to_dict(self) -> dict[str, Any]:
+        d = {
+            "CMD": "FLAG",
+            "C_OP": self.c_op,
+        }
+        return {k: v for k, v in d.items() if v is not None}
+
+
+@dataclass(frozen=True)
+class ArithInst(BaseInst):
+    """ARITH instruction: high-precision multiply-accumulate operation."""
+
+    c_op: str
+    r1: Optional[Register] = None
+    r2: Optional[Register] = None
+    r3: Optional[Register] = None
+    r4: Optional[Register] = None
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> ArithInst:
+        return cls(
+            c_op=str(d["C_OP"]),
+            r1=parse_register(d["R1"]) if "R1" in d else None,
+            r2=parse_register(d["R2"]) if "R2" in d else None,
+            r3=parse_register(d["R3"]) if "R3" in d else None,
+            r4=parse_register(d["R4"]) if "R4" in d else None,
+        )
+
+    @property
+    def reg_read(self) -> frozenset[str]:
+        reads: frozenset[str] = frozenset()
+        for r in [self.r1, self.r2, self.r3, self.r4]:
+            if r is not None:
+                reads = reads | r.regs()
+        return reads
+
+    @property
+    def reg_write(self) -> frozenset[str]:
+        return frozenset({"s3"})
+
+    def to_dict(self) -> dict[str, Any]:
+        d = {
+            "CMD": "ARITH",
+            "C_OP": self.c_op,
+            "R1": str(self.r1) if self.r1 else None,
+            "R2": str(self.r2) if self.r2 else None,
+            "R3": str(self.r3) if self.r3 else None,
+            "R4": str(self.r4) if self.r4 else None,
+        }
+        return {k: v for k, v in d.items() if v is not None}
+
+
+@dataclass(frozen=True)
+class DivInst(BaseInst):
+    """DIV instruction: integer division (async, result in s4/s5)."""
+
+    num: Register
+    den: Union[Register, Immediate]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> DivInst:
+        num_raw = str(d["NUM"])
+        den_raw = str(d["DEN"])
+        num = parse_register(num_raw)
+        if num is None:
+            raise ValueError(f"DIV.NUM: {num_raw!r} is not a register")
+        den_reg = parse_register(den_raw)
+        if den_reg is not None:
+            return cls(num=num, den=den_reg)
+        den_imm = parse_immediate(den_raw)
+        if den_imm is not None:
+            return cls(num=num, den=den_imm)
+        # Fallback: den may be a register name without # prefix
+        return cls(num=num, den=Register(den_raw))
+
+    @property
+    def reg_read(self) -> frozenset[str]:
+        reads = self.num.regs()
+        if isinstance(self.den, Register):
+            reads = reads | self.den.regs()
+        return reads
+
+    @property
+    def reg_write(self) -> frozenset[str]:
+        return frozenset({"s4", "s5"})
+
+    def to_dict(self) -> dict[str, Any]:
+        d = {
+            "CMD": "DIV",
+            "NUM": str(self.num) if self.num else None,
+            "DEN": str(self.den) if self.den else None,
+        }
+        return {k: v for k, v in d.items() if v is not None}
+
+
+@dataclass(frozen=True)
+class NetInst(BaseInst):
+    """NET instruction: QNET network peripheral control."""
+
+    c_op: str
+    r1: Optional[Register] = None
+    r2: Optional[Register] = None
+    r3: Optional[Register] = None
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> NetInst:
+        return cls(
+            c_op=str(d["C_OP"]),
+            r1=parse_register(d["R1"]) if "R1" in d else None,
+            r2=parse_register(d["R2"]) if "R2" in d else None,
+            r3=parse_register(d["R3"]) if "R3" in d else None,
+        )
+
+    @property
+    def reg_read(self) -> frozenset[str]:
+        reads: frozenset[str] = frozenset()
+        for r in [self.r1, self.r2, self.r3]:
+            if r is not None:
+                reads = reads | r.regs()
+        return reads
+
+    def to_dict(self) -> dict[str, Any]:
+        d = {
+            "CMD": "NET",
+            "C_OP": self.c_op,
+            "R1": str(self.r1) if self.r1 else None,
+            "R2": str(self.r2) if self.r2 else None,
+            "R3": str(self.r3) if self.r3 else None,
+        }
+        return {k: v for k, v in d.items() if v is not None}
+
+
+@dataclass(frozen=True)
+class ComInst(BaseInst):
+    """COM instruction: QCOM communication peripheral control."""
+
+    c_op: str
+    r1: Optional[Register] = None
+    lit: Optional[Immediate] = None
+    if_cond: Optional[CondCode] = None
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> ComInst:
+        r1_raw = d.get("R1")
+        if r1_raw is not None and isinstance(r1_raw, str):
+            try:
+                # R1 can be "0" or "1" (flag value) or a register
+                int(r1_raw)
+                r1 = None  # will be handled via lit below
+            except ValueError:
+                r1 = parse_register(r1_raw)
+        else:
+            r1 = parse_register(r1_raw)
+
+        return cls(
+            c_op=str(d["C_OP"]),
+            r1=r1,
+            lit=parse_immediate(d["LIT"]) if "LIT" in d else None,
+            if_cond=_parse_cond_code(d.get("IF")),
+        )
+
+    @property
+    def reg_read(self) -> frozenset[str]:
+        if self.r1 is not None:
+            return self.r1.regs()
+        return frozenset()
+
+    def to_dict(self) -> dict[str, Any]:
+        d = {
+            "CMD": "COM",
+            "C_OP": self.c_op,
+            "R1": str(self.r1) if self.r1 else None,
+            "LIT": str(self.lit) if self.lit else None,
+            "IF": self.if_cond if self.if_cond else None,
+        }
+        return {k: v for k, v in d.items() if v is not None}
+
+
+@dataclass(frozen=True)
+class CustomPeripheralInst(BaseInst):
+    """PA / PB instruction: custom peripheral A or B."""
+
+    cmd: str  # "PA" or "PB"
+    c_op: int
+    r1: Optional[Register] = None
+    r2: Optional[Register] = None
+    r3: Optional[Register] = None
+    r4: Optional[Register] = None
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> CustomPeripheralInst:
+        return cls(
+            cmd=str(d["CMD"]),
+            c_op=int(d["C_OP"]),
+            r1=parse_register(d["R1"]) if "R1" in d else None,
+            r2=parse_register(d["R2"]) if "R2" in d else None,
+            r3=parse_register(d["R3"]) if "R3" in d else None,
+            r4=parse_register(d["R4"]) if "R4" in d else None,
+        )
+
+    @property
+    def reg_read(self) -> frozenset[str]:
+        reads: frozenset[str] = frozenset()
+        for r in [self.r1, self.r2, self.r3, self.r4]:
+            if r is not None:
+                reads = reads | r.regs()
+        return reads
+
+    def to_dict(self) -> dict[str, Any]:
+        d = {
+            "CMD": self.cmd,
+            "C_OP": self.c_op,
+            "R1": str(self.r1) if self.r1 else None,
+            "R2": str(self.r2) if self.r2 else None,
+            "R3": str(self.r3) if self.r3 else None,
+            "R4": str(self.r4) if self.r4 else None,
+        }
+        return {k: v for k, v in d.items() if v is not None}
+
+
+@dataclass(frozen=True)
+class ClearInst(BaseInst):
+    """CLEAR instruction: clear peripheral data-new flags.
+
+    Expands to REG_WR s2 imm at the binary level, but appears as CLEAR in
+    prog_list before binary encoding.
+    """
+
+    c_op: str
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> ClearInst:
+        return cls(c_op=str(d["C_OP"]))
+
+    @property
+    def reg_write(self) -> frozenset[str]:
+        return frozenset({"s2"})
+
+    def to_dict(self) -> dict[str, Any]:
+        d = {
+            "CMD": "CLEAR",
+            "C_OP": self.c_op,
         }
         return {k: v for k, v in d.items() if v is not None}
 

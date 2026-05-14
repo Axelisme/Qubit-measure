@@ -49,13 +49,24 @@ the register, or at end of block.
 from __future__ import annotations
 
 from ...instructions import (
+    ArithInst,
     BaseInst,
+    CallInst,
+    ClearInst,
+    ComInst,
+    CustomPeripheralInst,
+    DivInst,
     DmemReadInst,
     DmemWriteInst,
+    DportReadInst,
+    FlagInst,
+    NetInst,
     NopInst,
     PortWriteInst,
     RegWriteInst,
+    RetInst,
     TimeInst,
+    TrigInst,
     WaitInst,
     WmemWriteInst,
 )
@@ -213,5 +224,20 @@ class IncRegMergePass(AbsChunkPass):
                 PortWriteInst,
                 WmemWriteInst,
                 NopInst,
+            ),
+        ) and not isinstance(
+            inst,
+            (
+                ArithInst,
+                CallInst,
+                ClearInst,
+                ComInst,
+                CustomPeripheralInst,
+                DivInst,
+                DportReadInst,
+                FlagInst,
+                NetInst,
+                RetInst,
+                TrigInst,
             ),
         )
