@@ -1,129 +1,185 @@
 from __future__ import annotations
 
-import dataclasses
+from abc import ABC, abstractmethod
 from collections.abc import Iterator
 
 from typing_extensions import List, Union, cast
 
-from ..instructions import Instruction
-from ..node import BasicBlockNode, BlockNode, IRNode, RootNode
-from ..pipeline import AbsIRPass, PipeLineContext
+from ..instructions import (
+    ArithInst,
+    BaseInst,
+    CallInst,
+    ClearInst,
+    ComInst,
+    CustomPeripheralInst,
+    DivInst,
+    DmemReadInst,
+    DmemWriteInst,
+    DportReadInst,
+    FlagInst,
+    Instruction,
+    NetInst,
+    NopInst,
+    PortWriteInst,
+    RegWriteInst,
+    RetInst,
+    TimeInst,
+    TrigInst,
+    WaitInst,
+    WmemWriteInst,
+)
+from ..node import BasicBlockNode, BlockNode, IRBranch, IRLoop, IRNode, RootNode
+from ..pipeline import AbsChunkPass, AbsIRPass, ChunkList, PipeLineContext
+
+# ---------------------------------------------------------------------------
+# Shared dataflow transparency list (R1)
+# ---------------------------------------------------------------------------
+
+# Instructions that are transparent to dataflow tracking: passes can freely
+# sink/hoist/reorder across these without flushing pending state.
+# Excluded (barrier by omission): JumpInst, TestInst, LabelInst, DportWriteInst.
+_DATAFLOW_TRANSPARENT_INSTS: tuple[type[BaseInst], ...] = (
+    TimeInst,
+    WaitInst,
+    RegWriteInst,
+    DmemReadInst,
+    DmemWriteInst,
+    PortWriteInst,
+    WmemWriteInst,
+    NopInst,
+    ArithInst,
+    CallInst,
+    ClearInst,
+    ComInst,
+    CustomPeripheralInst,
+    DivInst,
+    DportReadInst,
+    FlagInst,
+    NetInst,
+    RetInst,
+    TrigInst,
+)
+
+# ---------------------------------------------------------------------------
+# BlockChunkPass (R2)
+# ---------------------------------------------------------------------------
+
+
+class BlockChunkPass(AbsChunkPass, ABC):
+    """AbsChunkPass that iterates over BasicBlockNode chunks only.
+
+    Subclasses implement ``_process_block`` and get the per-chunk loop for free.
+    ``UnreachableEliminationPass`` uses a stateful linear scan instead and does
+    not inherit from this class.
+    """
+
+    def process(self, chunks: ChunkList, ctx: PipeLineContext) -> tuple[ChunkList, bool]:
+        changed = False
+        for chunk in chunks:
+            if isinstance(chunk, BasicBlockNode):
+                changed |= self._process_block(chunk)
+        return chunks, changed
+
+    @abstractmethod
+    def _process_block(self, block: BasicBlockNode) -> bool: ...
+
+
+# ---------------------------------------------------------------------------
+# IRTransformer (R3-B)
+# ---------------------------------------------------------------------------
 
 
 class IRTransformer:
-    """Base class for IR transformations with automatic recursion.
+    """Base class for IR tree transformations using explicit per-node visitors.
 
-    Subclasses (or callers wrapping ``visit``) should reset ``_changed`` to
-    ``False`` before a top-level traversal and read it afterwards to learn
-    whether any in-place mutation occurred.  ``generic_visit`` sets the flag
-    whenever it inserts, removes, or replaces a child node by identity.
+    Subclasses override ``visit_<ClassName>`` methods to transform specific
+    node types.  Default visitors recurse into child nodes automatically.
+
+    ``_changed`` is set whenever a structural change (insert / remove / replace)
+    is made during traversal.  Reset it to ``False`` before a top-level call
+    and inspect it afterwards.
     """
 
     _changed: bool = False
 
     def visit(self, node: IRNode) -> Union[IRNode, List[IRNode], None]:
-        """Visit a node, returning a new node, a list of nodes, the same node, or None to delete."""
+        """Dispatch to ``visit_<ClassName>`` or the default handler."""
         method_name = f"visit_{node.__class__.__name__}"
-        visitor = getattr(self, method_name, self.generic_visit)
+        visitor = getattr(self, method_name, self._unhandled_visit)
         return visitor(node)
+
+    def _unhandled_visit(self, node: IRNode) -> IRNode:
+        """Fallback for unknown IRNode types — return unchanged."""
+        return node
+
+    # -- Default visitors (recurse into children) --
 
     def visit_BasicBlockNode(
         self, node: BasicBlockNode
     ) -> Union[IRNode, List[IRNode], None]:
-        """Default visitor for BasicBlockNode: return unchanged (no child IRNodes)."""
+        """Leaf node: no IRNode children to recurse into."""
         return node
 
-    def generic_visit(self, node: IRNode) -> Union[IRNode, List[IRNode], None]:
-        """Default visitor that automatically recurses into child nodes using dataclass fields."""
-        if not dataclasses.is_dataclass(node):
-            return node
+    def visit_BlockNode(
+        self, node: BlockNode
+    ) -> Union[IRNode, List[IRNode], None]:
+        return self._visit_block(node)
 
-        for field in dataclasses.fields(node):
-            old_value = getattr(node, field.name)
+    def visit_RootNode(
+        self, node: RootNode
+    ) -> Union[IRNode, List[IRNode], None]:
+        return self._visit_block(node)
 
-            # 1. Handle lists of IRNodes (e.g., BlockNode.insts, IRBranch.cases)
-            if isinstance(old_value, list):
-                new_values: list = []
-                list_changed = False
-                for item in old_value:
-                    if isinstance(item, IRNode):
-                        res = self.visit(item)
-                        if res is None:
-                            list_changed = True
-                            continue
-                        elif isinstance(res, list):
-                            list_changed = True
-                            new_values.extend(res)
-                        else:
-                            if res is not item:
-                                list_changed = True
-                            new_values.append(res)
-                    else:
-                        new_values.append(item)
-                if list_changed or len(new_values) != len(old_value):
-                    self._changed = True
-                setattr(node, field.name, new_values)
-
-            # 2. Handle single IRNode fields (e.g., IRLoop.body, IRBranch.dispatch)
-            elif isinstance(old_value, IRNode):
-                res = self.visit(old_value)
-
-                # Protection: Structural fields expecting a BlockNode shouldn't be destroyed
-                if res is None:
-                    self._changed = True
-                    setattr(node, field.name, BlockNode())
-                elif isinstance(res, list):
-                    self._changed = True
-                    setattr(node, field.name, BlockNode(insts=res))
-                else:
-                    if res is not old_value:
-                        self._changed = True
-                    setattr(node, field.name, res)
-
+    def visit_IRLoop(
+        self, node: IRLoop
+    ) -> Union[IRNode, List[IRNode], None]:
+        res = self.visit(node.body)
+        if res is None:
+            self._changed = True
+            node.body = BlockNode()
+        elif isinstance(res, list):
+            self._changed = True
+            node.body = BlockNode(insts=res)
+        else:
+            if res is not node.body:
+                self._changed = True
+            node.body = res  # type: ignore[assignment]
         return node
 
+    def visit_IRBranch(
+        self, node: IRBranch
+    ) -> Union[IRNode, List[IRNode], None]:
+        new_cases: list[BlockNode] = []
+        for case in node.cases:
+            res = self.visit(case)
+            if res is None:
+                self._changed = True
+                new_cases.append(BlockNode())
+            elif isinstance(res, list):
+                self._changed = True
+                new_cases.append(BlockNode(insts=res))
+            else:
+                if res is not case:
+                    self._changed = True
+                new_cases.append(res)  # type: ignore[arg-type]
+        node.cases = new_cases
+        return node
 
-def _walk_nodes(node: IRNode) -> Iterator[IRNode]:
-    seen: set[int] = set()
-
-    def _walk(current: IRNode) -> Iterator[IRNode]:
-        ident = id(current)
-        if ident in seen:
-            return
-        seen.add(ident)
-        yield current
-        for child in current.children():
-            yield from _walk(child)
-
-    yield from _walk(node)
-
-
-def walk_basic_blocks(node: IRNode) -> Iterator[BasicBlockNode]:
-    """Yield every BasicBlockNode reachable from node (depth-first)."""
-    for current in _walk_nodes(node):
-        if isinstance(current, BasicBlockNode):
-            yield current
-
-
-def walk_instructions(node: IRNode) -> Iterator[Instruction]:
-    """Yield every Instruction reachable from node (labels, insts, branch)."""
-    for current in _walk_nodes(node):
-        if isinstance(current, BasicBlockNode):
-            yield from current.labels
-            yield from current.insts
-            if current.branch is not None:
-                yield current.branch
-
-
-class OptimizationPassBase(AbsIRPass, IRTransformer):
-    """Base class for IR-level optimization passes with recursive IR traversal."""
-
-    def process(self, ir: RootNode, ctx: PipeLineContext) -> tuple[RootNode, bool]:
-        self.ctx = ctx
-        self._changed = False
-        res = self.visit(ir)
-        if isinstance(res, list):
-            raise ValueError("Unexpected list returned from visit")
-        out = cast(RootNode, res or ir)
-        changed = self._changed or out is not ir
-        return out, changed
+    def _visit_block(self, node: BlockNode) -> Union[IRNode, List[IRNode], None]:
+        new_insts: list[IRNode] = []
+        list_changed = False
+        for item in node.insts:
+            res = self.visit(item)
+            if res is None:
+                list_changed = True
+            elif isinstance(res, list):
+                list_changed = True
+                new_insts.extend(res)
+            else:
+                if res is not item:
+                    list_changed = True
+                new_insts.append(res)
+        if list_changed:
+            self._changed = True
+            node.insts = new_insts
+        return node

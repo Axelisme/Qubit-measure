@@ -48,31 +48,10 @@ the register, or at end of block.
 
 from __future__ import annotations
 
-from ...instructions import (
-    ArithInst,
-    BaseInst,
-    CallInst,
-    ClearInst,
-    ComInst,
-    CustomPeripheralInst,
-    DivInst,
-    DmemReadInst,
-    DmemWriteInst,
-    DportReadInst,
-    FlagInst,
-    NetInst,
-    NopInst,
-    PortWriteInst,
-    RegWriteInst,
-    RetInst,
-    TimeInst,
-    TrigInst,
-    WaitInst,
-    WmemWriteInst,
-)
+from ...instructions import BaseInst, RegWriteInst
 from ...node import BasicBlockNode
 from ...operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
-from ...pipeline import AbsChunkPass, ChunkList, PipeLineContext
+from ..base import BlockChunkPass, _DATAFLOW_TRANSPARENT_INSTS
 
 # REG_WR rd op (rs +/- #N) encodes the immediate in a 24-bit signed field.
 # Use a conservative safe limit well within that range (same policy as
@@ -129,7 +108,7 @@ def _make_increment_inst(reg: str, val: int) -> RegWriteInst:
     return RegWriteInst(dst=Register(reg), src=SrcKeyword.OP, op=op)
 
 
-class IncRegMergePass(AbsChunkPass):
+class IncRegMergePass(BlockChunkPass):
     """Merge adjacent constant register increments.
 
     For free blocks (disable_opt=False):
@@ -138,17 +117,6 @@ class IncRegMergePass(AbsChunkPass):
       - Accumulates multiple increments into a single increment.
       - Drops the increment if the accumulated value is 0.
     """
-
-    def process(
-        self, chunks: ChunkList, ctx: PipeLineContext
-    ) -> tuple[ChunkList, bool]:
-        _ = ctx
-        changed = False
-        for chunk in chunks:
-            if not isinstance(chunk, BasicBlockNode):
-                continue
-            changed |= self._process_block(chunk)
-        return chunks, changed
 
     def _process_block(self, block: BasicBlockNode) -> bool:
         if block.disable_opt:
@@ -213,31 +181,4 @@ class IncRegMergePass(AbsChunkPass):
         block.insts = result
 
     def _is_increment_motion_barrier(self, inst: BaseInst) -> bool:
-        return not isinstance(
-            inst,
-            (
-                TimeInst,
-                WaitInst,
-                RegWriteInst,
-                DmemReadInst,
-                DmemWriteInst,
-                PortWriteInst,
-                WmemWriteInst,
-                NopInst,
-            ),
-        ) and not isinstance(
-            inst,
-            (
-                ArithInst,
-                CallInst,
-                ClearInst,
-                ComInst,
-                CustomPeripheralInst,
-                DivInst,
-                DportReadInst,
-                FlagInst,
-                NetInst,
-                RetInst,
-                TrigInst,
-            ),
-        )
+        return not isinstance(inst, _DATAFLOW_TRANSPARENT_INSTS)

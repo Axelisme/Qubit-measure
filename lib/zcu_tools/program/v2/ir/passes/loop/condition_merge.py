@@ -50,7 +50,7 @@ from __future__ import annotations
 from ...instructions import JumpInst, RegWriteInst
 from ...node import BasicBlockNode
 from ...operands import AluExpr, AluOp, Immediate, SideWrite, SrcKeyword
-from ...pipeline import AbsChunkPass, ChunkList, PipeLineContext
+from ..base import BlockChunkPass
 
 
 def _make_merged_branch(branch: JumpInst, inst: RegWriteInst) -> JumpInst:
@@ -64,7 +64,7 @@ def _make_merged_branch(branch: JumpInst, inst: RegWriteInst) -> JumpInst:
     )
 
 
-class LoopConditionMergePass(AbsChunkPass):
+class LoopConditionMergePass(BlockChunkPass):
     """Chunk pass to merge register increments and conditional jumps.
 
     Before:
@@ -76,17 +76,6 @@ class LoopConditionMergePass(AbsChunkPass):
     Only the REG_WR + JUMP zero-comparison form is merged.  TEST-based
     patterns are not handled (see module docstring for rationale).
     """
-
-    def process(
-        self, chunks: ChunkList, ctx: PipeLineContext
-    ) -> tuple[ChunkList, bool]:
-        _ = ctx
-        changed = False
-        for chunk in chunks:
-            if not isinstance(chunk, BasicBlockNode):
-                continue
-            changed |= self._process_block(chunk)
-        return chunks, changed
 
     def _process_block(self, block: BasicBlockNode) -> bool:
         if block.disable_opt:

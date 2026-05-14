@@ -41,14 +41,35 @@ pass invocation rather than requiring O(n) pipeline iterations.
 
 from __future__ import annotations
 
+from ...instructions import BaseInst
 from ...labels import Label
 from ...node import BasicBlockNode, BlockNode, IRBranch, IRLoop, IRNode, RootNode
-from ...pipeline import PipeLineContext
-from ..base import OptimizationPassBase
-from .dead_label import _collect_referenced_labels
+from ...pipeline import AbsIRPass, PipeLineContext
 
 
-class BlockMergePass(OptimizationPassBase):
+def _collect_referenced_labels_tree(node: IRNode) -> set[Label]:
+    """Collect all labels referenced by any instruction in the IR tree."""
+    refs: set[Label] = set()
+    _collect_from_node(node, refs)
+    return refs
+
+
+def _collect_from_node(node: IRNode, refs: set[Label]) -> None:
+    if isinstance(node, BasicBlockNode):
+        for inst in (*node.labels, *node.insts, *([node.branch] if node.branch else [])):
+            if isinstance(inst, BaseInst) and inst.need_label is not None:
+                refs.add(inst.need_label)
+    elif isinstance(node, BlockNode):
+        for child in node.insts:
+            _collect_from_node(child, refs)
+    elif isinstance(node, IRLoop):
+        _collect_from_node(node.body, refs)
+    elif isinstance(node, IRBranch):
+        for case in node.cases:
+            _collect_from_node(case, refs)
+
+
+class BlockMergePass(AbsIRPass):
     """Merge adjacent BasicBlockNodes when safe.
 
     Block A and Block B can be merged when:
@@ -57,8 +78,7 @@ class BlockMergePass(OptimizationPassBase):
     """
 
     def process(self, ir: RootNode, ctx: PipeLineContext) -> tuple[RootNode, bool]:
-        self.ctx = ctx
-        referenced = _collect_referenced_labels(ir)
+        referenced = _collect_referenced_labels_tree(ir)
         changed = self._merge_block(ir, referenced)
         return ir, changed
 

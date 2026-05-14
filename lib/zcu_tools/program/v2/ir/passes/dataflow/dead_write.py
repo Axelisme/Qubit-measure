@@ -52,46 +52,14 @@ instruction from elimination.
 
 from __future__ import annotations
 
-from ...instructions import (
-    ArithInst,
-    BaseInst,
-    CallInst,
-    ClearInst,
-    ComInst,
-    CustomPeripheralInst,
-    DivInst,
-    DmemReadInst,
-    DmemWriteInst,
-    DportReadInst,
-    FlagInst,
-    NetInst,
-    NopInst,
-    PortWriteInst,
-    RegWriteInst,
-    RetInst,
-    TimeInst,
-    TrigInst,
-    WaitInst,
-    WmemWriteInst,
-)
+from ...instructions import BaseInst, RegWriteInst, WmemWriteInst
 from ...node import BasicBlockNode
 from ...operands import Register, SrcKeyword
-from ...pipeline import AbsChunkPass, ChunkList, PipeLineContext
+from ..base import BlockChunkPass, _DATAFLOW_TRANSPARENT_INSTS
 
 
-class DeadWriteEliminationPass(AbsChunkPass):
+class DeadWriteEliminationPass(BlockChunkPass):
     """Remove overwritten register writes in free BasicBlockNode chunks."""
-
-    def process(
-        self, chunks: ChunkList, ctx: PipeLineContext
-    ) -> tuple[ChunkList, bool]:
-        _ = ctx
-        changed = False
-        for chunk in chunks:
-            if not isinstance(chunk, BasicBlockNode):
-                continue
-            changed |= self._process_block(chunk)
-        return chunks, changed
 
     def _process_block(self, block: BasicBlockNode) -> bool:
         if block.disable_opt:
@@ -169,31 +137,4 @@ class DeadWriteEliminationPass(AbsChunkPass):
         return dead
 
     def _is_write_tracking_barrier(self, inst: BaseInst) -> bool:
-        return not isinstance(
-            inst,
-            (
-                TimeInst,
-                WaitInst,
-                RegWriteInst,
-                DmemReadInst,
-                DmemWriteInst,
-                PortWriteInst,
-                WmemWriteInst,
-                NopInst,
-            ),
-        ) and not isinstance(
-            inst,
-            (
-                ArithInst,
-                CallInst,
-                ClearInst,
-                ComInst,
-                CustomPeripheralInst,
-                DivInst,
-                DportReadInst,
-                FlagInst,
-                NetInst,
-                RetInst,
-                TrigInst,
-            ),
-        )
+        return not isinstance(inst, _DATAFLOW_TRANSPARENT_INSTS)

@@ -27,22 +27,38 @@ from zcu_tools.program.v2.ir.labels import Label
 from zcu_tools.program.v2.ir.node import (
     BasicBlockNode,
     BlockNode,
+    IRBranch,
     IRLoop,
     IRNode,
     RootNode,
 )
 from zcu_tools.program.v2.ir.operands import Immediate, Register, SrcKeyword
-from zcu_tools.program.v2.ir.passes import (
-    BranchEliminationPass,
-    UnrollLoopPass,
-    walk_instructions,
-)
+from zcu_tools.program.v2.ir.instructions import Instruction
+from zcu_tools.program.v2.ir.passes import BranchEliminationPass, UnrollLoopPass
 from zcu_tools.program.v2.ir.passes.loop.dispatch_island import build_jump_table_blocks
 from zcu_tools.program.v2.ir.pipeline import (
     PipeLineConfig,
     PipeLineContext,
     make_default_pipeline,
 )
+
+from typing import Iterator
+
+
+def _walk_instructions(node: IRNode) -> Iterator[Instruction]:
+    if isinstance(node, BasicBlockNode):
+        yield from node.labels
+        yield from node.insts
+        if node.branch is not None:
+            yield node.branch
+    elif isinstance(node, BlockNode):
+        for child in node.insts:
+            yield from _walk_instructions(child)
+    elif isinstance(node, IRLoop):
+        yield from _walk_instructions(node.body)
+    elif isinstance(node, IRBranch):
+        for case in node.cases:
+            yield from _walk_instructions(case)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -309,7 +325,7 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
 
     After full unroll + DeadWriteElimination only the last write should
     survive (the first two are dead: overwritten before being read).
-    Uses walk_instructions to cover all BasicBlockNode paths.
+    Uses _walk_instructions to cover all BasicBlockNode paths.
     """
 
     Label.reset()
@@ -338,7 +354,7 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
 
     writes_to_r_out = [
         inst
-        for inst in walk_instructions(out)
+        for inst in _walk_instructions(out)
         if isinstance(inst, RegWriteInst) and inst.dst.name == "r2"
     ]
     assert len(writes_to_r_out) == 1, (

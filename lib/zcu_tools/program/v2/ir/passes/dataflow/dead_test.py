@@ -43,22 +43,11 @@ from __future__ import annotations
 
 from ...instructions import BaseInst, JumpInst, TestInst
 from ...node import BasicBlockNode
-from ...pipeline import AbsChunkPass, ChunkList, PipeLineContext
+from ..base import BlockChunkPass
 
 
-class DeadTestEliminationPass(AbsChunkPass):
+class DeadTestEliminationPass(BlockChunkPass):
     """Remove dead TestInst from free BasicBlockNode chunks."""
-
-    def process(
-        self, chunks: ChunkList, ctx: PipeLineContext
-    ) -> tuple[ChunkList, bool]:
-        _ = ctx
-        changed = False
-        for chunk in chunks:
-            if not isinstance(chunk, BasicBlockNode):
-                continue
-            changed |= self._process_block(chunk)
-        return chunks, changed
 
     def _process_block(self, block: BasicBlockNode) -> bool:
         if block.disable_opt:

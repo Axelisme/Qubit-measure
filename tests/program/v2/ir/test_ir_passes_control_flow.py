@@ -72,7 +72,7 @@ def test_dead_label_elim_removes_unreferenced_label_from_basic_block():
         ]
     )
 
-    out, _ = DeadLabelEliminationPass().process(root, _ctx())
+    out = _run_chunk_passes_on_root(root, [DeadLabelEliminationPass()])
 
     bb = out.insts[0]
     assert isinstance(bb, BasicBlockNode)
@@ -89,7 +89,7 @@ def test_dead_label_elim_keeps_referenced_label_in_basic_block():
         ]
     )
 
-    out, _ = DeadLabelEliminationPass().process(root, _ctx())
+    out = _run_chunk_passes_on_root(root, [DeadLabelEliminationPass()])
 
     bb = out.insts[0]
     assert isinstance(bb, BasicBlockNode)

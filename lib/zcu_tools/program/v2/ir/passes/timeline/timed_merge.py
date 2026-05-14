@@ -52,7 +52,7 @@ from ...hw_semantics import TIMED_BASE_REG
 from ...instructions import BaseInst, TimeInst
 from ...node import BasicBlockNode
 from ...operands import Immediate, TimeOffset
-from ...pipeline import AbsChunkPass, ChunkList, PipeLineContext
+from ..base import BlockChunkPass
 
 # conservative safe limit for TIME inc_ref and @T fields
 TIMED_LIT_MAX: int = (1 << 20) - 1
@@ -77,19 +77,8 @@ def _flush(result: list[BaseInst], pending_lit: int) -> int:
     return 0
 
 
-class TimedMergePass(AbsChunkPass):
+class TimedMergePass(BlockChunkPass):
     """Aggressive TIME inc_ref optimisation pass."""
-
-    def process(
-        self, chunks: ChunkList, ctx: PipeLineContext
-    ) -> tuple[ChunkList, bool]:
-        _ = ctx
-        changed = False
-        for chunk in chunks:
-            if not isinstance(chunk, BasicBlockNode):
-                continue
-            changed |= self._process_block(chunk)
-        return chunks, changed
 
     def _process_block(self, block: BasicBlockNode) -> bool:
         if block.disable_opt:

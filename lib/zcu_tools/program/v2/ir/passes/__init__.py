@@ -1,8 +1,7 @@
 from .base import (
+    BlockChunkPass,
     IRTransformer,
-    OptimizationPassBase,
-    walk_basic_blocks,
-    walk_instructions,
+    _DATAFLOW_TRANSPARENT_INSTS,
 )
 from .control_flow import (
     BlockMergePass,
@@ -20,10 +19,9 @@ from .timeline import TimedMergePass, ZeroDelayDCEPass
 
 __all__ = [
     # base
-    "OptimizationPassBase",
     "IRTransformer",
-    "walk_basic_blocks",
-    "walk_instructions",
+    "BlockChunkPass",
+    "_DATAFLOW_TRANSPARENT_INSTS",
     # control_flow
     "BlockMergePass",
     "BranchEliminationPass",

@@ -26,7 +26,6 @@ from zcu_tools.program.v2.ir.operands import (
     Register,
     SrcKeyword,
 )
-from zcu_tools.program.v2.ir.passes import walk_basic_blocks
 from zcu_tools.program.v2.ir.passes.dataflow import (
     DeadTestEliminationPass,
     DeadWriteEliminationPass,
@@ -37,6 +36,22 @@ from zcu_tools.program.v2.ir.pipeline import (
     PipeLineContext,
     make_default_pipeline,
 )
+
+from typing import Iterator
+from zcu_tools.program.v2.ir.node import IRBranch, IRNode
+
+
+def _walk_basic_blocks(node: IRNode) -> Iterator[BasicBlockNode]:
+    if isinstance(node, BasicBlockNode):
+        yield node
+    elif isinstance(node, BlockNode):
+        for child in node.insts:
+            yield from _walk_basic_blocks(child)
+    elif isinstance(node, IRLoop):
+        yield from _walk_basic_blocks(node.body)
+    elif isinstance(node, IRBranch):
+        for case in node.cases:
+            yield from _walk_basic_blocks(case)
 
 
 def _config(**kwargs) -> PipeLineConfig:
@@ -61,7 +76,7 @@ def _flatten_root(root: RootNode) -> list[Instruction]:
 
 
 def _count_fixed_blocks(root: RootNode) -> int:
-    return sum(1 for bb in walk_basic_blocks(root) if bb.disable_opt)
+    return sum(1 for bb in _walk_basic_blocks(root) if bb.disable_opt)
 
 
 def _counter_update(reg: str) -> BasicBlockNode:
@@ -343,7 +358,7 @@ def test_default_pipeline_can_disable_all_optimization_passes():
 
 
 def _collect_all_basic_blocks(root: RootNode) -> list[BasicBlockNode]:
-    return list(walk_basic_blocks(root))
+    return list(_walk_basic_blocks(root))
 
 
 def test_unroll_register_driven_jump_table_structure():

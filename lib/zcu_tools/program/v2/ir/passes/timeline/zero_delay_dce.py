@@ -39,7 +39,7 @@ from __future__ import annotations
 from ...instructions import BaseInst, TimeInst
 from ...node import BasicBlockNode
 from ...operands import Immediate
-from ...pipeline import AbsChunkPass, ChunkList, PipeLineContext
+from ..base import BlockChunkPass
 
 
 def _is_zero_ref_increment(inst: BaseInst) -> bool:
@@ -52,19 +52,8 @@ def _is_zero_ref_increment(inst: BaseInst) -> bool:
     return inst.lit == Immediate(0)
 
 
-class ZeroDelayDCEPass(AbsChunkPass):
+class ZeroDelayDCEPass(BlockChunkPass):
     """Remove TIME inc_ref #0 instructions from BasicBlockNode chunks."""
-
-    def process(
-        self, chunks: ChunkList, ctx: PipeLineContext
-    ) -> tuple[ChunkList, bool]:
-        _ = ctx
-        changed = False
-        for chunk in chunks:
-            if not isinstance(chunk, BasicBlockNode):
-                continue
-            changed |= self._process_block(chunk)
-        return chunks, changed
 
     def _process_block(self, block: BasicBlockNode) -> bool:
         if block.disable_opt:

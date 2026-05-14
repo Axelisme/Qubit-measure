@@ -51,11 +51,10 @@ from typing import Optional
 
 from ...labels import Label
 from ...node import BasicBlockNode, BlockNode, IRBranch, IRLoop, IRNode, RootNode
-from ...pipeline import PipeLineContext
-from ..base import OptimizationPassBase
+from ...pipeline import AbsIRPass, PipeLineContext
 
 
-class BranchEliminationPass(OptimizationPassBase):
+class BranchEliminationPass(AbsIRPass):
     """Remove redundant unconditional branches to the next block.
 
     A branch from Block A to Block B is redundant when Block B immediately
@@ -66,7 +65,6 @@ class BranchEliminationPass(OptimizationPassBase):
     """
 
     def process(self, ir: RootNode, ctx: PipeLineContext) -> tuple[RootNode, bool]:
-        self.ctx = ctx
         self._changed = False
         self._process_block(ir)
         return ir, self._changed

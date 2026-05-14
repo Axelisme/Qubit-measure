@@ -8,7 +8,7 @@ from zcu_tools.program.v2.ir.instructions import (
     TimeInst,
     WaitInst,
 )
-from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, RootNode
+from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRBranch, IRLoop, IRNode, RootNode
 from zcu_tools.program.v2.ir.operands import (
     Immediate,
     ImmValue,
@@ -17,9 +17,23 @@ from zcu_tools.program.v2.ir.operands import (
     SrcKeyword,
     TimeOffset,
 )
-from zcu_tools.program.v2.ir.passes import walk_basic_blocks
 from zcu_tools.program.v2.ir.passes.timeline import TimedMergePass, ZeroDelayDCEPass
 from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
+
+from typing import Iterator
+
+
+def _walk_basic_blocks(node: IRNode) -> Iterator[BasicBlockNode]:
+    if isinstance(node, BasicBlockNode):
+        yield node
+    elif isinstance(node, BlockNode):
+        for child in node.insts:
+            yield from _walk_basic_blocks(child)
+    elif isinstance(node, IRLoop):
+        yield from _walk_basic_blocks(node.body)
+    elif isinstance(node, IRBranch):
+        for case in node.cases:
+            yield from _walk_basic_blocks(case)
 
 
 def _run_dce(root: RootNode) -> RootNode:
@@ -155,7 +169,7 @@ def test_zero_delay_dce_removes_from_basic_block():
 
     out = _run_dce(root)
 
-    bb = list(walk_basic_blocks(out))[0]
+    bb = list(_walk_basic_blocks(out))[0]
     assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 1
     assert isinstance(bb.insts[0], NopInst)

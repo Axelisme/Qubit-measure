@@ -3,18 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional, Union
 
-from typing_extensions import Iterator
-
 from .instructions import BaseInst, JumpInst, LabelInst, MetaInst
 from .operands import Register
 
 
 class IRNode:
     """Base class for all IR nodes."""
-
-    def children(self) -> Iterator[IRNode]:
-        """Yield all immediate child nodes."""
-        return iter([])
 
     def _into_str(self, indent: int = 0) -> str:
         """Helper for __str__ that takes an indent level."""
@@ -58,9 +52,6 @@ class BasicBlockNode(IRNode):
                     f"use BasicBlockNode.branch instead. Got: {inst}"
                 )
 
-    def children(self) -> Iterator[IRNode]:
-        return iter([])
-
     @property
     def addr_size(self) -> int:
         size = sum(inst.addr_inc for inst in self.insts)
@@ -94,9 +85,6 @@ class BlockNode(IRNode):
     def append(self, item: IRNode) -> None:
         self.insts.append(item)
 
-    def children(self) -> Iterator[IRNode]:
-        yield from self.insts
-
     def _into_str(self, indent: int = 0) -> str:
         prefix = "    " * indent
         return f"{prefix} {self.__class__.__name__}()\n" + "\n".join(
@@ -124,9 +112,6 @@ class IRLoop(IRNode):
     body: BlockNode
     range_hint: Optional[tuple[int, int]] = None
 
-    def children(self) -> Iterator[IRNode]:
-        yield self.body
-
     def _into_str(self, indent: int = 0) -> str:
         prefix = "    " * indent
         return (
@@ -142,9 +127,6 @@ class IRBranch(IRNode):
     name: str
     compare_reg: Register
     cases: list[BlockNode]
-
-    def children(self) -> Iterator[IRNode]:
-        yield from self.cases
 
     def _into_str(self, indent: int = 0) -> str:
         prefix = "    " * indent
