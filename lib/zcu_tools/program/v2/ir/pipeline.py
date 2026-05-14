@@ -233,10 +233,10 @@ def make_default_pipeline(pmem_capacity: int) -> IRPipeLine:
             DeadTestEliminationPass(),
             DeadWriteEliminationPass(),
             DeadLabelEliminationPass(),
+            BranchEliminationPass(),
             BlockMergePass(),
         ],
         ir_passes=[
             UnrollLoopPass(),
-            BranchEliminationPass(),
         ],
     )

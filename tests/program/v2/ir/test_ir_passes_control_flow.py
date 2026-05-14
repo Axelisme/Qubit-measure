@@ -40,10 +40,6 @@ from zcu_tools.program.v2.ir.pipeline import (
 )
 
 
-def _ctx() -> PipeLineContext:
-    return PipeLineContext(config=PipeLineConfig(), pmem_budget=1024)
-
-
 def _label(name: str) -> Label:
     return Label.make_new(name)
 
@@ -117,7 +113,7 @@ def test_branch_elim_removes_unconditional_fallthrough():
         ]
     )
 
-    out, _ = BranchEliminationPass().process(root, _ctx())
+    out = _run_chunk_passes_on_root(root, [BranchEliminationPass()])
 
     a = out.insts[0]
     assert isinstance(a, BasicBlockNode)
@@ -141,7 +137,7 @@ def test_branch_elim_skips_fixed_block():
         ]
     )
 
-    out, _ = BranchEliminationPass().process(root, _ctx())
+    out = _run_chunk_passes_on_root(root, [BranchEliminationPass()])
 
     a = out.insts[0]
     assert isinstance(a, BasicBlockNode)
@@ -168,7 +164,7 @@ def test_branch_elim_keeps_conditional_branch():
         ]
     )
 
-    out, _ = BranchEliminationPass().process(root, _ctx())
+    out = _run_chunk_passes_on_root(root, [BranchEliminationPass()])
 
     a = out.insts[0]
     assert isinstance(a, BasicBlockNode)
@@ -186,7 +182,7 @@ def test_branch_elim_keeps_non_adjacent_branch():
         ]
     )
 
-    out, _ = BranchEliminationPass().process(root, _ctx())
+    out = _run_chunk_passes_on_root(root, [BranchEliminationPass()])
 
     a = out.insts[0]
     assert isinstance(a, BasicBlockNode)
@@ -357,7 +353,7 @@ def test_branch_elim_inside_irloop_body():
     insts: list = [IRLoop(name="L", counter_reg=Register("c"), body=body, n=4)]
     root = RootNode(insts=insts)
 
-    out, _ = BranchEliminationPass().process(root, _ctx())
+    out = _run_chunk_passes_on_root(root, [BranchEliminationPass()])
 
     loop = out.insts[0]
     assert isinstance(loop, IRLoop)
@@ -384,7 +380,7 @@ def test_branch_elim_inside_irbranch_cases():
     insts: list = [IRBranch(name="B", compare_reg=Register("c"), cases=[case])]
     root = RootNode(insts=insts)
 
-    out, _ = BranchEliminationPass().process(root, _ctx())
+    out = _run_chunk_passes_on_root(root, [BranchEliminationPass()])
 
     branch = out.insts[0]
     assert isinstance(branch, IRBranch)

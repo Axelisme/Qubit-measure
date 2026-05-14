@@ -64,6 +64,15 @@ def _walk_instructions(node: IRNode) -> Iterator[Instruction]:
 # ---------------------------------------------------------------------------
 
 
+def _run_chunk_passes_on_root(root: RootNode, passes: list) -> RootNode:
+    parser = IRParser()
+    chunks = parser.unparse(root)
+    ctx = PipeLineContext(config=PipeLineConfig(), pmem_budget=1024)
+    for pass_ in passes:
+        chunks, _ = pass_.process(chunks, ctx)
+    return parser.parse(chunks)
+
+
 def _collect_fixed_entry_blocks(root: RootNode) -> list[BasicBlockNode]:
     """Collect BasicBlockNodes that are disable_opt=True AND have labels."""
     result: list[BasicBlockNode] = []
@@ -383,10 +392,7 @@ def test_v3_fixed_block_branch_elim_skips_block():
         ]
     )
 
-    out, _ = BranchEliminationPass().process(
-        root,
-        PipeLineContext(config=PipeLineConfig(), pmem_budget=512),
-    )
+    out = _run_chunk_passes_on_root(root, [BranchEliminationPass()])
 
     fixed = out.insts[0]
     assert isinstance(fixed, BasicBlockNode)
@@ -411,9 +417,7 @@ def test_v3_non_fixed_block_branch_elim_removes_branch():
         ]
     )
 
-    out, _ = BranchEliminationPass().process(
-        root, PipeLineContext(config=PipeLineConfig(), pmem_budget=512)
-    )
+    out = _run_chunk_passes_on_root(root, [BranchEliminationPass()])
 
     free = out.insts[0]
     assert isinstance(free, BasicBlockNode)

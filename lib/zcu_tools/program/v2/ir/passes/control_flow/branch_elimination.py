@@ -37,12 +37,6 @@ QICK Hardware Notes
   be statically resolved to the next block, so they are also left untouched.
 - Blocks with ``disable_opt=True`` (dispatch-table stubs) must not be
   modified — their branch is part of the fixed-width encoding.
-
-Decision Notes
---------------
-The pass uses a recursive structural walk (not flat chunk iteration) so it
-can correctly identify the "next" block even across nested BlockNode
-containers (e.g., the first block of an IRLoop body).
 """
 
 from __future__ import annotations
@@ -50,87 +44,58 @@ from __future__ import annotations
 from typing import Optional
 
 from ...labels import Label
-from ...node import BasicBlockNode, BlockNode, IRBranch, IRLoop, IRNode, RootNode
-from ...pipeline import AbsIRPass, PipeLineContext
+from ...node import BasicBlockNode
+from ...pipeline import AbsChunkPass, ChunkList, PipeLineContext
 
 
-class BranchEliminationPass(AbsIRPass):
+class BranchEliminationPass(AbsChunkPass):
     """Remove redundant unconditional branches to the next block.
 
     A branch from Block A to Block B is redundant when Block B immediately
-    follows Block A in the flat block list.
+    follows Block A in the flat chunk list.
 
     Only unconditional jumps (if_cond is None, op is None) that target a
     plain Label (not a register address) are considered for elimination.
     """
 
-    def process(self, ir: RootNode, ctx: PipeLineContext) -> tuple[RootNode, bool]:
-        self._changed = False
-        self._process_block(ir)
-        return ir, self._changed
-
-    def _process_block(self, node: IRNode) -> None:
-        if isinstance(node, BlockNode):
-            blocks = node.insts
-            for i, item in enumerate(blocks):
-                if isinstance(item, BasicBlockNode):
-                    self._try_eliminate_branch(item, blocks, i)
-                else:
-                    self._process_block(item)
-        elif isinstance(node, IRLoop):
-            self._process_block(node.body)
-        elif isinstance(node, IRBranch):
-            for case in node.cases:
-                self._process_block(case)
+    def process(self, chunks: ChunkList, ctx: PipeLineContext) -> tuple[ChunkList, bool]:  # noqa: ARG002
+        changed = False
+        for i, chunk in enumerate(chunks):
+            if isinstance(chunk, BasicBlockNode):
+                changed |= self._try_eliminate_branch(chunk, chunks, i)
+        return chunks, changed
 
     def _try_eliminate_branch(
-        self, block: BasicBlockNode, siblings: list[IRNode], idx: int
-    ) -> None:
+        self, block: BasicBlockNode, chunks: ChunkList, idx: int
+    ) -> bool:
         if block.disable_opt:
-            return
+            return False
         branch = block.branch
         if branch is None:
-            return
+            return False
         # Only eliminate plain unconditional label jumps with no side effects.
         if branch.if_cond is not None or branch.op is not None or branch.wr is not None:
-            return
+            return False
         if not isinstance(branch.label, Label):
-            return
+            return False
 
-        # Find the next BasicBlockNode sibling.
-        next_block = _next_basic_block(siblings, idx)
+        # Find the next BasicBlockNode in the flat chunk list.
+        next_block = _next_basic_block(chunks, idx)
         if next_block is None:
-            return
+            return False
 
         # Check if the branch targets the immediately following block.
         target = branch.label
         if not any(lbl.name == target for lbl in next_block.labels):
-            return
+            return False
 
         block.branch = None
-        self._changed = True
+        return True
 
 
-def _next_basic_block(
-    siblings: list[IRNode], from_idx: int
-) -> Optional[BasicBlockNode]:
-    """Return the first BasicBlockNode after from_idx in the sibling list."""
-    for item in siblings[from_idx + 1 :]:
+def _next_basic_block(chunks: ChunkList, from_idx: int) -> Optional[BasicBlockNode]:
+    """Return the first BasicBlockNode after from_idx in the chunk list."""
+    for item in chunks[from_idx + 1 :]:
         if isinstance(item, BasicBlockNode):
             return item
-        if isinstance(item, BlockNode):
-            first = _first_basic_block(item)
-            if first is not None:
-                return first
-    return None
-
-
-def _first_basic_block(node: IRNode) -> Optional[BasicBlockNode]:
-    if isinstance(node, BasicBlockNode):
-        return node
-    if isinstance(node, BlockNode):
-        for child in node.insts:
-            result = _first_basic_block(child)
-            if result is not None:
-                return result
     return None
