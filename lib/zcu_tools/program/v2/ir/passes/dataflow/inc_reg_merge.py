@@ -51,7 +51,7 @@ from __future__ import annotations
 from ...instructions import BaseInst, RegWriteInst
 from ...node import BasicBlockNode
 from ...operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
-from ..base import BlockChunkPass, _DATAFLOW_TRANSPARENT_INSTS
+from ..base import DATAFLOW_TRANSPARENT_INSTS, BlockChunkPass
 
 # REG_WR rd op (rs +/- #N) encodes the immediate in a 24-bit signed field.
 # Use a conservative safe limit well within that range (same policy as
@@ -181,4 +181,4 @@ class IncRegMergePass(BlockChunkPass):
         block.insts = result
 
     def _is_increment_motion_barrier(self, inst: BaseInst) -> bool:
-        return not isinstance(inst, _DATAFLOW_TRANSPARENT_INSTS)
+        return not isinstance(inst, DATAFLOW_TRANSPARENT_INSTS)

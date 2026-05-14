@@ -1,7 +1,7 @@
 from .base import (
+    DATAFLOW_TRANSPARENT_INSTS,
     BlockChunkPass,
     IRTransformer,
-    _DATAFLOW_TRANSPARENT_INSTS,
 )
 from .control_flow import (
     BlockMergePass,
@@ -21,7 +21,7 @@ __all__ = [
     # base
     "IRTransformer",
     "BlockChunkPass",
-    "_DATAFLOW_TRANSPARENT_INSTS",
+    "DATAFLOW_TRANSPARENT_INSTS",
     # control_flow
     "BlockMergePass",
     "BranchEliminationPass",

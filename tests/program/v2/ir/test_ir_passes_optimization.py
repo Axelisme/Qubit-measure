@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import cast
+from typing import Iterator, cast
 
 from zcu_tools.program.v2.ir.factory import IRParser
 from zcu_tools.program.v2.ir.instructions import (
@@ -16,7 +16,9 @@ from zcu_tools.program.v2.ir.labels import Label
 from zcu_tools.program.v2.ir.node import (
     BasicBlockNode,
     BlockNode,
+    IRBranch,
     IRLoop,
+    IRNode,
     RootNode,
 )
 from zcu_tools.program.v2.ir.operands import (
@@ -36,9 +38,6 @@ from zcu_tools.program.v2.ir.pipeline import (
     PipeLineContext,
     make_default_pipeline,
 )
-
-from typing import Iterator
-from zcu_tools.program.v2.ir.node import IRBranch, IRNode
 
 
 def _walk_basic_blocks(node: IRNode) -> Iterator[BasicBlockNode]:
@@ -102,8 +101,12 @@ def test_dead_write_elimination_removes_overwritten_write():
         insts=[
             BasicBlockNode(
                 insts=[
-                    RegWriteInst(dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(1)),
-                    RegWriteInst(dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(2)),
+                    RegWriteInst(
+                        dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(1)
+                    ),
+                    RegWriteInst(
+                        dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(2)
+                    ),
                     NopInst(),
                 ]
             ),
@@ -124,9 +127,13 @@ def test_dead_write_elimination_keeps_write_before_read():
         insts=[
             BasicBlockNode(
                 insts=[
-                    RegWriteInst(dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(1)),
+                    RegWriteInst(
+                        dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(1)
+                    ),
                     TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Immediate(1))),
-                    RegWriteInst(dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(2)),
+                    RegWriteInst(
+                        dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(2)
+                    ),
                 ]
             ),
         ]
@@ -152,8 +159,12 @@ def test_dead_write_elimination_removes_overwritten_write_in_basic_block():
         insts=[
             BasicBlockNode(
                 insts=[
-                    RegWriteInst(dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(1)),
-                    RegWriteInst(dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(2)),
+                    RegWriteInst(
+                        dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(1)
+                    ),
+                    RegWriteInst(
+                        dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(2)
+                    ),
                 ]
             ),
         ]
@@ -231,7 +242,9 @@ def test_unroll_full_expansion_removes_overwritten_writes_in_body():
                         BasicBlockNode(
                             insts=[
                                 RegWriteInst(
-                                    dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(1)
+                                    dst=Register("r1"),
+                                    src=SrcKeyword.IMM,
+                                    lit=Immediate(1),
                                 )
                             ]
                         ),
@@ -250,7 +263,7 @@ def test_unroll_full_expansion_removes_overwritten_writes_in_body():
     # 2. Merge blocks so the linear pass sees the writes together in one block
     from zcu_tools.program.v2.ir.passes.control_flow import BlockMergePass
 
-    out, _ = BlockMergePass().process(out, ctx)
+    out = _run_chunk_passes_on_root(out, [BlockMergePass()])
 
     # 3. Chunk passes (inc DeadWriteElimination)
     out = _run_chunk_passes_on_root(out, pipeline.chunk_passes)
@@ -322,8 +335,12 @@ def test_default_pipeline_can_disable_all_optimization_passes():
         insts=[
             BasicBlockNode(
                 insts=[
-                    RegWriteInst(dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(1)),
-                    RegWriteInst(dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(2)),
+                    RegWriteInst(
+                        dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(1)
+                    ),
+                    RegWriteInst(
+                        dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(2)
+                    ),
                 ]
             ),
             BasicBlockNode(

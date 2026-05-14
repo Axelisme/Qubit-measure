@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Iterator
+
 from zcu_tools.program.v2.ir.factory import IRParser
 from zcu_tools.program.v2.ir.instructions import (
     NopInst,
@@ -8,7 +10,14 @@ from zcu_tools.program.v2.ir.instructions import (
     TimeInst,
     WaitInst,
 )
-from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRBranch, IRLoop, IRNode, RootNode
+from zcu_tools.program.v2.ir.node import (
+    BasicBlockNode,
+    BlockNode,
+    IRBranch,
+    IRLoop,
+    IRNode,
+    RootNode,
+)
 from zcu_tools.program.v2.ir.operands import (
     Immediate,
     ImmValue,
@@ -19,8 +28,6 @@ from zcu_tools.program.v2.ir.operands import (
 )
 from zcu_tools.program.v2.ir.passes.timeline import TimedMergePass, ZeroDelayDCEPass
 from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
-
-from typing import Iterator
 
 
 def _walk_basic_blocks(node: IRNode) -> Iterator[BasicBlockNode]:

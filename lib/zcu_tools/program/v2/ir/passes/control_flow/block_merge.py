@@ -34,42 +34,42 @@ QICK Hardware Notes
 
 Decision Notes
 --------------
-Merging is done with an inner fixed-point loop inside each container so that
-a chain ``A → B → C → D`` (all mergeable) collapses to one block in a single
-pass invocation rather than requiring O(n) pipeline iterations.
+Runs at the chunk layer (after ``IRParser.unparse()``): at that point all
+``IRLoop``/``IRBranch`` bodies are already flattened into the same chunk list,
+so a linear scan is equivalent to the previous recursive tree walk.  MetaInst
+boundaries between structural regions are skipped automatically because only
+``BasicBlockNode`` pairs are considered for merging.
+
+Merging is done with an inner fixed-point loop so that a chain
+``A → B → C → D`` (all mergeable) collapses to one block in a single pass
+invocation rather than requiring O(n) pipeline iterations.
 """
 
 from __future__ import annotations
 
 from ...instructions import BaseInst
 from ...labels import Label
-from ...node import BasicBlockNode, BlockNode, IRBranch, IRLoop, IRNode, RootNode
-from ...pipeline import AbsIRPass, PipeLineContext
+from ...node import BasicBlockNode
+from ...pipeline import AbsChunkPass, ChunkList, PipeLineContext
 
 
-def _collect_referenced_labels_tree(node: IRNode) -> set[Label]:
-    """Collect all labels referenced by any instruction in the IR tree."""
+def _collect_referenced_labels(chunks: ChunkList) -> set[Label]:
+    """Collect all labels referenced by any instruction in the chunk list."""
     refs: set[Label] = set()
-    _collect_from_node(node, refs)
+    for chunk in chunks:
+        if not isinstance(chunk, BasicBlockNode):
+            continue
+        for inst in (
+            *chunk.labels,
+            *chunk.insts,
+            *([chunk.branch] if chunk.branch else []),
+        ):
+            if isinstance(inst, BaseInst) and inst.need_label is not None:
+                refs.add(inst.need_label)
     return refs
 
 
-def _collect_from_node(node: IRNode, refs: set[Label]) -> None:
-    if isinstance(node, BasicBlockNode):
-        for inst in (*node.labels, *node.insts, *([node.branch] if node.branch else [])):
-            if isinstance(inst, BaseInst) and inst.need_label is not None:
-                refs.add(inst.need_label)
-    elif isinstance(node, BlockNode):
-        for child in node.insts:
-            _collect_from_node(child, refs)
-    elif isinstance(node, IRLoop):
-        _collect_from_node(node.body, refs)
-    elif isinstance(node, IRBranch):
-        for case in node.cases:
-            _collect_from_node(case, refs)
-
-
-class BlockMergePass(AbsIRPass):
+class BlockMergePass(AbsChunkPass):
     """Merge adjacent BasicBlockNodes when safe.
 
     Block A and Block B can be merged when:
@@ -77,33 +77,23 @@ class BlockMergePass(AbsIRPass):
       - Block B has no alive labels (not a jump target).
     """
 
-    def process(self, ir: RootNode, ctx: PipeLineContext) -> tuple[RootNode, bool]:
-        referenced = _collect_referenced_labels_tree(ir)
-        changed = self._merge_block(ir, referenced)
-        return ir, changed
-
-    def _merge_block(self, node: IRNode, referenced: set[Label]) -> bool:
+    def process(
+        self, chunks: ChunkList, ctx: PipeLineContext
+    ) -> tuple[ChunkList, bool]:
+        referenced = _collect_referenced_labels(chunks)
         changed_any = False
-        if isinstance(node, BlockNode):
-            changed = True
-            while changed:
-                changed = self._merge_pass(node.insts, referenced)
-                changed_any |= changed
-            for child in node.insts:
-                changed_any |= self._merge_block(child, referenced)
-        elif isinstance(node, IRLoop):
-            changed_any |= self._merge_block(node.body, referenced)
-        elif isinstance(node, IRBranch):
-            for case in node.cases:
-                changed_any |= self._merge_block(case, referenced)
-        return changed_any
+        changed = True
+        while changed:
+            changed = self._merge_pass(chunks, referenced)
+            changed_any |= changed
+        return chunks, changed_any
 
-    def _merge_pass(self, items: list[IRNode], referenced: set[Label]) -> bool:
+    def _merge_pass(self, chunks: ChunkList, referenced: set[Label]) -> bool:
         i = 0
         changed = False
-        while i < len(items) - 1:
-            a = items[i]
-            b = items[i + 1]
+        while i < len(chunks) - 1:
+            a = chunks[i]
+            b = chunks[i + 1]
             if (
                 isinstance(a, BasicBlockNode)
                 and isinstance(b, BasicBlockNode)
@@ -112,10 +102,9 @@ class BlockMergePass(AbsIRPass):
                 and not a.disable_opt
                 and not b.disable_opt
             ):
-                # Merge b into a.
                 a.insts.extend(b.insts)
                 a.branch = b.branch
-                del items[i + 1]
+                del chunks[i + 1]
                 changed = True
             else:
                 i += 1
@@ -124,6 +113,5 @@ class BlockMergePass(AbsIRPass):
 
 def _has_alive_labels(block: BasicBlockNode, referenced: set[Label]) -> bool:
     return any(
-        lbl.name in referenced and not lbl.name.is_pseudo_name()
-        for lbl in block.labels
+        lbl.name in referenced and not lbl.name.is_pseudo_name() for lbl in block.labels
     )

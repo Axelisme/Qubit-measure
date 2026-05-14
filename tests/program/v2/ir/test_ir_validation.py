@@ -13,10 +13,12 @@ Validation 3: disable_opt=True blocks are conservatively skipped by passes.
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import Iterator
 
 import pytest
 from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
 from zcu_tools.program.v2.ir.instructions import (
+    Instruction,
     JumpInst,
     LabelInst,
     MetaInst,
@@ -33,7 +35,6 @@ from zcu_tools.program.v2.ir.node import (
     RootNode,
 )
 from zcu_tools.program.v2.ir.operands import Immediate, Register, SrcKeyword
-from zcu_tools.program.v2.ir.instructions import Instruction
 from zcu_tools.program.v2.ir.passes import BranchEliminationPass, UnrollLoopPass
 from zcu_tools.program.v2.ir.passes.loop.dispatch_island import build_jump_table_blocks
 from zcu_tools.program.v2.ir.pipeline import (
@@ -41,8 +42,6 @@ from zcu_tools.program.v2.ir.pipeline import (
     PipeLineContext,
     make_default_pipeline,
 )
-
-from typing import Iterator
 
 
 def _walk_instructions(node: IRNode) -> Iterator[Instruction]:

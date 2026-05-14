@@ -206,7 +206,7 @@ def test_block_merge_merges_fallthrough_blocks():
         ]
     )
 
-    out, _ = BlockMergePass().process(root, _ctx())
+    out = _run_chunk_passes_on_root(root, [BlockMergePass()])
 
     assert len(out.insts) == 1
     merged = out.insts[0]
@@ -227,7 +227,7 @@ def test_block_merge_does_not_merge_labeled_block():
         ]
     )
 
-    out, _ = BlockMergePass().process(root, _ctx())
+    out = _run_chunk_passes_on_root(root, [BlockMergePass()])
 
     assert len(out.insts) == 2
 
@@ -240,32 +240,40 @@ def test_block_merge_does_not_merge_fixed_blocks():
         ]
     )
 
-    out, _ = BlockMergePass().process(root, _ctx())
+    out = _run_chunk_passes_on_root(root, [BlockMergePass()])
 
     assert len(out.insts) == 2
 
 
 def test_block_merge_cross_boundary_dead_write_cleared_by_post_linear():
-    """A dead write crossing the merge boundary is cleared when post_linear runs after BlockMergePass."""
+    """A dead write crossing the merge boundary is cleared when BlockMergePass + DeadWriteElimination run together."""
     root = RootNode(
         insts=[
             BasicBlockNode(
-                insts=[RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1))]
+                insts=[
+                    RegWriteInst(
+                        dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)
+                    )
+                ]
             ),
             BasicBlockNode(
-                insts=[RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(2))]
+                insts=[
+                    RegWriteInst(
+                        dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(2)
+                    )
+                ]
             ),
         ]
     )
 
-    _, _ = BlockMergePass().process(root, _ctx())
     # After merge: one block with two writes — dead write still present.
-    assert len(root.insts) == 1
-    assert len(root.insts[0].insts) == 2  # type: ignore[union-attr]
+    merged_root = _run_chunk_passes_on_root(root, [BlockMergePass()])
+    assert len(merged_root.insts) == 1
+    assert len(merged_root.insts[0].insts) == 2  # type: ignore[union-attr]
 
-    # Post-linear clears the dead write.
-    root = _run_chunk_passes_on_root(root, [DeadWriteEliminationPass()])
-    merged = root.insts[0]
+    # DeadWriteElimination clears the first (dead) write.
+    out = _run_chunk_passes_on_root(merged_root, [DeadWriteEliminationPass()])
+    merged = out.insts[0]
     assert isinstance(merged, BasicBlockNode)
     assert len(merged.insts) == 1
     assert str(merged.insts[0].lit) == "#2"  # type: ignore[attr-defined]
@@ -280,7 +288,7 @@ def test_block_merge_chains_three_blocks():
         ]
     )
 
-    out, _ = BlockMergePass().process(root, _ctx())
+    out = _run_chunk_passes_on_root(root, [BlockMergePass()])
 
     assert len(out.insts) == 1
     assert len(out.insts[0].insts) == 3  # type: ignore[union-attr]
@@ -292,7 +300,7 @@ def test_block_merge_chains_three_blocks():
 
 
 def test_block_merge_inside_irloop_body():
-    """BlockMergePass must recurse into IRLoop bodies."""
+    """BlockMergePass must merge blocks inside IRLoop bodies (via unparse/parse round-trip)."""
     body = BlockNode(
         insts=[
             BasicBlockNode(insts=[NopInst()]),  # no branch
@@ -302,7 +310,7 @@ def test_block_merge_inside_irloop_body():
     insts: list = [IRLoop(name="L", counter_reg=Register("c"), body=body, n=4)]
     root = RootNode(insts=insts)
 
-    out, _ = BlockMergePass().process(root, _ctx())
+    out = _run_chunk_passes_on_root(root, [BlockMergePass()])
 
     loop = out.insts[0]
     assert isinstance(loop, IRLoop)
@@ -313,7 +321,7 @@ def test_block_merge_inside_irloop_body():
 
 
 def test_block_merge_inside_irbranch_cases():
-    """BlockMergePass must recurse into every IRBranch case."""
+    """BlockMergePass must merge blocks inside IRBranch cases (via unparse/parse round-trip)."""
     case = BlockNode(
         insts=[
             BasicBlockNode(insts=[NopInst()]),
@@ -323,7 +331,7 @@ def test_block_merge_inside_irbranch_cases():
     insts: list = [IRBranch(name="B", compare_reg=Register("c"), cases=[case])]
     root = RootNode(insts=insts)
 
-    out, _ = BlockMergePass().process(root, _ctx())
+    out = _run_chunk_passes_on_root(root, [BlockMergePass()])
 
     branch = out.insts[0]
     assert isinstance(branch, IRBranch)

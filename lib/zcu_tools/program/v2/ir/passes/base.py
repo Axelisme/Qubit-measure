@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
 
-from typing_extensions import List, Union, cast
+from typing_extensions import List, Union
 
 from ..instructions import (
     ArithInst,
@@ -17,7 +16,6 @@ from ..instructions import (
     DmemWriteInst,
     DportReadInst,
     FlagInst,
-    Instruction,
     NetInst,
     NopInst,
     PortWriteInst,
@@ -29,7 +27,7 @@ from ..instructions import (
     WmemWriteInst,
 )
 from ..node import BasicBlockNode, BlockNode, IRBranch, IRLoop, IRNode, RootNode
-from ..pipeline import AbsChunkPass, AbsIRPass, ChunkList, PipeLineContext
+from ..pipeline import AbsChunkPass, ChunkList, PipeLineContext
 
 # ---------------------------------------------------------------------------
 # Shared dataflow transparency list (R1)
@@ -38,7 +36,7 @@ from ..pipeline import AbsChunkPass, AbsIRPass, ChunkList, PipeLineContext
 # Instructions that are transparent to dataflow tracking: passes can freely
 # sink/hoist/reorder across these without flushing pending state.
 # Excluded (barrier by omission): JumpInst, TestInst, LabelInst, DportWriteInst.
-_DATAFLOW_TRANSPARENT_INSTS: tuple[type[BaseInst], ...] = (
+DATAFLOW_TRANSPARENT_INSTS: tuple[type[BaseInst], ...] = (
     TimeInst,
     WaitInst,
     RegWriteInst,
@@ -73,7 +71,9 @@ class BlockChunkPass(AbsChunkPass, ABC):
     not inherit from this class.
     """
 
-    def process(self, chunks: ChunkList, ctx: PipeLineContext) -> tuple[ChunkList, bool]:
+    def process(
+        self, chunks: ChunkList, ctx: PipeLineContext
+    ) -> tuple[ChunkList, bool]:
         changed = False
         for chunk in chunks:
             if isinstance(chunk, BasicBlockNode):
@@ -120,19 +120,13 @@ class IRTransformer:
         """Leaf node: no IRNode children to recurse into."""
         return node
 
-    def visit_BlockNode(
-        self, node: BlockNode
-    ) -> Union[IRNode, List[IRNode], None]:
+    def visit_BlockNode(self, node: BlockNode) -> Union[IRNode, List[IRNode], None]:
         return self._visit_block(node)
 
-    def visit_RootNode(
-        self, node: RootNode
-    ) -> Union[IRNode, List[IRNode], None]:
+    def visit_RootNode(self, node: RootNode) -> Union[IRNode, List[IRNode], None]:
         return self._visit_block(node)
 
-    def visit_IRLoop(
-        self, node: IRLoop
-    ) -> Union[IRNode, List[IRNode], None]:
+    def visit_IRLoop(self, node: IRLoop) -> Union[IRNode, List[IRNode], None]:
         res = self.visit(node.body)
         if res is None:
             self._changed = True
@@ -146,9 +140,7 @@ class IRTransformer:
             node.body = res  # type: ignore[assignment]
         return node
 
-    def visit_IRBranch(
-        self, node: IRBranch
-    ) -> Union[IRNode, List[IRNode], None]:
+    def visit_IRBranch(self, node: IRBranch) -> Union[IRNode, List[IRNode], None]:
         new_cases: list[BlockNode] = []
         for case in node.cases:
             res = self.visit(case)

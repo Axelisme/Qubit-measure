@@ -52,10 +52,10 @@ instruction from elimination.
 
 from __future__ import annotations
 
-from ...instructions import BaseInst, RegWriteInst, WmemWriteInst
+from ...instructions import BaseInst, RegWriteInst
 from ...node import BasicBlockNode
 from ...operands import Register, SrcKeyword
-from ..base import BlockChunkPass, _DATAFLOW_TRANSPARENT_INSTS
+from ..base import DATAFLOW_TRANSPARENT_INSTS, BlockChunkPass
 
 
 class DeadWriteEliminationPass(BlockChunkPass):
@@ -137,4 +137,4 @@ class DeadWriteEliminationPass(BlockChunkPass):
         return dead
 
     def _is_write_tracking_barrier(self, inst: BaseInst) -> bool:
-        return not isinstance(inst, _DATAFLOW_TRANSPARENT_INSTS)
+        return not isinstance(inst, DATAFLOW_TRANSPARENT_INSTS)
