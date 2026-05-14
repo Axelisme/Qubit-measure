@@ -7,7 +7,7 @@ from typing import Union
 
 from .factory import IRLexer, IRParser
 from .instructions import Instruction, MetaInst
-from .node import BasicBlockNode, RootNode
+from .node import BasicBlockNode, BlockNode
 
 ChunkList = list[Union[BasicBlockNode, MetaInst]]
 
@@ -45,15 +45,6 @@ class PipeLineContext:
 # ---------------------------------------------------------------------------
 
 
-class AbsFlatPass(ABC):
-    """Optimization pass on flat instruction list."""
-
-    @abstractmethod
-    def process(
-        self, insts: list[Instruction], ctx: PipeLineContext
-    ) -> tuple[list[Instruction], bool]: ...
-
-
 class AbsChunkPass(ABC):
     """Optimization pass on chunk layer: list[BasicBlockNode | MetaInst]."""
 
@@ -64,10 +55,12 @@ class AbsChunkPass(ABC):
 
 
 class AbsIRPass(ABC):
-    """Structural IR pass: transforms a whole RootNode tree."""
+    """Structural IR pass: transforms a whole BlockNode tree."""
 
     @abstractmethod
-    def process(self, ir: RootNode, ctx: PipeLineContext) -> tuple[RootNode, bool]: ...
+    def process(
+        self, ir: BlockNode, ctx: PipeLineContext
+    ) -> tuple[BlockNode, bool]: ...
 
 
 # ---------------------------------------------------------------------------
@@ -109,8 +102,8 @@ def _run_chunk_passes(
 
 
 def _run_ir_passes(
-    passes: list[AbsIRPass], ir: RootNode, ctx: PipeLineContext
-) -> tuple[RootNode, bool]:
+    passes: list[AbsIRPass], ir: BlockNode, ctx: PipeLineContext
+) -> tuple[BlockNode, bool]:
     changed = False
     for ir_pass in passes:
         ir, pass_changed = ir_pass.process(ir, ctx)
@@ -118,35 +111,39 @@ def _run_ir_passes(
     return ir, changed
 
 
-def _run_flat_passes(
-    passes: list[AbsFlatPass], insts: list[Instruction], ctx: PipeLineContext
-) -> tuple[list[Instruction], bool]:
-    changed = False
-    for flat_pass in passes:
-        insts, pass_changed = flat_pass.process(insts, ctx)
-        changed |= pass_changed
-    return insts, changed
+def _strip_structural_meta(chunks: ChunkList) -> ChunkList:
+    """Remove all MetaInst except DISABLE_OPT_START/END markers.
+
+    Called after the U-shaped IR optimization stage to flatten structural
+    boundaries (LOOP_*, BRANCH_*, DISPATCH_*) so post-IR chunk passes can
+    optimize across former IRNode boundaries.
+    """
+    keep = {"DISABLE_OPT_START", "DISABLE_OPT_END"}
+    return [
+        item for item in chunks if not isinstance(item, MetaInst) or item.type in keep
+    ]
 
 
 class IRPipeLine:
-    """U-shaped multi-layer optimization pipeline.
+    """Two-stage optimization pipeline.
 
-    Per iteration:
-      Flat-up -> Chunk-up -> Tree -> Chunk-down -> Flat-down
+    Stage 1 — U-shaped IR optimization (repeated up to max_opt_iterations):
+      Chunk passes → IR tree passes → Chunk passes
+      Repeats until convergence.
 
-    If any pass reports changed=True, run another full U iteration until
-    convergence or `config.max_opt_iterations`.
+    Stage 2 — Post-IR chunk optimization:
+      Strip structural MetaInst (LOOP_*/BRANCH_*/DISPATCH_*) to expose
+      cross-boundary optimization opportunities, then run chunk passes again
+      (up to max_opt_iterations times) until convergence.
     """
 
     def __init__(
         self,
         config: PipeLineConfig,
-        flat_passes: list[AbsFlatPass],
         chunk_passes: list[AbsChunkPass],
         ir_passes: list[AbsIRPass],
     ) -> None:
         self.config = config
-        self.flat_passes = flat_passes
         self.chunk_passes = chunk_passes
         self.ir_passes = ir_passes
 
@@ -162,39 +159,35 @@ class IRPipeLine:
 
         lexer = IRLexer()
         parser = IRParser(pmem_size=self.config.pmem_capacity)
-        curr_insts = insts
 
+        # --- Stage 1: U-shaped IR optimization ---
+        chunks = lexer.lex(insts)
         max_iters = max(1, self.config.max_opt_iterations)
         for _ in range(max_iters):
             iter_changed = False
 
-            # Flat Optimization
-            curr_insts, changed = _run_flat_passes(self.flat_passes, curr_insts, ctx)
-            iter_changed |= changed
-
-            # Chunk Optimization
-            chunks = lexer.lex(curr_insts)
             chunks, changed = _run_chunk_passes(self.chunk_passes, chunks, ctx)
             iter_changed |= changed
 
-            # IR Tree Optimization
             ir = parser.parse(chunks)
             ir, changed = _run_ir_passes(self.ir_passes, ir, ctx)
             iter_changed |= changed
 
-            # Chunk Optimization
             chunks = parser.unparse(ir)
             chunks, changed = _run_chunk_passes(self.chunk_passes, chunks, ctx)
-            iter_changed |= changed
-
-            # Flat Optimization
-            curr_insts = lexer.flatten(chunks)
-            curr_insts, changed = _run_flat_passes(self.flat_passes, curr_insts, ctx)
             iter_changed |= changed
 
             if not iter_changed:
                 break
 
+        # --- Stage 2: post-IR chunk optimization ---
+        chunks = _strip_structural_meta(chunks)
+        for _ in range(max_iters):
+            chunks, changed = _run_chunk_passes(self.chunk_passes, chunks, ctx)
+            if not changed:
+                break
+
+        curr_insts = lexer.flatten(chunks)
         return curr_insts, ctx
 
 
@@ -212,6 +205,7 @@ def make_default_pipeline(pmem_capacity: int) -> IRPipeLine:
         DeadWriteEliminationPass,
         IncRegMergePass,
         LoopConditionMergePass,
+        SimplifyDispatchPass,
         TimedMergePass,
         UnreachableEliminationPass,
         UnrollLoopPass,
@@ -223,7 +217,6 @@ def make_default_pipeline(pmem_capacity: int) -> IRPipeLine:
 
     return IRPipeLine(
         config=config,
-        flat_passes=[],
         chunk_passes=[
             IncRegMergePass(),
             TimedMergePass(),
@@ -238,5 +231,6 @@ def make_default_pipeline(pmem_capacity: int) -> IRPipeLine:
         ],
         ir_passes=[
             UnrollLoopPass(),
+            SimplifyDispatchPass(),
         ],
     )

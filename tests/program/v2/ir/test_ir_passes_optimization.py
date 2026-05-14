@@ -19,7 +19,7 @@ from zcu_tools.program.v2.ir.node import (
     IRBranch,
     IRLoop,
     IRNode,
-    RootNode,
+    BlockNode,
 )
 from zcu_tools.program.v2.ir.operands import (
     AluExpr,
@@ -57,7 +57,7 @@ def _config(**kwargs) -> PipeLineConfig:
     return PipeLineConfig(**kwargs)
 
 
-def _run_chunk_passes_on_root(root: RootNode, passes: list) -> RootNode:
+def _run_chunk_passes_on_root(root: BlockNode, passes: list) -> BlockNode:
     parser = IRParser()
     chunks = parser.unparse(root)
     ctx = PipeLineContext(config=PipeLineConfig(), pmem_budget=1024)
@@ -66,7 +66,7 @@ def _run_chunk_passes_on_root(root: RootNode, passes: list) -> RootNode:
     return parser.parse(chunks)
 
 
-def _flatten_root(root: RootNode) -> list[Instruction]:
+def _flatten_root(root: BlockNode) -> list[Instruction]:
     from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
 
     parser = IRParser()
@@ -74,7 +74,7 @@ def _flatten_root(root: RootNode) -> list[Instruction]:
     return lexer.flatten(parser.unparse(root))
 
 
-def _count_fixed_blocks(root: RootNode) -> int:
+def _count_fixed_blocks(root: BlockNode) -> int:
     return sum(1 for bb in _walk_basic_blocks(root) if bb.disable_opt)
 
 
@@ -97,7 +97,7 @@ def _counter_update(reg: str) -> BasicBlockNode:
 
 
 def test_dead_write_elimination_removes_overwritten_write():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -123,7 +123,7 @@ def test_dead_write_elimination_removes_overwritten_write():
 
 
 def test_dead_write_elimination_keeps_write_before_read():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -155,7 +155,7 @@ def test_dead_write_elimination_keeps_write_before_read():
 
 
 def test_dead_write_elimination_removes_overwritten_write_in_basic_block():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -184,7 +184,7 @@ def test_dead_write_elimination_removes_overwritten_write_in_basic_block():
 
 
 def test_dead_test_elimination_removes_unused_test():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -205,7 +205,7 @@ def test_dead_test_elimination_removes_unused_test():
 
 def test_dead_test_elimination_keeps_used_test():
     lbl = Label.make_new("loop")
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Immediate(10)))],
@@ -231,7 +231,7 @@ def test_unroll_full_expansion_removes_overwritten_writes_in_body():
     """body: REG_WR r1 imm #1. n=2. Full expansion = 2 copies.
     Only the last write to r1 should survive.
     """
-    root = RootNode(
+    root = BlockNode(
         insts=[
             IRLoop(
                 name="L",
@@ -283,7 +283,7 @@ def test_unroll_full_expansion_keeps_counter_init_for_counter_dependent_body():
     """When body reads/increments loop counter, full expansion must still emit
     the counter init (`REG_WR counter imm #0`) before the first body copy."""
     Label.reset()
-    root = RootNode(
+    root = BlockNode(
         insts=[
             IRLoop(
                 name="loop",
@@ -311,9 +311,12 @@ def test_unroll_full_expansion_keeps_counter_init_for_counter_dependent_body():
         root, PipeLineContext(config=_config(), pmem_budget=512)
     )
 
-    # Full expansion: counter init BB + body BB + increment BB = 3 BasicBlockNodes
-    assert len(out.insts) == 3
-    init_bb = out.insts[0]
+    # Full expansion: the IRLoop is replaced by a BlockNode(insts=[init_bb, ...])
+    assert len(out.insts) == 1
+    expanded = out.insts[0]
+    assert isinstance(expanded, BlockNode)
+    assert len(expanded.insts) == 3
+    init_bb = expanded.insts[0]
     assert isinstance(init_bb, BasicBlockNode)
     assert len(init_bb.insts) > 0
     assert isinstance(init_bb.insts[0], RegWriteInst)
@@ -331,7 +334,7 @@ def test_default_pipeline_can_disable_all_optimization_passes():
 
     """Disabling all pass flags should keep the IR layout unchanged."""
     Label.reset()
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -374,14 +377,14 @@ def test_default_pipeline_can_disable_all_optimization_passes():
     assert str(cast(TimeInst, bb1.insts[0]).lit) == "#0"  # type: ignore
 
 
-def _collect_all_basic_blocks(root: RootNode) -> list[BasicBlockNode]:
+def _collect_all_basic_blocks(root: BlockNode) -> list[BasicBlockNode]:
     return list(_walk_basic_blocks(root))
 
 
 def test_unroll_register_driven_jump_table_structure():
     """Verify the dispatch-table loop has the expected fixed/free split."""
     Label.reset()
-    root = RootNode(
+    root = BlockNode(
         insts=[
             IRLoop(
                 name="loop",

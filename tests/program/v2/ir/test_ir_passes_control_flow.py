@@ -19,7 +19,7 @@ from zcu_tools.program.v2.ir.node import (
     BlockNode,
     IRBranch,
     IRLoop,
-    RootNode,
+    BlockNode,
 )
 from zcu_tools.program.v2.ir.operands import (
     AluExpr,
@@ -44,7 +44,7 @@ def _label(name: str) -> Label:
     return Label.make_new(name)
 
 
-def _run_chunk_passes_on_root(root: RootNode, passes: list) -> RootNode:
+def _run_chunk_passes_on_root(root: BlockNode, passes: list) -> BlockNode:
     parser = IRParser()
     chunks = parser.unparse(root)
     ctx = PipeLineContext(config=PipeLineConfig(), pmem_budget=1024)
@@ -60,7 +60,7 @@ def _run_chunk_passes_on_root(root: RootNode, passes: list) -> RootNode:
 
 def test_dead_label_elim_removes_unreferenced_label_from_basic_block():
     lbl = _label("unused")
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 labels=[LabelInst(name=lbl, can_remove=True)], insts=[NopInst()]
@@ -78,7 +78,7 @@ def test_dead_label_elim_removes_unreferenced_label_from_basic_block():
 
 def test_dead_label_elim_keeps_referenced_label_in_basic_block():
     lbl = _label("used_lbl")
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(labels=[LabelInst(name=lbl)], insts=[NopInst()]),
             BasicBlockNode(branch=JumpInst(label=lbl)),
@@ -100,7 +100,7 @@ def test_dead_label_elim_keeps_referenced_label_in_basic_block():
 
 def test_branch_elim_removes_unconditional_fallthrough():
     lbl = _label("next")
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[NopInst()],
@@ -123,7 +123,7 @@ def test_branch_elim_removes_unconditional_fallthrough():
 
 def test_branch_elim_skips_fixed_block():
     lbl = _label("next_fixed")
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[],
@@ -147,7 +147,7 @@ def test_branch_elim_skips_fixed_block():
 
 def test_branch_elim_keeps_conditional_branch():
     lbl = _label("cond_target")
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[NopInst()],
@@ -174,7 +174,7 @@ def test_branch_elim_keeps_conditional_branch():
 def test_branch_elim_keeps_non_adjacent_branch():
     lbl = _label("far")
     other = _label("middle")
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(branch=JumpInst(label=lbl)),
             BasicBlockNode(labels=[LabelInst(name=other)], insts=[NopInst()]),
@@ -195,7 +195,7 @@ def test_branch_elim_keeps_non_adjacent_branch():
 
 
 def test_block_merge_merges_fallthrough_blocks():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(insts=[NopInst()]),  # no branch
             BasicBlockNode(insts=[NopInst()]),  # no labels → mergeable
@@ -212,7 +212,7 @@ def test_block_merge_merges_fallthrough_blocks():
 
 def test_block_merge_does_not_merge_labeled_block():
     lbl = _label("entry")
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(insts=[NopInst()]),
             BasicBlockNode(
@@ -229,7 +229,7 @@ def test_block_merge_does_not_merge_labeled_block():
 
 
 def test_block_merge_does_not_merge_fixed_blocks():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(insts=[NopInst()], disable_opt=True),
             BasicBlockNode(insts=[NopInst()]),
@@ -243,7 +243,7 @@ def test_block_merge_does_not_merge_fixed_blocks():
 
 def test_block_merge_cross_boundary_dead_write_cleared_by_post_linear():
     """A dead write crossing the merge boundary is cleared when BlockMergePass + DeadWriteElimination run together."""
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -276,7 +276,7 @@ def test_block_merge_cross_boundary_dead_write_cleared_by_post_linear():
 
 
 def test_block_merge_chains_three_blocks():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(insts=[NopInst()]),
             BasicBlockNode(insts=[NopInst()]),
@@ -304,12 +304,13 @@ def test_block_merge_inside_irloop_body():
         ]
     )
     insts: list = [IRLoop(name="L", counter_reg=Register("c"), body=body, n=4)]
-    root = RootNode(insts=insts)
+    root = BlockNode(insts=insts)
 
     out = _run_chunk_passes_on_root(root, [BlockMergePass()])
 
     loop = out.insts[0]
     assert isinstance(loop, IRLoop)
+    assert isinstance(loop.body, BlockNode)
     assert len(loop.body.insts) == 1
     merged = loop.body.insts[0]
     assert isinstance(merged, BasicBlockNode)
@@ -325,14 +326,16 @@ def test_block_merge_inside_irbranch_cases():
         ]
     )
     insts: list = [IRBranch(name="B", compare_reg=Register("c"), cases=[case])]
-    root = RootNode(insts=insts)
+    root = BlockNode(insts=insts)
 
     out = _run_chunk_passes_on_root(root, [BlockMergePass()])
 
     branch = out.insts[0]
     assert isinstance(branch, IRBranch)
+    assert isinstance(branch.cases[0], BlockNode)
     assert len(branch.cases[0].insts) == 1
-    assert len(branch.cases[0].insts[0].insts) == 2  # type: ignore[union-attr]
+    assert isinstance(branch.cases[0].insts[0], BasicBlockNode)
+    assert len(branch.cases[0].insts[0].insts) == 2
 
 
 def test_branch_elim_inside_irloop_body():
@@ -351,12 +354,13 @@ def test_branch_elim_inside_irloop_body():
         ]
     )
     insts: list = [IRLoop(name="L", counter_reg=Register("c"), body=body, n=4)]
-    root = RootNode(insts=insts)
+    root = BlockNode(insts=insts)
 
     out = _run_chunk_passes_on_root(root, [BranchEliminationPass()])
 
     loop = out.insts[0]
     assert isinstance(loop, IRLoop)
+    assert isinstance(loop.body, BlockNode)
     first_block = loop.body.insts[0]
     assert isinstance(first_block, BasicBlockNode)
     assert first_block.branch is None
@@ -378,12 +382,13 @@ def test_branch_elim_inside_irbranch_cases():
         ]
     )
     insts: list = [IRBranch(name="B", compare_reg=Register("c"), cases=[case])]
-    root = RootNode(insts=insts)
+    root = BlockNode(insts=insts)
 
     out = _run_chunk_passes_on_root(root, [BranchEliminationPass()])
 
     branch = out.insts[0]
     assert isinstance(branch, IRBranch)
+    assert isinstance(branch.cases[0], BlockNode)
     first_block = branch.cases[0].insts[0]
     assert isinstance(first_block, BasicBlockNode)
     assert first_block.branch is None

@@ -122,4 +122,3 @@ class LoopConditionMergePass(BlockChunkPass):
                 block.insts.pop(last_idx)
                 return True
         return False
-

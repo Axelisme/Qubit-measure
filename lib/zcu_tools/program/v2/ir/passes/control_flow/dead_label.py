@@ -34,7 +34,9 @@ from ..base import BlockChunkPass
 class DeadLabelEliminationPass(BlockChunkPass):
     """Remove labels that are never referenced by any instruction."""
 
-    def process(self, chunks: ChunkList, ctx: PipeLineContext) -> tuple[ChunkList, bool]:
+    def process(
+        self, chunks: ChunkList, ctx: PipeLineContext
+    ) -> tuple[ChunkList, bool]:
         self._referenced = collect_referenced_labels(chunks)
         return super().process(chunks, ctx)
 

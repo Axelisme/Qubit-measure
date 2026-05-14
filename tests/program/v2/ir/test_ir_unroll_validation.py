@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 from zcu_tools.program.v2.ir.instructions import NopInst
-from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRLoop, RootNode
+from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRLoop, BlockNode
 from zcu_tools.program.v2.ir.operands import Register
 from zcu_tools.program.v2.ir.passes.loop.unroll import UnrollLoopPass
 from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
@@ -10,7 +10,7 @@ from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
 
 def test_unroll_rejects_non_general_counter():
     # s11 is a system register, not a general-purpose register.
-    root = RootNode(
+    root = BlockNode(
         insts=[
             IRLoop(
                 name="bad_loop",
@@ -28,7 +28,7 @@ def test_unroll_rejects_non_general_counter():
         pass_.process(root, ctx)
 
 def test_unroll_rejects_n_reg_equal_counter_reg():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             IRLoop(
                 name="bad_loop",
@@ -47,7 +47,7 @@ def test_unroll_rejects_n_reg_equal_counter_reg():
 
 def test_unroll_rejects_n_reg_conflict_s15():
     # s15 is reserved for absolute jumps in unroll logic.
-    root = RootNode(
+    root = BlockNode(
         insts=[
             IRLoop(
                 name="bad_loop",
@@ -65,7 +65,7 @@ def test_unroll_rejects_n_reg_conflict_s15():
         pass_.process(root, ctx)
 
 def test_unroll_accepts_valid_registers():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             IRLoop(
                 name="good_loop",

@@ -26,7 +26,7 @@ def test_branch_lower_produces_basic_blocks():
     """Verify IRParser lowers IRBranch to a well-formed BasicBlockNode sequence."""
     from zcu_tools.program.v2.ir.factory import IRParser
     from zcu_tools.program.v2.ir.labels import Label
-    from zcu_tools.program.v2.ir.node import RootNode
+    from zcu_tools.program.v2.ir.node import BlockNode
 
     Label.reset()
 
@@ -37,7 +37,7 @@ def test_branch_lower_produces_basic_blocks():
     case_1 = BlockNode(insts=[BasicBlockNode(insts=[case_1_inst])])
 
     branch = IRBranch(name="sel", compare_reg=Register("r_sel"), cases=[case_0, case_1])
-    blocks = IRParser().unparse(RootNode(insts=[branch]))
+    blocks = IRParser().unparse(BlockNode(insts=[branch]))
 
     meta_blocks = [b for b in blocks if isinstance(b, MetaInst)]
     bb_blocks = [b for b in blocks if isinstance(b, BasicBlockNode)]
@@ -74,7 +74,7 @@ def test_branch_lower_produces_basic_blocks():
 def test_branch_roundtrip_preserves_cases():
     from zcu_tools.program.v2.ir.factory import IRParser
     from zcu_tools.program.v2.ir.labels import Label
-    from zcu_tools.program.v2.ir.node import RootNode
+    from zcu_tools.program.v2.ir.node import BlockNode
 
     Label.reset()
 
@@ -86,7 +86,7 @@ def test_branch_roundtrip_preserves_cases():
     )
     case_0 = BlockNode(insts=[bb_0])
     case_1 = BlockNode(insts=[bb_1])
-    root = RootNode(
+    root = BlockNode(
         insts=[IRBranch(name="sel", compare_reg=Register("r_sel"), cases=[case_0, case_1])]
     )
 
@@ -97,11 +97,13 @@ def test_branch_roundtrip_preserves_cases():
     assert isinstance(branch, IRBranch)
     assert branch.compare_reg == Register("r_sel")
     assert len(branch.cases) == 2
+    assert isinstance(branch.cases[0], BlockNode)
     c0_bb = branch.cases[0].insts[0]
     assert isinstance(c0_bb, BasicBlockNode)
     c0_inst = c0_bb.insts[0]
     assert isinstance(c0_inst, RegWriteInst)
     assert str(c0_inst.lit) == "#1"
+    assert isinstance(branch.cases[1], BlockNode)
     c1_bb = branch.cases[1].insts[0]
     assert isinstance(c1_bb, BasicBlockNode)
     c1_inst = c1_bb.insts[0]

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing_extensions import Any
 from zcu_tools.program.v2.ir.instructions import NopInst, RegWriteInst
-from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRLoop, RootNode
+from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRLoop, BlockNode
 from zcu_tools.program.v2.ir.operands import (
     AluExpr,
     AluOp,
@@ -123,7 +123,7 @@ def test_irloop_emit_uses_s15_jump_for_large_pmem():
         n=5,
         body=BlockNode(insts=[bb_nop, bb_inc]),
     )
-    root = RootNode(insts=[loop_node])
+    root = BlockNode(insts=[loop_node])
 
     lexer = IRLexer()
     parser = IRParser(pmem_size=4096)

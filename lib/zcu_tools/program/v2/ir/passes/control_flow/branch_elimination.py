@@ -56,7 +56,9 @@ class BranchEliminationPass(AbsChunkPass):
     plain Label (not a register address) are considered for elimination.
     """
 
-    def process(self, chunks: ChunkList, ctx: PipeLineContext) -> tuple[ChunkList, bool]:  # noqa: ARG002
+    def process(
+        self, chunks: ChunkList, ctx: PipeLineContext
+    ) -> tuple[ChunkList, bool]:  # noqa: ARG002
         changed = False
         for i, chunk in enumerate(chunks):
             if isinstance(chunk, BasicBlockNode):

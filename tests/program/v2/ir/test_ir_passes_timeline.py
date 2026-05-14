@@ -16,7 +16,7 @@ from zcu_tools.program.v2.ir.node import (
     IRBranch,
     IRLoop,
     IRNode,
-    RootNode,
+    BlockNode,
 )
 from zcu_tools.program.v2.ir.operands import (
     Immediate,
@@ -43,7 +43,7 @@ def _walk_basic_blocks(node: IRNode) -> Iterator[BasicBlockNode]:
             yield from _walk_basic_blocks(case)
 
 
-def _run_dce(root: RootNode) -> RootNode:
+def _run_dce(root: BlockNode) -> BlockNode:
     parser = IRParser()
     chunks = parser.unparse(root)
     chunks, _ = ZeroDelayDCEPass().process(
@@ -52,7 +52,7 @@ def _run_dce(root: RootNode) -> RootNode:
     return parser.parse(chunks)
 
 
-def _run_merge(root: RootNode) -> RootNode:
+def _run_merge(root: BlockNode) -> BlockNode:
     parser = IRParser()
     chunks = parser.unparse(root)
     chunks, _ = TimedMergePass().process(
@@ -62,7 +62,7 @@ def _run_merge(root: RootNode) -> RootNode:
 
 
 def test_zero_delay_dce_removes_plain_zero_increment():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -86,7 +86,7 @@ def test_zero_delay_dce_removes_plain_zero_increment():
 
 def test_timed_instruction_merge_merges_plain_adjacent_increments():
     # New aggressive behavior: TIME sinks past NopInst, merges at end.
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -111,7 +111,7 @@ def test_timed_instruction_merge_merges_plain_adjacent_increments():
 def test_timed_instruction_merge_sinks_past_zero_increment():
     # TIME #0 is not a lit-time and not an anchor; both #2 and #3 accumulate
     # across it, producing a single merged TIME at the end.
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -135,7 +135,7 @@ def test_timed_instruction_merge_sinks_past_zero_increment():
 
 
 def test_timed_instruction_merge_does_not_cross_block_boundary():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit=Immediate(2))]),
             BasicBlockNode(insts=[WaitInst(c_op="time")]),
@@ -158,7 +158,7 @@ def test_timed_instruction_merge_does_not_cross_block_boundary():
 
 
 def test_zero_delay_dce_removes_from_basic_block():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BlockNode(
                 insts=[
@@ -183,7 +183,7 @@ def test_zero_delay_dce_removes_from_basic_block():
 
 
 def test_zero_delay_dce_skips_fixed_basic_block():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[TimeInst(c_op="inc_ref", lit=Immediate(0)), NopInst()],
@@ -203,7 +203,7 @@ def test_zero_delay_dce_skips_fixed_basic_block():
 
 def test_timed_merge_merges_in_basic_block():
     # TIME sinks past NopInst; merged TIME appears at end.
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -226,7 +226,7 @@ def test_timed_merge_merges_in_basic_block():
 
 
 def test_timed_merge_skips_fixed_basic_block():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -255,7 +255,7 @@ def test_timed_merge_skips_fixed_basic_block():
 
 
 def test_lit_time_sinks_past_reg_write():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -275,7 +275,7 @@ def test_lit_time_sinks_past_reg_write():
 
 
 def test_lit_time_sinks_past_multiple_non_timed():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -300,7 +300,7 @@ def test_lit_time_sinks_past_multiple_non_timed():
 
 def test_lit_time_absorbed_into_port_write():
     # TIME sinks to end; PortWrite's @N is adjusted.
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -326,7 +326,7 @@ def test_lit_time_absorbed_into_port_write():
 
 
 def test_lit_time_absorbed_into_wait_inst():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -347,7 +347,7 @@ def test_lit_time_absorbed_into_wait_inst():
 
 
 def test_accumulated_time_absorbed():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -374,7 +374,7 @@ def test_accumulated_time_absorbed():
 
 
 def test_time_and_non_timed_then_port_write():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -405,7 +405,7 @@ def test_time_and_non_timed_then_port_write():
 def test_all_timed_adjusted_with_same_delta():
     # pending_lit is NOT reset after absorption; all timed insts in the same
     # baseline segment receive the same delta adjustment.
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -444,7 +444,7 @@ def test_port_write_no_time_acts_as_barrier():
     # to the other side would shift the actual emission time by the
     # accumulated delta. PortWriteInst.reg_read declares s14, which the pass
     # uses as its barrier signal.
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -470,7 +470,7 @@ def test_port_write_reg_time_acts_as_barrier():
     # Register-driven @T (time=Register) cannot be folded by adjusting a
     # literal offset, and the WPORT_WR still reads s14 implicitly, so the
     # pending TIME inc_ref must remain before the WPORT_WR.
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -496,7 +496,7 @@ def test_port_write_reg_time_acts_as_barrier():
 
 
 def test_reg_time_flushes_pending_lit():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -524,7 +524,7 @@ def test_reg_time_flushes_pending_lit():
 
 
 def test_pending_lit_flushed_at_end_of_block():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[

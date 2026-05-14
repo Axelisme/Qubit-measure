@@ -80,7 +80,7 @@ from ...dispatch import dispatch_entry_words, needs_big_jump
 from ...factory import IRParser
 from ...instructions import JumpInst, LabelInst, RegWriteInst
 from ...labels import Label
-from ...node import BasicBlockNode, BlockNode, IRLoop, IRNode, RootNode
+from ...node import BasicBlockNode, BlockNode, IRLoop, IRNode
 from ...operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
 from ...pipeline import AbsIRPass, PipeLineContext
 from ..base import IRTransformer
@@ -201,16 +201,13 @@ class UnrollLoopPass(AbsIRPass, IRTransformer):
     before the outer loop's body_words is measured.
     """
 
-    def process(self, ir: RootNode, ctx: PipeLineContext) -> tuple[RootNode, bool]:
+    def process(self, ir: BlockNode, ctx: PipeLineContext) -> tuple[BlockNode, bool]:
         self.ctx = ctx
         self._changed = False
         res = self.visit(ir)
-        if isinstance(res, list):
-            raise ValueError("Unexpected list returned from visit")
-        out = cast(RootNode, res or ir)
-        return out, self._changed
+        return cast(BlockNode, res), self._changed
 
-    def visit_IRLoop(self, node: IRLoop) -> Optional[IRNode | list[IRNode]]:
+    def visit_IRLoop(self, node: IRLoop) -> IRNode:
         # Validation: check register safety for unrolling.
         from ...hw_semantics import ADDR_REG
 
@@ -236,9 +233,9 @@ class UnrollLoopPass(AbsIRPass, IRTransformer):
 
         # Post-order: recurse into the body first so any inner loops are
         # rewritten before we measure this loop's body size.
-        visited = IRTransformer.visit_IRLoop(self, node)
-        assert isinstance(visited, IRLoop)
-        node = visited
+        new_body = self.visit(node.body)
+        if new_body is not node.body:
+            node.body = new_body
 
         cfg = self.ctx.config
         loop_overhead = cfg.cost_default + cfg.cost_jump_flush
@@ -252,7 +249,9 @@ class UnrollLoopPass(AbsIRPass, IRTransformer):
             is_runtime_exact = True
 
         if n is not None and n <= 0:
-            logger.debug("UnrollLoopPass: skip loop name=%s because n=%s <= 0", node.name, n)
+            logger.debug(
+                "UnrollLoopPass: skip loop name=%s because n=%s <= 0", node.name, n
+            )
             return node
 
         if n is not None:
@@ -265,24 +264,37 @@ class UnrollLoopPass(AbsIRPass, IRTransformer):
         if jt_blocks is None:
             return node
         self._changed = True
-        return list(jt_blocks)  # list[BasicBlockNode] → list[IRNode] (coercion)
+        return BlockNode(insts=list(jt_blocks))
 
     def _unroll_constant(
         self, node: IRLoop, n: int, is_runtime_exact: bool, loop_overhead: int
-    ) -> Optional[IRNode | list[IRNode]]:
+    ) -> IRNode:
         """Handle loops with a known (compile-time or exact-hint) iteration count."""
-        analysis = _analyze_unroll(node.body.insts, loop_overhead, self.ctx)
+        analysis = _analyze_unroll(
+            cast(BlockNode, node.body).insts, loop_overhead, self.ctx
+        )
         logger.debug(
             "UnrollLoopPass: analyze constant/exact loop name=%s n=%s exact=%s "
             "scheduled_ticks=%s body_cost=%s slack=%s body_size=%s "
             "k_timing=%s k_budget=%s k_final=%s",
-            node.name, n, is_runtime_exact,
-            analysis.scheduled_ticks, analysis.body_cost, analysis.slack,
-            analysis.body_size, analysis.k_timing, analysis.k_budget, analysis.k_final,
+            node.name,
+            n,
+            is_runtime_exact,
+            analysis.scheduled_ticks,
+            analysis.body_cost,
+            analysis.slack,
+            analysis.body_size,
+            analysis.k_timing,
+            analysis.k_budget,
+            analysis.k_final,
         )
         k = analysis.k_final
         if k <= 1:
-            logger.debug("UnrollLoopPass: skip loop name=%s because k_final=%s <= 1", node.name, k)
+            logger.debug(
+                "UnrollLoopPass: skip loop name=%s because k_final=%s <= 1",
+                node.name,
+                k,
+            )
             return node
 
         if n <= k:
@@ -292,36 +304,48 @@ class UnrollLoopPass(AbsIRPass, IRTransformer):
             logger.debug(
                 "UnrollLoopPass: skip partial unroll for loop name=%s because "
                 "range_hint is exact runtime-only n=%s and n > k=%s",
-                node.name, n, k,
+                node.name,
+                n,
+                k,
             )
             return node
 
         return self._unroll_partial(node, n, k)
 
-    def _unroll_full(self, node: IRLoop, n: int) -> list[IRNode]:
+    def _unroll_full(self, node: IRLoop, n: int) -> BlockNode:
         """Full expansion: emit n body copies, drop the loop entirely (n <= k)."""
         logger.debug("UnrollLoopPass: fully expand loop name=%s n=%s", node.name, n)
         pmem_size = self.ctx.config.pmem_capacity
+        body_insts = cast(BlockNode, node.body).insts
         init_bb = BasicBlockNode(
-            insts=[RegWriteInst(dst=node.counter_reg, src=SrcKeyword.IMM, lit=Immediate(0))]
+            insts=[
+                RegWriteInst(dst=node.counter_reg, src=SrcKeyword.IMM, lit=Immediate(0))
+            ]
         )
         self._changed = True
-        return [init_bb, *_clone_body_nodes(node.body.insts, n, pmem_size=pmem_size)]
+        return BlockNode(
+            insts=[init_bb, *_clone_body_nodes(body_insts, n, pmem_size=pmem_size)]
+        )
 
     def _unroll_partial(self, node: IRLoop, n: int, k: int) -> BlockNode:
         """Partial unroll: loop of n//k iterations over a k-copy body + remainder prefix."""
         remainder = n % k
         logger.debug(
             "UnrollLoopPass: partially expand loop name=%s n=%s k=%s iters=%s remainder=%s",
-            node.name, n, k, n // k, remainder,
+            node.name,
+            n,
+            k,
+            n // k,
+            remainder,
         )
         pmem_size = self.ctx.config.pmem_capacity
+        body_insts = cast(BlockNode, node.body).insts
         result: list[IRNode] = []
 
         if remainder > 0:
             entry_label = Label.make_new(f"{node.name}_remainder_entry")
-            part1 = _clone_body_nodes(node.body.insts, k - remainder, pmem_size=pmem_size)
-            part2 = _clone_body_nodes(node.body.insts, remainder, pmem_size=pmem_size)
+            part1 = _clone_body_nodes(body_insts, k - remainder, pmem_size=pmem_size)
+            part2 = _clone_body_nodes(body_insts, remainder, pmem_size=pmem_size)
 
             if not part2:
                 part2 = [BasicBlockNode(labels=[LabelInst(name=entry_label)])]
@@ -332,19 +356,27 @@ class UnrollLoopPass(AbsIRPass, IRTransformer):
             if needs_big_jump(pmem_size):
                 init_bb = BasicBlockNode(
                     insts=[
-                        RegWriteInst(dst=node.counter_reg, src=SrcKeyword.IMM, lit=Immediate(0)),
-                        RegWriteInst(dst=Register("s15"), src=SrcKeyword.LABEL, label=entry_label),
+                        RegWriteInst(
+                            dst=node.counter_reg, src=SrcKeyword.IMM, lit=Immediate(0)
+                        ),
+                        RegWriteInst(
+                            dst=Register("s15"), src=SrcKeyword.LABEL, label=entry_label
+                        ),
                     ],
                     branch=JumpInst(addr=Register("s15")),
                 )
             else:
                 init_bb = BasicBlockNode(
-                    insts=[RegWriteInst(dst=node.counter_reg, src=SrcKeyword.IMM, lit=Immediate(0))],
+                    insts=[
+                        RegWriteInst(
+                            dst=node.counter_reg, src=SrcKeyword.IMM, lit=Immediate(0)
+                        )
+                    ],
                     branch=JumpInst(label=entry_label),
                 )
             result.append(init_bb)
         else:
-            unrolled_body = _clone_body_nodes(node.body.insts, k, pmem_size=pmem_size)
+            unrolled_body = _clone_body_nodes(body_insts, k, pmem_size=pmem_size)
 
         # Build flat loop: start label → unrolled body → back-edge → end label.
         # Not wrapped in IRLoop to prevent re-unrolling on the next pipeline iteration.
@@ -354,7 +386,11 @@ class UnrollLoopPass(AbsIRPass, IRTransformer):
         if remainder == 0:
             result.append(
                 BasicBlockNode(
-                    insts=[RegWriteInst(dst=node.counter_reg, src=SrcKeyword.IMM, lit=Immediate(0))]
+                    insts=[
+                        RegWriteInst(
+                            dst=node.counter_reg, src=SrcKeyword.IMM, lit=Immediate(0)
+                        )
+                    ]
                 )
             )
 
@@ -364,11 +400,15 @@ class UnrollLoopPass(AbsIRPass, IRTransformer):
         op_str = AluExpr(node.counter_reg, AluOp.SUB, Immediate(n))
         if needs_big_jump(pmem_size):
             back_bb = BasicBlockNode(
-                insts=[RegWriteInst(dst=Register("s15"), src=SrcKeyword.LABEL, label=start)],
+                insts=[
+                    RegWriteInst(dst=Register("s15"), src=SrcKeyword.LABEL, label=start)
+                ],
                 branch=JumpInst(addr=Register("s15"), if_cond="S", op=op_str),
             )
         else:
-            back_bb = BasicBlockNode(branch=JumpInst(label=start, if_cond="S", op=op_str))
+            back_bb = BasicBlockNode(
+                branch=JumpInst(label=start, if_cond="S", op=op_str)
+            )
         result.append(back_bb)
         result.append(BasicBlockNode(labels=[LabelInst(name=end)]))
 
@@ -383,7 +423,8 @@ class UnrollLoopPass(AbsIRPass, IRTransformer):
         Returns None when any precondition fails (k <= 1 after pow2 rounding,
         body_words == 0, etc.) so the caller falls back to no-unroll.
         """
-        analysis = _analyze_unroll(node.body.insts, loop_overhead, ctx)
+        body_insts = cast(BlockNode, node.body).insts
+        analysis = _analyze_unroll(body_insts, loop_overhead, ctx)
         body_size = analysis.body_size
         logger.debug(
             "UnrollLoopPass: analyze register-driven loop name=%s n_reg=%s "
@@ -439,7 +480,7 @@ class UnrollLoopPass(AbsIRPass, IRTransformer):
 
         entry_labels = [Label.make_new(f"{node.name}_jt_entry_{i}") for i in range(k)]
         exit_label = Label.make_new(f"{node.name}_jt_exit")
-        bodies = [BlockNode(insts=deepcopy(node.body.insts)) for _ in range(k)]
+        bodies = [BlockNode(insts=deepcopy(body_insts)) for _ in range(k)]
 
         assert isinstance(node.n, Register)
         return build_jump_table_blocks(

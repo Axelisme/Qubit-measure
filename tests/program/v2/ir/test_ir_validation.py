@@ -32,7 +32,7 @@ from zcu_tools.program.v2.ir.node import (
     IRBranch,
     IRLoop,
     IRNode,
-    RootNode,
+    BlockNode,
 )
 from zcu_tools.program.v2.ir.operands import Immediate, Register, SrcKeyword
 from zcu_tools.program.v2.ir.passes import BranchEliminationPass, UnrollLoopPass
@@ -64,7 +64,7 @@ def _walk_instructions(node: IRNode) -> Iterator[Instruction]:
 # ---------------------------------------------------------------------------
 
 
-def _run_chunk_passes_on_root(root: RootNode, passes: list) -> RootNode:
+def _run_chunk_passes_on_root(root: BlockNode, passes: list) -> BlockNode:
     parser = IRParser()
     chunks = parser.unparse(root)
     ctx = PipeLineContext(config=PipeLineConfig(), pmem_budget=1024)
@@ -73,7 +73,7 @@ def _run_chunk_passes_on_root(root: RootNode, passes: list) -> RootNode:
     return parser.parse(chunks)
 
 
-def _collect_fixed_entry_blocks(root: RootNode) -> list[BasicBlockNode]:
+def _collect_fixed_entry_blocks(root: BlockNode) -> list[BasicBlockNode]:
     """Collect BasicBlockNodes that are disable_opt=True AND have labels."""
     result: list[BasicBlockNode] = []
     stack: list[IRNode] = list(root.insts)
@@ -98,7 +98,7 @@ def _entry_addr_size(group: list[BasicBlockNode]) -> int:
     return total
 
 
-def _collect_all_basic_blocks(root: RootNode) -> list[BasicBlockNode]:
+def _collect_all_basic_blocks(root: BlockNode) -> list[BasicBlockNode]:
     result: list[BasicBlockNode] = []
     stack: list[IRNode] = list(root.insts)
     while stack:
@@ -110,7 +110,7 @@ def _collect_all_basic_blocks(root: RootNode) -> list[BasicBlockNode]:
     return result
 
 
-def _run_full_pipeline_on_root(root: RootNode, *, pmem: int = 512) -> RootNode:
+def _run_full_pipeline_on_root(root: BlockNode, *, pmem: int = 512) -> BlockNode:
     pipeline = make_default_pipeline(pmem_capacity=pmem)
     lexer = IRLexer()
     parser = IRParser(pmem_size=pmem)
@@ -145,7 +145,7 @@ def test_v1_jump_table_only_dispatch_stubs_are_fixed():
         bodies=bodies,
     )
 
-    root = RootNode(insts=list(blocks))
+    root = BlockNode(insts=list(blocks))
     fixed_blocks = _collect_fixed_entry_blocks(root)
     assert len(fixed_blocks) == k
     assert all(block.branch is not None for block in fixed_blocks)
@@ -166,7 +166,7 @@ def test_v1_jump_table_stub_width_is_uniform():
     """Every dispatch-table entry stub must keep the same physical width."""
     Label.reset()
     body_nops = 5  # body_words == 5
-    root = RootNode(
+    root = BlockNode(
         insts=[
             IRLoop(
                 name="loop",
@@ -194,7 +194,7 @@ def test_v1_jump_table_stub_width_is_uniform():
 def test_v1_pipeline_keeps_body_blocks_free_after_unroll():
     """After the full pipeline, body entry blocks must remain non-fixed."""
     Label.reset()
-    root = RootNode(
+    root = BlockNode(
         insts=[
             IRLoop(
                 name="loop",
@@ -290,7 +290,7 @@ def test_v2_fully_unrolled_loop_produces_single_fused_block():
     the two dead writes, leaving a single write.
     """
     Label.reset()
-    root = RootNode(
+    root = BlockNode(
         insts=[
             IRLoop(
                 name="loop",
@@ -337,7 +337,7 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
     """
 
     Label.reset()
-    root = RootNode(
+    root = BlockNode(
         insts=[
             IRLoop(
                 name="loop",
@@ -378,7 +378,7 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
 def test_v3_fixed_block_branch_elim_skips_block():
     """BranchEliminationPass should leave fixed-width stubs unchanged."""
     lbl = Label.make_new("next")
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[NopInst()],
@@ -403,7 +403,7 @@ def test_v3_fixed_block_branch_elim_skips_block():
 def test_v3_non_fixed_block_branch_elim_removes_branch():
     """Sanity check: disable_opt=False block loses its branch (no NOP added)."""
     lbl = Label.make_new("next_free")
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[NopInst()],

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing_extensions import TYPE_CHECKING
+from typing_extensions import TYPE_CHECKING, cast
 
 from .instructions import (
     BaseInst,
@@ -41,7 +41,7 @@ def estimate_body_scheduled_ticks(body: list[IRNode]) -> int:
         elif isinstance(node, BlockNode):
             total += estimate_body_scheduled_ticks(node.insts)
         elif isinstance(node, IRLoop):
-            inner = estimate_body_scheduled_ticks(node.body.insts)
+            inner = estimate_body_scheduled_ticks(cast(BlockNode, node.body).insts)
             if isinstance(node.n, int):
                 multiplier = node.n
             elif node.range_hint is not None:
@@ -52,7 +52,8 @@ def estimate_body_scheduled_ticks(body: list[IRNode]) -> int:
         elif isinstance(node, IRBranch):
             # Pessimistic: shortest IO window across all cases
             case_ticks = [
-                estimate_body_scheduled_ticks(case.insts) for case in node.cases
+                estimate_body_scheduled_ticks(cast(BlockNode, case).insts)
+                for case in node.cases
             ]
             if case_ticks:
                 total += min(case_ticks)
@@ -76,7 +77,7 @@ def estimate_flat_size(nodes: list[IRNode]) -> int:
         elif isinstance(node, BlockNode):
             size += estimate_flat_size(node.insts)
         elif isinstance(node, IRLoop):
-            inner = estimate_flat_size(node.body.insts)
+            inner = estimate_flat_size(cast(BlockNode, node.body).insts)
             if isinstance(node.n, int):
                 n = node.n
             elif node.range_hint is not None:
@@ -94,7 +95,9 @@ def estimate_flat_size(nodes: list[IRNode]) -> int:
             # - bodies: all cases are emitted physically, so sum their sizes
             setup_words = 4
             table_words = 2 * len(node.cases)
-            case_words = sum(estimate_flat_size(case.insts) for case in node.cases)
+            case_words = sum(
+                estimate_flat_size(cast(BlockNode, case).insts) for case in node.cases
+            )
             size += setup_words + table_words + case_words
     return size
 
@@ -123,7 +126,7 @@ def estimate_body_cost(body: list[IRNode], config: PipeLineConfig) -> int:
             # regardless of whether the loop is unrolled. loop_overhead models
             # only the single condensed back-edge JUMP plus its flush penalty.
             loop_overhead = config.cost_default + config.cost_jump_flush
-            inner_cost = estimate_body_cost(node.body.insts, config)
+            inner_cost = estimate_body_cost(cast(BlockNode, node.body).insts, config)
 
             if isinstance(node.n, int):
                 cost += node.n * (inner_cost + loop_overhead)
@@ -138,7 +141,10 @@ def estimate_body_cost(body: list[IRNode], config: PipeLineConfig) -> int:
                 config.cost_default + config.cost_jump_flush
             )
             case_cost = max(
-                (estimate_body_cost(case.insts, config) for case in node.cases),
+                (
+                    estimate_body_cost(cast(BlockNode, case).insts, config)
+                    for case in node.cases
+                ),
                 default=0,
             )
             cost += dispatch_overhead + case_cost

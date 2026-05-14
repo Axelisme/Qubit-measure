@@ -6,7 +6,7 @@ from zcu_tools.program.v2.ir.instructions import (
     TimeInst,
     WmemWriteInst,
 )
-from zcu_tools.program.v2.ir.node import BasicBlockNode, RootNode
+from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode
 from zcu_tools.program.v2.ir.operands import (
     AluExpr,
     AluOp,
@@ -22,7 +22,7 @@ from zcu_tools.program.v2.ir.passes.dataflow.inc_reg_merge import INC_REG_IMM_MA
 from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
 
 
-def _run_chunk_pass(root: RootNode) -> RootNode:
+def _run_chunk_pass(root: BlockNode) -> BlockNode:
     parser = IRParser()
     chunks = parser.unparse(root)
     chunks, _ = IncRegMergePass().process(
@@ -32,7 +32,7 @@ def _run_chunk_pass(root: RootNode) -> RootNode:
 
 
 def test_inc_reg_merge_free_basic():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -77,7 +77,7 @@ def test_inc_reg_merge_free_basic():
 
 
 def test_inc_reg_merge_free_flush_on_read():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -113,7 +113,7 @@ def test_inc_reg_merge_free_flush_on_read():
 
 
 def test_inc_reg_merge_free_can_cross_port_write():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -155,7 +155,7 @@ def test_inc_reg_merge_free_can_cross_port_write():
 
 
 def test_inc_reg_merge_free_cpmg_like_unrolled_body():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -214,7 +214,7 @@ def test_inc_reg_merge_free_cpmg_like_unrolled_body():
 
 
 def test_inc_reg_merge_fixed_basic_is_skipped():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -260,7 +260,7 @@ def test_inc_reg_merge_fixed_basic_is_skipped():
 
 
 def test_inc_reg_merge_fixed_barrier():
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -301,7 +301,7 @@ def test_inc_reg_merge_does_not_cross_wmem_write_via_alias():
     # of w0.  Without alias-aware read tracking, the pending +5 increment on
     # w_freq would be sunk past WMEM_WR and merged with +3, so the WMEM_WR
     # would observe the un-incremented value.
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -345,7 +345,7 @@ def test_inc_reg_merge_overflow_flushes_before_accumulating():
     big = INC_REG_IMM_MAX  # exactly at the limit — still OK to merge with 0
     step = 1               # big + step = INC_REG_IMM_MAX + 1 → overflow
 
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[
@@ -382,7 +382,7 @@ def test_inc_reg_merge_single_oversized_step_emitted_as_is():
     # unchanged (no crash, no silent truncation).
     huge = INC_REG_IMM_MAX + 1
 
-    root = RootNode(
+    root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[

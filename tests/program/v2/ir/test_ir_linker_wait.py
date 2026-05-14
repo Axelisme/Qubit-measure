@@ -9,11 +9,11 @@ from zcu_tools.program.v2.ir.instructions import (
 )
 from zcu_tools.program.v2.ir.labels import Label
 from zcu_tools.program.v2.ir.linker import IRLinker
-from zcu_tools.program.v2.ir.node import BasicBlockNode, RootNode
+from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode
 from zcu_tools.program.v2.ir.operands import Immediate, Register, SrcKeyword
 
 
-def _link_root(linker: IRLinker, root: RootNode):
+def _link_root(linker: IRLinker, root: BlockNode):
     inst_list = IRLexer().flatten(IRParser().unparse(root))
     return linker.link(inst_list)
 
@@ -44,7 +44,7 @@ def test_linker_wait_address_calculation():
         insts=[RegWriteInst(dst=Register("r2"), src=SrcKeyword.IMM, lit=Immediate(2))],
     )
     bb_l4: BasicBlockNode = BasicBlockNode(labels=[LabelInst(name=Label.make_new("L4"))])
-    ir = RootNode(insts=[bb_l1, bb_l2, bb_l3, bb_l4])
+    ir = BlockNode(insts=[bb_l1, bb_l2, bb_l3, bb_l4])
 
     linker = IRLinker()
     prog_list, labels, meta_infos, cursor = _link_root(linker, ir)
@@ -80,7 +80,7 @@ def test_linker_cursor_counts_wait_and_trailing_labels():
         labels=[LabelInst(name=Label.make_new("L2"))],
         insts=[RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(0))],
     )
-    ir = RootNode(insts=[bb2_l1, bb2_l2])
+    ir = BlockNode(insts=[bb2_l1, bb2_l2])
 
     linker = IRLinker()
     prog_list, labels, _meta_infos, cursor = _link_root(linker, ir)
@@ -95,7 +95,7 @@ def test_linker_wait_roundtrip():
     """Verify that unlink() correctly restores labels after WAIT."""
     Label.reset()
 
-    ir = RootNode(
+    ir = BlockNode(
         insts=[
             BasicBlockNode(labels=[LabelInst(name=Label.make_new("L1"))], insts=[WaitInst(c_op="time")]),
             BasicBlockNode(labels=[LabelInst(name=Label.make_new("L2"))]),

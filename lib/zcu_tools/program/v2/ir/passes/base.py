@@ -26,7 +26,7 @@ from ..instructions import (
     WaitInst,
     WmemWriteInst,
 )
-from ..node import BasicBlockNode, BlockNode, IRBranch, IRLoop, IRNode, RootNode
+from ..node import BasicBlockNode, BlockNode, IRBranch, IRDispatch, IRLoop, IRNode
 from ..pipeline import AbsChunkPass, ChunkList, PipeLineContext
 
 # ---------------------------------------------------------------------------
@@ -90,88 +90,35 @@ class BlockChunkPass(AbsChunkPass, ABC):
 
 
 class IRTransformer:
-    """Base class for IR tree transformations using explicit per-node visitors.
+    """Base class for IR tree transformations using the children()/replace_child() interface.
 
     Subclasses override ``visit_<ClassName>`` methods to transform specific
-    node types.  Default visitors recurse into child nodes automatically.
+    node types.  The default behaviour recurses into every child automatically
+    via ``IRNode.children()`` and ``IRNode.replace_child()``, so overrides only
+    need to handle the node itself — not its descendants.
 
-    ``_changed`` is set whenever a structural change (insert / remove / replace)
-    is made during traversal.  Reset it to ``False`` before a top-level call
-    and inspect it afterwards.
+    Traversal order: pre-order on the *result* of each visitor.  If
+    ``visit_Foo`` returns a new node, that new node's children are still
+    visited.  This ensures that a visitor that expands one node type into a
+    subtree containing further transformable nodes is handled in a single pass.
+
+    ``_changed`` is set whenever a child is replaced during traversal.
+    Reset it to ``False`` before a top-level call and inspect it afterwards.
     """
 
     _changed: bool = False
 
-    def visit(self, node: IRNode) -> Union[IRNode, List[IRNode], None]:
-        """Dispatch to ``visit_<ClassName>`` or the default handler."""
-        method_name = f"visit_{node.__class__.__name__}"
-        visitor = getattr(self, method_name, self._unhandled_visit)
-        return visitor(node)
+    def visit(self, node: IRNode) -> IRNode:
+        """Dispatch to ``visit_<ClassName>`` then recurse into result's children."""
+        method = getattr(self, f"visit_{type(node).__name__}", None)
+        result = method(node) if method is not None else node
 
-    def _unhandled_visit(self, node: IRNode) -> IRNode:
-        """Fallback for unknown IRNode types — return unchanged."""
-        return node
-
-    # -- Default visitors (recurse into children) --
-
-    def visit_BasicBlockNode(
-        self, node: BasicBlockNode
-    ) -> Union[IRNode, List[IRNode], None]:
-        """Leaf node: no IRNode children to recurse into."""
-        return node
-
-    def visit_BlockNode(self, node: BlockNode) -> Union[IRNode, List[IRNode], None]:
-        return self._visit_block(node)
-
-    def visit_RootNode(self, node: RootNode) -> Union[IRNode, List[IRNode], None]:
-        return self._visit_block(node)
-
-    def visit_IRLoop(self, node: IRLoop) -> Union[IRNode, List[IRNode], None]:
-        res = self.visit(node.body)
-        if res is None:
-            self._changed = True
-            node.body = BlockNode()
-        elif isinstance(res, list):
-            self._changed = True
-            node.body = BlockNode(insts=res)
-        else:
-            if res is not node.body:
+        # Recurse into children of the result (not the original node).
+        # Leaf nodes (BasicBlockNode, IRDispatch) return [] so the loop is a no-op.
+        for child in list(result.children()):
+            new_child = self.visit(child)
+            if new_child is not child:
+                result.replace_child(child, new_child)
                 self._changed = True
-            node.body = res  # type: ignore[assignment]
-        return node
 
-    def visit_IRBranch(self, node: IRBranch) -> Union[IRNode, List[IRNode], None]:
-        new_cases: list[BlockNode] = []
-        for case in node.cases:
-            res = self.visit(case)
-            if res is None:
-                self._changed = True
-                new_cases.append(BlockNode())
-            elif isinstance(res, list):
-                self._changed = True
-                new_cases.append(BlockNode(insts=res))
-            else:
-                if res is not case:
-                    self._changed = True
-                new_cases.append(res)  # type: ignore[arg-type]
-        node.cases = new_cases
-        return node
-
-    def _visit_block(self, node: BlockNode) -> Union[IRNode, List[IRNode], None]:
-        new_insts: list[IRNode] = []
-        list_changed = False
-        for item in node.insts:
-            res = self.visit(item)
-            if res is None:
-                list_changed = True
-            elif isinstance(res, list):
-                list_changed = True
-                new_insts.extend(res)
-            else:
-                if res is not item:
-                    list_changed = True
-                new_insts.append(res)
-        if list_changed:
-            self._changed = True
-            node.insts = new_insts
-        return node
+        return result
