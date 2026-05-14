@@ -19,7 +19,6 @@ from zcu_tools.program.v2.ir.node import (
     BlockNode,
     IRBranch,
     IRLoop,
-    BlockNode,
 )
 from zcu_tools.program.v2.ir.operands import (
     AluExpr,

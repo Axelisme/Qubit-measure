@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 from zcu_tools.program.v2.ir.instructions import NopInst
-from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRLoop, BlockNode
+from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRLoop
 from zcu_tools.program.v2.ir.operands import Register
 from zcu_tools.program.v2.ir.passes.loop.unroll import UnrollLoopPass
 from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext

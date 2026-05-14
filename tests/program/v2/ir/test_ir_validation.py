@@ -32,7 +32,6 @@ from zcu_tools.program.v2.ir.node import (
     IRBranch,
     IRLoop,
     IRNode,
-    BlockNode,
 )
 from zcu_tools.program.v2.ir.operands import Immediate, Register, SrcKeyword
 from zcu_tools.program.v2.ir.passes import BranchEliminationPass, UnrollLoopPass
