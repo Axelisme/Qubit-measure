@@ -25,31 +25,17 @@ is sufficient to collect referenced labels and filter dead ones.
 
 from __future__ import annotations
 
-from ...instructions import BaseInst
-from ...labels import Label
+from ...labels import collect_referenced_labels
 from ...node import BasicBlockNode
 from ...pipeline import ChunkList, PipeLineContext
 from ..base import BlockChunkPass
-
-
-def _collect_referenced_labels(chunks: ChunkList) -> set[Label]:
-    refs: set[Label] = set()
-    for chunk in chunks:
-        if not isinstance(chunk, BasicBlockNode):
-            continue
-        for inst in (*chunk.labels, *chunk.insts, *(
-            [chunk.branch] if chunk.branch else []
-        )):
-            if isinstance(inst, BaseInst) and inst.need_label is not None:
-                refs.add(inst.need_label)
-    return refs
 
 
 class DeadLabelEliminationPass(BlockChunkPass):
     """Remove labels that are never referenced by any instruction."""
 
     def process(self, chunks: ChunkList, ctx: PipeLineContext) -> tuple[ChunkList, bool]:
-        self._referenced = _collect_referenced_labels(chunks)
+        self._referenced = collect_referenced_labels(chunks)
         return super().process(chunks, ctx)
 
     def _process_block(self, block: BasicBlockNode) -> bool:

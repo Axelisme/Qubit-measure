@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from typing_extensions import Any
+
+if TYPE_CHECKING:
+    from .pipeline import ChunkList
 
 PSEUDO_LABELS = {"PREV", "HERE", "NEXT", "SKIP"}
 
@@ -77,3 +82,22 @@ class Label:
 
     def __repr__(self) -> str:
         return f"Label({self.name})"
+
+
+def collect_referenced_labels(chunks: ChunkList) -> set[Label]:
+    """Collect all Labels referenced by need_label across a chunk list."""
+    from .instructions import BaseInst
+    from .node import BasicBlockNode
+
+    refs: set[Label] = set()
+    for chunk in chunks:
+        if not isinstance(chunk, BasicBlockNode):
+            continue
+        for inst in (
+            *chunk.labels,
+            *chunk.insts,
+            *([chunk.branch] if chunk.branch else []),
+        ):
+            if isinstance(inst, BaseInst) and inst.need_label is not None:
+                refs.add(inst.need_label)
+    return refs

@@ -41,8 +41,6 @@ QICK Hardware Notes
 
 from __future__ import annotations
 
-from typing import Optional
-
 from ...labels import Label
 from ...node import BasicBlockNode
 from ...pipeline import AbsChunkPass, ChunkList, PipeLineContext
@@ -80,7 +78,10 @@ class BranchEliminationPass(AbsChunkPass):
             return False
 
         # Find the next BasicBlockNode in the flat chunk list.
-        next_block = _next_basic_block(chunks, idx)
+        next_block = next(
+            (item for item in chunks[idx + 1 :] if isinstance(item, BasicBlockNode)),
+            None,
+        )
         if next_block is None:
             return False
 
@@ -91,11 +92,3 @@ class BranchEliminationPass(AbsChunkPass):
 
         block.branch = None
         return True
-
-
-def _next_basic_block(chunks: ChunkList, from_idx: int) -> Optional[BasicBlockNode]:
-    """Return the first BasicBlockNode after from_idx in the chunk list."""
-    for item in chunks[from_idx + 1 :]:
-        if isinstance(item, BasicBlockNode):
-            return item
-    return None
