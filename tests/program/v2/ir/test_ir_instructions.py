@@ -70,15 +70,19 @@ class TestTimeInstruction:
         assert recovered == original
 
     def test_roundtrip_time_minimal(self):
-        original = {"CMD": "TIME", "C_OP": "trigger"}
+        original = {"CMD": "TIME", "C_OP": "rst"}
         inst = BaseInst.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
 
+    def test_time_rejects_invalid_cop(self):
+        with pytest.raises(ValueError, match="TIME.C_OP"):
+            BaseInst.from_dict({"CMD": "TIME", "C_OP": "trigger"})
+
     def test_time_immutable(self):
         inst = TimeInst(c_op="inc_ref")
         with pytest.raises(Exception):
-            inst.c_op = "trigger"  # type: ignore
+            inst.c_op = "inc_ref"  # type: ignore
 
 
 class TestTestInstruction:
@@ -421,7 +425,7 @@ class TestWaitInstruction:
     """Tests for WaitInst."""
 
     def test_wait_default_shape(self):
-        inst = WaitInst()
+        inst = WaitInst(c_op="time")
         assert inst.to_dict() == {"CMD": "WAIT", "C_OP": "time"}
 
     def test_wait_roundtrip(self):

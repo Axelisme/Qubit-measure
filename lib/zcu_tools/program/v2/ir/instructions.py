@@ -36,6 +36,74 @@ from .operands import (
 CondCode = Literal["Z", "S", "NZ", "NS"]
 _VALID_COND_CODES = frozenset({"Z", "S", "NZ", "NS"})
 
+TimeCOp = Literal["inc_ref", "set_ref", "updt", "rst"]
+_VALID_TIME_COPS = frozenset({"inc_ref", "set_ref", "updt", "rst"})
+
+FlagCOp = Literal["set", "clr", "inv"]
+_VALID_FLAG_COPS = frozenset({"set", "clr", "inv"})
+
+WaitCOp = Literal["time", "port_dt", "div_rdy", "div_dt", "qpa_rdy", "qpa_dt"]
+_VALID_WAIT_COPS = frozenset(
+    {"time", "port_dt", "div_rdy", "div_dt", "qpa_rdy", "qpa_dt"}
+)
+
+ClearCOp = Literal["arith", "div", "qnet", "qcom", "qpa", "qpb", "port", "all"]
+_VALID_CLEAR_COPS = frozenset(
+    {"arith", "div", "qnet", "qcom", "qpa", "qpb", "port", "all"}
+)
+
+NetCOp = Literal[
+    "set_net", "sync_net", "updt_offset", "set_dt", "get_dt", "set_flag", "get_flag"
+]
+_VALID_NET_COPS = frozenset(
+    {"set_net", "sync_net", "updt_offset", "set_dt", "get_dt", "set_flag", "get_flag"}
+)
+
+ComCOp = Literal[
+    "set_flag",
+    "sync",
+    "reset",
+    "set_byte_1",
+    "set_byte_2",
+    "set_hw_1",
+    "set_hw_2",
+    "set_word_1",
+    "set_word_2",
+]
+_VALID_COM_COPS = frozenset(
+    {
+        "set_flag",
+        "sync",
+        "reset",
+        "set_byte_1",
+        "set_byte_2",
+        "set_hw_1",
+        "set_hw_2",
+        "set_word_1",
+        "set_word_2",
+    }
+)
+
+ArithCOp = Literal["T", "TP", "TM", "PT", "PTP", "PTM", "MT", "MTP", "MTM"]
+_VALID_ARITH_COPS = frozenset({"T", "TP", "TM", "PT", "PTP", "PTM", "MT", "MTP", "MTM"})
+
+TrigSrc = Literal["set", "clr"]
+_VALID_TRIG_SRCS = frozenset({"set", "clr"})
+
+PACOp = Literal["PA", "PB"]
+_VALID_PA_CMDS = frozenset({"PA", "PB"})
+
+ComFlagVal = Literal["0", "1"]
+_VALID_COM_FLAG_VALS = frozenset({"0", "1"})
+
+
+def _require_literal(val: str, field: str, valid: frozenset[str]) -> str:
+    if val not in valid:
+        raise ValueError(
+            f"{field}: {val!r} is not valid, expected one of {sorted(valid)}"
+        )
+    return val
+
 
 def _parse_cond_code(val: Optional[str]) -> Optional[CondCode]:
     if val is None:
@@ -222,14 +290,14 @@ class MetaInst(Instruction):
 class TimeInst(BaseInst):
     """TIME instruction: advance timing counter."""
 
-    c_op: str
+    c_op: TimeCOp
     lit: Optional[Immediate] = None
     r1: Optional[Register] = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> TimeInst:
         return cls(
-            c_op=d["C_OP"],
+            c_op=_require_literal(str(d["C_OP"]), "TIME.C_OP", _VALID_TIME_COPS),  # type: ignore[arg-type]
             lit=parse_immediate(d["LIT"]) if "LIT" in d else None,
             r1=parse_register(d["R1"]) if "R1" in d else None,
         )
@@ -790,14 +858,14 @@ class TrigInst(BaseInst):
     """TRIG instruction: set or clear a trigger port."""
 
     dst: Union[Register, ImmValue]
-    src: str  # "set" or "clr"
+    src: TrigSrc
     time: Optional[TimeType] = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> TrigInst:
         return cls(
             dst=_parse_port_dst(str(d["DST"])),
-            src=str(d["SRC"]),
+            src=_require_literal(str(d["SRC"]), "TRIG.SRC", _VALID_TRIG_SRCS),  # type: ignore[arg-type]
             time=parse_time(d["TIME"]) if "TIME" in d else None,
         )
 
@@ -880,11 +948,13 @@ class RetInst(BaseInst):
 class FlagInst(BaseInst):
     """FLAG instruction: manipulate the external flag."""
 
-    c_op: str = "set"  # "set", "clr", or "inv"
+    c_op: FlagCOp
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> FlagInst:
-        return cls(c_op=str(d["C_OP"]))
+        return cls(
+            c_op=_require_literal(str(d["C_OP"]), "FLAG.C_OP", _VALID_FLAG_COPS),  # type: ignore[arg-type]
+        )
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -898,7 +968,7 @@ class FlagInst(BaseInst):
 class ArithInst(BaseInst):
     """ARITH instruction: high-precision multiply-accumulate operation."""
 
-    c_op: str
+    c_op: ArithCOp
     r1: Optional[Register] = None
     r2: Optional[Register] = None
     r3: Optional[Register] = None
@@ -907,7 +977,7 @@ class ArithInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> ArithInst:
         return cls(
-            c_op=str(d["C_OP"]),
+            c_op=_require_literal(str(d["C_OP"]), "ARITH.C_OP", _VALID_ARITH_COPS),  # type: ignore[arg-type]
             r1=parse_register(d["R1"]) if "R1" in d else None,
             r2=parse_register(d["R2"]) if "R2" in d else None,
             r3=parse_register(d["R3"]) if "R3" in d else None,
@@ -985,7 +1055,7 @@ class DivInst(BaseInst):
 class NetInst(BaseInst):
     """NET instruction: QNET network peripheral control."""
 
-    c_op: str
+    c_op: NetCOp
     r1: Optional[Register] = None
     r2: Optional[Register] = None
     r3: Optional[Register] = None
@@ -993,7 +1063,7 @@ class NetInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> NetInst:
         return cls(
-            c_op=str(d["C_OP"]),
+            c_op=_require_literal(str(d["C_OP"]), "NET.C_OP", _VALID_NET_COPS),  # type: ignore[arg-type]
             r1=parse_register(d["R1"]) if "R1" in d else None,
             r2=parse_register(d["R2"]) if "R2" in d else None,
             r3=parse_register(d["R3"]) if "R3" in d else None,
@@ -1022,27 +1092,31 @@ class NetInst(BaseInst):
 class ComInst(BaseInst):
     """COM instruction: QCOM communication peripheral control."""
 
-    c_op: str
+    c_op: ComCOp
     r1: Optional[Register] = None
+    flag_val: Optional[ComFlagVal] = None  # '0' or '1' for COM set_flag
     lit: Optional[Immediate] = None
     if_cond: Optional[CondCode] = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> ComInst:
         r1_raw = d.get("R1")
+        flag_val: Optional[ComFlagVal] = None
+        r1 = None
         if r1_raw is not None and isinstance(r1_raw, str):
-            try:
-                # R1 can be "0" or "1" (flag value) or a register
-                int(r1_raw)
-                r1 = None  # will be handled via lit below
-            except ValueError:
+            if r1_raw in _VALID_COM_FLAG_VALS:
+                # COM set_flag encodes flag value as bare '0'/'1' in R1 field;
+                # preserve it so to_dict can emit R1 exactly as assembler expects.
+                flag_val = r1_raw  # type: ignore[assignment]
+            else:
                 r1 = parse_register(r1_raw)
         else:
             r1 = parse_register(r1_raw)
 
         return cls(
-            c_op=str(d["C_OP"]),
+            c_op=_require_literal(str(d["C_OP"]), "COM.C_OP", _VALID_COM_COPS),  # type: ignore[arg-type]
             r1=r1,
+            flag_val=flag_val,
             lit=parse_immediate(d["LIT"]) if "LIT" in d else None,
             if_cond=_parse_cond_code(d.get("IF")),
         )
@@ -1054,10 +1128,15 @@ class ComInst(BaseInst):
         return frozenset()
 
     def to_dict(self) -> dict[str, Any]:
+        r1_out = (
+            self.flag_val
+            if self.flag_val is not None
+            else (str(self.r1) if self.r1 else None)
+        )
         d = {
             "CMD": "COM",
             "C_OP": self.c_op,
-            "R1": str(self.r1) if self.r1 else None,
+            "R1": r1_out,
             "LIT": str(self.lit) if self.lit else None,
             "IF": self.if_cond if self.if_cond else None,
         }
@@ -1068,7 +1147,7 @@ class ComInst(BaseInst):
 class CustomPeripheralInst(BaseInst):
     """PA / PB instruction: custom peripheral A or B."""
 
-    cmd: str  # "PA" or "PB"
+    cmd: PACOp
     c_op: int
     r1: Optional[Register] = None
     r2: Optional[Register] = None
@@ -1078,7 +1157,7 @@ class CustomPeripheralInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> CustomPeripheralInst:
         return cls(
-            cmd=str(d["CMD"]),
+            cmd=_require_literal(str(d["CMD"]), "PA/PB.CMD", _VALID_PA_CMDS),  # type: ignore[arg-type]
             c_op=int(d["C_OP"]),
             r1=parse_register(d["R1"]) if "R1" in d else None,
             r2=parse_register(d["R2"]) if "R2" in d else None,
@@ -1097,7 +1176,7 @@ class CustomPeripheralInst(BaseInst):
     def to_dict(self) -> dict[str, Any]:
         d = {
             "CMD": self.cmd,
-            "C_OP": self.c_op,
+            "C_OP": str(self.c_op),  # assembler integer2bin() requires str
             "R1": str(self.r1) if self.r1 else None,
             "R2": str(self.r2) if self.r2 else None,
             "R3": str(self.r3) if self.r3 else None,
@@ -1114,11 +1193,13 @@ class ClearInst(BaseInst):
     prog_list before binary encoding.
     """
 
-    c_op: str
+    c_op: ClearCOp
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> ClearInst:
-        return cls(c_op=str(d["C_OP"]))
+        return cls(
+            c_op=_require_literal(str(d["C_OP"]), "CLEAR.C_OP", _VALID_CLEAR_COPS),  # type: ignore[arg-type]
+        )
 
     @property
     def reg_write(self) -> frozenset[str]:
@@ -1136,14 +1217,14 @@ class ClearInst(BaseInst):
 class WaitInst(BaseInst):
     """WAIT instruction: wait for sync/trigger."""
 
-    c_op: str = "time"
+    c_op: WaitCOp
     time: Optional[TimeType] = None
     addr: Optional[AddrType] = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> WaitInst:
         return cls(
-            c_op=d["C_OP"],
+            c_op=_require_literal(str(d["C_OP"]), "WAIT.C_OP", _VALID_WAIT_COPS),  # type: ignore[arg-type]
             time=parse_time(str(d["TIME"])) if "TIME" in d else None,
             addr=parse_addr(d.get("ADDR")),
         )

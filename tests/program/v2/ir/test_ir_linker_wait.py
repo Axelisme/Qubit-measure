@@ -37,7 +37,7 @@ def test_linker_wait_address_calculation():
     )
     bb_l2: BasicBlockNode = BasicBlockNode(
         labels=[LabelInst(name=Label.make_new("L2"))],
-        insts=[WaitInst()],
+        insts=[WaitInst(c_op="time")],
     )
     bb_l3: BasicBlockNode = BasicBlockNode(
         labels=[LabelInst(name=Label.make_new("L3"))],
@@ -74,7 +74,7 @@ def test_linker_cursor_counts_wait_and_trailing_labels():
     Label.reset()
     bb2_l1: BasicBlockNode = BasicBlockNode(
         labels=[LabelInst(name=Label.make_new("L1"))],
-        insts=[WaitInst()],
+        insts=[WaitInst(c_op="time")],
     )
     bb2_l2: BasicBlockNode = BasicBlockNode(
         labels=[LabelInst(name=Label.make_new("L2"))],
@@ -97,7 +97,7 @@ def test_linker_wait_roundtrip():
 
     ir = RootNode(
         insts=[
-            BasicBlockNode(labels=[LabelInst(name=Label.make_new("L1"))], insts=[WaitInst()]),
+            BasicBlockNode(labels=[LabelInst(name=Label.make_new("L1"))], insts=[WaitInst(c_op="time")]),
             BasicBlockNode(labels=[LabelInst(name=Label.make_new("L2"))]),
         ]
     )

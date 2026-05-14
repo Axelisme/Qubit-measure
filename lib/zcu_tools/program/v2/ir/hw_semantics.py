@@ -19,4 +19,4 @@ WAVE_REGS = frozenset({"w0", "w1", "w2", "w3", "w4", "w5"})
 VOLATILE_REGS = frozenset({f"s{i}" for i in range(15)})
 
 # General regs
-GENERAL_REGS = frozenset({f"r{i}" for i in range(15)})
+GENERAL_REGS = frozenset({f"r{i}" for i in range(32)})  # r0~r31

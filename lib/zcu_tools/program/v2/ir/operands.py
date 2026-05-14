@@ -105,6 +105,9 @@ _REG_ALIAS: dict[str, str] = {
     "s_core_w2": "s13",
     "s_out_time": "s14",
     "s_addr": "s15",
+    "zero": "s0",
+    "curr_usr_time": "s11",
+    "out_usr_time": "s14",
 }
 
 
@@ -260,7 +263,7 @@ def parse_register(val: Union[Register, str, None]) -> Optional[Register]:
         core.startswith("r_wave")
         or core.startswith("s_")
         or core.startswith("w_")
-        or (bool(core) and core[0] in "rswp" and core[1:].isdigit())
+        or (bool(core) and core[0] in "rsw" and core[1:].isdigit())
         or core in _REG_ALIAS
     ):
         return Register(name=core)
