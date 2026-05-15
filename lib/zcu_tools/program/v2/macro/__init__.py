@@ -126,9 +126,20 @@ class AdditionalMacroMixin(AsmV2):
         """Insert a debug macro that prints the current time (cycle count) with a name."""
         self.append_macro(PrintTimeStamp(name, t, prefix=prefix))
 
-    def meta_macro(self, type: str, name: str, info: Optional[dict] = None) -> None:
-        """Insert a meta macro that emits a meta instruction for the IR builder."""
-        self.append_macro(MetaMacro(type=type, name=name, info=info))
+    def meta_macro(
+        self,
+        type: str,
+        name: str,
+        info: Optional[dict] = None,
+        regs: Optional[dict[str, str]] = None,
+    ) -> None:
+        """Insert a meta macro that emits a meta instruction for the IR builder.
+
+        regs maps info keys to register names resolved via prog._get_reg() at
+        translate time.  Use this when the register is known only by a logical
+        name (e.g. a loop name) rather than a bare ASM address.
+        """
+        self.append_macro(MetaMacro(type=type, name=name, info=info, regs=regs))
 
     @contextmanager
     def acquire_temp_reg(self, num: int = 1) -> Generator[list[str]]:

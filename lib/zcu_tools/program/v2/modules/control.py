@@ -168,7 +168,7 @@ class Branch(Module):
         prog.meta_macro(
             type="BRANCH_START",
             name=self.name,
-            info={"compare_reg": self.compare_reg},
+            regs={"compare_reg": self.compare_reg},
         )
 
         big_jump = needs_big_jump(prog.tproccfg["pmem_size"])

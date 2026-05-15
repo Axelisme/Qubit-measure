@@ -29,11 +29,11 @@ from zcu_tools.program.v2.ir.node import (
     BasicBlockNode,
     BlockNode,
     IRBranch,
+    IRDispatch,
     IRLoop,
     IRNode,
 )
 from zcu_tools.program.v2.ir.operands import Immediate, Register, SrcKeyword
-from zcu_tools.program.v2.ir.node import IRDispatch
 from zcu_tools.program.v2.ir.passes import BranchEliminationPass
 from zcu_tools.program.v2.ir.passes.control_flow import SimplifyDispatchPass
 from zcu_tools.program.v2.ir.pipeline import (
