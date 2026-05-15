@@ -428,8 +428,11 @@ def _collect_all_basic_blocks(root: BlockNode) -> list[BasicBlockNode]:
 
 
 def test_unroll_register_driven_jump_table_structure():
-    """Verify the dispatch-table loop has the expected fixed/free split."""
+    """UnrollLoopPass emits an IRDispatch node (not pre-lowered stubs) for the
+    dispatch table; stubs are produced later by the pipeline fallback."""
     Label.reset()
+    from zcu_tools.program.v2.ir.node import IRDispatch
+
     root = BlockNode(
         insts=[
             IRLoop(
@@ -452,8 +455,20 @@ def test_unroll_register_driven_jump_table_structure():
         root, UnrollLoopPass(), PipeLineContext(config=config, pmem_budget=512)
     )
 
-    # Only the dispatch-table stubs remain fixed.
-    assert _count_fixed_blocks(out) == 2
+    # UnrollLoopPass output should contain an IRDispatch node (not yet lowered).
+    def _collect_dispatch(node: IRNode) -> list[IRDispatch]:
+        if isinstance(node, IRDispatch):
+            return [node]
+        if isinstance(node, BlockNode):
+            result = []
+            for child in node.insts:
+                result.extend(_collect_dispatch(child))
+            return result
+        return []
+
+    dispatch_nodes = _collect_dispatch(out)
+    assert len(dispatch_nodes) == 1
+    assert len(dispatch_nodes[0].target_labels) == 2
 
     emit = _flatten_root(out)
     cond_jumps = [

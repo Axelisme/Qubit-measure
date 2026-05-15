@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Union
+from typing import Optional, Union
 
 from .factory import IRLexer, IRParser
 from .instructions import Instruction, MetaInst
@@ -376,7 +376,9 @@ class IRPipeLine:
 # ---------------------------------------------------------------------------
 
 
-def make_default_pipeline(pmem_capacity: int) -> IRPipeLine:
+def make_default_pipeline(
+    pmem_capacity: int, max_unroll_factor: Optional[int] = None
+) -> IRPipeLine:
     from .passes import (
         BlockMergePass,
         BranchEliminationPass,
@@ -394,6 +396,8 @@ def make_default_pipeline(pmem_capacity: int) -> IRPipeLine:
 
     config = deepcopy(DEFAULT_PIPELINE_CONFIG)
     config.pmem_capacity = pmem_capacity
+    if max_unroll_factor is not None:
+        config.max_unroll_factor = max_unroll_factor
 
     return IRPipeLine(
         config=config,

@@ -88,7 +88,7 @@ from ...analysis import (
     estimate_body_scheduled_ticks,
     estimate_flat_size,
 )
-from ...dispatch import dispatch_entry_words, needs_big_jump
+from ...dispatch import needs_big_jump
 from ...factory import IRParser
 from ...instructions import BaseInst, JumpInst, LabelInst, RegWriteInst
 from ...labels import Label
@@ -482,13 +482,12 @@ class UnrollLoopPass(AbsIRTreePass):
         pmem_size = ctx.config.pmem_capacity
         logger.debug(
             "UnrollLoopPass: build jump-table loop name=%s n_reg=%s "
-            "k_raw=%s k_pow2=%s body_words=%s entry_words=%s",
+            "k_raw=%s k_pow2=%s body_words=%s",
             node.name,
             node.n,
             k_raw,
             k,
             body_size,
-            dispatch_entry_words(pmem_size),
         )
 
         assert isinstance(node.n, Register)
@@ -496,9 +495,6 @@ class UnrollLoopPass(AbsIRTreePass):
         n = node.n
         entry_labels = [
             Label.make_new(f"{node.name}_jt_entry_{idx}") for idx in range(k)
-        ]
-        table_labels = [
-            Label.make_new(f"{node.name}_jt_entry_0_dispatch_{idx}") for idx in range(k)
         ]
         exit_label = Label.make_new(f"{node.name}_jt_exit")
 
@@ -580,8 +576,8 @@ class UnrollLoopPass(AbsIRTreePass):
                 )
             )
 
-        # Compute dispatch offset: offset = k - r, setup address, reset counter, jump.
-        from ...dispatch import build_dispatch_table_island, emit_dispatch_address_setup
+        # Compute dispatch offset: i = k - r, reset counter, then dispatch.
+        from ...node import IRDispatch
 
         offset_insts: list[BaseInst] = [
             RegWriteInst(
@@ -590,21 +586,21 @@ class UnrollLoopPass(AbsIRTreePass):
             RegWriteInst(
                 dst=i, src=SrcKeyword.OP, op=AluExpr(i, AluOp.ABS)
             ),  # i = k - r
-            *emit_dispatch_address_setup(
-                index_reg=i.name, table_base=table_labels[0], pmem_size=pmem_size
-            ),
-            RegWriteInst(dst=i, src=SrcKeyword.IMM, lit=Immediate(0)),  # reset counter
         ]
+        result.append(BasicBlockNode(insts=offset_insts))
+        # Reset counter before entering bodies (must precede dispatch jump).
         result.append(
-            BasicBlockNode(insts=offset_insts, branch=JumpInst(addr=Register("s15")))
+            BasicBlockNode(
+                insts=[RegWriteInst(dst=i, src=SrcKeyword.IMM, lit=Immediate(0))]
+            )
         )
 
-        # ── dispatch-table island (fixed-width stubs, disable_opt=True) ───────
-        result.extend(
-            build_dispatch_table_island(
-                table_labels=table_labels,
+        # ── dispatch node (lowered by pipeline → SimplifyDispatchPass or fallback) ──
+        result.append(
+            IRDispatch(
+                name=f"{node.name}_jt_entry_0",
+                value_reg=i,
                 target_labels=entry_labels,
-                pmem_size=pmem_size,
             )
         )
 
@@ -615,18 +611,10 @@ class UnrollLoopPass(AbsIRTreePass):
             result.append(body_block)
 
         # ── back edge ─────────────────────────────────────────────────────────
+        # Use S (i < n) to jump back to entry_0; when condition fails (i >= n)
+        # fall through to exit_label — mirrors normal loop back-edge structure.
         op_cmp = AluExpr(i, AluOp.SUB, n)
         if needs_big_jump(pmem_size):
-            result.append(
-                BasicBlockNode(
-                    insts=[
-                        RegWriteInst(
-                            dst=Register("s15"), src=SrcKeyword.LABEL, label=exit_label
-                        )
-                    ],
-                    branch=JumpInst(addr=Register("s15"), if_cond="NS", op=op_cmp),
-                )
-            )
             result.append(
                 BasicBlockNode(
                     insts=[
@@ -636,16 +624,15 @@ class UnrollLoopPass(AbsIRTreePass):
                             label=entry_labels[0],
                         )
                     ],
-                    branch=JumpInst(addr=Register("s15")),
+                    branch=JumpInst(addr=Register("s15"), if_cond="S", op=op_cmp),
                 )
             )
         else:
             result.append(
                 BasicBlockNode(
-                    branch=JumpInst(label=exit_label, if_cond="NS", op=op_cmp)
+                    branch=JumpInst(label=entry_labels[0], if_cond="S", op=op_cmp)
                 )
             )
-            result.append(BasicBlockNode(branch=JumpInst(label=entry_labels[0])))
 
         # ── exit ──────────────────────────────────────────────────────────────
         result.append(

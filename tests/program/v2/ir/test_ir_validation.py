@@ -33,25 +33,14 @@ from zcu_tools.program.v2.ir.node import (
     IRNode,
 )
 from zcu_tools.program.v2.ir.operands import Immediate, Register, SrcKeyword
-from zcu_tools.program.v2.ir.passes import BranchEliminationPass, UnrollLoopPass
+from zcu_tools.program.v2.ir.node import IRDispatch
+from zcu_tools.program.v2.ir.passes import BranchEliminationPass
+from zcu_tools.program.v2.ir.passes.control_flow import SimplifyDispatchPass
 from zcu_tools.program.v2.ir.pipeline import (
     PipeLineConfig,
     PipeLineContext,
     make_default_pipeline,
 )
-
-
-def _unroll_root(root: BlockNode, ctx: PipeLineContext) -> tuple[BlockNode, bool]:
-    """Apply UnrollLoopPass to each IRLoop child in root, return (result, changed)."""
-    pass_ = UnrollLoopPass()
-    changed = False
-    for i, child in enumerate(root.insts):
-        if isinstance(child, IRLoop):
-            result = pass_.transform(child, ctx)
-            if result is not child:
-                root.insts[i] = result
-                changed = True
-    return root, changed
 
 
 def _walk_instructions(node: IRNode) -> Iterator[Instruction]:
@@ -121,8 +110,12 @@ def _collect_all_basic_blocks(root: BlockNode) -> list[BasicBlockNode]:
     return result
 
 
-def _run_full_pipeline_on_root(root: BlockNode, *, pmem: int = 512) -> BlockNode:
-    pipeline = make_default_pipeline(pmem_capacity=pmem)
+def _run_full_pipeline_on_root(
+    root: BlockNode, *, pmem: int = 512, max_unroll_factor: int | None = None
+) -> BlockNode:
+    pipeline = make_default_pipeline(
+        pmem_capacity=pmem, max_unroll_factor=max_unroll_factor
+    )
     lexer = IRLexer()
     parser = IRParser(pmem_size=pmem)
     insts = lexer.flatten(parser.unparse(root))
@@ -136,7 +129,8 @@ def _run_full_pipeline_on_root(root: BlockNode, *, pmem: int = 512) -> BlockNode
 
 
 def test_v1_jump_table_only_dispatch_stubs_are_fixed():
-    """Dispatch-table lowering should freeze only the table island, body copies are free."""
+    """After full pipeline, only dispatch-table stubs are fixed; body copies are free.
+    Uses k=4 so SimplifyDispatchPass does not eliminate the dispatch island."""
     Label.reset()
     k = 4
     body_words = 3
@@ -153,8 +147,7 @@ def test_v1_jump_table_only_dispatch_stubs_are_fixed():
         ]
     )
 
-    config = PipeLineConfig(max_unroll_factor=k, pmem_capacity=512)
-    out, _ = _unroll_root(root, PipeLineContext(config=config, pmem_budget=3192))
+    out = _run_full_pipeline_on_root(root, pmem=512, max_unroll_factor=k)
 
     fixed_blocks = _collect_fixed_entry_blocks(out)
     assert len(fixed_blocks) == k
@@ -164,7 +157,8 @@ def test_v1_jump_table_only_dispatch_stubs_are_fixed():
         block
         for block in _collect_all_basic_blocks(out)
         if any(
-            lbl.name.name.startswith("loop_jt_entry_") and "_dispatch_" not in lbl.name.name
+            lbl.name.name.startswith("loop_jt_entry_")
+            and "_dispatch_" not in lbl.name.name
             for lbl in block.labels
         )
     ]
@@ -173,7 +167,8 @@ def test_v1_jump_table_only_dispatch_stubs_are_fixed():
 
 
 def test_v1_jump_table_stub_width_is_uniform():
-    """Every dispatch-table entry stub must keep the same physical width."""
+    """After full pipeline, every dispatch-table entry stub has the same physical width.
+    Uses k=4 so the dispatch island is not eliminated by SimplifyDispatchPass."""
     Label.reset()
     body_nops = 5  # body_words == 5
     root = BlockNode(
@@ -189,8 +184,7 @@ def test_v1_jump_table_stub_width_is_uniform():
         ]
     )
 
-    config = PipeLineConfig(max_unroll_factor=4, pmem_capacity=512)
-    out, _ = _unroll_root(root, PipeLineContext(config=config, pmem_budget=3192))
+    out = _run_full_pipeline_on_root(root, pmem=512, max_unroll_factor=4)
 
     stubs = _collect_fixed_entry_blocks(out)
     assert stubs
@@ -437,3 +431,62 @@ def test_v3_non_fixed_block_branch_elim_removes_branch():
     # No NOP should have been injected.
     assert len(free.insts) == 1
     assert isinstance(free.insts[0], NopInst)
+
+
+# ---------------------------------------------------------------------------
+# Validation 4: SimplifyDispatchPass collapses 2-target IRDispatch
+# ---------------------------------------------------------------------------
+
+
+def _apply_simplify_dispatch(node: IRNode, pmem: int = 512) -> IRNode:
+    ctx = PipeLineContext(config=PipeLineConfig(pmem_capacity=pmem), pmem_budget=1024)
+    return SimplifyDispatchPass().transform(node, ctx)
+
+
+def test_v4_simplify_dispatch_k2_produces_single_cond_jump():
+    """2-target IRDispatch must be replaced by a single BasicBlockNode with a
+    conditional jump to target_labels[1]; no dispatch table stubs produced."""
+    Label.reset()
+    t0 = Label.make_new("entry_0")
+    t1 = Label.make_new("entry_1")
+    node = IRDispatch(name="d", value_reg=Register("r1"), target_labels=[t0, t1])
+
+    result = _apply_simplify_dispatch(node, pmem=512)
+
+    assert isinstance(result, BasicBlockNode)
+    assert result.branch is not None
+    assert isinstance(result.branch, JumpInst)
+    assert result.branch.if_cond == "NZ"
+    assert result.branch.label == t1
+
+
+def test_v4_simplify_dispatch_k2_big_pmem_uses_indirect_jump():
+    """big-PMEM (pmem=4096): 2-target IRDispatch emits REG_WR s15 + indirect JUMP."""
+    Label.reset()
+    t0 = Label.make_new("entry_0")
+    t1 = Label.make_new("entry_1")
+    node = IRDispatch(name="d", value_reg=Register("r1"), target_labels=[t0, t1])
+
+    result = _apply_simplify_dispatch(node, pmem=4096)
+
+    assert isinstance(result, BasicBlockNode)
+    assert len(result.insts) == 1
+    wr = result.insts[0]
+    assert isinstance(wr, RegWriteInst)
+    assert wr.dst.name == "s15"
+    assert wr.label == t1
+    assert result.branch is not None
+    assert isinstance(result.branch, JumpInst)
+    assert result.branch.if_cond == "NZ"
+    assert result.branch.addr is not None
+
+
+def test_v4_simplify_dispatch_k_gt2_unchanged():
+    """IRDispatch with more than 2 targets must be left unchanged."""
+    Label.reset()
+    targets = [Label.make_new(f"entry_{i}") for i in range(4)]
+    node = IRDispatch(name="d", value_reg=Register("r1"), target_labels=targets)
+
+    result = _apply_simplify_dispatch(node)
+
+    assert result is node

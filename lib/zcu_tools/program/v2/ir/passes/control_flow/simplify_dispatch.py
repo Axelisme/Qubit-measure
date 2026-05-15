@@ -1,31 +1,30 @@
 from __future__ import annotations
 
-from ...instructions import JumpInst, LabelInst
-from ...labels import Label
-from ...node import BasicBlockNode, BlockNode, IRBranch, IRNode
-from ...operands import AluExpr, AluOp, Immediate
+from ...dispatch import needs_big_jump
+from ...instructions import JumpInst, RegWriteInst
+from ...node import BasicBlockNode, IRDispatch, IRNode
+from ...operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
 from ...pipeline import AbsIRTreePass, PipeLineContext
 
 
 class SimplifyDispatchPass(AbsIRTreePass):
-    """IR-layer pass: replace 2-case IRBranch with a single conditional jump.
+    """IR-layer pass: replace a 2-target IRDispatch with a single conditional jump.
 
-    When an IRBranch has exactly 2 cases, the dispatch table is unnecessary.
-    This pass builds:
+    When an IRDispatch has exactly 2 target labels, the dispatch table island
+    is unnecessary.  This pass emits a single conditional jump:
 
-        guard      = BasicBlockNode(branch=JUMP else_label -if(NZ) -op(compare_reg - #0))
-        case0      = cases[0]  (IRNode, lowered by pipeline recursion)
-        end_jump   = BasicBlockNode(branch=JUMP end_label)
-        else_entry = BasicBlockNode(labels=[else_label])
-        case1      = cases[1]  (IRNode, lowered by pipeline recursion)
-        end_pad    = BasicBlockNode(labels=[end_label])
+        value_reg AND #1 == 0  (Z set)  -> fall through to target_labels[0]
+        value_reg AND #1 != 0  (NZ set) -> jump to target_labels[1]
 
-    compare_reg == 0  -> Z flag set, NZ not taken -> fallthrough to case 0
-    compare_reg != 0  -> NZ taken -> jump to case 1 (else)
+    big-PMEM:
+        REG_WR s15 label target_labels[1]
+        JUMP [s15] -if(NZ) -op(value_reg AND #1)
 
-    Returns a BlockNode; pipeline re-recurses to lower case bodies and run
-    ChunkPass. BranchEliminationPass will later remove end_jump when end_label
-    immediately follows, and BlockMergePass will collapse label-only blocks.
+    small-PMEM:
+        JUMP target_labels[1] -if(NZ) -op(value_reg AND #1)
+
+    The body copies that follow as siblings in the parent BlockNode are
+    unaffected; the pipeline naturally falls through to target_labels[0].
     """
 
     def transform(
@@ -33,32 +32,33 @@ class SimplifyDispatchPass(AbsIRTreePass):
         node: IRNode,
         ctx: PipeLineContext,
     ) -> IRNode:
-        if not isinstance(node, IRBranch) or len(node.cases) != 2:
+        if not isinstance(node, IRDispatch) or len(node.target_labels) != 2:
             return node
 
-        else_label = Label.make_new(f"{node.name}_simp_else")
-        end_label = Label.make_new(f"{node.name}_simp_end")
+        pmem_size = ctx.config.pmem_capacity
+        target1 = node.target_labels[1]
+        op = AluExpr(node.value_reg, AluOp.AND, Immediate(1))
 
-        guard = BasicBlockNode(
-            branch=JumpInst(
-                label=else_label,
-                if_cond="NZ",
-                op=AluExpr(node.compare_reg, AluOp.SUB, Immediate(0)),
+        if needs_big_jump(pmem_size):
+            return BasicBlockNode(
+                insts=[
+                    RegWriteInst(
+                        dst=Register("s15"),
+                        src=SrcKeyword.LABEL,
+                        label=target1,
+                    )
+                ],
+                branch=JumpInst(
+                    addr=Register("s15"),
+                    if_cond="NZ",
+                    op=op,
+                ),
             )
-        )
-        end_jump = BasicBlockNode(branch=JumpInst(label=end_label))
-        else_entry = BasicBlockNode(
-            labels=[LabelInst(name=else_label, can_remove=True)]
-        )
-        end_pad = BasicBlockNode(labels=[LabelInst(name=end_label, can_remove=True)])
-
-        return BlockNode(
-            insts=[
-                guard,
-                node.cases[0],
-                end_jump,
-                else_entry,
-                node.cases[1],
-                end_pad,
-            ]
-        )
+        else:
+            return BasicBlockNode(
+                branch=JumpInst(
+                    label=target1,
+                    if_cond="NZ",
+                    op=op,
+                )
+            )
