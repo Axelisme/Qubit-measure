@@ -583,15 +583,27 @@ class IRParser:
         result: list[BasicBlockNode] = []
 
         # Out-of-range guard: if value_reg >= n → jump to last case.
-        result.append(
-            BasicBlockNode(
-                branch=JumpInst(
-                    label=node.target_labels[-1],
-                    if_cond="S",
-                    op=AluExpr(node.value_reg, AluOp.SUB, Immediate(n)),
+        last_label = node.target_labels[-1]
+        op_guard = AluExpr(node.value_reg, AluOp.SUB, Immediate(n))
+        if needs_big_jump(self.pmem_size):
+            result.append(
+                BasicBlockNode(
+                    insts=[
+                        RegWriteInst(
+                            dst=Register("s15"),
+                            src=SrcKeyword.LABEL,
+                            label=last_label,
+                        )
+                    ],
+                    branch=JumpInst(addr=Register("s15"), if_cond="S", op=op_guard),
                 )
             )
-        )
+        else:
+            result.append(
+                BasicBlockNode(
+                    branch=JumpInst(label=last_label, if_cond="S", op=op_guard)
+                )
+            )
 
         # Address computation + indirect jump.
         result.append(
