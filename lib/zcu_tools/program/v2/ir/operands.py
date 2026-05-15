@@ -142,7 +142,7 @@ class Register(Operand):
         return c == "r_wave" or c in WAVE_REGS
 
     def is_volatile_reg(self) -> bool:
-        """True if writes have hardware side effects (s0-s14)."""
+        """True if writes have hardware side effects or ordering constraints (s0-s15)."""
         return self.canonical_name in VOLATILE_REGS
 
     def __str__(self) -> str:

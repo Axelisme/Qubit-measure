@@ -84,7 +84,7 @@ def test_zero_delay_dce_removes_plain_zero_increment():
 
 
 def test_timed_instruction_merge_merges_plain_adjacent_increments():
-    # New aggressive behavior: TIME sinks past NopInst, merges at end.
+    # Adjacent TIME inc_ref are merged; NopInst is a barrier so TIME is flushed before it.
     root = BlockNode(
         insts=[
             BasicBlockNode(
@@ -102,14 +102,14 @@ def test_timed_instruction_merge_merges_plain_adjacent_increments():
     bb = out.insts[0]
     assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 2
-    assert isinstance(bb.insts[0], NopInst)
-    assert isinstance(bb.insts[1], TimeInst)
-    assert str(bb.insts[1].lit) == "#5"
+    assert isinstance(bb.insts[0], TimeInst)
+    assert str(bb.insts[0].lit) == "#5"
+    assert isinstance(bb.insts[1], NopInst)
 
 
 def test_timed_instruction_merge_sinks_past_zero_increment():
-    # TIME #0 is not a lit-time and not an anchor; both #2 and #3 accumulate
-    # across it, producing a single merged TIME at the end.
+    # TIME #0 is not a lit-time (value not > 0) so it falls into the else barrier branch,
+    # flushing pending before it. Result: TIME#2 flushed before TIME#0, then TIME#3 at end.
     root = BlockNode(
         insts=[
             BasicBlockNode(
@@ -126,11 +126,13 @@ def test_timed_instruction_merge_sinks_past_zero_increment():
 
     bb = out.insts[0]
     assert isinstance(bb, BasicBlockNode)
-    assert len(bb.insts) == 2
+    assert len(bb.insts) == 3
     assert isinstance(bb.insts[0], TimeInst)
-    assert str(bb.insts[0].lit) == "#0"
+    assert str(bb.insts[0].lit) == "#2"
     assert isinstance(bb.insts[1], TimeInst)
-    assert str(bb.insts[1].lit) == "#5"
+    assert str(bb.insts[1].lit) == "#0"
+    assert isinstance(bb.insts[2], TimeInst)
+    assert str(bb.insts[2].lit) == "#3"
 
 
 def test_timed_instruction_merge_does_not_cross_block_boundary():
@@ -201,7 +203,7 @@ def test_zero_delay_dce_skips_fixed_basic_block():
 
 
 def test_timed_merge_merges_in_basic_block():
-    # TIME sinks past NopInst; merged TIME appears at end.
+    # Adjacent TIME inc_ref are merged; NopInst is a barrier so TIME is flushed before it.
     root = BlockNode(
         insts=[
             BasicBlockNode(
@@ -219,9 +221,9 @@ def test_timed_merge_merges_in_basic_block():
     bb = out.insts[0]
     assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 2
-    assert isinstance(bb.insts[0], NopInst)
-    assert isinstance(bb.insts[1], TimeInst)
-    assert str(bb.insts[1].lit) == "#5"
+    assert isinstance(bb.insts[0], TimeInst)
+    assert str(bb.insts[0].lit) == "#5"
+    assert isinstance(bb.insts[1], NopInst)
 
 
 def test_timed_merge_skips_fixed_basic_block():
@@ -276,6 +278,7 @@ def test_lit_time_sinks_past_reg_write():
 
 
 def test_lit_time_sinks_past_multiple_non_timed():
+    # NopInst is a barrier; TIME is flushed before the first Nop. No sinking occurs.
     root = BlockNode(
         insts=[
             BasicBlockNode(
@@ -294,11 +297,11 @@ def test_lit_time_sinks_past_multiple_non_timed():
     bb = out.insts[0]
     assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 4
-    assert isinstance(bb.insts[0], NopInst)
-    assert isinstance(bb.insts[1], RegWriteInst)
-    assert isinstance(bb.insts[2], NopInst)
-    assert isinstance(bb.insts[3], TimeInst)
-    assert str(bb.insts[3].lit) == "#5"
+    assert isinstance(bb.insts[0], TimeInst)
+    assert str(bb.insts[0].lit) == "#5"
+    assert isinstance(bb.insts[1], NopInst)
+    assert isinstance(bb.insts[2], RegWriteInst)
+    assert isinstance(bb.insts[3], NopInst)
 
 
 def test_lit_time_absorbed_into_port_write():

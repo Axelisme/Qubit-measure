@@ -22,18 +22,17 @@ After::
 
 QICK Hardware Notes
 -------------------
-- ``s14`` is the implicit time base register (``TIMED_BASE_REG``).  Any
-  instruction that *reads* ``s14`` observes the current accumulated reference.
-  Before such an instruction, all pending literal ``TIME inc_ref`` must be
-  flushed to ensure the instruction sees the correct reference value.
 - ``@N`` (``TimeOffset``) is an *anchored* absolute offset from the current
   reference.  A pending ``TIME inc_ref #P`` can be absorbed by replacing
   ``@N`` with ``@(N + P)`` on the instruction.
 - Register-driven ``TIME inc_ref rX`` cannot be folded into ``@N`` because the
-  increment amount is unknown at compile time.  A pending literal delay is
-  flushed before a register-driven increment.
-- Only ``TIME inc_ref`` (``c_op == "inc_ref"``) instructions are handled.
-  Other ``TIME`` variants are not affected.
+  increment amount is unknown at compile time.  Pending is flushed before it.
+- ``TIME set_ref`` / ``updt`` / ``rst`` write s14 to an absolute value,
+  invalidating any accumulated pending delta.  Pending is flushed before them.
+- Transparent instructions (pending is NOT flushed): ``PortWriteInst``,
+  ``DportWriteInst``, ``DmemReadInst``, ``DmemWriteInst``, ``WmemWriteInst``,
+  and ``RegWriteInst`` whose ``dst`` is not a system register (``sN``).
+  Any other instruction flushes pending before it.
 
 Decision Notes
 --------------
@@ -49,7 +48,16 @@ from __future__ import annotations
 import dataclasses
 
 from ...hw_semantics import TIMED_BASE_REG
-from ...instructions import BaseInst, TimeInst
+from ...instructions import (
+    BaseInst,
+    DmemReadInst,
+    DmemWriteInst,
+    DportWriteInst,
+    PortWriteInst,
+    RegWriteInst,
+    TimeInst,
+    WmemWriteInst,
+)
 from ...node import BasicBlockNode
 from ...operands import Immediate, TimeOffset
 from ..base import BlockChunkPass
@@ -127,26 +135,31 @@ class TimedMergePass(BlockChunkPass):
                 and inst.c_op == "inc_ref"
                 and inst.r1 is not None
             ):
+                # Register-driven TIME inc_ref: unknown delta, must flush.
                 pending_lit = _flush(result, pending_lit)
                 result.append(inst)
-            elif isinstance(inst, TimeInst) and inst.c_op in (
-                "set_ref",
-                "updt",
-                "rst",
-            ):
-                # TIME set_ref/updt/rst writes s14 to an absolute value —
-                # the accumulated pending delta is invalidated.
+            elif isinstance(inst, TimeInst) and inst.c_op in ("set_ref", "updt", "rst"):
+                # TIME set_ref/updt/rst sets s14 to an absolute value —
+                # accumulated pending delta is invalidated.
                 pending_lit = _flush(result, pending_lit)
                 result.append(inst)
-            elif TIMED_BASE_REG in inst.reg_read or (
-                TIMED_BASE_REG in inst.reg_write and not isinstance(inst, TimeInst)
+            elif isinstance(
+                inst,
+                (
+                    PortWriteInst,
+                    DportWriteInst,
+                    DmemReadInst,
+                    DmemWriteInst,
+                    WmemWriteInst,
+                ),
             ):
-                # s14-reading or non-TIME s14-writing instruction: flush
-                # pending TIME inc_ref before it.
-                # inc_ref lit/reg and set_ref/updt/rst cases are handled above.
-                pending_lit = _flush(result, pending_lit)
+                if TIMED_BASE_REG in inst.reg_read or TIMED_BASE_REG in inst.reg_write:
+                    pending_lit = _flush(result, pending_lit)
+                result.append(inst)
+            elif isinstance(inst, RegWriteInst) and not inst.dst.is_volatile_reg():
                 result.append(inst)
             else:
+                pending_lit = _flush(result, pending_lit)
                 result.append(inst)
 
         _flush(result, pending_lit)

@@ -15,8 +15,9 @@ ADDR_REG = "s15"  # big-PMEM jump target / dispatch base
 
 WAVE_REGS = frozenset({"w0", "w1", "w2", "w3", "w4", "w5"})
 
-# Volatile system regs (s0..s14). Mirrors labels.is_volatile_reg_name as a set.
-VOLATILE_REGS = frozenset({f"s{i}" for i in range(15)})
+# Volatile system regs (s0..s15). s15 is included because it is the dispatch
+# address register — writes to it must not be reordered past counter increments.
+VOLATILE_REGS = frozenset({f"s{i}" for i in range(16)})
 
 # General regs
 GENERAL_REGS = frozenset({f"r{i}" for i in range(32)})  # r0~r31

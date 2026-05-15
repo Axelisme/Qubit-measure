@@ -29,11 +29,13 @@ QICK Hardware Notes
   optimisation.  System registers (``sN``) and wave registers (``wN`` /
   ``r_wave``) are excluded because they typically represent hardware state or
   pulse parameters whose write ordering matters to the firmware.
-- ``TimeInst``, ``WaitInst``, ``PortWriteInst``, ``WmemWriteInst``,
-  ``DmemReadInst``, ``DmemWriteInst``, ``NopInst``, and ``RegWriteInst`` are
-  transparent to increment motion (the pass can sink past them).  Any other
-  instruction type (JumpInst, TestInst, LabelInst, …) is treated as a barrier
-  and flushes all pending increments before it.
+- Transparent instructions (the pass can sink past them): ``PortWriteInst``,
+  ``DportWriteInst``, ``DmemReadInst``, ``DmemWriteInst``, ``WmemWriteInst``,
+  ``RegWriteInst`` whose ``dst`` is not a system register (``sN``), and
+  ``TIME inc_ref rX`` (register-driven).
+  ``TIME inc_ref #N`` (literal) is intentionally a barrier: TimedMergePass
+  sinks literal TIME in the opposite direction, so allowing sinking past it
+  would cause the two passes to oscillate indefinitely.
 - Tracking uses canonical register names so that ``w_freq → w0`` aliased
   reads flush the correct pending entry.
 
@@ -48,10 +50,19 @@ the register, or at end of block.
 
 from __future__ import annotations
 
-from ...instructions import BaseInst, RegWriteInst
+from ...instructions import (
+    BaseInst,
+    DmemReadInst,
+    DmemWriteInst,
+    DportWriteInst,
+    PortWriteInst,
+    RegWriteInst,
+    TimeInst,
+    WmemWriteInst,
+)
 from ...node import BasicBlockNode
 from ...operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
-from ..base import DATAFLOW_TRANSPARENT_INSTS, BlockChunkPass
+from ..base import BlockChunkPass
 
 # REG_WR rd op (rs +/- #N) encodes the immediate in a 24-bit signed field.
 # Use a conservative safe limit well within that range (same policy as
@@ -101,10 +112,7 @@ def _is_const_increment(inst: BaseInst) -> tuple[str, int] | None:
 
 
 def _make_increment_inst(reg: str, val: int) -> RegWriteInst:
-    if val >= 0:
-        op = AluExpr(Register(reg), AluOp.ADD, Immediate(val))
-    else:
-        op = AluExpr(Register(reg), AluOp.SUB, Immediate(-val))
+    op = AluExpr(Register(reg), AluOp.ADD, Immediate(val))
     return RegWriteInst(dst=Register(reg), src=SrcKeyword.OP, op=op)
 
 
@@ -181,4 +189,19 @@ class IncRegMergePass(BlockChunkPass):
         block.insts = result
 
     def _is_increment_motion_barrier(self, inst: BaseInst) -> bool:
-        return not isinstance(inst, DATAFLOW_TRANSPARENT_INSTS)
+        if isinstance(
+            inst,
+            (PortWriteInst, DportWriteInst, DmemReadInst, DmemWriteInst, WmemWriteInst),
+        ):
+            return False
+        # Register-driven TIME inc_ref is safe to cross: TimedMergePass cannot
+        # sink it, so no oscillation risk. Literal TIME inc_ref is a barrier.
+        if (
+            isinstance(inst, TimeInst)
+            and inst.c_op == "inc_ref"
+            and inst.r1 is not None
+        ):
+            return False
+        if isinstance(inst, RegWriteInst) and not inst.dst.is_volatile_reg():
+            return False
+        return True

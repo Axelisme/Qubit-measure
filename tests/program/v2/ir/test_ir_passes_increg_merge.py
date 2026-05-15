@@ -67,13 +67,15 @@ def test_inc_reg_merge_free_basic():
     assert isinstance(block, BasicBlockNode)
     insts = block.insts
 
-    assert len(insts) == 3
-    assert isinstance(insts[0], NopInst)
-    assert isinstance(insts[1], RegWriteInst) and isinstance(insts[2], RegWriteInst)
-    assert insts[1].op is not None and str(insts[1].op.rhs) == "#5"  # r1 + #5
-    assert insts[1].dst.name == "r1"
-    assert insts[2].op is not None and str(insts[2].op.rhs) == "#4"  # r2 + #4
-    assert insts[2].dst.name == "r2"
+    # NopInst is a barrier: r1+=2 is flushed before it, r1+=3 and r2+=4 after.
+    assert len(insts) == 4
+    assert isinstance(insts[0], RegWriteInst) and insts[0].dst.name == "r1"
+    assert insts[0].op is not None and str(insts[0].op.rhs) == "#2"
+    assert isinstance(insts[1], NopInst)
+    assert isinstance(insts[2], RegWriteInst) and insts[2].dst.name == "r1"
+    assert insts[2].op is not None and str(insts[2].op.rhs) == "#3"
+    assert isinstance(insts[3], RegWriteInst) and insts[3].dst.name == "r2"
+    assert insts[3].op is not None and str(insts[3].op.rhs) == "#4"
 
 
 def test_inc_reg_merge_free_flush_on_read():
@@ -146,12 +148,12 @@ def test_inc_reg_merge_free_can_cross_port_write():
 
     insts = _bb.insts
 
+    # r0+=1 sinks past PORT and register-driven TIME (both transparent), merges at end.
     assert len(insts) == 3
     assert isinstance(insts[0], PortWriteInst)
     assert isinstance(insts[1], TimeInst)
-    assert isinstance(insts[2], RegWriteInst)
+    assert isinstance(insts[2], RegWriteInst) and insts[2].dst.name == "r0"
     assert insts[2].op is not None and str(insts[2].op.rhs) == "#2"
-    assert insts[2].dst.name == "r0"
 
 
 def test_inc_reg_merge_free_cpmg_like_unrolled_body():
@@ -207,10 +209,15 @@ def test_inc_reg_merge_free_cpmg_like_unrolled_body():
 
     insts = _bb.insts
 
-    # 3 port writes + 3 time insts + 1 final merged reg write = 7
+    # Register-driven TIME is transparent: all 3 r0+=1 sink past PORT and TIME,
+    # merge at end. Result: PORT, TIME, PORT, TIME, PORT, TIME, r0+=3
     assert len(insts) == 7
-    assert isinstance(insts[-1], RegWriteInst)
-    assert insts[-1].op is not None and str(insts[-1].op.rhs) == "#3"
+    for i in range(3):
+        assert isinstance(insts[i * 2], PortWriteInst)
+        assert isinstance(insts[i * 2 + 1], TimeInst)
+    assert isinstance(insts[6], RegWriteInst) and insts[6].dst.name == "r0"
+    assert isinstance(insts[6], RegWriteInst) and insts[6].op is not None
+    assert str(insts[6].op.rhs) == "#3"
 
 
 def test_inc_reg_merge_fixed_basic_is_skipped():
