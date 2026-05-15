@@ -399,6 +399,7 @@ class IRParser:
             case_entry_labels = [
                 Label.make_new(f"{node.name}_case_entry_{i}") for i in range(n)
             ]
+            end_label = Label.make_new(f"{node.name}_end")
             dispatch_node = IRDispatch(
                 name=node.name,
                 value_reg=node.compare_reg,
@@ -415,6 +416,7 @@ class IRParser:
                 MetaInst(type="DISPATCH_END", name=node.name),
             ]
             for idx, case in enumerate(node.cases):
+                is_last = idx == n - 1
                 result_branch.append(MetaInst(type="BRANCH_CASE_START", name=str(idx)))
                 case_items = self._unparse_node(case)
                 first_block_attached = False
@@ -434,8 +436,29 @@ class IRParser:
                             ]
                         )
                     )
+                if not is_last:
+                    if needs_big_jump(self.pmem_size):
+                        result_branch.append(
+                            BasicBlockNode(
+                                insts=[
+                                    RegWriteInst(
+                                        dst=Register("s15"),
+                                        src=SrcKeyword.LABEL,
+                                        label=end_label,
+                                    )
+                                ],
+                                branch=JumpInst(addr=Register("s15")),
+                            )
+                        )
+                    else:
+                        result_branch.append(
+                            BasicBlockNode(branch=JumpInst(label=end_label))
+                        )
                 result_branch.append(MetaInst(type="BRANCH_CASE_END", name=str(idx)))
             result_branch.append(MetaInst(type="BRANCH_END", name=node.name))
+            result_branch.append(
+                BasicBlockNode(labels=[LabelInst(name=end_label, can_remove=True)])
+            )
             return result_branch
         if isinstance(node, IRDispatch):
             flat_dispatch = self._lower_dispatch(node)
@@ -532,12 +555,15 @@ class IRParser:
         then each case body with its entry label prepended.  caller supplies
         case_chunks_list[i] as the already-lowered flat chunks for cases[i].
 
-        The out-of-range guard jumps to target_labels[-1] (the last case).
+        Every case except the last gets an unconditional jump to the branch-end
+        label so that cases do not fall through into the next case body.
         """
         n = len(node.cases)
         case_entry_labels = [
             Label.make_new(f"{node.name}_case_entry_{i}") for i in range(n)
         ]
+        end_label = Label.make_new(f"{node.name}_end")
+
         dispatch_node = IRDispatch(
             name=node.name,
             value_reg=node.compare_reg,
@@ -547,6 +573,7 @@ class IRParser:
         result: list[BasicBlockNode] = list(self._lower_dispatch(dispatch_node))
 
         for idx, case_chunks in enumerate(case_chunks_list):
+            is_last = idx == n - 1
             if case_chunks:
                 case_chunks[0].labels.insert(
                     0, LabelInst(name=case_entry_labels[idx], can_remove=True)
@@ -558,7 +585,24 @@ class IRParser:
                         labels=[LabelInst(name=case_entry_labels[idx], can_remove=True)]
                     )
                 )
+            if not is_last:
+                if needs_big_jump(self.pmem_size):
+                    result.append(
+                        BasicBlockNode(
+                            insts=[
+                                RegWriteInst(
+                                    dst=Register("s15"),
+                                    src=SrcKeyword.LABEL,
+                                    label=end_label,
+                                )
+                            ],
+                            branch=JumpInst(addr=Register("s15")),
+                        )
+                    )
+                else:
+                    result.append(BasicBlockNode(branch=JumpInst(label=end_label)))
 
+        result.append(BasicBlockNode(labels=[LabelInst(name=end_label, can_remove=True)]))
         return result
 
     def _lower_dispatch(self, node: IRDispatch) -> list[BasicBlockNode]:

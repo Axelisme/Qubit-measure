@@ -188,8 +188,17 @@ class Branch(Module):
             else:
                 prog.jump(f"{self.name}_case_entry_{i}")
 
+        end_label = f"{self.name}_branch_end"
+
         for i in range(n):
             run_branch(i)
+            if i < n - 1:
+                if big_jump:
+                    _emit_write_label(prog, end_label)
+                    _emit_jump_s15(prog)
+                else:
+                    prog.jump(end_label)
         prog.meta_macro(type="BRANCH_END", name=self.name)
+        prog.label(end_label)
 
         return 0.0
