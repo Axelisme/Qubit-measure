@@ -45,6 +45,23 @@ class Label:
         cls._allocated[name] = inst
         return inst
 
+    @classmethod
+    def claim(cls, name: str) -> Label:
+        """Return the existing label with this name, or create it if not yet allocated.
+
+        Use this instead of make_new() when the IR lowering layer wants to reference
+        a label that the macro layer may have already registered via unlink()
+        pre-allocation (e.g. loop start/end, branch case entries, dispatch stubs).
+        Calling make_new() in that situation would produce a suffixed duplicate
+        (e.g. ``foo_case_entry_0_0``); claim() avoids the collision while still
+        creating the label if it does not exist yet (noopt / standalone paths).
+        """
+        if name in PSEUDO_LABELS:
+            return cls(name)
+        if name in cls._allocated:
+            return cls._allocated[name]
+        return cls.make_new(name)
+
     @property
     def label_set(self) -> set[str]:
         # Keep as property for backward compatibility if needed by other modules

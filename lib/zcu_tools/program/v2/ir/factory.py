@@ -397,9 +397,9 @@ class IRParser:
         if isinstance(node, IRBranch):
             n = len(node.cases)
             case_entry_labels = [
-                Label.make_new(f"{node.name}_case_entry_{i}") for i in range(n)
+                Label.claim(f"{node.name}_case_entry_{i}") for i in range(n)
             ]
-            end_label = Label.make_new(f"{node.name}_end")
+            end_label = Label.claim(f"{node.name}_end")
             dispatch_node = IRDispatch(
                 name=node.name,
                 value_reg=node.compare_reg,
@@ -493,8 +493,8 @@ class IRParser:
             end_label_bb         <- end label (n==0 escape)
         """
         lexer = IRLexer()
-        start = Label.make_new(f"{node.name}_start")
-        end = Label.make_new(f"{node.name}_end")
+        start = Label.claim(f"{node.name}_start")
+        end = Label.claim(f"{node.name}_end")
 
         counter = node.counter_reg
         if isinstance(node.n, int):
@@ -560,9 +560,9 @@ class IRParser:
         """
         n = len(node.cases)
         case_entry_labels = [
-            Label.make_new(f"{node.name}_case_entry_{i}") for i in range(n)
+            Label.claim(f"{node.name}_case_entry_{i}") for i in range(n)
         ]
-        end_label = Label.make_new(f"{node.name}_end")
+        end_label = Label.claim(f"{node.name}_end")
 
         dispatch_node = IRDispatch(
             name=node.name,
@@ -622,7 +622,7 @@ class IRParser:
         Case bodies are NOT emitted here; the caller (_lower_branch) appends them.
         """
         n = len(node.target_labels)
-        table_labels = [Label.make_new(f"{node.name}_dispatch_{i}") for i in range(n)]
+        table_labels = [Label.claim(f"{node.name}_dispatch_{i}") for i in range(n)]
 
         result: list[BasicBlockNode] = []
 

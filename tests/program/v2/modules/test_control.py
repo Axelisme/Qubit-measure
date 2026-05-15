@@ -36,8 +36,8 @@ def test_branch_uses_dispatch_table_jumps(mock_prog):
     assert mock_prog.cond_jump.call_count == 0
     assert mock_prog.write_reg_op.call_count == 1
     assert mock_prog.write_reg_op.call_args_list[0].args == ("s15", "s15", "+", "sel")
-    # 1 indirect jump into table + 3 direct jumps from table stubs.
-    assert mock_prog.jump.call_count == 3
+    # 3 dispatch table stubs + 2 end-of-case jumps (all non-last cases).
+    assert mock_prog.jump.call_count == 5
 
 
 def test_branch_power_of_two_has_no_nop_padding(mock_prog):
