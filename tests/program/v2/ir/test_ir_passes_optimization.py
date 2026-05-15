@@ -12,7 +12,7 @@ from zcu_tools.program.v2.ir.instructions import (
     TestInst,
     TimeInst,
 )
-from zcu_tools.program.v2.ir.labels import Label
+from zcu_tools.program.v2.ir.labels import Label, LabelRef
 from zcu_tools.program.v2.ir.node import (
     BasicBlockNode,
     BlockNode,
@@ -255,7 +255,7 @@ def test_dead_test_elimination_keeps_used_test():
         insts=[
             BasicBlockNode(
                 insts=[TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Immediate(10)))],
-                branch=JumpInst(label=lbl, if_cond="NZ"),
+                branch=JumpInst(label=LabelRef(lbl), if_cond="NZ"),
             ),
         ]
     )
@@ -473,3 +473,46 @@ def test_unroll_register_driven_jump_table_structure():
     ]
     # n==0 guard: JUMP -if(Z) -op(n - #0)
     assert any(j.if_cond == "Z" and str(j.op) == "r1 - #0" for j in cond_jumps)
+
+
+def test_clone_body_remaps_internal_label_refs():
+    """_clone_body must remap LabelRef targets inside the cloned body.
+
+    A body containing a conditional back-jump to its own internal label must
+    have that LabelRef updated to point to the cloned (renamed) label, not the
+    original label in the un-cloned body.
+    """
+    from zcu_tools.program.v2.ir.passes.loop.unroll import _clone_body
+
+    inner_label = Label("inner")
+    body: list = [
+        BasicBlockNode(
+            labels=[LabelInst(name=inner_label)],
+            insts=[TimeInst(c_op="inc_ref", lit=Immediate(1))],
+            branch=JumpInst(
+                label=LabelRef(inner_label),
+                if_cond="S",
+                op=AluExpr(Register("r0"), AluOp.SUB, Immediate(1)),
+            ),
+        )
+    ]
+
+    allocated: set[str] = {"inner"}
+    cloned = _clone_body(body, allocated)
+
+    assert len(cloned) == 1
+    bb = cloned[0]
+    assert isinstance(bb, BasicBlockNode)
+
+    # The cloned label must have a different name (suffix added).
+    cloned_label_name = bb.labels[0].name
+    assert cloned_label_name != inner_label, "cloned LabelInst must be renamed"
+
+    # The branch LabelRef must point to the same renamed label.
+    assert bb.branch is not None
+    assert isinstance(bb.branch, JumpInst)
+    assert bb.branch.label is not None
+    assert not bb.branch.label.is_pseudo()
+    assert bb.branch.label.as_label() == cloned_label_name, (
+        "cloned branch LabelRef must point to the renamed label"
+    )

@@ -188,7 +188,7 @@ class Branch(Module):
             else:
                 prog.jump(f"{self.name}_case_entry_{i}")
 
-        end_label = f"{self.name}_branch_end"
+        end_label = f"{self.name}_end"
 
         for i in range(n):
             run_branch(i)

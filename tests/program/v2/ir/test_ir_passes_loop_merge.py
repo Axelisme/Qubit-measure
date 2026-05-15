@@ -85,7 +85,7 @@ def test_pattern_2_merge_side_data_injection():
                 op=AluExpr(Register("r2"), AluOp.ADD, Immediate(1)),
             ),
         ],
-        branch=JumpInst(label=loop_label, if_cond="S"),
+        branch=JumpInst(label=LabelRef(loop_label), if_cond="S"),
     )
     _run_pass(block)
 
@@ -110,7 +110,7 @@ def test_pattern_2_merge_side_data_injection_disable_opt_is_skipped():
                 op=AluExpr(Register("r2"), AluOp.ADD, Immediate(1)),
             ),
         ],
-        branch=JumpInst(label=loop_label, if_cond="S"),
+        branch=JumpInst(label=LabelRef(loop_label), if_cond="S"),
         disable_opt=True,
     )
     _run_pass(block)
@@ -188,7 +188,7 @@ def test_pattern_2_rejects_conditional_regwrite():
                 if_cond="NZ",
             ),
         ],
-        branch=JumpInst(label=loop_label, if_cond="S"),
+        branch=JumpInst(label=LabelRef(loop_label), if_cond="S"),
     )
 
     _run_pass(block)
@@ -212,7 +212,7 @@ def test_pattern_2_rejects_branch_with_uf():
                 op=AluExpr(Register("r2"), AluOp.ADD, Immediate(1)),
             ),
         ],
-        branch=JumpInst(label=loop_label, if_cond="S", uf=True),
+        branch=JumpInst(label=LabelRef(loop_label), if_cond="S", uf=True),
     )
 
     _run_pass(block)

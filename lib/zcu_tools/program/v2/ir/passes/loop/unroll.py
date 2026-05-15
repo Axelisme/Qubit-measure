@@ -133,27 +133,30 @@ def _remap_node(node: IRNode, remap: dict[str, Label]) -> IRNode:
             for lbl in node.labels
         ]
 
-        def _remap_ref(ref: object) -> object:
-            if isinstance(ref, Label) and ref.name in remap:
-                return remap[ref.name]
-            return ref
+        def _remap_label_ref(ref: Optional[LabelRef]) -> Optional[LabelRef]:
+            if ref is None or ref.is_pseudo():
+                return ref
+            new_label = remap.get(ref.as_label().name)
+            if new_label is None:
+                return ref
+            return LabelRef(new_label)
 
         def _remap_inst(inst: JumpInst) -> JumpInst:
-            label = _remap_ref(inst.label)
-            if label is inst.label:
+            new_ref = _remap_label_ref(inst.label)
+            if new_ref is inst.label:
                 return inst
             import dataclasses
 
-            return dataclasses.replace(inst, label=LabelRef(label))  # type: ignore[call-overload]
+            return dataclasses.replace(inst, label=new_ref)
 
         def _remap_base_inst(inst: BaseInst) -> BaseInst:
             if isinstance(inst, (JumpInst, RegWriteInst, DmemReadInst, CallInst)):
-                label = _remap_ref(inst.label)
-                if label is inst.label:
+                new_ref = _remap_label_ref(inst.label)
+                if new_ref is inst.label:
                     return inst
                 import dataclasses
 
-                return dataclasses.replace(inst, label=LabelRef(label))  # type: ignore[call-overload]
+                return dataclasses.replace(inst, label=new_ref)
             return inst
 
         new_insts = [_remap_base_inst(i) for i in node.insts]
