@@ -12,7 +12,6 @@ Validation 3: disable_opt=True blocks are conservatively skipped by passes.
 
 from __future__ import annotations
 
-from copy import deepcopy
 from typing import Iterator
 
 import pytest
@@ -35,7 +34,6 @@ from zcu_tools.program.v2.ir.node import (
 )
 from zcu_tools.program.v2.ir.operands import Immediate, Register, SrcKeyword
 from zcu_tools.program.v2.ir.passes import BranchEliminationPass, UnrollLoopPass
-from zcu_tools.program.v2.ir.passes.loop.dispatch_island import build_jump_table_blocks
 from zcu_tools.program.v2.ir.pipeline import (
     PipeLineConfig,
     PipeLineContext,
@@ -49,14 +47,9 @@ def _unroll_root(root: BlockNode, ctx: PipeLineContext) -> tuple[BlockNode, bool
     changed = False
     for i, child in enumerate(root.insts):
         if isinstance(child, IRLoop):
-            result = pass_.transform(child, [], ctx)
+            result = pass_.transform(child, ctx)
             if result is not child:
-                node: IRNode = (
-                    BlockNode(insts=list(result))
-                    if isinstance(result, list)
-                    else result
-                )
-                root.insts[i] = node
+                root.insts[i] = result
                 changed = True
     return root, changed
 
@@ -143,36 +136,35 @@ def _run_full_pipeline_on_root(root: BlockNode, *, pmem: int = 512) -> BlockNode
 
 
 def test_v1_jump_table_only_dispatch_stubs_are_fixed():
-    """Dispatch-table lowering should freeze only the table island."""
+    """Dispatch-table lowering should freeze only the table island, body copies are free."""
     Label.reset()
     k = 4
     body_words = 3
-    entry_labels = [Label.make_new(f"jt_entry_{i}") for i in range(k)]
-    exit_label = Label.make_new("jt_exit")
-    body = BlockNode(
-        insts=[BasicBlockNode(insts=[NopInst()]) for _ in range(body_words)]
-    )
-    bodies = [deepcopy(body) for _ in range(k)]
-
-    blocks = build_jump_table_blocks(
-        n_reg="r1",
-        counter_reg="r0",
-        k=k,
-        entry_labels=entry_labels,
-        exit_label=exit_label,
-        bodies=bodies,
+    root = BlockNode(
+        insts=[
+            IRLoop(
+                name="loop",
+                counter_reg=Register("r0"),
+                n=Register("r1"),
+                body=BlockNode(
+                    insts=[BasicBlockNode(insts=[NopInst()]) for _ in range(body_words)]
+                ),
+            )
+        ]
     )
 
-    root = BlockNode(insts=list(blocks))
-    fixed_blocks = _collect_fixed_entry_blocks(root)
+    config = PipeLineConfig(max_unroll_factor=k, pmem_capacity=512)
+    out, _ = _unroll_root(root, PipeLineContext(config=config, pmem_budget=3192))
+
+    fixed_blocks = _collect_fixed_entry_blocks(out)
     assert len(fixed_blocks) == k
     assert all(block.branch is not None for block in fixed_blocks)
 
     plain_entry_blocks = [
         block
-        for block in _collect_all_basic_blocks(root)
+        for block in _collect_all_basic_blocks(out)
         if any(
-            lbl.name.name.startswith("jt_entry_") and "_dispatch_" not in lbl.name.name
+            lbl.name.name.startswith("loop_jt_entry_") and "_dispatch_" not in lbl.name.name
             for lbl in block.labels
         )
     ]

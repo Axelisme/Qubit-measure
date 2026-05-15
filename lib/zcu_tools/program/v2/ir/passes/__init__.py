@@ -1,4 +1,4 @@
-from ..pipeline import AbsChunkListPass, AbsIRTreePass, AbsNodeLower
+from ..pipeline import AbsChunkListPass, AbsIRTreePass
 from .base import (
     DATAFLOW_TRANSPARENT_INSTS,
     BlockChunkPass,
@@ -23,7 +23,6 @@ __all__ = [
     "BlockChunkPass",
     "AbsChunkListPass",
     "AbsIRTreePass",
-    "AbsNodeLower",
     "DATAFLOW_TRANSPARENT_INSTS",
     # control_flow
     "BlockMergePass",

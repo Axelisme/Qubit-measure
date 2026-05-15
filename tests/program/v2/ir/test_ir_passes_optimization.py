@@ -68,15 +68,11 @@ def _apply_tree_pass(
         new_body = _apply_tree_pass(node.body, pass_, ctx)
         if new_body is not node.body:
             node.body = new_body
-        child_chunks: list[
-            list[BasicBlockNode]
-        ] = []  # body not lowered, pass ignores it
     elif isinstance(node, IRBranch):
         for i, case in enumerate(node.cases):
             new_case = _apply_tree_pass(case, pass_, ctx)
             if new_case is not case:
                 node.cases[i] = new_case
-        child_chunks = []
     elif isinstance(node, BlockNode):
         for i, child in enumerate(node.insts):
             new_child = _apply_tree_pass(child, pass_, ctx)
@@ -86,10 +82,7 @@ def _apply_tree_pass(
     else:
         return node
 
-    result = pass_.transform(node, child_chunks, ctx)
-    if isinstance(result, list):
-        return BlockNode(insts=list(result))  # list[BasicBlockNode] -> list[IRNode]
-    return result
+    return pass_.transform(node, ctx)
 
 
 def _apply_tree_pass_to_root(

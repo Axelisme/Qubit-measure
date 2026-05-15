@@ -9,8 +9,8 @@ from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
 
 
 def _run(loop: IRLoop, ctx: PipeLineContext) -> None:
-    """Run UnrollLoopPass.transform on a single IRLoop (no child_chunks needed)."""
-    UnrollLoopPass().transform(loop, [], ctx)
+    """Run UnrollLoopPass.transform on a single IRLoop."""
+    UnrollLoopPass().transform(loop, ctx)
 
 
 def test_unroll_rejects_non_general_counter():
