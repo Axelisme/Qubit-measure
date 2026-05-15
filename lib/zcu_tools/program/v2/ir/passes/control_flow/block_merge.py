@@ -49,10 +49,10 @@ from __future__ import annotations
 
 from ...labels import Label, collect_referenced_labels
 from ...node import BasicBlockNode
-from ...pipeline import AbsChunkPass, ChunkList, PipeLineContext
+from ...pipeline import AbsChunkListPass, ChunkList, PipeLineContext
 
 
-class BlockMergePass(AbsChunkPass):
+class BlockMergePass(AbsChunkListPass):
     """Merge adjacent BasicBlockNodes when safe.
 
     Block A and Block B can be merged when:

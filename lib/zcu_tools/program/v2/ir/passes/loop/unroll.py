@@ -47,13 +47,24 @@ QICK Hardware Notes
 
 Decision Notes
 --------------
-Post-order traversal: inner loops are unrolled first so their expanded body
-size is already measured when the outer loop's pmem budget is computed.
+This pass implements AbsIRTreePass.transform, which is called *before* the
+node's body is lowered to flat chunks.  Unroll decisions are therefore based
+on the IR tree (``estimate_*`` functions), not on optimized flat chunks.
+
+# NOTE: Estimation before body lowering (Option A)
+# The unroll decision uses IR-tree cost/size estimates because the body has
+# not yet been lowered to flat chunks when transform() is called.  As a
+# consequence the body has also not yet been through ChunkPass optimization,
+# so estimates may slightly over-count body_cost / body_size.
+# If more accurate estimates are needed in the future, the pass could be
+# rearchitected as AbsNodeLower (called after child ChunkPasses), but that
+# requires solving the problem that inner-loop scheduled_ticks cannot be
+# reconstructed from flat BasicBlockNode lists.
 
 Three unrolling strategies:
 1. Full expansion (``n ≤ k``): emit n body copies, drop the loop entirely.
    Counter init is prepended; the cloned body already contains the
-   loop-carried update.
+   loop-carried counter update.
 2. Partial unroll (``n > k``, compile-time constant): emit a loop of
    ``n // k`` iterations over a k-copy body, plus a remainder prefix.
    Not applicable when n is only known at runtime (``is_runtime_exact``).
@@ -82,8 +93,7 @@ from ...instructions import JumpInst, LabelInst, RegWriteInst
 from ...labels import Label
 from ...node import BasicBlockNode, BlockNode, IRLoop, IRNode
 from ...operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
-from ...pipeline import AbsIRPass, PipeLineContext
-from ..base import IRTransformer
+from ...pipeline import AbsIRTreePass, PipeLineContext
 from .dispatch_island import build_jump_table_blocks
 
 logger = logging.getLogger(__name__)
@@ -193,21 +203,24 @@ def _analyze_unroll(
     )
 
 
-class UnrollLoopPass(AbsIRPass, IRTransformer):
+class UnrollLoopPass(AbsIRTreePass):
     """Scheduled-window-driven loop unrolling (Phase 8).
 
     k is chosen jointly from per-iteration timing slack and pmem budget.
-    Visits the body first (post-order) so inner loops are already unrolled
-    before the outer loop's body_words is measured.
+    Implements AbsIRTreePass so it runs before the body is lowered, enabling
+    IR-tree based cost/size estimation.  See module docstring for the
+    estimation tradeoff.
     """
 
-    def process(self, ir: BlockNode, ctx: PipeLineContext) -> tuple[BlockNode, bool]:
-        self.ctx = ctx
-        self._changed = False
-        res = self.visit(ir)
-        return cast(BlockNode, res), self._changed
+    def transform(
+        self,
+        node: IRNode,
+        child_chunks: list[list[BasicBlockNode]],  # noqa: ARG002
+        ctx: PipeLineContext,
+    ) -> IRNode | list[BasicBlockNode]:
+        if not isinstance(node, IRLoop):
+            return node
 
-    def visit_IRLoop(self, node: IRLoop) -> IRNode:
         # Validation: check register safety for unrolling.
         from ...hw_semantics import ADDR_REG
 
@@ -231,13 +244,7 @@ class UnrollLoopPass(AbsIRPass, IRTransformer):
                     f"conflicts with reserved address register {ADDR_REG}."
                 )
 
-        # Post-order: recurse into the body first so any inner loops are
-        # rewritten before we measure this loop's body size.
-        new_body = self.visit(node.body)
-        if new_body is not node.body:
-            node.body = new_body
-
-        cfg = self.ctx.config
+        cfg = ctx.config
         loop_overhead = cfg.cost_default + cfg.cost_jump_flush
 
         n: Optional[int] = None
@@ -255,24 +262,26 @@ class UnrollLoopPass(AbsIRPass, IRTransformer):
             return node
 
         if n is not None:
-            return self._unroll_constant(node, n, is_runtime_exact, loop_overhead)
+            return self._unroll_constant(node, n, is_runtime_exact, loop_overhead, ctx)
 
         # Register-driven (no exact hint) → jump-table dispatch.
         if not isinstance(node.n, Register):
             return node  # unexpected n type
-        jt_blocks = self._maybe_build_jump_table(node, loop_overhead, self.ctx)
+        jt_blocks = self._maybe_build_jump_table(node, loop_overhead, ctx)
         if jt_blocks is None:
             return node
-        self._changed = True
         return BlockNode(insts=list(jt_blocks))
 
     def _unroll_constant(
-        self, node: IRLoop, n: int, is_runtime_exact: bool, loop_overhead: int
+        self,
+        node: IRLoop,
+        n: int,
+        is_runtime_exact: bool,
+        loop_overhead: int,
+        ctx: PipeLineContext,
     ) -> IRNode:
         """Handle loops with a known (compile-time or exact-hint) iteration count."""
-        analysis = _analyze_unroll(
-            cast(BlockNode, node.body).insts, loop_overhead, self.ctx
-        )
+        analysis = _analyze_unroll(cast(BlockNode, node.body).insts, loop_overhead, ctx)
         logger.debug(
             "UnrollLoopPass: analyze constant/exact loop name=%s n=%s exact=%s "
             "scheduled_ticks=%s body_cost=%s slack=%s body_size=%s "
@@ -298,7 +307,7 @@ class UnrollLoopPass(AbsIRPass, IRTransformer):
             return node
 
         if n <= k:
-            return self._unroll_full(node, n)
+            return self._unroll_full(node, n, ctx)
 
         if is_runtime_exact:
             logger.debug(
@@ -310,24 +319,25 @@ class UnrollLoopPass(AbsIRPass, IRTransformer):
             )
             return node
 
-        return self._unroll_partial(node, n, k)
+        return self._unroll_partial(node, n, k, ctx)
 
-    def _unroll_full(self, node: IRLoop, n: int) -> BlockNode:
+    def _unroll_full(self, node: IRLoop, n: int, ctx: PipeLineContext) -> BlockNode:
         """Full expansion: emit n body copies, drop the loop entirely (n <= k)."""
         logger.debug("UnrollLoopPass: fully expand loop name=%s n=%s", node.name, n)
-        pmem_size = self.ctx.config.pmem_capacity
+        pmem_size = ctx.config.pmem_capacity
         body_insts = cast(BlockNode, node.body).insts
         init_bb = BasicBlockNode(
             insts=[
                 RegWriteInst(dst=node.counter_reg, src=SrcKeyword.IMM, lit=Immediate(0))
             ]
         )
-        self._changed = True
         return BlockNode(
             insts=[init_bb, *_clone_body_nodes(body_insts, n, pmem_size=pmem_size)]
         )
 
-    def _unroll_partial(self, node: IRLoop, n: int, k: int) -> BlockNode:
+    def _unroll_partial(
+        self, node: IRLoop, n: int, k: int, ctx: PipeLineContext
+    ) -> BlockNode:
         """Partial unroll: loop of n//k iterations over a k-copy body + remainder prefix."""
         remainder = n % k
         logger.debug(
@@ -338,7 +348,7 @@ class UnrollLoopPass(AbsIRPass, IRTransformer):
             n // k,
             remainder,
         )
-        pmem_size = self.ctx.config.pmem_capacity
+        pmem_size = ctx.config.pmem_capacity
         body_insts = cast(BlockNode, node.body).insts
         result: list[IRNode] = []
 
@@ -412,7 +422,6 @@ class UnrollLoopPass(AbsIRPass, IRTransformer):
         result.append(back_bb)
         result.append(BasicBlockNode(labels=[LabelInst(name=end)]))
 
-        self._changed = True
         return BlockNode(insts=result)
 
     def _maybe_build_jump_table(
@@ -475,7 +484,7 @@ class UnrollLoopPass(AbsIRPass, IRTransformer):
             k_raw,
             k,
             body_size,
-            dispatch_entry_words(self.ctx.config.pmem_capacity),
+            dispatch_entry_words(ctx.config.pmem_capacity),
         )
 
         entry_labels = [Label.make_new(f"{node.name}_jt_entry_{i}") for i in range(k)]
@@ -490,5 +499,5 @@ class UnrollLoopPass(AbsIRPass, IRTransformer):
             entry_labels=entry_labels,
             exit_label=exit_label,
             bodies=bodies,
-            pmem_size=self.ctx.config.pmem_capacity,
+            pmem_size=ctx.config.pmem_capacity,
         )

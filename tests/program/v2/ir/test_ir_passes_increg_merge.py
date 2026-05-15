@@ -334,7 +334,9 @@ def test_inc_reg_merge_does_not_cross_wmem_write_via_alias():
     # Whether the trailing +3 stays adjacent or merges into a #3 inc is an
     # implementation detail; what matters is that #5 never crosses WMEM_WR.
     assert any(
-        isinstance(inst, RegWriteInst) and inst.op is not None and str(inst.op.rhs) == "#3"
+        isinstance(inst, RegWriteInst)
+        and inst.op is not None
+        and str(inst.op.rhs) == "#3"
         for inst in insts[2:]
     )
 
@@ -343,7 +345,7 @@ def test_inc_reg_merge_overflow_flushes_before_accumulating():
     # Two increments whose sum exceeds INC_REG_IMM_MAX must NOT be merged.
     # The first must be flushed, the second starts a new accumulation.
     big = INC_REG_IMM_MAX  # exactly at the limit — still OK to merge with 0
-    step = 1               # big + step = INC_REG_IMM_MAX + 1 → overflow
+    step = 1  # big + step = INC_REG_IMM_MAX + 1 → overflow
 
     root = BlockNode(
         insts=[

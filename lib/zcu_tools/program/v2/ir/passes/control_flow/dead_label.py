@@ -27,26 +27,29 @@ from __future__ import annotations
 
 from ...labels import collect_referenced_labels
 from ...node import BasicBlockNode
-from ...pipeline import ChunkList, PipeLineContext
-from ..base import BlockChunkPass
+from ...pipeline import AbsChunkListPass, ChunkList, PipeLineContext
 
 
-class DeadLabelEliminationPass(BlockChunkPass):
+class DeadLabelEliminationPass(AbsChunkListPass):
     """Remove labels that are never referenced by any instruction."""
 
     def process(
-        self, chunks: ChunkList, ctx: PipeLineContext
+        self,
+        chunks: ChunkList,
+        ctx: PipeLineContext,  # noqa: ARG002
     ) -> tuple[ChunkList, bool]:
-        self._referenced = collect_referenced_labels(chunks)
-        return super().process(chunks, ctx)
-
-    def _process_block(self, block: BasicBlockNode) -> bool:
-        before = len(block.labels)
-        block.labels = [
-            lbl
-            for lbl in block.labels
-            if lbl.name.is_pseudo_name()
-            or not lbl.can_remove
-            or lbl.name in self._referenced
-        ]
-        return len(block.labels) != before
+        referenced = collect_referenced_labels(chunks)
+        changed = False
+        for chunk in chunks:
+            if not isinstance(chunk, BasicBlockNode):
+                continue
+            before = len(chunk.labels)
+            chunk.labels = [
+                lbl
+                for lbl in chunk.labels
+                if lbl.name.is_pseudo_name()
+                or not lbl.can_remove
+                or lbl.name in referenced
+            ]
+            changed |= len(chunk.labels) != before
+        return chunks, changed

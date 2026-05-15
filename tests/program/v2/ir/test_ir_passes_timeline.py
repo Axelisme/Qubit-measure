@@ -259,7 +259,9 @@ def test_lit_time_sinks_past_reg_write():
             BasicBlockNode(
                 insts=[
                     TimeInst(c_op="inc_ref", lit=Immediate(10)),
-                    RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)),
+                    RegWriteInst(
+                        dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)
+                    ),
                 ]
             )
         ]
@@ -280,7 +282,9 @@ def test_lit_time_sinks_past_multiple_non_timed():
                 insts=[
                     TimeInst(c_op="inc_ref", lit=Immediate(5)),
                     NopInst(),
-                    RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)),
+                    RegWriteInst(
+                        dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)
+                    ),
                     NopInst(),
                 ]
             )
@@ -378,7 +382,9 @@ def test_time_and_non_timed_then_port_write():
             BasicBlockNode(
                 insts=[
                     TimeInst(c_op="inc_ref", lit=Immediate(10)),
-                    RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)),
+                    RegWriteInst(
+                        dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)
+                    ),
                     TimeInst(c_op="inc_ref", lit=Immediate(20)),
                     PortWriteInst(
                         dst=ImmValue(2),
@@ -500,7 +506,9 @@ def test_reg_time_flushes_pending_lit():
             BasicBlockNode(
                 insts=[
                     TimeInst(c_op="inc_ref", lit=Immediate(10)),
-                    RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)),
+                    RegWriteInst(
+                        dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)
+                    ),
                     TimeInst(c_op="inc_ref", r1=Register("r1")),  # reg-TIME barrier
                     PortWriteInst(
                         dst=ImmValue(2),
@@ -528,7 +536,9 @@ def test_pending_lit_flushed_at_end_of_block():
             BasicBlockNode(
                 insts=[
                     TimeInst(c_op="inc_ref", lit=Immediate(15)),
-                    RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)),
+                    RegWriteInst(
+                        dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)
+                    ),
                 ]
             )
         ]

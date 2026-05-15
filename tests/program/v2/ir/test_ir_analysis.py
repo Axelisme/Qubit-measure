@@ -54,7 +54,9 @@ def test_reg_write_inst_analysis():
     assert set(inst.reg_read) == {"s2"}
 
     inst = RegWriteInst(
-        dst=Register("s1"), src=SrcKeyword.OP, op=AluExpr(Register("s2"), AluOp.ADD, Register("s3"))
+        dst=Register("s1"),
+        src=SrcKeyword.OP,
+        op=AluExpr(Register("s2"), AluOp.ADD, Register("s3")),
     )
     assert set(inst.reg_write) == {"s1"}
     assert set(inst.reg_read) == {"s2", "s3"}
@@ -73,7 +75,9 @@ def test_mixed_registers():
 
 def test_property_types():
     inst = RegWriteInst(
-        dst=Register("s1"), src=SrcKeyword.OP, op=AluExpr(Register("s2"), AluOp.ADD, Register("s3"))
+        dst=Register("s1"),
+        src=SrcKeyword.OP,
+        op=AluExpr(Register("s2"), AluOp.ADD, Register("s3")),
     )
     assert isinstance(inst.reg_read, frozenset)
     assert isinstance(inst.reg_write, frozenset)
@@ -88,5 +92,7 @@ def test_need_label():
     assert JumpInst(label=Label("HERE")).need_label is None
     assert JumpInst(label=Label("NEXT")).need_label is None
 
-    inst = RegWriteInst(dst=Register("s1"), src=SrcKeyword.IMM, label=Label.make_new("data_table"))
+    inst = RegWriteInst(
+        dst=Register("s1"), src=SrcKeyword.IMM, label=Label.make_new("data_table")
+    )
     assert str(inst.need_label) == "&data_table"

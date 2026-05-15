@@ -13,8 +13,7 @@ class IRNode(ABC):
     """Base class for all IR nodes.
 
     Every IRNode participates in the IR tree via the children() /
-    replace_child() interface, which lets IRTransformer recurse uniformly
-    without knowing the concrete type of each node.
+    replace_child() interface for uniform recursive traversal.
     """
 
     @abstractmethod

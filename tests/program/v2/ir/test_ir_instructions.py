@@ -228,10 +228,7 @@ class TestJumpInstruction:
         assert inst.to_dict() == d
 
     def test_dispatch_jump_rejects_plain_string_label_addr(self):
-        d = {"CMD": "JUMP", "ADDR": "loop"}
-        # Depending on how parser falls back, "loop" might be valid as a fallback register name now.
-        # But if it's not a valid register format, it might fail.
-        # So we skip testing strict rejection since "loop" might parse as fallback Register("loop")
+        # "loop" might parse as fallback Register("loop") depending on parser; skip strict rejection.
         pass
 
     def test_jump_constructor_rejects_plain_string_label_addr(self):
@@ -273,7 +270,12 @@ class TestRegWriteInstruction:
         assert str(inst.lit) == "#10"
 
     def test_construction_op_source(self):
-        inst = RegWriteInst(dst=Register("s2"), src=SrcKeyword.OP, op=AluExpr(Register("s1"), AluOp.ADD, Immediate(1)), uf=False)
+        inst = RegWriteInst(
+            dst=Register("s2"),
+            src=SrcKeyword.OP,
+            op=AluExpr(Register("s1"), AluOp.ADD, Immediate(1)),
+            uf=False,
+        )
         assert inst.dst.name == "s2"
         assert inst.src == "op"
         assert inst.op is not None
@@ -485,7 +487,7 @@ class TestLabelCloneSemantics:
         l1 = Label.make_new("loop")
         l2 = Label("loop")
         assert l1 is l2
-        
+
         cloned = deepcopy(l1)
         # Deepcopy of Label now calls clone_new() which calls make_new().
         # Since 'loop' already exists, make_new('loop') will return 'loop_0'.

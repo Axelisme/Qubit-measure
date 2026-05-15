@@ -1,7 +1,7 @@
+from ..pipeline import AbsChunkListPass, AbsIRTreePass, AbsNodeLower
 from .base import (
     DATAFLOW_TRANSPARENT_INSTS,
     BlockChunkPass,
-    IRTransformer,
 )
 from .control_flow import (
     BlockMergePass,
@@ -20,8 +20,10 @@ from .timeline import TimedMergePass, ZeroDelayDCEPass
 
 __all__ = [
     # base
-    "IRTransformer",
     "BlockChunkPass",
+    "AbsChunkListPass",
+    "AbsIRTreePass",
+    "AbsNodeLower",
     "DATAFLOW_TRANSPARENT_INSTS",
     # control_flow
     "BlockMergePass",

@@ -1,4 +1,5 @@
 """Unit tests for build_jump_table_blocks."""
+
 from __future__ import annotations
 
 from zcu_tools.program.v2.ir.instructions import (
@@ -33,7 +34,12 @@ def _make_jt_blocks(
     entry_labels = [Label.make_new(f"e_{i}") for i in range(k)]
     exit_label = Label.make_new("jt_exit")
     bodies = [
-        BlockNode(insts=[BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit=Immediate(1))]) for _ in range(body_words)])
+        BlockNode(
+            insts=[
+                BasicBlockNode(insts=[TimeInst(c_op="inc_ref", lit=Immediate(1))])
+                for _ in range(body_words)
+            ]
+        )
         for _ in range(k)
     ]
     return build_jump_table_blocks(
@@ -92,18 +98,26 @@ def test_build_jump_table_blocks_structure_k2():
     # LABEL exit
     types = [type(inst).__name__ for inst in real]
     assert types == [
-        "JumpInst",                                        # n==0 guard
-        "RegWriteInst", "JumpInst",                        # i=n%k, jump if r==0
-        "RegWriteInst", "RegWriteInst",                    # i=i-#k, i=ABS i
-        "RegWriteInst",                                    # s15=label dispatch_0
-        "RegWriteInst", "RegWriteInst",                    # s15+=i, i:=0
-        "JumpInst",                                        # JUMP s15
-        "LabelInst", "JumpInst",                           # dispatch_0 stub
-        "LabelInst", "JumpInst",                           # dispatch_1 stub
-        "LabelInst", "TimeInst",                           # entry_0: body
-        "LabelInst", "TimeInst",                           # entry_1: body
-        "JumpInst", "JumpInst",                            # back_edge: exit check, → entry_0
-        "LabelInst",                                       # exit
+        "JumpInst",  # n==0 guard
+        "RegWriteInst",
+        "JumpInst",  # i=n%k, jump if r==0
+        "RegWriteInst",
+        "RegWriteInst",  # i=i-#k, i=ABS i
+        "RegWriteInst",  # s15=label dispatch_0
+        "RegWriteInst",
+        "RegWriteInst",  # s15+=i, i:=0
+        "JumpInst",  # JUMP s15
+        "LabelInst",
+        "JumpInst",  # dispatch_0 stub
+        "LabelInst",
+        "JumpInst",  # dispatch_1 stub
+        "LabelInst",
+        "TimeInst",  # entry_0: body
+        "LabelInst",
+        "TimeInst",  # entry_1: body
+        "JumpInst",
+        "JumpInst",  # back_edge: exit check, → entry_0
+        "LabelInst",  # exit
     ]
 
     # Spot-check key operands.
@@ -124,7 +138,11 @@ def test_build_jump_table_blocks_structure_k2():
     assert label_writes[0].dst.name == "s15"
 
     dispatch_jumps = [
-        inst for inst in real if isinstance(inst, JumpInst) and inst.addr is not None and str(inst.addr) == "s15"
+        inst
+        for inst in real
+        if isinstance(inst, JumpInst)
+        and inst.addr is not None
+        and str(inst.addr) == "s15"
     ]
     assert len(dispatch_jumps) == 1
 
@@ -137,7 +155,9 @@ def test_build_jump_table_blocks_body_words_5_uses_shift_add_seq():
     s15_add_writes = [
         inst
         for inst in flat
-        if isinstance(inst, RegWriteInst) and inst.dst.name == "s15" and str(inst.op) == "s15 + r_i"
+        if isinstance(inst, RegWriteInst)
+        and inst.dst.name == "s15"
+        and str(inst.op) == "s15 + r_i"
     ]
     assert len(s15_add_writes) == 1
 
@@ -185,4 +205,6 @@ def test_build_jump_table_blocks_entry_blocks_have_disable_opt():
     assert all(b.branch is not None for b in fixed_blocks)
     # Body copies and back-edge blocks must remain free-form.
     free_blocks = [b for b in blocks if not b.disable_opt]
-    assert any(any(lbl.name.name.startswith("e_") for lbl in b.labels) for b in free_blocks)
+    assert any(
+        any(lbl.name.name.startswith("e_") for lbl in b.labels) for b in free_blocks
+    )

@@ -43,7 +43,9 @@ def test_linker_wait_address_calculation():
         labels=[LabelInst(name=Label.make_new("L3"))],
         insts=[RegWriteInst(dst=Register("r2"), src=SrcKeyword.IMM, lit=Immediate(2))],
     )
-    bb_l4: BasicBlockNode = BasicBlockNode(labels=[LabelInst(name=Label.make_new("L4"))])
+    bb_l4: BasicBlockNode = BasicBlockNode(
+        labels=[LabelInst(name=Label.make_new("L4"))]
+    )
     ir = BlockNode(insts=[bb_l1, bb_l2, bb_l3, bb_l4])
 
     linker = IRLinker()
@@ -97,7 +99,10 @@ def test_linker_wait_roundtrip():
 
     ir = BlockNode(
         insts=[
-            BasicBlockNode(labels=[LabelInst(name=Label.make_new("L1"))], insts=[WaitInst(c_op="time")]),
+            BasicBlockNode(
+                labels=[LabelInst(name=Label.make_new("L1"))],
+                insts=[WaitInst(c_op="time")],
+            ),
             BasicBlockNode(labels=[LabelInst(name=Label.make_new("L2"))]),
         ]
     )
@@ -126,4 +131,3 @@ def test_linker_wait_roundtrip():
 
 if __name__ == "__main__":
     pytest.main([__file__])
-

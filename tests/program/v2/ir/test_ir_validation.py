@@ -43,6 +43,24 @@ from zcu_tools.program.v2.ir.pipeline import (
 )
 
 
+def _unroll_root(root: BlockNode, ctx: PipeLineContext) -> tuple[BlockNode, bool]:
+    """Apply UnrollLoopPass to each IRLoop child in root, return (result, changed)."""
+    pass_ = UnrollLoopPass()
+    changed = False
+    for i, child in enumerate(root.insts):
+        if isinstance(child, IRLoop):
+            result = pass_.transform(child, [], ctx)
+            if result is not child:
+                node: IRNode = (
+                    BlockNode(insts=list(result))
+                    if isinstance(result, list)
+                    else result
+                )
+                root.insts[i] = node
+                changed = True
+    return root, changed
+
+
 def _walk_instructions(node: IRNode) -> Iterator[Instruction]:
     if isinstance(node, BasicBlockNode):
         yield from node.labels
@@ -57,6 +75,7 @@ def _walk_instructions(node: IRNode) -> Iterator[Instruction]:
     elif isinstance(node, IRBranch):
         for case in node.cases:
             yield from _walk_instructions(case)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -179,9 +198,7 @@ def test_v1_jump_table_stub_width_is_uniform():
     )
 
     config = PipeLineConfig(max_unroll_factor=4, pmem_capacity=512)
-    out, _ = UnrollLoopPass().process(
-        root, PipeLineContext(config=config, pmem_budget=3192)
-    )
+    out, _ = _unroll_root(root, PipeLineContext(config=config, pmem_budget=3192))
 
     stubs = _collect_fixed_entry_blocks(out)
     assert stubs
@@ -300,7 +317,9 @@ def test_v2_fully_unrolled_loop_produces_single_fused_block():
                         BasicBlockNode(
                             insts=[
                                 RegWriteInst(
-                                    dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(1)
+                                    dst=Register("r1"),
+                                    src=SrcKeyword.IMM,
+                                    lit=Immediate(1),
                                 )
                             ]
                         ),
@@ -347,7 +366,9 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
                         BasicBlockNode(
                             insts=[
                                 RegWriteInst(
-                                    dst=Register("r2"), src=SrcKeyword.IMM, lit=Immediate(42)
+                                    dst=Register("r2"),
+                                    src=SrcKeyword.IMM,
+                                    lit=Immediate(42),
                                 )
                             ]
                         ),

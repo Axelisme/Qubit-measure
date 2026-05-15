@@ -43,10 +43,10 @@ from __future__ import annotations
 
 from ...labels import Label
 from ...node import BasicBlockNode
-from ...pipeline import AbsChunkPass, ChunkList, PipeLineContext
+from ...pipeline import AbsChunkListPass, ChunkList, PipeLineContext
 
 
-class BranchEliminationPass(AbsChunkPass):
+class BranchEliminationPass(AbsChunkListPass):
     """Remove redundant unconditional branches to the next block.
 
     A branch from Block A to Block B is redundant when Block B immediately

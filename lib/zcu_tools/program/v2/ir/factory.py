@@ -309,38 +309,144 @@ class IRParser:
         return self._unparse_block_node(root)
 
     def lower_block(self, block: BlockNode) -> list[BasicBlockNode]:
-        items = self._unparse_block_node(block)
-        return [item for item in items if isinstance(item, BasicBlockNode)]
+        """Recursively lower a BlockNode to flat BasicBlockNodes without MetaInst markers."""
+        return self._lower_node_flat(block)
+
+    def _lower_node_flat(self, node: IRNode) -> list[BasicBlockNode]:
+        """Recursively lower an IRNode to flat BasicBlockNodes (no MetaInst)."""
+        if isinstance(node, BasicBlockNode):
+            return [node]
+        if isinstance(node, BlockNode):
+            result: list[BasicBlockNode] = []
+            for child in node.insts:
+                result.extend(self._lower_node_flat(child))
+            return result
+        if isinstance(node, IRLoop):
+            body_chunks = self._lower_node_flat(cast(BlockNode, node.body))
+            return self._lower_loop(node, body_chunks)
+        if isinstance(node, IRBranch):
+            case_chunks_list = [
+                self._lower_node_flat(cast(BlockNode, case)) for case in node.cases
+            ]
+            return self._lower_branch(node, case_chunks_list)
+        if isinstance(node, IRDispatch):
+            return self._lower_dispatch(node)
+        raise TypeError(
+            f"IRParser._lower_node_flat: unexpected node type {type(node).__name__}"
+        )
 
     def _unparse_node(self, node: IRNode) -> list[Union[BasicBlockNode, MetaInst]]:
-        """Recursively lower a single IRNode to a flat chunk list.
+        """Recursively lower a single IRNode to a flat chunk list (with MetaInst markers).
 
-        Iterates until no IRNode remains in the output so that lowering steps
-        that produce intermediate IRNodes (e.g. _lower_branch → IRDispatch) are
-        fully resolved in one call.
+        Used by the legacy unparse() path so that IRParser.parse() can reconstruct
+        the IR tree for the U-shape iteration pipeline.
         """
-        pending: list[Union[BasicBlockNode, MetaInst, IRNode]] = [node]
-        result: list[Union[BasicBlockNode, MetaInst]] = []
+        if isinstance(node, BasicBlockNode):
+            return [node]
+        if isinstance(node, BlockNode):
+            result: list[Union[BasicBlockNode, MetaInst]] = []
+            for child in node.insts:
+                result.extend(self._unparse_node(child))
+            return result
+        if isinstance(node, IRLoop):
+            # Build the full lowered loop (guard/init/start_label/body/back_edge/end_label)
+            # and wrap it in MetaInst markers so parse() can reconstruct the IRLoop.
+            # parse() scans: skips LOOP_START→LOOP_BODY_START, reads body to LOOP_BODY_END.
+            body_chunks = self._lower_node_flat(cast(BlockNode, node.body))
+            flat = self._lower_loop(node, body_chunks)
 
-        while pending:
-            item = pending.pop(0)
-            if isinstance(item, BasicBlockNode):
-                result.append(item)
-            elif isinstance(item, MetaInst):
-                result.append(item)
-            elif isinstance(item, IRLoop):
-                pending[0:0] = self._lower_loop(item)
-            elif isinstance(item, IRBranch):
-                pending[0:0] = self._lower_branch(item)
-            elif isinstance(item, IRDispatch):
-                pending[0:0] = self._lower_dispatch(item)
-            elif isinstance(item, BlockNode):
-                pending[0:0] = list(item.insts)
-            else:
-                raise TypeError(
-                    f"IRParser.unparse: unexpected node type {type(item).__name__}"
-                )
-        return result
+            # Identify the boundary between pre-body (guard/init/start_label) and
+            # body+post (body copies + back_edge + end_label) by finding which flat
+            # blocks originated from body_chunks.
+            body_chunk_ids = {id(b) for b in body_chunks}
+            split = next(
+                (i for i, b in enumerate(flat) if id(b) in body_chunk_ids),
+                len(flat),
+            )
+            pre_loop = flat[:split]
+            body_and_post = flat[split:]
+
+            # Find end of body section (last body block).
+            last_body = max(
+                (i for i, b in enumerate(body_and_post) if id(b) in body_chunk_ids),
+                default=-1,
+            )
+            post_loop = body_and_post[last_body + 1 :]
+
+            # Use the original _unparse_node output for body so nested structures
+            # get their MetaInst markers too.
+            body_items = self._unparse_node(cast(BlockNode, node.body))
+
+            return [
+                MetaInst(
+                    type="LOOP_START",
+                    name=node.name,
+                    info=dict(
+                        counter_reg=node.counter_reg.name,
+                        n=node.n.name if isinstance(node.n, Register) else node.n,
+                        range_hint=node.range_hint,
+                    ),
+                ),
+                *pre_loop,
+                MetaInst(type="LOOP_BODY_START", name=node.name),
+                *body_items,
+                MetaInst(type="LOOP_BODY_END", name=node.name),
+                *post_loop,
+                MetaInst(type="LOOP_END", name=node.name),
+            ]
+        if isinstance(node, IRBranch):
+            n = len(node.cases)
+            case_entry_labels = [
+                Label.make_new(f"{node.name}_case_entry_{i}") for i in range(n)
+            ]
+            dispatch_node = IRDispatch(
+                name=node.name,
+                value_reg=node.compare_reg,
+                target_labels=case_entry_labels,
+            )
+            result_branch: list[Union[BasicBlockNode, MetaInst]] = [
+                MetaInst(
+                    type="BRANCH_START",
+                    name=node.name,
+                    info=dict(compare_reg=node.compare_reg.name),
+                ),
+                MetaInst(type="DISPATCH_START", name=node.name),
+                *self._lower_dispatch(dispatch_node),
+                MetaInst(type="DISPATCH_END", name=node.name),
+            ]
+            for idx, case in enumerate(node.cases):
+                result_branch.append(MetaInst(type="BRANCH_CASE_START", name=str(idx)))
+                case_items = self._unparse_node(case)
+                first_block_attached = False
+                for item in case_items:
+                    if not first_block_attached and isinstance(item, BasicBlockNode):
+                        item.labels.insert(
+                            0,
+                            LabelInst(name=case_entry_labels[idx], can_remove=True),
+                        )
+                        first_block_attached = True
+                    result_branch.append(item)
+                if not first_block_attached:
+                    result_branch.append(
+                        BasicBlockNode(
+                            labels=[
+                                LabelInst(name=case_entry_labels[idx], can_remove=True)
+                            ]
+                        )
+                    )
+                result_branch.append(MetaInst(type="BRANCH_CASE_END", name=str(idx)))
+            result_branch.append(MetaInst(type="BRANCH_END", name=node.name))
+            return result_branch
+        if isinstance(node, IRDispatch):
+            flat_dispatch = self._lower_dispatch(node)
+            return [
+                MetaInst(type="DISPATCH_START", name=node.name),
+                *flat_dispatch,
+                MetaInst(type="DISPATCH_END", name=node.name),
+            ]
+        raise TypeError(
+            f"IRParser._unparse_node: unexpected node type {type(node).__name__}"
+        )
 
     def _unparse_block_node(
         self, block: BlockNode
@@ -350,30 +456,32 @@ class IRParser:
             result.extend(self._unparse_node(child))
         return result
 
-    def _lower_loop(self, node: IRLoop) -> list[Union[BasicBlockNode, MetaInst]]:
+    def _lower_loop(
+        self, node: IRLoop, body_chunks: list[BasicBlockNode]
+    ) -> list[BasicBlockNode]:
+        """Lower an IRLoop to flat BasicBlockNodes.
+
+        Shape (do-while):
+            [guard_bb?]          <- present only for register-driven n
+            init_bb              <- REG_WR counter imm #0
+            start_label_bb       <- entry label for back-edge
+            body_chunks...       <- caller supplies already-lowered body
+            back_edge_bb         <- JUMP start -if(S) -op(counter - n)
+            end_label_bb         <- end label (n==0 escape)
+        """
         lexer = IRLexer()
         start = Label.make_new(f"{node.name}_start")
         end = Label.make_new(f"{node.name}_end")
 
         counter = node.counter_reg
         if isinstance(node.n, int):
-            n_val = Immediate(node.n)
+            n_val: Union[Immediate, Register] = Immediate(node.n)
         else:
             n_val = node.n
 
         op_str = AluExpr(counter, AluOp.SUB, n_val)
 
-        pre: list[Instruction] = [
-            MetaInst(
-                type="LOOP_START",
-                name=node.name,
-                info=dict(
-                    counter_reg=node.counter_reg.name,
-                    n=node.n.name if isinstance(node.n, Register) else node.n,
-                    range_hint=node.range_hint,
-                ),
-            ),
-        ]
+        pre: list[Instruction] = []
         if isinstance(node.n, Register):
             if needs_big_jump(self.pmem_size):
                 pre += [
@@ -395,12 +503,9 @@ class IRParser:
         pre += [
             RegWriteInst(dst=counter, src=SrcKeyword.IMM, lit=Immediate(0)),
             LabelInst(name=start, can_remove=True),
-            MetaInst(type="LOOP_BODY_START", name=node.name),
         ]
 
-        post: list[Instruction] = [
-            MetaInst(type="LOOP_BODY_END", name=node.name),
-        ]
+        post: list[Instruction] = []
         if needs_big_jump(self.pmem_size):
             post += [
                 RegWriteInst(dst=Register("s15"), src=SrcKeyword.LABEL, label=start),
@@ -408,19 +513,26 @@ class IRParser:
             ]
         else:
             post.append(JumpInst(label=start, if_cond="S", op=op_str))
-        post += [
-            LabelInst(name=end, can_remove=True),
-            MetaInst(type="LOOP_END", name=node.name),
-        ]
+        post.append(LabelInst(name=end, can_remove=True))
 
-        return lexer.lex(pre) + self._unparse_node(node.body) + lexer.lex(post)
+        pre_blocks = lexer.lex(pre)
+        post_blocks = lexer.lex(post)
+        return (
+            [b for b in pre_blocks if isinstance(b, BasicBlockNode)]
+            + body_chunks
+            + [b for b in post_blocks if isinstance(b, BasicBlockNode)]
+        )
 
-    def _lower_branch(self, node: IRBranch) -> list[Union[BasicBlockNode, MetaInst]]:
-        """Lower an IRBranch to a flat chunk list via an IRDispatch node.
+    def _lower_branch(
+        self, node: IRBranch, case_chunks_list: list[list[BasicBlockNode]]
+    ) -> list[BasicBlockNode]:
+        """Lower an IRBranch to flat BasicBlockNodes.
 
-        All IRBranch sizes (including n==2) go through _lower_dispatch so that
-        SimplifyDispatchPass can later apply the n==2 cond_jump optimisation at
-        the IR-tree layer rather than duplicating the logic here.
+        The dispatch table is emitted first (guard + indirect jump + table island),
+        then each case body with its entry label prepended.  caller supplies
+        case_chunks_list[i] as the already-lowered flat chunks for cases[i].
+
+        The out-of-range guard jumps to target_labels[-1] (the last case).
         """
         n = len(node.cases)
         case_entry_labels = [
@@ -432,63 +544,43 @@ class IRParser:
             target_labels=case_entry_labels,
         )
 
-        result: list[Union[BasicBlockNode, MetaInst]] = []
-        result.append(
-            MetaInst(
-                type="BRANCH_START",
-                name=node.name,
-                info=dict(compare_reg=node.compare_reg.name),
-            )
-        )
-        result.extend(self._lower_dispatch(dispatch_node))
+        result: list[BasicBlockNode] = list(self._lower_dispatch(dispatch_node))
 
-        for idx, case in enumerate(node.cases):
-            case_name = str(idx)
-            result.append(MetaInst(type="BRANCH_CASE_START", name=case_name))
-            case_items = self._unparse_node(case)
-            first_block_attached = False
-            for item in case_items:
-                if not first_block_attached and isinstance(item, BasicBlockNode):
-                    item.labels.insert(
-                        0, LabelInst(name=case_entry_labels[idx], can_remove=True)
-                    )
-                    first_block_attached = True
-                result.append(item)
-            if not first_block_attached:
+        for idx, case_chunks in enumerate(case_chunks_list):
+            if case_chunks:
+                case_chunks[0].labels.insert(
+                    0, LabelInst(name=case_entry_labels[idx], can_remove=True)
+                )
+                result.extend(case_chunks)
+            else:
                 result.append(
                     BasicBlockNode(
                         labels=[LabelInst(name=case_entry_labels[idx], can_remove=True)]
                     )
                 )
-            result.append(MetaInst(type="BRANCH_CASE_END", name=case_name))
 
-        result.append(MetaInst(type="BRANCH_END", name=node.name))
         return result
 
-    def _lower_dispatch(
-        self, node: IRDispatch
-    ) -> list[Union[BasicBlockNode, MetaInst]]:
-        """Lower an IRDispatch leaf node to a flat chunk list.
+    def _lower_dispatch(self, node: IRDispatch) -> list[BasicBlockNode]:
+        """Lower an IRDispatch leaf node to flat BasicBlockNodes (guard + table stubs).
 
         Shape emitted (n = len(target_labels)):
 
-            DISPATCH_START
             BasicBlockNode(branch=JUMP target_labels[-1] -if(S) -op(value_reg - #n))
                 -- out-of-range guard: if value_reg >= n, jump to the last case
             BasicBlockNode(insts=[setup...], branch=JUMP s15)
                 -- address computation + indirect jump
             [dispatch table island (disable_opt blocks)]
-            DISPATCH_END
 
         Note: The guard jumps to ``target_labels[-1]`` (the last case).  Callers
         that want a specific fallback must place it at index n-1.  This is always
         the case for IRBranch lowering (the else-branch is the last case).
+        Case bodies are NOT emitted here; the caller (_lower_branch) appends them.
         """
         n = len(node.target_labels)
         table_labels = [Label.make_new(f"{node.name}_dispatch_{i}") for i in range(n)]
 
-        result: list[Union[BasicBlockNode, MetaInst]] = []
-        result.append(MetaInst(type="DISPATCH_START", name=node.name))
+        result: list[BasicBlockNode] = []
 
         # Out-of-range guard: if value_reg >= n → jump to last case.
         result.append(
@@ -521,5 +613,4 @@ class IRParser:
             )
         )
 
-        result.append(MetaInst(type="DISPATCH_END", name=node.name))
         return result

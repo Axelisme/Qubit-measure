@@ -49,10 +49,10 @@ from __future__ import annotations
 
 from ...instructions import MetaInst
 from ...node import BasicBlockNode
-from ...pipeline import AbsChunkPass, ChunkList, PipeLineContext
+from ...pipeline import AbsChunkListPass, ChunkList, PipeLineContext
 
 
-class UnreachableEliminationPass(AbsChunkPass):
+class UnreachableEliminationPass(AbsChunkListPass):
     """Remove unreachable BasicBlockNodes after unconditional jumps.
 
     Keep MetaInst even in dead regions (structural markers must not be dropped).

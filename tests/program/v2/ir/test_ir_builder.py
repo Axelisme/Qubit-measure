@@ -13,6 +13,7 @@ from zcu_tools.program.v2.ir.operands import Immediate, Register, SrcKeyword
 
 def test_instruction_parses_jump_label_to_jumpinst():
     from zcu_tools.program.v2.ir.labels import Label
+
     Label.reset()
     Label.make_new("target")
     inst = BaseInst.from_dict({"CMD": "JUMP", "LABEL": "target"})
@@ -26,7 +27,6 @@ def test_branch_lower_produces_basic_blocks():
     """Verify IRParser lowers IRBranch to a well-formed BasicBlockNode sequence."""
     from zcu_tools.program.v2.ir.factory import IRParser
     from zcu_tools.program.v2.ir.labels import Label
-    from zcu_tools.program.v2.ir.node import BlockNode
 
     Label.reset()
 
@@ -43,8 +43,10 @@ def test_branch_lower_produces_basic_blocks():
     bb_blocks = [b for b in blocks if isinstance(b, BasicBlockNode)]
 
     # BRANCH_START and BRANCH_END are standalone MetaInsts (not inside BasicBlockNode.insts).
-    assert any(m.type == "BRANCH_START" and m.info.get("compare_reg") == "r_sel"
-               for m in meta_blocks)
+    assert any(
+        m.type == "BRANCH_START" and m.info.get("compare_reg") == "r_sel"
+        for m in meta_blocks
+    )
     assert any(m.type == "BRANCH_END" for m in meta_blocks)
 
     # All non-meta elements are BasicBlockNodes.
@@ -74,7 +76,6 @@ def test_branch_lower_produces_basic_blocks():
 def test_branch_roundtrip_preserves_cases():
     from zcu_tools.program.v2.ir.factory import IRParser
     from zcu_tools.program.v2.ir.labels import Label
-    from zcu_tools.program.v2.ir.node import BlockNode
 
     Label.reset()
 
@@ -87,7 +88,9 @@ def test_branch_roundtrip_preserves_cases():
     case_0 = BlockNode(insts=[bb_0])
     case_1 = BlockNode(insts=[bb_1])
     root = BlockNode(
-        insts=[IRBranch(name="sel", compare_reg=Register("r_sel"), cases=[case_0, case_1])]
+        insts=[
+            IRBranch(name="sel", compare_reg=Register("r_sel"), cases=[case_0, case_1])
+        ]
     )
 
     parser = IRParser()
@@ -180,7 +183,7 @@ def test_unlink_supports_multiple_labels_same_address():
 def test_builder_build_accepts_qick_labels_map():
     from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
     from zcu_tools.program.v2.ir.linker import IRLinker
-    
+
     linker = IRLinker()
     prog_list = [
         {"CMD": "REG_WR", "DST": "r1", "SRC": "imm", "LIT": "#0", "P_ADDR": 1},

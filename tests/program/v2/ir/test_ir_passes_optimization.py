@@ -33,6 +33,7 @@ from zcu_tools.program.v2.ir.passes.dataflow import (
 )
 from zcu_tools.program.v2.ir.passes.loop import UnrollLoopPass
 from zcu_tools.program.v2.ir.pipeline import (
+    AbsIRTreePass,
     PipeLineConfig,
     PipeLineContext,
     make_default_pipeline,
@@ -54,6 +55,59 @@ def _walk_basic_blocks(node: IRNode) -> Iterator[BasicBlockNode]:
 
 def _config(**kwargs) -> PipeLineConfig:
     return PipeLineConfig(**kwargs)
+
+
+def _apply_tree_pass(
+    node: IRNode, pass_: AbsIRTreePass, ctx: PipeLineContext
+) -> IRNode:
+    """Apply an AbsIRTreePass to a single IRNode (post-order, no ChunkPass between layers)."""
+    from zcu_tools.program.v2.ir.node import IRBranch, IRLoop
+
+    # Recurse into children first (post-order).
+    if isinstance(node, IRLoop):
+        new_body = _apply_tree_pass(node.body, pass_, ctx)
+        if new_body is not node.body:
+            node.body = new_body
+        child_chunks: list[
+            list[BasicBlockNode]
+        ] = []  # body not lowered, pass ignores it
+    elif isinstance(node, IRBranch):
+        for i, case in enumerate(node.cases):
+            new_case = _apply_tree_pass(case, pass_, ctx)
+            if new_case is not case:
+                node.cases[i] = new_case
+        child_chunks = []
+    elif isinstance(node, BlockNode):
+        for i, child in enumerate(node.insts):
+            new_child = _apply_tree_pass(child, pass_, ctx)
+            if new_child is not child:
+                node.insts[i] = new_child
+        return node
+    else:
+        return node
+
+    result = pass_.transform(node, child_chunks, ctx)
+    if isinstance(result, list):
+        return BlockNode(insts=list(result))  # list[BasicBlockNode] -> list[IRNode]
+    return result
+
+
+def _apply_tree_pass_to_root(
+    root: BlockNode, pass_: AbsIRTreePass, ctx: PipeLineContext
+) -> tuple[BlockNode, bool]:
+    """Apply an AbsIRTreePass to all nodes in a BlockNode tree, return (result, changed)."""
+    before_id = id(root)
+    result = _apply_tree_pass(root, pass_, ctx)
+    changed = id(result) != before_id or any(
+        id(child) != id(orig)
+        for child, orig in zip(
+            (result.insts if isinstance(result, BlockNode) else []),
+            root.insts,
+        )
+    )
+    if isinstance(result, BlockNode):
+        return result, changed
+    return BlockNode(insts=[result]), changed
 
 
 def _run_chunk_passes_on_root(root: BlockNode, passes: list) -> BlockNode:
@@ -257,7 +311,7 @@ def test_unroll_full_expansion_removes_overwritten_writes_in_body():
     ctx = PipeLineContext(config=pipeline.config, pmem_budget=512)
 
     # 1. Unroll
-    out, _ = UnrollLoopPass().process(root, ctx)
+    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
 
     # 2. Merge blocks so the linear pass sees the writes together in one block
     from zcu_tools.program.v2.ir.passes.control_flow import BlockMergePass
@@ -306,8 +360,8 @@ def test_unroll_full_expansion_keeps_counter_init_for_counter_dependent_body():
         ]
     )
 
-    out, _ = UnrollLoopPass().process(
-        root, PipeLineContext(config=_config(), pmem_budget=512)
+    out, _ = _apply_tree_pass_to_root(
+        root, UnrollLoopPass(), PipeLineContext(config=_config(), pmem_budget=512)
     )
 
     # Full expansion: the IRLoop is replaced by a BlockNode(insts=[init_bb, ...])
@@ -401,8 +455,8 @@ def test_unroll_register_driven_jump_table_structure():
     )
 
     config = _config(max_unroll_factor=2)
-    out, _ = UnrollLoopPass().process(
-        root, PipeLineContext(config=config, pmem_budget=512)
+    out, _ = _apply_tree_pass_to_root(
+        root, UnrollLoopPass(), PipeLineContext(config=config, pmem_budget=512)
     )
 
     # Only the dispatch-table stubs remain fixed.
