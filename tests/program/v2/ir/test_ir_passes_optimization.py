@@ -301,7 +301,7 @@ def test_unroll_full_expansion_removes_overwritten_writes_in_body():
     )
 
     pipeline = make_default_pipeline(pmem_capacity=512)
-    ctx = PipeLineContext(config=pipeline.config, pmem_budget=512)
+    ctx = PipeLineContext(config=pipeline.config, pmem_budget=512, available_regs={'r14'})
 
     # 1. Unroll
     out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
@@ -449,7 +449,7 @@ def test_unroll_register_driven_jump_table_structure():
 
     config = _config(max_unroll_factor=2)
     out, _ = _apply_tree_pass_to_root(
-        root, UnrollLoopPass(), PipeLineContext(config=config, pmem_budget=512)
+        root, UnrollLoopPass(), PipeLineContext(config=config, pmem_budget=512, available_regs={'r14'})
     )
 
     # UnrollLoopPass output should contain an IRDispatch node (not yet lowered).

@@ -342,8 +342,7 @@ class IRParser:
     def _unparse_node(self, node: IRNode) -> list[Union[BasicBlockNode, MetaInst]]:
         """Recursively lower a single IRNode to a flat chunk list (with MetaInst markers).
 
-        Used by the legacy unparse() path so that IRParser.parse() can reconstruct
-        the IR tree for the U-shape iteration pipeline.
+        Used by the test suite to flatten IR trees into instruction streams for testing.
         """
         if isinstance(node, BasicBlockNode):
             return [node]
@@ -530,6 +529,17 @@ class IRParser:
                         op=AluExpr(node.n, AluOp.SUB, Immediate(0)),
                     )
                 )
+        elif isinstance(node.n, int) and node.n <= 0:
+            if needs_big_jump(self.pmem_size):
+                pre += [
+                    RegWriteInst(
+                        dst=Register("s15"), src=SrcKeyword.LABEL, label=LabelRef(end)
+                    ),
+                    JumpInst(addr=Register("s15")),
+                ]
+            else:
+                pre.append(JumpInst(label=LabelRef(end)))
+
         pre += [
             RegWriteInst(dst=counter, src=SrcKeyword.IMM, lit=Immediate(0)),
             LabelInst(name=start, can_remove=True),
@@ -654,14 +664,14 @@ class IRParser:
                             label=LabelRef(last_label),
                         )
                     ],
-                    branch=JumpInst(addr=Register("s15"), if_cond="S", op=op_guard),
+                    branch=JumpInst(addr=Register("s15"), if_cond="NS", op=op_guard),
                 )
             )
         else:
             result.append(
                 BasicBlockNode(
                     branch=JumpInst(
-                        label=LabelRef(last_label), if_cond="S", op=op_guard
+                        label=LabelRef(last_label), if_cond="NS", op=op_guard
                     )
                 )
             )

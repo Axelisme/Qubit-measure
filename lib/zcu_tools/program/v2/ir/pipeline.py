@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Union
 
 from .factory import IRLexer, IRParser
@@ -50,6 +50,7 @@ DEFAULT_PIPELINE_CONFIG = PipeLineConfig()
 class PipeLineContext:
     config: PipeLineConfig
     pmem_budget: int
+    available_regs: set[str] = field(default_factory=set)
 
 
 # ---------------------------------------------------------------------------
@@ -325,9 +326,28 @@ class IRPipeLine:
         self,
         insts: list[Instruction],
     ) -> tuple[list[Instruction], PipeLineContext]:
+        from .hw_semantics import GENERAL_REGS
+        from .instructions import BaseInst
+        from .operands import parse_register
+
+        used_regs = set()
+        for inst in insts:
+            if isinstance(inst, BaseInst):
+                used_regs.update(inst.reg_read)
+                used_regs.update(inst.reg_write)
+            elif isinstance(inst, MetaInst) and inst.info:
+                for v in inst.info.values():
+                    if isinstance(v, str):
+                        reg = parse_register(v)
+                        if reg is not None:
+                            used_regs.update(reg.regs())
+        
+        available_regs = set(GENERAL_REGS) - used_regs
+
         ctx = PipeLineContext(
             config=self.config,
             pmem_budget=int(0.8 * self.config.pmem_capacity),
+            available_regs=available_regs,
         )
         if self.config.disable_all_opt:
             return insts, ctx

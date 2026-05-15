@@ -561,6 +561,13 @@ class UnrollLoopPass(AbsIRTreePass):
             )
             return None
 
+        if not ctx.available_regs:
+            logger.debug(
+                "UnrollLoopPass: skip jump-table loop name=%s because no available_regs",
+                node.name,
+            )
+            return None
+
         pmem_size = ctx.config.pmem_capacity
         logger.debug(
             "UnrollLoopPass: build jump-table loop name=%s n_reg=%s "
@@ -575,6 +582,8 @@ class UnrollLoopPass(AbsIRTreePass):
         assert isinstance(node.n, Register)
         i = node.counter_reg
         n = node.n
+        # Pop one available register (deterministic: pick min)
+        scratch = Register(min(ctx.available_regs))
 
         # Local allocated set for labels generated within this jump-table session.
         local_allocated: set[str] = set(_collect_body_labels(body_insts))
@@ -587,6 +596,13 @@ class UnrollLoopPass(AbsIRTreePass):
         result: list[IRNode] = []
 
         # ── prologue ──────────────────────────────────────────────────────────
+        # Reset counter i to 0 at the very start of the loop setup
+        result.append(
+            BasicBlockNode(
+                insts=[RegWriteInst(dst=i, src=SrcKeyword.IMM, lit=Immediate(0))]
+            )
+        )
+
         # Guard: skip entirely when n == 0.
         if needs_big_jump(pmem_size):
             result.append(
@@ -616,14 +632,14 @@ class UnrollLoopPass(AbsIRTreePass):
                 )
             )
 
-        # Compute remainder r = n % k (stored in counter_reg temporarily).
+        # Compute remainder r = n % k (stored in scratch temporarily).
         # If r == 0, jump straight to entry_0 (full rounds only).
         if needs_big_jump(pmem_size):
             result.append(
                 BasicBlockNode(
                     insts=[
                         RegWriteInst(
-                            dst=i,
+                            dst=scratch,
                             src=SrcKeyword.OP,
                             op=AluExpr(n, AluOp.AND, Immediate(k - 1)),
                         )
@@ -642,7 +658,7 @@ class UnrollLoopPass(AbsIRTreePass):
                     branch=JumpInst(
                         addr=Register("s15"),
                         if_cond="Z",
-                        op=AluExpr(i, AluOp.SUB, Immediate(0)),
+                        op=AluExpr(scratch, AluOp.SUB, Immediate(0)),
                     ),
                 )
             )
@@ -651,7 +667,7 @@ class UnrollLoopPass(AbsIRTreePass):
                 BasicBlockNode(
                     insts=[
                         RegWriteInst(
-                            dst=i,
+                            dst=scratch,
                             src=SrcKeyword.OP,
                             op=AluExpr(n, AluOp.AND, Immediate(k - 1)),
                         )
@@ -659,35 +675,29 @@ class UnrollLoopPass(AbsIRTreePass):
                     branch=JumpInst(
                         label=LabelRef(entry_labels[0]),
                         if_cond="Z",
-                        op=AluExpr(i, AluOp.SUB, Immediate(0)),
+                        op=AluExpr(scratch, AluOp.SUB, Immediate(0)),
                     ),
                 )
             )
 
-        # Compute dispatch offset: i = k - r, reset counter, then dispatch.
+        # Compute dispatch offset: scratch = k - r, then dispatch.
         from ...node import IRDispatch
 
         offset_insts: list[BaseInst] = [
             RegWriteInst(
-                dst=i, src=SrcKeyword.OP, op=AluExpr(i, AluOp.SUB, Immediate(k))
-            ),  # i = r - k
+                dst=scratch, src=SrcKeyword.OP, op=AluExpr(scratch, AluOp.SUB, Immediate(k))
+            ),  # scratch = r - k
             RegWriteInst(
-                dst=i, src=SrcKeyword.OP, op=AluExpr(i, AluOp.ABS)
-            ),  # i = k - r
+                dst=scratch, src=SrcKeyword.OP, op=AluExpr(scratch, AluOp.ABS)
+            ),  # scratch = k - r
         ]
         result.append(BasicBlockNode(insts=offset_insts))
-        # Reset counter before entering bodies (must precede dispatch jump).
-        result.append(
-            BasicBlockNode(
-                insts=[RegWriteInst(dst=i, src=SrcKeyword.IMM, lit=Immediate(0))]
-            )
-        )
 
         # ── dispatch node (lowered by pipeline → SimplifyDispatchPass or fallback) ──
         result.append(
             IRDispatch(
                 name=f"{node.name}_jt_entry_0",
-                value_reg=i,
+                value_reg=scratch,
                 target_labels=entry_labels,
             )
         )

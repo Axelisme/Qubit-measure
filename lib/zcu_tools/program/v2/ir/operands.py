@@ -25,6 +25,7 @@ class SrcKeyword(str, Enum):
     LABEL = "label"
     DMEM = "dmem"
     WMEM = "wmem"
+    REG = "reg"
 
 
 class AluOp(str, Enum):
