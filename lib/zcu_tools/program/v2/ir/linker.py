@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing_extensions import Any
 
 from .instructions import BaseInst, Instruction, LabelInst, MetaInst
-from .labels import Label
 
 
 @dataclass(frozen=True)
@@ -61,8 +60,6 @@ class IRLinker:
         labels: dict[str, Any],
         meta_infos: list[dict[str, Any]],
     ) -> list[Instruction]:
-        Label.reset()
-
         # 1. Strict Validation: Compare labels.keys() with labels tracked in meta_infos
         tracked_label_names = {
             m["name"] for m in meta_infos if m.get("kind") == "label"
@@ -78,12 +75,6 @@ class IRLinker:
             if only_in_provided:
                 msg += f" Not found in meta_infos: {sorted(list(only_in_provided))}."
             raise ValueError(msg)
-
-        # 2. Pre-allocation: Initialize Label identities based on meta_infos
-        # We sort to ensure deterministic behavior if suffixes are ever needed,
-        # though since we just reset, they will match exactly.
-        for name in sorted(list(tracked_label_names)):
-            Label.make_new(name)
 
         # Group tracked markers by p_addr
         markers_by_addr: dict[int, list[dict]] = defaultdict(list)

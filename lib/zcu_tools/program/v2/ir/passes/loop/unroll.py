@@ -78,7 +78,6 @@ from __future__ import annotations
 
 import logging
 import math
-from copy import deepcopy
 from dataclasses import dataclass
 
 from typing_extensions import Optional, cast
@@ -91,7 +90,7 @@ from ...analysis import (
 from ...dispatch import needs_big_jump
 from ...factory import IRParser
 from ...instructions import BaseInst, JumpInst, LabelInst, RegWriteInst
-from ...labels import Label
+from ...labels import Label, LabelRef, make_label
 from ...node import BasicBlockNode, BlockNode, IRLoop, IRNode
 from ...operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
 from ...pipeline import AbsIRTreePass, PipeLineContext
@@ -110,6 +109,73 @@ class UnrollAnalysis:
     k_final: int
 
 
+def _collect_body_labels(nodes: list[IRNode]) -> set[str]:
+    """Recursively collect all LabelInst names defined inside body nodes."""
+    names: set[str] = set()
+    for node in nodes:
+        if isinstance(node, BasicBlockNode):
+            for lbl in node.labels:
+                names.add(lbl.name.name)
+        elif isinstance(node, BlockNode):
+            names |= _collect_body_labels(node.insts)
+    return names
+
+
+def _remap_node(node: IRNode, remap: dict[str, Label]) -> IRNode:
+    """Return a shallow-copied IRNode with all labels in remap substituted."""
+    from ...instructions import BaseInst, CallInst, DmemReadInst, JumpInst, RegWriteInst
+
+    if isinstance(node, BasicBlockNode):
+        new_labels = [
+            LabelInst(
+                name=remap.get(lbl.name.name, lbl.name), can_remove=lbl.can_remove
+            )
+            for lbl in node.labels
+        ]
+
+        def _remap_ref(ref: object) -> object:
+            if isinstance(ref, Label) and ref.name in remap:
+                return remap[ref.name]
+            return ref
+
+        def _remap_inst(inst: JumpInst) -> JumpInst:
+            label = _remap_ref(inst.label)
+            if label is inst.label:
+                return inst
+            import dataclasses
+
+            return dataclasses.replace(inst, label=LabelRef(label))  # type: ignore[call-overload]
+
+        def _remap_base_inst(inst: BaseInst) -> BaseInst:
+            if isinstance(inst, (JumpInst, RegWriteInst, DmemReadInst, CallInst)):
+                label = _remap_ref(inst.label)
+                if label is inst.label:
+                    return inst
+                import dataclasses
+
+                return dataclasses.replace(inst, label=LabelRef(label))  # type: ignore[call-overload]
+            return inst
+
+        new_insts = [_remap_base_inst(i) for i in node.insts]
+        new_branch = _remap_inst(node.branch) if node.branch is not None else None
+        return BasicBlockNode(
+            labels=new_labels,
+            insts=new_insts,
+            branch=new_branch,
+            disable_opt=node.disable_opt,
+        )
+    if isinstance(node, BlockNode):
+        return BlockNode(insts=[_remap_node(child, remap) for child in node.insts])
+    return node
+
+
+def _clone_body(nodes: list[IRNode], allocated: set[str]) -> list[IRNode]:
+    """Clone body nodes with all internal labels remapped to fresh unique names."""
+    body_names = _collect_body_labels(nodes)
+    remap = {n: make_label(n, allocated) for n in body_names}
+    return [_remap_node(node, remap) for node in nodes]
+
+
 def _clone_body_nodes(
     nodes: list[IRNode],
     repeat: int,
@@ -117,15 +183,18 @@ def _clone_body_nodes(
 ) -> list[BasicBlockNode]:
     """Clone `repeat` full loop-body copies as BasicBlockNodes.
 
-    The loop body is trusted to already include the loop-carried counter
-    update. Later linear passes may merge or reorder that write, so unroll
-    logic must clone the body as a semantic unit instead of trying to append
-    a structural increment block.
+    A local `allocated` set is built from all label names already present in
+    `nodes`.  Each clone call adds its remapped names to this set so successive
+    copies get distinct suffixes.  The set is discarded after the function
+    returns — it has no meaning outside of this clone session.
     """
+    # Seed allocated with all label names already present in the body so that
+    # the first clone does not collide with the original names.
+    allocated: set[str] = set(_collect_body_labels(nodes))
     result: list[BasicBlockNode] = []
     for _ in range(repeat):
         lowered = IRParser(pmem_size=pmem_size).lower_block(
-            BlockNode(insts=deepcopy(nodes))
+            BlockNode(insts=_clone_body(nodes, allocated))
         )
         result.extend(lowered)
     return result
@@ -331,7 +400,10 @@ class UnrollLoopPass(AbsIRTreePass):
             ]
         )
         return BlockNode(
-            insts=[init_bb, *_clone_body_nodes(body_insts, n, pmem_size=pmem_size)]
+            insts=[
+                init_bb,
+                *_clone_body_nodes(body_insts, n, pmem_size=pmem_size),
+            ]
         )
 
     def _unroll_partial(
@@ -351,8 +423,11 @@ class UnrollLoopPass(AbsIRTreePass):
         body_insts = cast(BlockNode, node.body).insts
         result: list[IRNode] = []
 
+        # Local allocated set for labels generated within this unroll session.
+        local_allocated: set[str] = set(_collect_body_labels(body_insts))
+
         if remainder > 0:
-            entry_label = Label.make_new(f"{node.name}_remainder_entry")
+            entry_label = make_label(f"{node.name}_remainder_entry", local_allocated)
             part1 = _clone_body_nodes(body_insts, k - remainder, pmem_size=pmem_size)
             part2 = _clone_body_nodes(body_insts, remainder, pmem_size=pmem_size)
 
@@ -369,7 +444,9 @@ class UnrollLoopPass(AbsIRTreePass):
                             dst=node.counter_reg, src=SrcKeyword.IMM, lit=Immediate(0)
                         ),
                         RegWriteInst(
-                            dst=Register("s15"), src=SrcKeyword.LABEL, label=entry_label
+                            dst=Register("s15"),
+                            src=SrcKeyword.LABEL,
+                            label=LabelRef(entry_label),
                         ),
                     ],
                     branch=JumpInst(addr=Register("s15")),
@@ -381,7 +458,7 @@ class UnrollLoopPass(AbsIRTreePass):
                             dst=node.counter_reg, src=SrcKeyword.IMM, lit=Immediate(0)
                         )
                     ],
-                    branch=JumpInst(label=entry_label),
+                    branch=JumpInst(label=LabelRef(entry_label)),
                 )
             result.append(init_bb)
         else:
@@ -389,8 +466,8 @@ class UnrollLoopPass(AbsIRTreePass):
 
         # Build flat loop: start label → unrolled body → back-edge → end label.
         # Not wrapped in IRLoop to prevent re-unrolling on the next pipeline iteration.
-        start = Label.make_new(f"{node.name}_unrolled_start")
-        end = Label.make_new(f"{node.name}_unrolled_end")
+        start = make_label(f"{node.name}_unrolled_start", local_allocated)
+        end = make_label(f"{node.name}_unrolled_end", local_allocated)
 
         if remainder == 0:
             result.append(
@@ -410,13 +487,15 @@ class UnrollLoopPass(AbsIRTreePass):
         if needs_big_jump(pmem_size):
             back_bb = BasicBlockNode(
                 insts=[
-                    RegWriteInst(dst=Register("s15"), src=SrcKeyword.LABEL, label=start)
+                    RegWriteInst(
+                        dst=Register("s15"), src=SrcKeyword.LABEL, label=LabelRef(start)
+                    )
                 ],
                 branch=JumpInst(addr=Register("s15"), if_cond="S", op=op_str),
             )
         else:
             back_bb = BasicBlockNode(
-                branch=JumpInst(label=start, if_cond="S", op=op_str)
+                branch=JumpInst(label=LabelRef(start), if_cond="S", op=op_str)
             )
         result.append(back_bb)
         result.append(BasicBlockNode(labels=[LabelInst(name=end)]))
@@ -493,10 +572,14 @@ class UnrollLoopPass(AbsIRTreePass):
         assert isinstance(node.n, Register)
         i = node.counter_reg
         n = node.n
+
+        # Local allocated set for labels generated within this jump-table session.
+        local_allocated: set[str] = set(_collect_body_labels(body_insts))
         entry_labels = [
-            Label.make_new(f"{node.name}_jt_entry_{idx}") for idx in range(k)
+            make_label(f"{node.name}_jt_entry_{idx}", local_allocated)
+            for idx in range(k)
         ]
-        exit_label = Label.make_new(f"{node.name}_jt_exit")
+        exit_label = make_label(f"{node.name}_jt_exit", local_allocated)
 
         result: list[IRNode] = []
 
@@ -507,7 +590,9 @@ class UnrollLoopPass(AbsIRTreePass):
                 BasicBlockNode(
                     insts=[
                         RegWriteInst(
-                            dst=Register("s15"), src=SrcKeyword.LABEL, label=exit_label
+                            dst=Register("s15"),
+                            src=SrcKeyword.LABEL,
+                            label=LabelRef(exit_label),
                         )
                     ],
                     branch=JumpInst(
@@ -521,7 +606,7 @@ class UnrollLoopPass(AbsIRTreePass):
             result.append(
                 BasicBlockNode(
                     branch=JumpInst(
-                        label=exit_label,
+                        label=LabelRef(exit_label),
                         if_cond="Z",
                         op=AluExpr(n, AluOp.SUB, Immediate(0)),
                     ),
@@ -548,7 +633,7 @@ class UnrollLoopPass(AbsIRTreePass):
                         RegWriteInst(
                             dst=Register("s15"),
                             src=SrcKeyword.LABEL,
-                            label=entry_labels[0],
+                            label=LabelRef(entry_labels[0]),
                         )
                     ],
                     branch=JumpInst(
@@ -569,7 +654,7 @@ class UnrollLoopPass(AbsIRTreePass):
                         )
                     ],
                     branch=JumpInst(
-                        label=entry_labels[0],
+                        label=LabelRef(entry_labels[0]),
                         if_cond="Z",
                         op=AluExpr(i, AluOp.SUB, Immediate(0)),
                     ),
@@ -607,7 +692,9 @@ class UnrollLoopPass(AbsIRTreePass):
         # ── k body copies (free-form IRNodes, lowered by pipeline) ────────────
         for idx in range(k):
             entry_bb = BasicBlockNode(labels=[LabelInst(name=entry_labels[idx])])
-            body_block = BlockNode(insts=[entry_bb, *deepcopy(body_insts)])
+            body_block = BlockNode(
+                insts=[entry_bb, *_clone_body(body_insts, local_allocated)]
+            )
             result.append(body_block)
 
         # ── back edge ─────────────────────────────────────────────────────────
@@ -621,7 +708,7 @@ class UnrollLoopPass(AbsIRTreePass):
                         RegWriteInst(
                             dst=Register("s15"),
                             src=SrcKeyword.LABEL,
-                            label=entry_labels[0],
+                            label=LabelRef(entry_labels[0]),
                         )
                     ],
                     branch=JumpInst(addr=Register("s15"), if_cond="S", op=op_cmp),
@@ -630,7 +717,9 @@ class UnrollLoopPass(AbsIRTreePass):
         else:
             result.append(
                 BasicBlockNode(
-                    branch=JumpInst(label=entry_labels[0], if_cond="S", op=op_cmp)
+                    branch=JumpInst(
+                        label=LabelRef(entry_labels[0]), if_cond="S", op=op_cmp
+                    )
                 )
             )
 

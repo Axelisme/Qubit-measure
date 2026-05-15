@@ -14,8 +14,7 @@ from zcu_tools.program.v2.ir.operands import Immediate, Register, SrcKeyword
 def test_instruction_parses_jump_label_to_jumpinst():
     from zcu_tools.program.v2.ir.labels import Label
 
-    Label.reset()
-    Label.make_new("target")
+    Label("target")
     inst = BaseInst.from_dict({"CMD": "JUMP", "LABEL": "target"})
 
     assert isinstance(inst, JumpInst)
@@ -27,8 +26,6 @@ def test_branch_lower_produces_basic_blocks():
     """Verify IRParser lowers IRBranch to a well-formed BasicBlockNode sequence."""
     from zcu_tools.program.v2.ir.factory import IRParser
     from zcu_tools.program.v2.ir.labels import Label
-
-    Label.reset()
 
     case_0_inst = RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1))
     case_1_inst = RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(2))
@@ -76,8 +73,6 @@ def test_branch_lower_produces_basic_blocks():
 def test_branch_roundtrip_preserves_cases():
     from zcu_tools.program.v2.ir.factory import IRParser
     from zcu_tools.program.v2.ir.labels import Label
-
-    Label.reset()
 
     bb_0: BasicBlockNode = BasicBlockNode(
         insts=[RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1))]

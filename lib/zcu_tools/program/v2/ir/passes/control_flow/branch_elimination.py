@@ -41,7 +41,6 @@ QICK Hardware Notes
 
 from __future__ import annotations
 
-from ...labels import Label
 from ...node import BasicBlockNode
 from ...pipeline import AbsChunkListPass, ChunkList, PipeLineContext
 
@@ -76,7 +75,7 @@ class BranchEliminationPass(AbsChunkListPass):
         # Only eliminate plain unconditional label jumps with no side effects.
         if branch.if_cond is not None or branch.op is not None or branch.wr is not None:
             return False
-        if not isinstance(branch.label, Label):
+        if branch.label is None or branch.label.is_pseudo():
             return False
 
         # Find the next BasicBlockNode in the flat chunk list.
@@ -88,7 +87,7 @@ class BranchEliminationPass(AbsChunkListPass):
             return False
 
         # Check if the branch targets the immediately following block.
-        target = branch.label
+        target = branch.label.as_label()
         if not any(lbl.name == target for lbl in next_block.labels):
             return False
 

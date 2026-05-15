@@ -322,7 +322,8 @@ class IRPipeLine:
         self.tree_passes: list[AbsIRTreePass] = tree_passes or []
 
     def __call__(
-        self, insts: list[Instruction]
+        self,
+        insts: list[Instruction],
     ) -> tuple[list[Instruction], PipeLineContext]:
         ctx = PipeLineContext(
             config=self.config,

@@ -7,7 +7,7 @@ from typing import Literal
 from typing_extensions import Any, Optional, Union
 
 from .hw_semantics import STATUS_REG, TIMED_BASE_REG, USR_TIME_REG
-from .labels import Label
+from .labels import Label, LabelRef
 from .operands import (
     AddrType,
     AluExpr,
@@ -232,7 +232,7 @@ class BaseInst(Instruction):
 
     @property
     def need_label(self) -> Optional[Label]:
-        """Label name this instruction depends on (e.g. for JUMP or WR_ADDR)."""
+        """Non-pseudo Label this instruction references (for dead-label analysis)."""
         return None
 
 
@@ -355,7 +355,7 @@ class TestInst(BaseInst):
 class JumpInst(BaseInst):
     """JUMP instruction: unconditional or conditional jump."""
 
-    label: Optional[Label] = None
+    label: Optional[LabelRef] = None
     if_cond: Optional[CondCode] = None
     addr: Optional[AddrType] = None
     wr: Optional[SideWrite] = None
@@ -374,11 +374,8 @@ class JumpInst(BaseInst):
         )
 
     def __post_init__(self) -> None:
-        if self.addr is not None and not isinstance(self.addr, Label):
-            if self.addr != Register("s15"):
-                raise ValueError(
-                    f"JumpInst.addr must be 's15' or Label, got {self.addr!r}."
-                )
+        if self.addr is not None and self.addr != Register("s15"):
+            raise ValueError(f"JumpInst.addr must be 's15', got {self.addr!r}.")
 
     @property
     def reg_read(self) -> frozenset[str]:
@@ -395,16 +392,20 @@ class JumpInst(BaseInst):
 
     @property
     def need_label(self) -> Optional[Label]:
-        if self.label and not self.label.is_pseudo_name():
-            return self.label
-        if isinstance(self.addr, Label) and not self.addr.is_pseudo_name():
-            return self.addr
+        if self.label is not None and not self.label.is_pseudo():
+            return self.label.as_label()
         return None
 
     def to_dict(self) -> dict[str, Any]:
+        if self.label is None:
+            label_name = None
+        elif not self.label.is_pseudo():
+            label_name = self.label.as_label().name
+        else:
+            label_name = self.label.target
         d = {
             "CMD": "JUMP",
-            "LABEL": self.label.name if self.label else None,
+            "LABEL": label_name,
             "ADDR": str(self.addr) if self.addr else None,
             "IF": self.if_cond if self.if_cond else None,
             "WR": str(self.wr) if self.wr else None,
@@ -426,7 +427,7 @@ class RegWriteInst(BaseInst):
     uf: bool = False
     wr: Optional[SideWrite] = None
     if_cond: Optional[CondCode] = None
-    label: Optional[Label] = None
+    label: Optional[LabelRef] = None
     ww: Optional[str] = None
     wp: Optional[str] = None
 
@@ -465,10 +466,8 @@ class RegWriteInst(BaseInst):
 
     @property
     def need_label(self) -> Optional[Label]:
-        if self.label and not self.label.is_pseudo_name():
-            return self.label
-        if isinstance(self.addr, Label) and not self.addr.is_pseudo_name():
-            return self.addr
+        if self.label is not None and not self.label.is_pseudo():
+            return self.label.as_label()
         return None
 
     def to_dict(self) -> dict[str, Any]:
@@ -479,6 +478,12 @@ class RegWriteInst(BaseInst):
             if self.src
             else None
         )
+        if self.label is None:
+            label_name = None
+        elif not self.label.is_pseudo():
+            label_name = self.label.as_label().name
+        else:
+            label_name = self.label.target
         d = {
             "CMD": "REG_WR",
             "DST": str(self.dst) if self.dst else None,
@@ -489,7 +494,7 @@ class RegWriteInst(BaseInst):
             "ADDR": str(self.addr) if self.addr else None,
             "UF": "1" if self.uf else None,
             "IF": self.if_cond if self.if_cond else None,
-            "LABEL": self.label.name if self.label else None,
+            "LABEL": label_name,
             "WW": self.ww,
             "WP": self.wp,
         }
@@ -587,7 +592,7 @@ class DmemReadInst(BaseInst):
     lit: Optional[Immediate] = None
     uf: bool = False
     if_cond: Optional[CondCode] = None
-    label: Optional[Label] = None
+    label: Optional[LabelRef] = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> DmemReadInst:
@@ -618,13 +623,17 @@ class DmemReadInst(BaseInst):
 
     @property
     def need_label(self) -> Optional[Label]:
-        if self.label and not self.label.is_pseudo_name():
-            return self.label
-        if isinstance(self.addr, Label) and not self.addr.is_pseudo_name():
-            return self.addr
+        if self.label is not None and not self.label.is_pseudo():
+            return self.label.as_label()
         return None
 
     def to_dict(self) -> dict[str, Any]:
+        if self.label is None:
+            label_name = None
+        elif not self.label.is_pseudo():
+            label_name = self.label.as_label().name
+        else:
+            label_name = self.label.target
         d = {
             "CMD": "REG_WR",
             "DST": str(self.dst) if self.dst else None,
@@ -635,7 +644,7 @@ class DmemReadInst(BaseInst):
             "LIT": str(self.lit) if self.lit else None,
             "UF": "1" if self.uf else None,
             "IF": self.if_cond if self.if_cond else None,
-            "LABEL": self.label.name if self.label else None,
+            "LABEL": label_name,
         }
         return {k: v for k, v in d.items() if v is not None}
 
@@ -892,7 +901,7 @@ class TrigInst(BaseInst):
 class CallInst(BaseInst):
     """CALL instruction: call a subroutine (stores return address before jumping)."""
 
-    label: Optional[Label] = None
+    label: Optional[LabelRef] = None
     addr: Optional[AddrType] = None
 
     @classmethod
@@ -903,11 +912,8 @@ class CallInst(BaseInst):
         )
 
     def __post_init__(self) -> None:
-        if self.addr is not None and not isinstance(self.addr, Label):
-            if self.addr != Register("s15"):
-                raise ValueError(
-                    f"CallInst.addr must be 's15' or Label, got {self.addr!r}."
-                )
+        if self.addr is not None and self.addr != Register("s15"):
+            raise ValueError(f"CallInst.addr must be 's15', got {self.addr!r}.")
 
     @property
     def reg_read(self) -> frozenset[str]:
@@ -917,16 +923,20 @@ class CallInst(BaseInst):
 
     @property
     def need_label(self) -> Optional[Label]:
-        if self.label and not self.label.is_pseudo_name():
-            return self.label
-        if isinstance(self.addr, Label) and not self.addr.is_pseudo_name():
-            return self.addr
+        if self.label is not None and not self.label.is_pseudo():
+            return self.label.as_label()
         return None
 
     def to_dict(self) -> dict[str, Any]:
+        if self.label is None:
+            label_name = None
+        elif not self.label.is_pseudo():
+            label_name = self.label.as_label().name
+        else:
+            label_name = self.label.target
         d = {
             "CMD": "CALL",
-            "LABEL": self.label.name if self.label else None,
+            "LABEL": label_name,
             "ADDR": str(self.addr) if self.addr else None,
         }
         return {k: v for k, v in d.items() if v is not None}
@@ -1240,12 +1250,6 @@ class WaitInst(BaseInst):
         if isinstance(self.addr, Register):
             reads = reads | self.addr.regs()
         return reads
-
-    @property
-    def need_label(self) -> Optional[Label]:
-        if isinstance(self.addr, Label) and not self.addr.is_pseudo_name():
-            return self.addr
-        return None
 
     def to_dict(self) -> dict[str, Any]:
         d = {

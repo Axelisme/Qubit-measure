@@ -250,7 +250,7 @@ def test_dead_test_elimination_removes_unused_test():
 
 
 def test_dead_test_elimination_keeps_used_test():
-    lbl = Label.make_new("loop")
+    lbl = Label("loop")
     root = BlockNode(
         insts=[
             BasicBlockNode(
@@ -328,7 +328,6 @@ def test_unroll_full_expansion_removes_overwritten_writes_in_body():
 def test_unroll_full_expansion_keeps_counter_init_for_counter_dependent_body():
     """When body reads/increments loop counter, full expansion must still emit
     the counter init (`REG_WR counter imm #0`) before the first body copy."""
-    Label.reset()
     root = BlockNode(
         insts=[
             IRLoop(
@@ -379,7 +378,6 @@ def test_default_pipeline_can_disable_all_optimization_passes():
     from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
 
     """Disabling all pass flags should keep the IR layout unchanged."""
-    Label.reset()
     root = BlockNode(
         insts=[
             BasicBlockNode(
@@ -393,7 +391,7 @@ def test_default_pipeline_can_disable_all_optimization_passes():
                 ]
             ),
             BasicBlockNode(
-                labels=[LabelInst(name=Label.make_new("dead"))],
+                labels=[LabelInst(name=Label("dead"))],
                 insts=[
                     TimeInst(c_op="inc_ref", lit=Immediate(0)),
                     TimeInst(c_op="inc_ref", lit=Immediate(1)),
@@ -430,7 +428,6 @@ def _collect_all_basic_blocks(root: BlockNode) -> list[BasicBlockNode]:
 def test_unroll_register_driven_jump_table_structure():
     """UnrollLoopPass emits an IRDispatch node (not pre-lowered stubs) for the
     dispatch table; stubs are produced later by the pipeline fallback."""
-    Label.reset()
     from zcu_tools.program.v2.ir.node import IRDispatch
 
     root = BlockNode(

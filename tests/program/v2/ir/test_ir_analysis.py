@@ -7,7 +7,7 @@ from zcu_tools.program.v2.ir.instructions import (
     TestInst,
     TimeInst,
 )
-from zcu_tools.program.v2.ir.labels import Label
+from zcu_tools.program.v2.ir.labels import Label, LabelRef
 from zcu_tools.program.v2.ir.operands import (
     AluExpr,
     AluOp,
@@ -39,7 +39,7 @@ def test_test_inst_analysis():
 
 
 def test_jump_inst_analysis():
-    inst = JumpInst(label=Label.make_new("loop"), if_cond="Z")
+    inst = JumpInst(label=LabelRef(Label("loop")), if_cond="Z")
     assert set(inst.reg_read) == set()
     assert set(inst.reg_write) == set()
 
@@ -86,13 +86,13 @@ def test_property_types():
 
 
 def test_need_label():
-    inst = JumpInst(label=Label.make_new("target"))
+    inst = JumpInst(label=LabelRef(Label("target")))
     assert str(inst.need_label) == "&target"
 
-    assert JumpInst(label=Label("HERE")).need_label is None
-    assert JumpInst(label=Label("NEXT")).need_label is None
+    assert JumpInst(label=LabelRef("HERE")).need_label is None
+    assert JumpInst(label=LabelRef("NEXT")).need_label is None
 
     inst = RegWriteInst(
-        dst=Register("s1"), src=SrcKeyword.IMM, label=Label.make_new("data_table")
+        dst=Register("s1"), src=SrcKeyword.IMM, label=LabelRef(Label("data_table"))
     )
     assert str(inst.need_label) == "&data_table"

@@ -1,104 +1,77 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from typing_extensions import Any
+from typing_extensions import Literal, Union
 
 if TYPE_CHECKING:
     from .pipeline import ChunkList
 
-PSEUDO_LABELS = {"PREV", "HERE", "NEXT", "SKIP"}
+PSEUDO_LABELS: frozenset[str] = frozenset({"PREV", "HERE", "NEXT", "SKIP"})
+
+PseudoLabel = Literal["PREV", "HERE", "NEXT", "SKIP"]
 
 
+@dataclass(frozen=True)
 class Label:
-    """A first-class logical label identity."""
+    """A first-class logical label identity.
 
-    # Global allocator: tracks all allocated label names to guarantee uniqueness.
-    # INVARIANT: Label.reset() must be called before each top-level build pass
-    # (i.e., before IRBuilder.build()).
-    _allocated: dict[str, Label] = {}
+    Value object: equality and hashing are based solely on ``name``.
+    Two ``Label`` instances with the same name are considered identical.
+    """
 
-    def __new__(cls, name: str):
-        if name in PSEUDO_LABELS:
-            return super().__new__(cls)
-        if name not in cls._allocated:
-            raise ValueError(f"Label name '{name}' has not been allocated yet.")
-        return cls._allocated[name]
-
-    def __init__(self, name: str):
-        self.name = name
-
-    @classmethod
-    def make_new(cls, base_name: str) -> Label:
-        """Create a new logical label, ensuring the name is unique."""
-        if base_name in PSEUDO_LABELS:
-            return cls(base_name)
-
-        name = base_name
-        counter = 0
-        while name in cls._allocated:
-            name = f"{base_name}_{counter}"
-            counter += 1
-
-        inst = super().__new__(cls)
-        inst.__init__(name)
-        cls._allocated[name] = inst
-        return inst
-
-    @classmethod
-    def claim(cls, name: str) -> Label:
-        """Return the existing label with this name, or create it if not yet allocated.
-
-        Use this instead of make_new() when the IR lowering layer wants to reference
-        a label that the macro layer may have already registered via unlink()
-        pre-allocation (e.g. loop start/end, branch case entries, dispatch stubs).
-        Calling make_new() in that situation would produce a suffixed duplicate
-        (e.g. ``foo_case_entry_0_0``); claim() avoids the collision while still
-        creating the label if it does not exist yet (noopt / standalone paths).
-        """
-        if name in PSEUDO_LABELS:
-            return cls(name)
-        if name in cls._allocated:
-            return cls._allocated[name]
-        return cls.make_new(name)
-
-    @property
-    def label_set(self) -> set[str]:
-        # Keep as property for backward compatibility if needed by other modules
-        return set(self._allocated.keys())
-
-    def is_pseudo_name(self) -> bool:
-        return self.name in PSEUDO_LABELS
-
-    def clone_new(self) -> Label:
-        """Create a new label derived from this one's name."""
-        if self.is_pseudo_name():
-            return self
-        return Label.make_new(self.name)
-
-    def __deepcopy__(self, memo: dict[int, Any]) -> "Label":
-        if self.is_pseudo_name():
-            memo[id(self)] = self
-            return self
-
-        # Ensure deepcopy preserves shared references within the cloned subtree
-        # while creating a fresh unique label identity overall.
-        new_label = self.clone_new()
-        memo[id(self)] = new_label
-        return new_label
-
-    @classmethod
-    def reset(cls) -> None:
-        """Clear the allocated label set. Must be called before each top-level build."""
-        cls._allocated.clear()
+    name: str
 
     def __str__(self) -> str:
-        if self.is_pseudo_name():
-            return self.name
         return f"&{self.name}"
 
     def __repr__(self) -> str:
-        return f"Label({self.name})"
+        return f"Label({self.name!r})"
+
+
+@dataclass(frozen=True)
+class LabelRef:
+    """A label reference (jump target / address-load operand).
+
+    ``target`` is either a ``Label`` (normal label) or a ``PseudoLabel`` str
+    (hardware-reserved: HERE / NEXT / SKIP / PREV).
+    """
+
+    target: Union[Label, PseudoLabel]
+
+    def is_pseudo(self) -> bool:
+        return isinstance(self.target, str)
+
+    def as_label(self) -> Label:
+        """Return the underlying Label; raises if this is a pseudo-label."""
+        if not isinstance(self.target, Label):
+            raise TypeError(f"LabelRef {self!r} is a pseudo-label, not a Label")
+        return self.target
+
+    def __str__(self) -> str:
+        if isinstance(self.target, Label):
+            return str(self.target)
+        return self.target
+
+    def __repr__(self) -> str:
+        return f"LabelRef({self.target!r})"
+
+
+def make_label(base: str, allocated: set[str]) -> Label:
+    """Create a ``Label`` whose name is unique within ``allocated``.
+
+    If ``base`` is already in ``allocated``, a numeric suffix is appended
+    (``base_0``, ``base_1``, …) until a free name is found.  The chosen name
+    is added to ``allocated`` before returning.
+    """
+    name = base
+    counter = 0
+    while name in allocated:
+        name = f"{base}_{counter}"
+        counter += 1
+    allocated.add(name)
+    return Label(name)
 
 
 def collect_referenced_labels(chunks: ChunkList) -> set[Label]:

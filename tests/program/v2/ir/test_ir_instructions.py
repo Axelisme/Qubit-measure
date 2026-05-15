@@ -32,7 +32,7 @@ from zcu_tools.program.v2.ir.instructions import (
     WaitInst,
     WmemWriteInst,
 )
-from zcu_tools.program.v2.ir.labels import Label
+from zcu_tools.program.v2.ir.labels import Label, LabelRef
 from zcu_tools.program.v2.ir.operands import (
     AluExpr,
     AluOp,
@@ -127,13 +127,13 @@ class TestJumpInstruction:
     """Tests for JumpInst (JUMP opcode)."""
 
     def test_construction_unconditional(self):
-        inst = JumpInst(label=Label.make_new("loop"))
+        inst = JumpInst(label=LabelRef(Label("loop")))
         assert str(inst.label) == "&loop"
         assert inst.if_cond is None
         assert inst.addr is None
 
     def test_construction_conditional(self):
-        inst = JumpInst(label=Label.make_new("exit"), if_cond="Z")
+        inst = JumpInst(label=LabelRef(Label("exit")), if_cond="Z")
         assert str(inst.label) == "&exit"
         assert inst.if_cond == "Z"
 
@@ -144,8 +144,7 @@ class TestJumpInstruction:
         assert inst.addr.name == "s15"
 
     def test_dispatch_jump_unconditional(self):
-        Label.reset()
-        Label.make_new("loop")
+        Label("loop")
         d = {"CMD": "JUMP", "LABEL": "loop"}
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, JumpInst)
@@ -153,8 +152,7 @@ class TestJumpInstruction:
         assert inst.if_cond is None
 
     def test_dispatch_jump_conditional(self):
-        Label.reset()
-        Label.make_new("end")
+        Label("end")
         d = {"CMD": "JUMP", "LABEL": "end", "IF": "NZ"}
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, JumpInst)
@@ -170,24 +168,21 @@ class TestJumpInstruction:
         assert inst.if_cond == "Z"
 
     def test_roundtrip_jump_unconditional(self):
-        Label.reset()
-        Label.make_new("loop")
+        Label("loop")
         original = {"CMD": "JUMP", "LABEL": "loop"}
         inst = BaseInst.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
 
     def test_roundtrip_jump_conditional(self):
-        Label.reset()
-        Label.make_new("end")
+        Label("end")
         original = {"CMD": "JUMP", "LABEL": "end", "IF": "Z"}
         inst = BaseInst.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
 
     def test_roundtrip_jump_with_raw_control_fields(self):
-        Label.reset()
-        Label.make_new("loop")
+        Label("loop")
         original = {
             "CMD": "JUMP",
             "LABEL": "loop",
@@ -216,17 +211,6 @@ class TestJumpInstruction:
             recovered = inst.to_dict()
             assert recovered == original
 
-    def test_dispatch_jump_with_label_addr(self):
-        Label.reset()
-        Label.make_new("loop")
-        d = {"CMD": "JUMP", "ADDR": "&loop"}
-        inst = BaseInst.from_dict(d)
-        assert isinstance(inst, JumpInst)
-        assert isinstance(inst.addr, Label)
-        assert str(inst.addr) == "&loop"
-
-        assert inst.to_dict() == d
-
     def test_dispatch_jump_rejects_plain_string_label_addr(self):
         # "loop" might parse as fallback Register("loop") depending on parser; skip strict rejection.
         pass
@@ -246,7 +230,7 @@ class TestJumpInstruction:
             JumpInst(addr=Register("r0"))
 
     def test_jump_immutable(self):
-        inst = JumpInst(label=Label.make_new("loop"))
+        inst = JumpInst(label=LabelRef(Label("loop")))
         with pytest.raises(Exception):
             inst.label = Label("exit")  # type: ignore
 
@@ -302,8 +286,7 @@ class TestRegWriteInstruction:
     def test_dispatch_regwr_dmem_lowering(self):
         """REG_WR src=dmem is recognized as DmemReadInst."""
         d = {"CMD": "REG_WR", "DST": "r0", "SRC": "dmem", "ADDR": "&123"}
-        Label.reset()
-        Label.make_new("123")
+        Label("123")
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, DmemReadInst)
         assert inst.src == "dmem"
@@ -449,16 +432,14 @@ class TestLabelInstruction:
     """Tests for LabelInst."""
 
     def test_label_only(self):
-        Label.reset()
-        Label.make_new("my_label")
+        Label("my_label")
         d = {"kind": "label", "name": "my_label"}
         inst = LabelInst.from_dict(d)
         assert isinstance(inst, LabelInst)
         assert str(inst.name) == "&my_label"
 
     def test_label_with_can_remove(self):
-        Label.reset()
-        Label.make_new("loop_start")
+        Label("loop_start")
         d = {"kind": "label", "name": "loop_start", "can_remove": True}
         inst = LabelInst.from_dict(d)
         assert isinstance(inst, LabelInst)
@@ -466,33 +447,28 @@ class TestLabelInstruction:
         assert inst.can_remove is True
 
     def test_label_roundtrip(self):
-        Label.reset()
-        Label.make_new("end_loop")
+        Label("end_loop")
         original = {"kind": "label", "name": "end_loop", "can_remove": False}
         inst = LabelInst.from_dict(original)
         recovered = inst.to_dict()
         assert recovered == original
 
 
-class TestLabelCloneSemantics:
-    def test_deepcopy_preserves_pseudo_label_identity(self):
-        label = Label("HERE")
-        cloned = deepcopy(label)
-        assert cloned is label
-
-    def test_deepcopy_preserves_normal_label_identity_by_shared_mapping(self):
-        # NOTE: Label identity management ensures that labels with the same name
-        # refer to the same object within a compilation scope.
-        Label.reset()
-        l1 = Label.make_new("loop")
+class TestLabelValueObjectSemantics:
+    def test_labels_with_same_name_are_equal(self):
+        l1 = Label("loop")
         l2 = Label("loop")
-        assert l1 is l2
+        assert l1 == l2
+        assert hash(l1) == hash(l2)
 
+    def test_labels_with_different_names_are_not_equal(self):
+        assert Label("a") != Label("b")
+
+    def test_deepcopy_produces_equal_label(self):
+        l1 = Label("loop")
         cloned = deepcopy(l1)
-        # Deepcopy of Label now calls clone_new() which calls make_new().
-        # Since 'loop' already exists, make_new('loop') will return 'loop_0'.
-        assert cloned.name == "loop_0"
-        assert cloned is not l1
+        assert cloned == l1
+        assert cloned.name == "loop"
 
 
 class TestMetaInstruction:
@@ -516,8 +492,7 @@ class TestConditionalJumpPattern:
 
     def test_test_then_jump_pattern(self):
         """Simulate conditional jump as TEST + JUMP sequence."""
-        Label.reset()
-        Label.make_new("end")
+        Label("end")
         test_dict = {"CMD": "TEST", "OP": "r1 - #10", "UF": "1"}
         jump_dict = {"CMD": "JUMP", "LABEL": "end", "IF": "Z"}
 
@@ -533,8 +508,7 @@ class TestConditionalJumpPattern:
 
     def test_conditional_jump_conditions(self):
         """Test various condition codes for conditional jumps."""
-        Label.reset()
-        Label.make_new("target")
+        Label("target")
         conditions = ["Z", "NZ", "S", "NS"]
         for cond in conditions:
             d = {"CMD": "JUMP", "LABEL": "target", "IF": cond}

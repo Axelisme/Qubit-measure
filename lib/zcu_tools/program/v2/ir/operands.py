@@ -11,7 +11,7 @@ from typing_extensions import Optional, TypeAlias, Union
 from .hw_semantics import GENERAL_REGS, VOLATILE_REGS, WAVE_REGS
 
 if TYPE_CHECKING:
-    from .labels import Label
+    from .labels import Label, LabelRef, PseudoLabel
 
 # Pattern to extract registers, literals and operators
 _OP_TOKEN_RE = re.compile(
@@ -203,7 +203,7 @@ class MemAddr(Operand):
 
 # Type aliases
 ValueType: TypeAlias = Union[Register, Immediate, ImmValue]
-AddrType: TypeAlias = Union[Register, MemAddr, "Label"]
+AddrType: TypeAlias = Union[Register, MemAddr]
 TimeType: TypeAlias = Union[Register, TimeOffset]
 SrcType: TypeAlias = Union[SrcKeyword, Register]
 
@@ -345,17 +345,21 @@ def parse_imm_value(val: Union[ImmValue, str, int, None]) -> Optional[ImmValue]:
     return None
 
 
-def parse_label(val: Union["Label", str, None]) -> Optional["Label"]:
-    from .labels import Label
+def parse_label(val: Union[Label, LabelRef, str, None]) -> Optional[LabelRef]:
+    from .labels import PSEUDO_LABELS, Label, LabelRef
 
-    if isinstance(val, Label):
+    if isinstance(val, LabelRef):
         return val
+    if isinstance(val, Label):
+        return LabelRef(val)
     if not isinstance(val, str):
         return None
     name = val[1:] if val.startswith("&") else val
     if not name:
         return None
-    return Label(name)
+    if name in PSEUDO_LABELS:
+        return LabelRef(name)  # type: ignore[arg-type]
+    return LabelRef(Label(name))
 
 
 def parse_alu_expr(val: Union[AluExpr, str, None]) -> Optional[AluExpr]:
@@ -453,14 +457,10 @@ def parse_value(
 
 
 def parse_addr(val: Union[Register, MemAddr, str, None]) -> Optional[AddrType]:
-    """Parse into AddrType: Register | MemAddr | Label."""
-    from .labels import Label
-
+    """Parse into AddrType: Register | MemAddr."""
     if val is None:
         return None
     if isinstance(val, (Register, MemAddr)):
-        return val
-    if isinstance(val, Label):
         return val
 
     if isinstance(val, str):
@@ -473,11 +473,6 @@ def parse_addr(val: Union[Register, MemAddr, str, None]) -> Optional[AddrType]:
         reg = parse_register(val_s)
         if reg is not None:
             return reg
-        # &name → Label
-        if val_s.startswith("&"):
-            lbl = parse_label(val_s)
-            if lbl is not None:
-                return lbl
     return None
 
 

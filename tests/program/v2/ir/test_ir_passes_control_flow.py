@@ -13,7 +13,7 @@ from zcu_tools.program.v2.ir.instructions import (
     NopInst,
     RegWriteInst,
 )
-from zcu_tools.program.v2.ir.labels import Label
+from zcu_tools.program.v2.ir.labels import Label, LabelRef
 from zcu_tools.program.v2.ir.node import (
     BasicBlockNode,
     BlockNode,
@@ -40,7 +40,11 @@ from zcu_tools.program.v2.ir.pipeline import (
 
 
 def _label(name: str) -> Label:
-    return Label.make_new(name)
+    return Label(name)
+
+
+def _lref(name: str) -> LabelRef:
+    return LabelRef(Label(name))
 
 
 def _run_chunk_passes_on_root(root: BlockNode, passes: list) -> BlockNode:
@@ -80,7 +84,7 @@ def test_dead_label_elim_keeps_referenced_label_in_basic_block():
     root = BlockNode(
         insts=[
             BasicBlockNode(labels=[LabelInst(name=lbl)], insts=[NopInst()]),
-            BasicBlockNode(branch=JumpInst(label=lbl)),
+            BasicBlockNode(branch=JumpInst(label=LabelRef(lbl))),
         ]
     )
 
@@ -103,7 +107,7 @@ def test_branch_elim_removes_unconditional_fallthrough():
         insts=[
             BasicBlockNode(
                 insts=[NopInst()],
-                branch=JumpInst(label=lbl),
+                branch=JumpInst(label=LabelRef(lbl)),
             ),
             BasicBlockNode(
                 labels=[LabelInst(name=lbl)],
@@ -126,7 +130,7 @@ def test_branch_elim_skips_fixed_block():
         insts=[
             BasicBlockNode(
                 insts=[],
-                branch=JumpInst(label=lbl),
+                branch=JumpInst(label=LabelRef(lbl)),
                 disable_opt=True,
             ),
             BasicBlockNode(
@@ -151,7 +155,7 @@ def test_branch_elim_keeps_conditional_branch():
             BasicBlockNode(
                 insts=[NopInst()],
                 branch=JumpInst(
-                    label=lbl,
+                    label=LabelRef(lbl),
                     if_cond="Z",
                     op=AluExpr(Register("r0"), AluOp.SUB, Immediate(0)),
                 ),
@@ -175,7 +179,7 @@ def test_branch_elim_keeps_non_adjacent_branch():
     other = _label("middle")
     root = BlockNode(
         insts=[
-            BasicBlockNode(branch=JumpInst(label=lbl)),
+            BasicBlockNode(branch=JumpInst(label=LabelRef(lbl))),
             BasicBlockNode(labels=[LabelInst(name=other)], insts=[NopInst()]),
             BasicBlockNode(labels=[LabelInst(name=lbl)], insts=[NopInst()]),
         ]
@@ -217,7 +221,7 @@ def test_block_merge_does_not_merge_labeled_block():
             BasicBlockNode(
                 labels=[LabelInst(name=lbl)],
                 insts=[NopInst()],
-                branch=JumpInst(label=lbl),  # makes lbl referenced
+                branch=JumpInst(label=LabelRef(lbl)),  # makes lbl referenced
             ),
         ]
     )
@@ -344,7 +348,7 @@ def test_branch_elim_inside_irloop_body():
         insts=[
             BasicBlockNode(
                 insts=[NopInst()],
-                branch=JumpInst(label=lbl),
+                branch=JumpInst(label=LabelRef(lbl)),
             ),
             BasicBlockNode(
                 labels=[LabelInst(name=lbl)],
@@ -372,7 +376,7 @@ def test_branch_elim_inside_irbranch_cases():
         insts=[
             BasicBlockNode(
                 insts=[NopInst()],
-                branch=JumpInst(label=lbl),
+                branch=JumpInst(label=LabelRef(lbl)),
             ),
             BasicBlockNode(
                 labels=[LabelInst(name=lbl)],

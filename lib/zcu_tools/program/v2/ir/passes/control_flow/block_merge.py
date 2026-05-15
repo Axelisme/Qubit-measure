@@ -95,6 +95,4 @@ class BlockMergePass(AbsChunkListPass):
 
 
 def _has_alive_labels(block: BasicBlockNode, referenced: set[Label]) -> bool:
-    return any(
-        not lbl.name.is_pseudo_name() and lbl.name in referenced for lbl in block.labels
-    )
+    return any(lbl.name in referenced for lbl in block.labels)

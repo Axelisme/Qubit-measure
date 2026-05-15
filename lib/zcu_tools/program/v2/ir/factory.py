@@ -17,7 +17,7 @@ from .instructions import (
     MetaInst,
     RegWriteInst,
 )
-from .labels import Label
+from .labels import LabelRef, make_label
 from .node import BasicBlockNode, BlockNode, IRBranch, IRDispatch, IRLoop, IRNode
 from .operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
 
@@ -96,8 +96,12 @@ class IRLexer:
 class IRParser:
     """Converts between a chunked block list and a structured IR tree."""
 
-    def __init__(self, pmem_size: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        pmem_size: Optional[int] = None,
+    ) -> None:
         self.pmem_size = pmem_size
+        self.allocated: set[str] = set()
 
     def parse(self, items: list[Union[BasicBlockNode, MetaInst]]) -> BlockNode:
         self._check_sese(items)
@@ -397,9 +401,10 @@ class IRParser:
         if isinstance(node, IRBranch):
             n = len(node.cases)
             case_entry_labels = [
-                Label.claim(f"{node.name}_case_entry_{i}") for i in range(n)
+                make_label(f"{node.name}_case_entry_{i}", self.allocated)
+                for i in range(n)
             ]
-            end_label = Label.claim(f"{node.name}_end")
+            end_label = make_label(f"{node.name}_end", self.allocated)
             dispatch_node = IRDispatch(
                 name=node.name,
                 value_reg=node.compare_reg,
@@ -444,7 +449,7 @@ class IRParser:
                                     RegWriteInst(
                                         dst=Register("s15"),
                                         src=SrcKeyword.LABEL,
-                                        label=end_label,
+                                        label=LabelRef(end_label),
                                     )
                                 ],
                                 branch=JumpInst(addr=Register("s15")),
@@ -452,7 +457,7 @@ class IRParser:
                         )
                     else:
                         result_branch.append(
-                            BasicBlockNode(branch=JumpInst(label=end_label))
+                            BasicBlockNode(branch=JumpInst(label=LabelRef(end_label)))
                         )
                 result_branch.append(MetaInst(type="BRANCH_CASE_END", name=str(idx)))
             result_branch.append(MetaInst(type="BRANCH_END", name=node.name))
@@ -493,8 +498,8 @@ class IRParser:
             end_label_bb         <- end label (n==0 escape)
         """
         lexer = IRLexer()
-        start = Label.claim(f"{node.name}_start")
-        end = Label.claim(f"{node.name}_end")
+        start = make_label(f"{node.name}_start", self.allocated)
+        end = make_label(f"{node.name}_end", self.allocated)
 
         counter = node.counter_reg
         if isinstance(node.n, int):
@@ -508,7 +513,9 @@ class IRParser:
         if isinstance(node.n, Register):
             if needs_big_jump(self.pmem_size):
                 pre += [
-                    RegWriteInst(dst=Register("s15"), src=SrcKeyword.LABEL, label=end),
+                    RegWriteInst(
+                        dst=Register("s15"), src=SrcKeyword.LABEL, label=LabelRef(end)
+                    ),
                     JumpInst(
                         addr=Register("s15"),
                         if_cond="Z",
@@ -518,7 +525,7 @@ class IRParser:
             else:
                 pre.append(
                     JumpInst(
-                        label=end,
+                        label=LabelRef(end),
                         if_cond="Z",
                         op=AluExpr(node.n, AluOp.SUB, Immediate(0)),
                     )
@@ -531,11 +538,13 @@ class IRParser:
         post: list[Instruction] = []
         if needs_big_jump(self.pmem_size):
             post += [
-                RegWriteInst(dst=Register("s15"), src=SrcKeyword.LABEL, label=start),
+                RegWriteInst(
+                    dst=Register("s15"), src=SrcKeyword.LABEL, label=LabelRef(start)
+                ),
                 JumpInst(addr=Register("s15"), if_cond="S", op=op_str),
             ]
         else:
-            post.append(JumpInst(label=start, if_cond="S", op=op_str))
+            post.append(JumpInst(label=LabelRef(start), if_cond="S", op=op_str))
         post.append(LabelInst(name=end, can_remove=True))
 
         pre_blocks = lexer.lex(pre)
@@ -560,9 +569,9 @@ class IRParser:
         """
         n = len(node.cases)
         case_entry_labels = [
-            Label.claim(f"{node.name}_case_entry_{i}") for i in range(n)
+            make_label(f"{node.name}_case_entry_{i}", self.allocated) for i in range(n)
         ]
-        end_label = Label.claim(f"{node.name}_end")
+        end_label = make_label(f"{node.name}_end", self.allocated)
 
         dispatch_node = IRDispatch(
             name=node.name,
@@ -593,16 +602,20 @@ class IRParser:
                                 RegWriteInst(
                                     dst=Register("s15"),
                                     src=SrcKeyword.LABEL,
-                                    label=end_label,
+                                    label=LabelRef(end_label),
                                 )
                             ],
                             branch=JumpInst(addr=Register("s15")),
                         )
                     )
                 else:
-                    result.append(BasicBlockNode(branch=JumpInst(label=end_label)))
+                    result.append(
+                        BasicBlockNode(branch=JumpInst(label=LabelRef(end_label)))
+                    )
 
-        result.append(BasicBlockNode(labels=[LabelInst(name=end_label, can_remove=True)]))
+        result.append(
+            BasicBlockNode(labels=[LabelInst(name=end_label, can_remove=True)])
+        )
         return result
 
     def _lower_dispatch(self, node: IRDispatch) -> list[BasicBlockNode]:
@@ -622,7 +635,9 @@ class IRParser:
         Case bodies are NOT emitted here; the caller (_lower_branch) appends them.
         """
         n = len(node.target_labels)
-        table_labels = [Label.claim(f"{node.name}_dispatch_{i}") for i in range(n)]
+        table_labels = [
+            make_label(f"{node.name}_dispatch_{i}", self.allocated) for i in range(n)
+        ]
 
         result: list[BasicBlockNode] = []
 
@@ -636,7 +651,7 @@ class IRParser:
                         RegWriteInst(
                             dst=Register("s15"),
                             src=SrcKeyword.LABEL,
-                            label=last_label,
+                            label=LabelRef(last_label),
                         )
                     ],
                     branch=JumpInst(addr=Register("s15"), if_cond="S", op=op_guard),
@@ -645,7 +660,9 @@ class IRParser:
         else:
             result.append(
                 BasicBlockNode(
-                    branch=JumpInst(label=last_label, if_cond="S", op=op_guard)
+                    branch=JumpInst(
+                        label=LabelRef(last_label), if_cond="S", op=op_guard
+                    )
                 )
             )
 

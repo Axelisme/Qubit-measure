@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from ...dispatch import needs_big_jump
-from ...instructions import JumpInst, RegWriteInst
+from ...instructions import BaseInst, JumpInst, RegWriteInst
+from ...labels import LabelRef
 from ...node import BasicBlockNode, IRDispatch, IRNode
 from ...operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
 from ...pipeline import AbsIRTreePass, PipeLineContext
@@ -45,7 +46,7 @@ class SimplifyDispatchPass(AbsIRTreePass):
                     RegWriteInst(
                         dst=Register("s15"),
                         src=SrcKeyword.LABEL,
-                        label=target1,
+                        label=LabelRef(target1),
                     )
                 ],
                 branch=JumpInst(
@@ -57,7 +58,7 @@ class SimplifyDispatchPass(AbsIRTreePass):
         else:
             return BasicBlockNode(
                 branch=JumpInst(
-                    label=target1,
+                    label=LabelRef(target1),
                     if_cond="NZ",
                     op=op,
                 )

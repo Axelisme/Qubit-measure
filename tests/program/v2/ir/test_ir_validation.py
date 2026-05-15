@@ -24,7 +24,7 @@ from zcu_tools.program.v2.ir.instructions import (
     NopInst,
     RegWriteInst,
 )
-from zcu_tools.program.v2.ir.labels import Label
+from zcu_tools.program.v2.ir.labels import Label, LabelRef
 from zcu_tools.program.v2.ir.node import (
     BasicBlockNode,
     BlockNode,
@@ -131,7 +131,6 @@ def _run_full_pipeline_on_root(
 def test_v1_jump_table_only_dispatch_stubs_are_fixed():
     """After full pipeline, only dispatch-table stubs are fixed; body copies are free.
     Uses k=4 so SimplifyDispatchPass does not eliminate the dispatch island."""
-    Label.reset()
     k = 4
     body_words = 3
     root = BlockNode(
@@ -169,7 +168,6 @@ def test_v1_jump_table_only_dispatch_stubs_are_fixed():
 def test_v1_jump_table_stub_width_is_uniform():
     """After full pipeline, every dispatch-table entry stub has the same physical width.
     Uses k=4 so the dispatch island is not eliminated by SimplifyDispatchPass."""
-    Label.reset()
     body_nops = 5  # body_words == 5
     root = BlockNode(
         insts=[
@@ -195,7 +193,6 @@ def test_v1_jump_table_stub_width_is_uniform():
 
 def test_v1_pipeline_keeps_body_blocks_free_after_unroll():
     """After the full pipeline, body entry blocks must remain non-fixed."""
-    Label.reset()
     root = BlockNode(
         insts=[
             IRLoop(
@@ -251,15 +248,14 @@ def test_branch_parse_rejects_branch_without_cases():
 
 
 def test_sese_rejects_jump_into_loop_control_region():
-    Label.reset()
-    loop_start = Label.make_new("loop_start")
-    loop_end = Label.make_new("loop_end")
-    outside = Label.make_new("outside")
+    loop_start = Label("loop_start")
+    loop_end = Label("loop_end")
+    outside = Label("outside")
 
     items = [
         BasicBlockNode(
             labels=[LabelInst(name=outside)],
-            branch=JumpInst(label=loop_end),
+            branch=JumpInst(label=LabelRef(loop_end)),
         ),
         MetaInst(
             type="LOOP_START",
@@ -291,7 +287,6 @@ def test_v2_fully_unrolled_loop_produces_single_fused_block():
     After 3 full unroll copies the pipeline should merge them and eliminate
     the two dead writes, leaving a single write.
     """
-    Label.reset()
     root = BlockNode(
         insts=[
             IRLoop(
@@ -339,8 +334,6 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
     survive (the first two are dead: overwritten before being read).
     Uses _walk_instructions to cover all BasicBlockNode paths.
     """
-
-    Label.reset()
     root = BlockNode(
         insts=[
             IRLoop(
@@ -383,12 +376,12 @@ def test_v2_fully_unrolled_dead_writes_eliminated_across_boundaries():
 
 def test_v3_fixed_block_branch_elim_skips_block():
     """BranchEliminationPass should leave fixed-width stubs unchanged."""
-    lbl = Label.make_new("next")
+    lbl = Label("next")
     root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[NopInst()],
-                branch=JumpInst(label=lbl),
+                branch=JumpInst(label=LabelRef(lbl)),
                 disable_opt=True,
             ),
             BasicBlockNode(
@@ -408,12 +401,12 @@ def test_v3_fixed_block_branch_elim_skips_block():
 
 def test_v3_non_fixed_block_branch_elim_removes_branch():
     """Sanity check: disable_opt=False block loses its branch (no NOP added)."""
-    lbl = Label.make_new("next_free")
+    lbl = Label("next_free")
     root = BlockNode(
         insts=[
             BasicBlockNode(
                 insts=[NopInst()],
-                branch=JumpInst(label=lbl),
+                branch=JumpInst(label=LabelRef(lbl)),
                 disable_opt=False,
             ),
             BasicBlockNode(
@@ -446,9 +439,8 @@ def _apply_simplify_dispatch(node: IRNode, pmem: int = 512) -> IRNode:
 def test_v4_simplify_dispatch_k2_produces_single_cond_jump():
     """2-target IRDispatch must be replaced by a single BasicBlockNode with a
     conditional jump to target_labels[1]; no dispatch table stubs produced."""
-    Label.reset()
-    t0 = Label.make_new("entry_0")
-    t1 = Label.make_new("entry_1")
+    t0 = Label("entry_0")
+    t1 = Label("entry_1")
     node = IRDispatch(name="d", value_reg=Register("r1"), target_labels=[t0, t1])
 
     result = _apply_simplify_dispatch(node, pmem=512)
@@ -457,14 +449,13 @@ def test_v4_simplify_dispatch_k2_produces_single_cond_jump():
     assert result.branch is not None
     assert isinstance(result.branch, JumpInst)
     assert result.branch.if_cond == "NZ"
-    assert result.branch.label == t1
+    assert result.branch.label == LabelRef(t1)
 
 
 def test_v4_simplify_dispatch_k2_big_pmem_uses_indirect_jump():
     """big-PMEM (pmem=4096): 2-target IRDispatch emits REG_WR s15 + indirect JUMP."""
-    Label.reset()
-    t0 = Label.make_new("entry_0")
-    t1 = Label.make_new("entry_1")
+    t0 = Label("entry_0")
+    t1 = Label("entry_1")
     node = IRDispatch(name="d", value_reg=Register("r1"), target_labels=[t0, t1])
 
     result = _apply_simplify_dispatch(node, pmem=4096)
@@ -474,7 +465,7 @@ def test_v4_simplify_dispatch_k2_big_pmem_uses_indirect_jump():
     wr = result.insts[0]
     assert isinstance(wr, RegWriteInst)
     assert wr.dst.name == "s15"
-    assert wr.label == t1
+    assert wr.label == LabelRef(t1)
     assert result.branch is not None
     assert isinstance(result.branch, JumpInst)
     assert result.branch.if_cond == "NZ"
@@ -483,8 +474,7 @@ def test_v4_simplify_dispatch_k2_big_pmem_uses_indirect_jump():
 
 def test_v4_simplify_dispatch_k_gt2_unchanged():
     """IRDispatch with more than 2 targets must be left unchanged."""
-    Label.reset()
-    targets = [Label.make_new(f"entry_{i}") for i in range(4)]
+    targets = [Label(f"entry_{i}") for i in range(4)]
     node = IRDispatch(name="d", value_reg=Register("r1"), target_labels=targets)
 
     result = _apply_simplify_dispatch(node)

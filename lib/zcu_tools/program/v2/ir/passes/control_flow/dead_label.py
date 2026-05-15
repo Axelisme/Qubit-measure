@@ -25,7 +25,7 @@ is sufficient to collect referenced labels and filter dead ones.
 
 from __future__ import annotations
 
-from ...labels import collect_referenced_labels
+from ...labels import Label, collect_referenced_labels
 from ...node import BasicBlockNode
 from ...pipeline import AbsChunkListPass, ChunkList, PipeLineContext
 
@@ -47,7 +47,7 @@ class DeadLabelEliminationPass(AbsChunkListPass):
             chunk.labels = [
                 lbl
                 for lbl in chunk.labels
-                if lbl.name.is_pseudo_name()
+                if not isinstance(lbl.name, Label)
                 or not lbl.can_remove
                 or lbl.name in referenced
             ]

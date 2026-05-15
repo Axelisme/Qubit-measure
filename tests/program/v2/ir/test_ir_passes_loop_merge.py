@@ -1,5 +1,5 @@
 from zcu_tools.program.v2.ir.instructions import JumpInst, RegWriteInst, TestInst
-from zcu_tools.program.v2.ir.labels import Label
+from zcu_tools.program.v2.ir.labels import Label, LabelRef
 from zcu_tools.program.v2.ir.node import BasicBlockNode
 from zcu_tools.program.v2.ir.operands import (
     AluExpr,
@@ -29,7 +29,7 @@ def test_pattern_1_merge_zero_comparison():
             )
         ],
         branch=JumpInst(
-            label=Label.make_new("loop"),
+            label=LabelRef(Label("loop")),
             if_cond="NZ",
             op=AluExpr(Register("r1"), AluOp.SUB, Immediate(0)),
         ),
@@ -55,7 +55,7 @@ def test_pattern_1_merge_zero_comparison_disable_opt_is_skipped():
             )
         ],
         branch=JumpInst(
-            label=Label.make_new("loop"),
+            label=LabelRef(Label("loop")),
             if_cond="NZ",
             op=AluExpr(Register("r1"), AluOp.SUB, Immediate(0)),
         ),
@@ -75,7 +75,7 @@ def test_pattern_2_merge_side_data_injection():
     # the -wr data source, and only one ALU expression can be encoded.
     # When TEST tests a different register than REG_WR writes, combining
     # them would alter the branch condition.
-    loop_label = Label.make_new("loop")
+    loop_label = Label("loop")
     block = BasicBlockNode(
         insts=[
             TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Immediate(10))),
@@ -100,7 +100,7 @@ def test_pattern_2_merge_side_data_injection():
 
 
 def test_pattern_2_merge_side_data_injection_disable_opt_is_skipped():
-    loop_label = Label.make_new("loop")
+    loop_label = Label("loop")
     block = BasicBlockNode(
         insts=[
             TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Immediate(10))),
@@ -133,7 +133,7 @@ def test_pattern_1_rejects_regwrite_with_uf():
             )
         ],
         branch=JumpInst(
-            label=Label.make_new("loop"),
+            label=LabelRef(Label("loop")),
             if_cond="NZ",
             op=AluExpr(Register("r1"), AluOp.SUB, Immediate(0)),
         ),
@@ -159,7 +159,7 @@ def test_pattern_1_rejects_branch_with_existing_wr():
             )
         ],
         branch=JumpInst(
-            label=Label.make_new("loop"),
+            label=LabelRef(Label("loop")),
             if_cond="NZ",
             op=AluExpr(Register("r1"), AluOp.SUB, Immediate(0)),
             wr=SideWrite(Register("r7"), "op"),
@@ -177,7 +177,7 @@ def test_pattern_1_rejects_branch_with_existing_wr():
 
 
 def test_pattern_2_rejects_conditional_regwrite():
-    loop_label = Label.make_new("loop")
+    loop_label = Label("loop")
     block = BasicBlockNode(
         insts=[
             TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Immediate(10))),
@@ -202,7 +202,7 @@ def test_pattern_2_rejects_conditional_regwrite():
 
 
 def test_pattern_2_rejects_branch_with_uf():
-    loop_label = Label.make_new("loop")
+    loop_label = Label("loop")
     block = BasicBlockNode(
         insts=[
             TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Immediate(10))),
