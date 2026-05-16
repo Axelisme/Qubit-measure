@@ -17,7 +17,7 @@ from .instructions import (
     MetaInst,
     RegWriteInst,
 )
-from .labels import LabelRef, make_label
+from .labels import Label, LabelRef, make_label
 from .node import BasicBlockNode, BlockNode, IRBranch, IRDispatch, IRLoop, IRNode
 from .operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
 
@@ -310,40 +310,16 @@ class IRParser:
         return start_meta.name, case
 
     def unparse(self, root: BlockNode) -> list[Union[BasicBlockNode, MetaInst]]:
+        """Lower an IR tree to a chunk list with structural MetaInst markers.
+
+        This is the single lowering entry point. ``parse(unparse(tree))``
+        round-trips for ``IRLoop`` / ``IRBranch`` structures (``IRDispatch``
+        is a leaf emitted only by passes, never re-parsed).
+        """
         return self._unparse_block_node(root)
 
-    def lower_block(self, block: BlockNode) -> list[BasicBlockNode]:
-        """Recursively lower a BlockNode to flat BasicBlockNodes without MetaInst markers."""
-        return self._lower_node_flat(block)
-
-    def _lower_node_flat(self, node: IRNode) -> list[BasicBlockNode]:
-        """Recursively lower an IRNode to flat BasicBlockNodes (no MetaInst)."""
-        if isinstance(node, BasicBlockNode):
-            return [node]
-        if isinstance(node, BlockNode):
-            result: list[BasicBlockNode] = []
-            for child in node.insts:
-                result.extend(self._lower_node_flat(child))
-            return result
-        if isinstance(node, IRLoop):
-            body_chunks = self._lower_node_flat(cast(BlockNode, node.body))
-            return self._lower_loop(node, body_chunks)
-        if isinstance(node, IRBranch):
-            case_chunks_list = [
-                self._lower_node_flat(cast(BlockNode, case)) for case in node.cases
-            ]
-            return self._lower_branch(node, case_chunks_list)
-        if isinstance(node, IRDispatch):
-            return self._lower_dispatch(node)
-        raise TypeError(
-            f"IRParser._lower_node_flat: unexpected node type {type(node).__name__}"
-        )
-
     def _unparse_node(self, node: IRNode) -> list[Union[BasicBlockNode, MetaInst]]:
-        """Recursively lower a single IRNode to a flat chunk list (with MetaInst markers).
-
-        Used by the test suite to flatten IR trees into instruction streams for testing.
-        """
+        """Recursively lower a single IRNode to a chunk list (with MetaInst markers)."""
         if isinstance(node, BasicBlockNode):
             return [node]
         if isinstance(node, BlockNode):
@@ -352,34 +328,14 @@ class IRParser:
                 result.extend(self._unparse_node(child))
             return result
         if isinstance(node, IRLoop):
-            # Build the full lowered loop (guard/init/start_label/body/back_edge/end_label)
-            # and wrap it in MetaInst markers so parse() can reconstruct the IRLoop.
-            # parse() scans: skips LOOP_START→LOOP_BODY_START, reads body to LOOP_BODY_END.
-            body_chunks = self._lower_node_flat(cast(BlockNode, node.body))
-            flat = self._lower_loop(node, body_chunks)
-
-            # Identify the boundary between pre-body (guard/init/start_label) and
-            # body+post (body copies + back_edge + end_label) by finding which flat
-            # blocks originated from body_chunks.
-            body_chunk_ids = {id(b) for b in body_chunks}
-            split = next(
-                (i for i, b in enumerate(flat) if id(b) in body_chunk_ids),
-                len(flat),
-            )
-            pre_loop = flat[:split]
-            body_and_post = flat[split:]
-
-            # Find end of body section (last body block).
-            last_body = max(
-                (i for i, b in enumerate(body_and_post) if id(b) in body_chunk_ids),
-                default=-1,
-            )
-            post_loop = body_and_post[last_body + 1 :]
-
-            # Use the original _unparse_node output for body so nested structures
-            # get their MetaInst markers too.
-            body_items = self._unparse_node(cast(BlockNode, node.body))
-
+            # LOOP_START + prologue + LOOP_BODY_START + body + LOOP_BODY_END
+            # + epilogue + LOOP_END. The body is unparsed recursively so any
+            # nested structure keeps its own markers. parse() reconstructs the
+            # IRLoop by reading between LOOP_BODY_START and LOOP_BODY_END.
+            # start/end labels are allocated once here so prologue and epilogue
+            # agree on them (make_label mutates `allocated`).
+            start = make_label(f"{node.name}_start", self.allocated)
+            end = make_label(f"{node.name}_end", self.allocated)
             return [
                 MetaInst(
                     type="LOOP_START",
@@ -390,11 +346,11 @@ class IRParser:
                         range_hint=node.range_hint,
                     ),
                 ),
-                *pre_loop,
+                *self._loop_prologue(node, start, end),
                 MetaInst(type="LOOP_BODY_START", name=node.name),
-                *body_items,
+                *self._unparse_node(cast(BlockNode, node.body)),
                 MetaInst(type="LOOP_BODY_END", name=node.name),
-                *post_loop,
+                *self._loop_epilogue(node, start, end),
                 MetaInst(type="LOOP_END", name=node.name),
             ]
         if isinstance(node, IRBranch):
@@ -483,30 +439,17 @@ class IRParser:
             result.extend(self._unparse_node(child))
         return result
 
-    def _lower_loop(
-        self, node: IRLoop, body_chunks: list[BasicBlockNode]
+    def _loop_prologue(
+        self, node: IRLoop, start: Label, end: Label
     ) -> list[BasicBlockNode]:
-        """Lower an IRLoop to flat BasicBlockNodes.
+        """Loop prologue: optional n==0 guard + counter init + start label.
 
-        Shape (do-while):
-            [guard_bb?]          <- present only for register-driven n
-            init_bb              <- REG_WR counter imm #0
-            start_label_bb       <- entry label for back-edge
-            body_chunks...       <- caller supplies already-lowered body
-            back_edge_bb         <- JUMP start -if(S) -op(counter - n)
-            end_label_bb         <- end label (n==0 escape)
+        Shape:
+            [guard_bb?]      <- register-driven n, or compile-time n <= 0
+            init_bb          <- REG_WR counter imm #0
+            start_label_bb   <- entry label for the back-edge
         """
-        lexer = IRLexer()
-        start = make_label(f"{node.name}_start", self.allocated)
-        end = make_label(f"{node.name}_end", self.allocated)
-
         counter = node.counter_reg
-        if isinstance(node.n, int):
-            n_val: Union[Immediate, Register] = Immediate(node.n)
-        else:
-            n_val = node.n
-
-        op_str = AluExpr(counter, AluOp.SUB, n_val)
 
         pre: list[Instruction] = []
         if isinstance(node.n, Register):
@@ -544,6 +487,21 @@ class IRParser:
             RegWriteInst(dst=counter, src=SrcKeyword.IMM, lit=Immediate(0)),
             LabelInst(name=start, can_remove=True),
         ]
+        return [b for b in IRLexer().lex(pre) if isinstance(b, BasicBlockNode)]
+
+    def _loop_epilogue(
+        self, node: IRLoop, start: Label, end: Label
+    ) -> list[BasicBlockNode]:
+        """Loop epilogue: do-while cond back-edge + end label.
+
+        ``start`` / ``end`` are the same Label objects passed to
+        ``_loop_prologue`` so the back-edge targets the prologue's start label.
+        """
+        counter = node.counter_reg
+        n_val: Union[Immediate, Register] = (
+            Immediate(node.n) if isinstance(node.n, int) else node.n
+        )
+        op_str = AluExpr(counter, AluOp.SUB, n_val)
 
         post: list[Instruction] = []
         if needs_big_jump(self.pmem_size):
@@ -556,77 +514,7 @@ class IRParser:
         else:
             post.append(JumpInst(label=LabelRef(start), if_cond="S", op=op_str))
         post.append(LabelInst(name=end, can_remove=True))
-
-        pre_blocks = lexer.lex(pre)
-        post_blocks = lexer.lex(post)
-        return (
-            [b for b in pre_blocks if isinstance(b, BasicBlockNode)]
-            + body_chunks
-            + [b for b in post_blocks if isinstance(b, BasicBlockNode)]
-        )
-
-    def _lower_branch(
-        self, node: IRBranch, case_chunks_list: list[list[BasicBlockNode]]
-    ) -> list[BasicBlockNode]:
-        """Lower an IRBranch to flat BasicBlockNodes.
-
-        The dispatch table is emitted first (guard + indirect jump + table island),
-        then each case body with its entry label prepended.  caller supplies
-        case_chunks_list[i] as the already-lowered flat chunks for cases[i].
-
-        Every case except the last gets an unconditional jump to the branch-end
-        label so that cases do not fall through into the next case body.
-        """
-        n = len(node.cases)
-        case_entry_labels = [
-            make_label(f"{node.name}_case_entry_{i}", self.allocated) for i in range(n)
-        ]
-        end_label = make_label(f"{node.name}_end", self.allocated)
-
-        dispatch_node = IRDispatch(
-            name=node.name,
-            value_reg=node.compare_reg,
-            target_labels=case_entry_labels,
-        )
-
-        result: list[BasicBlockNode] = list(self._lower_dispatch(dispatch_node))
-
-        for idx, case_chunks in enumerate(case_chunks_list):
-            is_last = idx == n - 1
-            if case_chunks:
-                case_chunks[0].labels.insert(
-                    0, LabelInst(name=case_entry_labels[idx], can_remove=True)
-                )
-                result.extend(case_chunks)
-            else:
-                result.append(
-                    BasicBlockNode(
-                        labels=[LabelInst(name=case_entry_labels[idx], can_remove=True)]
-                    )
-                )
-            if not is_last:
-                if needs_big_jump(self.pmem_size):
-                    result.append(
-                        BasicBlockNode(
-                            insts=[
-                                RegWriteInst(
-                                    dst=Register("s15"),
-                                    src=SrcKeyword.LABEL,
-                                    label=LabelRef(end_label),
-                                )
-                            ],
-                            branch=JumpInst(addr=Register("s15")),
-                        )
-                    )
-                else:
-                    result.append(
-                        BasicBlockNode(branch=JumpInst(label=LabelRef(end_label)))
-                    )
-
-        result.append(
-            BasicBlockNode(labels=[LabelInst(name=end_label, can_remove=True)])
-        )
-        return result
+        return [b for b in IRLexer().lex(post) if isinstance(b, BasicBlockNode)]
 
     def _lower_dispatch(self, node: IRDispatch) -> list[BasicBlockNode]:
         """Lower an IRDispatch leaf node to flat BasicBlockNodes (guard + table stubs).

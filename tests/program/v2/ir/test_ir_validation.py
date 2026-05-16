@@ -431,7 +431,7 @@ def test_v3_non_fixed_block_branch_elim_removes_branch():
 # ---------------------------------------------------------------------------
 
 
-def _apply_simplify_dispatch(node: IRNode, pmem: int = 512) -> IRNode:
+def _apply_simplify_dispatch(node: IRNode, pmem: int = 512):
     ctx = PipeLineContext(config=PipeLineConfig(pmem_capacity=pmem), pmem_budget=1024)
     return SimplifyDispatchPass().transform(node, ctx)
 
@@ -473,10 +473,14 @@ def test_v4_simplify_dispatch_k2_big_pmem_uses_indirect_jump():
 
 
 def test_v4_simplify_dispatch_k_gt2_unchanged():
-    """IRDispatch with more than 2 targets must be left unchanged."""
+    """IRDispatch with more than 2 targets must be left unchanged.
+
+    Under the AbsIRTreePass contract, "unchanged" is signalled by returning
+    None (not the same object).
+    """
     targets = [Label(f"entry_{i}") for i in range(4)]
     node = IRDispatch(name="d", value_reg=Register("r1"), target_labels=targets)
 
     result = _apply_simplify_dispatch(node)
 
-    assert result is node
+    assert result is None

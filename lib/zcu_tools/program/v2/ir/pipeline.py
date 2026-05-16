@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import Optional, Union, cast
 
 from .factory import IRLexer, IRParser
 from .instructions import Instruction, MetaInst
-from .node import BasicBlockNode, IRNode
+from .node import BasicBlockNode, BlockNode, IRNode
+
+logger = logging.getLogger(__name__)
 
 # Re-exported for backward compatibility with external imports.
 __all__ = [
@@ -92,12 +95,20 @@ class AbsIRTreePass(ABC):
     """Post-order IR tree pass: called on IRLoop / IRBranch / IRDispatch nodes.
 
     ``transform`` receives:
-      - ``node``: the IRNode being considered
+      - ``node``: the IRNode being considered (its children are already
+        post-order converged when the pass is invoked)
       - ``ctx``: pipeline context
 
     Return values:
-      - ``IRNode`` (same identity as ``node``): pass did nothing; try next pass
-      - ``IRNode`` (different object): replace subtree; pipeline will re-recurse _lower_node
+      - ``None``: the pass did not change the node; the pipeline tries the
+        next pass and leaves ``node`` untouched.
+      - ``IRNode``: a replacement subtree. The pipeline re-recurses into it,
+        so any structural nodes the replacement contains get lowered too.
+
+    A pass that needs information about the *un-lowered* subtree (e.g. an
+    unroll heuristic that estimates body size) must compute it at the start
+    of ``transform``: at that point children are converged but still
+    structural, not yet flattened.
     """
 
     @abstractmethod
@@ -105,7 +116,7 @@ class AbsIRTreePass(ABC):
         self,
         node: IRNode,
         ctx: PipeLineContext,
-    ) -> IRNode: ...
+    ) -> Optional[IRNode]: ...
 
 
 # ---------------------------------------------------------------------------
@@ -168,146 +179,144 @@ def _run_chunk_list_passes(
     return chunks, changed
 
 
-def _run_chunk_passes_on_block(
-    passes: list[AbsChunkPass], block: BasicBlockNode, ctx: PipeLineContext
-) -> BasicBlockNode:
-    """Run AbsChunkPass to convergence on a single BasicBlockNode."""
-    max_iters = ctx.config.max_opt_iterations
-    chunks: ChunkList = [block]
-    for _ in range(max_iters):
-        chunks, changed = _run_chunk_passes(passes, chunks, ctx)
-        if not changed:
-            break
-    # There is always exactly one BasicBlockNode in the list.
-    return next(c for c in chunks if isinstance(c, BasicBlockNode))
-
-
-def _run_all_passes_to_convergence(
+def _run_chunklist_opt(
     passes: list[AbsChunkPass],
     chunk_list_passes: list[AbsChunkListPass],
-    chunks: list[BasicBlockNode],
+    chunks: ChunkList,
     ctx: PipeLineContext,
-) -> list[BasicBlockNode]:
-    """Run AbsChunkPass + AbsChunkListPass to convergence on a flat BasicBlockNode list.
+) -> ChunkList:
+    """Run AbsChunkPass + AbsChunkListPass as one iteration group to convergence.
 
-    AbsChunkListPass requires the full flat chunk list to be correct (dead-label
-    detection, block adjacency for branch elimination, etc.).  Only call this
-    function when ``chunks`` represents the complete, globally-flat program — not
-    a subtree fragment produced during post-order lowering.
+    Both pass kinds operate at the ChunkList layer and are interleaved in the
+    same fixed-point loop: a ChunkListPass may expose work for a ChunkPass and
+    vice versa.  If convergence is not reached within ``max_opt_iterations``,
+    the loop stops and logs which passes are still reporting changes — this is
+    an oscillation signal, not a correctness problem (the result is still a
+    valid program, just not maximally optimized).
     """
     max_iters = ctx.config.max_opt_iterations
-    full_chunks: ChunkList = list(chunks)
     for _ in range(max_iters):
-        full_chunks, changed1 = _run_chunk_passes(passes, full_chunks, ctx)
-        full_chunks, changed2 = _run_chunk_list_passes(
-            chunk_list_passes, full_chunks, ctx
-        )
-        if not changed1 and not changed2:
-            break
-    return [c for c in full_chunks if isinstance(c, BasicBlockNode)]
+        chunks, changed_chunk = _run_chunk_passes(passes, chunks, ctx)
+        chunks, changed_list = _run_chunk_list_passes(chunk_list_passes, chunks, ctx)
+        if not changed_chunk and not changed_list:
+            return chunks
+    # Did not converge — identify the still-changing passes for debugging.
+    stuck: list[str] = []
+    for p in (*passes, *chunk_list_passes):
+        _, changed = p.process(chunks, ctx)
+        if changed:
+            stuck.append(type(p).__name__)
+    logger.warning(
+        "IR ChunkList optimization did not converge within %d iterations; "
+        "passes still reporting changes: %s",
+        max_iters,
+        ", ".join(stuck) if stuck else "(none — spurious change signal)",
+    )
+    return chunks
 
 
-def _lower_node(
+def _optimize_tree(
     node: IRNode,
-    chunk_passes: list[AbsChunkPass],
     tree_passes: list[AbsIRTreePass],
     ctx: PipeLineContext,
 ) -> IRNode:
-    """Post-order lower a single IRNode.
+    """Post-order apply AbsIRTreePass chain to an IR tree.
 
-    Recursively transforms the IR tree until only BlockNode and BasicBlockNode
-    remain.  The caller is responsible for flattening the result into a
-    list[BasicBlockNode].
+    The pipeline owns recursion: children are transformed to convergence
+    *before* a pass sees their parent, so each ``transform`` only reasons
+    about its own level.  A pass that returns a replacement node triggers a
+    re-recurse into that node, so any structural nodes the replacement
+    contains (e.g. an IRDispatch produced by unrolling) get visited too.
 
-    Rules:
-      - BasicBlockNode (leaf): run ChunkPass to convergence, return as-is.
-      - BlockNode (container): recursively lower each child; inline-flatten any
-        BlockNode children into the parent's inst list.
-      - IRLoop / IRBranch / IRDispatch: run AbsIRTreePass chain; if any pass
-        returns a new node, re-recurse on it.  After all passes, if the node is
-        still an IR control node, fall back to IRParser which returns a BlockNode;
-        re-recurse on that BlockNode.
-
-    AbsChunkListPass is intentionally excluded: those passes require the
-    globally-flat program and are applied only after the full tree is lowered.
+    Only AbsIRTreePass runs here.  ChunkPass / ChunkListPass run separately at
+    the ChunkList layer, before parse and after unparse.
     """
-    from .node import BlockNode, IRBranch, IRDispatch, IRLoop
+    from .node import BlockNode, IRBranch, IRLoop
 
-    # ── BasicBlockNode ────────────────────────────────────────────────────────
+    # ── Leaf nodes: BasicBlockNode / IRDispatch have no IRNode children ───────
     if isinstance(node, BasicBlockNode):
-        return _run_chunk_passes_on_block(chunk_passes, node, ctx)
-
-    # ── BlockNode ─────────────────────────────────────────────────────────────
-    if isinstance(node, BlockNode):
-        new_insts: list[IRNode] = []
-        for child in node.insts:
-            result = _lower_node(child, chunk_passes, tree_passes, ctx)
-            if isinstance(result, BlockNode):
-                new_insts.extend(result.insts)
-            else:
-                new_insts.append(result)
-        node.insts = new_insts
         return node
 
-    # ── IRLoop / IRBranch / IRDispatch ────────────────────────────────────────
-    # Run AbsIRTreePass chain; any pass that returns a new node triggers a
-    # full re-recurse so children get lowered in the new subtree.
-    current: IRNode = node
+    # ── Recurse into children first (post-order) ──────────────────────────────
+    if isinstance(node, BlockNode):
+        node.insts = [_optimize_tree(child, tree_passes, ctx) for child in node.insts]
+    elif isinstance(node, IRLoop):
+        node.body = _optimize_tree(node.body, tree_passes, ctx)
+    elif isinstance(node, IRBranch):
+        node.cases = [_optimize_tree(case, tree_passes, ctx) for case in node.cases]
+    # IRDispatch is a leaf (case bodies are not stored inside it).
+
+    # ── Apply the tree-pass chain to this node ────────────────────────────────
+    # A pass returning a new node replaces the subtree; re-recurse into it so
+    # the replacement's children and any new structural nodes are optimized.
     for tree_pass in tree_passes:
-        result_tp = tree_pass.transform(current, ctx)
-        if result_tp is not current:
-            return _lower_node(result_tp, chunk_passes, tree_passes, ctx)
+        replacement = tree_pass.transform(node, ctx)
+        if replacement is not None:
+            return _optimize_tree(replacement, tree_passes, ctx)
+    return node
 
-    # Fallback: lower children first, then call IRParser default lower.
-    # The result is a flat list[BasicBlockNode]; wrap in BlockNode and re-recurse
-    # so that the resulting BasicBlockNodes get ChunkPass treatment.
-    from .factory import IRParser
 
-    parser = IRParser(pmem_size=ctx.config.pmem_capacity)
-    if isinstance(current, IRLoop):
-        body_node = _lower_node(current.body, chunk_passes, tree_passes, ctx)
-        body_chunks: list[BasicBlockNode] = []
-        if isinstance(body_node, BasicBlockNode):
-            body_chunks = [body_node]
-        elif isinstance(body_node, BlockNode):
-            body_chunks = [c for c in body_node.insts if isinstance(c, BasicBlockNode)]
-        flat = parser._lower_loop(current, body_chunks)
-    elif isinstance(current, IRBranch):
-        case_chunks_list: list[list[BasicBlockNode]] = []
-        for case in current.cases:
-            case_node = _lower_node(case, chunk_passes, tree_passes, ctx)
-            if isinstance(case_node, BasicBlockNode):
-                case_chunks_list.append([case_node])
-            elif isinstance(case_node, BlockNode):
-                case_chunks_list.append(
-                    [c for c in case_node.insts if isinstance(c, BasicBlockNode)]
-                )
-            else:
-                case_chunks_list.append([])
-        flat = parser._lower_branch(current, case_chunks_list)
-    elif isinstance(current, IRDispatch):
-        flat = parser._lower_dispatch(current)
-    else:
-        raise TypeError(f"_lower_node: no lower for node type {type(current).__name__}")
+# Structural MetaInst types that mark IR-tree boundaries. They are consumed
+# by IRParser.parse / unparse and must be stripped before the post-tree
+# ChunkList optimization (DISABLE_OPT info already lives on
+# BasicBlockNode.disable_opt, so no MetaInst needs to survive).
+_STRUCTURAL_META_TYPES: frozenset[str] = frozenset(
+    {
+        "LOOP_START",
+        "LOOP_BODY_START",
+        "LOOP_BODY_END",
+        "LOOP_END",
+        "BRANCH_START",
+        "BRANCH_CASE_START",
+        "BRANCH_CASE_END",
+        "BRANCH_END",
+        "DISPATCH_START",
+        "DISPATCH_END",
+        "DISABLE_OPT_START",
+        "DISABLE_OPT_END",
+    }
+)
 
-    flat_nodes: list[IRNode] = list(flat)
-    return _lower_node(BlockNode(insts=flat_nodes), chunk_passes, tree_passes, ctx)
+
+def _strip_structural_meta(chunks: ChunkList) -> list[BasicBlockNode]:
+    """Drop structural MetaInst, keeping only BasicBlockNode chunks.
+
+    By the time this runs the chunk list has already been through IRLexer.lex
+    (which records DISABLE_OPT spans onto BasicBlockNode.disable_opt) and
+    IRParser.unparse, so every structural marker is redundant. Any leftover
+    non-structural MetaInst is unexpected and raises.
+    """
+    result: list[BasicBlockNode] = []
+    for chunk in chunks:
+        if isinstance(chunk, BasicBlockNode):
+            result.append(chunk)
+        elif chunk.type in _STRUCTURAL_META_TYPES:
+            continue
+        else:
+            raise ValueError(
+                f"_strip_structural_meta: unexpected non-structural MetaInst "
+                f"{chunk.type!r} in chunk list"
+            )
+    return result
 
 
 class IRPipeLine:
-    """Post-order IR lower pipeline.
+    """U-shape single-pass IR optimization pipeline.
 
-    Flow:
-      1. Lex flat instructions → ChunkList.
-      2. Pre-lower AbsChunkPass + AbsChunkListPass (single round, no iteration).
-      3. IRParser.parse() → IR tree (once).
-      4. _lower_node(root): post-order lower — BasicBlockNode gets ChunkPass,
-         IRLoop/IRBranch/IRDispatch gets IRTreePass chain then IRParser fallback,
-         BlockNode children are inline-flattened.  Recurse until only BlockNode
-         and BasicBlockNode remain.
-         AbsChunkListPass is NOT run inside _lower_node.
-      5. Flatten result tree → list[BasicBlockNode].
-      6. Post-lower AbsChunkPass + AbsChunkListPass to convergence.
+    Flow::
+
+        list[Instruction]
+          → IRLexer.lex            → ChunkList
+          → ChunkList optimization (ChunkPass + ChunkListPass, one iter group)
+          → IRParser.parse         → IR tree
+          → IR-tree optimization   (AbsIRTreePass, post-order, pipeline-driven)
+          → IRParser.unparse       → ChunkList (with structural MetaInst)
+          → strip structural MetaInst
+          → ChunkList optimization (ChunkPass + ChunkListPass, one iter group)
+          → IRLexer.flatten        → list[Instruction]
+
+    IR optimization is optional: ``disable_all_opt`` returns the input
+    untouched (the macro/module layer already emits runnable ASM).
     """
 
     def __init__(
@@ -341,7 +350,7 @@ class IRPipeLine:
                         reg = parse_register(v)
                         if reg is not None:
                             used_regs.update(reg.regs())
-        
+
         available_regs = set(GENERAL_REGS) - used_regs
 
         ctx = PipeLineContext(
@@ -355,41 +364,30 @@ class IRPipeLine:
         lexer = IRLexer()
         parser = IRParser(pmem_size=self.config.pmem_capacity)
 
-        # --- Step 1: pre-lower ChunkPass (single round, no iteration) ---
+        # --- lex → ChunkList ---
         chunks = lexer.lex(insts)
-        chunks, _ = _run_chunk_passes(self.chunk_passes, chunks, ctx)
-        chunks, _ = _run_chunk_list_passes(self.chunk_list_passes, chunks, ctx)
 
-        # --- Step 2: parse once → IR tree ---
+        # --- ChunkList optimization (pre-parse) ---
+        chunks = _run_chunklist_opt(
+            self.chunk_passes, self.chunk_list_passes, chunks, ctx
+        )
+
+        # --- parse → IR tree ---
         ir = parser.parse(chunks)
 
-        # --- Step 3: post-order lower ---
-        lowered = _lower_node(ir, self.chunk_passes, self.tree_passes, ctx)
+        # --- IR-tree optimization (post-order, pipeline-driven recursion) ---
+        ir = _optimize_tree(ir, self.tree_passes, ctx)
 
-        # --- Step 4: flatten result tree → list[BasicBlockNode] ---
-        from .node import BlockNode
+        # --- unparse → ChunkList, then strip structural MetaInst ---
+        unparsed = parser.unparse(cast(BlockNode, ir))
+        flat_chunks: ChunkList = list(_strip_structural_meta(unparsed))
 
-        def _flatten(node: IRNode) -> list[BasicBlockNode]:
-            if isinstance(node, BasicBlockNode):
-                return [node]
-            if isinstance(node, BlockNode):
-                result: list[BasicBlockNode] = []
-                for child in node.insts:
-                    result.extend(_flatten(child))
-                return result
-            raise TypeError(
-                f"IRPipeLine: unexpected node type after lowering: {type(node).__name__}"
-            )
-
-        flat_chunks = _flatten(lowered)
-
-        # --- Step 5: post-lower AbsChunkPass + AbsChunkListPass to convergence ---
-        final_chunks = _run_all_passes_to_convergence(
+        # --- ChunkList optimization (post-unparse) ---
+        flat_chunks = _run_chunklist_opt(
             self.chunk_passes, self.chunk_list_passes, flat_chunks, ctx
         )
 
-        curr_insts = lexer.flatten(list(final_chunks))
-        return curr_insts, ctx
+        return lexer.flatten(flat_chunks), ctx
 
 
 # ---------------------------------------------------------------------------

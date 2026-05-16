@@ -88,10 +88,16 @@ from ...analysis import (
     estimate_flat_size,
 )
 from ...dispatch import needs_big_jump
-from ...factory import IRParser
 from ...instructions import BaseInst, JumpInst, LabelInst, RegWriteInst
 from ...labels import Label, LabelRef, make_label
-from ...node import BasicBlockNode, BlockNode, IRLoop, IRNode
+from ...node import (
+    BasicBlockNode,
+    BlockNode,
+    IRLoop,
+    IRNode,
+    _collect_subtree_names,
+    clone_renamed,
+)
 from ...operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
 from ...pipeline import AbsIRTreePass, PipeLineContext
 
@@ -109,101 +115,30 @@ class UnrollAnalysis:
     k_final: int
 
 
-def _collect_body_labels(nodes: list[IRNode]) -> set[str]:
-    """Recursively collect all LabelInst names defined inside body nodes."""
-    names: set[str] = set()
-    for node in nodes:
-        if isinstance(node, BasicBlockNode):
-            for lbl in node.labels:
-                names.add(lbl.name.name)
-        elif isinstance(node, BlockNode):
-            names |= _collect_body_labels(node.insts)
-    return names
+def _clone_body_copies(nodes: list[IRNode], repeat: int) -> list[IRNode]:
+    """Clone `repeat` full loop-body copies, preserving structure.
 
+    Each copy is a deep clone with all internal labels and nested
+    IRLoop / IRBranch / IRDispatch names uniquified, so the copies do not
+    collide.  Nested structural nodes survive as IRNodes — the pipeline
+    re-recurses the unroll result, so a nested loop that was not itself
+    unrolled is still lowered correctly by unparse().
 
-def _remap_node(node: IRNode, remap: dict[str, Label]) -> IRNode:
-    """Return a shallow-copied IRNode with all labels in remap substituted."""
-    from ...instructions import BaseInst, CallInst, DmemReadInst, JumpInst, RegWriteInst
-
-    if isinstance(node, BasicBlockNode):
-        new_labels = [
-            LabelInst(
-                name=remap.get(lbl.name.name, lbl.name), can_remove=lbl.can_remove
-            )
-            for lbl in node.labels
-        ]
-
-        def _remap_label_ref(ref: Optional[LabelRef]) -> Optional[LabelRef]:
-            if ref is None or ref.is_pseudo():
-                return ref
-            new_label = remap.get(ref.as_label().name)
-            if new_label is None:
-                return ref
-            return LabelRef(new_label)
-
-        def _remap_inst(inst: JumpInst) -> JumpInst:
-            new_ref = _remap_label_ref(inst.label)
-            if new_ref is inst.label:
-                return inst
-            import dataclasses
-
-            return dataclasses.replace(inst, label=new_ref)
-
-        def _remap_base_inst(inst: BaseInst) -> BaseInst:
-            if isinstance(inst, (JumpInst, RegWriteInst, DmemReadInst, CallInst)):
-                new_ref = _remap_label_ref(inst.label)
-                if new_ref is inst.label:
-                    return inst
-                import dataclasses
-
-                return dataclasses.replace(inst, label=new_ref)
-            return inst
-
-        new_insts = [_remap_base_inst(i) for i in node.insts]
-        new_branch = _remap_inst(node.branch) if node.branch is not None else None
-        return BasicBlockNode(
-            labels=new_labels,
-            insts=new_insts,
-            branch=new_branch,
-            disable_opt=node.disable_opt,
-        )
-    if isinstance(node, BlockNode):
-        return BlockNode(insts=[_remap_node(child, remap) for child in node.insts])
-    return node
-
-
-def _clone_body(nodes: list[IRNode], allocated: set[str]) -> list[IRNode]:
-    """Clone body nodes with all internal labels remapped to fresh unique names."""
-    body_names = _collect_body_labels(nodes)
-    remap = {n: make_label(n, allocated) for n in body_names}
-    return [_remap_node(node, remap) for node in nodes]
-
-
-def _clone_body_nodes(
-    nodes: list[IRNode],
-    repeat: int,
-    pmem_size: int | None = None,
-) -> list[BasicBlockNode]:
-    """Clone `repeat` full loop-body copies as BasicBlockNodes.
-
-    A local `allocated` set is built from all label names already present in
-    `nodes`.  Each clone call adds its remapped names to this set so successive
-    copies get distinct suffixes.  The set is discarded after the function
-    returns — it has no meaning outside of this clone session.
+    A local `allocated` set seeded from the body's existing labels keeps
+    successive copies disjoint; it is discarded when the function returns.
     """
-    # Seed allocated with all label names already present in the body so that
-    # the first clone does not collide with the original names.
-    allocated: set[str] = set(_collect_body_labels(nodes))
-    result: list[BasicBlockNode] = []
+    body_block = BlockNode(insts=list(nodes))
+    label_names, struct_names = _collect_subtree_names(body_block)
+    allocated: set[str] = set(label_names) | set(struct_names)
+    result: list[IRNode] = []
     for _ in range(repeat):
-        lowered = IRParser(pmem_size=pmem_size).lower_block(
-            BlockNode(insts=_clone_body(nodes, allocated))
-        )
-        result.extend(lowered)
+        cloned = clone_renamed(body_block, allocated)
+        assert isinstance(cloned, BlockNode)
+        result.extend(cloned.insts)
     return result
 
 
-def _prepend_label_to_body(body: list, label: Label) -> None:
+def _prepend_label_to_body(body: list[IRNode], label: Label) -> None:
     """Insert a LabelInst for `label` at the front of the first BasicBlockNode.
     If body is empty or the first item is not a BasicBlockNode, prepend a new one."""
     if body and isinstance(body[0], BasicBlockNode):
@@ -288,9 +223,9 @@ class UnrollLoopPass(AbsIRTreePass):
         self,
         node: IRNode,
         ctx: PipeLineContext,
-    ) -> IRNode:
+    ) -> Optional[IRNode]:
         if not isinstance(node, IRLoop):
-            return node
+            return None
 
         # Validation: check register safety for unrolling.
         from ...hw_semantics import ADDR_REG
@@ -330,18 +265,15 @@ class UnrollLoopPass(AbsIRTreePass):
             logger.debug(
                 "UnrollLoopPass: skip loop name=%s because n=%s <= 0", node.name, n
             )
-            return node
+            return None
 
         if n is not None:
             return self._unroll_constant(node, n, is_runtime_exact, loop_overhead, ctx)
 
         # Register-driven (no exact hint) → jump-table dispatch.
         if not isinstance(node.n, Register):
-            return node  # unexpected n type
-        jt_block = self._maybe_build_jump_table(node, loop_overhead, ctx)
-        if jt_block is None:
-            return node
-        return jt_block
+            return None  # unexpected n type
+        return self._maybe_build_jump_table(node, loop_overhead, ctx)
 
     def _unroll_constant(
         self,
@@ -350,7 +282,7 @@ class UnrollLoopPass(AbsIRTreePass):
         is_runtime_exact: bool,
         loop_overhead: int,
         ctx: PipeLineContext,
-    ) -> IRNode:
+    ) -> Optional[IRNode]:
         """Handle loops with a known (compile-time or exact-hint) iteration count."""
         analysis = _analyze_unroll(cast(BlockNode, node.body).insts, loop_overhead, ctx)
         logger.debug(
@@ -375,10 +307,10 @@ class UnrollLoopPass(AbsIRTreePass):
                 node.name,
                 k,
             )
-            return node
+            return None
 
         if n <= k:
-            return self._unroll_full(node, n, ctx)
+            return self._unroll_full(node, n)
 
         if is_runtime_exact:
             logger.debug(
@@ -388,14 +320,13 @@ class UnrollLoopPass(AbsIRTreePass):
                 n,
                 k,
             )
-            return node
+            return None
 
         return self._unroll_partial(node, n, k, ctx)
 
-    def _unroll_full(self, node: IRLoop, n: int, ctx: PipeLineContext) -> BlockNode:
+    def _unroll_full(self, node: IRLoop, n: int) -> BlockNode:
         """Full expansion: emit n body copies, drop the loop entirely (n <= k)."""
         logger.debug("UnrollLoopPass: fully expand loop name=%s n=%s", node.name, n)
-        pmem_size = ctx.config.pmem_capacity
         body_insts = cast(BlockNode, node.body).insts
         init_bb = BasicBlockNode(
             insts=[
@@ -405,7 +336,7 @@ class UnrollLoopPass(AbsIRTreePass):
         return BlockNode(
             insts=[
                 init_bb,
-                *_clone_body_nodes(body_insts, n, pmem_size=pmem_size),
+                *_clone_body_copies(body_insts, n),
             ]
         )
 
@@ -427,17 +358,20 @@ class UnrollLoopPass(AbsIRTreePass):
         result: list[IRNode] = []
 
         # Local allocated set for labels generated within this unroll session.
-        local_allocated: set[str] = set(_collect_body_labels(body_insts))
+        body_label_names, body_struct_names = _collect_subtree_names(
+            BlockNode(insts=list(body_insts))
+        )
+        local_allocated: set[str] = set(body_label_names) | set(body_struct_names)
 
         if remainder > 0:
             entry_label = make_label(f"{node.name}_remainder_entry", local_allocated)
-            part1 = _clone_body_nodes(body_insts, k - remainder, pmem_size=pmem_size)
-            part2 = _clone_body_nodes(body_insts, remainder, pmem_size=pmem_size)
+            part1 = _clone_body_copies(body_insts, k - remainder)
+            part2 = _clone_body_copies(body_insts, remainder)
 
             if not part2:
                 part2 = [BasicBlockNode(labels=[LabelInst(name=entry_label)])]
             else:
-                part2[0].labels.append(LabelInst(name=entry_label))
+                _prepend_label_to_body(part2, entry_label)
             unrolled_body = part1 + part2
 
             if needs_big_jump(pmem_size):
@@ -465,7 +399,7 @@ class UnrollLoopPass(AbsIRTreePass):
                 )
             result.append(init_bb)
         else:
-            unrolled_body = _clone_body_nodes(body_insts, k, pmem_size=pmem_size)
+            unrolled_body = _clone_body_copies(body_insts, k)
 
         # Build flat loop: start label → unrolled body → back-edge → end label.
         # Not wrapped in IRLoop to prevent re-unrolling on the next pipeline iteration.
@@ -586,7 +520,10 @@ class UnrollLoopPass(AbsIRTreePass):
         scratch = Register(min(ctx.available_regs))
 
         # Local allocated set for labels generated within this jump-table session.
-        local_allocated: set[str] = set(_collect_body_labels(body_insts))
+        _jt_label_names, _jt_struct_names = _collect_subtree_names(
+            BlockNode(insts=list(body_insts))
+        )
+        local_allocated: set[str] = set(_jt_label_names) | set(_jt_struct_names)
         entry_labels = [
             make_label(f"{node.name}_jt_entry_{idx}", local_allocated)
             for idx in range(k)
@@ -685,7 +622,9 @@ class UnrollLoopPass(AbsIRTreePass):
 
         offset_insts: list[BaseInst] = [
             RegWriteInst(
-                dst=scratch, src=SrcKeyword.OP, op=AluExpr(scratch, AluOp.SUB, Immediate(k))
+                dst=scratch,
+                src=SrcKeyword.OP,
+                op=AluExpr(scratch, AluOp.SUB, Immediate(k)),
             ),  # scratch = r - k
             RegWriteInst(
                 dst=scratch, src=SrcKeyword.OP, op=AluExpr(scratch, AluOp.ABS)
@@ -705,9 +644,11 @@ class UnrollLoopPass(AbsIRTreePass):
         # ── k body copies (free-form IRNodes, lowered by pipeline) ────────────
         for idx in range(k):
             entry_bb = BasicBlockNode(labels=[LabelInst(name=entry_labels[idx])])
-            body_block = BlockNode(
-                insts=[entry_bb, *_clone_body(body_insts, local_allocated)]
+            cloned_body = clone_renamed(
+                BlockNode(insts=list(body_insts)), local_allocated
             )
+            assert isinstance(cloned_body, BlockNode)
+            body_block = BlockNode(insts=[entry_bb, *cloned_body.insts])
             result.append(body_block)
 
         # ── back edge ─────────────────────────────────────────────────────────

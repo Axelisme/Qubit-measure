@@ -103,6 +103,52 @@ def test_structural_loop_roundtrip():
     assert cursor.final_line == 6
 
 
+def test_nested_loop_unparse_parse_roundtrip():
+    """A nested IRLoop survives unparse → parse → unparse unchanged.
+
+    The outer loop body holds an inner IRLoop; unparse must emit both
+    structures' markers, and parse must reconstruct the same nesting so a
+    second unparse produces an identical chunk stream.
+    """
+    from zcu_tools.program.v2.ir.factory import IRParser
+    from zcu_tools.program.v2.ir.instructions import MetaInst
+
+    inner = IRLoop(
+        name="inner",
+        counter_reg=Register("r2"),
+        n=2,
+        body=BlockNode(insts=[BasicBlockNode(insts=[NopInst()])]),
+    )
+    outer = IRLoop(
+        name="outer",
+        counter_reg=Register("r1"),
+        n=3,
+        body=BlockNode(insts=[inner]),
+    )
+    root = BlockNode(insts=[outer])
+
+    parser = IRParser(pmem_size=1024)
+
+    chunks1 = parser.unparse(root)
+    reparsed = parser.parse(chunks1)
+
+    # The reconstructed tree must still be outer(IRLoop) → inner(IRLoop).
+    assert len(reparsed.insts) == 1
+    re_outer = reparsed.insts[0]
+    assert isinstance(re_outer, IRLoop)
+    assert re_outer.name == "outer"
+    assert isinstance(re_outer.body, BlockNode)
+    re_inner = next(c for c in re_outer.body.insts if isinstance(c, IRLoop))
+    assert re_inner.name == "inner"
+
+    # A second unparse must yield the same structural marker sequence.
+    chunks2 = IRParser(pmem_size=1024).unparse(reparsed)
+    markers1 = [c.type for c in chunks1 if isinstance(c, MetaInst)]
+    markers2 = [c.type for c in chunks2 if isinstance(c, MetaInst)]
+    assert markers1 == markers2
+    assert markers1.count("LOOP_START") == 2
+
+
 def test_irloop_emit_uses_s15_jump_for_large_pmem():
     from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
     from zcu_tools.program.v2.ir.linker import IRLinker

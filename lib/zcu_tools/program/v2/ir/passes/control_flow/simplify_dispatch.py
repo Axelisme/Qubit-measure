@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from typing_extensions import Optional
+
 from ...dispatch import needs_big_jump
-from ...instructions import BaseInst, JumpInst, RegWriteInst
+from ...instructions import JumpInst, RegWriteInst
 from ...labels import LabelRef
 from ...node import BasicBlockNode, IRDispatch, IRNode
 from ...operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
@@ -32,9 +34,9 @@ class SimplifyDispatchPass(AbsIRTreePass):
         self,
         node: IRNode,
         ctx: PipeLineContext,
-    ) -> IRNode:
+    ) -> Optional[IRNode]:
         if not isinstance(node, IRDispatch) or len(node.target_labels) != 2:
-            return node
+            return None
 
         pmem_size = ctx.config.pmem_capacity
         target1 = node.target_labels[1]

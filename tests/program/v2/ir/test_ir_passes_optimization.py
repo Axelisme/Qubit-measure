@@ -57,50 +57,20 @@ def _config(**kwargs) -> PipeLineConfig:
     return PipeLineConfig(**kwargs)
 
 
-def _apply_tree_pass(
-    node: IRNode, pass_: AbsIRTreePass, ctx: PipeLineContext
-) -> IRNode:
-    """Apply an AbsIRTreePass to a single IRNode (post-order, no ChunkPass between layers)."""
-    from zcu_tools.program.v2.ir.node import IRBranch, IRLoop
-
-    # Recurse into children first (post-order).
-    if isinstance(node, IRLoop):
-        new_body = _apply_tree_pass(node.body, pass_, ctx)
-        if new_body is not node.body:
-            node.body = new_body
-    elif isinstance(node, IRBranch):
-        for i, case in enumerate(node.cases):
-            new_case = _apply_tree_pass(case, pass_, ctx)
-            if new_case is not case:
-                node.cases[i] = new_case
-    elif isinstance(node, BlockNode):
-        for i, child in enumerate(node.insts):
-            new_child = _apply_tree_pass(child, pass_, ctx)
-            if new_child is not child:
-                node.insts[i] = new_child
-        return node
-    else:
-        return node
-
-    return pass_.transform(node, ctx)
-
-
 def _apply_tree_pass_to_root(
     root: BlockNode, pass_: AbsIRTreePass, ctx: PipeLineContext
 ) -> tuple[BlockNode, bool]:
-    """Apply an AbsIRTreePass to all nodes in a BlockNode tree, return (result, changed)."""
-    before_id = id(root)
-    result = _apply_tree_pass(root, pass_, ctx)
-    changed = id(result) != before_id or any(
-        id(child) != id(orig)
-        for child, orig in zip(
-            (result.insts if isinstance(result, BlockNode) else []),
-            root.insts,
-        )
-    )
+    """Run an AbsIRTreePass over a tree via the real pipeline post-order driver.
+
+    Returns (result, changed). `changed` is best-effort: True when the root
+    object identity changed.
+    """
+    from zcu_tools.program.v2.ir.pipeline import _optimize_tree
+
+    result = _optimize_tree(root, [pass_], ctx)
     if isinstance(result, BlockNode):
-        return result, changed
-    return BlockNode(insts=[result]), changed
+        return result, result is not root
+    return BlockNode(insts=[result]), True
 
 
 def _run_chunk_passes_on_root(root: BlockNode, passes: list) -> BlockNode:
@@ -541,33 +511,36 @@ def test_unroll_register_driven_jump_table_structure():
     assert any(j.if_cond == "Z" and str(j.op) == "r1 - #0" for j in cond_jumps)
 
 
-def test_clone_body_remaps_internal_label_refs():
-    """_clone_body must remap LabelRef targets inside the cloned body.
+def test_clone_renamed_remaps_internal_label_refs():
+    """clone_renamed must remap LabelRef targets inside the cloned body.
 
     A body containing a conditional back-jump to its own internal label must
     have that LabelRef updated to point to the cloned (renamed) label, not the
     original label in the un-cloned body.
     """
-    from zcu_tools.program.v2.ir.passes.loop.unroll import _clone_body
+    from zcu_tools.program.v2.ir.node import clone_renamed
 
     inner_label = Label("inner")
-    body: list = [
-        BasicBlockNode(
-            labels=[LabelInst(name=inner_label)],
-            insts=[TimeInst(c_op="inc_ref", lit=Immediate(1))],
-            branch=JumpInst(
-                label=LabelRef(inner_label),
-                if_cond="S",
-                op=AluExpr(Register("r0"), AluOp.SUB, Immediate(1)),
-            ),
-        )
-    ]
+    body = BlockNode(
+        insts=[
+            BasicBlockNode(
+                labels=[LabelInst(name=inner_label)],
+                insts=[TimeInst(c_op="inc_ref", lit=Immediate(1))],
+                branch=JumpInst(
+                    label=LabelRef(inner_label),
+                    if_cond="S",
+                    op=AluExpr(Register("r0"), AluOp.SUB, Immediate(1)),
+                ),
+            )
+        ]
+    )
 
     allocated: set[str] = {"inner"}
-    cloned = _clone_body(body, allocated)
+    cloned = clone_renamed(body, allocated)
 
-    assert len(cloned) == 1
-    bb = cloned[0]
+    assert isinstance(cloned, BlockNode)
+    assert len(cloned.insts) == 1
+    bb = cloned.insts[0]
     assert isinstance(bb, BasicBlockNode)
 
     # The cloned label must have a different name (suffix added).
@@ -582,3 +555,25 @@ def test_clone_body_remaps_internal_label_refs():
     assert bb.branch.label.as_label() == cloned_label_name, (
         "cloned branch LabelRef must point to the renamed label"
     )
+
+
+def test_clone_renamed_uniquifies_nested_structure_names():
+    """clone_renamed must give a nested IRLoop a fresh name so the labels its
+    later unparse() synthesises (``{name}_start`` etc.) do not collide."""
+    from zcu_tools.program.v2.ir.node import clone_renamed
+
+    inner = IRLoop(
+        name="inner",
+        counter_reg=Register("r2"),
+        n=2,
+        body=BlockNode(insts=[BasicBlockNode(insts=[NopInst()])]),
+    )
+    body = BlockNode(insts=[inner])
+
+    allocated: set[str] = {"inner"}
+    cloned = clone_renamed(body, allocated)
+
+    assert isinstance(cloned, BlockNode)
+    cloned_loop = cloned.insts[0]
+    assert isinstance(cloned_loop, IRLoop)
+    assert cloned_loop.name != "inner", "nested loop name must be uniquified"

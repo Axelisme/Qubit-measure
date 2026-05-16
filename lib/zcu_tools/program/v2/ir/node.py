@@ -208,3 +208,132 @@ class IRDispatch(IRNode):
         prefix = "    " * indent
         targets = ", ".join(str(lbl) for lbl in self.target_labels)
         return f"{prefix} IRDispatch(name={self.name}, value_reg={self.value_reg}, targets=[{targets}])\n"
+
+
+# ---------------------------------------------------------------------------
+# Subtree cloning with label / structure-name uniquification
+# ---------------------------------------------------------------------------
+
+
+def _collect_subtree_names(node: IRNode) -> tuple[set[str], set[str]]:
+    """Return (defined label names, structure node names) in a subtree.
+
+    Defined label names: every ``LabelInst.name`` inside any BasicBlockNode.
+    Structure names: ``name`` of every IRLoop / IRBranch / IRDispatch — these
+    drive the labels that unparse() will synthesise (``{name}_start`` etc.),
+    so they must also be uniquified when a subtree is duplicated.
+    """
+    labels: set[str] = set()
+    structs: set[str] = set()
+    if isinstance(node, BasicBlockNode):
+        for lbl in node.labels:
+            labels.add(lbl.name.name)
+    elif isinstance(node, BlockNode):
+        for child in node.insts:
+            sub_l, sub_s = _collect_subtree_names(child)
+            labels |= sub_l
+            structs |= sub_s
+    elif isinstance(node, IRLoop):
+        structs.add(node.name)
+        sub_l, sub_s = _collect_subtree_names(node.body)
+        labels |= sub_l
+        structs |= sub_s
+    elif isinstance(node, IRBranch):
+        structs.add(node.name)
+        for case in node.cases:
+            sub_l, sub_s = _collect_subtree_names(case)
+            labels |= sub_l
+            structs |= sub_s
+    elif isinstance(node, IRDispatch):
+        structs.add(node.name)
+    return labels, structs
+
+
+def _clone_node(
+    node: IRNode, label_remap: dict[str, Label], name_remap: dict[str, str]
+) -> IRNode:
+    """Deep-clone a subtree, applying label and structure-name remaps."""
+    from .instructions import CallInst, DmemReadInst, RegWriteInst
+    from .labels import LabelRef
+
+    def _remap_ref(ref: Optional[LabelRef]) -> Optional[LabelRef]:
+        if ref is None or ref.is_pseudo():
+            return ref
+        new = label_remap.get(ref.as_label().name)
+        return LabelRef(new) if new is not None else ref
+
+    def _remap_inst(inst: BaseInst) -> BaseInst:
+        import dataclasses
+
+        if isinstance(inst, (JumpInst, RegWriteInst, DmemReadInst, CallInst)):
+            new_ref = _remap_ref(inst.label)
+            if new_ref is not inst.label:
+                return dataclasses.replace(inst, label=new_ref)
+        return inst
+
+    def _remap_branch(branch: JumpInst) -> JumpInst:
+        import dataclasses
+
+        new_ref = _remap_ref(branch.label)
+        if new_ref is not branch.label:
+            return dataclasses.replace(branch, label=new_ref)
+        return branch
+
+    if isinstance(node, BasicBlockNode):
+        return BasicBlockNode(
+            labels=[
+                LabelInst(
+                    name=label_remap.get(lbl.name.name, lbl.name),
+                    can_remove=lbl.can_remove,
+                )
+                for lbl in node.labels
+            ],
+            insts=[_remap_inst(i) for i in node.insts],
+            branch=_remap_branch(node.branch) if node.branch is not None else None,
+            disable_opt=node.disable_opt,
+        )
+    if isinstance(node, BlockNode):
+        return BlockNode(
+            insts=[_clone_node(c, label_remap, name_remap) for c in node.insts]
+        )
+    if isinstance(node, IRLoop):
+        return IRLoop(
+            name=name_remap.get(node.name, node.name),
+            counter_reg=node.counter_reg,
+            n=node.n,
+            body=_clone_node(node.body, label_remap, name_remap),
+            range_hint=node.range_hint,
+        )
+    if isinstance(node, IRBranch):
+        return IRBranch(
+            name=name_remap.get(node.name, node.name),
+            compare_reg=node.compare_reg,
+            cases=[_clone_node(c, label_remap, name_remap) for c in node.cases],
+        )
+    if isinstance(node, IRDispatch):
+        return IRDispatch(
+            name=name_remap.get(node.name, node.name),
+            value_reg=node.value_reg,
+            target_labels=[
+                label_remap.get(lbl.name, lbl) for lbl in node.target_labels
+            ],
+        )
+    raise TypeError(f"_clone_node: unexpected node type {type(node).__name__}")
+
+
+def clone_renamed(node: IRNode, allocated: set[str]) -> IRNode:
+    """Deep-clone an IR subtree with every internal label and structure name
+    replaced by a fresh unique name.
+
+    ``allocated`` is the set of names already in use; the chosen fresh names
+    are added to it so successive clones do not collide. This makes it safe to
+    duplicate a loop body (including nested IRLoop / IRBranch / IRDispatch)
+    k times — each copy gets distinct labels, so the later unparse() step
+    synthesises non-colliding ``{name}_start`` etc. for nested structures.
+    """
+    from .labels import make_label
+
+    label_names, struct_names = _collect_subtree_names(node)
+    label_remap = {n: make_label(n, allocated) for n in label_names}
+    name_remap = {n: make_label(n, allocated).name for n in struct_names}
+    return _clone_node(node, label_remap, name_remap)
