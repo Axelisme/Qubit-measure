@@ -100,7 +100,10 @@ class LoadValue(Module):
             prog.read_dmem(dst=word_reg, addr=addr_reg)
 
             # shift = (idx AND #slot_mask) [SL #bits_shift]
-            shift_reg = addr_reg  # reuse addr_reg
+            # addr_reg is safe to reuse here: read_dmem above has already
+            # consumed it as the address, and word_reg now holds the fetched
+            # word, so addr_reg's value is dead.
+            shift_reg = addr_reg
             prog.write_reg_op(shift_reg, self.idx_reg, "AND", self._slot_mask)
             if self._bits_shift > 0:
                 prog.write_reg_op(shift_reg, shift_reg, "SL", self._bits_shift)

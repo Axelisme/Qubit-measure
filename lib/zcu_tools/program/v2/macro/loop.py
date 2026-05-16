@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import logging
-from numbers import Integral
 from typing import Union
 
 from qick.asm_v2 import AcquireProgramV2, AsmInst, Label, Macro, WriteLabel, WriteReg
 
 from .meta import MetaMacro
-from .write_reg import WriteRegOp
+from .write_reg import WriteRegOp, format_alu_op
 
 logger = logging.getLogger(__name__)
 
@@ -43,17 +42,6 @@ def _emit_cond_jump(
             addr_inc=1,
         )
     ]
-
-
-def _format_op(
-    prog: AcquireProgramV2, lhs_reg: str, op: str, rhs: Union[int, str]
-) -> str:
-    lhs = prog._get_reg(lhs_reg)
-    if isinstance(rhs, Integral):
-        return f"{lhs} {op} #{int(rhs)}"
-    if isinstance(rhs, str):
-        return f"{lhs} {op} {prog._get_reg(rhs)}"
-    raise RuntimeError(f"invalid rhs: {rhs!r}")
 
 
 class OpenInnerLoop(Macro):
@@ -142,7 +130,7 @@ class CloseInnerLoop(Macro):
         start = f"{self.name}_start"
         end = f"{self.name}_end"
 
-        op_str = _format_op(prog, self.counter_reg, "-", self.n)
+        op_str = format_alu_op(prog, self.counter_reg, "-", self.n)
 
         return [
             WriteRegOp(dst=self.counter_reg, lhs=self.counter_reg, op="+", rhs=1),

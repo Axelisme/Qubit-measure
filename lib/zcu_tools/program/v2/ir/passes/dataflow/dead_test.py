@@ -69,6 +69,14 @@ class DeadTestEliminationPass(BlockChunkPass):
                 if pending is not None:
                     dead.add(pending)  # previous TEST was never consumed
                 pending = idx
+            elif getattr(inst, "uf", False):
+                # A -uf instruction (e.g. REG_WR -uf) overwrites the ALU flags
+                # as a side effect. Any pending TEST is now dead — its flags can
+                # never be observed. The -uf instruction itself is kept: it has
+                # its own register-write side effect and is not a TestInst.
+                if pending is not None:
+                    dead.add(pending)
+                pending = None
             elif isinstance(inst, JumpInst) and inst.if_cond is not None:
                 pending = None  # flag consumed by conditional jump
 

@@ -117,7 +117,13 @@ class IRLinker:
             # 2. Insert the instruction itself
             logical_insts.append(BaseInst.from_dict(d))
 
-        # Handle trailing markers from meta_infos
+        # Handle trailing markers from meta_infos — markers whose p_addr lies
+        # past the last instruction (e.g. a label/meta at end-of-program).
+        # Sorting by p_addr keeps cross-address ordering correct; within a
+        # single p_addr the original meta_infos append order is preserved
+        # because markers_by_addr is a defaultdict(list) populated in link()
+        # order, so an interleaved label+meta at the same address keeps its
+        # relative order.
         for p_addr, markers in sorted(markers_by_addr.items()):
             for m in markers:
                 if m["kind"] == "label":

@@ -268,6 +268,68 @@ def test_dead_test_elimination_keeps_used_test():
     assert isinstance(bb.insts[0], TestInst)
 
 
+def test_dead_test_elimination_uf_instruction_overwrites_flag():
+    # A REG_WR -uf overwrites the ALU flags, so a preceding TEST whose flag is
+    # never read before it becomes dead. The -uf REG_WR itself is kept.
+    lbl = Label("loop")
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Immediate(10))),
+                    RegWriteInst(
+                        dst=Register("r2"),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r2"), AluOp.ADD, Immediate(1)),
+                        uf=True,
+                    ),
+                ],
+                branch=JumpInst(label=LabelRef(lbl), if_cond="NZ"),
+            ),
+        ]
+    )
+
+    root = _run_chunk_passes_on_root(root, [DeadTestEliminationPass()])
+
+    bb = root.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 1
+    assert isinstance(bb.insts[0], RegWriteInst)
+    assert bb.insts[0].uf is True
+
+
+def test_dead_test_elimination_keeps_test_when_uf_instruction_follows_consumption():
+    # TEST consumed by the conditional branch is live even if a -uf REG_WR
+    # would otherwise overwrite flags — the -uf write is after the branch
+    # point only conceptually; here the branch is the block terminal so the
+    # TEST before a non-uf inst stays. Guards against over-eager removal.
+    lbl = Label("loop")
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    RegWriteInst(
+                        dst=Register("r2"),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r2"), AluOp.ADD, Immediate(1)),
+                        uf=True,
+                    ),
+                    TestInst(op=AluExpr(Register("r1"), AluOp.SUB, Immediate(10))),
+                ],
+                branch=JumpInst(label=LabelRef(lbl), if_cond="NZ"),
+            ),
+        ]
+    )
+
+    root = _run_chunk_passes_on_root(root, [DeadTestEliminationPass()])
+
+    bb = root.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 2
+    assert isinstance(bb.insts[0], RegWriteInst)
+    assert isinstance(bb.insts[1], TestInst)
+
+
 # ---------------------------------------------------------------------------
 # UnrollLoopPass + DeadWriteElimination
 # ---------------------------------------------------------------------------
@@ -301,7 +363,9 @@ def test_unroll_full_expansion_removes_overwritten_writes_in_body():
     )
 
     pipeline = make_default_pipeline(pmem_capacity=512)
-    ctx = PipeLineContext(config=pipeline.config, pmem_budget=512, available_regs={'r14'})
+    ctx = PipeLineContext(
+        config=pipeline.config, pmem_budget=512, available_regs={"r14"}
+    )
 
     # 1. Unroll
     out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
@@ -449,7 +513,9 @@ def test_unroll_register_driven_jump_table_structure():
 
     config = _config(max_unroll_factor=2)
     out, _ = _apply_tree_pass_to_root(
-        root, UnrollLoopPass(), PipeLineContext(config=config, pmem_budget=512, available_regs={'r14'})
+        root,
+        UnrollLoopPass(),
+        PipeLineContext(config=config, pmem_budget=512, available_regs={"r14"}),
     )
 
     # UnrollLoopPass output should contain an IRDispatch node (not yet lowered).
