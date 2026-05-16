@@ -1038,8 +1038,7 @@ class DivInst(BaseInst):
         den_imm = parse_immediate(den_raw)
         if den_imm is not None:
             return cls(num=num, den=den_imm)
-        # Fallback: den may be a register name without # prefix
-        return cls(num=num, den=Register(den_raw))
+        raise ValueError(f"DIV.DEN: {den_raw!r} is not a register or immediate")
 
     @property
     def reg_read(self) -> frozenset[str]:
@@ -1238,6 +1237,10 @@ class WaitInst(BaseInst):
             time=parse_time(str(d["TIME"])) if "TIME" in d else None,
             addr=parse_addr(d.get("ADDR")),
         )
+
+    def __post_init__(self) -> None:
+        if self.addr is not None and self.addr != Register("s15"):
+            raise ValueError(f"WaitInst.addr must be 's15', got {self.addr!r}.")
 
     @property
     def reg_read(self) -> frozenset[str]:

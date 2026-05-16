@@ -17,6 +17,7 @@ from copy import deepcopy
 import pytest
 from zcu_tools.program.v2.ir.instructions import (
     BaseInst,
+    DivInst,
     DmemReadInst,
     DmemWriteInst,
     DportWriteInst,
@@ -41,6 +42,7 @@ from zcu_tools.program.v2.ir.operands import (
     Register,
     SideWrite,
     SrcKeyword,
+    parse_register,
 )
 
 
@@ -542,3 +544,44 @@ class TestEdgeCases:
         assert isinstance(inst, TimeInst)
         assert inst.lit is None
         assert inst.r1 is None
+
+
+class TestStrictParsing:
+    """Strict-parsing guarantees: bad input fails at the IR boundary (IR-2/3/4)."""
+
+    def test_div_from_dict_accepts_register_and_immediate_den(self):
+        reg_den = BaseInst.from_dict({"CMD": "DIV", "NUM": "r0", "DEN": "r1"})
+        assert isinstance(reg_den, DivInst)
+        assert reg_den.den == Register("r1")
+
+        imm_den = BaseInst.from_dict({"CMD": "DIV", "NUM": "r0", "DEN": "#5"})
+        assert isinstance(imm_den, DivInst)
+        assert imm_den.den == Immediate(5)
+
+    def test_div_from_dict_rejects_invalid_den(self):
+        # IR-2: a DEN that is neither a register nor an immediate must raise,
+        # not be silently wrapped into a bogus Register.
+        with pytest.raises(ValueError, match="DIV.DEN"):
+            BaseInst.from_dict({"CMD": "DIV", "NUM": "r0", "DEN": "garbage"})
+
+    def test_parse_register_rejects_unknown_descriptive_name(self):
+        # IR-3: a descriptive name not in the alias table is not a register.
+        assert parse_register("s_typo") is None
+        assert parse_register("w_bogus") is None
+
+    def test_parse_register_accepts_known_aliases_and_bare_names(self):
+        assert parse_register("s_out_time") == Register("s_out_time")
+        assert parse_register("w_freq") == Register("w_freq")
+        assert parse_register("r_wave") == Register("r_wave")
+        assert parse_register("r5") == Register("r5")
+        assert parse_register("s14") == Register("s14")
+        assert parse_register("&r1") == Register("r1")
+
+    def test_wait_inst_rejects_non_s15_addr(self):
+        # IR-4: WAIT ADDR may only be s15 (assembler enforces the same).
+        with pytest.raises(ValueError, match="WaitInst.addr"):
+            WaitInst(c_op="time", addr=Register("r0"))
+
+    def test_wait_inst_accepts_s15_addr(self):
+        inst = WaitInst(c_op="time", addr=Register("s15"))
+        assert inst.addr == Register("s15")

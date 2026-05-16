@@ -331,7 +331,12 @@ def test_lit_time_absorbed_into_port_write():
     assert str(bb.insts[1].lit) == "#43"
 
 
-def test_lit_time_absorbed_into_wait_inst():
+def test_wait_inst_is_flush_barrier_not_fold_target():
+    # WAIT time @T must NOT absorb a pending TIME inc_ref delta: the assembler
+    # expands WAIT time to `TEST s11 - #(T-10)`, so @T is an absolute user-time
+    # comparison value, not an s14-relative offset. Folding the delta in would
+    # change the wait target time. WaitInst is therefore a flush barrier: the
+    # pending TIME is emitted *before* it and @T stays unchanged.
     root = BlockNode(
         insts=[
             BasicBlockNode(
@@ -346,10 +351,44 @@ def test_lit_time_absorbed_into_wait_inst():
     bb = out.insts[0]
     assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 2
-    assert isinstance(bb.insts[0], WaitInst)
-    assert str(bb.insts[0].time) == "@83"
-    assert isinstance(bb.insts[1], TimeInst)
-    assert str(bb.insts[1].lit) == "#83"
+    assert isinstance(bb.insts[0], TimeInst)
+    assert str(bb.insts[0].lit) == "#83"
+    assert isinstance(bb.insts[1], WaitInst)
+    assert str(bb.insts[1].time) == "@0"
+
+
+def test_wait_inst_flush_then_following_timed_segment():
+    # After WaitInst flushes pending, a later TIME inc_ref starts a fresh
+    # segment that a subsequent PortWrite @T can still absorb.
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    TimeInst(c_op="inc_ref", lit=Immediate(50)),
+                    WaitInst(c_op="time", time=TimeOffset(100)),
+                    TimeInst(c_op="inc_ref", lit=Immediate(7)),
+                    PortWriteInst(
+                        dst=ImmValue(2),
+                        src=SrcKeyword.WMEM,
+                        addr=MemAddr(0),
+                        time=TimeOffset(0),
+                    ),
+                ]
+            )
+        ]
+    )
+    out = _run_merge(root)
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 4
+    assert isinstance(bb.insts[0], TimeInst)
+    assert str(bb.insts[0].lit) == "#50"
+    assert isinstance(bb.insts[1], WaitInst)
+    assert str(bb.insts[1].time) == "@100"  # untouched
+    assert isinstance(bb.insts[2], PortWriteInst)
+    assert str(bb.insts[2].time) == "@7"  # absorbed the post-WAIT segment delta
+    assert isinstance(bb.insts[3], TimeInst)
+    assert str(bb.insts[3].lit) == "#7"
 
 
 def test_accumulated_time_absorbed():

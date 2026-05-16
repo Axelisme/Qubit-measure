@@ -21,11 +21,7 @@ class PrintTimeStamp(Macro):
         gen_chs: Optional[list[int]] = None,
         ro_chs: Optional[list[int]] = None,
     ) -> None:
-        self.name = name
-        self.t = t
-        self.prefix = prefix
-        self.gen_chs = gen_chs
-        self.ro_chs = ro_chs
+        super().__init__(name=name, t=t, prefix=prefix, gen_chs=gen_chs, ro_chs=ro_chs)
 
     def expand(self, prog) -> list[AsmInst]:  # type: ignore
         return []

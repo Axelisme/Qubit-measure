@@ -50,6 +50,15 @@ class Repeat(Module):
         if isinstance(n, int) and n < 0:
             raise ValueError(f"Repeat n must be greater than or equal to 0, got {n}")
 
+        # counter_reg is named after `name`; a register-driven n sharing that
+        # name would make the back-edge `op(counter - n)` evaluate to a
+        # constant 0, breaking the loop condition.
+        if isinstance(n, str) and n == self.counter_reg:
+            raise ValueError(
+                f"Repeat n register {n!r} must differ from the counter register "
+                f"(named after Repeat name {name!r})"
+            )
+
     def add_content(self, mod: SubModule) -> Self:
         if isinstance(mod, Module):
             mod = [mod]

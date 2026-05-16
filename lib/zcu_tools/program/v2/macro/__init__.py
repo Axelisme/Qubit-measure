@@ -159,6 +159,19 @@ class AdditionalMacroMixin(AsmV2):
         used = self._reg_num_stack[-1] if self._reg_num_stack else 0
         total = used + num
 
+        # Guard against silent data-register exhaustion. tProc v2 has a limited
+        # dreg pool (tproccfg['dreg_qty'], usually 32) shared with loop
+        # counters, swept-time registers and user add_reg() calls. Without this
+        # check, a deeply nested acquire_temp_reg would surface as an opaque
+        # QICK add_reg() error instead of pointing at the real cause.
+        dreg_qty = int(self.tproccfg.get("dreg_qty", 32))  # type: ignore[attr-defined]
+        if total > dreg_qty:
+            raise RuntimeError(
+                f"acquire_temp_reg: requested {total} nested temp registers "
+                f"but tProc v2 only has {dreg_qty} data registers (shared with "
+                f"loop counters and user registers). Reduce nesting depth."
+            )
+
         while len(self._temp_regs) < total:
             reg_name = f"temp_reg_{len(self._temp_regs)}"
             self.add_reg(reg_name)  # type: ignore

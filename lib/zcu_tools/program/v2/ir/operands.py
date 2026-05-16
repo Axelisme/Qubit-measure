@@ -260,12 +260,14 @@ def parse_register(val: Union[Register, str, None]) -> Optional[Register]:
         return None
     # asm_v2.py encodes dmem register addresses as '&rN'; strip the leading '&'
     core = val[1:] if val.startswith("&") else val
+    # Accept only: the r_wave bundle, a known QICK alias (s_*/w_* descriptive
+    # names live in _REG_ALIAS), or a bare sN/rN/wN address. A descriptive name
+    # not in the alias table (e.g. 's_typo') is rejected here so the bad name
+    # surfaces at IR parse time instead of deep inside the QICK assembler.
     if (
-        core.startswith("r_wave")
-        or core.startswith("s_")
-        or core.startswith("w_")
-        or (bool(core) and core[0] in "rsw" and core[1:].isdigit())
+        core == "r_wave"
         or core in _REG_ALIAS
+        or (bool(core) and core[0] in "rsw" and core[1:].isdigit())
     ):
         return Register(name=core)
     return None

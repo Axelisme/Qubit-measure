@@ -169,6 +169,8 @@ class ScanWith(Module):
         self.name = name
 
         n = len(values)
+        if n == 0:
+            raise ValueError("ScanWith requires a non-empty values sequence")
         repeat_mod = Repeat(f"{name}_count", n, range_hint=(0, n - 1))
         repeat_mod.add_content(
             LoadValue(

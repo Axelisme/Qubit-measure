@@ -29,6 +29,11 @@ QICK Hardware Notes
   increment amount is unknown at compile time.  Pending is flushed before it.
 - ``TIME set_ref`` / ``updt`` / ``rst`` write s14 to an absolute value,
   invalidating any accumulated pending delta.  Pending is flushed before them.
+- ``WAIT time @T`` is NOT a fold target even though it carries a ``TimeOffset``:
+  its ``@T`` is an absolute user-time comparison value (the assembler expands it
+  to ``TEST s11 - #(T-10)``), not an offset from the s14 reference.  Folding a
+  ``TIME inc_ref`` delta into it would change the wait target time.  ``WaitInst``
+  is therefore treated as a flush barrier.
 - Transparent instructions (pending is NOT flushed): ``PortWriteInst``,
   ``DportWriteInst``, ``DmemReadInst``, ``DmemWriteInst``, ``WmemWriteInst``,
   and ``RegWriteInst`` whose ``dst`` is not a system register (``sN``).
@@ -56,6 +61,7 @@ from ...instructions import (
     PortWriteInst,
     RegWriteInst,
     TimeInst,
+    WaitInst,
     WmemWriteInst,
 )
 from ...node import BasicBlockNode
@@ -111,7 +117,13 @@ class TimedMergePass(BlockChunkPass):
                         pending_lit = delta
                 else:
                     pending_lit += delta
-            elif isinstance(getattr(inst, "time", None), TimeOffset):
+            elif not isinstance(inst, WaitInst) and isinstance(
+                getattr(inst, "time", None), TimeOffset
+            ):
+                # WAIT time @T is excluded: its @T is an absolute user-time
+                # comparison value (TEST s11 - #(T-10)), not an offset from the
+                # s14 reference, so absorbing a TIME inc_ref delta would change
+                # the wait target. WaitInst falls through to the else-flush.
                 time = getattr(inst, "time")
                 assert isinstance(time, TimeOffset)
                 if pending_lit > 0:
