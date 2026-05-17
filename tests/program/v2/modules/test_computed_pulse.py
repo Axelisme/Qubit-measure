@@ -117,6 +117,29 @@ def test_dmem_lookup_emits_dmem_read_in_asm():
     assert "dmem" in asm
 
 
+def test_identical_candidates_dedup_table_points_to_same_index():
+    """Two identical pulse cfgs are deduped by PulseRegistry: both dmem table entries
+    point to the same wmem index.  Accepted behaviour: both 'candidates' execute
+    the same waveform, and the program still compiles correctly."""
+    same_pulse = _const_pulse(gain=0.5)
+    soccfg = make_mock_soccfg(n_gens=2, n_readouts=1)
+    from zcu_tools.program.v2.base import ProgramV2Cfg
+
+    modules = _gate_modules([same_pulse, same_pulse])
+    prog = ModularProgramV2(
+        soccfg, ProgramV2Cfg(), modules=modules, sweep=[("idx_loop", 2)]
+    )
+    assert prog.binprog is not None
+
+    cp = modules[1]
+    assert isinstance(cp, ComputedPulse)
+    dmem = prog.compile_datamem()
+    assert dmem is not None
+    table = dmem[cp.dmem_offset : cp.dmem_offset + 2]
+    # Both entries point to the same wmem index (PulseRegistry dedup).
+    assert table[0] == table[1]
+
+
 # ---------------------------------------------------------------------------
 # Regression: non-flat_top behavior unchanged
 # ---------------------------------------------------------------------------
