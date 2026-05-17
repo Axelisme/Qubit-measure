@@ -625,3 +625,373 @@ def test_clone_renamed_remaps_dmem_addr_table_labels():
     assert inst.op.rhs.table_labels == (cloned_entry,), (
         "DmemAddr.table_labels must be remapped to the cloned entry label"
     )
+
+# ---------------------------------------------------------------------------
+# DeadTestEliminationPass — uncovered branches (8.4)
+# ---------------------------------------------------------------------------
+
+
+def _run_dead_test(root: BlockNode) -> BlockNode:
+    parser = IRParser()
+    chunks = parser.unparse(root)
+    ctx = PipeLineContext(config=PipeLineConfig(), pmem_budget=1024)
+    chunks, _ = DeadTestEliminationPass().process(chunks, ctx)
+    return parser.parse(chunks)
+
+
+def _test_inst() -> TestInst:
+    return TestInst(op=AluExpr(Register("r0"), AluOp.SUB, Immediate(0)))
+
+
+def test_dead_test_consecutive_tests_first_is_dead():
+    """Two consecutive TestInsts: the first is dead (overwritten before consumed)."""
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    _test_inst(),  # dead: overwritten by next TEST
+                    _test_inst(),  # alive: consumed by branch
+                ],
+                branch=JumpInst(
+                    label=LabelRef(Label("end")),
+                    if_cond="Z",
+                    op=AluExpr(Register("r0"), AluOp.SUB, Immediate(0)),
+                ),
+            )
+        ]
+    )
+    out = _run_dead_test(root)
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    test_insts = [i for i in bb.insts if isinstance(i, TestInst)]
+    assert len(test_insts) == 1  # first dead TEST removed
+
+
+def test_dead_test_uf_inst_kills_pending_test():
+    """-uf instruction overwrites ALU flags → preceding pending TEST is dead."""
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    _test_inst(),  # dead: flags overwritten by -uf below
+                    RegWriteInst(
+                        dst=Register("r1"),
+                        src=SrcKeyword.IMM,
+                        lit=Immediate(0),
+                        uf=True,  # -uf side-effect overwrites ALU flags
+                    ),
+                ],
+                branch=None,  # no branch consuming flags
+            )
+        ]
+    )
+    out = _run_dead_test(root)
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    # TEST must be removed; the -uf REG_WR must remain
+    test_insts = [i for i in bb.insts if isinstance(i, TestInst)]
+    assert len(test_insts) == 0
+    reg_insts = [i for i in bb.insts if isinstance(i, RegWriteInst)]
+    assert len(reg_insts) == 1
+
+
+def test_dead_test_conditional_jump_in_insts_consumes_flag():
+    """JumpInst with if_cond inside the insts list (not branch) consumes pending TEST.
+
+    BasicBlockNode.__post_init__ forbids JumpInst in .insts, so we test
+    _find_dead_indices directly — the method is designed to handle arbitrary
+    instruction lists, including ones that may arrive from non-IR paths.
+    """
+    from zcu_tools.program.v2.ir.passes.dataflow.dead_test import DeadTestEliminationPass
+
+    pass_ = DeadTestEliminationPass()
+    lbl = Label("skip")
+    insts = [
+        _test_inst(),  # alive: consumed by cond jump below
+        JumpInst(
+            label=LabelRef(lbl),
+            if_cond="Z",
+            op=AluExpr(Register("r0"), AluOp.SUB, Immediate(0)),
+        ),
+        _test_inst(),  # dead: no branch at end, no further consumer
+    ]
+    dead = pass_._find_dead_indices(insts, branch=None)  # type: ignore[attr-defined]
+    # The first TEST (index 0) should NOT be dead (consumed by cond jump at index 1)
+    # The second TEST (index 2) should be dead (no consumer after it)
+    assert 0 not in dead
+    assert 2 in dead
+
+
+# ---------------------------------------------------------------------------
+# Pipeline — non-convergence warning and disable_opt violation (8.7)
+# ---------------------------------------------------------------------------
+
+
+def test_pipeline_non_convergence_emits_warning(caplog):
+    """_run_chunklist_opt logs a warning when passes oscillate past max_opt_iterations."""
+    import logging
+
+    from zcu_tools.program.v2.ir.pipeline import (
+        AbsChunkListPass,
+        ChunkList,
+        _run_chunklist_opt,
+    )
+
+    class OscillatingPass(AbsChunkListPass):
+        """Always reports changed=True — simulates an oscillating pass."""
+
+        def process(self, chunks: ChunkList, ctx: PipeLineContext):
+            return chunks, True
+
+    ctx = PipeLineContext(config=PipeLineConfig(max_opt_iterations=2), pmem_budget=1024)
+    chunks = IRParser().unparse(BlockNode(insts=[BasicBlockNode(insts=[NopInst()])]))
+
+    with caplog.at_level(logging.WARNING, logger="zcu_tools.program.v2.ir.pipeline"):
+        _run_chunklist_opt([], [OscillatingPass()], chunks, ctx)
+
+    assert any("did not converge" in r.message for r in caplog.records)
+    assert any("OscillatingPass" in r.message for r in caplog.records)
+
+
+def test_pipeline_disable_opt_violation_raises():
+    """A ChunkPass that changes word count of a disable_opt block must raise ValueError."""
+    from zcu_tools.program.v2.ir.pipeline import (
+        AbsChunkPass,
+        ChunkList,
+        _run_chunk_passes,
+    )
+
+    class WordCountChangingPass(AbsChunkPass):
+        """Appends a NopInst to any disable_opt block — illegal word-count change."""
+
+        def process(self, chunks: ChunkList, ctx: PipeLineContext):
+            changed = False
+            for chunk in chunks:
+                if isinstance(chunk, BasicBlockNode) and chunk.disable_opt:
+                    chunk.insts.append(NopInst())
+                    changed = True
+            return chunks, changed
+
+    import pytest
+
+    ctx = PipeLineContext(config=PipeLineConfig(), pmem_budget=1024)
+    fixed_bb = BasicBlockNode(insts=[NopInst()], disable_opt=True)
+    chunks: ChunkList = [fixed_bb]
+
+    with pytest.raises(ValueError, match="disable_opt"):
+        _run_chunk_passes([WordCountChangingPass()], chunks, ctx)
+
+# ---------------------------------------------------------------------------
+# UnrollLoopPass — _unroll_partial big-jump paths (8.2)
+# ---------------------------------------------------------------------------
+
+
+def _nop_loop(name: str, n: int, counter: str = "r0") -> IRLoop:
+    """IRLoop with a single NopInst body (size=1, cost=1, scheduled_ticks=0)."""
+    return IRLoop(
+        name=name,
+        counter_reg=Register(counter),
+        n=n,
+        body=BlockNode(insts=[BasicBlockNode(insts=[NopInst()])]),
+    )
+
+
+def _ctx_partial(pmem_capacity: int, pmem_budget: int = 10) -> PipeLineContext:
+    """Context that forces k_final=pmem_budget (body_size=1) via pmem_budget control.
+    slack=-1 < 0 → k_timing=max_unroll_factor=32; k_budget=pmem_budget//1=pmem_budget.
+    k_final = min(32, pmem_budget).
+    """
+    return PipeLineContext(
+        config=PipeLineConfig(pmem_capacity=pmem_capacity),
+        pmem_budget=pmem_budget,
+    )
+
+
+def _collect_reg_write_s15(root: BlockNode) -> list:
+    """Collect all RegWriteInst with dst=s15 from the flat basic-block tree."""
+    result = []
+    for bb in _walk_basic_blocks(root):
+        for inst in bb.insts:
+            if isinstance(inst, RegWriteInst) and inst.dst == Register("s15"):
+                result.append(inst)
+    return result
+
+
+def test_partial_unroll_small_pmem_no_remainder_label_jump():
+    """Partial unroll (no remainder), small pmem: back-edge uses label-mode JUMP."""
+    # n=100, pmem_budget=10 → k=10, remainder=0, small pmem
+    loop = _nop_loop("lp", n=100)
+    root = BlockNode(insts=[loop])
+    ctx = _ctx_partial(pmem_capacity=512, pmem_budget=10)
+    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+
+    s15_writes = _collect_reg_write_s15(out)
+    assert len(s15_writes) == 0  # no s15 in small-pmem mode
+
+    # All back-edge jump BBs have label-mode JumpInst
+    back_jumps = [
+        bb.branch
+        for bb in _walk_basic_blocks(out)
+        if isinstance(getattr(bb, "branch", None), JumpInst)
+        and bb.branch is not None
+        and bb.branch.if_cond == "S"
+    ]
+    assert len(back_jumps) >= 1
+    assert all(j.label is not None for j in back_jumps)
+
+
+def test_partial_unroll_big_pmem_no_remainder_s15_jump():
+    """Partial unroll (no remainder), big pmem: back-edge uses s15 indirect jump."""
+    loop = _nop_loop("lp", n=100)
+    root = BlockNode(insts=[loop])
+    ctx = _ctx_partial(pmem_capacity=4096, pmem_budget=10)
+    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+
+    s15_writes = _collect_reg_write_s15(out)
+    # back-edge writes s15 in big-pmem mode
+    assert len(s15_writes) >= 1
+
+
+def test_partial_unroll_with_remainder_small_pmem():
+    """Partial unroll with remainder (n=103, k=10), small pmem: init_bb uses label JUMP."""
+    loop = _nop_loop("lp", n=103)  # remainder = 3
+    root = BlockNode(insts=[loop])
+    ctx = _ctx_partial(pmem_capacity=512, pmem_budget=10)
+    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+
+    s15_writes = _collect_reg_write_s15(out)
+    assert len(s15_writes) == 0  # no s15 in small-pmem mode
+
+
+def test_partial_unroll_with_remainder_big_pmem():
+    """Partial unroll with remainder (n=103, k=10), big pmem: init_bb uses s15 jump."""
+    loop = _nop_loop("lp", n=103)  # remainder = 3
+    root = BlockNode(insts=[loop])
+    ctx = _ctx_partial(pmem_capacity=4096, pmem_budget=10)
+    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+
+    s15_writes = _collect_reg_write_s15(out)
+    # init_bb (for remainder skip) + back-edge both write s15
+    assert len(s15_writes) >= 2
+
+
+# ---------------------------------------------------------------------------
+# UnrollLoopPass — _maybe_build_jump_table early-return paths (8.2)
+# ---------------------------------------------------------------------------
+
+
+def _reg_loop(name: str, counter: str = "r0", n_reg: str = "n_reg") -> IRLoop:
+    """Register-driven IRLoop (n=Register) with a NopInst body."""
+    return IRLoop(
+        name=name,
+        counter_reg=Register(counter),
+        n=Register(n_reg),
+        body=BlockNode(insts=[BasicBlockNode(insts=[NopInst()])]),
+    )
+
+
+def _reg_loop_empty(name: str) -> IRLoop:
+    """Register-driven IRLoop with an empty body (body_size=0 → skip jump table)."""
+    return IRLoop(
+        name=name,
+        counter_reg=Register("r0"),
+        n=Register("n_reg"),
+        body=BlockNode(insts=[]),
+    )
+
+
+def test_jump_table_body_size_zero_returns_none():
+    """IRLoop with empty body → body_size=0 → _maybe_build_jump_table returns None (no transform)."""
+    loop = _reg_loop_empty("lp")
+    root = BlockNode(insts=[loop])
+    ctx = PipeLineContext(
+        config=PipeLineConfig(pmem_capacity=512),
+        pmem_budget=1024,
+        available_regs={"r14"},
+    )
+    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+    # No IRDispatch should appear — loop was not transformed
+    from zcu_tools.program.v2.ir.node import IRDispatch
+
+    dispatches = [n for n in _walk_all_nodes(out) if isinstance(n, IRDispatch)]
+    assert len(dispatches) == 0
+
+
+def test_jump_table_no_available_regs_returns_none():
+    """No available_regs → _maybe_build_jump_table returns None (cannot allocate scratch)."""
+    loop = _reg_loop("lp")
+    root = BlockNode(insts=[loop])
+    ctx = PipeLineContext(
+        config=PipeLineConfig(pmem_capacity=512),
+        pmem_budget=1024,
+        available_regs=set(),  # empty
+    )
+    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+    from zcu_tools.program.v2.ir.node import IRDispatch
+
+    dispatches = [n for n in _walk_all_nodes(out) if isinstance(n, IRDispatch)]
+    assert len(dispatches) == 0
+
+
+def test_jump_table_k_raw_le_1_returns_none():
+    """k_raw <= 1 → skip jump table.  Force by using pmem_budget=1 (k_budget=1//1=1)."""
+    loop = _reg_loop("lp")
+    root = BlockNode(insts=[loop])
+    ctx = PipeLineContext(
+        config=PipeLineConfig(pmem_capacity=512),
+        pmem_budget=1,  # k_budget = 1//1 = 1 → k_raw=min(max_unroll,1)=1 → skip
+        available_regs={"r14"},
+    )
+    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+    from zcu_tools.program.v2.ir.node import IRDispatch
+
+    dispatches = [n for n in _walk_all_nodes(out) if isinstance(n, IRDispatch)]
+    assert len(dispatches) == 0
+
+
+def test_jump_table_normal_path_produces_dispatch():
+    """Normal register-driven path: k≥2 → BlockNode with IRDispatch inside."""
+    loop = _reg_loop("lp")
+    root = BlockNode(insts=[loop])
+    ctx = PipeLineContext(
+        config=PipeLineConfig(pmem_capacity=512),
+        pmem_budget=1024,
+        available_regs={"r14"},
+    )
+    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+    from zcu_tools.program.v2.ir.node import IRDispatch
+
+    dispatches = [n for n in _walk_all_nodes(out) if isinstance(n, IRDispatch)]
+    assert len(dispatches) >= 1
+
+
+def _walk_all_nodes(node):
+    """Walk all IRNodes recursively."""
+    yield node
+    if isinstance(node, BlockNode):
+        for child in node.insts:
+            yield from _walk_all_nodes(child)
+    elif isinstance(node, IRLoop):
+        yield from _walk_all_nodes(node.body)
+    elif isinstance(node, IRBranch):
+        for case in node.cases:
+            yield from _walk_all_nodes(case)
+
+def test_dead_test_disable_opt_block_not_modified():
+    """disable_opt=True block: DeadTestEliminationPass must not modify it (line 54)."""
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    _test_inst(),  # would normally be dead (no branch consumer)
+                ],
+                branch=None,
+                disable_opt=True,
+            )
+        ]
+    )
+    out = _run_dead_test(root)
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    # TEST must NOT be removed (block is disable_opt)
+    assert len([i for i in bb.insts if isinstance(i, TestInst)]) == 1

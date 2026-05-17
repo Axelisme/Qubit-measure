@@ -395,3 +395,32 @@ def test_branch_elim_inside_irbranch_cases():
     first_block = branch.cases[0].insts[0]
     assert isinstance(first_block, BasicBlockNode)
     assert first_block.branch is None
+
+# ---------------------------------------------------------------------------
+# BranchEliminationPass — no next block (8.6)
+# ---------------------------------------------------------------------------
+
+
+def test_branch_elim_no_next_block_keeps_jump():
+    """Unconditional jump at the very end of the chunk list (no next block)
+    must NOT be eliminated — there is no physically following block to fall through to.
+    """
+    lbl = _label("far_target")
+    # The jump target is NOT in this chunk list — simulates a forward reference
+    # to code in a different section.  Even if it were present, when the jumping
+    # block is the last BasicBlockNode in the flat list the pass returns False.
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[NopInst()],
+                branch=JumpInst(label=LabelRef(lbl)),
+            ),
+            # No BasicBlockNode after this one — only a non-BB node follows.
+        ]
+    )
+    out = _run_chunk_passes_on_root(root, [BranchEliminationPass()])
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    # Branch must be preserved
+    assert bb.branch is not None
+    assert isinstance(bb.branch, JumpInst)

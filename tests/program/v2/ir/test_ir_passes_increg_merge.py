@@ -419,3 +419,117 @@ def test_inc_reg_merge_single_oversized_step_emitted_as_is():
     assert len(insts) >= 2
     assert isinstance(insts[0], RegWriteInst) and insts[0].op is not None
     assert insts[0].op.rhs == Immediate(huge)
+
+# ---------------------------------------------------------------------------
+# IncRegMergePass — INC_REG_IMM_MAX overflow protection (8.5)
+# ---------------------------------------------------------------------------
+
+
+def test_inc_reg_overflow_flushes_old_and_restarts():
+    """accumulated + new > INC_REG_IMM_MAX → flush old, start fresh with new step."""
+    base = INC_REG_IMM_MAX - 5
+    step = 10  # base + step > MAX, but step alone is within limit
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    RegWriteInst(
+                        dst=Register("r1"),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r1"), AluOp.ADD, Immediate(base)),
+                    ),
+                    RegWriteInst(
+                        dst=Register("r1"),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r1"), AluOp.ADD, Immediate(step)),
+                    ),
+                ]
+            )
+        ]
+    )
+    out = _run_chunk_pass(root)
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    # Must produce 2 separate insts (not merged into one overflowing immediate)
+    assert len(bb.insts) == 2
+    assert isinstance(bb.insts[0], RegWriteInst)
+    assert bb.insts[0].op is not None and bb.insts[0].op.rhs == Immediate(base)
+    assert isinstance(bb.insts[1], RegWriteInst)
+    assert bb.insts[1].op is not None and bb.insts[1].op.rhs == Immediate(step)
+
+
+def test_inc_reg_single_step_exceeds_max_emitted_as_is():
+    """A single step > INC_REG_IMM_MAX must be emitted as-is, not accumulated."""
+    huge = INC_REG_IMM_MAX + 1
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    RegWriteInst(
+                        dst=Register("r1"),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r1"), AluOp.ADD, Immediate(huge)),
+                    ),
+                    RegWriteInst(
+                        dst=Register("r1"),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r1"), AluOp.ADD, Immediate(1)),
+                    ),
+                ]
+            )
+        ]
+    )
+    out = _run_chunk_pass(root)
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    # The huge step must appear first and unchanged
+    assert len(bb.insts) >= 1
+    assert isinstance(bb.insts[0], RegWriteInst)
+    assert bb.insts[0].op is not None and bb.insts[0].op.rhs == Immediate(huge)
+
+# ---------------------------------------------------------------------------
+# _is_const_increment filter paths (8.5 additional)
+# ---------------------------------------------------------------------------
+
+from zcu_tools.program.v2.ir.passes.dataflow.inc_reg_merge import (
+    _is_const_increment,
+)
+
+
+def _inc_inst(dst: str, rhs: int) -> RegWriteInst:
+    return RegWriteInst(
+        dst=Register(dst),
+        src=SrcKeyword.OP,
+        op=AluExpr(Register(dst), AluOp.ADD, Immediate(rhs)),
+    )
+
+
+def test_is_const_increment_returns_none_for_uf_inst():
+    """Instruction with uf=True is not a plain increment → return None (line 85)."""
+    inst = RegWriteInst(
+        dst=Register("r1"),
+        src=SrcKeyword.OP,
+        op=AluExpr(Register("r1"), AluOp.ADD, Immediate(1)),
+        uf=True,
+    )
+    assert _is_const_increment(inst) is None
+
+
+def test_is_const_increment_returns_none_for_non_immediate_rhs():
+    """rhs is a Register, not Immediate → return None (line 91)."""
+    inst = RegWriteInst(
+        dst=Register("r1"),
+        src=SrcKeyword.OP,
+        op=AluExpr(Register("r1"), AluOp.ADD, Register("r2")),
+    )
+    assert _is_const_increment(inst) is None
+
+
+def test_is_const_increment_returns_none_for_lhs_ne_dst():
+    """lhs != dst (copy, not self-increment) → return None (line 95)."""
+    inst = RegWriteInst(
+        dst=Register("r1"),
+        src=SrcKeyword.OP,
+        op=AluExpr(Register("r2"), AluOp.ADD, Immediate(1)),
+    )
+    assert _is_const_increment(inst) is None

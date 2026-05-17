@@ -592,3 +592,121 @@ def test_pending_lit_flushed_at_end_of_block():
     assert isinstance(bb.insts[0], RegWriteInst)
     assert isinstance(bb.insts[1], TimeInst)
     assert str(bb.insts[1].lit) == "#15"
+
+
+# ---------------------------------------------------------------------------
+# TimedMergePass — TIMED_LIT_MAX overflow protection (8.3)
+# ---------------------------------------------------------------------------
+
+from zcu_tools.program.v2.ir.passes.timeline.timed_merge import TIMED_LIT_MAX
+
+
+def _bb_with_insts(*insts) -> BlockNode:
+    return BlockNode(insts=[BasicBlockNode(insts=list(insts))])
+
+
+def test_timed_merge_overflow_flushes_then_accumulates_remainder():
+    """pending + delta > TIMED_LIT_MAX → flush old pending, then start fresh with delta."""
+    base = TIMED_LIT_MAX - 10
+    delta = 20  # base + 20 > MAX, but delta alone is within limit
+    root = _bb_with_insts(
+        TimeInst(c_op="inc_ref", lit=Immediate(base)),
+        TimeInst(c_op="inc_ref", lit=Immediate(delta)),
+        # A RegWriteInst to flush any remaining pending at end of useful region
+        RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)),
+    )
+    out = _run_merge(root)
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    time_insts = [i for i in bb.insts if isinstance(i, TimeInst)]
+    # Must have emitted 2 TIME insts: one for base flush, one for trailing delta
+    assert len(time_insts) == 2
+    # First emitted should be the flush of base
+    assert time_insts[0].lit == Immediate(base)
+    # Second should hold the remainder delta
+    assert time_insts[1].lit == Immediate(delta)
+
+
+def test_timed_merge_single_delta_exceeds_max_emitted_as_is():
+    """When a single delta > TIMED_LIT_MAX, it must be emitted as-is (not accumulated)."""
+    huge = TIMED_LIT_MAX + 1
+    root = _bb_with_insts(
+        TimeInst(c_op="inc_ref", lit=Immediate(huge)),
+        RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)),
+    )
+    out = _run_merge(root)
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    time_insts = [i for i in bb.insts if isinstance(i, TimeInst)]
+    assert len(time_insts) == 1
+    assert time_insts[0].lit == Immediate(huge)
+
+
+def test_timed_merge_at_offset_overflow_flushes_pending():
+    """time.value + pending_lit > TIMED_LIT_MAX → flush pending, keep original @T."""
+    pending = TIMED_LIT_MAX - 5
+    at_val = 10  # pending + at_val > MAX
+    root = _bb_with_insts(
+        TimeInst(c_op="inc_ref", lit=Immediate(pending)),
+        PortWriteInst(dst=ImmValue(2), time=TimeOffset(at_val), addr=MemAddr(0)),
+    )
+    out = _run_merge(root)
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    # pending was flushed → a TIME inst appears before the PortWriteInst
+    time_insts = [i for i in bb.insts if isinstance(i, TimeInst)]
+    assert len(time_insts) >= 1
+    # The PortWriteInst should retain the original @T (not folded)
+    port_insts = [i for i in bb.insts if isinstance(i, PortWriteInst)]
+    assert len(port_insts) == 1
+    assert port_insts[0].time == TimeOffset(at_val)
+
+
+def test_timed_merge_time_set_ref_flushes_pending():
+    """TIME set_ref invalidates accumulated delta → pending is flushed before it."""
+    root = _bb_with_insts(
+        TimeInst(c_op="inc_ref", lit=Immediate(50)),
+        TimeInst(c_op="set_ref", lit=Immediate(0)),
+        RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)),
+    )
+    out = _run_merge(root)
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    time_insts = [i for i in bb.insts if isinstance(i, TimeInst)]
+    # inc_ref must appear (pending flushed), then set_ref
+    c_ops = [t.c_op for t in time_insts]
+    assert "inc_ref" in c_ops
+    assert "set_ref" in c_ops
+    assert c_ops.index("inc_ref") < c_ops.index("set_ref")
+
+
+def test_timed_merge_time_updt_flushes_pending():
+    """TIME updt invalidates accumulated delta → pending is flushed before it."""
+    root = _bb_with_insts(
+        TimeInst(c_op="inc_ref", lit=Immediate(30)),
+        TimeInst(c_op="updt", r1=Register("s11")),
+        RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)),
+    )
+    out = _run_merge(root)
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    time_insts = [i for i in bb.insts if isinstance(i, TimeInst)]
+    c_ops = [t.c_op for t in time_insts]
+    assert "inc_ref" in c_ops
+    assert "updt" in c_ops
+
+
+def test_timed_merge_time_rst_flushes_pending():
+    """TIME rst invalidates accumulated delta → pending is flushed before it."""
+    root = _bb_with_insts(
+        TimeInst(c_op="inc_ref", lit=Immediate(20)),
+        TimeInst(c_op="rst"),
+        RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)),
+    )
+    out = _run_merge(root)
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    time_insts = [i for i in bb.insts if isinstance(i, TimeInst)]
+    c_ops = [t.c_op for t in time_insts]
+    assert "inc_ref" in c_ops
+    assert "rst" in c_ops
