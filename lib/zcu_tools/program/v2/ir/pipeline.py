@@ -331,14 +331,16 @@ def _resolve_dmem_dispatch(chunks: list[BasicBlockNode], ctx: PipeLineContext) -
     # table_labels tuple -> assigned dmem base offset
     assigned: dict[tuple[Label, ...], int] = {}
     next_offset = ctx.dmem_base_offset
+    ref_count = 0  # total DmemAddr references rewritten (incl. dedup hits)
 
     def _resolve_inst(inst: BaseInst) -> BaseInst:
-        nonlocal next_offset
+        nonlocal next_offset, ref_count
         if not isinstance(inst, RegWriteInst):
             return inst
         op = inst.op
         if not isinstance(op, AluExpr) or not isinstance(op.rhs, DmemAddr):
             return inst
+        ref_count += 1
         key = op.rhs.table_labels
         base = assigned.get(key)
         if base is None:
@@ -346,11 +348,37 @@ def _resolve_dmem_dispatch(chunks: list[BasicBlockNode], ctx: PipeLineContext) -
             assigned[key] = base
             next_offset += len(key)
             ctx.dmem_tables.append(list(key))
+            logger.debug(
+                "dmem dispatch: allocated table #%d at dmem offset %d, "
+                "%d entries: [%s]",
+                len(ctx.dmem_tables) - 1,
+                base,
+                len(key),
+                ", ".join(lbl.name for lbl in key),
+            )
+        else:
+            logger.debug(
+                "dmem dispatch: reused table at dmem offset %d for [%s]",
+                base,
+                ", ".join(lbl.name for lbl in key),
+            )
         new_op = dataclasses.replace(op, rhs=Immediate(base))
         return dataclasses.replace(inst, op=new_op)
 
     for block in chunks:
         block.insts = [_resolve_inst(i) for i in block.insts]
+
+    if ctx.dmem_tables:
+        words = next_offset - ctx.dmem_base_offset
+        logger.debug(
+            "dmem dispatch: resolved %d reference(s) into %d unique table(s), "
+            "dmem offsets [%d, %d) (%d words)",
+            ref_count,
+            len(ctx.dmem_tables),
+            ctx.dmem_base_offset,
+            next_offset,
+            words,
+        )
 
 
 class IRPipeLine:

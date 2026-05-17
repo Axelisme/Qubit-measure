@@ -73,7 +73,7 @@ class IRCompileMixin(QickProgramV2):
         if not ctx.dmem_tables:
             return
         cursor = dmem_base
-        for table_labels in ctx.dmem_tables:
+        for idx, table_labels in enumerate(ctx.dmem_tables):
             entry_addrs = [
                 IRLinker._parse_label_addr(lbl.name, opt_labels[lbl.name])
                 for lbl in table_labels
@@ -84,4 +84,17 @@ class IRCompileMixin(QickProgramV2):
                     f"dmem dispatch table allocation mismatch: pipeline reserved "
                     f"offset {cursor}, add_dmem returned {offset}."
                 )
+            logger.debug(
+                "dmem dispatch: materialized table #%d at dmem offset %d, "
+                "entry P_ADDRs %s",
+                idx,
+                offset,
+                entry_addrs,
+            )
             cursor += len(entry_addrs)
+        logger.debug(
+            "dmem dispatch: materialized %d table(s), dmem offsets [%d, %d)",
+            len(ctx.dmem_tables),
+            dmem_base,
+            cursor,
+        )
