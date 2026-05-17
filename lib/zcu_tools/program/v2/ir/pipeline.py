@@ -303,6 +303,8 @@ def _strip_structural_meta(chunks: ChunkList) -> list[BasicBlockNode]:
         elif chunk.type in _STRUCTURAL_META_TYPES:
             continue
         else:
+            # Internal consistency assertion: IRParser.unparse() must only emit
+            # structural MetaInsts. Reaching here means unparse() has a bug.
             raise ValueError(
                 f"_strip_structural_meta: unexpected non-structural MetaInst "
                 f"{chunk.type!r} in chunk list"

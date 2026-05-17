@@ -88,9 +88,6 @@ class LoopConditionMergePass(BlockChunkPass):
 
     def _merge_zero_comparison(self, block: BasicBlockNode) -> bool:
         """Pattern 1: REG_WR r1 op r1-1 + JUMP op(r1-0) -> JUMP wr(r1) op(r1-1)."""
-        if not block.insts:
-            return False
-
         last_idx = len(block.insts) - 1
         last_inst = block.insts[last_idx]
         branch = block.branch

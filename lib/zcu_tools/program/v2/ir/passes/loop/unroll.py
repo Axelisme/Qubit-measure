@@ -101,9 +101,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class UnrollAnalysis:
-    scheduled_ticks: Optional[int]
+    scheduled_ticks: int
     body_cost: int
-    slack: Optional[int]
+    slack: int
     body_size: int
     k_timing: int
     k_budget: int
@@ -170,17 +170,6 @@ def _analyze_unroll(
     scheduled_ticks = estimate_body_scheduled_ticks(body_insts)
     body_cost = estimate_body_cost(body_insts, ctx.config)
     body_size = estimate_flat_size(body_insts)
-
-    if scheduled_ticks is None:
-        return UnrollAnalysis(
-            scheduled_ticks=None,
-            body_cost=body_cost,
-            slack=None,
-            body_size=body_size,
-            k_timing=1,
-            k_budget=1,
-            k_final=1,
-        )
 
     slack = scheduled_ticks - body_cost
 
@@ -267,8 +256,6 @@ class UnrollLoopPass(AbsIRTreePass):
             return self._unroll_constant(node, n, is_runtime_exact, loop_overhead, ctx)
 
         # Register-driven (no exact hint) → jump-table dispatch.
-        if not isinstance(node.n, Register):
-            return None  # unexpected n type
         return self._maybe_build_jump_table(node, loop_overhead, ctx)
 
     def _unroll_constant(

@@ -34,8 +34,10 @@ QICK Hardware Notes
 Decision Notes
 --------------
 This is an optimization pass, peer to ``SimplifyDispatchPass``: that one handles
-``k == 2`` (single conditional jump), this one handles ``k >= 3``. An
-``IRDispatch`` not transformed by either pass (``disable_all_opt`` bypass,
+``k == 2`` with a single conditional jump (runs earlier in the pass chain), this
+one handles ``k >= 2`` as a dmem table.  When both are active, ``SimplifyDispatchPass``
+wins for k==2; if it is disabled, ``DmemDispatchPass`` handles k==2 as well.
+An ``IRDispatch`` not transformed by either pass (``disable_all_opt`` bypass,
 direct ``unparse`` in tests) still falls back to the program-memory island in
 ``_lower_dispatch`` — the two dispatch implementations coexist.
 
@@ -56,7 +58,7 @@ from ...pipeline import AbsIRTreePass, PipeLineContext
 
 
 class DmemDispatchPass(AbsIRTreePass):
-    """Lower an IRDispatch (k >= 3) into a dmem-backed jump table BlockNode."""
+    """Lower an IRDispatch (k >= 2) into a dmem-backed jump table BlockNode."""
 
     def transform(
         self,
@@ -65,8 +67,8 @@ class DmemDispatchPass(AbsIRTreePass):
     ) -> Optional[IRNode]:
         if not isinstance(node, IRDispatch):
             return None
-        # k == 2 is handled by SimplifyDispatchPass (runs earlier). Guard anyway.
-        if len(node.target_labels) < 3:
+        # k == 1 is not a meaningful dispatch (nothing to choose between).
+        if len(node.target_labels) <= 1:
             return None
 
         pmem_size = ctx.config.pmem_capacity

@@ -202,6 +202,46 @@ def test_zero_delay_dce_skips_fixed_basic_block():
     assert isinstance(bb.insts[1], NopInst)
 
 
+def test_zero_delay_dce_keeps_non_inc_ref_time_inst():
+    """TIME set_ref is not an inc_ref → not removed even if lit == 0."""
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    TimeInst(c_op="set_ref", lit=Immediate(0)),
+                    NopInst(),
+                ]
+            ),
+        ]
+    )
+    out = _run_dce(root)
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    time_insts = [i for i in bb.insts if isinstance(i, TimeInst)]
+    assert len(time_insts) == 1
+    assert time_insts[0].c_op == "set_ref"
+
+
+def test_zero_delay_dce_keeps_register_driven_inc_ref():
+    """TIME inc_ref r1 (register-driven) is not a literal-zero no-op → kept."""
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    TimeInst(c_op="inc_ref", r1=Register("r1")),
+                    NopInst(),
+                ]
+            ),
+        ]
+    )
+    out = _run_dce(root)
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    time_insts = [i for i in bb.insts if isinstance(i, TimeInst)]
+    assert len(time_insts) == 1
+    assert time_insts[0].r1 == Register("r1")
+
+
 def test_timed_merge_merges_in_basic_block():
     # Adjacent TIME inc_ref are merged; NopInst is a barrier so TIME is flushed before it.
     root = BlockNode(

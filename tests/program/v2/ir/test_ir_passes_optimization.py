@@ -702,7 +702,9 @@ def test_dead_test_conditional_jump_in_insts_consumes_flag():
     _find_dead_indices directly — the method is designed to handle arbitrary
     instruction lists, including ones that may arrive from non-IR paths.
     """
-    from zcu_tools.program.v2.ir.passes.dataflow.dead_test import DeadTestEliminationPass
+    from zcu_tools.program.v2.ir.passes.dataflow.dead_test import (
+        DeadTestEliminationPass,
+    )
 
     pass_ = DeadTestEliminationPass()
     lbl = Label("skip")
@@ -976,6 +978,139 @@ def _walk_all_nodes(node):
     elif isinstance(node, IRBranch):
         for case in node.cases:
             yield from _walk_all_nodes(case)
+
+
+# ---------------------------------------------------------------------------
+# DeadWriteEliminationPass — disable_opt guard (line 65-66)
+# ---------------------------------------------------------------------------
+
+
+def test_dead_write_disable_opt_block_not_modified():
+    """disable_opt=True block: DeadWriteEliminationPass must skip it (line 65-66)."""
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    RegWriteInst(dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(1)),
+                    RegWriteInst(dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(2)),
+                ],
+                disable_opt=True,
+            )
+        ]
+    )
+    out = _run_chunk_passes_on_root(root, [DeadWriteEliminationPass()])
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    # Both writes must survive (disable_opt blocks are left untouched)
+    assert len([i for i in bb.insts if isinstance(i, RegWriteInst)]) == 2
+
+
+# ---------------------------------------------------------------------------
+# LoopConditionMergePass — no-insts guard in _process_block (line 83)
+# ---------------------------------------------------------------------------
+
+
+def test_loop_condition_merge_no_insts_block_skipped():
+    """Block with empty insts: LoopConditionMergePass must skip (line 83)."""
+    from zcu_tools.program.v2.ir.passes.loop import LoopConditionMergePass
+
+    lbl = Label("start")
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[],
+                branch=JumpInst(label=LabelRef(lbl), if_cond="NZ"),
+            )
+        ]
+    )
+    out = _run_chunk_passes_on_root(root, [LoopConditionMergePass()])
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    assert len(bb.insts) == 0
+    # Branch must be unchanged (no merge happened)
+    assert bb.branch is not None
+    assert isinstance(bb.branch, JumpInst)
+    assert bb.branch.wr is None
+
+
+# ---------------------------------------------------------------------------
+# DmemDispatchPass — small pmem (line 97-103) and big pmem (line 84-95) paths
+# ---------------------------------------------------------------------------
+
+
+def test_dmem_dispatch_k1_returns_none():
+    """k == 1: DmemDispatchPass must skip (single target is not a meaningful dispatch)."""
+    from zcu_tools.program.v2.ir.node import IRDispatch
+    from zcu_tools.program.v2.ir.passes.control_flow import DmemDispatchPass
+
+    labels = [Label("only_case")]
+    dispatch = IRDispatch(name="br", value_reg=Register("r2"), target_labels=labels)
+    ctx = PipeLineContext(config=PipeLineConfig(pmem_capacity=4096), pmem_budget=1024)
+    result = DmemDispatchPass().transform(dispatch, ctx)
+    assert result is None
+
+
+def test_dmem_dispatch_small_pmem_uses_label_jump():
+    """pmem_capacity=512 (<=2048): guard uses label-mode JumpInst, not s15-indirect."""
+    from zcu_tools.program.v2.ir.node import IRDispatch
+    from zcu_tools.program.v2.ir.passes.control_flow import DmemDispatchPass
+
+    labels = [Label(f"case{i}") for i in range(3)]
+    dispatch = IRDispatch(
+        name="br",
+        value_reg=Register("r2"),
+        target_labels=labels,
+    )
+    root = BlockNode(insts=[dispatch])
+    ctx = PipeLineContext(
+        config=PipeLineConfig(pmem_capacity=512),
+        pmem_budget=1024,
+    )
+    out, _ = _apply_tree_pass_to_root(root, DmemDispatchPass(), ctx)
+
+    all_bbs = list(_walk_basic_blocks(out))
+    guard_bbs = [bb for bb in all_bbs if bb.branch is not None and bb.branch.if_cond == "NS"]
+    assert len(guard_bbs) == 1, "expected exactly one guard block"
+    guard_branch = guard_bbs[0].branch
+    assert isinstance(guard_branch, JumpInst)
+    # label-mode: has a label ref, no addr (no s15 register)
+    assert guard_branch.label is not None
+    assert guard_branch.addr is None
+
+
+def test_dmem_dispatch_big_pmem_uses_s15_indirect():
+    """pmem_capacity=4096 (>2048): guard uses RegWriteInst(s15=LABEL) + JumpInst(addr=s15)."""
+    from zcu_tools.program.v2.ir.node import IRDispatch
+    from zcu_tools.program.v2.ir.passes.control_flow import DmemDispatchPass
+
+    labels = [Label(f"case{i}") for i in range(3)]
+    dispatch = IRDispatch(
+        name="br",
+        value_reg=Register("r2"),
+        target_labels=labels,
+    )
+    root = BlockNode(insts=[dispatch])
+    ctx = PipeLineContext(
+        config=PipeLineConfig(pmem_capacity=4096),
+        pmem_budget=1024,
+    )
+    out, _ = _apply_tree_pass_to_root(root, DmemDispatchPass(), ctx)
+
+    all_bbs = list(_walk_basic_blocks(out))
+    guard_bbs = [bb for bb in all_bbs if bb.branch is not None and bb.branch.if_cond == "NS"]
+    assert len(guard_bbs) == 1, "expected exactly one guard block"
+    guard_bb = guard_bbs[0]
+    guard_branch = guard_bb.branch
+    assert isinstance(guard_branch, JumpInst)
+    # big pmem: addr=s15 (indirect), no label ref on the jump
+    assert guard_branch.addr == Register("s15")
+    assert guard_branch.label is None
+    # insts must contain a RegWriteInst that loads LABEL into s15
+    write_insts = [i for i in guard_bb.insts if isinstance(i, RegWriteInst)]
+    assert any(
+        getattr(i, "src", None) == SrcKeyword.LABEL for i in write_insts
+    ), "expected RegWriteInst src=LABEL in guard block"
+
 
 def test_dead_test_disable_opt_block_not_modified():
     """disable_opt=True block: DeadTestEliminationPass must not modify it (line 54)."""

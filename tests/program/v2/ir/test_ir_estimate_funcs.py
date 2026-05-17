@@ -27,7 +27,13 @@ from zcu_tools.program.v2.ir.instructions import (
     TimeInst,
 )
 from zcu_tools.program.v2.ir.labels import Label, LabelRef
-from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRBranch, IRLoop, IRNode
+from zcu_tools.program.v2.ir.node import (
+    BasicBlockNode,
+    BlockNode,
+    IRBranch,
+    IRLoop,
+    IRNode,
+)
 from zcu_tools.program.v2.ir.operands import (
     Immediate,
     ImmValue,
