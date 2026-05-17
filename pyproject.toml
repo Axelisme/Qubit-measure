@@ -65,7 +65,7 @@ packages = ["zcu_tools"]
 ignore = ["E402", "F401"]
 
 [tool.pyright]
-include = ["lib", "tests"]
+include = ["lib", "tests", "script"]
 typeCheckingMode = "standard"
 reportMissingImports = "none"
 reportIncompatibleVariableOverride = "none"
