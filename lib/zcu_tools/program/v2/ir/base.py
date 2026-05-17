@@ -43,8 +43,12 @@ class IRCompileMixin(QickProgramV2):
         linker = IRLinker()
         logical_insts = linker.unlink(insts, labels, meta_infos)
 
+        # dmem dispatch tables (Phase 7) are appended after the IR layer; tell
+        # the pipeline where in dmem they may start (current buffer length).
+        dmem_base = len(getattr(self, "_dmem_buffer", []))
+
         pipeline = make_default_pipeline(pmem_capacity=self.tproccfg["pmem_size"])
-        opt_insts, _ = pipeline(logical_insts)
+        opt_insts, ctx = pipeline(logical_insts, dmem_base_offset=dmem_base)
 
         opt_prog_list, opt_labels, opt_meta_infos, cursor = linker.link(opt_insts)
 
@@ -54,3 +58,30 @@ class IRCompileMixin(QickProgramV2):
 
         self.p_addr = cursor.final_p_addr
         self.line = cursor.final_line
+
+        # Materialize dmem dispatch tables: resolve each table's entry labels
+        # to program addresses and append them to dmem. The resolve step in the
+        # pipeline already rewrote the DmemAddr operands to these base offsets.
+        self._materialize_dmem_tables(ctx, opt_labels, dmem_base)
+
+    def _materialize_dmem_tables(
+        self,
+        ctx: Any,
+        opt_labels: dict[str, Any],
+        dmem_base: int,
+    ) -> None:
+        if not ctx.dmem_tables:
+            return
+        cursor = dmem_base
+        for table_labels in ctx.dmem_tables:
+            entry_addrs = [
+                IRLinker._parse_label_addr(lbl.name, opt_labels[lbl.name])
+                for lbl in table_labels
+            ]
+            offset = self.add_dmem(entry_addrs)  # type: ignore[attr-defined]
+            if offset != cursor:
+                raise RuntimeError(
+                    f"dmem dispatch table allocation mismatch: pipeline reserved "
+                    f"offset {cursor}, add_dmem returned {offset}."
+                )
+            cursor += len(entry_addrs)

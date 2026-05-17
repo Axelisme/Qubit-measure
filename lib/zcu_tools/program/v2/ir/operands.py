@@ -202,6 +202,38 @@ class MemAddr(Operand):
         return f"&{self.value}"
 
 
+@dataclass(frozen=True)
+class DmemAddr(Operand):
+    """An unresolved reference to a dispatch jump table stored in data memory.
+
+    A ``DmemAddr`` denotes "one dmem table" — a contiguous run of dmem words,
+    each holding the resolved program address of one ``table_labels`` entry.
+    It is a *reference*, not a resource: it carries no numeric offset.
+
+    The pipeline's resolve step (running after every clone-capable pass) is
+    what commits the resource: it scans for all ``DmemAddr`` references,
+    allocates a dmem run for each unique one, and replaces the reference with
+    a concrete ``Immediate(base_offset)``.  Cloning a ``DmemAddr`` (e.g. when
+    UnrollLoopPass duplicates a loop body) is therefore always safe — the copy
+    is just another reference, and its ``table_labels`` are remapped like any
+    other label, so each copy resolves to its own distinct dmem run.
+
+    ``__str__`` raises: a ``DmemAddr`` must never reach instruction
+    serialization. If it does, the resolve step was skipped — a pipeline bug.
+    """
+
+    table_labels: tuple["Label", ...]
+
+    def regs(self) -> frozenset[str]:
+        return frozenset()
+
+    def __str__(self) -> str:
+        raise RuntimeError(
+            "DmemAddr reached serialization unresolved; the pipeline resolve "
+            "step must replace every DmemAddr with a concrete Immediate first."
+        )
+
+
 # Type aliases
 ValueType: TypeAlias = Union[Register, Immediate, ImmValue]
 AddrType: TypeAlias = Union[Register, MemAddr]
@@ -211,11 +243,16 @@ SrcType: TypeAlias = Union[SrcKeyword, Register]
 
 @dataclass(frozen=True)
 class AluExpr(Operand):
-    """Represents an ALU operation (e.g., 'r1 + #1', 'ABS r2')."""
+    """Represents an ALU operation (e.g., 'r1 + #1', 'ABS r2').
+
+    ``rhs`` may transiently hold a ``DmemAddr`` placeholder while a dispatch
+    table address is still unresolved; the pipeline resolve step rewrites it
+    to an ``Immediate`` before serialization.
+    """
 
     lhs: Register
     op: AluOp
-    rhs: Optional[Union[Register, Immediate]] = None
+    rhs: Optional[Union[Register, Immediate, DmemAddr]] = None
 
     def regs(self) -> frozenset[str]:
         result = self.lhs.regs()

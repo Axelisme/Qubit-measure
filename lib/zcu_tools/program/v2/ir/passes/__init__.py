@@ -7,7 +7,9 @@ from .control_flow import (
     BlockMergePass,
     BranchEliminationPass,
     DeadLabelEliminationPass,
+    DmemDispatchPass,
     SimplifyDispatchPass,
+    UnpackIRBranchPass,
     UnreachableEliminationPass,
 )
 from .dataflow import (
@@ -28,7 +30,9 @@ __all__ = [
     "BlockMergePass",
     "BranchEliminationPass",
     "DeadLabelEliminationPass",
+    "DmemDispatchPass",
     "SimplifyDispatchPass",
+    "UnpackIRBranchPass",
     "UnreachableEliminationPass",
     # dataflow
     "DeadTestEliminationPass",

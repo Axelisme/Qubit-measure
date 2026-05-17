@@ -136,7 +136,7 @@ def test_compile_passes_pmem_budget_into_pipeline(monkeypatch):
     seen: dict[str, object] = {}
 
     class _NoopPipeline:
-        def __call__(self, ir):
+        def __call__(self, ir, dmem_base_offset=0):
             return ir, PipeLineContext(config=PipeLineConfig(), pmem_budget=1024)
 
     def fake_make_default_pipeline(pmem_capacity):

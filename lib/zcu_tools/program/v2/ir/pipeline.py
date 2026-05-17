@@ -7,7 +7,8 @@ from dataclasses import dataclass, field
 from typing import Optional, Union, cast
 
 from .factory import IRLexer, IRParser
-from .instructions import Instruction, MetaInst
+from .instructions import BaseInst, Instruction, MetaInst, RegWriteInst
+from .labels import Label
 from .node import BasicBlockNode, BlockNode, IRNode
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,15 @@ class PipeLineContext:
     config: PipeLineConfig
     pmem_budget: int
     available_regs: set[str] = field(default_factory=set)
+
+    # dmem dispatch tables (Phase 7). `dmem_base_offset` is the dmem index at
+    # which IR-generated dispatch tables start (set by the caller from the
+    # current dmem buffer length). `dmem_tables` is filled by the resolve step:
+    # an ordered list of each table's entry-label list, contiguous from
+    # `dmem_base_offset`. The caller resolves the labels to program addresses
+    # after linking and appends them to dmem.
+    dmem_base_offset: int = 0
+    dmem_tables: list[list["Label"]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -300,6 +310,49 @@ def _strip_structural_meta(chunks: ChunkList) -> list[BasicBlockNode]:
     return result
 
 
+def _resolve_dmem_dispatch(chunks: list[BasicBlockNode], ctx: PipeLineContext) -> None:
+    """Resolve every DmemAddr reference to a concrete dmem base offset.
+
+    Runs after every clone-capable pass and after ChunkList optimization, so
+    each DmemAddr is final. Walks all instructions, dedupes DmemAddr references
+    by their entry-label tuple (so identical dispatch tables share one dmem
+    run), assigns each unique table a contiguous dmem range starting at
+    ``ctx.dmem_base_offset``, and rewrites the ``DmemAddr`` operand to an
+    ``Immediate(base)``. The per-table entry-label lists are recorded in
+    ``ctx.dmem_tables`` in allocation order for the caller to materialize.
+
+    DmemAddr lives in ``RegWriteInst.op`` (an ``AluExpr`` whose ``rhs`` is the
+    DmemAddr), produced by ``DmemDispatchPass``.
+    """
+    import dataclasses
+
+    from .operands import AluExpr, DmemAddr, Immediate
+
+    # table_labels tuple -> assigned dmem base offset
+    assigned: dict[tuple[Label, ...], int] = {}
+    next_offset = ctx.dmem_base_offset
+
+    def _resolve_inst(inst: BaseInst) -> BaseInst:
+        nonlocal next_offset
+        if not isinstance(inst, RegWriteInst):
+            return inst
+        op = inst.op
+        if not isinstance(op, AluExpr) or not isinstance(op.rhs, DmemAddr):
+            return inst
+        key = op.rhs.table_labels
+        base = assigned.get(key)
+        if base is None:
+            base = next_offset
+            assigned[key] = base
+            next_offset += len(key)
+            ctx.dmem_tables.append(list(key))
+        new_op = dataclasses.replace(op, rhs=Immediate(base))
+        return dataclasses.replace(inst, op=new_op)
+
+    for block in chunks:
+        block.insts = [_resolve_inst(i) for i in block.insts]
+
+
 class IRPipeLine:
     """U-shape single-pass IR optimization pipeline.
 
@@ -334,9 +387,16 @@ class IRPipeLine:
     def __call__(
         self,
         insts: list[Instruction],
+        dmem_base_offset: int = 0,
     ) -> tuple[list[Instruction], PipeLineContext]:
+        """Optimize a flat instruction list.
+
+        ``dmem_base_offset`` is the dmem index at which IR-generated dispatch
+        tables may start (the caller passes the current dmem buffer length).
+        After the call, ``ctx.dmem_tables`` lists the tables that were
+        allocated, contiguous from that offset, for the caller to materialize.
+        """
         from .hw_semantics import GENERAL_REGS
-        from .instructions import BaseInst
         from .operands import parse_register
 
         used_regs = set()
@@ -357,6 +417,7 @@ class IRPipeLine:
             config=self.config,
             pmem_budget=int(0.8 * self.config.pmem_capacity),
             available_regs=available_regs,
+            dmem_base_offset=dmem_base_offset,
         )
         if self.config.disable_all_opt:
             return insts, ctx
@@ -387,6 +448,10 @@ class IRPipeLine:
             self.chunk_passes, self.chunk_list_passes, flat_chunks, ctx
         )
 
+        # --- resolve dmem dispatch tables (after every clone-capable pass) ---
+        bb_chunks = [c for c in flat_chunks if isinstance(c, BasicBlockNode)]
+        _resolve_dmem_dispatch(bb_chunks, ctx)
+
         return lexer.flatten(flat_chunks), ctx
 
 
@@ -404,10 +469,12 @@ def make_default_pipeline(
         DeadLabelEliminationPass,
         DeadTestEliminationPass,
         DeadWriteEliminationPass,
+        DmemDispatchPass,
         IncRegMergePass,
         LoopConditionMergePass,
         SimplifyDispatchPass,
         TimedMergePass,
+        UnpackIRBranchPass,
         UnreachableEliminationPass,
         UnrollLoopPass,
         ZeroDelayDCEPass,
@@ -436,6 +503,8 @@ def make_default_pipeline(
         ],
         tree_passes=[
             UnrollLoopPass(),
+            UnpackIRBranchPass(),
             SimplifyDispatchPass(),
+            DmemDispatchPass(),
         ],
     )

@@ -11,6 +11,7 @@ from .labels import Label, LabelRef
 from .operands import (
     AddrType,
     AluExpr,
+    DmemAddr,
     ExprType,
     Immediate,
     ImmValue,
@@ -234,6 +235,17 @@ class BaseInst(Instruction):
     def need_label(self) -> Optional[Label]:
         """Non-pseudo Label this instruction references (for dead-label analysis)."""
         return None
+
+    @property
+    def need_labels(self) -> frozenset[Label]:
+        """All non-pseudo Labels this instruction references.
+
+        Default: the single ``need_label`` if any. Instructions that reference
+        several labels (e.g. a dmem dispatch table via ``DmemAddr``) override
+        this so dead-label analysis sees every referenced label.
+        """
+        lbl = self.need_label
+        return frozenset({lbl}) if lbl is not None else frozenset()
 
 
 @dataclass(frozen=True)
@@ -469,6 +481,15 @@ class RegWriteInst(BaseInst):
         if self.label is not None and not self.label.is_pseudo():
             return self.label.as_label()
         return None
+
+    @property
+    def need_labels(self) -> frozenset[Label]:
+        labels = super().need_labels
+        # A dmem dispatch table address (DmemAddr) references every case-entry
+        # label; surface them so dead-label analysis keeps the entries alive.
+        if isinstance(self.op, AluExpr) and isinstance(self.op.rhs, DmemAddr):
+            labels = labels | frozenset(self.op.rhs.table_labels)
+        return labels
 
     def to_dict(self) -> dict[str, Any]:
         src_val = (

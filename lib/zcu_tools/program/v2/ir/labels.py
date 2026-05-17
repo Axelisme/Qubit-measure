@@ -75,7 +75,12 @@ def make_label(base: str, allocated: set[str]) -> Label:
 
 
 def collect_referenced_labels(chunks: ChunkList) -> set[Label]:
-    """Collect all Labels referenced by need_label across a chunk list."""
+    """Collect all Labels referenced across a chunk list.
+
+    Uses ``BaseInst.need_labels`` so multi-label references (e.g. a dmem
+    dispatch table addressed via ``DmemAddr``) keep every referenced label
+    alive, not just the single ``need_label``.
+    """
     from .instructions import BaseInst
     from .node import BasicBlockNode
 
@@ -88,6 +93,6 @@ def collect_referenced_labels(chunks: ChunkList) -> set[Label]:
             *chunk.insts,
             *([chunk.branch] if chunk.branch else []),
         ):
-            if isinstance(inst, BaseInst) and inst.need_label is not None:
-                refs.add(inst.need_label)
+            if isinstance(inst, BaseInst):
+                refs |= inst.need_labels
     return refs

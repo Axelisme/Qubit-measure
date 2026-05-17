@@ -17,6 +17,7 @@ from typing import Iterator
 import pytest
 from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
 from zcu_tools.program.v2.ir.instructions import (
+    DmemReadInst,
     Instruction,
     JumpInst,
     LabelInst,
@@ -87,17 +88,6 @@ def _collect_fixed_entry_blocks(root: BlockNode) -> list[BasicBlockNode]:
     return result
 
 
-def _entry_addr_size(group: list[BasicBlockNode]) -> int:
-    """Total addr words occupied by an entry group."""
-    total = 0
-    for bb in group:
-        for inst in bb.insts:
-            total += inst.addr_inc
-        if bb.branch is not None:
-            total += bb.branch.addr_inc
-    return total
-
-
 def _collect_all_basic_blocks(root: BlockNode) -> list[BasicBlockNode]:
     result: list[BasicBlockNode] = []
     stack: list[IRNode] = list(root.insts)
@@ -113,14 +103,24 @@ def _collect_all_basic_blocks(root: BlockNode) -> list[BasicBlockNode]:
 def _run_full_pipeline_on_root(
     root: BlockNode, *, pmem: int = 512, max_unroll_factor: int | None = None
 ) -> BlockNode:
+    out, _ctx = _run_full_pipeline_capture_ctx(
+        root, pmem=pmem, max_unroll_factor=max_unroll_factor
+    )
+    return out
+
+
+def _run_full_pipeline_capture_ctx(
+    root: BlockNode, *, pmem: int = 512, max_unroll_factor: int | None = None
+):
+    """Run the full pipeline; return (reconstructed BlockNode, PipeLineContext)."""
     pipeline = make_default_pipeline(
         pmem_capacity=pmem, max_unroll_factor=max_unroll_factor
     )
     lexer = IRLexer()
     parser = IRParser(pmem_size=pmem)
     insts = lexer.flatten(parser.unparse(root))
-    out_insts, _ = pipeline(insts)
-    return parser.parse(lexer.lex(out_insts))
+    out_insts, ctx = pipeline(insts)
+    return parser.parse(lexer.lex(out_insts)), ctx
 
 
 # ---------------------------------------------------------------------------
@@ -128,9 +128,13 @@ def _run_full_pipeline_on_root(
 # ---------------------------------------------------------------------------
 
 
-def test_v1_jump_table_only_dispatch_stubs_are_fixed():
-    """After full pipeline, only dispatch-table stubs are fixed; body copies are free.
-    Uses k=4 so SimplifyDispatchPass does not eliminate the dispatch island."""
+def test_v1_dispatch_uses_dmem_table_no_pmem_stubs():
+    """k>=3 dispatch is lowered by DmemDispatchPass to a dmem address table.
+
+    No fixed-width pmem stub island is produced — the disable_opt invariant is
+    gone; case bodies stay free. (Phase 7: dmem dispatch replaces the pmem
+    table island for k>=3.)
+    """
     k = 4
     body_words = 3
     root = BlockNode(
@@ -146,49 +150,88 @@ def test_v1_jump_table_only_dispatch_stubs_are_fixed():
         ]
     )
 
-    out = _run_full_pipeline_on_root(root, pmem=512, max_unroll_factor=k)
+    out, ctx = _run_full_pipeline_capture_ctx(root, pmem=512, max_unroll_factor=k)
 
-    fixed_blocks = _collect_fixed_entry_blocks(out)
-    assert len(fixed_blocks) == k
-    assert all(block.branch is not None for block in fixed_blocks)
+    # No pmem dispatch-table stubs survive: dmem dispatch has no disable_opt blocks.
+    assert _collect_fixed_entry_blocks(out) == []
 
+    # One dmem dispatch table with k entries was reserved.
+    assert len(ctx.dmem_tables) == 1
+    assert len(ctx.dmem_tables[0]) == k
+
+    # The dmem dispatch instruction pattern is present: a dmem read into s15
+    # followed by an indirect JUMP [s15].
+    blocks = _collect_all_basic_blocks(out)
+    has_dmem_dispatch = any(
+        any(
+            isinstance(inst, DmemReadInst) and inst.dst == Register("s15")
+            for inst in bb.insts
+        )
+        for bb in blocks
+    )
+    assert has_dmem_dispatch
+
+    # The k unrolled body entries stay free (not disable_opt).
     plain_entry_blocks = [
         block
-        for block in _collect_all_basic_blocks(out)
-        if any(
-            lbl.name.name.startswith("loop_jt_entry_")
-            and "_dispatch_" not in lbl.name.name
-            for lbl in block.labels
-        )
+        for block in blocks
+        if any(lbl.name.name.startswith("loop_jt_entry_") for lbl in block.labels)
     ]
     assert plain_entry_blocks
     assert all(not block.disable_opt for block in plain_entry_blocks)
 
 
-def test_v1_jump_table_stub_width_is_uniform():
-    """After full pipeline, every dispatch-table entry stub has the same physical width.
-    Uses k=4 so the dispatch island is not eliminated by SimplifyDispatchPass."""
-    body_nops = 5  # body_words == 5
-    root = BlockNode(
-        insts=[
-            IRLoop(
-                name="loop",
-                counter_reg=Register("r0"),
-                n=Register("r1"),
-                body=BlockNode(
-                    insts=[BasicBlockNode(insts=[NopInst()]) for _ in range(body_nops)]
-                ),
-            )
-        ]
+def test_v1_dmem_dispatch_tables_deduplicated():
+    """The resolve step dedupes DmemAddr by table_labels value.
+
+    Two dispatch instructions referencing identical entry-label tuples must
+    share a single dmem table; differing tuples get distinct tables.
+    """
+    from zcu_tools.program.v2.ir.operands import AluExpr, AluOp, DmemAddr, Immediate
+    from zcu_tools.program.v2.ir.pipeline import (
+        PipeLineConfig,
+        PipeLineContext,
+        _resolve_dmem_dispatch,
     )
 
-    out = _run_full_pipeline_on_root(root, pmem=512, max_unroll_factor=4)
+    labels_a = tuple(Label(f"a{i}") for i in range(4))
+    labels_b = tuple(Label(f"b{i}") for i in range(3))
 
-    stubs = _collect_fixed_entry_blocks(out)
-    assert stubs
-    stub_sizes = [_entry_addr_size([stub]) for stub in stubs]
-    assert len(set(stub_sizes)) == 1
-    assert stub_sizes[0] == 1
+    def _dispatch_block(table: tuple[Label, ...]) -> BasicBlockNode:
+        return BasicBlockNode(
+            insts=[
+                RegWriteInst(
+                    dst=Register("s15"),
+                    src=SrcKeyword.OP,
+                    op=AluExpr(Register("r0"), AluOp.ADD, DmemAddr(table)),
+                )
+            ]
+        )
+
+    # Two blocks reference labels_a (must dedup), one references labels_b.
+    chunks = [
+        _dispatch_block(labels_a),
+        _dispatch_block(labels_b),
+        _dispatch_block(labels_a),
+    ]
+    ctx = PipeLineContext(config=PipeLineConfig(), pmem_budget=1024, dmem_base_offset=7)
+    _resolve_dmem_dispatch(chunks, ctx)
+
+    # labels_a + labels_b → exactly 2 tables (labels_a shared by 2 blocks).
+    assert len(ctx.dmem_tables) == 2
+    assert [lbl.name for lbl in ctx.dmem_tables[0]] == [lbl.name for lbl in labels_a]
+    assert [lbl.name for lbl in ctx.dmem_tables[1]] == [lbl.name for lbl in labels_b]
+
+    # The two labels_a blocks resolved to the same base; allocation starts at
+    # dmem_base_offset (7); labels_b follows after labels_a's 4 words.
+    bases: list[int] = []
+    for b in chunks:
+        inst = b.insts[0]
+        assert isinstance(inst, RegWriteInst)
+        op = inst.op
+        assert isinstance(op, AluExpr) and isinstance(op.rhs, Immediate)
+        bases.append(op.rhs.value)
+    assert bases == [7, 11, 7]  # a@7, b@11, a@7 (shared)
 
 
 def test_v1_pipeline_keeps_body_blocks_free_after_unroll():
