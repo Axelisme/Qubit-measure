@@ -626,6 +626,7 @@ def test_clone_renamed_remaps_dmem_addr_table_labels():
         "DmemAddr.table_labels must be remapped to the cloned entry label"
     )
 
+
 # ---------------------------------------------------------------------------
 # DeadTestEliminationPass — uncovered branches (8.4)
 # ---------------------------------------------------------------------------
@@ -782,6 +783,7 @@ def test_pipeline_disable_opt_violation_raises():
 
     with pytest.raises(ValueError, match="disable_opt"):
         _run_chunk_passes([WordCountChangingPass()], chunks, ctx)
+
 
 # ---------------------------------------------------------------------------
 # UnrollLoopPass — _unroll_partial big-jump paths (8.2)
@@ -991,8 +993,12 @@ def test_dead_write_disable_opt_block_not_modified():
         insts=[
             BasicBlockNode(
                 insts=[
-                    RegWriteInst(dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(1)),
-                    RegWriteInst(dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(2)),
+                    RegWriteInst(
+                        dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(1)
+                    ),
+                    RegWriteInst(
+                        dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(2)
+                    ),
                 ],
                 disable_opt=True,
             )
@@ -1069,7 +1075,9 @@ def test_dmem_dispatch_small_pmem_uses_label_jump():
     out, _ = _apply_tree_pass_to_root(root, DmemDispatchPass(), ctx)
 
     all_bbs = list(_walk_basic_blocks(out))
-    guard_bbs = [bb for bb in all_bbs if bb.branch is not None and bb.branch.if_cond == "NS"]
+    guard_bbs = [
+        bb for bb in all_bbs if bb.branch is not None and bb.branch.if_cond == "NS"
+    ]
     assert len(guard_bbs) == 1, "expected exactly one guard block"
     guard_branch = guard_bbs[0].branch
     assert isinstance(guard_branch, JumpInst)
@@ -1097,7 +1105,9 @@ def test_dmem_dispatch_big_pmem_uses_s15_indirect():
     out, _ = _apply_tree_pass_to_root(root, DmemDispatchPass(), ctx)
 
     all_bbs = list(_walk_basic_blocks(out))
-    guard_bbs = [bb for bb in all_bbs if bb.branch is not None and bb.branch.if_cond == "NS"]
+    guard_bbs = [
+        bb for bb in all_bbs if bb.branch is not None and bb.branch.if_cond == "NS"
+    ]
     assert len(guard_bbs) == 1, "expected exactly one guard block"
     guard_bb = guard_bbs[0]
     guard_branch = guard_bb.branch
@@ -1107,9 +1117,9 @@ def test_dmem_dispatch_big_pmem_uses_s15_indirect():
     assert guard_branch.label is None
     # insts must contain a RegWriteInst that loads LABEL into s15
     write_insts = [i for i in guard_bb.insts if isinstance(i, RegWriteInst)]
-    assert any(
-        getattr(i, "src", None) == SrcKeyword.LABEL for i in write_insts
-    ), "expected RegWriteInst src=LABEL in guard block"
+    assert any(getattr(i, "src", None) == SrcKeyword.LABEL for i in write_insts), (
+        "expected RegWriteInst src=LABEL in guard block"
+    )
 
 
 def test_dead_test_disable_opt_block_not_modified():

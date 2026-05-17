@@ -152,6 +152,20 @@ def _parse_mem_addr_field(val: str, field: str) -> Union[Register, MemAddr]:
     raise ValueError(f"{field}: {val!r} is not a register or memory address")
 
 
+def _parse_dport_data_field(val: str) -> Union[Register, Immediate, ImmValue]:
+    """Parse DPORT_WR.DATA without the permissive parse_value() fallback."""
+    reg = parse_register(val)
+    if reg is not None:
+        return reg
+    imm = parse_immediate(val)
+    if imm is not None:
+        return imm
+    data = parse_imm_value(val)
+    if data is not None:
+        return data
+    raise ValueError(f"DATA: {val!r} is not a valid DPORT_WR data value")
+
+
 @dataclass(frozen=True)
 class Instruction(ABC):
     """Base class for all IR instructions."""
@@ -797,18 +811,12 @@ class DportWriteInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> DportWriteInst:
         data_raw = d.get("DATA")
-        parsed_data: Union[Register, Immediate, ImmValue]
-        if data_raw is None:
-            parsed_data = ImmValue(0)
-        else:
-            result = parse_value(str(data_raw))
-            if result is None:
-                raise ValueError(f"DATA: {data_raw!r} is not a valid value")
-            parsed_data = result
         return cls(
             dst=_parse_port_dst(str(d["DST"])),
             src=parse_src(d.get("SRC")),
-            data=parsed_data,
+            data=ImmValue(0)
+            if data_raw is None
+            else _parse_dport_data_field(str(data_raw)),
             time=parse_time(str(d["TIME"])) if "TIME" in d else None,
             wr=parse_side_write(d["WR"]) if "WR" in d else None,
             op=parse_alu_expr(d["OP"]) if "OP" in d else None,

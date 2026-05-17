@@ -585,3 +585,17 @@ class TestStrictParsing:
     def test_wait_inst_accepts_s15_addr(self):
         inst = WaitInst(c_op="time", addr=Register("s15"))
         assert inst.addr == Register("s15")
+
+    def test_dport_write_data_rejects_garbage_string(self):
+        with pytest.raises(ValueError, match="DPORT_WR data value"):
+            BaseInst.from_dict({"CMD": "DPORT_WR", "DST": "0", "DATA": "garbage"})
+
+    def test_dport_write_data_rejects_unknown_register_name(self):
+        with pytest.raises(ValueError, match="DPORT_WR data value"):
+            BaseInst.from_dict({"CMD": "DPORT_WR", "DST": "0", "DATA": "w_bogus"})
+
+    @pytest.mark.parametrize("data", ["0", "#1", "r0", "w0"])
+    def test_dport_write_data_accepts_valid_value_types(self, data: str):
+        inst = BaseInst.from_dict({"CMD": "DPORT_WR", "DST": "0", "DATA": data})
+        assert isinstance(inst, DportWriteInst)
+        assert inst.to_dict()["DATA"] == data

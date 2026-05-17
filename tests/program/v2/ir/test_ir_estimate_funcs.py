@@ -232,9 +232,7 @@ def test_body_cost_port_write_uses_cost_wmem():
 
 
 def test_body_cost_dmem_read_uses_cost_dmem():
-    bb = BasicBlockNode(
-        insts=[DmemReadInst(dst=Register("r0"), addr=Register("r1"))]
-    )
+    bb = BasicBlockNode(insts=[DmemReadInst(dst=Register("r0"), addr=Register("r1"))])
     cfg = _cfg(cost_dmem=5, cost_default=1)
     assert estimate_body_cost([bb], cfg) == 5
 

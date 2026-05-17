@@ -52,9 +52,7 @@ def _ctx(pmem_capacity: int = 512) -> PipeLineContext:
     )
 
 
-def _apply_unpack(
-    root: BlockNode, pmem_capacity: int = 512
-) -> tuple[BlockNode, bool]:
+def _apply_unpack(root: BlockNode, pmem_capacity: int = 512) -> tuple[BlockNode, bool]:
     """Run UnpackIRBranchPass on root via the real post-order driver."""
     from zcu_tools.program.v2.ir.pipeline import _optimize_tree
 
@@ -353,3 +351,67 @@ def test_unpack_end_label_is_unique_when_name_conflicts():
     assert isinstance(end_bb, BasicBlockNode)
     # end_label must differ from "br_end"
     assert end_bb.labels[0].name != Label("br_end")
+
+
+def test_unpack_same_named_branches_keep_labels_globally_unique():
+    from zcu_tools.program.v2.ir.factory import IRParser
+    from zcu_tools.program.v2.ir.pipeline import _optimize_tree
+
+    def _unlabeled_branch() -> IRBranch:
+        return IRBranch(
+            name="sel",
+            compare_reg=Register("r_sel"),
+            cases=[
+                BasicBlockNode(insts=[NopInst()]),
+                BasicBlockNode(insts=[NopInst()]),
+            ],
+        )
+
+    root = BlockNode(insts=[_unlabeled_branch(), _unlabeled_branch()])
+    parser = IRParser(pmem_size=512)
+    ctx = PipeLineContext(
+        config=PipeLineConfig(pmem_capacity=512),
+        pmem_budget=1024,
+        allocated_names={"sel"},
+    )
+
+    optimized = _optimize_tree(root, [UnpackIRBranchPass()], ctx)
+    assert isinstance(optimized, BlockNode)
+
+    chunks = parser.unparse(optimized)
+    labels = [
+        lbl.name.name
+        for chunk in chunks
+        if isinstance(chunk, BasicBlockNode)
+        for lbl in chunk.labels
+    ]
+    assert len(labels) == len(set(labels))
+
+
+def test_unpack_after_branch_roundtrip_does_not_duplicate_old_skeleton():
+    from zcu_tools.program.v2.ir.factory import IRParser
+
+    parser = IRParser(pmem_size=512)
+    branch = IRBranch(
+        name="sel",
+        compare_reg=Register("r_sel"),
+        cases=[
+            BlockNode(insts=[BasicBlockNode(insts=[NopInst()])]),
+            BlockNode(insts=[BasicBlockNode(insts=[NopInst()])]),
+            BlockNode(insts=[BasicBlockNode(insts=[NopInst()])]),
+        ],
+    )
+    rebuilt = parser.parse(parser.unparse(BlockNode(insts=[branch])))
+    out, _ = _apply_unpack(rebuilt)
+
+    expanded = out.insts[0]
+    assert isinstance(expanded, BlockNode)
+    children = expanded.insts
+    assert len(children) == 7
+    assert isinstance(children[0], IRDispatch)
+    jump_blocks = [
+        child
+        for child in children
+        if isinstance(child, BasicBlockNode) and isinstance(child.branch, JumpInst)
+    ]
+    assert len(jump_blocks) == 2

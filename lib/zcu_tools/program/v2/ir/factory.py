@@ -279,13 +279,18 @@ class IRParser:
 
         if all(name.isdigit() for name, _ in parsed_cases):
             parsed_cases.sort(key=lambda pair: int(pair[0]))
-        branch.cases = [case for _, case in parsed_cases]
 
         end_meta = self._consume_meta(items, pos, "BRANCH_END")
         if end_meta.name != branch.name:
             raise ValueError(
                 f"IRParser: mismatched BRANCH_END for {branch.name!r}, got {end_meta.name!r}"
             )
+
+        end_label = self._consume_branch_end_label(items, pos)
+        branch.cases = [
+            self._strip_synthetic_branch_jump(case, end_label)
+            for _, case in parsed_cases
+        ]
         return branch
 
     def _parse_branch_case(
@@ -308,6 +313,68 @@ class IRParser:
                 f"got {end_meta.name!r}"
             )
         return start_meta.name, case
+
+    def _consume_branch_end_label(
+        self,
+        items: list[Union[BasicBlockNode, MetaInst]],
+        pos: list[int],
+    ) -> Optional[Label]:
+        if pos[0] >= len(items):
+            return None
+        item = items[pos[0]]
+        if (
+            not isinstance(item, BasicBlockNode)
+            or item.insts
+            or item.branch is not None
+            or len(item.labels) != 1
+        ):
+            return None
+        pos[0] += 1
+        return item.labels[0].name
+
+    def _strip_synthetic_branch_jump(
+        self,
+        case: BlockNode,
+        end_label: Optional[Label],
+    ) -> BlockNode:
+        if end_label is None or not case.insts:
+            return case
+        last = case.insts[-1]
+        if not isinstance(last, BasicBlockNode) or last.labels:
+            return case
+        if self._is_small_branch_end_jump(
+            last, end_label
+        ) or self._is_big_branch_end_jump(last, end_label):
+            return BlockNode(insts=list(case.insts[:-1]))
+        return case
+
+    @staticmethod
+    def _is_small_branch_end_jump(block: BasicBlockNode, end_label: Label) -> bool:
+        branch = block.branch
+        return (
+            not block.insts
+            and isinstance(branch, JumpInst)
+            and branch.if_cond is None
+            and branch.addr is None
+            and branch.label == LabelRef(end_label)
+        )
+
+    @staticmethod
+    def _is_big_branch_end_jump(block: BasicBlockNode, end_label: Label) -> bool:
+        if len(block.insts) != 1:
+            return False
+        inst = block.insts[0]
+        branch = block.branch
+        return (
+            isinstance(inst, RegWriteInst)
+            and inst.dst == Register("s15")
+            and inst.src == SrcKeyword.LABEL
+            and inst.label == LabelRef(end_label)
+            and branch is not None
+            and branch.label is None
+            and branch.if_cond is None
+            and branch.addr == Register("s15")
+        )
 
     def unparse(self, root: BlockNode) -> list[Union[BasicBlockNode, MetaInst]]:
         """Lower an IR tree to a chunk list with structural MetaInst markers.

@@ -4,6 +4,7 @@ from zcu_tools.program.v2.ir.instructions import (
     JumpInst,
     LabelInst,
     MetaInst,
+    NopInst,
     RegWriteInst,
 )
 from zcu_tools.program.v2.ir.linker import IRLinker
@@ -107,6 +108,81 @@ def test_branch_roundtrip_preserves_cases():
     c1_inst = c1_bb.insts[0]
     assert isinstance(c1_inst, RegWriteInst)
     assert str(c1_inst.lit) == "#2"
+    assert rebuilt.insts == [branch]
+
+
+def test_branch_roundtrip_strips_synthetic_small_pmem_jump_and_end_label():
+    from zcu_tools.program.v2.ir.factory import IRParser
+
+    case_0 = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    RegWriteInst(
+                        dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)
+                    )
+                ]
+            )
+        ]
+    )
+    case_1 = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    RegWriteInst(
+                        dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(2)
+                    )
+                ]
+            )
+        ]
+    )
+    root = BlockNode(
+        insts=[
+            IRBranch(name="sel", compare_reg=Register("r_sel"), cases=[case_0, case_1])
+        ]
+    )
+
+    rebuilt = IRParser(pmem_size=512).parse(IRParser(pmem_size=512).unparse(root))
+
+    assert len(rebuilt.insts) == 1
+    branch = rebuilt.insts[0]
+    assert isinstance(branch, IRBranch)
+    first_case = branch.cases[0]
+    assert isinstance(first_case, BlockNode)
+    assert len(first_case.insts) == 1
+    only_block = first_case.insts[0]
+    assert isinstance(only_block, BasicBlockNode)
+    assert only_block.branch is None
+
+
+def test_branch_roundtrip_strips_synthetic_big_pmem_jump_and_end_label():
+    from zcu_tools.program.v2.ir.factory import IRParser
+
+    case_0 = BlockNode(insts=[BasicBlockNode(insts=[NopInst()])])
+    case_1 = BlockNode(insts=[BasicBlockNode(insts=[NopInst()])])
+    case_2 = BlockNode(insts=[BasicBlockNode(insts=[NopInst()])])
+    root = BlockNode(
+        insts=[
+            IRBranch(
+                name="sel",
+                compare_reg=Register("r_sel"),
+                cases=[case_0, case_1, case_2],
+            )
+        ]
+    )
+
+    parser = IRParser(pmem_size=4096)
+    rebuilt = parser.parse(parser.unparse(root))
+
+    assert len(rebuilt.insts) == 1
+    branch = rebuilt.insts[0]
+    assert isinstance(branch, IRBranch)
+    for case in branch.cases[:-1]:
+        assert isinstance(case, BlockNode)
+        assert len(case.insts) == 1
+        case_head = case.insts[0]
+        assert isinstance(case_head, BasicBlockNode)
+        assert case_head.branch is None
 
 
 def test_basic_block_rejects_metainst_in_insts():

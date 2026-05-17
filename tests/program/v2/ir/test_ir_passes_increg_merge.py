@@ -420,6 +420,7 @@ def test_inc_reg_merge_single_oversized_step_emitted_as_is():
     assert isinstance(insts[0], RegWriteInst) and insts[0].op is not None
     assert insts[0].op.rhs == Immediate(huge)
 
+
 # ---------------------------------------------------------------------------
 # IncRegMergePass — INC_REG_IMM_MAX overflow protection (8.5)
 # ---------------------------------------------------------------------------
@@ -486,6 +487,7 @@ def test_inc_reg_single_step_exceeds_max_emitted_as_is():
     assert len(bb.insts) >= 1
     assert isinstance(bb.insts[0], RegWriteInst)
     assert bb.insts[0].op is not None and bb.insts[0].op.rhs == Immediate(huge)
+
 
 # ---------------------------------------------------------------------------
 # _is_const_increment filter paths (8.5 additional)

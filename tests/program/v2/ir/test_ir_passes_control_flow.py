@@ -396,6 +396,7 @@ def test_branch_elim_inside_irbranch_cases():
     assert isinstance(first_block, BasicBlockNode)
     assert first_block.branch is None
 
+
 # ---------------------------------------------------------------------------
 # BranchEliminationPass — no next block (8.6)
 # ---------------------------------------------------------------------------

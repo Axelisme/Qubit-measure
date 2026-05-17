@@ -108,12 +108,16 @@ class UnpackIRBranchPass(AbsIRTreePass):
         pmem_size = ctx.config.pmem_capacity
         n = len(node.cases)
 
-        # Local allocated set: seed from every label / structure name already
-        # present in the branch subtree so any synthesised label is unique.
-        allocated: set[str] = set()
-        for case in node.cases:
-            labels, structs = _collect_subtree_names(case)
-            allocated |= labels | structs
+        # Tree-pass expansion must preserve the same "whole-tree unique labels"
+        # guarantee as IRParser.unparse(). Reuse a shared allocated-name set
+        # seeded from the parsed tree, so two same-named IRBranch siblings do
+        # not both synthesise identical ``{name}_end`` / ``{name}_case_*``.
+        allocated = ctx.allocated_names
+        if not allocated:
+            for case in node.cases:
+                labels, structs = _collect_subtree_names(case)
+                allocated |= labels | structs
+            allocated.add(node.name)
 
         # Resolve each case's entry label (reuse the macro-emitted one when
         # present, synthesise otherwise) so the dispatch targets stay in sync

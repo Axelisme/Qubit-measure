@@ -55,6 +55,7 @@ class PipeLineContext:
     config: PipeLineConfig
     pmem_budget: int
     available_regs: set[str] = field(default_factory=set)
+    allocated_names: set[str] = field(default_factory=set)
 
     # dmem dispatch tables (Phase 7). `dmem_base_offset` is the dmem index at
     # which IR-generated dispatch tables start (set by the caller from the
@@ -465,6 +466,10 @@ class IRPipeLine:
 
         # --- parse → IR tree ---
         ir = parser.parse(chunks)
+        from .node import _collect_subtree_names
+
+        label_names, struct_names = _collect_subtree_names(ir)
+        ctx.allocated_names = label_names | struct_names
 
         # --- IR-tree optimization (post-order, pipeline-driven recursion) ---
         ir = _optimize_tree(ir, self.tree_passes, ctx)
