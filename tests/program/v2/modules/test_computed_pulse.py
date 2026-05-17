@@ -68,6 +68,56 @@ def _gate_modules(gate_pulses, val_reg="gate_idx"):
 
 
 # ---------------------------------------------------------------------------
+# dmem lookup: verify dmem table is populated correctly
+# ---------------------------------------------------------------------------
+
+
+def test_dmem_table_populated_for_const_candidates():
+    """ComputedPulse.init() must populate a dmem table with one entry per candidate."""
+    n_pulses = 3
+    pulses = [_const_pulse(gain=(i + 1) * 0.2) for i in range(n_pulses)]
+    soccfg = make_mock_soccfg(n_gens=2, n_readouts=1)
+    from zcu_tools.program.v2.base import ProgramV2Cfg
+
+    cfg = ProgramV2Cfg()
+    from zcu_tools.program.v2.modules.dmem import LoadValue
+
+    modules = [
+        LoadValue(
+            "load_idx",
+            values=list(range(n_pulses)),
+            idx_reg="idx_loop",
+            val_reg="gate_idx",
+        ),
+        ComputedPulse("gate", val_reg="gate_idx", pulses=pulses),
+    ]
+    prog = ModularProgramV2(soccfg, cfg, modules=modules, sweep=[("idx_loop", n_pulses)])
+    assert prog.binprog is not None
+
+    # ComputedPulse.dmem_offset is the start of its table in the shared dmem buffer.
+    gate_mod = modules[1]
+    assert isinstance(gate_mod, ComputedPulse)
+    dmem = prog.compile_datamem()
+    assert dmem is not None
+
+    # The slice starting at dmem_offset must contain n_pulses entries.
+    offset = gate_mod.dmem_offset
+    table = dmem[offset : offset + n_pulses]
+    assert len(table) == n_pulses
+    # All entries must be distinct wmem indices (each pulse has its own waveform).
+    assert len(set(table.tolist())) == n_pulses
+
+
+def test_dmem_lookup_emits_dmem_read_in_asm():
+    """ASM output must contain a dmem read (REG_WR dst dmem [addr]) for the table lookup."""
+    pulses = [_const_pulse(gain=0.2), _const_pulse(gain=0.5)]
+    prog = _make_prog(_gate_modules(pulses))
+    asm = prog.asm()
+    # QICK serialises read_dmem as "REG_WR <dst> dmem [<addr>]"
+    assert "dmem" in asm
+
+
+# ---------------------------------------------------------------------------
 # Regression: non-flat_top behavior unchanged
 # ---------------------------------------------------------------------------
 

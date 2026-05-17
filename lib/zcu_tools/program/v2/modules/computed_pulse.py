@@ -59,7 +59,11 @@ class ComputedPulse(Module):
         for pulse_mod in self.pulse_modules:
             pulse_mod.init(prog)
 
-        flat_idxs: list[int] = []
+        # Collect the starting wmem index for each candidate and store them in
+        # a dmem table. This removes the contiguity requirement: candidates may
+        # share waveforms (PulseRegistry dedup) or be non-contiguous without
+        # causing errors.
+        base_idxs: list[int] = []
         for pulse_mod in self.pulse_modules:
             wave_names = prog.list_pulse_waveforms(
                 pulse_mod.pulse_id, exclude_special=False
@@ -70,33 +74,22 @@ class ComputedPulse(Module):
                     f"{self._stride} waveform(s) (style={self.ref_cfg.waveform.style}), "
                     f"got {len(wave_names)}"
                 )
-            flat_idxs.extend(prog.wave2idx[wn] for wn in wave_names)
+            base_idxs.append(prog.wave2idx[wave_names[0]])
 
-        expected = list(range(min(flat_idxs), max(flat_idxs) + 1))
-        if flat_idxs != expected:
-            raise ValueError(
-                "ComputedPulse candidate waveform indices must be contiguous, "
-                f"got {flat_idxs}"
-            )
-
-        self.wmem_offset = min(flat_idxs)
+        self.dmem_offset = prog.add_dmem(base_idxs)
 
     def run(
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
         ref_cfg = self.ref_cfg
-        with prog.acquire_temp_reg(1) as (addr_reg,):
-            # base = wmem_offset + gate_idx * stride
-            if self._stride == 1:
-                prog.write_reg_op(addr_reg, self.val_reg, "+", self.wmem_offset)
-            else:
-                # x*3 = (x<<1) + x; avoids relying on REG_WR multiplication.
-                prog.write_reg_op(addr_reg, self.val_reg, "<<", 1)
-                prog.write_reg_op(addr_reg, addr_reg, "+", self.val_reg)
-                prog.write_reg_op(addr_reg, addr_reg, "+", self.wmem_offset)
+        with prog.acquire_temp_reg(2) as (addr_reg, wmem_reg):
+            # addr_reg = val_reg + dmem_offset  →  address of table[val_reg]
+            prog.write_reg_op(addr_reg, self.val_reg, "+", self.dmem_offset)
+            # wmem_reg = dmem[addr_reg]  →  starting wmem index for this candidate
+            prog.read_dmem(dst=wmem_reg, addr=addr_reg)
             prog.pulse_by_reg(
                 ref_cfg.ch,
-                addr_reg,
+                wmem_reg,
                 t=t + ref_cfg.pre_delay,
                 flat_top_pulse=self._is_flat_top,
             )
