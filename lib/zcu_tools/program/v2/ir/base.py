@@ -72,6 +72,23 @@ class IRCompileMixin(QickProgramV2):
     ) -> None:
         if not ctx.dmem_tables:
             return
+
+        # Map each program address to the instruction physically at it, so the
+        # debug log can show what each dispatch entry actually jumps to.
+        # (WAIT occupies 2 words, so not every P_ADDR has an entry.)
+        inst_at_addr: dict[int, dict[str, Any]] = {
+            d["P_ADDR"]: d for d in self.prog_list if "P_ADDR" in d
+        }
+
+        def _inst_summary(addr: int) -> str:
+            d = inst_at_addr.get(addr)
+            if d is None:
+                return "(no inst)"
+            fields = " ".join(
+                f"{k}={v}" for k, v in d.items() if k not in ("P_ADDR", "LINE")
+            )
+            return fields or "(empty)"
+
         cursor = dmem_base
         for idx, table_labels in enumerate(ctx.dmem_tables):
             entry_addrs = [
@@ -85,12 +102,19 @@ class IRCompileMixin(QickProgramV2):
                     f"offset {cursor}, add_dmem returned {offset}."
                 )
             logger.debug(
-                "dmem dispatch: materialized table #%d at dmem offset %d, "
-                "entry P_ADDRs %s",
+                "dmem dispatch: materialized table #%d at dmem offset %d, %d entries:",
                 idx,
                 offset,
-                entry_addrs,
+                len(entry_addrs),
             )
+            for i, (lbl, addr) in enumerate(zip(table_labels, entry_addrs)):
+                logger.debug(
+                    "  dmem[%d] %s -> P_ADDR %d: %s",
+                    offset + i,
+                    lbl.name,
+                    addr,
+                    _inst_summary(addr),
+                )
             cursor += len(entry_addrs)
         logger.debug(
             "dmem dispatch: materialized %d table(s), dmem offsets [%d, %d)",
