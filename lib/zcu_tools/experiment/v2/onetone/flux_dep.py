@@ -59,6 +59,7 @@ class FluxDepCfg(ProgramV2Cfg, ExpCfgModel):
 
 class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
     def run(self, soc, soccfg, cfg: FluxDepCfg) -> FluxDepResult:
+        original_cfg = deepcopy(cfg)
         modules = cfg.modules
         freq_sweep = cfg.sweep.freq
         flux_sweep = cfg.sweep.flux
@@ -73,6 +74,9 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
                 "ro_ch": modules.readout.ro_cfg.ro_ch,
             },
         )
+
+        set_flux_in_dev_cfg(cfg.dev, dev_values[0])
+        setup_devices(cfg, progress=True)
 
         def measure_fn(
             ctx: TaskState, update_hook: Optional[Callable]
@@ -100,9 +104,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         ) as viewer:
             signals = run_task(
                 task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(len(freqs),),
-                    pbar_n=cfg.rounds,
+                    measure_fn=measure_fn, result_shape=(len(freqs),), pbar_n=cfg.rounds
                 ).scan(
                     "flux",
                     dev_values.tolist(),
@@ -120,7 +122,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             signals = np.asarray(signals)
 
         # record last cfg and result
-        self.last_cfg = deepcopy(cfg)
+        self.last_cfg = original_cfg
         self.last_result = (dev_values, freqs, signals)
 
         return dev_values, freqs, signals

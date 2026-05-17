@@ -65,15 +65,7 @@ def make_sweep(
             )
             expts = 1
         else:
-            expts_float = (stop - start) / step + 1
-            expts = int(round(expts_float))
-            assert expts > 0, f"expts must be greater than 0, but got {expts}"
-            assert abs(expts_float - expts) < 1e-9, (
-                "Inconsistent sweep settings: stop must satisfy "
-                "start + step * (expts - 1). "
-                f"got start={start}, stop={stop}, step={step}, "
-                f"derived_expts={expts_float}"
-            )
+            expts = int((stop - start) / step + 1)
     elif step is None:
         assert expts is not None, err_str
         if expts == 1:
@@ -169,14 +161,12 @@ def reconnect_devices(dev_info: Mapping[str, DeviceInfo]) -> ResourceManager:
 
     resource_manager = ResourceManager()
     for name, info in dev_info.items():
-        device_type = info.type if isinstance(info, DeviceInfo) else info["type"]
-        address = info.address if isinstance(info, DeviceInfo) else info["address"]
-        if device_type == "YOKOGS200":
-            device = YOKOGS200(address, resource_manager)
-        elif device_type == "RohdeSchwarzSGS100A":
-            device = RohdeSchwarzSGS100A(address, resource_manager)
+        if info.type == "YOKOGS200":
+            device = YOKOGS200(info.address, resource_manager)
+        elif info.type == "RohdeSchwarzSGS100A":
+            device = RohdeSchwarzSGS100A(info.address, resource_manager)
         else:
-            raise ValueError(f"Not supported device type: {device_type}")
+            raise ValueError(f"Not supported device type: {info.type}")
         GlobalDeviceManager.register_device(name, device)
 
     return resource_manager

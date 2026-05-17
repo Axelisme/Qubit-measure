@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import warnings as warn
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -123,7 +124,7 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
 
         title = f"T2 Ramsey - detune {detune:.2f} MHz"
         with LivePlot1D(
-            "Time (us)", "Amplitude", segment_kwargs={"title": title}
+            "Time (us)", "Real Signal", segment_kwargs={"title": title}
         ) as viewer:
             signals = run_task(
                 task=Task(
@@ -155,8 +156,9 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
         real_signals = t2ramsey_signal2real(signals)
 
         if fit_fringe:
+            fixedparams = [None, None, None, 0.0, None]
             t2r, t2rerr, detune, detune_err, y_fit, _ = fit_decay_fringe(
-                lengths, real_signals
+                lengths, real_signals, fixedparams=fixedparams
             )
         else:
             t2r, t2rerr, y_fit, _ = fit_decay(lengths, real_signals)

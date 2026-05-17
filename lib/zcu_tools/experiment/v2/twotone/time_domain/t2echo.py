@@ -130,7 +130,9 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
             )
 
         with LivePlot1D(
-            "Time (us)", "Amplitude", segment_kwargs={"title": "T2 Echo"}
+            "Time (us)",
+            "Amplitude",
+            segment_kwargs={"title": f"T2 Echo (detune={true_detune:.3f}MHz)"},
         ) as viewer:
             signals = run_task(
                 task=Task(
@@ -168,8 +170,9 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
         real_signals = rotate2real(signals).real
 
         if fit_method == "fringe":
+            fixedparams = [None, None, None, 0.0, None]
             t2e, t2eerr, detune, detune_err, y_fit, _ = fit_decay_fringe(
-                xs, real_signals
+                xs, real_signals, fixedparams=fixedparams
             )
         elif fit_method == "decay":
             t2e, t2eerr, y_fit, _ = fit_decay(xs, real_signals)

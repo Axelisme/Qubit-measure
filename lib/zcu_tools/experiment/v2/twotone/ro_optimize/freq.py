@@ -24,7 +24,7 @@ from zcu_tools.program.v2 import (
     Pulse,
     PulseCfg,
     Readout,
-    ReadoutCfg,
+    PulseReadoutCfg,
     Reset,
     ResetCfg,
     SweepCfg,
@@ -38,7 +38,7 @@ FreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 class FreqModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     qub_pulse: PulseCfg
-    readout: ReadoutCfg
+    readout: PulseReadoutCfg
 
 
 class FreqSweepCfg(ConfigBase):
@@ -62,13 +62,14 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> FreqResult:
+        original_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
         freqs = sweep2array(
             cfg.sweep.freq,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": modules.readout.pulse_cfg.ch},
         )
 
         def measure_fn(
@@ -92,10 +93,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                     Branch("ge", [], Pulse("qub_pulse", modules.qub_pulse)),
                     Readout("readout", modules.readout),
                 ],
-                sweep=[
-                    ("ge", 2),
-                    ("freq", freq_sweep),
-                ],
+                sweep=[("ge", 2), ("freq", freq_sweep)],
             )
             tracker = MomentTracker()
             prog.acquire(
@@ -111,7 +109,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn,
-                    raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
+                    raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=1),
                     result_shape=(len(freqs),),
                     dtype=np.float64,
                     pbar_n=cfg.rounds,
@@ -121,7 +119,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             )
 
         # record the last cfg and result
-        self.last_cfg = deepcopy(cfg)
+        self.last_cfg = original_cfg
         self.last_result = (freqs, signals)
 
         return freqs, signals  # freqs

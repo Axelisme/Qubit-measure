@@ -28,6 +28,7 @@ from zcu_tools.experiment.v2.runner import (
 )
 from zcu_tools.experiment.v2.utils import merge_result_list
 from zcu_tools.liveplot import AbsLivePlot, MultiLivePlot, make_plot_frame
+from zcu_tools.liveplot.backend.jupyter import grab_frame_with_instant_plot
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 
 T_PlotDict = TypeVar("T_PlotDict", bound=Mapping[str, AbsLivePlot])
@@ -109,7 +110,7 @@ class FluxDepBatchTask(BatchTask[str, Result, T_RootResult, FluxDepCfg]):
                 state.child(name, child_type=Result),
                 self.retry_time,
                 dynamic_pbar=True,
-                raise_error=False,
+                # raise_error=False,
             )
 
             self.task_pbar.update()
@@ -228,7 +229,8 @@ class FluxDepExecutor:
 
             if self.record_path is not None:
                 assert writer is not None
-                writer.grab_frame()
+                # writer.grab_frame()
+                grab_frame_with_instant_plot(writer)
 
             plotter.refresh()
 

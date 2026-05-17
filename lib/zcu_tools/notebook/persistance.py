@@ -104,6 +104,7 @@ class PointsData(TypedDict):
 
 
 class SpectrumResult(TypedDict):
+    type: NotRequired[str]
     flux_half: float
     flux_int: float
     flux_period: float

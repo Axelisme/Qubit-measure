@@ -116,7 +116,9 @@ class FreqFluxDependVisualizer(FluxDependVisualizer):
             freqs: NDArray[np.float64] = spect_data["freqs"][freq_mask]
 
             # Normalize data
-            real_signals = cast2real_and_norm(signals)
+            real_signals = cast2real_and_norm(
+                signals, use_phase=spect_data.get("type") != "OneTone"
+            )
 
             # Add heatmap trace
             self.fig.add_trace(

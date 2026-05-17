@@ -128,7 +128,7 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
         return freqs, signals
 
     def analyze(
-        self, result: Optional[DispersiveResult] = None
+        self, result: Optional[DispersiveResult] = None, fit_bg_slope: bool = False
     ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -143,8 +143,8 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
         edelay = 0.5 * (g_edelay + e_edelay)
 
         model = get_proper_model(freqs, g_signals)
-        g_params = model.fit(freqs, g_signals, edelay=edelay)
-        e_params = model.fit(freqs, e_signals, edelay=edelay)
+        g_params = model.fit(freqs, g_signals, edelay=edelay, fit_bg_slope=fit_bg_slope)
+        e_params = model.fit(freqs, e_signals, edelay=edelay, fit_bg_slope=fit_bg_slope)
 
         g_freq, g_fwhm = g_params["freq"], g_params["fwhm"]
         e_freq, e_fwhm = e_params["freq"], e_params["fwhm"]

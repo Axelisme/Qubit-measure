@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.19.1
   kernelspec:
-    display_name: .venv
+    display_name: zcu-tools (3.9.25)
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.9.23
+    version: 3.9.25
 ---
 
 # Import Module
@@ -47,9 +47,10 @@ from zcu_tools.utils.datasaver import create_datafolder
 # Create data/result folder
 
 ```python
-chip_name = "test"
+chip_name = "Q5_2D"
 res_name = "R1"
 qub_name = "Q1"
+# 4 2 5 1 3
 
 result_dir = os.path.join("..", "result", chip_name, qub_name)
 database_path = create_datafolder(
@@ -67,7 +68,7 @@ md = MetaDict()
 ```python
 from zcu_tools.remote import make_soc_proxy
 
-soc, soccfg = make_soc_proxy("192.168.10.82", 8887)
+soc, soccfg = make_soc_proxy("192.168.10.179", 8887)
 print(soccfg)
 ```
 
@@ -81,8 +82,8 @@ soc.get_sample_rates()
 ```python
 md.res_ch = 0
 # md.qub_0_1_ch = 11
-md.qub_1_4_ch = 2
-# md.qub_4_5_ch = 2
+# md.qub_1_4_ch = 2
+md.qub_4_5_ch = 1
 # md.qub_5_6_ch = 5
 # md.lo_flux_ch = 15
 
@@ -125,6 +126,7 @@ cur_value * 1e3
 ```
 
 ```python
+cur_value = 0.0e-3
 cur_value = flux_yoko.set_current(cur_value)
 cur_value * 1e3
 ```
@@ -184,18 +186,18 @@ jpa_sgs.get_info()
 # Initial Experiment Folder
 
 ```python
-# ml, md = em.new_flux(label="20260411", clone_from=(ml, md))
+# ml, md = em.new_flux(label="20260504", clone_from=(ml, md))
 # ml, md = em.new_flux(cur_value, unit="A")
 # ml, md = em.new_flux(cur_value, clone_from=(ml, md), unit="A")
 # ml, md = em.new_flux(cur_value, clone_from="032600_1.800mA", unit="A")
-ml, md = em.use_flux(label="20260411")
+ml, md = em.use_flux(label="051115_2.000mA")
 ml, md
 ```
 
 # Lookback
 
 ```python
-md.timeFly = 0.6
+md.timeFly = 0.5
 ```
 
 ```python
@@ -274,7 +276,7 @@ exp_cfg = {
                 "waveform": "ro_waveform",
                 "ch": md.res_ch,
                 "nqz": 2,
-                "gain": 0.2,
+                "gain": 0.05,
                 # "gain": 1.0,
                 "freq": 0.0,  # not used
             },
@@ -285,9 +287,9 @@ exp_cfg = {
             },
         }
     },
-    # "sweep": make_sweep(6650, 6800, 1001),
-    "sweep": make_sweep(6805, 6822, 1001),
-    # "sweep": make_sweep(md.r_f - 2 * md.rf_w, md.r_f + 2 * md.rf_w, 101),
+    # "sweep": make_sweep(5000, 6000, 1001),
+    # "sweep": make_sweep(5540, 5562, 301),
+    "sweep": make_sweep(md.r_f - 1.5 * md.rf_w, md.r_f + 1.5 * md.rf_w, 301),
     "relax_delay": 1.0,  # us
 }
 cfg = ml.make_cfg(exp_cfg, ze.onetone.FreqCfg, reps=100, rounds=100)
@@ -298,7 +300,7 @@ _ = res_freq_exp.run(soc, soccfg, cfg)
 
 ```python
 %matplotlib inline
-f, kappa, params, fig = res_freq_exp.analyze(model_type="hm")
+f, kappa, params, fig = res_freq_exp.analyze(model_type="hm", fit_bg_slope=True)
 ```
 
 ```python
@@ -339,19 +341,20 @@ exp_cfg = {
         },
     },
     "sweep": {
-        "gain": make_sweep(0.1, 1.0, 101),
+        "gain": make_sweep(0.001, 0.5, 101),
         "freq": make_sweep(md.r_f - 1.5 * md.rf_w, md.r_f + 1.5 * md.rf_w, 201),
+        # "freq": make_sweep(5450, 5480, 201),
     },
-    "relax_delay": 1.0,  # us
+    "relax_delay": 10.0,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.onetone.PowerDepCfg, reps=100, rounds=100)
+cfg = ml.make_cfg(exp_cfg, ze.onetone.PowerDepCfg, reps=100, rounds=10)
 
 res_gain_exp = ze.onetone.PowerDepExp()
 _ = res_gain_exp.run(soc, soccfg, cfg, earlystop_snr=100.0)
 ```
 
 ```python
-filename = f"{res_name}_gain_e_{time.strftime('%H%M')}"
+filename = f"{res_name}_gain_{time.strftime('%H%M')}"
 res_gain_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
 )
@@ -360,8 +363,12 @@ res_gain_exp.save(
 ## Flux dependence
 
 ```python
-cur_value = flux_yoko.set_current(-7e-3)
+cur_value = flux_yoko.set_current(-5e-3)
 cur_value * 1e3
+```
+
+```python
+flux_yoko.get_current()
 ```
 
 ```python
@@ -374,7 +381,7 @@ exp_cfg = {
                 "waveform": "ro_waveform",
                 "ch": md.res_ch,
                 "nqz": 2,
-                "gain": 0.15,
+                "gain": 0.005,
                 "freq": 0.0,  # not used
             },
             "ro_cfg": {
@@ -384,21 +391,16 @@ exp_cfg = {
             },
         },
     },
-    "dev": {
-        "flux_yoko": {
-            "label": "flux_dev",
-            "mode": "current",
-        }
-    },
+    "dev": {"flux_yoko": {"label": "flux_dev", "mode": "current"}},
     "sweep": {
-        "flux": make_sweep(-7e-3, 7e-3, 3001),
+        "flux": make_sweep(3.57e-3, 3.61e-3, 101),
         # "flux": make_sweep(5.0, -5.0, 101),
-        # "freq": make_sweep(md.r_f - 1 * md.rf_w, md.r_f + 1 * md.rf_w, 101),
-        "freq": make_sweep(7444, 7447, 101),
+        "freq": make_sweep(md.r_f - 1.0 * md.rf_w, md.r_f + 1.0 * md.rf_w, 101),
+        # "freq": make_sweep(5755, 5775, 101),
     },
-    "relax_delay": 0.1,  # us
+    "relax_delay": 1.0,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.onetone.FluxDepCfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, ze.onetone.FluxDepCfg, reps=1000, rounds=1)
 
 res_flux_exp = ze.onetone.FluxDepExp()
 _ = res_flux_exp.run(soc, soccfg, cfg)
@@ -430,7 +432,7 @@ cur_value * 1e3
 ## Set readout pulse
 
 ```python
-ro_pulse_len = 5.0  # us
+ro_pulse_len = 1.0  # us
 ml.register_module(
     readout_rf={
         "type": "readout/pulse",
@@ -715,6 +717,7 @@ jpa_sgs.get_info()
 
 ```python
 ml.register_waveform(
+    qub_const={"style": "const", "length": 2.0},
     qub_flat={
         "style": "flat_top",
         "raise_waveform": {"style": "cosine", "length": 0.02},
@@ -733,19 +736,19 @@ sample_table = SampleTable(os.path.join(result_dir, "samples.csv"))
 
 ```python
 preditor = FluxoniumPredictor.from_file(os.path.join(result_dir, "params.json"))
-# preditor.flx_half = md.flx_half
-# preditor.flx_period = md.flx_period
+preditor.flux_half = md.flx_half
+preditor.flux_period = md.flx_period
 # preditor.update_bias(md.flx_bias)
 ```
 
 # Twotone Frequency
 
 ```python
-cur_value = flux_yoko.set_current(1.8e-3)
+cur_value = flux_yoko.set_current(2e-3)
 print(f"{cur_value * 1e3:.2f} mA")
 
 # ml, md = em.use_flux(label="031620_0.000mA")
-# ml, md = em.new_flux(value=cur_value, clone_from=(ml, md), unit="A")
+ml, md = em.new_flux(value=cur_value, clone_from=(ml, md), unit="A")
 ```
 
 ```python
@@ -766,22 +769,22 @@ exp_cfg = {
         # "init_pulse": "pi_len",
         "qub_pulse": {
             "type": "pulse",
-            "waveform": ml.get_waveform("qub_flat", dict(length=0.3)),
+            "waveform": ml.get_waveform("qub_flat", dict(length=0.1)),
             "ch": md.qub_4_5_ch,
             "nqz": 2,
-            "gain": 0.01,
+            "gain": 0.05,
             # "mixer_freq": md.q_f,
             "freq": 0.0,  # not used
         },
-        "readout": "readout_rf",
-        # "readout": "readout_dpm",
+        # "readout": "readout_rf",
+        "readout": "readout_dpm",
     },
     # "sweep": make_sweep(md.q_f - 200, md.q_f + 200, step=0.25),
-    # "sweep": make_sweep(md.q_f - 20, md.q_f + 20, step=0.2),
-    "sweep": make_sweep(3100, 3150, step=0.1),
-    "relax_delay": 100.5,  # us
+    "sweep": make_sweep(md.q_f - 20, md.q_f + 20, step=0.2),
+    # "sweep": make_sweep(4000, 6000, step=1.00),
+    "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.FreqCfg, reps=100, rounds=1000)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.FreqCfg, reps=1000, rounds=100)
 
 qub_freq_exp = ze.twotone.FreqExp()
 _ = qub_freq_exp.run(soc, soccfg, cfg)
@@ -791,6 +794,10 @@ _ = qub_freq_exp.run(soc, soccfg, cfg)
 %matplotlib inline
 f, kappa, fig = qub_freq_exp.analyze()
 f
+```
+
+```python
+md.qf_w
 ```
 
 ```python
@@ -820,7 +827,7 @@ preditor.update_bias(md.flx_bias)
 # Rabi
 
 ```python
-
+gc_collect()
 ```
 
 ## Length Rabi
@@ -832,18 +839,18 @@ exp_cfg = {
         # "reset": "reset_10",
         "qub_pulse": {
             "type": "pulse",
-            "waveform": "qub_cos",
-            "ch": md.qub_1_4_ch,
+            "waveform": "qub_flat",
+            "ch": md.qub_4_5_ch,
             "nqz": 2,
             "freq": md.q_f,
-            "gain": 0.5,
+            "gain": 0.3,
             # "gain": md.pi_gain,
             # "mixer_freq": md.q_f,
         },
-        "readout": "readout_rf",
-        # "readout": "readout_dpm",
+        # "readout": "readout_rf",
+        "readout": "readout_dpm",
     },
-    "relax_delay": 100.5,  # us
+    "relax_delay": 10.5,  # us
     # "relax_delay": 5 * t1,  # us
     "sweep": make_sweep(0.03, 0.3, 101),
 }
@@ -851,10 +858,6 @@ cfg = ml.make_cfg(exp_cfg, ze.twotone.rabi.LenRabiCfg, reps=1000, rounds=100)
 
 qub_lenrabi_exp = ze.twotone.rabi.LenRabiExp()
 _ = qub_lenrabi_exp.run(soc, soccfg, cfg)
-```
-
-```python
-gc_collect()
 ```
 
 ```python
@@ -902,20 +905,20 @@ exp_cfg = {
         # "reset": "reset_10",
         "qub_pulse": {
             "type": "pulse",
-            "waveform": ml.get_waveform("qub_flat", dict(length=3.01 * md.pi_len)),
-            "ch": md.qub_1_4_ch,
+            "waveform": ml.get_waveform("qub_cos", dict(length=1.01 * md.pi_len)),
+            "ch": md.qub_4_5_ch,
             "nqz": 2,
             "freq": md.q_f,
             # "mixer_freq": md.q_f,
             # "mixer_freq": 0.5 * (reset_f + md.q_f),
             "gain": 0.0,  # not used
         },
-        "readout": "readout_rf",
-        # "readout": "readout_dpm",
+        # "readout": "readout_rf",
+        "readout": "readout_dpm",
     },
-    "relax_delay": 100.5,  # us
+    "relax_delay": 10.5,  # us
     # "relax_delay": 5 * t1,
-    "sweep": make_sweep(0.01, 1.0, 51),
+    "sweep": make_sweep(-0.3, 0.6, 51),
     # "sweep": make_sweep(0.0, max_gain, 51),
 }
 cfg = ml.make_cfg(exp_cfg, ze.twotone.rabi.AmpRabiCfg, reps=1000, rounds=100)
@@ -1728,15 +1731,16 @@ bathreset_rabicheck_exp.save(
 )
 ```
 
-# Flux Dependence
+# TwoTone Flux Dependence
 
 ```python
-cur_value
+cur_value = flux_yoko.set_current(-5e-3)
+# cur_value = flux_yoko.set_current(md.flx_int)
+cur_value * 1e3
 ```
 
 ```python
-cur_value = flux_yoko.set_current(2.2e-3)
-cur_value * 1e3
+gc_collect()
 ```
 
 ```python
@@ -1746,29 +1750,27 @@ exp_cfg = {
         # "reset": "reset_120",
         "qub_pulse": {
             "type": "pulse",
-            "waveform": ml.get_waveform("qub_flat", {"length": 2.0}),
+            "waveform": ml.get_waveform("qub_flat", dict(length=1.0)),
             "ch": md.qub_4_5_ch,
             "nqz": 2,
             "gain": 0.1,
             # "mixer_freq": md.q_f,
             "freq": 0.0,  # not used
         },
+        # "readout": "readout_rf",
         "readout": "readout_dpm",
     },
     "dev": {
-        "flux_yoko": {
-            "label": "flux_dev",
-            "mode": "current",
-        },
+        "flux_yoko": {"label": "flux_dev", "mode": "current"},
     },
     "sweep": {
-        "flux": make_sweep(5e-3, -5e-3, 121),
-        # "flux": make_sweep(-4.0, -3.0, 201),
-        "freq": make_sweep(4500, 6100, step=0.25),
+        "flux": make_sweep(-5.0e-3, 5e-3, 151),
+        # "flux": make_sweep(md.flx_int, -2e-3, 81),
+        "freq": make_sweep(4000, 6000, step=1.0),
     },
-    "relax_delay": 0.1,  # us
+    "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.FreqFluxCfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.FreqFluxCfg, reps=2000, rounds=40)
 
 qub_flux_exp = ze.twotone.FreqFluxExp()
 _ = qub_flux_exp.run(soc, soccfg, cfg, fail_retry=3)
@@ -1783,11 +1785,15 @@ qub_flux_exp.save(
 
 ```python
 %matplotlib widget
-actline = qub_flux_exp.analyze(flux_half=md.flx_half, flux_int=md.flx_int)
+actline = qub_flux_exp.analyze(
+    # flux_half=md.flx_half,
+    # flux_int=md.flx_int,
+)
 ```
 
 ```python
 md.flx_half, md.flx_int = actline.get_positions()
+md.flx_period = 2 * abs(md.flx_half - md.flx_int)
 md.flx_half, md.flx_int
 ```
 
@@ -2215,14 +2221,14 @@ gc_collect()
 %matplotlib widget
 exp_cfg = {
     "modules": {
-        "reset": "reset_bath",
+        # "reset": "reset_bath",
         "qub_pulse": "pi_amp",
         "readout": ml.get_module(
             "readout_rf",
             {
                 "pulse_cfg": {
                     "waveform": {"length": 1.1},
-                    "gain": 0.1,
+                    "gain": 0.02,
                 },
                 "ro_cfg": {
                     "ro_length": 1.0,
@@ -2230,10 +2236,10 @@ exp_cfg = {
             },
         ),
     },
-    "relax_delay": 10.5,  # us
-    # "relax_delay": 5 * md.t1,  # us
+    # "relax_delay": 10.5,  # us
+    "relax_delay": 5 * md.t1,  # us
     "sweep": make_sweep(md.r_f - 1.5 * md.rf_w, md.r_f + 1.5 * md.rf_w, step=0.1),
-    # "sweep": make_sweep(5920, 5940, step=0.25),
+    # "sweep": make_sweep(5450, 5460, step=0.1),
 }
 cfg = ml.make_cfg(exp_cfg, ze.twotone.ro_optimize.FreqCfg, reps=1000, rounds=100)
 
@@ -2243,8 +2249,12 @@ _ = opt_ro_freq_exp.run(soc, soccfg, cfg)
 
 ```python
 %matplotlib inline
-md.best_ro_freq, fig = opt_ro_freq_exp.analyze(smooth=2)
-md.best_ro_freq
+best_freq, fig = opt_ro_freq_exp.analyze(smooth=2)
+best_freq
+```
+
+```python
+md.best_ro_freq = best_freq
 ```
 
 ```python
@@ -2252,7 +2262,7 @@ filename = f"{qub_name}_ro_opt_freq_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 opt_ro_freq_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=f"optimal frequency = {md.best_ro_freq:.1f}MHz",
+    comment=f"optimal frequency = {best_freq:.1f}MHz",
 )
 ```
 
@@ -2261,6 +2271,10 @@ opt_ro_freq_exp.save(
 ```
 
 ## Power tuning
+
+```python
+gc_collect()
+```
 
 ```python
 %matplotlib widget
@@ -2272,20 +2286,21 @@ exp_cfg = {
             "readout_rf",
             {
                 "pulse_cfg": {
-                    # "waveform": {"length": 1.5},
+                    "waveform": {"length": 1.1},
                     "freq": md.best_ro_freq,
                 },
                 "ro_cfg": {
-                    # "ro_length": 1.5,
+                    "ro_length": 1.0,
+                    "ro_freq": md.best_ro_freq,
                 },
             },
         ),
     },
-    # "relax_delay": 30.5,  # us
-    "relax_delay": 3 * md.t1,  # us
-    "sweep": make_sweep(0.01, 0.2, 151),
+    # "relax_delay": 10.5,  # us
+    "relax_delay": 5 * md.t1,  # us
+    "sweep": make_sweep(0.001, 0.2, 101),
 }
-cfg = ml.make_cfg(exp_cfg, ze.twotone.ro_optimize.PowerCfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, ze.twotone.ro_optimize.PowerCfg, reps=1000, rounds=100)
 
 opt_ro_pdr_exp = ze.twotone.ro_optimize.PowerExp()
 _ = opt_ro_pdr_exp.run(soc, soccfg, cfg)
@@ -2293,8 +2308,12 @@ _ = opt_ro_pdr_exp.run(soc, soccfg, cfg)
 
 ```python
 %matplotlib inline
-md.best_ro_gain, fig = opt_ro_pdr_exp.analyze(penalty_ratio=2.5)
-md.best_ro_gain
+best_gain, fig = opt_ro_pdr_exp.analyze(penalty_ratio=0.5)
+best_gain
+```
+
+```python
+md.best_ro_gain = best_gain
 ```
 
 ```python
@@ -2302,7 +2321,66 @@ filename = f"{qub_name}_ro_opt_gain_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 opt_ro_pdr_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=f"optimal power = {md.best_ro_gain:.2f}",
+    comment=f"optimal power = {best_gain:.2f}",
+)
+```
+
+```python
+# md.best_ro_gain = 0.2
+```
+
+## Freq-Power tuning
+
+```python
+%matplotlib widget
+exp_cfg = {
+    "modules": {
+        # "reset": "reset_bath",
+        "qub_pulse": "pi_amp",
+        "readout": ml.get_module(
+            "readout_rf",
+            {
+                "pulse_cfg": {
+                    "waveform": {"length": 1.1},
+                },
+                "ro_cfg": {
+                    "ro_length": 1.0,
+                },
+            },
+        ),
+    },
+    # "relax_delay": 10.5,  # us
+    "relax_delay": 5 * md.t1,  # us
+    "sweep": {
+        "freq": make_sweep(
+            md.best_ro_freq - 0.5 * md.rf_w, md.best_ro_freq + 0.5 * md.rf_w, 31
+        ),
+        "gain": make_sweep(0.0, 0.2, 31),
+    },
+}
+cfg = ml.make_cfg(exp_cfg, ze.twotone.ro_optimize.FreqGainCfg, reps=100, rounds=1000)
+
+opt_ro_freq_pdr_exp = ze.twotone.ro_optimize.FreqGainExp()
+_ = opt_ro_freq_pdr_exp.run(soc, soccfg, cfg)
+```
+
+```python
+%matplotlib inline
+best_freq, best_gain, fig = opt_ro_freq_pdr_exp.analyze()
+best_freq, best_gain
+```
+
+```python
+md.best_ro_freq = best_freq
+md.best_ro_gain = best_gain
+```
+
+```python
+filename = f"{qub_name}_ro_opt_gain_{time.strftime('%m%d')}"
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+opt_ro_freq_pdr_exp.save(
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    comment=f"optimal freq = {best_freq:.2f}, power = {best_gain:.2f}",
 )
 ```
 
@@ -2321,13 +2399,16 @@ exp_cfg = {
                 "pulse_cfg": {
                     "freq": md.best_ro_freq,
                     "gain": md.best_ro_gain,
-                }
+                },
+                "ro_cfg": {
+                    "ro_freq": md.best_ro_freq,
+                },
             },
         ),
     },
-    # "relax_delay": 30.5,  # us
-    "relax_delay": 3 * md.t1,  # us
-    "sweep": make_sweep(0.01, 10.5, 51),
+    # "relax_delay": 10.5,  # us
+    "relax_delay": 5 * md.t1,  # us
+    "sweep": make_sweep(0.01, 3.5, 51),
 }
 cfg = ml.make_cfg(exp_cfg, ze.twotone.ro_optimize.LengthCfg, reps=10000, rounds=1)
 
@@ -2337,8 +2418,12 @@ _ = opt_ro_len_exp.run(soc, soccfg, cfg)
 
 ```python
 %matplotlib inline
-md.best_ro_length, fig = opt_ro_len_exp.analyze(t0=5.0)
-md.best_ro_length
+best_length, fig = opt_ro_len_exp.analyze(t0=5.0)
+best_length
+```
+
+```python
+md.best_ro_length = best_length
 ```
 
 ```python
@@ -2346,7 +2431,7 @@ filename = f"{qub_name}_ro_opt_length_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 opt_ro_len_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=f"optimal readout length = {md.best_ro_length:.2f}us",
+    comment=f"optimal readout length = {best_length:.2f}us",
 )
 ```
 
@@ -2365,9 +2450,11 @@ ml.register_module(
             },
             "ro_cfg": {
                 "ro_length": md.best_ro_length,
+                "ro_freq": md.best_ro_freq,
             },
             "desc": "Readout with largest dispersive shift",
         },
+        type=zp.PulseReadoutCfg,
     )
 )
 ```
@@ -2446,28 +2533,27 @@ gc_collect()
 %matplotlib widget
 exp_cfg = {
     "modules": {
-        "reset": "reset_bath",
+        # "reset": "reset_bath",
         "pi2_pulse": "pi2_amp",
         "readout": "readout_dpm",
     },
-    "relax_delay": 10.5,  # us
-    # "relax_delay": 5 * md.t1,  # us
-    "sweep": make_sweep(0, 3.5, 101),  # us
-    # "sweep": make_sweep(0, 1.5 * md.t2r, 101),  # us
+    # "relax_delay": 10.5,  # us
+    "relax_delay": 5 * md.t1,  # us
+    "sweep": make_sweep(0.0, 0.4, 101),  # us
+    # "sweep": make_sweep(0.0, 1.5 * md.t2r, 101),  # us
 }
 cfg = ml.make_cfg(exp_cfg, ze.twotone.time_domain.T2RamseyCfg, reps=1000, rounds=100)
 
-activate_detune = 0.1 / cfg.sweep.length["step"]
-print(f"activate_detune: {activate_detune:.2f} MHz")
+activate_detune = 0.05 / cfg.sweep.length.step
 
 t2ramsey_exp = ze.twotone.time_domain.T2RamseyExp()
-_ = t2ramsey_exp.run(soc, soccfg, cfg, detune=activate_detune)
+_, true_detune = t2ramsey_exp.run(soc, soccfg, cfg, detune=activate_detune)
 ```
 
 ```python
 %matplotlib inline
 md.t2r, md.t2r_err, detune, _, fig = t2ramsey_exp.analyze(fit_fringe=True)
-print(f"real detune: {(detune - activate_detune) * 1e3:.1f}kHz")
+print(f"real detune: {(detune - true_detune) * 1e3:.1f}kHz")
 ```
 
 ```python
@@ -2475,12 +2561,12 @@ filename = f"{qub_name}_t2ramsey_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 t2ramsey_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=f"activate detune = {activate_detune:.3f}MHz\nt2r = {md.t2r:.3f}us",
+    comment=f"activate detune = {true_detune:.3f}MHz\nt2r = {md.t2r:.3f}us",
 )
 ```
 
 ```python
-md.q_f = cfg.modules.pi2_pulse.freq + activate_detune - detune
+md.q_f = cfg.modules.pi2_pulse.freq + true_detune - detune
 md.q_f
 ```
 
@@ -2500,23 +2586,23 @@ exp_cfg = {
         #     "freq": q_f,
         #     "mixer_freq": q_f,
         # },
-        "readout": "readout_rf",
-        # "readout": "readout_dpm",
+        # "readout": "readout_rf",
+        "readout": "readout_dpm",
     },
-    "relax_delay": 300.5,  # us
+    "relax_delay": 30.5,  # us
     # "relax_delay": 5 * md.t1,  # us
-    "sweep": make_sweep(0.01, 300.1, 101),
-    # "sweep": make_sweep(0.01, 5 * md.t1, 51),
+    # "sweep": make_sweep(0.01, 10.1, 101),
+    "sweep": make_sweep(0.01, 5 * md.t1, 51),
 }
 cfg = ml.make_cfg(exp_cfg, ze.twotone.time_domain.T1Cfg, reps=1000, rounds=100)
 
 t1_exp = ze.twotone.time_domain.T1Exp()
-_ = t1_exp.run(soc, soccfg, cfg, uniform=True)
+_ = t1_exp.run(soc, soccfg, cfg, uniform=False)
 ```
 
 ```python
 %matplotlib inline
-md.t1, md.t1err, fig = t1_exp.analyze(dual_exp=False)
+md.t1, md.t1err, fig = t1_exp.analyze(dual_exp=False, skip=1)
 md.t1
 ```
 
@@ -2595,10 +2681,10 @@ exp_cfg = {
     },
 }
 cfg = ml.make_cfg(
-    exp_cfg, ze.twotone.time_domain.T1WithToneSweepCfg, reps=100, rounds=100
+    exp_cfg, ze.twotone.time_domain.ScanT1WithToneCfg, reps=100, rounds=100
 )
 
-t1_with_tone_sweep_exp = ze.twotone.time_domain.T1WithToneSweepExp()
+t1_with_tone_sweep_exp = ze.twotone.time_domain.ScanT1WithToneExp()
 _ = t1_with_tone_sweep_exp.run(soc, soccfg, cfg)
 ```
 
@@ -2634,11 +2720,10 @@ exp_cfg = {
 }
 cfg = ml.make_cfg(exp_cfg, ze.twotone.time_domain.T2EchoCfg, reps=1000, rounds=100)
 
-activate_detune = 0.1 / cfg.sweep.length["step"]
-print(f"activate_detune: {activate_detune:.2f}")
+activate_detune = 0.1 / cfg.sweep.length.step
 
 t2echo_exp = ze.twotone.time_domain.T2EchoExp()
-_ = t2echo_exp.run(soc, soccfg, cfg, detune=activate_detune)
+_, true_detune = t2echo_exp.run(soc, soccfg, cfg, detune=activate_detune)
 ```
 
 ```python
@@ -2651,7 +2736,7 @@ filename = f"{qub_name}_t2echo_{time.strftime('%m%d')}"
 savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 t2echo_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=f"activate detune = {activate_detune:.3f}MHz\nt2echo = {md.t2e:.3f}us",
+    comment=f"activate detune = {true_detune:.3f}MHz\nt2echo = {md.t2e:.3f}us",
 )
 ```
 

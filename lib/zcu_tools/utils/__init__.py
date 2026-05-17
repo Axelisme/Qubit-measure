@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from qick.asm_v2 import QickParam
 from typing_extensions import Any, Literal, Mapping, MutableMapping
 
 from . import datasaver, fitting, math, process, tomography
@@ -61,6 +62,8 @@ def format_obj(obj: Any) -> Any:
         obj = {k: format_obj(v) for k, v in obj.items()}
     if isinstance(obj, list):
         obj = [format_obj(v) for v in obj]
+    if isinstance(obj, QickParam):
+        obj = str(obj)
 
     return obj
 

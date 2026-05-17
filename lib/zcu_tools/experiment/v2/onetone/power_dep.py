@@ -63,11 +63,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         gains = sweep2array(
             gain_sweep,
             "gain",
-            {
-                "soccfg": soccfg,
-                "gen_ch": readout_cfg.pulse_cfg.ch,
-                "ro_ch": readout_cfg.ro_cfg.ro_ch,
-            },
+            {"soccfg": soccfg, "gen_ch": readout_cfg.pulse_cfg.ch},
             allow_array=True,
         )
         freqs = sweep2array(
