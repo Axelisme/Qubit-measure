@@ -48,7 +48,9 @@ def test_emit_cond_jump_small_pmem_single_inst(mock_prog):
 
 
 def test_emit_cond_jump_large_pmem_two_insts(large_pmem_prog):
-    result = _emit_cond_jump(large_pmem_prog, label="loop_end", if_cond="S", op="r0 - r1")
+    result = _emit_cond_jump(
+        large_pmem_prog, label="loop_end", if_cond="S", op="r0 - r1"
+    )
     assert len(result) == 2
     assert isinstance(result[0], WriteLabel)
     assert result[0].label == "loop_end"

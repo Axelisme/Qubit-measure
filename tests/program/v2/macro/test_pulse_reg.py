@@ -53,7 +53,9 @@ def test_pulse_by_reg_single_addr_register_time():
 
     # register time: set_timereg prepended + 1 WPORT_WR without TIME field
     assert len(result) >= 1
-    wport_insts = [x for x in result if isinstance(x, AsmInst) and x.inst["CMD"] == "WPORT_WR"]
+    wport_insts = [
+        x for x in result if isinstance(x, AsmInst) and x.inst["CMD"] == "WPORT_WR"
+    ]
     assert len(wport_insts) == 1
     assert "TIME" not in wport_insts[0].inst
 

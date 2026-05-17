@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
-
 from zcu_tools.program.v2.ir.instructions import (
     JumpInst,
     LabelInst,

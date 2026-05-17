@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -56,7 +56,7 @@ def _rotated_elliptical(center, sx, sy, angle, n, rng):
 
 def _score(samples_ge):
     return float(
-        snr_as_signal(cast(list[MomentTracker], _stats_from_samples(samples_ge)))
+        snr_as_signal(_stats_from_samples(samples_ge))  # type: ignore[arg-type]
     )
 
 
@@ -243,11 +243,8 @@ def test_sweep_axis_broadcasting(rng):
     cov = np.stack(covs, axis=0)  # (sweep, ge, IQ, IQ)
     m3 = np.stack(m3s, axis=0)  # (sweep, ge, 2, 2, 2)
 
-    raw = cast(
-        list[MomentTracker],
-        [_FakeTracker(mean=mean, covariance=cov, third_moment=m3)],
-    )
-    out = snr_as_signal(raw, ge_axis=1)
+    raw = [_FakeTracker(mean=mean, covariance=cov, third_moment=m3)]
+    out = snr_as_signal(raw, ge_axis=1)  # type: ignore[arg-type]
     assert out.shape == (n_sweep,)
     assert np.all(np.diff(out) >= -0.04)
 

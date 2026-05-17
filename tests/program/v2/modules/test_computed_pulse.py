@@ -37,7 +37,9 @@ def _flat_top_pulse(total=0.2, raise_length=0.04, gain=GEN_GAIN, pre_delay=0.0):
     return PulseCfg(
         waveform=FlatTopWaveformCfg(
             length=total,
-            raise_waveform=GaussWaveformCfg(length=raise_length, sigma=raise_length / 4),
+            raise_waveform=GaussWaveformCfg(
+                length=raise_length, sigma=raise_length / 4
+            ),
         ),
         ch=GEN_CH,
         nqz=1,
@@ -50,9 +52,7 @@ def _flat_top_pulse(total=0.2, raise_length=0.04, gain=GEN_GAIN, pre_delay=0.0):
 def _make_prog(modules):
     soccfg = make_mock_soccfg(n_gens=2, n_readouts=1)
     cfg = ProgramV2Cfg()
-    return ModularProgramV2(
-        soccfg, cfg, modules=modules, sweep=[("idx_loop", 2)]
-    )
+    return ModularProgramV2(soccfg, cfg, modules=modules, sweep=[("idx_loop", 2)])
 
 
 def _gate_modules(gate_pulses, val_reg="gate_idx"):

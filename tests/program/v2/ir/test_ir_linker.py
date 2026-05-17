@@ -1,5 +1,4 @@
 import pytest
-
 from zcu_tools.program.v2.ir.instructions import (
     LabelInst,
     MetaInst,

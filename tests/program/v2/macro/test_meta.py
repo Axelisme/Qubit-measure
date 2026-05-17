@@ -56,8 +56,16 @@ def test_meta_macro_default_info_and_regs(mock_prog):
 
 
 def test_meta_macro_various_types(mock_prog):
-    for t in ("LOOP_START", "LOOP_BODY_START", "LOOP_BODY_END", "LOOP_END",
-              "BRANCH_START", "BRANCH_CASE_START", "BRANCH_CASE_END", "BRANCH_END"):
+    for t in (
+        "LOOP_START",
+        "LOOP_BODY_START",
+        "LOOP_BODY_END",
+        "LOOP_END",
+        "BRANCH_START",
+        "BRANCH_CASE_START",
+        "BRANCH_CASE_END",
+        "BRANCH_END",
+    ):
         macro = MetaMacro(type=t, name="x")
         macro.translate(mock_prog)
     assert mock_prog._add_meta.call_count == 8

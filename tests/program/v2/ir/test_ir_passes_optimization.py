@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterator, cast
+from typing import Iterator
 
 from zcu_tools.program.v2.ir.factory import IRParser
 from zcu_tools.program.v2.ir.instructions import (
@@ -134,8 +134,9 @@ def test_dead_write_elimination_removes_overwritten_write():
     bb = root.insts[0]
     assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 2
-    assert isinstance(bb.insts[0], RegWriteInst)
-    assert str(cast(RegWriteInst, bb.insts[0]).lit) == "#2"
+    inst = bb.insts[0]
+    assert isinstance(inst, RegWriteInst)
+    assert str(inst.lit) == "#2"
 
 
 def test_dead_write_elimination_keeps_write_before_read():
@@ -160,11 +161,7 @@ def test_dead_write_elimination_keeps_write_before_read():
     bb = root.insts[0]
     assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 3
-    assert [
-        str(cast(RegWriteInst, item).lit)
-        for item in bb.insts
-        if isinstance(item, RegWriteInst)
-    ] == [
+    assert [str(item.lit) for item in bb.insts if isinstance(item, RegWriteInst)] == [
         "#1",
         "#2",
     ]
@@ -191,7 +188,9 @@ def test_dead_write_elimination_removes_overwritten_write_in_basic_block():
     bb = root.insts[0]
     assert isinstance(bb, BasicBlockNode)
     assert len(bb.insts) == 1
-    assert str(cast(RegWriteInst, bb.insts[0]).lit) == "#2"
+    inst = bb.insts[0]
+    assert isinstance(inst, RegWriteInst)
+    assert str(inst.lit) == "#2"
 
 
 # ---------------------------------------------------------------------------
@@ -398,8 +397,8 @@ def test_unroll_full_expansion_keeps_counter_init_for_counter_dependent_body():
     init_bb = expanded.insts[0]
     assert isinstance(init_bb, BasicBlockNode)
     assert len(init_bb.insts) > 0
-    assert isinstance(init_bb.insts[0], RegWriteInst)
-    init = cast(RegWriteInst, init_bb.insts[0])
+    init = init_bb.insts[0]
+    assert isinstance(init, RegWriteInst)
     assert init.dst.name == "r0"
 
 
@@ -445,14 +444,17 @@ def test_default_pipeline_can_disable_all_optimization_passes():
     out_insts, _ctx = pipeline(insts)
     out = parser.parse(lexer.lex(out_insts))
     assert len(out.insts) == 2
-    bb0 = cast(BasicBlockNode, out.insts[0])
+    bb0 = out.insts[0]
+    assert isinstance(bb0, BasicBlockNode)
     assert isinstance(bb0.insts[0], RegWriteInst)
     assert isinstance(bb0.insts[1], RegWriteInst)
-    bb1 = cast(BasicBlockNode, out.insts[1])
+    bb1 = out.insts[1]
+    assert isinstance(bb1, BasicBlockNode)
     assert len(bb1.labels) == 1
     assert isinstance(bb1.labels[0], LabelInst)
-    assert isinstance(bb1.insts[0], TimeInst)
-    assert str(cast(TimeInst, bb1.insts[0]).lit) == "#0"  # type: ignore
+    time_inst = bb1.insts[0]
+    assert isinstance(time_inst, TimeInst)
+    assert str(time_inst.lit) == "#0"
 
 
 def _collect_all_basic_blocks(root: BlockNode) -> list[BasicBlockNode]:

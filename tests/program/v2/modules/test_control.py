@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Union, cast
+from typing import Any, Union
 
 import pytest
 from qick.asm_v2 import QickParam
@@ -58,10 +58,10 @@ def test_branch_power_of_two_has_no_nop_padding(mock_prog):
 
 def test_branch_rejects_qickparam_duration(mock_prog):
     class _QickParamDurationModule(_FixedDurationModule):
-        def run(self, prog: Any, t: Union[float, QickParam] = 0.0) -> float:
+        def run(self, prog: Any, t: Union[float, QickParam] = 0.0) -> Any:
             # We want to return a QickParam to trigger the Branch error,
             # but we cast to float to satisfy Pyright's override check.
-            return cast(float, QickParam(start=0.1))
+            return QickParam(start=0.1)
 
     b = Branch(
         "sel",
@@ -146,7 +146,9 @@ def test_repeat_run_string_n_calls_open_close_inner_loop_with_reg(mock_prog):
     r = Repeat("lp", n="n_reg")
     r.run(mock_prog)
 
-    mock_prog.open_inner_loop.assert_called_once_with("lp", "lp", "n_reg", range_hint=None)
+    mock_prog.open_inner_loop.assert_called_once_with(
+        "lp", "lp", "n_reg", range_hint=None
+    )
     mock_prog.close_inner_loop.assert_called_once_with("lp", "lp", "n_reg")
 
 
