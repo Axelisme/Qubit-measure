@@ -577,3 +577,51 @@ def test_clone_renamed_uniquifies_nested_structure_names():
     cloned_loop = cloned.insts[0]
     assert isinstance(cloned_loop, IRLoop)
     assert cloned_loop.name != "inner", "nested loop name must be uniquified"
+
+
+def test_clone_renamed_remaps_dmem_addr_table_labels():
+    """clone_renamed must remap the entry labels inside a DmemAddr.
+
+    A dmem dispatch instruction (REG_WR s15 op (idx + DmemAddr)) inside a
+    cloned loop body must have its DmemAddr.table_labels remapped to the
+    cloned case-entry labels — otherwise every unrolled copy's dispatch would
+    point at the first copy's case entries.
+    """
+    from zcu_tools.program.v2.ir.node import clone_renamed
+    from zcu_tools.program.v2.ir.operands import AluExpr, AluOp, DmemAddr
+
+    entry = Label("case_entry_0")
+    # A block that both *defines* `entry` and references it via a DmemAddr.
+    body = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[
+                    RegWriteInst(
+                        dst=Register("s15"),
+                        src=SrcKeyword.OP,
+                        op=AluExpr(Register("r0"), AluOp.ADD, DmemAddr((entry,))),
+                    )
+                ],
+            ),
+            BasicBlockNode(labels=[LabelInst(name=entry)], insts=[NopInst()]),
+        ]
+    )
+
+    cloned = clone_renamed(body, {"case_entry_0"})
+    assert isinstance(cloned, BlockNode)
+
+    # The defining LabelInst was renamed.
+    entry_block = cloned.insts[1]
+    assert isinstance(entry_block, BasicBlockNode)
+    cloned_entry = entry_block.labels[0].name
+    assert cloned_entry != entry
+
+    # The DmemAddr.table_labels must point at the *cloned* entry label.
+    disp_block = cloned.insts[0]
+    assert isinstance(disp_block, BasicBlockNode)
+    inst = disp_block.insts[0]
+    assert isinstance(inst, RegWriteInst)
+    assert isinstance(inst.op, AluExpr) and isinstance(inst.op.rhs, DmemAddr)
+    assert inst.op.rhs.table_labels == (cloned_entry,), (
+        "DmemAddr.table_labels must be remapped to the cloned entry label"
+    )

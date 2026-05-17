@@ -517,20 +517,25 @@ class IRParser:
         return [b for b in IRLexer().lex(post) if isinstance(b, BasicBlockNode)]
 
     def _lower_dispatch(self, node: IRDispatch) -> list[BasicBlockNode]:
-        """Lower an IRDispatch leaf node to flat BasicBlockNodes (guard + table stubs).
+        """Lower an IRDispatch leaf node to a pmem dispatch-table island.
+
+        This is the **fallback** lowering: the normal path is the IR-tree pass
+        ``DmemDispatchPass`` (k>=3, dmem table) or ``SimplifyDispatchPass``
+        (k==2, single cond jump). ``_lower_dispatch`` is reached only by an
+        ``IRDispatch`` that survives to ``unparse`` — i.e. when IR optimization
+        is disabled, or a test unparses an ``IRDispatch`` tree directly.
 
         Shape emitted (n = len(target_labels)):
 
-            BasicBlockNode(branch=JUMP target_labels[-1] -if(S) -op(value_reg - #n))
+            BasicBlockNode(branch=JUMP target_labels[-1] -if(NS) -op(value_reg - #n))
                 -- out-of-range guard: if value_reg >= n, jump to the last case
             BasicBlockNode(insts=[setup...], branch=JUMP s15)
                 -- address computation + indirect jump
             [dispatch table island (disable_opt blocks)]
 
-        Note: The guard jumps to ``target_labels[-1]`` (the last case).  Callers
-        that want a specific fallback must place it at index n-1.  This is always
-        the case for IRBranch lowering (the else-branch is the last case).
-        Case bodies are NOT emitted here; the caller (_lower_branch) appends them.
+        The guard jumps to ``target_labels[-1]`` (the last case); callers that
+        want a specific fallback must place it at index n-1. Case bodies are
+        NOT emitted here — the caller appends them after the dispatch island.
         """
         n = len(node.target_labels)
         table_labels = [

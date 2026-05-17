@@ -45,8 +45,13 @@ class BasicBlockNode(IRNode):
     labels: LabelInst(s) that mark the entry point of this block.
     insts:  Linear instructions (no labels, no jumps except TestInst).
     branch: Optional terminal JumpInst that ends this block.
-    disable_opt: When True, the instruction count is frozen (set by jump-table
-                  lowering). Post-LIR passes must NOP-pad instead of removing.
+    disable_opt: When True, the block's instructions and program-memory word
+                  count must not change. Optimization passes skip such blocks
+                  entirely. Two sources: pmem dispatch-table stubs (fixed
+                  width so computed jumps land correctly) and macro expansions
+                  containing QICK pseudo-labels (HERE/NEXT/SKIP — the
+                  assembler resolves them to P_ADDR offsets, so inserting or
+                  removing instructions would misalign them).
     """
 
     labels: list[LabelInst] = field(default_factory=list)
@@ -181,7 +186,7 @@ class IRBranch(IRNode):
 
 @dataclass
 class IRDispatch(IRNode):
-    """A dispatch table node (pure data — lowering is handled by IRParser.unparse).
+    """A dispatch table node (pure data — lowered by a pass or by unparse).
 
     Represents a value-indexed dispatch: ``value_reg`` selects which target
     label to jump to.  A mandatory out-of-range guard is always emitted: if
@@ -189,9 +194,14 @@ class IRDispatch(IRNode):
     ``target_labels[-1]`` (the last case).  This behaviour is intentional and
     must be documented at call sites that rely on it.
 
+    Lowering: ``DmemDispatchPass`` (k>=3, dmem table) / ``SimplifyDispatchPass``
+    (k==2, single cond jump) on the IR tree; ``IRParser._lower_dispatch`` is
+    the pmem-island fallback for an IRDispatch that survives to unparse.
+
     IRDispatch is a leaf node — case bodies are **not** stored inside it.
-    The caller (IRParser._lower_branch) is responsible for emitting the bodies
-    after the dispatch table in the chunk stream.
+    The producer (``UnpackIRBranchPass`` for branches,
+    ``UnrollLoopPass._maybe_build_jump_table`` for register-driven loops)
+    places the case bodies as siblings after the IRDispatch.
     """
 
     name: str
@@ -253,8 +263,11 @@ def _clone_node(
     node: IRNode, label_remap: dict[str, Label], name_remap: dict[str, str]
 ) -> IRNode:
     """Deep-clone a subtree, applying label and structure-name remaps."""
+    import dataclasses
+
     from .instructions import CallInst, DmemReadInst, RegWriteInst
     from .labels import LabelRef
+    from .operands import AluExpr, DmemAddr
 
     def _remap_ref(ref: Optional[LabelRef]) -> Optional[LabelRef]:
         if ref is None or ref.is_pseudo():
@@ -262,18 +275,33 @@ def _clone_node(
         new = label_remap.get(ref.as_label().name)
         return LabelRef(new) if new is not None else ref
 
-    def _remap_inst(inst: BaseInst) -> BaseInst:
-        import dataclasses
+    def _remap_op(op: object) -> object:
+        # A dmem dispatch table reference (DmemAddr in AluExpr.rhs) holds entry
+        # labels that must be remapped too, or a cloned loop-body copy's
+        # dispatch would still point at the original copy's case entries.
+        if isinstance(op, AluExpr) and isinstance(op.rhs, DmemAddr):
+            new_labels = tuple(
+                label_remap.get(lbl.name, lbl) for lbl in op.rhs.table_labels
+            )
+            if new_labels != op.rhs.table_labels:
+                return dataclasses.replace(op, rhs=DmemAddr(table_labels=new_labels))
+        return op
 
+    def _remap_inst(inst: BaseInst) -> BaseInst:
+        changes: dict[str, object] = {}
         if isinstance(inst, (JumpInst, RegWriteInst, DmemReadInst, CallInst)):
             new_ref = _remap_ref(inst.label)
             if new_ref is not inst.label:
-                return dataclasses.replace(inst, label=new_ref)
+                changes["label"] = new_ref
+        if isinstance(inst, RegWriteInst):
+            new_op = _remap_op(inst.op)
+            if new_op is not inst.op:
+                changes["op"] = new_op
+        if changes:
+            return dataclasses.replace(inst, **changes)
         return inst
 
     def _remap_branch(branch: JumpInst) -> JumpInst:
-        import dataclasses
-
         new_ref = _remap_ref(branch.label)
         if new_ref is not branch.label:
             return dataclasses.replace(branch, label=new_ref)

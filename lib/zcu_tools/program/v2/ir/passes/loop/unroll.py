@@ -47,19 +47,14 @@ QICK Hardware Notes
 
 Decision Notes
 --------------
-This pass implements AbsIRTreePass.transform, which is called *before* the
-node's body is lowered to flat chunks.  Unroll decisions are therefore based
-on the IR tree (``estimate_*`` functions), not on optimized flat chunks.
-
-# NOTE: Estimation before body lowering (Option A)
-# The unroll decision uses IR-tree cost/size estimates because the body has
-# not yet been lowered to flat chunks when transform() is called.  As a
-# consequence the body has also not yet been through ChunkPass optimization,
-# so estimates may slightly over-count body_cost / body_size.
-# If more accurate estimates are needed in the future, the pass could be
-# rearchitected as AbsNodeLower (called after child ChunkPasses), but that
-# requires solving the problem that inner-loop scheduled_ticks cannot be
-# reconstructed from flat BasicBlockNode lists.
+``transform`` reasons about the IR tree, not flat chunks: it uses the
+``estimate_*`` cost/size functions on ``IRLoop.body``. Post-order convergence
+means the body's nested structure is already settled when ``transform`` runs,
+but the body has not been flattened to a ``BasicBlockNode`` list nor been
+through ChunkPass optimization — so the estimates may slightly over-count
+``body_cost`` / ``body_size``. This is an accepted approximation: a tighter
+estimate would need inner-loop ``scheduled_ticks`` reconstructed from flat
+blocks, which the flat form does not preserve.
 
 Three unrolling strategies:
 1. Full expansion (``n ≤ k``): emit n body copies, drop the loop entirely.
@@ -194,7 +189,7 @@ def _analyze_unroll(
     else:
         k_timing = min(math.ceil(loop_overhead / slack), ctx.config.max_unroll_factor)
 
-    if body_size > 0 and ctx.pmem_budget is not None:
+    if body_size > 0:
         k_budget = ctx.pmem_budget // body_size
     else:
         k_budget = k_timing
@@ -211,12 +206,13 @@ def _analyze_unroll(
 
 
 class UnrollLoopPass(AbsIRTreePass):
-    """Scheduled-window-driven loop unrolling (Phase 8).
+    """Scheduled-window-driven loop unrolling.
 
     k is chosen jointly from per-iteration timing slack and pmem budget.
-    Implements AbsIRTreePass so it runs before the body is lowered, enabling
-    IR-tree based cost/size estimation.  See module docstring for the
-    estimation tradeoff.
+    Being an AbsIRTreePass, ``transform`` sees the IR tree (post-order
+    converged children, not yet flattened) and bases the unroll decision on
+    IR-tree cost/size estimates.  See the module docstring for the estimation
+    tradeoff.
     """
 
     def transform(
