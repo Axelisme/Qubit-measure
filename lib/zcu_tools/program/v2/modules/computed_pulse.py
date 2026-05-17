@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from qick.asm_v2 import QickParam
 from typing_extensions import TYPE_CHECKING, Sequence, Union
 
@@ -8,6 +10,8 @@ from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
+
+logger = logging.getLogger(__name__)
 
 
 class ComputedPulse(Module):
@@ -77,6 +81,17 @@ class ComputedPulse(Module):
             base_idxs.append(prog.wave2idx[wave_names[0]])
 
         self.dmem_offset = prog.add_dmem(base_idxs)
+
+        logger.debug(
+            "ComputedPulse.init: name='%s', ch=%d, style=%s, stride=%d, "
+            "dmem_offset=%d, wmem_base_idxs=%s",
+            self.name,
+            self.ref_cfg.ch,
+            self.ref_cfg.waveform.style,
+            self._stride,
+            self.dmem_offset,
+            base_idxs,
+        )
 
     def run(
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
