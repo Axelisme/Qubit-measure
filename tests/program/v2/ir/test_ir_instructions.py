@@ -16,29 +16,47 @@ from copy import deepcopy
 
 import pytest
 from zcu_tools.program.v2.ir.instructions import (
+    ArithInst,
     BaseInst,
+    CallInst,
+    ClearInst,
+    ComInst,
+    CustomPeripheralInst,
     DivInst,
     DmemReadInst,
     DmemWriteInst,
+    DportReadInst,
     DportWriteInst,
+    FlagInst,
     Instruction,
     JumpInst,
     LabelInst,
     MetaInst,
+    NetInst,
     NopInst,
     PortWriteInst,
     RegWriteInst,
+    RetInst,
     TestInst,
     TimeInst,
+    TrigInst,
     WaitInst,
     WmemWriteInst,
+    _parse_cond_code,
+    _parse_mem_addr_field,
+    _parse_port_dst,
+    _require_alu_expr,
+    _require_literal,
+    _require_register,
 )
 from zcu_tools.program.v2.ir.labels import Label, LabelRef
 from zcu_tools.program.v2.ir.operands import (
     AluExpr,
     AluOp,
+    DmemAddr,
     Immediate,
     ImmValue,
+    MemAddr,
     Register,
     SideWrite,
     SrcKeyword,
@@ -369,6 +387,32 @@ class TestPortWriteInstruction:
         with pytest.raises(Exception):
             inst.dst = "1"  # type: ignore
 
+    def test_wport_wr_reg_read_includes_src_addr_time_and_op_registers(self):
+        inst = PortWriteInst(
+            dst=Register("r0"),
+            src=Register("r1"),
+            addr=Register("r2"),
+            time=Register("r3"),
+            op=AluExpr(Register("r4"), AluOp.ADD, Immediate(1)),
+        )
+        assert inst.reg_read == frozenset({"s14", "r0", "r1", "r2", "r3", "r4"})
+
+    def test_wport_wr_roundtrip_with_conditional_sidewrite_shape(self):
+        original = {
+            "CMD": "WPORT_WR",
+            "DST": "r0",
+            "SRC": "r1",
+            "ADDR": "r2",
+            "TIME": "r3",
+            "WR": "r4 op",
+            "OP": "r5 + #1",
+            "UF": "1",
+            "IF": "NZ",
+        }
+        inst = BaseInst.from_dict(original)
+        assert isinstance(inst, PortWriteInst)
+        assert inst.to_dict() == original
+
 
 class TestUnknownOpcode:
     def test_dispatch_unknown_opcode_raises(self):
@@ -382,6 +426,41 @@ class TestUnknownOpcode:
         assert isinstance(inst, DportWriteInst)
         assert str(inst.dst) == "0"
         assert str(inst.data) == "1"
+
+
+class TestDmemWriteInstruction:
+    def test_dmem_wr_roundtrip_with_bracketed_memaddr(self):
+        original = {"CMD": "DMEM_WR", "DST": "[&7]", "SRC": "imm", "LIT": "#3"}
+        inst = BaseInst.from_dict(original)
+        assert isinstance(inst, DmemWriteInst)
+        assert inst.dst == MemAddr(7)
+        assert inst.to_dict() == original
+
+    def test_dmem_wr_roundtrip_op_shape(self):
+        original = {
+            "CMD": "DMEM_WR",
+            "DST": "r0",
+            "SRC": "op",
+            "WR": "r1 op",
+            "OP": "r2 + #1",
+            "UF": "1",
+            "IF": "S",
+        }
+        inst = BaseInst.from_dict(original)
+        assert isinstance(inst, DmemWriteInst)
+        assert inst.to_dict() == original
+
+    def test_dmem_wr_reg_read_includes_dst_register_and_op(self):
+        inst = DmemWriteInst(
+            dst=Register("r0"),
+            src="op",
+            op=AluExpr(Register("r1"), AluOp.ADD, Immediate(1)),
+        )
+        assert inst.reg_read == frozenset({"r0", "r1"})
+
+    def test_dmem_wr_rejects_invalid_src_keyword(self):
+        with pytest.raises(ValueError, match="DMEM_WR.SRC"):
+            BaseInst.from_dict({"CMD": "DMEM_WR", "DST": "[&7]", "SRC": "bogus"})
 
 
 class TestWmemWriteInstruction:
@@ -407,6 +486,64 @@ class TestWmemWriteInstruction:
         recovered = inst.to_dict()
         assert recovered == original
 
+    def test_wmem_wr_reg_read_includes_wave_bundle_addr_time_and_op(self):
+        inst = WmemWriteInst(
+            addr=Register("r0"),
+            time=Register("r1"),
+            op=AluExpr(Register("r2"), AluOp.ADD, Immediate(1)),
+            wr=SideWrite(Register("r3"), "op"),
+            uf=True,
+            if_cond="NZ",
+            wp="r_wave p0",
+        )
+        reads = inst.reg_read
+        assert "s14" in reads
+        assert {"r0", "r1", "r2", "w0", "w1", "w2", "w3", "w4", "w5"} <= reads
+
+    def test_wmem_wr_roundtrip_full_shape(self):
+        original = {
+            "CMD": "WMEM_WR",
+            "DST": "r0",
+            "TIME": "r1",
+            "WR": "r2 op",
+            "OP": "r3 + #1",
+            "UF": "1",
+            "IF": "NZ",
+            "WP": "r_wave p0",
+        }
+        inst = BaseInst.from_dict(original)
+        assert isinstance(inst, WmemWriteInst)
+        assert inst.to_dict() == original
+
+
+class TestDportReadInstruction:
+    def test_dport_rd_roundtrip(self):
+        original = {"CMD": "DPORT_RD", "DST": "r0"}
+        inst = BaseInst.from_dict(original)
+        assert isinstance(inst, DportReadInst)
+        assert inst.to_dict() == original
+
+    def test_dport_rd_reg_read_and_write(self):
+        inst = DportReadInst(dst=Register("r0"))
+        assert inst.reg_read == frozenset({"r0", "s10"})
+        assert inst.reg_write == frozenset({"s8", "s9"})
+
+
+class TestTrigInstruction:
+    def test_trig_roundtrip(self):
+        original = {"CMD": "TRIG", "DST": "r0", "SRC": "set", "TIME": "r1"}
+        inst = BaseInst.from_dict(original)
+        assert isinstance(inst, TrigInst)
+        assert inst.to_dict() == original
+
+    def test_trig_reg_read(self):
+        inst = TrigInst(dst=Register("r0"), src="clr", time=Register("r1"))
+        assert inst.reg_read == frozenset({"s14", "r0", "r1"})
+
+    def test_trig_rejects_invalid_src(self):
+        with pytest.raises(ValueError, match="TRIG.SRC"):
+            BaseInst.from_dict({"CMD": "TRIG", "DST": "0", "SRC": "pulse"})
+
 
 class TestWaitInstruction:
     """Tests for WaitInst."""
@@ -428,6 +565,14 @@ class TestWaitInstruction:
         # Again, string 'wait_target' will parse as Register("wait_target") now due to fallback,
         # so it won't raise ValueError in parse_addr.
         pass
+
+    def test_wait_non_time_reg_read_uses_status_reg(self):
+        inst = WaitInst(c_op="div_rdy", time=Register("r0"), addr=Register("s15"))
+        assert inst.reg_read == frozenset({"s10", "r0", "s15"})
+
+    def test_wait_rejects_invalid_cop(self):
+        with pytest.raises(ValueError, match="WAIT.C_OP"):
+            BaseInst.from_dict({"CMD": "WAIT", "C_OP": "bad"})
 
 
 class TestLabelInstruction:
@@ -481,6 +626,190 @@ class TestMetaInstruction:
         assert inst.type == "loop"
         assert inst.name == "loop_1"
         assert inst.info["n"] == 10
+
+
+class TestInstructionHelpers:
+    def test_require_literal_accepts_valid_value(self):
+        assert _require_literal("set", "FLAG.C_OP", frozenset({"set", "clr"})) == "set"
+
+    def test_require_literal_rejects_invalid_value(self):
+        with pytest.raises(ValueError, match="FLAG.C_OP"):
+            _require_literal("bad", "FLAG.C_OP", frozenset({"set", "clr"}))
+
+    def test_parse_cond_code_accepts_none_and_valid(self):
+        assert _parse_cond_code(None) is None
+        assert _parse_cond_code("NZ") == "NZ"
+
+    def test_parse_cond_code_rejects_invalid_value(self):
+        with pytest.raises(ValueError, match="valid condition code"):
+            _parse_cond_code("bad")
+
+    def test_require_register_rejects_invalid_value(self):
+        with pytest.raises(ValueError, match="DST"):
+            _require_register("garbage", "DST")
+
+    def test_require_alu_expr_rejects_invalid_value(self):
+        with pytest.raises(ValueError):
+            _require_alu_expr("garbage", "OP")
+
+    def test_parse_port_dst_rejects_invalid_value(self):
+        with pytest.raises(ValueError, match="port number"):
+            _parse_port_dst("bogus")
+
+    def test_parse_mem_addr_field_rejects_invalid_value(self):
+        with pytest.raises(ValueError, match="ADDR"):
+            _parse_mem_addr_field("bogus", "ADDR")
+
+    def test_instruction_str_omits_none_fields(self):
+        assert str(TimeInst(c_op="rst")) == "TimeInst(C_OP=rst)"
+
+
+class TestNeedLabelHelpers:
+    def test_regwr_need_label_and_need_labels_with_real_label(self):
+        inst = RegWriteInst(
+            dst=Register("r0"), src=SrcKeyword.LABEL, label=LabelRef(Label("target"))
+        )
+        assert inst.need_label == Label("target")
+        assert inst.need_labels == frozenset({Label("target")})
+
+    def test_regwr_need_label_ignores_pseudo_label(self):
+        inst = RegWriteInst(
+            dst=Register("r0"), src=SrcKeyword.LABEL, label=LabelRef("NEXT")
+        )
+        assert inst.need_label is None
+        assert inst.need_labels == frozenset()
+
+    def test_regwr_need_labels_includes_dmem_addr_targets(self):
+        labels = (Label("a"), Label("b"))
+        inst = RegWriteInst(
+            dst=Register("s15"),
+            src=SrcKeyword.OP,
+            op=AluExpr(Register("r0"), AluOp.ADD, DmemAddr(table_labels=labels)),
+        )
+        assert inst.need_labels == frozenset(labels)
+
+    def test_dmem_read_need_label_handles_real_and_pseudo_labels(self):
+        real = DmemReadInst(dst=Register("r0"), label=LabelRef(Label("target")))
+        pseudo = DmemReadInst(dst=Register("r0"), label=LabelRef("NEXT"))
+        assert real.need_label == Label("target")
+        assert pseudo.need_label is None
+
+
+class TestCallRetInstruction:
+    def test_call_roundtrip_label_mode(self):
+        Label("subr")
+        original = {"CMD": "CALL", "LABEL": "subr"}
+        inst = BaseInst.from_dict(original)
+        assert isinstance(inst, CallInst)
+        assert inst.to_dict() == original
+
+    def test_call_roundtrip_addr_mode_and_reg_read(self):
+        original = {"CMD": "CALL", "ADDR": "s15"}
+        inst = BaseInst.from_dict(original)
+        assert isinstance(inst, CallInst)
+        assert inst.reg_read == frozenset({"s15"})
+        assert inst.to_dict() == original
+
+    def test_call_rejects_non_s15_addr(self):
+        with pytest.raises(ValueError, match="CallInst.addr"):
+            BaseInst.from_dict({"CMD": "CALL", "ADDR": "r0"})
+
+    def test_ret_roundtrip(self):
+        original = {"CMD": "RET"}
+        inst = BaseInst.from_dict(original)
+        assert isinstance(inst, RetInst)
+        assert inst.to_dict() == original
+
+
+class TestPeripheralInstructions:
+    def test_flag_roundtrip_and_rejects_invalid_cop(self):
+        original = {"CMD": "FLAG", "C_OP": "set"}
+        inst = BaseInst.from_dict(original)
+        assert isinstance(inst, FlagInst)
+        assert inst.to_dict() == original
+        with pytest.raises(ValueError, match="FLAG.C_OP"):
+            BaseInst.from_dict({"CMD": "FLAG", "C_OP": "bad"})
+
+    def test_arith_roundtrip_reg_read_and_reg_write(self):
+        original = {
+            "CMD": "ARITH",
+            "C_OP": "TP",
+            "R1": "r0",
+            "R2": "r1",
+            "R3": "r2",
+            "R4": "r3",
+        }
+        inst = BaseInst.from_dict(original)
+        assert isinstance(inst, ArithInst)
+        assert inst.reg_read == frozenset({"r0", "r1", "r2", "r3"})
+        assert inst.reg_write == frozenset({"s3"})
+        assert inst.to_dict() == original
+
+    def test_arith_rejects_invalid_cop(self):
+        with pytest.raises(ValueError, match="ARITH.C_OP"):
+            BaseInst.from_dict({"CMD": "ARITH", "C_OP": "bad"})
+
+    def test_net_roundtrip_reg_read_and_invalid_cop(self):
+        original = {
+            "CMD": "NET",
+            "C_OP": "set_flag",
+            "R1": "r0",
+            "R2": "r1",
+            "R3": "r2",
+        }
+        inst = BaseInst.from_dict(original)
+        assert isinstance(inst, NetInst)
+        assert inst.reg_read == frozenset({"r0", "r1", "r2"})
+        assert inst.to_dict() == original
+        with pytest.raises(ValueError, match="NET.C_OP"):
+            BaseInst.from_dict({"CMD": "NET", "C_OP": "bad"})
+
+    def test_com_roundtrip_flag_value_mode(self):
+        original = {"CMD": "COM", "C_OP": "set_flag", "R1": "1", "LIT": "#2", "IF": "Z"}
+        inst = BaseInst.from_dict(original)
+        assert isinstance(inst, ComInst)
+        assert inst.flag_val == "1"
+        assert inst.r1 is None
+        assert inst.to_dict() == original
+
+    def test_com_roundtrip_register_mode_and_reg_read(self):
+        original = {"CMD": "COM", "C_OP": "sync", "R1": "r0"}
+        inst = BaseInst.from_dict(original)
+        assert isinstance(inst, ComInst)
+        assert inst.reg_read == frozenset({"r0"})
+        assert inst.to_dict() == original
+
+    def test_com_rejects_invalid_cop(self):
+        with pytest.raises(ValueError, match="COM.C_OP"):
+            BaseInst.from_dict({"CMD": "COM", "C_OP": "bad"})
+
+    @pytest.mark.parametrize("cmd", ["PA", "PB"])
+    def test_custom_peripheral_roundtrip_and_reg_read(self, cmd: str):
+        original = {
+            "CMD": cmd,
+            "C_OP": "7",
+            "R1": "r0",
+            "R2": "r1",
+            "R3": "r2",
+            "R4": "r3",
+        }
+        inst = BaseInst.from_dict(original)
+        assert isinstance(inst, CustomPeripheralInst)
+        assert inst.reg_read == frozenset({"r0", "r1", "r2", "r3"})
+        assert inst.to_dict() == original
+
+    def test_custom_peripheral_rejects_invalid_cmd(self):
+        with pytest.raises(ValueError, match="PA/PB.CMD"):
+            CustomPeripheralInst.from_dict({"CMD": "PC", "C_OP": "1"})
+
+    def test_clear_roundtrip_reg_write_and_invalid_cop(self):
+        original = {"CMD": "CLEAR", "C_OP": "port"}
+        inst = BaseInst.from_dict(original)
+        assert isinstance(inst, ClearInst)
+        assert inst.reg_write == frozenset({"s2"})
+        assert inst.to_dict() == original
+        with pytest.raises(ValueError, match="CLEAR.C_OP"):
+            BaseInst.from_dict({"CMD": "CLEAR", "C_OP": "bad"})
 
 
 class TestConditionalJumpPattern:
