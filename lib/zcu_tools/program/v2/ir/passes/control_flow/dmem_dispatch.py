@@ -50,7 +50,7 @@ from __future__ import annotations
 from typing_extensions import Optional
 
 from ...hw_semantics import needs_big_jump
-from ...instructions import DmemReadInst, JumpInst, RegWriteInst
+from ...instructions import TestInst, DmemReadInst, JumpInst, RegWriteInst
 from ...labels import LabelRef
 from ...node import BasicBlockNode, BlockNode, IRDispatch, IRNode
 from ...operands import AluExpr, AluOp, DmemAddr, Immediate, Register, SrcKeyword
@@ -90,17 +90,17 @@ class DmemDispatchPass(AbsIRTreePass):
                             dst=s15,
                             src=SrcKeyword.LABEL,
                             label=LabelRef(last_label),
-                        )
+                        ),
+                        TestInst(op=op_guard, uf=True),
                     ],
-                    branch=JumpInst(addr=s15, if_cond="NS", op=op_guard, uf=True),
+                    branch=JumpInst(addr=s15, if_cond="NS"),
                 )
             )
         else:
             blocks.append(
                 BasicBlockNode(
-                    branch=JumpInst(
-                        label=LabelRef(last_label), if_cond="NS", op=op_guard, uf=True
-                    )
+                    insts=[TestInst(op=op_guard, uf=True)],
+                    branch=JumpInst(label=LabelRef(last_label), if_cond="NS"),
                 )
             )
 

@@ -36,25 +36,36 @@ def test_needs_big_jump_large_pmem_returns_true():
 
 def test_emit_cond_jump_small_pmem_single_inst(mock_prog):
     result = _emit_cond_jump(mock_prog, label="loop_end", if_cond="Z", op="r0 - #0")
-    assert len(result) == 1
-    inst = result[0]
-    assert isinstance(inst, AsmInst)
-    assert inst.inst["CMD"] == "JUMP"
-    assert inst.inst["IF"] == "Z"
-    assert inst.inst["LABEL"] == "loop_end"
-    assert "ADDR" not in inst.inst
+    assert len(result) == 2
+    inst_test = result[0]
+    assert isinstance(inst_test, AsmInst)
+    assert inst_test.inst["CMD"] == "TEST"
+    assert inst_test.inst["OP"] == "r0 - #0"
+
+    inst_jump = result[1]
+    assert isinstance(inst_jump, AsmInst)
+    assert inst_jump.inst["CMD"] == "JUMP"
+    assert inst_jump.inst["IF"] == "Z"
+    assert inst_jump.inst["LABEL"] == "loop_end"
+    assert "ADDR" not in inst_jump.inst
 
 
 def test_emit_cond_jump_large_pmem_two_insts(large_pmem_prog):
     result = _emit_cond_jump(
         large_pmem_prog, label="loop_end", if_cond="S", op="r0 - r1"
     )
-    assert len(result) == 2
+    assert len(result) == 3
     assert isinstance(result[0], WriteLabel)
     assert result[0].label == "loop_end"
+
     assert isinstance(result[1], AsmInst)
-    assert result[1].inst["ADDR"] == "s15"
-    assert result[1].inst["IF"] == "S"
+    assert result[1].inst["CMD"] == "TEST"
+    assert result[1].inst["OP"] == "r0 - r1"
+
+    assert isinstance(result[2], AsmInst)
+    assert result[2].inst["CMD"] == "JUMP"
+    assert result[2].inst["ADDR"] == "s15"
+    assert result[2].inst["IF"] == "S"
 
 
 # ---------------------------------------------------------------------------

@@ -83,7 +83,7 @@ from ...analysis import (
     estimate_flat_size,
 )
 from ...hw_semantics import needs_big_jump
-from ...instructions import BaseInst, JumpInst, LabelInst, RegWriteInst
+from ...instructions import TestInst, BaseInst, JumpInst, LabelInst, RegWriteInst
 from ...labels import Label, LabelRef, make_label
 from ...node import (
     BasicBlockNode,
@@ -409,13 +409,15 @@ class UnrollLoopPass(AbsIRTreePass):
                 insts=[
                     RegWriteInst(
                         dst=Register("s15"), src=SrcKeyword.LABEL, label=LabelRef(start)
-                    )
+                    ),
+                    TestInst(op=op_str, uf=True),
                 ],
-                branch=JumpInst(addr=Register("s15"), if_cond="S", op=op_str, uf=True),
+                branch=JumpInst(addr=Register("s15"), if_cond="S"),
             )
         else:
             back_bb = BasicBlockNode(
-                branch=JumpInst(label=LabelRef(start), if_cond="S", op=op_str, uf=True)
+                insts=[TestInst(op=op_str, uf=True)],
+                branch=JumpInst(label=LabelRef(start), if_cond="S"),
             )
         result.append(back_bb)
         result.append(BasicBlockNode(labels=[LabelInst(name=end)]))
@@ -532,24 +534,22 @@ class UnrollLoopPass(AbsIRTreePass):
                             dst=Register("s15"),
                             src=SrcKeyword.LABEL,
                             label=LabelRef(exit_label),
-                        )
+                        ),
+                        TestInst(op=AluExpr(n, AluOp.SUB, Immediate(0)), uf=True),
                     ],
                     branch=JumpInst(
                         addr=Register("s15"),
                         if_cond="Z",
-                        op=AluExpr(n, AluOp.SUB, Immediate(0)),
-                        uf=True,
                     ),
                 )
             )
         else:
             result.append(
                 BasicBlockNode(
+                    insts=[TestInst(op=AluExpr(n, AluOp.SUB, Immediate(0)), uf=True)],
                     branch=JumpInst(
                         label=LabelRef(exit_label),
                         if_cond="Z",
-                        op=AluExpr(n, AluOp.SUB, Immediate(0)),
-                        uf=True,
                     ),
                 )
             )
@@ -575,13 +575,12 @@ class UnrollLoopPass(AbsIRTreePass):
                             dst=Register("s15"),
                             src=SrcKeyword.LABEL,
                             label=LabelRef(entry_labels[0]),
-                        )
+                        ),
+                        TestInst(op=AluExpr(scratch, AluOp.SUB, Immediate(0)), uf=True),
                     ],
                     branch=JumpInst(
                         addr=Register("s15"),
                         if_cond="Z",
-                        op=AluExpr(scratch, AluOp.SUB, Immediate(0)),
-                        uf=True,
                     ),
                 )
             )
@@ -593,13 +592,12 @@ class UnrollLoopPass(AbsIRTreePass):
                             dst=scratch,
                             src=SrcKeyword.OP,
                             op=AluExpr(n, AluOp.AND, Immediate(k - 1)),
-                        )
+                        ),
+                        TestInst(op=AluExpr(scratch, AluOp.SUB, Immediate(0)), uf=True),
                     ],
                     branch=JumpInst(
                         label=LabelRef(entry_labels[0]),
                         if_cond="Z",
-                        op=AluExpr(scratch, AluOp.SUB, Immediate(0)),
-                        uf=True,
                     ),
                 )
             )
@@ -650,19 +648,17 @@ class UnrollLoopPass(AbsIRTreePass):
                             dst=Register("s15"),
                             src=SrcKeyword.LABEL,
                             label=LabelRef(entry_labels[0]),
-                        )
+                        ),
+                        TestInst(op=op_cmp, uf=True),
                     ],
-                    branch=JumpInst(
-                        addr=Register("s15"), if_cond="S", op=op_cmp, uf=True
-                    ),
+                    branch=JumpInst(addr=Register("s15"), if_cond="S"),
                 )
             )
         else:
             result.append(
                 BasicBlockNode(
-                    branch=JumpInst(
-                        label=LabelRef(entry_labels[0]), if_cond="S", op=op_cmp, uf=True
-                    )
+                    insts=[TestInst(op=op_cmp, uf=True)],
+                    branch=JumpInst(label=LabelRef(entry_labels[0]), if_cond="S"),
                 )
             )
 

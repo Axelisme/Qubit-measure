@@ -16,6 +16,7 @@ from .instructions import (
     LabelInst,
     MetaInst,
     RegWriteInst,
+    TestInst,
 )
 from .labels import Label, LabelRef, make_label
 from .node import BasicBlockNode, BlockNode, IRBranch, IRDispatch, IRLoop, IRNode
@@ -578,12 +579,12 @@ class IRParser:
                 RegWriteInst(
                     dst=Register("s15"), src=SrcKeyword.LABEL, label=LabelRef(start)
                 ),
-                JumpInst(addr=Register("s15"), if_cond="S", op=op_str, uf=True),
+                TestInst(op=op_str, uf=True),
+                JumpInst(addr=Register("s15"), if_cond="S"),
             ]
         else:
-            post.append(
-                JumpInst(label=LabelRef(start), if_cond="S", op=op_str, uf=True)
-            )
+            post.append(TestInst(op=op_str, uf=True))
+            post.append(JumpInst(label=LabelRef(start), if_cond="S"))
         post.append(LabelInst(name=end, can_remove=True))
         return [b for b in IRLexer().lex(post) if isinstance(b, BasicBlockNode)]
 
@@ -626,19 +627,17 @@ class IRParser:
                             dst=Register("s15"),
                             src=SrcKeyword.LABEL,
                             label=LabelRef(last_label),
-                        )
+                        ),
+                        TestInst(op=op_guard, uf=True),
                     ],
-                    branch=JumpInst(
-                        addr=Register("s15"), if_cond="NS", op=op_guard, uf=True
-                    ),
+                    branch=JumpInst(addr=Register("s15"), if_cond="NS"),
                 )
             )
         else:
             result.append(
                 BasicBlockNode(
-                    branch=JumpInst(
-                        label=LabelRef(last_label), if_cond="NS", op=op_guard, uf=True
-                    )
+                    insts=[TestInst(op=op_guard, uf=True)],
+                    branch=JumpInst(label=LabelRef(last_label), if_cond="NS"),
                 )
             )
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing_extensions import Optional
 
 from ...hw_semantics import needs_big_jump
-from ...instructions import JumpInst, RegWriteInst
+from ...instructions import TestInst, JumpInst, RegWriteInst
 from ...labels import LabelRef
 from ...node import BasicBlockNode, BlockNode, IRDispatch, IRNode
 from ...operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
@@ -56,9 +56,10 @@ class SimplifyDispatchPass(AbsIRTreePass):
                         dst=Register("s15"),
                         src=SrcKeyword.LABEL,
                         label=LabelRef(target1),
-                    )
+                    ),
+                    TestInst(op=op, uf=True),
                 ],
-                branch=JumpInst(addr=Register("s15"), if_cond="NZ", op=op, uf=True),
+                branch=JumpInst(addr=Register("s15"), if_cond="NZ"),
             )
             fallthrough_bb = BasicBlockNode(
                 insts=[
@@ -72,7 +73,8 @@ class SimplifyDispatchPass(AbsIRTreePass):
             )
         else:
             cond_bb = BasicBlockNode(
-                branch=JumpInst(label=LabelRef(target1), if_cond="NZ", op=op, uf=True)
+                insts=[TestInst(op=op, uf=True)],
+                branch=JumpInst(label=LabelRef(target1), if_cond="NZ"),
             )
             fallthrough_bb = BasicBlockNode(branch=JumpInst(label=LabelRef(target0)))
 

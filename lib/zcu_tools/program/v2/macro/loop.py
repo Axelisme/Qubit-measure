@@ -19,25 +19,32 @@ def _emit_cond_jump(
     if_cond: str,
     op: str,
 ) -> list[Macro]:
-    """Emit a condensed `JUMP -if(...) -op(...)` (single word) with big-jump fallback.
+    """Emit a TEST followed by a JUMP to properly evaluate flags.
 
-    On pmem_size > 2**11, lowers to `WriteLabel + JUMP IF=... ADDR=s15 OP=...`
-    so the same condensed-IF/OP semantics survive the s15 indirection. This
-    matches the IR layer's `_emit_label_jump` behavior.
+    On pmem_size > 2**11, lowers to `WriteLabel + TEST + JUMP ADDR=s15`
+    so the semantics survive the s15 indirection.
     """
     if needs_big_jump(prog.tproccfg.get("pmem_size")):
         return [
             WriteLabel(label=label),
             AsmInst(
-                inst={"CMD": "JUMP", "IF": if_cond, "OP": op, "ADDR": "s15", "UF": "1"},
+                inst={"CMD": "TEST", "OP": op, "UF": "1"},
+                addr_inc=1,
+            ),
+            AsmInst(
+                inst={"CMD": "JUMP", "IF": if_cond, "ADDR": "s15"},
                 addr_inc=1,
             ),
         ]
     return [
         AsmInst(
-            inst={"CMD": "JUMP", "IF": if_cond, "OP": op, "LABEL": label, "UF": "1"},
+            inst={"CMD": "TEST", "OP": op, "UF": "1"},
             addr_inc=1,
-        )
+        ),
+        AsmInst(
+            inst={"CMD": "JUMP", "IF": if_cond, "LABEL": label},
+            addr_inc=1,
+        ),
     ]
 
 

@@ -98,9 +98,10 @@ def test_structural_loop_roundtrip():
 
     # Note: Labels are extracted into a dictionary when creating binprog, but `emit()` outputs them as LabelInst dicts.
     cmds = [inst.get("CMD") for inst in opt_prog_list if "CMD" in inst]
+    expected_cmds.insert(3, "TEST")
     assert cmds == expected_cmds
-    assert cursor.final_p_addr == 4
-    assert cursor.final_line == 6
+    assert cursor.final_p_addr == 5
+    assert cursor.final_line == 7
 
 
 def test_nested_loop_unparse_parse_roundtrip():
@@ -181,7 +182,7 @@ def test_irloop_emit_uses_s15_jump_for_large_pmem():
     # Constant n: no guard. Body already contains counter += 1; then cond back-edge.
     # Big-pmem path: back-edge target loaded into s15, then JUMP s15.
     cmds = [inst.get("CMD") for inst in prog_list]
-    assert cmds == ["REG_WR", "NOP", "REG_WR", "REG_WR", "JUMP"]
+    assert cmds == ["REG_WR", "NOP", "REG_WR", "REG_WR", "TEST", "JUMP"]
 
     init = prog_list[0]
     assert init["DST"] == "r1"
@@ -197,11 +198,15 @@ def test_irloop_emit_uses_s15_jump_for_large_pmem():
     assert write_label["SRC"] == "label"
     assert write_label["LABEL"] == "big_start"
 
-    back_jump = prog_list[4]
+    test_inst = prog_list[4]
+    assert test_inst["CMD"] == "TEST"
+    assert test_inst["OP"] == "r1 - #5"
+    assert test_inst["UF"] == "1"
+
+    back_jump = prog_list[5]
     assert back_jump["CMD"] == "JUMP"
     assert back_jump["ADDR"] == "s15"
     assert back_jump["IF"] == "S"
-    assert back_jump["OP"] == "r1 - #5"
     assert "LABEL" not in back_jump
 
-    assert cursor.final_p_addr == 5
+    assert cursor.final_p_addr == 6

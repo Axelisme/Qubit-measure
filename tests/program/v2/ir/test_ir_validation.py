@@ -522,7 +522,7 @@ def test_v4_simplify_dispatch_k2_big_pmem_uses_indirect_jump():
 
     cond_bb = result.insts[0]
     assert isinstance(cond_bb, BasicBlockNode)
-    assert len(cond_bb.insts) == 1
+    assert len(cond_bb.insts) == 2
     wr1 = cond_bb.insts[0]
     assert isinstance(wr1, RegWriteInst)
     assert wr1.dst.name == "s15"

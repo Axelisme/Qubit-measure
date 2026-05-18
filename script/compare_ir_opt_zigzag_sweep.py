@@ -19,12 +19,11 @@ def build_zigzag_sweep_cfg(
 ) -> ze.twotone.ZigZagScanCfg:
     exp_cfg = {
         "modules": {
-            "reset": "reset_bath",
             "X90_pulse": "pi2_amp",
             "X180_pulse": "pi_amp",
             "readout": "readout_dpm",
         },
-        "sweep": {"gain": make_sweep(0.0, 1.0, 21)},
+        "sweep": {"gain": make_sweep(0.18, 0.26, 101)},
         "n_times": 10,
         "relax_delay": 0.5,
     }

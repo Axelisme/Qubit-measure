@@ -212,7 +212,7 @@ class MockQickSoc(QickConfig):
             for n in reads_per_shot
         ]
 
-        time.sleep(0.0001 * np.asarray(data).size)
+        time.sleep(0.00001 * np.asarray(data).size)
 
         self._poll_done = True
         return [(total_shots, (data, {}))]
