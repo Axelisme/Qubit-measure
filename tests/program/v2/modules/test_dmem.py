@@ -207,6 +207,20 @@ def test_large_value_max_16bits_gets_compressed():
     assert lv._is_compressed is True
     assert lv._bits_per_value == 16
     assert lv._values_per_word == 2
+    # Packed words that set bit 31 are stored as negative int32 (two's complement).
+    assert all(-(1 << 31) <= w <= (1 << 31) - 1 for w in lv._packed_values)
+
+
+def test_packed_words_fit_in_int32():
+    # Values that fill all 32 bits when packed must still be valid int32.
+    import numpy as np
+
+    values = [255] * _COMPRESS_MIN_VALUES  # 8-bit, vpw=4 → slot 3 at bit 24
+    lv = LoadValue("x", values, idx_reg="i", val_reg="v")
+    assert lv._is_compressed is True
+    # Must not raise OverflowError
+    arr = np.array(lv._packed_values, dtype=np.int32)
+    assert arr.dtype == np.int32
 
 
 def test_bits_needed_rejects_negative():

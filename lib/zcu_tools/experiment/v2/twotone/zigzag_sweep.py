@@ -86,7 +86,7 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
-        times = np.arange(0, cfg.n_times+1)
+        times = np.arange(0, cfg.n_times + 1)
 
         if cfg.sweep.freq is not None:
             x_key = "freq"

@@ -59,7 +59,7 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
     ) -> ZigZagResult:
         setup_devices(cfg, progress=True)
 
-        times = np.arange(0, cfg.n_times+1)
+        times = np.arange(0, cfg.n_times + 1)
         loop_n = list(2 * times if repeat_on == "X90_pulse" else times)
 
         def measure_fn(

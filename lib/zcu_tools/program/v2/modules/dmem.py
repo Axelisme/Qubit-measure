@@ -19,9 +19,11 @@ logger = logging.getLogger(__name__)
 # instructions emitted per access. Empirically, ~30 values is the break-even.
 _COMPRESS_MIN_VALUES = 30
 
-# tProc v2 dmem words are signed 32-bit; bit 31 must stay 0 so that values are
-# always read back as non-negative integers regardless of the read instruction's
-# sign-extension behaviour.
+# Individual (uncompressed) dmem values must be non-negative so that a direct
+# read_dmem into a register is always a valid non-negative integer regardless of
+# the instruction's sign-extension behaviour.  Packed words produced by the
+# compression path may legitimately set bit 31; the SR + AND extraction in run()
+# recovers the correct value in either arithmetic or logical shift mode.
 _INT32_MAX = (1 << 31) - 1
 
 SubModule: TypeAlias = Union[Module, list[Module]]
@@ -149,6 +151,12 @@ class LoadValue(Module):
             for slot, value in enumerate(chunk):
                 encoded = value & value_mask
                 word |= encoded << (slot * bits_per_value)
+            # Packed words may use all 32 bits (including bit 31).  Convert to
+            # the signed int32 two's-complement representation so that the value
+            # fits in np.int32 without overflow; the hardware bit pattern is
+            # identical and the SR + AND extraction in run() remains correct.
+            if word > _INT32_MAX:
+                word -= 1 << 32
             packed.append(word)
         return packed
 
