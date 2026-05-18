@@ -80,13 +80,15 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         length_sweep = cfg.sweep.length
 
         if isinstance(length_sweep, SweepCfg):
-            lengths = np.geomspace(
-                length_sweep.start, length_sweep.stop, length_sweep.expts
-            )
+            expected_t1 = 0.2 * length_sweep.stop
+            y0 = np.exp(-length_sweep.start / expected_t1)
+            yN = np.exp(-length_sweep.stop / expected_t1)
+            y_seq = np.linspace(y0, yN, length_sweep.expts, endpoint=True)
+            lengths = -expected_t1 * np.log(y_seq)
         else:
             lengths = np.asarray(length_sweep)
         length_cycles = np.asarray(
-            [int(soccfg.us2cycles(t)) for t in lengths], dtype=np.int64
+            [int(soccfg.us2cycles(t)) for t in lengths], dtype=np.int32
         )
         length_cycles = np.unique(length_cycles)
         lengths = np.asarray(
@@ -109,6 +111,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                         values=list(length_cycles),
                         idx_reg="length_idx",
                         val_reg="t1_delay_cycle",
+                        auto_compress=False,
                     ),
                     Reset("reset", modules.reset),
                     Pulse("pi_pulse", modules.pi_pulse),
