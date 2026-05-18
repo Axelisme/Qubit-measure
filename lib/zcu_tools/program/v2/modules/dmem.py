@@ -39,14 +39,13 @@ class LoadValue(Module):
     ) -> None:
         self.name = name
         self.values = [int(v) for v in values]
-        if len(self.values) == 0:
-            raise ValueError("LoadValue requires a non-empty values sequence")
         if any(v < 0 or v > _INT32_MAX for v in self.values):
             raise ValueError(
                 f"LoadValue values must be in [0, {_INT32_MAX}] (signed int32 positive range)"
             )
         self.use_existed = use_existed
         self.auto_compress = auto_compress
+        self._is_empty = len(self.values) == 0
 
         self.idx_reg = idx_reg
         self.val_reg = val_reg
@@ -64,6 +63,13 @@ class LoadValue(Module):
         self._plan_compression()
 
     def init(self, prog: ModularProgramV2) -> None:
+        if self._is_empty:
+            logger.debug(
+                "LoadValue.init: short-circuit empty values name='%s' (no dmem allocated)",
+                self.name,
+            )
+            return
+
         self.offset = prog.add_dmem(self._packed_values)
 
         if not self.use_existed:
@@ -84,6 +90,9 @@ class LoadValue(Module):
     def run(
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
+        if self._is_empty:
+            return t
+
         # addr_reg computes dmem address / shift amount; word_reg holds the
         # fetched packed word. addr_reg is reused for shift once word is loaded.
         temp_reg_num = 2 if self._is_compressed else 1

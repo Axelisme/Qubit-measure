@@ -18,14 +18,15 @@ from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     ComputedPulse,
+    LoadValue,
     ModularProgramV2,
     ProgramV2Cfg,
     PulseCfg,
     Readout,
     ReadoutCfg,
+    Repeat,
     Reset,
     ResetCfg,
-    ScanWith,
     SweepCfg,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
@@ -167,6 +168,33 @@ def rb_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(mean_signals).real
 
 
+def build_seed_program_tables(
+    total_clifford_seq: list[int],
+    acc_states: list[int],
+    depths: NDArray[np.int64],
+) -> tuple[list[int], list[int], list[int]]:
+    max_depth = int(np.max(depths))
+    rand_cliffords = [CLIFFORD_GROUP[ci] for ci in total_clifford_seq[:max_depth]]
+    rand_gate_seq = [int(gate) for gate in reduce_gate_seq(rand_cliffords)]
+
+    prefix_len_by_depth: list[int] = []
+    recovery_gate_by_depth: list[int] = []
+    for depth_i64 in depths:
+        depth = int(depth_i64)
+        prefix_cliffords = [CLIFFORD_GROUP[ci] for ci in total_clifford_seq[:depth]]
+        prefix_len_by_depth.append(len(reduce_gate_seq(prefix_cliffords)))
+
+        recovery_idx = RECOVERY_INDEX[acc_states[depth]]
+        recovery_seq = reduce_gate_seq([CLIFFORD_GROUP[recovery_idx]])
+        if len(recovery_seq) != 1:
+            raise ValueError(
+                "RB recovery Clifford must map to exactly one physical BasicGate"
+            )
+        recovery_gate_by_depth.append(int(recovery_seq[0]))
+
+    return rand_gate_seq, prefix_len_by_depth, recovery_gate_by_depth
+
+
 class RBModuleCfg(ConfigBase):
     reset: Optional[ResetCfg] = None
     I_pulse: Optional[PulseCfg] = None
@@ -198,9 +226,6 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
         cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
 
-        rounds = cfg.rounds
-        cfg.rounds = 1  # implement by task scan
-
         depths = sweep2array(cfg.sweep.depth, allow_array=True).astype(np.int64)
 
         max_depth = int(np.max(depths))
@@ -210,7 +235,7 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
             [child.entropy for child in ss.spawn(cfg.n_seeds)], dtype=np.int64
         )
 
-        prog_cahce: dict[tuple[int, int], ModularProgramV2] = {}
+        prog_cache: dict[int, ModularProgramV2] = {}
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, RBCfg],
@@ -220,10 +245,12 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
             modules = cfg.modules
 
             seed: int = ctx.env["seed"]
-            depth: int = ctx.env["depth"]
 
-            if (seed, depth) not in prog_cahce:
-                gate_seq = reduce_gate_seq(ctx.env["clifford_seq"])
+            if seed not in prog_cache:
+                rand_gate_seq: list[int] = ctx.env["rand_gate_seq"]
+                prefix_len_by_depth: list[int] = ctx.env["prefix_len_by_depth"]
+                recovery_gate_by_depth: list[int] = ctx.env["recovery_gate_by_depth"]
+                max_rand_len = max(prefix_len_by_depth, default=0)
 
                 Id_pulse = modules.I_pulse
                 X90_pulse = modules.X90_pulse
@@ -236,60 +263,68 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
                 if Id_pulse is None:
                     Id_pulse = X90_pulse.with_updates(gain=0.0)
 
-                prog_cahce[(seed, depth)] = ModularProgramV2(
+                gate_pulses = [
+                    Id_pulse,
+                    X90_pulse,
+                    X180_pulse,
+                    MX90_pulse,
+                    Y90_pulse,
+                    Y180_pulse,
+                    MY90_pulse,
+                ]
+
+                prog_cache[seed] = ModularProgramV2(
                     soccfg,
                     cfg,
                     modules=[
+                        LoadValue(
+                            "load_rand_len",
+                            values=prefix_len_by_depth,
+                            idx_reg="depth_idx",
+                            val_reg="rand_len",
+                        ),
+                        LoadValue(
+                            "load_recovery_gate",
+                            values=recovery_gate_by_depth,
+                            idx_reg="depth_idx",
+                            val_reg="recovery_gate",
+                        ),
                         Reset("reset", modules.reset),
-                        ScanWith("gate_idx", gate_seq, val_reg="gate_idx").add_content(
-                            ComputedPulse(
-                                "basic_gate",
-                                val_reg="gate_idx",
-                                pulses=[
-                                    Id_pulse,
-                                    X90_pulse,
-                                    X180_pulse,
-                                    MX90_pulse,
-                                    Y90_pulse,
-                                    Y180_pulse,
-                                    MY90_pulse,
-                                ],
-                            )
+                        Repeat(
+                            "rand_gate_idx", "rand_len", range_hint=(0, max_rand_len)
+                        ).add_content(
+                            [
+                                LoadValue(
+                                    "load_rand_gate",
+                                    values=rand_gate_seq,
+                                    idx_reg="rand_gate_idx",
+                                    val_reg="gate_idx",
+                                ),
+                                ComputedPulse(
+                                    "basic_gate",
+                                    val_reg="gate_idx",
+                                    pulses=gate_pulses,
+                                ),
+                            ]
+                        ),
+                        ComputedPulse(
+                            "recovery_gate",
+                            val_reg="recovery_gate",
+                            pulses=gate_pulses,
                         ),
                         Readout("readout", modules.readout),
                     ],
+                    sweep=[("depth_idx", len(depths))],
                 )
 
-            return prog_cahce[(seed, depth)].acquire(
+            return prog_cache[seed].acquire(
                 soc,
                 progress=False,
                 round_hook=update_hook,
                 **(acquire_kwargs or {}),
             )
 
-        def average_signals(
-            signals: list[list[list[NDArray[np.complex128]]]],
-        ) -> NDArray[np.complex128]:
-            _signals = np.asarray(signals)  # shape: (n_seeds, rounds, n_depths)
-            mean_signals = np.full(
-                (_signals.shape[0], _signals.shape[2]), np.nan, np.complex128
-            )  # (n_seeds, n_depths)
-            for i in range(_signals.shape[0]):
-                mask = np.any(np.isfinite(_signals[i]), axis=0)  # (n_depths, )
-                mean_signals[i, mask] = np.nanmean(_signals[i, :, mask], axis=1)
-            return mean_signals
-
         with LivePlot1D("Depth", "Signal") as viewer:
-
-            def update_seq_depth(di: int, ctx: TaskState, depth: int) -> None:
-                total_clifford_seq: list[int] = ctx.env["total_clifford_seq"]
-                acc_states: list[int] = ctx.env["acc_states"]
-
-                clifford_seq = total_clifford_seq[:depth]
-                clifford_seq.append(RECOVERY_INDEX[acc_states[depth]])
-
-                ctx.env["depth"] = depth
-                ctx.env["clifford_seq"] = [CLIFFORD_GROUP[ci] for ci in clifford_seq]
 
             def update_seq_seed(si: int, ctx: TaskState, entropy: int) -> None:
                 child = np.random.SeedSequence(entropy)
@@ -305,21 +340,28 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
                     cum_states.append(state)
 
                 ctx.env["seed"] = entropy
-                ctx.env["total_clifford_seq"] = clifford_idxs.tolist()
-                ctx.env["acc_states"] = cum_states
+                rand_gate_seq, prefix_len_by_depth, recovery_gate_by_depth = (
+                    build_seed_program_tables(
+                        clifford_idxs.tolist(), cum_states, depths
+                    )
+                )
+                ctx.env["rand_gate_seq"] = rand_gate_seq
+                ctx.env["prefix_len_by_depth"] = prefix_len_by_depth
+                ctx.env["recovery_gate_by_depth"] = recovery_gate_by_depth
 
             signals = run_task(
-                task=Task(measure_fn=measure_fn, pbar_n=1)
-                .scan("depth", depths.tolist(), before_each=update_seq_depth)
-                .repeat("rounds", rounds)
-                .scan("seed", entropys.tolist(), before_each=update_seq_seed),
+                task=Task(
+                    measure_fn=measure_fn,
+                    result_shape=(len(depths),),
+                    pbar_n=cfg.rounds,
+                ).scan("seed", entropys.tolist(), before_each=update_seq_seed),
                 init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     depths.astype(np.float64),
-                    rb_signal2real(average_signals(ctx.root_data)),
+                    rb_signal2real(np.asarray(ctx.root_data, dtype=np.complex128)),
                 ),
             )
-            signals2D = average_signals(signals)  # shape: (n_seeds, n_depths)
+            signals2D = np.asarray(signals, dtype=np.complex128)  # (n_seeds, n_depths)
 
         self.last_cfg = deepcopy(cfg)
         self.last_result = (entropys, depths, signals2D)

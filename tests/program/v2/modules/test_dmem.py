@@ -57,9 +57,18 @@ def test_auto_compress_off_keeps_values():
     assert lv._packed_values == values
 
 
-def test_empty_values_rejected():
-    with pytest.raises(ValueError):
-        LoadValue("x", [], idx_reg="i", val_reg="v")
+def test_empty_values_short_circuit():
+    lv = LoadValue("x", [], idx_reg="i", val_reg="v")
+    prog = _make_dmem_prog()
+
+    lv.init(prog)
+    out = lv.run(prog, t=1.25)
+
+    assert out == 1.25
+    prog.add_dmem.assert_not_called()
+    prog.read_dmem.assert_not_called()
+    prog.write_reg.assert_not_called()
+    prog.write_reg_op.assert_not_called()
 
 
 def test_bits_needed_unsigned_boundaries():

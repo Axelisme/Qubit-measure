@@ -118,6 +118,19 @@ def test_repeat_init_registers_counter_reg(mock_prog):
     mock_prog.add_reg.assert_called_with("lp")
 
 
+def test_repeat_init_zero_n_short_circuit(mock_prog):
+    child = _FixedDurationModule("c", 0.1)
+    from unittest.mock import MagicMock
+
+    child.init = MagicMock()
+    r = Repeat("lp", n=0)
+    r.add_content(child)
+    r.init(mock_prog)
+
+    mock_prog.add_reg.assert_not_called()
+    child.init.assert_not_called()
+
+
 def test_repeat_init_calls_submodule_init(mock_prog):
     child = _FixedDurationModule("c", 0.1)
     from unittest.mock import MagicMock
@@ -156,6 +169,17 @@ def test_repeat_run_returns_zero(mock_prog):
     r = Repeat("lp", n=2)
     out = r.run(mock_prog)
     assert out == 0.0
+
+
+def test_repeat_run_zero_n_short_circuits_loop_macros(mock_prog):
+    r = Repeat("lp", n=0)
+    out = r.run(mock_prog, t=0.25)
+
+    assert out == 0.0
+    mock_prog.open_inner_loop.assert_not_called()
+    mock_prog.close_inner_loop.assert_not_called()
+    mock_prog.delay.assert_called_once_with(t=0.25)
+    mock_prog.delay_auto.assert_called_once_with(t=0.0)
 
 
 def test_repeat_run_passes_range_hint(mock_prog):

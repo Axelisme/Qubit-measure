@@ -66,6 +66,10 @@ class Repeat(Module):
         return self
 
     def init(self, prog: ModularProgramV2) -> None:
+        if isinstance(self.n, int) and self.n == 0:
+            logger.debug("Repeat.init: skip zero-iteration loop name='%s'", self.name)
+            return
+
         prog.add_reg(self.counter_reg)
         for mod in self.sub_modules:
             mod.init(prog)
@@ -83,6 +87,12 @@ class Repeat(Module):
 
         prog.delay(t=t)
         prog.delay_auto(t=0.0)
+
+        if isinstance(self.n, int) and self.n == 0:
+            logger.debug(
+                "Repeat.run: short-circuit zero-iteration loop name='%s'", self.name
+            )
+            return 0.0
 
         prog.open_inner_loop(
             self.name, self.counter_reg, self.n, range_hint=self.range_hint
