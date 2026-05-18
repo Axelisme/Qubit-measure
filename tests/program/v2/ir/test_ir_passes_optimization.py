@@ -763,7 +763,7 @@ def test_pipeline_disable_opt_violation_raises():
     from zcu_tools.program.v2.ir.pipeline import (
         AbsChunkPass,
         ChunkList,
-        _run_chunk_passes,
+        _run_passes,
     )
 
     class WordCountChangingPass(AbsChunkPass):
@@ -784,7 +784,7 @@ def test_pipeline_disable_opt_violation_raises():
     chunks: ChunkList = [fixed_bb]
 
     with pytest.raises(ValueError, match="disable_opt"):
-        _run_chunk_passes([WordCountChangingPass()], chunks, ctx)
+        _run_passes([WordCountChangingPass()], chunks, ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -1011,34 +1011,6 @@ def test_dead_write_disable_opt_block_not_modified():
     assert isinstance(bb, BasicBlockNode)
     # Both writes must survive (disable_opt blocks are left untouched)
     assert len([i for i in bb.insts if isinstance(i, RegWriteInst)]) == 2
-
-
-# ---------------------------------------------------------------------------
-# LoopConditionMergePass — no-insts guard in _process_block (line 83)
-# ---------------------------------------------------------------------------
-
-
-def test_loop_condition_merge_no_insts_block_skipped():
-    """Block with empty insts: LoopConditionMergePass must skip (line 83)."""
-    from zcu_tools.program.v2.ir.passes.loop import LoopConditionMergePass
-
-    lbl = Label("start")
-    root = BlockNode(
-        insts=[
-            BasicBlockNode(
-                insts=[],
-                branch=JumpInst(label=LabelRef(lbl), if_cond="NZ"),
-            )
-        ]
-    )
-    out = _run_chunk_passes_on_root(root, [LoopConditionMergePass()])
-    bb = out.insts[0]
-    assert isinstance(bb, BasicBlockNode)
-    assert len(bb.insts) == 0
-    # Branch must be unchanged (no merge happened)
-    assert bb.branch is not None
-    assert isinstance(bb.branch, JumpInst)
-    assert bb.branch.wr is None
 
 
 # ---------------------------------------------------------------------------

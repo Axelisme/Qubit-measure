@@ -4,7 +4,7 @@ import logging
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Optional, Union, cast
+from typing import Optional, Sequence, Union, cast
 
 from .factory import IRLexer, IRParser
 from .instructions import BaseInst, Instruction, MetaInst, RegWriteInst
@@ -146,31 +146,12 @@ def _validate_fixed_block_words(
         )
 
 
-def _run_chunk_passes(
-    passes: list[AbsChunkPass], chunks: ChunkList, ctx: PipeLineContext
+def _run_passes(
+    passes: Sequence[Union[AbsChunkPass, AbsChunkListPass]],
+    chunks: ChunkList,
+    ctx: PipeLineContext,
 ) -> tuple[ChunkList, bool]:
-    changed = False
-    for chunk_pass in passes:
-        fixed_before = {
-            id(chunk): chunk.addr_size
-            for chunk in chunks
-            if isinstance(chunk, BasicBlockNode) and chunk.disable_opt
-        }
-        chunks, pass_changed = chunk_pass.process(chunks, ctx)
-        for chunk in chunks:
-            if not isinstance(chunk, BasicBlockNode):
-                continue
-            _validate_fixed_block_words(
-                chunk,
-                before_addr_size=fixed_before.get(id(chunk)),
-            )
-        changed |= pass_changed
-    return chunks, changed
-
-
-def _run_chunk_list_passes(
-    passes: list[AbsChunkListPass], chunks: ChunkList, ctx: PipeLineContext
-) -> tuple[ChunkList, bool]:
+    """Run a homogeneous list of chunk passes, validating disable_opt invariants."""
     changed = False
     for chunk_pass in passes:
         fixed_before = {
@@ -207,9 +188,9 @@ def _run_chunklist_opt(
     """
     max_iters = ctx.config.max_opt_iterations
     for _ in range(max_iters):
-        chunks, changed_chunk = _run_chunk_passes(passes, chunks, ctx)
-        chunks, changed_list = _run_chunk_list_passes(chunk_list_passes, chunks, ctx)
-        if not changed_chunk and not changed_list:
+        chunks, changed1 = _run_passes(passes, chunks, ctx)
+        chunks, changed2 = _run_passes(chunk_list_passes, chunks, ctx)
+        if not changed1 and not changed2:
             return chunks
     # Did not converge — identify the still-changing passes for debugging.
     stuck: list[str] = []
@@ -506,7 +487,6 @@ def make_default_pipeline(
         DeadWriteEliminationPass,
         DmemDispatchPass,
         IncRegMergePass,
-        LoopConditionMergePass,
         SimplifyDispatchPass,
         TimedMergePass,
         UnpackIRBranchPass,
@@ -526,7 +506,6 @@ def make_default_pipeline(
             IncRegMergePass(),
             TimedMergePass(),
             ZeroDelayDCEPass(),
-            LoopConditionMergePass(),
             DeadTestEliminationPass(),
             DeadWriteEliminationPass(),
         ],

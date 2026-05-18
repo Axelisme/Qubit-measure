@@ -480,39 +480,69 @@ def _apply_simplify_dispatch(node: IRNode, pmem: int = 512):
 
 
 def test_v4_simplify_dispatch_k2_produces_single_cond_jump():
-    """2-target IRDispatch must be replaced by a single BasicBlockNode with a
-    conditional jump to target_labels[1]; no dispatch table stubs produced."""
+    """2-target IRDispatch is replaced by a BlockNode with cond + fallthrough blocks.
+
+    Block 0: conditional jump to target_labels[1] (NZ).
+    Block 1: unconditional jump to target_labels[0].
+    """
     t0 = Label("entry_0")
     t1 = Label("entry_1")
     node = IRDispatch(name="d", value_reg=Register("r1"), target_labels=[t0, t1])
 
     result = _apply_simplify_dispatch(node, pmem=512)
 
-    assert isinstance(result, BasicBlockNode)
-    assert result.branch is not None
-    assert isinstance(result.branch, JumpInst)
-    assert result.branch.if_cond == "NZ"
-    assert result.branch.label == LabelRef(t1)
+    assert isinstance(result, BlockNode)
+    assert len(result.insts) == 2
+
+    cond_bb = result.insts[0]
+    assert isinstance(cond_bb, BasicBlockNode)
+    assert cond_bb.branch is not None
+    assert isinstance(cond_bb.branch, JumpInst)
+    assert cond_bb.branch.if_cond == "NZ"
+    assert cond_bb.branch.label == LabelRef(t1)
+
+    fallthrough_bb = result.insts[1]
+    assert isinstance(fallthrough_bb, BasicBlockNode)
+    assert fallthrough_bb.branch is not None
+    assert isinstance(fallthrough_bb.branch, JumpInst)
+    assert fallthrough_bb.branch.if_cond is None
+    assert fallthrough_bb.branch.label == LabelRef(t0)
 
 
 def test_v4_simplify_dispatch_k2_big_pmem_uses_indirect_jump():
-    """big-PMEM (pmem=4096): 2-target IRDispatch emits REG_WR s15 + indirect JUMP."""
+    """big-PMEM (pmem=4096): 2-target IRDispatch emits BlockNode with two indirect-jump blocks."""
     t0 = Label("entry_0")
     t1 = Label("entry_1")
     node = IRDispatch(name="d", value_reg=Register("r1"), target_labels=[t0, t1])
 
     result = _apply_simplify_dispatch(node, pmem=4096)
 
-    assert isinstance(result, BasicBlockNode)
-    assert len(result.insts) == 1
-    wr = result.insts[0]
-    assert isinstance(wr, RegWriteInst)
-    assert wr.dst.name == "s15"
-    assert wr.label == LabelRef(t1)
-    assert result.branch is not None
-    assert isinstance(result.branch, JumpInst)
-    assert result.branch.if_cond == "NZ"
-    assert result.branch.addr is not None
+    assert isinstance(result, BlockNode)
+    assert len(result.insts) == 2
+
+    cond_bb = result.insts[0]
+    assert isinstance(cond_bb, BasicBlockNode)
+    assert len(cond_bb.insts) == 1
+    wr1 = cond_bb.insts[0]
+    assert isinstance(wr1, RegWriteInst)
+    assert wr1.dst.name == "s15"
+    assert wr1.label == LabelRef(t1)
+    assert cond_bb.branch is not None
+    assert isinstance(cond_bb.branch, JumpInst)
+    assert cond_bb.branch.if_cond == "NZ"
+    assert cond_bb.branch.addr is not None
+
+    fallthrough_bb = result.insts[1]
+    assert isinstance(fallthrough_bb, BasicBlockNode)
+    assert len(fallthrough_bb.insts) == 1
+    wr0 = fallthrough_bb.insts[0]
+    assert isinstance(wr0, RegWriteInst)
+    assert wr0.dst.name == "s15"
+    assert wr0.label == LabelRef(t0)
+    assert fallthrough_bb.branch is not None
+    assert isinstance(fallthrough_bb.branch, JumpInst)
+    assert fallthrough_bb.branch.if_cond is None
+    assert fallthrough_bb.branch.addr is not None
 
 
 def test_v4_simplify_dispatch_k_gt2_unchanged():

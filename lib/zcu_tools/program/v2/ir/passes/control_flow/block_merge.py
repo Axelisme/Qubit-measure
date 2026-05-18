@@ -63,10 +63,10 @@ class BlockMergePass(AbsChunkListPass):
     def process(
         self, chunks: ChunkList, ctx: PipeLineContext
     ) -> tuple[ChunkList, bool]:
-        referenced = collect_referenced_labels(chunks)
         changed_any = False
         changed = True
         while changed:
+            referenced = collect_referenced_labels(chunks)
             changed = self._merge_pass(chunks, referenced)
             changed_any |= changed
         return chunks, changed_any

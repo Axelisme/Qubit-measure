@@ -91,7 +91,9 @@ def test_dmem_table_populated_for_const_candidates():
         ),
         ComputedPulse("gate", val_reg="gate_idx", pulses=pulses),
     ]
-    prog = ModularProgramV2(soccfg, cfg, modules=modules, sweep=[("idx_loop", n_pulses)])
+    prog = ModularProgramV2(
+        soccfg, cfg, modules=modules, sweep=[("idx_loop", n_pulses)]
+    )
     assert prog.binprog is not None
 
     # ComputedPulse.dmem_offset is the start of its table in the shared dmem buffer.
