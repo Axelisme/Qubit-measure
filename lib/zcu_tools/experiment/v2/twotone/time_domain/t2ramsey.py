@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import warnings as warn
+from copy import deepcopy
 
 import matplotlib.pyplot as plt
 import numpy as np

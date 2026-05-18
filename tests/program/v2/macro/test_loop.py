@@ -1,34 +1,32 @@
-"""Tests for macro/loop.py: _needs_big_jump, _emit_cond_jump, OpenInnerLoop, CloseInnerLoop."""
+"""Tests for macro/loop.py: _emit_cond_jump, OpenInnerLoop, CloseInnerLoop."""
 
 from __future__ import annotations
 
 from qick.asm_v2 import AsmInst, Label, WriteLabel, WriteReg
+from zcu_tools.program.v2.ir.dispatch import needs_big_jump
 from zcu_tools.program.v2.macro.loop import (
     CloseInnerLoop,
     OpenInnerLoop,
     _emit_cond_jump,
-    _needs_big_jump,
 )
 from zcu_tools.program.v2.macro.meta import MetaMacro
 from zcu_tools.program.v2.macro.write_reg import WriteRegOp
 
 # ---------------------------------------------------------------------------
-# _needs_big_jump
+# needs_big_jump (centralised in ir.dispatch)
 # ---------------------------------------------------------------------------
 
 
-def test_needs_big_jump_small_pmem_returns_false(mock_prog):
-    mock_prog.tproccfg = {"pmem_size": 512}
-    assert _needs_big_jump(mock_prog) is False
+def test_needs_big_jump_small_pmem_returns_false():
+    assert needs_big_jump(512) is False
 
 
-def test_needs_big_jump_boundary_2048_returns_false(mock_prog):
-    mock_prog.tproccfg = {"pmem_size": 2048}
-    assert _needs_big_jump(mock_prog) is False
+def test_needs_big_jump_boundary_2048_returns_false():
+    assert needs_big_jump(2048) is False
 
 
-def test_needs_big_jump_large_pmem_returns_true(large_pmem_prog):
-    assert _needs_big_jump(large_pmem_prog) is True
+def test_needs_big_jump_large_pmem_returns_true():
+    assert needs_big_jump(4096) is True
 
 
 # ---------------------------------------------------------------------------

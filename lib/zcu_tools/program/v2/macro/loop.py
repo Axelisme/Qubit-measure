@@ -3,16 +3,13 @@ from __future__ import annotations
 import logging
 from typing import Union
 
-from qick.asm_v2 import AcquireProgramV2, AsmInst, Label, Macro, WriteLabel, WriteReg
+from qick.asm_v2 import AsmInst, Label, Macro, WriteLabel, WriteReg
 
+from ..ir.dispatch import needs_big_jump
 from .meta import MetaMacro
 from .write_reg import WriteRegOp, format_alu_op
 
 logger = logging.getLogger(__name__)
-
-
-def _needs_big_jump(prog: AcquireProgramV2) -> bool:
-    return prog.tproccfg["pmem_size"] > 2**11
 
 
 def _emit_cond_jump(
@@ -28,7 +25,7 @@ def _emit_cond_jump(
     so the same condensed-IF/OP semantics survive the s15 indirection. This
     matches the IR layer's `_emit_label_jump` behavior.
     """
-    if _needs_big_jump(prog):
+    if needs_big_jump(prog.tproccfg.get("pmem_size")):
         return [
             WriteLabel(label=label),
             AsmInst(

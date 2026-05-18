@@ -34,9 +34,20 @@ QICK Hardware Notes
   to ``TEST s11 - #(T-10)``), not an offset from the s14 reference.  Folding a
   ``TIME inc_ref`` delta into it would change the wait target time.  ``WaitInst``
   is therefore treated as a flush barrier.
-- Transparent instructions (pending is NOT flushed): ``PortWriteInst``,
-  ``DportWriteInst``, ``DmemReadInst``, ``DmemWriteInst``, ``WmemWriteInst``,
-  and ``RegWriteInst`` whose ``dst`` is not a system register (``sN``).
+- Mostly-transparent instructions: ``PortWriteInst``, ``DportWriteInst``,
+  ``DmemReadInst``, ``DmemWriteInst``, ``WmemWriteInst``, and ``RegWriteInst``
+  whose ``dst`` is not a system register (``sN``).  These pass through
+  *without* flushing *unless* they carry an explicit ``@T`` (``TimeOffset``)
+  field or read/write the time-base register (``TIMED_BASE_REG = s14``).
+  Specifically:
+
+  - With ``@T``: the ``TimeOffset`` absorbs ``pending_lit`` (``@T += delta``);
+    pending is *not* cleared so the hardware clock still advances at block end.
+  - Without ``@T``, reading ``TIMED_BASE_REG``: pending is flushed first
+    because the instruction would observe a stale reference value.
+  - Without ``@T``, not reading ``TIMED_BASE_REG``: truly transparent; pending
+    is unchanged.
+
   Any other instruction flushes pending before it.
 
 Decision Notes

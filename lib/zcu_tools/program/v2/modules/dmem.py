@@ -15,6 +15,10 @@ from .control import Repeat
 
 logger = logging.getLogger(__name__)
 
+# Packing pays off only when the dmem savings outweigh the extra shift/mask
+# instructions emitted per access. Empirically, ~30 values is the break-even.
+_COMPRESS_MIN_VALUES = 30
+
 SubModule: TypeAlias = Union[Module, list[Module]]
 
 
@@ -39,8 +43,6 @@ class LoadValue(Module):
 
         self.idx_reg = idx_reg
         self.val_reg = val_reg
-        self.addr_reg = ""
-        self.word_reg = ""
         self.offset = 0
 
         self._packed_values: list[int] = list(self.values)
@@ -107,7 +109,7 @@ class LoadValue(Module):
             prog.write_reg_op(shift_reg, self.idx_reg, "AND", self._slot_mask)
             if self._bits_shift > 0:
                 prog.write_reg_op(shift_reg, shift_reg, "SL", self._bits_shift)
-            prog.write_reg_op(self.val_reg, word_reg, "ASR", shift_reg)
+            prog.write_reg_op(self.val_reg, word_reg, "SR", shift_reg)
 
             prog.write_reg_op(self.val_reg, self.val_reg, "AND", self._value_mask)
 
@@ -135,7 +137,7 @@ class LoadValue(Module):
         return packed
 
     def _plan_compression(self) -> None:
-        if not self.auto_compress or len(self.values) < 30:
+        if not self.auto_compress or len(self.values) < _COMPRESS_MIN_VALUES:
             return
 
         max_value = max(self.values)
