@@ -122,7 +122,22 @@ RECOVERY_INDEX = (9, 14, 21, 19, 0, 6)
 # fmt: on
 
 
-def reduce_gate_seq(seq: list[CliffordDecomp]) -> list[BasicGate]:
+def rb_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    mask = np.any(np.isfinite(signals), axis=0)  # (depths, )
+    mean_signals = np.full(
+        (signals.shape[1],), np.nan, dtype=np.complex128
+    )  # (depths,)
+    mean_signals[mask] = np.nanmean(signals[..., mask], axis=0)
+    return rotate2real(mean_signals).real
+
+
+def build_seed_program_tables(
+    total_clifford_seq: list[int],
+    acc_states: list[int],
+    depths: NDArray[np.int64],
+) -> tuple[list[int], list[int], list[int]]:
+    max_depth = int(np.max(depths))
+    
     phase_axis: int = 0
 
     def convert_gate(gate: GateName) -> Optional[BasicGate]:
@@ -149,48 +164,39 @@ def reduce_gate_seq(seq: list[CliffordDecomp]) -> list[BasicGate]:
 
         return None
 
-    reduced_seq: list[BasicGate] = []
-    for cf_group in seq:
-        for gate in cf_group:
-            basic_gate = convert_gate(gate)
+    rand_gate_seq: list[int] = []
+    prefix_len_all: list[int] = [0] * (max_depth + 1)
+    recovery_gate_all: list[int] = [0] * (max_depth + 1)
+    
+    for d in range(max_depth + 1):
+        prefix_len_all[d] = len(rand_gate_seq)
+        
+        recovery_idx = RECOVERY_INDEX[acc_states[d]]
+        saved_phase = phase_axis
+        recovery_gate = None
+        for r_gate in CLIFFORD_GROUP[recovery_idx]:
+            basic_gate = convert_gate(r_gate)
             if basic_gate is not None:
-                reduced_seq.append(basic_gate)
-
-    return reduced_seq
-
-
-def rb_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    mask = np.any(np.isfinite(signals), axis=0)  # (depths, )
-    mean_signals = np.full(
-        (signals.shape[1],), np.nan, dtype=np.complex128
-    )  # (depths,)
-    mean_signals[mask] = np.nanmean(signals[..., mask], axis=0)
-    return rotate2real(mean_signals).real
-
-
-def build_seed_program_tables(
-    total_clifford_seq: list[int],
-    acc_states: list[int],
-    depths: NDArray[np.int64],
-) -> tuple[list[int], list[int], list[int]]:
-    max_depth = int(np.max(depths))
-    rand_cliffords = [CLIFFORD_GROUP[ci] for ci in total_clifford_seq[:max_depth]]
-    rand_gate_seq = [int(gate) for gate in reduce_gate_seq(rand_cliffords)]
+                if recovery_gate is not None:
+                    raise ValueError("RB recovery Clifford must map to exactly one physical BasicGate")
+                recovery_gate = basic_gate
+        assert recovery_gate is not None
+        recovery_gate_all[d] = int(recovery_gate)
+        phase_axis = saved_phase
+        
+        if d < max_depth:
+            ci = total_clifford_seq[d]
+            for gate in CLIFFORD_GROUP[ci]:
+                basic_gate = convert_gate(gate)
+                if basic_gate is not None:
+                    rand_gate_seq.append(int(basic_gate))
 
     prefix_len_by_depth: list[int] = []
     recovery_gate_by_depth: list[int] = []
     for depth_i64 in depths:
-        depth = int(depth_i64)
-        prefix_cliffords = [CLIFFORD_GROUP[ci] for ci in total_clifford_seq[:depth]]
-        prefix_len_by_depth.append(len(reduce_gate_seq(prefix_cliffords)))
-
-        recovery_idx = RECOVERY_INDEX[acc_states[depth]]
-        recovery_seq = reduce_gate_seq([CLIFFORD_GROUP[recovery_idx]])
-        if len(recovery_seq) != 1:
-            raise ValueError(
-                "RB recovery Clifford must map to exactly one physical BasicGate"
-            )
-        recovery_gate_by_depth.append(int(recovery_seq[0]))
+        d = int(depth_i64)
+        prefix_len_by_depth.append(prefix_len_all[d])
+        recovery_gate_by_depth.append(recovery_gate_all[d])
 
     return rand_gate_seq, prefix_len_by_depth, recovery_gate_by_depth
 

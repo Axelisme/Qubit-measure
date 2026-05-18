@@ -15,6 +15,29 @@ def _simulate_acc_states(total_clifford_seq: list[int]) -> list[int]:
     return acc_states
 
 
+def _reference_reduce_gate_seq(seq: list[tuple[str, ...]]) -> list[int]:
+    phase_axis = 0
+    axis_map = {"Z90": 3, "Z180": 2, "-Z90": 1}
+    gate_map = {
+        "Id":   (rb.BasicGate.Id,   rb.BasicGate.Id,   rb.BasicGate.Id,   rb.BasicGate.Id),
+        "X90":  (rb.BasicGate.X90,  rb.BasicGate.Y90,  rb.BasicGate.MX90, rb.BasicGate.MY90),
+        "X180": (rb.BasicGate.X180, rb.BasicGate.Y180, rb.BasicGate.X180, rb.BasicGate.Y180),
+        "-X90": (rb.BasicGate.MX90, rb.BasicGate.MY90, rb.BasicGate.X90,  rb.BasicGate.Y90),
+        "Y90":  (rb.BasicGate.Y90,  rb.BasicGate.MX90, rb.BasicGate.MY90, rb.BasicGate.X90),
+        "Y180": (rb.BasicGate.Y180, rb.BasicGate.X180, rb.BasicGate.Y180, rb.BasicGate.X180),
+        "-Y90": (rb.BasicGate.MY90, rb.BasicGate.X90,  rb.BasicGate.Y90,  rb.BasicGate.MX90),
+    }
+    
+    reduced_seq = []
+    for group in seq:
+        for gate in group:
+            if gate in gate_map:
+                reduced_seq.append(int(gate_map[gate][phase_axis]))
+            else:
+                phase_axis = (phase_axis + axis_map[gate]) % 4
+    return reduced_seq
+
+
 def test_build_seed_program_tables_matches_reference_construction() -> None:
     total_clifford_seq = [21, 6, 14, 23, 10]
     acc_states = _simulate_acc_states(total_clifford_seq)
@@ -28,14 +51,14 @@ def test_build_seed_program_tables_matches_reference_construction() -> None:
         )
     )
 
-    expected_rand = rb.reduce_gate_seq(
+    expected_rand = _reference_reduce_gate_seq(
         [rb.CLIFFORD_GROUP[ci] for ci in total_clifford_seq[: int(np.max(depths))]]
     )
-    assert rand_gate_seq == [int(g) for g in expected_rand]
+    assert rand_gate_seq == expected_rand
 
     expected_prefix = [
         len(
-            rb.reduce_gate_seq(
+            _reference_reduce_gate_seq(
                 [rb.CLIFFORD_GROUP[ci] for ci in total_clifford_seq[:depth]]
             )
         )
@@ -45,10 +68,12 @@ def test_build_seed_program_tables_matches_reference_construction() -> None:
 
     expected_recovery: list[int] = []
     for depth in depths.tolist():
+        prefix_cliffords = [rb.CLIFFORD_GROUP[ci] for ci in total_clifford_seq[:depth]]
         recovery_idx = rb.RECOVERY_INDEX[acc_states[depth]]
-        recovery_seq = rb.reduce_gate_seq([rb.CLIFFORD_GROUP[recovery_idx]])
-        assert len(recovery_seq) == 1
-        expected_recovery.append(int(recovery_seq[0]))
+        # Recovery gate inherits phase from prefix
+        full_seq = prefix_cliffords + [rb.CLIFFORD_GROUP[recovery_idx]]
+        full_reduced = _reference_reduce_gate_seq(full_seq)
+        expected_recovery.append(full_reduced[-1])
     assert recovery_gate_by_depth == expected_recovery
 
 
