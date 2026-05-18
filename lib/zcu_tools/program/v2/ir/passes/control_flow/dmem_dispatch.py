@@ -92,14 +92,14 @@ class DmemDispatchPass(AbsIRTreePass):
                             label=LabelRef(last_label),
                         )
                     ],
-                    branch=JumpInst(addr=s15, if_cond="NS", op=op_guard),
+                    branch=JumpInst(addr=s15, if_cond="NS", op=op_guard, uf=True),
                 )
             )
         else:
             blocks.append(
                 BasicBlockNode(
                     branch=JumpInst(
-                        label=LabelRef(last_label), if_cond="NS", op=op_guard
+                        label=LabelRef(last_label), if_cond="NS", op=op_guard, uf=True
                     )
                 )
             )

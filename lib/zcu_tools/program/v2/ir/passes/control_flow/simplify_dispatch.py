@@ -58,7 +58,7 @@ class SimplifyDispatchPass(AbsIRTreePass):
                         label=LabelRef(target1),
                     )
                 ],
-                branch=JumpInst(addr=Register("s15"), if_cond="NZ", op=op),
+                branch=JumpInst(addr=Register("s15"), if_cond="NZ", op=op, uf=True),
             )
             fallthrough_bb = BasicBlockNode(
                 insts=[
@@ -72,7 +72,7 @@ class SimplifyDispatchPass(AbsIRTreePass):
             )
         else:
             cond_bb = BasicBlockNode(
-                branch=JumpInst(label=LabelRef(target1), if_cond="NZ", op=op)
+                branch=JumpInst(label=LabelRef(target1), if_cond="NZ", op=op, uf=True)
             )
             fallthrough_bb = BasicBlockNode(branch=JumpInst(label=LabelRef(target0)))
 

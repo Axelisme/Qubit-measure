@@ -628,14 +628,16 @@ class IRParser:
                             label=LabelRef(last_label),
                         )
                     ],
-                    branch=JumpInst(addr=Register("s15"), if_cond="NS", op=op_guard),
+                    branch=JumpInst(
+                        addr=Register("s15"), if_cond="NS", op=op_guard, uf=True
+                    ),
                 )
             )
         else:
             result.append(
                 BasicBlockNode(
                     branch=JumpInst(
-                        label=LabelRef(last_label), if_cond="NS", op=op_guard
+                        label=LabelRef(last_label), if_cond="NS", op=op_guard, uf=True
                     )
                 )
             )
