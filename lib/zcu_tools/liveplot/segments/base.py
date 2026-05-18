@@ -101,6 +101,8 @@ class BaseSegmentLivePlot(AbsLivePlot):
             for ax, segment in zip(ax_row, seg_row):
                 segment.init_ax(ax)
 
+        self.refresh()
+
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
