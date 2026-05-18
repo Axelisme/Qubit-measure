@@ -27,7 +27,7 @@ class ComputedPulse(Module):
 
         self.ref_cfg = raw_cfgs[0]
 
-        if any([cfg.ch != self.ref_cfg.ch for cfg in raw_cfgs]):
+        if any(cfg.ch != self.ref_cfg.ch for cfg in raw_cfgs):
             raise ValueError("All candidate pulses must have the same channel")
 
         if any(cfg.pre_delay != self.ref_cfg.pre_delay for cfg in raw_cfgs):
@@ -113,11 +113,11 @@ class ComputedPulse(Module):
 
     def total_length(self, prog: ModularProgramV2) -> float:
         lengths = [pulse.total_length(prog) for pulse in self.pulse_modules]
-        if any([isinstance(length, QickParam) for length in lengths]):
+        if any(isinstance(length, QickParam) for length in lengths):
             raise ValueError(
                 "ComputedPulse total length cannot be determined at compile time"
             )
-        return max([float(length) for length in lengths])
+        return max(float(length) for length in lengths)
 
     def allow_rerun(self) -> bool:
         return True

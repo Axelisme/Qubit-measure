@@ -19,6 +19,11 @@ logger = logging.getLogger(__name__)
 # instructions emitted per access. Empirically, ~30 values is the break-even.
 _COMPRESS_MIN_VALUES = 30
 
+# tProc v2 dmem words are signed 32-bit; bit 31 must stay 0 so that values are
+# always read back as non-negative integers regardless of the read instruction's
+# sign-extension behaviour.
+_INT32_MAX = (1 << 31) - 1
+
 SubModule: TypeAlias = Union[Module, list[Module]]
 
 
@@ -36,8 +41,10 @@ class LoadValue(Module):
         self.values = [int(v) for v in values]
         if len(self.values) == 0:
             raise ValueError("LoadValue requires a non-empty values sequence")
-        if any(v < 0 for v in self.values):
-            raise ValueError("LoadValue values must be non-negative integers")
+        if any(v < 0 or v > _INT32_MAX for v in self.values):
+            raise ValueError(
+                f"LoadValue values must be in [0, {_INT32_MAX}] (signed int32 positive range)"
+            )
         self.use_existed = use_existed
         self.auto_compress = auto_compress
 
@@ -148,8 +155,6 @@ class LoadValue(Module):
         # packing density: values_per_word = pow2_floor(32 // bits) already
         # collapses non-pow2 bits to the same value as the next pow2 above.
         bits = 1 if bits <= 1 else 1 << (bits - 1).bit_length()
-        if bits > 32:
-            return
 
         values_per_word = 32 // bits
         if values_per_word < 2:

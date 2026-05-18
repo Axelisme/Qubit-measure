@@ -184,3 +184,23 @@ def test_branch_large_pmem_emits_extra_write_reg_op(mock_prog):
 def test_branch_requires_at_least_two_branches():
     with pytest.raises(ValueError, match="at least 2"):
         Branch("sel", [_FixedDurationModule("b0", 0.1)])
+
+
+# ---------------------------------------------------------------------------
+# Branch — init delegates to sub-module init
+# ---------------------------------------------------------------------------
+
+
+def test_branch_init_calls_submodule_init(mock_prog):
+    from unittest.mock import MagicMock
+
+    child0 = _FixedDurationModule("b0", 0.1)
+    child1 = _FixedDurationModule("b1", 0.2)
+    child0.init = MagicMock()
+    child1.init = MagicMock()
+
+    b = Branch("sel", [child0], [child1])
+    b.init(mock_prog)
+
+    child0.init.assert_called_once_with(mock_prog)
+    child1.init.assert_called_once_with(mock_prog)

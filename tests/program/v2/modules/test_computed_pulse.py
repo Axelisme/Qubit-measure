@@ -241,3 +241,46 @@ def test_different_pre_delay_rejected():
     pulses = [_const_pulse(pre_delay=0.0), _const_pulse(pre_delay=0.1)]
     with pytest.raises(ValueError, match="pre_delay"):
         ComputedPulse("gate", val_reg="gate_idx", pulses=pulses)
+
+
+def test_different_channel_rejected():
+    from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+
+    p0 = PulseCfg(
+        waveform=ConstWaveformCfg(length=0.1),
+        ch=0,
+        nqz=1,
+        freq=GEN_FREQ,
+        gain=GEN_GAIN,
+    )
+    p1 = PulseCfg(
+        waveform=ConstWaveformCfg(length=0.1),
+        ch=1,
+        nqz=1,
+        freq=GEN_FREQ,
+        gain=GEN_GAIN,
+    )
+    with pytest.raises(ValueError, match="channel"):
+        ComputedPulse("gate", val_reg="gate_idx", pulses=[p0, p1])
+
+
+def test_allow_rerun_returns_true():
+    pulses = [_const_pulse(gain=0.2), _const_pulse(gain=0.5)]
+    cp = ComputedPulse("gate", val_reg="gate_idx", pulses=pulses)
+    assert cp.allow_rerun() is True
+
+
+def test_total_length_qickparam_raises():
+    from unittest.mock import MagicMock
+
+    from qick.asm_v2 import QickParam
+
+    pulses = [_const_pulse(gain=0.2), _const_pulse(gain=0.5)]
+    cp = ComputedPulse("gate", val_reg="gate_idx", pulses=pulses)
+
+    mock_prog = MagicMock()
+    cp.pulse_modules[0].total_length = MagicMock(return_value=QickParam(start=0.1))
+    cp.pulse_modules[1].total_length = MagicMock(return_value=0.1)
+
+    with pytest.raises(ValueError, match="compile time"):
+        cp.total_length(mock_prog)

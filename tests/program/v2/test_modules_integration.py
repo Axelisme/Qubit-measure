@@ -382,7 +382,7 @@ class TestDmemIntegration:
         assert lv._is_compressed
 
     def test_load_value_negative_rejected(self):
-        with pytest.raises(ValueError, match="non-negative"):
+        with pytest.raises(ValueError, match=r"\[0,"):
             LoadValue("lv", [-1, 0, 1], idx_reg="myloop", val_reg="myval")
 
     def test_compile_datamem_not_none(self):

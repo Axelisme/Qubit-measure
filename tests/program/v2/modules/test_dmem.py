@@ -2,7 +2,7 @@ from contextlib import contextmanager
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.program.v2.modules.dmem import LoadValue, ScanWith
+from zcu_tools.program.v2.modules.dmem import _COMPRESS_MIN_VALUES, LoadValue, ScanWith
 
 
 def _make_dmem_prog(temp_regs=("r10", "r11")):
@@ -36,8 +36,18 @@ def test_large_small_range_gets_compressed():
 
 
 def test_negative_values_rejected():
-    with pytest.raises(ValueError, match="non-negative"):
+    with pytest.raises(ValueError, match=r"\[0,"):
         LoadValue("x", [1, -1, 2], idx_reg="i", val_reg="v")
+
+
+def test_value_exceeding_int32_max_rejected():
+    with pytest.raises(ValueError, match=r"\[0,"):
+        LoadValue("x", [0, 2**31], idx_reg="i", val_reg="v")
+
+
+def test_int32_max_value_accepted():
+    lv = LoadValue("x", [2**31 - 1], idx_reg="i", val_reg="v")
+    assert lv.values == [2**31 - 1]
 
 
 def test_auto_compress_off_keeps_values():
@@ -167,3 +177,29 @@ def test_scan_with_add_content_delegates_to_repeat():
     # LoadValue is first, child is appended after it
     assert child in s.repeat_mod.sub_modules
     assert len(s.repeat_mod.sub_modules) == 2
+
+
+# ---------------------------------------------------------------------------
+# _plan_compression — edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_large_value_max_17bits_not_compressed():
+    # max value = 65536 (17-bit) → bits rounds to 32 → values_per_word = 1 < 2 → no compression
+    values = [65536] * _COMPRESS_MIN_VALUES
+    lv = LoadValue("x", values, idx_reg="i", val_reg="v")
+    assert lv._is_compressed is False
+
+
+def test_large_value_max_16bits_gets_compressed():
+    # max value = 65535 (16-bit) → bits = 16 → values_per_word = 2 → compressed
+    values = [65535] * _COMPRESS_MIN_VALUES
+    lv = LoadValue("x", values, idx_reg="i", val_reg="v")
+    assert lv._is_compressed is True
+    assert lv._bits_per_value == 16
+    assert lv._values_per_word == 2
+
+
+def test_bits_needed_rejects_negative():
+    with pytest.raises(ValueError, match="non-negative"):
+        LoadValue._bits_needed(-1)
