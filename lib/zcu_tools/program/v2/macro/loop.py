@@ -29,13 +29,13 @@ def _emit_cond_jump(
         return [
             WriteLabel(label=label),
             AsmInst(
-                inst={"CMD": "JUMP", "IF": if_cond, "OP": op, "ADDR": "s15"},
+                inst={"CMD": "JUMP", "IF": if_cond, "OP": op, "ADDR": "s15", "UF": "1"},
                 addr_inc=1,
             ),
         ]
     return [
         AsmInst(
-            inst={"CMD": "JUMP", "IF": if_cond, "OP": op, "LABEL": label},
+            inst={"CMD": "JUMP", "IF": if_cond, "OP": op, "LABEL": label, "UF": "1"},
             addr_inc=1,
         )
     ]

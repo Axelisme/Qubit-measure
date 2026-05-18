@@ -4,13 +4,7 @@ from copy import deepcopy
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import (
-    Any,
-    Callable,
-    Literal,
-    Optional,
-    TypeAlias,
-)
+from typing_extensions import Any, Callable, Literal, Optional, TypeAlias
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment

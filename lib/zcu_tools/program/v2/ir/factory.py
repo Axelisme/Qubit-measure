@@ -529,6 +529,7 @@ class IRParser:
                         addr=Register("s15"),
                         if_cond="Z",
                         op=AluExpr(node.n, AluOp.SUB, Immediate(0)),
+                        uf=True,
                     ),
                 ]
             else:
@@ -537,6 +538,7 @@ class IRParser:
                         label=LabelRef(end),
                         if_cond="Z",
                         op=AluExpr(node.n, AluOp.SUB, Immediate(0)),
+                        uf=True,
                     )
                 )
         elif isinstance(node.n, int) and node.n <= 0:
@@ -576,10 +578,12 @@ class IRParser:
                 RegWriteInst(
                     dst=Register("s15"), src=SrcKeyword.LABEL, label=LabelRef(start)
                 ),
-                JumpInst(addr=Register("s15"), if_cond="S", op=op_str),
+                JumpInst(addr=Register("s15"), if_cond="S", op=op_str, uf=True),
             ]
         else:
-            post.append(JumpInst(label=LabelRef(start), if_cond="S", op=op_str))
+            post.append(
+                JumpInst(label=LabelRef(start), if_cond="S", op=op_str, uf=True)
+            )
         post.append(LabelInst(name=end, can_remove=True))
         return [b for b in IRLexer().lex(post) if isinstance(b, BasicBlockNode)]
 
