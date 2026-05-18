@@ -1,12 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from typing_extensions import Literal, Union
-
-if TYPE_CHECKING:
-    from .pipeline import ChunkList
 
 PSEUDO_LABELS: frozenset[str] = frozenset({"PREV", "HERE", "NEXT", "SKIP"})
 
@@ -24,7 +20,7 @@ class Label:
     name: str
 
     def __str__(self) -> str:
-        return f"&{self.name}"
+        return self.name
 
     def __repr__(self) -> str:
         return f"Label({self.name!r})"
@@ -72,27 +68,3 @@ def make_label(base: str, allocated: set[str]) -> Label:
         counter += 1
     allocated.add(name)
     return Label(name)
-
-
-def collect_referenced_labels(chunks: ChunkList) -> set[Label]:
-    """Collect all Labels referenced across a chunk list.
-
-    Uses ``BaseInst.need_labels`` so multi-label references (e.g. a dmem
-    dispatch table addressed via ``DmemAddr``) keep every referenced label
-    alive, not just the single ``need_label``.
-    """
-    from .instructions import BaseInst
-    from .node import BasicBlockNode
-
-    refs: set[Label] = set()
-    for chunk in chunks:
-        if not isinstance(chunk, BasicBlockNode):
-            continue
-        for inst in (
-            *chunk.labels,
-            *chunk.insts,
-            *([chunk.branch] if chunk.branch else []),
-        ):
-            if isinstance(inst, BaseInst):
-                refs |= inst.need_labels
-    return refs

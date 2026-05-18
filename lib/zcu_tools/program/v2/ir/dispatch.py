@@ -2,16 +2,11 @@ from __future__ import annotations
 
 from typing_extensions import Optional
 
+from .hw_semantics import needs_big_jump
 from .instructions import BaseInst, JumpInst, LabelInst, RegWriteInst
 from .labels import Label, LabelRef
 from .node import BasicBlockNode
 from .operands import AluExpr, AluOp, Register, SrcKeyword
-
-BIG_JUMP_PMEM_THRESHOLD = 2**11
-
-
-def needs_big_jump(pmem_size: Optional[int]) -> bool:
-    return pmem_size is not None and pmem_size > BIG_JUMP_PMEM_THRESHOLD
 
 
 def dispatch_entry_words(pmem_size: Optional[int]) -> int:

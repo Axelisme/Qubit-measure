@@ -119,7 +119,7 @@ def test_irbranch_and_irdispatch_tree_api_and_string():
     assert branch.cases[0] is dispatch
 
     assert dispatch.children() == []
-    assert "targets=[&a, &b]" in str(dispatch)
+    assert "targets=[a, b]" in str(dispatch)
 
     with pytest.raises(TypeError, match="leaf node"):
         dispatch.replace_child(case1, case0)

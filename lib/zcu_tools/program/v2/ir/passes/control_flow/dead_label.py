@@ -25,7 +25,7 @@ is sufficient to collect referenced labels and filter dead ones.
 
 from __future__ import annotations
 
-from ...labels import collect_referenced_labels
+from ...analysis import collect_referenced_labels
 from ...node import BasicBlockNode
 from ...pipeline import AbsChunkListPass, ChunkList, PipeLineContext
 

@@ -237,7 +237,7 @@ def _collect_subtree_names(node: IRNode) -> tuple[set[str], set[str]]:
     structs: set[str] = set()
     if isinstance(node, BasicBlockNode):
         for lbl in node.labels:
-            labels.add(lbl.name.name)
+            labels.add(str(lbl.name))
     elif isinstance(node, BlockNode):
         for child in node.insts:
             sub_l, sub_s = _collect_subtree_names(child)
@@ -263,61 +263,19 @@ def _clone_node(
     node: IRNode, label_remap: dict[str, Label], name_remap: dict[str, str]
 ) -> IRNode:
     """Deep-clone a subtree, applying label and structure-name remaps."""
-    import dataclasses
-
-    from .instructions import CallInst, DmemReadInst, RegWriteInst
-    from .labels import LabelRef
-    from .operands import AluExpr, DmemAddr
-
-    def _remap_ref(ref: Optional[LabelRef]) -> Optional[LabelRef]:
-        if ref is None or ref.is_pseudo():
-            return ref
-        new = label_remap.get(ref.as_label().name)
-        return LabelRef(new) if new is not None else ref
-
-    def _remap_op(op: object) -> object:
-        # A dmem dispatch table reference (DmemAddr in AluExpr.rhs) holds entry
-        # labels that must be remapped too, or a cloned loop-body copy's
-        # dispatch would still point at the original copy's case entries.
-        if isinstance(op, AluExpr) and isinstance(op.rhs, DmemAddr):
-            new_labels = tuple(
-                label_remap.get(lbl.name, lbl) for lbl in op.rhs.table_labels
-            )
-            if new_labels != op.rhs.table_labels:
-                return dataclasses.replace(op, rhs=DmemAddr(table_labels=new_labels))
-        return op
-
-    def _remap_inst(inst: BaseInst) -> BaseInst:
-        changes: dict[str, object] = {}
-        if isinstance(inst, (JumpInst, RegWriteInst, DmemReadInst, CallInst)):
-            new_ref = _remap_ref(inst.label)
-            if new_ref is not inst.label:
-                changes["label"] = new_ref
-        if isinstance(inst, RegWriteInst):
-            new_op = _remap_op(inst.op)
-            if new_op is not inst.op:
-                changes["op"] = new_op
-        if changes:
-            return dataclasses.replace(inst, **changes)
-        return inst
-
-    def _remap_branch(branch: JumpInst) -> JumpInst:
-        new_ref = _remap_ref(branch.label)
-        if new_ref is not branch.label:
-            return dataclasses.replace(branch, label=new_ref)
-        return branch
-
     if isinstance(node, BasicBlockNode):
         return BasicBlockNode(
             labels=[
                 LabelInst(
-                    name=label_remap.get(lbl.name.name, lbl.name),
+                    name=label_remap.get(str(lbl.name), lbl.name),
                     can_remove=lbl.can_remove,
                 )
                 for lbl in node.labels
             ],
-            insts=[_remap_inst(i) for i in node.insts],
-            branch=_remap_branch(node.branch) if node.branch is not None else None,
+            insts=[inst.remap_labels(label_remap) for inst in node.insts],
+            branch=node.branch.remap_labels(label_remap)
+            if node.branch is not None
+            else None,
             disable_opt=node.disable_opt,
         )
     if isinstance(node, BlockNode):
@@ -343,7 +301,7 @@ def _clone_node(
             name=name_remap.get(node.name, node.name),
             value_reg=node.value_reg,
             target_labels=[
-                label_remap.get(lbl.name, lbl) for lbl in node.target_labels
+                label_remap.get(str(lbl), lbl) for lbl in node.target_labels
             ],
         )
     raise TypeError(f"_clone_node: unexpected node type {type(node).__name__}")

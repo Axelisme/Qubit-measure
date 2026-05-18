@@ -5,7 +5,7 @@ from typing import Union
 
 from qick.asm_v2 import AsmInst, Label, Macro, WriteLabel, WriteReg
 
-from ..ir.dispatch import needs_big_jump
+from ..ir.hw_semantics import needs_big_jump
 from .meta import MetaMacro
 from .write_reg import WriteRegOp, format_alu_op
 

@@ -12,13 +12,33 @@ from .instructions import (
     TimeInst,
     WmemWriteInst,
 )
+from .labels import Label
 from .node import BasicBlockNode, BlockNode, IRBranch, IRLoop, IRNode
+from .operands import Immediate
 
 if TYPE_CHECKING:
-    from .pipeline import PipeLineConfig
+    from .pipeline import ChunkList, PipeLineConfig
 
 
-from .operands import Immediate
+def collect_referenced_labels(chunks: ChunkList) -> set[Label]:
+    """Collect all Labels referenced across a chunk list.
+
+    Uses ``BaseInst.need_labels`` so multi-label references (e.g. a dmem
+    dispatch table addressed via ``DmemAddr``) keep every referenced label
+    alive, not just the single ``need_label``.
+    """
+    refs: set[Label] = set()
+    for chunk in chunks:
+        if not isinstance(chunk, BasicBlockNode):
+            continue
+        for inst in (
+            *chunk.labels,
+            *chunk.insts,
+            *([chunk.branch] if chunk.branch else []),
+        ):
+            if isinstance(inst, BaseInst):
+                refs |= inst.need_labels
+    return refs
 
 
 def estimate_body_scheduled_ticks(body: list[IRNode]) -> int:

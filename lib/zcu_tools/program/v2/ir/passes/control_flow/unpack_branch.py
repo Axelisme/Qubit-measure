@@ -44,7 +44,7 @@ from __future__ import annotations
 
 from typing_extensions import Optional
 
-from ...dispatch import needs_big_jump
+from ...hw_semantics import needs_big_jump
 from ...instructions import JumpInst, LabelInst, RegWriteInst
 from ...labels import Label, LabelRef, make_label
 from ...node import (

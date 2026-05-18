@@ -87,7 +87,7 @@ def test_property_types():
 
 def test_need_label():
     inst = JumpInst(label=LabelRef(Label("target")))
-    assert str(inst.need_label) == "&target"
+    assert str(inst.need_label) == "target"
 
     assert JumpInst(label=LabelRef("HERE")).need_label is None
     assert JumpInst(label=LabelRef("NEXT")).need_label is None
@@ -95,4 +95,4 @@ def test_need_label():
     inst = RegWriteInst(
         dst=Register("s1"), src=SrcKeyword.IMM, label=LabelRef(Label("data_table"))
     )
-    assert str(inst.need_label) == "&data_table"
+    assert str(inst.need_label) == "data_table"

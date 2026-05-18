@@ -117,9 +117,9 @@ def test_linker_wait_roundtrip():
             actual_cmds.append(inst.to_dict())
 
     expected = [
-        {"LABEL": "&L1"},
+        {"LABEL": "L1"},
         {"CMD": "WAIT", "C_OP": "time"},
-        {"LABEL": "&L2"},
+        {"LABEL": "L2"},
     ]
     assert actual_cmds == expected
 

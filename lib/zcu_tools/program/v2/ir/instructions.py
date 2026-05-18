@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Literal
@@ -261,6 +262,36 @@ class BaseInst(Instruction):
         lbl = self.need_label
         return frozenset({lbl}) if lbl is not None else frozenset()
 
+    def remap_labels(self, remap: dict[str, Label]) -> BaseInst:
+        """Return a copy with LabelRef targets remapped via ``remap``.
+
+        Default implementation returns ``self`` unchanged; override in any
+        instruction that holds a ``LabelRef`` (JumpInst, RegWriteInst, …).
+        ``remap`` is keyed by label name strings (``str(label)``).
+        """
+        return self
+
+
+def _remap_label_ref(
+    ref: Optional[LabelRef], remap: dict[str, Label]
+) -> Optional[LabelRef]:
+    """Return a remapped copy of ``ref``, or the original if unchanged."""
+    if ref is None or ref.is_pseudo():
+        return ref
+    new = remap.get(str(ref.as_label()))
+    return LabelRef(new) if new is not None else ref
+
+
+def _remap_op_labels(
+    op: Optional[ExprType], remap: dict[str, Label]
+) -> Optional[ExprType]:
+    """Remap DmemAddr entry labels inside an AluExpr, or return op unchanged."""
+    if isinstance(op, AluExpr) and isinstance(op.rhs, DmemAddr):
+        new_table = tuple(remap.get(str(lbl), lbl) for lbl in op.rhs.table_labels)
+        if new_table != op.rhs.table_labels:
+            return dataclasses.replace(op, rhs=DmemAddr(table_labels=new_table))
+    return op
+
 
 @dataclass(frozen=True)
 class LabelInst(Instruction):
@@ -280,7 +311,7 @@ class LabelInst(Instruction):
     def to_dict(self) -> dict[str, Any]:
         return {
             "kind": "label",
-            "name": self.name.name,
+            "name": str(self.name),
             "can_remove": self.can_remove,
         }
 
@@ -423,15 +454,9 @@ class JumpInst(BaseInst):
         return None
 
     def to_dict(self) -> dict[str, Any]:
-        if self.label is None:
-            label_name = None
-        elif not self.label.is_pseudo():
-            label_name = self.label.as_label().name
-        else:
-            label_name = self.label.target
         d = {
             "CMD": "JUMP",
-            "LABEL": label_name,
+            "LABEL": str(self.label) if self.label is not None else None,
             "ADDR": str(self.addr) if self.addr else None,
             "IF": self.if_cond if self.if_cond else None,
             "WR": str(self.wr) if self.wr else None,
@@ -439,6 +464,12 @@ class JumpInst(BaseInst):
             "UF": "1" if self.uf else None,
         }
         return {k: v for k, v in d.items() if v is not None}
+
+    def remap_labels(self, remap: dict[str, Label]) -> JumpInst:
+        new_label = _remap_label_ref(self.label, remap)
+        if new_label is self.label:
+            return self
+        return dataclasses.replace(self, label=new_label)
 
 
 @dataclass(frozen=True)
@@ -513,12 +544,6 @@ class RegWriteInst(BaseInst):
             if self.src
             else None
         )
-        if self.label is None:
-            label_name = None
-        elif not self.label.is_pseudo():
-            label_name = self.label.as_label().name
-        else:
-            label_name = self.label.target
         d = {
             "CMD": "REG_WR",
             "DST": str(self.dst) if self.dst else None,
@@ -529,11 +554,18 @@ class RegWriteInst(BaseInst):
             "ADDR": str(self.addr) if self.addr else None,
             "UF": "1" if self.uf else None,
             "IF": self.if_cond if self.if_cond else None,
-            "LABEL": label_name,
+            "LABEL": str(self.label) if self.label is not None else None,
             "WW": self.ww,
             "WP": self.wp,
         }
         return {k: v for k, v in d.items() if v is not None}
+
+    def remap_labels(self, remap: dict[str, Label]) -> RegWriteInst:
+        new_label = _remap_label_ref(self.label, remap)
+        new_op = _remap_op_labels(self.op, remap)
+        if new_label is self.label and new_op is self.op:
+            return self
+        return dataclasses.replace(self, label=new_label, op=new_op)
 
 
 @dataclass(frozen=True)
@@ -663,12 +695,6 @@ class DmemReadInst(BaseInst):
         return None
 
     def to_dict(self) -> dict[str, Any]:
-        if self.label is None:
-            label_name = None
-        elif not self.label.is_pseudo():
-            label_name = self.label.as_label().name
-        else:
-            label_name = self.label.target
         d = {
             "CMD": "REG_WR",
             "DST": str(self.dst) if self.dst else None,
@@ -679,9 +705,15 @@ class DmemReadInst(BaseInst):
             "LIT": str(self.lit) if self.lit else None,
             "UF": "1" if self.uf else None,
             "IF": self.if_cond if self.if_cond else None,
-            "LABEL": label_name,
+            "LABEL": str(self.label) if self.label is not None else None,
         }
         return {k: v for k, v in d.items() if v is not None}
+
+    def remap_labels(self, remap: dict[str, Label]) -> DmemReadInst:
+        new_label = _remap_label_ref(self.label, remap)
+        if new_label is self.label:
+            return self
+        return dataclasses.replace(self, label=new_label)
 
 
 DmemSrc = Literal["imm", "op"]
@@ -957,18 +989,18 @@ class CallInst(BaseInst):
         return None
 
     def to_dict(self) -> dict[str, Any]:
-        if self.label is None:
-            label_name = None
-        elif not self.label.is_pseudo():
-            label_name = self.label.as_label().name
-        else:
-            label_name = self.label.target
         d = {
             "CMD": "CALL",
-            "LABEL": label_name,
+            "LABEL": str(self.label) if self.label is not None else None,
             "ADDR": str(self.addr) if self.addr else None,
         }
         return {k: v for k, v in d.items() if v is not None}
+
+    def remap_labels(self, remap: dict[str, Label]) -> CallInst:
+        new_label = _remap_label_ref(self.label, remap)
+        if new_label is self.label:
+            return self
+        return dataclasses.replace(self, label=new_label)
 
 
 @dataclass(frozen=True)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing_extensions import Optional
 
-from ...dispatch import needs_big_jump
+from ...hw_semantics import needs_big_jump
 from ...instructions import JumpInst, RegWriteInst
 from ...labels import LabelRef
 from ...node import BasicBlockNode, BlockNode, IRDispatch, IRNode

@@ -148,13 +148,13 @@ class TestJumpInstruction:
 
     def test_construction_unconditional(self):
         inst = JumpInst(label=LabelRef(Label("loop")))
-        assert str(inst.label) == "&loop"
+        assert str(inst.label) == "loop"
         assert inst.if_cond is None
         assert inst.addr is None
 
     def test_construction_conditional(self):
         inst = JumpInst(label=LabelRef(Label("exit")), if_cond="Z")
-        assert str(inst.label) == "&exit"
+        assert str(inst.label) == "exit"
         assert inst.if_cond == "Z"
 
     def test_construction_with_addr(self):
@@ -168,7 +168,7 @@ class TestJumpInstruction:
         d = {"CMD": "JUMP", "LABEL": "loop"}
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, JumpInst)
-        assert str(inst.label) == "&loop"
+        assert str(inst.label) == "loop"
         assert inst.if_cond is None
 
     def test_dispatch_jump_conditional(self):
@@ -176,7 +176,7 @@ class TestJumpInstruction:
         d = {"CMD": "JUMP", "LABEL": "end", "IF": "NZ"}
         inst = BaseInst.from_dict(d)
         assert isinstance(inst, JumpInst)
-        assert str(inst.label) == "&end"
+        assert str(inst.label) == "end"
         assert inst.if_cond == "NZ"
 
     def test_dispatch_jump_with_addr(self):
@@ -583,14 +583,14 @@ class TestLabelInstruction:
         d = {"kind": "label", "name": "my_label"}
         inst = LabelInst.from_dict(d)
         assert isinstance(inst, LabelInst)
-        assert str(inst.name) == "&my_label"
+        assert str(inst.name) == "my_label"
 
     def test_label_with_can_remove(self):
         Label("loop_start")
         d = {"kind": "label", "name": "loop_start", "can_remove": True}
         inst = LabelInst.from_dict(d)
         assert isinstance(inst, LabelInst)
-        assert str(inst.name) == "&loop_start"
+        assert str(inst.name) == "loop_start"
         assert inst.can_remove is True
 
     def test_label_roundtrip(self):

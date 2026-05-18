@@ -7,8 +7,8 @@ from typing_extensions import Optional, Union
 from .dispatch import (
     build_dispatch_table_island,
     emit_dispatch_address_setup,
-    needs_big_jump,
 )
+from .hw_semantics import needs_big_jump
 from .instructions import (
     BaseInst,
     Instruction,

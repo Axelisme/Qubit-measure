@@ -19,14 +19,13 @@ def test_instruction_parses_jump_label_to_jumpinst():
     inst = BaseInst.from_dict({"CMD": "JUMP", "LABEL": "target"})
 
     assert isinstance(inst, JumpInst)
-    assert str(inst.label) == "&target"
+    assert str(inst.label) == "target"
     assert inst.if_cond is None
 
 
 def test_branch_lower_produces_basic_blocks():
     """Verify IRParser lowers IRBranch to a well-formed BasicBlockNode sequence."""
     from zcu_tools.program.v2.ir.factory import IRParser
-    from zcu_tools.program.v2.ir.labels import Label
 
     case_0_inst = RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1))
     case_1_inst = RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(2))
@@ -73,7 +72,6 @@ def test_branch_lower_produces_basic_blocks():
 
 def test_branch_roundtrip_preserves_cases():
     from zcu_tools.program.v2.ir.factory import IRParser
-    from zcu_tools.program.v2.ir.labels import Label
 
     bb_0: BasicBlockNode = BasicBlockNode(
         insts=[RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1))]
@@ -216,10 +214,10 @@ def test_unlink_inserts_labels_and_strips_p_addr():
             actual.append({"CMD": inst.to_dict()["CMD"]})
 
     assert actual == [
-        {"LABEL": "&start"},
+        {"LABEL": "start"},
         {"CMD": "REG_WR"},
         {"CMD": "JUMP"},
-        {"LABEL": "&end"},
+        {"LABEL": "end"},
     ]
 
 
@@ -245,8 +243,8 @@ def test_unlink_supports_multiple_labels_same_address():
             actual.append({"CMD": inst.to_dict()["CMD"]})
 
     assert actual == [
-        {"LABEL": "&first"},
-        {"LABEL": "&second"},
+        {"LABEL": "first"},
+        {"LABEL": "second"},
         {"CMD": "NOP"},
     ]
 

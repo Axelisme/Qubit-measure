@@ -47,7 +47,8 @@ invocation rather than requiring O(n) pipeline iterations.
 
 from __future__ import annotations
 
-from ...labels import Label, collect_referenced_labels
+from ...analysis import collect_referenced_labels
+from ...labels import Label
 from ...node import BasicBlockNode
 from ...pipeline import AbsChunkListPass, ChunkList, PipeLineContext
 
