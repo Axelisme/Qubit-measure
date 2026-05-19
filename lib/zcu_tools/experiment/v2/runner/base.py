@@ -98,14 +98,18 @@ class ActiveTask:
 
     Usage::
 
-        with ActiveTask() as handle:
+        stop_event = threading.Event()
+        with ActiveTask(stop_event) as handle:
             exp.run(soc, soccfg, cfg)  # run_task inside picks up the stop flag automatically
 
         # from another thread:
-        handle.cancel()
+        stop_event.set()  # or handle.cancel()
 
     Nesting ActiveTask is not allowed and raises RuntimeError.
     """
+
+    def __init__(self, stop_event: threading.Event) -> None:
+        self._stop_event = stop_event
 
     def __enter__(self) -> TaskHandle:
         global _current_stop_flag
@@ -113,7 +117,7 @@ class ActiveTask:
             raise RuntimeError(
                 "ActiveTask cannot be nested: an active task scope is already running"
             )
-        _current_stop_flag = threading.Event()
+        _current_stop_flag = self._stop_event
         return TaskHandle(_current_stop_flag)
 
     def __exit__(self, *args: object) -> None:
