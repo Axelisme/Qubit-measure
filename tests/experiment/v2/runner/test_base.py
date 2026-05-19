@@ -91,17 +91,18 @@ def test_task_handle_cancel_and_is_cancelled():
 def test_active_task_provides_handle_and_clears_on_exit():
     import zcu_tools.experiment.v2.runner.base as base_mod
 
-    with ActiveTask() as handle:
-        assert base_mod._current_stop_flag is not None
+    event = threading.Event()
+    with ActiveTask(event) as handle:
+        assert base_mod._current_stop_flag is event
         assert not handle.is_cancelled()
 
     assert base_mod._current_stop_flag is None
 
 
 def test_active_task_nested_raises():
-    with ActiveTask():
+    with ActiveTask(threading.Event()):
         with pytest.raises(RuntimeError, match="nested"):
-            with ActiveTask():
+            with ActiveTask(threading.Event()):
                 pass
 
 
@@ -114,7 +115,8 @@ def test_run_task_uses_active_task_stop_flag():
 
     t.run.side_effect = _run
 
-    with ActiveTask() as handle:
+    event = threading.Event()
+    with ActiveTask(event) as handle:
         handle.cancel()
         run_task(t, init_cfg=DictCfg())
 
@@ -131,7 +133,7 @@ def test_run_task_explicit_stop_flag_overrides_active_task():
     t.run.side_effect = _run
 
     explicit_flag = threading.Event()
-    with ActiveTask():
+    with ActiveTask(threading.Event()):
         # explicit_flag is not set; ActiveTask's flag is irrelevant
         run_task(t, init_cfg=DictCfg(), stop_flag=explicit_flag)
 
