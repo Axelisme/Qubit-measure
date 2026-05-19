@@ -25,7 +25,7 @@ def _make_adapter():
 def test_add_tab_then_get_tab_returns_correct_tabstate():
     state = State(_make_ctx())
     adapter = _make_adapter()
-    state.add_tab("t1", adapter)
+    state.add_tab("t1", adapter, _make_ctx())
     tab = state.get_tab("t1")
     assert isinstance(tab, TabState)
     assert tab.adapter is adapter
@@ -33,21 +33,21 @@ def test_add_tab_then_get_tab_returns_correct_tabstate():
 
 def test_add_tab_duplicate_raises():
     state = State(_make_ctx())
-    state.add_tab("t1", _make_adapter())
+    state.add_tab("t1", _make_adapter(), _make_ctx())
     with pytest.raises(ValueError, match="already exists"):
-        state.add_tab("t1", _make_adapter())
+        state.add_tab("t1", _make_adapter(), _make_ctx())
 
 
 def test_remove_tab_clears_tab():
     state = State(_make_ctx())
-    state.add_tab("t1", _make_adapter())
+    state.add_tab("t1", _make_adapter(), _make_ctx())
     state.remove_tab("t1")
     assert "t1" not in state.tabs
 
 
 def test_remove_tab_clears_active_tab_id():
     state = State(_make_ctx())
-    state.add_tab("t1", _make_adapter())
+    state.add_tab("t1", _make_adapter(), _make_ctx())
     state.set_active_tab("t1")
     state.remove_tab("t1")
     assert state.active_tab_id is None
@@ -60,8 +60,8 @@ def test_remove_tab_clears_active_tab_id():
 
 def test_set_active_tab_updates_active_tab_id():
     state = State(_make_ctx())
-    state.add_tab("t1", _make_adapter())
-    state.add_tab("t2", _make_adapter())
+    state.add_tab("t1", _make_adapter(), _make_ctx())
+    state.add_tab("t2", _make_adapter(), _make_ctx())
     state.set_active_tab("t2")
     assert state.active_tab_id == "t2"
 
@@ -93,7 +93,7 @@ def test_set_running_updates_is_running():
 
 def test_update_tab_result_stores_result_and_cfg():
     state = State(_make_ctx())
-    state.add_tab("t1", _make_adapter())
+    state.add_tab("t1", _make_adapter(), _make_ctx())
     result = object()
     cfg = object()
     state.update_tab_result("t1", result, cfg)
@@ -104,7 +104,7 @@ def test_update_tab_result_stores_result_and_cfg():
 
 def test_update_tab_analyze_stores_analyze_result_and_figure():
     state = State(_make_ctx())
-    state.add_tab("t1", _make_adapter())
+    state.add_tab("t1", _make_adapter(), _make_ctx())
     ar = object()
     fig = object()
     state.update_tab_analyze("t1", ar, fig)

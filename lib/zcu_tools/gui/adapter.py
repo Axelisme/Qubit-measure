@@ -64,6 +64,7 @@ class SweepField:
     start: float
     stop: float
     expts: int
+    step: Optional[float] = None  # None = expts mode; non-None = step mode
     label: str = "Sweep"
     editable: bool = True
 
@@ -111,12 +112,19 @@ def _section_to_dict(section: CfgSection, ml: "ModuleLibrary") -> dict:
         elif isinstance(node, SweepField):
             from zcu_tools.notebook.utils import make_sweep
 
-            result[key] = make_sweep(node.start, node.stop, expts=node.expts)
+            if node.step is not None:
+                result[key] = make_sweep(node.start, node.stop, step=node.step)
+            else:
+                result[key] = make_sweep(node.start, node.stop, expts=node.expts)
         elif isinstance(node, MultiSweepField):
             from zcu_tools.notebook.utils import make_sweep
 
             result[key] = {
-                axis: make_sweep(f.start, f.stop, expts=f.expts)
+                axis: (
+                    make_sweep(f.start, f.stop, step=f.step)
+                    if f.step is not None
+                    else make_sweep(f.start, f.stop, expts=f.expts)
+                )
                 for axis, f in node.sweeps.items()
             }
         elif isinstance(node, ModuleRefField):

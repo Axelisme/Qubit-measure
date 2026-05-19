@@ -56,7 +56,7 @@ class Controller:
         adapter = self._registry.create(adapter_name)
         tab_id = str(uuid.uuid4())
         logger.info("new_tab: adapter=%r tab_id=%r", adapter_name, tab_id)
-        self._state.add_tab(tab_id, adapter)
+        self._state.add_tab(tab_id, adapter, self._state.exp_context)
         return tab_id
 
     def close_tab(self, tab_id: str) -> None:
@@ -215,6 +215,9 @@ class Controller:
     # ------------------------------------------------------------------
     # View query interface (pull model)
     # ------------------------------------------------------------------
+
+    def get_tab_default_cfg(self, tab_id: str) -> Any:
+        return self._state.get_tab(tab_id).last_cfg
 
     def get_tab_result(self, tab_id: str) -> Any:
         return self._state.get_tab(tab_id).last_result

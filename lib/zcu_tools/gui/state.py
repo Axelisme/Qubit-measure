@@ -31,11 +31,13 @@ class State:
         logger.debug("set_context: em=%r", ctx.em)
         self.exp_context = ctx
 
-    def add_tab(self, tab_id: str, adapter: AbsExpAdapter) -> None:
+    def add_tab(self, tab_id: str, adapter: AbsExpAdapter, ctx: ExpContext) -> None:
         if tab_id in self.tabs:
             raise ValueError(f"tab_id {tab_id!r} already exists")
         logger.debug("add_tab: tab_id=%r adapter=%s", tab_id, type(adapter).__name__)
-        self.tabs[tab_id] = TabState(adapter=adapter)
+        tab = TabState(adapter=adapter)
+        tab.last_cfg = adapter.make_default_cfg(ctx)
+        self.tabs[tab_id] = tab
 
     def remove_tab(self, tab_id: str) -> None:
         logger.debug("remove_tab: tab_id=%r", tab_id)

@@ -30,10 +30,11 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QStackedWidget,
     QStatusBar,
     QTabWidget,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
+
+from .cfg_form import CfgFormWidget
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -162,9 +163,8 @@ class ExpTabWidget(QWidget):
         config_panel = QWidget()
         config_layout = QVBoxLayout(config_panel)
         config_layout.addWidget(QLabel("<b>Config</b>"))
-        self.cfg_editor = QTextEdit()
-        self.cfg_editor.setPlaceholderText("(cfg schema shown here)")
-        config_layout.addWidget(self.cfg_editor)
+        self.cfg_form = CfgFormWidget()
+        config_layout.addWidget(self.cfg_form, stretch=1)
 
         run_btn_row = QHBoxLayout()
         self.run_btn = QPushButton("Run")
@@ -242,6 +242,14 @@ class ExpTabWidget(QWidget):
         )
         splitter.addWidget(result_scroll)
         splitter.setSizes([250, 450, 300])
+
+    # ── cfg helpers ───────────────────────────────────────────────────────
+
+    def populate_cfg(self, schema: Any) -> None:
+        self.cfg_form.populate(schema)
+
+    def read_schema(self) -> Any:
+        return self.cfg_form.read_schema()
 
     # ── populate / refresh helpers ────────────────────────────────────────
 
@@ -335,6 +343,7 @@ class ExpTabWidget(QWidget):
     def set_running(self, is_running: bool) -> None:
         self.run_btn.setEnabled(not is_running)
         self.cancel_btn.setEnabled(is_running)
+        self.cfg_form.setEnabled(not is_running)
         self.analyze_btn.setEnabled(not is_running)
         self.save_data_btn.setEnabled(not is_running)
         self.save_image_btn.setEnabled(not is_running)
@@ -458,6 +467,11 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(tab_w, adapter_name)
         self._tabs.setCurrentWidget(tab_w)
 
+        # populate cfg form from adapter default
+        schema = self._ctrl.get_tab_default_cfg(tab_id)
+        if schema is not None:
+            tab_w.populate_cfg(schema)
+
         # wire buttons
         tab_w.run_btn.clicked.connect(lambda: self._on_run_clicked(tab_id))
         tab_w.cancel_btn.clicked.connect(self._on_cancel_clicked)
@@ -481,11 +495,12 @@ class MainWindow(QMainWindow):
         self._tabs.removeTab(index)
 
     def _on_run_clicked(self, tab_id: str) -> None:
-        from zcu_tools.gui.adapter import CfgSchema, CfgSection
-
         logger.info("_on_run_clicked: tab_id=%r", tab_id)
-        schema = CfgSchema(root=CfgSection(fields={}))
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return
         try:
+            schema = tab_w.read_schema()
             self._ctrl.start_run(tab_id, schema, {})
         except RuntimeError as exc:
             logger.warning("_on_run_clicked: blocked — %s", exc)
