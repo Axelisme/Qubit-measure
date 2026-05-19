@@ -514,6 +514,9 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         keys = tab_w.get_selected_writeback_keys()
+        if not keys:
+            self.show_status_message("No writeback keys selected")
+            return
         try:
             self._ctrl.apply_writeback(tab_id, keys)
             tab_w.mark_writeback_applied(keys)
