@@ -75,6 +75,8 @@ def _build_window(
 
         def refresh_config_panels(self) -> None: ...
 
+        def refresh_predictor_panel(self) -> None: ...
+
         def show_status_message(self, message: str) -> None:
             _ = message
 

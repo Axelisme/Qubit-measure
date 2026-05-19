@@ -425,11 +425,15 @@ class MainWindow(QMainWindow):
 
         main_layout.addLayout(toolbar)
 
-        # --- context status bar ---
+        # --- context / predictor status bar ---
         ctx_bar = QHBoxLayout()
         ctx_bar.addWidget(QLabel("Context:"))
         self._ctx_label = QLabel("(none)")
         ctx_bar.addWidget(self._ctx_label)
+        ctx_bar.addSpacing(24)
+        ctx_bar.addWidget(QLabel("Predictor:"))
+        self._predictor_label = QLabel("none")
+        ctx_bar.addWidget(self._predictor_label)
         ctx_bar.addStretch()
         main_layout.addLayout(ctx_bar)
 
@@ -491,6 +495,16 @@ class MainWindow(QMainWindow):
             schema = self._ctrl.get_tab_default_cfg(tab_id)
             if schema is not None:
                 tab_w.populate_cfg(schema)
+
+    def refresh_predictor_panel(self) -> None:
+        info = self._ctrl.get_predictor_info()
+        if info is None:
+            self._predictor_label.setText("none")
+            self._predictor_label.setStyleSheet("")
+        else:
+            flux_bias = info["flux_bias"]
+            self._predictor_label.setText(f"loaded (flux_bias={flux_bias:.4g})")
+            self._predictor_label.setStyleSheet("color: green;")
 
     def show_status_message(self, message: str) -> None:
         logger.info("status: %s", message)

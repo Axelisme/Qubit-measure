@@ -24,6 +24,7 @@ class ViewProtocol(Protocol):
     def refresh_run_state(self, is_running: bool) -> None: ...
     def refresh_context_panel(self) -> None: ...
     def refresh_config_panels(self) -> None: ...
+    def refresh_predictor_panel(self) -> None: ...
     def show_status_message(self, message: str) -> None: ...
 
 
@@ -43,6 +44,7 @@ class Controller:
         self._io = io_manager
         self._dm = device_manager
         self._view = view
+        self._predictor_path: Optional[str] = None
 
         runner.run_finished.connect(self._on_run_finished)
         runner.run_failed.connect(self._on_run_failed)
@@ -238,9 +240,19 @@ class Controller:
         new_ctx = dataclasses.replace(self._state.exp_context, soc=soc, soccfg=soccfg)
         self._state.set_context(new_ctx)
 
-    def set_predictor(self, predictor: Optional[Any]) -> None:
+    def set_predictor(
+        self, predictor: Optional[Any], path: Optional[str] = None
+    ) -> None:
+        self._predictor_path = path
         new_ctx = dataclasses.replace(self._state.exp_context, predictor=predictor)
         self._state.set_context(new_ctx)
+        self._view.refresh_predictor_panel()
+
+    def get_predictor_info(self) -> Optional[dict]:
+        predictor = self._state.exp_context.predictor
+        if predictor is None:
+            return None
+        return {"path": self._predictor_path, "flux_bias": predictor.flux_bias}
 
     # ------------------------------------------------------------------
     # View query interface (pull model)

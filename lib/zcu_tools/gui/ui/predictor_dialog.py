@@ -70,6 +70,14 @@ class PredictorDialog(QDialog):
         btn_box.rejected.connect(self.reject)
         layout.addWidget(btn_box)
 
+        # pre-fill with current predictor state
+        info = controller.get_predictor_info()
+        if info is not None:
+            if info["path"] is not None:
+                self._path_edit.setText(info["path"])
+            self._flux_bias_spin.setValue(info["flux_bias"])
+            self._set_status("Currently loaded", error=False)
+
     def _on_browse_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, "Select params.json", "", "JSON files (*.json);;All files (*)"
@@ -84,7 +92,7 @@ class PredictorDialog(QDialog):
             from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
             predictor = FluxoniumPredictor.from_file(path, flux_bias=flux_bias)
-            self._ctrl.set_predictor(predictor)
+            self._ctrl.set_predictor(predictor, path=path)
             self._set_status("Predictor loaded", error=False)
             logger.info("PredictorDialog: loaded path=%r", path)
             self.accept()
