@@ -273,14 +273,19 @@ class ExpTabWidget(QWidget):
                 f"  {item.description}"
             )
             cb.setChecked(True)
+            cb.stateChanged.connect(self._refresh_writeback_btn)
             self._writeback_layout.addWidget(cb)
             self._writeback_checks[item.key] = cb
 
         has_items = bool(items)
         self._writeback_group.setVisible(has_items)
         self.apply_writeback_btn.setVisible(has_items)
-        self.apply_writeback_btn.setEnabled(has_items)
         self.apply_writeback_btn.setText("Apply Writeback")
+        self._refresh_writeback_btn()
+
+    def _refresh_writeback_btn(self, *_: int) -> None:
+        has_selected = any(cb.isChecked() for cb in self._writeback_checks.values())
+        self.apply_writeback_btn.setEnabled(has_selected)
 
     def mark_writeback_applied(self, applied_keys: list[str]) -> None:
         """Hide checkboxes for already-applied keys; lock button when all done."""
@@ -514,9 +519,6 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         keys = tab_w.get_selected_writeback_keys()
-        if not keys:
-            self.show_status_message("No writeback keys selected")
-            return
         try:
             self._ctrl.apply_writeback(tab_id, keys)
             tab_w.mark_writeback_applied(keys)
