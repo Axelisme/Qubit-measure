@@ -137,7 +137,7 @@ def build_seed_program_tables(
     depths: NDArray[np.int64],
 ) -> tuple[list[int], list[int], list[int]]:
     max_depth = int(np.max(depths))
-    
+
     phase_axis: int = 0
 
     def convert_gate(gate: GateName) -> Optional[BasicGate]:
@@ -167,10 +167,10 @@ def build_seed_program_tables(
     rand_gate_seq: list[int] = []
     prefix_len_all: list[int] = [0] * (max_depth + 1)
     recovery_gate_all: list[int] = [0] * (max_depth + 1)
-    
+
     for d in range(max_depth + 1):
         prefix_len_all[d] = len(rand_gate_seq)
-        
+
         recovery_idx = RECOVERY_INDEX[acc_states[d]]
         saved_phase = phase_axis
         recovery_gate = None
@@ -178,12 +178,14 @@ def build_seed_program_tables(
             basic_gate = convert_gate(r_gate)
             if basic_gate is not None:
                 if recovery_gate is not None:
-                    raise ValueError("RB recovery Clifford must map to exactly one physical BasicGate")
+                    raise ValueError(
+                        "RB recovery Clifford must map to exactly one physical BasicGate"
+                    )
                 recovery_gate = basic_gate
         assert recovery_gate is not None
         recovery_gate_all[d] = int(recovery_gate)
         phase_axis = saved_phase
-        
+
         if d < max_depth:
             ci = total_clifford_seq[d]
             for gate in CLIFFORD_GROUP[ci]:

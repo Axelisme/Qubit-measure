@@ -20,7 +20,8 @@ def make_plot_frame(
 
 def refresh_figure(fig: Figure) -> None:
     fig.canvas.draw_idle()
-    plt.pause(0.001)
+    if plt.isinteractive():
+        plt.pause(0.001)
 
 
 def close_figure(fig: Figure) -> None:

@@ -19,15 +19,45 @@ def _reference_reduce_gate_seq(seq: list[tuple[str, ...]]) -> list[int]:
     phase_axis = 0
     axis_map = {"Z90": 3, "Z180": 2, "-Z90": 1}
     gate_map = {
-        "Id":   (rb.BasicGate.Id,   rb.BasicGate.Id,   rb.BasicGate.Id,   rb.BasicGate.Id),
-        "X90":  (rb.BasicGate.X90,  rb.BasicGate.Y90,  rb.BasicGate.MX90, rb.BasicGate.MY90),
-        "X180": (rb.BasicGate.X180, rb.BasicGate.Y180, rb.BasicGate.X180, rb.BasicGate.Y180),
-        "-X90": (rb.BasicGate.MX90, rb.BasicGate.MY90, rb.BasicGate.X90,  rb.BasicGate.Y90),
-        "Y90":  (rb.BasicGate.Y90,  rb.BasicGate.MX90, rb.BasicGate.MY90, rb.BasicGate.X90),
-        "Y180": (rb.BasicGate.Y180, rb.BasicGate.X180, rb.BasicGate.Y180, rb.BasicGate.X180),
-        "-Y90": (rb.BasicGate.MY90, rb.BasicGate.X90,  rb.BasicGate.Y90,  rb.BasicGate.MX90),
+        "Id": (rb.BasicGate.Id, rb.BasicGate.Id, rb.BasicGate.Id, rb.BasicGate.Id),
+        "X90": (
+            rb.BasicGate.X90,
+            rb.BasicGate.Y90,
+            rb.BasicGate.MX90,
+            rb.BasicGate.MY90,
+        ),
+        "X180": (
+            rb.BasicGate.X180,
+            rb.BasicGate.Y180,
+            rb.BasicGate.X180,
+            rb.BasicGate.Y180,
+        ),
+        "-X90": (
+            rb.BasicGate.MX90,
+            rb.BasicGate.MY90,
+            rb.BasicGate.X90,
+            rb.BasicGate.Y90,
+        ),
+        "Y90": (
+            rb.BasicGate.Y90,
+            rb.BasicGate.MX90,
+            rb.BasicGate.MY90,
+            rb.BasicGate.X90,
+        ),
+        "Y180": (
+            rb.BasicGate.Y180,
+            rb.BasicGate.X180,
+            rb.BasicGate.Y180,
+            rb.BasicGate.X180,
+        ),
+        "-Y90": (
+            rb.BasicGate.MY90,
+            rb.BasicGate.X90,
+            rb.BasicGate.Y90,
+            rb.BasicGate.MX90,
+        ),
     }
-    
+
     reduced_seq = []
     for group in seq:
         for gate in group:

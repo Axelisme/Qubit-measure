@@ -83,7 +83,7 @@ from ...analysis import (
     estimate_flat_size,
 )
 from ...hw_semantics import needs_big_jump
-from ...instructions import TestInst, BaseInst, JumpInst, LabelInst, RegWriteInst
+from ...instructions import BaseInst, JumpInst, LabelInst, RegWriteInst, TestInst
 from ...labels import Label, LabelRef, make_label
 from ...node import (
     BasicBlockNode,

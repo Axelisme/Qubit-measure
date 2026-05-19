@@ -14,13 +14,12 @@ def auto_select_backend() -> ModuleType:
     backend = mpl.get_backend().lower()
     if "nbagg" in backend:
         return jupyter
-    if any([name in backend for name in ["inline", "qtagg"]]):
+    if any(name in backend for name in ["inline", "qtagg", "agg"]):
         return fallback
-    else:
-        warnings.warn(
-            f"Auto-selected backend for matplotlib is '{backend}', which may not be fully supported."
-        )
-        return fallback
+    warnings.warn(
+        f"Auto-selected backend for matplotlib is '{backend}', which may not be fully supported."
+    )
+    return fallback
 
 
 def make_plot_frame(

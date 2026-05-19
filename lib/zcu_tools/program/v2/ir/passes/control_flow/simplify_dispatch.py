@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing_extensions import Optional
 
 from ...hw_semantics import needs_big_jump
-from ...instructions import TestInst, JumpInst, RegWriteInst
+from ...instructions import JumpInst, RegWriteInst, TestInst
 from ...labels import LabelRef
 from ...node import BasicBlockNode, BlockNode, IRDispatch, IRNode
 from ...operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
