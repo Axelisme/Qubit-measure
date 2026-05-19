@@ -81,6 +81,10 @@ def _build_window(
             _ = tab_id
             return None  # type: ignore[return-value]
 
+        def make_live_container(self, tab_id: str) -> None:
+            _ = tab_id
+            return None  # type: ignore[return-value]
+
         def show_status_message(self, message: str) -> None:
             _ = message
 

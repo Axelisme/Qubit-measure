@@ -27,6 +27,7 @@ class ViewProtocol(Protocol):
     def refresh_predictor_panel(self) -> None: ...
     def show_status_message(self, message: str) -> None: ...
     def make_pbar_factory(self, tab_id: str) -> Any: ...
+    def make_live_container(self, tab_id: str) -> Any: ...
 
 
 class Controller:
@@ -79,6 +80,11 @@ class Controller:
         self._state.set_running(True)
         self._view.refresh_run_state(True)
         pbar_factory = self._view.make_pbar_factory(tab_id)
+        live_container = self._view.make_live_container(tab_id)
+        if live_container is not None:
+            from zcu_tools.liveplot.backend.qt import register_pending_container
+
+            register_pending_container(live_container)
         self._runner.start_run(
             tab_id,
             tab.adapter,
@@ -96,6 +102,7 @@ class Controller:
         logger.info(
             "_on_run_finished: tab_id=%r result_type=%s", tab_id, type(result).__name__
         )
+        self._clear_live_container()
         self._state.update_tab_result(tab_id, result, cfg=None)
         self._state.set_running(False)
         self._view.refresh_run_state(False)
@@ -103,9 +110,15 @@ class Controller:
 
     def _on_run_failed(self, tab_id: str, error: Exception) -> None:  # noqa: ARG002
         logger.warning("_on_run_failed: tab_id=%r error=%r", tab_id, error)
+        self._clear_live_container()
         self._state.set_running(False)
         self._view.refresh_run_state(False)
         self._view.show_status_message(f"Run failed: {error}")
+
+    def _clear_live_container(self) -> None:
+        from zcu_tools.liveplot.backend.qt import clear_pending_container
+
+        clear_pending_container()
 
     # ------------------------------------------------------------------
     # Analyze flow  (Phase 9)

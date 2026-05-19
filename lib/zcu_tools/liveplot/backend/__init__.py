@@ -7,14 +7,16 @@ import matplotlib as mpl
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
-from . import fallback, jupyter
+from . import fallback, jupyter, qt
 
 
 def auto_select_backend() -> ModuleType:
     backend = mpl.get_backend().lower()
     if "nbagg" in backend:
         return jupyter
-    if any(name in backend for name in ["inline", "qtagg", "agg"]):
+    if "qtagg" in backend:
+        return qt
+    if any(name in backend for name in ["inline", "agg"]):
         return fallback
     warnings.warn(
         f"Auto-selected backend for matplotlib is '{backend}', which may not be fully supported."
@@ -39,12 +41,21 @@ def close_figure(fig: Figure) -> None:
     auto_select_backend().close_figure(fig)
 
 
+def set_figure_container(fig: Figure, container: object) -> None:
+    """Register a Qt container for fig. No-op when Qt backend is not active."""
+    backend = mpl.get_backend().lower()
+    if "qtagg" in backend:
+        qt.set_figure_container(fig, container)
+
+
 __all__ = [
-    # module
+    # modules
     "jupyter",
     "fallback",
+    "qt",
     # functions
     "make_plot_frame",
     "refresh_figure",
     "close_figure",
+    "set_figure_container",
 ]

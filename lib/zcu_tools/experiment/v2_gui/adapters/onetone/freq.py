@@ -11,9 +11,10 @@ from __future__ import annotations
 import time
 from typing import Any, Literal, Optional, cast
 
+import numpy as np
+from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.progress_bar.interface import make_pbar
 
-import numpy as np
 from matplotlib.figure import Figure
 from zcu_tools.experiment.v2.onetone.freq import FreqExp, FreqResult
 from zcu_tools.gui.adapter import (
@@ -98,31 +99,46 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
             freqs, freq, Ql, cast(float, Qc), phi, a0, edelay
         )
 
-        # simulate round-level averaging with two-layer progress bars
+        # simulate round-level averaging with two-layer progress bars and liveplot
         sigma = noise_scale / np.sqrt(reps * rounds)
         rng = np.random.default_rng()
         accumulated = np.zeros(len(freqs), dtype=np.complex128)
+        completed_rounds = 0
 
-        rounds_pbar = make_pbar(desc="rounds", total=rounds)
-        try:
-            for _ in range(rounds):
-                scan_pbar = make_pbar(desc="freq scan", total=freq_expts)
-                try:
-                    for i in range(freq_expts):
-                        accumulated[i] += (
-                            clean[i]
-                            + rng.normal(0, sigma * np.sqrt(rounds))
-                            + 1j * rng.normal(0, sigma * np.sqrt(rounds))
-                        )
-                        scan_pbar.update(1)
-                        time.sleep(0.0005)
-                finally:
-                    scan_pbar.close()
-                rounds_pbar.update(1)
-        finally:
-            rounds_pbar.close()
+        from zcu_tools.experiment.v2.runner.base import _current_stop_flag
 
-        signals = (accumulated / rounds).astype(np.complex128)
+        with LivePlot1D("Freq (MHz)", "|S21|", auto_close=False) as lp:
+            rounds_pbar = make_pbar(desc="rounds", total=rounds)
+            try:
+                for _ in range(rounds):
+                    # check for cancellation before each round
+                    if _current_stop_flag is not None and _current_stop_flag.is_set():
+                        break
+
+                    scan_pbar = make_pbar(desc="freq scan", total=freq_expts)
+                    try:
+                        for i in range(freq_expts):
+                            accumulated[i] += (
+                                clean[i]
+                                + rng.normal(0, sigma * np.sqrt(rounds))
+                                + 1j * rng.normal(0, sigma * np.sqrt(rounds))
+                            )
+                            scan_pbar.update(1)
+                            time.sleep(0.0005)
+                    finally:
+                        scan_pbar.close()
+
+                    completed_rounds += 1
+                    rounds_pbar.update(1)
+
+                    # update liveplot with current averaged signals
+                    avg = accumulated / completed_rounds
+                    lp.update(freqs, np.abs(avg))
+            finally:
+                rounds_pbar.close()
+
+        divisor = completed_rounds if completed_rounds > 0 else 1
+        signals = (accumulated / divisor).astype(np.complex128)
         return freqs, signals
 
     def get_analyze_params(self) -> dict[str, ParamSpec]:
