@@ -11,6 +11,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -42,6 +43,9 @@ class PredictorDialog(QDialog):
         self._path_edit = QLineEdit()
         self._path_edit.setPlaceholderText("/path/to/params.json")
         path_row.addWidget(self._path_edit)
+        browse_btn = QPushButton("Browse…")
+        browse_btn.clicked.connect(self._on_browse_file)
+        path_row.addWidget(browse_btn)
         form.addRow("params.json:", path_row)
 
         self._flux_bias_spin = QDoubleSpinBox()
@@ -65,6 +69,13 @@ class PredictorDialog(QDialog):
         btn_box.accepted.connect(self._on_accepted)
         btn_box.rejected.connect(self.reject)
         layout.addWidget(btn_box)
+
+    def _on_browse_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select params.json", "", "JSON files (*.json);;All files (*)"
+        )
+        if path:
+            self._path_edit.setText(path)
 
     def _on_accepted(self) -> None:
         path = self._path_edit.text().strip()

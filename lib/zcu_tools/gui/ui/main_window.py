@@ -15,6 +15,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -220,15 +221,25 @@ class ExpTabWidget(QWidget):
         save_group = QGroupBox("Save")
         save_layout = QFormLayout(save_group)
 
+        data_path_row = QHBoxLayout()
         self._data_path_edit = QLineEdit()
         self._data_path_edit.setPlaceholderText("/tmp/data")
-        save_layout.addRow("Data path:", self._data_path_edit)
+        data_path_row.addWidget(self._data_path_edit)
+        browse_data_btn = QPushButton("Browse…")
+        browse_data_btn.clicked.connect(self._on_browse_data_path)
+        data_path_row.addWidget(browse_data_btn)
+        save_layout.addRow("Data path:", data_path_row)
         self.save_data_btn = QPushButton("Save Data")
         save_layout.addRow("", self.save_data_btn)
 
+        image_path_row = QHBoxLayout()
         self._image_path_edit = QLineEdit()
         self._image_path_edit.setPlaceholderText("/tmp/image.png")
-        save_layout.addRow("Image path:", self._image_path_edit)
+        image_path_row.addWidget(self._image_path_edit)
+        browse_image_btn = QPushButton("Browse…")
+        browse_image_btn.clicked.connect(self._on_browse_image_path)
+        image_path_row.addWidget(browse_image_btn)
+        save_layout.addRow("Image path:", image_path_row)
         self.save_image_btn = QPushButton("Save Image")
         save_layout.addRow("", self.save_image_btn)
 
@@ -311,6 +322,20 @@ class ExpTabWidget(QWidget):
 
     def get_selected_writeback_keys(self) -> list[str]:
         return [k for k, cb in self._writeback_checks.items() if cb.isChecked()]
+
+    def _on_browse_data_path(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save data file", "", "HDF5 files (*.h5);;All files (*)"
+        )
+        if path:
+            self._data_path_edit.setText(path)
+
+    def _on_browse_image_path(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save image file", "", "PNG files (*.png);;All files (*)"
+        )
+        if path:
+            self._image_path_edit.setText(path)
 
     def set_save_paths(self, data_path: str, image_path: str) -> None:
         if data_path:

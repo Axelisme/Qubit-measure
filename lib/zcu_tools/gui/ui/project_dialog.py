@@ -13,6 +13,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -44,9 +45,14 @@ class ProjectDialog(QDialog):
         # ── result_dir ───────────────────────────────────────────────────
         dir_group = QGroupBox("Project directory")
         dir_form = QFormLayout(dir_group)
+        dir_row = QHBoxLayout()
         self._result_dir_edit = QLineEdit()
         self._result_dir_edit.setPlaceholderText("/path/to/result_dir")
-        dir_form.addRow("Result dir:", self._result_dir_edit)
+        dir_row.addWidget(self._result_dir_edit)
+        browse_dir_btn = QPushButton("Browse…")
+        browse_dir_btn.clicked.connect(self._on_browse_dir)
+        dir_row.addWidget(browse_dir_btn)
+        dir_form.addRow("Result dir:", dir_row)
         self._setup_btn = QPushButton("Setup")
         self._setup_btn.clicked.connect(self._on_setup_clicked)
         dir_form.addRow("", self._setup_btn)
@@ -101,6 +107,11 @@ class ProjectDialog(QDialog):
         self._refresh_context_list()
 
     # ------------------------------------------------------------------
+
+    def _on_browse_dir(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "Select result directory")
+        if path:
+            self._result_dir_edit.setText(path)
 
     def _on_setup_clicked(self) -> None:
         result_dir = self._result_dir_edit.text().strip()
