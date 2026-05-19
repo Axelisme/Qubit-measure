@@ -289,9 +289,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
             ctx: TaskState[NDArray[np.float64], Any, T1WithToneSweepCfg],
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
-            def prog_maker(
-                cfg: T1WithToneSweepCfg, length_param
-            ) -> ModularProgramV2:
+            def prog_maker(cfg: T1WithToneSweepCfg, length_param) -> ModularProgramV2:
                 _cfg = deepcopy(cfg)
                 modules = _cfg.modules
                 modules.probe_pulse.set_param("length", length_param)

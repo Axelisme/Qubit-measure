@@ -3,9 +3,9 @@ from __future__ import annotations
 import warnings
 
 import matplotlib as mpl
-from matplotlib.animation import FFMpegWriter
 import matplotlib.pyplot as plt
 from IPython.display import display
+from matplotlib.animation import FFMpegWriter
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 

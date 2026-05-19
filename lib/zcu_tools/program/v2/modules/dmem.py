@@ -15,6 +15,17 @@ from .control import Repeat
 
 logger = logging.getLogger(__name__)
 
+# Packing pays off only when the dmem savings outweigh the extra shift/mask
+# instructions emitted per access. Empirically, ~30 values is the break-even.
+_COMPRESS_MIN_VALUES = 30
+
+# Individual (uncompressed) dmem values must be non-negative so that a direct
+# read_dmem into a register is always a valid non-negative integer regardless of
+# the instruction's sign-extension behaviour.  Packed words produced by the
+# compression path may legitimately set bit 31; the SR + AND extraction in run()
+# recovers the correct value in either arithmetic or logical shift mode.
+_INT32_MAX = (1 << 31) - 1
+
 SubModule: TypeAlias = Union[Module, list[Module]]
 
 
@@ -30,17 +41,16 @@ class LoadValue(Module):
     ) -> None:
         self.name = name
         self.values = [int(v) for v in values]
-        if len(self.values) == 0:
-            raise ValueError("LoadValue requires a non-empty values sequence")
-        if any(v < 0 for v in self.values):
-            raise ValueError("LoadValue values must be non-negative integers")
+        if any(v < 0 or v > _INT32_MAX for v in self.values):
+            raise ValueError(
+                f"LoadValue values must be in [0, {_INT32_MAX}] (signed int32 positive range)"
+            )
         self.use_existed = use_existed
         self.auto_compress = auto_compress
+        self._is_empty = len(self.values) == 0
 
         self.idx_reg = idx_reg
         self.val_reg = val_reg
-        self.addr_reg = ""
-        self.word_reg = ""
         self.offset = 0
 
         self._packed_values: list[int] = list(self.values)
@@ -55,6 +65,13 @@ class LoadValue(Module):
         self._plan_compression()
 
     def init(self, prog: ModularProgramV2) -> None:
+        if self._is_empty:
+            logger.debug(
+                "LoadValue.init: short-circuit empty values name='%s' (no dmem allocated)",
+                self.name,
+            )
+            return
+
         self.offset = prog.add_dmem(self._packed_values)
 
         if not self.use_existed:
@@ -75,6 +92,9 @@ class LoadValue(Module):
     def run(
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
+        if self._is_empty:
+            return t
+
         # addr_reg computes dmem address / shift amount; word_reg holds the
         # fetched packed word. addr_reg is reused for shift once word is loaded.
         temp_reg_num = 2 if self._is_compressed else 1
@@ -100,11 +120,14 @@ class LoadValue(Module):
             prog.read_dmem(dst=word_reg, addr=addr_reg)
 
             # shift = (idx AND #slot_mask) [SL #bits_shift]
-            shift_reg = addr_reg  # reuse addr_reg
+            # addr_reg is safe to reuse here: read_dmem above has already
+            # consumed it as the address, and word_reg now holds the fetched
+            # word, so addr_reg's value is dead.
+            shift_reg = addr_reg
             prog.write_reg_op(shift_reg, self.idx_reg, "AND", self._slot_mask)
             if self._bits_shift > 0:
                 prog.write_reg_op(shift_reg, shift_reg, "SL", self._bits_shift)
-            prog.write_reg_op(self.val_reg, word_reg, "ASR", shift_reg)
+            prog.write_reg_op(self.val_reg, word_reg, "SR", shift_reg)
 
             prog.write_reg_op(self.val_reg, self.val_reg, "AND", self._value_mask)
 
@@ -128,11 +151,17 @@ class LoadValue(Module):
             for slot, value in enumerate(chunk):
                 encoded = value & value_mask
                 word |= encoded << (slot * bits_per_value)
+            # Packed words may use all 32 bits (including bit 31).  Convert to
+            # the signed int32 two's-complement representation so that the value
+            # fits in np.int32 without overflow; the hardware bit pattern is
+            # identical and the SR + AND extraction in run() remains correct.
+            if word > _INT32_MAX:
+                word -= 1 << 32
             packed.append(word)
         return packed
 
     def _plan_compression(self) -> None:
-        if not self.auto_compress or len(self.values) < 30:
+        if not self.auto_compress or len(self.values) < _COMPRESS_MIN_VALUES:
             return
 
         max_value = max(self.values)
@@ -143,8 +172,6 @@ class LoadValue(Module):
         # packing density: values_per_word = pow2_floor(32 // bits) already
         # collapses non-pow2 bits to the same value as the next pow2 above.
         bits = 1 if bits <= 1 else 1 << (bits - 1).bit_length()
-        if bits > 32:
-            return
 
         values_per_word = 32 // bits
         if values_per_word < 2:
@@ -167,7 +194,11 @@ class ScanWith(Module):
         self, name: str, values: Sequence[int], val_reg: str, use_existed: bool = False
     ) -> None:
         self.name = name
-        repeat_mod = Repeat(f"{name}_count", len(values))
+
+        n = len(values)
+        if n == 0:
+            raise ValueError("ScanWith requires a non-empty values sequence")
+        repeat_mod = Repeat(f"{name}_count", n, range_hint=(0, n - 1))
         repeat_mod.add_content(
             LoadValue(
                 name=f"{name}_load",

@@ -1,0 +1,65 @@
+from __future__ import annotations
+
+from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
+from zcu_tools.program.v2.ir.instructions import MetaInst, RegWriteInst
+from zcu_tools.program.v2.ir.node import BlockNode, IRLoop
+from zcu_tools.program.v2.ir.operands import Immediate, Register, SrcKeyword
+
+
+def test_loop_range_hint_preservation():
+    """Verify that range_hint is preserved through IRLoop construction and emission."""
+    # 1. Manually create a loop with range_hint
+    loop = IRLoop(
+        name="test_loop",
+        counter_reg=Register("r0"),
+        n=Register("r_count"),
+        body=BlockNode(),
+        range_hint=(10, 10),
+    )
+    assert loop.range_hint == (10, 10)
+
+
+def test_parse_loop_restores_range_hint():
+    """Verify that the parser restores range_hint from MetaInst ARGS."""
+    insts = [
+        MetaInst(
+            type="LOOP_START",
+            name="loop",
+            info=dict(counter_reg="r0", n="r_count", range_hint=(5, 5)),
+        ),
+        MetaInst(type="LOOP_BODY_START", name="loop"),
+        RegWriteInst(dst=Register("r1"), src=SrcKeyword.IMM, lit=Immediate(1)),
+        MetaInst(type="LOOP_BODY_END", name="loop"),
+        MetaInst(type="LOOP_END", name="loop"),
+    ]
+
+    items = IRLexer().lex(insts)
+    root = IRParser().parse(items)
+
+    assert isinstance(root.insts[0], IRLoop)
+    loop = root.insts[0]
+    # QICK might store hint as list, but we want tuple in IRLoop
+    assert loop.range_hint == (5, 5)
+
+
+def test_emit_loop_preserves_range_hint_in_meta():
+    """Verify that IRParser lowers IRLoop with range_hint into MetaInst."""
+    from zcu_tools.program.v2.ir.factory import IRParser
+    from zcu_tools.program.v2.ir.node import BlockNode
+
+    loop = IRLoop(
+        name="test",
+        counter_reg=Register("r0"),
+        n=100,
+        body=BlockNode(),
+        range_hint=(100, 100),
+    )
+    blocks = IRParser().unparse(BlockNode(insts=[loop]))
+
+    # Find LOOP_START meta (now a top-level MetaInst after lex())
+    start_meta = next(
+        item
+        for item in blocks
+        if isinstance(item, MetaInst) and item.type == "LOOP_START"
+    )
+    assert start_meta.info["range_hint"] == (100, 100)

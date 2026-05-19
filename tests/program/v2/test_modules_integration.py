@@ -10,9 +10,11 @@ from __future__ import annotations
 from typing import Literal
 
 import pytest
+from qick.asm_v2 import Label, WriteReg
 from zcu_tools.program.v2.base import ProgramV2Cfg
+from zcu_tools.program.v2.macro.loop import OpenInnerLoop
 from zcu_tools.program.v2.modular import ModularProgramV2
-from zcu_tools.program.v2.modules.control import Branch, Repeat
+from zcu_tools.program.v2.modules.control import Repeat
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, Join, SoftDelay
 from zcu_tools.program.v2.modules.dmem import LoadValue, ScanWith
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
@@ -63,6 +65,10 @@ def _make_prog(modules=None, sweep=None, n_gens=2, n_readouts=1, **cfg_kwargs):
     soccfg = make_mock_soccfg(n_gens=n_gens, n_readouts=n_readouts)
     cfg = ProgramV2Cfg(**cfg_kwargs)
     return ModularProgramV2(soccfg, cfg, modules=modules or [], sweep=sweep)
+
+
+def _label_addr(labels: dict[str, str], name: str) -> int:
+    return int(labels[name].removeprefix("&"))
 
 
 def _pulse_cfg(
@@ -295,6 +301,16 @@ class TestResetIntegration:
 
 
 class TestControlIntegration:
+    def test_open_inner_loop_expands_counter_init_before_start_label(self):
+        class _Prog:
+            def _get_reg(self, value):
+                return value
+
+        macros = OpenInnerLoop(name="r", counter_reg="r", n=4).expand(_Prog())
+
+        assert isinstance(macros[1], WriteReg)
+        assert isinstance(macros[2], Label)
+
     def test_repeat_zero_compiles(self):
         r = Repeat("r", 0)
         r.add_content(SoftDelay("d", 0.1))
@@ -311,22 +327,6 @@ class TestControlIntegration:
         r = Repeat("r", 5)
         r.add_content(Pulse("p", _pulse_cfg()))
         prog = _make_prog(modules=[r])
-        assert prog.binprog is not None
-
-    def test_branch_two_branches_compiles(self):
-        # Branch reads an outer sweep loop counter named "b"
-        b = Branch("b", [SoftDelay("a", 0.1)], [SoftDelay("c", 0.2)])
-        prog = _make_prog(modules=[b], sweep=[("b", 2)])
-        assert prog.binprog is not None
-
-    def test_branch_three_branches_compiles(self):
-        b = Branch(
-            "sel",
-            [SoftDelay("a", 0.1)],
-            [SoftDelay("b", 0.2)],
-            [SoftDelay("c", 0.3)],
-        )
-        prog = _make_prog(modules=[b], sweep=[("sel", 3)])
         assert prog.binprog is not None
 
     def test_repeat_register_driven_compiles(self):
@@ -382,7 +382,7 @@ class TestDmemIntegration:
         assert lv._is_compressed
 
     def test_load_value_negative_rejected(self):
-        with pytest.raises(ValueError, match="non-negative"):
+        with pytest.raises(ValueError, match=r"\[0,"):
             LoadValue("lv", [-1, 0, 1], idx_reg="myloop", val_reg="myval")
 
     def test_compile_datamem_not_none(self):

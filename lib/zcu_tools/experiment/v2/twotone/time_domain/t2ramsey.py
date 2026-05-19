@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import warnings as warn
+from copy import deepcopy
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -156,7 +156,12 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
         real_signals = t2ramsey_signal2real(signals)
 
         if fit_fringe:
-            fixedparams = [None, None, None, 0.0, None]
+            zero_signal = real_signals[np.argmin(np.abs(lengths))]
+            if zero_signal > 0.5 * (np.max(real_signals) + np.min(real_signals)):
+                init_phase = 0.0
+            else:
+                init_phase = 180.0
+            fixedparams = [None, None, None, init_phase, None]
             t2r, t2rerr, detune, detune_err, y_fit, _ = fit_decay_fringe(
                 lengths, real_signals, fixedparams=fixedparams
             )

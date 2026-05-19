@@ -32,18 +32,18 @@ if _LIB not in sys.path:
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from zcu_tools.notebook.analysis.fluxdep.fitting import (  # noqa: E402
+from zcu_tools.notebook.analysis.fluxdep.fitting import (
     fit_spectrum,
     search_in_database,
 )
-from zcu_tools.notebook.analysis.fluxdep.njit import (  # noqa: E402
+from zcu_tools.notebook.analysis.fluxdep.njit import (
     candidate_breakpoint_search,
     eval_dist_bounded,
     smart_fuzzy_search,
 )
-from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux  # noqa: E402
+from zcu_tools.notebook.persistance import TransitionDict
 
-from tests.notebook.analysis.fluxdep._synthetic import synth_ABC  # noqa: E402
+from tests.notebook.analysis.fluxdep._synthetic import synth_ABC
 
 
 def _timed(fn, *, repeat=5):
@@ -112,9 +112,9 @@ def _synth_observation(db_path: str, idx: int, n_fluxs: int, transitions):
     import h5py
 
     with h5py.File(db_path, "r") as f:
-        f_fluxs = f["fluxs"][:]
-        f_params = f["params"][:]
-        f_energies = f["energies"][:]
+        f_fluxs: np.ndarray = np.asarray(f["fluxs"])
+        f_params: np.ndarray = np.asarray(f["params"])
+        f_energies: np.ndarray = np.asarray(f["energies"])
 
     fluxs = np.linspace(0.05, 0.95, n_fluxs)
     params = tuple(float(x) for x in f_params[idx])
@@ -136,7 +136,7 @@ def macro_benches(db_path: str, quick: bool, n_fluxs: int | None = None) -> dict
         print(f"[skip macro] DB not found: {db_path}")
         return {}
 
-    transitions = {"transitions": [(0, 1), (0, 2), (1, 2)]}
+    transitions: TransitionDict = {"transitions": [(0, 1), (0, 2), (1, 2)]}  # type: ignore[typeddict-unknown-key]
     if n_fluxs is None:
         n_fluxs = 30 if quick else 128
     fluxs, freqs, true_params = _synth_observation(
@@ -154,19 +154,27 @@ def macro_benches(db_path: str, quick: bool, n_fluxs: int | None = None) -> dict
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    cases = [
-        ("search_njobs1_fuzzy", dict(n_jobs=1, fuzzy=True)),
-        ("search_njobsN_fuzzy", dict(n_jobs=-1, fuzzy=True)),
-        ("search_njobs1_exact", dict(n_jobs=1, fuzzy=False)),
-        ("search_njobsN_exact", dict(n_jobs=-1, fuzzy=False)),
+    cases: list[tuple[str, int, bool]] = [
+        ("search_njobs1_fuzzy", 1, True),
+        ("search_njobsN_fuzzy", -1, True),
+        ("search_njobs1_exact", 1, False),
+        ("search_njobsN_exact", -1, False),
     ]
     if quick:
         cases = cases[:2]
 
-    for name, kwargs in cases:
+    for name, n_jobs, fuzzy in cases:
         t0 = time.perf_counter()
         best_params, fig = search_in_database(
-            fluxs, freqs, db_path, transitions, EJb, ECb, ELb, **kwargs
+            fluxs,
+            freqs,
+            db_path,
+            transitions,
+            EJb,
+            ECb,
+            ELb,
+            n_jobs=n_jobs,
+            fuzzy=fuzzy,
         )
         dt = time.perf_counter() - t0
         plt.close(fig)
@@ -175,7 +183,8 @@ def macro_benches(db_path: str, quick: bool, n_fluxs: int | None = None) -> dict
 
     # fit_spectrum benchmark.
     if not quick:
-        init = tuple(p * 1.02 for p in true_params)
+        p0, p1, p2 = true_params
+        init: tuple[float, float, float] = (p0 * 1.02, p1 * 1.02, p2 * 1.02)
         t0 = time.perf_counter()
         fit = fit_spectrum(
             fluxs,

@@ -2,16 +2,25 @@ from __future__ import annotations
 
 import logging
 
-from qick.asm_v2 import QickParam
+from qick.asm_v2 import AsmInst, QickParam, WriteLabel
 from typing_extensions import Optional, Self, TypeAlias, Union
 
 from zcu_tools.program.v2.modular import ModularProgramV2
 
+from ..ir.hw_semantics import needs_big_jump
 from .base import Module
 
 logger = logging.getLogger(__name__)
 
 SubModule: TypeAlias = Union[Module, list[Module]]
+
+
+def _emit_jump_s15(prog) -> None:
+    prog.append_macro(AsmInst(inst={"CMD": "JUMP", "ADDR": "s15"}, addr_inc=1))
+
+
+def _emit_write_label(prog, label: str) -> None:
+    prog.append_macro(WriteLabel(label=label))
 
 
 class Repeat(Module):
@@ -23,14 +32,32 @@ class Repeat(Module):
     using cond_jump / jump / label, so the loop count can vary at runtime.
     """
 
-    def __init__(self, name: str, n: Union[int, str]) -> None:
+    def __init__(
+        self,
+        name: str,
+        n: Union[int, str],
+        *,
+        range_hint: Optional[tuple[int, int]] = None,
+    ) -> None:
         self.name = name
         self.n = n
         self.sub_modules = []
         self.counter_reg = self.name
+        self.range_hint = (
+            (range_hint[0], range_hint[1]) if range_hint is not None else None
+        )
 
         if isinstance(n, int) and n < 0:
             raise ValueError(f"Repeat n must be greater than or equal to 0, got {n}")
+
+        # counter_reg is named after `name`; a register-driven n sharing that
+        # name would make the back-edge `op(counter - n)` evaluate to a
+        # constant 0, breaking the loop condition.
+        if isinstance(n, str) and n == self.counter_reg:
+            raise ValueError(
+                f"Repeat n register {n!r} must differ from the counter register "
+                f"(named after Repeat name {name!r})"
+            )
 
     def add_content(self, mod: SubModule) -> Self:
         if isinstance(mod, Module):
@@ -39,6 +66,10 @@ class Repeat(Module):
         return self
 
     def init(self, prog: ModularProgramV2) -> None:
+        if isinstance(self.n, int) and self.n == 0:
+            logger.debug("Repeat.init: skip zero-iteration loop name='%s'", self.name)
+            return
+
         prog.add_reg(self.counter_reg)
         for mod in self.sub_modules:
             mod.init(prog)
@@ -57,7 +88,15 @@ class Repeat(Module):
         prog.delay(t=t)
         prog.delay_auto(t=0.0)
 
-        prog.open_inner_loop(self.name, self.counter_reg, self.n)
+        if isinstance(self.n, int) and self.n == 0:
+            logger.debug(
+                "Repeat.run: short-circuit zero-iteration loop name='%s'", self.name
+            )
+            return 0.0
+
+        prog.open_inner_loop(
+            self.name, self.counter_reg, self.n, range_hint=self.range_hint
+        )
 
         cur_t = 0.0
         for mod in self.sub_modules:
@@ -65,7 +104,7 @@ class Repeat(Module):
         prog.delay(t=cur_t)
         prog.delay_auto(t=0.0)
 
-        prog.close_inner_loop(self.name, self.counter_reg)
+        prog.close_inner_loop(self.name, self.counter_reg, self.n)
 
         return 0.0  # prog.delay will modify ref time
 
@@ -78,11 +117,16 @@ class Branch(Module):
     iteration of that outer loop the counter selects the corresponding branch,
     so branch *i* runs exactly once (at iteration *i*).
 
-    Branch selection uses a binary cond_jump dispatch tree. For non-power-of-two
-    branch counts, shorter paths are padded with NOP so each branch starts after
-    the same number of control instructions. Each branch is wrapped with delay /
-    delay_auto to flush timing, so branches may have different durations. The
-    module always returns 0.0.
+    Branch selection uses a dispatch-table island:
+
+    1. compute ``s15 = &table_0 + compare_reg * entry_words``
+    2. indirect jump into the table
+    3. table stub performs one more jump to the real case entry
+
+    This keeps dispatch depth constant while allowing each case body to be
+    independently optimised. Each branch is wrapped with delay / delay_auto to
+    flush timing, so branches may have different durations. The module always
+    returns 0.0.
     """
 
     def __init__(
@@ -114,50 +158,66 @@ class Branch(Module):
             t,
         )
 
-        prog.delay(t=t)
-        prog.delay_auto(t=0)
+        def run_branch(i: int) -> None:
+            prog.meta_macro(type="BRANCH_CASE_START", name=str(i))
+            prog.label(f"{self.name}_case_entry_{i}")
 
-        n = len(self.branches)
-        max_depth = (n - 1).bit_length()
-
-        def run_branch(i: int, depth: int) -> None:
-            for _ in range(max_depth - depth):
-                prog.nop()
-
-            with prog.disable_delay():
-                cur_t: Union[float, QickParam] = 0.0
-                for mod in self.branches[i]:
-                    if logger.isEnabledFor(logging.DEBUG):
-                        prog.debug_macro(
-                            f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
-                        )
-                    cur_t = mod.run(prog, cur_t)
+            cur_t: Union[float, QickParam] = 0.0
+            for mod in self.branches[i]:
+                if logger.isEnabledFor(logging.DEBUG):
+                    prog.debug_macro(
+                        f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
+                    )
+                cur_t = mod.run(prog, cur_t)
 
             # TODO: support branch with swept duration
             if isinstance(cur_t, QickParam):
                 raise NotImplementedError("Branch with swept duration is not supported")
 
             prog.delay(t=cur_t)
+            prog.delay_auto()
 
-        def emit_dispatch(lo: int, hi: int, depth: int) -> None:
-            if hi - lo == 1:
-                run_branch(lo, depth)
-                return
+            prog.meta_macro(type="BRANCH_CASE_END", name=str(i))
 
-            mid = (lo + hi) // 2
-            left_label = f"{self.name}_branch_l_{lo}_{mid}"
-            end_label = f"{self.name}_branch_e_{lo}_{hi}"
-
-            # compare_reg < mid -> left half, else right half
-            prog.cond_jump(left_label, self.compare_reg, "S", "-", mid)
-            emit_dispatch(mid, hi, depth + 1)
-            prog.jump(end_label)
-            prog.label(left_label)
-            emit_dispatch(lo, mid, depth + 1)
-            prog.label(end_label)
-
-        emit_dispatch(0, n, 0)
-
+        prog.delay(t=t)
         prog.delay_auto(t=0)
+
+        n = len(self.branches)
+
+        prog.meta_macro(
+            type="BRANCH_START",
+            name=self.name,
+            regs={"compare_reg": self.compare_reg},
+        )
+
+        big_jump = needs_big_jump(prog.tproccfg["pmem_size"])
+
+        table_base = f"{self.name}_dispatch_0"
+        _emit_write_label(prog, table_base)
+        prog.write_reg_op("s15", "s15", "+", self.compare_reg)
+        if big_jump:
+            prog.write_reg_op("s15", "s15", "+", self.compare_reg)
+        _emit_jump_s15(prog)
+
+        for i in range(n):
+            prog.label(f"{self.name}_dispatch_{i}")
+            if big_jump:
+                _emit_write_label(prog, f"{self.name}_case_entry_{i}")
+                _emit_jump_s15(prog)
+            else:
+                prog.jump(f"{self.name}_case_entry_{i}")
+
+        end_label = f"{self.name}_end"
+
+        for i in range(n):
+            run_branch(i)
+            if i < n - 1:
+                if big_jump:
+                    _emit_write_label(prog, end_label)
+                    _emit_jump_s15(prog)
+                else:
+                    prog.jump(end_label)
+        prog.meta_macro(type="BRANCH_END", name=self.name)
+        prog.label(end_label)
 
         return 0.0

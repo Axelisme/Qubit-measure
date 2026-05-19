@@ -89,14 +89,14 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
                 soccfg,
                 cfg,
                 sweep=[
-                    ("w/o_reset", 3),
+                    ("reset_sel", 3),
                     ("gain", cfg.sweep.gain),
                 ],
                 modules=[
                     Reset("reset", modules.reset),
                     Pulse("rabi_pulse", modules.rabi_pulse),
                     Branch(
-                        "w/o_reset",
+                        "reset_sel",
                         [],
                         Reset("tested_reset_1", modules.tested_reset),
                         [

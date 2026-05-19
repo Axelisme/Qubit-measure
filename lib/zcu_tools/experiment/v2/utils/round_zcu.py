@@ -158,8 +158,8 @@ def sweep2array(
         )
     elif isinstance(sweep, list) or isinstance(sweep, np.ndarray):
         if not allow_array:
-            raise ValueError("Custom sweep is not allowed")
+            raise ValueError(f"Custom sweep is not allowed: {sweep}")
         sweep_array = np.asarray(sweep, dtype=np.float64)
         return apply_round(sweep_array, round_type, round_info)
     else:
-        raise ValueError("Invalid sweep format")
+        raise ValueError(f"Invalid sweep format: {sweep}")

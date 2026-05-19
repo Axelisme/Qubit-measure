@@ -103,10 +103,11 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
 
         real_signals = rabi_signal2real(signals)
 
-        if real_signals[0] > 0.5 * (np.max(real_signals) + np.min(real_signals)):
+        zero_signal = real_signals[np.argmin(np.abs(gains))]
+        if zero_signal > 0.5 * (np.max(real_signals) + np.min(real_signals)):
             init_phase = 0.0
         else:
-            init_phase = 180
+            init_phase = 180.0
 
         pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, _, _, y_fit, _ = fit_rabi(
             gains, real_signals, decay=False, init_phase=init_phase

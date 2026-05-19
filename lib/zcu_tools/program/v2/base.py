@@ -8,6 +8,7 @@ from qick.asm_v2 import AveragerProgramV2
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.program.base import ImproveAcquireMixin
 
+from .ir import IRCompileMixin
 from .macro import ImproveAsmV2
 from .modules.registry import PulseRegistry
 
@@ -21,7 +22,7 @@ class ProgramV2Cfg(ConfigBase):
     relax_delay: float = 1.0
 
 
-class MyProgramV2(ImproveAcquireMixin, ImproveAsmV2, AveragerProgramV2):  # type: ignore
+class MyProgramV2(ImproveAcquireMixin, ImproveAsmV2, AveragerProgramV2, IRCompileMixin):  # type: ignore
     def __init__(self, soccfg: QickConfig, cfg: ProgramV2Cfg, **kwargs) -> None:
 
         # v2 program need to pass reps and final_delay to init

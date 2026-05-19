@@ -28,7 +28,9 @@ def test_task_run_writes_signal_into_state():
 
 
 def test_task_set_pbar_n_updates_total():
-    t = Task(measure_fn=_measure, raw2signal_fn=lambda raw: raw, result_shape=(1,), pbar_n=3)
+    t = Task(
+        measure_fn=_measure, raw2signal_fn=lambda raw: raw, result_shape=(1,), pbar_n=3
+    )
     t.init(dynamic_pbar=False)
     t.set_pbar_n(10)
     assert t.avg_pbar is not None

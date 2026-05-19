@@ -4,13 +4,7 @@ from copy import deepcopy
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import (
-    Any,
-    Callable,
-    Literal,
-    Optional,
-    TypeAlias,
-)
+from typing_extensions import Any, Callable, Literal, Optional, TypeAlias
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -65,7 +59,7 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
     ) -> ZigZagResult:
         setup_devices(cfg, progress=True)
 
-        times = np.arange(cfg.n_times)
+        times = np.arange(0, cfg.n_times + 1)
         loop_n = list(2 * times if repeat_on == "X90_pulse" else times)
 
         def measure_fn(
@@ -92,9 +86,11 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
                     ),
                     Reset("reset", modules.reset),
                     Pulse("X90_pulse", X90_pulse),
-                    Repeat("zigzag_loop", n="repeat_count").add_content(
-                        Pulse(f"loop_{repeat_on}", repeat_pulse)
-                    ),
+                    Repeat(
+                        "zigzag_loop",
+                        n="repeat_count",
+                        range_hint=(min(times), max(times)),
+                    ).add_content(Pulse(f"loop_{repeat_on}", repeat_pulse)),
                     Readout("readout", modules.readout),
                 ],
                 sweep=[("times", len(times))],

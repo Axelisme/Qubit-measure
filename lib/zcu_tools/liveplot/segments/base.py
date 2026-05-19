@@ -80,6 +80,11 @@ class BaseSegmentLivePlot(AbsLivePlot):
         for ax_row, seg_row in zip(self.axs, self.segments):
             for ax, segment in zip(ax_row, seg_row):
                 segment.clear(ax)
+
+        for ax_row, seg_row in zip(self.axs, self.segments):
+            for ax, segment in zip(ax_row, seg_row):
+                segment.init_ax(ax)
+
         self.refresh()
 
     def refresh(self) -> None:
@@ -100,6 +105,8 @@ class BaseSegmentLivePlot(AbsLivePlot):
         for ax_row, seg_row in zip(self.axs, self.segments):
             for ax, segment in zip(ax_row, seg_row):
                 segment.init_ax(ax)
+
+        self.refresh()
 
         return self
 
