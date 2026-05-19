@@ -10,7 +10,7 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState
-from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
+from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.notebook.utils import make_sweep
@@ -144,12 +144,11 @@ class T2EchoTask(MeasurementTask[T2EchoResult, T_RootResult, T2EchoPlotDict]):
             return prog.acquire(
                 ctx.env["soc"],
                 progress=False,
-                round_hook=wrap_earlystop_check(
-                    prog,
-                    update_hook,
-                    self.earlystop_snr,
-                    signal2real_fn=t2echo_signal2real,
-                ),
+                round_hook=update_hook,
+                stop_checkers=[
+                    ctx.is_stop,
+                    snr_checker(ctx, self.earlystop_snr, t2echo_signal2real),
+                ],
             )
 
         self.lengths = np.linspace(0, 1, num_expts)

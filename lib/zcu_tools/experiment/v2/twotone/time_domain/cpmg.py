@@ -16,7 +16,7 @@ from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
-from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
+from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.notebook.utils import make_sweep
 from zcu_tools.program.v2 import (
@@ -169,42 +169,43 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                 nonlocal current_snr
                 current_snr = snr
 
-            return (
-                prog := ModularProgramV2(
-                    soccfg,
-                    cfg,
-                    modules=[
-                        Reset("reset", modules.reset),
-                        Pulse("pi2_pulse1", pi2_pulse, block_mode=False),
-                        Delay("first_delay", interval - 0.5 * dpulse_len),
-                        Repeat("pi_loop", time - 1).add_content(
-                            [
-                                Pulse("pi_pulse", pi_pulse, block_mode=False),
-                                SoftDelay("inner_delay", 2 * interval),
-                            ]
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.reset),
+                    Pulse("pi2_pulse1", pi2_pulse, block_mode=False),
+                    Delay("first_delay", interval - 0.5 * dpulse_len),
+                    Repeat("pi_loop", time - 1).add_content(
+                        [
+                            Pulse("pi_pulse", pi_pulse, block_mode=False),
+                            SoftDelay("inner_delay", 2 * interval),
+                        ]
+                    ),
+                    Pulse("last_pi_pulse", pi_pulse, block_mode=False),
+                    Delay("last_delay", interval + 0.5 * dpulse_len),
+                    Pulse(
+                        name="pi2_pulse2",
+                        cfg=pi2_pulse.with_updates(
+                            phase=pi2_pulse.phase + detune_param
                         ),
-                        Pulse("last_pi_pulse", pi_pulse, block_mode=False),
-                        Delay("last_delay", interval + 0.5 * dpulse_len),
-                        Pulse(
-                            name="pi2_pulse2",
-                            cfg=pi2_pulse.with_updates(
-                                phase=pi2_pulse.phase + detune_param
-                            ),
-                        ),
-                        Readout("readout", modules.readout),
-                    ],
-                    sweep=[("length", length_sweep)],
-                )
+                    ),
+                    Readout("readout", modules.readout),
+                ],
+                sweep=[("length", length_sweep)],
             ).acquire(
                 soc,
                 progress=False,
-                round_hook=wrap_earlystop_check(
-                    prog,
-                    update_hook,
-                    earlystop_snr,
-                    signal2real_fn=lambda x: rotate2real(x).real,
-                    after_check=update_snr,
-                ),
+                round_hook=update_hook,
+                stop_checkers=[
+                    ctx.is_stop,
+                    snr_checker(
+                        ctx,
+                        earlystop_snr,
+                        lambda x: rotate2real(x).real,
+                        after_check=update_snr,
+                    ),
+                ],
                 **(acquire_kwargs or {}),
             )
 

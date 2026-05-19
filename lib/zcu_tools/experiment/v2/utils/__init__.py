@@ -8,7 +8,7 @@ from .round_zcu import (
     round_zcu_time,
     sweep2array,
 )
-from .snr import estimate_snr, snr_as_signal, wrap_earlystop_check
+from .snr import estimate_snr, snr_as_signal, snr_checker
 
 __all__ = [
     # module
@@ -25,5 +25,5 @@ __all__ = [
     # snr
     "estimate_snr",
     "snr_as_signal",
-    "wrap_earlystop_check",
+    "snr_checker",
 ]

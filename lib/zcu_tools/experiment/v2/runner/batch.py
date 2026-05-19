@@ -46,6 +46,9 @@ class BatchTask(AbsTask[dict[T_Key, T_ChildResult], T_RootResult, T_Cfg]):
         logger.debug("BatchTask.run: %d tasks", len(self.tasks))
 
         for name, task in self.tasks.items():
+            if state.is_stop():
+                break
+
             assert self.task_pbar is not None
             self.task_pbar.set_description(f"Task [{str(name)}]")
             logger.debug("BatchTask.run: starting task '%s'", name)

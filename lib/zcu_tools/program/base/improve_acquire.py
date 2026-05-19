@@ -67,34 +67,30 @@ class TypedAcquireMixin(AcquireMixin):
 
 
 class EarlyStopMixin(TypedAcquireMixin):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._early_stop = False
+    def acquire(
+        self, *args, stop_checkers: Optional[List[Callable[[], bool]]] = None, **kwargs
+    ):
+        extra_args = kwargs.pop("extra_args", dict())
+        extra_args.update(stop_checkers=stop_checkers)
+        return super().acquire(*args, extra_args=extra_args, **kwargs)  # type: ignore
 
-    def set_early_stop(self, silent: bool = False) -> None:
-        # tell program to return as soon as this round is finished
-        if not silent:
-            print("Program received early stop signal")
-        self._early_stop = True
-
-    def acquire(self, *args, **kwargs):
-        self._early_stop = False
-        return super().acquire(*args, **kwargs)  # type: ignore
-
-    def acquire_decimated(self, *args, **kwargs):
-        self._early_stop = False
-        return super().acquire_decimated(*args, **kwargs)  # type: ignore
+    def acquire_decimated(
+        self, *args, stop_checkers: Optional[List[Callable[[], bool]]] = None, **kwargs
+    ):
+        extra_args = kwargs.pop("extra_args", dict())
+        extra_args.update(stop_checkers=stop_checkers)
+        return super().acquire_decimated(*args, extra_args=extra_args, **kwargs)  # type: ignore
 
     def finish_round(self) -> bool:
         not_finish = super().finish_round()
-        if not_finish and self._early_stop:
-            if self.rounds_pbar is not None:
-                self.rounds_pbar.close()
-            else:
-                warnings.warn(
-                    "Early stop signal received but rounds_pbar is not set, cannot close the progress bar"
-                )
-        return not_finish and not self._early_stop
+        if not_finish:
+            assert self.acquire_params is not None
+            stop_checkers = self.acquire_params.get("stop_checkers") or []
+            if any(c() for c in stop_checkers):
+                if self.rounds_pbar is not None:
+                    self.rounds_pbar.close()
+                return False
+        return not_finish
 
 
 class SingleShotMixin(TypedAcquireMixin):

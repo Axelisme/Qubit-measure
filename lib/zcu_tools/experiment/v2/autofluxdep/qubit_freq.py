@@ -10,7 +10,7 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState
-from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
+from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
 from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.program.v2 import SweepCfg, TwoToneCfg, TwoToneProgram, sweep2param
@@ -108,19 +108,16 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
                 modules.qub_pulse.freq + detune_param,
             )
 
-            return (
-                prog := TwoToneProgram(
-                    ctx.env["soccfg"], cfg, sweep=[("detune", detune_sweep)]
-                )
+            return TwoToneProgram(
+                ctx.env["soccfg"], cfg, sweep=[("detune", detune_sweep)]
             ).acquire(
                 ctx.env["soc"],
                 progress=False,
-                round_hook=wrap_earlystop_check(
-                    prog,
-                    update_hook,
-                    self.earlystop_snr,
-                    signal2real_fn=qubitfreq_signal2real,
-                ),
+                round_hook=update_hook,
+                stop_checkers=[
+                    ctx.is_stop,
+                    snr_checker(ctx, self.earlystop_snr, qubitfreq_signal2real),
+                ],
             )
 
         self.task = Task[T_RootResult, list[NDArray[np.float64]], QubitFreqCfg](

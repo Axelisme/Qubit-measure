@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from abc import ABC, abstractmethod
 from copy import deepcopy
 
@@ -28,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 T_Result = TypeVar("T_Result", bound=Result)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
+
+_current_stop_flag: Optional[threading.Event] = None
 
 
 class AbsTask(ABC, Generic[T_Result, T_RootResult, T_Cfg]):
@@ -77,12 +80,54 @@ class AbsTask(ABC, Generic[T_Result, T_RootResult, T_Cfg]):
         return ReTryIfFail(task=self, max_retries=max_retries)
 
 
+class TaskHandle:
+    """A handle to a running task that allows cancellation from another thread."""
+
+    def __init__(self, stop_flag: threading.Event) -> None:
+        self._stop_flag = stop_flag
+
+    def cancel(self) -> None:
+        self._stop_flag.set()
+
+    def is_cancelled(self) -> bool:
+        return self._stop_flag.is_set()
+
+
+class ActiveTask:
+    """Context manager that registers a global stop flag for the current task scope.
+
+    Usage::
+
+        with ActiveTask() as handle:
+            exp.run(soc, soccfg, cfg)  # run_task inside picks up the stop flag automatically
+
+        # from another thread:
+        handle.cancel()
+
+    Nesting ActiveTask is not allowed and raises RuntimeError.
+    """
+
+    def __enter__(self) -> TaskHandle:
+        global _current_stop_flag
+        if _current_stop_flag is not None:
+            raise RuntimeError(
+                "ActiveTask cannot be nested: an active task scope is already running"
+            )
+        _current_stop_flag = threading.Event()
+        return TaskHandle(_current_stop_flag)
+
+    def __exit__(self, *args: object) -> None:
+        global _current_stop_flag
+        _current_stop_flag = None
+
+
 def run_task(
     task: AbsTask[T_Result, T_Result, T_Cfg],
     init_cfg: T_Cfg,
     env_dict: Optional[dict[str, Any]] = None,
     on_update: Optional[Callable[[TaskState[Any, T_Result, T_Cfg]], Any]] = None,
     update_interval: Optional[float] = 0.1,
+    stop_flag: Optional[threading.Event] = None,
 ) -> T_Result:
     """Run a task with a fresh TaskState.
 
@@ -98,11 +143,14 @@ def run_task(
 
     on_update = min_interval(on_update, update_interval)
 
+    effective_stop_flag = stop_flag if stop_flag is not None else _current_stop_flag
+
     state: TaskState[T_Result, T_Result, T_Cfg] = TaskState(
         root_data=init_result,
         cfg=cfg,
         env=env_dict,
         on_update=on_update,
+        _stop_flag=effective_stop_flag,
     )
 
     cfg_keys = list(cfg.keys()) if isinstance(cfg, Mapping) else [type(cfg).__name__]

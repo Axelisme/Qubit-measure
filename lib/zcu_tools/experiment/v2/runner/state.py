@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from copy import deepcopy
 from dataclasses import dataclass, field
 from numbers import Number
@@ -50,6 +51,14 @@ class TaskState(Generic[T_Result, T_RootResult, T_Cfg]):
     env: dict[str, Any] = field(default_factory=dict)
     on_update: Optional[Callable[["TaskState[Any, T_RootResult, Any]"], Any]] = None
     path: tuple[Union[int, Hashable], ...] = field(default_factory=tuple)
+    _stop_flag: Optional[threading.Event] = field(default=None, repr=False)
+
+    def is_stop(self) -> bool:
+        return self._stop_flag is not None and self._stop_flag.is_set()
+
+    def set_stop(self) -> None:
+        if self._stop_flag is not None:
+            self._stop_flag.set()
 
     # ------------------------------------------------------------------
     # Navigation helpers
@@ -80,6 +89,7 @@ class TaskState(Generic[T_Result, T_RootResult, T_Cfg]):
             env=self.env,
             on_update=self.on_update,
             path=self.path + (addr,),
+            _stop_flag=self._stop_flag,
         )
 
     @overload
@@ -110,6 +120,7 @@ class TaskState(Generic[T_Result, T_RootResult, T_Cfg]):
             env=self.env,
             on_update=self.on_update,
             path=self.path + (addr,),
+            _stop_flag=self._stop_flag,
         )
 
     # ------------------------------------------------------------------

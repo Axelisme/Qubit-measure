@@ -1,7 +1,7 @@
 import numpy as np
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.runner.state import TaskState
-from zcu_tools.experiment.v2.runner.task import Task
+from zcu_tools.experiment.v2.runner.task import Task, default_raw2signal_fn
 
 
 def _measure(state, hook):
@@ -48,3 +48,56 @@ def test_get_default_result_nan_filled():
     r = t.get_default_result()
     assert r.shape == (3, 2)
     assert np.isnan(r).all()
+
+
+def test_default_raw2signal_fn():
+    # raw = [[IQ_array]] where IQ_array has shape (N, 2) with columns [I, Q]
+    iq = np.array([[1.0, 2.0], [3.0, 4.0]])
+    raw = [[iq]]
+    result = default_raw2signal_fn(raw)  # type: ignore[arg-type]
+    expected = np.array([1.0 + 2.0j, 3.0 + 4.0j])
+    assert np.allclose(result, expected)
+
+
+def test_task_run_dynamic_pbar_closed_after_run():
+    t = Task(
+        measure_fn=_measure,
+        raw2signal_fn=lambda raw: raw,
+        result_shape=(1,),
+        pbar_n=1,
+    )
+    init = t.get_default_result()
+    state = TaskState(root_data=init, cfg=ExpCfgModel())
+
+    t.init(dynamic_pbar=True)
+    t.run(state)
+    assert t.avg_pbar is None
+
+
+def test_task_update_hook_called_and_updates_state():
+    def _measure_with_hook(state, hook):
+        raw = np.array([0.5 + 0.5j])
+        hook(0, raw)
+        return raw
+
+    t = Task(
+        measure_fn=_measure_with_hook,
+        raw2signal_fn=lambda raw: raw,
+        result_shape=(1,),
+        pbar_n=2,
+    )
+    init = t.get_default_result()
+    updates: list[np.ndarray] = []
+    state = TaskState(
+        root_data=init,
+        cfg=ExpCfgModel(),
+        on_update=lambda snap: updates.append(snap.value.copy()),  # type: ignore[union-attr]
+    )
+
+    t.init(dynamic_pbar=False)
+    t.run(state)
+    t.cleanup()
+
+    # update_hook triggered at least once during run
+    assert len(updates) >= 1
+    assert np.allclose(updates[0], [0.5 + 0.5j])
