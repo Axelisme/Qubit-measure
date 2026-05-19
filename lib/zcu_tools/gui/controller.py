@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any, Optional, Protocol
 
 logger = logging.getLogger(__name__)
 
-from .adapter import ExpContext
 from .device_manager import DeviceManager
 from .io_manager import IOManager
 from .registry import Registry
@@ -169,11 +168,20 @@ class Controller:
             self._view.show_status_message(f"Save image failed: {exc}")
 
     # ------------------------------------------------------------------
-    # Context / IO  (Phase 10)
+    # Context / IO  (Phase 11)
     # ------------------------------------------------------------------
 
+    def setup_project(self, result_dir: str) -> None:
+        logger.info("setup_project: result_dir=%r", result_dir)
+        self._io.setup(result_dir)
+        self._view.refresh_context_panel()
+
     def use_context(self, label: str) -> None:
-        raise NotImplementedError
+        logger.info("use_context: label=%r", label)
+        new_ctx = self._io.use_context(label, self._state.exp_context)
+        self._state.set_context(new_ctx)
+        self._view.refresh_context_panel()
+        self._view.refresh_config_panels()
 
     def new_context(
         self,
@@ -181,10 +189,24 @@ class Controller:
         unit: str = "A",
         clone_from_current: bool = False,
     ) -> None:
-        raise NotImplementedError
+        logger.info(
+            "new_context: value=%r unit=%r clone=%r", value, unit, clone_from_current
+        )
+        new_ctx = self._io.new_context(
+            self._state.exp_context,
+            value=value,
+            unit=unit,
+            clone_from_current=clone_from_current,
+        )
+        self._state.set_context(new_ctx)
+        self._view.refresh_context_panel()
+        self._view.refresh_config_panels()
+
+    def get_active_context_label(self) -> Optional[str]:
+        return self._io.get_active_label()
 
     # ------------------------------------------------------------------
-    # Device  (Phase 10)
+    # Device  (Phase 11)
     # ------------------------------------------------------------------
 
     def register_device(self, name: str, device: Any) -> None:
@@ -192,10 +214,18 @@ class Controller:
             raise RuntimeError("Cannot register device while a run is active")
         self._dm.register_device(name, device)
 
-    def set_device_value(self, name: str, value: Any) -> None:
+    def drop_device(self, name: str) -> None:
+        if self._state.is_running:
+            raise RuntimeError("Cannot drop device while a run is active")
+        self._dm.drop_device(name)
+
+    def list_devices(self) -> dict[str, str]:
+        return self._dm.list_devices()
+
+    def set_device_value(self, name: str, value: Any) -> Any:
         if self._state.is_running:
             raise RuntimeError("Cannot set device value while a run is active")
-        self._dm.set_device_value(name, value)
+        return self._dm.set_device_value(name, value)
 
     def get_device_value(self, name: str) -> Any:
         return self._dm.get_device_value(name)

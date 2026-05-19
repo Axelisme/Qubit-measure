@@ -381,7 +381,32 @@ class MainWindow(QMainWindow):
         self._new_tab_btn.clicked.connect(self._on_new_tab_requested)
         toolbar.addWidget(self._new_tab_btn)
         toolbar.addStretch()
+
+        project_btn = QPushButton("Project…")
+        project_btn.clicked.connect(self._on_project_clicked)
+        toolbar.addWidget(project_btn)
+
+        connection_btn = QPushButton("Connection…")
+        connection_btn.clicked.connect(self._on_connection_clicked)
+        toolbar.addWidget(connection_btn)
+
+        devices_btn = QPushButton("Devices…")
+        devices_btn.clicked.connect(self._on_devices_clicked)
+        toolbar.addWidget(devices_btn)
+
+        predictor_btn = QPushButton("Predictor…")
+        predictor_btn.clicked.connect(self._on_predictor_clicked)
+        toolbar.addWidget(predictor_btn)
+
         main_layout.addLayout(toolbar)
+
+        # --- context status bar ---
+        ctx_bar = QHBoxLayout()
+        ctx_bar.addWidget(QLabel("Context:"))
+        self._ctx_label = QLabel("(none)")
+        ctx_bar.addWidget(self._ctx_label)
+        ctx_bar.addStretch()
+        main_layout.addLayout(ctx_bar)
 
         # --- tab widget ---
         self._tabs = QTabWidget()
@@ -433,10 +458,14 @@ class MainWindow(QMainWindow):
             tab_w.set_running(is_running)
 
     def refresh_context_panel(self) -> None:
-        pass  # Phase 10
+        label = self._ctrl.get_active_context_label()
+        self._ctx_label.setText(label if label is not None else "(none)")
 
     def refresh_config_panels(self) -> None:
-        pass  # Phase 10
+        for tab_id, tab_w in self._tab_widgets.items():
+            schema = self._ctrl.get_tab_default_cfg(tab_id)
+            if schema is not None:
+                tab_w.populate_cfg(schema)
 
     def show_status_message(self, message: str) -> None:
         logger.info("status: %s", message)
@@ -566,5 +595,26 @@ class MainWindow(QMainWindow):
             logger.warning("_on_save_image_clicked: blocked — %s", exc)
             self.show_status_message(str(exc))
 
-    def _on_context_selected(self, label: str) -> None:
-        _ = label  # Phase 10
+    def _on_project_clicked(self) -> None:
+        from .project_dialog import ProjectDialog
+
+        dlg = ProjectDialog(self._ctrl, parent=self)
+        dlg.exec()
+
+    def _on_connection_clicked(self) -> None:
+        from .connection_dialog import ConnectionDialog
+
+        dlg = ConnectionDialog(self._ctrl, parent=self)
+        dlg.exec()
+
+    def _on_devices_clicked(self) -> None:
+        from .device_dialog import DeviceDialog
+
+        dlg = DeviceDialog(self._ctrl, parent=self)
+        dlg.exec()
+
+    def _on_predictor_clicked(self) -> None:
+        from .predictor_dialog import PredictorDialog
+
+        dlg = PredictorDialog(self._ctrl, parent=self)
+        dlg.exec()
