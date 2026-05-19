@@ -17,6 +17,7 @@ from .device_manager import DeviceManager
 from .io_manager import IOManager
 from .registry import Registry
 from .state import State, TabState
+from .ui import MainWindow
 
 __all__ = [
     "AbsExpAdapter",
@@ -25,6 +26,7 @@ __all__ = [
     "CfgSection",
     "DeviceManager",
     "ExpContext",
+    "MainWindow",
     "IOManager",
     "ModuleRefField",
     "MultiSweepField",

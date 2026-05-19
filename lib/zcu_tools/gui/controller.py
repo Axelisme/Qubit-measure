@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import dataclasses
+import logging
 import uuid
 from typing import TYPE_CHECKING, Any, Optional, Protocol
+
+logger = logging.getLogger(__name__)
 
 from .adapter import ExpContext
 from .device_manager import DeviceManager
@@ -52,10 +55,12 @@ class Controller:
     def new_tab(self, adapter_name: str) -> str:
         adapter = self._registry.create(adapter_name)
         tab_id = str(uuid.uuid4())
+        logger.info("new_tab: adapter=%r tab_id=%r", adapter_name, tab_id)
         self._state.add_tab(tab_id, adapter)
         return tab_id
 
     def close_tab(self, tab_id: str) -> None:
+        logger.info("close_tab: tab_id=%r", tab_id)
         if self._runner.is_running and self._state.active_tab_id == tab_id:
             self._runner.cancel()
         self._state.remove_tab(tab_id)
@@ -67,6 +72,7 @@ class Controller:
     def start_run(self, tab_id: str, schema: Any, user_params: dict) -> None:
         if self._state.is_running:
             raise RuntimeError("Another run is already active")
+        logger.info("start_run: tab_id=%r user_params=%r", tab_id, list(user_params))
         tab = self._state.get_tab(tab_id)
         self._state.set_running(True)
         self._view.refresh_run_state(True)
@@ -79,15 +85,20 @@ class Controller:
         )
 
     def cancel_run(self) -> None:
+        logger.info("cancel_run")
         self._runner.cancel()
 
     def _on_run_finished(self, tab_id: str, result: Any) -> None:
+        logger.info(
+            "_on_run_finished: tab_id=%r result_type=%s", tab_id, type(result).__name__
+        )
         self._state.update_tab_result(tab_id, result, cfg=None)
         self._state.set_running(False)
         self._view.refresh_run_state(False)
         self._view.refresh_tab(tab_id)
 
     def _on_run_failed(self, tab_id: str, error: Exception) -> None:  # noqa: ARG002
+        logger.warning("_on_run_failed: tab_id=%r error=%r", tab_id, error)
         self._state.set_running(False)
         self._view.refresh_run_state(False)
         self._view.show_status_message(f"Run failed: {error}")

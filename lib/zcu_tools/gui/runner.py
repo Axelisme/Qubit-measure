@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 from qtpy.QtCore import QObject, QThread, Signal  # type: ignore[attr-defined]
 
@@ -32,6 +35,7 @@ class RunWorker(QThread):
         self._stop_event = threading.Event()
 
     def run(self) -> None:
+        logger.debug("RunWorker.run: start adapter=%s", type(self._adapter).__name__)
         try:
             if self._pbar_factory is not None:
                 with ActiveTask(self._stop_event), use_pbar_factory(self._pbar_factory):
@@ -43,11 +47,16 @@ class RunWorker(QThread):
                     result = self._adapter.run(
                         self._ctx, self._schema, **self._user_params
                     )
+            logger.debug(
+                "RunWorker.run: finished result_type=%s", type(result).__name__
+            )
             self.run_finished.emit(result)
         except Exception as exc:
+            logger.warning("RunWorker.run: failed exc=%r", exc)
             self.run_failed.emit(exc)
 
     def cancel(self) -> None:
+        logger.debug("RunWorker.cancel: setting stop event")
         self._stop_event.set()
 
 
@@ -79,6 +88,9 @@ class Runner(QObject):
             raise RuntimeError(
                 f"Cannot start run for tab {tab_id!r}: another run is already active"
             )
+        logger.debug(
+            "Runner.start_run: tab_id=%r adapter=%s", tab_id, type(adapter).__name__
+        )
         self._active_tab_id = tab_id
         worker = RunWorker(adapter, ctx, schema, user_params, pbar_factory)
         worker.run_finished.connect(self._on_worker_finished)
@@ -88,16 +100,19 @@ class Runner(QObject):
 
     def cancel(self) -> None:
         if self._worker is not None:
+            logger.debug("Runner.cancel: requesting stop")
             self._worker.cancel()
 
     def _on_worker_finished(self, result: Any) -> None:
         tab_id = self._active_tab_id or ""
+        logger.debug("Runner._on_worker_finished: tab_id=%r", tab_id)
         self._worker = None
         self._active_tab_id = None
         self.run_finished.emit(tab_id, result)
 
     def _on_worker_failed(self, exc: Exception) -> None:
         tab_id = self._active_tab_id or ""
+        logger.warning("Runner._on_worker_failed: tab_id=%r exc=%r", tab_id, exc)
         self._worker = None
         self._active_tab_id = None
         self.run_failed.emit(tab_id, exc)
