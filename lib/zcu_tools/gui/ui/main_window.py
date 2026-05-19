@@ -145,6 +145,7 @@ class ExpTabWidget(QWidget):
         self.tab_id = tab_id
         self._param_widgets: dict[str, QWidget] = {}  # analyze param key → widget
         self._writeback_checks: dict[str, QCheckBox] = {}  # wb key → checkbox
+        self._applied_writeback_keys: set[str] = set()
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(4, 4, 4, 4)
@@ -198,14 +199,6 @@ class ExpTabWidget(QWidget):
         result_inner = QWidget()
         result_layout = QVBoxLayout(result_inner)
         result_layout.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
-
-        # Run result display
-        result_layout.addWidget(QLabel("<b>Run Result</b>"))
-        self.result_display = QTextEdit()
-        self.result_display.setReadOnly(True)
-        self.result_display.setMaximumHeight(80)
-        self.result_display.setPlaceholderText("(results shown here after run)")
-        result_layout.addWidget(self.result_display)
 
         # Analyze params group
         self._analyze_group = QGroupBox("Analyze Params")
@@ -264,18 +257,15 @@ class ExpTabWidget(QWidget):
             self._analyze_form.addRow(spec.label + ":", w)
             self._param_widgets[key] = w
 
-    def show_result(self, result: Any) -> None:
-        self.result_display.setPlainText(str(result))
-
     def show_writeback_spec(self, items: list["WritebackItem"]) -> None:
         """Rebuild the writeback checkbox list."""
-        # clear old checkboxes
         while self._writeback_layout.count():
             child = self._writeback_layout.takeAt(0)
             w = child.widget() if child is not None else None
             if w is not None:
                 w.deleteLater()
         self._writeback_checks.clear()
+        self._applied_writeback_keys: set[str] = set()
 
         for item in items:
             cb = QCheckBox(
@@ -289,6 +279,22 @@ class ExpTabWidget(QWidget):
         has_items = bool(items)
         self._writeback_group.setVisible(has_items)
         self.apply_writeback_btn.setVisible(has_items)
+        self.apply_writeback_btn.setEnabled(has_items)
+        self.apply_writeback_btn.setText("Apply Writeback")
+
+    def mark_writeback_applied(self, applied_keys: list[str]) -> None:
+        """Hide checkboxes for already-applied keys; lock button when all done."""
+        self._applied_writeback_keys.update(applied_keys)
+        for key in applied_keys:
+            cb = self._writeback_checks.get(key)
+            if cb is not None:
+                cb.setVisible(False)
+        all_applied = all(
+            k in self._applied_writeback_keys for k in self._writeback_checks
+        )
+        if all_applied:
+            self.apply_writeback_btn.setEnabled(False)
+            self.apply_writeback_btn.setText("Writeback Applied")
 
     def get_selected_writeback_keys(self) -> list[str]:
         return [k for k, cb in self._writeback_checks.items() if cb.isChecked()]
@@ -383,10 +389,6 @@ class MainWindow(QMainWindow):
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-
-        result = self._ctrl.get_tab_result(tab_id)
-        if result is not None:
-            tab_w.show_result(result)
 
         # populate analyze params on first result (adapter is now known)
         if not tab_w._param_widgets:
@@ -514,6 +516,8 @@ class MainWindow(QMainWindow):
         keys = tab_w.get_selected_writeback_keys()
         try:
             self._ctrl.apply_writeback(tab_id, keys)
+            tab_w.mark_writeback_applied(keys)
+            self.show_status_message(f"Writeback applied: {', '.join(keys)}")
         except RuntimeError as exc:
             logger.warning("_on_apply_writeback_clicked: blocked — %s", exc)
             self.show_status_message(str(exc))
