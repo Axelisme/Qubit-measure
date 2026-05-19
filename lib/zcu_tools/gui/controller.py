@@ -108,24 +108,65 @@ class Controller:
     # ------------------------------------------------------------------
 
     def analyze(self, tab_id: str, user_params: dict) -> None:
-        raise NotImplementedError
+        tab = self._state.get_tab(tab_id)
+        if tab.last_result is None:
+            raise RuntimeError("No run result available to analyze")
+        logger.info("analyze: tab_id=%r user_params=%r", tab_id, list(user_params))
+        try:
+            ctx = self._state.exp_context
+            analyze_result = tab.adapter.analyze(tab.last_result, ctx, **user_params)
+            figure = tab.adapter.get_figure(analyze_result)
+            self._state.update_tab_analyze(tab_id, analyze_result, figure)
+            self._view.refresh_tab(tab_id)
+        except Exception as exc:
+            logger.warning("analyze: failed tab_id=%r exc=%r", tab_id, exc)
+            self._view.show_status_message(f"Analyze failed: {exc}")
 
     # ------------------------------------------------------------------
     # Writeback  (Phase 9)
     # ------------------------------------------------------------------
 
     def apply_writeback(self, tab_id: str, selected_keys: list[str]) -> None:
-        raise NotImplementedError
+        tab = self._state.get_tab(tab_id)
+        if tab.last_analyze_result is None:
+            raise RuntimeError("No analyze result available for writeback")
+        logger.info("apply_writeback: tab_id=%r keys=%r", tab_id, selected_keys)
+        try:
+            ctx = self._state.exp_context
+            tab.adapter.apply_writeback(ctx, tab.last_analyze_result, selected_keys)
+            self._view.refresh_config_panels()
+        except Exception as exc:
+            logger.warning("apply_writeback: failed tab_id=%r exc=%r", tab_id, exc)
+            self._view.show_status_message(f"Writeback failed: {exc}")
 
     # ------------------------------------------------------------------
     # Save  (Phase 9)
     # ------------------------------------------------------------------
 
     def save_data(self, tab_id: str, data_path: str) -> None:
-        raise NotImplementedError
+        tab = self._state.get_tab(tab_id)
+        if tab.last_result is None:
+            raise RuntimeError("No run result available to save")
+        logger.info("save_data: tab_id=%r path=%r", tab_id, data_path)
+        try:
+            ctx = self._state.exp_context
+            tab.adapter.save(data_path, tab.last_result, ctx)
+            self._view.show_status_message(f"Data saved to {data_path}")
+        except Exception as exc:
+            logger.warning("save_data: failed tab_id=%r exc=%r", tab_id, exc)
+            self._view.show_status_message(f"Save data failed: {exc}")
 
     def save_image(self, tab_id: str, image_path: str) -> None:
-        raise NotImplementedError
+        tab = self._state.get_tab(tab_id)
+        if tab.last_figure is None:
+            raise RuntimeError("No figure available to save")
+        logger.info("save_image: tab_id=%r path=%r", tab_id, image_path)
+        try:
+            tab.last_figure.savefig(image_path)
+            self._view.show_status_message(f"Image saved to {image_path}")
+        except Exception as exc:
+            logger.warning("save_image: failed tab_id=%r exc=%r", tab_id, exc)
+            self._view.show_status_message(f"Save image failed: {exc}")
 
     # ------------------------------------------------------------------
     # Context / IO  (Phase 10)
@@ -182,7 +223,20 @@ class Controller:
         return self._state.get_tab(tab_id).last_figure
 
     def get_tab_writeback_spec(self, tab_id: str) -> list:
-        raise NotImplementedError
+        tab = self._state.get_tab(tab_id)
+        if tab.last_analyze_result is None:
+            return []
+        ctx = self._state.exp_context
+        return tab.adapter.get_writeback_spec(tab.last_analyze_result, ctx)
+
+    def get_tab_analyze_params(self, tab_id: str) -> dict:
+        tab = self._state.get_tab(tab_id)
+        return tab.adapter.get_analyze_params()
+
+    def get_tab_save_paths(self, tab_id: str) -> Any:
+        tab = self._state.get_tab(tab_id)
+        ctx = self._state.exp_context
+        return tab.adapter.make_save_paths(ctx)
 
     def get_context_labels(self) -> list[str]:
         return self._io.list_contexts()

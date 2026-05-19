@@ -12,13 +12,22 @@ logger = logging.getLogger(__name__)
 
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QProgressBar,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSpinBox,
     QSplitter,
+    QStackedWidget,
     QStatusBar,
     QTabWidget,
     QTextEdit,
@@ -27,6 +36,9 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 if TYPE_CHECKING:
+    from matplotlib.figure import Figure
+
+    from zcu_tools.gui.adapter import ParamSpec, WritebackItem
     from zcu_tools.gui.controller import Controller
 
 
@@ -65,9 +77,59 @@ class _ProgressStack(QWidget):
         self._refresh_visibility()
 
     def _refresh_visibility(self) -> None:
-        # show only the MAX_LAYERS innermost (last-pushed) bars
         for i, bar in enumerate(reversed(self._bars)):
             bar.setVisible(i < self.MAX_LAYERS)
+
+
+# ---------------------------------------------------------------------------
+# Helpers: dynamic param widgets
+# ---------------------------------------------------------------------------
+
+
+def _make_param_widget(spec: "ParamSpec") -> QWidget:
+    """Build an input widget from a ParamSpec."""
+    if spec.choices:
+        w = QComboBox()
+        w.addItems([str(c) for c in spec.choices])
+        default_str = str(spec.default)
+        idx = w.findText(default_str)
+        if idx >= 0:
+            w.setCurrentIndex(idx)
+        return w
+    if spec.type is bool:
+        w = QCheckBox()
+        w.setChecked(bool(spec.default))
+        return w
+    if spec.type is int:
+        w = QSpinBox()
+        w.setRange(-(2**31), 2**31 - 1)
+        w.setValue(int(spec.default))
+        return w
+    if spec.type is float:
+        w = QDoubleSpinBox()
+        w.setRange(-1e12, 1e12)
+        w.setDecimals(6)
+        w.setValue(float(spec.default))
+        return w
+    # fallback: text
+    w = QLineEdit(str(spec.default))
+    return w
+
+
+def _read_param_widget(w: QWidget, spec: "ParamSpec") -> Any:
+    """Read current value from a widget created by _make_param_widget."""
+    if isinstance(w, QComboBox):
+        txt = w.currentText()
+        return spec.type(txt) if spec.type not in (str,) else txt
+    if isinstance(w, QCheckBox):
+        return w.isChecked()
+    if isinstance(w, QSpinBox):
+        return w.value()
+    if isinstance(w, QDoubleSpinBox):
+        return w.value()
+    if isinstance(w, QLineEdit):
+        return spec.type(w.text())
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +143,8 @@ class ExpTabWidget(QWidget):
     def __init__(self, tab_id: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.tab_id = tab_id
+        self._param_widgets: dict[str, QWidget] = {}  # analyze param key → widget
+        self._writeback_checks: dict[str, QCheckBox] = {}  # wb key → checkbox
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(4, 4, 4, 4)
@@ -93,10 +157,10 @@ class ExpTabWidget(QWidget):
         splitter = QSplitter(Qt.Horizontal)  # type: ignore[attr-defined]
         root_layout.addWidget(splitter, stretch=1)
 
-        # Config area (left pane)
+        # ── Config area (left pane) ──────────────────────────────────────
         config_panel = QWidget()
         config_layout = QVBoxLayout(config_panel)
-        config_layout.addWidget(QLabel("Config"))
+        config_layout.addWidget(QLabel("<b>Config</b>"))
         self.cfg_editor = QTextEdit()
         self.cfg_editor.setPlaceholderText("(cfg schema shown here)")
         config_layout.addWidget(self.cfg_editor)
@@ -110,40 +174,160 @@ class ExpTabWidget(QWidget):
         config_layout.addLayout(run_btn_row)
         splitter.addWidget(config_panel)
 
-        # Plot area (centre pane) — placeholder for now
+        # ── Plot area (centre pane) ──────────────────────────────────────
         plot_panel = QWidget()
         plot_layout = QVBoxLayout(plot_panel)
-        plot_layout.addWidget(QLabel("Plot"))
-        self.plot_placeholder = QLabel("(no plot yet)")
-        self.plot_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
-        plot_layout.addWidget(self.plot_placeholder, stretch=1)
+        plot_layout.setContentsMargins(0, 0, 0, 0)
+
+        self._plot_stack = QStackedWidget()
+
+        # page 0: placeholder label
+        self._plot_placeholder = QLabel("(no plot yet)")
+        self._plot_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
+        self._plot_stack.addWidget(self._plot_placeholder)  # index 0
+
+        # page 1: matplotlib canvas (inserted on first show_analysis_image call)
+        self._canvas_widget: Optional[QWidget] = None
+
+        plot_layout.addWidget(self._plot_stack, stretch=1)
         splitter.addWidget(plot_panel)
 
-        # Result area (right pane)
-        result_panel = QWidget()
-        result_layout = QVBoxLayout(result_panel)
-        result_layout.addWidget(QLabel("Result"))
+        # ── Result area (right pane) ─────────────────────────────────────
+        result_scroll = QScrollArea()
+        result_scroll.setWidgetResizable(True)
+        result_inner = QWidget()
+        result_layout = QVBoxLayout(result_inner)
+        result_layout.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
+
+        # Run result display
+        result_layout.addWidget(QLabel("<b>Run Result</b>"))
         self.result_display = QTextEdit()
         self.result_display.setReadOnly(True)
+        self.result_display.setMaximumHeight(80)
         self.result_display.setPlaceholderText("(results shown here after run)")
+        result_layout.addWidget(self.result_display)
 
-        analyze_btn_row = QHBoxLayout()
+        # Analyze params group
+        self._analyze_group = QGroupBox("Analyze Params")
+        self._analyze_form = QFormLayout(self._analyze_group)
+        result_layout.addWidget(self._analyze_group)
         self.analyze_btn = QPushButton("Analyze")
-        analyze_btn_row.addWidget(self.analyze_btn)
+        result_layout.addWidget(self.analyze_btn)
 
-        result_layout.addWidget(self.result_display, stretch=1)
-        result_layout.addLayout(analyze_btn_row)
-        splitter.addWidget(result_panel)
+        # Writeback group
+        self._writeback_group = QGroupBox("Writeback")
+        self._writeback_layout = QVBoxLayout(self._writeback_group)
+        self._writeback_group.setVisible(False)
+        result_layout.addWidget(self._writeback_group)
+        self.apply_writeback_btn = QPushButton("Apply Writeback")
+        self.apply_writeback_btn.setVisible(False)
+        result_layout.addWidget(self.apply_writeback_btn)
 
-        splitter.setSizes([250, 400, 300])
+        # Save group
+        save_group = QGroupBox("Save")
+        save_layout = QFormLayout(save_group)
+
+        self._data_path_edit = QLineEdit()
+        self._data_path_edit.setPlaceholderText("/tmp/data")
+        save_layout.addRow("Data path:", self._data_path_edit)
+        self.save_data_btn = QPushButton("Save Data")
+        save_layout.addRow("", self.save_data_btn)
+
+        self._image_path_edit = QLineEdit()
+        self._image_path_edit.setPlaceholderText("/tmp/image.png")
+        save_layout.addRow("Image path:", self._image_path_edit)
+        self.save_image_btn = QPushButton("Save Image")
+        save_layout.addRow("", self.save_image_btn)
+
+        result_layout.addWidget(save_group)
+        result_layout.addStretch()
+
+        result_scroll.setWidget(result_inner)
+        result_scroll.setSizePolicy(
+            QSizePolicy.Preferred,
+            QSizePolicy.Expanding,  # type: ignore[attr-defined]
+        )
+        splitter.addWidget(result_scroll)
+        splitter.setSizes([250, 450, 300])
+
+    # ── populate / refresh helpers ────────────────────────────────────────
+
+    def populate_analyze_params(self, param_specs: dict[str, "ParamSpec"]) -> None:
+        """Rebuild the Analyze Params form from the adapter's ParamSpec dict."""
+        # clear old widgets
+        while self._analyze_form.rowCount():
+            self._analyze_form.removeRow(0)
+        self._param_widgets.clear()
+
+        for key, spec in param_specs.items():
+            w = _make_param_widget(spec)
+            self._analyze_form.addRow(spec.label + ":", w)
+            self._param_widgets[key] = w
 
     def show_result(self, result: Any) -> None:
         self.result_display.setPlainText(str(result))
+
+    def show_writeback_spec(self, items: list["WritebackItem"]) -> None:
+        """Rebuild the writeback checkbox list."""
+        # clear old checkboxes
+        while self._writeback_layout.count():
+            child = self._writeback_layout.takeAt(0)
+            w = child.widget() if child is not None else None
+            if w is not None:
+                w.deleteLater()
+        self._writeback_checks.clear()
+
+        for item in items:
+            cb = QCheckBox(
+                f"{item.key}  ({item.current_value!r} → {item.new_value!r})\n"
+                f"  {item.description}"
+            )
+            cb.setChecked(True)
+            self._writeback_layout.addWidget(cb)
+            self._writeback_checks[item.key] = cb
+
+        has_items = bool(items)
+        self._writeback_group.setVisible(has_items)
+        self.apply_writeback_btn.setVisible(has_items)
+
+    def get_selected_writeback_keys(self) -> list[str]:
+        return [k for k, cb in self._writeback_checks.items() if cb.isChecked()]
+
+    def set_save_paths(self, data_path: str, image_path: str) -> None:
+        if data_path:
+            self._data_path_edit.setText(data_path)
+        if image_path:
+            self._image_path_edit.setText(image_path)
+
+    def get_data_path(self) -> str:
+        return self._data_path_edit.text()
+
+    def get_image_path(self) -> str:
+        return self._image_path_edit.text()
+
+    def show_analysis_figure(self, fig: "Figure") -> None:
+        """Embed a matplotlib Figure in the plot area (replaces placeholder)."""
+        from matplotlib.backends.backend_qtagg import (  # type: ignore[import-untyped]
+            FigureCanvasQTAgg,
+        )
+
+        if self._canvas_widget is not None:
+            self._plot_stack.removeWidget(self._canvas_widget)
+            self._canvas_widget.deleteLater()
+
+        canvas = FigureCanvasQTAgg(fig)
+        self._canvas_widget = canvas
+        self._plot_stack.addWidget(canvas)  # index 1 (or replaces old)
+        self._plot_stack.setCurrentWidget(canvas)
+        logger.debug("show_analysis_figure: tab_id=%r canvas set", self.tab_id)
 
     def set_running(self, is_running: bool) -> None:
         self.run_btn.setEnabled(not is_running)
         self.cancel_btn.setEnabled(is_running)
         self.analyze_btn.setEnabled(not is_running)
+        self.save_data_btn.setEnabled(not is_running)
+        self.save_image_btn.setEnabled(not is_running)
+        self.apply_writeback_btn.setEnabled(not is_running)
 
 
 # ---------------------------------------------------------------------------
@@ -160,15 +344,14 @@ class MainWindow(QMainWindow):
         self._tab_widgets: dict[str, ExpTabWidget] = {}
 
         self.setWindowTitle("ZCU Qubit Measure — v2 GUI")
-        self.resize(1200, 700)
+        self.resize(1280, 750)
 
-        # Central widget
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
         main_layout.setContentsMargins(4, 4, 4, 4)
 
-        # --- toolbar row: adapter selector + New Tab button ---
+        # --- toolbar ---
         toolbar = QHBoxLayout()
         toolbar.addWidget(QLabel("Experiment:"))
         self._adapter_combo = QComboBox()
@@ -200,9 +383,32 @@ class MainWindow(QMainWindow):
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
+
         result = self._ctrl.get_tab_result(tab_id)
         if result is not None:
             tab_w.show_result(result)
+
+        # populate analyze params on first result (adapter is now known)
+        if not tab_w._param_widgets:
+            params = self._ctrl.get_tab_analyze_params(tab_id)
+            tab_w.populate_analyze_params(params)
+            tab_w._analyze_specs = params  # store for value-read
+
+        # update writeback list (may have new analyze result)
+        spec = self._ctrl.get_tab_writeback_spec(tab_id)
+        tab_w.show_writeback_spec(spec)
+
+        # populate save paths
+        try:
+            save_paths = self._ctrl.get_tab_save_paths(tab_id)
+            tab_w.set_save_paths(save_paths.data_path, save_paths.image_path)
+        except Exception:
+            pass
+
+        # show analysis figure if available
+        figure = self._ctrl.get_tab_figure(tab_id)
+        if figure is not None:
+            self.show_analysis_image(tab_id, figure)
 
     def refresh_run_state(self, is_running: bool) -> None:
         logger.debug("refresh_run_state: is_running=%s", is_running)
@@ -223,10 +429,12 @@ class MainWindow(QMainWindow):
     def show_plot(self, tab_id: str, fig: Any) -> None:  # Phase 11
         logger.debug("show_plot: tab_id=%r fig=%s", tab_id, type(fig).__name__)
 
-    def show_analysis_image(self, tab_id: str, fig: Any) -> None:  # Phase 9
-        logger.debug(
-            "show_analysis_image: tab_id=%r fig=%s", tab_id, type(fig).__name__
-        )
+    def show_analysis_image(self, tab_id: str, fig: Any) -> None:
+        logger.debug("show_analysis_image: tab_id=%r", tab_id)
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return
+        tab_w.show_analysis_figure(fig)
 
     # ------------------------------------------------------------------
     # Internal event handlers
@@ -243,10 +451,17 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(tab_w, adapter_name)
         self._tabs.setCurrentWidget(tab_w)
 
-        # wire per-tab buttons
+        # wire buttons
         tab_w.run_btn.clicked.connect(lambda: self._on_run_clicked(tab_id))
         tab_w.cancel_btn.clicked.connect(self._on_cancel_clicked)
         tab_w.analyze_btn.clicked.connect(lambda: self._on_analyze_clicked(tab_id))
+        tab_w.apply_writeback_btn.clicked.connect(
+            lambda: self._on_apply_writeback_clicked(tab_id)
+        )
+        tab_w.save_data_btn.clicked.connect(lambda: self._on_save_data_clicked(tab_id))
+        tab_w.save_image_btn.clicked.connect(
+            lambda: self._on_save_image_clicked(tab_id)
+        )
 
     def _on_tab_close_requested(self, index: int) -> None:
         tab_w = self._tabs.widget(index)
@@ -262,7 +477,6 @@ class MainWindow(QMainWindow):
         from zcu_tools.gui.adapter import CfgSchema, CfgSection
 
         logger.info("_on_run_clicked: tab_id=%r", tab_id)
-        # Phase 8: pass an empty schema as placeholder; real cfg editor in Phase 9
         schema = CfgSchema(root=CfgSection(fields={}))
         try:
             self._ctrl.start_run(tab_id, schema, {})
@@ -275,17 +489,58 @@ class MainWindow(QMainWindow):
         self._ctrl.cancel_run()
 
     def _on_analyze_clicked(self, tab_id: str) -> None:
-        logger.info("_on_analyze_clicked: tab_id=%r (not yet implemented)", tab_id)
-        self.show_status_message("Analyze not yet implemented (Phase 9)")
+        logger.info("_on_analyze_clicked: tab_id=%r", tab_id)
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return
+        # collect current param values
+        user_params: dict[str, Any] = {}
+        specs: dict = getattr(tab_w, "_analyze_specs", {})
+        for key, w in tab_w._param_widgets.items():
+            spec = specs.get(key)
+            if spec is not None:
+                user_params[key] = _read_param_widget(w, spec)
+        try:
+            self._ctrl.analyze(tab_id, user_params)
+        except RuntimeError as exc:
+            logger.warning("_on_analyze_clicked: blocked — %s", exc)
+            self.show_status_message(str(exc))
 
-    def _on_apply_writeback_clicked(self) -> None:
-        pass  # Phase 9
+    def _on_apply_writeback_clicked(self, tab_id: str) -> None:
+        logger.info("_on_apply_writeback_clicked: tab_id=%r", tab_id)
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return
+        keys = tab_w.get_selected_writeback_keys()
+        try:
+            self._ctrl.apply_writeback(tab_id, keys)
+        except RuntimeError as exc:
+            logger.warning("_on_apply_writeback_clicked: blocked — %s", exc)
+            self.show_status_message(str(exc))
 
-    def _on_save_data_clicked(self) -> None:
-        pass  # Phase 9
+    def _on_save_data_clicked(self, tab_id: str) -> None:
+        logger.info("_on_save_data_clicked: tab_id=%r", tab_id)
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return
+        path = tab_w.get_data_path()
+        try:
+            self._ctrl.save_data(tab_id, path)
+        except RuntimeError as exc:
+            logger.warning("_on_save_data_clicked: blocked — %s", exc)
+            self.show_status_message(str(exc))
 
-    def _on_save_image_clicked(self) -> None:
-        pass  # Phase 9
+    def _on_save_image_clicked(self, tab_id: str) -> None:
+        logger.info("_on_save_image_clicked: tab_id=%r", tab_id)
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return
+        path = tab_w.get_image_path()
+        try:
+            self._ctrl.save_image(tab_id, path)
+        except RuntimeError as exc:
+            logger.warning("_on_save_image_clicked: blocked — %s", exc)
+            self.show_status_message(str(exc))
 
     def _on_context_selected(self, label: str) -> None:
         _ = label  # Phase 10

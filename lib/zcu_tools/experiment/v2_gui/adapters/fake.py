@@ -69,13 +69,20 @@ class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult]):
     ) -> FakeAnalyzeResult:
         threshold = float(user_params.get("threshold", 0.5))
         peak = float(np.max(np.abs(result)))
-        fig: Optional[Figure] = None
-        if peak > threshold:
-            import matplotlib.pyplot as plt
+        import matplotlib.pyplot as plt
 
-            fig, ax = plt.subplots()
-            ax.plot(result)
-            plt.close(fig)
+        fig, ax = plt.subplots()
+        xs = np.arange(len(result))
+        ax.plot(xs, result, label="signal")
+        if peak > threshold:
+            idx = int(np.argmax(np.abs(result)))
+            ax.axvline(idx, color="red", linestyle="--", label=f"peak={peak:.3f}")
+        ax.axhline(
+            threshold, color="gray", linestyle=":", label=f"threshold={threshold}"
+        )
+        ax.set_title("FakeAdapter analysis")
+        ax.legend()
+        plt.close(fig)
         return (peak, fig)
 
     def get_figure(self, analyze_result: FakeAnalyzeResult) -> Optional[Figure]:
