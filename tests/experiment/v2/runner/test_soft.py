@@ -1,3 +1,4 @@
+import threading
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -46,3 +47,32 @@ def test_scan_default_result_length_matches_values():
     sub = _mock_subtask()
     scan = Scan("sw", [1, 2, 3, 4], before_each=lambda i, s, v: None, task=sub)
     assert len(scan.get_default_result()) == 4
+
+
+def test_scan_stops_early_when_flag_set():
+    flag = threading.Event()
+    sub = _mock_subtask()
+    values = [10, 20, 30]
+    scan = Scan("sw", values, before_each=lambda i, s, v: None, task=sub)
+
+    root = scan.get_default_result()
+    state = TaskState(root_data=root, cfg=ExpCfgModel(), _stop_flag=flag)
+
+    flag.set()
+    scan.init(dynamic_pbar=False)
+    scan.run(state)
+    scan.cleanup()
+
+    sub.run.assert_not_called()
+
+
+def test_scan_dynamic_pbar_closed_after_run():
+    sub = _mock_subtask()
+    scan = Scan("sw", [1, 2], before_each=lambda i, s, v: None, task=sub)
+
+    root = scan.get_default_result()
+    state = TaskState(root_data=root, cfg=ExpCfgModel())
+
+    scan.init(dynamic_pbar=True)
+    scan.run(state)
+    assert scan.sweep_pbar is None

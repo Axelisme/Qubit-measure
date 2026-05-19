@@ -1,17 +1,12 @@
 from __future__ import annotations
 
-from functools import wraps
-
 import numpy as np
 from numpy.typing import NDArray
 from scipy.signal import savgol_filter
 from scipy.special import erf
-from typing_extensions import Any, Callable, Optional, Sequence, TypeVar
+from typing_extensions import Any, Callable, Optional, Sequence
 
-from zcu_tools.experiment.v2.runner import default_raw2signal_fn
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
-from zcu_tools.program.v2 import ModularProgramV2
-from zcu_tools.utils.func_tools import min_interval
 
 DISC_WEIGHT = 1.0
 SYM_WEIGHT = 8.0
@@ -106,38 +101,41 @@ def snr_as_signal(
     return calc_snr(mean_d, cov_d, m3_d, ge_axis=ge_axis)
 
 
-T_RawResult = TypeVar("T_RawResult")
-
-
-def wrap_earlystop_check(
-    prog: ModularProgramV2,
-    callback_fn: Callable[[int, T_RawResult], None],
+def snr_checker(
+    ctx: Any,
     snr_threshold: Optional[float],
     signal2real_fn: Callable[[np.ndarray], np.ndarray],
-    raw2signal_fn: Callable[[T_RawResult], np.ndarray] = default_raw2signal_fn,
     after_check: Optional[Callable[[float], Any]] = None,
     check_interval: Optional[float] = 0.1,
-) -> Callable[[int, T_RawResult], None]:
+) -> Callable[[], bool]:
     if snr_threshold is None:
-        return callback_fn
+        return lambda: False
 
-    def check_snr(raw: T_RawResult) -> None:
-        signals = raw2signal_fn(raw)
+    import time
+
+    _triggered = False
+    _last_check = 0.0
+
+    def check() -> bool:
+        nonlocal _triggered, _last_check
+        if _triggered:
+            return True
+        now = time.time()
+        if check_interval is not None and now - _last_check < check_interval:
+            return False
+        _last_check = now
+        signals = np.asarray(ctx.value)
+        if np.all(np.isnan(signals)):
+            return False
         snr = estimate_snr(signal2real_fn(signals))
-        if snr >= snr_threshold:
-            prog.set_early_stop(silent=True)
-
         if after_check is not None:
             after_check(snr)
+        if snr >= snr_threshold:
+            _triggered = True
+            return True
+        return False
 
-    check_snr = min_interval(check_snr, check_interval)
-
-    @wraps(callback_fn)
-    def wrapped_callback_fn(i: int, raw: T_RawResult) -> None:
-        callback_fn(i, raw)
-        check_snr(raw)
-
-    return wrapped_callback_fn
+    return check
 
 
 if __name__ == "__main__":

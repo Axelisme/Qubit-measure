@@ -3,8 +3,8 @@ from __future__ import annotations
 from matplotlib.figure import Figure
 from typing_extensions import Generic, Hashable, TypeVar
 
-from .base import AbsLivePlot
 from .backend import refresh_figure
+from .base import AbsLivePlot
 
 PlotKey_T = TypeVar("PlotKey_T", bound=Hashable)
 

@@ -1,3 +1,4 @@
+import threading
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -44,3 +45,38 @@ def test_batch_run_dispatches_to_children():
     b.run.assert_called_once()
     a.cleanup.assert_called_once()
     b.cleanup.assert_called_once()
+
+
+def test_batch_stops_early_when_flag_set():
+    flag = threading.Event()
+    a = _mock_subtask(np.zeros(2))
+    b = _mock_subtask(np.zeros(2))
+    bt = BatchTask({"a": a, "b": b})
+
+    root = bt.get_default_result()
+    state: TaskState[dict[str, Result], dict[str, Result], DictCfg] = TaskState(
+        root_data=root, cfg=DictCfg(), _stop_flag=flag
+    )
+
+    flag.set()
+    bt.init()
+    bt.run(state)
+    bt.cleanup()
+
+    a.run.assert_not_called()
+    b.run.assert_not_called()
+
+
+def test_batch_dynamic_pbar_closed_after_run():
+    a = _mock_subtask(np.zeros(2))
+    bt = BatchTask({"a": a})
+
+    root = bt.get_default_result()
+    state: TaskState[dict[str, Result], dict[str, Result], DictCfg] = TaskState(
+        root_data=root, cfg=DictCfg()
+    )
+
+    bt.init(dynamic_pbar=True)
+    bt.run(state)
+    # pbar should be closed and cleared after dynamic run
+    assert bt.task_pbar is None

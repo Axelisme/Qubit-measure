@@ -63,6 +63,9 @@ class Scan(AbsTask[list[T_ChildResult], T_RootResult, T_Cfg]):
         )
 
         for i, v in enumerate(self.sweep_values):
+            if state.is_stop():
+                break
+
             self.before_each_fn(i, state, v)
 
             logger.debug(

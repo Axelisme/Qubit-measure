@@ -11,7 +11,7 @@ from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
-from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
+from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.program.v2 import (
     ModularProgramV2,
@@ -96,26 +96,24 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
                 nonlocal current_snr
                 current_snr = snr
 
-            return (
-                prog := ModularProgramV2(
-                    soccfg,
-                    cfg,
-                    modules=[
-                        Reset("reset", modules.reset),
-                        PulseReadout("readout", modules.readout),
-                    ],
-                    sweep=[("freq", freq_sweep)],
-                )
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.reset),
+                    PulseReadout("readout", modules.readout),
+                ],
+                sweep=[("freq", freq_sweep)],
             ).acquire(
                 soc,
                 progress=False,
-                round_hook=wrap_earlystop_check(
-                    prog,
-                    update_hook,
-                    earlystop_snr,
-                    signal2real_fn=gaindep_signal2real,
-                    after_check=update_snr,
-                ),
+                round_hook=update_hook,
+                stop_checkers=[
+                    ctx.is_stop,
+                    snr_checker(
+                        ctx, earlystop_snr, gaindep_signal2real, after_check=update_snr
+                    ),
+                ],
             )
 
         # run experiment

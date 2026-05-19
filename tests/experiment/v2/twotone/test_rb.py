@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from typing_extensions import Sequence
 from zcu_tools.experiment.v2.twotone import rb
 
 
@@ -15,7 +16,7 @@ def _simulate_acc_states(total_clifford_seq: list[int]) -> list[int]:
     return acc_states
 
 
-def _reference_reduce_gate_seq(seq: list[tuple[str, ...]]) -> list[int]:
+def _reference_reduce_gate_seq(seq: Sequence[tuple[str, ...]]) -> list[int]:
     phase_axis = 0
     axis_map = {"Z90": 3, "Z180": 2, "-Z90": 1}
     gate_map = {

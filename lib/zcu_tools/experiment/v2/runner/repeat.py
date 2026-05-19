@@ -120,7 +120,12 @@ class RepeatOverTime(AbsTask[list[T_ChildResult], T_RootResult, T_Cfg]):
         start_t = time.time() - 2 * self.interval
 
         for i in range(self.num_times):
+            if state.is_stop():
+                break
+
             while time.time() - start_t < self.interval:
+                if state.is_stop():
+                    break
                 pass_time = round(time.time() - start_t, 1)
                 assert self.time_pbar is not None
                 self.time_pbar.update(pass_time - self.time_pbar.n)
@@ -128,6 +133,9 @@ class RepeatOverTime(AbsTask[list[T_ChildResult], T_RootResult, T_Cfg]):
                 time.sleep(0.1)
             assert self.time_pbar is not None
             self.time_pbar.reset()
+
+            if state.is_stop():
+                break
 
             start_t = time.time()
 
