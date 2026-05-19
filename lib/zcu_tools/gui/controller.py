@@ -26,6 +26,7 @@ class ViewProtocol(Protocol):
     def refresh_config_panels(self) -> None: ...
     def refresh_predictor_panel(self) -> None: ...
     def show_status_message(self, message: str) -> None: ...
+    def make_pbar_factory(self, tab_id: str) -> Any: ...
 
 
 class Controller:
@@ -77,12 +78,14 @@ class Controller:
         tab = self._state.get_tab(tab_id)
         self._state.set_running(True)
         self._view.refresh_run_state(True)
+        pbar_factory = self._view.make_pbar_factory(tab_id)
         self._runner.start_run(
             tab_id,
             tab.adapter,
             self._state.exp_context,
             schema,
             user_params,
+            pbar_factory=pbar_factory,
         )
 
     def cancel_run(self) -> None:

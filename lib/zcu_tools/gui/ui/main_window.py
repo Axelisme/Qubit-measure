@@ -506,6 +506,14 @@ class MainWindow(QMainWindow):
             self._predictor_label.setText(f"loaded (flux_bias={flux_bias:.4g})")
             self._predictor_label.setStyleSheet("color: green;")
 
+    def make_pbar_factory(self, tab_id: str) -> Any:
+        from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
+
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return None
+        return QtProgressBarFactory(tab_w.progress_stack)
+
     def show_status_message(self, message: str) -> None:
         logger.info("status: %s", message)
         self._status_bar.showMessage(message)

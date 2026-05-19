@@ -1,3 +1,3 @@
-from . import tqdm
+from . import qt, tqdm
 
-__all__ = ["tqdm"]
+__all__ = ["tqdm", "qt"]

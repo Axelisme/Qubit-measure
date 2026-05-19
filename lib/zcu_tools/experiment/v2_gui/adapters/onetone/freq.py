@@ -11,6 +11,8 @@ from __future__ import annotations
 import time
 from typing import Any, Literal, Optional, cast
 
+from zcu_tools.progress_bar.interface import make_pbar
+
 import numpy as np
 from matplotlib.figure import Figure
 from zcu_tools.experiment.v2.onetone.freq import FreqExp, FreqResult
@@ -96,15 +98,31 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
             freqs, freq, Ql, cast(float, Qc), phi, a0, edelay
         )
 
-        # noise amplitude decreases with sqrt(reps * rounds) — same as hardware averaging
+        # simulate round-level averaging with two-layer progress bars
         sigma = noise_scale / np.sqrt(reps * rounds)
         rng = np.random.default_rng()
-        noise = rng.normal(0, sigma, len(freqs)) + 1j * rng.normal(0, sigma, len(freqs))
+        accumulated = np.zeros(len(freqs), dtype=np.complex128)
 
-        # simulate round-level accumulation: brief sleep so the run feels non-instant
-        time.sleep(0.05)
+        rounds_pbar = make_pbar(desc="rounds", total=rounds)
+        try:
+            for _ in range(rounds):
+                scan_pbar = make_pbar(desc="freq scan", total=freq_expts)
+                try:
+                    for i in range(freq_expts):
+                        accumulated[i] += (
+                            clean[i]
+                            + rng.normal(0, sigma * np.sqrt(rounds))
+                            + 1j * rng.normal(0, sigma * np.sqrt(rounds))
+                        )
+                        scan_pbar.update(1)
+                        time.sleep(0.0005)
+                finally:
+                    scan_pbar.close()
+                rounds_pbar.update(1)
+        finally:
+            rounds_pbar.close()
 
-        signals = (clean + noise).astype(np.complex128)
+        signals = (accumulated / rounds).astype(np.complex128)
         return freqs, signals
 
     def get_analyze_params(self) -> dict[str, ParamSpec]:

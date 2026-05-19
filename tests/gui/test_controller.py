@@ -56,7 +56,9 @@ def _make_view() -> MagicMock:
     view.refresh_run_state = MagicMock()
     view.refresh_context_panel = MagicMock()
     view.refresh_config_panels = MagicMock()
+    view.refresh_predictor_panel = MagicMock()
     view.show_status_message = MagicMock()
+    view.make_pbar_factory = MagicMock(return_value=None)
     return view
 
 
