@@ -26,9 +26,9 @@ class State:
         self.tabs: dict[str, TabState] = {}
         self.active_tab_id: Optional[str] = None
         self.is_running: bool = False
+        self.has_startup_context: bool = False
 
     def set_context(self, ctx: ExpContext) -> None:
-        logger.debug("set_context: em=%r", ctx.em)
         self.exp_context = ctx
 
     def add_tab(self, tab_id: str, adapter: AbsExpAdapter, ctx: ExpContext) -> None:

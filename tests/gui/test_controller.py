@@ -44,7 +44,6 @@ def _make_ctx() -> ExpContext:
     return ExpContext(
         md=MagicMock(),
         ml=MagicMock(),
-        em=MagicMock(),
         soc=MagicMock(),  # simulate connected soc
         soccfg=MagicMock(),
     )

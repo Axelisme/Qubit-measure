@@ -76,15 +76,16 @@ class Controller:
         return self._io.has_project
 
     def has_context(self) -> bool:
-        return self._io.has_context
+        """True when any valid context exists (startup empty ctx or file-backed flux ctx)."""
+        return self._io.has_context or self._state.has_startup_context
 
     def has_soc(self) -> bool:
         return self._state.exp_context.soc is not None
 
     def start_run(self, tab_id: str, schema: Any, user_params: dict) -> None:
-        if not self._io.has_context:
+        if not self.has_context():
             raise RuntimeError(
-                "No experiment context selected. Please set up a project and select a context first."
+                "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
         if not self.has_soc():
             raise RuntimeError("No ZCU connection. Please connect first.")
@@ -140,9 +141,9 @@ class Controller:
     # ------------------------------------------------------------------
 
     def analyze(self, tab_id: str, user_params: dict) -> None:
-        if not self._io.has_context:
+        if not self.has_context():
             raise RuntimeError(
-                "No experiment context selected. Please set up a project and select a context first."
+                "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
         tab = self._state.get_tab(tab_id)
         if tab.last_result is None:
@@ -163,9 +164,9 @@ class Controller:
     # ------------------------------------------------------------------
 
     def apply_writeback(self, tab_id: str, selected_keys: list[str]) -> None:
-        if not self._io.has_context:
+        if not self.has_context():
             raise RuntimeError(
-                "No experiment context selected. Please set up a project and select a context first."
+                "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
         tab = self._state.get_tab(tab_id)
         if tab.last_analyze_result is None:
@@ -184,9 +185,9 @@ class Controller:
     # ------------------------------------------------------------------
 
     def save_data(self, tab_id: str, data_path: str) -> None:
-        if not self._io.has_context:
+        if not self.has_context():
             raise RuntimeError(
-                "No experiment context selected. Please set up a project and select a context first."
+                "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
         tab = self._state.get_tab(tab_id)
         if tab.last_result is None:
@@ -201,9 +202,9 @@ class Controller:
             self._view.show_status_message(f"Save data failed: {exc}")
 
     def save_image(self, tab_id: str, image_path: str) -> None:
-        if not self._io.has_context:
+        if not self.has_context():
             raise RuntimeError(
-                "No experiment context selected. Please set up a project and select a context first."
+                "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
         tab = self._state.get_tab(tab_id)
         if tab.last_figure is None:
@@ -220,6 +221,41 @@ class Controller:
     # Context / IO  (Phase 11)
     # ------------------------------------------------------------------
 
+    def set_startup_context(
+        self,
+        md: Any,
+        ml: Any,
+        chip_name: str = "unknown_chip",
+        qub_name: str = "unknown_qubit",
+        res_name: str = "unknown_resonator",
+        result_dir: str = "",
+        database_path: str = "",
+    ) -> None:
+        """Set an in-memory (no file sync) startup context from the startup dialog."""
+        logger.info(
+            "set_startup_context: chip=%r qub=%r res=%r result_dir=%r db=%r",
+            chip_name,
+            qub_name,
+            res_name,
+            result_dir,
+            database_path,
+        )
+        new_ctx = dataclasses.replace(
+            self._state.exp_context,
+            md=md,
+            ml=ml,
+            chip_name=chip_name,
+            qub_name=qub_name,
+            res_name=res_name,
+            result_dir=result_dir,
+            database_path=database_path,
+        )
+        self._state.set_context(new_ctx)
+        self._state.has_startup_context = True
+        self._view.refresh_context_panel()
+        self._view.refresh_run_state(self._state.is_running)
+        self._view.refresh_config_panels()
+
     def setup_project(self, result_dir: str) -> None:
         logger.info("setup_project: result_dir=%r", result_dir)
         self._io.setup(result_dir)
@@ -229,6 +265,7 @@ class Controller:
     def use_context(self, label: str) -> None:
         logger.info("use_context: label=%r", label)
         new_ctx = self._io.use_context(label, self._state.exp_context)
+        new_ctx = dataclasses.replace(new_ctx, active_label=label)
         self._state.set_context(new_ctx)
         self._view.refresh_context_panel()
         self._view.refresh_config_panels()
@@ -248,12 +285,24 @@ class Controller:
             unit=unit,
             clone_from_current=clone_from_current,
         )
+        label = self._io.get_active_label() or ""
+        new_ctx = dataclasses.replace(new_ctx, active_label=label)
         self._state.set_context(new_ctx)
         self._view.refresh_context_panel()
         self._view.refresh_config_panels()
 
     def get_active_context_label(self) -> Optional[str]:
         return self._io.get_active_label()
+
+    def get_flux_dir(self) -> Optional[str]:
+        """Return result_dir/exps/{label}/image path for the active context, or None."""
+        import os
+
+        ctx = self._state.exp_context
+        label = self._io.get_active_label()
+        if ctx.result_dir and label:
+            return os.path.join(ctx.result_dir, "exps", label)
+        return None
 
     # ------------------------------------------------------------------
     # Device  (Phase 11)

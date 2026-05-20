@@ -1,4 +1,4 @@
-"""PredictorDialog — load FluxoniumPredictor from params.json."""
+"""PredictorDialog — load FluxoniumPredictor from params.json and predict frequencies."""
 
 from __future__ import annotations
 
@@ -13,10 +13,12 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -26,7 +28,7 @@ if TYPE_CHECKING:
 
 
 class PredictorDialog(QDialog):
-    """Modal dialog for loading a FluxoniumPredictor."""
+    """Modal dialog for loading a FluxoniumPredictor and predicting frequencies."""
 
     def __init__(
         self, controller: "Controller", parent: Optional[QWidget] = None
@@ -34,10 +36,13 @@ class PredictorDialog(QDialog):
         super().__init__(parent)
         self._ctrl = controller
         self.setWindowTitle("Predictor")
-        self.setMinimumWidth(380)
+        self.setMinimumWidth(400)
 
         layout = QVBoxLayout(self)
-        form = QFormLayout()
+
+        # ── Load predictor ────────────────────────────────────────────────
+        load_group = QGroupBox("Load predictor")
+        load_form = QFormLayout(load_group)
 
         path_row = QHBoxLayout()
         self._path_edit = QLineEdit()
@@ -46,27 +51,63 @@ class PredictorDialog(QDialog):
         browse_btn = QPushButton("Browse…")
         browse_btn.clicked.connect(self._on_browse_file)
         path_row.addWidget(browse_btn)
-        form.addRow("params.json:", path_row)
+        load_form.addRow("params.json:", path_row)
 
         self._flux_bias_spin = QDoubleSpinBox()
         self._flux_bias_spin.setRange(-1e6, 1e6)
         self._flux_bias_spin.setDecimals(6)
         self._flux_bias_spin.setValue(0.0)
-        form.addRow("flux_bias:", self._flux_bias_spin)
+        load_form.addRow("flux_bias:", self._flux_bias_spin)
 
-        layout.addLayout(form)
+        load_btn_row = QHBoxLayout()
+        load_btn = QPushButton("Load")
+        load_btn.clicked.connect(self._on_accepted)
+        load_btn_row.addWidget(load_btn)
+        clear_btn = QPushButton("Clear")
+        clear_btn.clicked.connect(self._on_clear)
+        load_btn_row.addWidget(clear_btn)
+        load_form.addRow("", load_btn_row)
 
+        layout.addWidget(load_group)
+
+        # ── Predict frequency ─────────────────────────────────────────────
+        predict_group = QGroupBox("Predict frequency")
+        predict_form = QFormLayout(predict_group)
+
+        self._predict_value_spin = QDoubleSpinBox()
+        self._predict_value_spin.setRange(-1e6, 1e6)
+        self._predict_value_spin.setDecimals(6)
+        self._predict_value_spin.setValue(0.0)
+        predict_form.addRow("Flux value (A):", self._predict_value_spin)
+
+        transition_row = QHBoxLayout()
+        self._from_spin = QSpinBox()
+        self._from_spin.setRange(0, 20)
+        self._from_spin.setValue(0)
+        self._to_spin = QSpinBox()
+        self._to_spin.setRange(0, 20)
+        self._to_spin.setValue(1)
+        transition_row.addWidget(QLabel("from"))
+        transition_row.addWidget(self._from_spin)
+        transition_row.addWidget(QLabel("to"))
+        transition_row.addWidget(self._to_spin)
+        predict_form.addRow("Transition:", transition_row)
+
+        predict_btn = QPushButton("Predict")
+        predict_btn.clicked.connect(self._on_predict_clicked)
+        predict_form.addRow("", predict_btn)
+
+        self._predict_result_label = QLabel("—")
+        self._predict_result_label.setStyleSheet("font-weight: bold;")
+        predict_form.addRow("Result:", self._predict_result_label)
+
+        layout.addWidget(predict_group)
+
+        # ── status label ──────────────────────────────────────────────────
         self._status_label = QLabel("")
         layout.addWidget(self._status_label)
 
-        clear_btn = QPushButton("Clear predictor")
-        clear_btn.clicked.connect(self._on_clear)
-        layout.addWidget(clear_btn)
-
-        btn_box = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel  # type: ignore[attr-defined]
-        )
-        btn_box.accepted.connect(self._on_accepted)
+        btn_box = QDialogButtonBox(QDialogButtonBox.Close)  # type: ignore[attr-defined]
         btn_box.rejected.connect(self.reject)
         layout.addWidget(btn_box)
 
@@ -95,15 +136,41 @@ class PredictorDialog(QDialog):
             self._ctrl.set_predictor(predictor, path=path)
             self._set_status("Predictor loaded", error=False)
             logger.info("PredictorDialog: loaded path=%r", path)
-            self.accept()
         except Exception as exc:
             self._set_status(str(exc), error=True)
             logger.warning("PredictorDialog: load failed: %r", exc)
 
     def _on_clear(self) -> None:
         self._ctrl.set_predictor(None)
+        self._predict_result_label.setText("—")
         self._set_status("Predictor cleared")
         logger.info("PredictorDialog: predictor cleared")
+
+    def _on_predict_clicked(self) -> None:
+        predictor = self._ctrl._state.exp_context.predictor
+        if predictor is None:
+            self._set_status("No predictor loaded — load one first", error=True)
+            return
+        value = self._predict_value_spin.value()
+        from_lvl = self._from_spin.value()
+        to_lvl = self._to_spin.value()
+        transition = (from_lvl, to_lvl)
+        try:
+            freq = predictor.predict_freq(value, transition=transition)
+            self._predict_result_label.setText(f"{freq:.4f} MHz")
+            self._set_status(
+                f"Predicted ({from_lvl},{to_lvl}) @ {value:.6g}: {freq:.4f} MHz"
+            )
+            logger.info(
+                "PredictorDialog: predict value=%r transition=%r → %.4f MHz",
+                value,
+                transition,
+                freq,
+            )
+        except Exception as exc:
+            self._set_status(str(exc), error=True)
+            self._predict_result_label.setText("error")
+            logger.warning("PredictorDialog: predict failed: %r", exc)
 
     def _set_status(self, msg: str, error: bool = False) -> None:
         self._status_label.setText(msg)

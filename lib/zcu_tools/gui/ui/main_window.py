@@ -606,17 +606,24 @@ class MainWindow(QMainWindow):
         label = self._ctrl.get_active_context_label()
         has_context = self._ctrl.has_context()
         has_soc = self._ctrl.has_soc()
-        if has_context:
-            self._ctx_label.setText(label if label is not None else "(unknown)")
+        if label is not None:
+            # file-backed flux context is active
+            self._ctx_label.setText(label)
             self._ctx_label.setStyleSheet("")
+        elif self._ctrl._state.has_startup_context:
+            # startup context (in-memory, no file sync)
+            self._ctx_label.setText(
+                "Startup context (in-memory) — set up project for persistence"
+            )
+            self._ctx_label.setStyleSheet("color: blue;")
         elif self._ctrl.has_project():
             self._ctx_label.setText(
                 "Project set — select a context to enable Run/Analyze/Save"
             )
             self._ctx_label.setStyleSheet("color: orange;")
         else:
-            self._ctx_label.setText("No project set — Run/Analyze/Save disabled")
-            self._ctx_label.setStyleSheet("color: red;")
+            self._ctx_label.setText("No project set — use Project… to configure")
+            self._ctx_label.setStyleSheet("color: gray;")
         is_running = self._ctrl._state.is_running
         for tab_w in self._tab_widgets.values():
             tab_w.set_running(is_running, has_context=has_context, has_soc=has_soc)

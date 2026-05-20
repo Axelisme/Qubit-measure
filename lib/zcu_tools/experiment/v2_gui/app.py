@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import sys
+from typing import TYPE_CHECKING, Any
 
 from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.controller import Controller
 
 from zcu_tools.gui.adapter import ExpContext
 from zcu_tools.gui.controller import Controller
@@ -18,14 +22,13 @@ from zcu_tools.gui.ui.main_window import MainWindow
 from .registry import register_all
 
 
-def _make_placeholder_ctx() -> ExpContext:
-    """Minimal context for startup before a real project is loaded."""
-    from unittest.mock import MagicMock
+def _make_empty_ctx() -> ExpContext:
+    """Minimal startup context: real empty MetaDict/ModuleLibrary, no file sync."""
+    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
     return ExpContext(
-        md=MagicMock(),
-        ml=MagicMock(),
-        em=MagicMock(),
+        md=MetaDict(),
+        ml=ModuleLibrary(),
         soc=None,
         soccfg=None,
     )
@@ -39,7 +42,7 @@ def run_app() -> None:
     registry = Registry()
     register_all(registry)
 
-    state = State(_make_placeholder_ctx())
+    state = State(_make_empty_ctx())
     runner = Runner()
     io_manager = IOManager()
     device_manager = DeviceManager()
@@ -50,7 +53,18 @@ def run_app() -> None:
     window = _build_window(state, runner, registry, io_manager, device_manager)
     window.show()
 
+    # Show startup dialog to let user set chip/qub names and derive paths.
+    # Non-blocking: user can close it and still use the app (with empty context).
+    _show_startup_dialog(window._ctrl, parent=window)  # type: ignore[attr-defined]
+
     sys.exit(app.exec())
+
+
+def _show_startup_dialog(ctrl: "Controller", parent: Any) -> None:
+    from zcu_tools.gui.ui.project_dialog import ProjectDialog
+
+    dlg = ProjectDialog(ctrl, parent=parent, startup_mode=True)
+    dlg.exec()
 
 
 def _build_window(

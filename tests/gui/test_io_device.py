@@ -21,7 +21,6 @@ def _make_base_ctx(**overrides) -> ExpContext:
     defaults = dict(
         md=MagicMock(),
         ml=MagicMock(),
-        em=MagicMock(),
         soc=object(),
         soccfg=object(),
         database_path="/db",

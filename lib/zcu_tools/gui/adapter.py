@@ -8,7 +8,7 @@ from matplotlib.figure import Figure
 from typing_extensions import Generic, TypeVar
 
 if TYPE_CHECKING:
-    from zcu_tools.meta_tool import ExperimentManager, ModuleLibrary
+    from zcu_tools.meta_tool import ModuleLibrary
     from zcu_tools.meta_tool.metadict import MetaDict
     from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
@@ -17,10 +17,14 @@ if TYPE_CHECKING:
 class ExpContext:
     md: "MetaDict"
     ml: "ModuleLibrary"
-    em: "ExperimentManager"
     soc: Any
     soccfg: Any
+    chip_name: str = "unknown_chip"
+    qub_name: str = "unknown_qubit"
+    res_name: str = "unknown_resonator"
+    result_dir: str = ""
     database_path: str = ""
+    active_label: str = ""
     predictor: Optional["FluxoniumPredictor"] = None
 
 

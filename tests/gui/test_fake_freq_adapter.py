@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import numpy as np
 from zcu_tools.experiment.v2_gui.adapters.onetone.freq import FakeFreqAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
-from zcu_tools.gui.adapter import ExpContext, ScalarField
+from zcu_tools.gui.adapter import CfgSchema, ExpContext, ScalarField
 from zcu_tools.gui.registry import Registry
 
 
@@ -20,7 +20,6 @@ def _make_ctx() -> ExpContext:
     return ExpContext(
         md=MagicMock(),
         ml=MagicMock(),
-        em=MagicMock(),
         soc=None,
         soccfg=None,
     )
@@ -101,23 +100,32 @@ def test_run_signals_are_complex():
 
 
 def test_run_noise_decreases_with_more_rounds():
-    """More rounds → lower noise (SNR ∝ sqrt(rounds))."""
+    """More rounds → lower noise (SNR ∝ sqrt(rounds)).
+
+    Run with a large noise_scale so the noise variance dominates the signal.
+    Compare std of raw amplitudes between 1 round and 100 rounds.  At 100
+    rounds the theoretical reduction is 10×; asserting > 3× gives a robust
+    lower bound even with an unlucky random seed.
+    """
     ctx = _make_ctx()
     adapter = _adapter()
 
-    schema_low = adapter.make_default_cfg(ctx)
-    schema_low.root.fields["rounds"] = ScalarField(value=1, label="Rounds", type=int)
-    _, sig_low = adapter.run(ctx, schema_low)
+    def _schema_with(rounds: int) -> CfgSchema:
+        s = adapter.make_default_cfg(ctx)
+        s.root.fields["rounds"] = ScalarField(value=rounds, label="Rounds", type=int)
+        # large noise_scale relative to |a0|=1 makes noise dominate
+        s.root.fields["noise_scale"] = ScalarField(
+            value=10.0, label="Noise scale", type=float
+        )
+        return s
 
-    schema_high = adapter.make_default_cfg(ctx)
-    schema_high.root.fields["rounds"] = ScalarField(value=400, label="Rounds", type=int)
-    _, sig_high = adapter.run(ctx, schema_high)
+    _, sig_low = adapter.run(ctx, _schema_with(1))
+    _, sig_high = adapter.run(ctx, _schema_with(100))
 
-    # The ideal signal is the same; noise amplitude ∝ 1/sqrt(rounds)
-    # so std of the residual from the mean should be larger for low rounds
-    noise_low = np.std(np.abs(sig_low))
-    noise_high = np.std(np.abs(sig_high))
-    assert noise_low > noise_high
+    # std of amplitudes: noise-dominated → should decrease with more rounds
+    noise_low = float(np.std(np.abs(sig_low)))
+    noise_high = float(np.std(np.abs(sig_high)))
+    assert noise_low > noise_high * 3  # theory ≈ 10×; 3× is a safe lower bound
 
 
 # ---------------------------------------------------------------------------

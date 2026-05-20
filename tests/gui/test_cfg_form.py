@@ -38,9 +38,7 @@ def _schema(fields: dict) -> CfgSchema:
 def _make_ctx():
     from zcu_tools.gui.adapter import ExpContext
 
-    return ExpContext(
-        md=MagicMock(), ml=MagicMock(), em=MagicMock(), soc=None, soccfg=None
-    )
+    return ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None)
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +163,7 @@ def test_read_schema_does_not_mutate_original(qapp):
 
     out = w.read_schema()
     assert out.root.fields["reps"].value == 999  # type: ignore[union-attr]
-    assert schema.root.fields["reps"].value == 100  # original unchanged
+    assert schema.root.fields["reps"].value == 100  # type: ignore[union-attr]  # original unchanged
 
 
 def test_populate_sweep_field_round_trip(qapp):

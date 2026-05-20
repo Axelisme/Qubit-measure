@@ -165,9 +165,7 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
             },
         )
         modules_section = CfgSection(
-            label="Modules (hardware — not used in simulation)",
-            collapsible=True,
-            fields={"readout": readout_section},
+            label="Modules", collapsible=True, fields={"readout": readout_section}
         )
         root = CfgSection(
             fields={
@@ -294,14 +292,34 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
         if "rf_w" in selected_keys:
             ctx.md.rf_w = fwhm
 
-    def make_save_paths(self, ctx: ExpContext) -> SavePaths:  # noqa: ARG002
+    def make_save_paths(self, ctx: ExpContext) -> SavePaths:
+        import os
         import time as _time
 
+        from zcu_tools.utils.datasaver import create_datafolder
+
         ts = _time.strftime("%m%d")
-        return SavePaths(
-            data_path=f"/tmp/fake_freq_{ts}",
-            image_path=f"/tmp/fake_freq_{ts}.png",
-        )
+        filename = f"{ctx.res_name}_freq_{ts}"
+
+        if ctx.database_path:
+            save_dir = create_datafolder(ctx.database_path)
+            data_path = os.path.join(save_dir, filename)
+        else:
+            data_path = f"/tmp/{filename}"
+
+        # image: result_dir/exps/{active_label}/image/ — mirrors em.flux_dir/image/
+        if ctx.result_dir and ctx.active_label:
+            flux_image_dir = os.path.join(
+                ctx.result_dir, "exps", ctx.active_label, "image"
+            )
+            os.makedirs(flux_image_dir, exist_ok=True)
+            image_path = os.path.join(flux_image_dir, f"{filename}.png")
+        elif ctx.result_dir:
+            image_path = os.path.join(ctx.result_dir, "exps", "image", f"{filename}.png")
+        else:
+            image_path = f"/tmp/{filename}.png"
+
+        return SavePaths(data_path=data_path, image_path=image_path)
 
     def save(
         self,

@@ -27,7 +27,7 @@ class IOManager:
         if self._em is None:
             raise RuntimeError("IOManager not set up. Call setup() first.")
         ml, md = self._em.use_flux(label)
-        return dataclasses.replace(base_ctx, md=md, ml=ml, em=self._em)
+        return dataclasses.replace(base_ctx, md=md, ml=ml)
 
     def new_context(
         self,
@@ -44,7 +44,7 @@ class IOManager:
         # Flush files so list_contexts() and use_context() can find them immediately.
         md.dump()
         ml.dump()
-        return dataclasses.replace(base_ctx, md=md, ml=ml, em=self._em)
+        return dataclasses.replace(base_ctx, md=md, ml=ml)
 
     @property
     def has_project(self) -> bool:

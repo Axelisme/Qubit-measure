@@ -139,9 +139,7 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
     stack = _make_stack(qapp)
     factory = QtProgressBarFactory(stack)
 
-    ctx = ExpContext(
-        md=MagicMock(), ml=MagicMock(), em=MagicMock(), soc=None, soccfg=None
-    )
+    ctx = ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None)
     adapter = FakeFreqAdapter()
     schema = adapter.make_default_cfg(ctx)
 
