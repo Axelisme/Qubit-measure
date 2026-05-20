@@ -172,6 +172,7 @@ class ExpTabWidget(QWidget):
         self._writeback_rows: dict[str, QWidget] = {}  # wb key → full row widget
         self._applied_writeback_keys: set[str] = set()
         self._writeback_overrides: dict[str, Any] = {}  # key → parsed JSON override
+        self._ml: Optional[Any] = None  # ModuleLibrary; set by show_writeback_spec
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(4, 4, 4, 4)
@@ -373,9 +374,11 @@ class ExpTabWidget(QWidget):
             self._analyze_form.addRow(spec.label + ":", w)
             self._param_widgets[key] = w
 
-    def show_writeback_spec(self, items: list["WritebackItem"]) -> None:
+    def show_writeback_spec(self, items: list["WritebackItem"], ml: Any = None) -> None:
         """Rebuild the writeback checkbox list."""
         from qtpy.QtWidgets import QWidget, QHBoxLayout  # type: ignore[attr-defined]
+
+        self._ml = ml  # stored for Edit Config dialog
 
         while self._writeback_layout.count():
             child = self._writeback_layout.takeAt(0)
@@ -392,16 +395,8 @@ class ExpTabWidget(QWidget):
             row_layout = QHBoxLayout(row_widget)
             row_layout.setContentsMargins(0, 0, 0, 0)
 
-            # Show Edit Config button when the Adapter provides an edit_template
-            # or when the value is a structured config object
-            from pydantic import BaseModel
-            from zcu_tools.cfg_model import ConfigBase
-
-            has_edit_template = item.edit_template is not None
-            is_config_obj = isinstance(
-                item.new_value, (ConfigBase, BaseModel)
-            ) or isinstance(item.current_value, (ConfigBase, BaseModel))
-            show_edit_btn = has_edit_template or is_config_obj
+            # Show Edit Config button only when the Adapter provides a CfgSchema template
+            show_edit_btn = item.edit_template is not None
 
             if show_edit_btn:
                 label_text = f"{item.key}  (Config modified)\n  {item.description}"
@@ -436,43 +431,43 @@ class ExpTabWidget(QWidget):
         from qtpy.QtWidgets import (  # type: ignore[attr-defined]
             QDialog,
             QVBoxLayout,
-            QTextEdit,
             QHBoxLayout,
             QMessageBox,
             QLabel,
+            QScrollArea,
         )
-        import json
+        import copy
+
+        from zcu_tools.gui.adapter import schema_to_dict
+        from .cfg_form import CfgFormWidget
+
+        # Determine which schema to show in the form.
+        # Priority: previously saved override dict (reconstruct schema by overriding
+        # edit_template) > edit_template schema > module_cfg_to_section fallback
+        schema = None
+        if item.edit_template is not None:
+            schema = copy.deepcopy(item.edit_template)
+
+        if schema is None:
+            return  # no editable template — button should not be shown
+
+        ml = self._ml
 
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Edit Config: {item.key}")
-        dialog.setMinimumSize(600, 500)
+        dialog.setMinimumSize(560, 460)
 
         layout = QVBoxLayout(dialog)
-        label = QLabel("Modify the configuration JSON below. Validation runs on Save:")
-        layout.addWidget(label)
+        hint = QLabel("Edit the configuration below. Click Save to confirm.")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
 
-        # Priority: previously saved override > edit_template > new_value/current_value
-        # edit_template is preferred over serialising the object because the template
-        # matches the format that Adapter's from_raw() expects, while to_json() emits
-        # a pydantic model-dump that is NOT a valid from_raw() input.
-        text_edit = QTextEdit()
-        existing_override = self._writeback_overrides.get(item.key)
-        if existing_override is not None:
-            text_edit.setPlainText(json.dumps(existing_override, indent=4))
-        elif item.edit_template is not None:
-            text_edit.setPlainText(json.dumps(item.edit_template, indent=4))
-        else:
-            # Fallback: try to serialize existing value (plain dict only; skip objects
-            # whose serialization format differs from from_raw() input)
-            val_to_edit = (
-                item.new_value if item.new_value is not None else item.current_value
-            )
-            if isinstance(val_to_edit, dict):
-                text_edit.setPlainText(json.dumps(val_to_edit, indent=4))
-            else:
-                text_edit.setPlainText("{}")
-
-        layout.addWidget(text_edit)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        form_widget = CfgFormWidget()
+        form_widget.populate(schema, ml=ml)
+        scroll.setWidget(form_widget)
+        layout.addWidget(scroll)
 
         btn_layout = QHBoxLayout()
         save_btn = QPushButton("Save")
@@ -483,11 +478,10 @@ class ExpTabWidget(QWidget):
 
         cancel_btn.clicked.connect(dialog.reject)
 
-        def save():
-            raw_text = text_edit.toPlainText()
+        def save() -> None:
             try:
-                parsed = json.loads(raw_text)
-                # Store the raw JSON override; Controller will pass it to apply_writeback
+                updated_schema = form_widget.read_schema()
+                parsed = schema_to_dict(updated_schema, ml)
                 self._writeback_overrides[item.key] = parsed
                 cb.setText(
                     f"{item.key}  (Config modified & edited)\n  {item.description}"
@@ -495,7 +489,7 @@ class ExpTabWidget(QWidget):
                 dialog.accept()
             except Exception as e:
                 QMessageBox.critical(
-                    dialog, "Validation Error", f"Failed to parse JSON:\n{e}"
+                    dialog, "Validation Error", f"Failed to read config:\n{e}"
                 )
 
         save_btn.clicked.connect(save)
@@ -682,7 +676,7 @@ class MainWindow(QMainWindow):
 
         # update writeback list (may have new analyze result)
         spec = self._ctrl.get_tab_writeback_spec(tab_id)
-        tab_w.show_writeback_spec(spec)
+        tab_w.show_writeback_spec(spec, ml=self._ctrl.get_current_ml())
 
         # populate save paths
         try:

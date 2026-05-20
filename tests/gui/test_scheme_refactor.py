@@ -144,10 +144,10 @@ def test_module_ref_select_and_override(qapp):
     assert mod2.module_name == "pulse_b"
     assert mod2.expanded_content is not None
     expanded2 = cast(CfgSection, mod2.expanded_content)
-    # pulse_b has gain 0.2 and ch 2
+    # pulse_b has gain 0.2 and ch 2; module_cfg_to_section makes all fields editable except "type"
     assert cast(ScalarField, expanded2.fields["gain"]).value == pytest.approx(0.2)
     assert cast(ScalarField, expanded2.fields["ch"]).value == 2
-    assert not cast(ScalarField, expanded2.fields["ch"]).editable
+    assert cast(ScalarField, expanded2.fields["ch"]).editable  # only "type" is locked
 
     # Simulate editing parameter (gain) inside the newly generated sub-form
     new_sub = cast(Any, container._sub_section_widget)

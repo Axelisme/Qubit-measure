@@ -43,7 +43,7 @@ class WritebackItem:
     current_value: Any
     new_value: Any
     description: str
-    edit_template: Optional[dict] = None  # JSON template shown in Edit Config dialog
+    edit_template: Optional["CfgSchema"] = None  # CfgSchema shown in Edit Config form
 
 
 @dataclass
@@ -127,10 +127,60 @@ class CfgSchema:
     # reps/rounds live as ScalarField entries in root.fields
 
 
+# --- module/waveform cfg → CfgSection helper ---
+
+
+def module_cfg_to_section(mod_cfg: Any) -> "CfgSection":
+    """Convert a ConfigBase (or plain dict) to a CfgSection for override editing.
+
+    Delegates to cfg_schemas.module_cfg_to_schema() for typed subtypes (which adds
+    correct choices for Literal fields).  Falls back to a generic dict-based conversion
+    for unknown types or plain dicts.
+
+    The resulting CfgSection mirrors the nested structure of mod_cfg.to_dict(), so
+    that schema_to_dict can deepupdate the override dict and pass it directly to
+    ml.get_module(name, override) → ConfigBase.with_updates(**override).
+    """
+    try:
+        from zcu_tools.gui.cfg_schemas import (
+            module_cfg_to_schema,
+            waveform_cfg_to_section,
+        )
+
+        from zcu_tools.program.v2.modules.waveform import AbsWaveformCfg
+
+        if isinstance(mod_cfg, AbsWaveformCfg):
+            return waveform_cfg_to_section(mod_cfg)
+        return module_cfg_to_schema(mod_cfg)
+    except Exception:
+        pass
+
+    # Generic fallback: mirror to_dict() structure, lock only "type"
+    def _dict_to_section(data: dict) -> "CfgSection":
+        fields: dict[str, Any] = {}
+        for k, v in data.items():
+            if isinstance(v, dict):
+                fields[k] = _dict_to_section(v)
+            elif isinstance(v, (int, float, bool, str)) or v is None:
+                fields[k] = ScalarField(
+                    value=v,
+                    label=k.replace("_", " ").title(),
+                    type=type(v) if v is not None else str,
+                    editable=(k != "type"),
+                )
+        return CfgSection(fields=fields, collapsible=True)
+
+    if hasattr(mod_cfg, "to_dict"):
+        d = mod_cfg.to_dict()
+    else:
+        d = dict(mod_cfg)
+    return _dict_to_section(d)
+
+
 # --- schema_to_dict helper ---
 
 
-def _section_to_dict(section: CfgSection, ml: "ModuleLibrary") -> dict:
+def _section_to_dict(section: CfgSection, ml: "Optional[ModuleLibrary]") -> dict:
     result: dict[str, Any] = {}
     for key, node in section.fields.items():
         if isinstance(node, ScalarField):
@@ -159,6 +209,11 @@ def _section_to_dict(section: CfgSection, ml: "ModuleLibrary") -> dict:
                 expanded_dict = _section_to_dict(node.expanded_content, ml)
 
             if node.module_name is not None:
+                if ml is None:
+                    raise RuntimeError(
+                        f"ModuleRefField '{key}' references module '{node.module_name}' "
+                        "but no ModuleLibrary is available"
+                    )
                 from copy import deepcopy
                 from zcu_tools.utils import deepupdate
 
@@ -177,6 +232,11 @@ def _section_to_dict(section: CfgSection, ml: "ModuleLibrary") -> dict:
                 expanded_dict = _section_to_dict(node.expanded_content, ml)
 
             if node.waveform_name is not None:
+                if ml is None:
+                    raise RuntimeError(
+                        f"WaveformRefField '{key}' references waveform '{node.waveform_name}' "
+                        "but no ModuleLibrary is available"
+                    )
                 from copy import deepcopy
                 from zcu_tools.utils import deepupdate
 
@@ -196,7 +256,7 @@ def _section_to_dict(section: CfgSection, ml: "ModuleLibrary") -> dict:
     return result
 
 
-def schema_to_dict(schema: CfgSchema, ml: "ModuleLibrary") -> dict:
+def schema_to_dict(schema: CfgSchema, ml: "Optional[ModuleLibrary]") -> dict:
     """Recursively convert a CfgSchema to an exp_cfg dict for ml.make_cfg()."""
     return _section_to_dict(schema.root, ml)
 

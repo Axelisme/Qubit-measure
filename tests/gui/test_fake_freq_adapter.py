@@ -342,8 +342,9 @@ def test_writeback_edit_template_provided():
     spec_by_key = {item.key: item for item in spec}
     assert spec_by_key["readout_rf"].edit_template is not None
     assert spec_by_key["ro_waveform"].edit_template is not None
-    assert isinstance(spec_by_key["readout_rf"].edit_template, dict)
-    assert isinstance(spec_by_key["ro_waveform"].edit_template, dict)
+    # edit_template is now a CfgSchema (not a dict), used to render a CfgFormWidget
+    assert isinstance(spec_by_key["readout_rf"].edit_template, CfgSchema)
+    assert isinstance(spec_by_key["ro_waveform"].edit_template, CfgSchema)
 
 
 def test_apply_writeback_with_overrides():

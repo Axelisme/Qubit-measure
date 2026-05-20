@@ -165,18 +165,38 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
     """Simulated one-tone frequency sweep.  No hardware required."""
 
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:  # noqa: ARG002
+        # custom_template: nested format matching ModuleCfgFactory.from_raw() / to_dict()
+        # Used when user selects <Custom> — expanded_content is deepcopy of this.
         custom_tmpl = CfgSection(
             label="Custom Readout",
             fields={
-                "ch": ScalarField(value=0, label="Gen ch", type=int),
-                "nqz": ScalarField(value=1, label="NQZ", type=int),
-                "freq": ScalarField(value=6000.0, label="Freq (MHz)", type=float),
-                "gain": ScalarField(value=0.5, label="Gain", type=float),
-                "ro_ch": ScalarField(value=0, label="RO ch", type=int),
-                "ro_length": ScalarField(value=1.0, label="RO length (us)", type=float),
+                "type": ScalarField(
+                    value="readout/pulse", label="Type", type=str, editable=False
+                ),
+                "pulse_cfg": CfgSection(
+                    label="Pulse Cfg",
+                    fields={
+                        "ch": ScalarField(value=0, label="Gen ch", type=int),
+                        "nqz": ScalarField(value=1, label="NQZ", type=int),
+                        "freq": ScalarField(
+                            value=6000.0, label="Freq (MHz)", type=float
+                        ),
+                        "gain": ScalarField(value=0.5, label="Gain", type=float),
+                    },
+                ),
+                "ro_cfg": CfgSection(
+                    label="RO Cfg",
+                    fields={
+                        "ro_ch": ScalarField(value=0, label="RO ch", type=int),
+                        "ro_length": ScalarField(
+                            value=1.0, label="RO length (us)", type=float
+                        ),
+                    },
+                ),
             },
         )
 
+        from zcu_tools.gui.adapter import module_cfg_to_section
         from zcu_tools.program.v2 import AbsReadoutCfg
 
         available_modules = []
@@ -187,46 +207,24 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
                 if isinstance(mod, AbsReadoutCfg)
             ]
 
-        expanded_content = None
         module_name = None
         if "readout_rf" in available_modules:
             module_name = "readout_rf"
         elif available_modules:
             module_name = available_modules[0]
 
+        expanded_content = None
         if module_name is not None and ctx.ml is not None:
             try:
                 mod_cfg = ctx.ml.get_module(module_name)
-                fields = {}
-                for k, field in custom_tmpl.fields.items():
-                    if isinstance(field, ScalarField):
-                        val = field.value
-                        if k in ["ch", "nqz", "freq", "gain"]:
-                            pulse_cfg = getattr(mod_cfg, "pulse_cfg", None)
-                            if pulse_cfg is not None:
-                                val = getattr(pulse_cfg, k, val)
-                        elif k in ["ro_ch", "ro_length"]:
-                            ro_cfg = getattr(mod_cfg, "ro_cfg", None)
-                            if ro_cfg is not None:
-                                val = getattr(ro_cfg, k, val)
-                        fields[k] = ScalarField(
-                            value=val, label=field.label, type=field.type
-                        )
-                expanded_content = CfgSection(label="Readout Params", fields=fields)
+                expanded_content = module_cfg_to_section(mod_cfg)
             except Exception:
                 pass
 
         if expanded_content is None:
-            expanded_fields = {}
-            for k, v in custom_tmpl.fields.items():
-                if isinstance(v, ScalarField):
-                    expanded_fields[k] = ScalarField(
-                        value=v.value, label=v.label, type=v.type
-                    )
-            expanded_content = CfgSection(
-                label="Readout Params",
-                fields=expanded_fields,
-            )
+            import copy
+
+            expanded_content = copy.deepcopy(custom_tmpl)
 
         readout_ref = ModuleRefField(
             module_name=module_name,
@@ -244,7 +242,7 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
         root = CfgSection(
             fields={
                 "reps": ScalarField(value=100, label="Reps", type=int),
-                "rounds": ScalarField(value=10, label="Rounds", type=int),
+                "rounds": ScalarField(value=100, label="Rounds", type=int),
                 "freq": SweepField(
                     start=5800.0,
                     stop=6200.0,
@@ -255,8 +253,8 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
                 "res_freq": ScalarField(
                     value=6000.0, label="Resonator freq (MHz)", type=float
                 ),
-                "Ql": ScalarField(value=5000, label="Ql (loaded Q)", type=int),
-                "Qc_abs": ScalarField(value=6000, label="|Qc| (coupling Q)", type=int),
+                "Ql": ScalarField(value=150, label="Ql (loaded Q)", type=int),
+                "Qc_abs": ScalarField(value=600, label="|Qc| (coupling Q)", type=int),
                 "phi": ScalarField(value=0.0, label="phi (rad)", type=float),
                 "a0_abs": ScalarField(
                     value=1.0, label="|a0| (bg amplitude)", type=float
@@ -367,6 +365,11 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
         ]
 
         if ctx.ml is not None:
+            from zcu_tools.gui.cfg_schemas import (
+                make_flat_top_waveform_schema,
+                make_pulse_readout_schema,
+            )
+
             cfg = analyze_result.run_result.cfg_snapshot
 
             # 1. readout_rf module
@@ -379,21 +382,15 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
                     current_value=cur_val_rf,
                     new_value=new_readout,
                     description="readout_rf module config",
-                    edit_template={
-                        "type": "readout/pulse",
-                        "pulse_cfg": {
-                            "waveform": {"style": "const", "length": 1.0},
-                            "ch": getattr(ctx.md, "res_ch", 0),
-                            "nqz": 2,
-                            "freq": freq,
-                            "gain": 0.2,
-                        },
-                        "ro_cfg": {
-                            "ro_ch": getattr(ctx.md, "ro_ch", 0),
-                            "ro_length": 0.9,
-                            "trig_offset": 0.335,
-                        },
-                    },
+                    edit_template=make_pulse_readout_schema(
+                        pulse_ch=getattr(ctx.md, "res_ch", 0),
+                        pulse_nqz=2,
+                        pulse_freq=freq,
+                        pulse_gain=0.2,
+                        ro_ch=getattr(ctx.md, "ro_ch", 0),
+                        ro_length=0.9,
+                        trig_offset=0.335,
+                    ),
                 )
             )
 
@@ -408,11 +405,11 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
                     current_value=cur_val_ro,
                     new_value=new_waveform,
                     description="ro_waveform length config",
-                    edit_template={
-                        "style": "flat_top",
-                        "raise_waveform": {"style": "cosine", "length": 0.1},
-                        "length": wav_len,
-                    },
+                    edit_template=make_flat_top_waveform_schema(
+                        length=float(wav_len),
+                        raise_style="cosine",
+                        raise_length=0.1,
+                    ),
                 )
             )
         return items

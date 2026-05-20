@@ -321,6 +321,8 @@ class ProjectDialog(QDialog):
             items = self._ctx_list.findItems(active, Qt.MatchExactly)  # type: ignore[attr-defined]
             if items:
                 self._ctx_list.setCurrentItem(items[0])
+        elif self._ctx_list.count() > 0:
+            self._ctx_list.setCurrentRow(0)
 
     def _set_status(self, msg: str, error: bool = False) -> None:
         self._status_label.setText(msg)

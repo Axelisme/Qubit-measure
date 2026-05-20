@@ -560,29 +560,9 @@ class CfgFormWidget(QWidget):
                 container._child_widgets["expanded_content"] = sub
 
     def _make_override_section_for_module(self, mod_cfg: Any) -> "CfgSection":
-        from zcu_tools.gui.adapter import CfgSection, ScalarField
+        from zcu_tools.gui.adapter import module_cfg_to_section
 
-        if hasattr(mod_cfg, "to_dict"):
-            d = mod_cfg.to_dict()
-        else:
-            d = dict(mod_cfg)
-
-        def _dict_to_section(data: dict, readonly_keys: set[str]) -> CfgSection:
-            fields = {}
-            for k, v in data.items():
-                if isinstance(v, dict):
-                    fields[k] = _dict_to_section(v, readonly_keys)
-                elif isinstance(v, (int, float, bool, str)) or v is None:
-                    fields[k] = ScalarField(
-                        value=v,
-                        label=k.replace("_", " ").title(),
-                        type=type(v) if v is not None else str,
-                        editable=(k not in readonly_keys),
-                    )
-            return CfgSection(fields=fields, collapsible=True)
-
-        readonly = {"ch", "type", "ro_ch", "ro_type", "style", "name"}
-        return _dict_to_section(d, readonly)
+        return module_cfg_to_section(mod_cfg)
 
     # ------------------------------------------------------------------
     # Read-back helpers

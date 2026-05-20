@@ -402,6 +402,10 @@ class Controller:
         ctx = self._state.exp_context
         return tab.adapter.make_save_paths(ctx)
 
+    def get_current_ml(self) -> Any:
+        """Return the current ModuleLibrary (may be None if no context is set)."""
+        return self._state.exp_context.ml
+
     def get_context_labels(self) -> list[str]:
         return self._io.list_contexts()
 
