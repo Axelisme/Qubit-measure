@@ -82,12 +82,14 @@ class ConnectionDialog(QDialog):
             else:
                 ip = self._ip_edit.text().strip()
                 port = self._port_spin.value()
-                # Real connection deferred to hardware-available environment.
-                # Import here to avoid hard dependency in offline use.
-                from qick import QickSoc  # type: ignore[import-untyped]
-
-                soc = QickSoc(host=ip, port=port)
-                soccfg = soc
+                try:
+                    from zcu_tools.remote import make_soc_proxy
+                except ImportError as e:
+                    raise RuntimeError(
+                        f"Cannot import ZCU client libraries: {e}\n"
+                        "Use MockSoc for offline testing."
+                    ) from e
+                soc, soccfg = make_soc_proxy(ip, port)
                 logger.info("ConnectionDialog: connected to %s:%d", ip, port)
             self._ctrl.set_connection(soc, soccfg)
             self._set_status("Connected", error=False)

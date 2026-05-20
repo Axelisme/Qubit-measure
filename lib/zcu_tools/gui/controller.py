@@ -75,13 +75,16 @@ class Controller:
     def has_project(self) -> bool:
         return self._io.has_project
 
+    def has_context(self) -> bool:
+        return self._io.has_context
+
     def has_soc(self) -> bool:
         return self._state.exp_context.soc is not None
 
     def start_run(self, tab_id: str, schema: Any, user_params: dict) -> None:
-        if not self._io.has_project:
+        if not self._io.has_context:
             raise RuntimeError(
-                "No project directory set. Please set up a project first."
+                "No experiment context selected. Please set up a project and select a context first."
             )
         if not self.has_soc():
             raise RuntimeError("No ZCU connection. Please connect first.")
@@ -137,9 +140,9 @@ class Controller:
     # ------------------------------------------------------------------
 
     def analyze(self, tab_id: str, user_params: dict) -> None:
-        if not self._io.has_project:
+        if not self._io.has_context:
             raise RuntimeError(
-                "No project directory set. Please set up a project first."
+                "No experiment context selected. Please set up a project and select a context first."
             )
         tab = self._state.get_tab(tab_id)
         if tab.last_result is None:
@@ -160,9 +163,9 @@ class Controller:
     # ------------------------------------------------------------------
 
     def apply_writeback(self, tab_id: str, selected_keys: list[str]) -> None:
-        if not self._io.has_project:
+        if not self._io.has_context:
             raise RuntimeError(
-                "No project directory set. Please set up a project first."
+                "No experiment context selected. Please set up a project and select a context first."
             )
         tab = self._state.get_tab(tab_id)
         if tab.last_analyze_result is None:
@@ -181,9 +184,9 @@ class Controller:
     # ------------------------------------------------------------------
 
     def save_data(self, tab_id: str, data_path: str) -> None:
-        if not self._io.has_project:
+        if not self._io.has_context:
             raise RuntimeError(
-                "No project directory set. Please set up a project first."
+                "No experiment context selected. Please set up a project and select a context first."
             )
         tab = self._state.get_tab(tab_id)
         if tab.last_result is None:
@@ -198,9 +201,9 @@ class Controller:
             self._view.show_status_message(f"Save data failed: {exc}")
 
     def save_image(self, tab_id: str, image_path: str) -> None:
-        if not self._io.has_project:
+        if not self._io.has_context:
             raise RuntimeError(
-                "No project directory set. Please set up a project first."
+                "No experiment context selected. Please set up a project and select a context first."
             )
         tab = self._state.get_tab(tab_id)
         if tab.last_figure is None:

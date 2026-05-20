@@ -50,6 +50,17 @@ class IOManager:
     def has_project(self) -> bool:
         return self._em is not None
 
+    @property
+    def has_context(self) -> bool:
+        """True only when a flux context (md/ml) has been selected."""
+        if self._em is None:
+            return False
+        try:
+            _ = self._em.label
+            return True
+        except RuntimeError:
+            return False
+
     def get_active_label(self) -> Optional[str]:
         if self._em is None:
             return None

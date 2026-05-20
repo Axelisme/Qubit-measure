@@ -466,10 +466,12 @@ class ExpTabWidget(QWidget):
         logger.debug("show_analysis_figure: tab_id=%r canvas set", self.tab_id)
 
     def set_running(
-        self, is_running: bool, has_project: bool = True, has_soc: bool = True
+        self, is_running: bool, has_context: bool = True, has_soc: bool = True
     ) -> None:
-        can_run = has_project and has_soc and not is_running
-        can_act = has_project and not is_running
+        can_run = has_context and has_soc and not is_running
+        can_act = (
+            has_context and not is_running
+        )  # analyze/save/writeback need context but not soc
         self.run_btn.setEnabled(can_run)
         self.cancel_btn.setEnabled(is_running)
         self.cfg_form.setEnabled(not is_running)
@@ -586,11 +588,11 @@ class MainWindow(QMainWindow):
 
     def refresh_run_state(self, is_running: bool) -> None:
         logger.debug("refresh_run_state: is_running=%s", is_running)
-        has_project = self._ctrl.has_project()
+        has_context = self._ctrl.has_context()
         has_soc = self._ctrl.has_soc()
         self._new_tab_btn.setEnabled(not is_running)
         for tab_w in self._tab_widgets.values():
-            tab_w.set_running(is_running, has_project=has_project, has_soc=has_soc)
+            tab_w.set_running(is_running, has_context=has_context, has_soc=has_soc)
         if is_running:
             # clear stale plot content before a new run starts
             for tab_w in self._tab_widgets.values():
@@ -602,17 +604,22 @@ class MainWindow(QMainWindow):
 
     def refresh_context_panel(self) -> None:
         label = self._ctrl.get_active_context_label()
-        has_project = self._ctrl.has_project()
+        has_context = self._ctrl.has_context()
         has_soc = self._ctrl.has_soc()
-        if has_project:
-            self._ctx_label.setText(label if label is not None else "(no context)")
+        if has_context:
+            self._ctx_label.setText(label if label is not None else "(unknown)")
             self._ctx_label.setStyleSheet("")
+        elif self._ctrl.has_project():
+            self._ctx_label.setText(
+                "Project set — select a context to enable Run/Analyze/Save"
+            )
+            self._ctx_label.setStyleSheet("color: orange;")
         else:
             self._ctx_label.setText("No project set — Run/Analyze/Save disabled")
             self._ctx_label.setStyleSheet("color: red;")
         is_running = self._ctrl._state.is_running
         for tab_w in self._tab_widgets.values():
-            tab_w.set_running(is_running, has_project=has_project, has_soc=has_soc)
+            tab_w.set_running(is_running, has_context=has_context, has_soc=has_soc)
 
     def refresh_config_panels(self) -> None:
         for tab_id, tab_w in self._tab_widgets.items():
@@ -681,7 +688,7 @@ class MainWindow(QMainWindow):
         # apply current project / running state
         tab_w.set_running(
             self._ctrl._state.is_running,
-            has_project=self._ctrl.has_project(),
+            has_context=self._ctrl.has_context(),
             has_soc=self._ctrl.has_soc(),
         )
 
