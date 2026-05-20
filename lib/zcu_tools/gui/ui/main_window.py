@@ -170,6 +170,7 @@ class ExpTabWidget(QWidget):
         self._param_widgets: dict[str, QWidget] = {}  # analyze param key → widget
         self._writeback_checks: dict[str, QCheckBox] = {}  # wb key → checkbox
         self._applied_writeback_keys: set[str] = set()
+        self._writeback_overrides: dict[str, Any] = {}  # key → parsed JSON override
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(4, 4, 4, 4)
@@ -381,6 +382,7 @@ class ExpTabWidget(QWidget):
             if w is not None:
                 w.deleteLater()
         self._writeback_checks.clear()
+        self._writeback_overrides.clear()
         self._applied_writeback_keys: set[str] = set()
 
         for item in items:
@@ -388,16 +390,18 @@ class ExpTabWidget(QWidget):
             row_layout = QHBoxLayout(row_widget)
             row_layout.setContentsMargins(0, 0, 0, 0)
 
-            # Check if value is config
+            # Show Edit Config button when the Adapter provides an edit_template
+            # or when the value is a structured config object
             from pydantic import BaseModel
             from zcu_tools.cfg_model import ConfigBase
-            is_config = (
-                isinstance(item.new_value, (ConfigBase, BaseModel, dict))
-                or isinstance(item.current_value, (ConfigBase, BaseModel, dict))
-                or item.key in ["readout_rf", "ro_waveform"]
-            )
 
-            if is_config:
+            has_edit_template = item.edit_template is not None
+            is_config_obj = isinstance(
+                item.new_value, (ConfigBase, BaseModel)
+            ) or isinstance(item.current_value, (ConfigBase, BaseModel))
+            show_edit_btn = has_edit_template or is_config_obj
+
+            if show_edit_btn:
                 label_text = f"{item.key}  (Config modified)\n  {item.description}"
             else:
                 label_text = f"{item.key}  ({item.current_value!r} → {item.new_value!r})\n  {item.description}"
@@ -409,7 +413,7 @@ class ExpTabWidget(QWidget):
 
             self._writeback_checks[item.key] = cb
 
-            if is_config:
+            if show_edit_btn:
                 edit_btn = QPushButton("Edit Config")
                 edit_btn.clicked.connect(self._make_edit_cb(item, cb))
                 row_layout.addWidget(edit_btn)
@@ -441,55 +445,34 @@ class ExpTabWidget(QWidget):
         dialog.setMinimumSize(600, 500)
 
         layout = QVBoxLayout(dialog)
-
         label = QLabel("Modify the configuration JSON below. Validation runs on Save:")
         layout.addWidget(label)
 
-        # Determine the object to edit
-        val_to_edit = item.new_value
-        if val_to_edit is None:
-            val_to_edit = item.current_value
-
+        # Priority: previously saved override > new_value > current_value > edit_template
         text_edit = QTextEdit()
-        if val_to_edit is None:
-            if item.key == "readout_rf":
-                default_tmpl = {
-                    "type": "readout/pulse",
-                    "pulse_cfg": {
-                        "waveform": {"style": "const", "length": 1.0},
-                        "ch": 0,
-                        "nqz": 2,
-                        "freq": 6000.0,
-                        "gain": 0.2,
-                    },
-                    "ro_cfg": {
-                        "ro_ch": 0,
-                        "ro_length": 0.9,
-                        "trig_offset": 0.335,
-                    },
-                }
-                text_edit.setPlainText(json.dumps(default_tmpl, indent=4))
-            elif item.key == "ro_waveform":
-                default_tmpl = {
-                    "style": "flat_top",
-                    "raise_waveform": {"style": "cosine", "length": 0.1},
-                    "length": 5.0,
-                }
-                text_edit.setPlainText(json.dumps(default_tmpl, indent=4))
-            else:
-                text_edit.setPlainText("{}")
+        existing_override = self._writeback_overrides.get(item.key)
+        if existing_override is not None:
+            text_edit.setPlainText(json.dumps(existing_override, indent=4))
         else:
-            if hasattr(val_to_edit, "to_json"):
+            val_to_edit = (
+                item.new_value if item.new_value is not None else item.current_value
+            )
+            if val_to_edit is None:
+                # No existing value — fall back to edit_template provided by Adapter
+                tmpl = item.edit_template or {}
+                text_edit.setPlainText(json.dumps(tmpl, indent=4))
+            elif hasattr(val_to_edit, "to_json"):
                 try:
-                    formatted_json = val_to_edit.to_json()
-                    parsed = json.loads(formatted_json)
-                    text_edit.setPlainText(json.dumps(parsed, indent=4))
+                    text_edit.setPlainText(
+                        json.dumps(json.loads(val_to_edit.to_json()), indent=4)
+                    )
                 except Exception:
                     text_edit.setPlainText(str(val_to_edit))
             elif hasattr(val_to_edit, "model_dump_json"):
                 try:
-                    parsed = json.loads(val_to_edit.model_dump_json())
-                    text_edit.setPlainText(json.dumps(parsed, indent=4))
+                    text_edit.setPlainText(
+                        json.dumps(json.loads(val_to_edit.model_dump_json()), indent=4)
+                    )
                 except Exception:
                     text_edit.setPlainText(str(val_to_edit))
             elif isinstance(val_to_edit, dict):
@@ -512,51 +495,15 @@ class ExpTabWidget(QWidget):
             raw_text = text_edit.toPlainText()
             try:
                 parsed = json.loads(raw_text)
-                updated_val = parsed
-
-                schema_cls = None
-                if item.new_value is not None:
-                    schema_cls = item.new_value.__class__
-                elif item.current_value is not None:
-                    schema_cls = item.current_value.__class__
-                else:
-                    if item.key == "readout_rf":
-                        from zcu_tools.program.v2 import ModuleCfgFactory
-
-                        try:
-                            updated_val = ModuleCfgFactory.from_raw(parsed)
-                        except Exception:
-                            updated_val = parsed
-                    elif item.key == "ro_waveform":
-                        from zcu_tools.program.v2 import WaveformCfgFactory
-
-                        try:
-                            updated_val = WaveformCfgFactory.from_raw(parsed)
-                        except Exception:
-                            updated_val = parsed
-                    else:
-                        updated_val = parsed
-
-                if schema_cls is not None:
-                    if hasattr(schema_cls, "model_validate"):
-                        updated_val = schema_cls.model_validate(parsed)
-                    elif hasattr(schema_cls, "__class__") and hasattr(
-                        schema_cls.__class__, "model_validate"
-                    ):
-                        updated_val = schema_cls.__class__.model_validate(parsed)
-                    else:
-                        updated_val = parsed
-                else:
-                    pass
-
-                item.new_value = updated_val
+                # Store the raw JSON override; Controller will pass it to apply_writeback
+                self._writeback_overrides[item.key] = parsed
                 cb.setText(
                     f"{item.key}  (Config modified & edited)\n  {item.description}"
                 )
                 dialog.accept()
             except Exception as e:
                 QMessageBox.critical(
-                    dialog, "Validation Error", f"Failed to validate config:\n{e}"
+                    dialog, "Validation Error", f"Failed to parse JSON:\n{e}"
                 )
 
         save_btn.clicked.connect(save)
@@ -796,7 +743,9 @@ class MainWindow(QMainWindow):
             self._ctx_label.setText("No project set — use Project… to configure")
             self._ctx_label.setStyleSheet("color: gray;")
         for tab_w in self._tab_widgets.values():
-            tab_w.set_running(self._ctrl.is_running(), has_context=has_context, has_soc=has_soc)
+            tab_w.set_running(
+                self._ctrl.is_running(), has_context=has_context, has_soc=has_soc
+            )
 
     def refresh_config_panels(self) -> None:
         for tab_id, tab_w in self._tab_widgets.items():
@@ -932,8 +881,9 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         keys = tab_w.get_selected_writeback_keys()
+        overrides = dict(tab_w._writeback_overrides)
         try:
-            self._ctrl.apply_writeback(tab_id, keys)
+            self._ctrl.apply_writeback_with_overrides(tab_id, keys, overrides)
             tab_w.mark_writeback_applied(keys)
             self.show_status_message(f"Writeback applied: {', '.join(keys)}")
         except RuntimeError as exc:

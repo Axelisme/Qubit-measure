@@ -170,6 +170,14 @@ class Controller:
     # ------------------------------------------------------------------
 
     def apply_writeback(self, tab_id: str, selected_keys: list[str]) -> None:
+        self.apply_writeback_with_overrides(tab_id, selected_keys, overrides={})
+
+    def apply_writeback_with_overrides(
+        self,
+        tab_id: str,
+        selected_keys: list[str],
+        overrides: dict[str, Any],
+    ) -> None:
         if not self.has_context():
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
@@ -177,10 +185,17 @@ class Controller:
         tab = self._state.get_tab(tab_id)
         if tab.last_analyze_result is None:
             raise RuntimeError("No analyze result available for writeback")
-        logger.info("apply_writeback: tab_id=%r keys=%r", tab_id, selected_keys)
+        logger.info(
+            "apply_writeback_with_overrides: tab_id=%r keys=%r overrides_keys=%r",
+            tab_id,
+            selected_keys,
+            list(overrides),
+        )
         try:
             ctx = self._state.exp_context
-            tab.adapter.apply_writeback(ctx, tab.last_analyze_result, selected_keys)
+            tab.adapter.apply_writeback(
+                ctx, tab.last_analyze_result, selected_keys, overrides
+            )
             self._view.refresh_config_panels()
         except Exception as exc:
             logger.warning("apply_writeback: failed tab_id=%r exc=%r", tab_id, exc)

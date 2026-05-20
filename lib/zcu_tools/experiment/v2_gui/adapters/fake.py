@@ -109,6 +109,7 @@ class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult]):
         ctx: ExpContext,  # noqa: ARG002
         analyze_result: FakeAnalyzeResult,  # noqa: ARG002
         selected_keys: list[str],  # noqa: ARG002
+        overrides: Optional[dict] = None,  # noqa: ARG002
     ) -> None:
         pass  # nothing to persist in fake mode
 

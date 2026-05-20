@@ -5,7 +5,11 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import numpy as np
-from zcu_tools.experiment.v2_gui.adapters.onetone.freq import FakeFreqAdapter
+from zcu_tools.experiment.v2_gui.adapters.onetone.freq import (
+    FakeFreqAdapter,
+    FakeFreqAnalyzeResult,
+    FreqRunResult,
+)
 from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.adapter import CfgSchema, ExpContext, ScalarField
 from zcu_tools.gui.registry import Registry
@@ -29,7 +33,7 @@ def _adapter() -> FakeFreqAdapter:
     return FakeFreqAdapter()
 
 
-def _run(adapter: FakeFreqAdapter, ctx: ExpContext):
+def _run(adapter: FakeFreqAdapter, ctx: ExpContext) -> FreqRunResult:
     schema = adapter.make_default_cfg(ctx)
     schema.root.fields["fast_mode"] = ScalarField(
         value=True, label="Fast mode", type=bool
@@ -65,23 +69,30 @@ def test_make_default_cfg_has_expected_fields():
 
 
 # ---------------------------------------------------------------------------
-# run
+# run — returns FreqRunResult dataclass
 # ---------------------------------------------------------------------------
+
+
+def test_run_returns_freq_run_result():
+    ctx = _make_ctx()
+    adapter = _adapter()
+    result = _run(adapter, ctx)
+    assert isinstance(result, FreqRunResult)
 
 
 def test_run_returns_tuple_of_arrays():
     ctx = _make_ctx()
     adapter = _adapter()
-    freqs, signals = _run(adapter, ctx)
-    assert isinstance(freqs, np.ndarray)
-    assert isinstance(signals, np.ndarray)
+    result = _run(adapter, ctx)
+    assert isinstance(result.freqs, np.ndarray)
+    assert isinstance(result.signals, np.ndarray)
 
 
 def test_run_shapes_match():
     ctx = _make_ctx()
     adapter = _adapter()
-    freqs, signals = _run(adapter, ctx)
-    assert freqs.shape == signals.shape
+    result = _run(adapter, ctx)
+    assert result.freqs.shape == result.signals.shape
 
 
 def test_run_freq_range_matches_cfg():
@@ -89,17 +100,29 @@ def test_run_freq_range_matches_cfg():
     adapter = _adapter()
     schema = adapter.make_default_cfg(ctx)
     # default SweepField: start=5800.0, stop=6200.0, expts=201
-    freqs, _ = adapter.run(ctx, schema)
-    assert abs(freqs[0] - 5800.0) < 1.0
-    assert abs(freqs[-1] - 6200.0) < 1.0
-    assert len(freqs) == 201
+    result = adapter.run(ctx, schema)
+    assert abs(result.freqs[0] - 5800.0) < 1.0
+    assert abs(result.freqs[-1] - 6200.0) < 1.0
+    assert len(result.freqs) == 201
 
 
 def test_run_signals_are_complex():
     ctx = _make_ctx()
     adapter = _adapter()
-    _, signals = _run(adapter, ctx)
-    assert np.iscomplexobj(signals)
+    result = _run(adapter, ctx)
+    assert np.iscomplexobj(result.signals)
+
+
+def test_run_cfg_snapshot_stored():
+    ctx = _make_ctx()
+    adapter = _adapter()
+    schema = adapter.make_default_cfg(ctx)
+    schema.root.fields["fast_mode"] = ScalarField(
+        value=True, label="Fast mode", type=bool
+    )
+    result = adapter.run(ctx, schema)
+    assert result.cfg_snapshot is not None
+    assert result.cfg_snapshot.fast_mode is True
 
 
 def test_run_noise_decreases_with_more_rounds():
@@ -125,26 +148,37 @@ def test_run_noise_decreases_with_more_rounds():
         )
         return s
 
-    _, sig_low = adapter.run(ctx, _schema_with(1))
-    _, sig_high = adapter.run(ctx, _schema_with(100))
+    res_low = adapter.run(ctx, _schema_with(1))
+    res_high = adapter.run(ctx, _schema_with(100))
 
     # std of amplitudes: noise-dominated → should decrease with more rounds
-    noise_low = float(np.std(np.abs(sig_low)))
-    noise_high = float(np.std(np.abs(sig_high)))
+    noise_low = float(np.std(np.abs(res_low.signals)))
+    noise_high = float(np.std(np.abs(res_high.signals)))
     assert noise_low > noise_high * 3  # theory ≈ 10×; 3× is a safe lower bound
 
 
 # ---------------------------------------------------------------------------
-# analyze
+# analyze — returns FakeFreqAnalyzeResult dataclass
 # ---------------------------------------------------------------------------
 
 
-def test_analyze_returns_four_tuple():
+def test_analyze_returns_fake_freq_analyze_result():
     ctx = _make_ctx()
     adapter = _adapter()
     result = _run(adapter, ctx)
     analyze_result = adapter.analyze(result, ctx)
-    assert len(analyze_result) == 4
+    assert isinstance(analyze_result, FakeFreqAnalyzeResult)
+
+
+def test_analyze_has_expected_fields():
+    ctx = _make_ctx()
+    adapter = _adapter()
+    result = _run(adapter, ctx)
+    ar = adapter.analyze(result, ctx)
+    assert isinstance(ar.freq, float)
+    assert isinstance(ar.fwhm, float)
+    assert isinstance(ar.params, dict)
+    assert ar.run_result is result
 
 
 def test_analyze_freq_close_to_true_value():
@@ -158,8 +192,8 @@ def test_analyze_freq_close_to_true_value():
         value=True, label="Fast mode", type=bool
     )
     result = adapter.run(ctx, schema)
-    freq_fit, _, _, _ = adapter.analyze(result, ctx)
-    assert abs(freq_fit - 6000.0) < 5.0
+    ar = adapter.analyze(result, ctx)
+    assert abs(ar.freq - 6000.0) < 5.0
 
 
 def test_analyze_produces_figure():
@@ -168,8 +202,8 @@ def test_analyze_produces_figure():
     ctx = _make_ctx()
     adapter = _adapter()
     result = _run(adapter, ctx)
-    _, _, _, fig = adapter.analyze(result, ctx)
-    assert isinstance(fig, Figure)
+    ar = adapter.analyze(result, ctx)
+    assert isinstance(ar.figure, Figure)
 
 
 def test_get_figure_returns_figure():
@@ -178,8 +212,8 @@ def test_get_figure_returns_figure():
     ctx = _make_ctx()
     adapter = _adapter()
     result = _run(adapter, ctx)
-    analyze_result = adapter.analyze(result, ctx)
-    fig = adapter.get_figure(analyze_result)
+    ar = adapter.analyze(result, ctx)
+    fig = adapter.get_figure(ar)
     assert isinstance(fig, Figure)
 
 
@@ -192,8 +226,8 @@ def test_get_writeback_spec_has_r_f_and_rf_w():
     ctx = _make_ctx()
     adapter = _adapter()
     result = _run(adapter, ctx)
-    analyze_result = adapter.analyze(result, ctx)
-    spec = adapter.get_writeback_spec(analyze_result, ctx)
+    ar = adapter.analyze(result, ctx)
+    spec = adapter.get_writeback_spec(ar, ctx)
     keys = [item.key for item in spec]
     assert "r_f" in keys
     assert "rf_w" in keys
@@ -203,8 +237,8 @@ def test_apply_writeback_sets_md_r_f():
     ctx = _make_ctx()
     adapter = _adapter()
     result = _run(adapter, ctx)
-    analyze_result = adapter.analyze(result, ctx)
-    adapter.apply_writeback(ctx, analyze_result, ["r_f"])
+    ar = adapter.analyze(result, ctx)
+    adapter.apply_writeback(ctx, ar, ["r_f"])
     assert ctx.md.r_f is not None
 
 
@@ -233,7 +267,6 @@ def test_registered_in_registry():
 
 
 def test_make_default_cfg_has_mod_ref_field():
-    from typing import cast
     from zcu_tools.gui.adapter import ModuleRefField, CfgSection
 
     ctx = _make_ctx()
@@ -261,15 +294,14 @@ def test_writeback_spec_and_apply_for_ml():
 
     adapter = _adapter()
     result = _run(adapter, ctx)
-    analyze_result = adapter.analyze(result, ctx)
-    spec = adapter.get_writeback_spec(analyze_result, ctx)
+    ar = adapter.analyze(result, ctx)
+    spec = adapter.get_writeback_spec(ar, ctx)
     keys = [item.key for item in spec]
     assert "readout_rf" in keys
     assert "ro_waveform" in keys
 
     # Apply writeback
-    # Should update the module and waveforms
-    adapter.apply_writeback(ctx, analyze_result, ["readout_rf", "ro_waveform"])
+    adapter.apply_writeback(ctx, ar, ["readout_rf", "ro_waveform"])
     cast(MagicMock, ctx.ml.register_module).assert_called_once()
     cast(MagicMock, ctx.ml.register_waveform).assert_called_once()
 
@@ -284,14 +316,77 @@ def test_writeback_spec_and_apply_for_ml_when_missing():
 
     adapter = _adapter()
     result = _run(adapter, ctx)
-    analyze_result = adapter.analyze(result, ctx)
-    spec = adapter.get_writeback_spec(analyze_result, ctx)
+    ar = adapter.analyze(result, ctx)
+    spec = adapter.get_writeback_spec(ar, ctx)
     keys = [item.key for item in spec]
     assert "readout_rf" in keys
     assert "ro_waveform" in keys
 
     # Apply writeback
-    # Should call register_module and register_waveform
-    adapter.apply_writeback(ctx, analyze_result, ["readout_rf", "ro_waveform"])
+    adapter.apply_writeback(ctx, ar, ["readout_rf", "ro_waveform"])
     cast(MagicMock, ctx.ml.register_module).assert_called_once()
     cast(MagicMock, ctx.ml.register_waveform).assert_called_once()
+
+
+def test_writeback_edit_template_provided():
+    """get_writeback_spec should provide edit_template for readout_rf and ro_waveform."""
+    ctx = _make_ctx()
+    ctx.ml.modules = {}
+    ctx.ml.waveforms = {}
+
+    adapter = _adapter()
+    result = _run(adapter, ctx)
+    ar = adapter.analyze(result, ctx)
+    spec = adapter.get_writeback_spec(ar, ctx)
+
+    spec_by_key = {item.key: item for item in spec}
+    assert spec_by_key["readout_rf"].edit_template is not None
+    assert spec_by_key["ro_waveform"].edit_template is not None
+    assert isinstance(spec_by_key["readout_rf"].edit_template, dict)
+    assert isinstance(spec_by_key["ro_waveform"].edit_template, dict)
+
+
+def test_apply_writeback_with_overrides():
+    """apply_writeback_with_overrides should use the raw JSON override instead of auto-build."""
+    from typing import cast
+
+    ctx = _make_ctx()
+    ctx.ml.modules = {}
+    ctx.ml.waveforms = {}
+
+    adapter = _adapter()
+    result = _run(adapter, ctx)
+    ar = adapter.analyze(result, ctx)
+
+    override_readout = {
+        "type": "readout/pulse",
+        "pulse_cfg": {
+            "waveform": {"style": "const", "length": 2.0},
+            "ch": 1,
+            "nqz": 2,
+            "freq": ar.freq,
+            "gain": 0.5,
+        },
+        "ro_cfg": {
+            "ro_ch": 1,
+            "ro_length": 1.8,
+            "trig_offset": 0.4,
+        },
+    }
+
+    adapter.apply_writeback(
+        ctx,
+        ar,
+        ["readout_rf"],
+        overrides={"readout_rf": override_readout},
+    )
+    cast(MagicMock, ctx.ml.register_module).assert_called_once()
+
+
+def test_no_last_cfg_side_channel():
+    """FakeFreqAdapter must not set last_cfg as an instance attribute after run."""
+    ctx = _make_ctx()
+    adapter = _adapter()
+    _run(adapter, ctx)
+    # last_cfg must NOT appear in the instance __dict__ (no side channel)
+    assert "last_cfg" not in adapter.__dict__

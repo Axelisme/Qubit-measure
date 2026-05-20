@@ -220,7 +220,9 @@ def test_apply_writeback_calls_adapter(cf):
     cf.ctrl.apply_writeback(tab_id, ["fake_peak"])
 
     spy.apply_writeback.assert_called_once()
-    _, _, keys = spy.apply_writeback.call_args[0]
+    call_args = spy.apply_writeback.call_args
+    # positional: (ctx, analyze_result, selected_keys, overrides)
+    keys = call_args[0][2]
     assert keys == ["fake_peak"]
 
 

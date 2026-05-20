@@ -9,6 +9,7 @@ CfgSchema into the FakeFreqCfg that FakeFreqExp expects.
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from typing import Any, Literal, Optional, cast
 
 import numpy as np
@@ -16,9 +17,8 @@ from numpy.typing import NDArray
 from typing_extensions import Callable
 
 from matplotlib.figure import Figure
-from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.base import AbsExperiment
-from zcu_tools.experiment.v2.onetone.freq import FreqExp, FreqResult
+from zcu_tools.experiment.v2.onetone.freq import FreqExp
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.adapter import (
@@ -39,20 +39,17 @@ from zcu_tools.program.v2 import ProgramV2Cfg
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.utils.fitting.resonance.hanger import HangerModel
 
-# AnalyzeResult: (freq_MHz, fwhm_MHz, param_dict, figure)
-FakeFreqAnalyzeResult = tuple[float, float, dict[str, Any], Figure]
-
 
 # ---------------------------------------------------------------------------
 # FakeFreqCfg — same structure as FreqCfg but with HangerModel params
 # ---------------------------------------------------------------------------
 
 
-class FakeFreqSweepCfg(ConfigBase):
+class FakeFreqSweepCfg(ProgramV2Cfg):  # type: ignore[misc]
     freq: SweepCfg
 
 
-class FakeFreqModelCfg(ConfigBase):
+class FakeFreqModelCfg(ProgramV2Cfg):  # type: ignore[misc]
     freq: float = 6000.0
     Ql: float = 5000.0
     Qc_abs: float = 6000.0
@@ -70,14 +67,35 @@ class FakeFreqCfg(ProgramV2Cfg, ExpCfgModel):
 
 
 # ---------------------------------------------------------------------------
+# Result types — named dataclasses, no side channels
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class FreqRunResult:
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: FakeFreqCfg  # immutable record of the run configuration
+
+
+@dataclass
+class FakeFreqAnalyzeResult:
+    freq: float
+    fwhm: float
+    params: dict[str, Any]
+    figure: Figure
+    run_result: FreqRunResult  # back-reference for writeback
+
+
+# ---------------------------------------------------------------------------
 # FakeFreqExp — same run structure as FreqExp, fake measure_fn
 # ---------------------------------------------------------------------------
 
 
-class FakeFreqExp(AbsExperiment[FreqResult, FakeFreqCfg]):
+class FakeFreqExp(AbsExperiment[FreqRunResult, FakeFreqCfg]):
     """Simulated FreqExp: same run/analyze/save interface, no hardware required."""
 
-    def run(self, cfg: FakeFreqCfg) -> FreqResult:
+    def run(self, cfg: FakeFreqCfg) -> FreqRunResult:
         sweep = cfg.sweep.freq
         freqs = np.linspace(sweep.start, sweep.stop, sweep.expts)
 
@@ -122,23 +140,19 @@ class FakeFreqExp(AbsExperiment[FreqResult, FakeFreqCfg]):
                 on_update=lambda ctx: viewer.update(freqs, np.abs(ctx.root_data)),
             )
 
-        self.last_cfg = cfg
-        self.last_result = (freqs, signals)
-
-        return freqs, signals
+        return FreqRunResult(freqs=freqs, signals=signals, cfg_snapshot=cfg)
 
     def analyze(
         self,
-        result: Optional[FreqResult] = None,
+        result: Optional[FreqRunResult] = None,
         *,
         model_type: Literal["hm", "t", "auto"] = "auto",
         fit_bg_slope: bool = False,
     ) -> tuple[float, float, dict[str, Any], Figure]:
-        if result is None:
-            result = self.last_result
         assert result is not None
+        raw_result = (result.freqs, result.signals)
         return FreqExp().analyze(
-            result, model_type=model_type, fit_bg_slope=fit_bg_slope
+            raw_result, model_type=model_type, fit_bg_slope=fit_bg_slope
         )
 
 
@@ -147,10 +161,8 @@ class FakeFreqExp(AbsExperiment[FreqResult, FakeFreqCfg]):
 # ---------------------------------------------------------------------------
 
 
-class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
+class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
     """Simulated one-tone frequency sweep.  No hardware required."""
-
-    last_cfg: Optional[FakeFreqCfg] = None
 
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:  # noqa: ARG002
         custom_tmpl = CfgSection(
@@ -284,9 +296,8 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
         ctx: ExpContext,
         schema: CfgSchema,
         **user_params: Any,  # noqa: ARG002
-    ) -> FreqResult:
+    ) -> FreqRunResult:
         cfg = self._schema_to_exp_cfg(schema, ctx)
-        self.last_cfg = cfg
         return FakeFreqExp().run(cfg)
 
     def get_analyze_params(self) -> dict[str, ParamSpec]:
@@ -307,26 +318,36 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
 
     def analyze(
         self,
-        result: FreqResult,
+        result: FreqRunResult,
         ctx: ExpContext,  # noqa: ARG002
         **user_params: Any,
     ) -> FakeFreqAnalyzeResult:
         _model_type = str(user_params.get("model_type", "hm"))
         fit_bg_slope = bool(user_params.get("fit_bg_slope", False))
         model_type = cast(Literal["hm", "t", "auto"], _model_type)
-        return FreqExp().analyze(
-            result, model_type=model_type, fit_bg_slope=fit_bg_slope
+        freq, fwhm, params, figure = FreqExp().analyze(
+            (result.freqs, result.signals),
+            model_type=model_type,
+            fit_bg_slope=fit_bg_slope,
+        )
+        return FakeFreqAnalyzeResult(
+            freq=freq,
+            fwhm=fwhm,
+            params=params,
+            figure=figure,
+            run_result=result,
         )
 
     def get_figure(self, analyze_result: FakeFreqAnalyzeResult) -> Optional[Figure]:
-        return analyze_result[3]
+        return analyze_result.figure
 
     def get_writeback_spec(
         self,
         analyze_result: FakeFreqAnalyzeResult,
         ctx: ExpContext,
     ) -> list[WritebackItem]:
-        freq, fwhm, _, _ = analyze_result
+        freq = analyze_result.freq
+        fwhm = analyze_result.fwhm
         md = ctx.md
         items = [
             WritebackItem(
@@ -346,50 +367,11 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
         ]
 
         if ctx.ml is not None:
-            # 1. Fetch readout module
-            gui_readout = None
-            if hasattr(self, "last_cfg") and self.last_cfg is not None:
-                gui_readout = self.last_cfg.modules.get("readout")
+            cfg = analyze_result.run_result.cfg_snapshot
 
-            new_readout = None
-            if gui_readout is not None:
-                try:
-                    pulse_cfg = getattr(gui_readout, "pulse_cfg", None)
-                    if pulse_cfg is not None:
-                        updated_pulse = pulse_cfg.with_updates(freq=freq)
-                        new_readout = gui_readout.with_updates(pulse_cfg=updated_pulse)
-                    else:
-                        new_readout = gui_readout
-                except Exception:
-                    new_readout = gui_readout
-
-            if new_readout is None:
-                fallback_raw = {
-                    "type": "readout/pulse",
-                    "pulse_cfg": {
-                        "waveform": {"style": "const", "length": 1.0},
-                        "ch": getattr(ctx.md, "res_ch", 0),
-                        "nqz": 2,
-                        "freq": freq,
-                        "gain": 0.2,
-                    },
-                    "ro_cfg": {
-                        "ro_ch": getattr(ctx.md, "ro_ch", 0),
-                        "ro_length": 1.0,
-                        "trig_offset": 0.5,
-                    },
-                }
-                from zcu_tools.program.v2 import ModuleCfgFactory
-
-                try:
-                    new_readout = ModuleCfgFactory.from_raw(fallback_raw, ml=ctx.ml)
-                except Exception:
-                    pass
-
-            cur_val_rf = None
-            if "readout_rf" in ctx.ml.modules:
-                cur_val_rf = ctx.ml.modules["readout_rf"]
-
+            # 1. readout_rf module
+            new_readout = _build_readout(cfg, freq, ctx)
+            cur_val_rf = ctx.ml.modules.get("readout_rf")
             items.append(
                 WritebackItem(
                     key="readout_rf",
@@ -397,48 +379,28 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
                     current_value=cur_val_rf,
                     new_value=new_readout,
                     description="readout_rf module config",
+                    edit_template={
+                        "type": "readout/pulse",
+                        "pulse_cfg": {
+                            "waveform": {"style": "const", "length": 1.0},
+                            "ch": getattr(ctx.md, "res_ch", 0),
+                            "nqz": 2,
+                            "freq": freq,
+                            "gain": 0.2,
+                        },
+                        "ro_cfg": {
+                            "ro_ch": getattr(ctx.md, "ro_ch", 0),
+                            "ro_length": 0.9,
+                            "trig_offset": 0.335,
+                        },
+                    },
                 )
             )
 
-            # 2. Fetch ro_waveform
-            gui_waveform = None
-            if hasattr(self, "last_cfg") and self.last_cfg is not None:
-                readout_cfg = self.last_cfg.modules.get("readout")
-                if readout_cfg is not None:
-                    pulse_cfg = getattr(readout_cfg, "pulse_cfg", None)
-                    if pulse_cfg is not None:
-                        gui_waveform = getattr(pulse_cfg, "waveform", None)
-
-            new_waveform = None
+            # 2. ro_waveform
             wav_len = getattr(ctx.md, "res_probe_len", 5.0)
-            if gui_waveform is not None:
-                from zcu_tools.program.v2 import AbsWaveformCfg
-
-                if isinstance(gui_waveform, AbsWaveformCfg):
-                    try:
-                        new_waveform = gui_waveform.with_updates(length=wav_len)
-                    except Exception:
-                        new_waveform = gui_waveform
-
-            if new_waveform is None:
-                fallback_wav_raw = {
-                    "style": "flat_top",
-                    "raise_waveform": {"style": "cosine", "length": 0.1},
-                    "length": wav_len,
-                }
-                from zcu_tools.program.v2 import WaveformCfgFactory
-
-                try:
-                    new_waveform = WaveformCfgFactory.from_raw(
-                        fallback_wav_raw, ml=ctx.ml
-                    )
-                except Exception:
-                    pass
-
-            cur_val_ro = None
-            if "ro_waveform" in ctx.ml.waveforms:
-                cur_val_ro = ctx.ml.waveforms["ro_waveform"]
-
+            new_waveform = _build_waveform(cfg, wav_len, ctx)
+            cur_val_ro = ctx.ml.waveforms.get("ro_waveform")
             items.append(
                 WritebackItem(
                     key="ro_waveform",
@@ -446,6 +408,11 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
                     current_value=cur_val_ro,
                     new_value=new_waveform,
                     description="ro_waveform length config",
+                    edit_template={
+                        "style": "flat_top",
+                        "raise_waveform": {"style": "cosine", "length": 0.1},
+                        "length": wav_len,
+                    },
                 )
             )
         return items
@@ -455,8 +422,13 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
         ctx: ExpContext,
         analyze_result: FakeFreqAnalyzeResult,
         selected_keys: list[str],
+        overrides: Optional[dict[str, Any]] = None,
     ) -> None:
-        freq, fwhm, _, _ = analyze_result
+        freq = analyze_result.freq
+        fwhm = analyze_result.fwhm
+        cfg = analyze_result.run_result.cfg_snapshot
+        _overrides = overrides or {}
+
         if "r_f" in selected_keys:
             ctx.md.r_f = freq
         if "rf_w" in selected_keys:
@@ -466,77 +438,33 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
             dirty = False
             if "readout_rf" in selected_keys:
                 try:
-                    gui_readout = None
-                    if hasattr(self, "last_cfg") and self.last_cfg is not None:
-                        gui_readout = self.last_cfg.modules.get("readout")
-
-                    new_readout = None
-                    if gui_readout is not None:
-                        pulse_cfg = getattr(gui_readout, "pulse_cfg", None)
-                        if pulse_cfg is not None:
-                            updated_pulse = pulse_cfg.with_updates(freq=freq)
-                            new_readout = gui_readout.with_updates(
-                                pulse_cfg=updated_pulse
-                            )
-                        else:
-                            new_readout = gui_readout
-
-                    if new_readout is None:
-                        ro_pulse_len = 1.0
-                        fallback_raw = {
-                            "type": "readout/pulse",
-                            "pulse_cfg": {
-                                "waveform": {"style": "const", "length": ro_pulse_len},
-                                "ch": getattr(ctx.md, "res_ch", 0),
-                                "nqz": 2,
-                                "freq": freq,
-                                "gain": 0.2,
-                            },
-                            "ro_cfg": {
-                                "ro_ch": getattr(ctx.md, "ro_ch", 0),
-                                "ro_length": ro_pulse_len - 0.1,
-                                "trig_offset": getattr(ctx.md, "timeFly", 0.285) + 0.05,
-                            },
-                        }
+                    raw_override = _overrides.get("readout_rf")
+                    if raw_override is not None:
                         from zcu_tools.program.v2 import ModuleCfgFactory
 
-                        new_readout = ModuleCfgFactory.from_raw(fallback_raw, ml=ctx.ml)
-                    ctx.ml.register_module(readout_rf=cast(Any, new_readout))
-                    dirty = True
+                        new_readout = ModuleCfgFactory.from_raw(raw_override, ml=ctx.ml)
+                    else:
+                        new_readout = _build_readout(cfg, freq, ctx)
+                    if new_readout is not None:
+                        ctx.ml.register_module(readout_rf=cast(Any, new_readout))
+                        dirty = True
                 except Exception:
                     pass
             if "ro_waveform" in selected_keys:
                 try:
-                    gui_waveform = None
-                    if hasattr(self, "last_cfg") and self.last_cfg is not None:
-                        readout_cfg = self.last_cfg.modules.get("readout")
-                        if readout_cfg is not None:
-                            pulse_cfg = getattr(readout_cfg, "pulse_cfg", None)
-                            if pulse_cfg is not None:
-                                gui_waveform = getattr(pulse_cfg, "waveform", None)
-
-                    new_waveform = None
-                    wav_len = getattr(ctx.md, "res_probe_len", 5.0)
-                    if gui_waveform is not None:
-                        from zcu_tools.program.v2 import AbsWaveformCfg
-
-                        if isinstance(gui_waveform, AbsWaveformCfg):
-                            new_waveform = gui_waveform.with_updates(length=wav_len)
-
-                    if new_waveform is None:
-                        fallback_wav_raw = {
-                            "style": "flat_top",
-                            "raise_waveform": {"style": "cosine", "length": 0.1},
-                            "length": wav_len,
-                        }
+                    raw_override = _overrides.get("ro_waveform")
+                    if raw_override is not None:
                         from zcu_tools.program.v2 import WaveformCfgFactory
 
                         new_waveform = WaveformCfgFactory.from_raw(
-                            fallback_wav_raw, ml=ctx.ml
+                            raw_override, ml=ctx.ml
                         )
-
-                    ctx.ml.register_waveform(ro_waveform=cast(Any, new_waveform))
-                    dirty = True
+                    else:
+                        wav_len = getattr(ctx.md, "res_probe_len", 5.0)
+                        new_waveform = _build_waveform(cfg, wav_len, ctx)
+                    if new_waveform is not None:
+                        ctx.ml.register_waveform(ro_waveform=cast(Any, new_waveform))
+                        dirty = True
                 except Exception:
                     pass
             if dirty:
@@ -579,7 +507,89 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
     def save(
         self,
         data_path: str,  # noqa: ARG002
-        result: FreqResult,  # noqa: ARG002
+        result: FreqRunResult,  # noqa: ARG002
         ctx: ExpContext,  # noqa: ARG002
     ) -> None:
         pass  # no real hardware, skip HDF5 persistence
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers — shared between get_writeback_spec and apply_writeback
+# ---------------------------------------------------------------------------
+
+
+def _build_readout(
+    cfg: FakeFreqCfg,
+    freq: float,
+    ctx: ExpContext,
+) -> Any:
+    """Build an updated readout module with the fitted frequency."""
+    gui_readout = cfg.modules.get("readout")
+
+    if gui_readout is not None:
+        try:
+            pulse_cfg = getattr(gui_readout, "pulse_cfg", None)
+            if pulse_cfg is not None:
+                updated_pulse = pulse_cfg.with_updates(freq=freq)
+                return gui_readout.with_updates(pulse_cfg=updated_pulse)
+            return gui_readout
+        except Exception:
+            pass
+
+    # Fallback: build from scratch
+    fallback_raw = {
+        "type": "readout/pulse",
+        "pulse_cfg": {
+            "waveform": {"style": "const", "length": 1.0},
+            "ch": getattr(ctx.md, "res_ch", 0),
+            "nqz": 2,
+            "freq": freq,
+            "gain": 0.2,
+        },
+        "ro_cfg": {
+            "ro_ch": getattr(ctx.md, "ro_ch", 0),
+            "ro_length": 1.0,
+            "trig_offset": 0.5,
+        },
+    }
+    try:
+        from zcu_tools.program.v2 import ModuleCfgFactory
+
+        return ModuleCfgFactory.from_raw(fallback_raw, ml=ctx.ml)
+    except Exception:
+        return None
+
+
+def _build_waveform(
+    cfg: FakeFreqCfg,
+    wav_len: float,
+    ctx: ExpContext,
+) -> Any:
+    """Build an updated ro_waveform with the given probe length."""
+    gui_readout = cfg.modules.get("readout")
+
+    if gui_readout is not None:
+        try:
+            pulse_cfg = getattr(gui_readout, "pulse_cfg", None)
+            if pulse_cfg is not None:
+                gui_waveform = getattr(pulse_cfg, "waveform", None)
+                if gui_waveform is not None:
+                    from zcu_tools.program.v2 import AbsWaveformCfg
+
+                    if isinstance(gui_waveform, AbsWaveformCfg):
+                        return gui_waveform.with_updates(length=wav_len)
+        except Exception:
+            pass
+
+    # Fallback
+    fallback_wav_raw = {
+        "style": "flat_top",
+        "raise_waveform": {"style": "cosine", "length": 0.1},
+        "length": wav_len,
+    }
+    try:
+        from zcu_tools.program.v2 import WaveformCfgFactory
+
+        return WaveformCfgFactory.from_raw(fallback_wav_raw, ml=ctx.ml)
+    except Exception:
+        return None

@@ -43,6 +43,7 @@ class WritebackItem:
     current_value: Any
     new_value: Any
     description: str
+    edit_template: Optional[dict] = None  # JSON template shown in Edit Config dialog
 
 
 @dataclass
@@ -240,6 +241,7 @@ class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult]):
         ctx: ExpContext,
         analyze_result: T_AnalyzeResult,
         selected_keys: list[str],
+        overrides: Optional[dict[str, Any]] = None,
     ) -> None: ...
 
     @abstractmethod
