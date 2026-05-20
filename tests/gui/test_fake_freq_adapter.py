@@ -98,6 +98,7 @@ def test_run_freq_range_matches_cfg():
     ctx = _make_ctx()
     adapter = _adapter()
     schema = adapter.make_default_cfg(ctx)
+    schema.root.fields["fast_mode"] = ScalarField(value=True, label="Fast mode", type=bool)
     # default SweepField: start=5800.0, stop=6200.0, expts=201
     result = adapter.run(ctx, schema)
     assert abs(result.freqs[0] - 5800.0) < 1.0

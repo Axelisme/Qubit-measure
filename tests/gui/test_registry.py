@@ -34,7 +34,7 @@ class _DummyAdapter(AbsExpAdapter):
     def get_writeback_spec(self, analyze_result, ctx) -> list[WritebackItem]:  # noqa: ARG002
         return []
 
-    def apply_writeback(self, ctx, analyze_result, selected_keys) -> None:  # noqa: ARG002
+    def apply_writeback(self, ctx, analyze_result, selected_keys, overrides=None) -> None:  # noqa: ARG002
         pass
 
     def get_figure(self, analyze_result):  # noqa: ARG002
