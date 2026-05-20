@@ -79,6 +79,12 @@ class Controller:
         """True when any valid context exists (startup empty ctx or file-backed flux ctx)."""
         return self._io.has_context or self._state.has_startup_context
 
+    def has_startup_context(self) -> bool:
+        return self._state.has_startup_context
+
+    def is_running(self) -> bool:
+        return self._state.is_running
+
     def has_soc(self) -> bool:
         return self._state.exp_context.soc is not None
 

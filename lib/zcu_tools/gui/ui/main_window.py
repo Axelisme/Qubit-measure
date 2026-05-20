@@ -317,8 +317,6 @@ class ExpTabWidget(QWidget):
         browse_data_btn.clicked.connect(self._on_browse_data_path)
         data_path_row.addWidget(browse_data_btn)
         save_layout.addRow("Data path:", data_path_row)
-        self.save_data_btn = QPushButton("Save Data")
-        save_layout.addRow("", self.save_data_btn)
 
         image_path_row = QHBoxLayout()
         self._image_path_edit = QLineEdit()
@@ -328,8 +326,15 @@ class ExpTabWidget(QWidget):
         browse_image_btn.clicked.connect(self._on_browse_image_path)
         image_path_row.addWidget(browse_image_btn)
         save_layout.addRow("Image path:", image_path_row)
+
+        btn_row = QHBoxLayout()
+        self.save_data_btn = QPushButton("Save Data")
         self.save_image_btn = QPushButton("Save Image")
-        save_layout.addRow("", self.save_image_btn)
+        self.save_both_btn = QPushButton("Save Both")
+        btn_row.addWidget(self.save_data_btn)
+        btn_row.addWidget(self.save_image_btn)
+        btn_row.addWidget(self.save_both_btn)
+        save_layout.addRow("", btn_row)
 
         result_layout.addWidget(save_section)
         result_layout.addStretch()
@@ -368,6 +373,8 @@ class ExpTabWidget(QWidget):
 
     def show_writeback_spec(self, items: list["WritebackItem"]) -> None:
         """Rebuild the writeback checkbox list."""
+        from qtpy.QtWidgets import QWidget, QHBoxLayout  # type: ignore[attr-defined]
+
         while self._writeback_layout.count():
             child = self._writeback_layout.takeAt(0)
             w = child.widget() if child is not None else None
@@ -377,20 +384,183 @@ class ExpTabWidget(QWidget):
         self._applied_writeback_keys: set[str] = set()
 
         for item in items:
-            cb = QCheckBox(
-                f"{item.key}  ({item.current_value!r} → {item.new_value!r})\n"
-                f"  {item.description}"
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+
+            # Check if value is config
+            from pydantic import BaseModel
+            from zcu_tools.cfg_model import ConfigBase
+            is_config = (
+                isinstance(item.new_value, (ConfigBase, BaseModel, dict))
+                or isinstance(item.current_value, (ConfigBase, BaseModel, dict))
+                or item.key in ["readout_rf", "ro_waveform"]
             )
+
+            if is_config:
+                label_text = f"{item.key}  (Config modified)\n  {item.description}"
+            else:
+                label_text = f"{item.key}  ({item.current_value!r} → {item.new_value!r})\n  {item.description}"
+
+            cb = QCheckBox(label_text)
             cb.setChecked(True)
             cb.stateChanged.connect(self._refresh_writeback_btn)
-            self._writeback_layout.addWidget(cb)
+            row_layout.addWidget(cb, 1)
+
             self._writeback_checks[item.key] = cb
+
+            if is_config:
+                edit_btn = QPushButton("Edit Config")
+                edit_btn.clicked.connect(self._make_edit_cb(item, cb))
+                row_layout.addWidget(edit_btn)
+
+            self._writeback_layout.addWidget(row_widget)
 
         has_items = bool(items)
         self._writeback_section.setVisible(has_items)
         self.apply_writeback_btn.setVisible(has_items)
         self.apply_writeback_btn.setText("Apply Writeback")
         self._refresh_writeback_btn()
+
+    def _make_edit_cb(self, item: "WritebackItem", cb: QCheckBox):
+        return lambda: self._on_edit_config_clicked(item, cb)
+
+    def _on_edit_config_clicked(self, item: "WritebackItem", cb: QCheckBox) -> None:
+        from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+            QDialog,
+            QVBoxLayout,
+            QTextEdit,
+            QHBoxLayout,
+            QMessageBox,
+            QLabel,
+        )
+        import json
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Edit Config: {item.key}")
+        dialog.setMinimumSize(600, 500)
+
+        layout = QVBoxLayout(dialog)
+
+        label = QLabel("Modify the configuration JSON below. Validation runs on Save:")
+        layout.addWidget(label)
+
+        # Determine the object to edit
+        val_to_edit = item.new_value
+        if val_to_edit is None:
+            val_to_edit = item.current_value
+
+        text_edit = QTextEdit()
+        if val_to_edit is None:
+            if item.key == "readout_rf":
+                default_tmpl = {
+                    "type": "readout/pulse",
+                    "pulse_cfg": {
+                        "waveform": {"style": "const", "length": 1.0},
+                        "ch": 0,
+                        "nqz": 2,
+                        "freq": 6000.0,
+                        "gain": 0.2,
+                    },
+                    "ro_cfg": {
+                        "ro_ch": 0,
+                        "ro_length": 0.9,
+                        "trig_offset": 0.335,
+                    },
+                }
+                text_edit.setPlainText(json.dumps(default_tmpl, indent=4))
+            elif item.key == "ro_waveform":
+                default_tmpl = {
+                    "style": "flat_top",
+                    "raise_waveform": {"style": "cosine", "length": 0.1},
+                    "length": 5.0,
+                }
+                text_edit.setPlainText(json.dumps(default_tmpl, indent=4))
+            else:
+                text_edit.setPlainText("{}")
+        else:
+            if hasattr(val_to_edit, "to_json"):
+                try:
+                    formatted_json = val_to_edit.to_json()
+                    parsed = json.loads(formatted_json)
+                    text_edit.setPlainText(json.dumps(parsed, indent=4))
+                except Exception:
+                    text_edit.setPlainText(str(val_to_edit))
+            elif hasattr(val_to_edit, "model_dump_json"):
+                try:
+                    parsed = json.loads(val_to_edit.model_dump_json())
+                    text_edit.setPlainText(json.dumps(parsed, indent=4))
+                except Exception:
+                    text_edit.setPlainText(str(val_to_edit))
+            elif isinstance(val_to_edit, dict):
+                text_edit.setPlainText(json.dumps(val_to_edit, indent=4))
+            else:
+                text_edit.setPlainText(json.dumps(val_to_edit, indent=4))
+
+        layout.addWidget(text_edit)
+
+        btn_layout = QHBoxLayout()
+        save_btn = QPushButton("Save")
+        cancel_btn = QPushButton("Cancel")
+        btn_layout.addWidget(save_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+
+        cancel_btn.clicked.connect(dialog.reject)
+
+        def save():
+            raw_text = text_edit.toPlainText()
+            try:
+                parsed = json.loads(raw_text)
+                updated_val = parsed
+
+                schema_cls = None
+                if item.new_value is not None:
+                    schema_cls = item.new_value.__class__
+                elif item.current_value is not None:
+                    schema_cls = item.current_value.__class__
+                else:
+                    if item.key == "readout_rf":
+                        from zcu_tools.program.v2 import ModuleCfgFactory
+
+                        try:
+                            updated_val = ModuleCfgFactory.from_raw(parsed)
+                        except Exception:
+                            updated_val = parsed
+                    elif item.key == "ro_waveform":
+                        from zcu_tools.program.v2 import WaveformCfgFactory
+
+                        try:
+                            updated_val = WaveformCfgFactory.from_raw(parsed)
+                        except Exception:
+                            updated_val = parsed
+                    else:
+                        updated_val = parsed
+
+                if schema_cls is not None:
+                    if hasattr(schema_cls, "model_validate"):
+                        updated_val = schema_cls.model_validate(parsed)
+                    elif hasattr(schema_cls, "__class__") and hasattr(
+                        schema_cls.__class__, "model_validate"
+                    ):
+                        updated_val = schema_cls.__class__.model_validate(parsed)
+                    else:
+                        updated_val = parsed
+                else:
+                    pass
+
+                item.new_value = updated_val
+                cb.setText(
+                    f"{item.key}  (Config modified & edited)\n  {item.description}"
+                )
+                dialog.accept()
+            except Exception as e:
+                QMessageBox.critical(
+                    dialog, "Validation Error", f"Failed to validate config:\n{e}"
+                )
+
+        save_btn.clicked.connect(save)
+        dialog.exec_()
 
     def _refresh_writeback_btn(self, *_: int) -> None:
         has_selected = any(cb.isChecked() for cb in self._writeback_checks.values())
@@ -478,6 +648,7 @@ class ExpTabWidget(QWidget):
         self.analyze_btn.setEnabled(can_act)
         self.save_data_btn.setEnabled(can_act)
         self.save_image_btn.setEnabled(can_act)
+        self.save_both_btn.setEnabled(can_act)
         self.apply_writeback_btn.setEnabled(can_act)
 
 
@@ -610,7 +781,7 @@ class MainWindow(QMainWindow):
             # file-backed flux context is active
             self._ctx_label.setText(label)
             self._ctx_label.setStyleSheet("")
-        elif self._ctrl._state.has_startup_context:
+        elif self._ctrl.has_startup_context():
             # startup context (in-memory, no file sync)
             self._ctx_label.setText(
                 "Startup context (in-memory) — set up project for persistence"
@@ -624,9 +795,8 @@ class MainWindow(QMainWindow):
         else:
             self._ctx_label.setText("No project set — use Project… to configure")
             self._ctx_label.setStyleSheet("color: gray;")
-        is_running = self._ctrl._state.is_running
         for tab_w in self._tab_widgets.values():
-            tab_w.set_running(is_running, has_context=has_context, has_soc=has_soc)
+            tab_w.set_running(self._ctrl.is_running(), has_context=has_context, has_soc=has_soc)
 
     def refresh_config_panels(self) -> None:
         for tab_id, tab_w in self._tab_widgets.items():
@@ -694,7 +864,7 @@ class MainWindow(QMainWindow):
 
         # apply current project / running state
         tab_w.set_running(
-            self._ctrl._state.is_running,
+            self._ctrl.is_running(),
             has_context=self._ctrl.has_context(),
             has_soc=self._ctrl.has_soc(),
         )
@@ -710,6 +880,7 @@ class MainWindow(QMainWindow):
         tab_w.save_image_btn.clicked.connect(
             lambda: self._on_save_image_clicked(tab_id)
         )
+        tab_w.save_both_btn.clicked.connect(lambda: self._on_save_both_clicked(tab_id))
 
     def _on_tab_close_requested(self, index: int) -> None:
         tab_w = self._tabs.widget(index)
@@ -792,6 +963,30 @@ class MainWindow(QMainWindow):
         except RuntimeError as exc:
             logger.warning("_on_save_image_clicked: blocked — %s", exc)
             self.show_status_message(str(exc))
+
+    def _on_save_both_clicked(self, tab_id: str) -> None:
+        logger.info("_on_save_both_clicked: tab_id=%r", tab_id)
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return
+        data_path = tab_w.get_data_path()
+        image_path = tab_w.get_image_path()
+        errors = []
+        try:
+            self._ctrl.save_data(tab_id, data_path)
+        except RuntimeError as exc:
+            errors.append(f"Data: {exc}")
+        try:
+            self._ctrl.save_image(tab_id, image_path)
+        except RuntimeError as exc:
+            errors.append(f"Image: {exc}")
+
+        if errors:
+            msg = " / ".join(errors)
+            logger.warning("_on_save_both_clicked: blocked/failed — %s", msg)
+            self.show_status_message(msg)
+        else:
+            self.show_status_message("Data and image saved successfully.")
 
     def _on_project_clicked(self) -> None:
         from .project_dialog import ProjectDialog
