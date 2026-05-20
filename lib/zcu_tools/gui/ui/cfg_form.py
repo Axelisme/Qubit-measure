@@ -37,11 +37,13 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 if TYPE_CHECKING:
+    from zcu_tools.meta_tool import ModuleLibrary
     from zcu_tools.gui.adapter import (
         CfgNode,
         CfgSchema,
         CfgSection,
         ModuleRefField,
+        WaveformRefField,
         ScalarField,
         SweepField,
     )
@@ -237,7 +239,11 @@ class CfgFormWidget(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._schema: Optional["CfgSchema"] = None
-        self._node_widgets: list[tuple[str, _NodeWidget]] = []  # flat (key, nw) list
+        self._root_widget: Optional[QWidget] = None
+        self._ml: Optional["ModuleLibrary"] = None
+        self._node_widgets: list[
+            tuple[str, _NodeWidget]
+        ] = []  # Kept for compatibility but unused
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -257,25 +263,26 @@ class CfgFormWidget(QWidget):
 
     # ------------------------------------------------------------------
 
-    def populate(self, schema: "CfgSchema") -> None:
+    def populate(
+        self, schema: "CfgSchema", ml: Optional["ModuleLibrary"] = None
+    ) -> None:
         """Build widget tree from schema. Clears any previous form."""
         self._schema = schema
-        self._node_widgets.clear()
+        self._ml = ml
         self._clear_inner()
 
         section_widget = self._build_section(schema.root, top_level=True)
+        self._root_widget = section_widget
         # insert before the trailing stretch
         self._inner_layout.insertWidget(self._inner_layout.count() - 1, section_widget)
-        logger.debug(
-            "CfgFormWidget.populate: built form with %d nodes", len(self._node_widgets)
-        )
+        logger.debug("CfgFormWidget.populate: built form root section widget")
 
     def read_schema(self) -> "CfgSchema":
         """Return a deep-copy of the original schema with widget values applied."""
-        if self._schema is None:
+        if self._schema is None or self._root_widget is None:
             raise RuntimeError("populate() must be called before read_schema()")
         new_schema = copy.deepcopy(self._schema)
-        self._apply_to_section(new_schema.root, iter(self._node_widgets))
+        self._apply_to_section(new_schema.root, self._root_widget)
         return new_schema
 
     # ------------------------------------------------------------------
@@ -295,12 +302,12 @@ class CfgFormWidget(QWidget):
         collapsible = section.collapsible and not top_level
 
         container = _CollapsibleSection(label, collapsible=collapsible, collapsed=False)
+        container._child_widgets = {}
 
         for key, node in section.fields.items():
             w, row_widget = self._build_node(node)
-            nw = _NodeWidget(node, w)
-            self._node_widgets.append((key, nw))
             container.form.addRow(_label_for(node, key) + ":", row_widget)
+            container._child_widgets[key] = w
 
         return container
 
@@ -314,6 +321,7 @@ class CfgFormWidget(QWidget):
         from zcu_tools.gui.adapter import (
             CfgSection,
             ModuleRefField,
+            WaveformRefField,
             MultiSweepField,
             ScalarField,
             SweepField,
@@ -347,6 +355,9 @@ class CfgFormWidget(QWidget):
         if isinstance(node, ModuleRefField):
             return self._build_module_ref(node)
 
+        if isinstance(node, WaveformRefField):
+            return self._build_waveform_ref(node)
+
         raise TypeError(f"Unknown CfgNode type: {type(node)}")
 
     def _build_module_ref(self, node: "ModuleRefField") -> tuple[QWidget, QWidget]:
@@ -356,10 +367,27 @@ class CfgFormWidget(QWidget):
         layout.setSpacing(2)
 
         combo = QComboBox()
-        combo.addItems(node.available_modules)
-        if node.module_name and node.module_name in node.available_modules:
+        if node.type_filter is not None and self._ml is not None:
+            items = [
+                name
+                for name, mod in self._ml.modules.items()
+                if isinstance(mod, node.type_filter)
+            ]
+        else:
+            items = list(node.available_modules) if node.available_modules else []
+
+        if "<Custom>" not in items:
+            items.append("<Custom>")
+        combo.addItems(items)
+
+        if node.module_name and node.module_name in items:
             combo.setCurrentText(node.module_name)
+        else:
+            combo.setCurrentText("<Custom>")
+
         layout.addWidget(combo)
+
+        container._child_widgets = {}
 
         # expanded_content sub-form (collapsed by default)
         if node.expanded_content is not None:
@@ -369,9 +397,192 @@ class CfgFormWidget(QWidget):
                 sub._toggle_btn.setChecked(False)
                 sub._body.setVisible(False)
             layout.addWidget(sub)
+            container._sub_section_widget = sub
+            container._child_widgets["expanded_content"] = sub
+        else:
+            container._sub_section_widget = None
 
-        container._combo = combo  # type: ignore[attr-defined]
+        combo._container = container
+        combo.currentIndexChanged.connect(
+            lambda: self._on_module_changed(node, combo, container)
+        )
+
         return combo, container
+
+    def _build_waveform_ref(self, node: "WaveformRefField") -> tuple[QWidget, QWidget]:
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+
+        combo = QComboBox()
+        if node.type_filter is not None and self._ml is not None:
+            items = [
+                name
+                for name, wav in self._ml.waveforms.items()
+                if isinstance(wav, node.type_filter)
+            ]
+        else:
+            items = list(node.available_waveforms) if node.available_waveforms else []
+
+        if "<Custom>" not in items:
+            items.append("<Custom>")
+        combo.addItems(items)
+
+        if node.waveform_name and node.waveform_name in items:
+            combo.setCurrentText(node.waveform_name)
+        else:
+            combo.setCurrentText("<Custom>")
+
+        layout.addWidget(combo)
+
+        container._child_widgets = {}
+
+        # expanded_content sub-form (collapsed by default)
+        if node.expanded_content is not None:
+            sub = self._build_section(node.expanded_content, top_level=False)
+            if hasattr(sub, "_toggle_btn") and sub._toggle_btn is not None:
+                sub._toggle_btn.setChecked(False)
+                sub._body.setVisible(False)
+            layout.addWidget(sub)
+            container._sub_section_widget = sub
+            container._child_widgets["expanded_content"] = sub
+        else:
+            container._sub_section_widget = None
+
+        combo._container = container
+        combo.currentIndexChanged.connect(
+            lambda: self._on_waveform_changed(node, combo, container)
+        )
+
+        return combo, container
+
+    def _on_module_changed(
+        self, node: "ModuleRefField", combo: QComboBox, container: QWidget
+    ) -> None:
+        name = combo.currentText()
+        layout = container.layout()
+        assert layout is not None
+
+        # 1. Clear old sub-section widget
+        if (
+            hasattr(container, "_sub_section_widget")
+            and container._sub_section_widget is not None
+        ):
+            layout.removeWidget(container._sub_section_widget)
+            container._sub_section_widget.deleteLater()
+            container._sub_section_widget = None
+            if (
+                hasattr(container, "_child_widgets")
+                and "expanded_content" in container._child_widgets
+            ):
+                del container._child_widgets["expanded_content"]
+
+        # 2. Reset or load expanded content
+        if name == "<Custom>":
+            node.module_name = None
+            if node.custom_template is not None:
+                node.expanded_content = copy.deepcopy(node.custom_template)
+            else:
+                node.expanded_content = None
+        else:
+            node.module_name = name
+            if self._ml is not None:
+                try:
+                    mod_cfg = self._ml.get_module(name)
+                    node.expanded_content = self._make_override_section_for_module(
+                        mod_cfg
+                    )
+                except Exception as e:
+                    logger.error(f"Error loading module {name} from ModuleLibrary: {e}")
+                    node.expanded_content = None
+            else:
+                node.expanded_content = None
+
+        # 3. Build and add new sub-section widget (collapsed by default, or open if user selects it)
+        if node.expanded_content is not None:
+            sub = self._build_section(node.expanded_content, top_level=False)
+            layout.addWidget(sub)
+            container._sub_section_widget = sub
+            if hasattr(container, "_child_widgets"):
+                container._child_widgets["expanded_content"] = sub
+
+    def _on_waveform_changed(
+        self, node: "WaveformRefField", combo: QComboBox, container: QWidget
+    ) -> None:
+        name = combo.currentText()
+        layout = container.layout()
+        assert layout is not None
+
+        # 1. Clear old sub-section widget
+        if (
+            hasattr(container, "_sub_section_widget")
+            and container._sub_section_widget is not None
+        ):
+            layout.removeWidget(container._sub_section_widget)
+            container._sub_section_widget.deleteLater()
+            container._sub_section_widget = None
+            if (
+                hasattr(container, "_child_widgets")
+                and "expanded_content" in container._child_widgets
+            ):
+                del container._child_widgets["expanded_content"]
+
+        # 2. Reset or load expanded content
+        if name == "<Custom>":
+            node.waveform_name = None
+            if node.custom_template is not None:
+                node.expanded_content = copy.deepcopy(node.custom_template)
+            else:
+                node.expanded_content = None
+        else:
+            node.waveform_name = name
+            if self._ml is not None:
+                try:
+                    wav_cfg = self._ml.get_waveform(name)
+                    node.expanded_content = self._make_override_section_for_module(
+                        wav_cfg
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Error loading waveform {name} from ModuleLibrary: {e}"
+                    )
+                    node.expanded_content = None
+            else:
+                node.expanded_content = None
+
+        # 3. Build and add new sub-section widget
+        if node.expanded_content is not None:
+            sub = self._build_section(node.expanded_content, top_level=False)
+            layout.addWidget(sub)
+            container._sub_section_widget = sub
+            if hasattr(container, "_child_widgets"):
+                container._child_widgets["expanded_content"] = sub
+
+    def _make_override_section_for_module(self, mod_cfg: Any) -> "CfgSection":
+        from zcu_tools.gui.adapter import CfgSection, ScalarField
+
+        if hasattr(mod_cfg, "to_dict"):
+            d = mod_cfg.to_dict()
+        else:
+            d = dict(mod_cfg)
+
+        def _dict_to_section(data: dict, readonly_keys: set[str]) -> CfgSection:
+            fields = {}
+            for k, v in data.items():
+                if isinstance(v, dict):
+                    fields[k] = _dict_to_section(v, readonly_keys)
+                elif isinstance(v, (int, float, bool, str)) or v is None:
+                    fields[k] = ScalarField(
+                        value=v,
+                        label=k.replace("_", " ").title(),
+                        type=type(v) if v is not None else str,
+                        editable=(k not in readonly_keys),
+                    )
+            return CfgSection(fields=fields, collapsible=True)
+
+        readonly = {"ch", "type", "ro_ch", "ro_type", "style", "name"}
+        return _dict_to_section(d, readonly)
 
     # ------------------------------------------------------------------
     # Read-back helpers
@@ -380,34 +591,39 @@ class CfgFormWidget(QWidget):
     def _apply_to_section(
         self,
         section: "CfgSection",
-        it: Any,
+        container: QWidget,
     ) -> None:
-        """Walk the flat node_widgets iterator in lock-step with section.fields."""
+        """Recursively apply values from widget tree to CfgSchema."""
         from zcu_tools.gui.adapter import (
             CfgSection,
             ModuleRefField,
+            WaveformRefField,
             MultiSweepField,
             ScalarField,
             SweepField,
         )
 
+        child_widgets = getattr(container, "_child_widgets", {})
+
         for key in section.fields:
-            _, nw = next(it)
+            w = child_widgets.get(key)
+            if w is None:
+                continue
             node = section.fields[key]
 
             if isinstance(node, ScalarField):
-                node.value = read_scalar_widget(nw.widget, node)
+                node.value = read_scalar_widget(w, node)
 
             elif isinstance(node, SweepField):
-                assert isinstance(nw.widget, _SweepRow)
-                start, stop, expts, step = nw.widget.read_back()
+                assert isinstance(w, _SweepRow)
+                start, stop, expts, step = w.read_back()
                 node.start = start
                 node.stop = stop
                 node.expts = expts
                 node.step = step
 
             elif isinstance(node, MultiSweepField):
-                rows: list[_SweepRow] = nw.widget._sweep_rows  # type: ignore[attr-defined]
+                rows: list[_SweepRow] = getattr(w, "_sweep_rows", [])
                 for sf, row in zip(node.sweeps.values(), rows):
                     start, stop, expts, step = row.read_back()
                     sf.start = start
@@ -416,13 +632,31 @@ class CfgFormWidget(QWidget):
                     sf.step = step
 
             elif isinstance(node, CfgSection):
-                self._apply_to_section(node, it)
+                self._apply_to_section(node, w)
 
             elif isinstance(node, ModuleRefField):
-                combo: QComboBox = nw.widget  # primary widget is the combo
+                combo = w
                 node.module_name = combo.currentText() or None
-                if node.expanded_content is not None:
-                    self._apply_to_section(node.expanded_content, it)
+                if node.module_name == "<Custom>":
+                    node.module_name = None
+
+                container_widget = getattr(combo, "_container", None)
+                if node.expanded_content is not None and container_widget is not None:
+                    sub_widget = getattr(container_widget, "_sub_section_widget", None)
+                    if sub_widget is not None:
+                        self._apply_to_section(node.expanded_content, sub_widget)
+
+            elif isinstance(node, WaveformRefField):
+                combo = w
+                node.waveform_name = combo.currentText() or None
+                if node.waveform_name == "<Custom>":
+                    node.waveform_name = None
+
+                container_widget = getattr(combo, "_container", None)
+                if node.expanded_content is not None and container_widget is not None:
+                    sub_widget = getattr(container_widget, "_sub_section_widget", None)
+                    if sub_widget is not None:
+                        self._apply_to_section(node.expanded_content, sub_widget)
 
 
 # ---------------------------------------------------------------------------

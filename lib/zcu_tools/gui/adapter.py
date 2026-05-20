@@ -86,10 +86,31 @@ class ModuleRefField:
     inline_cfg: Optional[dict]
     expanded_content: Optional["CfgSection"]  # eager load at make_default_cfg time
     available_modules: list
+    custom_template: Optional["CfgSection"] = None
     label: str = "Module"
+    type_filter: Optional[Any] = None
 
 
-CfgNode = Union[ScalarField, SweepField, MultiSweepField, ModuleRefField, "CfgSection"]
+@dataclass
+class WaveformRefField:
+    waveform_name: Optional[str]
+    override: dict
+    inline_cfg: Optional[dict]
+    expanded_content: Optional["CfgSection"]  # eager load at make_default_cfg time
+    available_waveforms: list
+    custom_template: Optional["CfgSection"] = None
+    label: str = "Waveform"
+    type_filter: Optional[Any] = None
+
+
+CfgNode = Union[
+    ScalarField,
+    SweepField,
+    MultiSweepField,
+    ModuleRefField,
+    WaveformRefField,
+    "CfgSection",
+]
 
 
 @dataclass
@@ -132,10 +153,41 @@ def _section_to_dict(section: CfgSection, ml: "ModuleLibrary") -> dict:
                 for axis, f in node.sweeps.items()
             }
         elif isinstance(node, ModuleRefField):
+            expanded_dict = None
+            if node.expanded_content is not None:
+                expanded_dict = _section_to_dict(node.expanded_content, ml)
+
             if node.module_name is not None:
-                result[key] = ml.get_module(node.module_name, node.override or None)
+                from copy import deepcopy
+                from zcu_tools.utils import deepupdate
+
+                override = deepcopy(node.override) if node.override else {}
+                if expanded_dict:
+                    deepupdate(override, expanded_dict, behavior="force")
+                result[key] = ml.get_module(node.module_name, override or None)
             else:
-                result[key] = node.inline_cfg or {}
+                if expanded_dict:
+                    result[key] = expanded_dict
+                else:
+                    result[key] = node.inline_cfg or {}
+        elif isinstance(node, WaveformRefField):
+            expanded_dict = None
+            if node.expanded_content is not None:
+                expanded_dict = _section_to_dict(node.expanded_content, ml)
+
+            if node.waveform_name is not None:
+                from copy import deepcopy
+                from zcu_tools.utils import deepupdate
+
+                override = deepcopy(node.override) if node.override else {}
+                if expanded_dict:
+                    deepupdate(override, expanded_dict, behavior="force")
+                result[key] = ml.get_waveform(node.waveform_name, override or None)
+            else:
+                if expanded_dict:
+                    result[key] = expanded_dict
+                else:
+                    result[key] = node.inline_cfg or {}
         elif isinstance(node, CfgSection):
             result[key] = _section_to_dict(node, ml)
         else:

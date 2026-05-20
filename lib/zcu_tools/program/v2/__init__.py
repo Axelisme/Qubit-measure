@@ -5,6 +5,7 @@ from .modular import ModularProgramV2
 from .modules import (
     AbsModuleCfg,
     AbsWaveformCfg,
+    AbsReadoutCfg,
     BathReset,
     BathResetCfg,
     Branch,

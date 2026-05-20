@@ -221,3 +221,70 @@ def test_registered_in_registry():
     assert registry.has("onetone/freq")
     adapter = registry.create("onetone/freq")
     assert isinstance(adapter, FakeFreqAdapter)
+
+
+def test_make_default_cfg_has_mod_ref_field():
+    from typing import cast
+    from zcu_tools.gui.adapter import ModuleRefField, CfgSection
+
+    ctx = _make_ctx()
+    adapter = _adapter()
+    schema = adapter.make_default_cfg(ctx)
+    modules_sec = schema.root.fields["modules"]
+    assert isinstance(modules_sec, CfgSection)
+    assert "readout" in modules_sec.fields
+    assert isinstance(modules_sec.fields["readout"], ModuleRefField)
+
+
+def test_writeback_spec_and_apply_for_ml():
+    from typing import cast
+    ctx = _make_ctx()
+    # Mock ml to contain readout_rf and ro_waveform
+    mock_readout_rf = MagicMock()
+    mock_readout_rf.pulse_cfg = MagicMock()
+    mock_readout_rf.pulse_cfg.freq = 5900.0
+    ctx.ml.modules = {"readout_rf": mock_readout_rf}
+
+    mock_ro_waveform = MagicMock()
+    mock_ro_waveform.length = 0.5
+    ctx.ml.waveforms = {"ro_waveform": mock_ro_waveform}
+
+    adapter = _adapter()
+    result = _run(adapter, ctx)
+    analyze_result = adapter.analyze(result, ctx)
+    spec = adapter.get_writeback_spec(analyze_result, ctx)
+    keys = [item.key for item in spec]
+    assert "readout_rf" in keys
+    assert "ro_waveform" in keys
+
+    # Apply writeback
+    # Should update the module and waveforms
+    adapter.apply_writeback(
+        ctx, analyze_result, ["readout_rf", "ro_waveform"]
+    )
+    cast(MagicMock, ctx.ml.register_module).assert_called_once()
+    cast(MagicMock, ctx.ml.register_waveform).assert_called_once()
+
+
+def test_writeback_spec_and_apply_for_ml_when_missing():
+    from typing import cast
+    ctx = _make_ctx()
+    # Mock ml to be empty
+    ctx.ml.modules = {}
+    ctx.ml.waveforms = {}
+
+    adapter = _adapter()
+    result = _run(adapter, ctx)
+    analyze_result = adapter.analyze(result, ctx)
+    spec = adapter.get_writeback_spec(analyze_result, ctx)
+    keys = [item.key for item in spec]
+    assert "readout_rf" in keys
+    assert "ro_waveform" in keys
+
+    # Apply writeback
+    # Should call register_module and register_waveform
+    adapter.apply_writeback(
+        ctx, analyze_result, ["readout_rf", "ro_waveform"]
+    )
+    cast(MagicMock, ctx.ml.register_module).assert_called_once()
+    cast(MagicMock, ctx.ml.register_waveform).assert_called_once()

@@ -26,6 +26,7 @@ from zcu_tools.gui.adapter import (
     CfgSchema,
     CfgSection,
     ExpContext,
+    ModuleRefField,
     ParamSpec,
     SavePaths,
     ScalarField,
@@ -64,6 +65,7 @@ class FakeFreqModelCfg(ConfigBase):
 class FakeFreqCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: FakeFreqSweepCfg
     model: FakeFreqModelCfg = FakeFreqModelCfg()
+    modules: dict[str, Any] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -146,26 +148,84 @@ class FakeFreqExp(AbsExperiment[FreqResult, FakeFreqCfg]):
 class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
     """Simulated one-tone frequency sweep.  No hardware required."""
 
+    last_cfg: Optional[FakeFreqCfg] = None
+
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:  # noqa: ARG002
-        readout_section = CfgSection(
-            label="Readout",
+        custom_tmpl = CfgSection(
+            label="Custom Readout",
             fields={
-                "ch": ScalarField(value=0, label="Gen ch", type=int, editable=False),
-                "nqz": ScalarField(value=1, label="NQZ", type=int, editable=False),
-                "freq": ScalarField(
-                    value=6000.0, label="Freq (MHz)", type=float, editable=False
-                ),
-                "gain": ScalarField(
-                    value=0.5, label="Gain", type=float, editable=False
-                ),
-                "ro_ch": ScalarField(value=0, label="RO ch", type=int, editable=False),
-                "ro_length": ScalarField(
-                    value=1.0, label="RO length (us)", type=float, editable=False
-                ),
+                "ch": ScalarField(value=0, label="Gen ch", type=int),
+                "nqz": ScalarField(value=1, label="NQZ", type=int),
+                "freq": ScalarField(value=6000.0, label="Freq (MHz)", type=float),
+                "gain": ScalarField(value=0.5, label="Gain", type=float),
+                "ro_ch": ScalarField(value=0, label="RO ch", type=int),
+                "ro_length": ScalarField(value=1.0, label="RO length (us)", type=float),
             },
         )
+
+        from zcu_tools.program.v2 import AbsReadoutCfg
+
+        available_modules = []
+        if ctx.ml is not None:
+            available_modules = [
+                name
+                for name, mod in ctx.ml.modules.items()
+                if isinstance(mod, AbsReadoutCfg)
+            ]
+
+        expanded_content = None
+        module_name = None
+        if "readout_rf" in available_modules:
+            module_name = "readout_rf"
+        elif available_modules:
+            module_name = available_modules[0]
+
+        if module_name is not None and ctx.ml is not None:
+            try:
+                mod_cfg = ctx.ml.get_module(module_name)
+                fields = {}
+                for k, field in custom_tmpl.fields.items():
+                    if isinstance(field, ScalarField):
+                        val = field.value
+                        if k in ["ch", "nqz", "freq", "gain"]:
+                            pulse_cfg = getattr(mod_cfg, "pulse_cfg", None)
+                            if pulse_cfg is not None:
+                                val = getattr(pulse_cfg, k, val)
+                        elif k in ["ro_ch", "ro_length"]:
+                            ro_cfg = getattr(mod_cfg, "ro_cfg", None)
+                            if ro_cfg is not None:
+                                val = getattr(ro_cfg, k, val)
+                        fields[k] = ScalarField(
+                            value=val, label=field.label, type=field.type
+                        )
+                expanded_content = CfgSection(label="Readout Params", fields=fields)
+            except Exception:
+                pass
+
+        if expanded_content is None:
+            expanded_fields = {}
+            for k, v in custom_tmpl.fields.items():
+                if isinstance(v, ScalarField):
+                    expanded_fields[k] = ScalarField(
+                        value=v.value, label=v.label, type=v.type
+                    )
+            expanded_content = CfgSection(
+                label="Readout Params",
+                fields=expanded_fields,
+            )
+
+        readout_ref = ModuleRefField(
+            module_name=module_name,
+            override={},
+            inline_cfg=None,
+            expanded_content=expanded_content,
+            available_modules=available_modules,
+            custom_template=custom_tmpl,
+            type_filter=AbsReadoutCfg,
+        )
+
         modules_section = CfgSection(
-            label="Modules", collapsible=True, fields={"readout": readout_section}
+            label="Modules", collapsible=True, fields={"readout": readout_ref}
         )
         root = CfgSection(
             fields={
@@ -210,6 +270,7 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
                 edelay=float(d["edelay"]),
                 noise_scale=float(d["noise_scale"]),
             ),
+            modules=d.get("modules", {}),
         )
 
     def get_run_params(self) -> dict[str, ParamSpec]:
@@ -222,6 +283,7 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
         **user_params: Any,  # noqa: ARG002
     ) -> FreqResult:
         cfg = self._schema_to_exp_cfg(schema, ctx)
+        self.last_cfg = cfg
         return FakeFreqExp().run(cfg)
 
     def get_analyze_params(self) -> dict[str, ParamSpec]:
@@ -263,7 +325,7 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
     ) -> list[WritebackItem]:
         freq, fwhm, _, _ = analyze_result
         md = ctx.md
-        return [
+        items = [
             WritebackItem(
                 key="r_f",
                 target="md",
@@ -280,6 +342,111 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
             ),
         ]
 
+        if ctx.ml is not None:
+            # 1. Fetch readout module
+            gui_readout = None
+            if hasattr(self, "last_cfg") and self.last_cfg is not None:
+                gui_readout = self.last_cfg.modules.get("readout")
+
+            new_readout = None
+            if gui_readout is not None:
+                try:
+                    pulse_cfg = getattr(gui_readout, "pulse_cfg", None)
+                    if pulse_cfg is not None:
+                        updated_pulse = pulse_cfg.with_updates(freq=freq)
+                        new_readout = gui_readout.with_updates(pulse_cfg=updated_pulse)
+                    else:
+                        new_readout = gui_readout
+                except Exception:
+                    new_readout = gui_readout
+
+            if new_readout is None:
+                fallback_raw = {
+                    "type": "readout/pulse",
+                    "pulse_cfg": {
+                        "waveform": {"style": "const", "length": 1.0},
+                        "ch": getattr(ctx.md, "res_ch", 0),
+                        "nqz": 2,
+                        "freq": freq,
+                        "gain": 0.2,
+                    },
+                    "ro_cfg": {
+                        "ro_ch": getattr(ctx.md, "ro_ch", 0),
+                        "ro_length": 1.0,
+                        "trig_offset": 0.5,
+                    },
+                }
+                from zcu_tools.program.v2 import ModuleCfgFactory
+
+                try:
+                    new_readout = ModuleCfgFactory.from_raw(fallback_raw, ml=ctx.ml)
+                except Exception:
+                    pass
+
+            cur_val_rf = None
+            if "readout_rf" in ctx.ml.modules:
+                cur_val_rf = ctx.ml.modules["readout_rf"]
+
+            items.append(
+                WritebackItem(
+                    key="readout_rf",
+                    target="ml",
+                    current_value=cur_val_rf,
+                    new_value=new_readout,
+                    description="readout_rf module config",
+                )
+            )
+
+            # 2. Fetch ro_waveform
+            gui_waveform = None
+            if hasattr(self, "last_cfg") and self.last_cfg is not None:
+                readout_cfg = self.last_cfg.modules.get("readout")
+                if readout_cfg is not None:
+                    pulse_cfg = getattr(readout_cfg, "pulse_cfg", None)
+                    if pulse_cfg is not None:
+                        gui_waveform = getattr(pulse_cfg, "waveform", None)
+
+            new_waveform = None
+            wav_len = getattr(ctx.md, "res_probe_len", 5.0)
+            if gui_waveform is not None:
+                from zcu_tools.program.v2 import AbsWaveformCfg
+
+                if isinstance(gui_waveform, AbsWaveformCfg):
+                    try:
+                        new_waveform = gui_waveform.with_updates(length=wav_len)
+                    except Exception:
+                        new_waveform = gui_waveform
+
+            if new_waveform is None:
+                fallback_wav_raw = {
+                    "style": "flat_top",
+                    "raise_waveform": {"style": "cosine", "length": 0.1},
+                    "length": wav_len,
+                }
+                from zcu_tools.program.v2 import WaveformCfgFactory
+
+                try:
+                    new_waveform = WaveformCfgFactory.from_raw(
+                        fallback_wav_raw, ml=ctx.ml
+                    )
+                except Exception:
+                    pass
+
+            cur_val_ro = None
+            if "ro_waveform" in ctx.ml.waveforms:
+                cur_val_ro = ctx.ml.waveforms["ro_waveform"]
+
+            items.append(
+                WritebackItem(
+                    key="ro_waveform",
+                    target="ml",
+                    current_value=cur_val_ro,
+                    new_value=new_waveform,
+                    description="ro_waveform length config",
+                )
+            )
+        return items
+
     def apply_writeback(
         self,
         ctx: ExpContext,
@@ -291,6 +458,89 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
             ctx.md.r_f = freq
         if "rf_w" in selected_keys:
             ctx.md.rf_w = fwhm
+
+        if ctx.ml is not None:
+            dirty = False
+            if "readout_rf" in selected_keys:
+                try:
+                    gui_readout = None
+                    if hasattr(self, "last_cfg") and self.last_cfg is not None:
+                        gui_readout = self.last_cfg.modules.get("readout")
+
+                    new_readout = None
+                    if gui_readout is not None:
+                        pulse_cfg = getattr(gui_readout, "pulse_cfg", None)
+                        if pulse_cfg is not None:
+                            updated_pulse = pulse_cfg.with_updates(freq=freq)
+                            new_readout = gui_readout.with_updates(
+                                pulse_cfg=updated_pulse
+                            )
+                        else:
+                            new_readout = gui_readout
+
+                    if new_readout is None:
+                        ro_pulse_len = 1.0
+                        fallback_raw = {
+                            "type": "readout/pulse",
+                            "pulse_cfg": {
+                                "waveform": {"style": "const", "length": ro_pulse_len},
+                                "ch": getattr(ctx.md, "res_ch", 0),
+                                "nqz": 2,
+                                "freq": freq,
+                                "gain": 0.2,
+                            },
+                            "ro_cfg": {
+                                "ro_ch": getattr(ctx.md, "ro_ch", 0),
+                                "ro_length": ro_pulse_len - 0.1,
+                                "trig_offset": getattr(ctx.md, "timeFly", 0.285) + 0.05,
+                            },
+                        }
+                        from zcu_tools.program.v2 import ModuleCfgFactory
+
+                        new_readout = ModuleCfgFactory.from_raw(fallback_raw, ml=ctx.ml)
+                    ctx.ml.register_module(readout_rf=cast(Any, new_readout))
+                    dirty = True
+                except Exception:
+                    pass
+            if "ro_waveform" in selected_keys:
+                try:
+                    gui_waveform = None
+                    if hasattr(self, "last_cfg") and self.last_cfg is not None:
+                        readout_cfg = self.last_cfg.modules.get("readout")
+                        if readout_cfg is not None:
+                            pulse_cfg = getattr(readout_cfg, "pulse_cfg", None)
+                            if pulse_cfg is not None:
+                                gui_waveform = getattr(pulse_cfg, "waveform", None)
+
+                    new_waveform = None
+                    wav_len = getattr(ctx.md, "res_probe_len", 5.0)
+                    if gui_waveform is not None:
+                        from zcu_tools.program.v2 import AbsWaveformCfg
+
+                        if isinstance(gui_waveform, AbsWaveformCfg):
+                            new_waveform = gui_waveform.with_updates(length=wav_len)
+
+                    if new_waveform is None:
+                        fallback_wav_raw = {
+                            "style": "flat_top",
+                            "raise_waveform": {"style": "cosine", "length": 0.1},
+                            "length": wav_len,
+                        }
+                        from zcu_tools.program.v2 import WaveformCfgFactory
+
+                        new_waveform = WaveformCfgFactory.from_raw(
+                            fallback_wav_raw, ml=ctx.ml
+                        )
+
+                    ctx.ml.register_waveform(ro_waveform=cast(Any, new_waveform))
+                    dirty = True
+                except Exception:
+                    pass
+            if dirty:
+                try:
+                    ctx.ml.dump()
+                except Exception:
+                    pass
 
     def make_save_paths(self, ctx: ExpContext) -> SavePaths:
         import os
@@ -315,7 +565,9 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
             os.makedirs(flux_image_dir, exist_ok=True)
             image_path = os.path.join(flux_image_dir, f"{filename}.png")
         elif ctx.result_dir:
-            image_path = os.path.join(ctx.result_dir, "exps", "image", f"{filename}.png")
+            image_path = os.path.join(
+                ctx.result_dir, "exps", "image", f"{filename}.png"
+            )
         else:
             image_path = f"/tmp/{filename}.png"
 
