@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QAbstractSpinBox,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -37,16 +38,16 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.meta_tool import ModuleLibrary
     from zcu_tools.gui.adapter import (
         CfgNode,
         CfgSchema,
         CfgSection,
         ModuleRefField,
-        WaveformRefField,
         ScalarField,
         SweepField,
+        WaveformRefField,
     )
+    from zcu_tools.meta_tool import ModuleLibrary
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +60,7 @@ def make_value_widget(
     default: Any,
     choices: Optional[list],
     editable: bool = True,
+    decimals: Optional[int] = None,
 ) -> QWidget:
     """Build an input widget from raw field attributes. Used by both
     make_scalar_widget (ScalarField) and main_window param widgets (ParamSpec)."""
@@ -79,13 +81,15 @@ def make_value_widget(
         w = QSpinBox()
         w.setRange(-(2**31), 2**31 - 1)
         w.setValue(int(default))
+        w.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
         w.setEnabled(editable)
         return w
     if type_ is float:
         w = QDoubleSpinBox()
         w.setRange(-1e12, 1e12)
-        w.setDecimals(6)
+        w.setDecimals(decimals if decimals is not None else 6)
         w.setValue(float(default))
+        w.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
         w.setEnabled(editable)
         return w
     w = QLineEdit(str(default))
@@ -111,7 +115,9 @@ def read_value_widget(w: QWidget, type_: type, fallback: Any = None) -> Any:
 
 def make_scalar_widget(field: "ScalarField") -> QWidget:
     """Build an input widget from a ScalarField."""
-    return make_value_widget(field.type, field.value, field.choices, field.editable)
+    return make_value_widget(
+        field.type, field.value, field.choices, field.editable, field.decimals
+    )
 
 
 def read_scalar_widget(w: QWidget, field: "ScalarField") -> Any:
@@ -143,17 +149,20 @@ class _SweepRow(QWidget):
         self._start.setRange(-1e12, 1e12)
         self._start.setDecimals(6)
         self._start.setValue(field.start)
+        self._start.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
         self._start.setEnabled(field.editable)
 
         self._stop = QDoubleSpinBox()
         self._stop.setRange(-1e12, 1e12)
         self._stop.setDecimals(6)
         self._stop.setValue(field.stop)
+        self._stop.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
         self._stop.setEnabled(field.editable)
 
         self._expts = QSpinBox()
         self._expts.setRange(1, 2**31 - 1)
         self._expts.setValue(field.expts)
+        self._expts.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
         self._expts.setEnabled(field.editable)
 
         layout.addWidget(QLabel("start"))
@@ -174,12 +183,16 @@ class _SweepRow(QWidget):
 
 
 # ---------------------------------------------------------------------------
-# _CollapsibleSection — QGroupBox with toggle button
+# _CollapsibleSection — header row (arrow + label) with collapsible body
 # ---------------------------------------------------------------------------
 
 
 class _CollapsibleSection(QWidget):
-    """A labelled section that can be collapsed/expanded via a toggle button."""
+    """A labelled section with a small arrow button on the left to collapse/expand.
+
+    Header layout: [▶/▼ btn (16px)] [label (stretch)]
+    collapsible=False renders only a bold label with no toggle.
+    """
 
     def __init__(
         self,
@@ -194,12 +207,21 @@ class _CollapsibleSection(QWidget):
         outer.setSpacing(0)
 
         if collapsible:
-            self._toggle_btn = QPushButton(label)
+            # Header row: small arrow button + label
+            header = QWidget()
+            header_row = QHBoxLayout(header)
+            header_row.setContentsMargins(0, 0, 0, 0)
+            header_row.setSpacing(2)
+
+            self._toggle_btn = QPushButton("▼" if not collapsed else "▶")
+            self._toggle_btn.setFixedWidth(16)
+            self._toggle_btn.setFlat(True)
             self._toggle_btn.setCheckable(True)
             self._toggle_btn.setChecked(not collapsed)
-            self._toggle_btn.setStyleSheet("text-align: left; padding: 2px 4px;")
             self._toggle_btn.clicked.connect(self._on_toggle)
-            outer.addWidget(self._toggle_btn)
+            header_row.addWidget(self._toggle_btn)
+            header_row.addWidget(QLabel(f"<b>{label}</b>"), stretch=1)
+            outer.addWidget(header)
         else:
             outer.addWidget(QLabel(f"<b>{label}</b>"))
             self._toggle_btn = None  # type: ignore[assignment]
@@ -219,6 +241,8 @@ class _CollapsibleSection(QWidget):
 
     def _on_toggle(self, checked: bool) -> None:
         self._body.setVisible(checked)
+        if self._toggle_btn is not None:
+            self._toggle_btn.setText("▼" if checked else "▶")
 
     @property
     def form(self) -> QFormLayout:
@@ -319,10 +343,10 @@ class CfgFormWidget(QWidget):
         from zcu_tools.gui.adapter import (
             CfgSection,
             ModuleRefField,
-            WaveformRefField,
             MultiSweepField,
             ScalarField,
             SweepField,
+            WaveformRefField,
         )
 
         if isinstance(node, ScalarField):
@@ -414,8 +438,9 @@ class CfgFormWidget(QWidget):
         if node.expanded_content is not None:
             sub = self._build_section(node.expanded_content, top_level=False)
             if hasattr(sub, "_toggle_btn") and sub._toggle_btn is not None:
+                # force collapsed; sync button text via _on_toggle
+                sub._on_toggle(False)
                 sub._toggle_btn.setChecked(False)
-                sub._body.setVisible(False)
             layout.addWidget(sub)
             container._sub_section_widget = sub  # type: ignore[attr-defined]
             container._child_widgets["expanded_content"] = sub  # type: ignore[attr-defined]
@@ -512,10 +537,10 @@ class CfgFormWidget(QWidget):
         from zcu_tools.gui.adapter import (
             CfgSection,
             ModuleRefField,
-            WaveformRefField,
             MultiSweepField,
             ScalarField,
             SweepField,
+            WaveformRefField,
         )
 
         child_widgets = getattr(container, "_child_widgets", {})

@@ -62,6 +62,7 @@ class ScalarField:
     type: type
     editable: bool = True
     choices: Optional[list] = None
+    decimals: Optional[int] = None  # float display precision; None = 6 (default)
 
 
 @dataclass
@@ -146,7 +147,6 @@ def module_cfg_to_section(mod_cfg: Any) -> "CfgSection":
             module_cfg_to_schema,
             waveform_cfg_to_section,
         )
-
         from zcu_tools.program.v2.modules.waveform import AbsWaveformCfg
 
         if isinstance(mod_cfg, AbsWaveformCfg):
@@ -215,6 +215,7 @@ def _section_to_dict(section: CfgSection, ml: "Optional[ModuleLibrary]") -> dict
                         "but no ModuleLibrary is available"
                     )
                 from copy import deepcopy
+
                 from zcu_tools.utils import deepupdate
 
                 override = deepcopy(node.override) if node.override else {}
@@ -238,6 +239,7 @@ def _section_to_dict(section: CfgSection, ml: "Optional[ModuleLibrary]") -> dict
                         "but no ModuleLibrary is available"
                     )
                 from copy import deepcopy
+
                 from zcu_tools.utils import deepupdate
 
                 override = deepcopy(node.override) if node.override else {}

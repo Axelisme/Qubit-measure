@@ -48,8 +48,16 @@ def _locked(value: Any, label: str, choices: list) -> ScalarField:
     )
 
 
-def _sf(value: Any, label: str, typ: type, choices: list | None = None) -> ScalarField:
-    return ScalarField(value=value, label=label, type=typ, choices=choices)
+def _sf(
+    value: Any,
+    label: str,
+    typ: type,
+    choices: list | None = None,
+    decimals: int | None = None,
+) -> ScalarField:
+    return ScalarField(
+        value=value, label=label, type=typ, choices=choices, decimals=decimals
+    )
 
 
 def _v(cfg: Any, attr: str, default: Any = 0) -> Any:
@@ -66,7 +74,7 @@ def _const_to_section(cfg: Any) -> CfgSection:
         label="Const Waveform",
         fields={
             "style": _locked("const", "Style", ["const"]),
-            "length": _sf(_v(cfg, "length", 1.0), "Length (us)", float),
+            "length": _sf(_v(cfg, "length", 1.0), "Length (us)", float, decimals=3),
         },
     )
 
@@ -76,7 +84,7 @@ def _cosine_to_section(cfg: Any) -> CfgSection:
         label="Cosine Waveform",
         fields={
             "style": _locked("cosine", "Style", _RAISE_WAVEFORM_STYLE_CHOICES),
-            "length": _sf(_v(cfg, "length", 0.1), "Length (us)", float),
+            "length": _sf(_v(cfg, "length", 0.1), "Length (us)", float, decimals=3),
         },
     )
 
@@ -86,8 +94,8 @@ def _gauss_to_section(cfg: Any) -> CfgSection:
         label="Gauss Waveform",
         fields={
             "style": _locked("gauss", "Style", _RAISE_WAVEFORM_STYLE_CHOICES),
-            "length": _sf(_v(cfg, "length", 1.0), "Length (us)", float),
-            "sigma": _sf(_v(cfg, "sigma", 0.25), "Sigma (us)", float),
+            "length": _sf(_v(cfg, "length", 1.0), "Length (us)", float, decimals=3),
+            "sigma": _sf(_v(cfg, "sigma", 0.25), "Sigma (us)", float, decimals=3),
         },
     )
 
@@ -97,10 +105,10 @@ def _drag_to_section(cfg: Any) -> CfgSection:
         label="DRAG Waveform",
         fields={
             "style": _locked("drag", "Style", _RAISE_WAVEFORM_STYLE_CHOICES),
-            "length": _sf(_v(cfg, "length", 1.0), "Length (us)", float),
-            "sigma": _sf(_v(cfg, "sigma", 0.25), "Sigma (us)", float),
-            "delta": _sf(_v(cfg, "delta", 0.0), "Delta (MHz)", float),
-            "alpha": _sf(_v(cfg, "alpha", 0.5), "Alpha", float),
+            "length": _sf(_v(cfg, "length", 1.0), "Length (us)", float, decimals=3),
+            "sigma": _sf(_v(cfg, "sigma", 0.25), "Sigma (us)", float, decimals=3),
+            "delta": _sf(_v(cfg, "delta", 0.0), "Delta (MHz)", float, decimals=2),
+            "alpha": _sf(_v(cfg, "alpha", 0.5), "Alpha", float, decimals=4),
         },
     )
 
@@ -110,7 +118,7 @@ def _arb_to_section(cfg: Any) -> CfgSection:
         label="Arb Waveform",
         fields={
             "style": _locked("arb", "Style", _RAISE_WAVEFORM_STYLE_CHOICES),
-            "length": _sf(_v(cfg, "length", 1.0), "Length (us)", float),
+            "length": _sf(_v(cfg, "length", 1.0), "Length (us)", float, decimals=3),
             "data": _sf(_v(cfg, "data", ""), "Data key", str),
         },
     )
@@ -127,7 +135,7 @@ def _flat_top_to_section(cfg: Any) -> CfgSection:
         label="FlatTop Waveform",
         fields={
             "style": _locked("flat_top", "Style", _WAVEFORM_STYLE_CHOICES),
-            "length": _sf(_v(cfg, "length", 5.0), "Length (us)", float),
+            "length": _sf(_v(cfg, "length", 5.0), "Length (us)", float, decimals=3),
             "raise_waveform": raise_sec,
         },
     )
@@ -169,11 +177,15 @@ def _pulse_to_section(cfg: Any) -> CfgSection:
             "waveform": wav_sec,
             "ch": _sf(_v(cfg, "ch", 0), "Gen ch", int),
             "nqz": _sf(_v(cfg, "nqz", 2), "NQZ", int, [1, 2]),
-            "freq": _sf(_v(cfg, "freq", 6000.0), "Freq (MHz)", float),
-            "phase": _sf(_v(cfg, "phase", 0.0), "Phase (deg)", float),
-            "gain": _sf(_v(cfg, "gain", 0.5), "Gain", float),
-            "pre_delay": _sf(_v(cfg, "pre_delay", 0.0), "Pre-delay (us)", float),
-            "post_delay": _sf(_v(cfg, "post_delay", 0.0), "Post-delay (us)", float),
+            "freq": _sf(_v(cfg, "freq", 6000.0), "Freq (MHz)", float, decimals=2),
+            "phase": _sf(_v(cfg, "phase", 0.0), "Phase (deg)", float, decimals=2),
+            "gain": _sf(_v(cfg, "gain", 0.5), "Gain", float, decimals=4),
+            "pre_delay": _sf(
+                _v(cfg, "pre_delay", 0.0), "Pre-delay (us)", float, decimals=3
+            ),
+            "post_delay": _sf(
+                _v(cfg, "post_delay", 0.0), "Post-delay (us)", float, decimals=3
+            ),
         },
     )
 
@@ -189,9 +201,15 @@ def _direct_readout_to_section(cfg: Any) -> CfgSection:
         fields={
             "type": _locked("readout/direct", "Type", ["readout/direct"]),
             "ro_ch": _sf(_v(cfg, "ro_ch", 0), "RO ch", int),
-            "ro_freq": _sf(_v(cfg, "ro_freq", 6000.0), "RO freq (MHz)", float),
-            "ro_length": _sf(_v(cfg, "ro_length", 1.0), "RO length (us)", float),
-            "trig_offset": _sf(_v(cfg, "trig_offset", 0.0), "Trig offset (us)", float),
+            "ro_freq": _sf(
+                _v(cfg, "ro_freq", 6000.0), "RO freq (MHz)", float, decimals=2
+            ),
+            "ro_length": _sf(
+                _v(cfg, "ro_length", 1.0), "RO length (us)", float, decimals=3
+            ),
+            "trig_offset": _sf(
+                _v(cfg, "trig_offset", 0.0), "Trig offset (us)", float, decimals=3
+            ),
         },
     )
 
@@ -390,7 +408,7 @@ def make_flat_top_waveform_schema(
         label="FlatTop Waveform",
         fields={
             "style": _locked("flat_top", "Style", _WAVEFORM_STYLE_CHOICES),
-            "length": _sf(length, "Length (us)", float),
+            "length": _sf(length, "Length (us)", float, decimals=3),
             "raise_waveform": raise_sec,
         },
     )
