@@ -146,11 +146,11 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
     schema = adapter.make_default_cfg(ctx)
 
     # Override to small values so the test is fast
-    from zcu_tools.gui.adapter import ScalarField
+    from zcu_tools.gui.adapter import ScalarField, SweepField
 
     schema.root.fields["rounds"] = ScalarField(value=2, label="Rounds", type=int)
-    schema.root.fields["freq_expts"] = ScalarField(
-        value=5, label="Freq expts", type=int
+    schema.root.fields["freq"] = SweepField(
+        start=5800.0, stop=5808.0, expts=5, label="Freq (MHz)"
     )
 
     with use_pbar_factory(factory):
@@ -159,5 +159,6 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
 
     assert len(freqs) == 5
     assert len(signals) == 5
-    # both bars use leave=False, so _active is empty after run
+    # run_task uses leave=True pbar; reset_all clears it
+    stack.reset_all()
     assert len(stack._active) == 0

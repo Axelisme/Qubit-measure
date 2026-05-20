@@ -55,10 +55,8 @@ def test_make_default_cfg_has_expected_fields():
     for key in (
         "reps",
         "rounds",
-        "freq_start",
-        "freq_stop",
-        "freq_expts",
-        "freq",
+        "freq",  # SweepField for frequency sweep
+        "res_freq",  # HangerModel resonator frequency
         "Ql",
     ):
         assert key in fields, f"missing field: {key}"
@@ -88,10 +86,10 @@ def test_run_freq_range_matches_cfg():
     ctx = _make_ctx()
     adapter = _adapter()
     schema = adapter.make_default_cfg(ctx)
-    # default: 5.8 to 6.2 MHz, 201 points
+    # default SweepField: start=5800.0, stop=6200.0, expts=201
     freqs, _ = adapter.run(ctx, schema)
-    assert abs(freqs[0] - 5.8) < 0.01
-    assert abs(freqs[-1] - 6.2) < 0.01
+    assert abs(freqs[0] - 5800.0) < 1.0
+    assert abs(freqs[-1] - 6200.0) < 1.0
     assert len(freqs) == 201
 
 
@@ -136,7 +134,7 @@ def test_analyze_returns_four_tuple():
 
 
 def test_analyze_freq_close_to_true_value():
-    """Fitted frequency should be within 0.05 MHz of the ground-truth 6.0 MHz."""
+    """Fitted frequency should be within 5 MHz of the ground-truth 6000.0 MHz."""
     ctx = _make_ctx()
     adapter = _adapter()
     # Use high rounds to reduce noise and make fit reliable
@@ -144,7 +142,7 @@ def test_analyze_freq_close_to_true_value():
     schema.root.fields["rounds"] = ScalarField(value=200, label="Rounds", type=int)
     result = adapter.run(ctx, schema)
     freq_fit, _, _, _ = adapter.analyze(result, ctx)
-    assert abs(freq_fit - 6.0) < 0.05
+    assert abs(freq_fit - 6000.0) < 5.0
 
 
 def test_analyze_produces_figure():

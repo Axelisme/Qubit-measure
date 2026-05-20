@@ -1,9 +1,9 @@
 """FakeFreqAdapter — simulates a one-tone frequency sweep using HangerModel.
 
-The run() generates ideal HangerModel signals plus complex Gaussian noise
-whose amplitude scales as 1/sqrt(reps * rounds), matching the SNR improvement
-of real hardware averaging.  analyze() delegates to FreqExp.analyze(), so
-the fitting pipeline is identical to the real experiment.
+FakeFreqExp mirrors the structure of FreqExp exactly (run_task + Task + LivePlot1D),
+with a measure_fn that generates HangerModel signals plus Gaussian noise instead of
+calling real hardware.  FakeFreqAdapter wraps FakeFreqExp and converts its flat
+CfgSchema into the FakeFreqCfg that FakeFreqExp expects.
 """
 
 from __future__ import annotations
@@ -12,11 +12,15 @@ import time
 from typing import Any, Literal, Optional, cast
 
 import numpy as np
-from zcu_tools.liveplot import LivePlot1D
-from zcu_tools.progress_bar.interface import make_pbar
+from numpy.typing import NDArray
+from typing_extensions import Callable
 
 from matplotlib.figure import Figure
+from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment.base import AbsExperiment
 from zcu_tools.experiment.v2.onetone.freq import FreqExp, FreqResult
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
     CfgSchema,
@@ -25,13 +29,114 @@ from zcu_tools.gui.adapter import (
     ParamSpec,
     SavePaths,
     ScalarField,
+    SweepField,
     WritebackItem,
     schema_to_dict,
 )
+from zcu_tools.liveplot import LivePlot1D
+from zcu_tools.program.v2 import ProgramV2Cfg
+from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.utils.fitting.resonance.hanger import HangerModel
 
 # AnalyzeResult: (freq_MHz, fwhm_MHz, param_dict, figure)
 FakeFreqAnalyzeResult = tuple[float, float, dict[str, Any], Figure]
+
+
+# ---------------------------------------------------------------------------
+# FakeFreqCfg — same structure as FreqCfg but with HangerModel params
+# ---------------------------------------------------------------------------
+
+
+class FakeFreqSweepCfg(ConfigBase):
+    freq: SweepCfg
+
+
+class FakeFreqModelCfg(ConfigBase):
+    freq: float = 6000.0
+    Ql: float = 5000.0
+    Qc_abs: float = 6000.0
+    phi: float = 0.0
+    a0_abs: float = 1.0
+    edelay: float = 0.05
+    noise_scale: float = 0.05
+
+
+class FakeFreqCfg(ProgramV2Cfg, ExpCfgModel):
+    sweep: FakeFreqSweepCfg
+    model: FakeFreqModelCfg = FakeFreqModelCfg()
+
+
+# ---------------------------------------------------------------------------
+# FakeFreqExp — same run structure as FreqExp, fake measure_fn
+# ---------------------------------------------------------------------------
+
+
+class FakeFreqExp(AbsExperiment[FreqResult, FakeFreqCfg]):
+    """Simulated FreqExp: same run/analyze/save interface, no hardware required."""
+
+    def run(self, cfg: FakeFreqCfg) -> FreqResult:
+        sweep = cfg.sweep.freq
+        freqs = np.linspace(sweep.start, sweep.stop, sweep.expts)
+
+        m = cfg.model
+        a0 = complex(m.a0_abs)
+        Qc = complex(m.Qc_abs * np.exp(-1j * m.phi))
+        clean = HangerModel.calc_signals(
+            freqs, m.freq, m.Ql, cast(float, Qc), m.phi, a0, m.edelay
+        )
+        sigma = m.noise_scale / np.sqrt(cfg.reps * cfg.rounds)
+        rng = np.random.default_rng()
+
+        def measure_fn(
+            ctx: TaskState,  # noqa: ARG001
+            update_hook: Optional[Callable[[int, NDArray[np.complex128]], None]],
+        ) -> NDArray[np.complex128]:
+            accumulated = np.zeros(len(freqs), dtype=np.complex128)
+            for r in range(cfg.rounds):
+                noise = rng.normal(0, sigma * np.sqrt(cfg.rounds), len(freqs))
+                noise_i = rng.normal(0, sigma * np.sqrt(cfg.rounds), len(freqs))
+                accumulated += clean + noise + 1j * noise_i
+                for _ in range(len(freqs)):
+                    time.sleep(0.0005)
+                if update_hook is not None:
+                    update_hook(r + 1, accumulated / (r + 1))
+            return accumulated / cfg.rounds
+
+        with LivePlot1D("Frequency (MHz)", "Amplitude") as viewer:
+            signals = run_task(
+                task=Task(
+                    measure_fn=measure_fn,
+                    raw2signal_fn=lambda raw: raw,
+                    result_shape=(len(freqs),),
+                    pbar_n=cfg.rounds,
+                ),
+                init_cfg=cfg,
+                on_update=lambda ctx: viewer.update(freqs, np.abs(ctx.root_data)),
+            )
+
+        self.last_cfg = cfg
+        self.last_result = (freqs, signals)
+
+        return freqs, signals
+
+    def analyze(
+        self,
+        result: Optional[FreqResult] = None,
+        *,
+        model_type: Literal["hm", "t", "auto"] = "auto",
+        fit_bg_slope: bool = False,
+    ) -> tuple[float, float, dict[str, Any], Figure]:
+        if result is None:
+            result = self.last_result
+        assert result is not None
+        return FreqExp().analyze(
+            result, model_type=model_type, fit_bg_slope=fit_bg_slope
+        )
+
+
+# ---------------------------------------------------------------------------
+# FakeFreqAdapter — wraps FakeFreqExp, converts CfgSchema → FakeFreqCfg
+# ---------------------------------------------------------------------------
 
 
 class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
@@ -42,17 +147,15 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
             fields={
                 "reps": ScalarField(value=100, label="Reps", type=int),
                 "rounds": ScalarField(value=10, label="Rounds", type=int),
-                # Frequency sweep range
-                "freq_start": ScalarField(
-                    value=5.8, label="Freq start (MHz)", type=float
+                "freq": SweepField(
+                    start=5800.0,
+                    stop=6200.0,
+                    expts=201,
+                    label="Freq (MHz)",
                 ),
-                "freq_stop": ScalarField(
-                    value=6.2, label="Freq stop (MHz)", type=float
-                ),
-                "freq_expts": ScalarField(value=201, label="Freq points", type=int),
-                # Hanger model parameters
-                "freq": ScalarField(
-                    value=6.0, label="Resonator freq (MHz)", type=float
+                # HangerModel parameters
+                "res_freq": ScalarField(
+                    value=6000.0, label="Resonator freq (MHz)", type=float
                 ),
                 "Ql": ScalarField(value=5000, label="Ql (loaded Q)", type=int),
                 "Qc_abs": ScalarField(value=6000, label="|Qc| (coupling Q)", type=int),
@@ -66,82 +169,35 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
         )
         return CfgSchema(root=root)
 
+    def _schema_to_exp_cfg(self, schema: CfgSchema, ctx: ExpContext) -> FakeFreqCfg:
+        d = schema_to_dict(schema, ctx.ml)
+        sweep_cfg: SweepCfg = d["freq"]  # SweepCfg pydantic object from SweepField
+        return FakeFreqCfg(
+            reps=int(d["reps"]),
+            rounds=int(d["rounds"]),
+            sweep=FakeFreqSweepCfg(freq=sweep_cfg),
+            model=FakeFreqModelCfg(
+                freq=float(d["res_freq"]),
+                Ql=float(d["Ql"]),
+                Qc_abs=float(d["Qc_abs"]),
+                phi=float(d["phi"]),
+                a0_abs=float(d["a0_abs"]),
+                edelay=float(d["edelay"]),
+                noise_scale=float(d["noise_scale"]),
+            ),
+        )
+
     def get_run_params(self) -> dict[str, ParamSpec]:
         return {}
 
     def run(
         self,
-        ctx: ExpContext,  # noqa: ARG002
+        ctx: ExpContext,
         schema: CfgSchema,
         **user_params: Any,  # noqa: ARG002
     ) -> FreqResult:
-        d = schema_to_dict(schema, ctx.ml)
-
-        reps = int(d.get("reps", 100))
-        rounds = int(d.get("rounds", 10))
-        freq_start = float(d.get("freq_start", 5.8))
-        freq_stop = float(d.get("freq_stop", 6.2))
-        freq_expts = int(d.get("freq_expts", 201))
-        freq = float(d.get("freq", 6.0))
-        Ql = float(d.get("Ql", 5000))
-        Qc_abs = float(d.get("Qc_abs", 6000))
-        phi = float(d.get("phi", 0.0))
-        a0_abs = float(d.get("a0_abs", 1.0))
-        edelay = float(d.get("edelay", 0.05))
-        noise_scale = float(d.get("noise_scale", 0.05))
-
-        freqs = np.linspace(freq_start, freq_stop, freq_expts)
-        a0 = complex(a0_abs)
-        Qc = complex(Qc_abs * np.exp(-1j * phi))
-
-        # ideal signal from HangerModel (Qc is complex despite the float hint)
-        clean = HangerModel.calc_signals(
-            freqs, freq, Ql, cast(float, Qc), phi, a0, edelay
-        )
-
-        # simulate round-level averaging with two-layer progress bars and liveplot
-        sigma = noise_scale / np.sqrt(reps * rounds)
-        rng = np.random.default_rng()
-        accumulated = np.zeros(len(freqs), dtype=np.complex128)
-        completed_rounds = 0
-
-        from zcu_tools.experiment.v2.runner.base import _current_stop_flag
-
-        with LivePlot1D("Freq (MHz)", "|S21|", auto_close=False) as lp:
-            rounds_pbar = make_pbar(desc="rounds", total=rounds, leave=False)
-            try:
-                for _ in range(rounds):
-                    # check for cancellation before each round
-                    if _current_stop_flag is not None and _current_stop_flag.is_set():
-                        break
-
-                    scan_pbar = make_pbar(
-                        desc="freq scan", total=freq_expts, leave=False
-                    )
-                    try:
-                        for i in range(freq_expts):
-                            accumulated[i] += (
-                                clean[i]
-                                + rng.normal(0, sigma * np.sqrt(rounds))
-                                + 1j * rng.normal(0, sigma * np.sqrt(rounds))
-                            )
-                            scan_pbar.update(1)
-                            time.sleep(0.0005)
-                    finally:
-                        scan_pbar.close()
-
-                    completed_rounds += 1
-                    rounds_pbar.update(1)
-
-                    # update liveplot with current averaged signals
-                    avg = accumulated / completed_rounds
-                    lp.update(freqs, np.abs(avg))
-            finally:
-                rounds_pbar.close()
-
-        divisor = completed_rounds if completed_rounds > 0 else 1
-        signals = (accumulated / divisor).astype(np.complex128)
-        return freqs, signals
+        cfg = self._schema_to_exp_cfg(schema, ctx)
+        return FakeFreqExp().run(cfg)
 
     def get_analyze_params(self) -> dict[str, ParamSpec]:
         return {
@@ -168,8 +224,9 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
         _model_type = str(user_params.get("model_type", "hm"))
         fit_bg_slope = bool(user_params.get("fit_bg_slope", False))
         model_type = cast(Literal["hm", "t", "auto"], _model_type)
-        exp = FreqExp()
-        return exp.analyze(result, model_type=model_type, fit_bg_slope=fit_bg_slope)
+        return FreqExp().analyze(
+            result, model_type=model_type, fit_bg_slope=fit_bg_slope
+        )
 
     def get_figure(self, analyze_result: FakeFreqAnalyzeResult) -> Optional[Figure]:
         return analyze_result[3]
