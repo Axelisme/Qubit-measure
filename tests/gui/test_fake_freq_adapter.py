@@ -31,6 +31,9 @@ def _adapter() -> FakeFreqAdapter:
 
 def _run(adapter: FakeFreqAdapter, ctx: ExpContext):
     schema = adapter.make_default_cfg(ctx)
+    schema.root.fields["fast_mode"] = ScalarField(
+        value=True, label="Fast mode", type=bool
+    )
     return adapter.run(ctx, schema)
 
 
@@ -117,6 +120,9 @@ def test_run_noise_decreases_with_more_rounds():
         s.root.fields["noise_scale"] = ScalarField(
             value=10.0, label="Noise scale", type=float
         )
+        s.root.fields["fast_mode"] = ScalarField(
+            value=True, label="Fast mode", type=bool
+        )
         return s
 
     _, sig_low = adapter.run(ctx, _schema_with(1))
@@ -148,6 +154,9 @@ def test_analyze_freq_close_to_true_value():
     # Use high rounds to reduce noise and make fit reliable
     schema = adapter.make_default_cfg(ctx)
     schema.root.fields["rounds"] = ScalarField(value=200, label="Rounds", type=int)
+    schema.root.fields["fast_mode"] = ScalarField(
+        value=True, label="Fast mode", type=bool
+    )
     result = adapter.run(ctx, schema)
     freq_fit, _, _, _ = adapter.analyze(result, ctx)
     assert abs(freq_fit - 6000.0) < 5.0
@@ -238,6 +247,7 @@ def test_make_default_cfg_has_mod_ref_field():
 
 def test_writeback_spec_and_apply_for_ml():
     from typing import cast
+
     ctx = _make_ctx()
     # Mock ml to contain readout_rf and ro_waveform
     mock_readout_rf = MagicMock()
@@ -259,15 +269,14 @@ def test_writeback_spec_and_apply_for_ml():
 
     # Apply writeback
     # Should update the module and waveforms
-    adapter.apply_writeback(
-        ctx, analyze_result, ["readout_rf", "ro_waveform"]
-    )
+    adapter.apply_writeback(ctx, analyze_result, ["readout_rf", "ro_waveform"])
     cast(MagicMock, ctx.ml.register_module).assert_called_once()
     cast(MagicMock, ctx.ml.register_waveform).assert_called_once()
 
 
 def test_writeback_spec_and_apply_for_ml_when_missing():
     from typing import cast
+
     ctx = _make_ctx()
     # Mock ml to be empty
     ctx.ml.modules = {}
@@ -283,8 +292,6 @@ def test_writeback_spec_and_apply_for_ml_when_missing():
 
     # Apply writeback
     # Should call register_module and register_waveform
-    adapter.apply_writeback(
-        ctx, analyze_result, ["readout_rf", "ro_waveform"]
-    )
+    adapter.apply_writeback(ctx, analyze_result, ["readout_rf", "ro_waveform"])
     cast(MagicMock, ctx.ml.register_module).assert_called_once()
     cast(MagicMock, ctx.ml.register_waveform).assert_called_once()

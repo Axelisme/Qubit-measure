@@ -66,6 +66,7 @@ class FakeFreqCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: FakeFreqSweepCfg
     model: FakeFreqModelCfg = FakeFreqModelCfg()
     modules: dict[str, Any] = {}
+    fast_mode: bool = False  # skip per-point sleep; set True in tests
 
 
 # ---------------------------------------------------------------------------
@@ -102,8 +103,9 @@ class FakeFreqExp(AbsExperiment[FreqResult, FakeFreqCfg]):
                 noise_i = rng.normal(0, sigma * np.sqrt(cfg.rounds), len(freqs))
                 accumulated += clean + noise + 1j * noise_i
                 rounds_done += 1
-                for _ in range(len(freqs)):
-                    time.sleep(0.0005)
+                if not cfg.fast_mode:
+                    for _ in range(len(freqs)):
+                        time.sleep(0.0005)
                 if update_hook is not None:
                     update_hook(r + 1, accumulated / rounds_done)
             return accumulated / max(rounds_done, 1)
@@ -271,6 +273,7 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
                 noise_scale=float(d["noise_scale"]),
             ),
             modules=d.get("modules", {}),
+            fast_mode=bool(d.get("fast_mode", False)),
         )
 
     def get_run_params(self) -> dict[str, ParamSpec]:
