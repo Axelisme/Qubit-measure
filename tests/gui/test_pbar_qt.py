@@ -159,6 +159,5 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
 
     assert len(freqs) == 5
     assert len(signals) == 5
-    # FakeFreqAdapter uses leave=True (default) for rounds bar, so it stays until reset
-    stack.reset_all()
+    # both bars use leave=False, so _active is empty after run
     assert len(stack._active) == 0

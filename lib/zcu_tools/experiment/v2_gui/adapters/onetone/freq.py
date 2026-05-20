@@ -108,14 +108,16 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
         from zcu_tools.experiment.v2.runner.base import _current_stop_flag
 
         with LivePlot1D("Freq (MHz)", "|S21|", auto_close=False) as lp:
-            rounds_pbar = make_pbar(desc="rounds", total=rounds)
+            rounds_pbar = make_pbar(desc="rounds", total=rounds, leave=False)
             try:
                 for _ in range(rounds):
                     # check for cancellation before each round
                     if _current_stop_flag is not None and _current_stop_flag.is_set():
                         break
 
-                    scan_pbar = make_pbar(desc="freq scan", total=freq_expts)
+                    scan_pbar = make_pbar(
+                        desc="freq scan", total=freq_expts, leave=False
+                    )
                     try:
                         for i in range(freq_expts):
                             accumulated[i] += (
