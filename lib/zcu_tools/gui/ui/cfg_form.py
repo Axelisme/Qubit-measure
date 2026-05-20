@@ -156,6 +156,8 @@ class _SweepRow(QWidget):
         self._start.setDecimals(6)
         self._start.setValue(start)
         self._start.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
+        self._start.setMinimumWidth(60)
+        self._start.setMaximumWidth(120)
         self._start.setEnabled(editable)
 
         self._stop = QDoubleSpinBox()
@@ -163,12 +165,16 @@ class _SweepRow(QWidget):
         self._stop.setDecimals(6)
         self._stop.setValue(stop)
         self._stop.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
+        self._stop.setMinimumWidth(60)
+        self._stop.setMaximumWidth(120)
         self._stop.setEnabled(editable)
 
         self._expts = QSpinBox()
         self._expts.setRange(1, 2**31 - 1)
         self._expts.setValue(expts)
         self._expts.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
+        self._expts.setMinimumWidth(50)
+        self._expts.setMaximumWidth(80)
         self._expts.setEnabled(editable)
 
         layout.addWidget(QLabel("start"))

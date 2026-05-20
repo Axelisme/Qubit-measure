@@ -233,8 +233,8 @@ def test_make_save_paths_returns_save_paths():
 def test_registered_in_registry():
     registry = Registry()
     register_all(registry)
-    assert registry.has("onetone/freq")
-    adapter = registry.create("onetone/freq")
+    assert registry.has("onetone/fake_freq")
+    adapter = registry.create("onetone/fake_freq")
     assert isinstance(adapter, FakeFreqAdapter)
 
 

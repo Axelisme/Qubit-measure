@@ -13,12 +13,12 @@ logger = logging.getLogger(__name__)
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
-    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -27,6 +27,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QStackedWidget,
     QStatusBar,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -158,21 +159,33 @@ class ExpTabWidget(QWidget):
         # splitter holds the three panes
         splitter = QSplitter(Qt.Horizontal)  # type: ignore[attr-defined]
 
+        _collapse_btn_style = (
+            "QToolButton { border: none; background: transparent; padding: 0px; }"
+            "QToolButton:hover { background: rgba(128,128,128,40); border-radius: 3px; }"
+            "QToolButton:checked { background: rgba(128,128,128,60); border-radius: 3px; }"
+        )
+
         # left collapse button (collapses/restores config pane)
-        _left_collapse_btn = QPushButton("◀")
-        _left_collapse_btn.setFixedWidth(16)
+        _left_collapse_btn = QToolButton()
+        _left_collapse_btn.setFixedWidth(14)
+        _left_collapse_btn.setArrowType(Qt.LeftArrow)  # type: ignore[attr-defined]
         _left_collapse_btn.setToolTip("Collapse/expand config panel")
         _left_collapse_btn.setCheckable(True)
         _left_collapse_btn.setChecked(False)
+        _left_collapse_btn.setAutoRaise(True)
+        _left_collapse_btn.setStyleSheet(_collapse_btn_style)
         content_row.addWidget(_left_collapse_btn)
         content_row.addWidget(splitter, stretch=1)
 
         # right collapse button (collapses/restores result pane)
-        _right_collapse_btn = QPushButton("▶")
-        _right_collapse_btn.setFixedWidth(16)
+        _right_collapse_btn = QToolButton()
+        _right_collapse_btn.setFixedWidth(14)
+        _right_collapse_btn.setArrowType(Qt.RightArrow)  # type: ignore[attr-defined]
         _right_collapse_btn.setToolTip("Collapse/expand result panel")
         _right_collapse_btn.setCheckable(True)
         _right_collapse_btn.setChecked(False)
+        _right_collapse_btn.setAutoRaise(True)
+        _right_collapse_btn.setStyleSheet(_collapse_btn_style)
         content_row.addWidget(_right_collapse_btn)
 
         # store default sizes for restore; updated lazily on first collapse
@@ -191,7 +204,9 @@ class ExpTabWidget(QWidget):
                 sizes[1] = max(0, sizes[1] - saved)
                 sizes[0] = saved
             self._splitter.setSizes(sizes)
-            _left_collapse_btn.setText("▶" if checked else "◀")
+            _left_collapse_btn.setArrowType(  # type: ignore[attr-defined]
+                Qt.RightArrow if checked else Qt.LeftArrow  # type: ignore[attr-defined]
+            )
 
         def _on_right_collapse(checked: bool) -> None:
             sizes = self._splitter.sizes()
@@ -204,7 +219,9 @@ class ExpTabWidget(QWidget):
                 sizes[1] = max(0, sizes[1] - saved)
                 sizes[2] = saved
             self._splitter.setSizes(sizes)
-            _right_collapse_btn.setText("◀" if checked else "▶")
+            _right_collapse_btn.setArrowType(  # type: ignore[attr-defined]
+                Qt.LeftArrow if checked else Qt.RightArrow  # type: ignore[attr-defined]
+            )
 
         _left_collapse_btn.clicked.connect(_on_left_collapse)
         _right_collapse_btn.clicked.connect(_on_right_collapse)
@@ -468,7 +485,7 @@ class ExpTabWidget(QWidget):
         self.apply_writeback_btn.setEnabled(has_selected)
 
     def mark_writeback_applied(self, applied_keys: list[str]) -> None:
-        """Hide entire rows for already-applied keys; lock button when all done."""
+        """Hide rows for applied keys; hide entire section when all done."""
         self._applied_writeback_keys.update(applied_keys)
         for key in applied_keys:
             row = self._writeback_rows.get(key)
@@ -478,8 +495,8 @@ class ExpTabWidget(QWidget):
             k in self._applied_writeback_keys for k in self._writeback_checks
         )
         if all_applied:
-            self.apply_writeback_btn.setEnabled(False)
-            self.apply_writeback_btn.setText("Writeback Applied")
+            self._writeback_section.setVisible(False)
+            self.apply_writeback_btn.setVisible(False)
 
     def get_selected_writeback_keys(self) -> list[str]:
         return [k for k, cb in self._writeback_checks.items() if cb.isChecked()]
@@ -537,20 +554,22 @@ class ExpTabWidget(QWidget):
         logger.debug("show_analysis_figure: tab_id=%r canvas set", self.tab_id)
 
     def set_running(
-        self, is_running: bool, has_context: bool = True, has_soc: bool = True
+        self,
+        is_running: bool,
+        has_context: bool = True,
+        has_soc: bool = True,
+        has_run_result: bool = False,
+        has_analyze_result: bool = False,
     ) -> None:
         can_run = has_context and has_soc and not is_running
-        can_act = (
-            has_context and not is_running
-        )  # analyze/save/writeback need context but not soc
+        idle = not is_running
         self.run_btn.setEnabled(can_run)
         self.cancel_btn.setEnabled(is_running)
-        self.cfg_form.setEnabled(not is_running)
-        self.analyze_btn.setEnabled(can_act)
-        self.save_data_btn.setEnabled(can_act)
-        self.save_image_btn.setEnabled(can_act)
-        self.save_both_btn.setEnabled(can_act)
-        self.apply_writeback_btn.setEnabled(can_act)
+        self.cfg_form.setEnabled(idle)
+        self.analyze_btn.setEnabled(idle and has_context and has_run_result)
+        self.save_data_btn.setEnabled(idle and has_context and has_run_result)
+        self.save_image_btn.setEnabled(idle and has_context and has_analyze_result)
+        self.save_both_btn.setEnabled(idle and has_context and has_analyze_result)
 
 
 # ---------------------------------------------------------------------------
@@ -576,11 +595,7 @@ class MainWindow(QMainWindow):
 
         # --- toolbar ---
         toolbar = QHBoxLayout()
-        toolbar.addWidget(QLabel("Experiment:"))
-        self._adapter_combo = QComboBox()
-        self._adapter_combo.addItems(controller.get_adapter_names())
-        toolbar.addWidget(self._adapter_combo)
-        self._new_tab_btn = QPushButton("New Tab")
+        self._new_tab_btn = QPushButton("New Tab ▾")
         self._new_tab_btn.clicked.connect(self._on_new_tab_requested)
         toolbar.addWidget(self._new_tab_btn)
         toolbar.addStretch()
@@ -630,6 +645,22 @@ class MainWindow(QMainWindow):
     # ViewProtocol implementation
     # ------------------------------------------------------------------
 
+    def _set_tab_running(
+        self,
+        tab_id: str,
+        tab_w: "ExpTabWidget",
+        is_running: bool,
+        has_context: bool,
+        has_soc: bool,
+    ) -> None:
+        tab_w.set_running(
+            is_running,
+            has_context=has_context,
+            has_soc=has_soc,
+            has_run_result=self._ctrl.has_run_result(tab_id),
+            has_analyze_result=self._ctrl.has_analyze_result(tab_id),
+        )
+
     def refresh_tab(self, tab_id: str) -> None:
         logger.debug("refresh_tab: tab_id=%r", tab_id)
         tab_w = self._tab_widgets.get(tab_id)
@@ -658,13 +689,22 @@ class MainWindow(QMainWindow):
         if figure is not None:
             self.show_analysis_image(tab_id, figure)
 
+        # refresh button states to reflect new result availability
+        self._set_tab_running(
+            tab_id,
+            tab_w,
+            self._ctrl.is_running(),
+            self._ctrl.has_context(),
+            self._ctrl.has_soc(),
+        )
+
     def refresh_run_state(self, is_running: bool) -> None:
         logger.debug("refresh_run_state: is_running=%s", is_running)
         has_context = self._ctrl.has_context()
         has_soc = self._ctrl.has_soc()
         self._new_tab_btn.setEnabled(not is_running)
-        for tab_w in self._tab_widgets.values():
-            tab_w.set_running(is_running, has_context=has_context, has_soc=has_soc)
+        for tab_id, tab_w in self._tab_widgets.items():
+            self._set_tab_running(tab_id, tab_w, is_running, has_context, has_soc)
         if is_running:
             # clear stale plot content before a new run starts
             for tab_w in self._tab_widgets.values():
@@ -696,10 +736,9 @@ class MainWindow(QMainWindow):
         else:
             self._ctx_label.setText("No project set — use Project… to configure")
             self._ctx_label.setStyleSheet("color: gray;")
-        for tab_w in self._tab_widgets.values():
-            tab_w.set_running(
-                self._ctrl.is_running(), has_context=has_context, has_soc=has_soc
-            )
+        is_running = self._ctrl.is_running()
+        for tab_id, tab_w in self._tab_widgets.items():
+            self._set_tab_running(tab_id, tab_w, is_running, has_context, has_soc)
 
     def refresh_config_panels(self) -> None:
         for tab_id, tab_w in self._tab_widgets.items():
@@ -750,14 +789,41 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_new_tab_requested(self) -> None:
-        adapter_name = self._adapter_combo.currentText()
+        menu = QMenu(self)
+        submenus: dict[str, QMenu] = {}
+        for name in self._ctrl.get_adapter_names():
+            parts = name.split("/")
+            if len(parts) == 1:
+                action = menu.addAction(parts[0])
+                action.setData(name)  # type: ignore[union-attr]
+            else:
+                group = parts[0]
+                label = "/".join(parts[1:])
+                if group not in submenus:
+                    submenus[group] = menu.addMenu(group)
+                action = submenus[group].addAction(label)
+                action.setData(name)  # type: ignore[union-attr]
+
+        action = menu.exec_(
+            self._new_tab_btn.mapToGlobal(  # type: ignore[assignment]
+                self._new_tab_btn.rect().bottomLeft()
+            )
+        )
+        if action is None:
+            return
+        adapter_name = action.data()
         if not adapter_name:
             return
-        logger.info("_on_new_tab_requested: adapter=%r", adapter_name)
+
+        self._open_new_tab(adapter_name)
+
+    def _open_new_tab(self, adapter_name: str) -> None:
+        logger.info("_open_new_tab: adapter=%r", adapter_name)
         tab_id = self._ctrl.new_tab(adapter_name)
+        tab_label = adapter_name.split("/")[-1]
         tab_w = ExpTabWidget(tab_id)
         self._tab_widgets[tab_id] = tab_w
-        self._tabs.addTab(tab_w, adapter_name)
+        self._tabs.addTab(tab_w, tab_label)
         self._tabs.setCurrentWidget(tab_w)
 
         # populate cfg form from adapter default
@@ -766,10 +832,12 @@ class MainWindow(QMainWindow):
             tab_w.populate_cfg(schema)
 
         # apply current project / running state
-        tab_w.set_running(
+        self._set_tab_running(
+            tab_id,
+            tab_w,
             self._ctrl.is_running(),
-            has_context=self._ctrl.has_context(),
-            has_soc=self._ctrl.has_soc(),
+            self._ctrl.has_context(),
+            self._ctrl.has_soc(),
         )
 
         # wire buttons

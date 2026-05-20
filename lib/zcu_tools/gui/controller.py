@@ -383,6 +383,12 @@ class Controller:
     def get_tab_result(self, tab_id: str) -> Any:
         return self._state.get_tab(tab_id).last_result
 
+    def has_run_result(self, tab_id: str) -> bool:
+        return self._state.get_tab(tab_id).last_result is not None
+
+    def has_analyze_result(self, tab_id: str) -> bool:
+        return self._state.get_tab(tab_id).last_analyze_result is not None
+
     def get_tab_figure(self, tab_id: str) -> Any:
         return self._state.get_tab(tab_id).last_figure
 

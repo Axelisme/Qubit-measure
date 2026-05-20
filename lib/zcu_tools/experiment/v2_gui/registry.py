@@ -7,7 +7,7 @@ from .adapters.onetone.freq import FakeFreqAdapter
 
 ADAPTERS = {
     "fake": FakeAdapter,
-    "onetone/freq": FakeFreqAdapter,
+    "onetone/fake_freq": FakeFreqAdapter,
 }
 
 
