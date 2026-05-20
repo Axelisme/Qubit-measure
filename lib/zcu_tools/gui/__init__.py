@@ -5,12 +5,12 @@ from .adapter import (
     CfgSection,
     ExpContext,
     ModuleRefField,
-    WaveformRefField,
     MultiSweepField,
     ParamSpec,
     SavePaths,
     ScalarField,
     SweepField,
+    WaveformRefField,
     WritebackItem,
     schema_to_dict,
 )

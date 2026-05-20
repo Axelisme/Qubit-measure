@@ -10,7 +10,6 @@ from typing import Any
 import pytest
 from qtpy.QtCore import QCoreApplication, QEventLoop, QTimer
 from qtpy.QtWidgets import QApplication
-
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.gui.adapter import CfgSchema, CfgSection, ExpContext, ScalarField
 from zcu_tools.gui.runner import Runner, RunWorker
@@ -221,8 +220,8 @@ def test_use_pbar_factory_restores_after_block():
 
 
 def test_use_pbar_factory_nested_restores_outer():
-    from zcu_tools.progress_bar.interface import _pbar_factory, use_pbar_factory
     from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
+    from zcu_tools.progress_bar.interface import _pbar_factory, use_pbar_factory
 
     outer_factory = lambda *a, **kw: TQDMProgressBar(*a, **kw)  # noqa: E731
     inner_factory = lambda *a, **kw: TQDMProgressBar(*a, **kw)  # noqa: E731

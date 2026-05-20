@@ -21,7 +21,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-
 if TYPE_CHECKING:
     from zcu_tools.gui.controller import Controller
 

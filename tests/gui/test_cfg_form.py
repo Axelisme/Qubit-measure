@@ -7,7 +7,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-
 from zcu_tools.gui.adapter import (
     CfgSchema,
     CfgSection,
@@ -16,7 +15,6 @@ from zcu_tools.gui.adapter import (
     ScalarField,
     SweepField,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -150,7 +148,6 @@ def test_populate_scalar_fields_round_trip(qapp):
 
 def test_read_schema_does_not_mutate_original(qapp):
     from qtpy.QtWidgets import QSpinBox  # type: ignore[attr-defined]
-
     from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 
     schema = _schema({"reps": ScalarField(value=100, label="Reps", type=int)})

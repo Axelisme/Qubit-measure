@@ -13,14 +13,14 @@ from dataclasses import dataclass
 from typing import Any, Literal, Optional, cast
 
 import numpy as np
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typing_extensions import Callable
 
-from matplotlib.figure import Figure
 from zcu_tools.experiment.base import AbsExperiment
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.onetone.freq import FreqExp
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
     CfgSchema,
@@ -38,7 +38,6 @@ from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import ProgramV2Cfg
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.utils.fitting.resonance.hanger import HangerModel
-
 
 # ---------------------------------------------------------------------------
 # FakeFreqCfg — same structure as FreqCfg but with HangerModel params

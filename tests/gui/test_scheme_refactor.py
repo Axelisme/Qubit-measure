@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import sys
-import pytest
-from typing import cast, Any, Optional
+from typing import Any, Optional, cast
 from unittest.mock import MagicMock
-from qtpy.QtWidgets import QApplication, QComboBox, QLineEdit
 
+import pytest
+from qtpy.QtWidgets import QApplication, QComboBox, QLineEdit
 from zcu_tools.gui.adapter import (
     CfgSchema,
     CfgSection,
@@ -49,6 +49,7 @@ class MockModuleLibrary:
 
     def get_module(self, name: str, override: Optional[dict] = None) -> dict:
         import copy
+
         from zcu_tools.utils import deepupdate
 
         if name not in self.modules:

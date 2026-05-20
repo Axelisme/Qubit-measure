@@ -5,12 +5,10 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-
 from zcu_tools.device import FakeDevice, GlobalDeviceManager
 from zcu_tools.gui.adapter import ExpContext
 from zcu_tools.gui.device_manager import DeviceManager
 from zcu_tools.gui.io_manager import IOManager
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -5,7 +5,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-
 from zcu_tools.gui.adapter import (
     CfgSchema,
     CfgSection,
@@ -15,7 +14,6 @@ from zcu_tools.gui.adapter import (
     SweepField,
     schema_to_dict,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

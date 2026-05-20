@@ -14,7 +14,6 @@ from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.adapter import CfgSchema, ExpContext, ScalarField
 from zcu_tools.gui.registry import Registry
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -267,7 +266,7 @@ def test_registered_in_registry():
 
 
 def test_make_default_cfg_has_mod_ref_field():
-    from zcu_tools.gui.adapter import ModuleRefField, CfgSection
+    from zcu_tools.gui.adapter import CfgSection, ModuleRefField
 
     ctx = _make_ctx()
     adapter = _adapter()

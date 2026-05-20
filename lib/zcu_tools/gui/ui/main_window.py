@@ -342,7 +342,7 @@ class ExpTabWidget(QWidget):
 
     def show_writeback_spec(self, items: list["WritebackItem"], ml: Any = None) -> None:
         """Rebuild the writeback checkbox list."""
-        from qtpy.QtWidgets import QWidget, QHBoxLayout  # type: ignore[attr-defined]
+        from qtpy.QtWidgets import QHBoxLayout, QWidget  # type: ignore[attr-defined]
 
         self._ml = ml  # stored for Edit Config dialog
 
@@ -394,17 +394,19 @@ class ExpTabWidget(QWidget):
         return lambda: self._on_edit_config_clicked(item, cb)
 
     def _on_edit_config_clicked(self, item: "WritebackItem", cb: QCheckBox) -> None:
-        from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-            QDialog,
-            QVBoxLayout,
-            QHBoxLayout,
-            QMessageBox,
-            QLabel,
-            QScrollArea,
-        )
         import copy
 
+        from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+            QDialog,
+            QHBoxLayout,
+            QLabel,
+            QMessageBox,
+            QScrollArea,
+            QVBoxLayout,
+        )
+
         from zcu_tools.gui.adapter import schema_to_dict
+
         from .cfg_form import CfgFormWidget
 
         # Determine which schema to show in the form.

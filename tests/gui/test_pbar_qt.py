@@ -34,7 +34,6 @@ def _make_stack(qapp):  # noqa: ARG001
 def test_factory_push_and_pop_leave_false(qapp):
     """leave=False: close() pops the bar immediately."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-
     from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
 
     stack = _make_stack(qapp)
@@ -56,7 +55,6 @@ def test_factory_push_and_pop_leave_false(qapp):
 def test_factory_push_and_pop_leave_true(qapp):
     """leave=True: close() leaves bar visible; reset_all() clears it."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-
     from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
 
     stack = _make_stack(qapp)
@@ -77,7 +75,6 @@ def test_factory_push_and_pop_leave_true(qapp):
 def test_factory_two_layers(qapp):
     """Two nested pbars (leave=False): inner pops on close, outer stays until reset."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-
     from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
 
     stack = _make_stack(qapp)
@@ -104,7 +101,6 @@ def test_factory_two_layers(qapp):
 def test_total_setter(qapp):
     """Setting total updates the QProgressBar maximum."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-
     from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
 
     stack = _make_stack(qapp)
@@ -130,7 +126,6 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
     from unittest.mock import MagicMock
 
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-
     from zcu_tools.experiment.v2_gui.adapters.onetone.freq import FakeFreqAdapter
     from zcu_tools.gui.adapter import ExpContext
     from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
