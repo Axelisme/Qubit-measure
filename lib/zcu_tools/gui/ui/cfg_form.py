@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import copy
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -54,44 +54,50 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-def make_scalar_widget(field: "ScalarField") -> QWidget:
-    """Build an input widget from a ScalarField."""
-    if field.choices:
+def make_value_widget(
+    type_: type,
+    default: Any,
+    choices: Optional[list],
+    editable: bool = True,
+) -> QWidget:
+    """Build an input widget from raw field attributes. Used by both
+    make_scalar_widget (ScalarField) and main_window param widgets (ParamSpec)."""
+    if choices:
         w = QComboBox()
-        w.addItems([str(c) for c in field.choices])
-        idx = w.findText(str(field.value))
+        w.addItems([str(c) for c in choices])
+        idx = w.findText(str(default))
         if idx >= 0:
             w.setCurrentIndex(idx)
-        w.setEnabled(field.editable)
+        w.setEnabled(editable)
         return w
-    if field.type is bool:
+    if type_ is bool:
         w = QCheckBox()
-        w.setChecked(bool(field.value))
-        w.setEnabled(field.editable)
+        w.setChecked(bool(default))
+        w.setEnabled(editable)
         return w
-    if field.type is int:
+    if type_ is int:
         w = QSpinBox()
         w.setRange(-(2**31), 2**31 - 1)
-        w.setValue(int(field.value))
-        w.setEnabled(field.editable)
+        w.setValue(int(default))
+        w.setEnabled(editable)
         return w
-    if field.type is float:
+    if type_ is float:
         w = QDoubleSpinBox()
         w.setRange(-1e12, 1e12)
         w.setDecimals(6)
-        w.setValue(float(field.value))
-        w.setEnabled(field.editable)
+        w.setValue(float(default))
+        w.setEnabled(editable)
         return w
-    w = QLineEdit(str(field.value))
-    w.setEnabled(field.editable)
+    w = QLineEdit(str(default))
+    w.setEnabled(editable)
     return w
 
 
-def read_scalar_widget(w: QWidget, field: "ScalarField") -> Any:
-    """Read the current value from a widget created by make_scalar_widget."""
+def read_value_widget(w: QWidget, type_: type, fallback: Any = None) -> Any:
+    """Read the current value from a widget created by make_value_widget."""
     if isinstance(w, QComboBox):
         txt = w.currentText()
-        return field.type(txt) if field.type is not str else txt
+        return type_(txt) if type_ is not str else txt
     if isinstance(w, QCheckBox):
         return w.isChecked()
     if isinstance(w, QSpinBox):
@@ -99,8 +105,18 @@ def read_scalar_widget(w: QWidget, field: "ScalarField") -> Any:
     if isinstance(w, QDoubleSpinBox):
         return w.value()
     if isinstance(w, QLineEdit):
-        return field.type(w.text())
-    return field.value
+        return type_(w.text())
+    return fallback
+
+
+def make_scalar_widget(field: "ScalarField") -> QWidget:
+    """Build an input widget from a ScalarField."""
+    return make_value_widget(field.type, field.value, field.choices, field.editable)
+
+
+def read_scalar_widget(w: QWidget, field: "ScalarField") -> Any:
+    """Read the current value from a widget created by make_scalar_widget."""
+    return read_value_widget(w, field.type, fallback=field.value)
 
 
 # ---------------------------------------------------------------------------
@@ -210,21 +226,6 @@ class _CollapsibleSection(QWidget):
 
 
 # ---------------------------------------------------------------------------
-# _NodeWidget — wraps the widget and the original CfgNode for read-back
-# ---------------------------------------------------------------------------
-
-
-class _NodeWidget:
-    """Associates a rendered widget with the CfgNode it represents."""
-
-    __slots__ = ("node", "widget")
-
-    def __init__(self, node: "CfgNode", widget: QWidget) -> None:
-        self.node = node
-        self.widget = widget
-
-
-# ---------------------------------------------------------------------------
 # CfgFormWidget — top-level form
 # ---------------------------------------------------------------------------
 
@@ -241,9 +242,6 @@ class CfgFormWidget(QWidget):
         self._schema: Optional["CfgSchema"] = None
         self._root_widget: Optional[QWidget] = None
         self._ml: Optional["ModuleLibrary"] = None
-        self._node_widgets: list[
-            tuple[str, _NodeWidget]
-        ] = []  # Kept for compatibility but unused
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -358,101 +356,75 @@ class CfgFormWidget(QWidget):
         if isinstance(node, WaveformRefField):
             return self._build_waveform_ref(node)
 
-        raise TypeError(f"Unknown CfgNode type: {type(node)}")
+        raise TypeError(f"Unknown CfgNode type: {type(node)}")  # type: ignore[unreachable]
 
     def _build_module_ref(self, node: "ModuleRefField") -> tuple[QWidget, QWidget]:
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
-
-        combo = QComboBox()
-        if node.type_filter is not None and self._ml is not None:
-            items = [
-                name
-                for name, mod in self._ml.modules.items()
-                if isinstance(mod, node.type_filter)
-            ]
-        else:
-            items = list(node.available_modules) if node.available_modules else []
-
-        if "<Custom>" not in items:
-            items.append("<Custom>")
-        combo.addItems(items)
-
-        if node.module_name and node.module_name in items:
-            combo.setCurrentText(node.module_name)
-        else:
-            combo.setCurrentText("<Custom>")
-
-        layout.addWidget(combo)
-
-        container._child_widgets = {}
-
-        # expanded_content sub-form (collapsed by default)
-        if node.expanded_content is not None:
-            sub = self._build_section(node.expanded_content, top_level=False)
-            # force collapsed on ModuleRefField sub-section
-            if hasattr(sub, "_toggle_btn") and sub._toggle_btn is not None:
-                sub._toggle_btn.setChecked(False)
-                sub._body.setVisible(False)
-            layout.addWidget(sub)
-            container._sub_section_widget = sub
-            container._child_widgets["expanded_content"] = sub
-        else:
-            container._sub_section_widget = None
-
-        combo._container = container
-        combo.currentIndexChanged.connect(
-            lambda: self._on_module_changed(node, combo, container)
-        )
-
-        return combo, container
+        return self._build_ref_field(node)
 
     def _build_waveform_ref(self, node: "WaveformRefField") -> tuple[QWidget, QWidget]:
+        return self._build_ref_field(node)
+
+    def _build_ref_field(
+        self, node: "Union[ModuleRefField, WaveformRefField]"
+    ) -> tuple[QWidget, QWidget]:
+        from zcu_tools.gui.adapter import ModuleRefField
+
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
 
         combo = QComboBox()
-        if node.type_filter is not None and self._ml is not None:
-            items = [
-                name
-                for name, wav in self._ml.waveforms.items()
-                if isinstance(wav, node.type_filter)
-            ]
+        if isinstance(node, ModuleRefField):
+            if node.type_filter is not None and self._ml is not None:
+                items = [
+                    name
+                    for name, mod in self._ml.modules.items()
+                    if isinstance(mod, node.type_filter)
+                ]
+            else:
+                items = list(node.available_modules) if node.available_modules else []
+            ref_name = node.module_name
         else:
-            items = list(node.available_waveforms) if node.available_waveforms else []
+            if node.type_filter is not None and self._ml is not None:
+                items = [
+                    name
+                    for name, wav in self._ml.waveforms.items()
+                    if isinstance(wav, node.type_filter)
+                ]
+            else:
+                items = (
+                    list(node.available_waveforms) if node.available_waveforms else []
+                )
+            ref_name = node.waveform_name
 
         if "<Custom>" not in items:
             items.append("<Custom>")
         combo.addItems(items)
 
-        if node.waveform_name and node.waveform_name in items:
-            combo.setCurrentText(node.waveform_name)
+        if ref_name and ref_name in items:
+            combo.setCurrentText(ref_name)
         else:
             combo.setCurrentText("<Custom>")
 
         layout.addWidget(combo)
 
-        container._child_widgets = {}
+        container._child_widgets = {}  # type: ignore[attr-defined]
 
-        # expanded_content sub-form (collapsed by default)
         if node.expanded_content is not None:
             sub = self._build_section(node.expanded_content, top_level=False)
             if hasattr(sub, "_toggle_btn") and sub._toggle_btn is not None:
                 sub._toggle_btn.setChecked(False)
                 sub._body.setVisible(False)
             layout.addWidget(sub)
-            container._sub_section_widget = sub
-            container._child_widgets["expanded_content"] = sub
+            container._sub_section_widget = sub  # type: ignore[attr-defined]
+            container._child_widgets["expanded_content"] = sub  # type: ignore[attr-defined]
         else:
-            container._sub_section_widget = None
+            container._sub_section_widget = None  # type: ignore[attr-defined]
 
-        combo._container = container
+        combo._container = container  # type: ignore[attr-defined]
         combo.currentIndexChanged.connect(
-            lambda: self._on_waveform_changed(node, combo, container)
+            lambda: self._on_ref_changed(node, combo, container)
         )
 
         return combo, container
@@ -460,93 +432,61 @@ class CfgFormWidget(QWidget):
     def _on_module_changed(
         self, node: "ModuleRefField", combo: QComboBox, container: QWidget
     ) -> None:
-        name = combo.currentText()
-        layout = container.layout()
-        assert layout is not None
-
-        # 1. Clear old sub-section widget
-        if (
-            hasattr(container, "_sub_section_widget")
-            and container._sub_section_widget is not None
-        ):
-            layout.removeWidget(container._sub_section_widget)
-            container._sub_section_widget.deleteLater()
-            container._sub_section_widget = None
-            if (
-                hasattr(container, "_child_widgets")
-                and "expanded_content" in container._child_widgets
-            ):
-                del container._child_widgets["expanded_content"]
-
-        # 2. Reset or load expanded content
-        if name == "<Custom>":
-            node.module_name = None
-            if node.custom_template is not None:
-                node.expanded_content = copy.deepcopy(node.custom_template)
-            else:
-                node.expanded_content = None
-        else:
-            node.module_name = name
-            if self._ml is not None:
-                try:
-                    mod_cfg = self._ml.get_module(name)
-                    node.expanded_content = self._make_override_section_for_module(
-                        mod_cfg
-                    )
-                except Exception as e:
-                    logger.error(f"Error loading module {name} from ModuleLibrary: {e}")
-                    node.expanded_content = None
-            else:
-                node.expanded_content = None
-
-        # 3. Build and add new sub-section widget (collapsed by default, or open if user selects it)
-        if node.expanded_content is not None:
-            sub = self._build_section(node.expanded_content, top_level=False)
-            layout.addWidget(sub)
-            container._sub_section_widget = sub
-            if hasattr(container, "_child_widgets"):
-                container._child_widgets["expanded_content"] = sub
+        self._on_ref_changed(node, combo, container)
 
     def _on_waveform_changed(
         self, node: "WaveformRefField", combo: QComboBox, container: QWidget
     ) -> None:
+        self._on_ref_changed(node, combo, container)
+
+    def _on_ref_changed(
+        self,
+        node: "Union[ModuleRefField, WaveformRefField]",
+        combo: QComboBox,
+        container: QWidget,
+    ) -> None:
+        from zcu_tools.gui.adapter import ModuleRefField
+
         name = combo.currentText()
         layout = container.layout()
         assert layout is not None
 
         # 1. Clear old sub-section widget
-        if (
-            hasattr(container, "_sub_section_widget")
-            and container._sub_section_widget is not None
-        ):
-            layout.removeWidget(container._sub_section_widget)
-            container._sub_section_widget.deleteLater()
-            container._sub_section_widget = None
-            if (
-                hasattr(container, "_child_widgets")
-                and "expanded_content" in container._child_widgets
-            ):
-                del container._child_widgets["expanded_content"]
+        sub_widget = getattr(container, "_sub_section_widget", None)
+        if sub_widget is not None:
+            layout.removeWidget(sub_widget)
+            sub_widget.deleteLater()
+            container._sub_section_widget = None  # type: ignore[attr-defined]
+            child_widgets = getattr(container, "_child_widgets", {})
+            child_widgets.pop("expanded_content", None)
 
         # 2. Reset or load expanded content
         if name == "<Custom>":
-            node.waveform_name = None
-            if node.custom_template is not None:
-                node.expanded_content = copy.deepcopy(node.custom_template)
+            if isinstance(node, ModuleRefField):
+                node.module_name = None
             else:
-                node.expanded_content = None
+                node.waveform_name = None
+            node.expanded_content = (
+                copy.deepcopy(node.custom_template)
+                if node.custom_template is not None
+                else None
+            )
         else:
-            node.waveform_name = name
+            if isinstance(node, ModuleRefField):
+                node.module_name = name
+            else:
+                node.waveform_name = name
             if self._ml is not None:
                 try:
-                    wav_cfg = self._ml.get_waveform(name)
-                    node.expanded_content = self._make_override_section_for_module(
-                        wav_cfg
-                    )
+                    if isinstance(node, ModuleRefField):
+                        item_cfg = self._ml.get_module(name)
+                    else:
+                        item_cfg = self._ml.get_waveform(name)
+                    from zcu_tools.gui.adapter import module_cfg_to_section
+
+                    node.expanded_content = module_cfg_to_section(item_cfg)
                 except Exception as e:
-                    logger.error(
-                        f"Error loading waveform {name} from ModuleLibrary: {e}"
-                    )
+                    logger.error("Error loading %r from ModuleLibrary: %s", name, e)
                     node.expanded_content = None
             else:
                 node.expanded_content = None
@@ -555,14 +495,9 @@ class CfgFormWidget(QWidget):
         if node.expanded_content is not None:
             sub = self._build_section(node.expanded_content, top_level=False)
             layout.addWidget(sub)
-            container._sub_section_widget = sub
-            if hasattr(container, "_child_widgets"):
-                container._child_widgets["expanded_content"] = sub
-
-    def _make_override_section_for_module(self, mod_cfg: Any) -> "CfgSection":
-        from zcu_tools.gui.adapter import module_cfg_to_section
-
-        return module_cfg_to_section(mod_cfg)
+            container._sub_section_widget = sub  # type: ignore[attr-defined]
+            child_widgets = getattr(container, "_child_widgets", {})
+            child_widgets["expanded_content"] = sub
 
     # ------------------------------------------------------------------
     # Read-back helpers

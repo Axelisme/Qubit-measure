@@ -14,7 +14,6 @@ from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -24,7 +23,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QPushButton,
     QScrollArea,
     QSizePolicy,
-    QSpinBox,
     QSplitter,
     QStackedWidget,
     QStatusBar,
@@ -33,7 +31,12 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from .cfg_form import CfgFormWidget, _CollapsibleSection
+from .cfg_form import (
+    CfgFormWidget,
+    _CollapsibleSection,
+    make_value_widget,
+    read_value_widget,
+)
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -111,49 +114,11 @@ class _ProgressStack(QWidget):
 
 
 def _make_param_widget(spec: "ParamSpec") -> QWidget:
-    """Build an input widget from a ParamSpec."""
-    if spec.choices:
-        w = QComboBox()
-        w.addItems([str(c) for c in spec.choices])
-        default_str = str(spec.default)
-        idx = w.findText(default_str)
-        if idx >= 0:
-            w.setCurrentIndex(idx)
-        return w
-    if spec.type is bool:
-        w = QCheckBox()
-        w.setChecked(bool(spec.default))
-        return w
-    if spec.type is int:
-        w = QSpinBox()
-        w.setRange(-(2**31), 2**31 - 1)
-        w.setValue(int(spec.default))
-        return w
-    if spec.type is float:
-        w = QDoubleSpinBox()
-        w.setRange(-1e12, 1e12)
-        w.setDecimals(6)
-        w.setValue(float(spec.default))
-        return w
-    # fallback: text
-    w = QLineEdit(str(spec.default))
-    return w
+    return make_value_widget(spec.type, spec.default, spec.choices, editable=True)
 
 
 def _read_param_widget(w: QWidget, spec: "ParamSpec") -> Any:
-    """Read current value from a widget created by _make_param_widget."""
-    if isinstance(w, QComboBox):
-        txt = w.currentText()
-        return spec.type(txt) if spec.type not in (str,) else txt
-    if isinstance(w, QCheckBox):
-        return w.isChecked()
-    if isinstance(w, QSpinBox):
-        return w.value()
-    if isinstance(w, QDoubleSpinBox):
-        return w.value()
-    if isinstance(w, QLineEdit):
-        return spec.type(w.text())
-    return None
+    return read_value_widget(w, spec.type, fallback=spec.default)
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +133,7 @@ class ExpTabWidget(QWidget):
         super().__init__(parent)
         self.tab_id = tab_id
         self._param_widgets: dict[str, QWidget] = {}  # analyze param key → widget
+        self._analyze_specs: dict[str, "ParamSpec"] = {}  # analyze param key → spec
         self._writeback_checks: dict[str, QCheckBox] = {}  # wb key → checkbox
         self._writeback_rows: dict[str, QWidget] = {}  # wb key → full row widget
         self._applied_writeback_keys: set[str] = set()
@@ -672,7 +638,7 @@ class MainWindow(QMainWindow):
         if not tab_w._param_widgets:
             params = self._ctrl.get_tab_analyze_params(tab_id)
             tab_w.populate_analyze_params(params)
-            tab_w._analyze_specs = params  # store for value-read
+            tab_w._analyze_specs = params
 
         # update writeback list (may have new analyze result)
         spec = self._ctrl.get_tab_writeback_spec(tab_id)
@@ -850,9 +816,8 @@ class MainWindow(QMainWindow):
             return
         # collect current param values
         user_params: dict[str, Any] = {}
-        specs: dict = getattr(tab_w, "_analyze_specs", {})
         for key, w in tab_w._param_widgets.items():
-            spec = specs.get(key)
+            spec = tab_w._analyze_specs.get(key)
             if spec is not None:
                 user_params[key] = _read_param_widget(w, spec)
         try:
