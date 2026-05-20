@@ -11,7 +11,7 @@ from qtpy.QtCore import QCoreApplication
 from qtpy.QtWidgets import QApplication
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
-from zcu_tools.gui.adapter import CfgSchema, CfgSection, ExpContext
+from zcu_tools.gui.adapter import CfgSchema, CfgSectionSpec, CfgSectionValue, ExpContext
 from zcu_tools.gui.controller import Controller
 from zcu_tools.gui.device_manager import DeviceManager
 from zcu_tools.gui.io_manager import IOManager
@@ -90,7 +90,7 @@ def _wait_for(condition, timeout_ms: int = 3000, step_ms: int = 10) -> bool:
 
 
 def _simple_schema() -> CfgSchema:
-    return CfgSchema(root=CfgSection(fields={}))
+    return CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
 
 
 def _run_and_wait(cf: ControllerFixture, tab_id: str) -> None:

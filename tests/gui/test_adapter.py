@@ -1,4 +1,4 @@
-"""Unit tests for zcu_tools.gui.adapter (Phase 2 — no Qt, no hardware)."""
+"""Unit tests for zcu_tools.gui.adapter (Phase 19 — Spec/Value split)."""
 
 from __future__ import annotations
 
@@ -7,11 +7,17 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.gui.adapter import (
     CfgSchema,
-    CfgSection,
-    ModuleRefField,
-    MultiSweepField,
-    ScalarField,
-    SweepField,
+    CfgSectionSpec,
+    CfgSectionValue,
+    ModuleRefSpec,
+    ModuleRefValue,
+    MultiSweepSpec,
+    MultiSweepValue,
+    ScalarSpec,
+    ScalarValue,
+    SweepSpec,
+    SweepValue,
+    make_default_value,
     schema_to_dict,
 )
 
@@ -21,54 +27,71 @@ from zcu_tools.gui.adapter import (
 
 
 def _make_ml() -> MagicMock:
-    """Return a minimal ModuleLibrary mock."""
     ml = MagicMock()
-    ml.get_module.side_effect = lambda name, override=None: {
-        "name": name,
-        "override": override,
-    }
     return ml
 
 
-def _schema(fields: dict) -> CfgSchema:
-    return CfgSchema(root=CfgSection(fields=fields))
+def _schema(spec_fields: dict, val_fields: dict | None = None) -> CfgSchema:
+    spec = CfgSectionSpec(fields=spec_fields)
+    value = CfgSectionValue(fields=val_fields or {})
+    return CfgSchema(spec=spec, value=value)
 
 
 # ---------------------------------------------------------------------------
-# ScalarField
+# ScalarSpec / ScalarValue
 # ---------------------------------------------------------------------------
 
 
-def test_scalar_field_int():
-    schema = _schema({"reps": ScalarField(value=100, label="Reps", type=int)})
-    result = schema_to_dict(schema, _make_ml())
-    assert result == {"reps": 100}
-
-
-def test_scalar_field_str():
-    schema = _schema({"name": ScalarField(value="hello", label="Name", type=str)})
-    result = schema_to_dict(schema, _make_ml())
-    assert result["name"] == "hello"
-
-
-def test_scalar_field_editable_false_does_not_affect_value():
-    schema = _schema(
-        {"freq": ScalarField(value=6.0, label="Freq", type=float, editable=False)}
+def test_scalar_int():
+    s = _schema(
+        {"reps": ScalarSpec(label="Reps", type=int)},
+        {"reps": ScalarValue(100)},
     )
-    result = schema_to_dict(schema, _make_ml())
-    assert result["freq"] == 6.0
+    assert schema_to_dict(s, _make_ml()) == {"reps": 100}
+
+
+def test_scalar_str():
+    s = _schema(
+        {"name": ScalarSpec(label="Name", type=str)},
+        {"name": ScalarValue("hello")},
+    )
+    assert schema_to_dict(s, _make_ml())["name"] == "hello"
+
+
+def test_scalar_editable_false_still_included():
+    s = _schema(
+        {"freq": ScalarSpec(label="Freq", type=float, editable=False)},
+        {"freq": ScalarValue(6.0)},
+    )
+    assert schema_to_dict(s, _make_ml())["freq"] == pytest.approx(6.0)
+
+
+def test_scalar_missing_in_value_skipped():
+    """A key present in spec but absent in value is silently skipped."""
+    s = _schema(
+        {
+            "reps": ScalarSpec(label="Reps", type=int),
+            "x": ScalarSpec(label="X", type=int),
+        },
+        {"reps": ScalarValue(5)},
+    )
+    result = schema_to_dict(s, _make_ml())
+    assert result == {"reps": 5}
 
 
 # ---------------------------------------------------------------------------
-# SweepField
+# SweepSpec / SweepValue
 # ---------------------------------------------------------------------------
 
 
-def test_sweep_field_produces_sweep_cfg():
+def test_sweep_produces_sweep_cfg():
     from zcu_tools.program.v2 import SweepCfg
 
-    schema = _schema({"sweep": SweepField(start=1.0, stop=2.0, expts=11)})
-    result = schema_to_dict(schema, _make_ml())
+    s = _schema(
+        {"sweep": SweepSpec(label="Freq")},
+        {"sweep": SweepValue(start=1.0, stop=2.0, expts=11)},
+    )
+    result = schema_to_dict(s, _make_ml())
     sweep = result["sweep"]
     assert isinstance(sweep, SweepCfg)
     assert sweep.start == pytest.approx(1.0)
@@ -76,25 +99,44 @@ def test_sweep_field_produces_sweep_cfg():
     assert sweep.expts == 11
 
 
-# ---------------------------------------------------------------------------
-# MultiSweepField
-# ---------------------------------------------------------------------------
-
-
-def test_multi_sweep_field_produces_dict_of_sweeps():
+def test_sweep_step_mode():
     from zcu_tools.program.v2 import SweepCfg
 
-    schema = _schema(
+    s = _schema(
+        {"sweep": SweepSpec()},
+        {"sweep": SweepValue(start=0.0, stop=1.0, expts=0, step=0.1)},
+    )
+    result = schema_to_dict(s, _make_ml())
+    assert isinstance(result["sweep"], SweepCfg)
+
+
+# ---------------------------------------------------------------------------
+# MultiSweepSpec / MultiSweepValue
+# ---------------------------------------------------------------------------
+
+
+def test_multi_sweep_produces_dict_of_sweeps():
+    from zcu_tools.program.v2 import SweepCfg
+
+    s = _schema(
         {
-            "sweep": MultiSweepField(
-                sweeps={
-                    "freq": SweepField(start=5.0, stop=6.0, expts=5),
-                    "gain": SweepField(start=0.0, stop=1.0, expts=3),
+            "sweep": MultiSweepSpec(
+                axes={
+                    "freq": SweepSpec(label="Freq"),
+                    "gain": SweepSpec(label="Gain"),
                 }
             )
-        }
+        },
+        {
+            "sweep": MultiSweepValue(
+                axes={
+                    "freq": SweepValue(5.0, 6.0, 5),
+                    "gain": SweepValue(0.0, 1.0, 3),
+                }
+            )
+        },
     )
-    result = schema_to_dict(schema, _make_ml())
+    result = schema_to_dict(s, _make_ml())
     assert set(result["sweep"].keys()) == {"freq", "gain"}
     assert isinstance(result["sweep"]["freq"], SweepCfg)
     assert result["sweep"]["freq"].expts == 5
@@ -102,121 +144,99 @@ def test_multi_sweep_field_produces_dict_of_sweeps():
 
 
 # ---------------------------------------------------------------------------
-# ModuleRefField — named module path
+# ModuleRefSpec / ModuleRefValue — value is directly flattened (no ml.get_module)
 # ---------------------------------------------------------------------------
 
 
-def test_module_ref_field_named_calls_get_module():
+def test_module_ref_value_flattened_directly():
+    """schema_to_dict reads ModuleRefValue.value directly; ml is not called."""
     ml = _make_ml()
-    schema = _schema(
-        {
-            "readout": ModuleRefField(
-                module_name="ro_pulse",
-                override={"gain": 0.1},
-                inline_cfg=None,
-                expanded_content=None,
-                available_modules=["ro_pulse"],
-            )
-        }
+    inner_spec = CfgSectionSpec(
+        label="Direct Readout",
+        fields={"ro_ch": ScalarSpec(label="RO ch", type=int)},
     )
-    result = schema_to_dict(schema, ml)
-    ml.get_module.assert_called_once_with("ro_pulse", {"gain": 0.1})
-    assert result["readout"]["name"] == "ro_pulse"
-
-
-def test_module_ref_field_named_empty_override_passes_none():
-    """Empty override dict should be treated as None (no override)."""
-    ml = _make_ml()
-    schema = _schema(
+    s = _schema(
+        {"readout": ModuleRefSpec(allowed=[inner_spec])},
         {
-            "readout": ModuleRefField(
-                module_name="ro_pulse",
-                override={},
-                inline_cfg=None,
-                expanded_content=None,
-                available_modules=["ro_pulse"],
+            "readout": ModuleRefValue(
+                chosen_key="readout_rf",
+                value=CfgSectionValue(fields={"ro_ch": ScalarValue(2)}),
             )
-        }
+        },
     )
-    schema_to_dict(schema, ml)
-    ml.get_module.assert_called_once_with("ro_pulse", None)
-
-
-# ---------------------------------------------------------------------------
-# ModuleRefField — inline path
-# ---------------------------------------------------------------------------
-
-
-def test_module_ref_field_inline_cfg_returns_inline_dict():
-    ml = _make_ml()
-    inline = {"type": "custom", "gain": 0.5}
-    schema = _schema(
-        {
-            "readout": ModuleRefField(
-                module_name=None,
-                override={},
-                inline_cfg=inline,
-                expanded_content=None,
-                available_modules=[],
-            )
-        }
-    )
-    result = schema_to_dict(schema, ml)
-    assert result["readout"] == inline
+    result = schema_to_dict(s, ml)
+    assert result["readout"] == {"ro_ch": 2}
     ml.get_module.assert_not_called()
 
 
-def test_module_ref_field_inline_none_returns_empty_dict():
-    schema = _schema(
-        {
-            "readout": ModuleRefField(
-                module_name=None,
-                override={},
-                inline_cfg=None,
-                expanded_content=None,
-                available_modules=[],
-            )
-        }
+def test_module_ref_custom_key_resolves_by_label():
+    inner_spec = CfgSectionSpec(
+        label="Direct Readout",
+        fields={"gain": ScalarSpec(label="Gain", type=float)},
     )
-    result = schema_to_dict(schema, _make_ml())
-    assert result["readout"] == {}
+    s = _schema(
+        {"ro": ModuleRefSpec(allowed=[inner_spec])},
+        {
+            "ro": ModuleRefValue(
+                chosen_key="<Custom:Direct Readout>",
+                value=CfgSectionValue(fields={"gain": ScalarValue(0.5)}),
+            )
+        },
+    )
+    result = schema_to_dict(s, _make_ml())
+    assert result["ro"] == {"gain": pytest.approx(0.5)}
 
 
 # ---------------------------------------------------------------------------
-# CfgSection nesting
+# CfgSectionSpec nesting
 # ---------------------------------------------------------------------------
 
 
 def test_nested_section_is_recursed():
-    schema = _schema(
-        {
-            "inner": CfgSection(
-                fields={
-                    "x": ScalarField(value=42, label="X", type=int),
-                }
-            )
-        }
+    s = _schema(
+        {"inner": CfgSectionSpec(fields={"x": ScalarSpec(label="X", type=int)})},
+        {"inner": CfgSectionValue(fields={"x": ScalarValue(42)})},
     )
-    result = schema_to_dict(schema, _make_ml())
-    assert result == {"inner": {"x": 42}}
+    assert schema_to_dict(s, _make_ml()) == {"inner": {"x": 42}}
 
 
 # ---------------------------------------------------------------------------
-# Mixed schema
+# make_default_value
 # ---------------------------------------------------------------------------
 
 
-def test_mixed_schema():
-    schema = _schema(
-        {
-            "reps": ScalarField(value=100, label="Reps", type=int),
-            "sweep": SweepField(start=0.0, stop=1.0, expts=3),
-            "cfg": CfgSection(
-                fields={"gain": ScalarField(value=0.05, label="Gain", type=float)}
-            ),
-        }
+def test_make_default_value_scalar():
+    spec = CfgSectionSpec(fields={"x": ScalarSpec(label="X", type=int)})
+    val = make_default_value(spec)
+    assert isinstance(val.fields["x"], ScalarValue)
+    assert val.fields["x"].value == 0
+
+
+def test_make_default_value_sweep():
+    spec = CfgSectionSpec(fields={"s": SweepSpec()})
+    val = make_default_value(spec)
+    sv = val.fields["s"]
+    assert isinstance(sv, SweepValue)
+    assert sv.expts == 11
+
+
+def test_make_default_value_nested():
+    inner = CfgSectionSpec(fields={"y": ScalarSpec(label="Y", type=float)})
+    spec = CfgSectionSpec(fields={"sub": inner})
+    val = make_default_value(spec)
+    sub = val.fields["sub"]
+    assert isinstance(sub, CfgSectionValue)
+    assert isinstance(sub.fields["y"], ScalarValue)
+
+
+def test_make_default_value_module_ref():
+    inner_spec = CfgSectionSpec(
+        label="Direct Readout",
+        fields={"ro_ch": ScalarSpec(label="RO ch", type=int)},
     )
-    result = schema_to_dict(schema, _make_ml())
-    assert result["reps"] == 100
-    assert result["sweep"].expts == 3
-    assert result["cfg"]["gain"] == pytest.approx(0.05)
+    spec = CfgSectionSpec(fields={"ro": ModuleRefSpec(allowed=[inner_spec])})
+    val = make_default_value(spec)
+    ro = val.fields["ro"]
+    assert isinstance(ro, ModuleRefValue)
+    assert ro.chosen_key == "<Custom:Direct Readout>"
+    assert isinstance(ro.value, CfgSectionValue)

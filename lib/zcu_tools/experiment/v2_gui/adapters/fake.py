@@ -10,12 +10,15 @@ from matplotlib.figure import Figure
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
     CfgSchema,
-    CfgSection,
+    CfgSectionSpec,
+    CfgSectionValue,
     ExpContext,
     ParamSpec,
     SavePaths,
-    ScalarField,
-    SweepField,
+    ScalarSpec,
+    ScalarValue,
+    SweepSpec,
+    SweepValue,
     WritebackItem,
 )
 
@@ -27,15 +30,23 @@ class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult]):
     """Minimal stub adapter — drives the full GUI flow without hardware."""
 
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:  # noqa: ARG002
-        root = CfgSection(
+        spec = CfgSectionSpec(
             fields={
-                "reps": ScalarField(value=100, label="Reps", type=int),
-                "rounds": ScalarField(value=10, label="Rounds", type=int),
-                "sweep": SweepField(start=5.0, stop=6.0, expts=11, label="Frequency"),
-                "gain": ScalarField(value=0.1, label="Gain", type=float),
+                "reps": ScalarSpec(label="Reps", type=int),
+                "rounds": ScalarSpec(label="Rounds", type=int),
+                "sweep": SweepSpec(label="Frequency"),
+                "gain": ScalarSpec(label="Gain", type=float, decimals=4),
             }
         )
-        return CfgSchema(root=root)
+        value = CfgSectionValue(
+            fields={
+                "reps": ScalarValue(100),
+                "rounds": ScalarValue(10),
+                "sweep": SweepValue(start=5.0, stop=6.0, expts=11),
+                "gain": ScalarValue(0.1),
+            }
+        )
+        return CfgSchema(spec=spec, value=value)
 
     def get_run_params(self) -> dict[str, ParamSpec]:
         return {

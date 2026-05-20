@@ -135,16 +135,14 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
     factory = QtProgressBarFactory(stack)
 
     ctx = ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None)
-    adapter = FakeFreqAdapter()
+    adapter = FakeFreqAdapter(fast_mode=True)
     schema = adapter.make_default_cfg(ctx)
 
     # Override to small values so the test is fast
-    from zcu_tools.gui.adapter import ScalarField, SweepField
+    from zcu_tools.gui.adapter import ScalarValue, SweepValue
 
-    schema.root.fields["rounds"] = ScalarField(value=2, label="Rounds", type=int)
-    schema.root.fields["freq"] = SweepField(
-        start=5800.0, stop=5808.0, expts=5, label="Freq (MHz)"
-    )
+    schema.value.fields["rounds"] = ScalarValue(2)
+    schema.value.fields["freq"] = SweepValue(start=5800.0, stop=5808.0, expts=5)
 
     with use_pbar_factory(factory):
         run_result = adapter.run(ctx, schema)

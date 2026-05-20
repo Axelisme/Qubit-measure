@@ -1,4 +1,4 @@
-"""Phase 10 tests — CfgFormWidget build and read_schema round-trip."""
+"""Tests — CfgFormWidget populate / read_values round-trip (Phase 19)."""
 
 from __future__ import annotations
 
@@ -9,11 +9,15 @@ import pytest
 from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 from zcu_tools.gui.adapter import (
     CfgSchema,
-    CfgSection,
-    ModuleRefField,
-    MultiSweepField,
-    ScalarField,
-    SweepField,
+    CfgSectionSpec,
+    CfgSectionValue,
+    MultiSweepSpec,
+    MultiSweepValue,
+    ScalarSpec,
+    ScalarValue,
+    SweepSpec,
+    SweepValue,
+    schema_to_dict,
 )
 
 # ---------------------------------------------------------------------------
@@ -29,8 +33,11 @@ def qapp():
     return app
 
 
-def _schema(fields: dict) -> CfgSchema:
-    return CfgSchema(root=CfgSection(fields=fields))
+def _schema(spec_fields: dict, value_fields: dict) -> CfgSchema:
+    return CfgSchema(
+        spec=CfgSectionSpec(fields=spec_fields),
+        value=CfgSectionValue(fields=value_fields),
+    )
 
 
 def _make_ctx():
@@ -40,33 +47,35 @@ def _make_ctx():
 
 
 # ---------------------------------------------------------------------------
-# SweepField schema_to_dict — step mode (10a)
+# schema_to_dict — SweepValue modes
 # ---------------------------------------------------------------------------
 
 
-def test_sweep_field_step_mode_schema_to_dict():
-    from zcu_tools.gui.adapter import schema_to_dict
+def test_sweep_value_expts_mode():
     from zcu_tools.program.v2 import SweepCfg
 
     ml = MagicMock()
-    schema = _schema({"f": SweepField(start=0.0, stop=1.0, expts=11, step=0.1)})
-    result = schema_to_dict(schema, ml)
-    sweep = result["f"]
-    assert isinstance(sweep, SweepCfg)
-    assert sweep.start == pytest.approx(0.0)
-    assert sweep.stop == pytest.approx(1.0)
-    assert sweep.step == pytest.approx(0.1)
-
-
-def test_sweep_field_expts_mode_unchanged():
-    from zcu_tools.gui.adapter import schema_to_dict
-    from zcu_tools.program.v2 import SweepCfg
-
-    ml = MagicMock()
-    schema = _schema({"f": SweepField(start=1.0, stop=2.0, expts=5)})
+    schema = _schema(
+        {"f": SweepSpec(label="Freq")},
+        {"f": SweepValue(start=1.0, stop=2.0, expts=5)},
+    )
     result = schema_to_dict(schema, ml)
     assert isinstance(result["f"], SweepCfg)
     assert result["f"].expts == 5
+
+
+def test_sweep_value_step_mode():
+    from zcu_tools.program.v2 import SweepCfg
+
+    ml = MagicMock()
+    schema = _schema(
+        {"f": SweepSpec(label="Freq")},
+        {"f": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)},
+    )
+    result = schema_to_dict(schema, ml)
+    sweep = result["f"]
+    assert isinstance(sweep, SweepCfg)
+    assert sweep.step == pytest.approx(0.1)
 
 
 # ---------------------------------------------------------------------------
@@ -77,48 +86,54 @@ def test_sweep_field_expts_mode_unchanged():
 def test_scalar_int_widget_round_trip(qapp):
     from zcu_tools.gui.ui.cfg_form import make_scalar_widget, read_scalar_widget
 
-    field = ScalarField(value=42, label="X", type=int)
-    w = make_scalar_widget(field)
-    assert read_scalar_widget(w, field) == 42
+    spec = ScalarSpec(label="X", type=int)
+    w = make_scalar_widget(spec, 42)
+    assert read_scalar_widget(w, spec) == 42
 
 
 def test_scalar_float_widget_round_trip(qapp):
     from zcu_tools.gui.ui.cfg_form import make_scalar_widget, read_scalar_widget
 
-    field = ScalarField(value=3.14, label="Pi", type=float)
-    w = make_scalar_widget(field)
-    assert read_scalar_widget(w, field) == pytest.approx(3.14)
+    spec = ScalarSpec(label="Pi", type=float)
+    w = make_scalar_widget(spec, 3.14)
+    assert read_scalar_widget(w, spec) == pytest.approx(3.14)
 
 
 def test_scalar_bool_widget_round_trip(qapp):
     from zcu_tools.gui.ui.cfg_form import make_scalar_widget, read_scalar_widget
 
-    field = ScalarField(value=True, label="Flag", type=bool)
-    w = make_scalar_widget(field)
-    assert read_scalar_widget(w, field) is True
+    spec = ScalarSpec(label="Flag", type=bool)
+    w = make_scalar_widget(spec, True)
+    assert read_scalar_widget(w, spec) is True
 
 
 def test_scalar_choices_widget_round_trip(qapp):
     from zcu_tools.gui.ui.cfg_form import make_scalar_widget, read_scalar_widget
 
-    field = ScalarField(
-        value="hm", label="Model", type=str, choices=["hm", "t", "auto"]
-    )
-    w = make_scalar_widget(field)
-    assert read_scalar_widget(w, field) == "hm"
+    spec = ScalarSpec(label="Model", type=str, choices=["hm", "t", "auto"])
+    w = make_scalar_widget(spec, "hm")
+    assert read_scalar_widget(w, spec) == "hm"
 
 
 def test_scalar_editable_false_widget_disabled(qapp):
     from zcu_tools.gui.ui.cfg_form import make_scalar_widget
 
-    field = ScalarField(value=1.0, label="RO", type=float, editable=False)
-    w = make_scalar_widget(field)
+    spec = ScalarSpec(label="RO", type=float, editable=False)
+    w = make_scalar_widget(spec, 1.0)
     assert not w.isEnabled()
 
 
 # ---------------------------------------------------------------------------
-# CfgFormWidget — populate and read_schema
+# CfgFormWidget — populate and read_values / read_schema
 # ---------------------------------------------------------------------------
+
+
+def test_read_values_before_populate_raises(qapp):
+    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+
+    w = CfgFormWidget()
+    with pytest.raises(RuntimeError):
+        w.read_values()
 
 
 def test_read_schema_before_populate_raises(qapp):
@@ -134,23 +149,44 @@ def test_populate_scalar_fields_round_trip(qapp):
 
     schema = _schema(
         {
-            "reps": ScalarField(value=100, label="Reps", type=int),
-            "freq": ScalarField(value=6.0, label="Freq", type=float),
-        }
+            "reps": ScalarSpec(label="Reps", type=int),
+            "freq": ScalarSpec(label="Freq", type=float),
+        },
+        {
+            "reps": ScalarValue(100),
+            "freq": ScalarValue(6.0),
+        },
+    )
+    w = CfgFormWidget()
+    w.populate(schema)
+    out = w.read_values()
+
+    assert out.fields["reps"].value == 100  # type: ignore[union-attr]
+    assert out.fields["freq"].value == pytest.approx(6.0)  # type: ignore[union-attr]
+
+
+def test_read_schema_returns_cfg_schema(qapp):
+    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+
+    schema = _schema(
+        {"reps": ScalarSpec(label="Reps", type=int)},
+        {"reps": ScalarValue(10)},
     )
     w = CfgFormWidget()
     w.populate(schema)
     out = w.read_schema()
+    assert isinstance(out, CfgSchema)
+    assert out.spec is schema.spec
 
-    assert out.root.fields["reps"].value == 100  # type: ignore[union-attr]
-    assert out.root.fields["freq"].value == pytest.approx(6.0)  # type: ignore[union-attr]
 
-
-def test_read_schema_does_not_mutate_original(qapp):
+def test_read_values_does_not_mutate_original(qapp):
     from qtpy.QtWidgets import QSpinBox  # type: ignore[attr-defined]
     from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 
-    schema = _schema({"reps": ScalarField(value=100, label="Reps", type=int)})
+    schema = _schema(
+        {"reps": ScalarSpec(label="Reps", type=int)},
+        {"reps": ScalarValue(100)},
+    )
     w = CfgFormWidget()
     w.populate(schema)
 
@@ -158,38 +194,44 @@ def test_read_schema_does_not_mutate_original(qapp):
     assert spin is not None
     spin.setValue(999)
 
-    out = w.read_schema()
-    assert out.root.fields["reps"].value == 999  # type: ignore[union-attr]
-    assert schema.root.fields["reps"].value == 100  # type: ignore[union-attr]  # original unchanged
+    out = w.read_values()
+    assert out.fields["reps"].value == 999  # type: ignore[union-attr]
+    assert schema.value.fields["reps"].value == 100  # type: ignore[union-attr]
 
 
 def test_populate_sweep_field_round_trip(qapp):
     from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 
-    schema = _schema({"f": SweepField(start=5.8, stop=6.2, expts=201)})
+    schema = _schema(
+        {"f": SweepSpec(label="Freq")},
+        {"f": SweepValue(start=5.8, stop=6.2, expts=201)},
+    )
     w = CfgFormWidget()
     w.populate(schema)
-    out = w.read_schema()
+    out = w.read_values()
 
-    sf = out.root.fields["f"]
-    assert isinstance(sf, SweepField)
-    assert sf.start == pytest.approx(5.8)
-    assert sf.stop == pytest.approx(6.2)
-    assert sf.expts == 201
-    assert sf.step is None
+    sv = out.fields["f"]
+    assert isinstance(sv, SweepValue)
+    assert sv.start == pytest.approx(5.8)
+    assert sv.stop == pytest.approx(6.2)
+    assert sv.expts == 201
+    assert sv.step is None
 
 
 def test_populate_sweep_field_step_preserved(qapp):
     from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 
-    schema = _schema({"f": SweepField(start=0.0, stop=1.0, expts=11, step=0.1)})
+    schema = _schema(
+        {"f": SweepSpec(label="Freq")},
+        {"f": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)},
+    )
     w = CfgFormWidget()
     w.populate(schema)
-    out = w.read_schema()
+    out = w.read_values()
 
-    sf = out.root.fields["f"]
-    assert isinstance(sf, SweepField)
-    assert sf.step == pytest.approx(0.1)
+    sv = out.fields["f"]
+    assert isinstance(sv, SweepValue)
+    assert sv.step == pytest.approx(0.1)
 
 
 def test_populate_nested_section_round_trip(qapp):
@@ -197,19 +239,18 @@ def test_populate_nested_section_round_trip(qapp):
 
     schema = _schema(
         {
-            "inner": CfgSection(
-                fields={
-                    "gain": ScalarField(value=0.05, label="Gain", type=float),
-                }
+            "inner": CfgSectionSpec(
+                fields={"gain": ScalarSpec(label="Gain", type=float)}
             )
-        }
+        },
+        {"inner": CfgSectionValue(fields={"gain": ScalarValue(0.05)})},
     )
     w = CfgFormWidget()
     w.populate(schema)
-    out = w.read_schema()
+    out = w.read_values()
 
-    inner = out.root.fields["inner"]
-    assert isinstance(inner, CfgSection)
+    inner = out.fields["inner"]
+    assert isinstance(inner, CfgSectionValue)
     assert inner.fields["gain"].value == pytest.approx(0.05)  # type: ignore[union-attr]
 
 
@@ -218,50 +259,65 @@ def test_populate_multi_sweep_round_trip(qapp):
 
     schema = _schema(
         {
-            "ms": MultiSweepField(
-                sweeps={
-                    "x": SweepField(start=0.0, stop=1.0, expts=5),
-                    "y": SweepField(start=2.0, stop=3.0, expts=3),
+            "ms": MultiSweepSpec(
+                axes={"x": SweepSpec(label="X"), "y": SweepSpec(label="Y")},
+                label="Multi",
+            )
+        },
+        {
+            "ms": MultiSweepValue(
+                axes={
+                    "x": SweepValue(start=0.0, stop=1.0, expts=5),
+                    "y": SweepValue(start=2.0, stop=3.0, expts=3),
                 }
             )
-        }
+        },
     )
     w = CfgFormWidget()
     w.populate(schema)
-    out = w.read_schema()
+    out = w.read_values()
 
-    ms = out.root.fields["ms"]
-    assert isinstance(ms, MultiSweepField)
-    assert ms.sweeps["x"].expts == 5
-    assert ms.sweeps["y"].start == pytest.approx(2.0)
+    ms = out.fields["ms"]
+    assert isinstance(ms, MultiSweepValue)
+    assert ms.axes["x"].expts == 5
+    assert ms.axes["y"].start == pytest.approx(2.0)
 
 
 def test_populate_module_ref_field_round_trip(qapp):
+    from zcu_tools.gui.adapter import ModuleRefSpec, ModuleRefValue
     from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 
-    schema = _schema(
-        {
-            "mod": ModuleRefField(
-                module_name="pulse_a",
-                override={},
-                inline_cfg=None,
-                expanded_content=None,
-                available_modules=["pulse_a", "pulse_b"],
-            )
-        }
+    allowed_spec = CfgSectionSpec(
+        label="Pulse",
+        fields={"gain": ScalarSpec(label="Gain", type=float)},
+    )
+    schema = CfgSchema(
+        spec=CfgSectionSpec(
+            fields={"mod": ModuleRefSpec(allowed=[allowed_spec], label="Module")}
+        ),
+        value=CfgSectionValue(
+            fields={
+                "mod": ModuleRefValue(
+                    chosen_key="<Custom:Pulse>",
+                    value=CfgSectionValue(fields={"gain": ScalarValue(0.5)}),
+                )
+            }
+        ),
     )
     w = CfgFormWidget()
     w.populate(schema)
-    out = w.read_schema()
+    out = w.read_values()
 
-    mod = out.root.fields["mod"]
-    assert isinstance(mod, ModuleRefField)
-    assert mod.module_name == "pulse_a"
+    mod = out.fields["mod"]
+    assert isinstance(mod, ModuleRefValue)
+    assert mod.chosen_key == "<Custom:Pulse>"
+    assert mod.value.fields["gain"].value == pytest.approx(0.5)  # type: ignore[union-attr]
 
 
 def test_populate_full_fake_freq_schema(qapp):
     """Smoke test: FakeFreqAdapter default schema populates and round-trips."""
     from zcu_tools.experiment.v2_gui.adapters.onetone.freq import FakeFreqAdapter
+    from zcu_tools.gui.adapter import ModuleRefSpec
     from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 
     ctx = _make_ctx()
@@ -269,12 +325,17 @@ def test_populate_full_fake_freq_schema(qapp):
 
     w = CfgFormWidget()
     w.populate(schema)
-    out = w.read_schema()
+    out = w.read_values()
 
     for key in ("reps", "rounds", "freq", "res_freq", "Ql", "modules"):
-        assert key in out.root.fields
+        assert key in out.fields, f"missing key: {key}"
 
-    from zcu_tools.gui.adapter import CfgSection, SweepField
-
-    assert isinstance(out.root.fields["freq"], SweepField)
-    assert isinstance(out.root.fields["modules"], CfgSection)
+    assert isinstance(out.fields["freq"], SweepValue)
+    # modules is a CfgSectionValue with readout as ModuleRefValue
+    modules_val = out.fields["modules"]
+    assert isinstance(modules_val, CfgSectionValue)
+    # Verify spec has ModuleRefSpec for readout
+    modules_spec = schema.spec.fields["modules"]
+    assert hasattr(modules_spec, "fields")
+    readout_spec = modules_spec.fields["readout"]  # type: ignore[union-attr]
+    assert isinstance(readout_spec, ModuleRefSpec)

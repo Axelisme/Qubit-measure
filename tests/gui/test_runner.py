@@ -11,7 +11,14 @@ import pytest
 from qtpy.QtCore import QCoreApplication, QEventLoop, QTimer
 from qtpy.QtWidgets import QApplication
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
-from zcu_tools.gui.adapter import CfgSchema, CfgSection, ExpContext, ScalarField
+from zcu_tools.gui.adapter import (
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
+    ExpContext,
+    ScalarSpec,
+    ScalarValue,
+)  # noqa: F401
 from zcu_tools.gui.runner import Runner, RunWorker
 
 # ---------------------------------------------------------------------------
@@ -42,9 +49,9 @@ def _make_ctx():
 
 
 def _simple_schema() -> CfgSchema:
-    return CfgSchema(
-        root=CfgSection(fields={"reps": ScalarField(value=10, label="Reps", type=int)})
-    )
+    spec = CfgSectionSpec(fields={"reps": ScalarSpec(label="Reps", type=int)})
+    value = CfgSectionValue(fields={"reps": ScalarValue(10)})
+    return CfgSchema(spec=spec, value=value)
 
 
 def _wait_for(condition, timeout_ms: int = 3000, step_ms: int = 10) -> bool:

@@ -24,16 +24,23 @@ from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
     CfgSchema,
-    CfgSection,
+    CfgSectionSpec,
+    CfgSectionValue,
     ExpContext,
-    ModuleRefField,
+    ModuleRefSpec,
+    ModuleRefValue,
     ParamSpec,
     SavePaths,
-    ScalarField,
-    SweepField,
+    ScalarSpec,
+    ScalarValue,
+    SweepSpec,
+    SweepValue,
     WritebackItem,
+    make_default_value,
     schema_to_dict,
 )
+from zcu_tools.gui.specs.readout import DIRECT_READOUT_SPEC, PULSE_READOUT_SPEC
+from zcu_tools.gui.specs.waveform import FLAT_TOP_WAVEFORM_SPEC
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import ProgramV2Cfg
 from zcu_tools.program.v2.sweep import SweepCfg
@@ -163,111 +170,85 @@ class FakeFreqExp(AbsExperiment[FreqRunResult, FakeFreqCfg]):
 class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
     """Simulated one-tone frequency sweep.  No hardware required."""
 
+    def __init__(self, fast_mode: bool = False) -> None:
+        self._fast_mode = fast_mode
+
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:  # noqa: ARG002
-        # custom_template: nested format matching ModuleCfgFactory.from_raw() / to_dict()
-        # Used when user selects <Custom> — expanded_content is deepcopy of this.
-        custom_tmpl = CfgSection(
-            label="Custom Readout",
+        # Spec: static structure, shared across all FakeFreqAdapter instances
+        readout_spec = ModuleRefSpec(
+            allowed=[DIRECT_READOUT_SPEC, PULSE_READOUT_SPEC],
+            label="Readout",
+        )
+        modules_spec = CfgSectionSpec(
+            label="Modules",
+            collapsible=True,
+            fields={"readout": readout_spec},
+        )
+        root_spec = CfgSectionSpec(
             fields={
-                "type": ScalarField(
-                    value="readout/pulse", label="Type", type=str, editable=False
+                "reps": ScalarSpec(label="Reps", type=int),
+                "rounds": ScalarSpec(label="Rounds", type=int),
+                "freq": SweepSpec(label="Freq (MHz)"),
+                "res_freq": ScalarSpec(
+                    label="Resonator freq (MHz)", type=float, decimals=2
                 ),
-                "pulse_cfg": CfgSection(
-                    label="Pulse Cfg",
-                    fields={
-                        "ch": ScalarField(value=0, label="Gen ch", type=int),
-                        "nqz": ScalarField(value=1, label="NQZ", type=int),
-                        "freq": ScalarField(
-                            value=6000.0, label="Freq (MHz)", type=float
-                        ),
-                        "gain": ScalarField(value=0.5, label="Gain", type=float),
-                    },
+                "Ql": ScalarSpec(label="Ql (loaded Q)", type=int),
+                "Qc_abs": ScalarSpec(label="|Qc| (coupling Q)", type=int),
+                "phi": ScalarSpec(label="phi (rad)", type=float, decimals=4),
+                "a0_abs": ScalarSpec(
+                    label="|a0| (bg amplitude)", type=float, decimals=4
                 ),
-                "ro_cfg": CfgSection(
-                    label="RO Cfg",
-                    fields={
-                        "ro_ch": ScalarField(value=0, label="RO ch", type=int),
-                        "ro_length": ScalarField(
-                            value=1.0, label="RO length (us)", type=float
-                        ),
-                    },
-                ),
-            },
+                "edelay": ScalarSpec(label="edelay (us)", type=float, decimals=3),
+                "noise_scale": ScalarSpec(label="Noise scale", type=float, decimals=4),
+                "modules": modules_spec,
+            }
         )
 
-        from zcu_tools.gui.adapter import module_cfg_to_section
-        from zcu_tools.program.v2 import AbsReadoutCfg
-
-        available_modules = []
+        # Value: initial values (may come from ctx)
+        # Try to pre-select readout_rf from ml if available
+        chosen_key = "<Custom:Direct Readout>"
+        readout_val = make_default_value(DIRECT_READOUT_SPEC)
         if ctx.ml is not None:
-            available_modules = [
-                name
-                for name, mod in ctx.ml.modules.items()
-                if isinstance(mod, AbsReadoutCfg)
-            ]
-
-        module_name = None
-        if "readout_rf" in available_modules:
-            module_name = "readout_rf"
-        elif available_modules:
-            module_name = available_modules[0]
-
-        expanded_content = None
-        if module_name is not None and ctx.ml is not None:
             try:
-                mod_cfg = ctx.ml.get_module(module_name)
-                expanded_content = module_cfg_to_section(mod_cfg)
+                from zcu_tools.program.v2 import AbsReadoutCfg
+
+                for name, mod in ctx.ml.modules.items():
+                    if isinstance(mod, AbsReadoutCfg):
+                        if name == "readout_rf" or chosen_key.startswith("<Custom:"):
+                            from zcu_tools.gui.cfg_schemas import module_cfg_to_value
+
+                            _, readout_val = module_cfg_to_value(mod)
+                            chosen_key = name
+                            if name == "readout_rf":
+                                break
             except Exception:
                 pass
 
-        if expanded_content is None:
-            import copy
-
-            expanded_content = copy.deepcopy(custom_tmpl)
-
-        readout_ref = ModuleRefField(
-            module_name=module_name,
-            override={},
-            inline_cfg=None,
-            expanded_content=expanded_content,
-            available_modules=available_modules,
-            custom_template=custom_tmpl,
-            type_filter=AbsReadoutCfg,
-        )
-
-        modules_section = CfgSection(
-            label="Modules", collapsible=True, fields={"readout": readout_ref}
-        )
-        root = CfgSection(
+        modules_val = CfgSectionValue(
             fields={
-                "reps": ScalarField(value=100, label="Reps", type=int),
-                "rounds": ScalarField(value=100, label="Rounds", type=int),
-                "freq": SweepField(
-                    start=5800.0,
-                    stop=6200.0,
-                    expts=201,
-                    label="Freq (MHz)",
-                ),
-                # HangerModel parameters
-                "res_freq": ScalarField(
-                    value=6000.0, label="Resonator freq (MHz)", type=float
-                ),
-                "Ql": ScalarField(value=150, label="Ql (loaded Q)", type=int),
-                "Qc_abs": ScalarField(value=600, label="|Qc| (coupling Q)", type=int),
-                "phi": ScalarField(value=0.0, label="phi (rad)", type=float),
-                "a0_abs": ScalarField(
-                    value=1.0, label="|a0| (bg amplitude)", type=float
-                ),
-                "edelay": ScalarField(value=0.05, label="edelay (us)", type=float),
-                "noise_scale": ScalarField(value=0.05, label="Noise scale", type=float),
-                "modules": modules_section,
+                "readout": ModuleRefValue(chosen_key=chosen_key, value=readout_val),
             }
         )
-        return CfgSchema(root=root)
+        root_val = CfgSectionValue(
+            fields={
+                "reps": ScalarValue(100),
+                "rounds": ScalarValue(100),
+                "freq": SweepValue(start=5800.0, stop=6200.0, expts=201),
+                "res_freq": ScalarValue(6000.0),
+                "Ql": ScalarValue(150),
+                "Qc_abs": ScalarValue(600),
+                "phi": ScalarValue(0.0),
+                "a0_abs": ScalarValue(1.0),
+                "edelay": ScalarValue(0.05),
+                "noise_scale": ScalarValue(0.05),
+                "modules": modules_val,
+            }
+        )
+        return CfgSchema(spec=root_spec, value=root_val)
 
     def _schema_to_exp_cfg(self, schema: CfgSchema, ctx: ExpContext) -> FakeFreqCfg:
         d = schema_to_dict(schema, ctx.ml)
-        sweep_cfg: SweepCfg = d["freq"]  # SweepCfg pydantic object from SweepField
+        sweep_cfg: SweepCfg = d["freq"]  # SweepCfg from make_sweep via SweepValue
         return FakeFreqCfg(
             reps=int(d["reps"]),
             rounds=int(d["rounds"]),
@@ -282,7 +263,7 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
                 noise_scale=float(d["noise_scale"]),
             ),
             modules=d.get("modules", {}),
-            fast_mode=bool(d.get("fast_mode", False)),
+            fast_mode=self._fast_mode,
         )
 
     def get_run_params(self) -> dict[str, ParamSpec]:
@@ -364,11 +345,6 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
         ]
 
         if ctx.ml is not None:
-            from zcu_tools.gui.cfg_schemas import (
-                make_flat_top_waveform_schema,
-                make_pulse_readout_schema,
-            )
-
             cfg = analyze_result.run_result.cfg_snapshot
 
             # 1. readout_rf module
@@ -381,14 +357,10 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
                     current_value=cur_val_rf,
                     new_value=new_readout,
                     description="readout_rf module config",
-                    edit_template=make_pulse_readout_schema(
+                    edit_template=_make_pulse_readout_template(
                         pulse_ch=getattr(ctx.md, "res_ch", 0),
-                        pulse_nqz=2,
                         pulse_freq=freq,
-                        pulse_gain=0.2,
                         ro_ch=getattr(ctx.md, "ro_ch", 0),
-                        ro_length=0.9,
-                        trig_offset=0.335,
                     ),
                 )
             )
@@ -404,10 +376,8 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
                     current_value=cur_val_ro,
                     new_value=new_waveform,
                     description="ro_waveform length config",
-                    edit_template=make_flat_top_waveform_schema(
-                        length=float(wav_len),
-                        raise_style="cosine",
-                        raise_length=0.1,
+                    edit_template=_make_flat_top_waveform_template(
+                        length=float(wav_len)
                     ),
                 )
             )
@@ -589,3 +559,76 @@ def _build_waveform(
         return WaveformCfgFactory.from_raw(fallback_wav_raw, ml=ctx.ml)
     except Exception:
         return None
+
+
+def _make_pulse_readout_template(
+    pulse_ch: int,
+    pulse_freq: float,
+    ro_ch: int,
+) -> CfgSchema:
+    """Build a CfgSchema edit_template for a pulse readout module."""
+    from zcu_tools.gui.adapter import (
+        WaveformRefValue,
+        make_default_value,
+    )
+    from zcu_tools.gui.specs.waveform import CONST_WAVEFORM_SPEC
+
+    const_val = make_default_value(CONST_WAVEFORM_SPEC)
+    const_val.fields["length"] = ScalarValue(1.0)
+    pulse_val = CfgSectionValue(
+        fields={
+            "type": ScalarValue("pulse"),
+            "waveform": WaveformRefValue(
+                chosen_key="<Custom:Const>",
+                value=const_val,
+            ),
+            "ch": ScalarValue(pulse_ch),
+            "nqz": ScalarValue(2),
+            "freq": ScalarValue(pulse_freq),
+            "phase": ScalarValue(0.0),
+            "gain": ScalarValue(0.2),
+            "pre_delay": ScalarValue(0.0),
+            "post_delay": ScalarValue(0.0),
+        }
+    )
+    ro_val = CfgSectionValue(
+        fields={
+            "type": ScalarValue("readout/direct"),
+            "ro_ch": ScalarValue(ro_ch),
+            "ro_freq": ScalarValue(pulse_freq),
+            "ro_length": ScalarValue(0.9),
+            "trig_offset": ScalarValue(0.335),
+        }
+    )
+    value = CfgSectionValue(
+        fields={
+            "type": ScalarValue("readout/pulse"),
+            "pulse_cfg": pulse_val,
+            "ro_cfg": ro_val,
+        }
+    )
+    return CfgSchema(spec=PULSE_READOUT_SPEC, value=value)
+
+
+def _make_flat_top_waveform_template(length: float) -> CfgSchema:
+    """Build a CfgSchema edit_template for a flat_top waveform."""
+    from zcu_tools.gui.adapter import WaveformRefValue
+    from zcu_tools.gui.specs.waveform import COSINE_WAVEFORM_SPEC
+
+    raise_val = CfgSectionValue(
+        fields={
+            "style": ScalarValue("cosine"),
+            "length": ScalarValue(0.1),
+        }
+    )
+    value = CfgSectionValue(
+        fields={
+            "style": ScalarValue("flat_top"),
+            "length": ScalarValue(length),
+            "raise_waveform": WaveformRefValue(
+                chosen_key="<Custom:Cosine>",
+                value=raise_val,
+            ),
+        }
+    )
+    return CfgSchema(spec=FLAT_TOP_WAVEFORM_SPEC, value=value)

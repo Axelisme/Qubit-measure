@@ -6,7 +6,8 @@ import pytest
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
     CfgSchema,
-    CfgSection,
+    CfgSectionSpec,
+    CfgSectionValue,
     ExpContext,
     ParamSpec,
     SavePaths,
@@ -17,7 +18,7 @@ from zcu_tools.gui.registry import Registry
 
 class _DummyAdapter(AbsExpAdapter):
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:  # noqa: ARG002
-        return CfgSchema(root=CfgSection())
+        return CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
 
     def get_run_params(self) -> dict[str, ParamSpec]:
         return {}
@@ -34,7 +35,9 @@ class _DummyAdapter(AbsExpAdapter):
     def get_writeback_spec(self, analyze_result, ctx) -> list[WritebackItem]:  # noqa: ARG002
         return []
 
-    def apply_writeback(self, ctx, analyze_result, selected_keys, overrides=None) -> None:  # noqa: ARG002
+    def apply_writeback(
+        self, ctx, analyze_result, selected_keys, overrides=None
+    ) -> None:  # noqa: ARG002
         pass
 
     def get_figure(self, analyze_result):  # noqa: ARG002

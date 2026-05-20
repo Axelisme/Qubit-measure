@@ -1,20 +1,22 @@
 """CfgFormWidget — renders a CfgSchema as an interactive Qt form.
 
-Each CfgNode type maps to a specific widget strategy:
-- ScalarField      → scalar input widget (spin / combo / checkbox / line edit)
-- SweepField       → _SweepRow: three inline inputs (start / stop / expts)
-                     step field is stored but hidden; future phase adds mode toggle
-- MultiSweepField  → one _SweepRow per axis with axis label
-- CfgSection       → collapsible QGroupBox containing a sub-form
-- ModuleRefField   → QComboBox for module_name + collapsible expanded_content sub-form
+Spec/Value split design:
+- populate(schema) reads spec to build widget structure, value to fill initial values.
+  The schema is never mutated; the form owns its own internal state.
+- read_values() rebuilds a CfgSectionValue purely from current widget state.
+- Callers assemble a new CfgSchema with CfgSchema(schema.spec, form.read_values()).
 
-read_schema() returns a deep copy of the original schema with all values updated
-from current widget state. The original schema passed to populate() is never mutated.
+Each CfgNodeSpec type maps to a specific widget strategy:
+- ScalarSpec      → scalar input widget (spin / combo / checkbox / line edit)
+- SweepSpec       → _SweepRow: three inline inputs (start / stop / expts)
+- MultiSweepSpec  → one _SweepRow per axis
+- CfgSectionSpec  → collapsible sub-form
+- ModuleRefSpec   → QComboBox for module name + collapsible sub-form from chosen spec
+- WaveformRefSpec → same as ModuleRefSpec
 """
 
 from __future__ import annotations
 
-import copy
 import logging
 from typing import TYPE_CHECKING, Any, Optional, Union
 
@@ -39,13 +41,16 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 
 if TYPE_CHECKING:
     from zcu_tools.gui.adapter import (
-        CfgNode,
+        CfgNodeSpec,
+        CfgNodeValue,
         CfgSchema,
-        CfgSection,
-        ModuleRefField,
-        ScalarField,
-        SweepField,
-        WaveformRefField,
+        CfgSectionSpec,
+        CfgSectionValue,
+        ModuleRefSpec,
+        ModuleRefValue,
+        ScalarSpec,
+        WaveformRefSpec,
+        WaveformRefValue,
     )
     from zcu_tools.meta_tool import ModuleLibrary
 
@@ -62,8 +67,7 @@ def make_value_widget(
     editable: bool = True,
     decimals: Optional[int] = None,
 ) -> QWidget:
-    """Build an input widget from raw field attributes. Used by both
-    make_scalar_widget (ScalarField) and main_window param widgets (ParamSpec)."""
+    """Build an input widget from raw field attributes."""
     if choices:
         w = QComboBox()
         w.addItems([str(c) for c in choices])
@@ -113,33 +117,35 @@ def read_value_widget(w: QWidget, type_: type, fallback: Any = None) -> Any:
     return fallback
 
 
-def make_scalar_widget(field: "ScalarField") -> QWidget:
-    """Build an input widget from a ScalarField."""
+def make_scalar_widget(spec: "ScalarSpec", value: Any) -> QWidget:
+    """Build an input widget from a ScalarSpec and initial value."""
     return make_value_widget(
-        field.type, field.value, field.choices, field.editable, field.decimals
+        spec.type, value, spec.choices, spec.editable, spec.decimals
     )
 
 
-def read_scalar_widget(w: QWidget, field: "ScalarField") -> Any:
+def read_scalar_widget(w: QWidget, spec: "ScalarSpec") -> Any:
     """Read the current value from a widget created by make_scalar_widget."""
-    return read_value_widget(w, field.type, fallback=field.value)
+    return read_value_widget(w, spec.type, fallback=None)
 
 
 # ---------------------------------------------------------------------------
-# _SweepRow — inline three-cell widget for SweepField
+# _SweepRow — inline three-cell widget for SweepSpec
 # ---------------------------------------------------------------------------
 
 
 class _SweepRow(QWidget):
-    """Inline widget for a SweepField: [start] [stop] [expts].
-
-    step is stored from the original field but not shown; a future phase
-    can add a mode toggle button to switch between expts and step inputs.
-    """
-
-    def __init__(self, field: "SweepField", parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        start: float,
+        stop: float,
+        expts: int,
+        step: Optional[float],
+        editable: bool = True,
+        parent: Optional[QWidget] = None,
+    ) -> None:
         super().__init__(parent)
-        self._original_step = field.step  # preserved for read_back round-trip
+        self._original_step = step
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -148,22 +154,22 @@ class _SweepRow(QWidget):
         self._start = QDoubleSpinBox()
         self._start.setRange(-1e12, 1e12)
         self._start.setDecimals(6)
-        self._start.setValue(field.start)
+        self._start.setValue(start)
         self._start.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
-        self._start.setEnabled(field.editable)
+        self._start.setEnabled(editable)
 
         self._stop = QDoubleSpinBox()
         self._stop.setRange(-1e12, 1e12)
         self._stop.setDecimals(6)
-        self._stop.setValue(field.stop)
+        self._stop.setValue(stop)
         self._stop.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
-        self._stop.setEnabled(field.editable)
+        self._stop.setEnabled(editable)
 
         self._expts = QSpinBox()
         self._expts.setRange(1, 2**31 - 1)
-        self._expts.setValue(field.expts)
+        self._expts.setValue(expts)
         self._expts.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
-        self._expts.setEnabled(field.editable)
+        self._expts.setEnabled(editable)
 
         layout.addWidget(QLabel("start"))
         layout.addWidget(self._start, stretch=1)
@@ -173,7 +179,6 @@ class _SweepRow(QWidget):
         layout.addWidget(self._expts)
 
     def read_back(self) -> tuple[float, float, int, Optional[float]]:
-        """Return (start, stop, expts, step) — step preserved from original."""
         return (
             self._start.value(),
             self._stop.value(),
@@ -183,17 +188,11 @@ class _SweepRow(QWidget):
 
 
 # ---------------------------------------------------------------------------
-# _CollapsibleSection — header row (arrow + label) with collapsible body
+# _CollapsibleSection
 # ---------------------------------------------------------------------------
 
 
 class _CollapsibleSection(QWidget):
-    """A labelled section with a small arrow button on the left to collapse/expand.
-
-    Header layout: [▶/▼ btn (16px)] [label (stretch)]
-    collapsible=False renders only a bold label with no toggle.
-    """
-
     def __init__(
         self,
         label: str,
@@ -207,7 +206,6 @@ class _CollapsibleSection(QWidget):
         outer.setSpacing(0)
 
         if collapsible:
-            # Header row: small arrow button + label
             header = QWidget()
             header_row = QHBoxLayout(header)
             header_row.setContentsMargins(0, 0, 0, 0)
@@ -250,20 +248,21 @@ class _CollapsibleSection(QWidget):
 
 
 # ---------------------------------------------------------------------------
-# CfgFormWidget — top-level form
+# CfgFormWidget
 # ---------------------------------------------------------------------------
 
 
 class CfgFormWidget(QWidget):
     """Renders a CfgSchema as an interactive Qt form.
 
-    Call populate(schema) to build the form; read_schema() to retrieve
-    a new CfgSchema with current widget values (original is not mutated).
+    populate(schema) builds the widget tree from spec+value; the schema is
+    never mutated. read_values() returns a fresh CfgSectionValue from widget state.
+    Callers compose a new CfgSchema with CfgSchema(schema.spec, form.read_values()).
     """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self._schema: Optional["CfgSchema"] = None
+        self._spec: Optional["CfgSectionSpec"] = None
         self._root_widget: Optional[QWidget] = None
         self._ml: Optional["ModuleLibrary"] = None
 
@@ -288,315 +287,396 @@ class CfgFormWidget(QWidget):
     def populate(
         self, schema: "CfgSchema", ml: Optional["ModuleLibrary"] = None
     ) -> None:
-        """Build widget tree from schema. Clears any previous form."""
-        self._schema = schema
+        """Build widget tree from schema. Schema is never mutated."""
+        self._spec = schema.spec
         self._ml = ml
         self._clear_inner()
 
-        section_widget = self._build_section(schema.root, top_level=True)
+        section_widget = self._build_section(schema.spec, schema.value, top_level=True)
         self._root_widget = section_widget
-        # insert before the trailing stretch
         self._inner_layout.insertWidget(self._inner_layout.count() - 1, section_widget)
         logger.debug("CfgFormWidget.populate: built form root section widget")
 
+    def read_values(self) -> "CfgSectionValue":
+        """Return a new CfgSectionValue from current widget state."""
+        if self._spec is None or self._root_widget is None:
+            raise RuntimeError("populate() must be called before read_values()")
+        return self._read_section(self._spec, self._root_widget)
+
     def read_schema(self) -> "CfgSchema":
-        """Return a deep-copy of the original schema with widget values applied."""
-        if self._schema is None or self._root_widget is None:
+        """Return a new CfgSchema combining the stored spec with current widget values."""
+        from zcu_tools.gui.adapter import CfgSchema
+
+        if self._spec is None:
             raise RuntimeError("populate() must be called before read_schema()")
-        new_schema = copy.deepcopy(self._schema)
-        self._apply_to_section(new_schema.root, self._root_widget)
-        return new_schema
+        return CfgSchema(spec=self._spec, value=self.read_values())
 
     # ------------------------------------------------------------------
-    # Internal build helpers
+    # Build helpers
     # ------------------------------------------------------------------
 
     def _clear_inner(self) -> None:
-        while self._inner_layout.count() > 1:  # keep trailing stretch
+        while self._inner_layout.count() > 1:
             item = self._inner_layout.takeAt(0)
             if item is not None:
                 w = item.widget()
                 if w is not None:
                     w.deleteLater()
 
-    def _build_section(self, section: "CfgSection", top_level: bool = False) -> QWidget:
-        label = section.label or ("Config" if top_level else "")
-        collapsible = section.collapsible and not top_level
+    def _build_section(
+        self,
+        spec: "CfgSectionSpec",
+        value: "CfgSectionValue",
+        top_level: bool = False,
+    ) -> QWidget:
+        label = spec.label or ("Config" if top_level else "")
+        collapsible = spec.collapsible and not top_level
 
         container = _CollapsibleSection(label, collapsible=collapsible, collapsed=False)
-        container._child_widgets = {}
+        container._child_widgets = {}  # type: ignore[attr-defined]
+        container._hidden_fields: dict[str, Any] = {}  # type: ignore[attr-defined]
 
-        for key, node in section.fields.items():
-            w, row_widget = self._build_node(node)
-            container.form.addRow(_label_for(node, key) + ":", row_widget)
-            container._child_widgets[key] = w
+        from zcu_tools.gui.adapter import ScalarSpec as _ScalarSpec
+        from zcu_tools.gui.adapter import ScalarValue as _ScalarValue
+
+        for key, node_spec in spec.fields.items():
+            node_val = value.fields.get(key)
+            if isinstance(node_spec, _ScalarSpec) and node_spec.hidden:
+                raw = node_val.value if isinstance(node_val, _ScalarValue) else None
+                container._hidden_fields[key] = _ScalarValue(raw)  # type: ignore[attr-defined]
+                continue
+            w, row_widget = self._build_node(node_spec, node_val)
+            container.form.addRow(_label_for(node_spec, key) + ":", row_widget)
+            container._child_widgets[key] = w  # type: ignore[attr-defined]
 
         return container
 
-    def _build_node(self, node: "CfgNode") -> tuple[QWidget, QWidget]:
-        """Return (value_widget, row_widget).
-
-        For most nodes value_widget == row_widget; for complex nodes
-        (section, module) the row_widget is a container while value_widget
-        is the primary interactive control.
-        """
+    def _build_node(
+        self,
+        node_spec: "CfgNodeSpec",
+        node_val: "Optional[CfgNodeValue]",
+    ) -> tuple[QWidget, QWidget]:
         from zcu_tools.gui.adapter import (
-            CfgSection,
-            ModuleRefField,
-            MultiSweepField,
-            ScalarField,
-            SweepField,
-            WaveformRefField,
+            CfgSectionSpec,
+            CfgSectionValue,
+            ModuleRefSpec,
+            ModuleRefValue,
+            MultiSweepSpec,
+            MultiSweepValue,
+            ScalarSpec,
+            ScalarValue,
+            SweepSpec,
+            SweepValue,
+            WaveformRefSpec,
+            WaveformRefValue,
+            make_default_value,
         )
 
-        if isinstance(node, ScalarField):
-            w = make_scalar_widget(node)
+        if isinstance(node_spec, ScalarSpec):
+            val = (
+                node_val.value
+                if isinstance(node_val, ScalarValue)
+                else (
+                    node_spec.choices[0]
+                    if node_spec.choices
+                    else {int: 0, float: 0.0, bool: False, str: ""}[node_spec.type]
+                )
+            )
+            w = make_scalar_widget(node_spec, val)
             return w, w
 
-        if isinstance(node, SweepField):
-            w = _SweepRow(node)
+        if isinstance(node_spec, SweepSpec):
+            sv = (
+                node_val
+                if isinstance(node_val, SweepValue)
+                else SweepValue(0.0, 1.0, 11)
+            )
+            w = _SweepRow(sv.start, sv.stop, sv.expts, sv.step, node_spec.editable)
             return w, w
 
-        if isinstance(node, MultiSweepField):
+        if isinstance(node_spec, MultiSweepSpec):
+            mv = node_val if isinstance(node_val, MultiSweepValue) else None
             container = QWidget()
             layout = QFormLayout(container)
             layout.setContentsMargins(0, 0, 0, 0)
             rows: list[_SweepRow] = []
-            for axis, sf in node.sweeps.items():
-                row = _SweepRow(sf)
+            for axis, axis_spec in node_spec.axes.items():
+                if mv is not None:
+                    sv = mv.axes.get(axis, SweepValue(0.0, 1.0, 11))
+                else:
+                    sv = SweepValue(0.0, 1.0, 11)
+                row = _SweepRow(
+                    sv.start, sv.stop, sv.expts, sv.step, axis_spec.editable
+                )
                 rows.append(row)
                 layout.addRow(f"  {axis}:", row)
-            # store rows list on container for read-back
             container._sweep_rows = rows  # type: ignore[attr-defined]
+            container._axis_names = list(node_spec.axes.keys())  # type: ignore[attr-defined]
             return container, container
 
-        if isinstance(node, CfgSection):
-            sub = self._build_section(node, top_level=False)
+        if isinstance(node_spec, CfgSectionSpec):
+            cv = (
+                node_val if isinstance(node_val, CfgSectionValue) else CfgSectionValue()
+            )
+            sub = self._build_section(node_spec, cv, top_level=False)
             return sub, sub
 
-        if isinstance(node, ModuleRefField):
-            return self._build_module_ref(node)
+        if isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
+            ref_val: Optional[Union[ModuleRefValue, WaveformRefValue]] = None
+            if isinstance(node_spec, ModuleRefSpec) and isinstance(
+                node_val, ModuleRefValue
+            ):
+                ref_val = node_val
+            elif isinstance(node_spec, WaveformRefSpec) and isinstance(
+                node_val, WaveformRefValue
+            ):
+                ref_val = node_val
+            if ref_val is None:
+                first = node_spec.allowed[0] if node_spec.allowed else CfgSectionSpec()
+                label = first.label or "Custom"
+                default_val = make_default_value(first)
+                ref_val = (
+                    ModuleRefValue(f"<Custom:{label}>", default_val)
+                    if isinstance(node_spec, ModuleRefSpec)
+                    else WaveformRefValue(f"<Custom:{label}>", default_val)
+                )
+            return self._build_ref_field(node_spec, ref_val)
 
-        if isinstance(node, WaveformRefField):
-            return self._build_waveform_ref(node)
-
-        raise TypeError(f"Unknown CfgNode type: {type(node)}")  # type: ignore[unreachable]
-
-    def _build_module_ref(self, node: "ModuleRefField") -> tuple[QWidget, QWidget]:
-        return self._build_ref_field(node)
-
-    def _build_waveform_ref(self, node: "WaveformRefField") -> tuple[QWidget, QWidget]:
-        return self._build_ref_field(node)
+        raise TypeError(f"Unknown CfgNodeSpec type: {type(node_spec)}")  # type: ignore[unreachable]
 
     def _build_ref_field(
-        self, node: "Union[ModuleRefField, WaveformRefField]"
+        self,
+        node_spec: "Union[ModuleRefSpec, WaveformRefSpec]",
+        node_val: "Union[ModuleRefValue, WaveformRefValue]",
     ) -> tuple[QWidget, QWidget]:
-        from zcu_tools.gui.adapter import ModuleRefField
+        from zcu_tools.gui.adapter import CfgSectionValue
 
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
 
+        # Build ComboBox items: ml named modules + Custom options per allowed spec
         combo = QComboBox()
-        if isinstance(node, ModuleRefField):
-            if node.type_filter is not None and self._ml is not None:
-                items = [
-                    name
-                    for name, mod in self._ml.modules.items()
-                    if isinstance(mod, node.type_filter)
-                ]
-            else:
-                items = list(node.available_modules) if node.available_modules else []
-            ref_name = node.module_name
-        else:
-            if node.type_filter is not None and self._ml is not None:
-                items = [
-                    name
-                    for name, wav in self._ml.waveforms.items()
-                    if isinstance(wav, node.type_filter)
-                ]
-            else:
-                items = (
-                    list(node.available_waveforms) if node.available_waveforms else []
-                )
-            ref_name = node.waveform_name
-
-        if "<Custom>" not in items:
-            items.append("<Custom>")
+        items = self._ref_items(node_spec)
         combo.addItems(items)
 
-        if ref_name and ref_name in items:
-            combo.setCurrentText(ref_name)
+        # Set current selection
+        chosen = node_val.chosen_key
+        if chosen in items:
+            combo.setCurrentText(chosen)
         else:
-            combo.setCurrentText("<Custom>")
+            # Try to match by ml module name (chosen_key may be a bare name)
+            custom_label = f"<Custom:{_spec_for_chosen(node_spec, chosen).label}>"
+            if custom_label in items:
+                combo.setCurrentText(custom_label)
+            else:
+                combo.setCurrentIndex(0)
 
         layout.addWidget(combo)
 
         container._child_widgets = {}  # type: ignore[attr-defined]
+        container._spec = node_spec  # type: ignore[attr-defined]
 
-        if node.expanded_content is not None:
-            sub = self._build_section(node.expanded_content, top_level=False)
-            if hasattr(sub, "_toggle_btn") and sub._toggle_btn is not None:
-                # force collapsed; sync button text via _on_toggle
-                sub._on_toggle(False)
-                sub._toggle_btn.setChecked(False)
-            layout.addWidget(sub)
-            container._sub_section_widget = sub  # type: ignore[attr-defined]
-            container._child_widgets["expanded_content"] = sub  # type: ignore[attr-defined]
-        else:
-            container._sub_section_widget = None  # type: ignore[attr-defined]
+        # Build initial sub-section from current value
+        chosen_spec = _spec_for_chosen(node_spec, node_val.chosen_key)
+        sub = self._build_section(chosen_spec, node_val.value, top_level=False)
+        if hasattr(sub, "_toggle_btn") and sub._toggle_btn is not None:
+            sub._on_toggle(False)
+            sub._toggle_btn.setChecked(False)
+        layout.addWidget(sub)
+        container._sub_section_widget = sub  # type: ignore[attr-defined]
+        container._sub_spec = chosen_spec  # type: ignore[attr-defined]
+        container._child_widgets["_sub"] = sub  # type: ignore[attr-defined]
 
         combo._container = container  # type: ignore[attr-defined]
         combo.currentIndexChanged.connect(
-            lambda: self._on_ref_changed(node, combo, container)
+            lambda: self._on_ref_changed(node_spec, combo, container)
         )
 
         return combo, container
 
-    def _on_module_changed(
-        self, node: "ModuleRefField", combo: QComboBox, container: QWidget
-    ) -> None:
-        self._on_ref_changed(node, combo, container)
+    def _ref_items(
+        self, node_spec: "Union[ModuleRefSpec, WaveformRefSpec]"
+    ) -> list[str]:
+        """Build ComboBox item list: ml named modules + Custom:<label> per allowed spec."""
+        from zcu_tools.gui.adapter import ModuleRefSpec
 
-    def _on_waveform_changed(
-        self, node: "WaveformRefField", combo: QComboBox, container: QWidget
-    ) -> None:
-        self._on_ref_changed(node, combo, container)
+        items: list[str] = []
+
+        # Named modules from ml filtered by allowed spec labels
+        if self._ml is not None:
+            allowed_labels = {s.label for s in node_spec.allowed}
+            if isinstance(node_spec, ModuleRefSpec):
+                for name, mod in self._ml.modules.items():
+                    try:
+                        from zcu_tools.gui.cfg_schemas import module_cfg_to_value
+
+                        s, _ = module_cfg_to_value(mod)
+                        if s.label in allowed_labels:
+                            items.append(name)
+                    except Exception:
+                        pass
+            else:
+                for name, wav in self._ml.waveforms.items():
+                    try:
+                        from zcu_tools.gui.cfg_schemas import waveform_cfg_to_value
+
+                        s, _ = waveform_cfg_to_value(wav)
+                        if s.label in allowed_labels:
+                            items.append(name)
+                    except Exception:
+                        pass
+
+        # Custom options per allowed spec
+        for s in node_spec.allowed:
+            items.append(f"<Custom:{s.label}>")
+
+        return items
 
     def _on_ref_changed(
         self,
-        node: "Union[ModuleRefField, WaveformRefField]",
+        node_spec: "Union[ModuleRefSpec, WaveformRefSpec]",
         combo: QComboBox,
         container: QWidget,
     ) -> None:
-        from zcu_tools.gui.adapter import ModuleRefField
+        from zcu_tools.gui.adapter import (
+            CfgSectionValue,
+            ModuleRefSpec,
+            make_default_value,
+        )
 
-        name = combo.currentText()
+        chosen = combo.currentText()
         layout = container.layout()
         assert layout is not None
 
-        # 1. Clear old sub-section widget
-        sub_widget = getattr(container, "_sub_section_widget", None)
-        if sub_widget is not None:
-            layout.removeWidget(sub_widget)
-            sub_widget.deleteLater()
+        # Remove old sub-section
+        old_sub = getattr(container, "_sub_section_widget", None)
+        if old_sub is not None:
+            layout.removeWidget(old_sub)
+            old_sub.deleteLater()
             container._sub_section_widget = None  # type: ignore[attr-defined]
-            child_widgets = getattr(container, "_child_widgets", {})
-            child_widgets.pop("expanded_content", None)
 
-        # 2. Reset or load expanded content
-        if name == "<Custom>":
-            if isinstance(node, ModuleRefField):
-                node.module_name = None
-            else:
-                node.waveform_name = None
-            node.expanded_content = (
-                copy.deepcopy(node.custom_template)
-                if node.custom_template is not None
-                else None
-            )
+        # Determine new spec and initial value
+        if chosen.startswith("<Custom:"):
+            chosen_spec = _spec_for_chosen(node_spec, chosen)
+            new_val = make_default_value(chosen_spec)
         else:
-            if isinstance(node, ModuleRefField):
-                node.module_name = name
-            else:
-                node.waveform_name = name
+            # Load from ml
+            chosen_spec = None
+            new_val = CfgSectionValue()
             if self._ml is not None:
                 try:
-                    if isinstance(node, ModuleRefField):
-                        item_cfg = self._ml.get_module(name)
+                    if isinstance(node_spec, ModuleRefSpec):
+                        cfg = self._ml.get_module(chosen)
                     else:
-                        item_cfg = self._ml.get_waveform(name)
-                    from zcu_tools.gui.adapter import module_cfg_to_section
+                        cfg = self._ml.get_waveform(chosen)
+                    from zcu_tools.gui.cfg_schemas import (
+                        module_cfg_to_value,
+                        waveform_cfg_to_value,
+                    )
 
-                    node.expanded_content = module_cfg_to_section(item_cfg)
+                    if isinstance(node_spec, ModuleRefSpec):
+                        chosen_spec, new_val = module_cfg_to_value(cfg)
+                    else:
+                        chosen_spec, new_val = waveform_cfg_to_value(cfg)
                 except Exception as e:
-                    logger.error("Error loading %r from ModuleLibrary: %s", name, e)
-                    node.expanded_content = None
-            else:
-                node.expanded_content = None
+                    logger.error("Error loading %r from library: %s", chosen, e)
 
-        # 3. Build and add new sub-section widget
-        if node.expanded_content is not None:
-            sub = self._build_section(node.expanded_content, top_level=False)
-            layout.addWidget(sub)
-            container._sub_section_widget = sub  # type: ignore[attr-defined]
-            child_widgets = getattr(container, "_child_widgets", {})
-            child_widgets["expanded_content"] = sub
+            if chosen_spec is None:
+                chosen_spec = (
+                    node_spec.allowed[0] if node_spec.allowed else CfgSectionSpec()
+                )  # type: ignore[attr-defined]
+                new_val = make_default_value(chosen_spec)
+
+        container._sub_spec = chosen_spec  # type: ignore[attr-defined]
+
+        # Build and attach new sub-section
+        sub = self._build_section(chosen_spec, new_val, top_level=False)
+        layout.addWidget(sub)
+        container._sub_section_widget = sub  # type: ignore[attr-defined]
+        container._child_widgets["_sub"] = sub  # type: ignore[attr-defined]
 
     # ------------------------------------------------------------------
     # Read-back helpers
     # ------------------------------------------------------------------
 
-    def _apply_to_section(
+    def _read_section(
         self,
-        section: "CfgSection",
+        spec: "CfgSectionSpec",
         container: QWidget,
-    ) -> None:
-        """Recursively apply values from widget tree to CfgSchema."""
+    ) -> "CfgSectionValue":
         from zcu_tools.gui.adapter import (
-            CfgSection,
-            ModuleRefField,
-            MultiSweepField,
-            ScalarField,
-            SweepField,
-            WaveformRefField,
+            CfgSectionSpec,
+            CfgSectionValue,
+            ModuleRefSpec,
+            ModuleRefValue,
+            MultiSweepSpec,
+            MultiSweepValue,
+            ScalarSpec,
+            ScalarValue,
+            SweepSpec,
+            SweepValue,
+            WaveformRefSpec,
+            WaveformRefValue,
         )
 
         child_widgets = getattr(container, "_child_widgets", {})
+        hidden_fields: dict[str, Any] = getattr(container, "_hidden_fields", {})
+        fields: dict[str, Any] = {}
 
-        for key in section.fields:
+        for key, node_spec in spec.fields.items():
+            if isinstance(node_spec, ScalarSpec) and node_spec.hidden:
+                if key in hidden_fields:
+                    fields[key] = hidden_fields[key]
+                continue
+
             w = child_widgets.get(key)
             if w is None:
                 continue
-            node = section.fields[key]
 
-            if isinstance(node, ScalarField):
-                node.value = read_scalar_widget(w, node)
+            if isinstance(node_spec, ScalarSpec):
+                fields[key] = ScalarValue(read_scalar_widget(w, node_spec))
 
-            elif isinstance(node, SweepField):
+            elif isinstance(node_spec, SweepSpec):
                 assert isinstance(w, _SweepRow)
                 start, stop, expts, step = w.read_back()
-                node.start = start
-                node.stop = stop
-                node.expts = expts
-                node.step = step
+                fields[key] = SweepValue(start, stop, expts, step)
 
-            elif isinstance(node, MultiSweepField):
+            elif isinstance(node_spec, MultiSweepSpec):
                 rows: list[_SweepRow] = getattr(w, "_sweep_rows", [])
-                for sf, row in zip(node.sweeps.values(), rows):
+                axis_names: list[str] = getattr(
+                    w, "_axis_names", list(node_spec.axes.keys())
+                )
+                axes: dict[str, SweepValue] = {}
+                for axis, row in zip(axis_names, rows):
                     start, stop, expts, step = row.read_back()
-                    sf.start = start
-                    sf.stop = stop
-                    sf.expts = expts
-                    sf.step = step
+                    axes[axis] = SweepValue(start, stop, expts, step)
+                fields[key] = MultiSweepValue(axes=axes)
 
-            elif isinstance(node, CfgSection):
-                self._apply_to_section(node, w)
+            elif isinstance(node_spec, CfgSectionSpec):
+                fields[key] = self._read_section(node_spec, w)
 
-            elif isinstance(node, ModuleRefField):
+            elif isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
+                # w is the combo; container is combo._container
                 combo = w
-                node.module_name = combo.currentText() or None
-                if node.module_name == "<Custom>":
-                    node.module_name = None
+                cont_widget = getattr(combo, "_container", None)
+                chosen_key = combo.currentText() if isinstance(combo, QComboBox) else ""
+                sub_spec: "CfgSectionSpec" = getattr(
+                    cont_widget, "_sub_spec", CfgSectionSpec()
+                )
+                sub_widget = getattr(cont_widget, "_sub_section_widget", None)
+                if sub_widget is not None:
+                    sub_val = self._read_section(sub_spec, sub_widget)
+                else:
+                    sub_val = CfgSectionValue()
 
-                container_widget = getattr(combo, "_container", None)
-                if node.expanded_content is not None and container_widget is not None:
-                    sub_widget = getattr(container_widget, "_sub_section_widget", None)
-                    if sub_widget is not None:
-                        self._apply_to_section(node.expanded_content, sub_widget)
+                if isinstance(node_spec, ModuleRefSpec):
+                    fields[key] = ModuleRefValue(chosen_key=chosen_key, value=sub_val)
+                else:
+                    fields[key] = WaveformRefValue(chosen_key=chosen_key, value=sub_val)
 
-            elif isinstance(node, WaveformRefField):
-                combo = w
-                node.waveform_name = combo.currentText() or None
-                if node.waveform_name == "<Custom>":
-                    node.waveform_name = None
-
-                container_widget = getattr(combo, "_container", None)
-                if node.expanded_content is not None and container_widget is not None:
-                    sub_widget = getattr(container_widget, "_sub_section_widget", None)
-                    if sub_widget is not None:
-                        self._apply_to_section(node.expanded_content, sub_widget)
+        return CfgSectionValue(fields=fields)
 
 
 # ---------------------------------------------------------------------------
@@ -604,6 +684,25 @@ class CfgFormWidget(QWidget):
 # ---------------------------------------------------------------------------
 
 
-def _label_for(node: "CfgNode", key: str) -> str:
-    label = getattr(node, "label", "")
+def _label_for(node_spec: "CfgNodeSpec", key: str) -> str:
+    label = getattr(node_spec, "label", "")
     return label if label else key
+
+
+def _spec_for_chosen(
+    ref_spec: "Union[ModuleRefSpec, WaveformRefSpec]",
+    chosen_key: str,
+) -> "CfgSectionSpec":
+    """Find the CfgSectionSpec from allowed[] matching the chosen key."""
+    from zcu_tools.gui.adapter import CfgSectionSpec
+
+    # Strip "<Custom:label>" prefix
+    if chosen_key.startswith("<Custom:"):
+        label = chosen_key[len("<Custom:") : -1]
+    else:
+        label = chosen_key
+
+    for s in ref_spec.allowed:
+        if s.label == label:
+            return s
+    return ref_spec.allowed[0] if ref_spec.allowed else CfgSectionSpec()

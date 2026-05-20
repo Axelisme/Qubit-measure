@@ -52,218 +52,249 @@ class SavePaths:
     image_path: str
 
 
-# --- CfgSchema type tree ---
+# ---------------------------------------------------------------------------
+# Spec tree — static, defined by Adapter, never mutated
+# ---------------------------------------------------------------------------
 
 
-@dataclass
-class ScalarField:
-    value: Any
+@dataclass(frozen=True)
+class ScalarSpec:
     label: str
     type: type
     editable: bool = True
     choices: Optional[list] = None
     decimals: Optional[int] = None  # float display precision; None = 6 (default)
+    hidden: bool = (
+        False  # skip widget in UI; value still included in schema_to_dict output
+    )
 
 
-@dataclass
-class SweepField:
-    start: float
-    stop: float
-    expts: int
-    step: Optional[float] = None  # None = expts mode; non-None = step mode
+@dataclass(frozen=True)
+class SweepSpec:
     label: str = "Sweep"
     editable: bool = True
 
 
-@dataclass
-class MultiSweepField:
-    sweeps: dict[str, SweepField]
+@dataclass(frozen=True)
+class MultiSweepSpec:
+    axes: dict[str, SweepSpec]
     label: str = "Sweep"
 
 
-@dataclass
-class ModuleRefField:
-    module_name: Optional[str]
-    override: dict
-    inline_cfg: Optional[dict]
-    expanded_content: Optional["CfgSection"]  # eager load at make_default_cfg time
-    available_modules: list
-    custom_template: Optional["CfgSection"] = None
+@dataclass(frozen=True)
+class ModuleRefSpec:
+    allowed: list["CfgSectionSpec"]  # each spec's label is its display name
     label: str = "Module"
-    type_filter: Optional[Any] = None
 
 
-@dataclass
-class WaveformRefField:
-    waveform_name: Optional[str]
-    override: dict
-    inline_cfg: Optional[dict]
-    expanded_content: Optional["CfgSection"]  # eager load at make_default_cfg time
-    available_waveforms: list
-    custom_template: Optional["CfgSection"] = None
+@dataclass(frozen=True)
+class WaveformRefSpec:
+    allowed: list["CfgSectionSpec"]  # each spec's label is its display name
     label: str = "Waveform"
-    type_filter: Optional[Any] = None
 
 
-CfgNode = Union[
-    ScalarField,
-    SweepField,
-    MultiSweepField,
-    ModuleRefField,
-    WaveformRefField,
-    "CfgSection",
-]
-
-
-@dataclass
-class CfgSection:
-    fields: dict[str, CfgNode] = field(default_factory=dict)
+@dataclass(frozen=True)
+class CfgSectionSpec:
+    fields: dict[str, "CfgNodeSpec"] = field(default_factory=dict)
     label: str = ""
     collapsible: bool = True
 
 
+CfgNodeSpec = Union[
+    ScalarSpec,
+    SweepSpec,
+    MultiSweepSpec,
+    ModuleRefSpec,
+    WaveformRefSpec,
+    "CfgSectionSpec",
+]
+
+
+# ---------------------------------------------------------------------------
+# Value tree — mutable, holds user-editable state
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ScalarValue:
+    value: Any
+
+
+@dataclass
+class SweepValue:
+    start: float
+    stop: float
+    expts: int
+    step: Optional[float] = None  # None = expts mode; non-None = step mode
+
+
+@dataclass
+class MultiSweepValue:
+    axes: dict[str, SweepValue]
+
+
+@dataclass
+class ModuleRefValue:
+    chosen_key: str  # ml module name, or "<Custom:label>"
+    value: "CfgSectionValue"
+
+
+@dataclass
+class WaveformRefValue:
+    chosen_key: str  # ml waveform name, or "<Custom:label>"
+    value: "CfgSectionValue"
+
+
+@dataclass
+class CfgSectionValue:
+    fields: dict[str, "CfgNodeValue"] = field(default_factory=dict)
+
+
+CfgNodeValue = Union[
+    ScalarValue,
+    SweepValue,
+    MultiSweepValue,
+    ModuleRefValue,
+    WaveformRefValue,
+    "CfgSectionValue",
+]
+
+
+# ---------------------------------------------------------------------------
+# CfgSchema — pairs a spec tree with a value tree
+# ---------------------------------------------------------------------------
+
+
 @dataclass
 class CfgSchema:
-    root: CfgSection
-    # reps/rounds live as ScalarField entries in root.fields
+    spec: CfgSectionSpec
+    value: CfgSectionValue
 
 
-# --- module/waveform cfg → CfgSection helper ---
+# ---------------------------------------------------------------------------
+# schema_to_dict — flatten (spec, value) into an exp_cfg dict
+# ---------------------------------------------------------------------------
 
 
-def module_cfg_to_section(mod_cfg: Any) -> "CfgSection":
-    """Convert a ConfigBase (or plain dict) to a CfgSection for override editing.
-
-    Delegates to cfg_schemas.module_cfg_to_schema() for typed subtypes (which adds
-    correct choices for Literal fields).  Falls back to a generic dict-based conversion
-    for unknown types or plain dicts.
-
-    The resulting CfgSection mirrors the nested structure of mod_cfg.to_dict(), so
-    that schema_to_dict can deepupdate the override dict and pass it directly to
-    ml.get_module(name, override) → ConfigBase.with_updates(**override).
-    """
-    try:
-        from zcu_tools.gui.cfg_schemas import (
-            module_cfg_to_schema,
-            waveform_cfg_to_section,
-        )
-        from zcu_tools.program.v2.modules.waveform import AbsWaveformCfg
-
-        if isinstance(mod_cfg, AbsWaveformCfg):
-            return waveform_cfg_to_section(mod_cfg)
-        return module_cfg_to_schema(mod_cfg)
-    except Exception:
-        pass
-
-    # Generic fallback: mirror to_dict() structure, lock only "type"
-    def _dict_to_section(data: dict) -> "CfgSection":
-        fields: dict[str, Any] = {}
-        for k, v in data.items():
-            if isinstance(v, dict):
-                fields[k] = _dict_to_section(v)
-            elif isinstance(v, (int, float, bool, str)) or v is None:
-                fields[k] = ScalarField(
-                    value=v,
-                    label=k.replace("_", " ").title(),
-                    type=type(v) if v is not None else str,
-                    editable=(k != "type"),
-                )
-        return CfgSection(fields=fields, collapsible=True)
-
-    if hasattr(mod_cfg, "to_dict"):
-        d = mod_cfg.to_dict()
-    else:
-        d = dict(mod_cfg)
-    return _dict_to_section(d)
-
-
-# --- schema_to_dict helper ---
-
-
-def _section_to_dict(section: CfgSection, ml: "Optional[ModuleLibrary]") -> dict:
+def _section_to_dict(
+    spec: CfgSectionSpec,
+    value: CfgSectionValue,
+    ml: "Optional[ModuleLibrary]",
+) -> dict:
     result: dict[str, Any] = {}
-    for key, node in section.fields.items():
-        if isinstance(node, ScalarField):
-            result[key] = node.value
-        elif isinstance(node, SweepField):
+    for key, node_spec in spec.fields.items():
+        node_val = value.fields.get(key)
+        if node_val is None:
+            continue
+
+        if isinstance(node_spec, ScalarSpec):
+            assert isinstance(node_val, ScalarValue)
+            result[key] = node_val.value
+
+        elif isinstance(node_spec, SweepSpec):
+            assert isinstance(node_val, SweepValue)
             from zcu_tools.notebook.utils import make_sweep
 
-            if node.step is not None:
-                result[key] = make_sweep(node.start, node.stop, step=node.step)
+            if node_val.step is not None:
+                result[key] = make_sweep(
+                    node_val.start, node_val.stop, step=node_val.step
+                )
             else:
-                result[key] = make_sweep(node.start, node.stop, expts=node.expts)
-        elif isinstance(node, MultiSweepField):
+                result[key] = make_sweep(
+                    node_val.start, node_val.stop, expts=node_val.expts
+                )
+
+        elif isinstance(node_spec, MultiSweepSpec):
+            assert isinstance(node_val, MultiSweepValue)
             from zcu_tools.notebook.utils import make_sweep
 
             result[key] = {
                 axis: (
-                    make_sweep(f.start, f.stop, step=f.step)
-                    if f.step is not None
-                    else make_sweep(f.start, f.stop, expts=f.expts)
+                    make_sweep(sv.start, sv.stop, step=sv.step)
+                    if sv.step is not None
+                    else make_sweep(sv.start, sv.stop, expts=sv.expts)
                 )
-                for axis, f in node.sweeps.items()
+                for axis, sv in node_val.axes.items()
             }
-        elif isinstance(node, ModuleRefField):
-            expanded_dict = None
-            if node.expanded_content is not None:
-                expanded_dict = _section_to_dict(node.expanded_content, ml)
 
-            if node.module_name is not None:
-                if ml is None:
-                    raise RuntimeError(
-                        f"ModuleRefField '{key}' references module '{node.module_name}' "
-                        "but no ModuleLibrary is available"
-                    )
-                from copy import deepcopy
+        elif isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
+            assert isinstance(node_val, (ModuleRefValue, WaveformRefValue))
+            result[key] = _section_to_dict(
+                _find_allowed_spec(node_spec, node_val),
+                node_val.value,
+                ml,
+            )
 
-                from zcu_tools.utils import deepupdate
+        elif isinstance(node_spec, CfgSectionSpec):
+            assert isinstance(node_val, CfgSectionValue)
+            result[key] = _section_to_dict(node_spec, node_val, ml)
 
-                override = deepcopy(node.override) if node.override else {}
-                if expanded_dict:
-                    deepupdate(override, expanded_dict, behavior="force")
-                result[key] = ml.get_module(node.module_name, override or None)
-            else:
-                if expanded_dict:
-                    result[key] = expanded_dict
-                else:
-                    result[key] = node.inline_cfg or {}
-        elif isinstance(node, WaveformRefField):
-            expanded_dict = None
-            if node.expanded_content is not None:
-                expanded_dict = _section_to_dict(node.expanded_content, ml)
-
-            if node.waveform_name is not None:
-                if ml is None:
-                    raise RuntimeError(
-                        f"WaveformRefField '{key}' references waveform '{node.waveform_name}' "
-                        "but no ModuleLibrary is available"
-                    )
-                from copy import deepcopy
-
-                from zcu_tools.utils import deepupdate
-
-                override = deepcopy(node.override) if node.override else {}
-                if expanded_dict:
-                    deepupdate(override, expanded_dict, behavior="force")
-                result[key] = ml.get_waveform(node.waveform_name, override or None)
-            else:
-                if expanded_dict:
-                    result[key] = expanded_dict
-                else:
-                    result[key] = node.inline_cfg or {}
-        elif isinstance(node, CfgSection):
-            result[key] = _section_to_dict(node, ml)
         else:
-            raise TypeError(f"Unknown CfgNode type: {type(node)}")
+            raise TypeError(f"Unknown CfgNodeSpec type: {type(node_spec)}")
+
     return result
 
 
+def _find_allowed_spec(
+    ref_spec: Union[ModuleRefSpec, WaveformRefSpec],
+    ref_val: Union[ModuleRefValue, WaveformRefValue],
+) -> CfgSectionSpec:
+    """Return the CfgSectionSpec from allowed[] that matches chosen_key's label."""
+    chosen = ref_val.chosen_key
+    # Strip "<Custom:...>" prefix to get the label
+    if chosen.startswith("<Custom:"):
+        label = chosen[len("<Custom:") : -1]
+    else:
+        label = chosen
+    for s in ref_spec.allowed:
+        if s.label == label:
+            return s
+    # fallback: return first allowed spec
+    if ref_spec.allowed:
+        return ref_spec.allowed[0]
+    return CfgSectionSpec()
+
+
 def schema_to_dict(schema: CfgSchema, ml: "Optional[ModuleLibrary]") -> dict:
-    """Recursively convert a CfgSchema to an exp_cfg dict for ml.make_cfg()."""
-    return _section_to_dict(schema.root, ml)
+    """Recursively convert a CfgSchema to an exp_cfg dict."""
+    return _section_to_dict(schema.spec, schema.value, ml)
 
 
-# --- Abstract base ---
+# ---------------------------------------------------------------------------
+# make_default_value — build a default CfgSectionValue from a CfgSectionSpec
+# ---------------------------------------------------------------------------
+
+
+def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
+    """Produce a default CfgSectionValue mirroring the given spec structure."""
+    fields: dict[str, CfgNodeValue] = {}
+    for key, node_spec in spec.fields.items():
+        if isinstance(node_spec, ScalarSpec):
+            # Use 0 / "" / False as a sensible zero-value per type
+            defaults: dict[type, Any] = {int: 0, float: 0.0, bool: False, str: ""}
+            fields[key] = ScalarValue(defaults.get(node_spec.type, None))
+        elif isinstance(node_spec, SweepSpec):
+            fields[key] = SweepValue(start=0.0, stop=1.0, expts=11)
+        elif isinstance(node_spec, MultiSweepSpec):
+            fields[key] = MultiSweepValue(
+                axes={axis: SweepValue(0.0, 1.0, 11) for axis in node_spec.axes}
+            )
+        elif isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
+            first = node_spec.allowed[0] if node_spec.allowed else CfgSectionSpec()
+            label = first.label or "Custom"
+            fields[key] = (
+                ModuleRefValue(f"<Custom:{label}>", make_default_value(first))
+                if isinstance(node_spec, ModuleRefSpec)
+                else WaveformRefValue(f"<Custom:{label}>", make_default_value(first))
+            )
+        elif isinstance(node_spec, CfgSectionSpec):
+            fields[key] = make_default_value(node_spec)
+    return CfgSectionValue(fields=fields)
+
+
+# ---------------------------------------------------------------------------
+# Abstract base
+# ---------------------------------------------------------------------------
 
 T_Result = TypeVar("T_Result")
 T_AnalyzeResult = TypeVar("T_AnalyzeResult")
@@ -272,7 +303,7 @@ T_AnalyzeResult = TypeVar("T_AnalyzeResult")
 class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult]):
     @abstractmethod
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
-        """Build a default CfgSchema from ctx; ModuleRefField.expanded_content eager-loaded."""
+        """Build a default CfgSchema from ctx."""
 
     @abstractmethod
     def get_run_params(self) -> dict[str, ParamSpec]:
@@ -280,7 +311,7 @@ class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult]):
 
     @abstractmethod
     def run(self, ctx: ExpContext, schema: CfgSchema, **user_params: Any) -> T_Result:
-        """Run the experiment; internally calls schema_to_dict() + ml.make_cfg()."""
+        """Run the experiment; internally calls schema_to_dict()."""
 
     @abstractmethod
     def get_analyze_params(self) -> dict[str, ParamSpec]:
@@ -290,7 +321,7 @@ class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult]):
     def analyze(
         self, result: T_Result, ctx: ExpContext, **user_params: Any
     ) -> T_AnalyzeResult:
-        """Run analysis; params derivable from ctx are read internally."""
+        """Run analysis."""
 
     @abstractmethod
     def get_writeback_spec(
@@ -308,7 +339,7 @@ class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult]):
 
     @abstractmethod
     def get_figure(self, analyze_result: T_AnalyzeResult) -> Optional[Figure]:
-        """Extract a matplotlib Figure from the analyze result (None if not available)."""
+        """Extract a matplotlib Figure from the analyze result."""
 
     @abstractmethod
     def make_save_paths(self, ctx: ExpContext) -> SavePaths: ...

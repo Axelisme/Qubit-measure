@@ -1,63 +1,40 @@
-"""cfg_schemas.py — typed CfgSection builders for every ModuleCfg / WaveformCfg subtype.
+"""cfg_schemas.py — convert ModuleCfg / WaveformCfg objects to (spec, value) pairs.
 
-Each concrete config class (PulseCfg, PulseReadoutCfg, FlatTopWaveformCfg, …) gets its
-own _xxx_to_section() function that produces a CfgSection with:
-  - correct `choices` for Literal-typed discriminator / enum fields
-  - `editable=False` on discriminator-only fields ("type" / "style")
-  - proper numeric types (float vs int) so the right spin-box is rendered
-  - recursive sub-sections for nested config fields
+The Spec side comes from gui/specs/ static constants.
+This module only handles the value extraction: reading actual field values from
+a live config object and producing a CfgSectionValue that matches its spec.
 
 Public entry points:
-  waveform_cfg_to_schema(cfg) → CfgSection   (for any AbsWaveformCfg subtype)
-  module_cfg_to_schema(cfg)   → CfgSection   (for any AbsModuleCfg subtype)
-
-Both fall back to the generic module_cfg_to_section() from adapter.py when the subtype
-is not explicitly handled (so new types still work, just without choices).
+    module_cfg_to_value(cfg) -> (CfgSectionSpec, CfgSectionValue)
+    waveform_cfg_to_value(cfg) -> (CfgSectionSpec, CfgSectionValue)
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from zcu_tools.gui.adapter import CfgSection, ScalarField, module_cfg_to_section
-
-if TYPE_CHECKING:
-    from zcu_tools.gui.adapter import CfgSchema
+from zcu_tools.gui.adapter import (
+    CfgSectionSpec,
+    CfgSectionValue,
+    ScalarValue,
+    WaveformRefValue,
+    make_default_value,
+)
+from zcu_tools.gui.specs import (
+    BATH_RESET_SPEC,
+    CONST_WAVEFORM_SPEC,
+    DIRECT_READOUT_SPEC,
+    NONE_RESET_SPEC,
+    PULSE_READOUT_SPEC,
+    PULSE_RESET_SPEC,
+    PULSE_SPEC,
+    TWO_PULSE_RESET_SPEC,
+    WAVEFORM_SPEC_BY_STYLE,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-_WAVEFORM_STYLE_CHOICES = ["const", "cosine", "gauss", "drag", "arb", "flat_top"]
-_RAISE_WAVEFORM_STYLE_CHOICES = ["cosine", "gauss", "drag", "arb"]
-
-_MODULE_TYPE_CHOICES = [
-    "pulse",
-    "readout/direct",
-    "readout/pulse",
-    "reset/none",
-    "reset/pulse",
-    "reset/two_pulse",
-    "reset/bath",
-]
-
-
-def _locked(value: Any, label: str, choices: list) -> ScalarField:
-    return ScalarField(
-        value=value, label=label, type=str, editable=False, choices=choices
-    )
-
-
-def _sf(
-    value: Any,
-    label: str,
-    typ: type,
-    choices: list | None = None,
-    decimals: int | None = None,
-) -> ScalarField:
-    return ScalarField(
-        value=value, label=label, type=typ, choices=choices, decimals=decimals
-    )
 
 
 def _v(cfg: Any, attr: str, default: Any = 0) -> Any:
@@ -65,351 +42,273 @@ def _v(cfg: Any, attr: str, default: Any = 0) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# Waveform section builders
+# Waveform value builders
 # ---------------------------------------------------------------------------
 
 
-def _const_to_section(cfg: Any) -> CfgSection:
-    return CfgSection(
-        label="Const Waveform",
-        fields={
-            "style": _locked("const", "Style", ["const"]),
-            "length": _sf(_v(cfg, "length", 1.0), "Length (us)", float, decimals=3),
-        },
-    )
+def waveform_cfg_to_value(cfg: Any) -> tuple[CfgSectionSpec, CfgSectionValue]:
+    """Return (spec, value) for any AbsWaveformCfg subtype."""
+    style = str(getattr(cfg, "style", "const"))
+    spec = WAVEFORM_SPEC_BY_STYLE.get(style, CONST_WAVEFORM_SPEC)
 
+    if style == "const":
+        val = CfgSectionValue(
+            fields={
+                "style": ScalarValue("const"),
+                "length": ScalarValue(float(_v(cfg, "length", 1.0))),
+            }
+        )
+    elif style == "cosine":
+        val = CfgSectionValue(
+            fields={
+                "style": ScalarValue("cosine"),
+                "length": ScalarValue(float(_v(cfg, "length", 0.1))),
+            }
+        )
+    elif style == "gauss":
+        val = CfgSectionValue(
+            fields={
+                "style": ScalarValue("gauss"),
+                "length": ScalarValue(float(_v(cfg, "length", 1.0))),
+                "sigma": ScalarValue(float(_v(cfg, "sigma", 0.25))),
+            }
+        )
+    elif style == "drag":
+        val = CfgSectionValue(
+            fields={
+                "style": ScalarValue("drag"),
+                "length": ScalarValue(float(_v(cfg, "length", 1.0))),
+                "sigma": ScalarValue(float(_v(cfg, "sigma", 0.25))),
+                "delta": ScalarValue(float(_v(cfg, "delta", 0.0))),
+                "alpha": ScalarValue(float(_v(cfg, "alpha", 0.5))),
+            }
+        )
+    elif style == "arb":
+        val = CfgSectionValue(
+            fields={
+                "style": ScalarValue("arb"),
+                "length": ScalarValue(float(_v(cfg, "length", 1.0))),
+                "data": ScalarValue(str(_v(cfg, "data", ""))),
+            }
+        )
+    elif style == "flat_top":
+        raise_wav = getattr(cfg, "raise_waveform", None)
+        if raise_wav is not None:
+            _, raise_val = waveform_cfg_to_value(raise_wav)
+            raise_spec = WAVEFORM_SPEC_BY_STYLE.get(
+                str(getattr(raise_wav, "style", "cosine")), CONST_WAVEFORM_SPEC
+            )
+        else:
+            from zcu_tools.gui.specs.waveform import COSINE_WAVEFORM_SPEC
 
-def _cosine_to_section(cfg: Any) -> CfgSection:
-    return CfgSection(
-        label="Cosine Waveform",
-        fields={
-            "style": _locked("cosine", "Style", _RAISE_WAVEFORM_STYLE_CHOICES),
-            "length": _sf(_v(cfg, "length", 0.1), "Length (us)", float, decimals=3),
-        },
-    )
+            raise_spec = COSINE_WAVEFORM_SPEC
+            raise_val = make_default_value(raise_spec)
 
+        raise_label = raise_spec.label
+        val = CfgSectionValue(
+            fields={
+                "style": ScalarValue("flat_top"),
+                "length": ScalarValue(float(_v(cfg, "length", 5.0))),
+                "raise_waveform": WaveformRefValue(
+                    chosen_key=f"<Custom:{raise_label}>",
+                    value=raise_val,
+                ),
+            }
+        )
+    else:
+        val = make_default_value(spec)
 
-def _gauss_to_section(cfg: Any) -> CfgSection:
-    return CfgSection(
-        label="Gauss Waveform",
-        fields={
-            "style": _locked("gauss", "Style", _RAISE_WAVEFORM_STYLE_CHOICES),
-            "length": _sf(_v(cfg, "length", 1.0), "Length (us)", float, decimals=3),
-            "sigma": _sf(_v(cfg, "sigma", 0.25), "Sigma (us)", float, decimals=3),
-        },
-    )
-
-
-def _drag_to_section(cfg: Any) -> CfgSection:
-    return CfgSection(
-        label="DRAG Waveform",
-        fields={
-            "style": _locked("drag", "Style", _RAISE_WAVEFORM_STYLE_CHOICES),
-            "length": _sf(_v(cfg, "length", 1.0), "Length (us)", float, decimals=3),
-            "sigma": _sf(_v(cfg, "sigma", 0.25), "Sigma (us)", float, decimals=3),
-            "delta": _sf(_v(cfg, "delta", 0.0), "Delta (MHz)", float, decimals=2),
-            "alpha": _sf(_v(cfg, "alpha", 0.5), "Alpha", float, decimals=4),
-        },
-    )
-
-
-def _arb_to_section(cfg: Any) -> CfgSection:
-    return CfgSection(
-        label="Arb Waveform",
-        fields={
-            "style": _locked("arb", "Style", _RAISE_WAVEFORM_STYLE_CHOICES),
-            "length": _sf(_v(cfg, "length", 1.0), "Length (us)", float, decimals=3),
-            "data": _sf(_v(cfg, "data", ""), "Data key", str),
-        },
-    )
-
-
-def _flat_top_to_section(cfg: Any) -> CfgSection:
-    raise_wav = getattr(cfg, "raise_waveform", None)
-    raise_sec = (
-        waveform_cfg_to_section(raise_wav)
-        if raise_wav is not None
-        else _cosine_to_section(None)
-    )
-    return CfgSection(
-        label="FlatTop Waveform",
-        fields={
-            "style": _locked("flat_top", "Style", _WAVEFORM_STYLE_CHOICES),
-            "length": _sf(_v(cfg, "length", 5.0), "Length (us)", float, decimals=3),
-            "raise_waveform": raise_sec,
-        },
-    )
-
-
-_WAVEFORM_BUILDERS: dict[str, Any] = {
-    "const": _const_to_section,
-    "cosine": _cosine_to_section,
-    "gauss": _gauss_to_section,
-    "drag": _drag_to_section,
-    "arb": _arb_to_section,
-    "flat_top": _flat_top_to_section,
-}
-
-
-def waveform_cfg_to_section(cfg: Any) -> CfgSection:
-    """Return a typed CfgSection for any AbsWaveformCfg subtype."""
-    style = getattr(cfg, "style", None)
-    builder = _WAVEFORM_BUILDERS.get(str(style)) if style else None
-    if builder is not None:
-        return builder(cfg)
-    return module_cfg_to_section(cfg)
+    return spec, val
 
 
 # ---------------------------------------------------------------------------
-# Module section builders — pulse
+# Module value builders
 # ---------------------------------------------------------------------------
 
 
-def _pulse_to_section(cfg: Any) -> CfgSection:
+def _pulse_to_value(cfg: Any) -> CfgSectionValue:
     wav = getattr(cfg, "waveform", None)
-    wav_sec = (
-        waveform_cfg_to_section(wav) if wav is not None else _const_to_section(None)
-    )
-    return CfgSection(
-        label="Pulse",
+    if wav is not None:
+        wav_spec, wav_val = waveform_cfg_to_value(wav)
+    else:
+        wav_spec = CONST_WAVEFORM_SPEC
+        wav_val = make_default_value(wav_spec)
+
+    wav_label = wav_spec.label
+    return CfgSectionValue(
         fields={
-            "type": _locked("pulse", "Type", ["pulse"]),
-            "waveform": wav_sec,
-            "ch": _sf(_v(cfg, "ch", 0), "Gen ch", int),
-            "nqz": _sf(_v(cfg, "nqz", 2), "NQZ", int, [1, 2]),
-            "freq": _sf(_v(cfg, "freq", 6000.0), "Freq (MHz)", float, decimals=2),
-            "phase": _sf(_v(cfg, "phase", 0.0), "Phase (deg)", float, decimals=2),
-            "gain": _sf(_v(cfg, "gain", 0.5), "Gain", float, decimals=4),
-            "pre_delay": _sf(
-                _v(cfg, "pre_delay", 0.0), "Pre-delay (us)", float, decimals=3
+            "type": ScalarValue("pulse"),
+            "waveform": WaveformRefValue(
+                chosen_key=f"<Custom:{wav_label}>",
+                value=wav_val,
             ),
-            "post_delay": _sf(
-                _v(cfg, "post_delay", 0.0), "Post-delay (us)", float, decimals=3
-            ),
-        },
+            "ch": ScalarValue(int(_v(cfg, "ch", 0))),
+            "nqz": ScalarValue(int(_v(cfg, "nqz", 2))),
+            "freq": ScalarValue(float(_v(cfg, "freq", 6000.0))),
+            "phase": ScalarValue(float(_v(cfg, "phase", 0.0))),
+            "gain": ScalarValue(float(_v(cfg, "gain", 0.5))),
+            "pre_delay": ScalarValue(float(_v(cfg, "pre_delay", 0.0))),
+            "post_delay": ScalarValue(float(_v(cfg, "post_delay", 0.0))),
+        }
     )
 
 
-# ---------------------------------------------------------------------------
-# Module section builders — readout
-# ---------------------------------------------------------------------------
-
-
-def _direct_readout_to_section(cfg: Any) -> CfgSection:
-    return CfgSection(
-        label="Direct Readout",
+def _direct_readout_to_value(cfg: Any) -> CfgSectionValue:
+    return CfgSectionValue(
         fields={
-            "type": _locked("readout/direct", "Type", ["readout/direct"]),
-            "ro_ch": _sf(_v(cfg, "ro_ch", 0), "RO ch", int),
-            "ro_freq": _sf(
-                _v(cfg, "ro_freq", 6000.0), "RO freq (MHz)", float, decimals=2
-            ),
-            "ro_length": _sf(
-                _v(cfg, "ro_length", 1.0), "RO length (us)", float, decimals=3
-            ),
-            "trig_offset": _sf(
-                _v(cfg, "trig_offset", 0.0), "Trig offset (us)", float, decimals=3
-            ),
-        },
+            "type": ScalarValue("readout/direct"),
+            "ro_ch": ScalarValue(int(_v(cfg, "ro_ch", 0))),
+            "ro_freq": ScalarValue(float(_v(cfg, "ro_freq", 6000.0))),
+            "ro_length": ScalarValue(float(_v(cfg, "ro_length", 1.0))),
+            "trig_offset": ScalarValue(float(_v(cfg, "trig_offset", 0.0))),
+        }
     )
 
 
-def _pulse_readout_to_section(cfg: Any) -> CfgSection:
+def _pulse_readout_to_value(cfg: Any) -> CfgSectionValue:
     pulse_cfg = getattr(cfg, "pulse_cfg", None)
     ro_cfg = getattr(cfg, "ro_cfg", None)
-    pulse_sec = (
-        _pulse_to_section(pulse_cfg)
+    pulse_val = (
+        _pulse_to_value(pulse_cfg)
         if pulse_cfg is not None
-        else _pulse_to_section(None)
+        else make_default_value(PULSE_SPEC)
     )
-    ro_sec = (
-        _direct_readout_to_section(ro_cfg)
+    ro_val = (
+        _direct_readout_to_value(ro_cfg)
         if ro_cfg is not None
-        else _direct_readout_to_section(None)
+        else make_default_value(DIRECT_READOUT_SPEC)
     )
-    return CfgSection(
-        label="Pulse Readout",
+    return CfgSectionValue(
         fields={
-            "type": _locked(
-                "readout/pulse", "Type", ["readout/direct", "readout/pulse"]
-            ),
-            "pulse_cfg": pulse_sec,
-            "ro_cfg": ro_sec,
-        },
+            "type": ScalarValue("readout/pulse"),
+            "pulse_cfg": pulse_val,
+            "ro_cfg": ro_val,
+        }
     )
 
 
-# ---------------------------------------------------------------------------
-# Module section builders — reset
-# ---------------------------------------------------------------------------
+def _none_reset_to_value(cfg: Any) -> CfgSectionValue:  # noqa: ARG001
+    return CfgSectionValue(fields={"type": ScalarValue("reset/none")})
 
 
-def _none_reset_to_section(_cfg: Any) -> CfgSection:
-    return CfgSection(
-        label="None Reset",
-        fields={
-            "type": _locked("reset/none", "Type", _MODULE_TYPE_CHOICES),
-        },
-    )
-
-
-def _pulse_reset_to_section(cfg: Any) -> CfgSection:
+def _pulse_reset_to_value(cfg: Any) -> CfgSectionValue:
     pulse_cfg = getattr(cfg, "pulse_cfg", None)
-    pulse_sec = (
-        _pulse_to_section(pulse_cfg)
+    pulse_val = (
+        _pulse_to_value(pulse_cfg)
         if pulse_cfg is not None
-        else _pulse_to_section(None)
+        else make_default_value(PULSE_SPEC)
     )
-    return CfgSection(
-        label="Pulse Reset",
+    return CfgSectionValue(
         fields={
-            "type": _locked("reset/pulse", "Type", _MODULE_TYPE_CHOICES),
-            "pulse_cfg": pulse_sec,
-        },
+            "type": ScalarValue("reset/pulse"),
+            "pulse_cfg": pulse_val,
+        }
     )
 
 
-def _two_pulse_reset_to_section(cfg: Any) -> CfgSection:
+def _two_pulse_reset_to_value(cfg: Any) -> CfgSectionValue:
     p1 = getattr(cfg, "pulse1_cfg", None)
     p2 = getattr(cfg, "pulse2_cfg", None)
-    return CfgSection(
-        label="Two-Pulse Reset",
+    return CfgSectionValue(
         fields={
-            "type": _locked("reset/two_pulse", "Type", _MODULE_TYPE_CHOICES),
-            "pulse1_cfg": _pulse_to_section(p1)
+            "type": ScalarValue("reset/two_pulse"),
+            "pulse1_cfg": _pulse_to_value(p1)
             if p1 is not None
-            else _pulse_to_section(None),
-            "pulse2_cfg": _pulse_to_section(p2)
+            else make_default_value(PULSE_SPEC),
+            "pulse2_cfg": _pulse_to_value(p2)
             if p2 is not None
-            else _pulse_to_section(None),
-        },
+            else make_default_value(PULSE_SPEC),
+        }
     )
 
 
-def _bath_reset_to_section(cfg: Any) -> CfgSection:
+def _bath_reset_to_value(cfg: Any) -> CfgSectionValue:
     cav = getattr(cfg, "cavity_tone_cfg", None)
     qub = getattr(cfg, "qubit_tone_cfg", None)
     pi2 = getattr(cfg, "pi2_cfg", None)
-    return CfgSection(
-        label="Bath Reset",
+    return CfgSectionValue(
         fields={
-            "type": _locked("reset/bath", "Type", _MODULE_TYPE_CHOICES),
-            "cavity_tone_cfg": _pulse_to_section(cav)
+            "type": ScalarValue("reset/bath"),
+            "cavity_tone_cfg": _pulse_to_value(cav)
             if cav is not None
-            else _pulse_to_section(None),
-            "qubit_tone_cfg": _pulse_to_section(qub)
+            else make_default_value(PULSE_SPEC),
+            "qubit_tone_cfg": _pulse_to_value(qub)
             if qub is not None
-            else _pulse_to_section(None),
-            "pi2_cfg": _pulse_to_section(pi2)
+            else make_default_value(PULSE_SPEC),
+            "pi2_cfg": _pulse_to_value(pi2)
             if pi2 is not None
-            else _pulse_to_section(None),
-        },
+            else make_default_value(PULSE_SPEC),
+        }
     )
 
 
-_MODULE_BUILDERS: dict[str, Any] = {
-    "pulse": _pulse_to_section,
-    "readout/direct": _direct_readout_to_section,
-    "readout/pulse": _pulse_readout_to_section,
-    "reset/none": _none_reset_to_section,
-    "reset/pulse": _pulse_reset_to_section,
-    "reset/two_pulse": _two_pulse_reset_to_section,
-    "reset/bath": _bath_reset_to_section,
+_MODULE_SPEC_BY_TYPE: dict[str, CfgSectionSpec] = {
+    "pulse": PULSE_SPEC,
+    "readout/direct": DIRECT_READOUT_SPEC,
+    "readout/pulse": PULSE_READOUT_SPEC,
+    "reset/none": NONE_RESET_SPEC,
+    "reset/pulse": PULSE_RESET_SPEC,
+    "reset/two_pulse": TWO_PULSE_RESET_SPEC,
+    "reset/bath": BATH_RESET_SPEC,
+}
+
+_MODULE_VALUE_BUILDERS: dict[str, Any] = {
+    "pulse": _pulse_to_value,
+    "readout/direct": _direct_readout_to_value,
+    "readout/pulse": _pulse_readout_to_value,
+    "reset/none": _none_reset_to_value,
+    "reset/pulse": _pulse_reset_to_value,
+    "reset/two_pulse": _two_pulse_reset_to_value,
+    "reset/bath": _bath_reset_to_value,
 }
 
 
-def module_cfg_to_schema(cfg: Any) -> CfgSection:
-    """Return a typed CfgSection for any AbsModuleCfg subtype."""
-    type_val = getattr(cfg, "type", None)
-    builder = _MODULE_BUILDERS.get(str(type_val)) if type_val else None
-    if builder is not None:
-        return builder(cfg)
-    return module_cfg_to_section(cfg)
+def module_cfg_to_value(cfg: Any) -> tuple[CfgSectionSpec, CfgSectionValue]:
+    """Return (spec, value) for any AbsModuleCfg or AbsWaveformCfg subtype.
+
+    Used by CfgFormWidget._on_ref_changed when loading a named module from ml.
+    Falls back to a generic dict-based extraction for unknown types.
+    """
+    try:
+        from zcu_tools.program.v2.modules.waveform import AbsWaveformCfg
+
+        if isinstance(cfg, AbsWaveformCfg):
+            return waveform_cfg_to_value(cfg)
+    except Exception:
+        pass
+
+    type_val = str(getattr(cfg, "type", ""))
+    spec = _MODULE_SPEC_BY_TYPE.get(type_val)
+    builder = _MODULE_VALUE_BUILDERS.get(type_val)
+    if spec is not None and builder is not None:
+        return spec, builder(cfg)
+
+    # Generic fallback: mirror to_dict() structure
+    if hasattr(cfg, "to_dict"):
+        d = cfg.to_dict()
+    else:
+        d = dict(cfg)
+    return _dict_to_spec_value(d)
 
 
-# ---------------------------------------------------------------------------
-# Public schema factories — build CfgSchema with typed fields from raw values
-# Used by Adapters to provide WritebackItem.edit_template
-# ---------------------------------------------------------------------------
+def _dict_to_spec_value(
+    data: dict,
+) -> tuple[CfgSectionSpec, CfgSectionValue]:
+    from zcu_tools.gui.adapter import ScalarSpec
 
-
-class _SimpleNamespace:
-    """Minimal namespace to pass values to section builders via getattr."""
-
-    def __init__(self, **kwargs: Any) -> None:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-
-
-def make_pulse_readout_schema(
-    *,
-    pulse_ch: int = 0,
-    pulse_nqz: int = 2,
-    pulse_freq: float = 6000.0,
-    pulse_gain: float = 0.2,
-    waveform_style: str = "const",
-    waveform_length: float = 1.0,
-    ro_ch: int = 0,
-    ro_length: float = 0.9,
-    trig_offset: float = 0.335,
-) -> "CfgSchema":
-    """Build a CfgSchema for a PulseReadoutCfg with given default values."""
-    from zcu_tools.gui.adapter import CfgSchema
-
-    wav_builder = _WAVEFORM_BUILDERS.get(waveform_style, _const_to_section)
-    wav_ns = _SimpleNamespace(style=waveform_style, length=waveform_length)
-    wav_sec = wav_builder(wav_ns)
-
-    pulse_ns = _SimpleNamespace(
-        waveform=None,
-        ch=pulse_ch,
-        nqz=pulse_nqz,
-        freq=pulse_freq,
-        phase=0.0,
-        gain=pulse_gain,
-        pre_delay=0.0,
-        post_delay=0.0,
-    )
-    pulse_sec = _pulse_to_section(pulse_ns)
-    pulse_sec.fields["waveform"] = wav_sec
-
-    ro_ns = _SimpleNamespace(
-        ro_ch=ro_ch, ro_freq=pulse_freq, ro_length=ro_length, trig_offset=trig_offset
-    )
-    ro_sec = _direct_readout_to_section(ro_ns)
-
-    root = CfgSection(
-        label="Pulse Readout",
-        fields={
-            "type": _locked(
-                "readout/pulse", "Type", ["readout/direct", "readout/pulse"]
-            ),
-            "pulse_cfg": pulse_sec,
-            "ro_cfg": ro_sec,
-        },
-    )
-    return CfgSchema(root=root)
-
-
-def make_flat_top_waveform_schema(
-    *,
-    length: float = 5.0,
-    raise_style: str = "cosine",
-    raise_length: float = 0.1,
-) -> "CfgSchema":
-    """Build a CfgSchema for a FlatTopWaveformCfg with given default values."""
-    from zcu_tools.gui.adapter import CfgSchema
-
-    raise_builder = _WAVEFORM_BUILDERS.get(raise_style, _cosine_to_section)
-    raise_ns = _SimpleNamespace(style=raise_style, length=raise_length)
-    raise_sec = raise_builder(raise_ns)
-
-    root = CfgSection(
-        label="FlatTop Waveform",
-        fields={
-            "style": _locked("flat_top", "Style", _WAVEFORM_STYLE_CHOICES),
-            "length": _sf(length, "Length (us)", float, decimals=3),
-            "raise_waveform": raise_sec,
-        },
-    )
-    return CfgSchema(root=root)
+    spec_fields: dict = {}
+    val_fields: dict = {}
+    for k, v in data.items():
+        if isinstance(v, dict):
+            sub_spec, sub_val = _dict_to_spec_value(v)
+            spec_fields[k] = sub_spec
+            val_fields[k] = sub_val
+        elif isinstance(v, (int, float, bool, str)) or v is None:
+            is_discriminator = k in ("type", "style")
+            spec_fields[k] = ScalarSpec(
+                label=k.replace("_", " ").title(),
+                type=type(v) if v is not None else str,
+                hidden=is_discriminator,
+            )
+            val_fields[k] = ScalarValue(v)
+    return CfgSectionSpec(fields=spec_fields), CfgSectionValue(fields=val_fields)
