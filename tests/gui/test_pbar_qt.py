@@ -31,8 +31,8 @@ def _make_stack(qapp):  # noqa: ARG001
 # ---------------------------------------------------------------------------
 
 
-def test_factory_push_and_pop(qapp):
-    """Factory push/pop cycle leaves the stack empty."""
+def test_factory_push_and_pop_leave_false(qapp):
+    """leave=False: close() pops the bar immediately."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 
     from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
@@ -40,9 +40,9 @@ def test_factory_push_and_pop(qapp):
     stack = _make_stack(qapp)
     factory = QtProgressBarFactory(stack)
 
-    pbar = factory(desc="test", total=10)
+    pbar = factory(desc="test", total=10, leave=False)
     QApplication.processEvents()
-    assert stack._bars != []  # bar was pushed
+    assert len(stack._active) == 1  # bar was pushed
 
     pbar.update(3)
     QApplication.processEvents()
@@ -50,11 +50,11 @@ def test_factory_push_and_pop(qapp):
 
     pbar.close()
     QApplication.processEvents()
-    assert stack._bars == []  # bar was popped
+    assert len(stack._active) == 0  # bar was popped
 
 
-def test_factory_two_layers(qapp):
-    """Two nested pbars result in two bars in the stack."""
+def test_factory_push_and_pop_leave_true(qapp):
+    """leave=True: close() leaves bar visible; reset_all() clears it."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 
     from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
@@ -62,19 +62,43 @@ def test_factory_two_layers(qapp):
     stack = _make_stack(qapp)
     factory = QtProgressBarFactory(stack)
 
-    outer = factory(desc="outer", total=5)
+    pbar = factory(desc="test", total=10, leave=True)
     QApplication.processEvents()
-    inner = factory(desc="inner", total=10)
+    assert len(stack._active) == 1
+
+    pbar.close()
     QApplication.processEvents()
-    assert len(stack._bars) == 2
+    assert len(stack._active) == 1  # still active (leave=True)
+
+    stack.reset_all()
+    assert len(stack._active) == 0
+
+
+def test_factory_two_layers(qapp):
+    """Two nested pbars (leave=False): inner pops on close, outer stays until reset."""
+    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+
+    from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
+
+    stack = _make_stack(qapp)
+    factory = QtProgressBarFactory(stack)
+
+    outer = factory(desc="outer", total=5, leave=True)
+    QApplication.processEvents()
+    inner = factory(desc="inner", total=10, leave=False)
+    QApplication.processEvents()
+    assert len(stack._active) == 2
 
     inner.close()
     QApplication.processEvents()
-    assert len(stack._bars) == 1
+    assert len(stack._active) == 1  # inner popped (leave=False)
 
     outer.close()
     QApplication.processEvents()
-    assert len(stack._bars) == 0
+    assert len(stack._active) == 1  # outer stays (leave=True)
+
+    stack.reset_all()
+    assert len(stack._active) == 0
 
 
 def test_total_setter(qapp):
@@ -86,11 +110,11 @@ def test_total_setter(qapp):
     stack = _make_stack(qapp)
     factory = QtProgressBarFactory(stack)
 
-    pbar = factory(desc="t", total=5)
+    pbar = factory(desc="t", total=5, leave=False)
     QApplication.processEvents()
     pbar.total = 20
     QApplication.processEvents()
-    assert stack._bars[0].maximum() == 20
+    assert stack._active[0].maximum() == 20
 
     pbar.close()
     QApplication.processEvents()
@@ -102,7 +126,7 @@ def test_total_setter(qapp):
 
 
 def test_fake_freq_adapter_run_with_qt_pbar(qapp):
-    """FakeFreqAdapter.run() completes when QtProgressBarFactory is active."""
+    """FakeFreqAdapter.run() completes; leave=True outer bar stays, reset_all clears."""
     from unittest.mock import MagicMock
 
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
@@ -135,4 +159,6 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
 
     assert len(freqs) == 5
     assert len(signals) == 5
-    assert stack._bars == []  # all pbars were closed
+    # FakeFreqAdapter uses leave=True (default) for rounds bar, so it stays until reset
+    stack.reset_all()
+    assert len(stack._active) == 0

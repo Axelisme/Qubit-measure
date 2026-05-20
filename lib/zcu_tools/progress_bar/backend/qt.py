@@ -94,11 +94,13 @@ class QtProgressBar(BaseProgressBar):
         bridge: "_StackBridge",
         label: str = "",
         total: Optional[ProgressTotal] = None,
+        leave: bool = True,
         **_kwargs: Any,
     ) -> None:
         self._bridge = bridge
         self._label = label
         self._total: ProgressTotal = total
+        self._leave = leave
         self._n: ProgressValue = 0
         # emit push; block briefly until main thread creates the QProgressBar
         bridge.push_requested.emit(label, int(total) if total is not None else 0)
@@ -123,7 +125,8 @@ class QtProgressBar(BaseProgressBar):
         pass  # Qt repaints automatically
 
     def close(self) -> None:
-        self._bridge.pop_requested.emit(self._bar)
+        if not self._leave:
+            self._bridge.pop_requested.emit(self._bar)
 
     @property
     def total(self) -> ProgressTotal:
@@ -153,9 +156,12 @@ class QtProgressBarFactory:
 
     def __call__(self, *args: Any, **kwargs: Any) -> QtProgressBar:
         # tqdm-compatible: positional args may be (iterable, desc, total, ...)
-        # We only care about desc/total/label keywords.
         label = kwargs.pop("desc", "") or (args[1] if len(args) > 1 else "")
         total = kwargs.pop("total", None) or (args[2] if len(args) > 2 else None)
+        leave = kwargs.pop("leave", True)
         return QtProgressBar(
-            self._bridge, label=str(label) if label else "", total=total
+            self._bridge,
+            label=str(label) if label else "",
+            total=total,
+            leave=leave,
         )

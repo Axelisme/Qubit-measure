@@ -50,7 +50,12 @@ if TYPE_CHECKING:
 
 
 class _ProgressStack(QWidget):
-    """Displays up to MAX_LAYERS progress bars stacked innermost-on-top."""
+    """Fixed-height panel with MAX_LAYERS pre-allocated progress bar slots.
+
+    Slots are always present in the layout so the panel height never changes.
+    push() claims the next free slot and makes it visible; pop() hides it.
+    This prevents layout thrashing / screen jitter when inner bars open/close.
+    """
 
     MAX_LAYERS = 4
 
@@ -59,28 +64,53 @@ class _ProgressStack(QWidget):
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(2)
-        self._bars: list[QProgressBar] = []
+
+        # Pre-allocate slots (index 0 = outermost/bottom, MAX_LAYERS-1 = innermost/top)
+        self._slots: list[QProgressBar] = []
+        for _ in range(self.MAX_LAYERS):
+            bar = QProgressBar()
+            bar.setMaximum(0)
+            bar.setValue(0)
+            bar.setVisible(False)
+            self._layout.insertWidget(
+                0, bar
+            )  # insert at top so slots are top-to-bottom
+            self._slots.append(bar)
+
+        # Stack of currently active (visible) slots, bottom-to-top order
+        self._active: list[QProgressBar] = []
 
     def push(self, label: str = "", total: int = 0) -> QProgressBar:
-        bar = QProgressBar()
-        bar.setFormat(f"{label} %v/%m" if label else "%v/%m")
-        bar.setMaximum(total)
-        bar.setValue(0)
-        self._bars.append(bar)
-        self._refresh_visibility()
-        self._layout.insertWidget(0, bar)  # newest on top
-        return bar
+        # Find the first slot not currently active
+        for slot in self._slots:
+            if slot not in self._active:
+                slot.setFormat(f"{label} %v/%m" if label else "%v/%m")
+                slot.setMaximum(total)
+                slot.setValue(0)
+                slot.setVisible(True)
+                self._active.append(slot)
+                return slot
+        # All slots busy — return last slot re-used (best-effort)
+        slot = self._slots[-1]
+        slot.setFormat(f"{label} %v/%m" if label else "%v/%m")
+        slot.setMaximum(total)
+        slot.setValue(0)
+        return slot
 
     def pop(self, bar: QProgressBar) -> None:
-        if bar in self._bars:
-            self._bars.remove(bar)
-            self._layout.removeWidget(bar)
-            bar.deleteLater()
-        self._refresh_visibility()
+        if bar in self._active:
+            self._active.remove(bar)
+            bar.setValue(0)
+            bar.setFormat("%v/%m")
+            bar.setVisible(False)
 
-    def _refresh_visibility(self) -> None:
-        for i, bar in enumerate(reversed(self._bars)):
-            bar.setVisible(i < self.MAX_LAYERS)
+    def reset_all(self) -> None:
+        """Hide all active slots (called when a run ends to clear leave=True bars)."""
+        for bar in list(self._active):
+            bar.setValue(0)
+            bar.setFormat("%v/%m")
+            bar.setVisible(False)
+        self._active.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -152,13 +182,13 @@ class ExpTabWidget(QWidget):
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(4, 4, 4, 4)
 
-        # --- progress stack at top ---
-        self.progress_stack = _ProgressStack()
-        root_layout.addWidget(self.progress_stack)
-
         # --- main content splitter ---
         splitter = QSplitter(Qt.Horizontal)  # type: ignore[attr-defined]
         root_layout.addWidget(splitter, stretch=1)
+
+        # --- progress stack at bottom ---
+        self.progress_stack = _ProgressStack()
+        root_layout.addWidget(self.progress_stack)
 
         # ── Config area (left pane) ──────────────────────────────────────
         config_panel = QWidget()
@@ -485,6 +515,10 @@ class MainWindow(QMainWindow):
         self._new_tab_btn.setEnabled(not is_running)
         for tab_w in self._tab_widgets.values():
             tab_w.set_running(is_running)
+        if not is_running:
+            # clear any leave=True bars that were not popped during the run
+            for tab_w in self._tab_widgets.values():
+                tab_w.progress_stack.reset_all()
 
     def refresh_context_panel(self) -> None:
         label = self._ctrl.get_active_context_label()
