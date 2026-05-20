@@ -337,8 +337,8 @@ class ExpTabWidget(QWidget):
 
     # ── cfg helpers ───────────────────────────────────────────────────────
 
-    def populate_cfg(self, schema: Any) -> None:
-        self.cfg_form.populate(schema)
+    def populate_cfg(self, schema: Any, ml: Any = None) -> None:
+        self.cfg_form.populate(schema, ml=ml)
 
     def read_schema(self) -> Any:
         return self.cfg_form.read_schema()
@@ -741,10 +741,11 @@ class MainWindow(QMainWindow):
             self._set_tab_running(tab_id, tab_w, is_running, has_context, has_soc)
 
     def refresh_config_panels(self) -> None:
+        ml = self._ctrl.get_current_ml()
         for tab_id, tab_w in self._tab_widgets.items():
             schema = self._ctrl.get_tab_default_cfg(tab_id)
             if schema is not None:
-                tab_w.populate_cfg(schema)
+                tab_w.populate_cfg(schema, ml=ml)
 
     def refresh_predictor_panel(self) -> None:
         info = self._ctrl.get_predictor_info()
@@ -829,7 +830,7 @@ class MainWindow(QMainWindow):
         # populate cfg form from adapter default
         schema = self._ctrl.get_tab_default_cfg(tab_id)
         if schema is not None:
-            tab_w.populate_cfg(schema)
+            tab_w.populate_cfg(schema, ml=self._ctrl.get_current_ml())
 
         # apply current project / running state
         self._set_tab_running(
