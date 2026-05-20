@@ -61,6 +61,9 @@ class State:
         tab = self.tabs[tab_id]
         tab.last_result = result
         tab.last_cfg = cfg
+        # invalidate stale analyze results from the previous run
+        tab.last_analyze_result = None
+        tab.last_figure = None
 
     def update_tab_analyze(self, tab_id: str, analyze_result: Any, figure: Any) -> None:
         logger.debug(

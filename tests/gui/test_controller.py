@@ -45,8 +45,8 @@ def _make_ctx() -> ExpContext:
         md=MagicMock(),
         ml=MagicMock(),
         em=MagicMock(),
-        soc=None,
-        soccfg=None,
+        soc=MagicMock(),  # simulate connected soc
+        soccfg=MagicMock(),
     )
 
 
@@ -71,11 +71,13 @@ class ControllerFixture:
         self.registry = Registry()
         register_all(self.registry)
         self.view = _make_view()
+        io_manager = IOManager()
+        io_manager._em = MagicMock()  # simulate a project being set up
         self.ctrl = Controller(
             state=self.state,
             runner=self.runner,
             registry=self.registry,
-            io_manager=IOManager(),
+            io_manager=io_manager,
             device_manager=DeviceManager(),
             view=self.view,
         )

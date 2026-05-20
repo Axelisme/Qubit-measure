@@ -276,13 +276,10 @@ def test_populate_full_fake_freq_schema(qapp):
     w.populate(schema)
     out = w.read_schema()
 
-    for key in (
-        "reps",
-        "rounds",
-        "freq_start",
-        "freq_stop",
-        "freq_expts",
-        "freq",
-        "Ql",
-    ):
+    for key in ("reps", "rounds", "freq", "res_freq", "Ql", "modules"):
         assert key in out.root.fields
+
+    from zcu_tools.gui.adapter import CfgSection, SweepField
+
+    assert isinstance(out.root.fields["freq"], SweepField)
+    assert isinstance(out.root.fields["modules"], CfgSection)

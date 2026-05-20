@@ -72,7 +72,19 @@ class Controller:
     # Run flow
     # ------------------------------------------------------------------
 
+    def has_project(self) -> bool:
+        return self._io.has_project
+
+    def has_soc(self) -> bool:
+        return self._state.exp_context.soc is not None
+
     def start_run(self, tab_id: str, schema: Any, user_params: dict) -> None:
+        if not self._io.has_project:
+            raise RuntimeError(
+                "No project directory set. Please set up a project first."
+            )
+        if not self.has_soc():
+            raise RuntimeError("No ZCU connection. Please connect first.")
         if self._state.is_running:
             raise RuntimeError("Another run is already active")
         logger.info("start_run: tab_id=%r user_params=%r", tab_id, list(user_params))
@@ -125,6 +137,10 @@ class Controller:
     # ------------------------------------------------------------------
 
     def analyze(self, tab_id: str, user_params: dict) -> None:
+        if not self._io.has_project:
+            raise RuntimeError(
+                "No project directory set. Please set up a project first."
+            )
         tab = self._state.get_tab(tab_id)
         if tab.last_result is None:
             raise RuntimeError("No run result available to analyze")
@@ -144,6 +160,10 @@ class Controller:
     # ------------------------------------------------------------------
 
     def apply_writeback(self, tab_id: str, selected_keys: list[str]) -> None:
+        if not self._io.has_project:
+            raise RuntimeError(
+                "No project directory set. Please set up a project first."
+            )
         tab = self._state.get_tab(tab_id)
         if tab.last_analyze_result is None:
             raise RuntimeError("No analyze result available for writeback")
@@ -161,6 +181,10 @@ class Controller:
     # ------------------------------------------------------------------
 
     def save_data(self, tab_id: str, data_path: str) -> None:
+        if not self._io.has_project:
+            raise RuntimeError(
+                "No project directory set. Please set up a project first."
+            )
         tab = self._state.get_tab(tab_id)
         if tab.last_result is None:
             raise RuntimeError("No run result available to save")
@@ -174,6 +198,10 @@ class Controller:
             self._view.show_status_message(f"Save data failed: {exc}")
 
     def save_image(self, tab_id: str, image_path: str) -> None:
+        if not self._io.has_project:
+            raise RuntimeError(
+                "No project directory set. Please set up a project first."
+            )
         tab = self._state.get_tab(tab_id)
         if tab.last_figure is None:
             raise RuntimeError("No figure available to save")
@@ -193,6 +221,7 @@ class Controller:
         logger.info("setup_project: result_dir=%r", result_dir)
         self._io.setup(result_dir)
         self._view.refresh_context_panel()
+        self._view.refresh_run_state(self._state.is_running)
 
     def use_context(self, label: str) -> None:
         logger.info("use_context: label=%r", label)
@@ -255,6 +284,7 @@ class Controller:
     def set_connection(self, soc: Any, soccfg: Any) -> None:
         new_ctx = dataclasses.replace(self._state.exp_context, soc=soc, soccfg=soccfg)
         self._state.set_context(new_ctx)
+        self._view.refresh_run_state(self._state.is_running)
 
     def set_predictor(
         self, predictor: Optional[Any], path: Optional[str] = None

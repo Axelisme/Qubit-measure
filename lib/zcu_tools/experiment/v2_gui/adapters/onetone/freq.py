@@ -88,21 +88,25 @@ class FakeFreqExp(AbsExperiment[FreqResult, FakeFreqCfg]):
         rng = np.random.default_rng()
 
         def measure_fn(
-            ctx: TaskState,  # noqa: ARG001
+            ctx: TaskState,
             update_hook: Optional[Callable[[int, NDArray[np.complex128]], None]],
         ) -> NDArray[np.complex128]:
             accumulated = np.zeros(len(freqs), dtype=np.complex128)
+            rounds_done = 0
             for r in range(cfg.rounds):
+                if ctx.is_stop():
+                    break
                 noise = rng.normal(0, sigma * np.sqrt(cfg.rounds), len(freqs))
                 noise_i = rng.normal(0, sigma * np.sqrt(cfg.rounds), len(freqs))
                 accumulated += clean + noise + 1j * noise_i
+                rounds_done += 1
                 for _ in range(len(freqs)):
                     time.sleep(0.0005)
                 if update_hook is not None:
-                    update_hook(r + 1, accumulated / (r + 1))
-            return accumulated / cfg.rounds
+                    update_hook(r + 1, accumulated / rounds_done)
+            return accumulated / max(rounds_done, 1)
 
-        with LivePlot1D("Frequency (MHz)", "Amplitude") as viewer:
+        with LivePlot1D("Frequency (MHz)", "Amplitude", auto_close=False) as viewer:
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn,
@@ -143,6 +147,28 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
     """Simulated one-tone frequency sweep.  No hardware required."""
 
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:  # noqa: ARG002
+        readout_section = CfgSection(
+            label="Readout",
+            fields={
+                "ch": ScalarField(value=0, label="Gen ch", type=int, editable=False),
+                "nqz": ScalarField(value=1, label="NQZ", type=int, editable=False),
+                "freq": ScalarField(
+                    value=6000.0, label="Freq (MHz)", type=float, editable=False
+                ),
+                "gain": ScalarField(
+                    value=0.5, label="Gain", type=float, editable=False
+                ),
+                "ro_ch": ScalarField(value=0, label="RO ch", type=int, editable=False),
+                "ro_length": ScalarField(
+                    value=1.0, label="RO length (us)", type=float, editable=False
+                ),
+            },
+        )
+        modules_section = CfgSection(
+            label="Modules (hardware — not used in simulation)",
+            collapsible=True,
+            fields={"readout": readout_section},
+        )
         root = CfgSection(
             fields={
                 "reps": ScalarField(value=100, label="Reps", type=int),
@@ -165,6 +191,7 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
                 ),
                 "edelay": ScalarField(value=0.05, label="edelay (us)", type=float),
                 "noise_scale": ScalarField(value=0.05, label="Noise scale", type=float),
+                "modules": modules_section,
             }
         )
         return CfgSchema(root=root)
@@ -238,18 +265,26 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
     ) -> list[WritebackItem]:
         freq, fwhm, _, _ = analyze_result
         md = ctx.md
+
+        def _safe_get(obj: Any, attr: str) -> Any:
+            try:
+                v = getattr(obj, attr)
+            except AttributeError:
+                return None
+            return v if isinstance(v, (int, float, str, bool, type(None))) else None
+
         return [
             WritebackItem(
                 key="r_f",
                 target="md",
-                current_value=getattr(md, "r_f", None),
+                current_value=_safe_get(md, "r_f"),
                 new_value=round(freq, 4),
                 description="Resonator frequency (MHz)",
             ),
             WritebackItem(
                 key="rf_w",
                 target="md",
-                current_value=getattr(md, "rf_w", None),
+                current_value=_safe_get(md, "rf_w"),
                 new_value=round(fwhm, 4),
                 description="Resonator linewidth FWHM (MHz)",
             ),

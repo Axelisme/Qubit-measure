@@ -16,8 +16,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
-    QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -35,7 +33,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from .cfg_form import CfgFormWidget
+from .cfg_form import CfgFormWidget, _CollapsibleSection
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -50,11 +48,12 @@ if TYPE_CHECKING:
 
 
 class _ProgressStack(QWidget):
-    """Fixed-height panel with MAX_LAYERS pre-allocated progress bar slots.
+    """Compact progress bar panel that only occupies space for active bars.
 
-    Slots are always present in the layout so the panel height never changes.
-    push() claims the next free slot and makes it visible; pop() hides it.
-    This prevents layout thrashing / screen jitter when inner bars open/close.
+    Bars are added to the layout on push() and removed on pop()/reset_all(),
+    so the widget has zero height when idle and grows only as bars are pushed.
+    The anti-jitter strategy: bars are reused from a pool so Qt does not
+    repeatedly allocate/free widgets; only the layout insertion/removal happens.
     """
 
     MAX_LAYERS = 4
@@ -65,51 +64,44 @@ class _ProgressStack(QWidget):
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(2)
 
-        # Pre-allocate slots (index 0 = outermost/bottom, MAX_LAYERS-1 = innermost/top)
-        self._slots: list[QProgressBar] = []
-        for _ in range(self.MAX_LAYERS):
-            bar = QProgressBar()
-            bar.setMaximum(0)
-            bar.setValue(0)
-            bar.setVisible(False)
-            self._layout.insertWidget(
-                0, bar
-            )  # insert at top so slots are top-to-bottom
-            self._slots.append(bar)
-
-        # Stack of currently active (visible) slots, bottom-to-top order
+        # Pool of recycled bars (not currently in layout)
+        self._pool: list[QProgressBar] = [
+            QProgressBar() for _ in range(self.MAX_LAYERS)
+        ]
+        # Bars currently inserted into the layout, bottom-to-top order
         self._active: list[QProgressBar] = []
 
     def push(self, label: str = "", total: int = 0) -> QProgressBar:
-        # Find the first slot not currently active
-        for slot in self._slots:
-            if slot not in self._active:
-                slot.setFormat(f"{label} %v/%m" if label else "%v/%m")
-                slot.setMaximum(total)
-                slot.setValue(0)
-                slot.setVisible(True)
-                self._active.append(slot)
-                return slot
-        # All slots busy — return last slot re-used (best-effort)
-        slot = self._slots[-1]
-        slot.setFormat(f"{label} %v/%m" if label else "%v/%m")
-        slot.setMaximum(total)
-        slot.setValue(0)
-        return slot
+        if self._pool:
+            bar = self._pool.pop()
+        else:
+            bar = self._active[-1]  # reuse innermost when all slots busy
+            return bar
+        bar.setFormat(f"{label} %v/%m" if label else "%v/%m")
+        bar.setMaximum(total)
+        bar.setValue(0)
+        # Insert at position 0 so the newest bar appears at the top
+        self._layout.insertWidget(0, bar)
+        self._active.append(bar)
+        return bar
 
     def pop(self, bar: QProgressBar) -> None:
         if bar in self._active:
             self._active.remove(bar)
+            self._layout.removeWidget(bar)
+            bar.setParent(None)  # type: ignore[call-overload]
             bar.setValue(0)
             bar.setFormat("%v/%m")
-            bar.setVisible(False)
+            self._pool.append(bar)
 
     def reset_all(self) -> None:
-        """Hide all active slots (called when a run ends to clear leave=True bars)."""
+        """Remove all active bars (called when a run ends)."""
         for bar in list(self._active):
+            self._layout.removeWidget(bar)
+            bar.setParent(None)  # type: ignore[call-overload]
             bar.setValue(0)
             bar.setFormat("%v/%m")
-            bar.setVisible(False)
+            self._pool.append(bar)
         self._active.clear()
 
 
@@ -181,18 +173,79 @@ class ExpTabWidget(QWidget):
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(4, 4, 4, 4)
+        root_layout.setSpacing(2)
 
-        # --- main content splitter ---
-        splitter = QSplitter(Qt.Horizontal)  # type: ignore[attr-defined]
-        root_layout.addWidget(splitter, stretch=1)
+        # --- main content area: [collapse-btn | splitter | collapse-btn] ---
+        content_widget = QWidget()
+        content_row = QHBoxLayout(content_widget)
+        content_row.setContentsMargins(0, 0, 0, 0)
+        content_row.setSpacing(0)
+        root_layout.addWidget(content_widget, stretch=1)
 
-        # --- progress stack at bottom ---
+        # --- progress stack at bottom (zero height when idle) ---
         self.progress_stack = _ProgressStack()
-        root_layout.addWidget(self.progress_stack)
+        root_layout.addWidget(self.progress_stack, stretch=0)
+
+        # splitter holds the three panes
+        splitter = QSplitter(Qt.Horizontal)  # type: ignore[attr-defined]
+
+        # left collapse button (collapses/restores config pane)
+        _left_collapse_btn = QPushButton("◀")
+        _left_collapse_btn.setFixedWidth(16)
+        _left_collapse_btn.setToolTip("Collapse/expand config panel")
+        _left_collapse_btn.setCheckable(True)
+        _left_collapse_btn.setChecked(False)
+        content_row.addWidget(_left_collapse_btn)
+        content_row.addWidget(splitter, stretch=1)
+
+        # right collapse button (collapses/restores result pane)
+        _right_collapse_btn = QPushButton("▶")
+        _right_collapse_btn.setFixedWidth(16)
+        _right_collapse_btn.setToolTip("Collapse/expand result panel")
+        _right_collapse_btn.setCheckable(True)
+        _right_collapse_btn.setChecked(False)
+        content_row.addWidget(_right_collapse_btn)
+
+        # store default sizes for restore; updated lazily on first collapse
+        self._splitter = splitter
+        self._left_collapse_btn = _left_collapse_btn
+        self._right_collapse_btn = _right_collapse_btn
+
+        def _on_left_collapse(checked: bool) -> None:
+            sizes = self._splitter.sizes()
+            if checked:
+                self._splitter_left_saved = sizes[0]
+                sizes[1] += sizes[0]
+                sizes[0] = 0
+            else:
+                saved = getattr(self, "_splitter_left_saved", 250)
+                sizes[1] = max(0, sizes[1] - saved)
+                sizes[0] = saved
+            self._splitter.setSizes(sizes)
+            _left_collapse_btn.setText("▶" if checked else "◀")
+
+        def _on_right_collapse(checked: bool) -> None:
+            sizes = self._splitter.sizes()
+            if checked:
+                self._splitter_right_saved = sizes[2]
+                sizes[1] += sizes[2]
+                sizes[2] = 0
+            else:
+                saved = getattr(self, "_splitter_right_saved", 300)
+                sizes[1] = max(0, sizes[1] - saved)
+                sizes[2] = saved
+            self._splitter.setSizes(sizes)
+            _right_collapse_btn.setText("◀" if checked else "▶")
+
+        _left_collapse_btn.clicked.connect(_on_left_collapse)
+        _right_collapse_btn.clicked.connect(_on_right_collapse)
 
         # ── Config area (left pane) ──────────────────────────────────────
         config_panel = QWidget()
         config_layout = QVBoxLayout(config_panel)
+        config_layout.setContentsMargins(0, 0, 0, 0)
+        config_layout.setSpacing(2)
+
         config_layout.addWidget(QLabel("<b>Config</b>"))
         self.cfg_form = CfgFormWidget()
         config_layout.addWidget(self.cfg_form, stretch=1)
@@ -232,24 +285,29 @@ class ExpTabWidget(QWidget):
         result_layout.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
 
         # Analyze params group
-        self._analyze_group = QGroupBox("Analyze Params")
-        self._analyze_form = QFormLayout(self._analyze_group)
-        result_layout.addWidget(self._analyze_group)
+        self._analyze_section = _CollapsibleSection(
+            "Analyze Params", collapsible=True, collapsed=False
+        )
+        self._analyze_form = self._analyze_section.form
+        result_layout.addWidget(self._analyze_section)
         self.analyze_btn = QPushButton("Analyze")
         result_layout.addWidget(self.analyze_btn)
 
         # Writeback group
-        self._writeback_group = QGroupBox("Writeback")
-        self._writeback_layout = QVBoxLayout(self._writeback_group)
-        self._writeback_group.setVisible(False)
-        result_layout.addWidget(self._writeback_group)
+        self._writeback_section = _CollapsibleSection(
+            "Writeback", collapsible=True, collapsed=False
+        )
+        self._writeback_layout = QVBoxLayout()
+        self._writeback_section.form.addRow(self._writeback_layout)
+        self._writeback_section.setVisible(False)
+        result_layout.addWidget(self._writeback_section)
         self.apply_writeback_btn = QPushButton("Apply Writeback")
         self.apply_writeback_btn.setVisible(False)
         result_layout.addWidget(self.apply_writeback_btn)
 
         # Save group
-        save_group = QGroupBox("Save")
-        save_layout = QFormLayout(save_group)
+        save_section = _CollapsibleSection("Save", collapsible=True, collapsed=False)
+        save_layout = save_section.form
 
         data_path_row = QHBoxLayout()
         self._data_path_edit = QLineEdit()
@@ -273,7 +331,7 @@ class ExpTabWidget(QWidget):
         self.save_image_btn = QPushButton("Save Image")
         save_layout.addRow("", self.save_image_btn)
 
-        result_layout.addWidget(save_group)
+        result_layout.addWidget(save_section)
         result_layout.addStretch()
 
         result_scroll.setWidget(result_inner)
@@ -282,6 +340,8 @@ class ExpTabWidget(QWidget):
             QSizePolicy.Expanding,  # type: ignore[attr-defined]
         )
         splitter.addWidget(result_scroll)
+        splitter.setCollapsible(0, True)
+        splitter.setCollapsible(2, True)
         splitter.setSizes([250, 450, 300])
 
     # ── cfg helpers ───────────────────────────────────────────────────────
@@ -327,7 +387,7 @@ class ExpTabWidget(QWidget):
             self._writeback_checks[item.key] = cb
 
         has_items = bool(items)
-        self._writeback_group.setVisible(has_items)
+        self._writeback_section.setVisible(has_items)
         self.apply_writeback_btn.setVisible(has_items)
         self.apply_writeback_btn.setText("Apply Writeback")
         self._refresh_writeback_btn()
@@ -379,8 +439,18 @@ class ExpTabWidget(QWidget):
     def get_image_path(self) -> str:
         return self._image_path_edit.text()
 
+    def reset_plot(self) -> None:
+        """Remove all canvases from plot_stack, revert to placeholder."""
+        while self._plot_stack.count() > 1:
+            w = self._plot_stack.widget(self._plot_stack.count() - 1)
+            self._plot_stack.removeWidget(w)
+            if w is not None:
+                w.deleteLater()
+        self._canvas_widget = None
+        self._plot_stack.setCurrentWidget(self._plot_placeholder)
+
     def show_analysis_figure(self, fig: "Figure") -> None:
-        """Embed a matplotlib Figure in the plot area (replaces placeholder)."""
+        """Embed a matplotlib Figure in the plot area (replaces any existing analysis canvas)."""
         from matplotlib.backends.backend_qtagg import (  # type: ignore[import-untyped]
             FigureCanvasQTAgg,
         )
@@ -391,18 +461,22 @@ class ExpTabWidget(QWidget):
 
         canvas = FigureCanvasQTAgg(fig)
         self._canvas_widget = canvas
-        self._plot_stack.addWidget(canvas)  # index 1 (or replaces old)
+        self._plot_stack.addWidget(canvas)
         self._plot_stack.setCurrentWidget(canvas)
         logger.debug("show_analysis_figure: tab_id=%r canvas set", self.tab_id)
 
-    def set_running(self, is_running: bool) -> None:
-        self.run_btn.setEnabled(not is_running)
+    def set_running(
+        self, is_running: bool, has_project: bool = True, has_soc: bool = True
+    ) -> None:
+        can_run = has_project and has_soc and not is_running
+        can_act = has_project and not is_running
+        self.run_btn.setEnabled(can_run)
         self.cancel_btn.setEnabled(is_running)
         self.cfg_form.setEnabled(not is_running)
-        self.analyze_btn.setEnabled(not is_running)
-        self.save_data_btn.setEnabled(not is_running)
-        self.save_image_btn.setEnabled(not is_running)
-        self.apply_writeback_btn.setEnabled(not is_running)
+        self.analyze_btn.setEnabled(can_act)
+        self.save_data_btn.setEnabled(can_act)
+        self.save_image_btn.setEnabled(can_act)
+        self.apply_writeback_btn.setEnabled(can_act)
 
 
 # ---------------------------------------------------------------------------
@@ -512,17 +586,33 @@ class MainWindow(QMainWindow):
 
     def refresh_run_state(self, is_running: bool) -> None:
         logger.debug("refresh_run_state: is_running=%s", is_running)
+        has_project = self._ctrl.has_project()
+        has_soc = self._ctrl.has_soc()
         self._new_tab_btn.setEnabled(not is_running)
         for tab_w in self._tab_widgets.values():
-            tab_w.set_running(is_running)
-        if not is_running:
+            tab_w.set_running(is_running, has_project=has_project, has_soc=has_soc)
+        if is_running:
+            # clear stale plot content before a new run starts
+            for tab_w in self._tab_widgets.values():
+                tab_w.reset_plot()
+        else:
             # clear any leave=True bars that were not popped during the run
             for tab_w in self._tab_widgets.values():
                 tab_w.progress_stack.reset_all()
 
     def refresh_context_panel(self) -> None:
         label = self._ctrl.get_active_context_label()
-        self._ctx_label.setText(label if label is not None else "(none)")
+        has_project = self._ctrl.has_project()
+        has_soc = self._ctrl.has_soc()
+        if has_project:
+            self._ctx_label.setText(label if label is not None else "(no context)")
+            self._ctx_label.setStyleSheet("")
+        else:
+            self._ctx_label.setText("No project set — Run/Analyze/Save disabled")
+            self._ctx_label.setStyleSheet("color: red;")
+        is_running = self._ctrl._state.is_running
+        for tab_w in self._tab_widgets.values():
+            tab_w.set_running(is_running, has_project=has_project, has_soc=has_soc)
 
     def refresh_config_panels(self) -> None:
         for tab_id, tab_w in self._tab_widgets.items():
@@ -587,6 +677,13 @@ class MainWindow(QMainWindow):
         schema = self._ctrl.get_tab_default_cfg(tab_id)
         if schema is not None:
             tab_w.populate_cfg(schema)
+
+        # apply current project / running state
+        tab_w.set_running(
+            self._ctrl._state.is_running,
+            has_project=self._ctrl.has_project(),
+            has_soc=self._ctrl.has_soc(),
+        )
 
         # wire buttons
         tab_w.run_btn.clicked.connect(lambda: self._on_run_clicked(tab_id))

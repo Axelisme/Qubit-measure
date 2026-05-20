@@ -46,6 +46,10 @@ class IOManager:
         ml.dump()
         return dataclasses.replace(base_ctx, md=md, ml=ml, em=self._em)
 
+    @property
+    def has_project(self) -> bool:
+        return self._em is not None
+
     def get_active_label(self) -> Optional[str]:
         if self._em is None:
             return None
