@@ -265,26 +265,18 @@ class FakeFreqAdapter(AbsExpAdapter[FreqResult, FakeFreqAnalyzeResult]):
     ) -> list[WritebackItem]:
         freq, fwhm, _, _ = analyze_result
         md = ctx.md
-
-        def _safe_get(obj: Any, attr: str) -> Any:
-            try:
-                v = getattr(obj, attr)
-            except AttributeError:
-                return None
-            return v if isinstance(v, (int, float, str, bool, type(None))) else None
-
         return [
             WritebackItem(
                 key="r_f",
                 target="md",
-                current_value=_safe_get(md, "r_f"),
+                current_value=getattr(md, "r_f", None),
                 new_value=round(freq, 4),
                 description="Resonator frequency (MHz)",
             ),
             WritebackItem(
                 key="rf_w",
                 target="md",
-                current_value=_safe_get(md, "rf_w"),
+                current_value=getattr(md, "rf_w", None),
                 new_value=round(fwhm, 4),
                 description="Resonator linewidth FWHM (MHz)",
             ),
