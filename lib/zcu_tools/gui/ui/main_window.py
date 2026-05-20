@@ -169,6 +169,7 @@ class ExpTabWidget(QWidget):
         self.tab_id = tab_id
         self._param_widgets: dict[str, QWidget] = {}  # analyze param key → widget
         self._writeback_checks: dict[str, QCheckBox] = {}  # wb key → checkbox
+        self._writeback_rows: dict[str, QWidget] = {}  # wb key → full row widget
         self._applied_writeback_keys: set[str] = set()
         self._writeback_overrides: dict[str, Any] = {}  # key → parsed JSON override
 
@@ -382,6 +383,7 @@ class ExpTabWidget(QWidget):
             if w is not None:
                 w.deleteLater()
         self._writeback_checks.clear()
+        self._writeback_rows.clear()
         self._writeback_overrides.clear()
         self._applied_writeback_keys: set[str] = set()
 
@@ -412,6 +414,7 @@ class ExpTabWidget(QWidget):
             row_layout.addWidget(cb, 1)
 
             self._writeback_checks[item.key] = cb
+            self._writeback_rows[item.key] = row_widget
 
             if show_edit_btn:
                 edit_btn = QPushButton("Edit Config")
@@ -448,37 +451,26 @@ class ExpTabWidget(QWidget):
         label = QLabel("Modify the configuration JSON below. Validation runs on Save:")
         layout.addWidget(label)
 
-        # Priority: previously saved override > new_value > current_value > edit_template
+        # Priority: previously saved override > edit_template > new_value/current_value
+        # edit_template is preferred over serialising the object because the template
+        # matches the format that Adapter's from_raw() expects, while to_json() emits
+        # a pydantic model-dump that is NOT a valid from_raw() input.
         text_edit = QTextEdit()
         existing_override = self._writeback_overrides.get(item.key)
         if existing_override is not None:
             text_edit.setPlainText(json.dumps(existing_override, indent=4))
+        elif item.edit_template is not None:
+            text_edit.setPlainText(json.dumps(item.edit_template, indent=4))
         else:
+            # Fallback: try to serialize existing value (plain dict only; skip objects
+            # whose serialization format differs from from_raw() input)
             val_to_edit = (
                 item.new_value if item.new_value is not None else item.current_value
             )
-            if val_to_edit is None:
-                # No existing value — fall back to edit_template provided by Adapter
-                tmpl = item.edit_template or {}
-                text_edit.setPlainText(json.dumps(tmpl, indent=4))
-            elif hasattr(val_to_edit, "to_json"):
-                try:
-                    text_edit.setPlainText(
-                        json.dumps(json.loads(val_to_edit.to_json()), indent=4)
-                    )
-                except Exception:
-                    text_edit.setPlainText(str(val_to_edit))
-            elif hasattr(val_to_edit, "model_dump_json"):
-                try:
-                    text_edit.setPlainText(
-                        json.dumps(json.loads(val_to_edit.model_dump_json()), indent=4)
-                    )
-                except Exception:
-                    text_edit.setPlainText(str(val_to_edit))
-            elif isinstance(val_to_edit, dict):
+            if isinstance(val_to_edit, dict):
                 text_edit.setPlainText(json.dumps(val_to_edit, indent=4))
             else:
-                text_edit.setPlainText(json.dumps(val_to_edit, indent=4))
+                text_edit.setPlainText("{}")
 
         layout.addWidget(text_edit)
 
@@ -514,12 +506,12 @@ class ExpTabWidget(QWidget):
         self.apply_writeback_btn.setEnabled(has_selected)
 
     def mark_writeback_applied(self, applied_keys: list[str]) -> None:
-        """Hide checkboxes for already-applied keys; lock button when all done."""
+        """Hide entire rows for already-applied keys; lock button when all done."""
         self._applied_writeback_keys.update(applied_keys)
         for key in applied_keys:
-            cb = self._writeback_checks.get(key)
-            if cb is not None:
-                cb.setVisible(False)
+            row = self._writeback_rows.get(key)
+            if row is not None:
+                row.setVisible(False)
         all_applied = all(
             k in self._applied_writeback_keys for k in self._writeback_checks
         )
