@@ -30,6 +30,16 @@ class DeviceManager:
         dev = GlobalDeviceManager.get_device(name)
         return dev.set_value(value)  # type: ignore[attr-defined]
 
+    def get_device_info(self, name: str) -> Any:
+        """Return the DeviceInfo object for a registered device."""
+        dev = GlobalDeviceManager.get_device(name)
+        return dev.get_info()  # type: ignore[attr-defined]
+
+    def setup_device(self, name: str, info: Any) -> None:
+        """Apply a DeviceInfo to the device via dev.setup(info)."""
+        dev = GlobalDeviceManager.get_device(name)
+        dev.setup(info)  # type: ignore[attr-defined]
+
     def get_all_info(self) -> dict[str, Any]:
         """Delegate to GlobalDeviceManager.get_all_info()."""
         return GlobalDeviceManager.get_all_info()

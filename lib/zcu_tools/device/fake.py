@@ -6,7 +6,7 @@ from .base import BaseDevice, BaseDeviceInfo
 
 
 class FakeDeviceInfo(BaseDeviceInfo):
-    type: Literal["fake"] = "fake"
+    type: Literal["FakeDevice"] = "FakeDevice"
     output: Literal["on", "off"] = "off"
     value: float
 
