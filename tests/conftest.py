@@ -13,3 +13,11 @@ if _LIB_PATH not in sys.path:
 @pytest.fixture(autouse=True)
 def _np_seed():
     np.random.seed(0)
+
+
+@pytest.fixture(autouse=True)
+def _close_matplotlib_figures():
+    yield
+    import matplotlib.pyplot as plt
+    plt.close("all")
+
