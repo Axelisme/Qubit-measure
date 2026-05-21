@@ -29,7 +29,7 @@ class ExperimentManager:
         value: Optional[float] = None,
         clone_from: Optional[Union[tuple[ModuleLibrary, MetaDict], str]] = None,
         label: Optional[str] = None,
-        unit: Literal["A", "V", "K"] = "A",
+        unit: Literal["A", "V", "K", "none"] = "none",
     ) -> tuple[ModuleLibrary, MetaDict]:
         if label is None:
             label = self._auto_label(value, unit)
@@ -92,7 +92,9 @@ class ExperimentManager:
         return self.exp_dir / self.label
 
     def _auto_label(
-        self, value: Optional[float] = None, unit: Literal["A", "V", "K"] = "A"
+        self,
+        value: Optional[float] = None,
+        unit: Literal["A", "V", "K", "none"] = "none",
     ) -> str:
 
         UNIT_RANGES = {
@@ -110,17 +112,22 @@ class ExperimentManager:
             ],
         }
 
+        united_value = None
         if value is not None:
-            for unit_suffix, max_value, scale in UNIT_RANGES[unit]:
-                if value <= max_value:
-                    united_value = f"{value * scale:.3f}{unit_suffix}"
-                    break
-            else:  # fallback for extremely large values
-                united_value = f"{value:.3e}{unit}"
-        else:
-            united_value = "NoValue"
+            if unit == "none":
+                united_value = f"{value:.3e}"
+            else:
+                for unit_suffix, max_value, scale in UNIT_RANGES[unit]:
+                    if value <= max_value:
+                        united_value = f"{value * scale:.3f}{unit_suffix}"
+                        break
+                else:  # fallback for extremely large values
+                    united_value = f"{value:.3e}{unit}"
 
-        base_name = f"{datetime.now().strftime('%m%d%H')}_{united_value}"
+        base_name = datetime.now().strftime("%m%d%H")
+        if united_value is not None:
+            base_name += f"_{united_value}"
+
         existing = set(self.list_contexts())
         if base_name not in existing:
             return base_name

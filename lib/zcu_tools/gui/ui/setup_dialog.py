@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.controller import Controller
 
 _DEVICE_DEFAULT_UNITS: dict[str, str] = {
-    "FakeDevice": "A",
+    "FakeDevice": "none",
     "YOKOGS200": "A",
 }
 
@@ -49,9 +49,9 @@ def _detect_unit(device_name: str) -> str:
         if dev_type == "YOKOGS200":
             mode = dev.get_mode()  # type: ignore[attr-defined]
             return "V" if mode == "voltage" else "A"
-        return _DEVICE_DEFAULT_UNITS.get(dev_type, "A")
+        return _DEVICE_DEFAULT_UNITS.get(dev_type, "none")
     except Exception:
-        return "A"
+        return "none"
 
 
 class SetupDialog(QDialog):
@@ -333,6 +333,7 @@ class SetupDialog(QDialog):
         label = item.data(Qt.UserRole)  # type: ignore[attr-defined]
         try:
             self._ctrl.use_context(label)
+            self._refresh_context_list()
             self._set_project_status(f"Switched to context: {label}")
             logger.info("SetupDialog: switched to context=%r", label)
         except Exception as exc:
@@ -342,7 +343,7 @@ class SetupDialog(QDialog):
     def _on_new_ctx_clicked(self) -> None:
         clone = self._clone_check.isChecked()
         device_name: Optional[str] = self._device_combo.currentData()
-        unit = self._unit_label.text() if device_name else "A"
+        unit = self._unit_label.text() if device_name else "none"
         value: Optional[float] = None
         if device_name:
             try:
