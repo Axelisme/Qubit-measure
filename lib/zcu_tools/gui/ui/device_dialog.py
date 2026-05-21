@@ -528,11 +528,16 @@ class DeviceDialog(QDialog):
         logger.warning("DeviceDialog: setup_device failed name=%r: %r", name, msg)
 
     def _set_apply_busy(self, busy: bool) -> None:
-        self._apply_btn.setEnabled(not busy)
-        self._drop_btn.setEnabled(not busy)
-        self._add_btn.setEnabled(not busy)
+        enabled = not busy
+        self._apply_btn.setEnabled(enabled)
+        self._drop_btn.setEnabled(enabled)
+        self._add_btn.setEnabled(enabled)
         if self._close_btn is not None:
-            self._close_btn.setEnabled(not busy)
+            self._close_btn.setEnabled(enabled)
+        # disable the current panel so user cannot modify fields during apply
+        panel = self._stack.currentWidget()
+        if panel is not None:
+            panel.setEnabled(enabled)
 
     # ------------------------------------------------------------------
     # Status helpers
