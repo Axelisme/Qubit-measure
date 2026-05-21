@@ -22,7 +22,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QProgressBar,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QSplitter,
     QStackedWidget,
     QStatusBar,
@@ -138,14 +137,16 @@ class ExpTabWidget(QWidget):
         self._writeback_checks: dict[str, QCheckBox] = {}  # wb key → checkbox
         self._writeback_rows: dict[str, QWidget] = {}  # wb key → full row widget
         self._applied_writeback_keys: set[str] = set()
-        self._writeback_overrides: dict[str, Any] = {}  # key → parsed JSON override
+        self._writeback_overrides: dict[
+            str, Any
+        ] = {}  # key → {"name": str, "cfg": dict}
         self._ml: Optional[Any] = None  # ModuleLibrary; set by show_writeback_spec
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(4, 4, 4, 4)
         root_layout.setSpacing(2)
 
-        # --- main content area: [collapse-btn | splitter | collapse-btn] ---
+        # --- main content area: [collapse-btn | splitter] ---
         content_widget = QWidget()
         content_row = QHBoxLayout(content_widget)
         content_row.setContentsMargins(0, 0, 0, 0)
@@ -156,7 +157,7 @@ class ExpTabWidget(QWidget):
         self.progress_stack = _ProgressStack()
         root_layout.addWidget(self.progress_stack, stretch=0)
 
-        # splitter holds the three panes
+        # splitter holds two panes: left (tab panel) | right (plot)
         splitter = QSplitter(Qt.Horizontal)  # type: ignore[attr-defined]
 
         _collapse_btn_style = (
@@ -165,11 +166,11 @@ class ExpTabWidget(QWidget):
             "QToolButton:checked { background: rgba(128,128,128,60); border-radius: 3px; }"
         )
 
-        # left collapse button (collapses/restores config pane)
+        # left collapse button (collapses/restores left tab panel)
         _left_collapse_btn = QToolButton()
         _left_collapse_btn.setFixedWidth(14)
         _left_collapse_btn.setArrowType(Qt.LeftArrow)  # type: ignore[attr-defined]
-        _left_collapse_btn.setToolTip("Collapse/expand config panel")
+        _left_collapse_btn.setToolTip("Collapse/expand left panel")
         _left_collapse_btn.setCheckable(True)
         _left_collapse_btn.setChecked(False)
         _left_collapse_btn.setAutoRaise(True)
@@ -177,21 +178,8 @@ class ExpTabWidget(QWidget):
         content_row.addWidget(_left_collapse_btn)
         content_row.addWidget(splitter, stretch=1)
 
-        # right collapse button (collapses/restores result pane)
-        _right_collapse_btn = QToolButton()
-        _right_collapse_btn.setFixedWidth(14)
-        _right_collapse_btn.setArrowType(Qt.RightArrow)  # type: ignore[attr-defined]
-        _right_collapse_btn.setToolTip("Collapse/expand result panel")
-        _right_collapse_btn.setCheckable(True)
-        _right_collapse_btn.setChecked(False)
-        _right_collapse_btn.setAutoRaise(True)
-        _right_collapse_btn.setStyleSheet(_collapse_btn_style)
-        content_row.addWidget(_right_collapse_btn)
-
-        # store default sizes for restore; updated lazily on first collapse
         self._splitter = splitter
         self._left_collapse_btn = _left_collapse_btn
-        self._right_collapse_btn = _right_collapse_btn
 
         def _on_left_collapse(checked: bool) -> None:
             sizes = self._splitter.sizes()
@@ -200,7 +188,7 @@ class ExpTabWidget(QWidget):
                 sizes[1] += sizes[0]
                 sizes[0] = 0
             else:
-                saved = getattr(self, "_splitter_left_saved", 250)
+                saved = getattr(self, "_splitter_left_saved", 350)
                 sizes[1] = max(0, sizes[1] - saved)
                 sizes[0] = saved
             self._splitter.setSizes(sizes)
@@ -208,31 +196,17 @@ class ExpTabWidget(QWidget):
                 Qt.RightArrow if checked else Qt.LeftArrow  # type: ignore[attr-defined]
             )
 
-        def _on_right_collapse(checked: bool) -> None:
-            sizes = self._splitter.sizes()
-            if checked:
-                self._splitter_right_saved = sizes[2]
-                sizes[1] += sizes[2]
-                sizes[2] = 0
-            else:
-                saved = getattr(self, "_splitter_right_saved", 300)
-                sizes[1] = max(0, sizes[1] - saved)
-                sizes[2] = saved
-            self._splitter.setSizes(sizes)
-            _right_collapse_btn.setArrowType(  # type: ignore[attr-defined]
-                Qt.LeftArrow if checked else Qt.RightArrow  # type: ignore[attr-defined]
-            )
-
         _left_collapse_btn.clicked.connect(_on_left_collapse)
-        _right_collapse_btn.clicked.connect(_on_right_collapse)
 
-        # ── Config area (left pane) ──────────────────────────────────────
+        # ── Left pane: QTabWidget with Config tab and Analysis tab ───────
+        self._left_tabs = QTabWidget()
+
+        # ── Tab 0: Config ────────────────────────────────────────────────
         config_panel = QWidget()
         config_layout = QVBoxLayout(config_panel)
-        config_layout.setContentsMargins(0, 0, 0, 0)
+        config_layout.setContentsMargins(4, 4, 4, 4)
         config_layout.setSpacing(2)
 
-        config_layout.addWidget(QLabel("<b>Config</b>"))
         self.cfg_form = CfgFormWidget()
         config_layout.addWidget(self.cfg_form, stretch=1)
 
@@ -243,41 +217,23 @@ class ExpTabWidget(QWidget):
         run_btn_row.addWidget(self.run_btn)
         run_btn_row.addWidget(self.cancel_btn)
         config_layout.addLayout(run_btn_row)
-        splitter.addWidget(config_panel)
+        self._left_tabs.addTab(config_panel, "Config")
 
-        # ── Plot area (centre pane) ──────────────────────────────────────
-        plot_panel = QWidget()
-        plot_layout = QVBoxLayout(plot_panel)
-        plot_layout.setContentsMargins(0, 0, 0, 0)
-
-        self._plot_stack = QStackedWidget()
-
-        # page 0: placeholder label
-        self._plot_placeholder = QLabel("(no plot yet)")
-        self._plot_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
-        self._plot_stack.addWidget(self._plot_placeholder)  # index 0
-
-        # page 1: matplotlib canvas (inserted on first show_analysis_image call)
-        self._canvas_widget: Optional[QWidget] = None
-
-        plot_layout.addWidget(self._plot_stack, stretch=1)
-        splitter.addWidget(plot_panel)
-
-        # ── Result area (right pane) ─────────────────────────────────────
-        result_scroll = QScrollArea()
-        result_scroll.setWidgetResizable(True)
-        result_inner = QWidget()
-        result_layout = QVBoxLayout(result_inner)
-        result_layout.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
+        # ── Tab 1: Analysis ──────────────────────────────────────────────
+        analysis_scroll = QScrollArea()
+        analysis_scroll.setWidgetResizable(True)
+        analysis_inner = QWidget()
+        analysis_layout = QVBoxLayout(analysis_inner)
+        analysis_layout.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
 
         # Analyze params group
         self._analyze_section = _CollapsibleSection(
-            "Analyze Params", collapsible=True, collapsed=False
+            "Analysis", collapsible=True, collapsed=False
         )
         self._analyze_form = self._analyze_section.form
-        result_layout.addWidget(self._analyze_section)
         self.analyze_btn = QPushButton("Analyze")
-        result_layout.addWidget(self.analyze_btn)
+        self._analyze_section.form.addRow(self.analyze_btn)
+        analysis_layout.addWidget(self._analyze_section)
 
         # Writeback group
         self._writeback_section = _CollapsibleSection(
@@ -286,10 +242,10 @@ class ExpTabWidget(QWidget):
         self._writeback_layout = QVBoxLayout()
         self._writeback_section.form.addRow(self._writeback_layout)
         self._writeback_section.setVisible(False)
-        result_layout.addWidget(self._writeback_section)
+        analysis_layout.addWidget(self._writeback_section)
         self.apply_writeback_btn = QPushButton("Apply Writeback")
         self.apply_writeback_btn.setVisible(False)
-        result_layout.addWidget(self.apply_writeback_btn)
+        analysis_layout.addWidget(self.apply_writeback_btn)
 
         # Save group
         save_section = _CollapsibleSection("Save", collapsible=True, collapsed=False)
@@ -322,18 +278,32 @@ class ExpTabWidget(QWidget):
         btn_row.addWidget(self.save_both_btn)
         save_layout.addRow("", btn_row)
 
-        result_layout.addWidget(save_section)
-        result_layout.addStretch()
+        analysis_layout.addWidget(save_section)
+        analysis_layout.addStretch()
 
-        result_scroll.setWidget(result_inner)
-        result_scroll.setSizePolicy(
-            QSizePolicy.Preferred,
-            QSizePolicy.Expanding,  # type: ignore[attr-defined]
-        )
-        splitter.addWidget(result_scroll)
+        analysis_scroll.setWidget(analysis_inner)
+        self._left_tabs.addTab(analysis_scroll, "Analysis")
+
+        splitter.addWidget(self._left_tabs)
+
+        # ── Right pane: Plot ─────────────────────────────────────────────
+        plot_panel = QWidget()
+        plot_layout = QVBoxLayout(plot_panel)
+        plot_layout.setContentsMargins(0, 0, 0, 0)
+
+        self._plot_stack = QStackedWidget()
+
+        self._plot_placeholder = QLabel("(no plot yet)")
+        self._plot_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
+        self._plot_stack.addWidget(self._plot_placeholder)
+
+        self._canvas_widget: Optional[QWidget] = None
+
+        plot_layout.addWidget(self._plot_stack, stretch=1)
+        splitter.addWidget(plot_panel)
+
         splitter.setCollapsible(0, True)
-        splitter.setCollapsible(2, True)
-        splitter.setSizes([250, 450, 300])
+        splitter.setSizes([350, 650])
 
     # ── cfg helpers ───────────────────────────────────────────────────────
 
@@ -415,6 +385,7 @@ class ExpTabWidget(QWidget):
 
         from qtpy.QtWidgets import (  # type: ignore[attr-defined]
             QDialog,
+            QFormLayout,
             QHBoxLayout,
             QLabel,
             QMessageBox,
@@ -426,23 +397,27 @@ class ExpTabWidget(QWidget):
 
         from .cfg_form import CfgFormWidget
 
-        # Determine which schema to show in the form.
-        # Priority: previously saved override dict (reconstruct schema by overriding
-        # edit_template) > edit_template schema > module_cfg_to_section fallback
-        schema = None
-        if item.edit_template is not None:
-            schema = copy.deepcopy(item.edit_template)
-
-        if schema is None:
+        if item.edit_template is None:
             return  # no editable template — button should not be shown
 
+        schema = copy.deepcopy(item.edit_template)
         ml = self._ml
+
+        # restore previously saved name if any
+        existing = self._writeback_overrides.get(item.key)
+        initial_name = existing["name"] if isinstance(existing, dict) else item.key
 
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Edit Config: {item.key}")
-        dialog.setMinimumSize(560, 460)
+        dialog.setMinimumSize(560, 500)
 
         layout = QVBoxLayout(dialog)
+
+        name_form = QFormLayout()
+        name_edit = QLineEdit(initial_name)
+        name_form.addRow("Name:", name_edit)
+        layout.addLayout(name_form)
+
         hint = QLabel("Edit the configuration below. Click Save to confirm.")
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -452,7 +427,7 @@ class ExpTabWidget(QWidget):
         form_widget = CfgFormWidget()
         form_widget.populate(schema, ml=ml)
         scroll.setWidget(form_widget)
-        layout.addWidget(scroll)
+        layout.addWidget(scroll, stretch=1)
 
         btn_layout = QHBoxLayout()
         save_btn = QPushButton("Save")
@@ -464,12 +439,14 @@ class ExpTabWidget(QWidget):
         cancel_btn.clicked.connect(dialog.reject)
 
         def save() -> None:
+            new_name = name_edit.text().strip() or item.key
             try:
                 updated_schema = form_widget.read_schema()
                 parsed = schema_to_dict(updated_schema, ml)
-                self._writeback_overrides[item.key] = parsed
+                self._writeback_overrides[item.key] = {"name": new_name, "cfg": parsed}
+                name_part = f" → {new_name}" if new_name != item.key else ""
                 cb.setText(
-                    f"{item.key}  (Config modified & edited)\n  {item.description}"
+                    f"{item.key}{name_part}  (Config edited)\n  {item.description}"
                 )
                 dialog.accept()
             except Exception as e:
@@ -689,6 +666,10 @@ class MainWindow(QMainWindow):
         if figure is not None:
             self.show_analysis_image(tab_id, figure)
 
+        # auto-switch to Analysis tab when a run result first arrives
+        if self._ctrl.has_run_result(tab_id):
+            tab_w._left_tabs.setCurrentIndex(1)
+
         # refresh button states to reflect new result availability
         self._set_tab_running(
             tab_id,
@@ -743,7 +724,7 @@ class MainWindow(QMainWindow):
     def refresh_config_panels(self) -> None:
         ml = self._ctrl.get_current_ml()
         for tab_id, tab_w in self._tab_widgets.items():
-            schema = self._ctrl.get_tab_default_cfg(tab_id)
+            schema = self._ctrl.get_tab_fresh_cfg(tab_id)
             if schema is not None:
                 tab_w.populate_cfg(schema, ml=ml)
 

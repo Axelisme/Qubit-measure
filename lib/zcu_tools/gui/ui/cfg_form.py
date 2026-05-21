@@ -35,6 +35,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QPushButton,
     QScrollArea,
     QSpinBox,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -156,8 +157,7 @@ class _SweepRow(QWidget):
         self._start.setDecimals(6)
         self._start.setValue(start)
         self._start.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
-        self._start.setMinimumWidth(60)
-        self._start.setMaximumWidth(120)
+        self._start.setMinimumWidth(30)
         self._start.setEnabled(editable)
 
         self._stop = QDoubleSpinBox()
@@ -165,16 +165,14 @@ class _SweepRow(QWidget):
         self._stop.setDecimals(6)
         self._stop.setValue(stop)
         self._stop.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
-        self._stop.setMinimumWidth(60)
-        self._stop.setMaximumWidth(120)
+        self._stop.setMinimumWidth(30)
         self._stop.setEnabled(editable)
 
         self._expts = QSpinBox()
         self._expts.setRange(1, 2**31 - 1)
         self._expts.setValue(expts)
         self._expts.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
-        self._expts.setMinimumWidth(50)
-        self._expts.setMaximumWidth(80)
+        self._expts.setMinimumWidth(30)
         self._expts.setEnabled(editable)
 
         layout.addWidget(QLabel("start"))
@@ -204,6 +202,7 @@ class _CollapsibleSection(QWidget):
         label: str,
         collapsible: bool = True,
         collapsed: bool = False,
+        no_header: bool = False,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -211,24 +210,27 @@ class _CollapsibleSection(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        if collapsible:
-            header = QWidget()
-            header_row = QHBoxLayout(header)
-            header_row.setContentsMargins(0, 0, 0, 0)
-            header_row.setSpacing(2)
+        self._toggle_btn = None  # type: ignore[assignment]
 
-            self._toggle_btn = QPushButton("▼" if not collapsed else "▶")
-            self._toggle_btn.setFixedWidth(16)
-            self._toggle_btn.setFlat(True)
-            self._toggle_btn.setCheckable(True)
-            self._toggle_btn.setChecked(not collapsed)
-            self._toggle_btn.clicked.connect(self._on_toggle)
-            header_row.addWidget(self._toggle_btn)
-            header_row.addWidget(QLabel(f"<b>{label}</b>"), stretch=1)
-            outer.addWidget(header)
-        else:
-            outer.addWidget(QLabel(f"<b>{label}</b>"))
-            self._toggle_btn = None  # type: ignore[assignment]
+        if not no_header:
+            if collapsible:
+                header = QWidget()
+                header_row = QHBoxLayout(header)
+                header_row.setContentsMargins(0, 0, 0, 0)
+                header_row.setSpacing(2)
+
+                self._toggle_btn = QPushButton("▼" if not collapsed else "▶")
+                self._toggle_btn.setFixedWidth(16)
+                self._toggle_btn.setFlat(True)
+                self._toggle_btn.setCheckable(True)
+                self._toggle_btn.setChecked(not collapsed)
+                self._toggle_btn.clicked.connect(self._on_toggle)
+                header_row.addWidget(self._toggle_btn)
+                header_row.addWidget(QLabel(f"<b>{label}</b>"), stretch=1)
+                outer.addWidget(header)
+            else:
+                if label:
+                    outer.addWidget(QLabel(f"<b>{label}</b>"))
 
         self._body = QWidget()
         body_layout = QVBoxLayout(self._body)
@@ -240,7 +242,7 @@ class _CollapsibleSection(QWidget):
         self._form.setContentsMargins(0, 0, 0, 0)
         body_layout.addLayout(self._form)
 
-        if collapsible:
+        if collapsible and not no_header:
             self._body.setVisible(not collapsed)
 
     def _on_toggle(self, checked: bool) -> None:
@@ -334,19 +336,27 @@ class CfgFormWidget(QWidget):
         spec: "CfgSectionSpec",
         value: "CfgSectionValue",
         top_level: bool = False,
+        no_header: bool = False,
     ) -> QWidget:
         label = spec.label or ("Config" if top_level else "")
-        collapsible = spec.collapsible and not top_level
+        collapsible = spec.collapsible and not top_level and not no_header
 
-        container = _CollapsibleSection(label, collapsible=collapsible, collapsed=False)
+        container = _CollapsibleSection(
+            label, collapsible=collapsible, collapsed=False, no_header=no_header
+        )
         container._child_widgets = {}  # type: ignore[attr-defined]
         container._hidden_fields: dict[str, Any] = {}  # type: ignore[attr-defined]
 
+        from zcu_tools.gui.adapter import LiteralSpec as _LiteralSpec
         from zcu_tools.gui.adapter import ScalarSpec as _ScalarSpec
         from zcu_tools.gui.adapter import ScalarValue as _ScalarValue
 
         for key, node_spec in spec.fields.items():
             node_val = value.fields.get(key)
+            if isinstance(node_spec, _LiteralSpec):
+                # LiteralSpec: no widget, value is fixed by spec
+                container._hidden_fields[key] = _ScalarValue(node_spec.value)  # type: ignore[attr-defined]
+                continue
             if isinstance(node_spec, _ScalarSpec) and node_spec.hidden:
                 raw = node_val.value if isinstance(node_val, _ScalarValue) else None
                 container._hidden_fields[key] = _ScalarValue(raw)  # type: ignore[attr-defined]
@@ -455,14 +465,24 @@ class CfgFormWidget(QWidget):
         node_spec: "Union[ModuleRefSpec, WaveformRefSpec]",
         node_val: "Union[ModuleRefValue, WaveformRefValue]",
     ) -> tuple[QWidget, QWidget]:
-        from zcu_tools.gui.adapter import CfgSectionValue
-
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
 
-        # Build ComboBox items: ml named modules + Custom options per allowed spec
+        # Header row: [ toggle_btn ] [ combo ]
+        header = QWidget()
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(4)
+
+        toggle_btn = QToolButton()
+        toggle_btn.setArrowType(Qt.RightArrow)  # type: ignore[attr-defined]
+        toggle_btn.setAutoRaise(True)
+        toggle_btn.setCheckable(True)
+        toggle_btn.setChecked(False)
+        toggle_btn.setStyleSheet("background: transparent; border: none;")
+
         combo = QComboBox()
         items = self._ref_items(node_spec)
         combo.addItems(items)
@@ -472,28 +492,38 @@ class CfgFormWidget(QWidget):
         if chosen in items:
             combo.setCurrentText(chosen)
         else:
-            # Try to match by ml module name (chosen_key may be a bare name)
             custom_label = f"<Custom:{_spec_for_chosen(node_spec, chosen).label}>"
             if custom_label in items:
                 combo.setCurrentText(custom_label)
             else:
                 combo.setCurrentIndex(0)
 
-        layout.addWidget(combo)
+        header_layout.addWidget(toggle_btn)
+        header_layout.addWidget(combo, stretch=1)
+        layout.addWidget(header)
 
         container._child_widgets = {}  # type: ignore[attr-defined]
         container._spec = node_spec  # type: ignore[attr-defined]
 
-        # Build initial sub-section from current value
+        # Build initial sub-section (no header: outer toggle replaces it)
         chosen_spec = _spec_for_chosen(node_spec, node_val.chosen_key)
-        sub = self._build_section(chosen_spec, node_val.value, top_level=False)
-        if hasattr(sub, "_toggle_btn") and sub._toggle_btn is not None:
-            sub._on_toggle(False)
-            sub._toggle_btn.setChecked(False)
+        sub = self._build_section(chosen_spec, node_val.value, no_header=True)
+        sub.setVisible(False)
         layout.addWidget(sub)
         container._sub_section_widget = sub  # type: ignore[attr-defined]
         container._sub_spec = chosen_spec  # type: ignore[attr-defined]
         container._child_widgets["_sub"] = sub  # type: ignore[attr-defined]
+
+        def _on_toggle(checked: bool) -> None:
+            sub_w = getattr(container, "_sub_section_widget", None)
+            if sub_w is not None:
+                sub_w.setVisible(checked)
+            toggle_btn.setArrowType(
+                Qt.DownArrow if checked else Qt.RightArrow  # type: ignore[attr-defined]
+            )
+
+        toggle_btn.toggled.connect(_on_toggle)
+        container._toggle_btn = toggle_btn  # type: ignore[attr-defined]
 
         combo._container = container  # type: ignore[attr-defined]
         combo.currentIndexChanged.connect(
@@ -597,8 +627,10 @@ class CfgFormWidget(QWidget):
 
         container._sub_spec = chosen_spec  # type: ignore[attr-defined]
 
-        # Build and attach new sub-section
-        sub = self._build_section(chosen_spec, new_val, top_level=False)
+        # Build and attach new sub-section; visibility follows toggle state
+        sub = self._build_section(chosen_spec, new_val, no_header=True)
+        toggle_btn = getattr(container, "_toggle_btn", None)
+        sub.setVisible(toggle_btn.isChecked() if toggle_btn is not None else False)
         layout.addWidget(sub)
         container._sub_section_widget = sub  # type: ignore[attr-defined]
         container._child_widgets["_sub"] = sub  # type: ignore[attr-defined]
@@ -615,6 +647,7 @@ class CfgFormWidget(QWidget):
         from zcu_tools.gui.adapter import (
             CfgSectionSpec,
             CfgSectionValue,
+            LiteralSpec,
             ModuleRefSpec,
             ModuleRefValue,
             MultiSweepSpec,
@@ -632,6 +665,9 @@ class CfgFormWidget(QWidget):
         fields: dict[str, Any] = {}
 
         for key, node_spec in spec.fields.items():
+            if isinstance(node_spec, LiteralSpec):
+                fields[key] = ScalarValue(node_spec.value)
+                continue
             if isinstance(node_spec, ScalarSpec) and node_spec.hidden:
                 if key in hidden_fields:
                     fields[key] = hidden_fields[key]

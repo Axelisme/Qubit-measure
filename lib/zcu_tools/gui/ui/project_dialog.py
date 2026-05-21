@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Optional
 logger = logging.getLogger(__name__)
 
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+from qtpy.QtGui import QFont  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
     QComboBox,
@@ -21,6 +22,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -314,9 +316,14 @@ class ProjectDialog(QDialog):
     def _refresh_context_list(self) -> None:
         self._ctx_list.clear()
         labels = self._ctrl.get_context_labels()
-        for label in labels:
-            self._ctx_list.addItem(label)
         active = self._ctrl.get_active_context_label()
+        bold_font = QFont()
+        bold_font.setBold(True)
+        for label in labels:
+            item = QListWidgetItem(label)
+            if label == active:
+                item.setFont(bold_font)
+            self._ctx_list.addItem(item)
         if active:
             items = self._ctx_list.findItems(active, Qt.MatchExactly)  # type: ignore[attr-defined]
             if items:
