@@ -400,7 +400,7 @@ class SetupDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _maybe_show_current_cfg(self) -> None:
-        soccfg = self._ctrl._state.exp_context.soccfg
+        soccfg = self._ctrl.get_soccfg()
         if soccfg is not None and hasattr(soccfg, "description"):
             try:
                 self._show_cfg(soccfg.description())

@@ -403,6 +403,12 @@ class Controller:
         self._state.set_context(new_ctx)
         self._view.refresh_predictor_panel()
 
+    def get_soccfg(self) -> Any:
+        return self._state.exp_context.soccfg
+
+    def get_predictor(self) -> Optional[Any]:
+        return self._state.exp_context.predictor
+
     def get_predictor_info(self) -> Optional[dict]:
         predictor = self._state.exp_context.predictor
         if predictor is None:

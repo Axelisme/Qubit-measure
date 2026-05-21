@@ -147,7 +147,7 @@ class PredictorDialog(QDialog):
         logger.info("PredictorDialog: predictor cleared")
 
     def _on_predict_clicked(self) -> None:
-        predictor = self._ctrl._state.exp_context.predictor
+        predictor = self._ctrl.get_predictor()
         if predictor is None:
             self._set_status("No predictor loaded — load one first", error=True)
             return
