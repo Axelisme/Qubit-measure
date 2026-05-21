@@ -82,6 +82,12 @@ class _FakeDevicePanel(QWidget):
         self._value_spin.setStepType(QDoubleSpinBox.AdaptiveDecimalStepType)  # type: ignore[attr-defined]
         form.addRow("Value:", self._value_spin)
 
+        self._rampstep_spin = QDoubleSpinBox()
+        self._rampstep_spin.setRange(1e-9, 1e9)
+        self._rampstep_spin.setDecimals(9)
+        self._rampstep_spin.setStepType(QDoubleSpinBox.AdaptiveDecimalStepType)  # type: ignore[attr-defined]
+        form.addRow("Ramp step:", self._rampstep_spin)
+
     def load(self, info: object) -> None:
         from zcu_tools.device.fake import FakeDeviceInfo
 
@@ -90,11 +96,13 @@ class _FakeDevicePanel(QWidget):
         self._address_label.setText(info.address)
         self._output_combo.setCurrentText(info.output)
         self._value_spin.setValue(info.value)
+        self._rampstep_spin.setValue(info.rampstep)
 
     def read(self) -> dict:
         return {
             "output": self._output_combo.currentText(),
             "value": self._value_spin.value(),
+            "rampstep": self._rampstep_spin.value(),
         }
 
 
