@@ -61,9 +61,9 @@ def run_app() -> None:
 
 
 def _show_startup_dialog(ctrl: "Controller", parent: Any) -> None:
-    from zcu_tools.gui.ui.project_dialog import ProjectDialog
+    from zcu_tools.gui.ui.setup_dialog import SetupDialog
 
-    dlg = ProjectDialog(ctrl, parent=parent, startup_mode=True)
+    dlg = SetupDialog(ctrl, parent=parent, startup_mode=True)
     dlg.exec()
 
 

@@ -231,9 +231,9 @@ class ExpTabWidget(QWidget):
             "Analysis", collapsible=True, collapsed=False
         )
         self._analyze_form = self._analyze_section.form
-        self.analyze_btn = QPushButton("Analyze")
-        self._analyze_section.form.addRow(self.analyze_btn)
         analysis_layout.addWidget(self._analyze_section)
+        self.analyze_btn = QPushButton("Analyze")
+        analysis_layout.addWidget(self.analyze_btn)
 
         # Writeback group
         self._writeback_section = _CollapsibleSection(
@@ -577,13 +577,9 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self._new_tab_btn)
         toolbar.addStretch()
 
-        project_btn = QPushButton("Project…")
-        project_btn.clicked.connect(self._on_project_clicked)
-        toolbar.addWidget(project_btn)
-
-        connection_btn = QPushButton("Connection…")
-        connection_btn.clicked.connect(self._on_connection_clicked)
-        toolbar.addWidget(connection_btn)
+        setup_btn = QPushButton("Setup…")
+        setup_btn.clicked.connect(self._on_setup_clicked)
+        toolbar.addWidget(setup_btn)
 
         devices_btn = QPushButton("Devices…")
         devices_btn.clicked.connect(self._on_devices_clicked)
@@ -941,16 +937,10 @@ class MainWindow(QMainWindow):
         else:
             self.show_status_message("Data and image saved successfully.")
 
-    def _on_project_clicked(self) -> None:
-        from .project_dialog import ProjectDialog
+    def _on_setup_clicked(self) -> None:
+        from .setup_dialog import SetupDialog
 
-        dlg = ProjectDialog(self._ctrl, parent=self)
-        dlg.exec()
-
-    def _on_connection_clicked(self) -> None:
-        from .connection_dialog import ConnectionDialog
-
-        dlg = ConnectionDialog(self._ctrl, parent=self)
+        dlg = SetupDialog(self._ctrl, parent=self)
         dlg.exec()
 
     def _on_devices_clicked(self) -> None:
