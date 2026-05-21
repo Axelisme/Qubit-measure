@@ -12,7 +12,6 @@ from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QComboBox,
     QDialog,
-    QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
@@ -331,8 +330,11 @@ class DeviceDialog(QDialog):
         self._apply_btn = QPushButton("Apply")
         self._apply_btn.setEnabled(False)
         self._apply_btn.clicked.connect(self._on_apply_clicked)
+        self._close_btn = QPushButton("Close")
+        self._close_btn.clicked.connect(self.reject)
         apply_row.addStretch()
         apply_row.addWidget(self._apply_btn)
+        apply_row.addWidget(self._close_btn)
         right_layout.addLayout(apply_row)
 
         self._right_status = QLabel("")
@@ -344,12 +346,6 @@ class DeviceDialog(QDialog):
         # ── Progress bar (idle height = 0) ────────────────────────────────
         self._pbar_stack = ProgressStack()
         root_layout.addWidget(self._pbar_stack)
-
-        # ── Close button ─────────────────────────────────────────────────
-        btn_box = QDialogButtonBox(QDialogButtonBox.Close)  # type: ignore[attr-defined]
-        btn_box.rejected.connect(self.reject)
-        self._close_btn = btn_box.button(QDialogButtonBox.Close)  # type: ignore[attr-defined]
-        root_layout.addWidget(btn_box)
 
         self._worker = None  # holds active _DeviceSetupWorker to prevent GC
 

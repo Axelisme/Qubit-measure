@@ -106,6 +106,13 @@ class _StackBridge(QObject):
         raise RuntimeError("QtProgressBar: timed out waiting for push to complete")
 
 
+def _fmt_seconds(secs: float) -> str:
+    """Format seconds as M:SS (no hours, keeps it compact)."""
+    secs = max(0.0, secs)
+    m, s = divmod(int(secs), 60)
+    return f"{m}:{s:02d}"
+
+
 class QtProgressBar(BaseProgressBar):
     """BaseProgressBar that drives a QProgressBar on _ProgressStack via signals."""
 
@@ -117,28 +124,55 @@ class QtProgressBar(BaseProgressBar):
         leave: bool = True,
         **_kwargs: Any,
     ) -> None:
+        import time
+
         self._bridge = bridge
         self._label = label
         self._total: ProgressTotal = total
         self._leave = leave
         self._n: ProgressValue = 0
+        self._start_time: float = time.monotonic()
         bridge.push_requested.emit(label, float(total) if total is not None else 0.0)
         self._bar = bridge.pop_pending()
 
     # ------------------------------------------------------------------
 
+    def _build_format(self) -> str:
+        import time
+
+        elapsed = time.monotonic() - self._start_time
+        elapsed_str = _fmt_seconds(elapsed)
+
+        n = float(self._n)
+        total = float(self._total) if self._total is not None else None
+
+        if total is not None and total > 0 and n > 0:
+            rate = n / elapsed if elapsed > 0 else 0.0
+            remaining = (total - n) / rate if rate > 0 else 0.0
+            eta_str = _fmt_seconds(remaining)
+            time_part = f"[{elapsed_str}<{eta_str}]"
+        else:
+            time_part = f"[{elapsed_str}]"
+
+        prefix = f"{self._label} " if self._label else ""
+        return f"{prefix}%v/%m {time_part}"
+
     def set_description(self, description: str) -> None:
         self._label = description
-        fmt = f"{description} %v/%m" if description else "%v/%m"
-        self._bridge.set_format_requested.emit(self._bar, fmt)
+        self._bridge.set_format_requested.emit(self._bar, self._build_format())
 
     def update(self, value: ProgressValue = 1) -> None:
         self._n = self._n + value
         self._bridge.update_requested.emit(self._bar, float(value))
+        self._bridge.set_format_requested.emit(self._bar, self._build_format())
 
     def reset(self) -> None:
+        import time
+
         self._n = 0
+        self._start_time = time.monotonic()
         self._bridge.set_value_requested.emit(self._bar, 0)
+        self._bridge.set_format_requested.emit(self._bar, self._build_format())
 
     def refresh(self) -> None:
         pass  # Qt repaints automatically
