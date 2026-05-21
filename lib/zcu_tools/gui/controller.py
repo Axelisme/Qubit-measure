@@ -198,6 +198,7 @@ class Controller:
                 ctx, tab.last_analyze_result, selected_keys, overrides
             )
             self._view.refresh_config_panels()
+            self._view.refresh_inspect_panel()
         except Exception as exc:
             logger.warning("apply_writeback: failed tab_id=%r exc=%r", tab_id, exc)
             self._view.show_status_message(f"Writeback failed: {exc}")

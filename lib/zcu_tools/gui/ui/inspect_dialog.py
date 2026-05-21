@@ -147,9 +147,9 @@ class InspectDialog(QDialog):
                 else value_str[:_MAX_VALUE_LEN] + "…"
             )
             value_item = QTableWidgetItem(display_str)
-            value_item.setFlags(
-                Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
-            )  # type: ignore[attr-defined]
+            value_item.setFlags(  # type: ignore[arg-type]
+                Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable  # type: ignore[attr-defined]
+            )
             if len(value_str) > _MAX_VALUE_LEN:
                 value_item.setToolTip(value_str)
 
@@ -160,15 +160,26 @@ class InspectDialog(QDialog):
         self._md_table.setSortingEnabled(True)
 
     def _populate_ml(self, ml: Any) -> None:
+        # Remember current selection to restore after rebuild
+        prev_item = self._ml_tree.currentItem()
+        prev_data = (
+            prev_item.data(0, Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+            if prev_item is not None
+            else None
+        )
+
+        self._ml_tree.blockSignals(True)
         self._ml_tree.clear()
-        self._ml_text.setPlainText("")
 
         if ml is None:
+            self._ml_tree.blockSignals(False)
+            self._ml_text.setPlainText("")
             return
 
         bold = QFont()
         bold.setBold(True)
 
+        restore_item: Optional[QTreeWidgetItem] = None
         for group_label, store in [
             ("modules", ml.modules),
             ("waveforms", ml.waveforms),
@@ -182,6 +193,15 @@ class InspectDialog(QDialog):
             for name in sorted(store.keys()):
                 child = QTreeWidgetItem(group_item, [name])
                 child.setData(0, Qt.ItemDataRole.UserRole, (group_label, name))  # type: ignore[attr-defined]
+                if prev_data == (group_label, name):
+                    restore_item = child
+
+        self._ml_tree.blockSignals(False)
+
+        if restore_item is not None:
+            self._ml_tree.setCurrentItem(restore_item)
+        else:
+            self._ml_text.setPlainText("")
 
     def _on_ml_item_changed(
         self, current: Optional[QTreeWidgetItem], _previous: Any

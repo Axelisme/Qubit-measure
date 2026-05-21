@@ -507,7 +507,26 @@ class CfgFormWidget(QWidget):
         container._spec = node_spec  # type: ignore[attr-defined]
 
         # Build initial sub-section (no header: outer toggle replaces it)
-        chosen_spec = _spec_for_chosen(node_spec, node_val.chosen_key)
+        # Named module: derive spec from ml (same as _on_ref_changed Named path)
+        # Custom: fall back to _spec_for_chosen by label
+        chosen_key = node_val.chosen_key
+        chosen_spec: "CfgSectionSpec" = _spec_for_chosen(node_spec, chosen_key)
+        if not chosen_key.startswith("<Custom:") and self._ml is not None:
+            try:
+                from zcu_tools.gui.adapter import ModuleRefSpec
+                from zcu_tools.gui.cfg_schemas import (
+                    module_cfg_to_value,
+                    waveform_cfg_to_value,
+                )
+
+                if isinstance(node_spec, ModuleRefSpec):
+                    cfg = self._ml.get_module(chosen_key)
+                    chosen_spec, _ = module_cfg_to_value(cfg)
+                else:
+                    cfg = self._ml.get_waveform(chosen_key)
+                    chosen_spec, _ = waveform_cfg_to_value(cfg)
+            except Exception:
+                pass
         sub = self._build_section(chosen_spec, node_val.value, no_header=True)
         sub.setVisible(False)
         layout.addWidget(sub)
