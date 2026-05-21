@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import threading
 import time
 
 import numpy as np
-from typing_extensions import Literal
+from typing_extensions import Literal, Optional
 
 from zcu_tools.progress_bar import make_pbar
 
@@ -51,7 +52,12 @@ class FakeDevice(BaseDevice[FakeDeviceInfo]):
         self.value = value
         return self.value
 
-    def _set_value_smart(self, value: float, progress: bool = False) -> None:
+    def _set_value_smart(
+        self,
+        value: float,
+        progress: bool = False,
+        stop_event: Optional[threading.Event] = None,
+    ) -> None:
         if self.value == value:
             return
 
@@ -67,6 +73,8 @@ class FakeDevice(BaseDevice[FakeDeviceInfo]):
             disable=not progress,
         )
         for target in targets[1:]:  # skip first (current value)
+            if stop_event is not None and stop_event.is_set():
+                break
             prev = self.value
             self.value = float(target)
             if not self._fast_mode:
@@ -76,10 +84,16 @@ class FakeDevice(BaseDevice[FakeDeviceInfo]):
 
     # ==========================================================================#
 
-    def _setup(self, cfg, *, progress: bool = True) -> None:
+    def _setup(
+        self,
+        cfg,
+        *,
+        progress: bool = True,
+        stop_event: Optional[threading.Event] = None,
+    ) -> None:
         self.set_output(cfg.output)
         self._rampstep = cfg.rampstep
-        self._set_value_smart(cfg.value, progress=progress)
+        self._set_value_smart(cfg.value, progress=progress, stop_event=stop_event)
 
     def get_info(self) -> FakeDeviceInfo:
         return FakeDeviceInfo(

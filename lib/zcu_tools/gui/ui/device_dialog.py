@@ -29,6 +29,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from .progress_stack import ProgressStack
+from .widgets import TrimDoubleSpinBox
 
 if TYPE_CHECKING:
     from zcu_tools.gui.controller import Controller
@@ -76,13 +77,13 @@ class _FakeDevicePanel(QWidget):
         self._output_combo.addItems(["on", "off"])
         form.addRow("Output:", self._output_combo)
 
-        self._value_spin = QDoubleSpinBox()
+        self._value_spin = TrimDoubleSpinBox()
         self._value_spin.setRange(-1e9, 1e9)
         self._value_spin.setDecimals(6)
         self._value_spin.setStepType(QDoubleSpinBox.AdaptiveDecimalStepType)  # type: ignore[attr-defined]
         form.addRow("Value:", self._value_spin)
 
-        self._rampstep_spin = QDoubleSpinBox()
+        self._rampstep_spin = TrimDoubleSpinBox()
         self._rampstep_spin.setRange(1e-9, 1e9)
         self._rampstep_spin.setDecimals(9)
         self._rampstep_spin.setStepType(QDoubleSpinBox.AdaptiveDecimalStepType)  # type: ignore[attr-defined]
@@ -126,12 +127,12 @@ class _YOKOPanel(QWidget):
         self._output_combo.addItems(["on", "off"])
         form.addRow("Output:", self._output_combo)
 
-        self._value_spin = QDoubleSpinBox()
+        self._value_spin = TrimDoubleSpinBox()
         self._value_spin.setDecimals(6)
         self._value_spin.setStepType(QDoubleSpinBox.AdaptiveDecimalStepType)  # type: ignore[attr-defined]
         form.addRow("Value:", self._value_spin)
 
-        self._rampstep_spin = QDoubleSpinBox()
+        self._rampstep_spin = TrimDoubleSpinBox()
         self._rampstep_spin.setRange(1e-9, 1.0)
         self._rampstep_spin.setDecimals(9)
         self._rampstep_spin.setStepType(QDoubleSpinBox.AdaptiveDecimalStepType)  # type: ignore[attr-defined]
@@ -192,14 +193,14 @@ class _SGSPanel(QWidget):
         self._iq_combo.addItems(["on", "off"])
         form.addRow("IQ:", self._iq_combo)
 
-        self._freq_spin = QDoubleSpinBox()
+        self._freq_spin = TrimDoubleSpinBox()
         self._freq_spin.setRange(1e6, 20e9)
         self._freq_spin.setDecimals(0)
         self._freq_spin.setSuffix(" Hz")
         self._freq_spin.setStepType(QDoubleSpinBox.AdaptiveDecimalStepType)  # type: ignore[attr-defined]
         form.addRow("Frequency:", self._freq_spin)
 
-        self._power_spin = QDoubleSpinBox()
+        self._power_spin = TrimDoubleSpinBox()
         self._power_spin.setRange(-120.0, 25.0)
         self._power_spin.setDecimals(2)
         self._power_spin.setSuffix(" dBm")
@@ -510,9 +511,14 @@ class DeviceDialog(QDialog):
         self._worker = worker
         worker.finished.connect(self._on_apply_finished)
         worker.failed.connect(self._on_apply_failed)
+        worker.cancelled.connect(self._on_apply_cancelled)
         logger.info(
             "DeviceDialog: setup_device started name=%r updates=%r", name, updates
         )
+
+    def _on_cancel_clicked(self) -> None:
+        if self._worker is not None:
+            self._worker.cancel()
 
     def _on_apply_finished(self, name: str) -> None:
         self._worker = None
@@ -527,17 +533,34 @@ class DeviceDialog(QDialog):
         self._set_right_status(msg, error=True)
         logger.warning("DeviceDialog: setup_device failed name=%r: %r", name, msg)
 
+    def _on_apply_cancelled(self, name: str) -> None:
+        self._worker = None
+        self._set_apply_busy(False)
+        self._load_device_info(name)
+        self._set_right_status("Cancelled")
+        logger.info("DeviceDialog: setup_device cancelled name=%r", name)
+
     def _set_apply_busy(self, busy: bool) -> None:
-        enabled = not busy
-        self._apply_btn.setEnabled(enabled)
-        self._drop_btn.setEnabled(enabled)
-        self._add_btn.setEnabled(enabled)
+        self._drop_btn.setEnabled(not busy)
+        self._add_btn.setEnabled(not busy)
         if self._close_btn is not None:
-            self._close_btn.setEnabled(enabled)
+            self._close_btn.setEnabled(not busy)
         # disable the current panel so user cannot modify fields during apply
         panel = self._stack.currentWidget()
         if panel is not None:
-            panel.setEnabled(enabled)
+            panel.setEnabled(not busy)
+
+        if busy:
+            self._apply_btn.setText("Cancel")
+            self._apply_btn.clicked.disconnect(self._on_apply_clicked)
+            self._apply_btn.clicked.connect(self._on_cancel_clicked)
+        else:
+            self._apply_btn.setText("Apply")
+            try:
+                self._apply_btn.clicked.disconnect(self._on_cancel_clicked)
+            except RuntimeError:
+                pass  # already disconnected
+            self._apply_btn.clicked.connect(self._on_apply_clicked)
 
     # ------------------------------------------------------------------
     # Status helpers

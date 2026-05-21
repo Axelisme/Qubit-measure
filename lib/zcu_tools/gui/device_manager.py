@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from typing import Any, Callable, Optional
 
 from qtpy.QtCore import QThread, Signal  # type: ignore[attr-defined]
@@ -9,10 +10,11 @@ from zcu_tools.progress_bar import use_pbar_factory
 
 
 class _DeviceSetupWorker(QThread):
-    """Runs dev.setup(info) on a background thread with an optional pbar factory."""
+    """Runs dev.setup(info) on a background thread with optional pbar factory and cancellation."""
 
     finished: Signal = Signal(str)  # name
     failed: Signal = Signal(str, str)  # name, error_message
+    cancelled: Signal = Signal(str)  # name
 
     def __init__(
         self,
@@ -27,15 +29,23 @@ class _DeviceSetupWorker(QThread):
         self._name = name
         self._info = info
         self._pbar_factory = pbar_factory
+        self._stop_event = threading.Event()
+
+    def cancel(self) -> None:
+        self._stop_event.set()
 
     def run(self) -> None:
         try:
             if self._pbar_factory is not None:
                 with use_pbar_factory(self._pbar_factory):
-                    self._dev.setup(self._info)
+                    self._dev.setup(self._info, stop_event=self._stop_event)
             else:
-                self._dev.setup(self._info)
-            self.finished.emit(self._name)
+                self._dev.setup(self._info, stop_event=self._stop_event)
+
+            if self._stop_event.is_set():
+                self.cancelled.emit(self._name)
+            else:
+                self.finished.emit(self._name)
         except Exception as exc:
             self.failed.emit(self._name, str(exc))
 
