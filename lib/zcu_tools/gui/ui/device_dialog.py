@@ -28,6 +28,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from .progress_stack import ProgressStack
+
 if TYPE_CHECKING:
     from zcu_tools.gui.controller import Controller
 
@@ -330,10 +332,17 @@ class DeviceDialog(QDialog):
 
         splitter.setSizes([240, 480])
 
+        # ── Progress bar (idle height = 0) ────────────────────────────────
+        self._pbar_stack = ProgressStack()
+        root_layout.addWidget(self._pbar_stack)
+
         # ── Close button ─────────────────────────────────────────────────
         btn_box = QDialogButtonBox(QDialogButtonBox.Close)  # type: ignore[attr-defined]
         btn_box.rejected.connect(self.reject)
+        self._close_btn = btn_box.button(QDialogButtonBox.Close)  # type: ignore[attr-defined]
         root_layout.addWidget(btn_box)
+
+        self._worker = None  # holds active _DeviceSetupWorker to prevent GC
 
         self._on_type_changed(self._type_combo.currentText())
         self._refresh_device_list()
@@ -381,7 +390,9 @@ class DeviceDialog(QDialog):
 
     def _refresh_device_list(self, select_name: Optional[str] = None) -> None:
         """Rebuild the list; select_name overrides the previous selection."""
-        current_name = select_name if select_name is not None else self._current_device_name()
+        current_name = (
+            select_name if select_name is not None else self._current_device_name()
+        )
         self._device_list.blockSignals(True)
         self._device_list.clear()
         devices = self._ctrl.list_devices()
@@ -470,14 +481,50 @@ class DeviceDialog(QDialog):
             info = self._ctrl.get_device_info(name)
             updates = panel.read()  # type: ignore[union-attr]
             new_info = info.with_updates(**updates)
-            self._ctrl.setup_device(name, new_info)
-            # reload to reflect actual device state after setup
-            self._load_device_info(name)
-            self._set_right_status(f"Applied to {name}")
-            logger.info("DeviceDialog: setup_device name=%r updates=%r", name, updates)
         except Exception as exc:
             self._set_right_status(str(exc), error=True)
-            logger.warning("DeviceDialog: apply failed name=%r: %r", name, exc)
+            logger.warning("DeviceDialog: build info failed name=%r: %r", name, exc)
+            return
+
+        from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
+
+        factory = QtProgressBarFactory(self._pbar_stack)
+        self._set_apply_busy(True)
+        self._set_right_status(f"Applying to {name}…")
+        try:
+            worker = self._ctrl.setup_device(name, new_info, pbar_factory=factory)
+        except Exception as exc:
+            self._set_apply_busy(False)
+            self._set_right_status(str(exc), error=True)
+            logger.warning("DeviceDialog: setup_device rejected name=%r: %r", name, exc)
+            return
+
+        self._worker = worker
+        worker.finished.connect(self._on_apply_finished)
+        worker.failed.connect(self._on_apply_failed)
+        logger.info(
+            "DeviceDialog: setup_device started name=%r updates=%r", name, updates
+        )
+
+    def _on_apply_finished(self, name: str) -> None:
+        self._worker = None
+        self._set_apply_busy(False)
+        self._load_device_info(name)
+        self._set_right_status(f"Applied to {name}")
+        logger.info("DeviceDialog: setup_device finished name=%r", name)
+
+    def _on_apply_failed(self, name: str, msg: str) -> None:
+        self._worker = None
+        self._set_apply_busy(False)
+        self._set_right_status(msg, error=True)
+        logger.warning("DeviceDialog: setup_device failed name=%r: %r", name, msg)
+
+    def _set_apply_busy(self, busy: bool) -> None:
+        self._apply_btn.setEnabled(not busy)
+        self._drop_btn.setEnabled(not busy)
+        self._add_btn.setEnabled(not busy)
+        if self._close_btn is not None:
+            self._close_btn.setEnabled(not busy)
 
     # ------------------------------------------------------------------
     # Status helpers

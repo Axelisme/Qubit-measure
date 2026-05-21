@@ -353,10 +353,12 @@ class Controller:
     def get_device_info(self, name: str) -> Any:
         return self._dm.get_device_info(name)
 
-    def setup_device(self, name: str, info: Any) -> None:
+    def setup_device(
+        self, name: str, info: Any, pbar_factory: Optional[Any] = None
+    ) -> Any:
         if self._state.is_running:
             raise RuntimeError("Cannot setup device while a run is active")
-        self._dm.setup_device(name, info)
+        return self._dm.setup_device(name, info, pbar_factory)
 
     # ------------------------------------------------------------------
     # Connection / Predictor  (Phase 10)

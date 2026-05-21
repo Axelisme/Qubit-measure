@@ -14,7 +14,7 @@ from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 from ..base import BaseProgressBar, ProgressTotal, ProgressValue
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.ui.main_window import _ProgressStack
+    from zcu_tools.gui.ui.progress_stack import ProgressStack
 
 
 class _StackBridge(QObject):
@@ -27,7 +27,7 @@ class _StackBridge(QObject):
     set_max_requested: Signal = Signal(object, int)  # QProgressBar, maximum
     set_format_requested: Signal = Signal(object, str)  # QProgressBar, fmt
 
-    def __init__(self, stack: "_ProgressStack") -> None:
+    def __init__(self, stack: "ProgressStack") -> None:
         super().__init__()
         self._stack = stack
         # keep a mapping worker_id → QProgressBar so push_requested can store the result
@@ -151,7 +151,7 @@ class QtProgressBar(BaseProgressBar):
 class QtProgressBarFactory:
     """Callable factory; pass to use_pbar_factory() or Runner.start_run()."""
 
-    def __init__(self, stack: "_ProgressStack") -> None:
+    def __init__(self, stack: "ProgressStack") -> None:
         self._bridge = _StackBridge(stack)
 
     def __call__(self, *args: Any, **kwargs: Any) -> QtProgressBar:

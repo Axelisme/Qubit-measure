@@ -205,7 +205,7 @@ def test_use_pbar_factory_restores_after_block():
     from zcu_tools.progress_bar import make_pbar
     from zcu_tools.progress_bar.interface import _pbar_factory, use_pbar_factory
 
-    before = _pbar_factory
+    before = _pbar_factory.get()
     sentinel = []
 
     def fake_factory(*a, **kw):
@@ -215,14 +215,10 @@ def test_use_pbar_factory_restores_after_block():
         return TQDMProgressBar(*a, **kw)
 
     with use_pbar_factory(fake_factory):
-        from zcu_tools.progress_bar.interface import _pbar_factory as during
-
-        assert during is fake_factory
+        assert _pbar_factory.get() is fake_factory
         make_pbar(total=1)
 
-    from zcu_tools.progress_bar.interface import _pbar_factory as after
-
-    assert after is before
+    assert _pbar_factory.get() is before
     assert sentinel  # factory was actually called
 
 
@@ -235,9 +231,5 @@ def test_use_pbar_factory_nested_restores_outer():
 
     with use_pbar_factory(outer_factory):
         with use_pbar_factory(inner_factory):
-            from zcu_tools.progress_bar.interface import _pbar_factory as innermost
-
-            assert innermost is inner_factory
-        from zcu_tools.progress_bar.interface import _pbar_factory as mid
-
-        assert mid is outer_factory
+            assert _pbar_factory.get() is inner_factory
+        assert _pbar_factory.get() is outer_factory

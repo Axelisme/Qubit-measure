@@ -1,8 +1,43 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable, Optional
+
+from qtpy.QtCore import QThread, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.device import GlobalDeviceManager
+from zcu_tools.progress_bar import use_pbar_factory
+
+
+class _DeviceSetupWorker(QThread):
+    """Runs dev.setup(info) on a background thread with an optional pbar factory."""
+
+    finished: Signal = Signal(str)  # name
+    failed: Signal = Signal(str, str)  # name, error_message
+
+    def __init__(
+        self,
+        dev: Any,
+        name: str,
+        info: Any,
+        pbar_factory: Optional[Callable[..., Any]],
+        parent: Any = None,
+    ) -> None:
+        super().__init__(parent)
+        self._dev = dev
+        self._name = name
+        self._info = info
+        self._pbar_factory = pbar_factory
+
+    def run(self) -> None:
+        try:
+            if self._pbar_factory is not None:
+                with use_pbar_factory(self._pbar_factory):
+                    self._dev.setup(self._info)
+            else:
+                self._dev.setup(self._info)
+            self.finished.emit(self._name)
+        except Exception as exc:
+            self.failed.emit(self._name, str(exc))
 
 
 class DeviceManager:
@@ -35,10 +70,17 @@ class DeviceManager:
         dev = GlobalDeviceManager.get_device(name)
         return dev.get_info()  # type: ignore[attr-defined]
 
-    def setup_device(self, name: str, info: Any) -> None:
-        """Apply a DeviceInfo to the device via dev.setup(info)."""
+    def setup_device(
+        self,
+        name: str,
+        info: Any,
+        pbar_factory: Optional[Callable[..., Any]] = None,
+    ) -> _DeviceSetupWorker:
+        """Start an async worker that applies info to the device; return the worker."""
         dev = GlobalDeviceManager.get_device(name)
-        dev.setup(info)  # type: ignore[attr-defined]
+        worker = _DeviceSetupWorker(dev, name, info, pbar_factory)
+        worker.start()
+        return worker
 
     def get_all_info(self) -> dict[str, Any]:
         """Delegate to GlobalDeviceManager.get_all_info()."""

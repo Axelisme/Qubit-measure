@@ -21,9 +21,9 @@ def qapp():
 
 
 def _make_stack(qapp):  # noqa: ARG001
-    from zcu_tools.gui.ui.main_window import _ProgressStack
+    from zcu_tools.gui.ui.progress_stack import ProgressStack
 
-    return _ProgressStack()
+    return ProgressStack()
 
 
 # ---------------------------------------------------------------------------

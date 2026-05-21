@@ -4,8 +4,9 @@ import time
 import warnings
 
 import numpy as np
-from tqdm.auto import tqdm
 from typing_extensions import Literal, Optional
+
+from zcu_tools.progress_bar import make_pbar
 
 from .base import BaseDevice, BaseDeviceInfo
 
@@ -81,7 +82,13 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         self._check_voltage(voltage)
 
         dist = abs(current_voltage - voltage)
-        pbar = tqdm(total=round(dist, 2), unit="V", leave=False, disable=not progress)
+        pbar = make_pbar(
+            total=round(dist, 2),
+            desc="Ramp voltage",
+            unit="V",
+            leave=False,
+            disable=not progress,
+        )
 
         step = 10 * self._rampstep
         steps = max(1, round(abs(voltage - current_voltage) / step))
@@ -127,7 +134,13 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         self._check_current(current)
 
         dist = 1e3 * abs(current_current - current)
-        pbar = tqdm(total=round(dist, 2), unit="mA", leave=False, disable=not progress)
+        pbar = make_pbar(
+            total=round(dist, 2),
+            desc="Ramp current",
+            unit="mA",
+            leave=False,
+            disable=not progress,
+        )
 
         step = 10 * self._rampstep
         steps = max(1, round(abs(current - current_current) / step))

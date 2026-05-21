@@ -19,7 +19,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QLineEdit,
     QMainWindow,
     QMenu,
-    QProgressBar,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -37,75 +36,13 @@ from .cfg_form import (
     make_value_widget,
     read_value_widget,
 )
+from .progress_stack import ProgressStack
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
     from zcu_tools.gui.adapter import ParamSpec, WritebackItem
     from zcu_tools.gui.controller import Controller
-
-
-# ---------------------------------------------------------------------------
-# Progress bar stack panel (max 4 visible layers, innermost on top)
-# ---------------------------------------------------------------------------
-
-
-class _ProgressStack(QWidget):
-    """Compact progress bar panel that only occupies space for active bars.
-
-    Bars are added to the layout on push() and removed on pop()/reset_all(),
-    so the widget has zero height when idle and grows only as bars are pushed.
-    The anti-jitter strategy: bars are reused from a pool so Qt does not
-    repeatedly allocate/free widgets; only the layout insertion/removal happens.
-    """
-
-    MAX_LAYERS = 4
-
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.setSpacing(2)
-
-        # Pool of recycled bars (not currently in layout)
-        self._pool: list[QProgressBar] = [
-            QProgressBar() for _ in range(self.MAX_LAYERS)
-        ]
-        # Bars currently inserted into the layout, bottom-to-top order
-        self._active: list[QProgressBar] = []
-
-    def push(self, label: str = "", total: int = 0) -> QProgressBar:
-        if self._pool:
-            bar = self._pool.pop()
-        else:
-            bar = self._active[-1]  # reuse innermost when all slots busy
-            return bar
-        bar.setFormat(f"{label} %v/%m" if label else "%v/%m")
-        bar.setMaximum(total)
-        bar.setValue(0)
-        # Insert at position 0 so the newest bar appears at the top
-        self._layout.insertWidget(0, bar)
-        self._active.append(bar)
-        return bar
-
-    def pop(self, bar: QProgressBar) -> None:
-        if bar in self._active:
-            self._active.remove(bar)
-            self._layout.removeWidget(bar)
-            bar.setParent(None)  # type: ignore[call-overload]
-            bar.setValue(0)
-            bar.setFormat("%v/%m")
-            self._pool.append(bar)
-
-    def reset_all(self) -> None:
-        """Remove all active bars (called when a run ends)."""
-        for bar in list(self._active):
-            self._layout.removeWidget(bar)
-            bar.setParent(None)  # type: ignore[call-overload]
-            bar.setValue(0)
-            bar.setFormat("%v/%m")
-            self._pool.append(bar)
-        self._active.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +91,7 @@ class ExpTabWidget(QWidget):
         root_layout.addWidget(content_widget, stretch=1)
 
         # --- progress stack at bottom (zero height when idle) ---
-        self.progress_stack = _ProgressStack()
+        self.progress_stack = ProgressStack()
         root_layout.addWidget(self.progress_stack, stretch=0)
 
         # splitter holds two panes: left (tab panel) | right (plot)
