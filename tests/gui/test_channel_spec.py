@@ -43,11 +43,13 @@ def test_channel_str_chosen_to_dict_uses_resolved() -> None:
     assert result["ch"] == 5
 
 
-def test_channel_str_chosen_unresolved_gives_none() -> None:
+def test_channel_str_chosen_unresolved_raises() -> None:
+    import pytest
+
     spec = _section({"ch": ChannelSpec(label="Gen ch")})
     val = _val({"ch": ChannelValue(chosen="unknown_key", resolved=None)})
-    result = schema_to_dict(CfgSchema(spec=spec, value=val), ml=None)
-    assert result["ch"] is None
+    with pytest.raises(RuntimeError, match="unknown_key"):
+        schema_to_dict(CfgSchema(spec=spec, value=val), ml=None)
 
 
 # ---------------------------------------------------------------------------

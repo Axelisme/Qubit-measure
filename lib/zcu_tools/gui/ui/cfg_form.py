@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, Callable, Optional, Union
 logger = logging.getLogger(__name__)
 
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
+from qtpy.QtCore import Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QAbstractSpinBox,
     QCheckBox,
@@ -43,7 +44,6 @@ from .widgets import TrimDoubleSpinBox
 
 if TYPE_CHECKING:
     from zcu_tools.gui.adapter import (
-        ChannelSpec,
         ChannelValue,
         CfgNodeSpec,
         CfgNodeValue,
@@ -221,6 +221,8 @@ def _resolve_channel(text: str, md: "Optional[MetaDict]") -> Optional[int]:
 
 
 class _ChannelRow(QWidget):
+    validity_changed: Signal = Signal(bool)
+
     def __init__(
         self,
         chosen: Union[int, str],
@@ -229,6 +231,7 @@ class _ChannelRow(QWidget):
     ) -> None:
         super().__init__(parent)
         self._md = md
+        self._valid = True
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -251,6 +254,8 @@ class _ChannelRow(QWidget):
             v = int(text)
             if v >= 0:
                 self._ghost.setText("")
+                self._ghost.setStyleSheet("color: gray; font-style: italic;")
+                self._set_valid(True)
                 return
         except ValueError:
             pass
@@ -258,8 +263,20 @@ class _ChannelRow(QWidget):
         resolved = _resolve_channel(text, self._md)
         if resolved is not None:
             self._ghost.setText(f"= {resolved}")
+            self._ghost.setStyleSheet("color: gray; font-style: italic;")
+            self._set_valid(True)
         else:
             self._ghost.setText("= ?")
+            self._ghost.setStyleSheet("color: red; font-style: italic;")
+            self._set_valid(False)
+
+    def _set_valid(self, valid: bool) -> None:
+        if valid != self._valid:
+            self._valid = valid
+            self.validity_changed.emit(valid)
+
+    def is_valid(self) -> bool:
+        return self._valid
 
     def refresh_md(self, md: "Optional[MetaDict]") -> None:
         self._md = md
@@ -356,6 +373,8 @@ class CfgFormWidget(QWidget):
     Callers compose a new CfgSchema with CfgSchema(schema.spec, form.read_values()).
     """
 
+    validity_changed: Signal = Signal(bool)
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._spec: Optional["CfgSectionSpec"] = None
@@ -407,12 +426,22 @@ class CfgFormWidget(QWidget):
 
         if self._channel_rows:
             self._setup_md_updates(bus)
+            for row in self._channel_rows:
+                row.validity_changed.connect(self._on_channel_validity_changed)
+        # Emit initial validity state
+        self.validity_changed.emit(self._is_valid())
 
     def read_values(self) -> "CfgSectionValue":
         """Return a new CfgSectionValue from current widget state."""
         if self._spec is None or self._root_widget is None:
             raise RuntimeError("populate() must be called before read_values()")
         return self._read_section(self._spec, self._root_widget)
+
+    def _is_valid(self) -> bool:
+        return all(row.is_valid() for row in self._channel_rows)
+
+    def _on_channel_validity_changed(self) -> None:
+        self.validity_changed.emit(self._is_valid())
 
     def read_schema(self) -> "CfgSchema":
         """Return a new CfgSchema combining the stored spec with current widget values."""
@@ -878,7 +907,6 @@ class CfgFormWidget(QWidget):
                 # w is the combo; container is combo._container
                 combo = w
                 cont_widget = getattr(combo, "_container", None)
-                chosen_key = combo.currentText() if isinstance(combo, QComboBox) else ""
                 sub_spec: "CfgSectionSpec" = getattr(
                     cont_widget, "_sub_spec", CfgSectionSpec()
                 )
@@ -888,10 +916,19 @@ class CfgFormWidget(QWidget):
                 else:
                     sub_val = CfgSectionValue()
 
+                # Always use "<Custom:label>" so _find_allowed_spec can match by label.
+                # Named vs Custom distinction is only needed for UI display, not for
+                # schema_to_dict which now always expands the value tree directly.
+                canonical_key = f"<Custom:{sub_spec.label}>"
+
                 if isinstance(node_spec, ModuleRefSpec):
-                    fields[key] = ModuleRefValue(chosen_key=chosen_key, value=sub_val)
+                    fields[key] = ModuleRefValue(
+                        chosen_key=canonical_key, value=sub_val
+                    )
                 else:
-                    fields[key] = WaveformRefValue(chosen_key=chosen_key, value=sub_val)
+                    fields[key] = WaveformRefValue(
+                        chosen_key=canonical_key, value=sub_val
+                    )
 
         return CfgSectionValue(fields=fields)
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from zcu_tools.gui.adapter import (
+    ChannelValue,
     CfgSectionSpec,
     CfgSectionValue,
     ScalarValue,
@@ -142,7 +143,7 @@ def _pulse_to_value(cfg: Any) -> CfgSectionValue:
                 chosen_key=f"<Custom:{wav_label}>",
                 value=wav_val,
             ),
-            "ch": ScalarValue(int(_v(cfg, "ch", 0))),
+            "ch": ChannelValue(chosen=int(_v(cfg, "ch", 0)), resolved=None),
             "nqz": ScalarValue(int(_v(cfg, "nqz", 2))),
             "freq": ScalarValue(float(_v(cfg, "freq", 6000.0))),
             "phase": ScalarValue(float(_v(cfg, "phase", 0.0))),
@@ -157,7 +158,7 @@ def _direct_readout_to_value(cfg: Any) -> CfgSectionValue:
     return CfgSectionValue(
         fields={
             "type": ScalarValue("readout/direct"),
-            "ro_ch": ScalarValue(int(_v(cfg, "ro_ch", 0))),
+            "ro_ch": ChannelValue(chosen=int(_v(cfg, "ro_ch", 0)), resolved=None),
             "ro_freq": ScalarValue(float(_v(cfg, "ro_freq", 6000.0))),
             "ro_length": ScalarValue(float(_v(cfg, "ro_length", 1.0))),
             "trig_offset": ScalarValue(float(_v(cfg, "trig_offset", 0.0))),

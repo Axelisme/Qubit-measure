@@ -148,10 +148,9 @@ def test_multi_sweep_produces_dict_of_sweeps():
 # ---------------------------------------------------------------------------
 
 
-def test_module_ref_named_key_fetches_from_ml():
-    """schema_to_dict fetches named ml module via get_module().to_dict()."""
+def test_module_ref_named_key_uses_value_tree():
+    """schema_to_dict always expands the value tree, regardless of Named vs Custom."""
     ml = _make_ml()
-    ml.get_module.return_value.to_dict.return_value = {"ro_ch": 2}
     inner_spec = CfgSectionSpec(
         label="Direct Readout",
         fields={"ro_ch": ScalarSpec(label="RO ch", type=int)},
@@ -166,9 +165,8 @@ def test_module_ref_named_key_fetches_from_ml():
         },
     )
     result = schema_to_dict(s, ml)
-    # should use ml value, not widget value (99)
-    assert result["readout"] == {"ro_ch": 2}
-    ml.get_module.assert_called_once_with("readout_rf")
+    # value tree (99) takes precedence — ml is not consulted for dict output
+    assert result["readout"] == {"ro_ch": 99}
 
 
 def test_module_ref_custom_key_resolves_by_label():

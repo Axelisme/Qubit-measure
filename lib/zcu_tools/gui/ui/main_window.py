@@ -78,6 +78,7 @@ class ExpTabWidget(QWidget):
             str, Any
         ] = {}  # key → {"name": str, "cfg": dict}
         self._ml: Optional[Any] = None  # ModuleLibrary; set by show_writeback_spec
+        self._cfg_valid: bool = True  # False when any ChannelRow is unresolved
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(4, 4, 4, 4)
@@ -145,6 +146,7 @@ class ExpTabWidget(QWidget):
         config_layout.setSpacing(2)
 
         self.cfg_form = CfgFormWidget()
+        self.cfg_form.validity_changed.connect(self._on_cfg_validity_changed)
         config_layout.addWidget(self.cfg_form, stretch=1)
 
         run_btn_row = QHBoxLayout()
@@ -244,8 +246,10 @@ class ExpTabWidget(QWidget):
 
     # ── cfg helpers ───────────────────────────────────────────────────────
 
-    def populate_cfg(self, schema: Any, ml: Any = None) -> None:
-        self.cfg_form.populate(schema, ml=ml)
+    def populate_cfg(
+        self, schema: Any, ml: Any = None, md: Any = None, bus: Any = None
+    ) -> None:
+        self.cfg_form.populate(schema, ml=ml, md=md, bus=bus)
 
     def read_schema(self) -> Any:
         return self.cfg_form.read_schema()
@@ -467,6 +471,9 @@ class ExpTabWidget(QWidget):
         self._plot_stack.setCurrentWidget(canvas)
         logger.debug("show_analysis_figure: tab_id=%r canvas set", self.tab_id)
 
+    def _on_cfg_validity_changed(self, valid: bool) -> None:
+        self._cfg_valid = valid
+
     def set_running(
         self,
         is_running: bool,
@@ -475,7 +482,7 @@ class ExpTabWidget(QWidget):
         has_run_result: bool = False,
         has_analyze_result: bool = False,
     ) -> None:
-        can_run = has_context and has_soc and not is_running
+        can_run = has_context and has_soc and not is_running and self._cfg_valid
         idle = not is_running
         self.run_btn.setEnabled(can_run)
         self.cancel_btn.setEnabled(is_running)
@@ -661,10 +668,12 @@ class MainWindow(QMainWindow):
 
     def refresh_config_panels(self) -> None:
         ml = self._ctrl.get_current_ml()
+        md = self._ctrl.get_current_md()
+        bus = self._ctrl.get_bus()
         for tab_id, tab_w in self._tab_widgets.items():
             schema = self._ctrl.get_tab_fresh_cfg(tab_id)
             if schema is not None:
-                tab_w.populate_cfg(schema, ml=ml)
+                tab_w.populate_cfg(schema, ml=ml, md=md, bus=bus)
 
     def refresh_inspect_panel(self) -> None:
         if self._inspect_dialog is not None and self._inspect_dialog.isVisible():
@@ -753,7 +762,12 @@ class MainWindow(QMainWindow):
         # populate cfg form from adapter default
         schema = self._ctrl.get_tab_default_cfg(tab_id)
         if schema is not None:
-            tab_w.populate_cfg(schema, ml=self._ctrl.get_current_ml())
+            tab_w.populate_cfg(
+                schema,
+                ml=self._ctrl.get_current_ml(),
+                md=self._ctrl.get_current_md(),
+                bus=self._ctrl.get_bus(),
+            )
 
         # apply current project / running state
         self._set_tab_running(
@@ -762,6 +776,17 @@ class MainWindow(QMainWindow):
             self._ctrl.is_running(),
             self._ctrl.has_context(),
             self._ctrl.has_soc(),
+        )
+
+        # re-evaluate run_btn when channel validity changes
+        tab_w.cfg_form.validity_changed.connect(
+            lambda _valid, tid=tab_id, tw=tab_w: self._set_tab_running(
+                tid,
+                tw,
+                self._ctrl.is_running(),
+                self._ctrl.has_context(),
+                self._ctrl.has_soc(),
+            )
         )
 
         # wire buttons
@@ -795,7 +820,7 @@ class MainWindow(QMainWindow):
         try:
             schema = tab_w.read_schema()
             self._ctrl.start_run(tab_id, schema, {})
-        except RuntimeError as exc:
+        except Exception as exc:
             logger.warning("_on_run_clicked: blocked — %s", exc)
             self.show_status_message(str(exc))
 

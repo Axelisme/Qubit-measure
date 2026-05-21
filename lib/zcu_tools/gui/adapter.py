@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Optional, Union
 
 from matplotlib.figure import Figure
 from typing_extensions import Generic, TypeVar
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
@@ -246,26 +249,24 @@ def _section_to_dict(
 
         elif isinstance(node_spec, ChannelSpec):
             assert isinstance(node_val, ChannelValue)
+            logger.debug(
+                "_section_to_dict ChannelSpec key=%r chosen=%r resolved=%r",
+                key,
+                node_val.chosen,
+                node_val.resolved,
+            )
             if isinstance(node_val.chosen, str):
+                if node_val.resolved is None:
+                    raise RuntimeError(
+                        f"Channel '{node_val.chosen}' ({node_spec.label!r}) "
+                        "could not be resolved from MetaDict"
+                    )
                 result[key] = node_val.resolved
             else:
                 result[key] = int(node_val.chosen)
 
         elif isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
             assert isinstance(node_val, (ModuleRefValue, WaveformRefValue))
-            chosen = node_val.chosen_key
-            # If chosen_key is an ml-named entry, return its to_dict() directly
-            if not chosen.startswith("<Custom:") and ml is not None:
-                try:
-                    obj = (
-                        ml.get_module(chosen)
-                        if isinstance(node_spec, ModuleRefSpec)
-                        else ml.get_waveform(chosen)
-                    )
-                    result[key] = obj.to_dict()
-                    continue
-                except Exception:
-                    pass
             result[key] = _section_to_dict(
                 _find_allowed_spec(node_spec, node_val),
                 node_val.value,

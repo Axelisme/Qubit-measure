@@ -104,6 +104,11 @@ class Controller:
             raise RuntimeError("No ZCU connection. Please connect first.")
         if self._state.is_running:
             raise RuntimeError("Another run is already active")
+        # Validate schema before starting the worker — RuntimeError here stays on main thread
+        # and is caught by _on_run_clicked's try/except, which shows it in the status bar.
+        from zcu_tools.gui.adapter import schema_to_dict
+
+        schema_to_dict(schema, self.get_current_ml())
         logger.info("start_run: tab_id=%r user_params=%r", tab_id, list(user_params))
         tab = self._state.get_tab(tab_id)
         self._state.set_running(True)
