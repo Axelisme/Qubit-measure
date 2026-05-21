@@ -580,6 +580,7 @@ class CfgFormWidget(QWidget):
         from zcu_tools.gui.adapter import (
             CfgSectionValue,
             ModuleRefSpec,
+            inherit_from,
             make_default_value,
         )
 
@@ -587,19 +588,32 @@ class CfgFormWidget(QWidget):
         layout = container.layout()
         assert layout is not None
 
-        # Remove old sub-section
+        # Read current values before destroying old sub-section
+        old_spec = getattr(container, "_sub_spec", None)
         old_sub = getattr(container, "_sub_section_widget", None)
+        if old_sub is not None and old_spec is not None:
+            try:
+                old_val: CfgSectionValue = self._read_section(old_spec, old_sub)
+            except Exception:
+                old_val = CfgSectionValue()
+        else:
+            old_val = CfgSectionValue()
+
+        # Remove old sub-section widget
         if old_sub is not None:
             layout.removeWidget(old_sub)
             old_sub.deleteLater()
             container._sub_section_widget = None  # type: ignore[attr-defined]
 
-        # Determine new spec and initial value
+        # Determine new spec and value
         if chosen.startswith("<Custom:"):
+            # Custom: start from defaults then inherit matching fields from old sub-section
             chosen_spec = _spec_for_chosen(node_spec, chosen)
             new_val = make_default_value(chosen_spec)
+            if old_spec is not None:
+                new_val = inherit_from(old_val, old_spec, chosen_spec)
         else:
-            # Load from ml
+            # Named module: use ml's cfg as-is (do not inherit)
             chosen_spec = None
             new_val = CfgSectionValue()
             if self._ml is not None:

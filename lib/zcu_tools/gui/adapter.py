@@ -320,6 +320,162 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
 
 
 # ---------------------------------------------------------------------------
+# inherit_from — carry matching field values when switching Ref combo
+# ---------------------------------------------------------------------------
+
+
+def inherit_from(
+    old_val: CfgSectionValue,
+    old_spec: CfgSectionSpec,
+    new_spec: CfgSectionSpec,
+) -> CfgSectionValue:
+    """Build a new CfgSectionValue from new_spec, inheriting old_val where compatible.
+
+    Rules (per field key in new_spec):
+    - LiteralSpec: always use new spec's fixed value (never inherit).
+    - ScalarSpec: inherit if old has same key with ScalarSpec of identical type.
+    - SweepSpec: inherit if old has same key with SweepSpec (copy entire SweepValue).
+    - MultiSweepSpec: inherit per axis key; new axes fall back to defaults.
+    - ModuleRefSpec / WaveformRefSpec: inherit the whole value (chosen_key + sub-value)
+      if old has same key with the same ref type.
+    - CfgSectionSpec: recurse into inherit_from.
+
+    - No matching key / incompatible type: make_default_value for that field.
+
+    Special cross-spec rules (hardcoded by label pair):
+    - "Direct Readout" → "Pulse Readout": inject old_val into new ro_cfg sub-section.
+    - "Pulse Readout" → "Direct Readout": extract old ro_cfg sub-section as new top-level.
+    """
+    # --- Hardcoded cross-spec rules (identified by spec label) ---
+    old_label = old_spec.label
+    new_label = new_spec.label
+
+    if old_label == "Direct Readout" and new_label == "Pulse Readout":
+        result = make_default_value(new_spec)
+        result.fields["ro_cfg"] = old_val
+        return result
+
+    if old_label == "Pulse Readout" and new_label == "Direct Readout":
+        ro_cfg_val = old_val.fields.get("ro_cfg")
+        if isinstance(ro_cfg_val, CfgSectionValue):
+            return ro_cfg_val
+        return make_default_value(new_spec)
+
+    # --- Generic field-by-field inheritance ---
+    new_fields: dict[str, CfgNodeValue] = {}
+
+    for key, new_node_spec in new_spec.fields.items():
+        old_node_spec = old_spec.fields.get(key)
+        old_node_val = old_val.fields.get(key)
+
+        # LiteralSpec — always use spec's fixed value
+        if isinstance(new_node_spec, LiteralSpec):
+            new_fields[key] = ScalarValue(new_node_spec.value)
+            continue
+
+        # ScalarSpec — inherit if same type
+        if isinstance(new_node_spec, ScalarSpec):
+            if (
+                isinstance(old_node_spec, ScalarSpec)
+                and old_node_spec.type is new_node_spec.type
+                and isinstance(old_node_val, ScalarValue)
+            ):
+                new_fields[key] = ScalarValue(old_node_val.value)
+            else:
+                defaults: dict[type, Any] = {int: 0, float: 0.0, bool: False, str: ""}
+                new_fields[key] = ScalarValue(defaults.get(new_node_spec.type, None))
+            continue
+
+        # SweepSpec — inherit whole SweepValue
+        if isinstance(new_node_spec, SweepSpec):
+            if isinstance(old_node_spec, SweepSpec) and isinstance(
+                old_node_val, SweepValue
+            ):
+                new_fields[key] = SweepValue(
+                    old_node_val.start,
+                    old_node_val.stop,
+                    old_node_val.expts,
+                    old_node_val.step,
+                )
+            else:
+                new_fields[key] = SweepValue(start=0.0, stop=1.0, expts=11)
+            continue
+
+        # MultiSweepSpec — per-axis key matching
+        if isinstance(new_node_spec, MultiSweepSpec):
+            old_axes = (
+                old_node_val.axes
+                if isinstance(old_node_spec, MultiSweepSpec)
+                and isinstance(old_node_val, MultiSweepValue)
+                else {}
+            )
+            new_axes: dict[str, SweepValue] = {}
+            for axis_key in new_node_spec.axes:
+                if axis_key in old_axes:
+                    old_sv = old_axes[axis_key]
+                    new_axes[axis_key] = SweepValue(
+                        old_sv.start, old_sv.stop, old_sv.expts, old_sv.step
+                    )
+                else:
+                    new_axes[axis_key] = SweepValue(0.0, 1.0, 11)
+            new_fields[key] = MultiSweepValue(axes=new_axes)
+            continue
+
+        # ModuleRefSpec / WaveformRefSpec — inherit whole ref value
+        if isinstance(new_node_spec, ModuleRefSpec):
+            if isinstance(old_node_spec, ModuleRefSpec) and isinstance(
+                old_node_val, ModuleRefValue
+            ):
+                new_fields[key] = ModuleRefValue(
+                    old_node_val.chosen_key, old_node_val.value
+                )
+            else:
+                first = (
+                    new_node_spec.allowed[0]
+                    if new_node_spec.allowed
+                    else CfgSectionSpec()
+                )
+                label = first.label or "Custom"
+                new_fields[key] = ModuleRefValue(
+                    f"<Custom:{label}>", make_default_value(first)
+                )
+            continue
+
+        if isinstance(new_node_spec, WaveformRefSpec):
+            if isinstance(old_node_spec, WaveformRefSpec) and isinstance(
+                old_node_val, WaveformRefValue
+            ):
+                new_fields[key] = WaveformRefValue(
+                    old_node_val.chosen_key, old_node_val.value
+                )
+            else:
+                first = (
+                    new_node_spec.allowed[0]
+                    if new_node_spec.allowed
+                    else CfgSectionSpec()
+                )
+                label = first.label or "Custom"
+                new_fields[key] = WaveformRefValue(
+                    f"<Custom:{label}>", make_default_value(first)
+                )
+            continue
+
+        # CfgSectionSpec — recurse
+        if isinstance(new_node_spec, CfgSectionSpec):
+            if isinstance(old_node_spec, CfgSectionSpec) and isinstance(
+                old_node_val, CfgSectionValue
+            ):
+                new_fields[key] = inherit_from(
+                    old_node_val, old_node_spec, new_node_spec
+                )
+            else:
+                new_fields[key] = make_default_value(new_node_spec)
+            continue
+
+    return CfgSectionValue(fields=new_fields)
+
+
+# ---------------------------------------------------------------------------
 # Abstract base
 # ---------------------------------------------------------------------------
 
