@@ -241,14 +241,34 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
                 "readout": ModuleRefValue(chosen_key=chosen_key, value=readout_val),
             }
         )
+        # Pre-fill model params from md if available
+        r_f: float = 6000.0
+        rf_w: Optional[float] = None
+        if ctx.md is not None:
+            _r_f = getattr(ctx.md, "r_f", None)
+            if isinstance(_r_f, (int, float)):
+                r_f = float(_r_f)
+            _rf_w = getattr(ctx.md, "rf_w", None)
+            if isinstance(_rf_w, (int, float)):
+                rf_w = float(_rf_w)
+
+        # Sweep range: ±5× linewidth around r_f, or ±200 MHz if rf_w unknown
+        half_span = (rf_w * 5.0) if rf_w is not None else 200.0
+        freq_start = r_f - half_span
+        freq_stop = r_f + half_span
+
+        # Rough Ql estimate from linewidth: Ql ≈ r_f / rf_w
+        ql_default = round(r_f / rf_w) if rf_w is not None and rf_w > 0 else 5000
+        qc_default = ql_default * 2
+
         root_val = CfgSectionValue(
             fields={
                 "reps": ScalarValue(100),
                 "rounds": ScalarValue(100),
-                "freq": SweepValue(start=5800.0, stop=6200.0, expts=201),
-                "res_freq": ScalarValue(6000.0),
-                "Ql": ScalarValue(150),
-                "Qc_abs": ScalarValue(600),
+                "freq": SweepValue(start=freq_start, stop=freq_stop, expts=201),
+                "res_freq": ScalarValue(r_f),
+                "Ql": ScalarValue(ql_default),
+                "Qc_abs": ScalarValue(qc_default),
                 "phi": ScalarValue(0.0),
                 "a0_abs": ScalarValue(1.0),
                 "edelay": ScalarValue(0.05),

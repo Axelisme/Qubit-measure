@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import numpy as np
 from zcu_tools.experiment.v2_gui.adapters.onetone.freq import (
     FakeFreqAdapter,
@@ -13,6 +11,7 @@ from zcu_tools.experiment.v2_gui.adapters.onetone.freq import (
 from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.adapter import CfgSchema, ExpContext
 from zcu_tools.gui.registry import Registry
+from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -21,8 +20,8 @@ from zcu_tools.gui.registry import Registry
 
 def _make_ctx() -> ExpContext:
     return ExpContext(
-        md=MagicMock(),
-        ml=MagicMock(),
+        md=MetaDict(),
+        ml=ModuleLibrary(),
         soc=None,
         soccfg=None,
     )
@@ -60,6 +59,41 @@ def test_make_default_cfg_has_expected_fields():
         "Ql",
     ):
         assert key in fields, f"missing spec field: {key}"
+
+
+def test_make_default_cfg_uses_r_f_from_md():
+    """make_default_cfg should pre-fill res_freq and sweep range from md.r_f."""
+    from zcu_tools.gui.adapter import ScalarValue, SweepValue
+
+    ctx = _make_ctx()
+    ctx.md.r_f = 7500.0
+    schema = _adapter().make_default_cfg(ctx)
+    val = schema.value
+    res_freq_val = val.fields["res_freq"]
+    assert isinstance(res_freq_val, ScalarValue)
+    assert abs(res_freq_val.value - 7500.0) < 1e-6
+    sweep = val.fields["freq"]
+    assert isinstance(sweep, SweepValue)
+    assert abs(sweep.start - 7300.0) < 1e-6  # r_f - 200 (no rf_w)
+    assert abs(sweep.stop - 7700.0) < 1e-6
+
+
+def test_make_default_cfg_uses_rf_w_for_sweep_and_ql():
+    """make_default_cfg should estimate Ql and sweep range from md.r_f + md.rf_w."""
+    from zcu_tools.gui.adapter import ScalarValue, SweepValue
+
+    ctx = _make_ctx()
+    ctx.md.r_f = 6000.0
+    ctx.md.rf_w = 2.0  # 2 MHz linewidth → Ql ≈ 3000, span ±10 MHz
+    schema = _adapter().make_default_cfg(ctx)
+    val = schema.value
+    sweep = val.fields["freq"]
+    assert isinstance(sweep, SweepValue)
+    assert abs(sweep.start - 5990.0) < 1e-6
+    assert abs(sweep.stop - 6010.0) < 1e-6
+    ql_val = val.fields["Ql"]
+    assert isinstance(ql_val, ScalarValue)
+    assert abs(ql_val.value - 3000) < 10  # round(6000/2) = 3000
 
 
 # ---------------------------------------------------------------------------
@@ -251,18 +285,7 @@ def test_make_default_cfg_has_mod_ref_field():
 
 
 def test_writeback_spec_and_apply_for_ml():
-    from typing import cast
-
     ctx = _make_ctx()
-    mock_readout_rf = MagicMock()
-    mock_readout_rf.pulse_cfg = MagicMock()
-    mock_readout_rf.pulse_cfg.freq = 5900.0
-    ctx.ml.modules = {"readout_rf": mock_readout_rf}
-
-    mock_ro_waveform = MagicMock()
-    mock_ro_waveform.length = 0.5
-    ctx.ml.waveforms = {"ro_waveform": mock_ro_waveform}
-
     adapter = _adapter()
     result = _run(adapter, ctx)
     ar = adapter.analyze(result, ctx)
@@ -272,17 +295,13 @@ def test_writeback_spec_and_apply_for_ml():
     assert "ro_waveform" in keys
 
     adapter.apply_writeback(ctx, ar, ["readout_rf", "ro_waveform"])
-    cast(MagicMock, ctx.ml.register_module).assert_called_once()
-    cast(MagicMock, ctx.ml.register_waveform).assert_called_once()
+    assert "readout_rf" in ctx.ml.modules
+    assert "ro_waveform" in ctx.ml.waveforms
 
 
 def test_writeback_spec_and_apply_for_ml_when_missing():
-    from typing import cast
-
     ctx = _make_ctx()
-    ctx.ml.modules = {}
-    ctx.ml.waveforms = {}
-
+    # ml is empty (no pre-registered modules/waveforms)
     adapter = _adapter()
     result = _run(adapter, ctx)
     ar = adapter.analyze(result, ctx)
@@ -292,16 +311,13 @@ def test_writeback_spec_and_apply_for_ml_when_missing():
     assert "ro_waveform" in keys
 
     adapter.apply_writeback(ctx, ar, ["readout_rf", "ro_waveform"])
-    cast(MagicMock, ctx.ml.register_module).assert_called_once()
-    cast(MagicMock, ctx.ml.register_waveform).assert_called_once()
+    assert "readout_rf" in ctx.ml.modules
+    assert "ro_waveform" in ctx.ml.waveforms
 
 
 def test_writeback_edit_template_provided():
     """get_writeback_spec should provide edit_template for readout_rf and ro_waveform."""
     ctx = _make_ctx()
-    ctx.ml.modules = {}
-    ctx.ml.waveforms = {}
-
     adapter = _adapter()
     result = _run(adapter, ctx)
     ar = adapter.analyze(result, ctx)
@@ -316,12 +332,7 @@ def test_writeback_edit_template_provided():
 
 def test_apply_writeback_with_overrides():
     """apply_writeback should use raw dict override instead of auto-build."""
-    from typing import cast
-
     ctx = _make_ctx()
-    ctx.ml.modules = {}
-    ctx.ml.waveforms = {}
-
     adapter = _adapter()
     result = _run(adapter, ctx)
     ar = adapter.analyze(result, ctx)
@@ -348,7 +359,7 @@ def test_apply_writeback_with_overrides():
         ["readout_rf"],
         overrides={"readout_rf": {"name": "readout_rf", "cfg": override_readout}},
     )
-    cast(MagicMock, ctx.ml.register_module).assert_called_once()
+    assert "readout_rf" in ctx.ml.modules
 
 
 def test_no_last_cfg_side_channel():
