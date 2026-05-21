@@ -26,6 +26,7 @@ from zcu_tools.experiment.v2.onetone.freq import FreqExp
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
+    ChannelValue,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -619,7 +620,7 @@ def _make_pulse_readout_template(
                 chosen_key="<Custom:Const>",
                 value=const_val,
             ),
-            "ch": ScalarValue(pulse_ch),
+            "ch": ChannelValue(chosen=pulse_ch, resolved=None),
             "nqz": ScalarValue(2),
             "freq": ScalarValue(pulse_freq),
             "phase": ScalarValue(0.0),
@@ -630,7 +631,7 @@ def _make_pulse_readout_template(
     )
     ro_val = CfgSectionValue(
         fields={
-            "ro_ch": ScalarValue(ro_ch),
+            "ro_ch": ChannelValue(chosen=ro_ch, resolved=None),
             "ro_freq": ScalarValue(pulse_freq),
             "ro_length": ScalarValue(0.9),
             "trig_offset": ScalarValue(0.335),

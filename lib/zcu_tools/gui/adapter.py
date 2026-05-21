@@ -102,6 +102,13 @@ class WaveformRefSpec:
 
 
 @dataclass(frozen=True)
+class ChannelSpec:
+    """Channel field: accepts a non-negative int or an md-key string."""
+
+    label: str
+
+
+@dataclass(frozen=True)
 class CfgSectionSpec:
     fields: dict[str, "CfgNodeSpec"] = field(default_factory=dict)
     label: str = ""
@@ -115,6 +122,7 @@ CfgNodeSpec = Union[
     MultiSweepSpec,
     ModuleRefSpec,
     WaveformRefSpec,
+    ChannelSpec,
     "CfgSectionSpec",
 ]
 
@@ -155,6 +163,12 @@ class WaveformRefValue:
 
 
 @dataclass
+class ChannelValue:
+    chosen: Union[int, str]  # int = direct channel; str = md key
+    resolved: Optional[int]  # resolved int from md (meaningful only when chosen is str)
+
+
+@dataclass
 class CfgSectionValue:
     fields: dict[str, "CfgNodeValue"] = field(default_factory=dict)
 
@@ -165,6 +179,7 @@ CfgNodeValue = Union[
     MultiSweepValue,
     ModuleRefValue,
     WaveformRefValue,
+    ChannelValue,
     "CfgSectionValue",
 ]
 
@@ -228,6 +243,13 @@ def _section_to_dict(
                 )
                 for axis, sv in node_val.axes.items()
             }
+
+        elif isinstance(node_spec, ChannelSpec):
+            assert isinstance(node_val, ChannelValue)
+            if isinstance(node_val.chosen, str):
+                result[key] = node_val.resolved
+            else:
+                result[key] = int(node_val.chosen)
 
         elif isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
             assert isinstance(node_val, (ModuleRefValue, WaveformRefValue))
@@ -314,6 +336,8 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
                 if isinstance(node_spec, ModuleRefSpec)
                 else WaveformRefValue(f"<Custom:{label}>", make_default_value(first))
             )
+        elif isinstance(node_spec, ChannelSpec):
+            fields[key] = ChannelValue(chosen=0, resolved=None)
         elif isinstance(node_spec, CfgSectionSpec):
             fields[key] = make_default_value(node_spec)
     return CfgSectionValue(fields=fields)
@@ -458,6 +482,16 @@ def inherit_from(
                 new_fields[key] = WaveformRefValue(
                     f"<Custom:{label}>", make_default_value(first)
                 )
+            continue
+
+        # ChannelSpec — inherit whole ChannelValue
+        if isinstance(new_node_spec, ChannelSpec):
+            if isinstance(old_node_val, ChannelValue):
+                new_fields[key] = ChannelValue(
+                    old_node_val.chosen, old_node_val.resolved
+                )
+            else:
+                new_fields[key] = ChannelValue(chosen=0, resolved=None)
             continue
 
         # CfgSectionSpec — recurse

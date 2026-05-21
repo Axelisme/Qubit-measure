@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Optional, Protocol
 logger = logging.getLogger(__name__)
 
 from .device_manager import DeviceManager
+from .event_bus import EventBus
 from .io_manager import IOManager
 from .registry import Registry
 from .runner import Runner
@@ -40,6 +41,7 @@ class Controller:
         io_manager: IOManager,
         device_manager: DeviceManager,
         view: ViewProtocol,
+        bus: Optional[EventBus] = None,
     ) -> None:
         self._state = state
         self._runner = runner
@@ -47,10 +49,14 @@ class Controller:
         self._io = io_manager
         self._dm = device_manager
         self._view = view
+        self._bus = bus
         self._predictor_path: Optional[str] = None
 
         runner.run_finished.connect(self._on_run_finished)
         runner.run_failed.connect(self._on_run_failed)
+
+    def get_bus(self) -> Optional[EventBus]:
+        return self._bus
 
     # ------------------------------------------------------------------
     # ExpTab operations
@@ -130,6 +136,8 @@ class Controller:
         self._state.set_running(False)
         self._view.refresh_run_state(False)
         self._view.refresh_tab(tab_id)
+        if self._bus is not None:
+            self._bus.emit("run_state_changed")
 
     def _on_run_failed(self, tab_id: str, error: Exception) -> None:  # noqa: ARG002
         logger.warning("_on_run_failed: tab_id=%r error=%r", tab_id, error)
@@ -137,6 +145,8 @@ class Controller:
         self._state.set_running(False)
         self._view.refresh_run_state(False)
         self._view.show_status_message(f"Run failed: {error}")
+        if self._bus is not None:
+            self._bus.emit("run_state_changed")
 
     def _clear_live_container(self) -> None:
         from zcu_tools.liveplot.backend.qt import clear_pending_container
@@ -279,6 +289,8 @@ class Controller:
         self._view.refresh_run_state(self._state.is_running)
         self._view.refresh_config_panels()
         self._view.refresh_inspect_panel()
+        if self._bus is not None:
+            self._bus.emit("context_changed")
 
     def setup_project(self, result_dir: str) -> None:
         logger.info("setup_project: result_dir=%r", result_dir)
@@ -294,6 +306,8 @@ class Controller:
         self._view.refresh_context_panel()
         self._view.refresh_config_panels()
         self._view.refresh_inspect_panel()
+        if self._bus is not None:
+            self._bus.emit("context_changed")
 
     def new_context(
         self,
@@ -316,6 +330,8 @@ class Controller:
         self._view.refresh_context_panel()
         self._view.refresh_config_panels()
         self._view.refresh_inspect_panel()
+        if self._bus is not None:
+            self._bus.emit("context_changed")
 
     def get_active_context_label(self) -> Optional[str]:
         return self._io.get_active_label()
@@ -431,6 +447,26 @@ class Controller:
     def get_current_md(self) -> Any:
         """Return the current MetaDict (may be None if no context is set)."""
         return self._state.exp_context.md
+
+    def set_md_attr(self, key: str, value: Any) -> None:
+        if not self.has_context():
+            raise RuntimeError("No experiment context.")
+        md = self._state.exp_context.md
+        setattr(md, key, value)
+        if md._path is not None:
+            md.dump()
+        if self._bus is not None:
+            self._bus.emit("md_changed")
+
+    def del_md_attr(self, key: str) -> None:
+        if not self.has_context():
+            raise RuntimeError("No experiment context.")
+        md = self._state.exp_context.md
+        delattr(md, key)
+        if md._path is not None:
+            md.dump()
+        if self._bus is not None:
+            self._bus.emit("md_changed")
 
     def get_current_ml(self) -> Any:
         """Return the current ModuleLibrary (may be None if no context is set)."""

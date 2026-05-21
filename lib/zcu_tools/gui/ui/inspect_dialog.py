@@ -1,7 +1,8 @@
-"""InspectDialog — read-only overview of MetaDict parameters and ModuleLibrary."""
+"""InspectDialog — overview of MetaDict parameters (editable) and ModuleLibrary (read-only)."""
 
 from __future__ import annotations
 
+import ast
 import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
@@ -13,6 +14,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QSplitter,
@@ -27,6 +29,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 
 if TYPE_CHECKING:
     from zcu_tools.gui.controller import Controller
+    from zcu_tools.gui.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +42,12 @@ _MAX_VALUE_LEN = 80
 class InspectDialog(QDialog):
     """Non-modal dialog showing MetaDict and ModuleLibrary contents."""
 
-    def __init__(self, ctrl: "Controller", parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        ctrl: "Controller",
+        bus: Optional["EventBus"] = None,
+        parent: Optional[QWidget] = None,
+    ) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
         self.setWindowTitle("Inspect Context")
@@ -67,6 +75,16 @@ class InspectDialog(QDialog):
         bottom.addWidget(self._status_label)
         layout.addLayout(bottom)
 
+        # Subscribe to EventBus for auto-refresh
+        if bus is not None:
+            bus.subscribe("context_changed", self.refresh)
+            bus.subscribe("md_changed", self.refresh)
+            # Unsubscribe when dialog is destroyed
+            self.destroyed.connect(
+                lambda: bus.unsubscribe("context_changed", self.refresh)
+            )
+            self.destroyed.connect(lambda: bus.unsubscribe("md_changed", self.refresh))
+
         self.refresh()
 
     # ------------------------------------------------------------------
@@ -87,7 +105,31 @@ class InspectDialog(QDialog):
         self._md_table.setAlternatingRowColors(True)
         self._md_table.setSortingEnabled(True)
         self._md_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._md_table.cellClicked.connect(self._on_md_row_clicked)
         layout.addWidget(self._md_table)
+
+        # Edit bar
+        edit_row = QHBoxLayout()
+        edit_row.addWidget(QLabel("Key:"))
+        self._edit_key = QLineEdit()
+        self._edit_key.setPlaceholderText("key")
+        self._edit_key.setFixedWidth(120)
+        self._edit_key.textChanged.connect(self._on_edit_key_changed)
+        edit_row.addWidget(self._edit_key)
+        edit_row.addWidget(QLabel("Value:"))
+        self._edit_value = QLineEdit()
+        self._edit_value.setPlaceholderText("value (Python literal or plain string)")
+        edit_row.addWidget(self._edit_value)
+        self._set_btn = QPushButton("Set")
+        self._set_btn.setEnabled(False)
+        self._set_btn.clicked.connect(self._on_set_clicked)
+        edit_row.addWidget(self._set_btn)
+        self._delete_btn = QPushButton("Delete")
+        self._delete_btn.setEnabled(False)
+        self._delete_btn.clicked.connect(self._on_delete_clicked)
+        edit_row.addWidget(self._delete_btn)
+        layout.addLayout(edit_row)
+
         return w
 
     def _build_ml_tab(self) -> QWidget:
@@ -202,6 +244,59 @@ class InspectDialog(QDialog):
             self._ml_tree.setCurrentItem(restore_item)
         else:
             self._ml_text.setPlainText("")
+
+    def _on_md_row_clicked(self, row: int, _col: int) -> None:
+        key_item = self._md_table.item(row, 0)
+        val_item = self._md_table.item(row, 1)
+        if key_item is None:
+            return
+        self._edit_key.setText(key_item.text())
+        # Use full value from tooltip if truncated, else display text
+        full_val = (
+            val_item.toolTip()
+            if (val_item and val_item.toolTip())
+            else (val_item.text() if val_item else "")
+        )
+        self._edit_value.setText(full_val)
+
+    def _on_edit_key_changed(self, text: str) -> None:
+        has_key = bool(text.strip())
+        self._set_btn.setEnabled(has_key)
+        self._delete_btn.setEnabled(has_key)
+
+    @staticmethod
+    def _parse_value(text: str) -> Any:
+        try:
+            return ast.literal_eval(text)
+        except (ValueError, SyntaxError):
+            return text
+
+    def _on_set_clicked(self) -> None:
+        key = self._edit_key.text().strip()
+        if not key:
+            return
+        value = self._parse_value(self._edit_value.text())
+        try:
+            self._ctrl.set_md_attr(key, value)
+            self._populate_md(self._ctrl.get_current_md())
+            now = datetime.now().strftime("%H:%M:%S")
+            self._status_label.setText(f"Last updated: {now}")
+        except Exception as exc:
+            self._status_label.setText(f"Error: {exc}")
+
+    def _on_delete_clicked(self) -> None:
+        key = self._edit_key.text().strip()
+        if not key:
+            return
+        try:
+            self._ctrl.del_md_attr(key)
+            self._edit_key.clear()
+            self._edit_value.clear()
+            self._populate_md(self._ctrl.get_current_md())
+            now = datetime.now().strftime("%H:%M:%S")
+            self._status_label.setText(f"Last updated: {now}")
+        except Exception as exc:
+            self._status_label.setText(f"Error: {exc}")
 
     def _on_ml_item_changed(
         self, current: Optional[QTreeWidgetItem], _previous: Any

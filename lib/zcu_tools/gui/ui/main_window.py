@@ -905,7 +905,9 @@ class MainWindow(QMainWindow):
         from .inspect_dialog import InspectDialog
 
         if self._inspect_dialog is None:
-            self._inspect_dialog = InspectDialog(self._ctrl, parent=None)
+            self._inspect_dialog = InspectDialog(
+                self._ctrl, bus=self._ctrl.get_bus(), parent=None
+            )
         self._inspect_dialog.show()
         self._inspect_dialog.raise_()
         self._inspect_dialog.activateWindow()

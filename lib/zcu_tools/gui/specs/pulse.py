@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from zcu_tools.gui.adapter import (
+    ChannelSpec,
     CfgSectionSpec,
     LiteralSpec,
     ScalarSpec,
@@ -32,7 +33,7 @@ PULSE_SPEC = CfgSectionSpec(
             ],
             label="Waveform",
         ),
-        "ch": ScalarSpec(label="Gen ch", type=int),
+        "ch": ChannelSpec(label="Gen ch"),
         "nqz": ScalarSpec(label="NQZ", type=int, choices=[1, 2]),
         "freq": ScalarSpec(label="Freq (MHz)", type=float, decimals=2),
         "phase": ScalarSpec(label="Phase (deg)", type=float, decimals=2),

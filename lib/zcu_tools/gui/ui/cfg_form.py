@@ -18,11 +18,11 @@ Each CfgNodeSpec type maps to a specific widget strategy:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Optional, Union
 
 logger = logging.getLogger(__name__)
 
-from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QAbstractSpinBox,
     QCheckBox,
@@ -43,6 +43,8 @@ from .widgets import TrimDoubleSpinBox
 
 if TYPE_CHECKING:
     from zcu_tools.gui.adapter import (
+        ChannelSpec,
+        ChannelValue,
         CfgNodeSpec,
         CfgNodeValue,
         CfgSchema,
@@ -54,7 +56,8 @@ if TYPE_CHECKING:
         WaveformRefSpec,
         WaveformRefValue,
     )
-    from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.gui.event_bus import EventBus
+    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +196,90 @@ class _SweepRow(QWidget):
 
 
 # ---------------------------------------------------------------------------
+# _ChannelRow — single QLineEdit accepting int or md-key string
+# ---------------------------------------------------------------------------
+
+
+def _resolve_channel(text: str, md: "Optional[MetaDict]") -> Optional[int]:
+    """Resolve a channel text: int string → int directly; md-key → lookup."""
+    try:
+        v = int(text)
+        if v >= 0:
+            return v
+        return None
+    except ValueError:
+        pass
+    if md is None:
+        return None
+    try:
+        raw = getattr(md, text, None)
+        if isinstance(raw, int) and raw >= 0:
+            return raw
+    except Exception:
+        pass
+    return None
+
+
+class _ChannelRow(QWidget):
+    def __init__(
+        self,
+        chosen: Union[int, str],
+        md: "Optional[MetaDict]",
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self._md = md
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        self._edit = QLineEdit(str(chosen))
+        self._edit.setMinimumWidth(60)
+        self._edit.textChanged.connect(self._refresh_ghost)
+        layout.addWidget(self._edit, stretch=1)
+
+        self._ghost = QLabel()
+        self._ghost.setStyleSheet("color: gray; font-style: italic;")
+        layout.addWidget(self._ghost)
+
+        self._refresh_ghost()
+
+    def _refresh_ghost(self) -> None:
+        text = self._edit.text().strip()
+        try:
+            v = int(text)
+            if v >= 0:
+                self._ghost.setText("")
+                return
+        except ValueError:
+            pass
+        # md-key path
+        resolved = _resolve_channel(text, self._md)
+        if resolved is not None:
+            self._ghost.setText(f"= {resolved}")
+        else:
+            self._ghost.setText("= ?")
+
+    def refresh_md(self, md: "Optional[MetaDict]") -> None:
+        self._md = md
+        self._refresh_ghost()
+
+    def read_back(self) -> "ChannelValue":
+        from zcu_tools.gui.adapter import ChannelValue
+
+        text = self._edit.text().strip()
+        try:
+            v = int(text)
+            if v >= 0:
+                return ChannelValue(chosen=v, resolved=None)
+        except ValueError:
+            pass
+        resolved = _resolve_channel(text, self._md)
+        return ChannelValue(chosen=text, resolved=resolved)
+
+
+# ---------------------------------------------------------------------------
 # _CollapsibleSection
 # ---------------------------------------------------------------------------
 
@@ -274,6 +361,11 @@ class CfgFormWidget(QWidget):
         self._spec: Optional["CfgSectionSpec"] = None
         self._root_widget: Optional[QWidget] = None
         self._ml: Optional["ModuleLibrary"] = None
+        self._md: Optional["MetaDict"] = None
+        self._bus: Optional["EventBus"] = None
+        self._channel_rows: list[_ChannelRow] = []
+        self._md_timer: Optional[QTimer] = None
+        self._bus_cb: Optional[Callable[[], None]] = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -294,17 +386,27 @@ class CfgFormWidget(QWidget):
     # ------------------------------------------------------------------
 
     def populate(
-        self, schema: "CfgSchema", ml: Optional["ModuleLibrary"] = None
+        self,
+        schema: "CfgSchema",
+        ml: Optional["ModuleLibrary"] = None,
+        md: Optional["MetaDict"] = None,
+        bus: Optional["EventBus"] = None,
     ) -> None:
         """Build widget tree from schema. Schema is never mutated."""
         self._spec = schema.spec
         self._ml = ml
+        self._md = md
+        self._channel_rows = []
         self._clear_inner()
+        self._teardown_md_updates()
 
         section_widget = self._build_section(schema.spec, schema.value, top_level=True)
         self._root_widget = section_widget
         self._inner_layout.insertWidget(self._inner_layout.count() - 1, section_widget)
         logger.debug("CfgFormWidget.populate: built form root section widget")
+
+        if self._channel_rows:
+            self._setup_md_updates(bus)
 
     def read_values(self) -> "CfgSectionValue":
         """Return a new CfgSectionValue from current widget state."""
@@ -319,6 +421,32 @@ class CfgFormWidget(QWidget):
         if self._spec is None:
             raise RuntimeError("populate() must be called before read_schema()")
         return CfgSchema(spec=self._spec, value=self.read_values())
+
+    def _teardown_md_updates(self) -> None:
+        if self._md_timer is not None:
+            self._md_timer.stop()
+            self._md_timer = None
+        if self._bus is not None and self._bus_cb is not None:
+            self._bus.unsubscribe("md_changed", self._bus_cb)
+            self._bus_cb = None
+        self._bus = None
+
+    def _setup_md_updates(self, bus: Optional["EventBus"]) -> None:
+        if bus is not None:
+            self._bus = bus
+            self._bus_cb = self._refresh_channel_ghosts
+            bus.subscribe("md_changed", self._bus_cb)
+            # also refresh on context switch (md object may have changed)
+            bus.subscribe("context_changed", self._bus_cb)
+        else:
+            self._md_timer = QTimer(self)
+            self._md_timer.setInterval(200)
+            self._md_timer.timeout.connect(self._refresh_channel_ghosts)
+            self._md_timer.start()
+
+    def _refresh_channel_ghosts(self) -> None:
+        for row in self._channel_rows:
+            row.refresh_md(self._md)
 
     # ------------------------------------------------------------------
     # Build helpers
@@ -374,6 +502,8 @@ class CfgFormWidget(QWidget):
         node_val: "Optional[CfgNodeValue]",
     ) -> tuple[QWidget, QWidget]:
         from zcu_tools.gui.adapter import (
+            ChannelSpec,
+            ChannelValue,
             CfgSectionSpec,
             CfgSectionValue,
             ModuleRefSpec,
@@ -388,6 +518,12 @@ class CfgFormWidget(QWidget):
             WaveformRefValue,
             make_default_value,
         )
+
+        if isinstance(node_spec, ChannelSpec):
+            chosen = node_val.chosen if isinstance(node_val, ChannelValue) else 0
+            w = _ChannelRow(chosen, self._md)
+            self._channel_rows.append(w)
+            return w, w
 
         if isinstance(node_spec, ScalarSpec):
             val = (
@@ -679,6 +815,7 @@ class CfgFormWidget(QWidget):
         container: QWidget,
     ) -> "CfgSectionValue":
         from zcu_tools.gui.adapter import (
+            ChannelSpec,
             CfgSectionSpec,
             CfgSectionValue,
             LiteralSpec,
@@ -729,6 +866,10 @@ class CfgFormWidget(QWidget):
                     start, stop, expts, step = row.read_back()
                     axes[axis] = SweepValue(start, stop, expts, step)
                 fields[key] = MultiSweepValue(axes=axes)
+
+            elif isinstance(node_spec, ChannelSpec):
+                assert isinstance(w, _ChannelRow)
+                fields[key] = w.read_back()
 
             elif isinstance(node_spec, CfgSectionSpec):
                 fields[key] = self._read_section(node_spec, w)
