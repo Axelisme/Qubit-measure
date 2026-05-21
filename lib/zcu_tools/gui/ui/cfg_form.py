@@ -27,7 +27,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QAbstractSpinBox,
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -39,6 +38,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QVBoxLayout,
     QWidget,
 )
+
+from .widgets import TrimDoubleSpinBox
 
 if TYPE_CHECKING:
     from zcu_tools.gui.adapter import (
@@ -90,7 +91,7 @@ def make_value_widget(
         w.setEnabled(editable)
         return w
     if type_ is float:
-        w = QDoubleSpinBox()
+        w = TrimDoubleSpinBox()
         w.setRange(-1e12, 1e12)
         w.setDecimals(decimals if decimals is not None else 6)
         w.setValue(float(default))
@@ -111,7 +112,7 @@ def read_value_widget(w: QWidget, type_: type, fallback: Any = None) -> Any:
         return w.isChecked()
     if isinstance(w, QSpinBox):
         return w.value()
-    if isinstance(w, QDoubleSpinBox):
+    if isinstance(w, TrimDoubleSpinBox):
         return w.value()
     if isinstance(w, QLineEdit):
         return type_(w.text())
@@ -152,7 +153,7 @@ class _SweepRow(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
 
-        self._start = QDoubleSpinBox()
+        self._start = TrimDoubleSpinBox()
         self._start.setRange(-1e12, 1e12)
         self._start.setDecimals(6)
         self._start.setValue(start)
@@ -160,7 +161,7 @@ class _SweepRow(QWidget):
         self._start.setMinimumWidth(30)
         self._start.setEnabled(editable)
 
-        self._stop = QDoubleSpinBox()
+        self._stop = TrimDoubleSpinBox()
         self._stop.setRange(-1e12, 1e12)
         self._stop.setDecimals(6)
         self._stop.setValue(stop)
