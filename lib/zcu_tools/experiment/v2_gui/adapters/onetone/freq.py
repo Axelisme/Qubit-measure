@@ -8,9 +8,12 @@ CfgSchema into the FakeFreqCfg that FakeFreqExp expects.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any, Literal, Optional, cast
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -210,17 +213,26 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
         readout_val = make_default_value(DIRECT_READOUT_SPEC)
         if ctx.ml is not None:
             try:
+                from zcu_tools.gui.cfg_schemas import module_cfg_to_value
                 from zcu_tools.program.v2 import AbsReadoutCfg
 
-                for name, mod in ctx.ml.modules.items():
-                    if isinstance(mod, AbsReadoutCfg):
-                        if name == "readout_rf" or chosen_key.startswith("<Custom:"):
-                            from zcu_tools.gui.cfg_schemas import module_cfg_to_value
-
-                            _, readout_val = module_cfg_to_value(mod)
-                            chosen_key = name
-                            if name == "readout_rf":
-                                break
+                # Prefer "readout_rf" by name; fall back to the last valid readout module
+                candidates = {
+                    name: mod
+                    for name, mod in ctx.ml.modules.items()
+                    if isinstance(mod, AbsReadoutCfg)
+                }
+                pick = candidates.get("readout_rf") or (
+                    next(iter(reversed(list(candidates.values()))), None)
+                )
+                pick_name = (
+                    "readout_rf"
+                    if "readout_rf" in candidates
+                    else next(iter(reversed(list(candidates.keys()))), None)
+                )
+                if pick is not None and pick_name is not None:
+                    _, readout_val = module_cfg_to_value(pick)
+                    chosen_key = pick_name
             except Exception:
                 pass
 
@@ -404,35 +416,41 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
             dirty = False
             if "readout_rf" in selected_keys:
                 try:
-                    raw_override = _overrides.get("readout_rf")
-                    if raw_override is not None:
+                    ov = _overrides.get("readout_rf")
+                    if ov is not None:
                         from zcu_tools.program.v2 import ModuleCfgFactory
 
-                        new_readout = ModuleCfgFactory.from_raw(raw_override, ml=ctx.ml)
+                        name = ov["name"] if isinstance(ov, dict) else "readout_rf"
+                        raw_cfg = ov["cfg"] if isinstance(ov, dict) else ov
+                        new_readout = ModuleCfgFactory.from_raw(raw_cfg, ml=ctx.ml)
                     else:
+                        name = "readout_rf"
                         new_readout = _build_readout(cfg, freq, ctx)
                     if new_readout is not None:
-                        ctx.ml.register_module(readout_rf=cast(Any, new_readout))
+                        ctx.ml.register_module(**{name: cast(Any, new_readout)})
+                        logger.debug("apply_writeback: registered module %r", name)
                         dirty = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("apply_writeback: readout_rf failed: %s", e)
             if "ro_waveform" in selected_keys:
                 try:
-                    raw_override = _overrides.get("ro_waveform")
-                    if raw_override is not None:
+                    ov = _overrides.get("ro_waveform")
+                    if ov is not None:
                         from zcu_tools.program.v2 import WaveformCfgFactory
 
-                        new_waveform = WaveformCfgFactory.from_raw(
-                            raw_override, ml=ctx.ml
-                        )
+                        name = ov["name"] if isinstance(ov, dict) else "ro_waveform"
+                        raw_cfg = ov["cfg"] if isinstance(ov, dict) else ov
+                        new_waveform = WaveformCfgFactory.from_raw(raw_cfg, ml=ctx.ml)
                     else:
+                        name = "ro_waveform"
                         wav_len = getattr(ctx.md, "res_probe_len", 5.0)
                         new_waveform = _build_waveform(cfg, wav_len, ctx)
                     if new_waveform is not None:
-                        ctx.ml.register_waveform(ro_waveform=cast(Any, new_waveform))
+                        ctx.ml.register_waveform(**{name: cast(Any, new_waveform)})
+                        logger.debug("apply_writeback: registered waveform %r", name)
                         dirty = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("apply_writeback: ro_waveform failed: %s", e)
             if dirty:
                 try:
                     ctx.ml.dump()
@@ -577,7 +595,6 @@ def _make_pulse_readout_template(
     const_val.fields["length"] = ScalarValue(1.0)
     pulse_val = CfgSectionValue(
         fields={
-            "type": ScalarValue("pulse"),
             "waveform": WaveformRefValue(
                 chosen_key="<Custom:Const>",
                 value=const_val,
@@ -593,7 +610,6 @@ def _make_pulse_readout_template(
     )
     ro_val = CfgSectionValue(
         fields={
-            "type": ScalarValue("readout/direct"),
             "ro_ch": ScalarValue(ro_ch),
             "ro_freq": ScalarValue(pulse_freq),
             "ro_length": ScalarValue(0.9),
@@ -602,7 +618,6 @@ def _make_pulse_readout_template(
     )
     value = CfgSectionValue(
         fields={
-            "type": ScalarValue("readout/pulse"),
             "pulse_cfg": pulse_val,
             "ro_cfg": ro_val,
         }

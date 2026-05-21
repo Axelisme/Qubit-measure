@@ -148,9 +148,10 @@ def test_multi_sweep_produces_dict_of_sweeps():
 # ---------------------------------------------------------------------------
 
 
-def test_module_ref_value_flattened_directly():
-    """schema_to_dict reads ModuleRefValue.value directly; ml is not called."""
+def test_module_ref_named_key_fetches_from_ml():
+    """schema_to_dict fetches named ml module via get_module().to_dict()."""
     ml = _make_ml()
+    ml.get_module.return_value.to_dict.return_value = {"ro_ch": 2}
     inner_spec = CfgSectionSpec(
         label="Direct Readout",
         fields={"ro_ch": ScalarSpec(label="RO ch", type=int)},
@@ -160,13 +161,14 @@ def test_module_ref_value_flattened_directly():
         {
             "readout": ModuleRefValue(
                 chosen_key="readout_rf",
-                value=CfgSectionValue(fields={"ro_ch": ScalarValue(2)}),
+                value=CfgSectionValue(fields={"ro_ch": ScalarValue(99)}),
             )
         },
     )
     result = schema_to_dict(s, ml)
+    # should use ml value, not widget value (99)
     assert result["readout"] == {"ro_ch": 2}
-    ml.get_module.assert_not_called()
+    ml.get_module.assert_called_once_with("readout_rf")
 
 
 def test_module_ref_custom_key_resolves_by_label():

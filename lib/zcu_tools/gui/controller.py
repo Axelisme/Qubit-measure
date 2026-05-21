@@ -380,6 +380,11 @@ class Controller:
     def get_tab_default_cfg(self, tab_id: str) -> Any:
         return self._state.get_tab(tab_id).last_cfg
 
+    def get_tab_fresh_cfg(self, tab_id: str) -> Any:
+        """Re-run make_default_cfg so the form reflects the current ml state."""
+        tab = self._state.get_tab(tab_id)
+        return tab.adapter.make_default_cfg(self._state.exp_context)
+
     def get_tab_result(self, tab_id: str) -> Any:
         return self._state.get_tab(tab_id).last_result
 

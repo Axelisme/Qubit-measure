@@ -346,7 +346,7 @@ def test_apply_writeback_with_overrides():
         ctx,
         ar,
         ["readout_rf"],
-        overrides={"readout_rf": override_readout},
+        overrides={"readout_rf": {"name": "readout_rf", "cfg": override_readout}},
     )
     cast(MagicMock, ctx.ml.register_module).assert_called_once()
 

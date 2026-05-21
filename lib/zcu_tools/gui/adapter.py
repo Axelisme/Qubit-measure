@@ -70,6 +70,14 @@ class ScalarSpec:
 
 
 @dataclass(frozen=True)
+class LiteralSpec:
+    """A fixed-value field: no widget shown, value is always spec.value."""
+
+    value: Any
+    label: str = ""
+
+
+@dataclass(frozen=True)
 class SweepSpec:
     label: str = "Sweep"
     editable: bool = True
@@ -102,6 +110,7 @@ class CfgSectionSpec:
 
 CfgNodeSpec = Union[
     ScalarSpec,
+    LiteralSpec,
     SweepSpec,
     MultiSweepSpec,
     ModuleRefSpec,
@@ -191,6 +200,9 @@ def _section_to_dict(
             assert isinstance(node_val, ScalarValue)
             result[key] = node_val.value
 
+        elif isinstance(node_spec, LiteralSpec):
+            result[key] = node_spec.value
+
         elif isinstance(node_spec, SweepSpec):
             assert isinstance(node_val, SweepValue)
             from zcu_tools.notebook.utils import make_sweep
@@ -219,6 +231,19 @@ def _section_to_dict(
 
         elif isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
             assert isinstance(node_val, (ModuleRefValue, WaveformRefValue))
+            chosen = node_val.chosen_key
+            # If chosen_key is an ml-named entry, return its to_dict() directly
+            if not chosen.startswith("<Custom:") and ml is not None:
+                try:
+                    obj = (
+                        ml.get_module(chosen)
+                        if isinstance(node_spec, ModuleRefSpec)
+                        else ml.get_waveform(chosen)
+                    )
+                    result[key] = obj.to_dict()
+                    continue
+                except Exception:
+                    pass
             result[key] = _section_to_dict(
                 _find_allowed_spec(node_spec, node_val),
                 node_val.value,
@@ -269,7 +294,9 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
     """Produce a default CfgSectionValue mirroring the given spec structure."""
     fields: dict[str, CfgNodeValue] = {}
     for key, node_spec in spec.fields.items():
-        if isinstance(node_spec, ScalarSpec):
+        if isinstance(node_spec, LiteralSpec):
+            fields[key] = ScalarValue(node_spec.value)
+        elif isinstance(node_spec, ScalarSpec):
             # Use 0 / "" / False as a sensible zero-value per type
             defaults: dict[type, Any] = {int: 0, float: 0.0, bool: False, str: ""}
             fields[key] = ScalarValue(defaults.get(node_spec.type, None))

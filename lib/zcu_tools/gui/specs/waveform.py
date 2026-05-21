@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.adapter import CfgSectionSpec, ScalarSpec, WaveformRefSpec
+from zcu_tools.gui.adapter import (
+    CfgSectionSpec,
+    LiteralSpec,
+    ScalarSpec,
+    WaveformRefSpec,
+)
 
 CONST_WAVEFORM_SPEC = CfgSectionSpec(
     label="Const",
     fields={
-        "style": ScalarSpec(label="Style", type=str, hidden=True),
+        "style": LiteralSpec("const"),
         "length": ScalarSpec(label="Length (us)", type=float, decimals=3),
     },
 )
@@ -15,7 +20,7 @@ CONST_WAVEFORM_SPEC = CfgSectionSpec(
 COSINE_WAVEFORM_SPEC = CfgSectionSpec(
     label="Cosine",
     fields={
-        "style": ScalarSpec(label="Style", type=str, hidden=True),
+        "style": LiteralSpec("cosine"),
         "length": ScalarSpec(label="Length (us)", type=float, decimals=3),
     },
 )
@@ -23,7 +28,7 @@ COSINE_WAVEFORM_SPEC = CfgSectionSpec(
 GAUSS_WAVEFORM_SPEC = CfgSectionSpec(
     label="Gauss",
     fields={
-        "style": ScalarSpec(label="Style", type=str, hidden=True),
+        "style": LiteralSpec("gauss"),
         "length": ScalarSpec(label="Length (us)", type=float, decimals=3),
         "sigma": ScalarSpec(label="Sigma (us)", type=float, decimals=3),
     },
@@ -32,7 +37,7 @@ GAUSS_WAVEFORM_SPEC = CfgSectionSpec(
 DRAG_WAVEFORM_SPEC = CfgSectionSpec(
     label="DRAG",
     fields={
-        "style": ScalarSpec(label="Style", type=str, hidden=True),
+        "style": LiteralSpec("drag"),
         "length": ScalarSpec(label="Length (us)", type=float, decimals=3),
         "sigma": ScalarSpec(label="Sigma (us)", type=float, decimals=3),
         "delta": ScalarSpec(label="Delta (MHz)", type=float, decimals=2),
@@ -43,7 +48,7 @@ DRAG_WAVEFORM_SPEC = CfgSectionSpec(
 ARB_WAVEFORM_SPEC = CfgSectionSpec(
     label="Arb",
     fields={
-        "style": ScalarSpec(label="Style", type=str, hidden=True),
+        "style": LiteralSpec("arb"),
         "length": ScalarSpec(label="Length (us)", type=float, decimals=3),
         "data": ScalarSpec(label="Data key", type=str),
     },
@@ -58,7 +63,7 @@ _RAISE_WAVEFORM_SPEC = WaveformRefSpec(
 FLAT_TOP_WAVEFORM_SPEC = CfgSectionSpec(
     label="FlatTop",
     fields={
-        "style": ScalarSpec(label="Style", type=str, hidden=True),
+        "style": LiteralSpec("flat_top"),
         "length": ScalarSpec(label="Length (us)", type=float, decimals=3),
         "raise_waveform": _RAISE_WAVEFORM_SPEC,
     },

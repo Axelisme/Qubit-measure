@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.adapter import CfgSectionSpec, ScalarSpec, WaveformRefSpec
+from zcu_tools.gui.adapter import (
+    CfgSectionSpec,
+    LiteralSpec,
+    ScalarSpec,
+    WaveformRefSpec,
+)
 from zcu_tools.gui.specs.waveform import (
     ARB_WAVEFORM_SPEC,
     CONST_WAVEFORM_SPEC,
@@ -15,7 +20,7 @@ from zcu_tools.gui.specs.waveform import (
 PULSE_SPEC = CfgSectionSpec(
     label="Pulse",
     fields={
-        "type": ScalarSpec(label="Type", type=str, hidden=True),
+        "type": LiteralSpec("pulse"),
         "waveform": WaveformRefSpec(
             allowed=[
                 CONST_WAVEFORM_SPEC,
