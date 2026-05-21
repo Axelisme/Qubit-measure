@@ -498,6 +498,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._ctrl = controller
         self._tab_widgets: dict[str, ExpTabWidget] = {}
+        self._inspect_dialog: Any = None
 
         self.setWindowTitle("ZCU Qubit Measure — v2 GUI")
         self.resize(1280, 750)
@@ -525,6 +526,10 @@ class MainWindow(QMainWindow):
         predictor_btn = QPushButton("Predictor…")
         predictor_btn.clicked.connect(self._on_predictor_clicked)
         toolbar.addWidget(predictor_btn)
+
+        inspect_btn = QPushButton("Inspect…")
+        inspect_btn.clicked.connect(self._on_inspect_clicked)
+        toolbar.addWidget(inspect_btn)
 
         main_layout.addLayout(toolbar)
 
@@ -660,6 +665,10 @@ class MainWindow(QMainWindow):
             schema = self._ctrl.get_tab_fresh_cfg(tab_id)
             if schema is not None:
                 tab_w.populate_cfg(schema, ml=ml)
+
+    def refresh_inspect_panel(self) -> None:
+        if self._inspect_dialog is not None and self._inspect_dialog.isVisible():
+            self._inspect_dialog.refresh()
 
     def refresh_predictor_panel(self) -> None:
         info = self._ctrl.get_predictor_info()
@@ -891,3 +900,12 @@ class MainWindow(QMainWindow):
 
         dlg = PredictorDialog(self._ctrl, parent=self)
         dlg.exec()
+
+    def _on_inspect_clicked(self) -> None:
+        from .inspect_dialog import InspectDialog
+
+        if self._inspect_dialog is None:
+            self._inspect_dialog = InspectDialog(self._ctrl, parent=None)
+        self._inspect_dialog.show()
+        self._inspect_dialog.raise_()
+        self._inspect_dialog.activateWindow()

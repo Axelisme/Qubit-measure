@@ -25,6 +25,7 @@ class ViewProtocol(Protocol):
     def refresh_context_panel(self) -> None: ...
     def refresh_config_panels(self) -> None: ...
     def refresh_predictor_panel(self) -> None: ...
+    def refresh_inspect_panel(self) -> None: ...
     def show_status_message(self, message: str) -> None: ...
     def make_pbar_factory(self, tab_id: str) -> Any: ...
     def make_live_container(self, tab_id: str) -> Any: ...
@@ -276,6 +277,7 @@ class Controller:
         self._view.refresh_context_panel()
         self._view.refresh_run_state(self._state.is_running)
         self._view.refresh_config_panels()
+        self._view.refresh_inspect_panel()
 
     def setup_project(self, result_dir: str) -> None:
         logger.info("setup_project: result_dir=%r", result_dir)
@@ -290,6 +292,7 @@ class Controller:
         self._state.set_context(new_ctx)
         self._view.refresh_context_panel()
         self._view.refresh_config_panels()
+        self._view.refresh_inspect_panel()
 
     def new_context(
         self,
@@ -311,6 +314,7 @@ class Controller:
         self._state.set_context(new_ctx)
         self._view.refresh_context_panel()
         self._view.refresh_config_panels()
+        self._view.refresh_inspect_panel()
 
     def get_active_context_label(self) -> Optional[str]:
         return self._io.get_active_label()
@@ -422,6 +426,10 @@ class Controller:
         tab = self._state.get_tab(tab_id)
         ctx = self._state.exp_context
         return tab.adapter.make_save_paths(ctx)
+
+    def get_current_md(self) -> Any:
+        """Return the current MetaDict (may be None if no context is set)."""
+        return self._state.exp_context.md
 
     def get_current_ml(self) -> Any:
         """Return the current ModuleLibrary (may be None if no context is set)."""
