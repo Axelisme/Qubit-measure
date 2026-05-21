@@ -110,19 +110,21 @@ class ExperimentManager:
                 ("mK", 1000e-3, 1e3),  # 1000 mK
                 ("K", float("inf"), 1),
             ],
+            "none": [
+                ("", 1, 1),
+                ("k", 1e3, 1e-3),
+                ("M", 1e6, 1e-6),
+                ("G", 1e9, 1e-9),
+                ("T", float("inf"), 1e-12),
+            ],
         }
 
         united_value = None
         if value is not None:
-            if unit == "none":
-                united_value = f"{value:.3e}"
-            else:
-                for unit_suffix, max_value, scale in UNIT_RANGES[unit]:
-                    if value <= max_value:
-                        united_value = f"{value * scale:.3f}{unit_suffix}"
-                        break
-                else:  # fallback for extremely large values
-                    united_value = f"{value:.3e}{unit}"
+            for unit_suffix, max_value, scale in UNIT_RANGES[unit]:
+                if value <= max_value:
+                    united_value = f"{value * scale:.3f}{unit_suffix}"
+                    break
 
         base_name = datetime.now().strftime("%m%d%H")
         if united_value is not None:
