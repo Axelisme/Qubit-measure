@@ -99,18 +99,21 @@ def test_factory_two_layers(qapp):
 
 
 def test_total_setter(qapp):
-    """Setting total updates the QProgressBar maximum."""
+    """Setting total keeps QProgressBar maximum at _SCALE; pbar.total reflects logical value."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-    from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
+    from zcu_tools.progress_bar.backend.qt import _SCALE, QtProgressBarFactory
 
     stack = _make_stack(qapp)
     factory = QtProgressBarFactory(stack)
 
     pbar = factory(desc="t", total=5, leave=False)
     QApplication.processEvents()
+    assert stack._active[0].maximum() == _SCALE  # always scaled
+
     pbar.total = 20
     QApplication.processEvents()
-    assert stack._active[0].maximum() == 20
+    assert stack._active[0].maximum() == _SCALE  # still scaled, not raw 20
+    assert pbar.total == 20  # logical value unchanged
 
     pbar.close()
     QApplication.processEvents()

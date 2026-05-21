@@ -17,21 +17,35 @@ if TYPE_CHECKING:
     from zcu_tools.gui.ui.progress_stack import ProgressStack
 
 
-class _StackBridge(QObject):
-    """Lives in the main thread; receives signals and forwards to _ProgressStack."""
+_SCALE = 1000  # QProgressBar is integer-only; map [0, total] → [0, _SCALE]
 
-    push_requested: Signal = Signal(str, int)  # label, total → emitted by worker
-    pop_requested: Signal = Signal(object)  # QProgressBar → emitted by worker
-    update_requested: Signal = Signal(object, int)  # QProgressBar, delta
-    set_value_requested: Signal = Signal(object, int)  # QProgressBar, value
-    set_max_requested: Signal = Signal(object, int)  # QProgressBar, maximum
+
+class _StackBridge(QObject):
+    """Lives in the main thread; receives signals and forwards to ProgressStack.
+
+    All progress values are scaled to [0, _SCALE] integers so that QProgressBar
+    (which is integer-only) can represent arbitrary float totals accurately.
+    """
+
+    push_requested: Signal = Signal(str, float)  # label, total
+    pop_requested: Signal = Signal(object)  # QProgressBar
+    update_requested: Signal = Signal(
+        object, float
+    )  # QProgressBar, delta (original units)
+    set_value_requested: Signal = Signal(
+        object, float
+    )  # QProgressBar, value (original units)
+    set_max_requested: Signal = Signal(
+        object, float
+    )  # QProgressBar, total (original units)
     set_format_requested: Signal = Signal(object, str)  # QProgressBar, fmt
 
     def __init__(self, stack: "ProgressStack") -> None:
         super().__init__()
         self._stack = stack
-        # keep a mapping worker_id → QProgressBar so push_requested can store the result
         self._pending: dict[int, Any] = {}
+        # per-bar scale factor: maps original total → _SCALE
+        self._scales: dict[int, float] = {}
 
         self.push_requested.connect(self._on_push)
         self.pop_requested.connect(self._on_pop)
@@ -40,32 +54,38 @@ class _StackBridge(QObject):
         self.set_max_requested.connect(self._on_set_max)
         self.set_format_requested.connect(self._on_set_format)
 
-    def _on_push(self, label: str, total: int) -> None:
-        # Result stored in _pending keyed by label+total; QtProgressBar polls it.
-        bar = self._stack.push(label, total)
+    def _scale_of(self, bar: Any) -> float:
+        return self._scales.get(id(bar), 1.0)
+
+    def _on_push(self, label: str, total: float) -> None:
+        bar = self._stack.push(label, _SCALE)
         key = id(bar)
         self._pending[key] = bar
+        self._scales[key] = (_SCALE / total) if total > 0 else 1.0
 
     def _on_pop(self, bar: object) -> None:
+        self._scales.pop(id(bar), None)
         self._stack.pop(bar)  # type: ignore[arg-type]
 
-    def _on_update(self, bar: object, delta: int) -> None:
+    def _on_update(self, bar: object, delta: float) -> None:
         from qtpy.QtWidgets import QProgressBar  # type: ignore[attr-defined]
 
         if isinstance(bar, QProgressBar):
-            bar.setValue(bar.value() + delta)
+            scaled = int(round(delta * self._scale_of(bar)))
+            bar.setValue(bar.value() + scaled)
 
-    def _on_set_value(self, bar: object, value: int) -> None:
+    def _on_set_value(self, bar: object, value: float) -> None:
         from qtpy.QtWidgets import QProgressBar  # type: ignore[attr-defined]
 
         if isinstance(bar, QProgressBar):
-            bar.setValue(value)
+            bar.setValue(int(round(value * self._scale_of(bar))))
 
-    def _on_set_max(self, bar: object, maximum: int) -> None:
+    def _on_set_max(self, bar: object, total: float) -> None:
         from qtpy.QtWidgets import QProgressBar  # type: ignore[attr-defined]
 
         if isinstance(bar, QProgressBar):
-            bar.setMaximum(maximum)
+            self._scales[id(bar)] = (_SCALE / total) if total > 0 else 1.0
+            bar.setMaximum(_SCALE)
 
     def _on_set_format(self, bar: object, fmt: str) -> None:
         from qtpy.QtWidgets import QProgressBar  # type: ignore[attr-defined]
@@ -102,8 +122,7 @@ class QtProgressBar(BaseProgressBar):
         self._total: ProgressTotal = total
         self._leave = leave
         self._n: ProgressValue = 0
-        # emit push; block briefly until main thread creates the QProgressBar
-        bridge.push_requested.emit(label, int(total) if total is not None else 0)
+        bridge.push_requested.emit(label, float(total) if total is not None else 0.0)
         self._bar = bridge.pop_pending()
 
     # ------------------------------------------------------------------
@@ -115,7 +134,7 @@ class QtProgressBar(BaseProgressBar):
 
     def update(self, value: ProgressValue = 1) -> None:
         self._n = self._n + value
-        self._bridge.update_requested.emit(self._bar, int(value))
+        self._bridge.update_requested.emit(self._bar, float(value))
 
     def reset(self) -> None:
         self._n = 0
@@ -136,7 +155,7 @@ class QtProgressBar(BaseProgressBar):
     def total(self, value: ProgressTotal) -> None:
         self._total = value
         self._bridge.set_max_requested.emit(
-            self._bar, int(value) if value is not None else 0
+            self._bar, float(value) if value is not None else 0.0
         )
 
     @property

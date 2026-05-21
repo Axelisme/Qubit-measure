@@ -61,16 +61,17 @@ class FakeDevice(BaseDevice[FakeDeviceInfo]):
         targets = np.linspace(self.value, value, num=steps + 1, endpoint=True)
 
         pbar = make_pbar(
-            total=steps,
+            total=round(dist, 6),
             desc="Ramp value",
             leave=False,
             disable=not progress,
         )
         for target in targets[1:]:  # skip first (current value)
+            prev = self.value
             self.value = float(target)
             if not self._fast_mode:
                 time.sleep(RAMP_INTERVAL)
-            pbar.update(1)
+            pbar.update(round(abs(self.value - prev), 6))
         pbar.close()
 
     # ==========================================================================#
