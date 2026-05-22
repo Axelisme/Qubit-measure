@@ -120,6 +120,7 @@ class ExpTabWidget(QWidget):
         content_row.addWidget(splitter, stretch=1)
 
         self._splitter = splitter
+        self._splitter_left_saved = 350
         self._left_collapse_btn = _left_collapse_btn
 
         def _on_left_collapse(checked: bool) -> None:
@@ -399,7 +400,7 @@ class ExpTabWidget(QWidget):
                 )
 
         save_btn.clicked.connect(save)
-        dialog.exec_()
+        dialog.exec()
 
     def _refresh_writeback_btn(self, *_: int) -> None:
         has_selected = any(cb.isChecked() for cb in self._writeback_checks.values())
@@ -754,11 +755,14 @@ class MainWindow(QMainWindow):
                 group = parts[0]
                 label = "/".join(parts[1:])
                 if group not in submenus:
-                    submenus[group] = menu.addMenu(group)
-                action = submenus[group].addAction(label)
-                action.setData(name)  # type: ignore[union-attr]
+                    sub_menu = menu.addMenu(group)
+                    if sub_menu is not None:
+                        submenus[group] = sub_menu
+                if group in submenus:
+                    action = submenus[group].addAction(label)
+                    action.setData(name)  # type: ignore[union-attr]
 
-        action = menu.exec_(
+        action = menu.exec(
             self._new_tab_btn.mapToGlobal(  # type: ignore[assignment]
                 self._new_tab_btn.rect().bottomLeft()
             )
