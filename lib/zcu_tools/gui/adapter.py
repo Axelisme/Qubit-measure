@@ -138,6 +138,7 @@ CfgNodeSpec = Union[
 @dataclass
 class ScalarValue:
     value: Any
+    is_unset: bool = False
 
 
 @dataclass
@@ -207,15 +208,32 @@ def _section_to_dict(
     spec: CfgSectionSpec,
     value: CfgSectionValue,
     ml: "Optional[ModuleLibrary]",
+    path: Optional[list[str]] = None,
 ) -> dict:
+    if path is None:
+        path = []
     result: dict[str, Any] = {}
+    extra_keys = set(value.fields.keys()) - set(spec.fields.keys())
+    if extra_keys:
+        section = ".".join(path) or "<root>"
+        extras = ", ".join(sorted(extra_keys))
+        raise RuntimeError(f"Config section '{section}' has unknown fields: {extras}")
     for key, node_spec in spec.fields.items():
         node_val = value.fields.get(key)
         if node_val is None:
-            continue
+            if isinstance(node_spec, LiteralSpec):
+                result[key] = node_spec.value
+                continue
+            label = getattr(node_spec, "label", "") or key
+            full_path = ".".join([*path, key])
+            raise RuntimeError(f"Config field '{full_path}' ({label}) is missing")
 
         if isinstance(node_spec, ScalarSpec):
             assert isinstance(node_val, ScalarValue)
+            if node_val.is_unset:
+                label = node_spec.label or key
+                full_path = ".".join([*path, key])
+                raise RuntimeError(f"Config field '{full_path}' ({label}) is unset")
             result[key] = node_val.value
 
         elif isinstance(node_spec, LiteralSpec):
@@ -267,15 +285,20 @@ def _section_to_dict(
 
         elif isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
             assert isinstance(node_val, (ModuleRefValue, WaveformRefValue))
+            if not isinstance(node_val.value, CfgSectionValue):
+                label = node_spec.label or key
+                full_path = ".".join([*path, key])
+                raise RuntimeError(f"Config field '{full_path}' ({label}) is missing")
             result[key] = _section_to_dict(
                 _find_allowed_spec(node_spec, node_val),
                 node_val.value,
                 ml,
+                path=[*path, key],
             )
 
         elif isinstance(node_spec, CfgSectionSpec):
             assert isinstance(node_val, CfgSectionValue)
-            result[key] = _section_to_dict(node_spec, node_val, ml)
+            result[key] = _section_to_dict(node_spec, node_val, ml, path=[*path, key])
 
         else:
             raise TypeError(f"Unknown CfgNodeSpec type: {type(node_spec)}")
@@ -297,6 +320,32 @@ def _find_allowed_spec(
     for s in ref_spec.allowed:
         if s.label == label:
             return s
+    # Named module: match by LiteralSpec discriminators first (type/style)
+    if isinstance(ref_val.value, CfgSectionValue):
+        literal_matches = []
+        for spec in ref_spec.allowed:
+            ok = True
+            for key, node_spec in spec.fields.items():
+                if isinstance(node_spec, LiteralSpec):
+                    node_val = ref_val.value.fields.get(key)
+                    if (
+                        not isinstance(node_val, ScalarValue)
+                        or node_val.value != node_spec.value
+                    ):
+                        ok = False
+                        break
+            if ok:
+                literal_matches.append(spec)
+        if literal_matches:
+            return max(literal_matches, key=lambda s: len(s.fields))
+    # Named module: infer spec from value shape (prefer most specific match)
+    if isinstance(ref_val.value, CfgSectionValue):
+        value_keys = set(ref_val.value.fields.keys())
+        matches = [
+            s for s in ref_spec.allowed if set(s.fields.keys()).issubset(value_keys)
+        ]
+        if matches:
+            return max(matches, key=lambda s: len(s.fields))
     # fallback: return first allowed spec
     if ref_spec.allowed:
         return ref_spec.allowed[0]

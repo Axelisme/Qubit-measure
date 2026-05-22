@@ -135,7 +135,7 @@ class ExpTabWidget(QWidget):
                 sizes[1] += sizes[0]
                 sizes[0] = 0
             else:
-                saved = getattr(self, "_splitter_left_saved", 350)
+                saved = self._splitter_left_saved
                 sizes[1] = max(0, sizes[1] - saved)
                 sizes[0] = saved
             self._splitter.setSizes(sizes)
@@ -251,10 +251,8 @@ class ExpTabWidget(QWidget):
 
     # ── cfg helpers ───────────────────────────────────────────────────────
 
-    def populate_cfg(
-        self, schema: Any, bus: Any, ml: Any = None, md: Any = None
-    ) -> None:
-        self.cfg_form.populate(schema, bus, ml=ml, md=md)
+    def populate_cfg(self, schema: Any, bus: Any, ctrl: "Controller") -> None:
+        self.cfg_form.populate(schema, bus, ctrl)
 
     def read_schema(self) -> Any:
         return self.cfg_form.read_schema()
@@ -371,9 +369,7 @@ class ExpTabWidget(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         form_widget = CfgFormWidget()
-        form_widget.populate(
-            schema, self._ctrl.get_bus(), ml=ml, md=self._ctrl.get_current_md()
-        )
+        form_widget.populate(schema, self._ctrl.get_bus(), self._ctrl)
         scroll.setWidget(form_widget)
         layout.addWidget(scroll, stretch=1)
 
@@ -607,7 +603,7 @@ class MainWindow(QMainWindow):
     def _on_bus_run_state_changed(self) -> None:
         self.refresh_run_state(self._ctrl.is_running())
 
-    def _on_bus_context_changed(self) -> None:
+    def _on_bus_context_changed(self, md: Any, ml: Any) -> None:
         self.refresh_context_panel()
         self.refresh_config_panels()
 
@@ -625,12 +621,7 @@ class MainWindow(QMainWindow):
         # populate cfg form from adapter default
         schema = self._ctrl.get_tab_default_cfg(tab_id)
         if schema is not None:
-            tab_w.populate_cfg(
-                schema,
-                bus=self._ctrl.get_bus(),
-                ml=self._ctrl.get_current_ml(),
-                md=self._ctrl.get_current_md(),
-            )
+            tab_w.populate_cfg(schema, self._ctrl.get_bus(), self._ctrl)
 
         # refresh state (enables/disables buttons based on context)
         self.refresh_run_state(self._ctrl.is_running())
@@ -672,7 +663,8 @@ class MainWindow(QMainWindow):
     def _on_bus_tab_content_changed(self, tab_id: str) -> None:
         self.refresh_tab(tab_id)
 
-    def _on_bus_inspect_changed(self) -> None:
+    def _on_bus_inspect_changed(self, md: Optional[Any] = None) -> None:
+        # emitted from context.py (with md) and controller.py (without)
         self.refresh_inspect_panel()
         self.refresh_config_panels()
 
@@ -787,13 +779,11 @@ class MainWindow(QMainWindow):
             self._set_tab_running(tab_id, tab_w, is_running, has_context, has_soc)
 
     def refresh_config_panels(self) -> None:
-        ml = self._ctrl.get_current_ml()
-        md = self._ctrl.get_current_md()
         bus = self._ctrl.get_bus()
         for tab_id, tab_w in self._tab_widgets.items():
             schema = self._ctrl.get_tab_fresh_cfg(tab_id)
             if schema is not None:
-                tab_w.populate_cfg(schema, ml=ml, md=md, bus=bus)
+                tab_w.populate_cfg(schema, bus, self._ctrl)
 
     def refresh_inspect_panel(self) -> None:
         if self._inspect_dialog is not None and self._inspect_dialog.isVisible():
@@ -889,6 +879,11 @@ class MainWindow(QMainWindow):
             logger.info("_on_run_stop_clicked: run requested tab_id=%r", tab_id)
             tab_w = self._tab_widgets.get(tab_id)
             if tab_w is None:
+                return
+            if not tab_w.cfg_form.is_valid():
+                msg = "Config has unset fields — fill required values before running"
+                logger.warning("_on_run_stop_clicked: blocked — %s", msg)
+                self.show_status_message(msg)
                 return
             try:
                 schema = tab_w.read_schema()

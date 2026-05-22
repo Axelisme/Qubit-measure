@@ -25,6 +25,9 @@ class ConnectionService:
     def set_connection(self, soc: Any, soccfg: Any) -> None:
         new_ctx = dataclasses.replace(self._state.exp_context, soc=soc, soccfg=soccfg)
         self._state.set_context(new_ctx)
+        from zcu_tools.gui.event_bus import GuiEvent
+
+        self._bus.emit(GuiEvent.CONTEXT_CHANGED, new_ctx.md, new_ctx.ml)
 
     def set_predictor(
         self, predictor: Optional[Any], path: Optional[str] = None
@@ -32,6 +35,9 @@ class ConnectionService:
         self._predictor_path = path
         new_ctx = dataclasses.replace(self._state.exp_context, predictor=predictor)
         self._state.set_context(new_ctx)
+        from zcu_tools.gui.event_bus import GuiEvent
+
+        self._bus.emit(GuiEvent.CONTEXT_CHANGED, new_ctx.md, new_ctx.ml)
 
     def get_predictor(self) -> Optional[Any]:
         return self._state.exp_context.predictor

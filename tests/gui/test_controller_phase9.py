@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 import time
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, ANY
 
 import pytest
 from qtpy.QtCore import QCoreApplication
@@ -238,7 +238,7 @@ def test_apply_writeback_calls_refresh_config_panels(cf):
 
     cf.ctrl.apply_writeback(tab_id, ["fake_peak"])
 
-    cf.bus.emit.assert_any_call(GuiEvent.INSPECT_CHANGED)
+    cf.bus.emit.assert_any_call(GuiEvent.INSPECT_CHANGED, ANY)
 
 
 def test_apply_writeback_without_analyze_raises(cf):

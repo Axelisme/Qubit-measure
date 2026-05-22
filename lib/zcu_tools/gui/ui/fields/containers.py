@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, Optional, Union, cast
 
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
@@ -16,8 +16,10 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from ...live_model import ModuleRefLiveField, SectionLiveField
-from .registry import get_widget_cls, register_widget
+from ...adapter import ScalarSpec
+from ...live_model import LiveField, ModuleRefLiveField, SectionLiveField
+from .common import BaseLiveWidget
+from .registry import FieldWidgetProtocol, get_widget_cls, register_widget
 
 
 class _CollapsibleSection(QWidget):
@@ -64,6 +66,12 @@ class _CollapsibleSection(QWidget):
         self.body_layout.setSpacing(2)
         outer.addWidget(self._body)
 
+        # For compatibility with old code that expects .form on this widget
+        self.form = QFormLayout()
+        self.form.setContentsMargins(0, 0, 0, 0)
+        self.form.setSpacing(4)
+        self.body_layout.addLayout(self.form)
+
         if collapsed:
             self._body.setVisible(False)
 
@@ -73,17 +81,16 @@ class _CollapsibleSection(QWidget):
         self._body.setVisible(checked)
 
 
-@register_widget("SectionLiveField") # Type string used to avoid circular import if needed, but we can use real type too
-class SectionWidget(QWidget):
+@register_widget(SectionLiveField)
+class SectionWidget(BaseLiveWidget):
     def __init__(
         self,
         field: SectionLiveField,
         top_level: bool = False,
         parent: Optional[QWidget] = None,
     ):
-        super().__init__(parent)
-        self._field = field
-        
+        super().__init__(field, parent)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -95,38 +102,35 @@ class SectionWidget(QWidget):
         )
         layout.addWidget(self._container)
 
-        self.form = QFormLayout()
-        self.form.setContentsMargins(0, 0, 0, 0)
-        self.form.setSpacing(4)
-        self.form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)  # type: ignore[attr-defined]
-        self._container.body_layout.addLayout(self.form)
-
-        self._child_widgets: Dict[str, QWidget] = {}
+        self._child_widgets: Dict[str, FieldWidgetProtocol] = {}
         self._build_children()
 
     def _build_children(self) -> None:
-        from ...adapter import ScalarSpec
-
-        for key, child_field in self._field.fields.items():
+        field = cast(SectionLiveField, self._field)
+        for key, child_field in field.fields.items():
             spec = child_field.spec
             # Skip hidden scalar fields
-            if hasattr(spec, "hidden") and spec.hidden:
+            if isinstance(spec, ScalarSpec) and spec.hidden:
                 continue
-            
+
             widget_cls = get_widget_cls(child_field)
-            w = widget_cls(child_field) # type: ignore
-            
+            w = widget_cls(child_field)  # type: ignore
+
             label = spec.label or key
-            self.form.addRow(f"{label}:", w)
+            self._container.form.addRow(f"{label}:", cast(QWidget, w))
             self._child_widgets[key] = w
 
+    def teardown(self) -> None:
+        # Recursively teardown children
+        for w in self._child_widgets.values():
+            w.teardown()
 
-@register_widget("ModuleRefLiveField")
-class ModuleRefWidget(QWidget):
+
+@register_widget(ModuleRefLiveField)
+class ModuleRefWidget(BaseLiveWidget):
     def __init__(self, field: ModuleRefLiveField, parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        self._field = field
-        
+        super().__init__(field, parent)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
@@ -134,16 +138,15 @@ class ModuleRefWidget(QWidget):
         # Header: Checkbox + Combo
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
-        
+
         self._cb = QCheckBox()
-        self._cb.setChecked(True) # In UI, ModuleRef is usually optional but we don't have 'enabled' in Spec yet
-        self._cb.setVisible(False) # Hide for now until we support optional modules
+        self._cb.setChecked(True)
+        self._cb.setVisible(False)
 
         self._combo = QComboBox()
-        # Initial items
         self._refresh_combo_items()
         self._combo.currentIndexChanged.connect(self._on_combo_changed)
-        
+
         header.addWidget(self._cb)
         header.addWidget(self._combo, stretch=1)
         layout.addLayout(header)
@@ -154,29 +157,31 @@ class ModuleRefWidget(QWidget):
         self._sub_layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._sub_container)
 
-        self._sub_widget: Optional[QWidget] = None
+        self._sub_widget: Optional[FieldWidgetProtocol] = None
         self._refresh_sub_widget()
-        
+
         # Reactive sync
         field.on_change.connect(self._on_model_changed)
 
     def _refresh_combo_items(self) -> None:
         self._combo.blockSignals(True)
         self._combo.clear()
-        
-        current = self._field.get_chosen_key()
-        
+
+        field = cast(ModuleRefLiveField, self._field)
+        current = field.get_chosen_key()
+
         # 1. Custom specs from 'allowed'
-        for spec in self._field.spec.allowed:
+        for spec in field.spec.allowed:
             label = spec.label or "Custom"
             key = f"<Custom:{label}>"
             self._combo.addItem(label, key)
-        
+
         # 2. Named modules from Library if available
-        ml = self._field._ml
+        ml = field.env.ctrl.get_current_ml()
         if ml:
             from ...adapter import ModuleRefSpec
-            is_module = isinstance(self._field.spec, ModuleRefSpec)
+
+            is_module = isinstance(field.spec, ModuleRefSpec)
             store = ml.modules if is_module else ml.waveforms
             if store:
                 self._combo.insertSeparator(self._combo.count())
@@ -190,33 +195,38 @@ class ModuleRefWidget(QWidget):
 
     def _on_combo_changed(self, index: int) -> None:
         key = self._combo.itemData(index)
-        self._field.set_chosen_key(key)
+        cast(ModuleRefLiveField, self._field).set_chosen_key(key)
 
     def _on_model_changed(self, *_: Any) -> None:
-        # If chosen key changed in model, update combo and sub-widget
-        key = self._field.get_chosen_key()
+        field = cast(ModuleRefLiveField, self._field)
+        key = field.get_chosen_key()
         idx = self._combo.findData(key)
         if idx >= 0 and idx != self._combo.currentIndex():
             self._combo.blockSignals(True)
             self._combo.setCurrentIndex(idx)
             self._combo.blockSignals(False)
-        
+
         self._refresh_sub_widget()
 
     def _refresh_sub_widget(self) -> None:
-        sub_field = self._field.sub_field
-        
-        # If we already have the correct widget, do nothing (Partial Update!)
-        if self._sub_widget and hasattr(self._sub_widget, "_field") and self._sub_widget._field == sub_field: # type: ignore
+        field = cast(ModuleRefLiveField, self._field)
+        sub_field = field.sub_field
+
+        if self._sub_widget and self._sub_widget.field == sub_field:
             return
-            
-        # Clean old
+
         if self._sub_widget:
-            self._sub_layout.removeWidget(self._sub_widget)
-            self._sub_widget.deleteLater()
+            self._sub_layout.removeWidget(cast(QWidget, self._sub_widget))
+            cast(QWidget, self._sub_widget).deleteLater()
             self._sub_widget = None
 
         if sub_field:
             widget_cls = get_widget_cls(sub_field)
-            self._sub_widget = widget_cls(sub_field) # type: ignore
-            self._sub_layout.addWidget(self._sub_widget)
+            w = widget_cls(sub_field)  # type: ignore
+            self._sub_widget = w
+            self._sub_layout.addWidget(cast(QWidget, w))
+
+    def teardown(self) -> None:
+        self._field.on_change.disconnect(self._on_model_changed)
+        if self._sub_widget:
+            self._sub_widget.teardown()

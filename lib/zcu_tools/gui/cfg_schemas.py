@@ -1,17 +1,14 @@
-"""cfg_schemas.py — convert ModuleCfg / WaveformCfg objects to (spec, value) pairs.
+"""cfg_schemas.py — convert Module/Waveform dicts to (spec, value) pairs.
 
-The Spec side comes from gui/specs/ static constants.
-This module only handles the value extraction: reading actual field values from
-a live config object and producing a CfgSectionValue that matches its spec.
-
-Public entry points:
-    module_cfg_to_value(cfg) -> (CfgSectionSpec, CfgSectionValue)
-    waveform_cfg_to_value(cfg) -> (CfgSectionSpec, CfgSectionValue)
+REFACTORED (Phase 36.5):
+- Now strictly expects dictionaries (dicts) as input.
+- Uses 'is_unset' flag for missing fields to avoid silent defaults.
+- No more getattr or _v hacks.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from zcu_tools.gui.adapter import (
     CfgSectionSpec,
@@ -32,14 +29,19 @@ from zcu_tools.gui.specs import (
     TWO_PULSE_RESET_SPEC,
     WAVEFORM_SPEC_BY_STYLE,
 )
+from zcu_tools.program.v2.modules.base import AbsModuleCfg
+from zcu_tools.program.v2.modules.waveform import AbsWaveformCfg
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _v(cfg: Any, attr: str, default: Any = 0) -> Any:
-    return getattr(cfg, attr, default)
+def _val(cfg: dict, key: str, default: Any = None) -> ScalarValue:
+    """Extract a scalar value from dict, marking as is_unset if key is missing."""
+    if key not in cfg:
+        return ScalarValue(value=default, is_unset=True)
+    return ScalarValue(value=cfg[key], is_unset=False)
 
 
 # ---------------------------------------------------------------------------
@@ -47,77 +49,81 @@ def _v(cfg: Any, attr: str, default: Any = 0) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def waveform_cfg_to_value(cfg: Any) -> tuple[CfgSectionSpec, CfgSectionValue]:
-    """Return (spec, value) for any AbsWaveformCfg subtype."""
-    style = str(getattr(cfg, "style", "const"))
+def waveform_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionValue]:
+    """Return (spec, value) from a raw waveform dictionary or object."""
+    if isinstance(cfg_input, AbsWaveformCfg):
+        cfg = cfg_input.to_dict()
+    elif isinstance(cfg_input, dict):
+        cfg = cfg_input
+    else:
+        raise TypeError(f"Expected dict or AbsWaveformCfg, got {type(cfg_input)}")
+    style = cfg.get("style", "const")
     spec = WAVEFORM_SPEC_BY_STYLE.get(style, CONST_WAVEFORM_SPEC)
 
     if style == "const":
         val = CfgSectionValue(
             fields={
                 "style": ScalarValue("const"),
-                "length": ScalarValue(float(_v(cfg, "length", 1.0))),
+                "length": _val(cfg, "length", 1.0),
             }
         )
     elif style == "cosine":
         val = CfgSectionValue(
             fields={
                 "style": ScalarValue("cosine"),
-                "length": ScalarValue(float(_v(cfg, "length", 0.1))),
+                "length": _val(cfg, "length", 0.1),
             }
         )
     elif style == "gauss":
         val = CfgSectionValue(
             fields={
                 "style": ScalarValue("gauss"),
-                "length": ScalarValue(float(_v(cfg, "length", 1.0))),
-                "sigma": ScalarValue(float(_v(cfg, "sigma", 0.25))),
+                "length": _val(cfg, "length", 1.0),
+                "sigma": _val(cfg, "sigma", 0.25),
             }
         )
     elif style == "drag":
         val = CfgSectionValue(
             fields={
                 "style": ScalarValue("drag"),
-                "length": ScalarValue(float(_v(cfg, "length", 1.0))),
-                "sigma": ScalarValue(float(_v(cfg, "sigma", 0.25))),
-                "delta": ScalarValue(float(_v(cfg, "delta", 0.0))),
-                "alpha": ScalarValue(float(_v(cfg, "alpha", 0.5))),
-            }
-        )
-    elif style == "arb":
-        val = CfgSectionValue(
-            fields={
-                "style": ScalarValue("arb"),
-                "length": ScalarValue(float(_v(cfg, "length", 1.0))),
-                "data": ScalarValue(str(_v(cfg, "data", ""))),
+                "length": _val(cfg, "length", 1.0),
+                "sigma": _val(cfg, "sigma", 0.25),
+                "beta": _val(cfg, "beta", 0.0),
             }
         )
     elif style == "flat_top":
-        raise_wav = getattr(cfg, "raise_waveform", None)
-        if raise_wav is not None:
+        raise_wav = cfg.get("raise_waveform")
+        if isinstance(raise_wav, dict):
             _, raise_val = waveform_cfg_to_value(raise_wav)
-            raise_spec = WAVEFORM_SPEC_BY_STYLE.get(
-                str(getattr(raise_wav, "style", "cosine")), CONST_WAVEFORM_SPEC
-            )
+            raise_style = raise_wav.get("style", "cosine")
+            raise_spec = WAVEFORM_SPEC_BY_STYLE.get(raise_style, CONST_WAVEFORM_SPEC)
         else:
             from zcu_tools.gui.specs.waveform import COSINE_WAVEFORM_SPEC
 
             raise_spec = COSINE_WAVEFORM_SPEC
             raise_val = make_default_value(raise_spec)
 
-        raise_label = raise_spec.label
         val = CfgSectionValue(
             fields={
                 "style": ScalarValue("flat_top"),
-                "length": ScalarValue(float(_v(cfg, "length", 5.0))),
+                "length": _val(cfg, "length", 1.0),
                 "raise_waveform": WaveformRefValue(
-                    chosen_key=f"<Custom:{raise_label}>",
+                    chosen_key=f"<Custom:{raise_spec.label}>",
                     value=raise_val,
                 ),
             }
         )
+    elif style == "arb":
+        val = CfgSectionValue(
+            fields={
+                "style": ScalarValue("arb"),
+                "length": _val(cfg, "length", 1.0),
+                "data": _val(cfg, "data", ""),
+            }
+        )
     else:
-        val = make_default_value(spec)
+        # Unknown style, fallback to generic
+        return _dict_to_spec_value(cfg)
 
     return spec, val
 
@@ -127,56 +133,56 @@ def waveform_cfg_to_value(cfg: Any) -> tuple[CfgSectionSpec, CfgSectionValue]:
 # ---------------------------------------------------------------------------
 
 
-def _pulse_to_value(cfg: Any) -> CfgSectionValue:
-    wav = getattr(cfg, "waveform", None)
-    if wav is not None:
+def _pulse_to_value(cfg: dict) -> CfgSectionValue:
+    wav = cfg.get("waveform")
+    if isinstance(wav, dict):
         wav_spec, wav_val = waveform_cfg_to_value(wav)
     else:
         wav_spec = CONST_WAVEFORM_SPEC
         wav_val = make_default_value(wav_spec)
 
-    wav_label = wav_spec.label
     return CfgSectionValue(
         fields={
             "type": ScalarValue("pulse"),
             "waveform": WaveformRefValue(
-                chosen_key=f"<Custom:{wav_label}>",
+                chosen_key=f"<Custom:{wav_spec.label}>",
                 value=wav_val,
             ),
-            "ch": ChannelValue(chosen=int(_v(cfg, "ch", 0)), resolved=None),
-            "nqz": ScalarValue(int(_v(cfg, "nqz", 2))),
-            "freq": ScalarValue(float(_v(cfg, "freq", 6000.0))),
-            "phase": ScalarValue(float(_v(cfg, "phase", 0.0))),
-            "gain": ScalarValue(float(_v(cfg, "gain", 0.5))),
-            "pre_delay": ScalarValue(float(_v(cfg, "pre_delay", 0.0))),
-            "post_delay": ScalarValue(float(_v(cfg, "post_delay", 0.0))),
+            "ch": ChannelValue(chosen=cfg.get("ch", 0), resolved=None),
+            "nqz": _val(cfg, "nqz", 2),
+            "freq": _val(cfg, "freq", 6000.0),
+            "phase": _val(cfg, "phase", 0.0),
+            "gain": _val(cfg, "gain", 0.5),
+            "pre_delay": _val(cfg, "pre_delay", 0.0),
+            "post_delay": _val(cfg, "post_delay", 0.0),
         }
     )
 
 
-def _direct_readout_to_value(cfg: Any) -> CfgSectionValue:
+def _direct_readout_to_value(cfg: dict) -> CfgSectionValue:
     return CfgSectionValue(
         fields={
             "type": ScalarValue("readout/direct"),
-            "ro_ch": ChannelValue(chosen=int(_v(cfg, "ro_ch", 0)), resolved=None),
-            "ro_freq": ScalarValue(float(_v(cfg, "ro_freq", 6000.0))),
-            "ro_length": ScalarValue(float(_v(cfg, "ro_length", 1.0))),
-            "trig_offset": ScalarValue(float(_v(cfg, "trig_offset", 0.0))),
+            "ro_ch": ChannelValue(chosen=cfg.get("ro_ch", 0), resolved=None),
+            "ro_freq": _val(cfg, "ro_freq", 6000.0),
+            "ro_length": _val(cfg, "ro_length", 1.0),
+            "trig_offset": _val(cfg, "trig_offset", 0.0),
         }
     )
 
 
-def _pulse_readout_to_value(cfg: Any) -> CfgSectionValue:
-    pulse_cfg = getattr(cfg, "pulse_cfg", None)
-    ro_cfg = getattr(cfg, "ro_cfg", None)
+def _pulse_readout_to_value(cfg: dict) -> CfgSectionValue:
+    pulse_cfg = cfg.get("pulse_cfg")
+    ro_cfg = cfg.get("ro_cfg")
+
     pulse_val = (
         _pulse_to_value(pulse_cfg)
-        if pulse_cfg is not None
+        if isinstance(pulse_cfg, dict)
         else make_default_value(PULSE_SPEC)
     )
     ro_val = (
         _direct_readout_to_value(ro_cfg)
-        if ro_cfg is not None
+        if isinstance(ro_cfg, dict)
         else make_default_value(DIRECT_READOUT_SPEC)
     )
     return CfgSectionValue(
@@ -188,15 +194,15 @@ def _pulse_readout_to_value(cfg: Any) -> CfgSectionValue:
     )
 
 
-def _none_reset_to_value(cfg: Any) -> CfgSectionValue:  # noqa: ARG001
+def _none_reset_to_value(cfg: dict) -> CfgSectionValue:  # noqa: ARG001
     return CfgSectionValue(fields={"type": ScalarValue("reset/none")})
 
 
-def _pulse_reset_to_value(cfg: Any) -> CfgSectionValue:
-    pulse_cfg = getattr(cfg, "pulse_cfg", None)
+def _pulse_reset_to_value(cfg: dict) -> CfgSectionValue:
+    pulse_cfg = cfg.get("pulse_cfg")
     pulse_val = (
         _pulse_to_value(pulse_cfg)
-        if pulse_cfg is not None
+        if isinstance(pulse_cfg, dict)
         else make_default_value(PULSE_SPEC)
     )
     return CfgSectionValue(
@@ -207,54 +213,44 @@ def _pulse_reset_to_value(cfg: Any) -> CfgSectionValue:
     )
 
 
-def _two_pulse_reset_to_value(cfg: Any) -> CfgSectionValue:
-    p1 = getattr(cfg, "pulse1_cfg", None)
-    p2 = getattr(cfg, "pulse2_cfg", None)
+def _two_pulse_reset_to_value(cfg: dict) -> CfgSectionValue:
+    p1 = cfg.get("pulse1_cfg")
+    p2 = cfg.get("pulse2_cfg")
     return CfgSectionValue(
         fields={
             "type": ScalarValue("reset/two_pulse"),
             "pulse1_cfg": _pulse_to_value(p1)
-            if p1 is not None
+            if isinstance(p1, dict)
             else make_default_value(PULSE_SPEC),
             "pulse2_cfg": _pulse_to_value(p2)
-            if p2 is not None
+            if isinstance(p2, dict)
             else make_default_value(PULSE_SPEC),
         }
     )
 
 
-def _bath_reset_to_value(cfg: Any) -> CfgSectionValue:
-    cav = getattr(cfg, "cavity_tone_cfg", None)
-    qub = getattr(cfg, "qubit_tone_cfg", None)
-    pi2 = getattr(cfg, "pi2_cfg", None)
+def _bath_reset_to_value(cfg: dict) -> CfgSectionValue:
+    cav = cfg.get("cavity_tone_cfg")
+    qub = cfg.get("qubit_tone_cfg")
+    pi2 = cfg.get("pi2_cfg")
     return CfgSectionValue(
         fields={
             "type": ScalarValue("reset/bath"),
             "cavity_tone_cfg": _pulse_to_value(cav)
-            if cav is not None
+            if isinstance(cav, dict)
             else make_default_value(PULSE_SPEC),
             "qubit_tone_cfg": _pulse_to_value(qub)
-            if qub is not None
+            if isinstance(qub, dict)
             else make_default_value(PULSE_SPEC),
             "pi2_cfg": _pulse_to_value(pi2)
-            if pi2 is not None
+            if isinstance(pi2, dict)
             else make_default_value(PULSE_SPEC),
+            "relax_delay": _val(cfg, "relax_delay", 1.0),
         }
     )
 
 
-_MODULE_SPEC_BY_TYPE: dict[str, CfgSectionSpec] = {
-    "pulse": PULSE_SPEC,
-    "readout/direct": DIRECT_READOUT_SPEC,
-    "readout/pulse": PULSE_READOUT_SPEC,
-    "reset/none": NONE_RESET_SPEC,
-    "reset/pulse": PULSE_RESET_SPEC,
-    "reset/two_pulse": TWO_PULSE_RESET_SPEC,
-    "reset/bath": BATH_RESET_SPEC,
-}
-
-_MODULE_VALUE_BUILDERS: dict[str, Any] = {
-    "pulse": _pulse_to_value,
+_MODULE_VALUE_BUILDERS = {
     "readout/direct": _direct_readout_to_value,
     "readout/pulse": _pulse_readout_to_value,
     "reset/none": _none_reset_to_value,
@@ -263,33 +259,39 @@ _MODULE_VALUE_BUILDERS: dict[str, Any] = {
     "reset/bath": _bath_reset_to_value,
 }
 
+_MODULE_SPEC_BY_TYPE = {
+    "readout/direct": DIRECT_READOUT_SPEC,
+    "readout/pulse": PULSE_READOUT_SPEC,
+    "reset/none": NONE_RESET_SPEC,
+    "reset/pulse": PULSE_RESET_SPEC,
+    "reset/two_pulse": TWO_PULSE_RESET_SPEC,
+    "reset/bath": BATH_RESET_SPEC,
+}
 
-def module_cfg_to_value(cfg: Any) -> tuple[CfgSectionSpec, CfgSectionValue]:
-    """Return (spec, value) for any AbsModuleCfg or AbsWaveformCfg subtype.
 
-    Used by CfgFormWidget._on_ref_changed when loading a named module from ml.
-    Falls back to a generic dict-based extraction for unknown types.
-    """
-    try:
-        from zcu_tools.program.v2.modules.waveform import AbsWaveformCfg
+def module_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionValue]:
+    """Return (spec, value) from a raw module dictionary or object."""
+    # 1. Normalize input to a dictionary
+    if isinstance(cfg_input, (AbsModuleCfg, AbsWaveformCfg)):
+        cfg = cfg_input.to_dict()
+    elif isinstance(cfg_input, dict):
+        cfg = cfg_input
+    else:
+        raise TypeError(f"Expected dict or ModuleCfg, got {type(cfg_input)}")
 
-        if isinstance(cfg, AbsWaveformCfg):
-            return waveform_cfg_to_value(cfg)
-    except Exception:
-        pass
+    # 2. Check for waveform styles
+    if "style" in cfg:
+        return waveform_cfg_to_value(cfg)
 
-    type_val = str(getattr(cfg, "type", ""))
+    # 3. Check for module types
+    type_val = str(cfg.get("type", ""))
     spec = _MODULE_SPEC_BY_TYPE.get(type_val)
     builder = _MODULE_VALUE_BUILDERS.get(type_val)
     if spec is not None and builder is not None:
         return spec, builder(cfg)
 
-    # Generic fallback: mirror to_dict() structure
-    if hasattr(cfg, "to_dict"):
-        d = cfg.to_dict()
-    else:
-        d = dict(cfg)
-    return _dict_to_spec_value(d)
+    # 4. Generic fallback
+    return _dict_to_spec_value(cfg)
 
 
 def _dict_to_spec_value(
@@ -311,5 +313,5 @@ def _dict_to_spec_value(
                 type=type(v) if v is not None else str,
                 hidden=is_discriminator,
             )
-            val_fields[k] = ScalarValue(v)
+            val_fields[k] = ScalarValue(v, is_unset=(v is None))
     return CfgSectionSpec(fields=spec_fields), CfgSectionValue(fields=val_fields)

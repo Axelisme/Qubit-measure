@@ -1,34 +1,64 @@
 """LiveModel — Reactive data layer for CfgSchema.
 
-This layer sits between Spec (static definition) and Widget (UI rendering).
-It holds the active state, handles validation, and emits signals on change.
-No Qt dependency; pure Python.
+REFACTORED (Phase 36/36.5):
+- Uses LiveModelEnv for dependency injection (SSOT enforcement).
+- Fields dynamically fetch md/ml from ControllerProtocol.
+- Supports 'is_unset' flag for Scalar fields to distinguish missing data.
 """
 
 from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Callable, Optional, Union
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Protocol, Union, cast
 
+from .adapter import (
+    CfgNodeSpec,
+    CfgSectionSpec,
+    CfgSectionValue,
+    ChannelSpec,
+    ChannelValue,
+    LiteralSpec,
+    ModuleRefSpec,
+    ModuleRefValue,
+    MultiSweepSpec,
+    MultiSweepValue,
+    ScalarSpec,
+    ScalarValue,
+    SweepSpec,
+    SweepValue,
+    WaveformRefSpec,
+    WaveformRefValue,
+)
 from .event_bus import GuiEvent
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import MetaDict
-    from .adapter import (
-        CfgNodeSpec,
-        CfgSectionSpec,
-        CfgSectionValue,
-        ChannelSpec,
-        ModuleRefSpec,
-        MultiSweepSpec,
-        ScalarSpec,
-        SweepSpec,
-        WaveformRefSpec,
-    )
     from .event_bus import EventBus
 
 logger = logging.getLogger(__name__)
+
+
+class ControllerProtocol(Protocol):
+    """Minimal interface needed by LiveFields to fetch environment state."""
+
+    def get_bus(self) -> EventBus: ...
+    def get_current_md(self) -> Any: ...
+    def get_current_ml(self) -> Any: ...
+    def is_running(self) -> bool: ...
+    def has_soc(self) -> bool: ...
+
+
+@dataclass(frozen=True)
+class LiveModelEnv:
+    """Environment container for LiveFields."""
+
+    ctrl: ControllerProtocol
+
+    @property
+    def bus(self) -> EventBus:
+        return self.ctrl.get_bus()
 
 
 class CallbackList:
@@ -58,15 +88,16 @@ class CallbackList:
 class LiveField(ABC):
     """Base class for a reactive field."""
 
-    def __init__(self, spec: Any) -> None:
+    def __init__(self, spec: Any, env: LiveModelEnv) -> None:
         self.spec = spec
+        self.env = env
         self.on_change = CallbackList()
         self.on_validity_changed = CallbackList()
         self._valid = True
 
     @abstractmethod
     def get_value(self) -> Any:
-        """Return the current value (as a Python object)."""
+        """Return the current value (as a CfgNodeValue or subtype)."""
         ...
 
     @abstractmethod
@@ -87,45 +118,65 @@ class LiveField(ABC):
             self._valid = valid
             self.on_validity_changed.emit(valid)
 
+    def teardown(self) -> None:
+        """Cleanup subscriptions."""
+        pass
+
 
 class ScalarLiveField(LiveField):
-    def __init__(self, spec: ScalarSpec, initial_val: Any = None) -> None:
-        super().__init__(spec)
-        from .adapter import ScalarValue
+    def __init__(
+        self, spec: ScalarSpec, env: LiveModelEnv, initial_val: Any = None
+    ) -> None:
+        super().__init__(spec, env)
 
         if isinstance(initial_val, ScalarValue):
             self._value = initial_val.value
+            self._is_unset = initial_val.is_unset
         else:
             self._value = initial_val
+            self._is_unset = initial_val is None
 
-    def get_value(self) -> Any:
-        from .adapter import ScalarValue
+        if self._is_unset:
+            # Type-appropriate zero values, but flag remains is_unset=True
+            defaults: dict[type, Any] = {int: 0, float: 0.0, bool: False, str: ""}
+            self._value = defaults.get(spec.type)
+        self._set_valid(not self._is_unset)
 
-        return ScalarValue(value=self._value)
+    def get_value(self) -> ScalarValue:
+        return ScalarValue(value=self._value, is_unset=self._is_unset)
 
     def set_value(self, val: Any) -> None:
-        from .adapter import ScalarValue
+        if isinstance(val, ScalarValue):
+            new_val = val.value
+            new_unset = val.is_unset
+        else:
+            new_val = val
+            new_unset = val is None
 
-        new_val = val.value if isinstance(val, ScalarValue) else val
-        if new_val != self._value:
+        if new_unset:
+            defaults: dict[type, Any] = {int: 0, float: 0.0, bool: False, str: ""}
+            new_val = defaults.get(self.spec.type)
+
+        if new_val != self._value or new_unset != self._is_unset:
             self._value = new_val
+            self._is_unset = new_unset
             self.on_change.emit(self.get_value())
+        self._set_valid(not self._is_unset)
 
     def to_dict(self) -> Any:
         return self._value
 
 
 class LiteralLiveField(LiveField):
-    def __init__(self, spec: LiteralSpec, initial_val: Any = None) -> None:
-        super().__init__(spec)
+    def __init__(
+        self, spec: LiteralSpec, env: LiveModelEnv, initial_val: Any = None
+    ) -> None:
+        super().__init__(spec, env)
 
-    def get_value(self) -> Any:
-        from .adapter import ScalarValue
-
-        return ScalarValue(value=self.spec.value)
+    def get_value(self) -> ScalarValue:
+        return ScalarValue(value=self.spec.value, is_unset=False)
 
     def set_value(self, val: Any) -> None:
-        # Literal values cannot be changed
         pass
 
     def to_dict(self) -> Any:
@@ -133,64 +184,76 @@ class LiteralLiveField(LiveField):
 
 
 class SweepLiveField(LiveField):
-    def __init__(self, spec: SweepSpec, initial_val: Any = None) -> None:
-        super().__init__(spec)
-        from .adapter import SweepValue
+    def __init__(
+        self, spec: SweepSpec, env: LiveModelEnv, initial_val: Any = None
+    ) -> None:
+        super().__init__(spec, env)
 
         if isinstance(initial_val, SweepValue):
             self._value = initial_val
         else:
             self._value = SweepValue(start=0.0, stop=1.0, expts=11)
 
-    def get_value(self) -> Any:
+    def get_value(self) -> SweepValue:
         return self._value
 
     def set_value(self, val: Any) -> None:
-        # Expecting SweepValue
         self._value = val
         self.on_change.emit(val)
 
     def to_dict(self) -> Any:
-        return self._value.to_dict()
+        return {
+            "start": self._value.start,
+            "stop": self._value.stop,
+            "expts": self._value.expts,
+            "step": self._value.step,
+        }
 
 
 class MultiSweepLiveField(LiveField):
-    def __init__(self, spec: MultiSweepSpec, initial_val: Any = None) -> None:
-        super().__init__(spec)
-        from .adapter import MultiSweepValue, SweepValue
+    def __init__(
+        self, spec: MultiSweepSpec, env: LiveModelEnv, initial_val: Any = None
+    ) -> None:
+        super().__init__(spec, env)
 
+        self.fields: Dict[str, SweepLiveField] = {}
+
+        initial_axes = {}
         if isinstance(initial_val, MultiSweepValue):
-            self._value = initial_val
-        else:
-            axes = {k: SweepValue(0.0, 1.0, 11) for k in spec.axes}
-            self._value = MultiSweepValue(axes=axes)
+            initial_axes = initial_val.axes
 
-    def get_value(self) -> Any:
-        return self._value
+        for axis, axis_spec in spec.axes.items():
+            sv = initial_axes.get(axis, SweepValue(0.0, 1.0, 11))
+            field = SweepLiveField(axis_spec, env, initial_val=sv)
+            self.fields[axis] = field
+            field.on_change.connect(self._on_child_change)
+
+    def _on_child_change(self, *_: Any) -> None:
+        self.on_change.emit(self.get_value())
+
+    def get_value(self) -> MultiSweepValue:
+        return MultiSweepValue(axes={k: f.get_value() for k, f in self.fields.items()})
 
     def set_value(self, val: Any) -> None:
-        self._value = val
-        self.on_change.emit(val)
+        if isinstance(val, MultiSweepValue):
+            for k, field in self.fields.items():
+                if k in val.axes:
+                    field.set_value(val.axes[k])
 
     def to_dict(self) -> Any:
-        return self._value.to_dict()
+        return {k: f.to_dict() for k, f in self.fields.items()}
 
 
 class ChannelLiveField(LiveField):
-    """Reactive Channel field that resolves names via MetaDict."""
+    """Reactive Channel field that resolves names via MetaDict from Controller."""
 
     def __init__(
         self,
         spec: ChannelSpec,
-        bus: EventBus,
-        md: Optional[MetaDict] = None,
+        env: LiveModelEnv,
         initial_val: Any = None,
     ) -> None:
-        super().__init__(spec)
-        self._bus = bus
-        self._md = md
-
-        from .adapter import ChannelValue
+        super().__init__(spec, env)
 
         if isinstance(initial_val, ChannelValue):
             self._chosen = initial_val.chosen
@@ -198,32 +261,30 @@ class ChannelLiveField(LiveField):
             self._chosen = initial_val if initial_val is not None else 0
 
         self._resolved_id: Optional[int] = None
-        self._bus.subscribe(GuiEvent.MD_CHANGED, self._refresh_resolve)
-        self._bus.subscribe(GuiEvent.CONTEXT_CHANGED, self._on_context_changed)
+        self.env.bus.subscribe(GuiEvent.MD_CHANGED, self._on_md_changed)
+        self.env.bus.subscribe(GuiEvent.CONTEXT_CHANGED, self._on_context_changed)
         self._refresh_resolve()
 
-    def _on_context_changed(self, md: Optional[MetaDict] = None) -> None:
-        # Event might pass new md
-        if md is not None:
-            self._md = md
+    def _on_md_changed(self, md: Any) -> None:
+        self._refresh_resolve()
+
+    def _on_context_changed(self, md: Any, ml: Any) -> None:
         self._refresh_resolve()
 
     def _refresh_resolve(self) -> None:
         from .ui.fields.utils import _resolve_channel
 
-        new_id = _resolve_channel(str(self._chosen), self._md)
+        md = self.env.ctrl.get_current_md()
+        new_id = _resolve_channel(str(self._chosen), md)
         if new_id != self._resolved_id:
             self._resolved_id = new_id
             self._set_valid(new_id is not None)
             self.on_change.emit(self.get_value())
 
-    def get_value(self) -> Any:
-        from .adapter import ChannelValue
-
+    def get_value(self) -> ChannelValue:
         return ChannelValue(chosen=self._chosen, resolved=self._resolved_id)
 
     def set_value(self, val: Any) -> None:
-        # UI usually sets the 'chosen' part (str or int)
         if val != self._chosen:
             self._chosen = val
             self._refresh_resolve()
@@ -233,8 +294,8 @@ class ChannelLiveField(LiveField):
         return self._resolved_id
 
     def teardown(self) -> None:
-        self._bus.unsubscribe(GuiEvent.MD_CHANGED, self._refresh_resolve)
-        self._bus.unsubscribe(GuiEvent.CONTEXT_CHANGED, self._on_context_changed)
+        self.env.bus.unsubscribe(GuiEvent.MD_CHANGED, self._on_md_changed)
+        self.env.bus.unsubscribe(GuiEvent.CONTEXT_CHANGED, self._on_context_changed)
 
 
 class SectionLiveField(LiveField):
@@ -243,22 +304,21 @@ class SectionLiveField(LiveField):
     def __init__(
         self,
         spec: CfgSectionSpec,
-        bus: EventBus,
-        ml: Optional[Any] = None,
-        md: Optional[Any] = None,
+        env: LiveModelEnv,
         initial_val: Optional[CfgSectionValue] = None,
     ) -> None:
-        super().__init__(spec)
+        super().__init__(spec, env)
         self.fields: dict[str, LiveField] = {}
-        self._bus = bus
-        self._ml = ml
-        self._md = md
+
+        # If no initial value provided, use Spec defaults to avoid is_unset=True for all children
+        from .adapter import make_default_value
+
+        val = initial_val if initial_val is not None else make_default_value(spec)
 
         # Build child fields
-        val_map = initial_val.fields if initial_val else {}
         for key, node_spec in spec.fields.items():
-            child_val = val_map.get(key)
-            field = create_live_field(node_spec, bus, ml, md, child_val)
+            child_val = val.fields.get(key)
+            field = create_live_field(node_spec, env, child_val)
             self.fields[key] = field
             field.on_change.connect(self._on_child_change)
             field.on_validity_changed.connect(self._on_child_validity_change)
@@ -274,24 +334,24 @@ class SectionLiveField(LiveField):
     def _refresh_validity(self) -> None:
         self._set_valid(all(f.is_valid() for f in self.fields.values()))
 
-    def get_value(self) -> Any:
-        from .adapter import CfgSectionValue
-
-        return CfgSectionValue(fields={k: f.get_value() for k, f in self.fields.items()})
+    def get_value(self) -> CfgSectionValue:
+        return CfgSectionValue(
+            fields={k: f.get_value() for k, f in self.fields.items()}
+        )
 
     def set_value(self, val: Any) -> None:
         # val should be CfgSectionValue
-        for k, field in self.fields.items():
-            if k in val.fields:
-                field.set_value(val.fields[k])
+        if isinstance(val, CfgSectionValue):
+            for k, field in self.fields.items():
+                if k in val.fields:
+                    field.set_value(val.fields[k])
 
     def to_dict(self) -> dict[str, Any]:
         return {k: f.to_dict() for k, f in self.fields.items()}
 
     def teardown(self) -> None:
         for f in self.fields.values():
-            if hasattr(f, "teardown"):
-                f.teardown()
+            f.teardown()
 
 
 class ModuleRefLiveField(LiveField):
@@ -300,17 +360,10 @@ class ModuleRefLiveField(LiveField):
     def __init__(
         self,
         spec: Union[ModuleRefSpec, WaveformRefSpec],
-        bus: EventBus,
-        ml: Optional[Any] = None,
-        md: Optional[Any] = None,
+        env: LiveModelEnv,
         initial_val: Any = None,
     ) -> None:
-        super().__init__(spec)
-        self._bus = bus
-        self._ml = ml
-        self._md = md
-
-        from .adapter import ModuleRefValue, WaveformRefValue
+        super().__init__(spec, env)
 
         if isinstance(initial_val, (ModuleRefValue, WaveformRefValue)):
             self._chosen_key = initial_val.chosen_key
@@ -326,16 +379,30 @@ class ModuleRefLiveField(LiveField):
         self._rebuild_sub_field()
 
     def _rebuild_sub_field(self) -> None:
+        old_spec = self.sub_field.spec if self.sub_field else None
+        old_val = self.sub_field.get_value() if self.sub_field else None
         if self.sub_field:
             self.sub_field.teardown()
 
-        from .ui.fields.utils import _spec_for_chosen
+        from .ui.fields.utils import _spec_value_for_chosen
 
-        chosen_spec = _spec_for_chosen(self._chosen_key, self.spec.allowed, self._ml)
+        ml = self.env.ctrl.get_current_ml()
+        chosen_spec, initial_val = _spec_value_for_chosen(
+            self._chosen_key, self.spec.allowed, ml
+        )
         if chosen_spec:
-            self.sub_field = SectionLiveField(
-                chosen_spec, self._bus, self._ml, self._md, self._sub_value
-            )
+            # Use initial_val from library if available, otherwise fallback to self._sub_value
+            if initial_val is not None:
+                val = initial_val
+            elif isinstance(old_spec, CfgSectionSpec) and isinstance(
+                old_val, CfgSectionValue
+            ):
+                from .adapter import inherit_from
+
+                val = inherit_from(old_val, old_spec, chosen_spec)
+            else:
+                val = self._sub_value
+            self.sub_field = SectionLiveField(chosen_spec, self.env, val)
             self.sub_field.on_change.connect(self._on_sub_change)
             self.sub_field.on_validity_changed.connect(self._on_sub_validity_change)
         else:
@@ -359,19 +426,20 @@ class ModuleRefLiveField(LiveField):
     def set_chosen_key(self, key: str) -> None:
         if key != self._chosen_key:
             self._chosen_key = key
-            self._sub_value = None  # Reset sub-value on key change
+            self._sub_value = (
+                self.sub_field.get_value() if self.sub_field is not None else None
+            )
             self._rebuild_sub_field()
             self.on_change.emit(self.get_value())
 
-    def get_value(self) -> Any:
-        from .adapter import ModuleRefValue, WaveformRefValue, ModuleRefSpec
-
-        klass = ModuleRefValue if isinstance(self.spec, ModuleRefSpec) else WaveformRefValue
-        sub_val = self.sub_field.get_value() if self.sub_field else None
+    def get_value(self) -> Union[ModuleRefValue, WaveformRefValue]:
+        klass = (
+            ModuleRefValue if isinstance(self.spec, ModuleRefSpec) else WaveformRefValue
+        )
+        sub_val = self.sub_field.get_value() if self.sub_field else cast(Any, None)
         return klass(chosen_key=self._chosen_key, value=sub_val)
 
     def set_value(self, val: Any) -> None:
-        # val is ModuleRefValue or WaveformRefValue
         if val.chosen_key != self._chosen_key:
             self._chosen_key = val.chosen_key
             self._sub_value = val.value
@@ -392,36 +460,23 @@ class ModuleRefLiveField(LiveField):
 
 def create_live_field(
     spec: CfgNodeSpec,
-    bus: EventBus,
-    ml: Optional[Any] = None,
-    md: Optional[Any] = None,
+    env: LiveModelEnv,
     initial_val: Any = None,
 ) -> LiveField:
     """Factory to create the appropriate LiveField from a Spec."""
-    from .adapter import (
-        CfgSectionSpec,
-        ChannelSpec,
-        LiteralSpec,
-        ModuleRefSpec,
-        MultiSweepSpec,
-        ScalarSpec,
-        SweepSpec,
-        WaveformRefSpec,
-    )
-
     if isinstance(spec, ScalarSpec):
-        return ScalarLiveField(spec, initial_val)
+        return ScalarLiveField(spec, env, initial_val)
     if isinstance(spec, LiteralSpec):
-        return LiteralLiveField(spec, initial_val)
+        return LiteralLiveField(spec, env, initial_val)
     if isinstance(spec, SweepSpec):
-        return SweepLiveField(spec, initial_val)
+        return SweepLiveField(spec, env, initial_val)
     if isinstance(spec, MultiSweepSpec):
-        return MultiSweepLiveField(spec, initial_val)
+        return MultiSweepLiveField(spec, env, initial_val)
     if isinstance(spec, ChannelSpec):
-        return ChannelLiveField(spec, bus, md, initial_val)
+        return ChannelLiveField(spec, env, initial_val)
     if isinstance(spec, (ModuleRefSpec, WaveformRefSpec)):
-        return ModuleRefLiveField(spec, bus, ml, md, initial_val)
+        return ModuleRefLiveField(spec, env, initial_val)
     if isinstance(spec, CfgSectionSpec):
-        return SectionLiveField(spec, bus, ml, md, initial_val)
+        return SectionLiveField(spec, env, initial_val)
 
     raise TypeError(f"Unknown spec type: {type(spec)}")

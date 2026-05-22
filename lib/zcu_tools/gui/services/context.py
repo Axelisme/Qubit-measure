@@ -92,14 +92,14 @@ class ContextService:
         )
         self._state.set_context(new_ctx)
         self._state.has_startup_context = True
-        self._bus.emit(GuiEvent.CONTEXT_CHANGED)
+        self._bus.emit(GuiEvent.CONTEXT_CHANGED, new_ctx.md, new_ctx.ml)
 
     def use_context(self, label: str) -> None:
         logger.info("use_context: label=%r", label)
         new_ctx = self._io.use_context(label, self._state.exp_context)
         new_ctx = dataclasses.replace(new_ctx, active_label=label)
         self._state.set_context(new_ctx)
-        self._bus.emit(GuiEvent.CONTEXT_CHANGED)
+        self._bus.emit(GuiEvent.CONTEXT_CHANGED, new_ctx.md, new_ctx.ml)
 
     def new_context(
         self,
@@ -119,7 +119,7 @@ class ContextService:
         label = self._io.get_active_label() or ""
         new_ctx = dataclasses.replace(new_ctx, active_label=label)
         self._state.set_context(new_ctx)
-        self._bus.emit(GuiEvent.CONTEXT_CHANGED)
+        self._bus.emit(GuiEvent.CONTEXT_CHANGED, new_ctx.md, new_ctx.ml)
 
     def set_md_attr(self, key: str, value: Any) -> None:
         if not self.has_context():
@@ -128,7 +128,7 @@ class ContextService:
         setattr(md, key, value)
         if md._path is not None:
             md.dump()
-        self._bus.emit(GuiEvent.MD_CHANGED)
+        self._bus.emit(GuiEvent.MD_CHANGED, md)
 
     def del_md_attr(self, key: str) -> None:
         if not self.has_context():
@@ -137,4 +137,4 @@ class ContextService:
         delattr(md, key)
         if md._path is not None:
             md.dump()
-        self._bus.emit(GuiEvent.MD_CHANGED)
+        self._bus.emit(GuiEvent.MD_CHANGED, md)

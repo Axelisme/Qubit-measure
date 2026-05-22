@@ -106,7 +106,7 @@ class TabService:
             ctx, tab.last_analyze_result, selected_keys, overrides
         )
         self._bus.emit(
-            GuiEvent.MD_CHANGED
+            GuiEvent.MD_CHANGED, ctx.md
         )  # Emit explicitly, in case adapter changed md
 
     def save_data(self, tab_id: str, data_path: str) -> None:

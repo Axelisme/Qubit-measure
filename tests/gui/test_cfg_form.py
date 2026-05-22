@@ -31,6 +31,14 @@ def bus():
     return EventBus()
 
 
+@pytest.fixture()
+def ctrl():
+    c = MagicMock()
+    c.get_current_md.return_value = MagicMock()
+    c.get_current_ml.return_value = MagicMock()
+    return c
+
+
 @pytest.fixture(scope="session")
 def qapp():
     app = QApplication.instance()
@@ -150,7 +158,7 @@ def test_read_schema_before_populate_raises(qapp):
         w.read_schema()
 
 
-def test_populate_scalar_fields_round_trip(qapp, bus):
+def test_populate_scalar_fields_round_trip(qapp, bus, ctrl):
     from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 
     schema = _schema(
@@ -164,14 +172,14 @@ def test_populate_scalar_fields_round_trip(qapp, bus):
         },
     )
     w = CfgFormWidget()
-    w.populate(schema, bus)
+    w.populate(schema, bus, ctrl)
     out = w.read_values()
 
     assert out.fields["reps"].value == 100  # type: ignore[union-attr]
     assert out.fields["freq"].value == pytest.approx(6.0)  # type: ignore[union-attr]
 
 
-def test_read_schema_returns_cfg_schema(qapp, bus):
+def test_read_schema_returns_cfg_schema(qapp, bus, ctrl):
     from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 
     schema = _schema(
@@ -179,13 +187,13 @@ def test_read_schema_returns_cfg_schema(qapp, bus):
         {"reps": ScalarValue(10)},
     )
     w = CfgFormWidget()
-    w.populate(schema, bus)
+    w.populate(schema, bus, ctrl)
     out = w.read_schema()
     assert isinstance(out, CfgSchema)
     assert out.spec is schema.spec
 
 
-def test_read_values_does_not_mutate_original(qapp, bus):
+def test_read_values_does_not_mutate_original(qapp, bus, ctrl):
     from qtpy.QtWidgets import QSpinBox  # type: ignore[attr-defined]
     from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 
@@ -194,7 +202,7 @@ def test_read_values_does_not_mutate_original(qapp, bus):
         {"reps": ScalarValue(100)},
     )
     w = CfgFormWidget()
-    w.populate(schema, bus)
+    w.populate(schema, bus, ctrl)
 
     spin = w.findChild(QSpinBox)
     assert spin is not None
@@ -205,7 +213,7 @@ def test_read_values_does_not_mutate_original(qapp, bus):
     assert schema.value.fields["reps"].value == 100  # type: ignore[union-attr]
 
 
-def test_populate_sweep_field_round_trip(qapp, bus):
+def test_populate_sweep_field_round_trip(qapp, bus, ctrl):
     from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 
     schema = _schema(
@@ -213,7 +221,7 @@ def test_populate_sweep_field_round_trip(qapp, bus):
         {"f": SweepValue(start=5.8, stop=6.2, expts=201)},
     )
     w = CfgFormWidget()
-    w.populate(schema, bus)
+    w.populate(schema, bus, ctrl)
     out = w.read_values()
 
     sv = out.fields["f"]
@@ -224,7 +232,7 @@ def test_populate_sweep_field_round_trip(qapp, bus):
     assert sv.step is None
 
 
-def test_populate_sweep_field_step_preserved(qapp, bus):
+def test_populate_sweep_field_step_preserved(qapp, bus, ctrl):
     from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 
     schema = _schema(
@@ -232,7 +240,7 @@ def test_populate_sweep_field_step_preserved(qapp, bus):
         {"f": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)},
     )
     w = CfgFormWidget()
-    w.populate(schema, bus)
+    w.populate(schema, bus, ctrl)
     out = w.read_values()
 
     sv = out.fields["f"]
@@ -240,7 +248,7 @@ def test_populate_sweep_field_step_preserved(qapp, bus):
     assert sv.step == pytest.approx(0.1)
 
 
-def test_populate_nested_section_round_trip(qapp, bus):
+def test_populate_nested_section_round_trip(qapp, bus, ctrl):
     from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 
     schema = _schema(
@@ -252,7 +260,7 @@ def test_populate_nested_section_round_trip(qapp, bus):
         {"inner": CfgSectionValue(fields={"gain": ScalarValue(0.05)})},
     )
     w = CfgFormWidget()
-    w.populate(schema, bus)
+    w.populate(schema, bus, ctrl)
     out = w.read_values()
 
     inner = out.fields["inner"]
@@ -260,7 +268,7 @@ def test_populate_nested_section_round_trip(qapp, bus):
     assert inner.fields["gain"].value == pytest.approx(0.05)  # type: ignore[union-attr]
 
 
-def test_populate_multi_sweep_round_trip(qapp, bus):
+def test_populate_multi_sweep_round_trip(qapp, bus, ctrl):
     from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 
     schema = _schema(
@@ -280,7 +288,7 @@ def test_populate_multi_sweep_round_trip(qapp, bus):
         },
     )
     w = CfgFormWidget()
-    w.populate(schema, bus)
+    w.populate(schema, bus, ctrl)
     out = w.read_values()
 
     ms = out.fields["ms"]
@@ -289,7 +297,7 @@ def test_populate_multi_sweep_round_trip(qapp, bus):
     assert ms.axes["y"].start == pytest.approx(2.0)
 
 
-def test_populate_module_ref_field_round_trip(qapp, bus):
+def test_populate_module_ref_field_round_trip(qapp, bus, ctrl):
     from zcu_tools.gui.adapter import ModuleRefSpec, ModuleRefValue
     from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 
@@ -311,7 +319,7 @@ def test_populate_module_ref_field_round_trip(qapp, bus):
         ),
     )
     w = CfgFormWidget()
-    w.populate(schema, bus)
+    w.populate(schema, bus, ctrl)
     out = w.read_values()
 
     mod = out.fields["mod"]
@@ -320,7 +328,7 @@ def test_populate_module_ref_field_round_trip(qapp, bus):
     assert mod.value.fields["gain"].value == pytest.approx(0.5)  # type: ignore[union-attr]
 
 
-def test_populate_full_fake_freq_schema(qapp, bus):
+def test_populate_full_fake_freq_schema(qapp, bus, ctrl):
     """Smoke test: FakeFreqAdapter default schema populates and round-trips."""
     from zcu_tools.experiment.v2_gui.adapters.onetone.freq import FakeFreqAdapter
     from zcu_tools.gui.adapter import ModuleRefSpec
@@ -330,7 +338,7 @@ def test_populate_full_fake_freq_schema(qapp, bus):
     schema = FakeFreqAdapter().make_default_cfg(ctx)
 
     w = CfgFormWidget()
-    w.populate(schema, bus)
+    w.populate(schema, bus, ctrl)
     out = w.read_values()
 
     for key in ("reps", "rounds", "freq", "res_freq", "Ql", "modules"):

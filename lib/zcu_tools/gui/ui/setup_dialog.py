@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,13 @@ _DEVICE_DEFAULT_UNITS: dict[str, str] = {
 }
 
 
+@runtime_checkable
+class SocConfigProtocol(Protocol):
+    """Protocol for QICK Soc configuration objects."""
+
+    def description(self) -> str: ...
+
+
 def _detect_unit(device_name: str) -> str:
     try:
         from zcu_tools.device import GlobalDeviceManager
@@ -47,8 +54,12 @@ def _detect_unit(device_name: str) -> str:
         dev = GlobalDeviceManager.get_device(device_name)
         dev_type = type(dev).__name__
         if dev_type == "YOKOGS200":
-            mode = dev.get_mode()  # type: ignore[attr-defined]
-            return "V" if mode == "voltage" else "A"
+            # For YOKOGS200, we can use a protocol or specific check
+            from zcu_tools.device.yoko import YOKOGS200
+
+            if isinstance(dev, YOKOGS200):
+                mode = dev.get_mode()
+                return "V" if mode == "voltage" else "A"
         return _DEVICE_DEFAULT_UNITS.get(dev_type, "none")
     except Exception:
         return "none"
@@ -72,7 +83,7 @@ class SetupDialog(QDialog):
         root_layout = QVBoxLayout(self)
 
         # ── horizontal splitter: left = project, right = connection ──────
-        splitter = QSplitter(Qt.Horizontal)  # type: ignore[attr-defined]
+        splitter = QSplitter(Qt.Orientation.Horizontal)  # type: ignore[attr-defined]
         splitter.setChildrenCollapsible(False)
         root_layout.addWidget(splitter, stretch=1)
 
@@ -212,7 +223,7 @@ class SetupDialog(QDialog):
         # soccfg description — hidden until connection succeeds
         self._cfg_text = QPlainTextEdit()
         self._cfg_text.setReadOnly(True)
-        self._cfg_text.setLineWrapMode(QPlainTextEdit.NoWrap)  # type: ignore[attr-defined]
+        self._cfg_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)  # type: ignore[attr-defined]
         self._cfg_text.setVisible(False)
         right_layout.addWidget(self._cfg_text, stretch=1)
 
@@ -222,7 +233,7 @@ class SetupDialog(QDialog):
         splitter.setSizes([450, 450])
 
         # ── Close button ─────────────────────────────────────────────────
-        btn_box = QDialogButtonBox(QDialogButtonBox.Close)  # type: ignore[attr-defined]
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)  # type: ignore[attr-defined]
         btn_box.rejected.connect(self.reject)
         root_layout.addWidget(btn_box)
 
@@ -330,7 +341,7 @@ class SetupDialog(QDialog):
         if item is None:
             self._set_project_status("Select a context first", error=True)
             return
-        label = item.data(Qt.UserRole)  # type: ignore[attr-defined]
+        label = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
         try:
             self._ctrl.use_context(label)
             self._refresh_context_list()
@@ -350,7 +361,9 @@ class SetupDialog(QDialog):
                 from zcu_tools.device import GlobalDeviceManager
 
                 dev = GlobalDeviceManager.get_device(device_name)
-                value = float(dev.get_value())  # type: ignore[attr-defined]
+                # Proper float conversion check
+                raw_val = dev.get_value()  # type: ignore[attr-defined]
+                value = float(raw_val)
             except Exception:
                 pass
         try:
@@ -380,7 +393,7 @@ class SetupDialog(QDialog):
             is_active = label == active
             display = f"▶ {label}" if is_active else f"   {label}"
             item = QListWidgetItem(display)
-            item.setData(Qt.UserRole, label)  # type: ignore[attr-defined]
+            item.setData(Qt.ItemDataRole.UserRole, label)  # type: ignore[attr-defined]
             if is_active:
                 item.setFont(bold_font)
                 active_idx = i
@@ -401,7 +414,7 @@ class SetupDialog(QDialog):
 
     def _maybe_show_current_cfg(self) -> None:
         soccfg = self._ctrl.get_soccfg()
-        if soccfg is not None and hasattr(soccfg, "description"):
+        if isinstance(soccfg, SocConfigProtocol):
             try:
                 self._show_cfg(soccfg.description())
                 self._set_conn_status("Currently connected", error=False)
@@ -440,7 +453,7 @@ class SetupDialog(QDialog):
             self._ctrl.set_connection(soc, soccfg)
             self._set_conn_status("Connected", error=False)
 
-            if hasattr(soccfg, "description"):
+            if isinstance(soccfg, SocConfigProtocol):
                 self._show_cfg(soccfg.description())
 
         except Exception as exc:

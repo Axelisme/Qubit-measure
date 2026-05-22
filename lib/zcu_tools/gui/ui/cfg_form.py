@@ -1,8 +1,8 @@
 """CfgFormWidget — renders a CfgSchema as an interactive reactive Qt form.
 
-REFACTORED (Phase 35):
+REFACTORED (Phase 35/36):
 - Uses LiveModel as the active data layer.
-- Reactive fields handle their own UI synchronization.
+- Reactive fields handle their own UI synchronization via LiveModelEnv.
 - Decoupled widget implementation into lib/zcu_tools/gui/ui/fields/.
 """
 
@@ -18,14 +18,13 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from ..live_model import SectionLiveField
+from ..live_model import LiveModelEnv, SectionLiveField
 from .fields import SectionWidget
 
 if TYPE_CHECKING:
     from zcu_tools.gui.adapter import CfgSchema, CfgSectionValue
+    from zcu_tools.gui.controller import Controller
     from zcu_tools.gui.event_bus import EventBus
-    from zcu_tools.meta_tool import MetaDict
-    from zcu_tools.meta_tool.library import ModuleLibrary
 
 logger = logging.getLogger(__name__)
 
@@ -58,22 +57,22 @@ class CfgFormWidget(QWidget):
         self,
         schema: CfgSchema,
         bus: EventBus,
-        ml: Optional[ModuleLibrary] = None,
-        md: Optional[MetaDict] = None,
+        ctrl: Controller,
     ) -> None:
         """Build LiveModel and widget tree from schema."""
         self._clear_inner()
 
-        # 1. Create the reactive data layer
-        self._model = SectionLiveField(
-            schema.spec, bus, ml=ml, md=md, initial_val=schema.value
-        )
+        # 1. Create the environment and reactive data layer
+        env = LiveModelEnv(ctrl=ctrl)
+        self._model = SectionLiveField(schema.spec, env, initial_val=schema.value)
         self._model.on_validity_changed.connect(self.validity_changed.emit)
 
         # 2. Build the UI tree
         self._root_widget = SectionWidget(self._model, top_level=True)
-        self._inner_layout.insertWidget(self._inner_layout.count() - 1, self._root_widget)
-        
+        self._inner_layout.insertWidget(
+            self._inner_layout.count() - 1, self._root_widget
+        )
+
         # 3. Emit initial validity
         self.validity_changed.emit(self._model.is_valid())
         logger.debug("CfgFormWidget.populate: built reactive form")
@@ -82,7 +81,7 @@ class CfgFormWidget(QWidget):
         if self._model:
             self._model.teardown()
             self._model = None
-            
+
         if self._root_widget:
             self._inner_layout.removeWidget(self._root_widget)
             self._root_widget.deleteLater()

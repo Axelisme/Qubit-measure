@@ -67,7 +67,7 @@ def test_scalar_editable_false_still_included():
 
 
 def test_scalar_missing_in_value_skipped():
-    """A key present in spec but absent in value is silently skipped."""
+    """A key present in spec but absent in value raises."""
     s = _schema(
         {
             "reps": ScalarSpec(label="Reps", type=int),
@@ -75,8 +75,17 @@ def test_scalar_missing_in_value_skipped():
         },
         {"reps": ScalarValue(5)},
     )
-    result = schema_to_dict(s, _make_ml())
-    assert result == {"reps": 5}
+    with pytest.raises(RuntimeError, match="x"):
+        schema_to_dict(s, _make_ml())
+
+
+def test_extra_value_fields_raise():
+    s = _schema(
+        {"reps": ScalarSpec(label="Reps", type=int)},
+        {"reps": ScalarValue(5), "extra": ScalarValue(1)},
+    )
+    with pytest.raises(RuntimeError, match="extra"):
+        schema_to_dict(s, _make_ml())
 
 
 # ---------------------------------------------------------------------------

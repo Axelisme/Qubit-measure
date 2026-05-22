@@ -331,7 +331,7 @@ class InspectDialog(QDialog):
     # Public API
     # ------------------------------------------------------------------
 
-    def refresh(self) -> None:
+    def refresh(self, *_: Any) -> None:
         md = self._ctrl.get_current_md()
         ml = self._ctrl.get_current_ml()
 

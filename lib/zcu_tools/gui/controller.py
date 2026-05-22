@@ -157,7 +157,7 @@ class Controller:
             self._tab_svc.apply_writeback_with_overrides(
                 tab_id, selected_keys, overrides
             )
-            self._bus.emit(GuiEvent.INSPECT_CHANGED)
+            self._bus.emit(GuiEvent.INSPECT_CHANGED, self.get_current_md())
         except Exception as exc:
             logger.warning("apply_writeback: failed tab_id=%r exc=%r", tab_id, exc)
             self._view.show_status_message(f"Writeback failed: {exc}")
@@ -207,15 +207,16 @@ class Controller:
         self._ctx_svc.set_startup_context(
             md, ml, chip_name, qub_name, res_name, result_dir, database_path
         )
-        self._bus.emit(GuiEvent.INSPECT_CHANGED)
+        self._bus.emit(GuiEvent.INSPECT_CHANGED, md)
 
     def setup_project(self, result_dir: str) -> None:
         self._ctx_svc.setup_project(result_dir)
-        self._bus.emit(GuiEvent.CONTEXT_CHANGED)
+        ctx = self._state.exp_context
+        self._bus.emit(GuiEvent.CONTEXT_CHANGED, ctx.md, ctx.ml)
 
     def use_context(self, label: str) -> None:
         self._ctx_svc.use_context(label)
-        self._bus.emit(GuiEvent.INSPECT_CHANGED)
+        self._bus.emit(GuiEvent.INSPECT_CHANGED, self.get_current_md())
 
     def new_context(
         self,
@@ -224,7 +225,7 @@ class Controller:
         clone_from_current: bool = False,
     ) -> None:
         self._ctx_svc.new_context(value, unit, clone_from_current)
-        self._bus.emit(GuiEvent.INSPECT_CHANGED)
+        self._bus.emit(GuiEvent.INSPECT_CHANGED, self.get_current_md())
 
     def get_active_context_label(self) -> Optional[str]:
         return self._ctx_svc.get_active_context_label()

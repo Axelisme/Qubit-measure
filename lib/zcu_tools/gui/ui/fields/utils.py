@@ -27,12 +27,12 @@ def _resolve_channel(text: str, md: Optional[MetaDict]) -> Optional[int]:
         return None
 
 
-def _spec_for_chosen(
+def _spec_value_for_chosen(
     chosen_key: str,
     allowed: list[CfgSectionSpec],
     ml: Optional[ModuleLibrary],
-) -> Optional[CfgSectionSpec]:
-    """Find the appropriate CfgSectionSpec for a chosen key (Custom or Named)."""
+) -> tuple[Optional[CfgSectionSpec], Optional[Any]]:
+    """Find both Spec and initial Value for a chosen key (Custom or Named)."""
     from ...cfg_schemas import module_cfg_to_value, waveform_cfg_to_value
 
     # 1. Custom template from 'allowed' list
@@ -40,18 +40,16 @@ def _spec_for_chosen(
         label = chosen_key[8:-1]
         for spec in allowed:
             if spec.label == label:
-                return spec
-        return allowed[0] if allowed else None
+                return spec, None
+        return (allowed[0] if allowed else None), None
 
     # 2. Named instance from Library
     if ml:
         if chosen_key in ml.modules:
             cfg = ml.modules[chosen_key]
-            spec, _ = module_cfg_to_value(cfg)
-            return spec
+            return module_cfg_to_value(cfg)
         if chosen_key in ml.waveforms:
             cfg = ml.waveforms[chosen_key]
-            spec, _ = waveform_cfg_to_value(cfg)
-            return spec
+            return waveform_cfg_to_value(cfg)
 
-    return None
+    return None, None
