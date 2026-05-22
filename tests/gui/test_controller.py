@@ -22,6 +22,7 @@ from zcu_tools.gui.adapter import (
 )
 from zcu_tools.gui.controller import Controller
 from zcu_tools.gui.device_manager import DeviceManager
+from zcu_tools.gui.event_bus import GuiEvent
 from zcu_tools.gui.io_manager import IOManager
 from zcu_tools.gui.registry import Registry
 from zcu_tools.gui.runner import Runner
@@ -80,6 +81,7 @@ class ControllerFixture:
         from zcu_tools.gui.event_bus import EventBus
 
         self.bus = EventBus()
+        self.bus.emit = MagicMock()
         self.ctrl = Controller(
             state=self.state,
             runner=self.runner,
@@ -157,7 +159,7 @@ def test_start_run_sets_is_running(cf):
 def test_start_run_calls_refresh_run_state_true(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.ctrl.start_run(tab_id, _simple_schema(), {})
-    cf.view.refresh_run_state.assert_called_with(True)
+    cf.bus.emit.assert_any_call(GuiEvent.RUN_STATE_CHANGED)
     _wait_for(lambda: not cf.state.is_running)
 
 
@@ -172,14 +174,14 @@ def test_run_finished_calls_refresh_run_state_false(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.ctrl.start_run(tab_id, _simple_schema(), {})
     assert _wait_for(lambda: not cf.state.is_running)
-    cf.view.refresh_run_state.assert_called_with(False)
+    cf.bus.emit.assert_any_call(GuiEvent.RUN_STATE_CHANGED)
 
 
 def test_run_finished_calls_refresh_tab(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.ctrl.start_run(tab_id, _simple_schema(), {})
     assert _wait_for(lambda: not cf.state.is_running)
-    cf.view.refresh_tab.assert_called_with(tab_id)
+    cf.bus.emit.assert_any_call(GuiEvent.TAB_CONTENT_CHANGED, tab_id)
 
 
 # ---------------------------------------------------------------------------

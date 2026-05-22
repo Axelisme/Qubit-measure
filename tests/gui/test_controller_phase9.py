@@ -14,6 +14,7 @@ from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.adapter import CfgSchema, CfgSectionSpec, CfgSectionValue, ExpContext
 from zcu_tools.gui.controller import Controller
 from zcu_tools.gui.device_manager import DeviceManager
+from zcu_tools.gui.event_bus import GuiEvent
 from zcu_tools.gui.io_manager import IOManager
 from zcu_tools.gui.registry import Registry
 from zcu_tools.gui.runner import Runner
@@ -65,6 +66,7 @@ class ControllerFixture:
         from zcu_tools.gui.event_bus import EventBus
 
         self.bus = EventBus()
+        self.bus.emit = MagicMock()
         self.ctrl = Controller(
             state=self.state,
             runner=self.runner,
@@ -146,7 +148,7 @@ def test_analyze_calls_refresh_tab(cf):
 
     cf.ctrl.analyze(tab_id, {})
 
-    cf.view.refresh_tab.assert_called_with(tab_id)
+    cf.bus.emit.assert_any_call(GuiEvent.TAB_CONTENT_CHANGED, tab_id)
 
 
 def test_analyze_without_result_raises(cf):
@@ -236,7 +238,7 @@ def test_apply_writeback_calls_refresh_config_panels(cf):
 
     cf.ctrl.apply_writeback(tab_id, ["fake_peak"])
 
-    cf.view.refresh_config_panels.assert_called_once()
+    cf.bus.emit.assert_any_call(GuiEvent.INSPECT_CHANGED)
 
 
 def test_apply_writeback_without_analyze_raises(cf):

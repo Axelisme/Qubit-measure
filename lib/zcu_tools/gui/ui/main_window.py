@@ -69,9 +69,12 @@ def _read_param_widget(w: QWidget, spec: "ParamSpec") -> Any:
 class ExpTabWidget(QWidget):
     """A single experiment tab: Config | Plot | Result areas."""
 
-    def __init__(self, tab_id: str, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self, tab_id: str, ctrl: "Controller", parent: Optional[QWidget] = None
+    ) -> None:
         super().__init__(parent)
         self.tab_id = tab_id
+        self._ctrl = ctrl
         self._param_widgets: dict[str, QWidget] = {}  # analyze param key → widget
         self._analyze_specs: dict[str, "ParamSpec"] = {}  # analyze param key → spec
         self._writeback_checks: dict[str, QCheckBox] = {}  # wb key → checkbox
@@ -251,9 +254,9 @@ class ExpTabWidget(QWidget):
     # ── cfg helpers ───────────────────────────────────────────────────────
 
     def populate_cfg(
-        self, schema: Any, ml: Any = None, md: Any = None, bus: Any = None
+        self, schema: Any, bus: Any, ml: Any = None, md: Any = None
     ) -> None:
-        self.cfg_form.populate(schema, ml=ml, md=md, bus=bus)
+        self.cfg_form.populate(schema, bus, ml=ml, md=md)
 
     def read_schema(self) -> Any:
         return self.cfg_form.read_schema()
@@ -370,7 +373,9 @@ class ExpTabWidget(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         form_widget = CfgFormWidget()
-        form_widget.populate(schema, ml=ml)
+        form_widget.populate(
+            schema, self._ctrl.get_bus(), ml=ml, md=self._ctrl.get_current_md()
+        )
         scroll.setWidget(form_widget)
         layout.addWidget(scroll, stretch=1)
 
@@ -573,9 +578,26 @@ class MainWindow(QMainWindow):
 
         # EventBus subscriptions
         bus = self._ctrl.get_bus()
-        if bus is not None:
-            bus.subscribe(GuiEvent.RUN_STATE_CHANGED, self._on_bus_run_state_changed)
-            bus.subscribe(GuiEvent.CONTEXT_CHANGED, self._on_bus_context_changed)
+        bus.subscribe(GuiEvent.RUN_STATE_CHANGED, self._on_bus_run_state_changed)
+        bus.subscribe(GuiEvent.CONTEXT_CHANGED, self._on_bus_context_changed)
+        bus.subscribe(GuiEvent.TAB_ADDED, self._on_bus_tab_added)
+        bus.subscribe(GuiEvent.TAB_CLOSED, self._on_bus_tab_closed)
+        bus.subscribe(GuiEvent.TAB_CONTENT_CHANGED, self._on_bus_tab_content_changed)
+        bus.subscribe(GuiEvent.INSPECT_CHANGED, self._on_bus_inspect_changed)
+        bus.subscribe(GuiEvent.PREDICTOR_CHANGED, self._on_bus_predictor_changed)
+
+        # Cleanup on destroy
+        self.destroyed.connect(self._cleanup_bus_subscriptions)
+
+    def _cleanup_bus_subscriptions(self) -> None:
+        bus = self._ctrl.get_bus()
+        bus.unsubscribe(GuiEvent.RUN_STATE_CHANGED, self._on_bus_run_state_changed)
+        bus.unsubscribe(GuiEvent.CONTEXT_CHANGED, self._on_bus_context_changed)
+        bus.unsubscribe(GuiEvent.TAB_ADDED, self._on_bus_tab_added)
+        bus.unsubscribe(GuiEvent.TAB_CLOSED, self._on_bus_tab_closed)
+        bus.unsubscribe(GuiEvent.TAB_CONTENT_CHANGED, self._on_bus_tab_content_changed)
+        bus.unsubscribe(GuiEvent.INSPECT_CHANGED, self._on_bus_inspect_changed)
+        bus.unsubscribe(GuiEvent.PREDICTOR_CHANGED, self._on_bus_predictor_changed)
 
     def _on_bus_run_state_changed(self) -> None:
         self.refresh_run_state(self._ctrl.is_running())
@@ -583,6 +605,75 @@ class MainWindow(QMainWindow):
     def _on_bus_context_changed(self) -> None:
         self.refresh_context_panel()
         self.refresh_config_panels()
+
+    def _on_bus_tab_added(self, tab_id: str, adapter_name: str) -> None:
+        logger.info("_on_bus_tab_added: tab_id=%r adapter=%r", tab_id, adapter_name)
+        if tab_id in self._tab_widgets:
+            return
+
+        tab_label = adapter_name.split("/")[-1]
+        tab_w = ExpTabWidget(tab_id, self._ctrl)
+        self._tab_widgets[tab_id] = tab_w
+        self._tabs.addTab(tab_w, tab_label)
+        self._tabs.setCurrentWidget(tab_w)
+
+        # populate cfg form from adapter default
+        schema = self._ctrl.get_tab_default_cfg(tab_id)
+        if schema is not None:
+            tab_w.populate_cfg(
+                schema,
+                bus=self._ctrl.get_bus(),
+                ml=self._ctrl.get_current_ml(),
+                md=self._ctrl.get_current_md(),
+            )
+
+        # refresh state (enables/disables buttons based on context)
+        self.refresh_run_state(self._ctrl.is_running())
+
+        # re-evaluate run_btn when channel validity changes
+        tab_w.cfg_form.validity_changed.connect(
+            lambda _valid, tid=tab_id, tw=tab_w: self._set_tab_running(
+                tid,
+                tw,
+                self._ctrl.is_running(),
+                self._ctrl.has_context(),
+                self._ctrl.has_soc(),
+            )
+        )
+
+        # wire buttons
+        tab_w.run_btn.clicked.connect(lambda: self._on_run_clicked(tab_id))
+        tab_w.cancel_btn.clicked.connect(self._on_cancel_clicked)
+        tab_w.analyze_btn.clicked.connect(lambda: self._on_analyze_clicked(tab_id))
+        tab_w.apply_writeback_btn.clicked.connect(
+            lambda: self._on_apply_writeback_clicked(tab_id)
+        )
+        tab_w.save_data_btn.clicked.connect(lambda: self._on_save_data_clicked(tab_id))
+        tab_w.save_image_btn.clicked.connect(
+            lambda: self._on_save_image_clicked(tab_id)
+        )
+        tab_w.save_both_btn.clicked.connect(lambda: self._on_save_both_clicked(tab_id))
+
+    def _on_bus_tab_closed(self, tab_id: str) -> None:
+        logger.info("_on_bus_tab_closed: tab_id=%r", tab_id)
+        tab_w = self._tab_widgets.pop(tab_id, None)
+        if tab_w is not None:
+            index = self._tabs.indexOf(tab_w)
+            if index >= 0:
+                self._tabs.removeTab(index)
+            tab_w.deleteLater()
+
+        self.refresh_run_state(self._ctrl.is_running())
+
+    def _on_bus_tab_content_changed(self, tab_id: str) -> None:
+        self.refresh_tab(tab_id)
+
+    def _on_bus_inspect_changed(self) -> None:
+        self.refresh_inspect_panel()
+        self.refresh_config_panels()
+
+    def _on_bus_predictor_changed(self) -> None:
+        self.refresh_predictor_panel()
 
     # ------------------------------------------------------------------
     # ViewProtocol implementation
@@ -596,6 +687,9 @@ class MainWindow(QMainWindow):
         has_context: bool,
         has_soc: bool,
     ) -> None:
+        if not self._ctrl.has_tab(tab_id):
+            return
+
         state = TabInteractionState(
             is_running=is_running,
             has_context=has_context,
@@ -773,59 +867,7 @@ class MainWindow(QMainWindow):
         if not adapter_name:
             return
 
-        self._open_new_tab(adapter_name)
-
-    def _open_new_tab(self, adapter_name: str) -> None:
-        logger.info("_open_new_tab: adapter=%r", adapter_name)
-        tab_id = self._ctrl.new_tab(adapter_name)
-        tab_label = adapter_name.split("/")[-1]
-        tab_w = ExpTabWidget(tab_id)
-        self._tab_widgets[tab_id] = tab_w
-        self._tabs.addTab(tab_w, tab_label)
-        self._tabs.setCurrentWidget(tab_w)
-
-        # populate cfg form from adapter default
-        schema = self._ctrl.get_tab_default_cfg(tab_id)
-        if schema is not None:
-            tab_w.populate_cfg(
-                schema,
-                ml=self._ctrl.get_current_ml(),
-                md=self._ctrl.get_current_md(),
-                bus=self._ctrl.get_bus(),
-            )
-
-        # apply current project / running state
-        self._set_tab_running(
-            tab_id,
-            tab_w,
-            self._ctrl.is_running(),
-            self._ctrl.has_context(),
-            self._ctrl.has_soc(),
-        )
-
-        # re-evaluate run_btn when channel validity changes
-        tab_w.cfg_form.validity_changed.connect(
-            lambda _valid, tid=tab_id, tw=tab_w: self._set_tab_running(
-                tid,
-                tw,
-                self._ctrl.is_running(),
-                self._ctrl.has_context(),
-                self._ctrl.has_soc(),
-            )
-        )
-
-        # wire buttons
-        tab_w.run_btn.clicked.connect(lambda: self._on_run_clicked(tab_id))
-        tab_w.cancel_btn.clicked.connect(self._on_cancel_clicked)
-        tab_w.analyze_btn.clicked.connect(lambda: self._on_analyze_clicked(tab_id))
-        tab_w.apply_writeback_btn.clicked.connect(
-            lambda: self._on_apply_writeback_clicked(tab_id)
-        )
-        tab_w.save_data_btn.clicked.connect(lambda: self._on_save_data_clicked(tab_id))
-        tab_w.save_image_btn.clicked.connect(
-            lambda: self._on_save_image_clicked(tab_id)
-        )
-        tab_w.save_both_btn.clicked.connect(lambda: self._on_save_both_clicked(tab_id))
+        self._ctrl.new_tab(adapter_name)
 
     def _on_tab_close_requested(self, index: int) -> None:
         tab_w = self._tabs.widget(index)
@@ -834,8 +876,6 @@ class MainWindow(QMainWindow):
         tab_id = tab_w.tab_id
         logger.info("_on_tab_close_requested: tab_id=%r", tab_id)
         self._ctrl.close_tab(tab_id)
-        self._tab_widgets.pop(tab_id, None)
-        self._tabs.removeTab(index)
 
     def _on_run_clicked(self, tab_id: str) -> None:
         logger.info("_on_run_clicked: tab_id=%r", tab_id)

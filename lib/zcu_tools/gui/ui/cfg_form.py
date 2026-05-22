@@ -296,7 +296,11 @@ class _ChannelRow(QWidget):
 
     def refresh_md(self, md: "Optional[MetaDict]") -> None:
         self._md = md
-        self._refresh_ghost()
+        try:
+            self._refresh_ghost()
+        except RuntimeError:
+            # Widget might have been deleted by Qt during teardown
+            pass
 
     def read_back(self) -> "ChannelValue":
         from zcu_tools.gui.adapter import ChannelValue
@@ -417,14 +421,16 @@ class CfgFormWidget(QWidget):
         self._inner_layout.addStretch()
         scroll.setWidget(self._inner)
 
+        self.destroyed.connect(lambda: self._teardown_md_updates())
+
     # ------------------------------------------------------------------
 
     def populate(
         self,
         schema: "CfgSchema",
+        bus: "EventBus",
         ml: Optional["ModuleLibrary"] = None,
         md: Optional["MetaDict"] = None,
-        bus: Optional["EventBus"] = None,
     ) -> None:
         """Build widget tree from schema. Schema is never mutated."""
         self._spec = schema.spec
@@ -473,11 +479,7 @@ class CfgFormWidget(QWidget):
             self._bus_cb = None
         self._bus = None
 
-    def _setup_md_updates(self, bus: Optional["EventBus"]) -> None:
-        if bus is None:
-            from zcu_tools.gui.event_bus import EventBus
-
-            bus = EventBus()
+    def _setup_md_updates(self, bus: "EventBus") -> None:
         self._bus = bus
         self._bus_cb = self._refresh_channel_ghosts
         self._bus.subscribe(GuiEvent.MD_CHANGED, self._bus_cb)

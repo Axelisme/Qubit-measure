@@ -47,11 +47,12 @@ class InspectDialog(QDialog):
     def __init__(
         self,
         ctrl: "Controller",
-        bus: Optional["EventBus"] = None,
+        bus: "EventBus",
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
+        self._bus = bus
         self.setWindowTitle("Inspect Context")
         self.resize(700, 500)
         self.setWindowFlags(
@@ -78,16 +79,15 @@ class InspectDialog(QDialog):
         layout.addLayout(bottom)
 
         # Subscribe to EventBus for auto-refresh
-        if bus is not None:
-            bus.subscribe(GuiEvent.CONTEXT_CHANGED, self.refresh)
-            bus.subscribe(GuiEvent.MD_CHANGED, self.refresh)
-            # Unsubscribe when dialog is destroyed
-            self.destroyed.connect(
-                lambda: bus.unsubscribe(GuiEvent.CONTEXT_CHANGED, self.refresh)
-            )
-            self.destroyed.connect(
-                lambda: bus.unsubscribe(GuiEvent.MD_CHANGED, self.refresh)
-            )
+        bus.subscribe(GuiEvent.CONTEXT_CHANGED, self.refresh)
+        bus.subscribe(GuiEvent.MD_CHANGED, self.refresh)
+        # Unsubscribe when dialog is destroyed
+        self.destroyed.connect(
+            lambda: bus.unsubscribe(GuiEvent.CONTEXT_CHANGED, self.refresh)
+        )
+        self.destroyed.connect(
+            lambda: bus.unsubscribe(GuiEvent.MD_CHANGED, self.refresh)
+        )
 
         self.refresh()
 
