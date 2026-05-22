@@ -156,13 +156,9 @@ class ExpTabWidget(QWidget):
         self.cfg_form.validity_changed.connect(self._on_cfg_validity_changed)
         config_layout.addWidget(self.cfg_form, stretch=1)
 
-        run_btn_row = QHBoxLayout()
         self.run_btn = QPushButton("Run")
-        self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.setEnabled(False)
-        run_btn_row.addWidget(self.run_btn)
-        run_btn_row.addWidget(self.cancel_btn)
-        config_layout.addLayout(run_btn_row)
+        self.run_btn.setFixedHeight(30)
+        config_layout.addWidget(self.run_btn)
         self._left_tabs.addTab(config_panel, "Config")
 
         # ── Tab 1: Analysis ──────────────────────────────────────────────
@@ -484,15 +480,20 @@ class ExpTabWidget(QWidget):
         self._cfg_valid = valid
 
     def update_interaction_state(self, state: TabInteractionState) -> None:
-        can_run = (
-            state.has_context
-            and state.has_soc
-            and not state.is_running
-            and self._cfg_valid
-        )
-        idle = not state.is_running
-        self.run_btn.setEnabled(can_run)
-        self.cancel_btn.setEnabled(state.is_running)
+        is_running = state.is_running
+        if is_running:
+            self.run_btn.setText("Stop")
+            self.run_btn.setEnabled(True)
+            self.run_btn.setStyleSheet(
+                "background-color: #f44336; color: white; font-weight: bold;"
+            )
+        else:
+            self.run_btn.setText("Run")
+            can_run = state.has_context and state.has_soc and self._cfg_valid
+            self.run_btn.setEnabled(can_run)
+            self.run_btn.setStyleSheet("")
+
+        idle = not is_running
         self.cfg_form.setEnabled(idle)
         self.analyze_btn.setEnabled(idle and state.has_context and state.has_run_result)
         self.save_data_btn.setEnabled(
@@ -642,8 +643,7 @@ class MainWindow(QMainWindow):
         )
 
         # wire buttons
-        tab_w.run_btn.clicked.connect(lambda: self._on_run_clicked(tab_id))
-        tab_w.cancel_btn.clicked.connect(self._on_cancel_clicked)
+        tab_w.run_btn.clicked.connect(lambda: self._on_run_stop_clicked(tab_id))
         tab_w.analyze_btn.clicked.connect(lambda: self._on_analyze_clicked(tab_id))
         tab_w.apply_writeback_btn.clicked.connect(
             lambda: self._on_apply_writeback_clicked(tab_id)
@@ -877,21 +877,21 @@ class MainWindow(QMainWindow):
         logger.info("_on_tab_close_requested: tab_id=%r", tab_id)
         self._ctrl.close_tab(tab_id)
 
-    def _on_run_clicked(self, tab_id: str) -> None:
-        logger.info("_on_run_clicked: tab_id=%r", tab_id)
-        tab_w = self._tab_widgets.get(tab_id)
-        if tab_w is None:
-            return
-        try:
-            schema = tab_w.read_schema()
-            self._ctrl.start_run(tab_id, schema, {})
-        except Exception as exc:
-            logger.warning("_on_run_clicked: blocked — %s", exc)
-            self.show_status_message(str(exc))
-
-    def _on_cancel_clicked(self) -> None:
-        logger.info("_on_cancel_clicked")
-        self._ctrl.cancel_run()
+    def _on_run_stop_clicked(self, tab_id: str) -> None:
+        if self._ctrl.is_running():
+            logger.info("_on_run_stop_clicked: stop requested tab_id=%r", tab_id)
+            self._ctrl.cancel_run()
+        else:
+            logger.info("_on_run_stop_clicked: run requested tab_id=%r", tab_id)
+            tab_w = self._tab_widgets.get(tab_id)
+            if tab_w is None:
+                return
+            try:
+                schema = tab_w.read_schema()
+                self._ctrl.start_run(tab_id, schema, {})
+            except Exception as exc:
+                logger.warning("_on_run_stop_clicked: blocked — %s", exc)
+                self.show_status_message(str(exc))
 
     def _on_analyze_clicked(self, tab_id: str) -> None:
         logger.info("_on_analyze_clicked: tab_id=%r", tab_id)
