@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Optional
 
+from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
+
 from zcu_tools.gui.event_bus import GuiEvent
 
 logger = logging.getLogger(__name__)
@@ -13,10 +15,14 @@ if TYPE_CHECKING:
     from zcu_tools.gui.state import State
 
 
-class RunService:
+class RunService(QObject):
     """Encapsulates execution of an experiment adapter via a Runner."""
 
+    run_finished: Signal = Signal(str, object)
+    run_failed: Signal = Signal(str, object)
+
     def __init__(self, state: "State", runner: "Runner", bus: "EventBus") -> None:
+        super().__init__()
         self._state = state
         self._runner = runner
         self._bus = bus
@@ -73,12 +79,14 @@ class RunService:
             "_on_run_finished: tab_id=%r result_type=%s", tab_id, type(result).__name__
         )
         self._clear_live_container()
-        self._state.update_tab_result(tab_id, result, cfg=None)
+        self._state.update_tab_result(tab_id, result)
         self._state.set_running(False)
         self._bus.emit(GuiEvent.RUN_STATE_CHANGED)
+        self.run_finished.emit(tab_id, result)
 
     def _on_run_failed(self, tab_id: str, error: Exception) -> None:
         logger.warning("_on_run_failed: tab_id=%r error=%r", tab_id, error)
         self._clear_live_container()
         self._state.set_running(False)
         self._bus.emit(GuiEvent.RUN_STATE_CHANGED)
+        self.run_failed.emit(tab_id, error)

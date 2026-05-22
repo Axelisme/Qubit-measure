@@ -5,6 +5,11 @@ from typing import TYPE_CHECKING, Any, Optional, Protocol
 
 logger = logging.getLogger(__name__)
 
+from matplotlib.figure import Figure
+
+from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+
+from .adapter import CfgSchema
 from .device_manager import DeviceManager
 from .event_bus import EventBus, GuiEvent
 from .io_manager import IOManager
@@ -27,8 +32,8 @@ class ViewProtocol(Protocol):
     """Minimal interface Controller uses to update the View."""
 
     def show_status_message(self, message: str) -> None: ...
-    def make_pbar_factory(self, tab_id: str) -> Any: ...
-    def make_live_container(self, tab_id: str) -> Any: ...
+    def make_pbar_factory(self, tab_id: str) -> Optional[object]: ...
+    def make_live_container(self, tab_id: str) -> Optional[object]: ...
 
 
 class Controller:
@@ -41,7 +46,7 @@ class Controller:
         registry: Registry,
         io_manager: IOManager,
         device_manager: DeviceManager,
-        view: ViewProtocol,
+        view: Optional[ViewProtocol],
         bus: EventBus,
     ) -> None:
         self._state = state
@@ -55,16 +60,23 @@ class Controller:
         self._tab_svc = TabService(state, registry, bus)
         self._run_svc = RunService(state, runner, bus)
 
-        # Overriding RunService callbacks to inform the View (Targeted Actions)
-        self._run_svc._runner.run_finished.connect(self._on_run_finished)
-        self._run_svc._runner.run_failed.connect(self._on_run_failed)
+        self._run_svc.run_finished.connect(self._on_run_finished)
+        self._run_svc.run_failed.connect(self._on_run_failed)
 
-    def _on_run_finished(self, tab_id: str, _result: Any) -> None:
+    def set_view(self, view: ViewProtocol) -> None:
+        self._view = view
+
+    def _require_view(self) -> ViewProtocol:
+        if self._view is None:
+            raise RuntimeError("Controller view is not attached")
+        return self._view
+
+    def _on_run_finished(self, tab_id: str, _result: object) -> None:
         # State is already updated in RunService/Runner
         self._bus.emit(GuiEvent.TAB_CONTENT_CHANGED, tab_id)
 
     def _on_run_failed(self, _tab_id: str, error: Exception) -> None:
-        self._view.show_status_message(f"Run failed: {error}")
+        self._require_view().show_status_message(f"Run failed: {error}")
 
     def get_bus(self) -> EventBus:
         return self._bus
@@ -103,7 +115,9 @@ class Controller:
     def has_soc(self) -> bool:
         return self._conn_svc.has_soc()
 
-    def start_run(self, tab_id: str, schema: Any, user_params: dict) -> None:
+    def start_run(
+        self, tab_id: str, schema: CfgSchema, user_params: dict[str, object]
+    ) -> None:
         if not self.has_context():
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
@@ -111,8 +125,9 @@ class Controller:
         if not self.has_soc():
             raise RuntimeError("No ZCU connection. Please connect first.")
 
-        pbar_factory = self._view.make_pbar_factory(tab_id)
-        live_container = self._view.make_live_container(tab_id)
+        view = self._require_view()
+        pbar_factory = view.make_pbar_factory(tab_id)
+        live_container = view.make_live_container(tab_id)
         self._run_svc.start_run(
             tab_id, schema, user_params, pbar_factory, live_container
         )
@@ -134,7 +149,7 @@ class Controller:
             self._bus.emit(GuiEvent.TAB_CONTENT_CHANGED, tab_id)
         except Exception as exc:
             logger.warning("analyze: failed tab_id=%r exc=%r", tab_id, exc)
-            self._view.show_status_message(f"Analyze failed: {exc}")
+            self._require_view().show_status_message(f"Analyze failed: {exc}")
 
     # ------------------------------------------------------------------
     # Writeback (TabService)
@@ -160,7 +175,7 @@ class Controller:
             self._bus.emit(GuiEvent.INSPECT_CHANGED, self.get_current_md())
         except Exception as exc:
             logger.warning("apply_writeback: failed tab_id=%r exc=%r", tab_id, exc)
-            self._view.show_status_message(f"Writeback failed: {exc}")
+            self._require_view().show_status_message(f"Writeback failed: {exc}")
 
     # ------------------------------------------------------------------
     # Save (TabService)
@@ -173,10 +188,10 @@ class Controller:
             )
         try:
             self._tab_svc.save_data(tab_id, data_path)
-            self._view.show_status_message(f"Data saved to {data_path}")
+            self._require_view().show_status_message(f"Data saved to {data_path}")
         except Exception as exc:
             logger.warning("save_data: failed tab_id=%r exc=%r", tab_id, exc)
-            self._view.show_status_message(f"Save data failed: {exc}")
+            self._require_view().show_status_message(f"Save data failed: {exc}")
 
     def save_image(self, tab_id: str, image_path: str) -> None:
         if not self.has_context():
@@ -185,10 +200,10 @@ class Controller:
             )
         try:
             self._tab_svc.save_image(tab_id, image_path)
-            self._view.show_status_message(f"Image saved to {image_path}")
+            self._require_view().show_status_message(f"Image saved to {image_path}")
         except Exception as exc:
             logger.warning("save_image: failed tab_id=%r exc=%r", tab_id, exc)
-            self._view.show_status_message(f"Save image failed: {exc}")
+            self._require_view().show_status_message(f"Save image failed: {exc}")
 
     # ------------------------------------------------------------------
     # Context / IO (ContextService)
@@ -236,7 +251,7 @@ class Controller:
     def get_context_labels(self) -> list[str]:
         return self._ctx_svc.get_context_labels()
 
-    def get_current_md(self) -> Any:
+    def get_current_md(self) -> MetaDict:
         return self._ctx_svc.get_current_md()
 
     def set_md_attr(self, key: str, value: Any) -> None:
@@ -245,7 +260,7 @@ class Controller:
     def del_md_attr(self, key: str) -> None:
         self._ctx_svc.del_md_attr(key)
 
-    def get_current_ml(self) -> Any:
+    def get_current_ml(self) -> ModuleLibrary:
         return self._ctx_svc.get_current_ml()
 
     # ------------------------------------------------------------------
@@ -304,19 +319,19 @@ class Controller:
     def has_tab(self, tab_id: str) -> bool:
         return tab_id in self._state.tabs
 
-    def get_tab_default_cfg(self, tab_id: str) -> Any:
+    def get_tab_default_cfg(self, tab_id: str) -> Optional[CfgSchema]:
         if not self.has_tab(tab_id):
             logger.debug("get_tab_default_cfg: tab_id %r not found", tab_id)
             return None
         return self._tab_svc.get_tab_default_cfg(tab_id)
 
-    def get_tab_fresh_cfg(self, tab_id: str) -> Any:
+    def get_tab_fresh_cfg(self, tab_id: str) -> Optional[CfgSchema]:
         if not self.has_tab(tab_id):
             logger.debug("get_tab_fresh_cfg: tab_id %r not found", tab_id)
             return None
         return self._tab_svc.get_tab_fresh_cfg(tab_id)
 
-    def get_tab_result(self, tab_id: str) -> Any:
+    def get_tab_result(self, tab_id: str) -> Optional[object]:
         if not self.has_tab(tab_id):
             logger.debug("get_tab_result: tab_id %r not found", tab_id)
             return None
@@ -332,7 +347,7 @@ class Controller:
             return False
         return self._tab_svc.has_analyze_result(tab_id)
 
-    def get_tab_figure(self, tab_id: str) -> Any:
+    def get_tab_figure(self, tab_id: str) -> Optional[Figure]:
         if not self.has_tab(tab_id):
             logger.debug("get_tab_figure: tab_id %r not found", tab_id)
             return None

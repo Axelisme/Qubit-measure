@@ -46,8 +46,9 @@ from .progress_stack import ProgressStack
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
-    from zcu_tools.gui.adapter import ParamSpec, WritebackItem
+    from zcu_tools.gui.adapter import CfgSchema, ParamSpec, WritebackItem
     from zcu_tools.gui.controller import Controller
+    from zcu_tools.meta_tool import ModuleLibrary
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +86,7 @@ class ExpTabWidget(QWidget):
         self._writeback_overrides: dict[
             str, Any
         ] = {}  # key → {"name": str, "cfg": dict}
-        self._ml: Optional[Any] = None  # ModuleLibrary; set by show_writeback_spec
+        self._ml: Optional["ModuleLibrary"] = None
         self._cfg_valid: bool = True  # False when any ChannelRow is unresolved
 
         root_layout = QVBoxLayout(self)
@@ -251,10 +252,10 @@ class ExpTabWidget(QWidget):
 
     # ── cfg helpers ───────────────────────────────────────────────────────
 
-    def populate_cfg(self, schema: Any, bus: Any, ctrl: "Controller") -> None:
-        self.cfg_form.populate(schema, bus, ctrl)
+    def populate_cfg(self, schema: "CfgSchema", ctrl: "Controller") -> None:
+        self.cfg_form.populate(schema, ctrl)
 
-    def read_schema(self) -> Any:
+    def read_schema(self) -> "CfgSchema":
         return self.cfg_form.read_schema()
 
     # ── populate / refresh helpers ────────────────────────────────────────
@@ -271,7 +272,11 @@ class ExpTabWidget(QWidget):
             self._analyze_form.addRow(spec.label + ":", w)
             self._param_widgets[key] = w
 
-    def show_writeback_spec(self, items: list["WritebackItem"], ml: Any = None) -> None:
+    def show_writeback_spec(
+        self,
+        items: list["WritebackItem"],
+        ml: Optional["ModuleLibrary"] = None,
+    ) -> None:
         """Rebuild the writeback checkbox list."""
         from qtpy.QtWidgets import QHBoxLayout, QWidget  # type: ignore[attr-defined]
 
@@ -285,7 +290,7 @@ class ExpTabWidget(QWidget):
         self._writeback_checks.clear()
         self._writeback_rows.clear()
         self._writeback_overrides.clear()
-        self._applied_writeback_keys: set[str] = set()
+        self._applied_writeback_keys = set()
 
         for item in items:
             row_widget = QWidget()
@@ -369,7 +374,7 @@ class ExpTabWidget(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         form_widget = CfgFormWidget()
-        form_widget.populate(schema, self._ctrl.get_bus(), self._ctrl)
+        form_widget.populate(schema, self._ctrl)
         scroll.setWidget(form_widget)
         layout.addWidget(scroll, stretch=1)
 
@@ -621,7 +626,7 @@ class MainWindow(QMainWindow):
         # populate cfg form from adapter default
         schema = self._ctrl.get_tab_default_cfg(tab_id)
         if schema is not None:
-            tab_w.populate_cfg(schema, self._ctrl.get_bus(), self._ctrl)
+            tab_w.populate_cfg(schema, self._ctrl)
 
         # refresh state (enables/disables buttons based on context)
         self.refresh_run_state(self._ctrl.is_running())
@@ -779,11 +784,10 @@ class MainWindow(QMainWindow):
             self._set_tab_running(tab_id, tab_w, is_running, has_context, has_soc)
 
     def refresh_config_panels(self) -> None:
-        bus = self._ctrl.get_bus()
         for tab_id, tab_w in self._tab_widgets.items():
             schema = self._ctrl.get_tab_fresh_cfg(tab_id)
             if schema is not None:
-                tab_w.populate_cfg(schema, bus, self._ctrl)
+                tab_w.populate_cfg(schema, self._ctrl)
 
     def refresh_inspect_panel(self) -> None:
         if self._inspect_dialog is not None and self._inspect_dialog.isVisible():

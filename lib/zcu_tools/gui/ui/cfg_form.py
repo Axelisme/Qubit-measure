@@ -24,7 +24,6 @@ from .fields import SectionWidget
 if TYPE_CHECKING:
     from zcu_tools.gui.adapter import CfgSchema, CfgSectionValue
     from zcu_tools.gui.controller import Controller
-    from zcu_tools.gui.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +55,6 @@ class CfgFormWidget(QWidget):
     def populate(
         self,
         schema: CfgSchema,
-        bus: EventBus,
         ctrl: Controller,
     ) -> None:
         """Build LiveModel and widget tree from schema."""

@@ -44,13 +44,9 @@ def _make_ctx() -> ExpContext:
 
 def _make_view() -> MagicMock:
     view = MagicMock()
-    view.refresh_tab = MagicMock()
-    view.refresh_run_state = MagicMock()
-    view.refresh_context_panel = MagicMock()
-    view.refresh_config_panels = MagicMock()
-    view.refresh_predictor_panel = MagicMock()
     view.show_status_message = MagicMock()
     view.make_pbar_factory = MagicMock(return_value=None)
+    view.make_live_container = MagicMock(return_value=None)
     return view
 
 
@@ -117,7 +113,7 @@ def test_analyze_updates_tab_analyze_result(cf):
     cf.ctrl.analyze(tab_id, {})
 
     tab = cf.state.get_tab(tab_id)
-    assert tab.last_analyze_result is not None
+    assert tab.analyze_result is not None
 
 
 def test_analyze_result_is_tuple_peak_fig(cf):
@@ -127,7 +123,7 @@ def test_analyze_result_is_tuple_peak_fig(cf):
     cf.ctrl.analyze(tab_id, {})
 
     tab = cf.state.get_tab(tab_id)
-    peak, _fig = tab.last_analyze_result
+    peak, _fig = tab.analyze_result
     assert isinstance(peak, float)
 
 
@@ -138,7 +134,7 @@ def test_analyze_stores_figure_in_tab(cf):
     cf.ctrl.analyze(tab_id, {})
 
     tab = cf.state.get_tab(tab_id)
-    assert tab.last_figure is not None
+    assert tab.figure is not None
 
 
 def test_analyze_calls_refresh_tab(cf):

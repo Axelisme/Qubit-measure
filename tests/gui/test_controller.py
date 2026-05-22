@@ -57,13 +57,9 @@ def _make_ctx() -> ExpContext:
 
 def _make_view() -> MagicMock:
     view = MagicMock()
-    view.refresh_tab = MagicMock()
-    view.refresh_run_state = MagicMock()
-    view.refresh_context_panel = MagicMock()
-    view.refresh_config_panels = MagicMock()
-    view.refresh_predictor_panel = MagicMock()
     view.show_status_message = MagicMock()
     view.make_pbar_factory = MagicMock(return_value=None)
+    view.make_live_container = MagicMock(return_value=None)
     return view
 
 
@@ -167,7 +163,7 @@ def test_run_finished_updates_tab_state(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.ctrl.start_run(tab_id, _simple_schema(), {})
     assert _wait_for(lambda: not cf.state.is_running)
-    assert cf.state.get_tab(tab_id).last_result is not None
+    assert cf.state.get_tab(tab_id).run_result is not None
 
 
 def test_run_finished_calls_refresh_run_state_false(cf):

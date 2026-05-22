@@ -2,20 +2,22 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
 
-from .adapter import AbsExpAdapter, ExpContext
+from matplotlib.figure import Figure
+
+from .adapter import AbsExpAdapter, CfgSchema, ExpContext
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class TabState:
-    adapter: AbsExpAdapter
-    last_result: Any = None
-    last_analyze_result: Any = None
-    last_figure: Any = None
-    last_cfg: Any = None
+    adapter: AbsExpAdapter[object, object]
+    default_cfg: CfgSchema
+    run_result: Optional[object] = None
+    analyze_result: Optional[object] = None
+    figure: Optional[Figure] = None
 
 
 @dataclass(frozen=True)
@@ -28,7 +30,7 @@ class TabInteractionState:
 
 
 class State:
-    """Passive state container; only updated by Controller."""
+    """Passive GUI state container shared by Controller and domain services."""
 
     def __init__(self, ctx: ExpContext) -> None:
         self.exp_context: ExpContext = ctx
@@ -40,12 +42,13 @@ class State:
     def set_context(self, ctx: ExpContext) -> None:
         self.exp_context = ctx
 
-    def add_tab(self, tab_id: str, adapter: AbsExpAdapter, ctx: ExpContext) -> None:
+    def add_tab(
+        self, tab_id: str, adapter: AbsExpAdapter[object, object], ctx: ExpContext
+    ) -> None:
         if tab_id in self.tabs:
             raise ValueError(f"tab_id {tab_id!r} already exists")
         logger.debug("add_tab: tab_id=%r adapter=%s", tab_id, type(adapter).__name__)
-        tab = TabState(adapter=adapter)
-        tab.last_cfg = adapter.make_default_cfg(ctx)
+        tab = TabState(adapter=adapter, default_cfg=adapter.make_default_cfg(ctx))
         self.tabs[tab_id] = tab
 
     def remove_tab(self, tab_id: str) -> None:
@@ -63,26 +66,27 @@ class State:
         logger.debug("set_active_tab: tab_id=%r", tab_id)
         self.active_tab_id = tab_id
 
-    def update_tab_result(self, tab_id: str, result: Any, cfg: Any) -> None:
+    def update_tab_result(self, tab_id: str, result: object) -> None:
         logger.debug(
             "update_tab_result: tab_id=%r result_type=%s", tab_id, type(result).__name__
         )
         tab = self.tabs[tab_id]
-        tab.last_result = result
-        tab.last_cfg = cfg
+        tab.run_result = result
         # invalidate stale analyze results from the previous run
-        tab.last_analyze_result = None
-        tab.last_figure = None
+        tab.analyze_result = None
+        tab.figure = None
 
-    def update_tab_analyze(self, tab_id: str, analyze_result: Any, figure: Any) -> None:
+    def update_tab_analyze(
+        self, tab_id: str, analyze_result: object, figure: Optional[Figure]
+    ) -> None:
         logger.debug(
             "update_tab_analyze: tab_id=%r figure=%s",
             tab_id,
             "yes" if figure is not None else "none",
         )
         tab = self.tabs[tab_id]
-        tab.last_analyze_result = analyze_result
-        tab.last_figure = figure
+        tab.analyze_result = analyze_result
+        tab.figure = figure
 
     def set_running(self, running: bool) -> None:
         logger.debug("set_running: %s", running)

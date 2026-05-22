@@ -5,6 +5,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Optional
 
 from zcu_tools.gui.event_bus import GuiEvent
+from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +44,10 @@ class ContextService:
     def get_context_labels(self) -> list[str]:
         return self._io.list_contexts()
 
-    def get_current_md(self) -> Any:
+    def get_current_md(self) -> MetaDict:
         return self._state.exp_context.md
 
-    def get_current_ml(self) -> Any:
+    def get_current_ml(self) -> ModuleLibrary:
         return self._state.exp_context.ml
 
     def get_flux_dir(self) -> Optional[str]:

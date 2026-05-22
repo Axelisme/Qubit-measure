@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 
@@ -47,20 +47,17 @@ def run_app() -> None:
     io_manager = IOManager()
     device_manager = DeviceManager()
 
-    # MainWindow needs a Controller reference, but Controller needs a View.
-    # Use a two-step init: create window stub, then build controller.
-    # We pass a forward-reference sentinel and patch after construction.
-    window = _build_window(state, runner, registry, io_manager, device_manager)
+    ctrl, window = _build_window(state, runner, registry, io_manager, device_manager)
     window.show()
 
     # Show startup dialog to let user set chip/qub names and derive paths.
     # Non-blocking: user can close it and still use the app (with empty context).
-    _show_startup_dialog(window._ctrl, parent=window)  # type: ignore[attr-defined]
+    _show_startup_dialog(ctrl, parent=window)
 
     sys.exit(app.exec())
 
 
-def _show_startup_dialog(ctrl: "Controller", parent: Any) -> None:
+def _show_startup_dialog(ctrl: "Controller", parent: MainWindow) -> None:
     from zcu_tools.gui.ui.setup_dialog import SetupDialog
 
     dlg = SetupDialog(ctrl, parent=parent, startup_mode=True)
@@ -73,36 +70,8 @@ def _build_window(
     registry: Registry,
     io_manager: IOManager,
     device_manager: DeviceManager,
-) -> MainWindow:
+) -> tuple[Controller, MainWindow]:
     """Create Controller + MainWindow in the correct order."""
-
-    # Temporary placeholder View that satisfies ViewProtocol before the real
-    # window is ready — used only during Controller.__init__ signal wiring.
-    class _PlaceholderView:
-        def refresh_tab(self, tab_id: str) -> None:
-            _ = tab_id
-
-        def refresh_run_state(self, is_running: bool) -> None:
-            _ = is_running
-
-        def refresh_context_panel(self) -> None: ...
-
-        def refresh_config_panels(self) -> None: ...
-
-        def refresh_predictor_panel(self) -> None: ...
-
-        def refresh_inspect_panel(self) -> None: ...
-
-        def make_pbar_factory(self, tab_id: str) -> None:
-            _ = tab_id
-            return None  # type: ignore[return-value]
-
-        def make_live_container(self, tab_id: str) -> None:
-            _ = tab_id
-            return None  # type: ignore[return-value]
-
-        def show_status_message(self, message: str) -> None:
-            _ = message
 
     from zcu_tools.gui.event_bus import EventBus
 
@@ -114,11 +83,10 @@ def _build_window(
         registry=registry,
         io_manager=io_manager,
         device_manager=device_manager,
-        view=_PlaceholderView(),  # type: ignore[arg-type]
+        view=None,
         bus=bus,
     )
 
     window = MainWindow(ctrl)
-    # Replace placeholder with the real window
-    ctrl._view = window  # type: ignore[attr-defined]
-    return window
+    ctrl.set_view(window)
+    return ctrl, window
