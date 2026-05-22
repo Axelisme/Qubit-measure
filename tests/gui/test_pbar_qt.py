@@ -121,7 +121,7 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
     from unittest.mock import MagicMock
 
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-    from zcu_tools.experiment.v2_gui.adapters.onetone.freq import FakeFreqAdapter
+    from zcu_tools.experiment.v2_gui.adapters.onetone.fakefreq import FakeFreqAdapter
     from zcu_tools.gui.adapter import ExpContext
     from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
     from zcu_tools.progress_bar.interface import use_pbar_factory

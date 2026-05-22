@@ -1,21 +1,22 @@
 """Tests — CfgFormWidget populate / read_values round-trip (Phase 19)."""
 
 from __future__ import annotations
+
 from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.adapter import (
     CfgSchema,
-    ChannelSpec,
-    ChannelValue,
     CfgSectionSpec,
     CfgSectionValue,
+    ChannelSpec,
+    ChannelValue,
     LiteralSpec,
-    MultiSweepSpec,
-    MultiSweepValue,
     ModuleRefSpec,
     ModuleRefValue,
+    MultiSweepSpec,
+    MultiSweepValue,
     ScalarSpec,
     ScalarValue,
     SweepSpec,
@@ -490,7 +491,7 @@ def test_populate_module_ref_field_round_trip(qapp, ctrl):
 
 def test_populate_full_fake_freq_schema(qapp, ctrl):
     """Smoke test: FakeFreqAdapter default schema populates and round-trips."""
-    from zcu_tools.experiment.v2_gui.adapters.onetone.freq import FakeFreqAdapter
+    from zcu_tools.experiment.v2_gui.adapters.onetone.fakefreq import FakeFreqAdapter
     from zcu_tools.gui.adapter import ModuleRefSpec
     from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 

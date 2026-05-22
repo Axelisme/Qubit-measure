@@ -9,6 +9,7 @@ CfgSchema into the FakeFreqCfg that FakeFreqExp expects.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Any, Literal, Optional, cast
@@ -24,12 +25,18 @@ from zcu_tools.experiment.base import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.onetone.freq import FreqExp
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2_gui.adapters.shared import (
+    build_readout_for_frequency,
+    build_waveform_for_length,
+    make_flat_top_waveform_edit_template,
+    make_module_ref_default,
+    make_readout_edit_template,
+)
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
-    ChannelValue,
     ExpContext,
     ModuleRefSpec,
     ModuleRefValue,
@@ -40,15 +47,22 @@ from zcu_tools.gui.adapter import (
     SweepSpec,
     SweepValue,
     WritebackItem,
-    make_default_value,
     schema_to_dict,
 )
-from zcu_tools.gui.specs.readout import DIRECT_READOUT_SPEC, PULSE_READOUT_SPEC
-from zcu_tools.gui.specs.waveform import FLAT_TOP_WAVEFORM_SPEC
+from zcu_tools.gui.specs.readout import (
+    make_direct_readout_spec,
+    make_pulse_readout_spec,
+)
 from zcu_tools.liveplot import LivePlot1D
-from zcu_tools.program.v2 import ProgramV2Cfg
+from zcu_tools.program.v2 import (
+    AbsReadoutCfg,
+    ModuleCfgFactory,
+    ProgramV2Cfg,
+    WaveformCfgFactory,
+)
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.utils.fitting.resonance.hanger import HangerModel
+from zcu_tools.utils.datasaver import create_datafolder
 
 # ---------------------------------------------------------------------------
 # FakeFreqCfg — same structure as FreqCfg but with HangerModel params
@@ -178,18 +192,21 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
         self._fast_mode = fast_mode
 
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:  # noqa: ARG002
-        # Spec: static structure, shared across all FakeFreqAdapter instances
-        readout_spec = ModuleRefSpec(
-            allowed=[DIRECT_READOUT_SPEC, PULSE_READOUT_SPEC],
-            label="Readout",
-        )
-        modules_spec = CfgSectionSpec(
-            label="Modules",
-            collapsible=True,
-            fields={"readout": readout_spec},
-        )
         root_spec = CfgSectionSpec(
             fields={
+                "modules": CfgSectionSpec(
+                    label="Modules",
+                    collapsible=True,
+                    fields={
+                        "readout": ModuleRefSpec(
+                            allowed=[
+                                make_direct_readout_spec(),
+                                make_pulse_readout_spec(),
+                            ],
+                            label="Readout",
+                        )
+                    },
+                ),
                 "reps": ScalarSpec(label="Reps", type=int),
                 "rounds": ScalarSpec(label="Rounds", type=int),
                 "freq": SweepSpec(label="Freq (MHz)"),
@@ -204,54 +221,23 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
                 ),
                 "edelay": ScalarSpec(label="edelay (us)", type=float, decimals=3),
                 "noise_scale": ScalarSpec(label="Noise scale", type=float, decimals=4),
-                "modules": modules_spec,
             }
         )
-
-        # Value: initial values (may come from ctx)
-        # Try to pre-select readout_rf from ml if available
-        chosen_key = "<Custom:Direct Readout>"
-        readout_val = make_default_value(DIRECT_READOUT_SPEC)
-        if ctx.ml is not None:
-            try:
-                from zcu_tools.gui.cfg_schemas import module_cfg_to_value
-                from zcu_tools.program.v2 import AbsReadoutCfg
-
-                # Prefer "readout_rf" by name; fall back to the last valid readout module
-                candidates = {
-                    name: mod
-                    for name, mod in ctx.ml.modules.items()
-                    if isinstance(mod, AbsReadoutCfg)
-                }
-                pick = candidates.get("readout_rf") or (
-                    next(iter(reversed(list(candidates.values()))), None)
-                )
-                pick_name = (
-                    "readout_rf"
-                    if "readout_rf" in candidates
-                    else next(iter(reversed(list(candidates.keys()))), None)
-                )
-                if pick is not None and pick_name is not None:
-                    _, readout_val = module_cfg_to_value(pick)
-                    chosen_key = pick_name
-            except Exception:
-                pass
 
         modules_val = CfgSectionValue(
             fields={
-                "readout": ModuleRefValue(chosen_key=chosen_key, value=readout_val),
+                "readout": self._make_default_readout_value(ctx),
             }
         )
-        # Pre-fill model params from md if available
+
         r_f: float = 6000.0
         rf_w: Optional[float] = None
-        if ctx.md is not None:
-            _r_f = getattr(ctx.md, "r_f", None)
-            if isinstance(_r_f, (int, float)):
-                r_f = float(_r_f)
-            _rf_w = getattr(ctx.md, "rf_w", None)
-            if isinstance(_rf_w, (int, float)):
-                rf_w = float(_rf_w)
+        _r_f = getattr(ctx.md, "r_f", None)
+        if isinstance(_r_f, (int, float)):
+            r_f = float(_r_f)
+        _rf_w = getattr(ctx.md, "rf_w", None)
+        if isinstance(_rf_w, (int, float)):
+            rf_w = float(_rf_w)
 
         # Sweep range: ±5× linewidth around r_f, or ±200 MHz if rf_w unknown
         half_span = (rf_w * 5.0) if rf_w is not None else 200.0
@@ -279,13 +265,19 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
         )
         return CfgSchema(spec=root_spec, value=root_val)
 
+    def _make_default_readout_value(self, ctx: ExpContext) -> ModuleRefValue:
+        return make_module_ref_default(
+            ml=ctx.ml,
+            module_type=AbsReadoutCfg,
+            preferred_names=["readout_rf", "readout", "res_readout"],
+        )
+
     def _schema_to_exp_cfg(self, schema: CfgSchema, ctx: ExpContext) -> FakeFreqCfg:
         d = schema_to_dict(schema, ctx.ml)
         sweep_cfg: SweepCfg = d["freq"]  # SweepCfg from make_sweep via SweepValue
 
         # Convert raw dicts to ModuleCfg objects for better writeback support
         modules_raw = d.get("modules", {})
-        from zcu_tools.program.v2 import ModuleCfgFactory
 
         def _is_direct_readout_complete(raw: dict) -> bool:
             return all(key in raw for key in ("ro_ch", "ro_length", "ro_freq"))
@@ -371,10 +363,7 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
         }
 
     def analyze(
-        self,
-        result: FreqRunResult,
-        ctx: ExpContext,  # noqa: ARG002
-        **user_params: Any,
+        self, result: FreqRunResult, ctx: ExpContext, **user_params: Any
     ) -> FakeFreqAnalyzeResult:
         _model_type = str(user_params.get("model_type", "hm"))
         fit_bg_slope = bool(user_params.get("fit_bg_slope", False))
@@ -396,9 +385,7 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
         return analyze_result.figure
 
     def get_writeback_spec(
-        self,
-        analyze_result: FakeFreqAnalyzeResult,
-        ctx: ExpContext,
+        self, analyze_result: FakeFreqAnalyzeResult, ctx: ExpContext
     ) -> list[WritebackItem]:
         freq = analyze_result.freq
         fwhm = analyze_result.fwhm
@@ -420,43 +407,54 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
             ),
         ]
 
-        if ctx.ml is not None:
-            cfg = analyze_result.run_result.cfg_snapshot
+        cfg = analyze_result.run_result.cfg_snapshot
+        readout = cfg.modules.get("readout")
+        pulse_ch = getattr(ctx.md, "res_ch", 0)
+        ro_ch = getattr(ctx.md, "ro_ch", 0)
 
-            # 1. readout_rf module
-            new_readout = _build_readout(cfg, freq, ctx)
-            cur_val_rf = ctx.ml.modules.get("readout_rf")
-            items.append(
-                WritebackItem(
-                    key="readout_rf",
-                    target="ml",
-                    current_value=cur_val_rf,
-                    new_value=new_readout,
-                    description="readout_rf module config",
-                    edit_template=_make_readout_template(
-                        cfg.modules.get("readout"),
-                        freq=freq,
-                        ctx=ctx,
-                    ),
-                )
+        new_readout = build_readout_for_frequency(
+            readout,
+            freq=freq,
+            pulse_ch=pulse_ch,
+            ro_ch=ro_ch,
+            ml=ctx.ml,
+        )
+        cur_val_rf = ctx.ml.modules.get("readout_rf")
+        items.append(
+            WritebackItem(
+                key="readout_rf",
+                target="ml",
+                current_value=cur_val_rf,
+                new_value=new_readout,
+                description="readout_rf module config",
+                edit_template=make_readout_edit_template(
+                    readout,
+                    freq=freq,
+                    pulse_ch=pulse_ch,
+                    ro_ch=ro_ch,
+                ),
             )
+        )
 
-            # 2. ro_waveform
-            wav_len = getattr(ctx.md, "res_probe_len", 5.0)
-            new_waveform = _build_waveform(cfg, wav_len, ctx)
-            cur_val_ro = ctx.ml.waveforms.get("ro_waveform")
-            items.append(
-                WritebackItem(
-                    key="ro_waveform",
-                    target="ml",
-                    current_value=cur_val_ro,
-                    new_value=new_waveform,
-                    description="ro_waveform length config",
-                    edit_template=_make_flat_top_waveform_template(
-                        length=float(wav_len)
-                    ),
-                )
+        wav_len = getattr(ctx.md, "res_probe_len", 5.0)
+        new_waveform = build_waveform_for_length(
+            readout,
+            length=float(wav_len),
+            ml=ctx.ml,
+        )
+        cur_val_ro = ctx.ml.waveforms.get("ro_waveform")
+        items.append(
+            WritebackItem(
+                key="ro_waveform",
+                target="ml",
+                current_value=cur_val_ro,
+                new_value=new_waveform,
+                description="ro_waveform length config",
+                edit_template=make_flat_top_waveform_edit_template(
+                    length=float(wav_len)
+                ),
             )
+        )
         return items
 
     def apply_writeback(
@@ -476,58 +474,58 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
         if "rf_w" in selected_keys:
             ctx.md.rf_w = fwhm
 
-        if ctx.ml is not None:
-            dirty = False
-            if "readout_rf" in selected_keys:
-                try:
-                    ov = _overrides.get("readout_rf")
-                    if ov is not None:
-                        from zcu_tools.program.v2 import ModuleCfgFactory
-
-                        name = ov["name"] if isinstance(ov, dict) else "readout_rf"
-                        raw_cfg = ov["cfg"] if isinstance(ov, dict) else ov
-                        new_readout = ModuleCfgFactory.from_raw(raw_cfg, ml=ctx.ml)
-                    else:
-                        name = "readout_rf"
-                        new_readout = _build_readout(cfg, freq, ctx)
-                    if new_readout is not None:
-                        ctx.ml.register_module(**{name: cast(Any, new_readout)})
-                        logger.debug("apply_writeback: registered module %r", name)
-                        dirty = True
-                except Exception as e:
-                    logger.warning("apply_writeback: readout_rf failed: %s", e)
-            if "ro_waveform" in selected_keys:
-                try:
-                    ov = _overrides.get("ro_waveform")
-                    if ov is not None:
-                        from zcu_tools.program.v2 import WaveformCfgFactory
-
-                        name = ov["name"] if isinstance(ov, dict) else "ro_waveform"
-                        raw_cfg = ov["cfg"] if isinstance(ov, dict) else ov
-                        new_waveform = WaveformCfgFactory.from_raw(raw_cfg, ml=ctx.ml)
-                    else:
-                        name = "ro_waveform"
-                        wav_len = getattr(ctx.md, "res_probe_len", 5.0)
-                        new_waveform = _build_waveform(cfg, wav_len, ctx)
-                    if new_waveform is not None:
-                        ctx.ml.register_waveform(**{name: cast(Any, new_waveform)})
-                        logger.debug("apply_writeback: registered waveform %r", name)
-                        dirty = True
-                except Exception as e:
-                    logger.warning("apply_writeback: ro_waveform failed: %s", e)
-            if dirty:
-                try:
-                    ctx.ml.dump()
-                except Exception:
-                    pass
+        dirty = False
+        if "readout_rf" in selected_keys:
+            try:
+                ov = _overrides.get("readout_rf")
+                if ov is not None:
+                    name = ov["name"] if isinstance(ov, dict) else "readout_rf"
+                    raw_cfg = ov["cfg"] if isinstance(ov, dict) else ov
+                    new_readout = ModuleCfgFactory.from_raw(raw_cfg, ml=ctx.ml)
+                else:
+                    name = "readout_rf"
+                    new_readout = build_readout_for_frequency(
+                        cfg.modules.get("readout"),
+                        freq=freq,
+                        pulse_ch=getattr(ctx.md, "res_ch", 0),
+                        ro_ch=getattr(ctx.md, "ro_ch", 0),
+                        ml=ctx.ml,
+                    )
+                if new_readout is not None:
+                    ctx.ml.register_module(**{name: cast(Any, new_readout)})
+                    logger.debug("apply_writeback: registered module %r", name)
+                    dirty = True
+            except Exception as e:
+                logger.warning("apply_writeback: readout_rf failed: %s", e)
+        if "ro_waveform" in selected_keys:
+            try:
+                ov = _overrides.get("ro_waveform")
+                if ov is not None:
+                    name = ov["name"] if isinstance(ov, dict) else "ro_waveform"
+                    raw_cfg = ov["cfg"] if isinstance(ov, dict) else ov
+                    new_waveform = WaveformCfgFactory.from_raw(raw_cfg, ml=ctx.ml)
+                else:
+                    name = "ro_waveform"
+                    wav_len = getattr(ctx.md, "res_probe_len", 5.0)
+                    new_waveform = build_waveform_for_length(
+                        cfg.modules.get("readout"),
+                        length=float(wav_len),
+                        ml=ctx.ml,
+                    )
+                if new_waveform is not None:
+                    ctx.ml.register_waveform(**{name: cast(Any, new_waveform)})
+                    logger.debug("apply_writeback: registered waveform %r", name)
+                    dirty = True
+            except Exception as e:
+                logger.warning("apply_writeback: ro_waveform failed: %s", e)
+        if dirty:
+            try:
+                ctx.ml.dump()
+            except Exception:
+                pass
 
     def make_save_paths(self, ctx: ExpContext) -> SavePaths:
-        import os
-        import time as _time
-
-        from zcu_tools.utils.datasaver import create_datafolder
-
-        ts = _time.strftime("%m%d")
+        ts = time.strftime("%m%d")
         filename = f"{ctx.res_name}_freq_{ts}"
 
         if ctx.database_path:
@@ -559,223 +557,3 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
         ctx: ExpContext,  # noqa: ARG002
     ) -> None:
         pass  # no real hardware, skip HDF5 persistence
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers — shared between get_writeback_spec and apply_writeback
-# ---------------------------------------------------------------------------
-
-
-def _build_readout(
-    cfg: FakeFreqCfg,
-    freq: float,
-    ctx: ExpContext,
-) -> Any:
-    """Build an updated readout module with the fitted frequency."""
-    gui_readout = cfg.modules.get("readout")
-
-    if gui_readout is not None:
-        try:
-            from zcu_tools.program.v2 import AbsModuleCfg
-
-            if isinstance(gui_readout, AbsModuleCfg):
-                updates = {}
-                # 1. Pulse Readout path
-                pulse_cfg = getattr(gui_readout, "pulse_cfg", None)
-                if pulse_cfg is not None:
-                    updates["pulse_cfg"] = pulse_cfg.with_updates(freq=freq)
-
-                # 2. RO Config (Direct or nested in Pulse)
-                ro_cfg = getattr(gui_readout, "ro_cfg", None)
-                if ro_cfg is not None:
-                    updates["ro_cfg"] = ro_cfg.with_updates(ro_freq=freq)
-
-                # 3. Direct Readout path (ro_freq is top-level)
-                if hasattr(gui_readout, "ro_freq"):
-                    updates["ro_freq"] = freq
-
-                if updates:
-                    return gui_readout.with_updates(**updates)
-                return gui_readout
-        except Exception as e:
-            logger.warning("_build_readout: failed to update from gui_readout: %s", e)
-
-    # Fallback: build from scratch
-    fallback_raw = {
-        "type": "readout/pulse",
-        "pulse_cfg": {
-            "waveform": {"style": "const", "length": 1.0},
-            "ch": getattr(ctx.md, "res_ch", 0),
-            "nqz": 2,
-            "freq": freq,
-            "gain": 0.2,
-        },
-        "ro_cfg": {
-            "ro_ch": getattr(ctx.md, "ro_ch", 0),
-            "ro_freq": freq,
-            "ro_length": 1.0,
-            "trig_offset": 0.5,
-        },
-    }
-    try:
-        from zcu_tools.program.v2 import ModuleCfgFactory
-
-        return ModuleCfgFactory.from_raw(fallback_raw, ml=ctx.ml)
-    except Exception:
-        return None
-
-
-def _build_waveform(
-    cfg: FakeFreqCfg,
-    wav_len: float,
-    ctx: ExpContext,
-) -> Any:
-    """Build an updated ro_waveform with the given probe length."""
-    gui_readout = cfg.modules.get("readout")
-
-    if gui_readout is not None:
-        try:
-            pulse_cfg = getattr(gui_readout, "pulse_cfg", None)
-            if pulse_cfg is not None:
-                gui_waveform = getattr(pulse_cfg, "waveform", None)
-                if gui_waveform is not None:
-                    from zcu_tools.program.v2 import AbsWaveformCfg
-
-                    if isinstance(gui_waveform, AbsWaveformCfg):
-                        return gui_waveform.with_updates(length=wav_len)
-
-            # If no pulse_cfg, check if it's a standalone waveform in library
-            # (though FakeFreqAdapter currently doesn't expose it that way in schema)
-        except Exception:
-            pass
-
-    # Fallback
-    fallback_wav_raw = {
-        "style": "flat_top",
-        "raise_waveform": {"style": "cosine", "length": 0.1},
-        "length": wav_len,
-    }
-    try:
-        from zcu_tools.program.v2 import WaveformCfgFactory
-
-        return WaveformCfgFactory.from_raw(fallback_wav_raw, ml=ctx.ml)
-    except Exception:
-        return None
-
-
-def _update_readout_value(readout_val: CfgSectionValue, freq: float) -> CfgSectionValue:
-    fields = dict(readout_val.fields)
-
-    ro_freq = fields.get("ro_freq")
-    if isinstance(ro_freq, ScalarValue):
-        fields["ro_freq"] = ScalarValue(freq)
-
-    pulse_cfg = fields.get("pulse_cfg")
-    if isinstance(pulse_cfg, CfgSectionValue):
-        pulse_fields = dict(pulse_cfg.fields)
-        pulse_freq = pulse_fields.get("freq")
-        if isinstance(pulse_freq, ScalarValue):
-            pulse_fields["freq"] = ScalarValue(freq)
-        fields["pulse_cfg"] = CfgSectionValue(fields=pulse_fields)
-
-    ro_cfg = fields.get("ro_cfg")
-    if isinstance(ro_cfg, CfgSectionValue):
-        ro_fields = dict(ro_cfg.fields)
-        ro_cfg_freq = ro_fields.get("ro_freq")
-        if isinstance(ro_cfg_freq, ScalarValue):
-            ro_fields["ro_freq"] = ScalarValue(freq)
-        fields["ro_cfg"] = CfgSectionValue(fields=ro_fields)
-
-    return CfgSectionValue(fields=fields)
-
-
-def _make_readout_template(
-    readout: Any,
-    freq: float,
-    ctx: ExpContext,
-) -> CfgSchema:
-    if readout is not None:
-        try:
-            from zcu_tools.gui.cfg_schemas import module_cfg_to_value
-
-            spec, readout_val = module_cfg_to_value(readout)
-            value = _update_readout_value(readout_val, freq)
-            return CfgSchema(spec=spec, value=value)
-        except Exception as e:
-            logger.warning("_make_readout_template: failed to use readout cfg: %s", e)
-
-    return _make_pulse_readout_template(
-        pulse_ch=getattr(ctx.md, "res_ch", 0),
-        pulse_freq=freq,
-        ro_ch=getattr(ctx.md, "ro_ch", 0),
-    )
-
-
-def _make_pulse_readout_template(
-    pulse_ch: int,
-    pulse_freq: float,
-    ro_ch: int,
-) -> CfgSchema:
-    """Build a CfgSchema edit_template for a pulse readout module."""
-    from zcu_tools.gui.adapter import (
-        WaveformRefValue,
-        make_default_value,
-    )
-    from zcu_tools.gui.specs.waveform import CONST_WAVEFORM_SPEC
-
-    const_val = make_default_value(CONST_WAVEFORM_SPEC)
-    const_val.fields["length"] = ScalarValue(1.0)
-    pulse_val = CfgSectionValue(
-        fields={
-            "waveform": WaveformRefValue(
-                chosen_key="<Custom:Const>",
-                value=const_val,
-            ),
-            "ch": ChannelValue(chosen=pulse_ch, resolved=None),
-            "nqz": ScalarValue(2),
-            "freq": ScalarValue(pulse_freq),
-            "phase": ScalarValue(0.0),
-            "gain": ScalarValue(0.2),
-            "pre_delay": ScalarValue(0.0),
-            "post_delay": ScalarValue(0.0),
-        }
-    )
-    ro_val = CfgSectionValue(
-        fields={
-            "ro_ch": ChannelValue(chosen=ro_ch, resolved=None),
-            "ro_freq": ScalarValue(pulse_freq),
-            "ro_length": ScalarValue(0.9),
-            "trig_offset": ScalarValue(0.335),
-        }
-    )
-    value = CfgSectionValue(
-        fields={
-            "pulse_cfg": pulse_val,
-            "ro_cfg": ro_val,
-        }
-    )
-    return CfgSchema(spec=PULSE_READOUT_SPEC, value=value)
-
-
-def _make_flat_top_waveform_template(length: float) -> CfgSchema:
-    """Build a CfgSchema edit_template for a flat_top waveform."""
-    from zcu_tools.gui.adapter import WaveformRefValue
-    from zcu_tools.gui.specs.waveform import COSINE_WAVEFORM_SPEC
-
-    raise_val = CfgSectionValue(
-        fields={
-            "style": ScalarValue("cosine"),
-            "length": ScalarValue(0.1),
-        }
-    )
-    value = CfgSectionValue(
-        fields={
-            "style": ScalarValue("flat_top"),
-            "length": ScalarValue(length),
-            "raise_waveform": WaveformRefValue(
-                chosen_key="<Custom:Cosine>",
-                value=raise_val,
-            ),
-        }
-    )
-    return CfgSchema(spec=FLAT_TOP_WAVEFORM_SPEC, value=value)

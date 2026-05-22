@@ -1,34 +1,34 @@
-from .pulse import PULSE_SPEC
-from .readout import DIRECT_READOUT_SPEC, PULSE_READOUT_SPEC
+from .pulse import make_pulse_spec
+from .readout import make_direct_readout_spec, make_pulse_readout_spec
 from .reset import (
-    BATH_RESET_SPEC,
-    NONE_RESET_SPEC,
-    PULSE_RESET_SPEC,
-    TWO_PULSE_RESET_SPEC,
+    make_bath_reset_spec,
+    make_none_reset_spec,
+    make_pulse_reset_spec,
+    make_two_pulse_reset_spec,
 )
 from .waveform import (
-    ARB_WAVEFORM_SPEC,
-    CONST_WAVEFORM_SPEC,
-    COSINE_WAVEFORM_SPEC,
-    DRAG_WAVEFORM_SPEC,
-    FLAT_TOP_WAVEFORM_SPEC,
-    GAUSS_WAVEFORM_SPEC,
-    WAVEFORM_SPEC_BY_STYLE,
+    make_arb_waveform_spec,
+    make_const_waveform_spec,
+    make_cosine_waveform_spec,
+    make_drag_waveform_spec,
+    make_flat_top_waveform_spec,
+    make_gauss_waveform_spec,
+    make_waveform_spec_by_style,
 )
 
 __all__ = [
-    "ARB_WAVEFORM_SPEC",
-    "BATH_RESET_SPEC",
-    "CONST_WAVEFORM_SPEC",
-    "COSINE_WAVEFORM_SPEC",
-    "DIRECT_READOUT_SPEC",
-    "DRAG_WAVEFORM_SPEC",
-    "FLAT_TOP_WAVEFORM_SPEC",
-    "GAUSS_WAVEFORM_SPEC",
-    "NONE_RESET_SPEC",
-    "PULSE_READOUT_SPEC",
-    "PULSE_RESET_SPEC",
-    "PULSE_SPEC",
-    "TWO_PULSE_RESET_SPEC",
-    "WAVEFORM_SPEC_BY_STYLE",
+    "make_arb_waveform_spec",
+    "make_bath_reset_spec",
+    "make_const_waveform_spec",
+    "make_cosine_waveform_spec",
+    "make_direct_readout_spec",
+    "make_drag_waveform_spec",
+    "make_flat_top_waveform_spec",
+    "make_gauss_waveform_spec",
+    "make_none_reset_spec",
+    "make_pulse_readout_spec",
+    "make_pulse_reset_spec",
+    "make_pulse_spec",
+    "make_two_pulse_reset_spec",
+    "make_waveform_spec_by_style",
 ]

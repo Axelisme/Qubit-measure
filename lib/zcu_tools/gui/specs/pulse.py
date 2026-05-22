@@ -1,4 +1,4 @@
-"""Static CfgSectionSpec definitions for pulse module."""
+"""Fresh CfgSectionSpec factories for pulse modules."""
 
 from __future__ import annotations
 
@@ -10,35 +10,37 @@ from zcu_tools.gui.adapter import (
     WaveformRefSpec,
 )
 from zcu_tools.gui.specs.waveform import (
-    ARB_WAVEFORM_SPEC,
-    CONST_WAVEFORM_SPEC,
-    COSINE_WAVEFORM_SPEC,
-    DRAG_WAVEFORM_SPEC,
-    FLAT_TOP_WAVEFORM_SPEC,
-    GAUSS_WAVEFORM_SPEC,
+    make_arb_waveform_spec,
+    make_const_waveform_spec,
+    make_cosine_waveform_spec,
+    make_drag_waveform_spec,
+    make_flat_top_waveform_spec,
+    make_gauss_waveform_spec,
 )
 
-PULSE_SPEC = CfgSectionSpec(
-    label="Pulse",
-    fields={
-        "type": LiteralSpec("pulse"),
-        "waveform": WaveformRefSpec(
-            allowed=[
-                CONST_WAVEFORM_SPEC,
-                COSINE_WAVEFORM_SPEC,
-                GAUSS_WAVEFORM_SPEC,
-                DRAG_WAVEFORM_SPEC,
-                ARB_WAVEFORM_SPEC,
-                FLAT_TOP_WAVEFORM_SPEC,
-            ],
-            label="Waveform",
-        ),
-        "ch": ChannelSpec(label="Gen ch"),
-        "nqz": ScalarSpec(label="NQZ", type=int, choices=[1, 2]),
-        "freq": ScalarSpec(label="Freq (MHz)", type=float, decimals=2),
-        "phase": ScalarSpec(label="Phase (deg)", type=float, decimals=2),
-        "gain": ScalarSpec(label="Gain", type=float, decimals=4),
-        "pre_delay": ScalarSpec(label="Pre-delay (us)", type=float, decimals=3),
-        "post_delay": ScalarSpec(label="Post-delay (us)", type=float, decimals=3),
-    },
-)
+
+def make_pulse_spec() -> CfgSectionSpec:
+    return CfgSectionSpec(
+        label="Pulse",
+        fields={
+            "type": LiteralSpec("pulse"),
+            "waveform": WaveformRefSpec(
+                allowed=[
+                    make_const_waveform_spec(),
+                    make_cosine_waveform_spec(),
+                    make_gauss_waveform_spec(),
+                    make_drag_waveform_spec(),
+                    make_arb_waveform_spec(),
+                    make_flat_top_waveform_spec(),
+                ],
+                label="Waveform",
+            ),
+            "ch": ChannelSpec(label="Gen ch"),
+            "nqz": ScalarSpec(label="NQZ", type=int, choices=[1, 2]),
+            "freq": ScalarSpec(label="Freq (MHz)", type=float, decimals=2),
+            "phase": ScalarSpec(label="Phase (deg)", type=float, decimals=2),
+            "gain": ScalarSpec(label="Gain", type=float, decimals=4),
+            "pre_delay": ScalarSpec(label="Pre-delay (us)", type=float, decimals=3),
+            "post_delay": ScalarSpec(label="Post-delay (us)", type=float, decimals=3),
+        },
+    )

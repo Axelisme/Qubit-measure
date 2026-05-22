@@ -1,6 +1,7 @@
 """Phase 7 tests — Controller skeleton (tab + run flow)."""
 
 from __future__ import annotations
+
 import threading
 import time
 from unittest.mock import MagicMock

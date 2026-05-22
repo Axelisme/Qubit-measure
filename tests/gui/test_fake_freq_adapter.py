@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
-from zcu_tools.experiment.v2_gui.adapters.onetone.freq import (
+from zcu_tools.experiment.v2_gui.adapters.onetone.fakefreq import (
     FakeFreqAdapter,
     FakeFreqAnalyzeResult,
     FreqRunResult,
@@ -94,6 +94,32 @@ def test_make_default_cfg_uses_rf_w_for_sweep_and_ql():
     ql_val = val.fields["Ql"]
     assert isinstance(ql_val, ScalarValue)
     assert abs(ql_val.value - 3000) < 10  # round(6000/2) = 3000
+
+
+def test_make_default_cfg_prefers_named_readout_module_from_ml():
+    from zcu_tools.gui.adapter import CfgSectionValue
+    from zcu_tools.program.v2 import ModuleCfgFactory
+
+    ctx = _make_ctx()
+    ctx.ml.register_module(
+        readout_rf=ModuleCfgFactory.from_raw(
+            {
+                "type": "readout/direct",
+                "ro_ch": 3,
+                "ro_freq": 6123.0,
+                "ro_length": 1.2,
+                "trig_offset": 0.4,
+            },
+            ml=ctx.ml,
+        )
+    )
+
+    schema = _adapter().make_default_cfg(ctx)
+    modules = schema.value.fields["modules"]
+
+    assert isinstance(modules, CfgSectionValue)
+    readout = modules.fields["readout"]
+    assert readout.chosen_key == "readout_rf"  # type: ignore[union-attr]
 
 
 # ---------------------------------------------------------------------------

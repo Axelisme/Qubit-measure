@@ -18,7 +18,10 @@ from zcu_tools.gui.adapter import (
     WaveformRefValue,
     inherit_from,
 )
-from zcu_tools.gui.specs.readout import DIRECT_READOUT_SPEC, PULSE_READOUT_SPEC
+from zcu_tools.gui.specs.readout import (
+    make_direct_readout_spec,
+    make_pulse_readout_spec,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -297,7 +300,9 @@ def _direct_readout_val() -> CfgSectionValue:
 def test_direct_to_pulse_injects_into_ro_cfg():
     old_val = _direct_readout_val()
 
-    result = inherit_from(old_val, DIRECT_READOUT_SPEC, PULSE_READOUT_SPEC)
+    result = inherit_from(
+        old_val, make_direct_readout_spec(), make_pulse_readout_spec()
+    )
 
     # ro_cfg should be the old DirectReadout value verbatim
     assert result.fields["ro_cfg"] is old_val
@@ -308,7 +313,9 @@ def test_direct_to_pulse_injects_into_ro_cfg():
 def test_direct_to_pulse_ro_cfg_carries_field_values():
     old_val = _direct_readout_val()
 
-    result = inherit_from(old_val, DIRECT_READOUT_SPEC, PULSE_READOUT_SPEC)
+    result = inherit_from(
+        old_val, make_direct_readout_spec(), make_pulse_readout_spec()
+    )
 
     ro = result.fields["ro_cfg"]
     assert isinstance(ro, CfgSectionValue)
@@ -328,7 +335,9 @@ def test_pulse_to_direct_extracts_ro_cfg():
         }
     )
 
-    result = inherit_from(old_val, PULSE_READOUT_SPEC, DIRECT_READOUT_SPEC)
+    result = inherit_from(
+        old_val, make_pulse_readout_spec(), make_direct_readout_spec()
+    )
 
     assert result is ro_val
 
@@ -342,7 +351,9 @@ def test_pulse_to_direct_missing_ro_cfg_uses_default():
         }
     )
 
-    result = inherit_from(old_val, PULSE_READOUT_SPEC, DIRECT_READOUT_SPEC)
+    result = inherit_from(
+        old_val, make_pulse_readout_spec(), make_direct_readout_spec()
+    )
 
     from zcu_tools.gui.adapter import ChannelValue
 

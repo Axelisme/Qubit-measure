@@ -13,8 +13,13 @@ from zcu_tools.gui.state import TabInteractionState
 
 logger = logging.getLogger(__name__)
 
-from qtpy.QtCore import QTimer, Qt  # type: ignore[attr-defined]
-from qtpy.QtGui import QColor, QPainter, QPainterPath, QPen  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
+from qtpy.QtGui import (  # type: ignore[attr-defined]
+    QColor,
+    QPainter,
+    QPainterPath,
+    QPen,
+)
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
     QFileDialog,

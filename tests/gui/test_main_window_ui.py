@@ -65,10 +65,7 @@ def test_left_panel_handle_tracks_splitter_boundary(qapp):
     initial_x = tab._left_edge_handle.x()
     splitter_x = tab._splitter.geometry().x()
     left_boundary = splitter_x + tab._left_tabs.geometry().right() + 1
-    assert (
-        abs(initial_x - (left_boundary - tab._left_edge_handle.width() // 2))
-        <= 2
-    )
+    assert abs(initial_x - (left_boundary - tab._left_edge_handle.width() // 2)) <= 2
 
     tab._splitter.setSizes([260, 740])
     tab._schedule_handle_layout()
@@ -77,7 +74,4 @@ def test_left_panel_handle_tracks_splitter_boundary(qapp):
     moved_x = tab._left_edge_handle.x()
     splitter_x = tab._splitter.geometry().x()
     left_boundary = splitter_x + tab._left_tabs.geometry().right() + 1
-    assert (
-        abs(moved_x - (left_boundary - tab._left_edge_handle.width() // 2))
-        <= 2
-    )
+    assert abs(moved_x - (left_boundary - tab._left_edge_handle.width() // 2)) <= 2

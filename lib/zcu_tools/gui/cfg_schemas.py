@@ -19,15 +19,15 @@ from zcu_tools.gui.adapter import (
     make_default_value,
 )
 from zcu_tools.gui.specs import (
-    BATH_RESET_SPEC,
-    CONST_WAVEFORM_SPEC,
-    DIRECT_READOUT_SPEC,
-    NONE_RESET_SPEC,
-    PULSE_READOUT_SPEC,
-    PULSE_RESET_SPEC,
-    PULSE_SPEC,
-    TWO_PULSE_RESET_SPEC,
-    WAVEFORM_SPEC_BY_STYLE,
+    make_bath_reset_spec,
+    make_const_waveform_spec,
+    make_direct_readout_spec,
+    make_none_reset_spec,
+    make_pulse_readout_spec,
+    make_pulse_reset_spec,
+    make_pulse_spec,
+    make_two_pulse_reset_spec,
+    make_waveform_spec_by_style,
 )
 from zcu_tools.program.v2.modules.base import AbsModuleCfg
 from zcu_tools.program.v2.modules.waveform import AbsWaveformCfg
@@ -58,7 +58,7 @@ def waveform_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionVal
     else:
         raise TypeError(f"Expected dict or AbsWaveformCfg, got {type(cfg_input)}")
     style = cfg.get("style", "const")
-    spec = WAVEFORM_SPEC_BY_STYLE.get(style, CONST_WAVEFORM_SPEC)
+    spec = make_waveform_spec_by_style(style)
 
     if style == "const":
         val = CfgSectionValue(
@@ -96,11 +96,11 @@ def waveform_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionVal
         if isinstance(raise_wav, dict):
             _, raise_val = waveform_cfg_to_value(raise_wav)
             raise_style = raise_wav.get("style", "cosine")
-            raise_spec = WAVEFORM_SPEC_BY_STYLE.get(raise_style, CONST_WAVEFORM_SPEC)
+            raise_spec = make_waveform_spec_by_style(raise_style)
         else:
-            from zcu_tools.gui.specs.waveform import COSINE_WAVEFORM_SPEC
+            from zcu_tools.gui.specs.waveform import make_cosine_waveform_spec
 
-            raise_spec = COSINE_WAVEFORM_SPEC
+            raise_spec = make_cosine_waveform_spec()
             raise_val = make_default_value(raise_spec)
 
         val = CfgSectionValue(
@@ -138,7 +138,7 @@ def _pulse_to_value(cfg: dict) -> CfgSectionValue:
     if isinstance(wav, dict):
         wav_spec, wav_val = waveform_cfg_to_value(wav)
     else:
-        wav_spec = CONST_WAVEFORM_SPEC
+        wav_spec = make_const_waveform_spec()
         wav_val = make_default_value(wav_spec)
 
     return CfgSectionValue(
@@ -178,12 +178,12 @@ def _pulse_readout_to_value(cfg: dict) -> CfgSectionValue:
     pulse_val = (
         _pulse_to_value(pulse_cfg)
         if isinstance(pulse_cfg, dict)
-        else make_default_value(PULSE_SPEC)
+        else make_default_value(make_pulse_spec())
     )
     ro_val = (
         _direct_readout_to_value(ro_cfg)
         if isinstance(ro_cfg, dict)
-        else make_default_value(DIRECT_READOUT_SPEC)
+        else make_default_value(make_direct_readout_spec())
     )
     return CfgSectionValue(
         fields={
@@ -203,7 +203,7 @@ def _pulse_reset_to_value(cfg: dict) -> CfgSectionValue:
     pulse_val = (
         _pulse_to_value(pulse_cfg)
         if isinstance(pulse_cfg, dict)
-        else make_default_value(PULSE_SPEC)
+        else make_default_value(make_pulse_spec())
     )
     return CfgSectionValue(
         fields={
@@ -221,10 +221,10 @@ def _two_pulse_reset_to_value(cfg: dict) -> CfgSectionValue:
             "type": ScalarValue("reset/two_pulse"),
             "pulse1_cfg": _pulse_to_value(p1)
             if isinstance(p1, dict)
-            else make_default_value(PULSE_SPEC),
+            else make_default_value(make_pulse_spec()),
             "pulse2_cfg": _pulse_to_value(p2)
             if isinstance(p2, dict)
-            else make_default_value(PULSE_SPEC),
+            else make_default_value(make_pulse_spec()),
         }
     )
 
@@ -238,13 +238,13 @@ def _bath_reset_to_value(cfg: dict) -> CfgSectionValue:
             "type": ScalarValue("reset/bath"),
             "cavity_tone_cfg": _pulse_to_value(cav)
             if isinstance(cav, dict)
-            else make_default_value(PULSE_SPEC),
+            else make_default_value(make_pulse_spec()),
             "qubit_tone_cfg": _pulse_to_value(qub)
             if isinstance(qub, dict)
-            else make_default_value(PULSE_SPEC),
+            else make_default_value(make_pulse_spec()),
             "pi2_cfg": _pulse_to_value(pi2)
             if isinstance(pi2, dict)
-            else make_default_value(PULSE_SPEC),
+            else make_default_value(make_pulse_spec()),
             "relax_delay": _val(cfg, "relax_delay", 1.0),
         }
     )
@@ -259,13 +259,13 @@ _MODULE_VALUE_BUILDERS = {
     "reset/bath": _bath_reset_to_value,
 }
 
-_MODULE_SPEC_BY_TYPE = {
-    "readout/direct": DIRECT_READOUT_SPEC,
-    "readout/pulse": PULSE_READOUT_SPEC,
-    "reset/none": NONE_RESET_SPEC,
-    "reset/pulse": PULSE_RESET_SPEC,
-    "reset/two_pulse": TWO_PULSE_RESET_SPEC,
-    "reset/bath": BATH_RESET_SPEC,
+_MODULE_SPEC_FACTORIES = {
+    "readout/direct": make_direct_readout_spec,
+    "readout/pulse": make_pulse_readout_spec,
+    "reset/none": make_none_reset_spec,
+    "reset/pulse": make_pulse_reset_spec,
+    "reset/two_pulse": make_two_pulse_reset_spec,
+    "reset/bath": make_bath_reset_spec,
 }
 
 
@@ -285,10 +285,10 @@ def module_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionValue
 
     # 3. Check for module types
     type_val = str(cfg.get("type", ""))
-    spec = _MODULE_SPEC_BY_TYPE.get(type_val)
+    spec_factory = _MODULE_SPEC_FACTORIES.get(type_val)
     builder = _MODULE_VALUE_BUILDERS.get(type_val)
-    if spec is not None and builder is not None:
-        return spec, builder(cfg)
+    if spec_factory is not None and builder is not None:
+        return spec_factory(), builder(cfg)
 
     # 4. Generic fallback
     return _dict_to_spec_value(cfg)

@@ -1,6 +1,7 @@
 """Phase 6 tests — Runner / RunWorker (Qt, FakeAdapter)."""
 
 from __future__ import annotations
+
 import threading
 import time
 from typing import Any
