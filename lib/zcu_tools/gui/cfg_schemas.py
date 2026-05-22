@@ -14,9 +14,9 @@ from __future__ import annotations
 from typing import Any
 
 from zcu_tools.gui.adapter import (
-    ChannelValue,
     CfgSectionSpec,
     CfgSectionValue,
+    ChannelValue,
     ScalarValue,
     WaveformRefValue,
     make_default_value,

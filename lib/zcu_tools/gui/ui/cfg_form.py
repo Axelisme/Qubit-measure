@@ -18,12 +18,28 @@ Each CfgNodeSpec type maps to a specific widget strategy:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Optional, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    Union,
+    cast,
+)
+
+from zcu_tools.gui.event_bus import GuiEvent
 
 logger = logging.getLogger(__name__)
 
-from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
-from qtpy.QtCore import Signal  # type: ignore[attr-defined]
+from qtpy.QtCore import (  # type: ignore[attr-defined]
+    Qt,
+    QTimer,
+    Signal,  # type: ignore[attr-defined]
+)
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QAbstractSpinBox,
     QCheckBox,
@@ -44,12 +60,12 @@ from .widgets import TrimDoubleSpinBox
 
 if TYPE_CHECKING:
     from zcu_tools.gui.adapter import (
-        ChannelValue,
         CfgNodeSpec,
         CfgNodeValue,
         CfgSchema,
         CfgSectionSpec,
         CfgSectionValue,
+        ChannelValue,
         ModuleRefSpec,
         ModuleRefValue,
         ScalarSpec,
@@ -383,7 +399,6 @@ class CfgFormWidget(QWidget):
         self._md: Optional["MetaDict"] = None
         self._bus: Optional["EventBus"] = None
         self._channel_rows: list[_ChannelRow] = []
-        self._md_timer: Optional[QTimer] = None
         self._bus_cb: Optional[Callable[[], None]] = None
 
         outer = QVBoxLayout(self)
@@ -452,26 +467,21 @@ class CfgFormWidget(QWidget):
         return CfgSchema(spec=self._spec, value=self.read_values())
 
     def _teardown_md_updates(self) -> None:
-        if self._md_timer is not None:
-            self._md_timer.stop()
-            self._md_timer = None
         if self._bus is not None and self._bus_cb is not None:
-            self._bus.unsubscribe("md_changed", self._bus_cb)
+            self._bus.unsubscribe(GuiEvent.MD_CHANGED, self._bus_cb)
+            self._bus.unsubscribe(GuiEvent.CONTEXT_CHANGED, self._bus_cb)
             self._bus_cb = None
         self._bus = None
 
     def _setup_md_updates(self, bus: Optional["EventBus"]) -> None:
-        if bus is not None:
-            self._bus = bus
-            self._bus_cb = self._refresh_channel_ghosts
-            bus.subscribe("md_changed", self._bus_cb)
-            # also refresh on context switch (md object may have changed)
-            bus.subscribe("context_changed", self._bus_cb)
-        else:
-            self._md_timer = QTimer(self)
-            self._md_timer.setInterval(200)
-            self._md_timer.timeout.connect(self._refresh_channel_ghosts)
-            self._md_timer.start()
+        if bus is None:
+            from zcu_tools.gui.event_bus import EventBus
+
+            bus = EventBus()
+        self._bus = bus
+        self._bus_cb = self._refresh_channel_ghosts
+        self._bus.subscribe(GuiEvent.MD_CHANGED, self._bus_cb)
+        self._bus.subscribe(GuiEvent.CONTEXT_CHANGED, self._bus_cb)
 
     def _refresh_channel_ghosts(self) -> None:
         for row in self._channel_rows:
@@ -531,10 +541,10 @@ class CfgFormWidget(QWidget):
         node_val: "Optional[CfgNodeValue]",
     ) -> tuple[QWidget, QWidget]:
         from zcu_tools.gui.adapter import (
-            ChannelSpec,
-            ChannelValue,
             CfgSectionSpec,
             CfgSectionValue,
+            ChannelSpec,
+            ChannelValue,
             ModuleRefSpec,
             ModuleRefValue,
             MultiSweepSpec,
@@ -844,9 +854,9 @@ class CfgFormWidget(QWidget):
         container: QWidget,
     ) -> "CfgSectionValue":
         from zcu_tools.gui.adapter import (
-            ChannelSpec,
             CfgSectionSpec,
             CfgSectionValue,
+            ChannelSpec,
             LiteralSpec,
             ModuleRefSpec,
             ModuleRefValue,

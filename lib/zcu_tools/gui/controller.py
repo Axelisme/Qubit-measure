@@ -10,8 +10,6 @@ from .event_bus import EventBus
 from .io_manager import IOManager
 from .registry import Registry
 from .runner import Runner
-from .state import State
-
 from .services import (
     ConnectionService,
     ContextService,
@@ -19,6 +17,7 @@ from .services import (
     RunService,
     TabService,
 )
+from .state import State
 
 if TYPE_CHECKING:
     pass
@@ -49,7 +48,7 @@ class Controller:
         io_manager: IOManager,
         device_manager: DeviceManager,
         view: ViewProtocol,
-        bus: Optional[EventBus] = None,
+        bus: EventBus,
     ) -> None:
         self._state = state
         self._view = view
@@ -63,11 +62,12 @@ class Controller:
         self._run_svc = RunService(state, runner, bus)
 
         # For RunService to communicate explicit refresh back to the façade
-        if self._bus is not None:
-            self._bus.subscribe("run_state_changed", self._on_run_state_changed)
-            # Cannot easily subscribe to dynamic tab_id events via the bus without a wildcard,
-            # so we let the run_svc keep its own callbacks or we can inject a callback
-            # A simpler way is to give RunService explicit callbacks for the Façade to use.
+        from .event_bus import GuiEvent
+
+        self._bus.subscribe(GuiEvent.RUN_STATE_CHANGED, self._on_run_state_changed)
+        # Cannot easily subscribe to dynamic tab_id events via the bus without a wildcard,
+        # so we let the run_svc keep its own callbacks or we can inject a callback
+        # A simpler way is to give RunService explicit callbacks for the Façade to use.
 
         # Overriding RunService callbacks to inform the View (Targeted Actions)
         self._run_svc._runner.run_finished.connect(self._on_run_finished)
@@ -82,7 +82,7 @@ class Controller:
     def _on_run_failed(self, _tab_id: str, error: Exception) -> None:
         self._view.show_status_message(f"Run failed: {error}")
 
-    def get_bus(self) -> Optional[EventBus]:
+    def get_bus(self) -> EventBus:
         return self._bus
 
     # ------------------------------------------------------------------

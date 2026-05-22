@@ -8,6 +8,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Optional
 
+from zcu_tools.gui.event_bus import GuiEvent
+from zcu_tools.gui.state import TabInteractionState
+
 logger = logging.getLogger(__name__)
 
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
@@ -474,23 +477,27 @@ class ExpTabWidget(QWidget):
     def _on_cfg_validity_changed(self, valid: bool) -> None:
         self._cfg_valid = valid
 
-    def set_running(
-        self,
-        is_running: bool,
-        has_context: bool = True,
-        has_soc: bool = True,
-        has_run_result: bool = False,
-        has_analyze_result: bool = False,
-    ) -> None:
-        can_run = has_context and has_soc and not is_running and self._cfg_valid
-        idle = not is_running
+    def update_interaction_state(self, state: TabInteractionState) -> None:
+        can_run = (
+            state.has_context
+            and state.has_soc
+            and not state.is_running
+            and self._cfg_valid
+        )
+        idle = not state.is_running
         self.run_btn.setEnabled(can_run)
-        self.cancel_btn.setEnabled(is_running)
+        self.cancel_btn.setEnabled(state.is_running)
         self.cfg_form.setEnabled(idle)
-        self.analyze_btn.setEnabled(idle and has_context and has_run_result)
-        self.save_data_btn.setEnabled(idle and has_context and has_run_result)
-        self.save_image_btn.setEnabled(idle and has_context and has_analyze_result)
-        self.save_both_btn.setEnabled(idle and has_context and has_analyze_result)
+        self.analyze_btn.setEnabled(idle and state.has_context and state.has_run_result)
+        self.save_data_btn.setEnabled(
+            idle and state.has_context and state.has_run_result
+        )
+        self.save_image_btn.setEnabled(
+            idle and state.has_context and state.has_analyze_result
+        )
+        self.save_both_btn.setEnabled(
+            idle and state.has_context and state.has_analyze_result
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -566,8 +573,8 @@ class MainWindow(QMainWindow):
         # EventBus subscriptions
         bus = self._ctrl.get_bus()
         if bus is not None:
-            bus.subscribe("run_state_changed", self._on_bus_run_state_changed)
-            bus.subscribe("context_changed", self._on_bus_context_changed)
+            bus.subscribe(GuiEvent.RUN_STATE_CHANGED, self._on_bus_run_state_changed)
+            bus.subscribe(GuiEvent.CONTEXT_CHANGED, self._on_bus_context_changed)
 
     def _on_bus_run_state_changed(self) -> None:
         self.refresh_run_state(self._ctrl.is_running())
@@ -588,13 +595,14 @@ class MainWindow(QMainWindow):
         has_context: bool,
         has_soc: bool,
     ) -> None:
-        tab_w.set_running(
-            is_running,
+        state = TabInteractionState(
+            is_running=is_running,
             has_context=has_context,
             has_soc=has_soc,
             has_run_result=self._ctrl.has_run_result(tab_id),
             has_analyze_result=self._ctrl.has_analyze_result(tab_id),
         )
+        tab_w.update_interaction_state(state)
 
     def refresh_tab(self, tab_id: str) -> None:
         logger.debug("refresh_tab: tab_id=%r", tab_id)

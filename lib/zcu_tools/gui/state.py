@@ -18,6 +18,15 @@ class TabState:
     last_cfg: Any = None
 
 
+@dataclass(frozen=True)
+class TabInteractionState:
+    is_running: bool
+    has_context: bool
+    has_soc: bool
+    has_run_result: bool
+    has_analyze_result: bool
+
+
 class State:
     """Passive state container; only updated by Controller."""
 

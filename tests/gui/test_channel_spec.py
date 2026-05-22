@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from zcu_tools.gui.adapter import (
-    ChannelSpec,
-    ChannelValue,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
+    ChannelSpec,
+    ChannelValue,
     ScalarSpec,
     ScalarValue,
     inherit_from,

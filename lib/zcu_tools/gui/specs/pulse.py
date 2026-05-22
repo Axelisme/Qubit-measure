@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from zcu_tools.gui.adapter import (
-    ChannelSpec,
     CfgSectionSpec,
+    ChannelSpec,
     LiteralSpec,
     ScalarSpec,
     WaveformRefSpec,

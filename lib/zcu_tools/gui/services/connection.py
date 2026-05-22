@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 class ConnectionService:
     """Encapsulates SOC connection and Predictor settings."""
 
-    def __init__(self, state: "State", bus: Optional["EventBus"] = None) -> None:
+    def __init__(self, state: "State", bus: "EventBus") -> None:
         self._state = state
         self._bus = bus
         self._predictor_path: Optional[str] = None

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.adapter import ChannelSpec, CfgSectionSpec, LiteralSpec, ScalarSpec
+from zcu_tools.gui.adapter import CfgSectionSpec, ChannelSpec, LiteralSpec, ScalarSpec
 from zcu_tools.gui.specs.pulse import PULSE_SPEC
 
 DIRECT_READOUT_SPEC = CfgSectionSpec(

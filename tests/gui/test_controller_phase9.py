@@ -63,6 +63,7 @@ class ControllerFixture:
         io_manager = IOManager()
         io_manager._em = MagicMock()  # simulate a project being set up
         from zcu_tools.gui.event_bus import EventBus
+
         self.bus = EventBus()
         self.ctrl = Controller(
             state=self.state,

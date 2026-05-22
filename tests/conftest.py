@@ -19,5 +19,5 @@ def _np_seed():
 def _close_matplotlib_figures():
     yield
     import matplotlib.pyplot as plt
-    plt.close("all")
 
+    plt.close("all")

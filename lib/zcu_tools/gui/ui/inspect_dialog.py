@@ -27,6 +27,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.gui.event_bus import GuiEvent
+
 if TYPE_CHECKING:
     from zcu_tools.gui.controller import Controller
     from zcu_tools.gui.event_bus import EventBus
@@ -77,13 +79,15 @@ class InspectDialog(QDialog):
 
         # Subscribe to EventBus for auto-refresh
         if bus is not None:
-            bus.subscribe("context_changed", self.refresh)
-            bus.subscribe("md_changed", self.refresh)
+            bus.subscribe(GuiEvent.CONTEXT_CHANGED, self.refresh)
+            bus.subscribe(GuiEvent.MD_CHANGED, self.refresh)
             # Unsubscribe when dialog is destroyed
             self.destroyed.connect(
-                lambda: bus.unsubscribe("context_changed", self.refresh)
+                lambda: bus.unsubscribe(GuiEvent.CONTEXT_CHANGED, self.refresh)
             )
-            self.destroyed.connect(lambda: bus.unsubscribe("md_changed", self.refresh))
+            self.destroyed.connect(
+                lambda: bus.unsubscribe(GuiEvent.MD_CHANGED, self.refresh)
+            )
 
         self.refresh()
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Optional
 
+from zcu_tools.gui.event_bus import GuiEvent
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -14,9 +16,7 @@ if TYPE_CHECKING:
 class RunService:
     """Encapsulates execution of an experiment adapter via a Runner."""
 
-    def __init__(
-        self, state: "State", runner: "Runner", bus: Optional["EventBus"] = None
-    ) -> None:
+    def __init__(self, state: "State", runner: "Runner", bus: "EventBus") -> None:
         self._state = state
         self._runner = runner
         self._bus = bus
@@ -57,8 +57,7 @@ class RunService:
             user_params,
             pbar_factory=pbar_factory,
         )
-        if self._bus is not None:
-            self._bus.emit("run_state_changed")
+        self._bus.emit(GuiEvent.RUN_STATE_CHANGED)
 
     def cancel_run(self) -> None:
         logger.info("cancel_run")
@@ -76,14 +75,10 @@ class RunService:
         self._clear_live_container()
         self._state.update_tab_result(tab_id, result, cfg=None)
         self._state.set_running(False)
-        if self._bus is not None:
-            self._bus.emit("run_state_changed")
-            self._bus.emit(f"run_finished_{tab_id}")  # targeted event for the façade
+        self._bus.emit(GuiEvent.RUN_STATE_CHANGED)
 
     def _on_run_failed(self, tab_id: str, error: Exception) -> None:
         logger.warning("_on_run_failed: tab_id=%r error=%r", tab_id, error)
         self._clear_live_container()
         self._state.set_running(False)
-        if self._bus is not None:
-            self._bus.emit("run_state_changed")
-            self._bus.emit(f"run_failed_{tab_id}_{id(error)}")  # targeted event with error
+        self._bus.emit(GuiEvent.RUN_STATE_CHANGED)

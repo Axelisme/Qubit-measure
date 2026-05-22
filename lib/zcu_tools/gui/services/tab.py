@@ -4,6 +4,8 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any, Optional
 
+from zcu_tools.gui.event_bus import GuiEvent
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -19,7 +21,7 @@ class TabService:
         self,
         state: "State",
         registry: "Registry",
-        bus: Optional["EventBus"] = None,
+        bus: "EventBus",
     ) -> None:
         self._state = state
         self._registry = registry
@@ -103,8 +105,9 @@ class TabService:
         tab.adapter.apply_writeback(
             ctx, tab.last_analyze_result, selected_keys, overrides
         )
-        if self._bus is not None:
-            self._bus.emit("md_changed")  # Emit explicitly, in case adapter changed md
+        self._bus.emit(
+            GuiEvent.MD_CHANGED
+        )  # Emit explicitly, in case adapter changed md
 
     def save_data(self, tab_id: str, data_path: str) -> None:
         tab = self._state.get_tab(tab_id)

@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import Optional
 
-from qtpy.QtWidgets import QProgressBar, QVBoxLayout, QWidget  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QProgressBar,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class ProgressStack(QWidget):

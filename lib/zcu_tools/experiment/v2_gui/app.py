@@ -104,6 +104,10 @@ def _build_window(
         def show_status_message(self, message: str) -> None:
             _ = message
 
+    from zcu_tools.gui.event_bus import EventBus
+
+    bus = EventBus()
+
     ctrl = Controller(
         state=state,
         runner=runner,
@@ -111,6 +115,7 @@ def _build_window(
         io_manager=io_manager,
         device_manager=device_manager,
         view=_PlaceholderView(),  # type: ignore[arg-type]
+        bus=bus,
     )
 
     window = MainWindow(ctrl)

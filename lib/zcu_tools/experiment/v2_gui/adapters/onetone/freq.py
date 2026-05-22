@@ -26,10 +26,10 @@ from zcu_tools.experiment.v2.onetone.freq import FreqExp
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
-    ChannelValue,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
+    ChannelValue,
     ExpContext,
     ModuleRefSpec,
     ModuleRefValue,

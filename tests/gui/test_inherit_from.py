@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.specs.readout import DIRECT_READOUT_SPEC, PULSE_READOUT_SPEC
 from zcu_tools.gui.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
@@ -19,7 +18,7 @@ from zcu_tools.gui.adapter import (
     WaveformRefValue,
     inherit_from,
 )
-
+from zcu_tools.gui.specs.readout import DIRECT_READOUT_SPEC, PULSE_READOUT_SPEC
 
 # ---------------------------------------------------------------------------
 # Helpers
