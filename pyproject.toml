@@ -14,8 +14,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+development = ["pytest", "pytest-cov"]
 server = ["numpy==1.23.5"]
-fit = [
+client = [
   "h5py",
   "ipykernel",
   "ipywidgets",
@@ -32,9 +33,6 @@ fit = [
   "requests",
   "flask",
   "scikit-optimize",
-]
-client = [
-  "zcu-tools[fit]",
   "qick @ git+https://github.com/openquantumhardware/qick.git",
   "labber @ git+https://github.com/Axelisme/labber_api.git",
   "numpy==1.23.5",
@@ -50,12 +48,8 @@ gdrive = [
   "google-auth-oauthlib",
   "python-dotenv",
 ]
-gui = [
-  "zcu-tools[client]",
-  "qtpy",
-  "PyQt5",
-]
-all = ["zcu_tools[client,design,gdrive,gui]"]
+gui = ["zcu-tools[client]", "qtpy", "PyQt6"]
+all = ["zcu_tools[development,client,design,gdrive,gui]"]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
