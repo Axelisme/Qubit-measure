@@ -32,6 +32,9 @@ if TYPE_CHECKING:
     from ...adapter import ScalarSpec
 
 
+FIELD_INPUT_MIN_WIDTH = 20
+
+
 def make_value_widget(
     type_: type,
     default: Any,
@@ -46,6 +49,7 @@ def make_value_widget(
         idx = w.findText(str(default))
         if idx >= 0:
             w.setCurrentIndex(idx)
+        w.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
         w.setEnabled(editable)
         return w
     if type_ is bool:
@@ -58,6 +62,7 @@ def make_value_widget(
         w.setRange(-(2**31), 2**31 - 1)
         w.setValue(int(default))
         w.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
+        w.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
         w.setEnabled(editable)
         return w
     if type_ is float:
@@ -66,9 +71,11 @@ def make_value_widget(
         w.setDecimals(decimals if decimals is not None else 6)
         w.setValue(float(default))
         w.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
+        w.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
         w.setEnabled(editable)
         return w
     w = QLineEdit(str(default))
+    w.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
     w.setEnabled(editable)
     return w
 
@@ -328,7 +335,7 @@ class ChannelWidget(BaseLiveWidget):
 
         cv = field.get_value()
         self._edit = QLineEdit(str(cv.chosen))
-        self._edit.setMinimumWidth(60)
+        self._edit.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
         self._edit.textChanged.connect(self._on_ui_changed)
         layout.addWidget(self._edit, stretch=1)
 

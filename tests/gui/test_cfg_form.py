@@ -1,22 +1,27 @@
 """Tests — CfgFormWidget populate / read_values round-trip (Phase 19)."""
 
 from __future__ import annotations
-
-import sys
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 from zcu_tools.gui.adapter import (
     CfgSchema,
+    ChannelSpec,
+    ChannelValue,
     CfgSectionSpec,
     CfgSectionValue,
+    LiteralSpec,
     MultiSweepSpec,
     MultiSweepValue,
+    ModuleRefSpec,
+    ModuleRefValue,
     ScalarSpec,
     ScalarValue,
     SweepSpec,
     SweepValue,
+    WaveformRefSpec,
+    WaveformRefValue,
     schema_to_dict,
 )
 from zcu_tools.gui.event_bus import EventBus
@@ -33,14 +38,6 @@ def ctrl():
     c.get_current_md.return_value = MagicMock()
     c.get_current_ml.return_value = MagicMock()
     return c
-
-
-@pytest.fixture(scope="session")
-def qapp():
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication(sys.argv)
-    return app
 
 
 def _schema(spec_fields: dict, value_fields: dict) -> CfgSchema:
@@ -131,6 +128,28 @@ def test_scalar_editable_false_widget_disabled(qapp):
     spec = ScalarSpec(label="RO", type=float, editable=False)
     w = make_scalar_widget(spec, 1.0)
     assert not w.isEnabled()
+
+
+def test_scalar_widget_minimum_width_reduced(qapp):
+    from zcu_tools.gui.ui.fields import make_scalar_widget
+
+    spec = ScalarSpec(label="Name", type=str)
+    w = make_scalar_widget(spec, "demo")
+    assert w.minimumWidth() == 20
+
+
+def test_channel_widget_minimum_width_reduced(qapp, ctrl):
+    from zcu_tools.gui.live_model import ChannelLiveField, LiveModelEnv
+    from zcu_tools.gui.ui.fields.common import ChannelWidget
+
+    field = ChannelLiveField(
+        ChannelSpec(label="Ch"),
+        LiveModelEnv(ctrl=ctrl),
+        initial_val=ChannelValue(chosen="qub_ch", resolved=7),
+    )
+    w = ChannelWidget(field)
+    assert w.findChild(type(w._edit)) is not None
+    assert w._edit.minimumWidth() == 20
 
 
 # ---------------------------------------------------------------------------
@@ -262,6 +281,151 @@ def test_populate_nested_section_round_trip(qapp, ctrl):
     inner = out.fields["inner"]
     assert isinstance(inner, CfgSectionValue)
     assert inner.fields["gain"].value == pytest.approx(0.05)  # type: ignore[union-attr]
+
+
+def test_literal_type_and_style_rows_are_hidden(qapp, ctrl):
+    from qtpy.QtWidgets import QLabel
+    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+
+    schema = _schema(
+        {
+            "type": LiteralSpec("pulse", label="Type"),
+            "waveform": CfgSectionSpec(
+                label="Waveform",
+                fields={
+                    "style": LiteralSpec("gauss", label="Style"),
+                    "sigma": ScalarSpec(label="Sigma", type=float),
+                },
+            ),
+        },
+        {
+            "waveform": CfgSectionValue(fields={"sigma": ScalarValue(1.2)}),
+        },
+    )
+    w = CfgFormWidget()
+    w.populate(schema, ctrl)
+
+    labels = [label.text() for label in w.findChildren(QLabel)]
+    assert "Type:" not in labels
+    assert "Style:" not in labels
+    assert "Sigma:" in labels
+
+
+def test_module_ref_toggle_sits_left_of_combo_and_controls_subsection(qapp, ctrl):
+    from qtpy.QtWidgets import QComboBox, QHBoxLayout, QToolButton
+    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.ui.fields.containers import ModuleRefWidget
+
+    custom_spec = CfgSectionSpec(
+        label="Pulse Shape",
+        fields={
+            "type": LiteralSpec("pulse"),
+            "gain": ScalarSpec(label="Gain", type=float),
+        },
+    )
+    schema = _schema(
+        {"pulse": ModuleRefSpec(label="Pulse", allowed=[custom_spec])},
+        {
+            "pulse": ModuleRefValue(
+                chosen_key="<Custom:Pulse Shape>",
+                value=CfgSectionValue(fields={"gain": ScalarValue(0.25)}),
+            )
+        },
+    )
+    w = CfgFormWidget()
+    w.populate(schema, ctrl)
+    w.show()
+
+    ref_widget = w.findChild(ModuleRefWidget)
+    assert ref_widget is not None
+
+    root_layout = ref_widget.layout()
+    assert root_layout is not None
+    header_item = root_layout.itemAt(0)
+    assert header_item is not None
+    header = cast(QHBoxLayout, header_item.layout())
+    expand_item = header.itemAt(0)
+    combo_item = header.itemAt(1)
+    assert expand_item is not None
+    assert combo_item is not None
+    assert isinstance(expand_item.widget(), QToolButton)
+    assert isinstance(combo_item.widget(), QComboBox)
+    assert ref_widget._sub_container.isVisible() is True
+
+    ref_widget._expand_btn.click()
+    assert ref_widget._sub_container.isVisible() is False
+
+    ref_widget._expand_btn.click()
+    assert ref_widget._sub_container.isVisible() is True
+
+
+def test_waveform_ref_toggle_sits_left_of_combo(qapp, ctrl):
+    from qtpy.QtWidgets import QComboBox, QHBoxLayout, QToolButton
+    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.ui.fields.containers import ModuleRefWidget
+
+    custom_spec = CfgSectionSpec(
+        label="Gaussian",
+        fields={
+            "style": LiteralSpec("gauss"),
+            "sigma": ScalarSpec(label="Sigma", type=float),
+        },
+    )
+    schema = _schema(
+        {"waveform": WaveformRefSpec(label="Waveform", allowed=[custom_spec])},
+        {
+            "waveform": WaveformRefValue(
+                chosen_key="<Custom:Gaussian>",
+                value=CfgSectionValue(fields={"sigma": ScalarValue(0.5)}),
+            )
+        },
+    )
+    w = CfgFormWidget()
+    w.populate(schema, ctrl)
+
+    ref_widget = w.findChild(ModuleRefWidget)
+    assert ref_widget is not None
+    root_layout = ref_widget.layout()
+    assert root_layout is not None
+    header_item = root_layout.itemAt(0)
+    assert header_item is not None
+    header = cast(QHBoxLayout, header_item.layout())
+    expand_item = header.itemAt(0)
+    combo_item = header.itemAt(1)
+    assert expand_item is not None
+    assert combo_item is not None
+    assert isinstance(expand_item.widget(), QToolButton)
+    assert isinstance(combo_item.widget(), QComboBox)
+
+
+def test_cfg_form_does_not_wrap_module_ref_row(qapp, ctrl):
+    from qtpy.QtWidgets import QFormLayout
+    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.ui.fields.containers import SectionWidget
+
+    custom_spec = CfgSectionSpec(
+        label="Long Custom Module Name",
+        fields={"gain": ScalarSpec(label="Gain", type=float)},
+    )
+    schema = _schema(
+        {"pulse": ModuleRefSpec(label="Pulse", allowed=[custom_spec])},
+        {
+            "pulse": ModuleRefValue(
+                chosen_key="<Custom:Long Custom Module Name>",
+                value=CfgSectionValue(fields={"gain": ScalarValue(0.25)}),
+            )
+        },
+    )
+    w = CfgFormWidget()
+    w.resize(520, 480)
+    w.populate(schema, ctrl)
+
+    section = w.findChild(SectionWidget)
+    assert section is not None
+    assert (
+        section._container.form.rowWrapPolicy()
+        == QFormLayout.RowWrapPolicy.DontWrapRows
+    )
 
 
 def test_populate_multi_sweep_round_trip(qapp, ctrl):

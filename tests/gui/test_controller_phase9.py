@@ -1,14 +1,11 @@
 """Phase 9 tests — Controller analyze / writeback / save flow."""
 
 from __future__ import annotations
-
-import sys
 import time
 from unittest.mock import ANY, MagicMock
 
 import pytest
 from qtpy.QtCore import QCoreApplication
-from qtpy.QtWidgets import QApplication
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.adapter import CfgSchema, CfgSectionSpec, CfgSectionValue, ExpContext
@@ -23,14 +20,6 @@ from zcu_tools.gui.state import State
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture(scope="session")
-def qapp():
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication(sys.argv)
-    return app
 
 
 def _make_ctx() -> ExpContext:

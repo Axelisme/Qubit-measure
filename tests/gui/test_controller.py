@@ -1,15 +1,12 @@
 """Phase 7 tests — Controller skeleton (tab + run flow)."""
 
 from __future__ import annotations
-
-import sys
 import threading
 import time
 from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QCoreApplication
-from qtpy.QtWidgets import QApplication
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.adapter import (
@@ -27,19 +24,6 @@ from zcu_tools.gui.io_manager import IOManager
 from zcu_tools.gui.registry import Registry
 from zcu_tools.gui.runner import Runner
 from zcu_tools.gui.state import State
-
-# ---------------------------------------------------------------------------
-# Session-scoped QApplication
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(scope="session")
-def qapp():
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication(sys.argv)
-    return app
-
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures

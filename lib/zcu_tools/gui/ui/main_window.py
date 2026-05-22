@@ -13,7 +13,8 @@ from zcu_tools.gui.state import TabInteractionState
 
 logger = logging.getLogger(__name__)
 
-from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+from qtpy.QtCore import QTimer, Qt  # type: ignore[attr-defined]
+from qtpy.QtGui import QColor, QPainter, QPainterPath, QPen  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
     QFileDialog,
@@ -69,6 +70,58 @@ def _read_param_widget(w: QWidget, spec: "ParamSpec") -> Any:
 # ---------------------------------------------------------------------------
 
 
+class _PanelEdgeHandle(QToolButton):
+    """Boundary handle for collapsing/expanding the left panel."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(16, 42)
+        self.setCursor(Qt.PointingHandCursor)  # type: ignore[attr-defined]
+        self.setAutoRaise(True)
+        self._collapsed = False
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        self._collapsed = collapsed
+        self.setToolTip("Expand left panel" if collapsed else "Collapse left panel")
+        self.update()
+
+    def paintEvent(self, a0) -> None:
+        del a0
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        rect = self.rect().adjusted(1, 1, -1, -1)
+        path = QPainterPath()
+        notch = 6
+        path.moveTo(rect.right() - 1, rect.center().y())
+        path.lineTo(rect.right() - notch, rect.top())
+        path.lineTo(rect.left(), rect.top())
+        path.lineTo(rect.left(), rect.bottom())
+        path.lineTo(rect.right() - notch, rect.bottom())
+        path.closeSubpath()
+
+        fill = QColor(236, 238, 242)
+        border = QColor(120, 126, 138)
+        arrow = QColor(70, 76, 88)
+        if self.underMouse():
+            fill = QColor(224, 228, 236)
+            border = QColor(96, 102, 114)
+
+        painter.setPen(QPen(border, 1.2))
+        painter.setBrush(fill)
+        painter.drawPath(path)
+
+        painter.setPen(QPen(arrow, 2))
+        center_x = rect.center().x()
+        center_y = rect.center().y()
+        if self._collapsed:
+            painter.drawLine(center_x - 2, center_y - 7, center_x + 2, center_y)
+            painter.drawLine(center_x - 2, center_y + 7, center_x + 2, center_y)
+        else:
+            painter.drawLine(center_x + 2, center_y - 7, center_x - 2, center_y)
+            painter.drawLine(center_x + 2, center_y + 7, center_x - 2, center_y)
+
+
 class ExpTabWidget(QWidget):
     """A single experiment tab: Config | Plot | Result areas."""
 
@@ -93,12 +146,12 @@ class ExpTabWidget(QWidget):
         root_layout.setContentsMargins(4, 4, 4, 4)
         root_layout.setSpacing(2)
 
-        # --- main content area: [collapse-btn | splitter] ---
-        content_widget = QWidget()
-        content_row = QHBoxLayout(content_widget)
+        # --- main content area: [splitter] ---
+        self._content_widget = QWidget()
+        content_row = QHBoxLayout(self._content_widget)
         content_row.setContentsMargins(0, 0, 0, 0)
         content_row.setSpacing(0)
-        root_layout.addWidget(content_widget, stretch=1)
+        root_layout.addWidget(self._content_widget, stretch=1)
 
         # --- progress stack at bottom (zero height when idle) ---
         self.progress_stack = ProgressStack()
@@ -107,47 +160,18 @@ class ExpTabWidget(QWidget):
         # splitter holds two panes: left (tab panel) | right (plot)
         splitter = QSplitter(Qt.Horizontal)  # type: ignore[attr-defined]
 
-        _collapse_btn_style = (
-            "QToolButton { border: none; background: transparent; padding: 0px; }"
-            "QToolButton:hover { background: rgba(128,128,128,40); border-radius: 3px; }"
-            "QToolButton:checked { background: rgba(128,128,128,60); border-radius: 3px; }"
-        )
-
-        # left collapse button (collapses/restores left tab panel)
-        _left_collapse_btn = QToolButton()
-        _left_collapse_btn.setFixedWidth(14)
-        _left_collapse_btn.setArrowType(Qt.LeftArrow)  # type: ignore[attr-defined]
-        _left_collapse_btn.setToolTip("Collapse/expand left panel")
-        _left_collapse_btn.setCheckable(True)
-        _left_collapse_btn.setChecked(False)
-        _left_collapse_btn.setAutoRaise(True)
-        _left_collapse_btn.setStyleSheet(_collapse_btn_style)
-        content_row.addWidget(_left_collapse_btn)
         content_row.addWidget(splitter, stretch=1)
 
         self._splitter = splitter
         self._splitter_left_saved = 350
-        self._left_collapse_btn = _left_collapse_btn
-
-        def _on_left_collapse(checked: bool) -> None:
-            sizes = self._splitter.sizes()
-            if checked:
-                self._splitter_left_saved = sizes[0]
-                sizes[1] += sizes[0]
-                sizes[0] = 0
-            else:
-                saved = self._splitter_left_saved
-                sizes[1] = max(0, sizes[1] - saved)
-                sizes[0] = saved
-            self._splitter.setSizes(sizes)
-            _left_collapse_btn.setArrowType(  # type: ignore[attr-defined]
-                Qt.RightArrow if checked else Qt.LeftArrow  # type: ignore[attr-defined]
-            )
-
-        _left_collapse_btn.clicked.connect(_on_left_collapse)
+        self._left_panel_collapsed = False
+        self._splitter.splitterMoved.connect(self._on_splitter_moved)
 
         # ── Left pane: QTabWidget with Config tab and Analysis tab ───────
         self._left_tabs = QTabWidget()
+
+        self._left_edge_handle = _PanelEdgeHandle(self._content_widget)
+        self._left_edge_handle.clicked.connect(self._toggle_left_panel)
 
         # ── Tab 0: Config ────────────────────────────────────────────────
         config_panel = QWidget()
@@ -249,6 +273,63 @@ class ExpTabWidget(QWidget):
 
         splitter.setCollapsible(0, True)
         splitter.setSizes([350, 650])
+        self._update_left_panel_controls()
+        self._schedule_handle_layout()
+
+    def resizeEvent(self, a0) -> None:
+        super().resizeEvent(a0)
+        self._schedule_handle_layout()
+
+    def showEvent(self, a0) -> None:
+        super().showEvent(a0)
+        self._schedule_handle_layout()
+
+    def _toggle_left_panel(self) -> None:
+        if self._left_panel_collapsed:
+            self._expand_left_panel()
+        else:
+            self._collapse_left_panel()
+
+    def _collapse_left_panel(self) -> None:
+        sizes = self._splitter.sizes()
+        self._splitter_left_saved = max(1, sizes[0])
+        sizes[1] += sizes[0]
+        sizes[0] = 0
+        self._splitter.setSizes(sizes)
+        self._left_panel_collapsed = True
+        self._update_left_panel_controls()
+
+    def _expand_left_panel(self) -> None:
+        sizes = self._splitter.sizes()
+        saved = max(240, self._splitter_left_saved)
+        sizes[0] = saved
+        sizes[1] = max(0, sizes[1] - saved)
+        self._splitter.setSizes(sizes)
+        self._left_panel_collapsed = False
+        self._update_left_panel_controls()
+
+    def _update_left_panel_controls(self) -> None:
+        self._left_edge_handle.set_collapsed(self._left_panel_collapsed)
+        self._left_edge_handle.setVisible(True)
+        self._schedule_handle_layout()
+        self._left_edge_handle.raise_()
+
+    def _layout_collapsed_handle(self) -> None:
+        host = self._content_widget.rect()
+        splitter_x = self._splitter.geometry().x()
+        if self._left_panel_collapsed:
+            boundary_x = splitter_x
+        else:
+            boundary_x = splitter_x + self._left_tabs.geometry().right() + 1
+        x = max(0, boundary_x - self._left_edge_handle.width() // 2)
+        y = max(8, (host.height() - self._left_edge_handle.height()) // 2)
+        self._left_edge_handle.move(x, y)
+
+    def _on_splitter_moved(self, _pos: int, _index: int) -> None:
+        self._schedule_handle_layout()
+
+    def _schedule_handle_layout(self) -> None:
+        QTimer.singleShot(0, self._layout_collapsed_handle)
 
     # ── cfg helpers ───────────────────────────────────────────────────────
 

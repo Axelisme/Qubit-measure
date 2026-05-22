@@ -6,17 +6,17 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Union, cast
 
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-    QCheckBox,
     QComboBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from ...adapter import ScalarSpec
+from ...adapter import LiteralSpec, ScalarSpec
 from ...live_model import LiveField, ModuleRefLiveField, SectionLiveField
 from .common import BaseLiveWidget
 from .registry import FieldWidgetProtocol, get_widget_cls, register_widget
@@ -70,6 +70,7 @@ class _CollapsibleSection(QWidget):
         self.form = QFormLayout()
         self.form.setContentsMargins(0, 0, 0, 0)
         self.form.setSpacing(4)
+        self.form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
         self.body_layout.addLayout(self.form)
 
         if collapsed:
@@ -112,6 +113,8 @@ class SectionWidget(BaseLiveWidget):
             # Skip hidden scalar fields
             if isinstance(spec, ScalarSpec) and spec.hidden:
                 continue
+            if isinstance(spec, LiteralSpec) and key in {"type", "style"}:
+                continue
 
             widget_cls = get_widget_cls(child_field)
             w = widget_cls(child_field)  # type: ignore
@@ -138,16 +141,20 @@ class ModuleRefWidget(BaseLiveWidget):
         # Header: Checkbox + Combo
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(4)
 
-        self._cb = QCheckBox()
-        self._cb.setChecked(True)
-        self._cb.setVisible(False)
+        self._expand_btn = QToolButton()
+        self._expand_btn.setAutoRaise(True)
+        self._expand_btn.setCheckable(True)
+        self._expand_btn.setChecked(True)
+        self._expand_btn.setArrowType(Qt.DownArrow)  # type: ignore[attr-defined]
+        self._expand_btn.clicked.connect(self._on_toggle_subsection)
+        header.addWidget(self._expand_btn)
 
         self._combo = QComboBox()
         self._refresh_combo_items()
+        self._combo.setMinimumWidth(20)
         self._combo.currentIndexChanged.connect(self._on_combo_changed)
-
-        header.addWidget(self._cb)
         header.addWidget(self._combo, stretch=1)
         layout.addLayout(header)
 
@@ -208,11 +215,31 @@ class ModuleRefWidget(BaseLiveWidget):
 
         self._refresh_sub_widget()
 
+    def _on_toggle_subsection(self, expanded: bool) -> None:
+        self._sub_container.setVisible(expanded)
+        self._expand_btn.setArrowType(  # type: ignore[attr-defined]
+            Qt.DownArrow if expanded else Qt.RightArrow  # type: ignore[attr-defined]
+        )
+
+    def _sync_expand_btn(self) -> None:
+        has_subsection = self._sub_widget is not None
+        self._expand_btn.setVisible(has_subsection)
+        self._expand_btn.setEnabled(has_subsection)
+        if not has_subsection:
+            self._sub_container.setVisible(False)
+            return
+        expanded = self._expand_btn.isChecked()
+        self._sub_container.setVisible(expanded)
+        self._expand_btn.setArrowType(  # type: ignore[attr-defined]
+            Qt.DownArrow if expanded else Qt.RightArrow  # type: ignore[attr-defined]
+        )
+
     def _refresh_sub_widget(self) -> None:
         field = cast(ModuleRefLiveField, self._field)
         sub_field = field.sub_field
 
         if self._sub_widget and self._sub_widget.field == sub_field:
+            self._sync_expand_btn()
             return
 
         if self._sub_widget:
@@ -225,6 +252,7 @@ class ModuleRefWidget(BaseLiveWidget):
             w = widget_cls(sub_field)  # type: ignore
             self._sub_widget = w
             self._sub_layout.addWidget(cast(QWidget, w))
+        self._sync_expand_btn()
 
     def teardown(self) -> None:
         self._field.on_change.disconnect(self._on_model_changed)

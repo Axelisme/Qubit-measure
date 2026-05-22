@@ -1,15 +1,12 @@
 """Phase 6 tests — Runner / RunWorker (Qt, FakeAdapter)."""
 
 from __future__ import annotations
-
-import sys
 import threading
 import time
 from typing import Any
 
 import pytest
 from qtpy.QtCore import QCoreApplication, QEventLoop, QTimer
-from qtpy.QtWidgets import QApplication
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.gui.adapter import (
     CfgSchema,
@@ -20,19 +17,6 @@ from zcu_tools.gui.adapter import (
     ScalarValue,
 )  # noqa: F401
 from zcu_tools.gui.runner import Runner, RunWorker
-
-# ---------------------------------------------------------------------------
-# QApplication singleton — must exist before any QObject is created
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(scope="session")
-def qapp():
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication(sys.argv)
-    return app
-
 
 # ---------------------------------------------------------------------------
 # Helpers

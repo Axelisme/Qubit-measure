@@ -7,14 +7,6 @@ import pytest
 pytest.importorskip("qtpy")
 
 
-@pytest.fixture(scope="module")
-def qapp():
-    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-
-    app = QApplication.instance() or QApplication([])
-    return app
-
-
 # ---------------------------------------------------------------------------
 # _ProgressStack helpers
 # ---------------------------------------------------------------------------
