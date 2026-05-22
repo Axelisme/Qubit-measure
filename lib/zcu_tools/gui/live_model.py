@@ -209,7 +209,7 @@ class ChannelLiveField(LiveField):
         self._refresh_resolve()
 
     def _refresh_resolve(self) -> None:
-        from .ui.cfg_form import _resolve_channel
+        from .ui.fields.utils import _resolve_channel
 
         new_id = _resolve_channel(str(self._chosen), self._md)
         if new_id != self._resolved_id:
@@ -329,7 +329,7 @@ class ModuleRefLiveField(LiveField):
         if self.sub_field:
             self.sub_field.teardown()
 
-        from .ui.cfg_form import _spec_for_chosen
+        from .ui.fields.utils import _spec_for_chosen
 
         chosen_spec = _spec_for_chosen(self._chosen_key, self.spec.allowed, self._ml)
         if chosen_spec:
@@ -399,13 +399,14 @@ def create_live_field(
 ) -> LiveField:
     """Factory to create the appropriate LiveField from a Spec."""
     from .adapter import (
+        CfgSectionSpec,
+        ChannelSpec,
+        LiteralSpec,
+        ModuleRefSpec,
+        MultiSweepSpec,
         ScalarSpec,
         SweepSpec,
-        MultiSweepSpec,
-        ChannelSpec,
-        ModuleRefSpec,
         WaveformRefSpec,
-        CfgSectionSpec,
     )
 
     if isinstance(spec, ScalarSpec):

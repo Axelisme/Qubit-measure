@@ -35,6 +35,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 
 from .cfg_form import (
     CfgFormWidget,
+)
+from .fields import (
     _CollapsibleSection,
     make_value_widget,
     read_value_widget,

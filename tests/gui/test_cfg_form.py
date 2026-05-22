@@ -90,7 +90,7 @@ def test_sweep_value_step_mode():
 
 
 def test_scalar_int_widget_round_trip(qapp):
-    from zcu_tools.gui.ui.cfg_form import make_scalar_widget, read_scalar_widget
+    from zcu_tools.gui.ui.fields import make_scalar_widget, read_scalar_widget
 
     spec = ScalarSpec(label="X", type=int)
     w = make_scalar_widget(spec, 42)
@@ -98,7 +98,7 @@ def test_scalar_int_widget_round_trip(qapp):
 
 
 def test_scalar_float_widget_round_trip(qapp):
-    from zcu_tools.gui.ui.cfg_form import make_scalar_widget, read_scalar_widget
+    from zcu_tools.gui.ui.fields import make_scalar_widget, read_scalar_widget
 
     spec = ScalarSpec(label="Pi", type=float)
     w = make_scalar_widget(spec, 3.14)
@@ -106,7 +106,7 @@ def test_scalar_float_widget_round_trip(qapp):
 
 
 def test_scalar_bool_widget_round_trip(qapp):
-    from zcu_tools.gui.ui.cfg_form import make_scalar_widget, read_scalar_widget
+    from zcu_tools.gui.ui.fields import make_scalar_widget, read_scalar_widget
 
     spec = ScalarSpec(label="Flag", type=bool)
     w = make_scalar_widget(spec, True)
@@ -114,7 +114,7 @@ def test_scalar_bool_widget_round_trip(qapp):
 
 
 def test_scalar_choices_widget_round_trip(qapp):
-    from zcu_tools.gui.ui.cfg_form import make_scalar_widget, read_scalar_widget
+    from zcu_tools.gui.ui.fields import make_scalar_widget, read_scalar_widget
 
     spec = ScalarSpec(label="Model", type=str, choices=["hm", "t", "auto"])
     w = make_scalar_widget(spec, "hm")
@@ -122,7 +122,7 @@ def test_scalar_choices_widget_round_trip(qapp):
 
 
 def test_scalar_editable_false_widget_disabled(qapp):
-    from zcu_tools.gui.ui.cfg_form import make_scalar_widget
+    from zcu_tools.gui.ui.fields import make_scalar_widget
 
     spec = ScalarSpec(label="RO", type=float, editable=False)
     w = make_scalar_widget(spec, 1.0)
