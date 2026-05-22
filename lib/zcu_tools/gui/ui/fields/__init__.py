@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from .registry import get_widget_cls, register_widget
 from .common import (
+    ChannelWidget,
     LiteralWidget,
     ScalarWidget,
     SweepWidget,
-    ChannelWidget,
-    make_value_widget,
-    read_value_widget,
     make_scalar_widget,
+    make_value_widget,
     read_scalar_widget,
+    read_value_widget,
 )
-from .containers import SectionWidget, ModuleRefWidget, _CollapsibleSection
+from .containers import ModuleRefWidget, SectionWidget, _CollapsibleSection
+from .registry import get_widget_cls, register_widget
 
 __all__ = [
     "get_widget_cls",

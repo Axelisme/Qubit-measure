@@ -35,6 +35,7 @@ from .event_bus import GuiEvent
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import MetaDict
+
     from .event_bus import EventBus
 
 logger = logging.getLogger(__name__)

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Optional
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import MetaDict
     from zcu_tools.meta_tool.library import ModuleLibrary
+
     from .adapter import CfgSectionSpec
 
 

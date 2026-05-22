@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Dict, Protocol, Type, TypeVar, runtime_ch
 
 if TYPE_CHECKING:
     from qtpy.QtWidgets import QWidget
+
     from ..live_model import LiveField
 
 

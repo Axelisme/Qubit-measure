@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 import time
-from unittest.mock import MagicMock, ANY
+from unittest.mock import ANY, MagicMock
 
 import pytest
 from qtpy.QtCore import QCoreApplication
