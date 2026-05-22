@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.state import State, TabState
+from zcu_tools.gui.state import State, TabInteractionState, TabState
 
 
 def _make_ctx():
@@ -14,6 +14,26 @@ def _make_ctx():
 
 def _make_adapter():
     return MagicMock()
+
+
+# ---------------------------------------------------------------------------
+# TabInteractionState
+# ---------------------------------------------------------------------------
+
+
+def test_tab_interaction_state_creation():
+    s = TabInteractionState(
+        is_running=True,
+        has_context=False,
+        has_soc=True,
+        has_run_result=True,
+        has_analyze_result=False,
+    )
+    assert s.is_running is True
+    assert s.has_context is False
+    assert s.has_soc is True
+    assert s.has_run_result is True
+    assert s.has_analyze_result is False
 
 
 # ---------------------------------------------------------------------------
