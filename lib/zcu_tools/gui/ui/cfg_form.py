@@ -450,7 +450,7 @@ class CfgFormWidget(QWidget):
             for row in self._channel_rows:
                 row.validity_changed.connect(self._on_channel_validity_changed)
         # Emit initial validity state
-        self.validity_changed.emit(self._is_valid())
+        self.validity_changed.emit(self.is_valid())
 
     def read_values(self) -> "CfgSectionValue":
         """Return a new CfgSectionValue from current widget state."""
@@ -458,11 +458,11 @@ class CfgFormWidget(QWidget):
             raise RuntimeError("populate() must be called before read_values()")
         return self._read_section(self._spec, self._root_widget)
 
-    def _is_valid(self) -> bool:
+    def is_valid(self) -> bool:
         return all(row.is_valid() for row in self._channel_rows)
 
     def _on_channel_validity_changed(self) -> None:
-        self.validity_changed.emit(self._is_valid())
+        self.validity_changed.emit(self.is_valid())
 
     def read_schema(self) -> "CfgSchema":
         """Return a new CfgSchema combining the stored spec with current widget values."""

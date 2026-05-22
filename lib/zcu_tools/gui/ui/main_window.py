@@ -377,11 +377,13 @@ class ExpTabWidget(QWidget):
 
         btn_layout = QHBoxLayout()
         save_btn = QPushButton("Save")
+        save_btn.setEnabled(form_widget.is_valid())
         cancel_btn = QPushButton("Cancel")
         btn_layout.addWidget(save_btn)
         btn_layout.addWidget(cancel_btn)
         layout.addLayout(btn_layout)
 
+        form_widget.validity_changed.connect(save_btn.setEnabled)
         cancel_btn.clicked.connect(dialog.reject)
 
         def save() -> None:
