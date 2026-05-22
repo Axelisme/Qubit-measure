@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Any, Optional
 
 from matplotlib.figure import Figure
 
@@ -13,11 +13,12 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class TabState:
-    adapter: AbsExpAdapter[object, object]
+    adapter: AbsExpAdapter[Any, Any]
     default_cfg: CfgSchema
     run_result: Optional[object] = None
     analyze_result: Optional[object] = None
     figure: Optional[Figure] = None
+    applied_writeback_keys: set[str] = field(default_factory=set)
 
 
 @dataclass(frozen=True)
@@ -43,7 +44,7 @@ class State:
         self.exp_context = ctx
 
     def add_tab(
-        self, tab_id: str, adapter: AbsExpAdapter[object, object], ctx: ExpContext
+        self, tab_id: str, adapter: AbsExpAdapter[Any, Any], ctx: ExpContext
     ) -> None:
         if tab_id in self.tabs:
             raise ValueError(f"tab_id {tab_id!r} already exists")
@@ -75,6 +76,7 @@ class State:
         # invalidate stale analyze results from the previous run
         tab.analyze_result = None
         tab.figure = None
+        tab.applied_writeback_keys.clear()
 
     def update_tab_analyze(
         self, tab_id: str, analyze_result: object, figure: Optional[Figure]
@@ -87,6 +89,7 @@ class State:
         tab = self.tabs[tab_id]
         tab.analyze_result = analyze_result
         tab.figure = figure
+        tab.applied_writeback_keys.clear()
 
     def set_running(self, running: bool) -> None:
         logger.debug("set_running: %s", running)

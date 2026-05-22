@@ -1,0 +1,258 @@
+from __future__ import annotations
+
+import copy
+from typing import TYPE_CHECKING, Any, Optional, Sequence
+
+from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QCheckBox,
+    QDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
+
+from zcu_tools.gui.adapter import (
+    MetaDictWriteback,
+    ModuleWriteback,
+    WaveformWriteback,
+    WritebackItem,
+)
+
+from .cfg_form import CfgFormWidget
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.controller import Controller
+
+
+class WritebackDialog(QDialog):
+    def __init__(
+        self,
+        items: Sequence[WritebackItem],
+        ctrl: "Controller",
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self._ctrl = ctrl
+        self._items = copy.deepcopy(items)
+        self._checks: dict[str, QCheckBox] = {}
+
+        self.setWindowTitle("Writeback")
+        self.setMinimumSize(700, 520)
+
+        layout = QVBoxLayout(self)
+        hint = QLabel(
+            "Select the items to write back. Use Edit to adjust values first."
+        )
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        self._rows_layout = QVBoxLayout(content)
+        self._rows_layout.setContentsMargins(0, 0, 0, 0)
+        self._rows_layout.setSpacing(6)
+        scroll.setWidget(content)
+        layout.addWidget(scroll, stretch=1)
+
+        btn_row = QHBoxLayout()
+        self._apply_btn = QPushButton("Apply Selected")
+        cancel_btn = QPushButton("Cancel")
+        btn_row.addWidget(self._apply_btn)
+        btn_row.addWidget(cancel_btn)
+        layout.addLayout(btn_row)
+
+        self._build_rows()
+        self._apply_btn.clicked.connect(self.accept)
+        cancel_btn.clicked.connect(self.reject)
+        self._refresh_apply_enabled()
+
+    def get_selected_items(self) -> list[WritebackItem]:
+        selected: list[WritebackItem] = []
+        for item in self._items:
+            check = self._checks[item.key]
+            item.selected = check.isChecked()
+            if item.selected:
+                selected.append(item)
+        return selected
+
+    def _build_rows(self) -> None:
+        for item in self._items:
+            row = QWidget(self)
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+
+            label = self._make_label_text(item)
+            cb = QCheckBox(label)
+            cb.setChecked(item.selected)
+            cb.stateChanged.connect(self._refresh_apply_enabled)
+            row_layout.addWidget(cb, 1)
+            self._checks[item.key] = cb
+
+            if self._is_editable(item):
+                edit_btn = QPushButton("Edit")
+                edit_btn.clicked.connect(
+                    lambda _=False, it=item, chk=cb: self._edit_item(it, chk)
+                )
+                row_layout.addWidget(edit_btn)
+
+            self._rows_layout.addWidget(row)
+        self._rows_layout.addStretch()
+
+    def _refresh_apply_enabled(self, *_: int) -> None:
+        self._apply_btn.setEnabled(any(cb.isChecked() for cb in self._checks.values()))
+
+    def _is_editable(self, item: WritebackItem) -> bool:
+        if isinstance(item, MetaDictWriteback):
+            return True
+        if isinstance(item, ModuleWriteback):
+            return item.edit_schema is not None
+        if isinstance(item, WaveformWriteback):
+            return item.edit_schema is not None
+        return False
+
+    def _make_label_text(self, item: WritebackItem) -> str:
+        if isinstance(item, MetaDictWriteback):
+            return (
+                f"{item.key}  ({item.current_value!r} -> {item.proposed_value!r})\n"
+                f"  {item.description}"
+            )
+        if isinstance(item, ModuleWriteback):
+            status = (
+                "Config edited" if item.edited_schema is not None else "Config modified"
+            )
+            name_part = (
+                f" -> {item.module_name}" if item.module_name != item.key else ""
+            )
+            return f"{item.key}{name_part}  ({status})\n  {item.description}"
+        if isinstance(item, WaveformWriteback):
+            status = (
+                "Config edited" if item.edited_schema is not None else "Config modified"
+            )
+            name_part = (
+                f" -> {item.waveform_name}" if item.waveform_name != item.key else ""
+            )
+            return f"{item.key}{name_part}  ({status})\n  {item.description}"
+        return f"{item.key}\n  {item.description}"
+
+    def _edit_item(self, item: WritebackItem, cb: QCheckBox) -> None:
+        if isinstance(item, MetaDictWriteback):
+            self._edit_md_item(item, cb)
+        elif isinstance(item, ModuleWriteback):
+            self._edit_cfg_item(item, cb, item.module_name)
+        elif isinstance(item, WaveformWriteback):
+            self._edit_cfg_item(item, cb, item.waveform_name)
+
+    def _edit_md_item(self, item: MetaDictWriteback, cb: QCheckBox) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Edit Value: {item.key}")
+        layout = QVBoxLayout(dialog)
+
+        form = QFormLayout()
+        name_edit = QLineEdit(item.md_key)
+        value_edit = QLineEdit(str(item.proposed_value))
+        form.addRow("Key:", name_edit)
+        form.addRow("Value:", value_edit)
+        layout.addLayout(form)
+
+        btn_row = QHBoxLayout()
+        save_btn = QPushButton("Save")
+        cancel_btn = QPushButton("Cancel")
+        btn_row.addWidget(save_btn)
+        btn_row.addWidget(cancel_btn)
+        layout.addLayout(btn_row)
+        cancel_btn.clicked.connect(dialog.reject)
+
+        def save() -> None:
+            try:
+                item.md_key = name_edit.text().strip() or item.md_key
+                item.proposed_value = _coerce_scalar_input(
+                    value_edit.text(),
+                    item.proposed_value,
+                )
+                cb.setText(self._make_label_text(item))
+                dialog.accept()
+            except Exception as exc:
+                QMessageBox.critical(dialog, "Validation Error", str(exc))
+
+        save_btn.clicked.connect(save)
+        dialog.exec()
+
+    def _edit_cfg_item(
+        self,
+        item: ModuleWriteback | WaveformWriteback,
+        cb: QCheckBox,
+        initial_name: str,
+    ) -> None:
+        if item.edit_schema is None:
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Edit Config: {item.key}")
+        dialog.setMinimumSize(560, 500)
+
+        layout = QVBoxLayout(dialog)
+        name_form = QFormLayout()
+        name_edit = QLineEdit(initial_name)
+        name_form.addRow("Name:", name_edit)
+        layout.addLayout(name_form)
+
+        hint = QLabel("Edit the configuration below. Click Save to confirm.")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        form_widget = CfgFormWidget()
+        schema = copy.deepcopy(item.edited_schema or item.edit_schema)
+        form_widget.populate(schema, self._ctrl)
+        scroll.setWidget(form_widget)
+        layout.addWidget(scroll, stretch=1)
+
+        btn_row = QHBoxLayout()
+        save_btn = QPushButton("Save")
+        save_btn.setEnabled(form_widget.is_valid())
+        cancel_btn = QPushButton("Cancel")
+        btn_row.addWidget(save_btn)
+        btn_row.addWidget(cancel_btn)
+        layout.addLayout(btn_row)
+
+        form_widget.validity_changed.connect(save_btn.setEnabled)
+        cancel_btn.clicked.connect(dialog.reject)
+
+        def save() -> None:
+            try:
+                updated = form_widget.read_schema()
+                if isinstance(item, ModuleWriteback):
+                    item.module_name = name_edit.text().strip() or item.module_name
+                else:
+                    item.waveform_name = name_edit.text().strip() or item.waveform_name
+                item.edited_schema = updated
+                cb.setText(self._make_label_text(item))
+                dialog.accept()
+            except Exception as exc:
+                QMessageBox.critical(dialog, "Validation Error", str(exc))
+
+        save_btn.clicked.connect(save)
+        dialog.exec()
+
+
+def _coerce_scalar_input(text: str, original: Any) -> Any:
+    if isinstance(original, bool):
+        lowered = text.strip().lower()
+        if lowered in {"true", "1", "yes", "on"}:
+            return True
+        if lowered in {"false", "0", "no", "off"}:
+            return False
+        raise RuntimeError(f"Invalid bool value: {text}")
+    if isinstance(original, int) and not isinstance(original, bool):
+        return int(text)
+    if isinstance(original, float):
+        return float(text)
+    return text

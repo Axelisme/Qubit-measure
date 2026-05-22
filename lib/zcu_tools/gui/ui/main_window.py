@@ -138,13 +138,7 @@ class ExpTabWidget(QWidget):
         self._ctrl = ctrl
         self._param_widgets: dict[str, QWidget] = {}  # analyze param key → widget
         self._analyze_specs: dict[str, "ParamSpec"] = {}  # analyze param key → spec
-        self._writeback_checks: dict[str, QCheckBox] = {}  # wb key → checkbox
-        self._writeback_rows: dict[str, QWidget] = {}  # wb key → full row widget
-        self._applied_writeback_keys: set[str] = set()
-        self._writeback_overrides: dict[
-            str, Any
-        ] = {}  # key → {"name": str, "cfg": dict}
-        self._ml: Optional["ModuleLibrary"] = None
+        self._writeback_count: int = 0
         self._cfg_valid: bool = True  # False when any ChannelRow is unresolved
 
         root_layout = QVBoxLayout(self)
@@ -209,17 +203,9 @@ class ExpTabWidget(QWidget):
         self.analyze_btn = QPushButton("Analyze")
         analysis_layout.addWidget(self.analyze_btn)
 
-        # Writeback group
-        self._writeback_section = _CollapsibleSection(
-            "Writeback", collapsible=True, collapsed=False
-        )
-        self._writeback_layout = QVBoxLayout()
-        self._writeback_section.form.addRow(self._writeback_layout)
-        self._writeback_section.setVisible(False)
-        analysis_layout.addWidget(self._writeback_section)
-        self.apply_writeback_btn = QPushButton("Apply Writeback")
-        self.apply_writeback_btn.setVisible(False)
-        analysis_layout.addWidget(self.apply_writeback_btn)
+        self.writeback_btn = QPushButton("Writeback…")
+        self.writeback_btn.setVisible(False)
+        analysis_layout.addWidget(self.writeback_btn)
 
         # Save group
         save_section = _CollapsibleSection("Save", collapsible=True, collapsed=False)
@@ -358,162 +344,10 @@ class ExpTabWidget(QWidget):
             self._analyze_form.addRow(spec.label + ":", w)
             self._param_widgets[key] = w
 
-    def show_writeback_spec(
-        self,
-        items: list["WritebackItem"],
-        ml: Optional["ModuleLibrary"] = None,
-    ) -> None:
-        """Rebuild the writeback checkbox list."""
-        from qtpy.QtWidgets import QHBoxLayout, QWidget  # type: ignore[attr-defined]
-
-        self._ml = ml  # stored for Edit Config dialog
-
-        while self._writeback_layout.count():
-            child = self._writeback_layout.takeAt(0)
-            w = child.widget() if child is not None else None
-            if w is not None:
-                w.deleteLater()
-        self._writeback_checks.clear()
-        self._writeback_rows.clear()
-        self._writeback_overrides.clear()
-        self._applied_writeback_keys = set()
-
-        for item in items:
-            row_widget = QWidget()
-            row_layout = QHBoxLayout(row_widget)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-
-            # Show Edit Config button only when the Adapter provides a CfgSchema template
-            show_edit_btn = item.edit_template is not None
-
-            if show_edit_btn:
-                label_text = f"{item.key}  (Config modified)\n  {item.description}"
-            else:
-                label_text = f"{item.key}  ({item.current_value!r} → {item.new_value!r})\n  {item.description}"
-
-            cb = QCheckBox(label_text)
-            cb.setChecked(True)
-            cb.stateChanged.connect(self._refresh_writeback_btn)
-            row_layout.addWidget(cb, 1)
-
-            self._writeback_checks[item.key] = cb
-            self._writeback_rows[item.key] = row_widget
-
-            if show_edit_btn:
-                edit_btn = QPushButton("Edit Config")
-                edit_btn.clicked.connect(self._make_edit_cb(item, cb))
-                row_layout.addWidget(edit_btn)
-
-            self._writeback_layout.addWidget(row_widget)
-
-        has_items = bool(items)
-        self._writeback_section.setVisible(has_items)
-        self.apply_writeback_btn.setVisible(has_items)
-        self.apply_writeback_btn.setText("Apply Writeback")
-        self._refresh_writeback_btn()
-
-    def _make_edit_cb(self, item: "WritebackItem", cb: QCheckBox):
-        return lambda: self._on_edit_config_clicked(item, cb)
-
-    def _on_edit_config_clicked(self, item: "WritebackItem", cb: QCheckBox) -> None:
-        import copy
-
-        from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-            QDialog,
-            QFormLayout,
-            QHBoxLayout,
-            QLabel,
-            QMessageBox,
-            QScrollArea,
-            QVBoxLayout,
-        )
-
-        from zcu_tools.gui.adapter import schema_to_dict
-
-        from .cfg_form import CfgFormWidget
-
-        if item.edit_template is None:
-            return  # no editable template — button should not be shown
-
-        schema = copy.deepcopy(item.edit_template)
-        ml = self._ml
-
-        # restore previously saved name if any
-        existing = self._writeback_overrides.get(item.key)
-        initial_name = existing["name"] if isinstance(existing, dict) else item.key
-
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"Edit Config: {item.key}")
-        dialog.setMinimumSize(560, 500)
-
-        layout = QVBoxLayout(dialog)
-
-        name_form = QFormLayout()
-        name_edit = QLineEdit(initial_name)
-        name_form.addRow("Name:", name_edit)
-        layout.addLayout(name_form)
-
-        hint = QLabel("Edit the configuration below. Click Save to confirm.")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        form_widget = CfgFormWidget()
-        form_widget.populate(schema, self._ctrl)
-        scroll.setWidget(form_widget)
-        layout.addWidget(scroll, stretch=1)
-
-        btn_layout = QHBoxLayout()
-        save_btn = QPushButton("Save")
-        save_btn.setEnabled(form_widget.is_valid())
-        cancel_btn = QPushButton("Cancel")
-        btn_layout.addWidget(save_btn)
-        btn_layout.addWidget(cancel_btn)
-        layout.addLayout(btn_layout)
-
-        form_widget.validity_changed.connect(save_btn.setEnabled)
-        cancel_btn.clicked.connect(dialog.reject)
-
-        def save() -> None:
-            new_name = name_edit.text().strip() or item.key
-            try:
-                updated_schema = form_widget.read_schema()
-                parsed = schema_to_dict(updated_schema, ml)
-                self._writeback_overrides[item.key] = {"name": new_name, "cfg": parsed}
-                name_part = f" → {new_name}" if new_name != item.key else ""
-                cb.setText(
-                    f"{item.key}{name_part}  (Config edited)\n  {item.description}"
-                )
-                dialog.accept()
-            except Exception as e:
-                QMessageBox.critical(
-                    dialog, "Validation Error", f"Failed to read config:\n{e}"
-                )
-
-        save_btn.clicked.connect(save)
-        dialog.exec()
-
-    def _refresh_writeback_btn(self, *_: int) -> None:
-        has_selected = any(cb.isChecked() for cb in self._writeback_checks.values())
-        self.apply_writeback_btn.setEnabled(has_selected)
-
-    def mark_writeback_applied(self, applied_keys: list[str]) -> None:
-        """Hide rows for applied keys; hide entire section when all done."""
-        self._applied_writeback_keys.update(applied_keys)
-        for key in applied_keys:
-            row = self._writeback_rows.get(key)
-            if row is not None:
-                row.setVisible(False)
-        all_applied = all(
-            k in self._applied_writeback_keys for k in self._writeback_checks
-        )
-        if all_applied:
-            self._writeback_section.setVisible(False)
-            self.apply_writeback_btn.setVisible(False)
-
-    def get_selected_writeback_keys(self) -> list[str]:
-        return [k for k, cb in self._writeback_checks.items() if cb.isChecked()]
+    def set_writeback_count(self, count: int) -> None:
+        self._writeback_count = count
+        self.writeback_btn.setVisible(count > 0)
+        self.writeback_btn.setText(f"Writeback… ({count})")
 
     def _on_browse_data_path(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -595,6 +429,12 @@ class ExpTabWidget(QWidget):
         )
         self.save_both_btn.setEnabled(
             idle and state.has_context and state.has_analyze_result
+        )
+        self.writeback_btn.setEnabled(
+            idle
+            and state.has_context
+            and state.has_analyze_result
+            and self._writeback_count > 0
         )
 
 
@@ -731,9 +571,7 @@ class MainWindow(QMainWindow):
         # wire buttons
         tab_w.run_btn.clicked.connect(lambda: self._on_run_stop_clicked(tab_id))
         tab_w.analyze_btn.clicked.connect(lambda: self._on_analyze_clicked(tab_id))
-        tab_w.apply_writeback_btn.clicked.connect(
-            lambda: self._on_apply_writeback_clicked(tab_id)
-        )
+        tab_w.writeback_btn.clicked.connect(lambda: self._on_writeback_clicked(tab_id))
         tab_w.save_data_btn.clicked.connect(lambda: self._on_save_data_clicked(tab_id))
         tab_w.save_image_btn.clicked.connect(
             lambda: self._on_save_image_clicked(tab_id)
@@ -798,9 +636,8 @@ class MainWindow(QMainWindow):
             tab_w.populate_analyze_params(params)
             tab_w._analyze_specs = params
 
-        # update writeback list (may have new analyze result)
-        spec = self._ctrl.get_tab_writeback_spec(tab_id)
-        tab_w.show_writeback_spec(spec, ml=self._ctrl.get_current_ml())
+        items = self._ctrl.get_tab_writeback_items(tab_id)
+        tab_w.set_writeback_count(sum(1 for item in items if item.selected))
 
         # populate save paths
         try:
@@ -999,19 +836,29 @@ class MainWindow(QMainWindow):
             logger.warning("_on_analyze_clicked: blocked — %s", exc)
             self.show_status_message(str(exc))
 
-    def _on_apply_writeback_clicked(self, tab_id: str) -> None:
-        logger.info("_on_apply_writeback_clicked: tab_id=%r", tab_id)
+    def _on_writeback_clicked(self, tab_id: str) -> None:
+        logger.info("_on_writeback_clicked: tab_id=%r", tab_id)
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        keys = tab_w.get_selected_writeback_keys()
-        overrides = dict(tab_w._writeback_overrides)
+        items = self._ctrl.get_tab_writeback_items(tab_id)
+        if not items:
+            self.show_status_message("No writeback items available")
+            return
+        from .writeback_dialog import WritebackDialog
+
+        dialog = WritebackDialog(items, self._ctrl, parent=self)
+        if dialog.exec() == 0:
+            return
         try:
-            self._ctrl.apply_writeback_with_overrides(tab_id, keys, overrides)
-            tab_w.mark_writeback_applied(keys)
-            self.show_status_message(f"Writeback applied: {', '.join(keys)}")
+            selected_items = dialog.get_selected_items()
+            applied_keys = self._ctrl.apply_writeback_items(tab_id, selected_items)
+            if applied_keys:
+                self.show_status_message(
+                    f"Writeback applied: {', '.join(applied_keys)}"
+                )
         except RuntimeError as exc:
-            logger.warning("_on_apply_writeback_clicked: blocked — %s", exc)
+            logger.warning("_on_writeback_clicked: blocked — %s", exc)
             self.show_status_message(str(exc))
 
     def _on_save_data_clicked(self, tab_id: str) -> None:

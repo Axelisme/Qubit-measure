@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Sequence
+
 import pytest
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
@@ -9,9 +11,9 @@ from zcu_tools.gui.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
+    MetaDictWriteback,
     ParamSpec,
     SavePaths,
-    WritebackItem,
 )
 from zcu_tools.gui.registry import Registry
 
@@ -32,13 +34,8 @@ class _DummyAdapter(AbsExpAdapter):
     def analyze(self, result, ctx, **kw):  # noqa: ARG002
         return None
 
-    def get_writeback_spec(self, analyze_result, ctx) -> list[WritebackItem]:  # noqa: ARG002
+    def get_writeback_items(self, analyze_result, ctx) -> Sequence[MetaDictWriteback]:  # noqa: ARG002
         return []
-
-    def apply_writeback(
-        self, ctx, analyze_result, selected_keys, overrides=None
-    ) -> None:  # noqa: ARG002
-        pass
 
     def get_figure(self, analyze_result):  # noqa: ARG002
         return None

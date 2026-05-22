@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     build_readout_for_frequency,
     build_waveform_for_length,
@@ -11,7 +10,12 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     select_named_module_value,
     update_readout_value_frequency,
 )
-from zcu_tools.gui.adapter import CfgSectionValue, ChannelValue, ModuleRefValue, ScalarValue
+from zcu_tools.gui.adapter import (
+    CfgSectionValue,
+    ChannelValue,
+    ModuleRefValue,
+    ScalarValue,
+)
 from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.program.v2 import AbsReadoutCfg, ModuleCfgFactory
 

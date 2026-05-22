@@ -46,14 +46,11 @@ def test_fake_adapter_full_flow():
     returned_fig = adapter.get_figure(analyze_result)
     assert returned_fig is fig
 
-    # 6. get_writeback_spec
-    items = adapter.get_writeback_spec(analyze_result, ctx)
+    # 6. get_writeback_items
+    items = adapter.get_writeback_items(analyze_result, ctx)
     assert len(items) == 1
     assert items[0].key == "fake_peak"
-    assert items[0].new_value == peak
-
-    # 7. apply_writeback (no-op, just must not raise)
-    adapter.apply_writeback(ctx, analyze_result, ["fake_peak"])
+    assert items[0].proposed_value == peak
 
 
 def test_registry_register_all_and_create():

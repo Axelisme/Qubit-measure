@@ -12,13 +12,16 @@ from .module_templates import (
 )
 
 __all__ = [
+    # Module builders
     "build_readout_for_frequency",
     "build_waveform_for_length",
+    # Module defaults
     "infer_module_ref_fallback",
     "make_module_ref_default",
+    "select_named_module_value",
+    # Module templates
     "make_flat_top_waveform_edit_template",
     "make_pulse_readout_edit_template",
     "make_readout_edit_template",
-    "select_named_module_value",
     "update_readout_value_frequency",
 ]

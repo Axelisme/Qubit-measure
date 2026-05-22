@@ -28,3 +28,14 @@ def make_pulse_readout_spec() -> CfgSectionSpec:
             "ro_cfg": make_direct_readout_spec(),
         },
     )
+
+
+def make_readout_spec() -> CfgSectionSpec:
+    return CfgSectionSpec(
+        label="Readout",
+        fields={
+            "type": LiteralSpec("readout/direct", "readout/pulse"),
+            "direct_cfg": make_direct_readout_spec(),
+            "pulse_cfg": make_pulse_readout_spec(),
+        },
+    )

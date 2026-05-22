@@ -12,7 +12,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, cast
+from typing import Any, Literal, Optional, Sequence, cast
 
 logger = logging.getLogger(__name__)
 
@@ -38,15 +38,16 @@ from zcu_tools.gui.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
+    MetaDictWriteback,
     ModuleRefSpec,
-    ModuleRefValue,
+    ModuleWriteback,
     ParamSpec,
     SavePaths,
     ScalarSpec,
     ScalarValue,
     SweepSpec,
     SweepValue,
-    WritebackItem,
+    WaveformWriteback,
     schema_to_dict,
 )
 from zcu_tools.gui.specs.readout import (
@@ -58,11 +59,10 @@ from zcu_tools.program.v2 import (
     AbsReadoutCfg,
     ModuleCfgFactory,
     ProgramV2Cfg,
-    WaveformCfgFactory,
 )
 from zcu_tools.program.v2.sweep import SweepCfg
-from zcu_tools.utils.fitting.resonance.hanger import HangerModel
 from zcu_tools.utils.datasaver import create_datafolder
+from zcu_tools.utils.fitting.resonance.hanger import HangerModel
 
 # ---------------------------------------------------------------------------
 # FakeFreqCfg — same structure as FreqCfg but with HangerModel params
@@ -192,6 +192,24 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
         self._fast_mode = fast_mode
 
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:  # noqa: ARG002
+        r_f: float = 6000.0
+        rf_w: Optional[float] = None
+        _r_f = getattr(ctx.md, "r_f", None)
+        if isinstance(_r_f, (int, float)):
+            r_f = float(_r_f)
+        _rf_w = getattr(ctx.md, "rf_w", None)
+        if isinstance(_rf_w, (int, float)):
+            rf_w = float(_rf_w)
+
+        # Sweep range: ±5× linewidth around r_f, or ±200 MHz if rf_w unknown
+        half_span = (rf_w * 5.0) if rf_w is not None else 200.0
+        freq_start = r_f - half_span
+        freq_stop = r_f + half_span
+
+        # Rough Ql estimate from linewidth: Ql ≈ r_f / rf_w
+        ql_default = round(r_f / rf_w) if rf_w is not None and rf_w > 0 else 5000
+        qc_default = ql_default * 2
+
         root_spec = CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
@@ -224,30 +242,6 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
             }
         )
 
-        modules_val = CfgSectionValue(
-            fields={
-                "readout": self._make_default_readout_value(ctx),
-            }
-        )
-
-        r_f: float = 6000.0
-        rf_w: Optional[float] = None
-        _r_f = getattr(ctx.md, "r_f", None)
-        if isinstance(_r_f, (int, float)):
-            r_f = float(_r_f)
-        _rf_w = getattr(ctx.md, "rf_w", None)
-        if isinstance(_rf_w, (int, float)):
-            rf_w = float(_rf_w)
-
-        # Sweep range: ±5× linewidth around r_f, or ±200 MHz if rf_w unknown
-        half_span = (rf_w * 5.0) if rf_w is not None else 200.0
-        freq_start = r_f - half_span
-        freq_stop = r_f + half_span
-
-        # Rough Ql estimate from linewidth: Ql ≈ r_f / rf_w
-        ql_default = round(r_f / rf_w) if rf_w is not None and rf_w > 0 else 5000
-        qc_default = ql_default * 2
-
         root_val = CfgSectionValue(
             fields={
                 "reps": ScalarValue(100),
@@ -260,17 +254,18 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
                 "a0_abs": ScalarValue(1.0),
                 "edelay": ScalarValue(0.05),
                 "noise_scale": ScalarValue(0.05),
-                "modules": modules_val,
+                "modules": CfgSectionValue(
+                    fields={
+                        "readout": make_module_ref_default(
+                            ml=ctx.ml,
+                            module_type=AbsReadoutCfg,
+                            preferred_names=["readout_rf", "readout", "res_readout"],
+                        ),
+                    }
+                ),
             }
         )
         return CfgSchema(spec=root_spec, value=root_val)
-
-    def _make_default_readout_value(self, ctx: ExpContext) -> ModuleRefValue:
-        return make_module_ref_default(
-            ml=ctx.ml,
-            module_type=AbsReadoutCfg,
-            preferred_names=["readout_rf", "readout", "res_readout"],
-        )
 
     def _schema_to_exp_cfg(self, schema: CfgSchema, ctx: ExpContext) -> FakeFreqCfg:
         d = schema_to_dict(schema, ctx.ml)
@@ -384,28 +379,12 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
     def get_figure(self, analyze_result: FakeFreqAnalyzeResult) -> Optional[Figure]:
         return analyze_result.figure
 
-    def get_writeback_spec(
+    def get_writeback_items(
         self, analyze_result: FakeFreqAnalyzeResult, ctx: ExpContext
-    ) -> list[WritebackItem]:
+    ) -> Sequence[MetaDictWriteback | ModuleWriteback | WaveformWriteback]:
         freq = analyze_result.freq
         fwhm = analyze_result.fwhm
         md = ctx.md
-        items = [
-            WritebackItem(
-                key="r_f",
-                target="md",
-                current_value=getattr(md, "r_f", None),
-                new_value=round(freq, 4),
-                description="Resonator frequency (MHz)",
-            ),
-            WritebackItem(
-                key="rf_w",
-                target="md",
-                current_value=getattr(md, "rf_w", None),
-                new_value=round(fwhm, 4),
-                description="Resonator linewidth FWHM (MHz)",
-            ),
-        ]
 
         cfg = analyze_result.run_result.cfg_snapshot
         readout = cfg.modules.get("readout")
@@ -420,21 +399,6 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
             ml=ctx.ml,
         )
         cur_val_rf = ctx.ml.modules.get("readout_rf")
-        items.append(
-            WritebackItem(
-                key="readout_rf",
-                target="ml",
-                current_value=cur_val_rf,
-                new_value=new_readout,
-                description="readout_rf module config",
-                edit_template=make_readout_edit_template(
-                    readout,
-                    freq=freq,
-                    pulse_ch=pulse_ch,
-                    ro_ch=ro_ch,
-                ),
-            )
-        )
 
         wav_len = getattr(ctx.md, "res_probe_len", 5.0)
         new_waveform = build_waveform_for_length(
@@ -443,86 +407,44 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
             ml=ctx.ml,
         )
         cur_val_ro = ctx.ml.waveforms.get("ro_waveform")
-        items.append(
-            WritebackItem(
-                key="ro_waveform",
-                target="ml",
-                current_value=cur_val_ro,
-                new_value=new_waveform,
-                description="ro_waveform length config",
-                edit_template=make_flat_top_waveform_edit_template(
-                    length=float(wav_len)
+
+        return [
+            MetaDictWriteback(
+                key="r_f",
+                description="Resonator frequency (MHz)",
+                current_value=getattr(md, "r_f", None),
+                md_key="r_f",
+                proposed_value=round(freq, 4),
+            ),
+            MetaDictWriteback(
+                key="rf_w",
+                description="Resonator linewidth FWHM (MHz)",
+                current_value=getattr(md, "rf_w", None),
+                md_key="rf_w",
+                proposed_value=round(fwhm, 4),
+            ),
+            ModuleWriteback(
+                key="readout_rf",
+                description="readout_rf module config",
+                current_value=cur_val_rf,
+                module_name="readout_rf",
+                proposed_module=new_readout,
+                edit_schema=make_readout_edit_template(
+                    readout,
+                    freq=freq,
+                    pulse_ch=pulse_ch,
+                    ro_ch=ro_ch,
                 ),
-            )
-        )
-        return items
-
-    def apply_writeback(
-        self,
-        ctx: ExpContext,
-        analyze_result: FakeFreqAnalyzeResult,
-        selected_keys: list[str],
-        overrides: Optional[dict[str, Any]] = None,
-    ) -> None:
-        freq = analyze_result.freq
-        fwhm = analyze_result.fwhm
-        cfg = analyze_result.run_result.cfg_snapshot
-        _overrides = overrides or {}
-
-        if "r_f" in selected_keys:
-            ctx.md.r_f = freq
-        if "rf_w" in selected_keys:
-            ctx.md.rf_w = fwhm
-
-        dirty = False
-        if "readout_rf" in selected_keys:
-            try:
-                ov = _overrides.get("readout_rf")
-                if ov is not None:
-                    name = ov["name"] if isinstance(ov, dict) else "readout_rf"
-                    raw_cfg = ov["cfg"] if isinstance(ov, dict) else ov
-                    new_readout = ModuleCfgFactory.from_raw(raw_cfg, ml=ctx.ml)
-                else:
-                    name = "readout_rf"
-                    new_readout = build_readout_for_frequency(
-                        cfg.modules.get("readout"),
-                        freq=freq,
-                        pulse_ch=getattr(ctx.md, "res_ch", 0),
-                        ro_ch=getattr(ctx.md, "ro_ch", 0),
-                        ml=ctx.ml,
-                    )
-                if new_readout is not None:
-                    ctx.ml.register_module(**{name: cast(Any, new_readout)})
-                    logger.debug("apply_writeback: registered module %r", name)
-                    dirty = True
-            except Exception as e:
-                logger.warning("apply_writeback: readout_rf failed: %s", e)
-        if "ro_waveform" in selected_keys:
-            try:
-                ov = _overrides.get("ro_waveform")
-                if ov is not None:
-                    name = ov["name"] if isinstance(ov, dict) else "ro_waveform"
-                    raw_cfg = ov["cfg"] if isinstance(ov, dict) else ov
-                    new_waveform = WaveformCfgFactory.from_raw(raw_cfg, ml=ctx.ml)
-                else:
-                    name = "ro_waveform"
-                    wav_len = getattr(ctx.md, "res_probe_len", 5.0)
-                    new_waveform = build_waveform_for_length(
-                        cfg.modules.get("readout"),
-                        length=float(wav_len),
-                        ml=ctx.ml,
-                    )
-                if new_waveform is not None:
-                    ctx.ml.register_waveform(**{name: cast(Any, new_waveform)})
-                    logger.debug("apply_writeback: registered waveform %r", name)
-                    dirty = True
-            except Exception as e:
-                logger.warning("apply_writeback: ro_waveform failed: %s", e)
-        if dirty:
-            try:
-                ctx.ml.dump()
-            except Exception:
-                pass
+            ),
+            WaveformWriteback(
+                key="ro_waveform",
+                description="ro_waveform length config",
+                current_value=cur_val_ro,
+                waveform_name="ro_waveform",
+                proposed_waveform=new_waveform,
+                edit_schema=make_flat_top_waveform_edit_template(length=float(wav_len)),
+            ),
+        ]
 
     def make_save_paths(self, ctx: ExpContext) -> SavePaths:
         ts = time.strftime("%m%d")
@@ -550,10 +472,5 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
 
         return SavePaths(data_path=data_path, image_path=image_path)
 
-    def save(
-        self,
-        data_path: str,  # noqa: ARG002
-        result: FreqRunResult,  # noqa: ARG002
-        ctx: ExpContext,  # noqa: ARG002
-    ) -> None:
+    def save(self, data_path: str, result: FreqRunResult, ctx: ExpContext) -> None:
         pass  # no real hardware, skip HDF5 persistence

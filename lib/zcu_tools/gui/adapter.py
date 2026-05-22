@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Sequence, Union
 
 from matplotlib.figure import Figure
 from typing_extensions import Generic, TypeVar
@@ -40,13 +40,33 @@ class ParamSpec:
 
 
 @dataclass
-class WritebackItem:
+class WritebackItem(ABC):
     key: str
-    target: str  # "md" or "ml"
-    current_value: Any
-    new_value: Any
     description: str
-    edit_template: Optional["CfgSchema"] = None  # CfgSchema shown in Edit Config form
+    current_value: Any
+    selected: bool = True
+
+
+@dataclass
+class MetaDictWriteback(WritebackItem):
+    md_key: str = ""
+    proposed_value: Any = None
+
+
+@dataclass
+class ModuleWriteback(WritebackItem):
+    module_name: str = ""
+    proposed_module: Any = None
+    edit_schema: Optional["CfgSchema"] = None
+    edited_schema: Optional["CfgSchema"] = None
+
+
+@dataclass
+class WaveformWriteback(WritebackItem):
+    waveform_name: str = ""
+    proposed_waveform: Any = None
+    edit_schema: Optional["CfgSchema"] = None
+    edited_schema: Optional["CfgSchema"] = None
 
 
 @dataclass
@@ -591,18 +611,9 @@ class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult]):
         """Run analysis."""
 
     @abstractmethod
-    def get_writeback_spec(
+    def get_writeback_items(
         self, analyze_result: T_AnalyzeResult, ctx: ExpContext
-    ) -> list[WritebackItem]: ...
-
-    @abstractmethod
-    def apply_writeback(
-        self,
-        ctx: ExpContext,
-        analyze_result: T_AnalyzeResult,
-        selected_keys: list[str],
-        overrides: Optional[dict[str, Any]] = None,
-    ) -> None: ...
+    ) -> Sequence[WritebackItem]: ...
 
     @abstractmethod
     def get_figure(self, analyze_result: T_AnalyzeResult) -> Optional[Figure]:

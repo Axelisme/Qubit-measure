@@ -60,13 +60,6 @@ class TabService:
     def get_tab_figure(self, tab_id: str) -> Figure | None:
         return self._state.get_tab(tab_id).figure
 
-    def get_tab_writeback_spec(self, tab_id: str) -> list:
-        tab = self._state.get_tab(tab_id)
-        if tab.analyze_result is None:
-            return []
-        ctx = self._state.exp_context
-        return tab.adapter.get_writeback_spec(tab.analyze_result, ctx)
-
     def get_tab_analyze_params(self, tab_id: str) -> dict:
         tab = self._state.get_tab(tab_id)
         return tab.adapter.get_analyze_params()
@@ -85,30 +78,6 @@ class TabService:
         analyze_result = tab.adapter.analyze(tab.run_result, ctx, **user_params)
         figure = tab.adapter.get_figure(analyze_result)
         self._state.update_tab_analyze(tab_id, analyze_result, figure)
-
-    def apply_writeback(self, tab_id: str, selected_keys: list[str]) -> None:
-        self.apply_writeback_with_overrides(tab_id, selected_keys, overrides={})
-
-    def apply_writeback_with_overrides(
-        self,
-        tab_id: str,
-        selected_keys: list[str],
-        overrides: dict[str, Any],
-    ) -> None:
-        tab = self._state.get_tab(tab_id)
-        if tab.analyze_result is None:
-            raise RuntimeError("No analyze result available for writeback")
-        logger.info(
-            "apply_writeback_with_overrides: tab_id=%r keys=%r overrides_keys=%r",
-            tab_id,
-            selected_keys,
-            list(overrides),
-        )
-        ctx = self._state.exp_context
-        tab.adapter.apply_writeback(ctx, tab.analyze_result, selected_keys, overrides)
-        self._bus.emit(
-            GuiEvent.MD_CHANGED, ctx.md
-        )  # Emit explicitly, in case adapter changed md
 
     def save_data(self, tab_id: str, data_path: str) -> None:
         tab = self._state.get_tab(tab_id)

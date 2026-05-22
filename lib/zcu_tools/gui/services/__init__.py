@@ -5,6 +5,7 @@ from .context import ContextService
 from .device import DeviceService
 from .run import RunService
 from .tab import TabService
+from .writeback import WritebackService
 
 __all__ = [
     "ConnectionService",
@@ -12,4 +13,5 @@ __all__ = [
     "DeviceService",
     "RunService",
     "TabService",
+    "WritebackService",
 ]

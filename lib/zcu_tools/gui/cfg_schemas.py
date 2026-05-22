@@ -88,7 +88,8 @@ def waveform_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionVal
                 "style": ScalarValue("drag"),
                 "length": _val(cfg, "length", 1.0),
                 "sigma": _val(cfg, "sigma", 0.25),
-                "beta": _val(cfg, "beta", 0.0),
+                "delta": _val(cfg, "delta", -200.0),
+                "alpha": _val(cfg, "alpha", 0.5),
             }
         )
     elif style == "flat_top":

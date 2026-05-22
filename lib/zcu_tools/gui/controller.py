@@ -9,7 +9,7 @@ from matplotlib.figure import Figure
 
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
-from .adapter import CfgSchema
+from .adapter import CfgSchema, WritebackItem
 from .device_manager import DeviceManager
 from .event_bus import EventBus, GuiEvent
 from .io_manager import IOManager
@@ -21,6 +21,7 @@ from .services import (
     DeviceService,
     RunService,
     TabService,
+    WritebackService,
 )
 from .state import State
 
@@ -59,6 +60,7 @@ class Controller:
         self._ctx_svc = ContextService(state, io_manager, bus)
         self._tab_svc = TabService(state, registry, bus)
         self._run_svc = RunService(state, runner, bus)
+        self._writeback_svc = WritebackService(state, bus)
 
         self._run_svc.run_finished.connect(self._on_run_finished)
         self._run_svc.run_failed.connect(self._on_run_failed)
@@ -155,27 +157,19 @@ class Controller:
     # Writeback (TabService)
     # ------------------------------------------------------------------
 
-    def apply_writeback(self, tab_id: str, selected_keys: list[str]) -> None:
-        self.apply_writeback_with_overrides(tab_id, selected_keys, overrides={})
-
-    def apply_writeback_with_overrides(
-        self,
-        tab_id: str,
-        selected_keys: list[str],
-        overrides: dict[str, Any],
-    ) -> None:
+    def apply_writeback_items(
+        self, tab_id: str, items: list[WritebackItem]
+    ) -> list[str]:
         if not self.has_context():
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
         try:
-            self._tab_svc.apply_writeback_with_overrides(
-                tab_id, selected_keys, overrides
-            )
-            self._bus.emit(GuiEvent.INSPECT_CHANGED, self.get_current_md())
+            return self._writeback_svc.apply_tab_writeback_items(tab_id, items)
         except Exception as exc:
             logger.warning("apply_writeback: failed tab_id=%r exc=%r", tab_id, exc)
             self._require_view().show_status_message(f"Writeback failed: {exc}")
+            return []
 
     # ------------------------------------------------------------------
     # Save (TabService)
@@ -353,11 +347,11 @@ class Controller:
             return None
         return self._tab_svc.get_tab_figure(tab_id)
 
-    def get_tab_writeback_spec(self, tab_id: str) -> list:
+    def get_tab_writeback_items(self, tab_id: str) -> list:
         if not self.has_tab(tab_id):
-            logger.debug("get_tab_writeback_spec: tab_id %r not found", tab_id)
+            logger.debug("get_tab_writeback_items: tab_id %r not found", tab_id)
             return []
-        return self._tab_svc.get_tab_writeback_spec(tab_id)
+        return self._writeback_svc.get_tab_writeback_items(tab_id)
 
     def get_tab_analyze_params(self, tab_id: str) -> dict:
         if not self.has_tab(tab_id):

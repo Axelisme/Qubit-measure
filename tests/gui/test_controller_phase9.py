@@ -173,64 +173,63 @@ def test_analyze_passes_user_params(cf):
 
 
 # ---------------------------------------------------------------------------
-# get_tab_writeback_spec
+# get_tab_writeback_items
 # ---------------------------------------------------------------------------
 
 
-def test_get_tab_writeback_spec_empty_before_analyze(cf):
+def test_get_tab_writeback_items_empty_before_analyze(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
 
-    assert cf.ctrl.get_tab_writeback_spec(tab_id) == []
+    assert cf.ctrl.get_tab_writeback_items(tab_id) == []
 
 
-def test_get_tab_writeback_spec_after_analyze(cf):
+def test_get_tab_writeback_items_after_analyze(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
     cf.ctrl.analyze(tab_id, {})
 
-    spec = cf.ctrl.get_tab_writeback_spec(tab_id)
+    spec = cf.ctrl.get_tab_writeback_items(tab_id)
     assert len(spec) == 1
     assert spec[0].key == "fake_peak"
 
 
 # ---------------------------------------------------------------------------
-# apply_writeback
+# apply_writeback_items
 # ---------------------------------------------------------------------------
 
 
-def test_apply_writeback_calls_adapter(cf):
+def test_apply_writeback_items_updates_md(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
     cf.ctrl.analyze(tab_id, {})
+    items = cf.ctrl.get_tab_writeback_items(tab_id)
 
-    spy = MagicMock(wraps=cf.state.get_tab(tab_id).adapter)
-    cf.state.get_tab(tab_id).adapter = spy
+    applied = cf.ctrl.apply_writeback_items(tab_id, items)
 
-    cf.ctrl.apply_writeback(tab_id, ["fake_peak"])
+    assert applied == ["fake_peak"]
+    assert cf.state.exp_context.md.fake_peak is not None
 
-    spy.apply_writeback.assert_called_once()
-    call_args = spy.apply_writeback.call_args
-    # positional: (ctx, analyze_result, selected_keys, overrides)
-    keys = call_args[0][2]
-    assert keys == ["fake_peak"]
+    items_after = cf.ctrl.get_tab_writeback_items(tab_id)
+    assert len(items_after) == 1
+    assert items_after[0].selected is False
 
 
-def test_apply_writeback_calls_refresh_config_panels(cf):
+def test_apply_writeback_items_emits_inspect_changed(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
     cf.ctrl.analyze(tab_id, {})
-    cf.view.refresh_config_panels.reset_mock()
+    items = cf.ctrl.get_tab_writeback_items(tab_id)
 
-    cf.ctrl.apply_writeback(tab_id, ["fake_peak"])
+    cf.ctrl.apply_writeback_items(tab_id, items)
 
     cf.bus.emit.assert_any_call(GuiEvent.INSPECT_CHANGED, ANY)
 
 
-def test_apply_writeback_without_analyze_raises(cf):
+def test_apply_writeback_items_without_analyze_raises(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
-    cf.ctrl.apply_writeback(tab_id, ["fake_peak"])
+    cf.ctrl.apply_writeback_items(tab_id, [])
     cf.view.show_status_message.assert_called()
 
 

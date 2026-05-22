@@ -253,26 +253,18 @@ def test_get_figure_returns_figure():
 
 
 # ---------------------------------------------------------------------------
-# writeback spec
+# writeback items
 # ---------------------------------------------------------------------------
 
 
-def test_get_writeback_spec_has_r_f_and_rf_w():
+def test_get_writeback_items_has_r_f_and_rf_w():
     ctx = _make_ctx()
     result = _run(_adapter(), ctx)
     ar = _adapter().analyze(result, ctx)
-    spec = _adapter().get_writeback_spec(ar, ctx)
+    spec = _adapter().get_writeback_items(ar, ctx)
     keys = [item.key for item in spec]
     assert "r_f" in keys
     assert "rf_w" in keys
-
-
-def test_apply_writeback_sets_md_r_f():
-    ctx = _make_ctx()
-    result = _run(_adapter(), ctx)
-    ar = _adapter().analyze(result, ctx)
-    _adapter().apply_writeback(ctx, ar, ["r_f"])
-    assert ctx.md.r_f is not None
 
 
 # ---------------------------------------------------------------------------
@@ -310,82 +302,47 @@ def test_make_default_cfg_has_mod_ref_field():
     assert isinstance(readout_spec, ModuleRefSpec)
 
 
-def test_writeback_spec_and_apply_for_ml():
+def test_writeback_items_include_ml_targets():
     ctx = _make_ctx()
     adapter = _adapter()
     result = _run(adapter, ctx)
     ar = adapter.analyze(result, ctx)
-    spec = adapter.get_writeback_spec(ar, ctx)
+    spec = adapter.get_writeback_items(ar, ctx)
     keys = [item.key for item in spec]
     assert "readout_rf" in keys
     assert "ro_waveform" in keys
 
-    adapter.apply_writeback(ctx, ar, ["readout_rf", "ro_waveform"])
-    assert "readout_rf" in ctx.ml.modules
-    assert "ro_waveform" in ctx.ml.waveforms
 
-
-def test_writeback_spec_and_apply_for_ml_when_missing():
+def test_writeback_items_include_ml_targets_when_missing():
     ctx = _make_ctx()
-    # ml is empty (no pre-registered modules/waveforms)
     adapter = _adapter()
     result = _run(adapter, ctx)
     ar = adapter.analyze(result, ctx)
-    spec = adapter.get_writeback_spec(ar, ctx)
+    spec = adapter.get_writeback_items(ar, ctx)
     keys = [item.key for item in spec]
     assert "readout_rf" in keys
     assert "ro_waveform" in keys
 
-    adapter.apply_writeback(ctx, ar, ["readout_rf", "ro_waveform"])
-    assert "readout_rf" in ctx.ml.modules
-    assert "ro_waveform" in ctx.ml.waveforms
 
+def test_writeback_edit_schema_provided():
+    """get_writeback_items should provide edit_schema for readout_rf and ro_waveform."""
+    from zcu_tools.gui.adapter import ModuleWriteback, WaveformWriteback
 
-def test_writeback_edit_template_provided():
-    """get_writeback_spec should provide edit_template for readout_rf and ro_waveform."""
     ctx = _make_ctx()
     adapter = _adapter()
     result = _run(adapter, ctx)
     ar = adapter.analyze(result, ctx)
-    spec = adapter.get_writeback_spec(ar, ctx)
+    spec = adapter.get_writeback_items(ar, ctx)
 
     spec_by_key = {item.key: item for item in spec}
-    assert spec_by_key["readout_rf"].edit_template is not None
-    assert spec_by_key["ro_waveform"].edit_template is not None
-    assert isinstance(spec_by_key["readout_rf"].edit_template, CfgSchema)
-    assert isinstance(spec_by_key["ro_waveform"].edit_template, CfgSchema)
-
-
-def test_apply_writeback_with_overrides():
-    """apply_writeback should use raw dict override instead of auto-build."""
-    ctx = _make_ctx()
-    adapter = _adapter()
-    result = _run(adapter, ctx)
-    ar = adapter.analyze(result, ctx)
-
-    override_readout = {
-        "type": "readout/pulse",
-        "pulse_cfg": {
-            "waveform": {"style": "const", "length": 2.0},
-            "ch": 1,
-            "nqz": 2,
-            "freq": ar.freq,
-            "gain": 0.5,
-        },
-        "ro_cfg": {
-            "ro_ch": 1,
-            "ro_length": 1.8,
-            "trig_offset": 0.4,
-        },
-    }
-
-    adapter.apply_writeback(
-        ctx,
-        ar,
-        ["readout_rf"],
-        overrides={"readout_rf": {"name": "readout_rf", "cfg": override_readout}},
-    )
-    assert "readout_rf" in ctx.ml.modules
+    readout_item = spec_by_key["readout_rf"]
+    waveform_item = spec_by_key["ro_waveform"]
+    assert isinstance(readout_item, ModuleWriteback)
+    assert isinstance(waveform_item, WaveformWriteback)
+    assert readout_item.edit_schema is not None
+    assert waveform_item.edit_schema is not None
+    assert isinstance(readout_item.edit_schema, CfgSchema)
+    assert isinstance(waveform_item.edit_schema, CfgSchema)
 
 
 def test_no_last_cfg_side_channel():

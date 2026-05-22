@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -13,13 +13,13 @@ from zcu_tools.gui.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
+    MetaDictWriteback,
     ParamSpec,
     SavePaths,
     ScalarSpec,
     ScalarValue,
     SweepSpec,
     SweepValue,
-    WritebackItem,
 )
 
 FakeResult = np.ndarray
@@ -99,30 +99,21 @@ class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult]):
     def get_figure(self, analyze_result: FakeAnalyzeResult) -> Optional[Figure]:
         return analyze_result[1]
 
-    def get_writeback_spec(
+    def get_writeback_items(
         self,
         analyze_result: FakeAnalyzeResult,
         ctx: ExpContext,  # noqa: ARG002
-    ) -> list[WritebackItem]:
+    ) -> Sequence[MetaDictWriteback]:
         peak, _ = analyze_result
         return [
-            WritebackItem(
+            MetaDictWriteback(
                 key="fake_peak",
-                target="md",
-                current_value=0.0,
-                new_value=peak,
                 description="Fake peak value from FakeAdapter analysis",
+                current_value=0.0,
+                md_key="fake_peak",
+                proposed_value=peak,
             )
         ]
-
-    def apply_writeback(
-        self,
-        ctx: ExpContext,  # noqa: ARG002
-        analyze_result: FakeAnalyzeResult,  # noqa: ARG002
-        selected_keys: list[str],  # noqa: ARG002
-        overrides: Optional[dict] = None,  # noqa: ARG002
-    ) -> None:
-        pass  # nothing to persist in fake mode
 
     def make_save_paths(self, ctx: ExpContext) -> SavePaths:  # noqa: ARG002
         return SavePaths(data_path="/tmp/fake_data", image_path="/tmp/fake_image.png")
