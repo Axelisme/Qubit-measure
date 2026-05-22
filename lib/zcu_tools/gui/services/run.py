@@ -1,0 +1,89 @@
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING, Any, Optional
+
+logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.event_bus import EventBus
+    from zcu_tools.gui.runner import Runner
+    from zcu_tools.gui.state import State
+
+
+class RunService:
+    """Encapsulates execution of an experiment adapter via a Runner."""
+
+    def __init__(
+        self, state: "State", runner: "Runner", bus: Optional["EventBus"] = None
+    ) -> None:
+        self._state = state
+        self._runner = runner
+        self._bus = bus
+
+        self._runner.run_finished.connect(self._on_run_finished)
+        self._runner.run_failed.connect(self._on_run_failed)
+
+    def start_run(
+        self,
+        tab_id: str,
+        schema: Any,
+        user_params: dict,
+        pbar_factory: Optional[Any] = None,
+        live_container: Optional[Any] = None,
+    ) -> None:
+        if self._state.is_running:
+            raise RuntimeError("Another run is already active")
+
+        # Validate schema before starting the worker
+        from zcu_tools.gui.adapter import schema_to_dict
+
+        schema_to_dict(schema, self._state.exp_context.ml)
+        logger.info("start_run: tab_id=%r user_params=%r", tab_id, list(user_params))
+
+        tab = self._state.get_tab(tab_id)
+        self._state.set_running(True)
+
+        if live_container is not None:
+            from zcu_tools.liveplot.backend.qt import register_pending_container
+
+            register_pending_container(live_container)
+
+        self._runner.start_run(
+            tab_id,
+            tab.adapter,
+            self._state.exp_context,
+            schema,
+            user_params,
+            pbar_factory=pbar_factory,
+        )
+        if self._bus is not None:
+            self._bus.emit("run_state_changed")
+
+    def cancel_run(self) -> None:
+        logger.info("cancel_run")
+        self._runner.cancel()
+
+    def _clear_live_container(self) -> None:
+        from zcu_tools.liveplot.backend.qt import clear_pending_container
+
+        clear_pending_container()
+
+    def _on_run_finished(self, tab_id: str, result: Any) -> None:
+        logger.info(
+            "_on_run_finished: tab_id=%r result_type=%s", tab_id, type(result).__name__
+        )
+        self._clear_live_container()
+        self._state.update_tab_result(tab_id, result, cfg=None)
+        self._state.set_running(False)
+        if self._bus is not None:
+            self._bus.emit("run_state_changed")
+            self._bus.emit(f"run_finished_{tab_id}")  # targeted event for the façade
+
+    def _on_run_failed(self, tab_id: str, error: Exception) -> None:
+        logger.warning("_on_run_failed: tab_id=%r error=%r", tab_id, error)
+        self._clear_live_container()
+        self._state.set_running(False)
+        if self._bus is not None:
+            self._bus.emit("run_state_changed")
+            self._bus.emit(f"run_failed_{tab_id}_{id(error)}")  # targeted event with error

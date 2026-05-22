@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import dataclasses
 import logging
-import uuid
 from typing import TYPE_CHECKING, Any, Optional, Protocol
 
 logger = logging.getLogger(__name__)
@@ -13,6 +11,14 @@ from .io_manager import IOManager
 from .registry import Registry
 from .runner import Runner
 from .state import State
+
+from .services import (
+    ConnectionService,
+    ContextService,
+    DeviceService,
+    RunService,
+    TabService,
+)
 
 if TYPE_CHECKING:
     pass
@@ -33,6 +39,8 @@ class ViewProtocol(Protocol):
 
 
 class Controller:
+    """Façade for the GUI application. Delegates to domain services."""
+
     def __init__(
         self,
         state: State,
@@ -44,56 +52,69 @@ class Controller:
         bus: Optional[EventBus] = None,
     ) -> None:
         self._state = state
-        self._runner = runner
-        self._registry = registry
-        self._io = io_manager
-        self._dm = device_manager
         self._view = view
         self._bus = bus
-        self._predictor_path: Optional[str] = None
 
-        runner.run_finished.connect(self._on_run_finished)
-        runner.run_failed.connect(self._on_run_failed)
+        # Initialize domain services
+        self._dev_svc = DeviceService(state, device_manager)
+        self._conn_svc = ConnectionService(state, bus)
+        self._ctx_svc = ContextService(state, io_manager, bus)
+        self._tab_svc = TabService(state, registry, bus)
+        self._run_svc = RunService(state, runner, bus)
+
+        # For RunService to communicate explicit refresh back to the façade
+        if self._bus is not None:
+            self._bus.subscribe("run_state_changed", self._on_run_state_changed)
+            # Cannot easily subscribe to dynamic tab_id events via the bus without a wildcard,
+            # so we let the run_svc keep its own callbacks or we can inject a callback
+            # A simpler way is to give RunService explicit callbacks for the Façade to use.
+
+        # Overriding RunService callbacks to inform the View (Targeted Actions)
+        self._run_svc._runner.run_finished.connect(self._on_run_finished)
+        self._run_svc._runner.run_failed.connect(self._on_run_failed)
+
+    def _on_run_state_changed(self) -> None:
+        self._view.refresh_run_state(self._state.is_running)
+
+    def _on_run_finished(self, tab_id: str, _result: Any) -> None:
+        self._view.refresh_tab(tab_id)
+
+    def _on_run_failed(self, _tab_id: str, error: Exception) -> None:
+        self._view.show_status_message(f"Run failed: {error}")
 
     def get_bus(self) -> Optional[EventBus]:
         return self._bus
 
     # ------------------------------------------------------------------
-    # ExpTab operations
+    # ExpTab operations (TabService)
     # ------------------------------------------------------------------
 
     def new_tab(self, adapter_name: str) -> str:
-        adapter = self._registry.create(adapter_name)
-        tab_id = str(uuid.uuid4())
-        logger.info("new_tab: adapter=%r tab_id=%r", adapter_name, tab_id)
-        self._state.add_tab(tab_id, adapter, self._state.exp_context)
-        return tab_id
+        return self._tab_svc.new_tab(adapter_name)
 
     def close_tab(self, tab_id: str) -> None:
-        logger.info("close_tab: tab_id=%r", tab_id)
-        if self._runner.is_running and self._state.active_tab_id == tab_id:
-            self._runner.cancel()
-        self._state.remove_tab(tab_id)
+        if self.is_running() and self._state.active_tab_id == tab_id:
+            self.cancel_run()
+        self._tab_svc.close_tab(tab_id)
 
     # ------------------------------------------------------------------
-    # Run flow
+    # Run flow (RunService & ContextService)
     # ------------------------------------------------------------------
 
     def has_project(self) -> bool:
-        return self._io.has_project
+        return self._ctx_svc.has_project()
 
     def has_context(self) -> bool:
-        """True when any valid context exists (startup empty ctx or file-backed flux ctx)."""
-        return self._io.has_context or self._state.has_startup_context
+        return self._ctx_svc.has_context()
 
     def has_startup_context(self) -> bool:
-        return self._state.has_startup_context
+        return self._ctx_svc.has_startup_context()
 
     def is_running(self) -> bool:
         return self._state.is_running
 
     def has_soc(self) -> bool:
-        return self._state.exp_context.soc is not None
+        return self._conn_svc.has_soc()
 
     def start_run(self, tab_id: str, schema: Any, user_params: dict) -> None:
         if not self.has_context():
@@ -102,64 +123,18 @@ class Controller:
             )
         if not self.has_soc():
             raise RuntimeError("No ZCU connection. Please connect first.")
-        if self._state.is_running:
-            raise RuntimeError("Another run is already active")
-        # Validate schema before starting the worker — RuntimeError here stays on main thread
-        # and is caught by _on_run_clicked's try/except, which shows it in the status bar.
-        from zcu_tools.gui.adapter import schema_to_dict
 
-        schema_to_dict(schema, self.get_current_ml())
-        logger.info("start_run: tab_id=%r user_params=%r", tab_id, list(user_params))
-        tab = self._state.get_tab(tab_id)
-        self._state.set_running(True)
-        self._view.refresh_run_state(True)
         pbar_factory = self._view.make_pbar_factory(tab_id)
         live_container = self._view.make_live_container(tab_id)
-        if live_container is not None:
-            from zcu_tools.liveplot.backend.qt import register_pending_container
-
-            register_pending_container(live_container)
-        self._runner.start_run(
-            tab_id,
-            tab.adapter,
-            self._state.exp_context,
-            schema,
-            user_params,
-            pbar_factory=pbar_factory,
+        self._run_svc.start_run(
+            tab_id, schema, user_params, pbar_factory, live_container
         )
 
     def cancel_run(self) -> None:
-        logger.info("cancel_run")
-        self._runner.cancel()
-
-    def _on_run_finished(self, tab_id: str, result: Any) -> None:
-        logger.info(
-            "_on_run_finished: tab_id=%r result_type=%s", tab_id, type(result).__name__
-        )
-        self._clear_live_container()
-        self._state.update_tab_result(tab_id, result, cfg=None)
-        self._state.set_running(False)
-        self._view.refresh_run_state(False)
-        self._view.refresh_tab(tab_id)
-        if self._bus is not None:
-            self._bus.emit("run_state_changed")
-
-    def _on_run_failed(self, tab_id: str, error: Exception) -> None:  # noqa: ARG002
-        logger.warning("_on_run_failed: tab_id=%r error=%r", tab_id, error)
-        self._clear_live_container()
-        self._state.set_running(False)
-        self._view.refresh_run_state(False)
-        self._view.show_status_message(f"Run failed: {error}")
-        if self._bus is not None:
-            self._bus.emit("run_state_changed")
-
-    def _clear_live_container(self) -> None:
-        from zcu_tools.liveplot.backend.qt import clear_pending_container
-
-        clear_pending_container()
+        self._run_svc.cancel_run()
 
     # ------------------------------------------------------------------
-    # Analyze flow  (Phase 9)
+    # Analyze flow (TabService)
     # ------------------------------------------------------------------
 
     def analyze(self, tab_id: str, user_params: dict) -> None:
@@ -167,22 +142,15 @@ class Controller:
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
-        tab = self._state.get_tab(tab_id)
-        if tab.last_result is None:
-            raise RuntimeError("No run result available to analyze")
-        logger.info("analyze: tab_id=%r user_params=%r", tab_id, list(user_params))
         try:
-            ctx = self._state.exp_context
-            analyze_result = tab.adapter.analyze(tab.last_result, ctx, **user_params)
-            figure = tab.adapter.get_figure(analyze_result)
-            self._state.update_tab_analyze(tab_id, analyze_result, figure)
+            self._tab_svc.analyze(tab_id, user_params)
             self._view.refresh_tab(tab_id)
         except Exception as exc:
             logger.warning("analyze: failed tab_id=%r exc=%r", tab_id, exc)
             self._view.show_status_message(f"Analyze failed: {exc}")
 
     # ------------------------------------------------------------------
-    # Writeback  (Phase 9)
+    # Writeback (TabService)
     # ------------------------------------------------------------------
 
     def apply_writeback(self, tab_id: str, selected_keys: list[str]) -> None:
@@ -198,19 +166,9 @@ class Controller:
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
-        tab = self._state.get_tab(tab_id)
-        if tab.last_analyze_result is None:
-            raise RuntimeError("No analyze result available for writeback")
-        logger.info(
-            "apply_writeback_with_overrides: tab_id=%r keys=%r overrides_keys=%r",
-            tab_id,
-            selected_keys,
-            list(overrides),
-        )
         try:
-            ctx = self._state.exp_context
-            tab.adapter.apply_writeback(
-                ctx, tab.last_analyze_result, selected_keys, overrides
+            self._tab_svc.apply_writeback_with_overrides(
+                tab_id, selected_keys, overrides
             )
             self._view.refresh_config_panels()
             self._view.refresh_inspect_panel()
@@ -219,7 +177,7 @@ class Controller:
             self._view.show_status_message(f"Writeback failed: {exc}")
 
     # ------------------------------------------------------------------
-    # Save  (Phase 9)
+    # Save (TabService)
     # ------------------------------------------------------------------
 
     def save_data(self, tab_id: str, data_path: str) -> None:
@@ -227,13 +185,8 @@ class Controller:
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
-        tab = self._state.get_tab(tab_id)
-        if tab.last_result is None:
-            raise RuntimeError("No run result available to save")
-        logger.info("save_data: tab_id=%r path=%r", tab_id, data_path)
         try:
-            ctx = self._state.exp_context
-            tab.adapter.save(data_path, tab.last_result, ctx)
+            self._tab_svc.save_data(tab_id, data_path)
             self._view.show_status_message(f"Data saved to {data_path}")
         except Exception as exc:
             logger.warning("save_data: failed tab_id=%r exc=%r", tab_id, exc)
@@ -244,19 +197,15 @@ class Controller:
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
-        tab = self._state.get_tab(tab_id)
-        if tab.last_figure is None:
-            raise RuntimeError("No figure available to save")
-        logger.info("save_image: tab_id=%r path=%r", tab_id, image_path)
         try:
-            tab.last_figure.savefig(image_path)
+            self._tab_svc.save_image(tab_id, image_path)
             self._view.show_status_message(f"Image saved to {image_path}")
         except Exception as exc:
             logger.warning("save_image: failed tab_id=%r exc=%r", tab_id, exc)
             self._view.show_status_message(f"Save image failed: {exc}")
 
     # ------------------------------------------------------------------
-    # Context / IO  (Phase 11)
+    # Context / IO (ContextService)
     # ------------------------------------------------------------------
 
     def set_startup_context(
@@ -269,50 +218,18 @@ class Controller:
         result_dir: str = "",
         database_path: str = "",
     ) -> None:
-        """Set an in-memory (no file sync) startup context from the startup dialog."""
-        logger.info(
-            "set_startup_context: chip=%r qub=%r res=%r result_dir=%r db=%r",
-            chip_name,
-            qub_name,
-            res_name,
-            result_dir,
-            database_path,
+        self._ctx_svc.set_startup_context(
+            md, ml, chip_name, qub_name, res_name, result_dir, database_path
         )
-        new_ctx = dataclasses.replace(
-            self._state.exp_context,
-            md=md,
-            ml=ml,
-            chip_name=chip_name,
-            qub_name=qub_name,
-            res_name=res_name,
-            result_dir=result_dir,
-            database_path=database_path,
-        )
-        self._state.set_context(new_ctx)
-        self._state.has_startup_context = True
-        self._view.refresh_context_panel()
-        self._view.refresh_run_state(self._state.is_running)
-        self._view.refresh_config_panels()
         self._view.refresh_inspect_panel()
-        if self._bus is not None:
-            self._bus.emit("context_changed")
 
     def setup_project(self, result_dir: str) -> None:
-        logger.info("setup_project: result_dir=%r", result_dir)
-        self._io.setup(result_dir)
+        self._ctx_svc.setup_project(result_dir)
         self._view.refresh_context_panel()
-        self._view.refresh_run_state(self._state.is_running)
 
     def use_context(self, label: str) -> None:
-        logger.info("use_context: label=%r", label)
-        new_ctx = self._io.use_context(label, self._state.exp_context)
-        new_ctx = dataclasses.replace(new_ctx, active_label=label)
-        self._state.set_context(new_ctx)
-        self._view.refresh_context_panel()
-        self._view.refresh_config_panels()
+        self._ctx_svc.use_context(label)
         self._view.refresh_inspect_panel()
-        if self._bus is not None:
-            self._bus.emit("context_changed")
 
     def new_context(
         self,
@@ -320,171 +237,110 @@ class Controller:
         unit: str = "A",
         clone_from_current: bool = False,
     ) -> None:
-        logger.info(
-            "new_context: value=%r unit=%r clone=%r", value, unit, clone_from_current
-        )
-        new_ctx = self._io.new_context(
-            self._state.exp_context,
-            value=value,
-            unit=unit,
-            clone_from_current=clone_from_current,
-        )
-        label = self._io.get_active_label() or ""
-        new_ctx = dataclasses.replace(new_ctx, active_label=label)
-        self._state.set_context(new_ctx)
-        self._view.refresh_context_panel()
-        self._view.refresh_config_panels()
+        self._ctx_svc.new_context(value, unit, clone_from_current)
         self._view.refresh_inspect_panel()
-        if self._bus is not None:
-            self._bus.emit("context_changed")
 
     def get_active_context_label(self) -> Optional[str]:
-        return self._io.get_active_label()
+        return self._ctx_svc.get_active_context_label()
 
     def get_flux_dir(self) -> Optional[str]:
-        """Return result_dir/exps/{label}/image path for the active context, or None."""
-        import os
+        return self._ctx_svc.get_flux_dir()
 
-        ctx = self._state.exp_context
-        label = self._io.get_active_label()
-        if ctx.result_dir and label:
-            return os.path.join(ctx.result_dir, "exps", label)
-        return None
+    def get_context_labels(self) -> list[str]:
+        return self._ctx_svc.get_context_labels()
+
+    def get_current_md(self) -> Any:
+        return self._ctx_svc.get_current_md()
+
+    def set_md_attr(self, key: str, value: Any) -> None:
+        self._ctx_svc.set_md_attr(key, value)
+
+    def del_md_attr(self, key: str) -> None:
+        self._ctx_svc.del_md_attr(key)
+
+    def get_current_ml(self) -> Any:
+        return self._ctx_svc.get_current_ml()
 
     # ------------------------------------------------------------------
-    # Device  (Phase 11)
+    # Device (DeviceService)
     # ------------------------------------------------------------------
 
     def register_device(self, name: str, device: Any) -> None:
-        if self._state.is_running:
-            raise RuntimeError("Cannot register device while a run is active")
-        self._dm.register_device(name, device)
+        self._dev_svc.register_device(name, device)
 
     def drop_device(self, name: str) -> None:
-        if self._state.is_running:
-            raise RuntimeError("Cannot drop device while a run is active")
-        self._dm.drop_device(name)
+        self._dev_svc.drop_device(name)
 
     def list_devices(self) -> dict[str, str]:
-        return self._dm.list_devices()
+        return self._dev_svc.list_devices()
 
     def set_device_value(self, name: str, value: Any) -> Any:
-        if self._state.is_running:
-            raise RuntimeError("Cannot set device value while a run is active")
-        return self._dm.set_device_value(name, value)
+        return self._dev_svc.set_device_value(name, value)
 
     def get_device_value(self, name: str) -> Any:
-        return self._dm.get_device_value(name)
+        return self._dev_svc.get_device_value(name)
 
     def get_device_info(self, name: str) -> Any:
-        return self._dm.get_device_info(name)
+        return self._dev_svc.get_device_info(name)
 
     def setup_device(
         self, name: str, info: Any, pbar_factory: Optional[Any] = None
     ) -> Any:
-        if self._state.is_running:
-            raise RuntimeError("Cannot setup device while a run is active")
-        return self._dm.setup_device(name, info, pbar_factory)
+        return self._dev_svc.setup_device(name, info, pbar_factory)
 
     # ------------------------------------------------------------------
-    # Connection / Predictor  (Phase 10)
+    # Connection / Predictor (ConnectionService)
     # ------------------------------------------------------------------
 
     def set_connection(self, soc: Any, soccfg: Any) -> None:
-        new_ctx = dataclasses.replace(self._state.exp_context, soc=soc, soccfg=soccfg)
-        self._state.set_context(new_ctx)
-        self._view.refresh_run_state(self._state.is_running)
+        self._conn_svc.set_connection(soc, soccfg)
 
     def set_predictor(
         self, predictor: Optional[Any], path: Optional[str] = None
     ) -> None:
-        self._predictor_path = path
-        new_ctx = dataclasses.replace(self._state.exp_context, predictor=predictor)
-        self._state.set_context(new_ctx)
+        self._conn_svc.set_predictor(predictor, path)
         self._view.refresh_predictor_panel()
 
     def get_soccfg(self) -> Any:
-        return self._state.exp_context.soccfg
+        return self._conn_svc.get_soccfg()
 
     def get_predictor(self) -> Optional[Any]:
-        return self._state.exp_context.predictor
+        return self._conn_svc.get_predictor()
 
     def get_predictor_info(self) -> Optional[dict]:
-        predictor = self._state.exp_context.predictor
-        if predictor is None:
-            return None
-        return {"path": self._predictor_path, "flux_bias": predictor.flux_bias}
+        return self._conn_svc.get_predictor_info()
 
     # ------------------------------------------------------------------
-    # View query interface (pull model)
+    # View query interface (TabService)
     # ------------------------------------------------------------------
 
     def get_tab_default_cfg(self, tab_id: str) -> Any:
-        return self._state.get_tab(tab_id).last_cfg
+        return self._tab_svc.get_tab_default_cfg(tab_id)
 
     def get_tab_fresh_cfg(self, tab_id: str) -> Any:
-        """Re-run make_default_cfg so the form reflects the current ml state."""
-        tab = self._state.get_tab(tab_id)
-        return tab.adapter.make_default_cfg(self._state.exp_context)
+        return self._tab_svc.get_tab_fresh_cfg(tab_id)
 
     def get_tab_result(self, tab_id: str) -> Any:
-        return self._state.get_tab(tab_id).last_result
+        return self._tab_svc.get_tab_result(tab_id)
 
     def has_run_result(self, tab_id: str) -> bool:
-        return self._state.get_tab(tab_id).last_result is not None
+        return self._tab_svc.has_run_result(tab_id)
 
     def has_analyze_result(self, tab_id: str) -> bool:
-        return self._state.get_tab(tab_id).last_analyze_result is not None
+        return self._tab_svc.has_analyze_result(tab_id)
 
     def get_tab_figure(self, tab_id: str) -> Any:
-        return self._state.get_tab(tab_id).last_figure
+        return self._tab_svc.get_tab_figure(tab_id)
 
     def get_tab_writeback_spec(self, tab_id: str) -> list:
-        tab = self._state.get_tab(tab_id)
-        if tab.last_analyze_result is None:
-            return []
-        ctx = self._state.exp_context
-        return tab.adapter.get_writeback_spec(tab.last_analyze_result, ctx)
+        return self._tab_svc.get_tab_writeback_spec(tab_id)
 
     def get_tab_analyze_params(self, tab_id: str) -> dict:
-        tab = self._state.get_tab(tab_id)
-        return tab.adapter.get_analyze_params()
+        return self._tab_svc.get_tab_analyze_params(tab_id)
 
     def get_tab_save_paths(self, tab_id: str) -> Any:
-        tab = self._state.get_tab(tab_id)
-        ctx = self._state.exp_context
-        return tab.adapter.make_save_paths(ctx)
-
-    def get_current_md(self) -> Any:
-        """Return the current MetaDict (may be None if no context is set)."""
-        return self._state.exp_context.md
-
-    def set_md_attr(self, key: str, value: Any) -> None:
-        if not self.has_context():
-            raise RuntimeError("No experiment context.")
-        md = self._state.exp_context.md
-        setattr(md, key, value)
-        if md._path is not None:
-            md.dump()
-        if self._bus is not None:
-            self._bus.emit("md_changed")
-
-    def del_md_attr(self, key: str) -> None:
-        if not self.has_context():
-            raise RuntimeError("No experiment context.")
-        md = self._state.exp_context.md
-        delattr(md, key)
-        if md._path is not None:
-            md.dump()
-        if self._bus is not None:
-            self._bus.emit("md_changed")
-
-    def get_current_ml(self) -> Any:
-        """Return the current ModuleLibrary (may be None if no context is set)."""
-        return self._state.exp_context.ml
-
-    def get_context_labels(self) -> list[str]:
-        return self._io.list_contexts()
+        return self._tab_svc.get_tab_save_paths(tab_id)
 
     def get_adapter_names(self) -> list[str]:
-        return self._registry.list_names()
+        # Simple passthrough to registry
+        return self._tab_svc._registry.list_names()

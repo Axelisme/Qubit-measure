@@ -563,6 +563,19 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self._status_bar)
         self._status_bar.showMessage("Ready")
 
+        # EventBus subscriptions
+        bus = self._ctrl.get_bus()
+        if bus is not None:
+            bus.subscribe("run_state_changed", self._on_bus_run_state_changed)
+            bus.subscribe("context_changed", self._on_bus_context_changed)
+
+    def _on_bus_run_state_changed(self) -> None:
+        self.refresh_run_state(self._ctrl.is_running())
+
+    def _on_bus_context_changed(self) -> None:
+        self.refresh_context_panel()
+        self.refresh_config_panels()
+
     # ------------------------------------------------------------------
     # ViewProtocol implementation
     # ------------------------------------------------------------------

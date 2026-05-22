@@ -62,6 +62,8 @@ class ControllerFixture:
         self.view = _make_view()
         io_manager = IOManager()
         io_manager._em = MagicMock()  # simulate a project being set up
+        from zcu_tools.gui.event_bus import EventBus
+        self.bus = EventBus()
         self.ctrl = Controller(
             state=self.state,
             runner=self.runner,
@@ -69,6 +71,7 @@ class ControllerFixture:
             io_manager=io_manager,
             device_manager=DeviceManager(),
             view=self.view,
+            bus=self.bus,
         )
 
 
@@ -147,8 +150,8 @@ def test_analyze_calls_refresh_tab(cf):
 
 def test_analyze_without_result_raises(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    with pytest.raises(RuntimeError, match="No run result"):
-        cf.ctrl.analyze(tab_id, {})
+    cf.ctrl.analyze(tab_id, {})
+    cf.view.show_status_message.assert_called()
 
 
 def test_analyze_exception_shows_status_message(cf):
@@ -238,8 +241,8 @@ def test_apply_writeback_calls_refresh_config_panels(cf):
 def test_apply_writeback_without_analyze_raises(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
-    with pytest.raises(RuntimeError, match="No analyze result"):
-        cf.ctrl.apply_writeback(tab_id, ["fake_peak"])
+    cf.ctrl.apply_writeback(tab_id, ["fake_peak"])
+    cf.view.show_status_message.assert_called()
 
 
 # ---------------------------------------------------------------------------
@@ -249,8 +252,8 @@ def test_apply_writeback_without_analyze_raises(cf):
 
 def test_save_data_without_result_raises(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    with pytest.raises(RuntimeError, match="No run result"):
-        cf.ctrl.save_data(tab_id, "/tmp/test")
+    cf.ctrl.save_data(tab_id, "/tmp/test")
+    cf.view.show_status_message.assert_called()
 
 
 def test_save_data_calls_adapter_save(cf):
@@ -281,8 +284,9 @@ def test_save_image_without_figure_raises(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
     # no analyze yet → no figure
-    with pytest.raises(RuntimeError, match="No figure"):
-        cf.ctrl.save_image(tab_id, "/tmp/test.png")
+    cf.ctrl.save_image(tab_id, "/tmp/test.png")
+    cf.view.show_status_message.assert_called()
+    assert "No figure" in cf.view.show_status_message.call_args[0][0]
 
 
 def test_save_image_calls_savefig(cf, tmp_path):
