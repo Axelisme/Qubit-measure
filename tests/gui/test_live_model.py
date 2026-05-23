@@ -9,8 +9,6 @@ import pytest
 from zcu_tools.gui.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
-    ChannelSpec,
-    ChannelValue,
     DirectValue,
     EvalValue,
     ScalarSpec,
@@ -18,7 +16,6 @@ from zcu_tools.gui.adapter import (
 )
 from zcu_tools.gui.event_bus import EventBus, GuiEvent
 from zcu_tools.gui.live_model import (
-    ChannelLiveField,
     LiveModelEnv,
     ScalarLiveField,
     SectionLiveField,
@@ -90,39 +87,6 @@ def test_section_field_propagation(env):
     assert f2_val.value == 0.5
 
     assert section.to_dict() == {"f1": 10, "f2": 0.5}
-
-
-def test_channel_field_resolution(env):
-    spec = ChannelSpec(label="Ch")
-
-    # Setup mock md
-    from zcu_tools.meta_tool import MetaDict
-
-    md = MetaDict()
-    md.qub_ch = 7
-    env.ctrl.get_current_md.return_value = md
-
-    field = ChannelLiveField(spec, env, initial_val="qub_ch")
-    assert field.get_value().resolved == 7
-    assert field.is_valid() is True
-
-    # Update md
-    md.qub_ch = 9
-    field.refresh_external(GuiEvent.MD_CHANGED)
-    assert field.get_value().resolved == 9
-
-    # Change to unknown
-    field.set_value("unknown_ch")
-    assert field.get_value().resolved is None
-    assert field.is_valid() is False
-
-
-def test_channel_field_does_not_subscribe_to_bus(env, bus):
-    spec = ChannelSpec(label="Ch")
-    field = ChannelLiveField(spec, env, initial_val="qub_ch")
-
-    assert bus._subs == {}
-    field.teardown()
 
 
 def test_scalar_eval_field_resolves_from_md(env):

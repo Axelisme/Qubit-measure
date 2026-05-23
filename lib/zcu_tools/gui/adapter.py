@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -8,8 +7,6 @@ from typing import TYPE_CHECKING, Any, Optional, Protocol, Sequence, Union, cast
 
 from matplotlib.figure import Figure
 from typing_extensions import Generic, TypeAlias, TypeVar
-
-logger = logging.getLogger(__name__)
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.meta_tool import ModuleLibrary
@@ -221,13 +218,6 @@ class WaveformRefSpec:
 
 
 @dataclass(frozen=True)
-class ChannelSpec:
-    """Channel field: accepts a non-negative int or an md-key string."""
-
-    label: str
-
-
-@dataclass(frozen=True)
 class CfgSectionSpec:
     fields: dict[str, "CfgNodeSpec"] = field(default_factory=dict)
     label: str = ""
@@ -241,7 +231,6 @@ CfgNodeSpec = Union[
     MultiSweepSpec,
     ModuleRefSpec,
     WaveformRefSpec,
-    ChannelSpec,
     "CfgSectionSpec",
 ]
 
@@ -292,12 +281,6 @@ class WaveformRefValue:
 
 
 @dataclass
-class ChannelValue:
-    chosen: Union[int, str]  # int = direct channel; str = md key
-    resolved: Optional[int]  # resolved int from md (meaningful only when chosen is str)
-
-
-@dataclass
 class CfgSectionValue:
     fields: dict[str, "CfgNodeValue"] = field(default_factory=dict)
 
@@ -308,7 +291,6 @@ CfgNodeValue = Union[
     MultiSweepValue,
     ModuleRefValue,
     WaveformRefValue,
-    ChannelValue,
     "CfgSectionValue",
 ]
 
@@ -403,24 +385,6 @@ def _section_to_dict(
                 )
                 for axis, sv in node_val.axes.items()
             }
-
-        elif isinstance(node_spec, ChannelSpec):
-            assert isinstance(node_val, ChannelValue)
-            logger.debug(
-                "_section_to_dict ChannelSpec key=%r chosen=%r resolved=%r",
-                key,
-                node_val.chosen,
-                node_val.resolved,
-            )
-            if isinstance(node_val.chosen, str):
-                if node_val.resolved is None:
-                    raise RuntimeError(
-                        f"Channel '{node_val.chosen}' ({node_spec.label!r}) "
-                        "could not be resolved from MetaDict"
-                    )
-                result[key] = node_val.resolved
-            else:
-                result[key] = int(node_val.chosen)
 
         elif isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
             assert isinstance(node_val, (ModuleRefValue, WaveformRefValue))
@@ -528,8 +492,6 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
                 if isinstance(node_spec, ModuleRefSpec)
                 else WaveformRefValue(f"<Custom:{label}>", make_default_value(first))
             )
-        elif isinstance(node_spec, ChannelSpec):
-            fields[key] = ChannelValue(chosen=0, resolved=None)
         elif isinstance(node_spec, CfgSectionSpec):
             fields[key] = make_default_value(node_spec)
     return CfgSectionValue(fields=fields)
@@ -594,9 +556,9 @@ def inherit_from(
             if (
                 isinstance(old_node_spec, ScalarSpec)
                 and old_node_spec.type is new_node_spec.type
-                and isinstance(old_node_val, DirectValue)
+                and isinstance(old_node_val, (DirectValue, EvalValue))
             ):
-                new_fields[key] = DirectValue(old_node_val.value)
+                new_fields[key] = old_node_val
             else:
                 defaults: dict[type, Any] = {int: 0, float: 0.0, bool: False, str: ""}
                 new_fields[key] = DirectValue(defaults.get(new_node_spec.type, None))
@@ -674,16 +636,6 @@ def inherit_from(
                 new_fields[key] = WaveformRefValue(
                     f"<Custom:{label}>", make_default_value(first)
                 )
-            continue
-
-        # ChannelSpec — inherit whole ChannelValue
-        if isinstance(new_node_spec, ChannelSpec):
-            if isinstance(old_node_val, ChannelValue):
-                new_fields[key] = ChannelValue(
-                    old_node_val.chosen, old_node_val.resolved
-                )
-            else:
-                new_fields[key] = ChannelValue(chosen=0, resolved=None)
             continue
 
         # CfgSectionSpec — recurse

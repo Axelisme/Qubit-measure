@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from .common import (
-    ChannelWidget,
     LiteralWidget,
     ScalarWidget,
     SweepWidget,
@@ -21,7 +20,6 @@ __all__ = [
     "LiteralWidget",
     "ScalarWidget",
     "SweepWidget",
-    "ChannelWidget",
     "SectionWidget",
     "ModuleRefWidget",
     "_CollapsibleSection",

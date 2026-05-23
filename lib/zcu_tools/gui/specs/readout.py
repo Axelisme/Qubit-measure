@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.adapter import CfgSectionSpec, ChannelSpec, LiteralSpec, ScalarSpec
+from zcu_tools.gui.adapter import CfgSectionSpec, LiteralSpec, ScalarSpec
 from zcu_tools.gui.specs.pulse import make_pulse_spec
 
 
@@ -11,7 +11,7 @@ def make_direct_readout_spec() -> CfgSectionSpec:
         label="Direct Readout",
         fields={
             "type": LiteralSpec("readout/direct"),
-            "ro_ch": ChannelSpec(label="RO ch"),
+            "ro_ch": ScalarSpec(label="RO ch", type=int),
             "ro_freq": ScalarSpec(label="RO Freq (MHz)", type=float, decimals=2),
             "ro_length": ScalarSpec(label="RO length (us)", type=float, decimals=3),
             "trig_offset": ScalarSpec(label="Trig offset (us)", type=float, decimals=3),

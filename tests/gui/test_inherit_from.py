@@ -356,7 +356,7 @@ def test_pulse_to_direct_missing_ro_cfg_uses_default():
         old_val, make_pulse_readout_spec(), make_direct_readout_spec()
     )
 
-    from zcu_tools.gui.adapter import ChannelValue
-
     assert isinstance(result, CfgSectionValue)
-    assert isinstance(result.fields.get("ro_ch"), ChannelValue)
+    ro_ch = result.fields.get("ro_ch")
+    assert isinstance(ro_ch, DirectValue)
+    assert ro_ch.value == 0

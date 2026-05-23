@@ -20,7 +20,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 
 from ...adapter import DirectValue, EvalValue
 from ...live_model import (
-    ChannelLiveField,
     LiteralLiveField,
     LiveField,
     MultiSweepLiveField,
@@ -110,6 +109,17 @@ def read_scalar_widget(w: QWidget, spec: "ScalarSpec") -> Any:
     return read_value_widget(w, spec.type, fallback=None)
 
 
+def _default_value_for_type(type_: type) -> Any:
+    defaults: dict[type, object] = {int: 0, float: 0.0, bool: False, str: ""}
+    return defaults.get(type_, "")
+
+
+def _widget_default_for_direct_value(value: DirectValue, spec: "ScalarSpec") -> Any:
+    if value.value is None:
+        return _default_value_for_type(spec.type)
+    return value.value
+
+
 class BaseLiveWidget(QWidget):
     """Base class implementing FieldWidgetProtocol."""
 
@@ -158,7 +168,6 @@ class ScalarWidget(BaseLiveWidget):
 
         self._rebuild_ui()
         field.on_change.connect(self._on_model_changed)
-        self._install_context_menu(self)
 
     def teardown(self) -> None:
         self._field.on_change.disconnect(self._on_model_changed)
@@ -195,15 +204,20 @@ class ScalarWidget(BaseLiveWidget):
                 self._sync_eval_ghost(val)
                 return
 
-            raw = val.value
+            if not isinstance(val, DirectValue):
+                return
+            field = cast(ScalarLiveField, self._field)
+            raw = _widget_default_for_direct_value(val, field.spec)
             if isinstance(self._input, QComboBox):
                 idx = self._input.findText(str(raw))
                 if idx >= 0:
                     self._input.setCurrentIndex(idx)
             elif isinstance(self._input, QCheckBox):
                 self._input.setChecked(bool(raw))
-            elif isinstance(self._input, (QSpinBox, TrimDoubleSpinBox)):
-                self._input.setValue(raw)
+            elif isinstance(self._input, QSpinBox):
+                self._input.setValue(int(raw))
+            elif isinstance(self._input, TrimDoubleSpinBox):
+                self._input.setValue(float(raw))
             elif isinstance(self._input, QLineEdit):
                 self._input.setText(str(raw))
         finally:
@@ -229,7 +243,7 @@ class ScalarWidget(BaseLiveWidget):
         else:
             self._input = make_value_widget(
                 field.spec.type,
-                value.value,
+                _widget_default_for_direct_value(value, field.spec),
                 field.spec.choices,
                 field.spec.editable,
                 field.spec.decimals,
@@ -271,32 +285,53 @@ class ScalarWidget(BaseLiveWidget):
     def _install_context_menu(self, widget: Optional[QWidget]) -> None:
         if widget is None:
             return
+        if not isinstance(widget, (QAbstractSpinBox, QLineEdit)):
+            return
         widget.setContextMenuPolicy(Qt.CustomContextMenu)  # type: ignore[attr-defined]
         widget.customContextMenuRequested.connect(  # type: ignore[attr-defined]
-            lambda pos, w=widget: self._show_context_menu(w.mapToGlobal(pos))
+            lambda pos, w=widget: self._show_context_menu(w, w.mapToGlobal(pos))
         )
 
-    def _show_context_menu(self, global_pos: Any) -> None:
-        field = cast(ScalarLiveField, self._field)
-        if not self._supports_eval_mode():
+    def _show_context_menu(
+        self, widget: "QAbstractSpinBox | QLineEdit", global_pos: Any
+    ) -> None:
+        if isinstance(widget, QAbstractSpinBox):
+            line_edit = cast(Any, widget).lineEdit()
+            if not isinstance(line_edit, QLineEdit):
+                return
+        else:
+            line_edit = widget
+        menu, mode_action = self._build_context_menu(line_edit)
+        if mode_action is None:
             return
-        menu = QMenu(self)
+        field = cast(ScalarLiveField, self._field)
+        chosen = cast(Any, menu).exec_(global_pos)
+        if chosen is not mode_action:
+            return
         value = field.get_value()
         if isinstance(value, EvalValue):
-            action = menu.addAction("Use direct value")
-            chosen = cast(Any, menu).exec_(global_pos)
-            if chosen is action:
-                if value.resolved is None:
-                    field.set_value(DirectValue(value=None, is_unset=True))
-                else:
-                    field.set_value(DirectValue(value=value.resolved, is_unset=False))
+            if value.resolved is None:
+                field.set_value(None)
+            else:
+                field.set_value(DirectValue(value=value.resolved, is_unset=False))
             return
 
-        action = menu.addAction("Use expression")
-        chosen = cast(Any, menu).exec_(global_pos)
-        if chosen is action and isinstance(value, DirectValue):
+        if isinstance(value, DirectValue):
             expr = "" if value.is_unset else str(value.value)
             field.set_value(EvalValue(expr=expr))
+
+    def _build_context_menu(self, widget: QLineEdit) -> tuple[QMenu, Any]:
+        menu = widget.createStandardContextMenu()
+        if menu is None:
+            raise RuntimeError("QLineEdit.createStandardContextMenu() returned None")
+        if not self._supports_eval_mode():
+            return menu, None
+        if menu.actions():
+            menu.addSeparator()
+        value = cast(ScalarLiveField, self._field).get_value()
+        if isinstance(value, EvalValue):
+            return menu, menu.addAction("Use direct value")
+        return menu, menu.addAction("Use expression")
 
     def _supports_eval_mode(self) -> bool:
         spec = cast(ScalarLiveField, self._field).spec
@@ -415,63 +450,3 @@ class MultiSweepWidget(BaseLiveWidget):
         # MultiSweepLiveField.set_value already updates child fields.
         # SweepWidget already listens to child field changes.
         pass
-
-
-@register_widget(ChannelLiveField)
-class ChannelWidget(BaseLiveWidget):
-    """Input with resolution ghost label."""
-
-    def __init__(self, field: ChannelLiveField, parent: Optional[QWidget] = None):
-        super().__init__(field, parent)
-        self._updating = False
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
-
-        cv = field.get_value()
-        self._edit = QLineEdit(str(cv.chosen))
-        self._edit.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
-        self._edit.textChanged.connect(self._on_ui_changed)
-        layout.addWidget(self._edit, stretch=1)
-
-        self._ghost = QLabel()
-        self._ghost.setStyleSheet("color: gray; font-style: italic;")
-        layout.addWidget(self._ghost)
-
-        field.on_change.connect(self._on_model_changed)
-        self._update_ghost(cv.resolved)
-
-    def teardown(self) -> None:
-        self._field.on_change.disconnect(self._on_model_changed)
-
-    def _on_ui_changed(self, text: str) -> None:
-        if self._updating:
-            return
-        self._updating = True
-        try:
-            self._field.set_value(text.strip())
-        finally:
-            self._updating = False
-
-    def _on_model_changed(self, val: Any) -> None:
-        self._update_ghost(val.resolved)
-        if self._updating:
-            return
-        self._updating = True
-        try:
-            self._edit.setText(str(val.chosen))
-        finally:
-            self._updating = False
-
-    def _update_ghost(self, resolved: Optional[int]) -> None:
-        if resolved is not None:
-            try:
-                int(self._edit.text().strip())
-                self._ghost.setText("")
-            except ValueError:
-                self._ghost.setText(f"= {resolved}")
-            self._ghost.setStyleSheet("color: gray; font-style: italic;")
-        else:
-            self._ghost.setText("= ?")
-            self._ghost.setStyleSheet("color: red; font-style: italic;")

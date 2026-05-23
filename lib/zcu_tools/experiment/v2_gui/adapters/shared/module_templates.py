@@ -5,7 +5,6 @@ import logging
 from zcu_tools.gui.adapter import (
     CfgSchema,
     CfgSectionValue,
-    ChannelValue,
     DirectValue,
     EvalValue,
     WaveformRefValue,
@@ -87,7 +86,7 @@ def make_pulse_readout_edit_template(
                 chosen_key="<Custom:Const>",
                 value=const_value,
             ),
-            "ch": ChannelValue(chosen=pulse_ch, resolved=None),
+            "ch": DirectValue(pulse_ch),
             "nqz": DirectValue(2),
             "freq": DirectValue(pulse_freq),
             "phase": DirectValue(0.0),
@@ -98,7 +97,7 @@ def make_pulse_readout_edit_template(
     )
     ro_value = CfgSectionValue(
         fields={
-            "ro_ch": ChannelValue(chosen=ro_ch, resolved=None),
+            "ro_ch": DirectValue(ro_ch),
             "ro_freq": DirectValue(pulse_freq),
             "ro_length": DirectValue(0.9),
             "trig_offset": DirectValue(0.335),

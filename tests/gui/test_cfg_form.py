@@ -10,8 +10,6 @@ from zcu_tools.gui.adapter import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
-    ChannelSpec,
-    ChannelValue,
     LiteralSpec,
     ModuleRefSpec,
     ModuleRefValue,
@@ -141,20 +139,6 @@ def test_scalar_widget_minimum_width_reduced(qapp):
     assert w.minimumWidth() == 20
 
 
-def test_channel_widget_minimum_width_reduced(qapp, ctrl):
-    from zcu_tools.gui.live_model import ChannelLiveField, LiveModelEnv
-    from zcu_tools.gui.ui.fields.common import ChannelWidget
-
-    field = ChannelLiveField(
-        ChannelSpec(label="Ch"),
-        LiveModelEnv(ctrl=ctrl),
-        initial_val=ChannelValue(chosen="qub_ch", resolved=7),
-    )
-    w = ChannelWidget(field)
-    assert w.findChild(type(w._edit)) is not None
-    assert w._edit.minimumWidth() == 20
-
-
 def test_scalar_widget_eval_mode_shows_resolved_ghost(qapp, ctrl):
     from zcu_tools.gui.live_model import LiveModelEnv, ScalarLiveField
     from zcu_tools.gui.ui.fields.common import ScalarWidget
@@ -190,6 +174,58 @@ def test_scalar_widget_eval_mode_marks_unresolved_red(qapp, ctrl):
     assert w._ghost is not None
     assert w._ghost.text() == "= ?"
     assert "red" in w._ghost.styleSheet()
+
+
+def test_scalar_widget_eval_menu_extends_standard_line_edit_menu(qapp, ctrl):
+    from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
+    from zcu_tools.gui.live_model import LiveModelEnv, ScalarLiveField
+    from zcu_tools.gui.ui.fields.common import ScalarWidget
+    from zcu_tools.meta_tool import MetaDict
+
+    md = MetaDict()
+    md.r_f = 6000.0
+    ctrl.get_current_md.return_value = md
+    field = ScalarLiveField(
+        ScalarSpec(label="Freq", type=float),
+        LiveModelEnv(ctrl=ctrl),
+        initial_val=EvalValue("r_f"),
+    )
+    w = ScalarWidget(field)
+    edit = w.findChild(QLineEdit)
+    assert edit is not None
+
+    menu, mode_action = w._build_context_menu(edit)
+    action_texts = [action.text() for action in menu.actions()]
+
+    assert mode_action is not None
+    assert "Use direct value" in action_texts
+    assert len(action_texts) > 1
+
+
+def test_scalar_widget_unresolved_eval_can_switch_back_to_direct(qapp, ctrl):
+    from qtpy.QtWidgets import QDoubleSpinBox  # type: ignore[attr-defined]
+    from zcu_tools.gui.live_model import LiveModelEnv, ScalarLiveField
+    from zcu_tools.gui.ui.fields.common import ScalarWidget
+    from zcu_tools.meta_tool import MetaDict
+
+    ctrl.get_current_md.return_value = MetaDict()
+    field = ScalarLiveField(
+        ScalarSpec(label="Freq", type=float),
+        LiveModelEnv(ctrl=ctrl),
+        initial_val=EvalValue("missing"),
+    )
+    w = ScalarWidget(field)
+
+    field.set_value(None)
+
+    value = field.get_value()
+    assert isinstance(value, DirectValue)
+    assert value.is_unset is True
+    assert value.value == pytest.approx(0.0)
+    assert w._mode == "direct"
+    spin = w.findChild(QDoubleSpinBox)
+    assert spin is not None
+    assert spin.value() == pytest.approx(0.0)
 
 
 # ---------------------------------------------------------------------------

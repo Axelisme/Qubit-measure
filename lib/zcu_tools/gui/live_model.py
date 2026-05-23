@@ -18,8 +18,6 @@ from .adapter import (
     CfgNodeValue,
     CfgSectionSpec,
     CfgSectionValue,
-    ChannelSpec,
-    ChannelValue,
     EvalValue,
     LiteralSpec,
     ModuleRefSpec,
@@ -300,62 +298,6 @@ class MultiSweepLiveField(LiveField):
         return {k: f.to_dict() for k, f in self.fields.items()}
 
 
-class ChannelLiveField(LiveField):
-    """Reactive Channel field that resolves names via MetaDict from Controller."""
-
-    spec: ChannelSpec
-
-    def __init__(
-        self,
-        spec: ChannelSpec,
-        env: LiveModelEnv,
-        initial_val: object = None,
-    ) -> None:
-        super().__init__(spec, env)
-
-        if isinstance(initial_val, ChannelValue):
-            self._chosen = initial_val.chosen
-        else:
-            self._chosen = initial_val if isinstance(initial_val, (int, str)) else 0
-
-        self._resolved_id: Optional[int] = None
-        self._refresh_resolve(emit_change=False)
-
-    def _refresh_resolve(self, *, emit_change: bool) -> None:
-        from .ui.fields.utils import _resolve_channel
-
-        md = self.env.ctrl.get_current_md()
-        new_id = _resolve_channel(str(self._chosen), md)
-        if new_id != self._resolved_id:
-            self._resolved_id = new_id
-            self._set_valid(new_id is not None)
-            if emit_change:
-                self.on_change.emit(self.get_value())
-
-    def get_value(self) -> ChannelValue:
-        return ChannelValue(chosen=self._chosen, resolved=self._resolved_id)
-
-    def set_value(self, val: object) -> None:
-        if isinstance(val, ChannelValue):
-            new_chosen = val.chosen
-        elif isinstance(val, (int, str)):
-            new_chosen = val
-        else:
-            return
-
-        if new_chosen != self._chosen:
-            self._chosen = new_chosen
-            self._refresh_resolve(emit_change=False)
-            self.on_change.emit(self.get_value())
-
-    def to_dict(self) -> Optional[int]:
-        return self._resolved_id
-
-    def refresh_external(self, event: object) -> None:
-        del event
-        self._refresh_resolve(emit_change=True)
-
-
 class SectionLiveField(LiveField):
     """Container for a group of fields."""
 
@@ -571,8 +513,6 @@ def create_live_field(
         return SweepLiveField(spec, env, initial_val)
     if isinstance(spec, MultiSweepSpec):
         return MultiSweepLiveField(spec, env, initial_val)
-    if isinstance(spec, ChannelSpec):
-        return ChannelLiveField(spec, env, initial_val)
     if isinstance(spec, (ModuleRefSpec, WaveformRefSpec)):
         return ModuleRefLiveField(spec, env, initial_val)
     if isinstance(spec, CfgSectionSpec):

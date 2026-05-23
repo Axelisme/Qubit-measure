@@ -5,27 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
-    from zcu_tools.meta_tool import MetaDict
     from zcu_tools.meta_tool.library import ModuleLibrary
 
     from .adapter import CfgSectionSpec
-
-
-def _resolve_channel(text: str, md: Optional[MetaDict]) -> Optional[int]:
-    """Resolve a channel string (int or MetaDict key) to a physical channel ID."""
-    try:
-        return int(text)
-    except ValueError:
-        pass
-
-    if md is None:
-        return None
-
-    try:
-        val = getattr(md, text)
-        return int(val)
-    except (AttributeError, ValueError, TypeError):
-        return None
 
 
 def _spec_value_for_chosen(

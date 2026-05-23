@@ -12,7 +12,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 )
 from zcu_tools.gui.adapter import (
     CfgSectionValue,
-    ChannelValue,
     ModuleRefValue,
     DirectValue,
     ScalarValue,
@@ -55,10 +54,8 @@ def test_make_pulse_readout_edit_template_uses_requested_defaults():
     assert isinstance(ro_cfg, CfgSectionValue)
     assert pulse_cfg.fields["freq"].value == 6200.0  # type: ignore[union-attr]
     assert ro_cfg.fields["ro_freq"].value == 6200.0  # type: ignore[union-attr]
-    assert isinstance(pulse_cfg.fields["ch"], ChannelValue)
-    assert isinstance(ro_cfg.fields["ro_ch"], ChannelValue)
-    assert pulse_cfg.fields["ch"].chosen == 3  # type: ignore[union-attr]
-    assert ro_cfg.fields["ro_ch"].chosen == 7  # type: ignore[union-attr]
+    assert pulse_cfg.fields["ch"].value == 3  # type: ignore[union-attr]
+    assert ro_cfg.fields["ro_ch"].value == 7  # type: ignore[union-attr]
 
 
 def test_build_readout_for_frequency_updates_existing_module():

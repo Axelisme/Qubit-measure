@@ -13,7 +13,6 @@ from typing import Any, Optional
 from zcu_tools.gui.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
-    ChannelValue,
     DirectValue,
     ScalarValue,
     WaveformRefValue,
@@ -150,7 +149,7 @@ def _pulse_to_value(cfg: dict) -> CfgSectionValue:
                 chosen_key=f"<Custom:{wav_spec.label}>",
                 value=wav_val,
             ),
-            "ch": ChannelValue(chosen=cfg.get("ch", 0), resolved=None),
+            "ch": DirectValue(cfg.get("ch", 0)),
             "nqz": _val(cfg, "nqz", 2),
             "freq": _val(cfg, "freq", 6000.0),
             "phase": _val(cfg, "phase", 0.0),
@@ -165,7 +164,7 @@ def _direct_readout_to_value(cfg: dict) -> CfgSectionValue:
     return CfgSectionValue(
         fields={
             "type": DirectValue("readout/direct"),
-            "ro_ch": ChannelValue(chosen=cfg.get("ro_ch", 0), resolved=None),
+            "ro_ch": DirectValue(cfg.get("ro_ch", 0)),
             "ro_freq": _val(cfg, "ro_freq", 6000.0),
             "ro_length": _val(cfg, "ro_length", 1.0),
             "trig_offset": _val(cfg, "trig_offset", 0.0),

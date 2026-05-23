@@ -11,7 +11,6 @@ from zcu_tools.gui.adapter import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
-    ChannelValue,
     DirectValue,
     EvalValue,
     ModuleRefValue,
@@ -55,13 +54,6 @@ def _get_parent_section_value(
 def _coerce_value_for_node(current: CfgNodeValue, value: object) -> CfgNodeValue:
     if isinstance(current, (DirectValue, EvalValue)):
         return DirectValue(value=value, is_unset=False)
-    if isinstance(current, ChannelValue):
-        if not isinstance(value, (int, str)):
-            raise RuntimeError(
-                f"ChannelValue path requires int|str default, got {type(value).__name__}"
-            )
-        resolved = value if isinstance(value, int) else None
-        return ChannelValue(chosen=value, resolved=resolved)
     if isinstance(current, SweepValue):
         if not isinstance(value, SweepValue):
             raise RuntimeError("SweepValue path requires SweepValue default")
