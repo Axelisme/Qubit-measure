@@ -102,7 +102,7 @@ def _default_fake_schema(ctx: ExpContext) -> CfgSchema:
 def _run_and_wait(cf: ControllerFixture, tab_id: str) -> None:
     """Start a run and block until it finishes."""
     cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context), {})
-    assert _wait_for(lambda: not cf.state.is_running)
+    assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
 
 def _default_analyze_params(cf: ControllerFixture, tab_id: str) -> dict[str, object]:
@@ -175,7 +175,7 @@ def test_analyze_exception_shows_status_message(cf):
     cf.state.get_tab(tab_id).adapter = bad_adapter
 
     cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
-    assert _wait_for(lambda: not cf.state.is_analyzing)
+    assert _wait_for(lambda: not cf.state.is_tab_analyzing(tab_id))
 
     assert cf.view.show_status_message.called
     msg = cf.view.show_status_message.call_args[0][0]
@@ -352,8 +352,8 @@ def test_analyze_is_async_and_sets_busy_flag(cf):
     cf.state.get_tab(tab_id).adapter = slow_adapter
 
     cf.ctrl.analyze(tab_id, {"threshold": 0.0})
-    assert cf.state.is_analyzing is True
-    assert _wait_for(lambda: not cf.state.is_analyzing)
+    assert cf.state.is_tab_analyzing(tab_id) is True
+    assert _wait_for(lambda: not cf.state.is_tab_analyzing(tab_id))
 
 
 def test_analyze_clears_active_figure_container_after_finish(cf):
@@ -363,7 +363,7 @@ def test_analyze_clears_active_figure_container_after_finish(cf):
 
     cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
 
-    assert _wait_for(lambda: not cf.state.is_analyzing)
+    assert _wait_for(lambda: not cf.state.is_tab_analyzing(tab_id))
     assert has_current_container() is False
 
 
@@ -381,8 +381,8 @@ def test_save_data_is_async_and_sets_busy_flag(cf):
     cf.state.get_tab(tab_id).adapter = slow_adapter
 
     cf.ctrl.save_data(tab_id, "/tmp/fake_data")
-    assert cf.state.is_saving_data is True
-    assert _wait_for(lambda: not cf.state.is_saving_data)
+    assert cf.state.is_tab_saving_data(tab_id) is True
+    assert _wait_for(lambda: not cf.state.is_tab_saving_data(tab_id))
 
 
 def test_save_both_reports_mixed_result(cf):
@@ -418,15 +418,17 @@ def test_start_run_blocked_while_analyzing(cf):
     cf.state.get_tab(tab_id).adapter = slow_adapter
 
     cf.ctrl.analyze(tab_id, {"threshold": 0.0})
-    assert cf.state.is_analyzing is True
-    with pytest.raises(RuntimeError, match="already active"):
+    assert cf.state.is_tab_analyzing(tab_id) is True
+    with pytest.raises(RuntimeError, match="Tab .* is busy"):
         cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context), {})
-    assert _wait_for(lambda: not cf.state.is_analyzing)
+    assert _wait_for(lambda: not cf.state.is_tab_analyzing(tab_id))
 
 
-def test_analyze_blocked_while_saving_data(cf):
+def test_analyze_allowed_while_other_tab_saving_data(cf):
     tab_id = cf.ctrl.new_tab("fake")
+    other_tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
+    _run_and_wait(cf, other_tab_id)
 
     slow_adapter = MagicMock(wraps=FakeAdapter())
 
@@ -435,14 +437,37 @@ def test_analyze_blocked_while_saving_data(cf):
         return FakeAdapter().save(req)
 
     slow_adapter.save.side_effect = slow_save
+    cf.state.get_tab(other_tab_id).adapter = slow_adapter
+
+    cf.ctrl.save_data(other_tab_id, "/tmp/fake_data")
+    assert cf.state.is_tab_saving_data(other_tab_id) is True
+    cf.ctrl.analyze(tab_id, {"threshold": 0.0})
+    assert _wait_for(lambda: cf.state.get_tab(tab_id).analyze_result is not None)
+    assert _wait_for(lambda: not cf.state.is_tab_saving_data(other_tab_id))
+
+
+def test_close_busy_tab_shows_status_message(cf):
+    tab_id = cf.ctrl.new_tab("fake")
+    _run_and_wait(cf, tab_id)
+
+    slow_adapter = MagicMock(wraps=FakeAdapter())
+
+    def slow_analyze(req):
+        time.sleep(0.05)
+        return FakeAdapter().analyze(req)
+
+    slow_adapter.get_analyze_params.side_effect = lambda result, ctx: (
+        FakeAdapter().get_analyze_params(result, ctx)
+    )
+    slow_adapter.analyze.side_effect = slow_analyze
     cf.state.get_tab(tab_id).adapter = slow_adapter
 
-    cf.ctrl.save_data(tab_id, "/tmp/fake_data")
-    assert cf.state.is_saving_data is True
     cf.ctrl.analyze(tab_id, {"threshold": 0.0})
-    assert _wait_for(lambda: cf.view.show_status_message.called)
-    assert "already active" in cf.view.show_status_message.call_args[0][0].lower()
-    assert _wait_for(lambda: not cf.state.is_saving_data)
+    assert cf.state.is_tab_analyzing(tab_id) is True
+    cf.ctrl.close_tab(tab_id)
+    assert tab_id in cf.state.tabs
+    assert cf.view.show_status_message.called
+    assert _wait_for(lambda: not cf.state.is_tab_analyzing(tab_id))
 
 
 def test_get_tab_save_paths_returns_save_paths(cf):

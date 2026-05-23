@@ -40,8 +40,10 @@ class RunService(QObject):
         pbar_factory: Optional[Any] = None,
         live_container: Optional[FigureContainer] = None,
     ) -> None:
-        if self._state.has_active_long_task:
-            raise RuntimeError("Another long-running task is already active")
+        if self._state.is_run_active():
+            raise RuntimeError("Another run is already active")
+        if self._state.is_tab_busy(tab_id):
+            raise RuntimeError(f"Tab {tab_id!r} is busy")
 
         ctx = self._state.exp_context
         req = RunRequest(
@@ -69,8 +71,9 @@ class RunService(QObject):
             )
         except Exception:
             raise
-        self._state.set_running(True)
-        self._bus.emit(GuiEvent.RUN_STATE_CHANGED)
+        self._state.set_tab_running(tab_id, True)
+        self._bus.emit(GuiEvent.TAB_INTERACTION_CHANGED, tab_id)
+        self._bus.emit(GuiEvent.RUN_LOCK_CHANGED, tab_id)
 
     def cancel_run(self) -> None:
         logger.info("cancel_run")
@@ -81,12 +84,14 @@ class RunService(QObject):
             "_on_run_finished: tab_id=%r result_type=%s", tab_id, type(result).__name__
         )
         self._state.update_tab_result(tab_id, result)
-        self._state.set_running(False)
-        self._bus.emit(GuiEvent.RUN_STATE_CHANGED)
+        self._state.set_tab_running(tab_id, False)
+        self._bus.emit(GuiEvent.TAB_INTERACTION_CHANGED, tab_id)
+        self._bus.emit(GuiEvent.RUN_LOCK_CHANGED, None)
         self.run_finished.emit(tab_id, result)
 
     def _on_run_failed(self, tab_id: str, error: Exception) -> None:
         logger.warning("_on_run_failed: tab_id=%r error=%r", tab_id, error)
-        self._state.set_running(False)
-        self._bus.emit(GuiEvent.RUN_STATE_CHANGED)
+        self._state.set_tab_running(tab_id, False)
+        self._bus.emit(GuiEvent.TAB_INTERACTION_CHANGED, tab_id)
+        self._bus.emit(GuiEvent.RUN_LOCK_CHANGED, None)
         self.run_failed.emit(tab_id, error)

@@ -25,7 +25,9 @@ class GuiEvent(str, Enum):
     TAB_ADDED = "tab_added"  # payload: (tab_id, adapter_name)
     TAB_CLOSED = "tab_closed"  # payload: (tab_id)
     TAB_CONTENT_CHANGED = "tab_content_changed"  # payload: (tab_id)
-    RUN_STATE_CHANGED = "run_state_changed"  # global run state changed
+    TAB_INTERACTION_CHANGED = "tab_interaction_changed"  # payload: (tab_id)
+    RUN_LOCK_CHANGED = "run_lock_changed"  # payload: (running_tab_id | None)
+    RUN_STATE_CHANGED = "run_state_changed"  # deprecated compatibility event
 
     # UI / Panel layer
     PREDICTOR_CHANGED = "predictor_changed"  # predictor state or values changed

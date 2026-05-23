@@ -32,6 +32,7 @@ class CfgFormWidget(QWidget):
     """Container for the reactive experiment configuration form."""
 
     validity_changed: Signal = Signal(bool)
+    schema_changed: Signal = Signal(object)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -64,6 +65,7 @@ class CfgFormWidget(QWidget):
         env = LiveModelEnv(ctrl=ctrl)
         self._model = SectionLiveField(schema.spec, env, initial_val=schema.value)
         self._model.on_validity_changed.connect(self.validity_changed.emit)
+        self._model.on_change.connect(self._emit_schema_changed)
 
         # 2. Build the UI tree
         self._root_widget = SectionWidget(self._model, top_level=True)
@@ -77,6 +79,7 @@ class CfgFormWidget(QWidget):
 
     def _clear_inner(self) -> None:
         if self._model:
+            self._model.on_change.disconnect(self._emit_schema_changed)
             self._model.teardown()
             self._model = None
 
@@ -101,6 +104,11 @@ class CfgFormWidget(QWidget):
 
     def is_valid(self) -> bool:
         return self._model.is_valid() if self._model else True
+
+    def _emit_schema_changed(self, *_: object) -> None:
+        if self._model is None:
+            return
+        self.schema_changed.emit(self.read_schema())
 
     def to_dict(self) -> dict[str, Any]:
         """Convenience: return raw dict for experiment runner."""

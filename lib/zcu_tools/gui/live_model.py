@@ -404,6 +404,8 @@ class ModuleRefLiveField(LiveField):
             self._sub_value = None
 
         self.sub_field: Optional[SectionLiveField] = None
+        self.env.bus.subscribe(GuiEvent.CONTEXT_CHANGED, self._on_context_changed)
+        self.env.bus.subscribe(GuiEvent.INSPECT_CHANGED, self._on_inspect_changed)
         self._rebuild_sub_field()
 
     def _rebuild_sub_field(self) -> None:
@@ -448,6 +450,23 @@ class ModuleRefLiveField(LiveField):
         valid = self.sub_field.is_valid() if self.sub_field else True
         self._set_valid(valid)
 
+    def _on_context_changed(self, md: object, ml: object) -> None:
+        del md, ml
+        self._refresh_library_binding()
+
+    def _on_inspect_changed(self, md: object = None) -> None:
+        del md
+        self._refresh_library_binding()
+
+    def _refresh_library_binding(self) -> None:
+        if self._chosen_key.startswith("<Custom:"):
+            return
+        self._sub_value = (
+            self.sub_field.get_value() if self.sub_field else self._sub_value
+        )
+        self._rebuild_sub_field()
+        self.on_change.emit(self.get_value())
+
     def get_chosen_key(self) -> str:
         return self._chosen_key
 
@@ -484,6 +503,8 @@ class ModuleRefLiveField(LiveField):
         return {}
 
     def teardown(self) -> None:
+        self.env.bus.unsubscribe(GuiEvent.CONTEXT_CHANGED, self._on_context_changed)
+        self.env.bus.unsubscribe(GuiEvent.INSPECT_CHANGED, self._on_inspect_changed)
         if self.sub_field:
             self.sub_field.teardown()
 

@@ -41,8 +41,8 @@ class AnalyzeService(QObject):
         analyze_params: dict[str, object],
         figure_container: Optional[FigureContainer] = None,
     ) -> None:
-        if self._state.has_active_long_task:
-            raise RuntimeError("Another long-running task is already active")
+        if self._state.is_tab_busy(tab_id):
+            raise RuntimeError(f"Tab {tab_id!r} is busy")
 
         tab = self._state.get_tab(tab_id)
         if tab.run_result is None:
@@ -65,8 +65,8 @@ class AnalyzeService(QObject):
             req,
             figure_container=figure_container,
         )
-        self._state.set_analyzing(True)
-        self._bus.emit(GuiEvent.RUN_STATE_CHANGED)
+        self._state.set_tab_analyzing(tab_id, True)
+        self._bus.emit(GuiEvent.TAB_INTERACTION_CHANGED, tab_id)
 
     def _on_analyze_finished(self, tab_id: str, analyze_result: Any) -> None:
         logger.info(
@@ -75,12 +75,12 @@ class AnalyzeService(QObject):
             type(analyze_result).__name__,
         )
         self._state.update_tab_analyze(tab_id, analyze_result, analyze_result.figure)
-        self._state.set_analyzing(False)
-        self._bus.emit(GuiEvent.RUN_STATE_CHANGED)
+        self._state.set_tab_analyzing(tab_id, False)
+        self._bus.emit(GuiEvent.TAB_INTERACTION_CHANGED, tab_id)
         self.analyze_finished.emit(tab_id, analyze_result)
 
     def _on_analyze_failed(self, tab_id: str, error: Exception) -> None:
         logger.warning("_on_analyze_failed: tab_id=%r error=%r", tab_id, error)
-        self._state.set_analyzing(False)
-        self._bus.emit(GuiEvent.RUN_STATE_CHANGED)
+        self._state.set_tab_analyzing(tab_id, False)
+        self._bus.emit(GuiEvent.TAB_INTERACTION_CHANGED, tab_id)
         self.analyze_failed.emit(tab_id, error)

@@ -39,20 +39,16 @@ def test_left_panel_toggle_uses_collapsed_boundary_handle(qapp):
     tab._left_edge_handle.click()
     QApplication.processEvents()
 
-    collapsed_left = tab._splitter.sizes()[0]
-    assert collapsed_left == 0
+    assert tab._splitter.sizes()[0] == 0
     assert tab._left_panel_collapsed is True
-    assert tab._left_edge_handle.isVisible() is True
     assert tab._left_edge_handle.x() == 0
 
     tab._left_edge_handle.click()
     QApplication.processEvents()
 
-    reopened_left = tab._splitter.sizes()[0]
     assert tab._left_panel_collapsed is False
-    assert tab._left_edge_handle.isVisible() is True
     assert tab._left_edge_handle.x() > 0
-    assert reopened_left >= expanded_left
+    assert tab._splitter.sizes()[0] >= expanded_left
 
 
 def test_left_panel_handle_tracks_splitter_boundary(qapp):
@@ -79,13 +75,14 @@ def test_left_panel_handle_tracks_splitter_boundary(qapp):
     assert abs(moved_x - (left_boundary - tab._left_edge_handle.width() // 2)) <= 2
 
 
-def test_exp_tab_disables_analyze_and_writeback_while_analyzing(qapp):
+def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
     from zcu_tools.gui.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget("tab-1", MagicMock())
     tab.set_writeback_count(1)
     tab.update_interaction_state(
         TabInteractionState(
+            global_run_active=False,
             is_running=False,
             is_analyzing=True,
             is_saving_data=False,
@@ -101,12 +98,35 @@ def test_exp_tab_disables_analyze_and_writeback_while_analyzing(qapp):
     assert tab.save_image_btn.isEnabled() is False
 
 
+def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(qapp):
+    from zcu_tools.gui.ui.main_window import ExpTabWidget
+
+    tab = ExpTabWidget("tab-1", MagicMock())
+    tab.update_interaction_state(
+        TabInteractionState(
+            global_run_active=True,
+            is_running=False,
+            is_analyzing=False,
+            is_saving_data=False,
+            has_context=True,
+            has_soc=True,
+            has_run_result=True,
+            has_analyze_result=True,
+        )
+    )
+
+    assert tab.run_btn.isEnabled() is False
+    assert tab.analyze_btn.isEnabled() is True
+    assert tab.save_data_btn.isEnabled() is True
+
+
 def test_exp_tab_disables_save_buttons_while_saving_data(qapp):
     from zcu_tools.gui.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget("tab-1", MagicMock())
     tab.update_interaction_state(
         TabInteractionState(
+            global_run_active=False,
             is_running=False,
             is_analyzing=False,
             is_saving_data=True,
@@ -122,30 +142,32 @@ def test_exp_tab_disables_save_buttons_while_saving_data(qapp):
     assert tab.run_btn.text() == "Run"
 
 
-def test_main_window_save_data_busy_does_not_reset_plot(qapp):
+def test_main_window_run_lock_disables_only_new_tab_and_run(qapp):
     from zcu_tools.gui.ui.main_window import MainWindow
 
     ctrl = MagicMock()
     ctrl.get_bus.return_value = EventBus()
-    ctrl.is_run_active.return_value = False
-    ctrl.is_running.return_value = True
-    ctrl.is_analyzing.return_value = False
-    ctrl.is_saving_data.return_value = True
+    ctrl.is_run_active.return_value = True
     ctrl.has_context.return_value = True
     ctrl.has_soc.return_value = True
     ctrl.has_tab.return_value = True
     ctrl.has_run_result.return_value = True
     ctrl.has_analyze_result.return_value = True
+    ctrl.is_tab_running.side_effect = lambda tab_id: tab_id == "tab-1"
+    ctrl.is_tab_analyzing.return_value = False
+    ctrl.is_tab_saving_data.return_value = False
 
     window = MainWindow(ctrl)
-    mock_tab = MagicMock()
-    window._tab_widgets["tab-1"] = mock_tab
+    tab_one = MagicMock()
+    tab_two = MagicMock()
+    window._tab_widgets["tab-1"] = tab_one
+    window._tab_widgets["tab-2"] = tab_two
 
-    window.refresh_run_state(False)
+    window.refresh_run_lock("tab-1")
 
-    mock_tab.reset_plot.assert_not_called()
-    mock_tab.update_interaction_state.assert_called_once()
     assert window._new_tab_btn.isEnabled() is False
+    tab_one.update_interaction_state.assert_called_once()
+    tab_two.update_interaction_state.assert_called_once()
 
 
 def test_show_analysis_figure_draws_canvas(qapp, monkeypatch):

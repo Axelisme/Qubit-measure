@@ -355,9 +355,13 @@ class ExpTabWidget(QWidget):
 
     def set_save_paths(self, data_path: str, image_path: str) -> None:
         if data_path:
+            self._data_path_edit.blockSignals(True)
             self._data_path_edit.setText(data_path)
+            self._data_path_edit.blockSignals(False)
         if image_path:
+            self._image_path_edit.blockSignals(True)
             self._image_path_edit.setText(image_path)
+            self._image_path_edit.blockSignals(False)
 
     def get_data_path(self) -> str:
         return self._data_path_edit.text()
@@ -386,9 +390,7 @@ class ExpTabWidget(QWidget):
         self._cfg_valid = valid
 
     def update_interaction_state(self, state: TabInteractionState) -> None:
-        long_task_active = (
-            state.is_running or state.is_analyzing or state.is_saving_data
-        )
+        local_busy = state.is_running or state.is_analyzing or state.is_saving_data
         if state.is_running:
             self.run_btn.setText("Stop")
             self.run_btn.setEnabled(True)
@@ -398,7 +400,8 @@ class ExpTabWidget(QWidget):
         else:
             self.run_btn.setText("Run")
             can_run = (
-                not long_task_active
+                not local_busy
+                and not state.global_run_active
                 and state.has_context
                 and state.has_soc
                 and self._cfg_valid
@@ -406,8 +409,9 @@ class ExpTabWidget(QWidget):
             self.run_btn.setEnabled(can_run)
             self.run_btn.setStyleSheet("")
 
-        idle = not long_task_active
+        idle = not local_busy
         self.cfg_form.setEnabled(idle)
+        self.analyze_form.setEnabled(idle)
         self.analyze_btn.setEnabled(idle and state.has_context and state.has_run_result)
         self.save_data_btn.setEnabled(
             idle and state.has_context and state.has_run_result
@@ -498,7 +502,10 @@ class MainWindow(QMainWindow):
 
         # EventBus subscriptions
         bus = self._ctrl.get_bus()
-        bus.subscribe(GuiEvent.RUN_STATE_CHANGED, self._on_bus_run_state_changed)
+        bus.subscribe(
+            GuiEvent.TAB_INTERACTION_CHANGED, self._on_bus_tab_interaction_changed
+        )
+        bus.subscribe(GuiEvent.RUN_LOCK_CHANGED, self._on_bus_run_lock_changed)
         bus.subscribe(GuiEvent.CONTEXT_CHANGED, self._on_bus_context_changed)
         bus.subscribe(GuiEvent.TAB_ADDED, self._on_bus_tab_added)
         bus.subscribe(GuiEvent.TAB_CLOSED, self._on_bus_tab_closed)
@@ -511,7 +518,10 @@ class MainWindow(QMainWindow):
 
     def _cleanup_bus_subscriptions(self) -> None:
         bus = self._ctrl.get_bus()
-        bus.unsubscribe(GuiEvent.RUN_STATE_CHANGED, self._on_bus_run_state_changed)
+        bus.unsubscribe(
+            GuiEvent.TAB_INTERACTION_CHANGED, self._on_bus_tab_interaction_changed
+        )
+        bus.unsubscribe(GuiEvent.RUN_LOCK_CHANGED, self._on_bus_run_lock_changed)
         bus.unsubscribe(GuiEvent.CONTEXT_CHANGED, self._on_bus_context_changed)
         bus.unsubscribe(GuiEvent.TAB_ADDED, self._on_bus_tab_added)
         bus.unsubscribe(GuiEvent.TAB_CLOSED, self._on_bus_tab_closed)
@@ -519,12 +529,17 @@ class MainWindow(QMainWindow):
         bus.unsubscribe(GuiEvent.INSPECT_CHANGED, self._on_bus_inspect_changed)
         bus.unsubscribe(GuiEvent.PREDICTOR_CHANGED, self._on_bus_predictor_changed)
 
-    def _on_bus_run_state_changed(self) -> None:
-        self.refresh_run_state(self._ctrl.is_run_active())
+    def _on_bus_tab_interaction_changed(self, tab_id: str) -> None:
+        self.refresh_tab_interaction(tab_id)
+
+    def _on_bus_run_lock_changed(self, running_tab_id: Optional[str]) -> None:
+        self.refresh_run_lock(running_tab_id)
 
     def _on_bus_context_changed(self, md: Any, ml: Any) -> None:
+        del md, ml
         self.refresh_context_panel()
-        self.refresh_config_panels()
+        for tab_id in list(self._tab_widgets):
+            self.refresh_tab(tab_id)
 
     def _on_bus_tab_added(self, tab_id: str, adapter_name: str) -> None:
         logger.info("_on_bus_tab_added: tab_id=%r adapter=%r", tab_id, adapter_name)
@@ -541,18 +556,36 @@ class MainWindow(QMainWindow):
         schema = self._ctrl.get_tab_default_cfg(tab_id)
         if schema is not None:
             tab_w.populate_cfg(schema, self._ctrl)
+        analyze_values = self._ctrl.get_tab_analyze_param_values(tab_id)
+        if analyze_values and tab_w.has_analyze_params():
+            tab_w.analyze_form.populate_values(analyze_values)
 
         # refresh state (enables/disables buttons based on context)
-        self.refresh_run_state(self._ctrl.is_run_active())
+        self.refresh_run_lock(self._state_running_tab_id())
+        self.refresh_tab_interaction(tab_id)
 
         # re-evaluate run_btn when channel validity changes
         tab_w.cfg_form.validity_changed.connect(
-            lambda _valid, tid=tab_id, tw=tab_w: self._set_tab_running(
+            lambda _valid, tid=tab_id: self.refresh_tab_interaction(tid)
+        )
+        tab_w.cfg_form.schema_changed.connect(
+            lambda schema_obj, tid=tab_id: self._ctrl.update_tab_cfg(tid, schema_obj)
+        )
+        tab_w.analyze_form.params_changed.connect(
+            lambda values, tid=tab_id: self._ctrl.update_tab_analyze_params(tid, values)
+        )
+        tab_w._data_path_edit.textChanged.connect(
+            lambda _text, tid=tab_id, tw=tab_w: self._ctrl.update_tab_save_paths(
                 tid,
-                tw,
-                self._ctrl.is_run_active(),
-                self._ctrl.has_context(),
-                self._ctrl.has_soc(),
+                tw.get_data_path(),
+                tw.get_image_path(),
+            )
+        )
+        tab_w._image_path_edit.textChanged.connect(
+            lambda _text, tid=tab_id, tw=tab_w: self._ctrl.update_tab_save_paths(
+                tid,
+                tw.get_data_path(),
+                tw.get_image_path(),
             )
         )
 
@@ -575,15 +608,17 @@ class MainWindow(QMainWindow):
                 self._tabs.removeTab(index)
             tab_w.deleteLater()
 
-        self.refresh_run_state(self._ctrl.is_run_active())
+        self.refresh_run_lock(self._state_running_tab_id())
 
     def _on_bus_tab_content_changed(self, tab_id: str) -> None:
         self.refresh_tab(tab_id)
 
     def _on_bus_inspect_changed(self, md: Optional[Any] = None) -> None:
         # emitted from context.py (with md) and controller.py (without)
+        del md
         self.refresh_inspect_panel()
-        self.refresh_config_panels()
+        for tab_id in list(self._tab_widgets):
+            self.refresh_tab(tab_id)
 
     def _on_bus_predictor_changed(self) -> None:
         self.refresh_predictor_panel()
@@ -596,7 +631,6 @@ class MainWindow(QMainWindow):
         self,
         tab_id: str,
         tab_w: "ExpTabWidget",
-        is_running: bool,
         has_context: bool,
         has_soc: bool,
     ) -> None:
@@ -604,9 +638,11 @@ class MainWindow(QMainWindow):
             return
 
         state = TabInteractionState(
-            is_running=is_running,
-            is_analyzing=self._ctrl.is_analyzing(),
-            is_saving_data=self._ctrl.is_saving_data(),
+            global_run_active=self._ctrl.is_run_active()
+            and not self._ctrl.is_tab_running(tab_id),
+            is_running=self._ctrl.is_tab_running(tab_id),
+            is_analyzing=self._ctrl.is_tab_analyzing(tab_id),
+            is_saving_data=self._ctrl.is_tab_saving_data(tab_id),
             has_context=has_context,
             has_soc=has_soc,
             has_run_result=self._ctrl.has_run_result(tab_id),
@@ -620,10 +656,13 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
 
-        # populate analyze params on first result (adapter is now known)
-        if not tab_w.has_analyze_params() and self._ctrl.has_run_result(tab_id):
+        # analyze params are part of per-tab state; rehydrate UI from state on refresh
+        if self._ctrl.has_run_result(tab_id):
             params = self._ctrl.get_tab_analyze_params(tab_id)
             tab_w.populate_analyze_params(params)
+            values = self._ctrl.get_tab_analyze_param_values(tab_id)
+            if values:
+                tab_w.analyze_form.populate_values(values)
 
         items = self._ctrl.get_tab_writeback_items(tab_id)
         tab_w.set_writeback_count(sum(1 for item in items if item.selected))
@@ -645,29 +684,29 @@ class MainWindow(QMainWindow):
             tab_w._left_tabs.setCurrentIndex(1)
 
         # refresh button states to reflect new result availability
+        self.refresh_tab_interaction(tab_id)
+
+    def refresh_run_lock(self, running_tab_id: Optional[str]) -> None:
+        logger.debug("refresh_run_lock: running_tab_id=%r", running_tab_id)
+        has_context = self._ctrl.has_context()
+        has_soc = self._ctrl.has_soc()
+        self._new_tab_btn.setEnabled(running_tab_id is None)
+        for tab_id, tab_w in self._tab_widgets.items():
+            self._set_tab_running(tab_id, tab_w, has_context, has_soc)
+        if running_tab_id is None:
+            for tab_w in self._tab_widgets.values():
+                tab_w.progress_stack.reset_all()
+
+    def refresh_tab_interaction(self, tab_id: str) -> None:
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return
         self._set_tab_running(
             tab_id,
             tab_w,
-            self._ctrl.is_run_active(),
             self._ctrl.has_context(),
             self._ctrl.has_soc(),
         )
-
-    def refresh_run_state(self, is_run_active: bool) -> None:
-        logger.debug("refresh_run_state: is_run_active=%s", is_run_active)
-        has_context = self._ctrl.has_context()
-        has_soc = self._ctrl.has_soc()
-        self._new_tab_btn.setEnabled(not self._ctrl.is_running())
-        for tab_id, tab_w in self._tab_widgets.items():
-            self._set_tab_running(tab_id, tab_w, is_run_active, has_context, has_soc)
-        if is_run_active:
-            # clear stale plot content before a new run starts
-            for tab_w in self._tab_widgets.values():
-                tab_w.reset_plot()
-        else:
-            # clear any leave=True bars that were not popped during the run
-            for tab_w in self._tab_widgets.values():
-                tab_w.progress_stack.reset_all()
 
     def refresh_context_panel(self) -> None:
         label = self._ctrl.get_active_context_label()
@@ -691,15 +730,8 @@ class MainWindow(QMainWindow):
         else:
             self._ctx_label.setText("No project set — use Project… to configure")
             self._ctx_label.setStyleSheet("color: gray;")
-        is_run_active = self._ctrl.is_run_active()
         for tab_id, tab_w in self._tab_widgets.items():
-            self._set_tab_running(tab_id, tab_w, is_run_active, has_context, has_soc)
-
-    def refresh_config_panels(self) -> None:
-        for tab_id, tab_w in self._tab_widgets.items():
-            schema = self._ctrl.get_tab_fresh_cfg(tab_id)
-            if schema is not None:
-                tab_w.populate_cfg(schema, self._ctrl)
+            self._set_tab_running(tab_id, tab_w, has_context, has_soc)
 
     def refresh_inspect_panel(self) -> None:
         if self._inspect_dialog is not None and self._inspect_dialog.isVisible():
@@ -788,7 +820,7 @@ class MainWindow(QMainWindow):
         self._ctrl.close_tab(tab_id)
 
     def _on_run_stop_clicked(self, tab_id: str) -> None:
-        if self._ctrl.is_run_active():
+        if self._ctrl.is_tab_running(tab_id):
             logger.info("_on_run_stop_clicked: stop requested tab_id=%r", tab_id)
             self._ctrl.cancel_run()
         else:
@@ -804,6 +836,7 @@ class MainWindow(QMainWindow):
             try:
                 schema = tab_w.read_schema()
                 self._ctrl.start_run(tab_id, schema, {})
+                tab_w.reset_plot()
             except Exception as exc:
                 logger.warning("_on_run_stop_clicked: blocked — %s", exc)
                 self.show_status_message(str(exc))
@@ -884,6 +917,12 @@ class MainWindow(QMainWindow):
             msg = " / ".join(errors)
             logger.warning("_on_save_both_clicked: blocked/failed — %s", msg)
             self.show_status_message(msg)
+
+    def _state_running_tab_id(self) -> Optional[str]:
+        for tab_id in self._tab_widgets:
+            if self._ctrl.is_tab_running(tab_id):
+                return tab_id
+        return None
 
     def _on_setup_clicked(self) -> None:
         from .setup_dialog import SetupDialog

@@ -10,7 +10,7 @@ from qtpy.QtCore import (  # type: ignore[attr-defined]
     QCoreApplication,
     QObject,
     QThread,
-    Signal,
+    Signal,  # type: ignore[reportPrivateImportUsage]
 )
 from qtpy.QtWidgets import QStackedWidget, QWidget  # type: ignore[attr-defined]
 

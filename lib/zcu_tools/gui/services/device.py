@@ -15,12 +15,12 @@ class DeviceService:
         self._dm = device_manager
 
     def register_device(self, name: str, device: Any) -> None:
-        if self._state.has_active_long_task:
+        if self._state.is_run_active():
             raise RuntimeError("Cannot register device while a run is active")
         self._dm.register_device(name, device)
 
     def drop_device(self, name: str) -> None:
-        if self._state.has_active_long_task:
+        if self._state.is_run_active():
             raise RuntimeError("Cannot drop device while a run is active")
         self._dm.drop_device(name)
 
@@ -28,7 +28,7 @@ class DeviceService:
         return self._dm.list_devices()
 
     def set_device_value(self, name: str, value: Any) -> Any:
-        if self._state.has_active_long_task:
+        if self._state.is_run_active():
             raise RuntimeError("Cannot set device value while a run is active")
         return self._dm.set_device_value(name, value)
 
@@ -41,6 +41,6 @@ class DeviceService:
     def setup_device(
         self, name: str, info: Any, pbar_factory: Optional[Any] = None
     ) -> Any:
-        if self._state.has_active_long_task:
+        if self._state.is_run_active():
             raise RuntimeError("Cannot setup device while a run is active")
         return self._dm.setup_device(name, info, pbar_factory)

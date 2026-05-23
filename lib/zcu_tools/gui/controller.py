@@ -145,8 +145,11 @@ class Controller:
         return tab_id
 
     def close_tab(self, tab_id: str) -> None:
-        if self.is_running() and self._state.active_tab_id == tab_id:
-            self.cancel_run()
+        if not self.has_tab(tab_id):
+            return
+        if self._state.is_tab_busy(tab_id):
+            self._require_view().show_status_message("Cannot close a busy tab")
+            return
         self._tab_svc.close_tab(tab_id)
         self._bus.emit(GuiEvent.TAB_CLOSED, tab_id)
 
@@ -164,16 +167,22 @@ class Controller:
         return self._ctx_svc.has_startup_context()
 
     def is_running(self) -> bool:
-        return self._state.has_active_long_task
+        return self._state.is_run_active()
 
     def is_run_active(self) -> bool:
-        return self._state.is_running
+        return self._state.is_run_active()
 
-    def is_analyzing(self) -> bool:
-        return self._state.is_analyzing
+    def is_tab_running(self, tab_id: str) -> bool:
+        return self.has_tab(tab_id) and self._state.is_tab_running(tab_id)
 
-    def is_saving_data(self) -> bool:
-        return self._state.is_saving_data
+    def is_tab_analyzing(self, tab_id: str) -> bool:
+        return self.has_tab(tab_id) and self._state.is_tab_analyzing(tab_id)
+
+    def is_tab_saving_data(self, tab_id: str) -> bool:
+        return self.has_tab(tab_id) and self._state.is_tab_saving_data(tab_id)
+
+    def is_tab_busy(self, tab_id: str) -> bool:
+        return self.has_tab(tab_id) and self._state.is_tab_busy(tab_id)
 
     def has_soc(self) -> bool:
         return self._conn_svc.has_soc()
@@ -454,11 +463,37 @@ class Controller:
             return []
         return self._tab_svc.get_tab_analyze_params(tab_id)
 
+    def get_tab_analyze_param_values(self, tab_id: str) -> dict[str, object]:
+        if not self.has_tab(tab_id):
+            logger.debug("get_tab_analyze_param_values: tab_id %r not found", tab_id)
+            return {}
+        return self._tab_svc.get_tab_analyze_param_values(tab_id)
+
     def get_tab_save_paths(self, tab_id: str) -> Any:
         if not self.has_tab(tab_id):
             logger.debug("get_tab_save_paths: tab_id %r not found", tab_id)
             return None
         return self._tab_svc.get_tab_save_paths(tab_id)
+
+    def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None:
+        if not self.has_tab(tab_id):
+            return
+        self._tab_svc.update_tab_cfg(tab_id, schema)
+        self._bus.emit(GuiEvent.TAB_INTERACTION_CHANGED, tab_id)
+
+    def update_tab_analyze_params(self, tab_id: str, values: dict[str, object]) -> None:
+        if not self.has_tab(tab_id):
+            return
+        self._tab_svc.update_tab_analyze_param_values(tab_id, values)
+        self._bus.emit(GuiEvent.TAB_INTERACTION_CHANGED, tab_id)
+
+    def update_tab_save_paths(
+        self, tab_id: str, data_path: str, image_path: str
+    ) -> None:
+        if not self.has_tab(tab_id):
+            return
+        self._tab_svc.update_tab_save_paths(tab_id, data_path, image_path)
+        self._bus.emit(GuiEvent.TAB_INTERACTION_CHANGED, tab_id)
 
     def get_adapter_names(self) -> list[str]:
         # Simple passthrough to registry

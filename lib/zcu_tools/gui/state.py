@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from matplotlib.figure import Figure
 
-from .adapter import AbsExpAdapter, CfgSchema, ExpContext
+from .adapter import AbsExpAdapter, AnalyzeParam, CfgSchema, ExpContext, SavePaths
 
 logger = logging.getLogger(__name__)
 
@@ -14,15 +14,23 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TabState:
     adapter: AbsExpAdapter[Any, Any]
-    default_cfg: CfgSchema
+    cfg_schema: CfgSchema
     run_result: Optional[object] = None
     analyze_result: Optional[object] = None
     figure: Optional[Figure] = None
+    analyze_params: list[AnalyzeParam] = field(default_factory=list)
+    analyze_param_values: dict[str, object] = field(default_factory=dict)
+    suggested_save_paths: Optional[SavePaths] = None
+    save_path_overrides: Optional[SavePaths] = None
     applied_writeback_keys: set[str] = field(default_factory=set)
+    is_running: bool = False
+    is_analyzing: bool = False
+    is_saving_data: bool = False
 
 
 @dataclass(frozen=True)
 class TabInteractionState:
+    global_run_active: bool
     is_running: bool
     is_analyzing: bool
     is_saving_data: bool
@@ -39,9 +47,7 @@ class State:
         self.exp_context: ExpContext = ctx
         self.tabs: dict[str, TabState] = {}
         self.active_tab_id: Optional[str] = None
-        self.is_running: bool = False
-        self.is_analyzing: bool = False
-        self.is_saving_data: bool = False
+        self.running_tab_id: Optional[str] = None
         self.has_startup_context: bool = False
 
     def set_context(self, ctx: ExpContext) -> None:
@@ -53,14 +59,18 @@ class State:
         if tab_id in self.tabs:
             raise ValueError(f"tab_id {tab_id!r} already exists")
         logger.debug("add_tab: tab_id=%r adapter=%s", tab_id, type(adapter).__name__)
-        tab = TabState(adapter=adapter, default_cfg=adapter.make_default_cfg(ctx))
+        tab = TabState(adapter=adapter, cfg_schema=adapter.make_default_cfg(ctx))
         self.tabs[tab_id] = tab
 
     def remove_tab(self, tab_id: str) -> None:
         logger.debug("remove_tab: tab_id=%r", tab_id)
+        if self.is_tab_busy(tab_id):
+            raise RuntimeError(f"Cannot close busy tab {tab_id!r}")
         del self.tabs[tab_id]
         if self.active_tab_id == tab_id:
             self.active_tab_id = None
+        if self.running_tab_id == tab_id:
+            self.running_tab_id = None
 
     def get_tab(self, tab_id: str) -> TabState:
         return self.tabs[tab_id]
@@ -77,6 +87,9 @@ class State:
         )
         tab = self.tabs[tab_id]
         tab.run_result = result
+        tab.analyze_params = []
+        tab.analyze_param_values = {}
+        tab.suggested_save_paths = None
         # invalidate stale analyze results from the previous run
         tab.analyze_result = None
         tab.figure = None
@@ -95,18 +108,88 @@ class State:
         tab.figure = figure
         tab.applied_writeback_keys.clear()
 
-    def set_running(self, running: bool) -> None:
-        logger.debug("set_running: %s", running)
-        self.is_running = running
+    def update_tab_cfg_schema(self, tab_id: str, schema: CfgSchema) -> None:
+        logger.debug("update_tab_cfg_schema: tab_id=%r", tab_id)
+        self.tabs[tab_id].cfg_schema = schema
 
-    def set_analyzing(self, analyzing: bool) -> None:
-        logger.debug("set_analyzing: %s", analyzing)
-        self.is_analyzing = analyzing
+    def update_tab_analyze_params(
+        self,
+        tab_id: str,
+        params: list[AnalyzeParam],
+        values: Optional[dict[str, object]] = None,
+    ) -> None:
+        logger.debug(
+            "update_tab_analyze_params: tab_id=%r keys=%r",
+            tab_id,
+            [p.key for p in params],
+        )
+        tab = self.tabs[tab_id]
+        tab.analyze_params = list(params)
+        if values is None:
+            tab.analyze_param_values = {param.key: param.default for param in params}
+            return
+        tab.analyze_param_values = dict(values)
 
-    def set_saving_data(self, saving_data: bool) -> None:
-        logger.debug("set_saving_data: %s", saving_data)
-        self.is_saving_data = saving_data
+    def update_tab_analyze_param_values(
+        self, tab_id: str, values: dict[str, object]
+    ) -> None:
+        logger.debug(
+            "update_tab_analyze_param_values: tab_id=%r keys=%r", tab_id, list(values)
+        )
+        self.tabs[tab_id].analyze_param_values = dict(values)
 
-    @property
-    def has_active_long_task(self) -> bool:
-        return self.is_running or self.is_analyzing or self.is_saving_data
+    def update_tab_suggested_save_paths(self, tab_id: str, paths: SavePaths) -> None:
+        logger.debug("update_tab_suggested_save_paths: tab_id=%r", tab_id)
+        self.tabs[tab_id].suggested_save_paths = paths
+
+    def update_tab_save_path_overrides(
+        self,
+        tab_id: str,
+        data_path: Optional[str] = None,
+        image_path: Optional[str] = None,
+    ) -> None:
+        logger.debug("update_tab_save_path_overrides: tab_id=%r", tab_id)
+        tab = self.tabs[tab_id]
+        current = (
+            tab.save_path_overrides or tab.suggested_save_paths or SavePaths("", "")
+        )
+        tab.save_path_overrides = SavePaths(
+            data_path=current.data_path if data_path is None else data_path,
+            image_path=current.image_path if image_path is None else image_path,
+        )
+
+    def get_effective_save_paths(self, tab_id: str) -> Optional[SavePaths]:
+        tab = self.tabs[tab_id]
+        return tab.save_path_overrides or tab.suggested_save_paths
+
+    def set_tab_running(self, tab_id: str, running: bool) -> None:
+        logger.debug("set_tab_running: tab_id=%r running=%s", tab_id, running)
+        tab = self.tabs[tab_id]
+        tab.is_running = running
+        self.running_tab_id = tab_id if running else None
+
+    def set_tab_analyzing(self, tab_id: str, analyzing: bool) -> None:
+        logger.debug("set_tab_analyzing: tab_id=%r analyzing=%s", tab_id, analyzing)
+        self.tabs[tab_id].is_analyzing = analyzing
+
+    def set_tab_saving_data(self, tab_id: str, saving_data: bool) -> None:
+        logger.debug(
+            "set_tab_saving_data: tab_id=%r saving_data=%s", tab_id, saving_data
+        )
+        self.tabs[tab_id].is_saving_data = saving_data
+
+    def is_run_active(self) -> bool:
+        return self.running_tab_id is not None
+
+    def is_tab_running(self, tab_id: str) -> bool:
+        return self.tabs[tab_id].is_running
+
+    def is_tab_analyzing(self, tab_id: str) -> bool:
+        return self.tabs[tab_id].is_analyzing
+
+    def is_tab_saving_data(self, tab_id: str) -> bool:
+        return self.tabs[tab_id].is_saving_data
+
+    def is_tab_busy(self, tab_id: str) -> bool:
+        tab = self.tabs[tab_id]
+        return tab.is_running or tab.is_analyzing or tab.is_saving_data

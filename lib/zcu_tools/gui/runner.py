@@ -196,12 +196,11 @@ class AnalyzeRunner(QObject):
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
-        self._worker: Optional[AnalyzeWorker] = None
-        self._active_tab_id: Optional[str] = None
+        self._workers: dict[str, AnalyzeWorker] = {}
 
     @property
     def is_running(self) -> bool:
-        return self._worker is not None and self._worker.isRunning()
+        return any(worker.isRunning() for worker in self._workers.values())
 
     def start_analyze(
         self,
@@ -210,32 +209,31 @@ class AnalyzeRunner(QObject):
         req: AnalyzeRequest,
         figure_container: Optional[FigureContainer] = None,
     ) -> None:
-        if self.is_running:
+        if tab_id in self._workers and self._workers[tab_id].isRunning():
             raise RuntimeError(
-                f"Cannot start analyze for tab {tab_id!r}: another analyze is already active"
+                f"Cannot start analyze for tab {tab_id!r}: another analyze is already active for this tab"
             )
         logger.debug(
             "AnalyzeRunner.start_analyze: tab_id=%r adapter=%s",
             tab_id,
             type(adapter).__name__,
         )
-        self._active_tab_id = tab_id
         worker = AnalyzeWorker(adapter, req, figure_container)
-        worker.analyze_finished.connect(self._on_worker_finished)
-        worker.analyze_failed.connect(self._on_worker_failed)
-        self._worker = worker
+        worker.analyze_finished.connect(
+            lambda result, tid=tab_id: self._on_worker_finished(tid, result)
+        )
+        worker.analyze_failed.connect(
+            lambda exc, tid=tab_id: self._on_worker_failed(tid, exc)
+        )
+        self._workers[tab_id] = worker
         worker.start()
 
-    def _on_worker_finished(self, result: Any) -> None:
-        tab_id = self._active_tab_id or ""
-        self._worker = None
-        self._active_tab_id = None
+    def _on_worker_finished(self, tab_id: str, result: Any) -> None:
+        self._workers.pop(tab_id, None)
         self.analyze_finished.emit(tab_id, result)
 
-    def _on_worker_failed(self, exc: Exception) -> None:
-        tab_id = self._active_tab_id or ""
-        self._worker = None
-        self._active_tab_id = None
+    def _on_worker_failed(self, tab_id: str, exc: Exception) -> None:
+        self._workers.pop(tab_id, None)
         self.analyze_failed.emit(tab_id, exc)
 
 
@@ -245,12 +243,11 @@ class SaveDataRunner(QObject):
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
-        self._worker: Optional[SaveDataWorker] = None
-        self._active_tab_id: Optional[str] = None
+        self._workers: dict[str, SaveDataWorker] = {}
 
     @property
     def is_running(self) -> bool:
-        return self._worker is not None and self._worker.isRunning()
+        return any(worker.isRunning() for worker in self._workers.values())
 
     def start_save(
         self,
@@ -258,30 +255,27 @@ class SaveDataRunner(QObject):
         adapter: AbsExpAdapter,
         req: SaveDataRequest,
     ) -> None:
-        if self.is_running:
+        if tab_id in self._workers and self._workers[tab_id].isRunning():
             raise RuntimeError(
-                f"Cannot start save for tab {tab_id!r}: another save is already active"
+                f"Cannot start save for tab {tab_id!r}: another save is already active for this tab"
             )
         logger.debug(
             "SaveDataRunner.start_save: tab_id=%r adapter=%s",
             tab_id,
             type(adapter).__name__,
         )
-        self._active_tab_id = tab_id
         worker = SaveDataWorker(adapter, req)
-        worker.save_finished.connect(self._on_worker_finished)
-        worker.save_failed.connect(self._on_worker_failed)
-        self._worker = worker
+        worker.save_finished.connect(lambda tid=tab_id: self._on_worker_finished(tid))
+        worker.save_failed.connect(
+            lambda exc, tid=tab_id: self._on_worker_failed(tid, exc)
+        )
+        self._workers[tab_id] = worker
         worker.start()
 
-    def _on_worker_finished(self) -> None:
-        tab_id = self._active_tab_id or ""
-        self._worker = None
-        self._active_tab_id = None
+    def _on_worker_finished(self, tab_id: str) -> None:
+        self._workers.pop(tab_id, None)
         self.save_finished.emit(tab_id)
 
-    def _on_worker_failed(self, exc: Exception) -> None:
-        tab_id = self._active_tab_id or ""
-        self._worker = None
-        self._active_tab_id = None
+    def _on_worker_failed(self, tab_id: str, exc: Exception) -> None:
+        self._workers.pop(tab_id, None)
         self.save_failed.emit(tab_id, exc)
