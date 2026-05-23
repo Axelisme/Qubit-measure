@@ -7,6 +7,7 @@ from unittest.mock import ANY, MagicMock
 
 import pytest
 from qtpy.QtCore import QCoreApplication
+from qtpy.QtWidgets import QLabel, QStackedWidget
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.adapter import CfgSchema, CfgSectionSpec, CfgSectionValue, ExpContext
@@ -14,6 +15,7 @@ from zcu_tools.gui.controller import Controller
 from zcu_tools.gui.device_manager import DeviceManager
 from zcu_tools.gui.event_bus import GuiEvent
 from zcu_tools.gui.io_manager import IOManager
+from zcu_tools.gui.plot_host import FigureContainer, has_container
 from zcu_tools.gui.registry import Registry
 from zcu_tools.gui.runner import Runner
 from zcu_tools.gui.state import State
@@ -83,6 +85,13 @@ def _wait_for(condition, timeout_ms: int = 3000, step_ms: int = 10) -> bool:
             return True
         time.sleep(step_ms / 1000)
     return False
+
+
+def _make_figure_container() -> FigureContainer:
+    stack = QStackedWidget()
+    placeholder = QLabel("(placeholder)")
+    stack.addWidget(placeholder)
+    return FigureContainer(stack, placeholder)
 
 
 def _default_fake_schema(ctx: ExpContext) -> CfgSchema:
@@ -344,6 +353,17 @@ def test_analyze_is_async_and_sets_busy_flag(cf):
     cf.ctrl.analyze(tab_id, {"threshold": 0.0})
     assert cf.state.is_analyzing is True
     assert _wait_for(lambda: not cf.state.is_analyzing)
+
+
+def test_analyze_clears_active_figure_container_after_finish(cf):
+    tab_id = cf.ctrl.new_tab("fake")
+    _run_and_wait(cf, tab_id)
+    cf.view.make_live_container.return_value = _make_figure_container()
+
+    cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
+
+    assert _wait_for(lambda: not cf.state.is_analyzing)
+    assert has_container() is False
 
 
 def test_save_data_is_async_and_sets_busy_flag(cf):

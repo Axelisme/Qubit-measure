@@ -7,6 +7,7 @@ from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.adapter import RunRequest
 from zcu_tools.gui.event_bus import GuiEvent
+from zcu_tools.gui.plot_host import FigureContainer
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ class RunService(QObject):
         self._state = state
         self._runner = runner
         self._bus = bus
+        self._active_container: Optional[FigureContainer] = None
 
         self._runner.run_finished.connect(self._on_run_finished)
         self._runner.run_failed.connect(self._on_run_failed)
@@ -37,7 +39,7 @@ class RunService(QObject):
         schema: Any,
         user_params: dict,
         pbar_factory: Optional[Any] = None,
-        live_container: Optional[Any] = None,
+        live_container: Optional[FigureContainer] = None,
     ) -> None:
         if self._state.has_active_long_task:
             raise RuntimeError("Another long-running task is already active")
@@ -60,6 +62,7 @@ class RunService(QObject):
             from zcu_tools.liveplot.backend.qt import register_pending_container
 
             register_pending_container(live_container)
+            self._active_container = live_container
 
         try:
             self._runner.start_run(
@@ -83,7 +86,8 @@ class RunService(QObject):
     def _clear_live_container(self) -> None:
         from zcu_tools.liveplot.backend.qt import clear_pending_container
 
-        clear_pending_container()
+        clear_pending_container(self._active_container)
+        self._active_container = None
 
     def _on_run_finished(self, tab_id: str, result: Any) -> None:
         logger.info(

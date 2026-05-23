@@ -14,6 +14,7 @@ from .adapter import CfgSchema, WritebackItem
 from .device_manager import DeviceManager
 from .event_bus import EventBus, GuiEvent
 from .io_manager import IOManager
+from .plot_host import FigureContainer
 from .registry import Registry
 from .runner import AnalyzeRunner, Runner, SaveDataRunner
 from .services import (
@@ -44,7 +45,7 @@ class ViewProtocol(Protocol):
 
     def show_status_message(self, message: str) -> None: ...
     def make_pbar_factory(self, tab_id: str) -> Optional[object]: ...
-    def make_live_container(self, tab_id: str) -> Optional[object]: ...
+    def make_live_container(self, tab_id: str) -> Optional[FigureContainer]: ...
 
 
 class Controller:
@@ -207,7 +208,8 @@ class Controller:
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
         try:
-            self._analyze_svc.start_analyze(tab_id, analyze_params)
+            figure_container = self._require_view().make_live_container(tab_id)
+            self._analyze_svc.start_analyze(tab_id, analyze_params, figure_container)
         except Exception as exc:
             logger.warning("analyze: failed tab_id=%r exc=%r", tab_id, exc)
             self._require_view().show_status_message(f"Analyze failed: {exc}")

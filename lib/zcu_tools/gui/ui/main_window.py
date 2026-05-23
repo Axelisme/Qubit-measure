@@ -9,6 +9,11 @@ import logging
 from typing import TYPE_CHECKING, Any, Optional
 
 from zcu_tools.gui.event_bus import GuiEvent
+from zcu_tools.gui.plot_host import (
+    FigureContainer,
+    attach_existing_figure_to_container,
+    remove_canvas,
+)
 from zcu_tools.gui.state import TabInteractionState
 
 logger = logging.getLogger(__name__)
@@ -241,6 +246,9 @@ class ExpTabWidget(QWidget):
         self._plot_placeholder = QLabel("(no plot yet)")
         self._plot_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
         self._plot_stack.addWidget(self._plot_placeholder)
+        self._figure_container = FigureContainer(
+            self._plot_stack, self._plot_placeholder
+        )
 
         self._canvas_widget: Optional[QWidget] = None
 
@@ -359,28 +367,15 @@ class ExpTabWidget(QWidget):
 
     def reset_plot(self) -> None:
         """Remove all canvases from plot_stack, revert to placeholder."""
-        while self._plot_stack.count() > 1:
-            w = self._plot_stack.widget(self._plot_stack.count() - 1)
-            self._plot_stack.removeWidget(w)
-            if w is not None:
-                w.deleteLater()
+        self._figure_container.clear_dynamic_canvases()
         self._canvas_widget = None
-        self._plot_stack.setCurrentWidget(self._plot_placeholder)
 
     def show_analysis_figure(self, fig: "Figure") -> None:
-        """Embed a matplotlib Figure in the plot area (replaces any existing analysis canvas)."""
-        from matplotlib.backends.backend_qtagg import (  # type: ignore[import-untyped]
-            FigureCanvasQTAgg,
-        )
-
-        if self._canvas_widget is not None:
-            self._plot_stack.removeWidget(self._canvas_widget)
-            self._canvas_widget.deleteLater()
-
-        canvas = FigureCanvasQTAgg(fig)
+        """Embed a matplotlib Figure in the plot area (replaces prior analysis canvas)."""
+        canvas = attach_existing_figure_to_container(fig, self._figure_container)
+        if self._canvas_widget is not None and self._canvas_widget is not canvas:
+            remove_canvas(self._canvas_widget)
         self._canvas_widget = canvas
-        self._plot_stack.addWidget(canvas)
-        self._plot_stack.setCurrentWidget(canvas)
         logger.debug("show_analysis_figure: tab_id=%r canvas set", self.tab_id)
 
     def _on_cfg_validity_changed(self, valid: bool) -> None:
@@ -728,7 +723,7 @@ class MainWindow(QMainWindow):
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return None
-        return tab_w._plot_stack
+        return tab_w._figure_container
 
     def show_status_message(self, message: str) -> None:
         logger.info("status: %s", message)
