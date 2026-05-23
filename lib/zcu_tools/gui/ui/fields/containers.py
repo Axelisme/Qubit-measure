@@ -212,7 +212,10 @@ class ModuleRefWidget(BaseLiveWidget):
             if store:
                 self._combo.insertSeparator(self._combo.count())
                 for name in sorted(store.keys()):
-                    self._combo.addItem(f"Lib: {name}", name)
+                    text = f"Lib: {name}"
+                    if name == current and field.is_modified():
+                        text = f"Lib: {name} (modified)"
+                    self._combo.addItem(text, name)
 
         idx = self._combo.findData(current)
         if idx >= 0:
@@ -224,14 +227,7 @@ class ModuleRefWidget(BaseLiveWidget):
         cast(ModuleRefLiveField, self._field).set_chosen_key(key)
 
     def _on_model_changed(self, *_: Any) -> None:
-        field = cast(ModuleRefLiveField, self._field)
-        key = field.get_chosen_key()
-        idx = self._combo.findData(key)
-        if idx >= 0 and idx != self._combo.currentIndex():
-            self._combo.blockSignals(True)
-            self._combo.setCurrentIndex(idx)
-            self._combo.blockSignals(False)
-
+        self._refresh_combo_items()
         self._refresh_sub_widget()
 
     def _on_toggle_subsection(self, expanded: bool) -> None:

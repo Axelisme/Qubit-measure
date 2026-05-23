@@ -388,8 +388,12 @@ class ModuleRefLiveField(LiveField):
             )
             self._sub_value = None
 
+        self._is_modified = False
         self.sub_field: Optional[SectionLiveField] = None
         self._rebuild_sub_field()
+
+    def is_modified(self) -> bool:
+        return self._is_modified
 
     def _rebuild_sub_field(self) -> None:
         old_spec = self.sub_field.spec if self.sub_field else None
@@ -426,6 +430,8 @@ class ModuleRefLiveField(LiveField):
         self._refresh_validity()
 
     def _on_sub_change(self, *_: object) -> None:
+        if not self._chosen_key.startswith("<Custom:"):
+            self._is_modified = True
         self.on_change.emit(self.get_value())
 
     def _on_sub_validity_change(self, *_: object) -> None:
@@ -437,6 +443,9 @@ class ModuleRefLiveField(LiveField):
 
     def _refresh_library_binding(self) -> None:
         if self._chosen_key.startswith("<Custom:"):
+            return
+        if self._is_modified:
+            # Do not overwrite user-modified fields
             return
         self._sub_value = (
             self.sub_field.get_value() if self.sub_field else self._sub_value
@@ -450,6 +459,7 @@ class ModuleRefLiveField(LiveField):
     def set_chosen_key(self, key: str) -> None:
         if key != self._chosen_key:
             self._chosen_key = key
+            self._is_modified = False
             self._sub_value = (
                 self.sub_field.get_value() if self.sub_field is not None else None
             )
@@ -468,6 +478,7 @@ class ModuleRefLiveField(LiveField):
             return
         if val.chosen_key != self._chosen_key:
             self._chosen_key = val.chosen_key
+            self._is_modified = False
             self._sub_value = val.value
             self._rebuild_sub_field()
         elif self.sub_field:

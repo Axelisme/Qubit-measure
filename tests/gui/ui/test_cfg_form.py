@@ -655,3 +655,69 @@ def test_section_widget_no_header(qapp, ctrl):
     w2 = SectionWidget(field, top_level=False, no_header=True)
     assert w2._container._toggle_btn is None
     assert w2._container._header_label is None
+
+
+def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
+    from typing import Any, cast
+
+    from qtpy.QtWidgets import QDoubleSpinBox
+    from zcu_tools.gui.live_model import ModuleRefLiveField
+    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.ui.fields.containers import ModuleRefWidget
+    from zcu_tools.meta_tool import ModuleLibrary
+
+    ml = ModuleLibrary()
+    # Populate a library module with raw dict
+    ml.modules["my_pulse"] = cast(Any, {"gain": 0.5})
+    ctrl.get_current_ml.return_value = ml
+
+    allowed_spec = CfgSectionSpec(
+        label="Pulse",
+        fields={"gain": ScalarSpec(label="Gain", type=float)},
+    )
+    schema = CfgSchema(
+        spec=CfgSectionSpec(
+            fields={"mod": ModuleRefSpec(allowed=[allowed_spec], label="Module")}
+        ),
+        value=CfgSectionValue(
+            fields={
+                "mod": ModuleRefValue(
+                    chosen_key="my_pulse",
+                    value=CfgSectionValue(fields={"gain": DirectValue(0.5)}),
+                )
+            }
+        ),
+    )
+
+    w = CfgFormWidget()
+    w.populate(schema, ctrl)
+    w.show()
+
+    ref_widget = w.findChild(ModuleRefWidget)
+    assert ref_widget is not None
+    # 1. Initially unmodified
+    assert ref_widget._combo.currentText() == "Lib: my_pulse"
+    assert cast(ModuleRefLiveField, ref_widget._field).is_modified() is False
+
+    # 2. Simulate user edits the inner value
+    spin = ref_widget.findChild(QDoubleSpinBox)
+    assert spin is not None
+    spin.setValue(0.6)
+
+    # Verify is_modified is True and combobox text has (modified) suffix
+    assert cast(ModuleRefLiveField, ref_widget._field).is_modified() is True
+    assert ref_widget._combo.currentText() == "Lib: my_pulse (modified)"
+
+    # 3. Trigger MD_CHANGED and verify it does not overwrite modified value
+    from zcu_tools.gui.event_bus import GuiEvent, MdChangedPayload
+    from zcu_tools.meta_tool import MetaDict
+
+    md = MetaDict()
+    ctrl.get_bus.return_value.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=md))
+
+    # Should stay as user modified (0.6), not library default (0.5)
+    mod_val = w.read_values().fields["mod"]
+    assert isinstance(mod_val, ModuleRefValue)
+    gain_val = mod_val.value.fields["gain"]
+    assert isinstance(gain_val, DirectValue)
+    assert gain_val.value == 0.6
