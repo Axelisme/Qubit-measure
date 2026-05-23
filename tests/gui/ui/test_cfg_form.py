@@ -721,3 +721,26 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     gain_val = mod_val.value.fields["gain"]
     assert isinstance(gain_val, DirectValue)
     assert gain_val.value == 0.6
+
+    # Verify both modified and clean items are present in combo box
+    items_list = [
+        ref_widget._combo.itemText(i) for i in range(ref_widget._combo.count())
+    ]
+    assert "Lib: my_pulse (modified)" in items_list
+    assert "Lib: my_pulse" in items_list
+
+    # 4. Select the clean item to revert modifications
+    clean_idx = -1
+    for i in range(ref_widget._combo.count()):
+        if ref_widget._combo.itemText(i) == "Lib: my_pulse":
+            clean_idx = i
+            break
+    assert clean_idx >= 0
+    ref_widget._combo.setCurrentIndex(clean_idx)
+
+    assert cast(ModuleRefLiveField, ref_widget._field).is_modified() is False
+    mod_val2 = w.read_values().fields["mod"]
+    assert isinstance(mod_val2, ModuleRefValue)
+    gain_val2 = mod_val2.value.fields["gain"]
+    assert isinstance(gain_val2, DirectValue)
+    assert gain_val2.value == 0.5

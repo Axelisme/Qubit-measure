@@ -212,10 +212,11 @@ class ModuleRefWidget(BaseLiveWidget):
             if store:
                 self._combo.insertSeparator(self._combo.count())
                 for name in sorted(store.keys()):
-                    text = f"Lib: {name}"
                     if name == current and field.is_modified():
-                        text = f"Lib: {name} (modified)"
-                    self._combo.addItem(text, name)
+                        self._combo.addItem(f"Lib: {name} (modified)", name)
+                        self._combo.addItem(f"Lib: {name}", name)
+                    else:
+                        self._combo.addItem(f"Lib: {name}", name)
 
         idx = self._combo.findData(current)
         if idx >= 0:

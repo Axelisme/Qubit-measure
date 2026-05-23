@@ -457,7 +457,7 @@ class ModuleRefLiveField(LiveField):
         return self._chosen_key
 
     def set_chosen_key(self, key: str) -> None:
-        if key != self._chosen_key:
+        if key != self._chosen_key or self._is_modified:
             self._chosen_key = key
             self._is_modified = False
             self._sub_value = (
@@ -476,7 +476,7 @@ class ModuleRefLiveField(LiveField):
     def set_value(self, val: object) -> None:
         if not isinstance(val, (ModuleRefValue, WaveformRefValue)):
             return
-        if val.chosen_key != self._chosen_key:
+        if val.chosen_key != self._chosen_key or self._is_modified:
             self._chosen_key = val.chosen_key
             self._is_modified = False
             self._sub_value = val.value
