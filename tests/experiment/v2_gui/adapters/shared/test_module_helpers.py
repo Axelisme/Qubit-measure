@@ -14,6 +14,7 @@ from zcu_tools.gui.adapter import (
     CfgSectionValue,
     ChannelValue,
     ModuleRefValue,
+    DirectValue,
     ScalarValue,
 )
 from zcu_tools.meta_tool import ModuleLibrary
@@ -23,12 +24,12 @@ from zcu_tools.program.v2 import AbsReadoutCfg, ModuleCfgFactory
 def test_update_readout_value_frequency_updates_all_supported_paths():
     readout_value = CfgSectionValue(
         fields={
-            "ro_freq": ScalarValue(6000.0),
+            "ro_freq": DirectValue(6000.0),
             "pulse_cfg": CfgSectionValue(
-                fields={"freq": ScalarValue(6000.0)},
+                fields={"freq": DirectValue(6000.0)},
             ),
             "ro_cfg": CfgSectionValue(
-                fields={"ro_freq": ScalarValue(6000.0)},
+                fields={"ro_freq": DirectValue(6000.0)},
             ),
         }
     )

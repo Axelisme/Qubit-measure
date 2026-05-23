@@ -14,6 +14,7 @@ from zcu_tools.gui.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     ChannelValue,
+    DirectValue,
     ScalarValue,
     WaveformRefValue,
     make_default_value,
@@ -40,8 +41,8 @@ from zcu_tools.program.v2.modules.waveform import AbsWaveformCfg
 def _val(cfg: dict, key: str, default: Any = None) -> ScalarValue:
     """Extract a scalar value from dict, marking as is_unset if key is missing."""
     if key not in cfg:
-        return ScalarValue(value=default, is_unset=True)
-    return ScalarValue(value=cfg[key], is_unset=False)
+        return DirectValue(value=default, is_unset=True)
+    return DirectValue(value=cfg[key], is_unset=False)
 
 
 # ---------------------------------------------------------------------------
@@ -63,21 +64,21 @@ def waveform_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionVal
     if style == "const":
         val = CfgSectionValue(
             fields={
-                "style": ScalarValue("const"),
+                "style": DirectValue("const"),
                 "length": _val(cfg, "length", 1.0),
             }
         )
     elif style == "cosine":
         val = CfgSectionValue(
             fields={
-                "style": ScalarValue("cosine"),
+                "style": DirectValue("cosine"),
                 "length": _val(cfg, "length", 0.1),
             }
         )
     elif style == "gauss":
         val = CfgSectionValue(
             fields={
-                "style": ScalarValue("gauss"),
+                "style": DirectValue("gauss"),
                 "length": _val(cfg, "length", 1.0),
                 "sigma": _val(cfg, "sigma", 0.25),
             }
@@ -85,7 +86,7 @@ def waveform_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionVal
     elif style == "drag":
         val = CfgSectionValue(
             fields={
-                "style": ScalarValue("drag"),
+                "style": DirectValue("drag"),
                 "length": _val(cfg, "length", 1.0),
                 "sigma": _val(cfg, "sigma", 0.25),
                 "delta": _val(cfg, "delta", -200.0),
@@ -106,7 +107,7 @@ def waveform_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionVal
 
         val = CfgSectionValue(
             fields={
-                "style": ScalarValue("flat_top"),
+                "style": DirectValue("flat_top"),
                 "length": _val(cfg, "length", 1.0),
                 "raise_waveform": WaveformRefValue(
                     chosen_key=f"<Custom:{raise_spec.label}>",
@@ -117,7 +118,7 @@ def waveform_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionVal
     elif style == "arb":
         val = CfgSectionValue(
             fields={
-                "style": ScalarValue("arb"),
+                "style": DirectValue("arb"),
                 "length": _val(cfg, "length", 1.0),
                 "data": _val(cfg, "data", ""),
             }
@@ -144,7 +145,7 @@ def _pulse_to_value(cfg: dict) -> CfgSectionValue:
 
     return CfgSectionValue(
         fields={
-            "type": ScalarValue("pulse"),
+            "type": DirectValue("pulse"),
             "waveform": WaveformRefValue(
                 chosen_key=f"<Custom:{wav_spec.label}>",
                 value=wav_val,
@@ -163,7 +164,7 @@ def _pulse_to_value(cfg: dict) -> CfgSectionValue:
 def _direct_readout_to_value(cfg: dict) -> CfgSectionValue:
     return CfgSectionValue(
         fields={
-            "type": ScalarValue("readout/direct"),
+            "type": DirectValue("readout/direct"),
             "ro_ch": ChannelValue(chosen=cfg.get("ro_ch", 0), resolved=None),
             "ro_freq": _val(cfg, "ro_freq", 6000.0),
             "ro_length": _val(cfg, "ro_length", 1.0),
@@ -188,7 +189,7 @@ def _pulse_readout_to_value(cfg: dict) -> CfgSectionValue:
     )
     return CfgSectionValue(
         fields={
-            "type": ScalarValue("readout/pulse"),
+            "type": DirectValue("readout/pulse"),
             "pulse_cfg": pulse_val,
             "ro_cfg": ro_val,
         }
@@ -196,7 +197,7 @@ def _pulse_readout_to_value(cfg: dict) -> CfgSectionValue:
 
 
 def _none_reset_to_value(cfg: dict) -> CfgSectionValue:  # noqa: ARG001
-    return CfgSectionValue(fields={"type": ScalarValue("reset/none")})
+    return CfgSectionValue(fields={"type": DirectValue("reset/none")})
 
 
 def _pulse_reset_to_value(cfg: dict) -> CfgSectionValue:
@@ -208,7 +209,7 @@ def _pulse_reset_to_value(cfg: dict) -> CfgSectionValue:
     )
     return CfgSectionValue(
         fields={
-            "type": ScalarValue("reset/pulse"),
+            "type": DirectValue("reset/pulse"),
             "pulse_cfg": pulse_val,
         }
     )
@@ -219,7 +220,7 @@ def _two_pulse_reset_to_value(cfg: dict) -> CfgSectionValue:
     p2 = cfg.get("pulse2_cfg")
     return CfgSectionValue(
         fields={
-            "type": ScalarValue("reset/two_pulse"),
+            "type": DirectValue("reset/two_pulse"),
             "pulse1_cfg": _pulse_to_value(p1)
             if isinstance(p1, dict)
             else make_default_value(make_pulse_spec()),
@@ -236,7 +237,7 @@ def _bath_reset_to_value(cfg: dict) -> CfgSectionValue:
     pi2 = cfg.get("pi2_cfg")
     return CfgSectionValue(
         fields={
-            "type": ScalarValue("reset/bath"),
+            "type": DirectValue("reset/bath"),
             "cavity_tone_cfg": _pulse_to_value(cav)
             if isinstance(cav, dict)
             else make_default_value(make_pulse_spec()),
@@ -314,5 +315,5 @@ def _dict_to_spec_value(
                 type=type(v) if v is not None else str,
                 hidden=is_discriminator,
             )
-            val_fields[k] = ScalarValue(v, is_unset=(v is None))
+            val_fields[k] = DirectValue(v, is_unset=(v is None))
     return CfgSectionSpec(fields=spec_fields), CfgSectionValue(fields=val_fields)

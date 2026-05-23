@@ -9,6 +9,7 @@ from zcu_tools.gui.adapter import (
     ChannelSpec,
     ChannelValue,
     ScalarSpec,
+    DirectValue,
     ScalarValue,
     inherit_from,
     make_default_value,
@@ -86,7 +87,7 @@ def test_channel_inherit_from_channel() -> None:
 def test_channel_inherit_from_non_channel_uses_default() -> None:
     old_spec = _section({"ch": ScalarSpec(label="ch", type=int)})
     new_spec = _section({"ch": ChannelSpec(label="Gen ch")})
-    old_val = _val({"ch": ScalarValue(7)})
+    old_val = _val({"ch": DirectValue(7)})
 
     result = inherit_from(old_val, old_spec, new_spec)
     ch = result.fields["ch"]

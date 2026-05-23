@@ -20,19 +20,20 @@ from .adapter import (
     CfgSectionValue,
     ChannelSpec,
     ChannelValue,
+    EvalValue,
     LiteralSpec,
     ModuleRefSpec,
     ModuleRefValue,
     MultiSweepSpec,
     MultiSweepValue,
     ScalarSpec,
+    DirectValue,
     ScalarValue,
     SweepSpec,
     SweepValue,
     WaveformRefSpec,
     WaveformRefValue,
 )
-from .event_bus import GuiEvent
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
@@ -126,6 +127,10 @@ class LiveField(ABC):
         """Cleanup subscriptions."""
         pass
 
+    def refresh_external(self, event: object) -> None:
+        """Refresh values derived from external context."""
+        del event
+
 
 class ScalarLiveField(LiveField):
     spec: ScalarSpec
@@ -135,42 +140,80 @@ class ScalarLiveField(LiveField):
     ) -> None:
         super().__init__(spec, env)
 
-        if isinstance(initial_val, ScalarValue):
-            self._value = initial_val.value
-            self._is_unset = initial_val.is_unset
+        if isinstance(initial_val, (DirectValue, EvalValue)):
+            self._value: ScalarValue = initial_val
         else:
-            self._value = initial_val
-            self._is_unset = initial_val is None
+            self._value = self._make_direct_value(initial_val, initial_val is None)
 
-        if self._is_unset:
-            # Type-appropriate zero values, but flag remains is_unset=True
-            defaults: dict[type, object] = {int: 0, float: 0.0, bool: False, str: ""}
-            self._value = defaults.get(spec.type)
-        self._set_valid(not self._is_unset)
+        if isinstance(self._value, EvalValue):
+            self._resolve_expression(emit_change=False)
+        self._refresh_validity()
 
     def get_value(self) -> ScalarValue:
-        return ScalarValue(value=self._value, is_unset=self._is_unset)
+        return self._value
 
     def set_value(self, val: object) -> None:
-        if isinstance(val, ScalarValue):
-            new_val = val.value
-            new_unset = val.is_unset
+        if isinstance(val, (DirectValue, EvalValue)):
+            new_value = val
         else:
-            new_val = val
-            new_unset = val is None
+            new_value = self._make_direct_value(val, val is None)
 
-        if new_unset:
-            defaults: dict[type, object] = {int: 0, float: 0.0, bool: False, str: ""}
-            new_val = defaults.get(self.spec.type)
+        if isinstance(new_value, EvalValue):
+            new_value = self._resolved_eval_value(new_value)
 
-        if new_val != self._value or new_unset != self._is_unset:
-            self._value = new_val
-            self._is_unset = new_unset
+        if new_value != self._value:
+            self._value = new_value
+            self._refresh_validity()
             self.on_change.emit(self.get_value())
-        self._set_valid(not self._is_unset)
+        else:
+            self._refresh_validity()
 
     def to_dict(self) -> object:
-        return self._value
+        if isinstance(self._value, DirectValue):
+            return self._value.value
+        return self._value.resolved
+
+    def refresh_external(self, event: object) -> None:
+        del event
+        if isinstance(self._value, EvalValue):
+            self._resolve_expression(emit_change=True)
+
+    def _make_direct_value(self, value: object, is_unset: bool) -> DirectValue:
+        if is_unset:
+            defaults: dict[type, object] = {int: 0, float: 0.0, bool: False, str: ""}
+            value = defaults.get(self.spec.type)
+        return DirectValue(value=value, is_unset=is_unset)
+
+    def _resolved_eval_value(self, value: EvalValue) -> EvalValue:
+        from dataclasses import replace
+
+        from .expression import coerce_eval_result, evaluate_numeric_expr
+
+        try:
+            resolved = coerce_eval_result(
+                evaluate_numeric_expr(value.expr, self.env.ctrl.get_current_md()),
+                self.spec.type,
+            )
+        except Exception:
+            resolved = None
+        return replace(value, resolved=resolved)
+
+    def _resolve_expression(self, *, emit_change: bool) -> None:
+        assert isinstance(self._value, EvalValue)
+        new_value = self._resolved_eval_value(self._value)
+        if new_value != self._value:
+            self._value = new_value
+            self._refresh_validity()
+            if emit_change:
+                self.on_change.emit(self.get_value())
+        else:
+            self._refresh_validity()
+
+    def _refresh_validity(self) -> None:
+        if isinstance(self._value, DirectValue):
+            self._set_valid(not self._value.is_unset)
+        else:
+            self._set_valid(self._value.resolved is not None)
 
 
 class LiteralLiveField(LiveField):
@@ -182,7 +225,7 @@ class LiteralLiveField(LiveField):
         super().__init__(spec, env)
 
     def get_value(self) -> ScalarValue:
-        return ScalarValue(value=self.spec.value, is_unset=False)
+        return DirectValue(value=self.spec.value, is_unset=False)
 
     def set_value(self, val: object) -> None:
         pass
@@ -276,17 +319,9 @@ class ChannelLiveField(LiveField):
             self._chosen = initial_val if isinstance(initial_val, (int, str)) else 0
 
         self._resolved_id: Optional[int] = None
-        self.env.bus.subscribe(GuiEvent.MD_CHANGED, self._on_md_changed)
-        self.env.bus.subscribe(GuiEvent.CONTEXT_CHANGED, self._on_context_changed)
-        self._refresh_resolve()
+        self._refresh_resolve(emit_change=False)
 
-    def _on_md_changed(self, md: object) -> None:
-        self._refresh_resolve()
-
-    def _on_context_changed(self, md: object, ml: object) -> None:
-        self._refresh_resolve()
-
-    def _refresh_resolve(self) -> None:
+    def _refresh_resolve(self, *, emit_change: bool) -> None:
         from .ui.fields.utils import _resolve_channel
 
         md = self.env.ctrl.get_current_md()
@@ -294,7 +329,8 @@ class ChannelLiveField(LiveField):
         if new_id != self._resolved_id:
             self._resolved_id = new_id
             self._set_valid(new_id is not None)
-            self.on_change.emit(self.get_value())
+            if emit_change:
+                self.on_change.emit(self.get_value())
 
     def get_value(self) -> ChannelValue:
         return ChannelValue(chosen=self._chosen, resolved=self._resolved_id)
@@ -309,15 +345,15 @@ class ChannelLiveField(LiveField):
 
         if new_chosen != self._chosen:
             self._chosen = new_chosen
-            self._refresh_resolve()
+            self._refresh_resolve(emit_change=False)
             self.on_change.emit(self.get_value())
 
     def to_dict(self) -> Optional[int]:
         return self._resolved_id
 
-    def teardown(self) -> None:
-        self.env.bus.unsubscribe(GuiEvent.MD_CHANGED, self._on_md_changed)
-        self.env.bus.unsubscribe(GuiEvent.CONTEXT_CHANGED, self._on_context_changed)
+    def refresh_external(self, event: object) -> None:
+        del event
+        self._refresh_resolve(emit_change=True)
 
 
 class SectionLiveField(LiveField):
@@ -377,7 +413,14 @@ class SectionLiveField(LiveField):
 
     def teardown(self) -> None:
         for f in self.fields.values():
+            f.on_change.disconnect(self._on_child_change)
+            f.on_validity_changed.disconnect(self._on_child_validity_change)
             f.teardown()
+
+    def refresh_external(self, event: object) -> None:
+        for f in self.fields.values():
+            f.refresh_external(event)
+        self._refresh_validity()
 
 
 class ModuleRefLiveField(LiveField):
@@ -404,14 +447,14 @@ class ModuleRefLiveField(LiveField):
             self._sub_value = None
 
         self.sub_field: Optional[SectionLiveField] = None
-        self.env.bus.subscribe(GuiEvent.CONTEXT_CHANGED, self._on_context_changed)
-        self.env.bus.subscribe(GuiEvent.INSPECT_CHANGED, self._on_inspect_changed)
         self._rebuild_sub_field()
 
     def _rebuild_sub_field(self) -> None:
         old_spec = self.sub_field.spec if self.sub_field else None
         old_val = self.sub_field.get_value() if self.sub_field else None
         if self.sub_field:
+            self.sub_field.on_change.disconnect(self._on_sub_change)
+            self.sub_field.on_validity_changed.disconnect(self._on_sub_validity_change)
             self.sub_field.teardown()
 
         from .ui.fields.utils import _spec_value_for_chosen
@@ -449,14 +492,6 @@ class ModuleRefLiveField(LiveField):
     def _refresh_validity(self) -> None:
         valid = self.sub_field.is_valid() if self.sub_field else True
         self._set_valid(valid)
-
-    def _on_context_changed(self, md: object, ml: object) -> None:
-        del md, ml
-        self._refresh_library_binding()
-
-    def _on_inspect_changed(self, md: object = None) -> None:
-        del md
-        self._refresh_library_binding()
 
     def _refresh_library_binding(self) -> None:
         if self._chosen_key.startswith("<Custom:"):
@@ -503,10 +538,23 @@ class ModuleRefLiveField(LiveField):
         return {}
 
     def teardown(self) -> None:
-        self.env.bus.unsubscribe(GuiEvent.CONTEXT_CHANGED, self._on_context_changed)
-        self.env.bus.unsubscribe(GuiEvent.INSPECT_CHANGED, self._on_inspect_changed)
         if self.sub_field:
+            self.sub_field.on_change.disconnect(self._on_sub_change)
+            self.sub_field.on_validity_changed.disconnect(self._on_sub_validity_change)
             self.sub_field.teardown()
+
+    def refresh_external(self, event: object) -> None:
+        from .event_bus import GuiEvent
+
+        if event in {GuiEvent.CONTEXT_CHANGED, GuiEvent.INSPECT_CHANGED}:
+            self._refresh_library_binding()
+            if self._chosen_key.startswith("<Custom:") and self.sub_field:
+                self.sub_field.refresh_external(event)
+                self._refresh_validity()
+            return
+        if self.sub_field:
+            self.sub_field.refresh_external(event)
+            self._refresh_validity()
 
 
 def create_live_field(

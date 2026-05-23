@@ -23,6 +23,7 @@ from zcu_tools.gui.adapter import (
     RunRequest,
     SaveDataRequest,
     ScalarSpec,
+    DirectValue,
     ScalarValue,
     SweepSpec,
     SweepValue,
@@ -86,11 +87,11 @@ class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult]):
         )
         value = CfgSectionValue(
             fields={
-                "reps": ScalarValue(100),
-                "rounds": ScalarValue(10),
+                "reps": DirectValue(100),
+                "rounds": DirectValue(10),
                 "sweep": SweepValue(start=5.0, stop=6.0, expts=11),
-                "gain": ScalarValue(0.1),
-                "noise_scale": ScalarValue(0.1),
+                "gain": DirectValue(0.1),
+                "noise_scale": DirectValue(0.1),
             }
         )
         return CfgSchema(spec=spec, value=value)

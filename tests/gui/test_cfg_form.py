@@ -17,6 +17,8 @@ from zcu_tools.gui.adapter import (
     ModuleRefValue,
     MultiSweepSpec,
     MultiSweepValue,
+    DirectValue,
+    EvalValue,
     ScalarSpec,
     ScalarValue,
     SweepSpec,
@@ -153,6 +155,43 @@ def test_channel_widget_minimum_width_reduced(qapp, ctrl):
     assert w._edit.minimumWidth() == 20
 
 
+def test_scalar_widget_eval_mode_shows_resolved_ghost(qapp, ctrl):
+    from zcu_tools.gui.live_model import LiveModelEnv, ScalarLiveField
+    from zcu_tools.gui.ui.fields.common import ScalarWidget
+    from zcu_tools.meta_tool import MetaDict
+
+    md = MetaDict()
+    md.r_f = 6000.0
+    ctrl.get_current_md.return_value = md
+    field = ScalarLiveField(
+        ScalarSpec(label="Freq", type=float),
+        LiveModelEnv(ctrl=ctrl),
+        initial_val=EvalValue("r_f"),
+    )
+
+    w = ScalarWidget(field)
+    assert w._ghost is not None
+    assert w._ghost.text() == "= 6000.0"
+
+
+def test_scalar_widget_eval_mode_marks_unresolved_red(qapp, ctrl):
+    from zcu_tools.gui.live_model import LiveModelEnv, ScalarLiveField
+    from zcu_tools.gui.ui.fields.common import ScalarWidget
+    from zcu_tools.meta_tool import MetaDict
+
+    ctrl.get_current_md.return_value = MetaDict()
+    field = ScalarLiveField(
+        ScalarSpec(label="Freq", type=float),
+        LiveModelEnv(ctrl=ctrl),
+        initial_val=EvalValue("missing"),
+    )
+
+    w = ScalarWidget(field)
+    assert w._ghost is not None
+    assert w._ghost.text() == "= ?"
+    assert "red" in w._ghost.styleSheet()
+
+
 # ---------------------------------------------------------------------------
 # CfgFormWidget — populate and read_values / read_schema
 # ---------------------------------------------------------------------------
@@ -183,8 +222,8 @@ def test_populate_scalar_fields_round_trip(qapp, ctrl):
             "freq": ScalarSpec(label="Freq", type=float),
         },
         {
-            "reps": ScalarValue(100),
-            "freq": ScalarValue(6.0),
+            "reps": DirectValue(100),
+            "freq": DirectValue(6.0),
         },
     )
     w = CfgFormWidget()
@@ -195,12 +234,56 @@ def test_populate_scalar_fields_round_trip(qapp, ctrl):
     assert out.fields["freq"].value == pytest.approx(6.0)  # type: ignore[union-attr]
 
 
+def test_cfg_form_refreshes_eval_field_from_bus(qapp, ctrl):
+    from zcu_tools.gui.event_bus import GuiEvent
+    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.meta_tool import MetaDict
+
+    md = MetaDict()
+    md.r_f = 6000.0
+    ctrl.get_current_md.return_value = md
+    schema = _schema(
+        {"freq": ScalarSpec(label="Freq", type=float)},
+        {"freq": EvalValue("r_f")},
+    )
+    w = CfgFormWidget()
+    emitted = []
+    w.schema_changed.connect(emitted.append)
+    w.populate(schema, ctrl)
+
+    md.r_f = 6100.0
+    ctrl.get_bus.return_value.emit(GuiEvent.MD_CHANGED, md)
+
+    val = w.read_values().fields["freq"]
+    assert isinstance(val, EvalValue)
+    assert val.resolved == 6100.0
+    assert emitted
+
+
+def test_cfg_form_unsubscribes_bus_on_repopulate(qapp, ctrl):
+    from zcu_tools.gui.event_bus import GuiEvent
+    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+
+    schema = _schema(
+        {"freq": ScalarSpec(label="Freq", type=float)},
+        {"freq": DirectValue(6000.0)},
+    )
+    w = CfgFormWidget()
+    w.populate(schema, ctrl)
+    w.populate(schema, ctrl)
+
+    bus = ctrl.get_bus.return_value
+    assert len(bus._subs[GuiEvent.MD_CHANGED]) == 1
+    assert len(bus._subs[GuiEvent.CONTEXT_CHANGED]) == 1
+    assert len(bus._subs[GuiEvent.INSPECT_CHANGED]) == 1
+
+
 def test_read_schema_returns_cfg_schema(qapp, ctrl):
     from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 
     schema = _schema(
         {"reps": ScalarSpec(label="Reps", type=int)},
-        {"reps": ScalarValue(10)},
+        {"reps": DirectValue(10)},
     )
     w = CfgFormWidget()
     w.populate(schema, ctrl)
@@ -215,7 +298,7 @@ def test_read_values_does_not_mutate_original(qapp, ctrl):
 
     schema = _schema(
         {"reps": ScalarSpec(label="Reps", type=int)},
-        {"reps": ScalarValue(100)},
+        {"reps": DirectValue(100)},
     )
     w = CfgFormWidget()
     w.populate(schema, ctrl)
@@ -273,7 +356,7 @@ def test_populate_nested_section_round_trip(qapp, ctrl):
                 fields={"gain": ScalarSpec(label="Gain", type=float)}
             )
         },
-        {"inner": CfgSectionValue(fields={"gain": ScalarValue(0.05)})},
+        {"inner": CfgSectionValue(fields={"gain": DirectValue(0.05)})},
     )
     w = CfgFormWidget()
     w.populate(schema, ctrl)
@@ -300,7 +383,7 @@ def test_literal_type_and_style_rows_are_hidden(qapp, ctrl):
             ),
         },
         {
-            "waveform": CfgSectionValue(fields={"sigma": ScalarValue(1.2)}),
+            "waveform": CfgSectionValue(fields={"sigma": DirectValue(1.2)}),
         },
     )
     w = CfgFormWidget()
@@ -329,7 +412,7 @@ def test_module_ref_toggle_sits_left_of_combo_and_controls_subsection(qapp, ctrl
         {
             "pulse": ModuleRefValue(
                 chosen_key="<Custom:Pulse Shape>",
-                value=CfgSectionValue(fields={"gain": ScalarValue(0.25)}),
+                value=CfgSectionValue(fields={"gain": DirectValue(0.25)}),
             )
         },
     )
@@ -377,7 +460,7 @@ def test_waveform_ref_toggle_sits_left_of_combo(qapp, ctrl):
         {
             "waveform": WaveformRefValue(
                 chosen_key="<Custom:Gaussian>",
-                value=CfgSectionValue(fields={"sigma": ScalarValue(0.5)}),
+                value=CfgSectionValue(fields={"sigma": DirectValue(0.5)}),
             )
         },
     )
@@ -413,7 +496,7 @@ def test_cfg_form_does_not_wrap_module_ref_row(qapp, ctrl):
         {
             "pulse": ModuleRefValue(
                 chosen_key="<Custom:Long Custom Module Name>",
-                value=CfgSectionValue(fields={"gain": ScalarValue(0.25)}),
+                value=CfgSectionValue(fields={"gain": DirectValue(0.25)}),
             )
         },
     )
@@ -474,7 +557,7 @@ def test_populate_module_ref_field_round_trip(qapp, ctrl):
             fields={
                 "mod": ModuleRefValue(
                     chosen_key="<Custom:Pulse>",
-                    value=CfgSectionValue(fields={"gain": ScalarValue(0.5)}),
+                    value=CfgSectionValue(fields={"gain": DirectValue(0.5)}),
                 )
             }
         ),

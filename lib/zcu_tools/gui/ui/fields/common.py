@@ -13,10 +13,12 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QSpinBox,
     QWidget,
 )
 
+from ...adapter import DirectValue, EvalValue
 from ...live_model import (
     ChannelLiveField,
     LiteralLiveField,
@@ -147,30 +149,16 @@ class ScalarWidget(BaseLiveWidget):
     def __init__(self, field: ScalarLiveField, parent: Optional[QWidget] = None):
         super().__init__(field, parent)
         self._updating = False
+        self._input: Optional[QWidget] = None
+        self._ghost: Optional[QLabel] = None
+        self._mode = ""
+        self._layout = QHBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(4)
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-
-        spec = field.spec
-        val = field.get_value().value
-
-        self._input = make_value_widget(
-            spec.type, val, spec.choices, spec.editable, spec.decimals
-        )
-        layout.addWidget(self._input)
-
-        # Connect signals based on widget type
-        if isinstance(self._input, QComboBox):
-            self._input.currentIndexChanged.connect(self._on_ui_changed)
-        elif isinstance(self._input, QCheckBox):
-            self._input.toggled.connect(self._on_ui_changed)
-        elif isinstance(self._input, (QSpinBox, TrimDoubleSpinBox)):
-            self._input.valueChanged.connect(self._on_ui_changed)
-        elif isinstance(self._input, QLineEdit):
-            self._input.textChanged.connect(self._on_ui_changed)
-
-        # Reactive sync: Model -> UI
+        self._rebuild_ui()
         field.on_change.connect(self._on_model_changed)
+        self._install_context_menu(self)
 
     def teardown(self) -> None:
         self._field.on_change.disconnect(self._on_model_changed)
@@ -180,18 +168,33 @@ class ScalarWidget(BaseLiveWidget):
             return
         self._updating = True
         try:
-            val = read_value_widget(
-                self._input, cast(ScalarLiveField, self._field).spec.type
-            )
-            self._field.set_value(val)
+            field = cast(ScalarLiveField, self._field)
+            if isinstance(field.get_value(), EvalValue):
+                assert isinstance(self._input, QLineEdit)
+                field.set_value(EvalValue(expr=self._input.text().strip()))
+                self._sync_eval_ghost(field.get_value())
+            else:
+                assert self._input is not None
+                val = read_value_widget(self._input, field.spec.type)
+                field.set_value(val)
         finally:
             self._updating = False
 
     def _on_model_changed(self, val: Any) -> None:
+        next_mode = "eval" if isinstance(val, EvalValue) else "direct"
+        if next_mode != self._mode:
+            self._rebuild_ui()
+            return
         if self._updating:
             return
         self._updating = True
         try:
+            if isinstance(val, EvalValue):
+                assert isinstance(self._input, QLineEdit)
+                self._input.setText(val.expr)
+                self._sync_eval_ghost(val)
+                return
+
             raw = val.value
             if isinstance(self._input, QComboBox):
                 idx = self._input.findText(str(raw))
@@ -205,6 +208,99 @@ class ScalarWidget(BaseLiveWidget):
                 self._input.setText(str(raw))
         finally:
             self._updating = False
+
+    def _rebuild_ui(self) -> None:
+        self._clear_layout()
+        field = cast(ScalarLiveField, self._field)
+        value = field.get_value()
+        self._mode = "eval" if isinstance(value, EvalValue) else "direct"
+        self._ghost = None
+
+        if isinstance(value, EvalValue):
+            self._input = QLineEdit(value.expr)
+            self._input.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
+            self._input.setEnabled(field.spec.editable)
+            self._input.textChanged.connect(self._on_ui_changed)
+            self._layout.addWidget(self._input, stretch=1)
+
+            self._ghost = QLabel()
+            self._layout.addWidget(self._ghost)
+            self._sync_eval_ghost(value)
+        else:
+            self._input = make_value_widget(
+                field.spec.type,
+                value.value,
+                field.spec.choices,
+                field.spec.editable,
+                field.spec.decimals,
+            )
+            self._layout.addWidget(self._input, stretch=1)
+            self._connect_direct_input()
+
+        self._install_context_menu(self._input)
+
+    def _clear_layout(self) -> None:
+        while self._layout.count():
+            item = self._layout.takeAt(0)
+            if item is None:
+                continue
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _connect_direct_input(self) -> None:
+        if isinstance(self._input, QComboBox):
+            self._input.currentIndexChanged.connect(self._on_ui_changed)
+        elif isinstance(self._input, QCheckBox):
+            self._input.toggled.connect(self._on_ui_changed)
+        elif isinstance(self._input, (QSpinBox, TrimDoubleSpinBox)):
+            self._input.valueChanged.connect(self._on_ui_changed)
+        elif isinstance(self._input, QLineEdit):
+            self._input.textChanged.connect(self._on_ui_changed)
+
+    def _sync_eval_ghost(self, value: object) -> None:
+        if self._ghost is None or not isinstance(value, EvalValue):
+            return
+        if value.resolved is None:
+            self._ghost.setText("= ?")
+            self._ghost.setStyleSheet("color: red; font-style: italic;")
+            return
+        self._ghost.setText(f"= {value.resolved}")
+        self._ghost.setStyleSheet("color: gray; font-style: italic;")
+
+    def _install_context_menu(self, widget: Optional[QWidget]) -> None:
+        if widget is None:
+            return
+        widget.setContextMenuPolicy(Qt.CustomContextMenu)  # type: ignore[attr-defined]
+        widget.customContextMenuRequested.connect(  # type: ignore[attr-defined]
+            lambda pos, w=widget: self._show_context_menu(w.mapToGlobal(pos))
+        )
+
+    def _show_context_menu(self, global_pos: Any) -> None:
+        field = cast(ScalarLiveField, self._field)
+        if not self._supports_eval_mode():
+            return
+        menu = QMenu(self)
+        value = field.get_value()
+        if isinstance(value, EvalValue):
+            action = menu.addAction("Use direct value")
+            chosen = cast(Any, menu).exec_(global_pos)
+            if chosen is action:
+                if value.resolved is None:
+                    field.set_value(DirectValue(value=None, is_unset=True))
+                else:
+                    field.set_value(DirectValue(value=value.resolved, is_unset=False))
+            return
+
+        action = menu.addAction("Use expression")
+        chosen = cast(Any, menu).exec_(global_pos)
+        if chosen is action and isinstance(value, DirectValue):
+            expr = "" if value.is_unset else str(value.value)
+            field.set_value(EvalValue(expr=expr))
+
+    def _supports_eval_mode(self) -> bool:
+        spec = cast(ScalarLiveField, self._field).spec
+        return spec.editable and spec.choices is None and spec.type in {int, float}
 
 
 @register_widget(SweepLiveField)

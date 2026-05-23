@@ -10,12 +10,13 @@ from zcu_tools.gui.adapter import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
+    DirectValue,
+    EvalValue,
     ModuleRefSpec,
     ModuleRefValue,
     MultiSweepSpec,
     MultiSweepValue,
     ScalarSpec,
-    ScalarValue,
     SweepSpec,
     SweepValue,
     analyze_params_to_raw_dict,
@@ -47,7 +48,7 @@ def _schema(spec_fields: dict, val_fields: dict | None = None) -> CfgSchema:
 def test_scalar_int():
     s = _schema(
         {"reps": ScalarSpec(label="Reps", type=int)},
-        {"reps": ScalarValue(100)},
+        {"reps": DirectValue(100)},
     )
     assert schema_to_dict(s, _make_ml()) == {"reps": 100}
 
@@ -55,7 +56,7 @@ def test_scalar_int():
 def test_scalar_str():
     s = _schema(
         {"name": ScalarSpec(label="Name", type=str)},
-        {"name": ScalarValue("hello")},
+        {"name": DirectValue("hello")},
     )
     assert schema_to_dict(s, _make_ml())["name"] == "hello"
 
@@ -63,9 +64,26 @@ def test_scalar_str():
 def test_scalar_editable_false_still_included():
     s = _schema(
         {"freq": ScalarSpec(label="Freq", type=float, editable=False)},
-        {"freq": ScalarValue(6.0)},
+        {"freq": DirectValue(6.0)},
     )
     assert schema_to_dict(s, _make_ml())["freq"] == pytest.approx(6.0)
+
+
+def test_scalar_eval_value_uses_resolved_snapshot():
+    s = _schema(
+        {"freq": ScalarSpec(label="Freq", type=float)},
+        {"freq": EvalValue(expr="r_f - rf_w", resolved=5998.0)},
+    )
+    assert schema_to_dict(s, _make_ml())["freq"] == pytest.approx(5998.0)
+
+
+def test_scalar_eval_value_unresolved_raises():
+    s = _schema(
+        {"freq": ScalarSpec(label="Freq", type=float)},
+        {"freq": EvalValue(expr="missing_name", resolved=None)},
+    )
+    with pytest.raises(RuntimeError, match="freq.*missing_name.*unresolved"):
+        schema_to_dict(s, _make_ml())
 
 
 def test_scalar_missing_in_value_skipped():
@@ -75,7 +93,7 @@ def test_scalar_missing_in_value_skipped():
             "reps": ScalarSpec(label="Reps", type=int),
             "x": ScalarSpec(label="X", type=int),
         },
-        {"reps": ScalarValue(5)},
+        {"reps": DirectValue(5)},
     )
     with pytest.raises(RuntimeError, match="x"):
         schema_to_dict(s, _make_ml())
@@ -84,7 +102,7 @@ def test_scalar_missing_in_value_skipped():
 def test_extra_value_fields_raise():
     s = _schema(
         {"reps": ScalarSpec(label="Reps", type=int)},
-        {"reps": ScalarValue(5), "extra": ScalarValue(1)},
+        {"reps": DirectValue(5), "extra": DirectValue(1)},
     )
     with pytest.raises(RuntimeError, match="extra"):
         schema_to_dict(s, _make_ml())
@@ -171,7 +189,7 @@ def test_module_ref_named_key_uses_value_tree():
         {
             "readout": ModuleRefValue(
                 chosen_key="readout_rf",
-                value=CfgSectionValue(fields={"ro_ch": ScalarValue(99)}),
+                value=CfgSectionValue(fields={"ro_ch": DirectValue(99)}),
             )
         },
     )
@@ -190,7 +208,7 @@ def test_module_ref_custom_key_resolves_by_label():
         {
             "ro": ModuleRefValue(
                 chosen_key="<Custom:Direct Readout>",
-                value=CfgSectionValue(fields={"gain": ScalarValue(0.5)}),
+                value=CfgSectionValue(fields={"gain": DirectValue(0.5)}),
             )
         },
     )
@@ -206,7 +224,7 @@ def test_module_ref_custom_key_resolves_by_label():
 def test_nested_section_is_recursed():
     s = _schema(
         {"inner": CfgSectionSpec(fields={"x": ScalarSpec(label="X", type=int)})},
-        {"inner": CfgSectionValue(fields={"x": ScalarValue(42)})},
+        {"inner": CfgSectionValue(fields={"x": DirectValue(42)})},
     )
     assert schema_to_dict(s, _make_ml()) == {"inner": {"x": 42}}
 
@@ -219,7 +237,7 @@ def test_nested_section_is_recursed():
 def test_make_default_value_scalar():
     spec = CfgSectionSpec(fields={"x": ScalarSpec(label="X", type=int)})
     val = make_default_value(spec)
-    assert isinstance(val.fields["x"], ScalarValue)
+    assert isinstance(val.fields["x"], DirectValue)
 
 
 def test_analyze_params_to_raw_dict_round_trips_scalars():
@@ -266,7 +284,7 @@ def test_make_default_value_nested():
     val = make_default_value(spec)
     sub = val.fields["sub"]
     assert isinstance(sub, CfgSectionValue)
-    assert isinstance(sub.fields["y"], ScalarValue)
+    assert isinstance(sub.fields["y"], DirectValue)
 
 
 def test_make_default_value_module_ref():

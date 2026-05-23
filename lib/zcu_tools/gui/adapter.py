@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Optional, Protocol, Sequence, Union, cast
 
 from matplotlib.figure import Figure
-from typing_extensions import Generic, TypeVar
+from typing_extensions import Generic, TypeAlias, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -251,10 +251,19 @@ CfgNodeSpec = Union[
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class ScalarValue:
+@dataclass(frozen=True)
+class DirectValue:
     value: Any
     is_unset: bool = False
+
+
+@dataclass(frozen=True)
+class EvalValue:
+    expr: str
+    resolved: Optional[Any] = None
+
+
+ScalarValue: TypeAlias = Union[DirectValue, EvalValue]
 
 
 @dataclass
@@ -349,12 +358,22 @@ def _section_to_dict(
             raise RuntimeError(f"Config field '{full_path}' ({label}) is missing")
 
         if isinstance(node_spec, ScalarSpec):
-            assert isinstance(node_val, ScalarValue)
-            if node_val.is_unset:
-                label = node_spec.label or key
-                full_path = ".".join([*path, key])
-                raise RuntimeError(f"Config field '{full_path}' ({label}) is unset")
-            result[key] = node_val.value
+            assert isinstance(node_val, (DirectValue, EvalValue))
+            if isinstance(node_val, DirectValue):
+                if node_val.is_unset:
+                    label = node_spec.label or key
+                    full_path = ".".join([*path, key])
+                    raise RuntimeError(f"Config field '{full_path}' ({label}) is unset")
+                result[key] = node_val.value
+            else:
+                if node_val.resolved is None:
+                    label = node_spec.label or key
+                    full_path = ".".join([*path, key])
+                    raise RuntimeError(
+                        f"Config field '{full_path}' ({label}) expression "
+                        f"{node_val.expr!r} is unresolved"
+                    )
+                result[key] = node_val.resolved
 
         elif isinstance(node_spec, LiteralSpec):
             result[key] = node_spec.value
@@ -449,7 +468,7 @@ def _find_allowed_spec(
                 if isinstance(node_spec, LiteralSpec):
                     node_val = ref_val.value.fields.get(key)
                     if (
-                        not isinstance(node_val, ScalarValue)
+                        not isinstance(node_val, DirectValue)
                         or node_val.value != node_spec.value
                     ):
                         ok = False
@@ -490,11 +509,11 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
     fields: dict[str, CfgNodeValue] = {}
     for key, node_spec in spec.fields.items():
         if isinstance(node_spec, LiteralSpec):
-            fields[key] = ScalarValue(node_spec.value)
+            fields[key] = DirectValue(node_spec.value)
         elif isinstance(node_spec, ScalarSpec):
             # Use 0 / "" / False as a sensible zero-value per type
             defaults: dict[type, Any] = {int: 0, float: 0.0, bool: False, str: ""}
-            fields[key] = ScalarValue(defaults.get(node_spec.type, None))
+            fields[key] = DirectValue(defaults.get(node_spec.type, None))
         elif isinstance(node_spec, SweepSpec):
             fields[key] = SweepValue(start=0.0, stop=1.0, expts=11)
         elif isinstance(node_spec, MultiSweepSpec):
@@ -567,7 +586,7 @@ def inherit_from(
 
         # LiteralSpec — always use spec's fixed value
         if isinstance(new_node_spec, LiteralSpec):
-            new_fields[key] = ScalarValue(new_node_spec.value)
+            new_fields[key] = DirectValue(new_node_spec.value)
             continue
 
         # ScalarSpec — inherit if same type
@@ -575,12 +594,12 @@ def inherit_from(
             if (
                 isinstance(old_node_spec, ScalarSpec)
                 and old_node_spec.type is new_node_spec.type
-                and isinstance(old_node_val, ScalarValue)
+                and isinstance(old_node_val, DirectValue)
             ):
-                new_fields[key] = ScalarValue(old_node_val.value)
+                new_fields[key] = DirectValue(old_node_val.value)
             else:
                 defaults: dict[type, Any] = {int: 0, float: 0.0, bool: False, str: ""}
-                new_fields[key] = ScalarValue(defaults.get(new_node_spec.type, None))
+                new_fields[key] = DirectValue(defaults.get(new_node_spec.type, None))
             continue
 
         # SweepSpec — inherit whole SweepValue

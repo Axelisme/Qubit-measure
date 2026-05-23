@@ -12,9 +12,10 @@ from zcu_tools.gui.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     ChannelValue,
+    DirectValue,
+    EvalValue,
     ModuleRefValue,
     ScalarSpec,
-    ScalarValue,
     SweepValue,
     WaveformRefValue,
 )
@@ -52,8 +53,8 @@ def _get_parent_section_value(
 
 
 def _coerce_value_for_node(current: CfgNodeValue, value: object) -> CfgNodeValue:
-    if isinstance(current, ScalarValue):
-        return ScalarValue(value=value, is_unset=False)
+    if isinstance(current, (DirectValue, EvalValue)):
+        return DirectValue(value=value, is_unset=False)
     if isinstance(current, ChannelValue):
         if not isinstance(value, (int, str)):
             raise RuntimeError(

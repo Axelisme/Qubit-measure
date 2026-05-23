@@ -39,6 +39,7 @@ class _CollapsibleSection(QWidget):
         outer.setSpacing(0)
 
         self._toggle_btn = None
+        self._header_label: Optional[QLabel] = None
 
         if not no_header:
             if collapsible:
@@ -54,11 +55,13 @@ class _CollapsibleSection(QWidget):
                 self._toggle_btn.setChecked(not collapsed)
                 self._toggle_btn.clicked.connect(self._on_toggle)
                 header_row.addWidget(self._toggle_btn)
-                header_row.addWidget(QLabel(f"<b>{label}</b>"), stretch=1)
+                self._header_label = QLabel(f"<b>{label}</b>")
+                header_row.addWidget(self._header_label, stretch=1)
                 outer.addWidget(header)
             else:
                 if label:
-                    outer.addWidget(QLabel(f"<b>{label}</b>"))
+                    self._header_label = QLabel(f"<b>{label}</b>")
+                    outer.addWidget(self._header_label)
 
         self._body = QWidget()
         self.body_layout = QVBoxLayout(self._body)
@@ -80,6 +83,13 @@ class _CollapsibleSection(QWidget):
         if self._toggle_btn:
             self._toggle_btn.setText("▼" if checked else "▶")
         self._body.setVisible(checked)
+
+    def set_invalid(self, invalid: bool) -> None:
+        style = "color: red;" if invalid else ""
+        if self._header_label is not None:
+            self._header_label.setStyleSheet(style)
+        if self._toggle_btn is not None:
+            self._toggle_btn.setStyleSheet(style)
 
 
 @register_widget(SectionLiveField)
@@ -105,6 +115,8 @@ class SectionWidget(BaseLiveWidget):
 
         self._child_widgets: Dict[str, FieldWidgetProtocol] = {}
         self._build_children()
+        field.on_validity_changed.connect(self._on_validity_changed)
+        self._on_validity_changed(field.is_valid())
 
     def _build_children(self) -> None:
         field = cast(SectionLiveField, self._field)
@@ -124,9 +136,13 @@ class SectionWidget(BaseLiveWidget):
             self._child_widgets[key] = w
 
     def teardown(self) -> None:
+        self._field.on_validity_changed.disconnect(self._on_validity_changed)
         # Recursively teardown children
         for w in self._child_widgets.values():
             w.teardown()
+
+    def _on_validity_changed(self, valid: bool) -> None:
+        self._container.set_invalid(not valid)
 
 
 @register_widget(ModuleRefLiveField)
@@ -169,6 +185,8 @@ class ModuleRefWidget(BaseLiveWidget):
 
         # Reactive sync
         field.on_change.connect(self._on_model_changed)
+        field.on_validity_changed.connect(self._on_validity_changed)
+        self._on_validity_changed(field.is_valid())
 
     def _refresh_combo_items(self) -> None:
         self._combo.blockSignals(True)
@@ -243,6 +261,7 @@ class ModuleRefWidget(BaseLiveWidget):
             return
 
         if self._sub_widget:
+            self._sub_widget.teardown()
             self._sub_layout.removeWidget(cast(QWidget, self._sub_widget))
             cast(QWidget, self._sub_widget).deleteLater()
             self._sub_widget = None
@@ -256,5 +275,11 @@ class ModuleRefWidget(BaseLiveWidget):
 
     def teardown(self) -> None:
         self._field.on_change.disconnect(self._on_model_changed)
+        self._field.on_validity_changed.disconnect(self._on_validity_changed)
         if self._sub_widget:
             self._sub_widget.teardown()
+
+    def _on_validity_changed(self, valid: bool) -> None:
+        style = "" if valid else "border: 1px solid red;"
+        self._combo.setStyleSheet(style)
+        self._expand_btn.setStyleSheet("" if valid else "color: red;")

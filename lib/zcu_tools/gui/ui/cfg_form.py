@@ -9,7 +9,7 @@ REFACTORED (Phase 35/36):
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from qtpy.QtCore import Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
@@ -24,6 +24,7 @@ from .fields import SectionWidget
 if TYPE_CHECKING:
     from zcu_tools.gui.adapter import CfgSchema, CfgSectionValue
     from zcu_tools.gui.controller import Controller
+    from zcu_tools.gui.event_bus import EventBus, GuiEvent
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,8 @@ class CfgFormWidget(QWidget):
         super().__init__(parent)
         self._model: Optional[SectionLiveField] = None
         self._root_widget: Optional[SectionWidget] = None
+        self._bus: Optional[EventBus] = None
+        self._bus_subs: list[tuple[GuiEvent, Callable[..., None]]] = []
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -66,6 +69,7 @@ class CfgFormWidget(QWidget):
         self._model = SectionLiveField(schema.spec, env, initial_val=schema.value)
         self._model.on_validity_changed.connect(self.validity_changed.emit)
         self._model.on_change.connect(self._emit_schema_changed)
+        self._subscribe_external_refresh(ctrl)
 
         # 2. Build the UI tree
         self._root_widget = SectionWidget(self._model, top_level=True)
@@ -78,8 +82,10 @@ class CfgFormWidget(QWidget):
         logger.debug("CfgFormWidget.populate: built reactive form")
 
     def _clear_inner(self) -> None:
+        self._unsubscribe_external_refresh()
         if self._model:
             self._model.on_change.disconnect(self._emit_schema_changed)
+            self._model.on_validity_changed.disconnect(self.validity_changed.emit)
             self._model.teardown()
             self._model = None
 
@@ -109,6 +115,37 @@ class CfgFormWidget(QWidget):
         if self._model is None:
             return
         self.schema_changed.emit(self.read_schema())
+
+    def _subscribe_external_refresh(self, ctrl: Controller) -> None:
+        from zcu_tools.gui.event_bus import GuiEvent
+
+        self._bus = ctrl.get_bus()
+        for event in (
+            GuiEvent.MD_CHANGED,
+            GuiEvent.CONTEXT_CHANGED,
+            GuiEvent.INSPECT_CHANGED,
+        ):
+            cb = self._make_external_refresh_cb(event)
+            self._bus.subscribe(event, cb)
+            self._bus_subs.append((event, cb))
+
+    def _unsubscribe_external_refresh(self) -> None:
+        if self._bus is None:
+            self._bus_subs.clear()
+            return
+        for event, cb in self._bus_subs:
+            self._bus.unsubscribe(event, cb)
+        self._bus_subs.clear()
+        self._bus = None
+
+    def _make_external_refresh_cb(self, event: GuiEvent) -> Callable[..., None]:
+        def _callback(*_: object, **__: object) -> None:
+            if self._model is None:
+                return
+            self._model.refresh_external(event)
+            self.validity_changed.emit(self._model.is_valid())
+
+        return _callback
 
     def to_dict(self) -> dict[str, Any]:
         """Convenience: return raw dict for experiment runner."""

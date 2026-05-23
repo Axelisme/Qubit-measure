@@ -9,7 +9,13 @@ from zcu_tools.experiment.v2_gui.adapters.onetone.fakefreq import (
     FreqRunResult,
 )
 from zcu_tools.experiment.v2_gui.registry import register_all
-from zcu_tools.gui.adapter import AnalyzeRequest, CfgSchema, ExpContext, RunRequest
+from zcu_tools.gui.adapter import (
+    AnalyzeRequest,
+    CfgSchema,
+    DirectValue,
+    ExpContext,
+    RunRequest,
+)
 from zcu_tools.gui.registry import Registry
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
@@ -92,14 +98,14 @@ def test_make_default_cfg_has_expected_fields():
 
 def test_make_default_cfg_uses_r_f_from_md():
     """make_default_cfg should pre-fill res_freq and sweep range from md.r_f."""
-    from zcu_tools.gui.adapter import ScalarValue, SweepValue
+    from zcu_tools.gui.adapter import SweepValue
 
     ctx = _make_ctx()
     ctx.md.r_f = 7500.0
     schema = _adapter().make_default_cfg(ctx)
     val = schema.value
     res_freq_val = val.fields["res_freq"]
-    assert isinstance(res_freq_val, ScalarValue)
+    assert isinstance(res_freq_val, DirectValue)
     assert abs(res_freq_val.value - 7500.0) < 1e-6
     sweep = val.fields["freq"]
     assert isinstance(sweep, SweepValue)
@@ -109,7 +115,7 @@ def test_make_default_cfg_uses_r_f_from_md():
 
 def test_make_default_cfg_uses_rf_w_for_sweep_and_ql():
     """make_default_cfg should estimate Ql and sweep range from md.r_f + md.rf_w."""
-    from zcu_tools.gui.adapter import ScalarValue, SweepValue
+    from zcu_tools.gui.adapter import SweepValue
 
     ctx = _make_ctx()
     ctx.md.r_f = 6000.0
@@ -121,7 +127,7 @@ def test_make_default_cfg_uses_rf_w_for_sweep_and_ql():
     assert abs(sweep.start - 5990.0) < 1e-6
     assert abs(sweep.stop - 6010.0) < 1e-6
     ql_val = val.fields["Ql"]
-    assert isinstance(ql_val, ScalarValue)
+    assert isinstance(ql_val, DirectValue)
     assert abs(ql_val.value - 3000) < 10  # round(6000/2) = 3000
 
 
@@ -208,15 +214,13 @@ def test_run_noise_decreases_with_more_rounds():
     rounds the theoretical reduction is 10×; asserting > 3× gives a robust
     lower bound even with an unlucky random seed.
     """
-    from zcu_tools.gui.adapter import ScalarValue
-
     ctx = _make_ctx()
     adapter = FakeFreqAdapter(fast_mode=True)
 
     def _schema_with(rounds: int) -> CfgSchema:
         s = adapter.make_default_cfg(ctx)
-        s.value.fields["rounds"] = ScalarValue(rounds)
-        s.value.fields["noise_scale"] = ScalarValue(10.0)
+        s.value.fields["rounds"] = DirectValue(rounds)
+        s.value.fields["noise_scale"] = DirectValue(10.0)
         return s
 
     res_low = adapter.run(_run_req(ctx), _schema_with(1))
@@ -262,12 +266,10 @@ def test_analyze_has_expected_fields():
 
 def test_analyze_freq_close_to_true_value():
     """Fitted frequency should be within 5 MHz of the ground-truth 6000.0 MHz."""
-    from zcu_tools.gui.adapter import ScalarValue
-
     ctx = _make_ctx()
     adapter = FakeFreqAdapter(fast_mode=True)
     schema = adapter.make_default_cfg(ctx)
-    schema.value.fields["rounds"] = ScalarValue(200)
+    schema.value.fields["rounds"] = DirectValue(200)
     result = adapter.run(_run_req(ctx), schema)
     ar = adapter.analyze(
         _analyze_req(ctx, result, _default_analyze_params(adapter, result, ctx))

@@ -7,7 +7,12 @@ from unittest.mock import MagicMock
 import numpy as np
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import ADAPTERS, register_all
-from zcu_tools.gui.adapter import AnalyzeRequest, RunRequest, schema_to_dict
+from zcu_tools.gui.adapter import (
+    AnalyzeRequest,
+    DirectValue,
+    RunRequest,
+    schema_to_dict,
+)
 from zcu_tools.gui.registry import Registry
 
 
@@ -36,7 +41,7 @@ def test_fake_adapter_full_flow():
     assert "sweep" in cfg_dict
 
     # 3. run
-    schema.value.fields["noise_scale"].value = 0.05  # type: ignore[index,union-attr]
+    schema.value.fields["noise_scale"] = DirectValue(0.05)
     run_req = RunRequest(md=ctx.md, ml=ctx.ml, soc=ctx.soc, soccfg=ctx.soccfg)
     result = adapter.run(run_req, schema)
     assert isinstance(result, np.ndarray)

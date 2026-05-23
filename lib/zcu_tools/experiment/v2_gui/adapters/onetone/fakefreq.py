@@ -42,6 +42,7 @@ from zcu_tools.gui.adapter import (
     RunRequest,
     SaveDataRequest,
     ScalarSpec,
+    DirectValue,
     ScalarValue,
     SweepSpec,
     SweepValue,
@@ -241,16 +242,16 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
 
         root_val = CfgSectionValue(
             fields={
-                "reps": ScalarValue(100),
-                "rounds": ScalarValue(100),
+                "reps": DirectValue(100),
+                "rounds": DirectValue(100),
                 "freq": SweepValue(start=freq_start, stop=freq_stop, expts=201),
-                "res_freq": ScalarValue(r_f),
-                "Ql": ScalarValue(ql_default),
-                "Qc_abs": ScalarValue(qc_default),
-                "phi": ScalarValue(0.0),
-                "a0_abs": ScalarValue(1.0),
-                "edelay": ScalarValue(0.05),
-                "noise_scale": ScalarValue(0.05),
+                "res_freq": DirectValue(r_f),
+                "Ql": DirectValue(ql_default),
+                "Qc_abs": DirectValue(qc_default),
+                "phi": DirectValue(0.0),
+                "a0_abs": DirectValue(1.0),
+                "edelay": DirectValue(0.05),
+                "noise_scale": DirectValue(0.05),
                 "modules": CfgSectionValue(
                     fields={
                         "readout": make_module_ref_default(

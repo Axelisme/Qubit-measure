@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import cast
 
 import pytest
-from zcu_tools.gui.adapter import CfgSchema, ScalarSpec, ScalarValue
+from zcu_tools.gui.adapter import CfgSchema, DirectValue, ScalarSpec
 from zcu_tools.gui.schema_overrides import (
     apply_schema_overrides,
     hide_field,
@@ -46,8 +46,8 @@ def test_set_default_value_updates_scalar_without_mutating_input():
 
     updated = set_default_value(schema, "pulse_cfg.freq", 0.0)
 
-    assert schema.value.fields["pulse_cfg"].fields["freq"] == ScalarValue(0.0)  # type: ignore[union-attr]
-    assert updated.value.fields["pulse_cfg"].fields["freq"] == ScalarValue(0.0)  # type: ignore[union-attr]
+    assert schema.value.fields["pulse_cfg"].fields["freq"] == DirectValue(0.0)  # type: ignore[union-attr]
+    assert updated.value.fields["pulse_cfg"].fields["freq"] == DirectValue(0.0)  # type: ignore[union-attr]
     assert updated.value.fields["pulse_cfg"] is not schema.value.fields["pulse_cfg"]  # type: ignore[comparison-overlap]
 
 
@@ -64,7 +64,7 @@ def test_apply_schema_overrides_combines_spec_and_value_updates():
     freq_spec = cast(ScalarSpec, pulse_spec.fields["freq"])  # type: ignore[union-attr]
     assert freq_spec.editable is False
     assert freq_spec.hidden is True
-    assert updated.value.fields["pulse_cfg"].fields["freq"] == ScalarValue(123.4)  # type: ignore[union-attr]
+    assert updated.value.fields["pulse_cfg"].fields["freq"] == DirectValue(123.4)  # type: ignore[union-attr]
 
 
 def test_lock_field_missing_path_fails_fast():
