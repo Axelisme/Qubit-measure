@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional, Sequence
+from dataclasses import dataclass
+from typing import Any, Sequence
 
 import numpy as np
 from matplotlib.figure import Figure
 
+from zcu_tools.experiment.base import AbsExperiment
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
     CfgSchema,
@@ -15,7 +18,6 @@ from zcu_tools.gui.adapter import (
     ExpContext,
     MetaDictWriteback,
     ParamSpec,
-    SavePaths,
     ScalarSpec,
     ScalarValue,
     SweepSpec,
@@ -23,11 +25,50 @@ from zcu_tools.gui.adapter import (
 )
 
 FakeResult = np.ndarray
-FakeAnalyzeResult = tuple[float, Optional[Figure]]
+
+
+class FakeExpCfg(ExpCfgModel):
+    reps: int = 100
+    rounds: int = 10
+    gain: float = 0.1
+    noise_scale: float = 0.1
+    sweep: object
+
+
+class FakeExperiment(AbsExperiment[FakeResult, FakeExpCfg]):
+    def run(self, cfg: FakeExpCfg) -> FakeResult:
+        rng = np.random.default_rng(seed=42)
+        return rng.normal(0.0, cfg.noise_scale, size=11)
+
+
+@dataclass
+class FakeAnalyzeResult:
+    peak: float
+    figure: Figure
+
+
+def _require_int(raw_cfg: dict[str, object], key: str) -> int:
+    value = raw_cfg.get(key)
+    if not isinstance(value, int):
+        raise RuntimeError(
+            f"FakeAdapter config field {key!r} must be int, got {type(value)}"
+        )
+    return value
+
+
+def _require_float(raw_cfg: dict[str, object], key: str) -> float:
+    value = raw_cfg.get(key)
+    if not isinstance(value, (int, float)):
+        raise RuntimeError(
+            f"FakeAdapter config field {key!r} must be float, got {type(value)}"
+        )
+    return float(value)
 
 
 class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult]):
     """Minimal stub adapter — drives the full GUI flow without hardware."""
+
+    exp_cls = FakeExperiment
 
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:  # noqa: ARG002
         spec = CfgSectionSpec(
@@ -36,6 +77,7 @@ class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult]):
                 "rounds": ScalarSpec(label="Rounds", type=int),
                 "sweep": SweepSpec(label="Frequency"),
                 "gain": ScalarSpec(label="Gain", type=float, decimals=4),
+                "noise_scale": ScalarSpec(label="Noise Scale", type=float, decimals=4),
             }
         )
         value = CfgSectionValue(
@@ -44,26 +86,19 @@ class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult]):
                 "rounds": ScalarValue(10),
                 "sweep": SweepValue(start=5.0, stop=6.0, expts=11),
                 "gain": ScalarValue(0.1),
+                "noise_scale": ScalarValue(0.1),
             }
         )
         return CfgSchema(spec=spec, value=value)
 
-    def get_run_params(self) -> dict[str, ParamSpec]:
-        return {
-            "noise_scale": ParamSpec(
-                label="Noise Scale", default=0.1, type=float, choices=None
-            ),
-        }
-
-    def run(
-        self,
-        ctx: ExpContext,  # noqa: ARG002
-        schema: CfgSchema,  # noqa: ARG002
-        **user_params: Any,
-    ) -> FakeResult:
-        noise_scale = float(user_params.get("noise_scale", 0.1))
-        rng = np.random.default_rng(seed=42)
-        return rng.normal(0.0, noise_scale, size=11)
+    def build_exp_cfg(self, raw_cfg: dict[str, object], ctx: ExpContext) -> FakeExpCfg:  # noqa: ARG002
+        return FakeExpCfg(
+            reps=_require_int(raw_cfg, "reps"),
+            rounds=_require_int(raw_cfg, "rounds"),
+            gain=_require_float(raw_cfg, "gain"),
+            noise_scale=_require_float(raw_cfg, "noise_scale"),
+            sweep=raw_cfg["sweep"],
+        )
 
     def get_analyze_params(self) -> dict[str, ParamSpec]:
         return {
@@ -94,29 +129,25 @@ class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult]):
         ax.set_title("FakeAdapter analysis")
         ax.legend()
         plt.close(fig)
-        return (peak, fig)
-
-    def get_figure(self, analyze_result: FakeAnalyzeResult) -> Optional[Figure]:
-        return analyze_result[1]
+        return FakeAnalyzeResult(peak=peak, figure=fig)
 
     def get_writeback_items(
         self,
         analyze_result: FakeAnalyzeResult,
         ctx: ExpContext,  # noqa: ARG002
     ) -> Sequence[MetaDictWriteback]:
-        peak, _ = analyze_result
         return [
             MetaDictWriteback(
                 key="fake_peak",
                 description="Fake peak value from FakeAdapter analysis",
                 current_value=0.0,
                 md_key="fake_peak",
-                proposed_value=peak,
+                proposed_value=analyze_result.peak,
             )
         ]
 
-    def make_save_paths(self, ctx: ExpContext) -> SavePaths:  # noqa: ARG002
-        return SavePaths(data_path="/tmp/fake_data", image_path="/tmp/fake_image.png")
+    def make_filename_stem(self, ctx: ExpContext) -> str:  # noqa: ARG002
+        return f"{ctx.res_name}_fake"
 
     def save(
         self,

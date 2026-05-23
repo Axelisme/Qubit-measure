@@ -17,6 +17,10 @@ def _make_ctx() -> ExpContext:
         ml=ModuleLibrary(),
         soc=None,
         soccfg=None,
+        res_name="test_res",
+        result_dir="/tmp/zcu_result",
+        database_path="/tmp/zcu_db/test_chip/test_qubit",
+        active_label="ctx001",
     )
 
 
@@ -32,7 +36,7 @@ def test_writeback_service_applies_md_items():
     result = adapter.run(ctx, schema)
     analyze_result = adapter.analyze(result, ctx)
     state.update_tab_result(tab_id, result)
-    state.update_tab_analyze(tab_id, analyze_result, adapter.get_figure(analyze_result))
+    state.update_tab_analyze(tab_id, analyze_result, analyze_result.figure)
 
     svc = WritebackService(state, bus)
     items = svc.get_tab_writeback_items(tab_id)
@@ -59,7 +63,7 @@ def test_writeback_service_applies_module_and_waveform_items():
     result = adapter.run(ctx, schema)
     analyze_result = adapter.analyze(result, ctx)
     state.update_tab_result(tab_id, result)
-    state.update_tab_analyze(tab_id, analyze_result, adapter.get_figure(analyze_result))
+    state.update_tab_analyze(tab_id, analyze_result, analyze_result.figure)
 
     svc = WritebackService(state, bus)
     items = svc.get_tab_writeback_items(tab_id)

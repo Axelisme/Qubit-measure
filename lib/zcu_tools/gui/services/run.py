@@ -42,9 +42,7 @@ class RunService(QObject):
             raise RuntimeError("Another run is already active")
 
         # Validate schema before starting the worker
-        from zcu_tools.gui.adapter import schema_to_dict
-
-        schema_to_dict(schema, self._state.exp_context.ml)
+        schema.to_raw_dict(self._state.exp_context)
         logger.info("start_run: tab_id=%r user_params=%r", tab_id, list(user_params))
 
         tab = self._state.get_tab(tab_id)

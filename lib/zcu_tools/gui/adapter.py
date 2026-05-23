@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Optional, Sequence, Union
+from typing import TYPE_CHECKING, Any, Optional, Protocol, Sequence, Union, cast
 
 from matplotlib.figure import Figure
 from typing_extensions import Generic, TypeVar
@@ -11,6 +12,7 @@ from typing_extensions import Generic, TypeVar
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from zcu_tools.experiment.cfg_model import ExpCfgModel
     from zcu_tools.meta_tool import ModuleLibrary
     from zcu_tools.meta_tool.metadict import MetaDict
     from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
@@ -218,6 +220,10 @@ class CfgSchema:
     spec: CfgSectionSpec
     value: CfgSectionValue
 
+    def to_raw_dict(self, ctx: ExpContext) -> dict[str, object]:
+        """Lower the current schema into a raw experiment config dictionary."""
+        return _section_to_dict(self.spec, self.value, ctx.ml)
+
 
 # ---------------------------------------------------------------------------
 # schema_to_dict — flatten (spec, value) into an exp_cfg dict
@@ -373,7 +379,11 @@ def _find_allowed_spec(
 
 
 def schema_to_dict(schema: CfgSchema, ml: "Optional[ModuleLibrary]") -> dict:
-    """Recursively convert a CfgSchema to an exp_cfg dict."""
+    """Compatibility wrapper around CfgSchema.to_raw_dict()."""
+    if ml is None:
+        return _section_to_dict(schema.spec, schema.value, None)
+    fake_ctx = ExpContext(md=cast(Any, None), ml=ml, soc=None, soccfg=None)
+    return schema.to_raw_dict(fake_ctx)
     return _section_to_dict(schema.spec, schema.value, ml)
 
 
@@ -584,21 +594,45 @@ def inherit_from(
 # ---------------------------------------------------------------------------
 
 T_Result = TypeVar("T_Result")
-T_AnalyzeResult = TypeVar("T_AnalyzeResult")
+
+
+class AnalyzeResultWithFigure(Protocol):
+    @property
+    def figure(self) -> Optional[Figure]: ...
+
+
+T_AnalyzeResult = TypeVar("T_AnalyzeResult", bound=AnalyzeResultWithFigure)
 
 
 class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult]):
+    exp_cls: Optional[type[Any]] = None
+
     @abstractmethod
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
         """Build a default CfgSchema from ctx."""
 
     @abstractmethod
-    def get_run_params(self) -> dict[str, ParamSpec]:
-        """Declare extra run params the GUI should collect from the user."""
+    def build_exp_cfg(
+        self, raw_cfg: dict[str, object], ctx: ExpContext
+    ) -> "ExpCfgModel":
+        """Convert lowered raw cfg into the concrete experiment config model."""
 
-    @abstractmethod
     def run(self, ctx: ExpContext, schema: CfgSchema, **user_params: Any) -> T_Result:
-        """Run the experiment; internally calls schema_to_dict()."""
+        """Default run pipeline for adapters backed by an experiment class."""
+        if user_params:
+            keys = ", ".join(sorted(user_params))
+            raise RuntimeError(
+                "Run-time user params are not supported; move them into CfgSchema: "
+                f"{keys}"
+            )
+        if self.exp_cls is None:
+            raise RuntimeError(
+                f"{type(self).__name__} must define exp_cls or override run()"
+            )
+        raw_cfg = schema.to_raw_dict(ctx)
+        exp_cfg = self.build_exp_cfg(raw_cfg, ctx)
+        experiment = cast(Any, self.exp_cls())
+        return cast(T_Result, experiment.run(exp_cfg))
 
     @abstractmethod
     def get_analyze_params(self) -> dict[str, ParamSpec]:
@@ -616,11 +650,31 @@ class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult]):
     ) -> Sequence[WritebackItem]: ...
 
     @abstractmethod
-    def get_figure(self, analyze_result: T_AnalyzeResult) -> Optional[Figure]:
-        """Extract a matplotlib Figure from the analyze result."""
+    def make_filename_stem(self, ctx: ExpContext) -> str:
+        """Return the filename stem used by the default save path template."""
 
-    @abstractmethod
-    def make_save_paths(self, ctx: ExpContext) -> SavePaths: ...
+    def make_default_save_paths(self, ctx: ExpContext) -> SavePaths:
+        """Default save path policy shared by most adapters."""
+        if not ctx.database_path:
+            raise RuntimeError("ExpContext.database_path is required for save paths")
+        if not ctx.result_dir:
+            raise RuntimeError("ExpContext.result_dir is required for save paths")
+        if not ctx.active_label:
+            raise RuntimeError("ExpContext.active_label is required for save paths")
+
+        from zcu_tools.utils.datasaver import create_datafolder
+
+        stem = self.make_filename_stem(ctx)
+        data_dir = create_datafolder(ctx.database_path)
+        image_dir = os.path.join(ctx.result_dir, "exps", ctx.active_label, "image")
+        os.makedirs(image_dir, exist_ok=True)
+        return SavePaths(
+            data_path=os.path.join(data_dir, stem),
+            image_path=os.path.join(image_dir, f"{stem}.png"),
+        )
+
+    def make_save_paths(self, ctx: ExpContext) -> SavePaths:
+        return self.make_default_save_paths(ctx)
 
     @abstractmethod
     def save(self, data_path: str, result: T_Result, ctx: ExpContext) -> None: ...

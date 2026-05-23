@@ -9,14 +9,7 @@ from typing import Any
 import pytest
 from qtpy.QtCore import QCoreApplication, QEventLoop, QTimer
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
-from zcu_tools.gui.adapter import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    ExpContext,
-    ScalarSpec,
-    ScalarValue,
-)  # noqa: F401
+from zcu_tools.gui.adapter import CfgSchema, ExpContext
 from zcu_tools.gui.runner import Runner, RunWorker
 
 # ---------------------------------------------------------------------------
@@ -34,9 +27,7 @@ def _make_ctx():
 
 
 def _simple_schema() -> CfgSchema:
-    spec = CfgSectionSpec(fields={"reps": ScalarSpec(label="Reps", type=int)})
-    value = CfgSectionValue(fields={"reps": ScalarValue(10)})
-    return CfgSchema(spec=spec, value=value)
+    return FakeAdapter().make_default_cfg(_make_ctx())
 
 
 def _wait_for(condition, timeout_ms: int = 3000, step_ms: int = 10) -> bool:

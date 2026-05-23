@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Sequence
 
 import pytest
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
     CfgSchema,
@@ -13,35 +15,37 @@ from zcu_tools.gui.adapter import (
     ExpContext,
     MetaDictWriteback,
     ParamSpec,
-    SavePaths,
 )
 from zcu_tools.gui.registry import Registry
+
+
+class _DummyCfg(ExpCfgModel):
+    pass
+
+
+@dataclass
+class _DummyAnalyzeResult:
+    figure: None = None
 
 
 class _DummyAdapter(AbsExpAdapter):
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:  # noqa: ARG002
         return CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
 
-    def get_run_params(self) -> dict[str, ParamSpec]:
-        return {}
-
-    def run(self, ctx, schema, **kw):  # noqa: ARG002
-        return None
+    def build_exp_cfg(self, raw_cfg, ctx):  # noqa: ARG002
+        return _DummyCfg()
 
     def get_analyze_params(self) -> dict[str, ParamSpec]:
         return {}
 
     def analyze(self, result, ctx, **kw):  # noqa: ARG002
-        return None
+        return _DummyAnalyzeResult()
 
     def get_writeback_items(self, analyze_result, ctx) -> Sequence[MetaDictWriteback]:  # noqa: ARG002
         return []
 
-    def get_figure(self, analyze_result):  # noqa: ARG002
-        return None
-
-    def make_save_paths(self, ctx) -> SavePaths:  # noqa: ARG002
-        return SavePaths(data_path="", image_path="")
+    def make_filename_stem(self, ctx) -> str:  # noqa: ARG002
+        return "dummy"
 
     def save(self, data_path, result, ctx) -> None:  # noqa: ARG002
         pass

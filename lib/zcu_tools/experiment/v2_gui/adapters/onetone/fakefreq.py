@@ -8,13 +8,9 @@ CfgSchema into the FakeFreqCfg that FakeFreqExp expects.
 
 from __future__ import annotations
 
-import logging
-import os
 import time
 from dataclasses import dataclass
 from typing import Any, Literal, Optional, Sequence, cast
-
-logger = logging.getLogger(__name__)
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -42,13 +38,11 @@ from zcu_tools.gui.adapter import (
     ModuleRefSpec,
     ModuleWriteback,
     ParamSpec,
-    SavePaths,
     ScalarSpec,
     ScalarValue,
     SweepSpec,
     SweepValue,
     WaveformWriteback,
-    schema_to_dict,
 )
 from zcu_tools.gui.specs.readout import (
     make_direct_readout_spec,
@@ -57,11 +51,9 @@ from zcu_tools.gui.specs.readout import (
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     AbsReadoutCfg,
-    ModuleCfgFactory,
     ProgramV2Cfg,
 )
 from zcu_tools.program.v2.sweep import SweepCfg
-from zcu_tools.utils.datasaver import create_datafolder
 from zcu_tools.utils.fitting.resonance.hanger import HangerModel
 
 # ---------------------------------------------------------------------------
@@ -188,6 +180,8 @@ class FakeFreqExp(AbsExperiment[FreqRunResult, FakeFreqCfg]):
 class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
     """Simulated one-tone frequency sweep.  No hardware required."""
 
+    exp_cls = FakeFreqExp
+
     def __init__(self, fast_mode: bool = False) -> None:
         self._fast_mode = fast_mode
 
@@ -267,79 +261,27 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
         )
         return CfgSchema(spec=root_spec, value=root_val)
 
-    def _schema_to_exp_cfg(self, schema: CfgSchema, ctx: ExpContext) -> FakeFreqCfg:
-        d = schema_to_dict(schema, ctx.ml)
-        sweep_cfg: SweepCfg = d["freq"]  # SweepCfg from make_sweep via SweepValue
-
-        # Convert raw dicts to ModuleCfg objects for better writeback support
-        modules_raw = d.get("modules", {})
-
-        def _is_direct_readout_complete(raw: dict) -> bool:
-            return all(key in raw for key in ("ro_ch", "ro_length", "ro_freq"))
-
-        def _is_pulse_cfg_complete(raw: dict) -> bool:
-            if not all(key in raw for key in ("waveform", "ch", "nqz", "freq", "gain")):
-                return False
-            waveform = raw.get("waveform")
-            return isinstance(waveform, dict) and "style" in waveform
-
-        def _should_convert_module(raw: dict) -> bool:
-            type_val = raw.get("type")
-            if type_val == "readout/direct":
-                return _is_direct_readout_complete(raw)
-            if type_val == "readout/pulse":
-                pulse_cfg = raw.get("pulse_cfg")
-                ro_cfg = raw.get("ro_cfg")
-                return (
-                    isinstance(pulse_cfg, dict)
-                    and isinstance(ro_cfg, dict)
-                    and _is_pulse_cfg_complete(pulse_cfg)
-                    and _is_direct_readout_complete(ro_cfg)
-                )
-            return True
-
-        modules = {}
-        for k, v in modules_raw.items():
-            try:
-                if isinstance(v, dict) and "type" in v:
-                    if _should_convert_module(v):
-                        modules[k] = ModuleCfgFactory.from_raw(v, ml=ctx.ml)
-                    else:
-                        modules[k] = v
-                else:
-                    modules[k] = v
-            except Exception as e:
-                logger.warning("Failed to convert module %r to object: %s", k, e)
-                modules[k] = v
-
-        return FakeFreqCfg(
-            reps=int(d["reps"]),
-            rounds=int(d["rounds"]),
-            sweep=FakeFreqSweepCfg(freq=sweep_cfg),
-            model=FakeFreqModelCfg(
-                freq=float(d["res_freq"]),
-                Ql=float(d["Ql"]),
-                Qc_abs=float(d["Qc_abs"]),
-                phi=float(d["phi"]),
-                a0_abs=float(d["a0_abs"]),
-                edelay=float(d["edelay"]),
-                noise_scale=float(d["noise_scale"]),
-            ),
-            modules=modules,
+    def build_exp_cfg(self, raw_cfg: dict[str, object], ctx: ExpContext) -> FakeFreqCfg:
+        exp_cfg: dict[str, object] = {
+            "reps": raw_cfg["reps"],
+            "rounds": raw_cfg["rounds"],
+            "sweep": {"freq": raw_cfg["freq"]},
+            "model": {
+                "freq": raw_cfg["res_freq"],
+                "Ql": raw_cfg["Ql"],
+                "Qc_abs": raw_cfg["Qc_abs"],
+                "phi": raw_cfg["phi"],
+                "a0_abs": raw_cfg["a0_abs"],
+                "edelay": raw_cfg["edelay"],
+                "noise_scale": raw_cfg["noise_scale"],
+            },
+            "modules": raw_cfg.get("modules", {}),
+        }
+        return ctx.ml.make_cfg(
+            exp_cfg,
+            FakeFreqCfg,
             fast_mode=self._fast_mode,
         )
-
-    def get_run_params(self) -> dict[str, ParamSpec]:
-        return {}
-
-    def run(
-        self,
-        ctx: ExpContext,
-        schema: CfgSchema,
-        **user_params: Any,  # noqa: ARG002
-    ) -> FreqRunResult:
-        cfg = self._schema_to_exp_cfg(schema, ctx)
-        return FakeFreqExp().run(cfg)
 
     def get_analyze_params(self) -> dict[str, ParamSpec]:
         return {
@@ -375,9 +317,6 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
             figure=figure,
             run_result=result,
         )
-
-    def get_figure(self, analyze_result: FakeFreqAnalyzeResult) -> Optional[Figure]:
-        return analyze_result.figure
 
     def get_writeback_items(
         self, analyze_result: FakeFreqAnalyzeResult, ctx: ExpContext
@@ -446,31 +385,8 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
             ),
         ]
 
-    def make_save_paths(self, ctx: ExpContext) -> SavePaths:
-        ts = time.strftime("%m%d")
-        filename = f"{ctx.res_name}_freq_{ts}"
-
-        if ctx.database_path:
-            save_dir = create_datafolder(ctx.database_path)
-            data_path = os.path.join(save_dir, filename)
-        else:
-            data_path = f"/tmp/{filename}"
-
-        # image: result_dir/exps/{active_label}/image/ — mirrors em.flux_dir/image/
-        if ctx.result_dir and ctx.active_label:
-            flux_image_dir = os.path.join(
-                ctx.result_dir, "exps", ctx.active_label, "image"
-            )
-            os.makedirs(flux_image_dir, exist_ok=True)
-            image_path = os.path.join(flux_image_dir, f"{filename}.png")
-        elif ctx.result_dir:
-            image_path = os.path.join(
-                ctx.result_dir, "exps", "image", f"{filename}.png"
-            )
-        else:
-            image_path = f"/tmp/{filename}.png"
-
-        return SavePaths(data_path=data_path, image_path=image_path)
+    def make_filename_stem(self, ctx: ExpContext) -> str:
+        return f"{ctx.res_name}_freq_{time.strftime('%m%d')}"
 
     def save(self, data_path: str, result: FreqRunResult, ctx: ExpContext) -> None:
         pass  # no real hardware, skip HDF5 persistence

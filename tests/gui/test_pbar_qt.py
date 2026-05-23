@@ -118,18 +118,17 @@ def test_total_setter(qapp):
 
 def test_fake_freq_adapter_run_with_qt_pbar(qapp):
     """FakeFreqAdapter.run() completes; leave=True outer bar stays, reset_all clears."""
-    from unittest.mock import MagicMock
-
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
     from zcu_tools.experiment.v2_gui.adapters.onetone.fakefreq import FakeFreqAdapter
     from zcu_tools.gui.adapter import ExpContext
+    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
     from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
     from zcu_tools.progress_bar.interface import use_pbar_factory
 
     stack = _make_stack(qapp)
     factory = QtProgressBarFactory(stack)
 
-    ctx = ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None)
+    ctx = ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
     adapter = FakeFreqAdapter(fast_mode=True)
     schema = adapter.make_default_cfg(ctx)
 

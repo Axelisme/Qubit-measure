@@ -76,8 +76,7 @@ class TabService:
         logger.info("analyze: tab_id=%r user_params=%r", tab_id, list(user_params))
         ctx = self._state.exp_context
         analyze_result = tab.adapter.analyze(tab.run_result, ctx, **user_params)
-        figure = tab.adapter.get_figure(analyze_result)
-        self._state.update_tab_analyze(tab_id, analyze_result, figure)
+        self._state.update_tab_analyze(tab_id, analyze_result, analyze_result.figure)
 
     def save_data(self, tab_id: str, data_path: str) -> None:
         tab = self._state.get_tab(tab_id)

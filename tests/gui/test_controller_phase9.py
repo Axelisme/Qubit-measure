@@ -29,6 +29,10 @@ def _make_ctx() -> ExpContext:
         ml=MagicMock(),
         soc=MagicMock(),  # simulate connected soc
         soccfg=MagicMock(),
+        res_name="fake_res",
+        result_dir="/tmp/zcu_result",
+        database_path="/tmp/zcu_db/fake_chip/fake_qubit",
+        active_label="ctx001",
     )
 
 
@@ -81,13 +85,13 @@ def _wait_for(condition, timeout_ms: int = 3000, step_ms: int = 10) -> bool:
     return False
 
 
-def _simple_schema() -> CfgSchema:
-    return CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
+def _default_fake_schema(ctx: ExpContext) -> CfgSchema:
+    return FakeAdapter().make_default_cfg(ctx)
 
 
 def _run_and_wait(cf: ControllerFixture, tab_id: str) -> None:
     """Start a run and block until it finishes."""
-    cf.ctrl.start_run(tab_id, _simple_schema(), {})
+    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context), {})
     assert _wait_for(lambda: not cf.state.is_running)
 
 
@@ -106,15 +110,15 @@ def test_analyze_updates_tab_analyze_result(cf):
     assert tab.analyze_result is not None
 
 
-def test_analyze_result_is_tuple_peak_fig(cf):
+def test_analyze_result_has_peak_and_figure(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
 
     cf.ctrl.analyze(tab_id, {})
 
     tab = cf.state.get_tab(tab_id)
-    peak, _fig = tab.analyze_result
-    assert isinstance(peak, float)
+    assert isinstance(tab.analyze_result.peak, float)
+    assert tab.analyze_result.figure is not None
 
 
 def test_analyze_stores_figure_in_tab(cf):
@@ -163,7 +167,6 @@ def test_analyze_passes_user_params(cf):
     _run_and_wait(cf, tab_id)
 
     spy_adapter = MagicMock(wraps=FakeAdapter())
-    spy_adapter.get_figure = MagicMock(return_value=None)
     cf.state.get_tab(tab_id).adapter = spy_adapter
 
     cf.ctrl.analyze(tab_id, {"threshold": 0.99})

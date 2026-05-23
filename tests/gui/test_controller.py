@@ -37,6 +37,10 @@ def _make_ctx() -> ExpContext:
         ml=MagicMock(),
         soc=MagicMock(),  # simulate connected soc
         soccfg=MagicMock(),
+        res_name="fake_res",
+        result_dir="/tmp/zcu_result",
+        database_path="/tmp/zcu_db/fake_chip/fake_qubit",
+        active_label="ctx001",
     )
 
 
@@ -79,10 +83,8 @@ def cf(qapp) -> ControllerFixture:  # noqa: ARG001
     return ControllerFixture()
 
 
-def _simple_schema() -> CfgSchema:
-    spec = CfgSectionSpec(fields={"reps": ScalarSpec(label="Reps", type=int)})
-    value = CfgSectionValue(fields={"reps": ScalarValue(10)})
-    return CfgSchema(spec=spec, value=value)
+def _default_fake_schema(ctx: ExpContext) -> CfgSchema:
+    return FakeAdapter().make_default_cfg(ctx)
 
 
 def _wait_for(condition, timeout_ms: int = 3000, step_ms: int = 10) -> bool:
@@ -132,35 +134,35 @@ def test_close_tab_removes_from_state(cf):
 
 def test_start_run_sets_is_running(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id, _simple_schema(), {})
+    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context), {})
     assert cf.state.is_running
     _wait_for(lambda: not cf.state.is_running)  # cleanup
 
 
 def test_start_run_calls_refresh_run_state_true(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id, _simple_schema(), {})
+    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context), {})
     cf.bus.emit.assert_any_call(GuiEvent.RUN_STATE_CHANGED)
     _wait_for(lambda: not cf.state.is_running)
 
 
 def test_run_finished_updates_tab_state(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id, _simple_schema(), {})
+    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context), {})
     assert _wait_for(lambda: not cf.state.is_running)
     assert cf.state.get_tab(tab_id).run_result is not None
 
 
 def test_run_finished_calls_refresh_run_state_false(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id, _simple_schema(), {})
+    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context), {})
     assert _wait_for(lambda: not cf.state.is_running)
     cf.bus.emit.assert_any_call(GuiEvent.RUN_STATE_CHANGED)
 
 
 def test_run_finished_calls_refresh_tab(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id, _simple_schema(), {})
+    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context), {})
     assert _wait_for(lambda: not cf.state.is_running)
     cf.bus.emit.assert_any_call(GuiEvent.TAB_CONTENT_CHANGED, tab_id)
 
@@ -176,7 +178,7 @@ def test_run_failed_shows_status_message(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.get_tab(tab_id).adapter = bad_adapter
 
-    cf.ctrl.start_run(tab_id, _simple_schema(), {})
+    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context), {})
     assert _wait_for(lambda: not cf.state.is_running)
     assert cf.view.show_status_message.called
     msg = cf.view.show_status_message.call_args[0][0]
@@ -189,7 +191,7 @@ def test_run_failed_clears_is_running(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.get_tab(tab_id).adapter = bad_adapter
 
-    cf.ctrl.start_run(tab_id, _simple_schema(), {})
+    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context), {})
     assert _wait_for(lambda: not cf.state.is_running)
     assert not cf.state.is_running
 
@@ -206,11 +208,11 @@ def test_start_run_while_running_raises(cf):
 
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.get_tab(tab_id).adapter = slow
-    cf.ctrl.start_run(tab_id, _simple_schema(), {})
+    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context), {})
 
     assert cf.state.is_running
     with pytest.raises(RuntimeError, match="already active"):
-        cf.ctrl.start_run(tab_id, _simple_schema(), {})
+        cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context), {})
 
     # cleanup
     ev.set()
@@ -226,7 +228,7 @@ def test_get_tab_result_returns_last_result(cf):
     import numpy as np
 
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id, _simple_schema(), {})
+    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context), {})
     _wait_for(lambda: not cf.state.is_running)
     result = cf.ctrl.get_tab_result(tab_id)
     assert isinstance(result, np.ndarray)

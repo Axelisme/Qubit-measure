@@ -24,6 +24,10 @@ def _make_ctx() -> ExpContext:
         ml=ModuleLibrary(),
         soc=None,
         soccfg=None,
+        res_name="unknown_resonator",
+        result_dir="/tmp/zcu_result",
+        database_path="/tmp/zcu_db/unknown_chip/unknown_qubit",
+        active_label="ctx001",
     )
 
 
@@ -242,14 +246,13 @@ def test_analyze_produces_figure():
     assert isinstance(ar.figure, Figure)
 
 
-def test_get_figure_returns_figure():
+def test_analyze_result_carries_figure():
     from matplotlib.figure import Figure
 
     ctx = _make_ctx()
     result = _run(_adapter(), ctx)
     ar = _adapter().analyze(result, ctx)
-    fig = _adapter().get_figure(ar)
-    assert isinstance(fig, Figure)
+    assert isinstance(ar.figure, Figure)
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +283,8 @@ def test_make_save_paths_returns_save_paths():
     assert isinstance(paths, SavePaths)
     assert paths.data_path
     assert paths.image_path
+    assert "unknown_resonator_freq_" in paths.data_path
+    assert "/exps/ctx001/image/" in paths.image_path
 
 
 def test_registered_in_registry():

@@ -33,24 +33,21 @@ def test_fake_adapter_full_flow():
     assert "sweep" in cfg_dict
 
     # 3. run
-    result = adapter.run(ctx, schema, noise_scale=0.05)
+    schema.value.fields["noise_scale"].value = 0.05  # type: ignore[index,union-attr]
+    result = adapter.run(ctx, schema)
     assert isinstance(result, np.ndarray)
     assert len(result) == 11
 
     # 4. analyze
     analyze_result = adapter.analyze(result, ctx, threshold=0.0)
-    peak, fig = analyze_result
-    assert isinstance(peak, float)
+    assert isinstance(analyze_result.peak, float)
+    assert analyze_result.figure is not None
 
-    # 5. get_figure
-    returned_fig = adapter.get_figure(analyze_result)
-    assert returned_fig is fig
-
-    # 6. get_writeback_items
+    # 5. get_writeback_items
     items = adapter.get_writeback_items(analyze_result, ctx)
     assert len(items) == 1
     assert items[0].key == "fake_peak"
-    assert items[0].proposed_value == peak
+    assert items[0].proposed_value == analyze_result.peak
 
 
 def test_registry_register_all_and_create():
