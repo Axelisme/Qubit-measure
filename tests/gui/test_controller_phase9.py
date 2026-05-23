@@ -13,7 +13,11 @@ from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.adapter import CfgSchema, CfgSectionSpec, CfgSectionValue, ExpContext
 from zcu_tools.gui.controller import Controller
 from zcu_tools.gui.device_manager import DeviceManager
-from zcu_tools.gui.event_bus import GuiEvent
+from zcu_tools.gui.event_bus import (
+    GuiEvent,
+    InspectChangedPayload,
+    TabContentChangedPayload,
+)
 from zcu_tools.gui.io_manager import IOManager
 from zcu_tools.gui.plot_host import FigureContainer
 from zcu_tools.gui.plot_routing import has_current_container
@@ -157,7 +161,9 @@ def test_analyze_calls_refresh_tab(cf):
     cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
     assert _wait_for(lambda: cf.state.get_tab(tab_id).analyze_result is not None)
 
-    cf.bus.emit.assert_any_call(GuiEvent.TAB_CONTENT_CHANGED, tab_id)
+    cf.bus.emit.assert_any_call(
+        GuiEvent.TAB_CONTENT_CHANGED, TabContentChangedPayload(tab_id=tab_id)
+    )
 
 
 def test_analyze_without_result_raises(cf):

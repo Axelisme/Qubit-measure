@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.adapter import AnalyzeRequest
-from zcu_tools.gui.event_bus import GuiEvent
+from zcu_tools.gui.event_bus import GuiEvent, TabInteractionChangedPayload
 from zcu_tools.gui.plot_host import FigureContainer
 from zcu_tools.gui.runner import AnalyzeRunner
 
@@ -66,7 +66,10 @@ class AnalyzeService(QObject):
             figure_container=figure_container,
         )
         self._state.set_tab_analyzing(tab_id, True)
-        self._bus.emit(GuiEvent.TAB_INTERACTION_CHANGED, tab_id)
+        self._bus.emit(
+            GuiEvent.TAB_INTERACTION_CHANGED,
+            TabInteractionChangedPayload(tab_id=tab_id),
+        )
 
     def _on_analyze_finished(self, tab_id: str, analyze_result: Any) -> None:
         logger.info(
@@ -76,11 +79,17 @@ class AnalyzeService(QObject):
         )
         self._state.update_tab_analyze(tab_id, analyze_result, analyze_result.figure)
         self._state.set_tab_analyzing(tab_id, False)
-        self._bus.emit(GuiEvent.TAB_INTERACTION_CHANGED, tab_id)
+        self._bus.emit(
+            GuiEvent.TAB_INTERACTION_CHANGED,
+            TabInteractionChangedPayload(tab_id=tab_id),
+        )
         self.analyze_finished.emit(tab_id, analyze_result)
 
     def _on_analyze_failed(self, tab_id: str, error: Exception) -> None:
         logger.warning("_on_analyze_failed: tab_id=%r error=%r", tab_id, error)
         self._state.set_tab_analyzing(tab_id, False)
-        self._bus.emit(GuiEvent.TAB_INTERACTION_CHANGED, tab_id)
+        self._bus.emit(
+            GuiEvent.TAB_INTERACTION_CHANGED,
+            TabInteractionChangedPayload(tab_id=tab_id),
+        )
         self.analyze_failed.emit(tab_id, error)

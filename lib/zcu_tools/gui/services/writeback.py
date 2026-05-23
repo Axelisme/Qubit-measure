@@ -10,7 +10,12 @@ from zcu_tools.gui.adapter import (
     WritebackItem,
     schema_to_dict,
 )
-from zcu_tools.gui.event_bus import GuiEvent
+from zcu_tools.gui.event_bus import (
+    GuiEvent,
+    InspectChangedPayload,
+    MdChangedPayload,
+    TabContentChangedPayload,
+)
 from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
 
 logger = logging.getLogger(__name__)
@@ -76,11 +81,13 @@ class WritebackService:
             except Exception:
                 pass
         if touched_md:
-            self._bus.emit(GuiEvent.MD_CHANGED, ctx.md)
+            self._bus.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=ctx.md))
         if touched_md or touched_ml:
             tab.applied_writeback_keys.update(applied_keys)
-            self._bus.emit(GuiEvent.INSPECT_CHANGED, ctx.md)
-            self._bus.emit(GuiEvent.TAB_CONTENT_CHANGED, tab_id)
+            self._bus.emit(GuiEvent.INSPECT_CHANGED, InspectChangedPayload(md=ctx.md))
+            self._bus.emit(
+                GuiEvent.TAB_CONTENT_CHANGED, TabContentChangedPayload(tab_id=tab_id)
+            )
         return applied_keys
 
     def _resolve_module_item(self, item: ModuleWriteback) -> Any:

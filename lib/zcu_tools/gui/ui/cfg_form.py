@@ -56,6 +56,10 @@ class CfgFormWidget(QWidget):
         self._inner_layout.addStretch()
         scroll.setWidget(self._inner)
 
+        # Unsubscribe from EventBus when Qt destroys this widget (e.g. via
+        # deleteLater after tab close) so dead C++ callbacks are never invoked.
+        self.destroyed.connect(self._unsubscribe_external_refresh)
+
     def populate(
         self,
         schema: CfgSchema,
@@ -138,8 +142,9 @@ class CfgFormWidget(QWidget):
         self._bus_subs.clear()
         self._bus = None
 
-    def _make_external_refresh_cb(self, event: GuiEvent) -> Callable[..., None]:
-        def _callback(*_: object, **__: object) -> None:
+    def _make_external_refresh_cb(self, event: "GuiEvent") -> "Callable[[Any], None]":
+        def _callback(payload: Any) -> None:
+            del payload
             if self._model is None:
                 return
             self._model.refresh_external(event)

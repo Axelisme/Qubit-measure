@@ -12,7 +12,17 @@ from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 from .adapter import CfgSchema, WritebackItem
 from .device_manager import DeviceManager
-from .event_bus import EventBus, GuiEvent
+from .event_bus import (
+    ContextChangedPayload,
+    EventBus,
+    GuiEvent,
+    InspectChangedPayload,
+    PredictorChangedPayload,
+    TabAddedPayload,
+    TabClosedPayload,
+    TabContentChangedPayload,
+    TabInteractionChangedPayload,
+)
 from .io_manager import IOManager
 from .plot_host import FigureContainer
 from .registry import Registry
@@ -93,13 +103,17 @@ class Controller:
 
     def _on_run_finished(self, tab_id: str, _result: object) -> None:
         # State is already updated in RunService/Runner
-        self._bus.emit(GuiEvent.TAB_CONTENT_CHANGED, tab_id)
+        self._bus.emit(
+            GuiEvent.TAB_CONTENT_CHANGED, TabContentChangedPayload(tab_id=tab_id)
+        )
 
     def _on_run_failed(self, _tab_id: str, error: Exception) -> None:
         self._require_view().show_status_message(f"Run failed: {error}")
 
     def _on_analyze_finished(self, tab_id: str, _result: object) -> None:
-        self._bus.emit(GuiEvent.TAB_CONTENT_CHANGED, tab_id)
+        self._bus.emit(
+            GuiEvent.TAB_CONTENT_CHANGED, TabContentChangedPayload(tab_id=tab_id)
+        )
 
     def _on_analyze_failed(self, _tab_id: str, error: Exception) -> None:
         self._require_view().show_status_message(f"Analyze failed: {error}")
@@ -141,7 +155,10 @@ class Controller:
 
     def new_tab(self, adapter_name: str) -> str:
         tab_id = self._tab_svc.new_tab(adapter_name)
-        self._bus.emit(GuiEvent.TAB_ADDED, tab_id, adapter_name)
+        self._bus.emit(
+            GuiEvent.TAB_ADDED,
+            TabAddedPayload(tab_id=tab_id, adapter_name=adapter_name),
+        )
         return tab_id
 
     def close_tab(self, tab_id: str) -> None:
@@ -151,7 +168,7 @@ class Controller:
             self._require_view().show_status_message("Cannot close a busy tab")
             return
         self._tab_svc.close_tab(tab_id)
-        self._bus.emit(GuiEvent.TAB_CLOSED, tab_id)
+        self._bus.emit(GuiEvent.TAB_CLOSED, TabClosedPayload(tab_id=tab_id))
 
     # ------------------------------------------------------------------
     # Run flow (RunService & ContextService)
@@ -320,16 +337,20 @@ class Controller:
         self._ctx_svc.set_startup_context(
             md, ml, chip_name, qub_name, res_name, result_dir, database_path
         )
-        self._bus.emit(GuiEvent.INSPECT_CHANGED, md)
+        self._bus.emit(GuiEvent.INSPECT_CHANGED, InspectChangedPayload(md=md))
 
     def setup_project(self, result_dir: str) -> None:
         self._ctx_svc.setup_project(result_dir)
         ctx = self._state.exp_context
-        self._bus.emit(GuiEvent.CONTEXT_CHANGED, ctx.md, ctx.ml)
+        self._bus.emit(
+            GuiEvent.CONTEXT_CHANGED, ContextChangedPayload(md=ctx.md, ml=ctx.ml)
+        )
 
     def use_context(self, label: str) -> None:
         self._ctx_svc.use_context(label)
-        self._bus.emit(GuiEvent.INSPECT_CHANGED, self.get_current_md())
+        self._bus.emit(
+            GuiEvent.INSPECT_CHANGED, InspectChangedPayload(md=self.get_current_md())
+        )
 
     def new_context(
         self,
@@ -338,7 +359,9 @@ class Controller:
         clone_from_current: bool = False,
     ) -> None:
         self._ctx_svc.new_context(value, unit, clone_from_current)
-        self._bus.emit(GuiEvent.INSPECT_CHANGED, self.get_current_md())
+        self._bus.emit(
+            GuiEvent.INSPECT_CHANGED, InspectChangedPayload(md=self.get_current_md())
+        )
 
     def get_active_context_label(self) -> Optional[str]:
         return self._ctx_svc.get_active_context_label()
@@ -399,7 +422,7 @@ class Controller:
         self, predictor: Optional[Any], path: Optional[str] = None
     ) -> None:
         self._conn_svc.set_predictor(predictor, path)
-        self._bus.emit(GuiEvent.PREDICTOR_CHANGED)
+        self._bus.emit(GuiEvent.PREDICTOR_CHANGED, PredictorChangedPayload())
 
     def get_soccfg(self) -> Any:
         return self._conn_svc.get_soccfg()
@@ -479,13 +502,19 @@ class Controller:
         if not self.has_tab(tab_id):
             return
         self._tab_svc.update_tab_cfg(tab_id, schema)
-        self._bus.emit(GuiEvent.TAB_INTERACTION_CHANGED, tab_id)
+        self._bus.emit(
+            GuiEvent.TAB_INTERACTION_CHANGED,
+            TabInteractionChangedPayload(tab_id=tab_id),
+        )
 
     def update_tab_analyze_params(self, tab_id: str, values: dict[str, object]) -> None:
         if not self.has_tab(tab_id):
             return
         self._tab_svc.update_tab_analyze_param_values(tab_id, values)
-        self._bus.emit(GuiEvent.TAB_INTERACTION_CHANGED, tab_id)
+        self._bus.emit(
+            GuiEvent.TAB_INTERACTION_CHANGED,
+            TabInteractionChangedPayload(tab_id=tab_id),
+        )
 
     def update_tab_save_paths(
         self, tab_id: str, data_path: str, image_path: str
@@ -493,7 +522,10 @@ class Controller:
         if not self.has_tab(tab_id):
             return
         self._tab_svc.update_tab_save_paths(tab_id, data_path, image_path)
-        self._bus.emit(GuiEvent.TAB_INTERACTION_CHANGED, tab_id)
+        self._bus.emit(
+            GuiEvent.TAB_INTERACTION_CHANGED,
+            TabInteractionChangedPayload(tab_id=tab_id),
+        )
 
     def get_adapter_names(self) -> list[str]:
         # Simple passthrough to registry

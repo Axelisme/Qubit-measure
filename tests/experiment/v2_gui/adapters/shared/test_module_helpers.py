@@ -12,8 +12,8 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 )
 from zcu_tools.gui.adapter import (
     CfgSectionValue,
-    ModuleRefValue,
     DirectValue,
+    ModuleRefValue,
     ScalarValue,
 )
 from zcu_tools.meta_tool import ModuleLibrary

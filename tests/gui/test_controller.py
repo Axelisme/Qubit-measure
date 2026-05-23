@@ -21,7 +21,11 @@ from zcu_tools.gui.adapter import (
 )
 from zcu_tools.gui.controller import Controller
 from zcu_tools.gui.device_manager import DeviceManager
-from zcu_tools.gui.event_bus import GuiEvent
+from zcu_tools.gui.event_bus import (
+    GuiEvent,
+    RunLockChangedPayload,
+    TabContentChangedPayload,
+)
 from zcu_tools.gui.io_manager import IOManager
 from zcu_tools.gui.plot_host import FigureContainer
 from zcu_tools.gui.plot_routing import has_current_container
@@ -152,7 +156,9 @@ def test_start_run_sets_is_running(cf):
 def test_start_run_emits_run_lock_changed(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context), {})
-    cf.bus.emit.assert_any_call(GuiEvent.RUN_LOCK_CHANGED, tab_id)
+    cf.bus.emit.assert_any_call(
+        GuiEvent.RUN_LOCK_CHANGED, RunLockChangedPayload(running_tab_id=tab_id)
+    )
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
 
@@ -167,14 +173,18 @@ def test_run_finished_emits_run_lock_release(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context), {})
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
-    cf.bus.emit.assert_any_call(GuiEvent.RUN_LOCK_CHANGED, None)
+    cf.bus.emit.assert_any_call(
+        GuiEvent.RUN_LOCK_CHANGED, RunLockChangedPayload(running_tab_id=None)
+    )
 
 
 def test_run_finished_calls_refresh_tab(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context), {})
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
-    cf.bus.emit.assert_any_call(GuiEvent.TAB_CONTENT_CHANGED, tab_id)
+    cf.bus.emit.assert_any_call(
+        GuiEvent.TAB_CONTENT_CHANGED, TabContentChangedPayload(tab_id=tab_id)
+    )
 
 
 # ---------------------------------------------------------------------------

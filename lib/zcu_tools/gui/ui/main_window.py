@@ -8,7 +8,17 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Optional
 
-from zcu_tools.gui.event_bus import GuiEvent
+from zcu_tools.gui.event_bus import (
+    ContextChangedPayload,
+    GuiEvent,
+    InspectChangedPayload,
+    PredictorChangedPayload,
+    RunLockChangedPayload,
+    TabAddedPayload,
+    TabClosedPayload,
+    TabContentChangedPayload,
+    TabInteractionChangedPayload,
+)
 from zcu_tools.gui.plot_host import (
     FigureContainer,
     attach_existing_figure_to_container,
@@ -529,19 +539,23 @@ class MainWindow(QMainWindow):
         bus.unsubscribe(GuiEvent.INSPECT_CHANGED, self._on_bus_inspect_changed)
         bus.unsubscribe(GuiEvent.PREDICTOR_CHANGED, self._on_bus_predictor_changed)
 
-    def _on_bus_tab_interaction_changed(self, tab_id: str) -> None:
-        self.refresh_tab_interaction(tab_id)
+    def _on_bus_tab_interaction_changed(
+        self, payload: TabInteractionChangedPayload
+    ) -> None:
+        self.refresh_tab_interaction(payload.tab_id)
 
-    def _on_bus_run_lock_changed(self, running_tab_id: Optional[str]) -> None:
-        self.refresh_run_lock(running_tab_id)
+    def _on_bus_run_lock_changed(self, payload: RunLockChangedPayload) -> None:
+        self.refresh_run_lock(payload.running_tab_id)
 
-    def _on_bus_context_changed(self, md: Any, ml: Any) -> None:
-        del md, ml
+    def _on_bus_context_changed(self, payload: ContextChangedPayload) -> None:
+        del payload
         self.refresh_context_panel()
         for tab_id in list(self._tab_widgets):
             self.refresh_tab(tab_id)
 
-    def _on_bus_tab_added(self, tab_id: str, adapter_name: str) -> None:
+    def _on_bus_tab_added(self, payload: TabAddedPayload) -> None:
+        tab_id = payload.tab_id
+        adapter_name = payload.adapter_name
         logger.info("_on_bus_tab_added: tab_id=%r adapter=%r", tab_id, adapter_name)
         if tab_id in self._tab_widgets:
             return
@@ -599,7 +613,8 @@ class MainWindow(QMainWindow):
         )
         tab_w.save_both_btn.clicked.connect(lambda: self._on_save_both_clicked(tab_id))
 
-    def _on_bus_tab_closed(self, tab_id: str) -> None:
+    def _on_bus_tab_closed(self, payload: TabClosedPayload) -> None:
+        tab_id = payload.tab_id
         logger.info("_on_bus_tab_closed: tab_id=%r", tab_id)
         tab_w = self._tab_widgets.pop(tab_id, None)
         if tab_w is not None:
@@ -610,17 +625,17 @@ class MainWindow(QMainWindow):
 
         self.refresh_run_lock(self._state_running_tab_id())
 
-    def _on_bus_tab_content_changed(self, tab_id: str) -> None:
-        self.refresh_tab(tab_id)
+    def _on_bus_tab_content_changed(self, payload: TabContentChangedPayload) -> None:
+        self.refresh_tab(payload.tab_id)
 
-    def _on_bus_inspect_changed(self, md: Optional[Any] = None) -> None:
-        # emitted from context.py (with md) and controller.py (without)
-        del md
+    def _on_bus_inspect_changed(self, payload: InspectChangedPayload) -> None:
+        del payload
         self.refresh_inspect_panel()
         for tab_id in list(self._tab_widgets):
             self.refresh_tab(tab_id)
 
-    def _on_bus_predictor_changed(self) -> None:
+    def _on_bus_predictor_changed(self, payload: PredictorChangedPayload) -> None:
+        del payload
         self.refresh_predictor_panel()
 
     # ------------------------------------------------------------------

@@ -6,7 +6,11 @@ from typing import TYPE_CHECKING, Any, Optional
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.adapter import RunRequest
-from zcu_tools.gui.event_bus import GuiEvent
+from zcu_tools.gui.event_bus import (
+    GuiEvent,
+    RunLockChangedPayload,
+    TabInteractionChangedPayload,
+)
 from zcu_tools.gui.plot_host import FigureContainer
 
 logger = logging.getLogger(__name__)
@@ -72,8 +76,13 @@ class RunService(QObject):
         except Exception:
             raise
         self._state.set_tab_running(tab_id, True)
-        self._bus.emit(GuiEvent.TAB_INTERACTION_CHANGED, tab_id)
-        self._bus.emit(GuiEvent.RUN_LOCK_CHANGED, tab_id)
+        self._bus.emit(
+            GuiEvent.TAB_INTERACTION_CHANGED,
+            TabInteractionChangedPayload(tab_id=tab_id),
+        )
+        self._bus.emit(
+            GuiEvent.RUN_LOCK_CHANGED, RunLockChangedPayload(running_tab_id=tab_id)
+        )
 
     def cancel_run(self) -> None:
         logger.info("cancel_run")
@@ -85,13 +94,23 @@ class RunService(QObject):
         )
         self._state.update_tab_result(tab_id, result)
         self._state.set_tab_running(tab_id, False)
-        self._bus.emit(GuiEvent.TAB_INTERACTION_CHANGED, tab_id)
-        self._bus.emit(GuiEvent.RUN_LOCK_CHANGED, None)
+        self._bus.emit(
+            GuiEvent.TAB_INTERACTION_CHANGED,
+            TabInteractionChangedPayload(tab_id=tab_id),
+        )
+        self._bus.emit(
+            GuiEvent.RUN_LOCK_CHANGED, RunLockChangedPayload(running_tab_id=None)
+        )
         self.run_finished.emit(tab_id, result)
 
     def _on_run_failed(self, tab_id: str, error: Exception) -> None:
         logger.warning("_on_run_failed: tab_id=%r error=%r", tab_id, error)
         self._state.set_tab_running(tab_id, False)
-        self._bus.emit(GuiEvent.TAB_INTERACTION_CHANGED, tab_id)
-        self._bus.emit(GuiEvent.RUN_LOCK_CHANGED, None)
+        self._bus.emit(
+            GuiEvent.TAB_INTERACTION_CHANGED,
+            TabInteractionChangedPayload(tab_id=tab_id),
+        )
+        self._bus.emit(
+            GuiEvent.RUN_LOCK_CHANGED, RunLockChangedPayload(running_tab_id=None)
+        )
         self.run_failed.emit(tab_id, error)

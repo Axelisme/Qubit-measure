@@ -10,13 +10,13 @@ from zcu_tools.gui.adapter import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
+    DirectValue,
+    EvalValue,
     LiteralSpec,
     ModuleRefSpec,
     ModuleRefValue,
     MultiSweepSpec,
     MultiSweepValue,
-    DirectValue,
-    EvalValue,
     ScalarSpec,
     ScalarValue,
     SweepSpec,
@@ -25,7 +25,7 @@ from zcu_tools.gui.adapter import (
     WaveformRefValue,
     schema_to_dict,
 )
-from zcu_tools.gui.event_bus import EventBus
+from zcu_tools.gui.event_bus import EventBus, MdChangedPayload
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -288,7 +288,7 @@ def test_cfg_form_refreshes_eval_field_from_bus(qapp, ctrl):
     w.populate(schema, ctrl)
 
     md.r_f = 6100.0
-    ctrl.get_bus.return_value.emit(GuiEvent.MD_CHANGED, md)
+    ctrl.get_bus.return_value.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=md))
 
     val = w.read_values().fields["freq"]
     assert isinstance(val, EvalValue)

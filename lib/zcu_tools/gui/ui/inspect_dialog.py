@@ -27,7 +27,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.event_bus import GuiEvent
+from zcu_tools.gui.event_bus import ContextChangedPayload, GuiEvent, MdChangedPayload
 
 if TYPE_CHECKING:
     from zcu_tools.gui.controller import Controller
@@ -79,14 +79,14 @@ class InspectDialog(QDialog):
         layout.addLayout(bottom)
 
         # Subscribe to EventBus for auto-refresh
-        bus.subscribe(GuiEvent.CONTEXT_CHANGED, self.refresh)
-        bus.subscribe(GuiEvent.MD_CHANGED, self.refresh)
+        bus.subscribe(GuiEvent.CONTEXT_CHANGED, self._on_bus_refresh)
+        bus.subscribe(GuiEvent.MD_CHANGED, self._on_bus_refresh)
         # Unsubscribe when dialog is destroyed
         self.destroyed.connect(
-            lambda: bus.unsubscribe(GuiEvent.CONTEXT_CHANGED, self.refresh)
+            lambda: bus.unsubscribe(GuiEvent.CONTEXT_CHANGED, self._on_bus_refresh)
         )
         self.destroyed.connect(
-            lambda: bus.unsubscribe(GuiEvent.MD_CHANGED, self.refresh)
+            lambda: bus.unsubscribe(GuiEvent.MD_CHANGED, self._on_bus_refresh)
         )
 
         self.refresh()
@@ -331,7 +331,14 @@ class InspectDialog(QDialog):
     # Public API
     # ------------------------------------------------------------------
 
-    def refresh(self, *_: Any) -> None:
+    def _on_bus_refresh(
+        self, payload: "ContextChangedPayload | MdChangedPayload"
+    ) -> None:
+        """EventBus subscriber wrapper; payload is ignored, delegates to refresh()."""
+        del payload
+        self.refresh()
+
+    def refresh(self) -> None:
         md = self._ctrl.get_current_md()
         ml = self._ctrl.get_current_ml()
 
