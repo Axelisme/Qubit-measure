@@ -7,7 +7,7 @@ from zcu_tools.experiment.v2_gui.adapters.onetone.fakefreq import FakeFreqAdapte
 from zcu_tools.gui.adapter import AnalyzeRequest, ExpContext, RunRequest
 from zcu_tools.gui.event_bus import EventBus
 from zcu_tools.gui.ui.cfg_form import CfgFormWidget
-from zcu_tools.gui.ui.writeback_dialog import WritebackDialog
+from zcu_tools.gui.ui.writeback_widget import WritebackWidget
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
@@ -25,7 +25,7 @@ def _default_analyze_params(adapter, result, ctx) -> dict[str, object]:
     return {param.key: param.default for param in params}
 
 
-def test_writeback_dialog_lists_items_and_edit_buttons(qapp):
+def test_writeback_widget_lists_items_and_edit_buttons(qapp):
     ctx = _make_ctx()
     adapter = FakeFreqAdapter(fast_mode=True)
     schema = adapter.make_default_cfg(ctx)
@@ -43,9 +43,10 @@ def test_writeback_dialog_lists_items_and_edit_buttons(qapp):
     )
     items = adapter.get_writeback_items(analyze_result, ctx)
 
-    dialog = WritebackDialog(items, MagicMock())
-    selected = dialog.get_selected_items()
-    edit_buttons = [w for w in dialog.findChildren(QPushButton) if w.text() == "Edit"]
+    widget = WritebackWidget(MagicMock())
+    widget.populate(items)
+    selected = widget.get_selected_items()
+    edit_buttons = [w for w in widget.findChildren(QPushButton) if w.text() == "Edit"]
 
     assert len(selected) == len(items)
     assert len(edit_buttons) >= 4

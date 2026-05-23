@@ -79,7 +79,7 @@ def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
     from zcu_tools.gui.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget("tab-1", MagicMock())
-    tab.set_writeback_count(1)
+    tab.update_writeback_items([MagicMock(selected=True)])
     tab.update_interaction_state(
         TabInteractionState(
             global_run_active=False,
@@ -94,7 +94,7 @@ def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
     )
 
     assert tab.analyze_btn.isEnabled() is False
-    assert tab.writeback_btn.isEnabled() is False
+    assert tab.writeback_widget.isEnabled() is False
     assert tab.save_image_btn.isEnabled() is False
 
 

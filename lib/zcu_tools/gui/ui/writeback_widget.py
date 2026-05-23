@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import copy
+import logging
 from typing import TYPE_CHECKING, Any, Optional, Sequence
 
+from qtpy.QtCore import Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
     QDialog,
@@ -29,60 +31,57 @@ from .cfg_form import CfgFormWidget
 if TYPE_CHECKING:
     from zcu_tools.gui.controller import Controller
 
+logger = logging.getLogger(__name__)
 
-class WritebackDialog(QDialog):
+
+class WritebackWidget(QWidget):
+    apply_requested: Signal = Signal(list)  # list[WritebackItem]
+
     def __init__(
         self,
-        items: Sequence[WritebackItem],
         ctrl: "Controller",
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
-        self._items = copy.deepcopy(items)
+        self._items: list[WritebackItem] = []
         self._checks: dict[str, QCheckBox] = {}
 
-        self.setWindowTitle("Writeback")
-        self.setMinimumSize(700, 520)
-
         layout = QVBoxLayout(self)
-        hint = QLabel(
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        self._hint = QLabel(
             "Select the items to write back. Use Edit to adjust values first."
         )
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
+        self._hint.setWordWrap(True)
+        layout.addWidget(self._hint)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        content = QWidget()
-        self._rows_layout = QVBoxLayout(content)
+        self._rows_container = QWidget()
+        self._rows_layout = QVBoxLayout(self._rows_container)
         self._rows_layout.setContentsMargins(0, 0, 0, 0)
         self._rows_layout.setSpacing(6)
-        scroll.setWidget(content)
-        layout.addWidget(scroll, stretch=1)
+        layout.addWidget(self._rows_container)
 
-        btn_row = QHBoxLayout()
         self._apply_btn = QPushButton("Apply Selected")
-        cancel_btn = QPushButton("Cancel")
-        btn_row.addWidget(self._apply_btn)
-        btn_row.addWidget(cancel_btn)
-        layout.addLayout(btn_row)
+        self._apply_btn.setFixedHeight(30)
+        self._apply_btn.clicked.connect(self._on_apply_clicked)
+        layout.addWidget(self._apply_btn)
 
-        self._build_rows()
-        self._apply_btn.clicked.connect(self.accept)
-        cancel_btn.clicked.connect(self.reject)
         self._refresh_apply_enabled()
 
-    def get_selected_items(self) -> list[WritebackItem]:
-        selected: list[WritebackItem] = []
-        for item in self._items:
-            check = self._checks[item.key]
-            item.selected = check.isChecked()
-            if item.selected:
-                selected.append(item)
-        return selected
+    def populate(self, items: Sequence[WritebackItem]) -> None:
+        # Clear old rows
+        while self._rows_layout.count():
+            child = self._rows_layout.takeAt(0)
+            if child is not None:
+                w = child.widget()
+                if w is not None:
+                    w.deleteLater()
 
-    def _build_rows(self) -> None:
+        self._items = copy.deepcopy(list(items))
+        self._checks.clear()
+
         for item in self._items:
             row = QWidget(self)
             row_layout = QHBoxLayout(row)
@@ -103,10 +102,23 @@ class WritebackDialog(QDialog):
                 row_layout.addWidget(edit_btn)
 
             self._rows_layout.addWidget(row)
-        self._rows_layout.addStretch()
+
+        self._refresh_apply_enabled()
 
     def _refresh_apply_enabled(self, *_: int) -> None:
         self._apply_btn.setEnabled(any(cb.isChecked() for cb in self._checks.values()))
+
+    def get_selected_items(self) -> list[WritebackItem]:
+        selected: list[WritebackItem] = []
+        for item in self._items:
+            check = self._checks[item.key]
+            item.selected = check.isChecked()
+            if item.selected:
+                selected.append(item)
+        return selected
+
+    def _on_apply_clicked(self) -> None:
+        self.apply_requested.emit(self.get_selected_items())
 
     def _is_editable(self, item: WritebackItem) -> bool:
         if isinstance(item, MetaDictWriteback):

@@ -633,3 +633,25 @@ def test_populate_full_fake_freq_schema(qapp, ctrl):
     assert hasattr(modules_spec, "fields")
     readout_spec = modules_spec.fields["readout"]  # type: ignore[union-attr]
     assert isinstance(readout_spec, ModuleRefSpec)
+
+
+def test_section_widget_no_header(qapp, ctrl):
+    from zcu_tools.gui.live_model import LiveModelEnv, SectionLiveField
+    from zcu_tools.gui.ui.fields.containers import SectionWidget
+
+    spec = CfgSectionSpec(
+        label="TestSection",
+        fields={"val": ScalarSpec(label="Val", type=int)},
+    )
+    val = CfgSectionValue(fields={"val": DirectValue(10)})
+    field = SectionLiveField(spec, LiveModelEnv(ctrl=ctrl), val)
+
+    # 1. no_header=False (default)
+    w1 = SectionWidget(field, top_level=False, no_header=False)
+    assert w1._container._toggle_btn is not None
+    assert w1._container._header_label is not None
+
+    # 2. no_header=True
+    w2 = SectionWidget(field, top_level=False, no_header=True)
+    assert w2._container._toggle_btn is None
+    assert w2._container._header_label is None

@@ -98,6 +98,7 @@ class SectionWidget(BaseLiveWidget):
         self,
         field: SectionLiveField,
         top_level: bool = False,
+        no_header: bool = False,
         parent: Optional[QWidget] = None,
     ):
         super().__init__(field, parent)
@@ -108,8 +109,8 @@ class SectionWidget(BaseLiveWidget):
 
         self._container = _CollapsibleSection(
             field.spec.label,
-            collapsible=not top_level,
-            no_header=top_level and not field.spec.label,
+            collapsible=not top_level and not no_header,
+            no_header=no_header or (top_level and not field.spec.label),
         )
         layout.addWidget(self._container)
 
@@ -268,7 +269,10 @@ class ModuleRefWidget(BaseLiveWidget):
 
         if sub_field:
             widget_cls = get_widget_cls(sub_field)
-            w = widget_cls(sub_field)  # type: ignore
+            if widget_cls == SectionWidget:
+                w = SectionWidget(sub_field, no_header=True)
+            else:
+                w = widget_cls(sub_field)  # type: ignore
             self._sub_widget = w
             self._sub_layout.addWidget(cast(QWidget, w))
         self._sync_expand_btn()

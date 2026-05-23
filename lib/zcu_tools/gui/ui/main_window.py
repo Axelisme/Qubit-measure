@@ -62,6 +62,7 @@ from .fields import (
     _CollapsibleSection,
 )
 from .progress_stack import ProgressStack
+from .writeback_widget import WritebackWidget
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -203,9 +204,13 @@ class ExpTabWidget(QWidget):
         self.analyze_btn = QPushButton("Analyze")
         analysis_layout.addWidget(self.analyze_btn)
 
-        self.writeback_btn = QPushButton("Writeback…")
-        self.writeback_btn.setVisible(False)
-        analysis_layout.addWidget(self.writeback_btn)
+        self.writeback_section = _CollapsibleSection(
+            "Writeback", collapsible=True, collapsed=False
+        )
+        self.writeback_widget = WritebackWidget(self._ctrl)
+        self.writeback_section.body_layout.addWidget(self.writeback_widget)
+        self.writeback_section.setVisible(False)
+        analysis_layout.addWidget(self.writeback_section)
 
         # Save group
         save_section = _CollapsibleSection("Save", collapsible=True, collapsed=False)
@@ -344,10 +349,10 @@ class ExpTabWidget(QWidget):
     def has_analyze_params(self) -> bool:
         return self.analyze_form.has_params()
 
-    def set_writeback_count(self, count: int) -> None:
-        self._writeback_count = count
-        self.writeback_btn.setVisible(count > 0)
-        self.writeback_btn.setText(f"Writeback… ({count})")
+    def update_writeback_items(self, items: list["WritebackItem"]) -> None:
+        self._writeback_count = sum(1 for item in items if item.selected)
+        self.writeback_widget.populate(items)
+        self.writeback_section.setVisible(len(items) > 0)
 
     def _on_browse_data_path(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -432,11 +437,8 @@ class ExpTabWidget(QWidget):
         self.save_both_btn.setEnabled(
             idle and state.has_context and state.has_analyze_result
         )
-        self.writeback_btn.setEnabled(
-            idle
-            and state.has_context
-            and state.has_analyze_result
-            and self._writeback_count > 0
+        self.writeback_widget.setEnabled(
+            idle and state.has_context and state.has_analyze_result
         )
 
 
@@ -606,7 +608,9 @@ class MainWindow(QMainWindow):
         # wire buttons
         tab_w.run_btn.clicked.connect(lambda: self._on_run_stop_clicked(tab_id))
         tab_w.analyze_btn.clicked.connect(lambda: self._on_analyze_clicked(tab_id))
-        tab_w.writeback_btn.clicked.connect(lambda: self._on_writeback_clicked(tab_id))
+        tab_w.writeback_widget.apply_requested.connect(
+            lambda items, tid=tab_id: self._on_writeback_inline_apply(tid, items)
+        )
         tab_w.save_data_btn.clicked.connect(lambda: self._on_save_data_clicked(tab_id))
         tab_w.save_image_btn.clicked.connect(
             lambda: self._on_save_image_clicked(tab_id)
@@ -680,7 +684,7 @@ class MainWindow(QMainWindow):
                 tab_w.analyze_form.populate_values(values)
 
         items = self._ctrl.get_tab_writeback_items(tab_id)
-        tab_w.set_writeback_count(sum(1 for item in items if item.selected))
+        tab_w.update_writeback_items(items)
 
         # populate save paths
         try:
@@ -867,29 +871,20 @@ class MainWindow(QMainWindow):
             logger.warning("_on_analyze_clicked: blocked — %s", exc)
             self.show_status_message(str(exc))
 
-    def _on_writeback_clicked(self, tab_id: str) -> None:
-        logger.info("_on_writeback_clicked: tab_id=%r", tab_id)
-        tab_w = self._tab_widgets.get(tab_id)
-        if tab_w is None:
-            return
-        items = self._ctrl.get_tab_writeback_items(tab_id)
+    def _on_writeback_inline_apply(
+        self, tab_id: str, items: list["WritebackItem"]
+    ) -> None:
+        logger.info("_on_writeback_inline_apply: tab_id=%r", tab_id)
         if not items:
-            self.show_status_message("No writeback items available")
-            return
-        from .writeback_dialog import WritebackDialog
-
-        dialog = WritebackDialog(items, self._ctrl, parent=self)
-        if dialog.exec() == 0:
             return
         try:
-            selected_items = dialog.get_selected_items()
-            applied_keys = self._ctrl.apply_writeback_items(tab_id, selected_items)
+            applied_keys = self._ctrl.apply_writeback_items(tab_id, items)
             if applied_keys:
                 self.show_status_message(
                     f"Writeback applied: {', '.join(applied_keys)}"
                 )
         except RuntimeError as exc:
-            logger.warning("_on_writeback_clicked: blocked — %s", exc)
+            logger.warning("_on_writeback_inline_apply: blocked — %s", exc)
             self.show_status_message(str(exc))
 
     def _on_save_data_clicked(self, tab_id: str) -> None:
