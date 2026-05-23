@@ -95,6 +95,11 @@ def _run_and_wait(cf: ControllerFixture, tab_id: str) -> None:
     assert _wait_for(lambda: not cf.state.is_running)
 
 
+def _default_analyze_params(cf: ControllerFixture, tab_id: str) -> dict[str, object]:
+    params = cf.ctrl.get_tab_analyze_params(tab_id)
+    return {param.key: param.default for param in params}
+
+
 # ---------------------------------------------------------------------------
 # analyze
 # ---------------------------------------------------------------------------
@@ -104,7 +109,7 @@ def test_analyze_updates_tab_analyze_result(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
 
-    cf.ctrl.analyze(tab_id, {})
+    cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
 
     tab = cf.state.get_tab(tab_id)
     assert tab.analyze_result is not None
@@ -114,7 +119,7 @@ def test_analyze_result_has_peak_and_figure(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
 
-    cf.ctrl.analyze(tab_id, {})
+    cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
 
     tab = cf.state.get_tab(tab_id)
     assert isinstance(tab.analyze_result.peak, float)
@@ -125,7 +130,7 @@ def test_analyze_stores_figure_in_tab(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
 
-    cf.ctrl.analyze(tab_id, {})
+    cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
 
     tab = cf.state.get_tab(tab_id)
     assert tab.figure is not None
@@ -136,7 +141,7 @@ def test_analyze_calls_refresh_tab(cf):
     _run_and_wait(cf, tab_id)
     cf.view.refresh_tab.reset_mock()
 
-    cf.ctrl.analyze(tab_id, {})
+    cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
 
     cf.bus.emit.assert_any_call(GuiEvent.TAB_CONTENT_CHANGED, tab_id)
 
@@ -155,7 +160,7 @@ def test_analyze_exception_shows_status_message(cf):
     bad_adapter.analyze.side_effect = ValueError("bad analysis")
     cf.state.get_tab(tab_id).adapter = bad_adapter
 
-    cf.ctrl.analyze(tab_id, {})
+    cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
 
     assert cf.view.show_status_message.called
     msg = cf.view.show_status_message.call_args[0][0]
@@ -171,8 +176,8 @@ def test_analyze_passes_user_params(cf):
 
     cf.ctrl.analyze(tab_id, {"threshold": 0.99})
 
-    call_kwargs = spy_adapter.analyze.call_args[1]
-    assert call_kwargs.get("threshold") == 0.99
+    call_args = spy_adapter.analyze.call_args[0]
+    assert call_args[2] == {"threshold": 0.99}
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +195,7 @@ def test_get_tab_writeback_items_empty_before_analyze(cf):
 def test_get_tab_writeback_items_after_analyze(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
-    cf.ctrl.analyze(tab_id, {})
+    cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
 
     spec = cf.ctrl.get_tab_writeback_items(tab_id)
     assert len(spec) == 1
@@ -205,7 +210,7 @@ def test_get_tab_writeback_items_after_analyze(cf):
 def test_apply_writeback_items_updates_md(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
-    cf.ctrl.analyze(tab_id, {})
+    cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
     items = cf.ctrl.get_tab_writeback_items(tab_id)
 
     applied = cf.ctrl.apply_writeback_items(tab_id, items)
@@ -221,7 +226,7 @@ def test_apply_writeback_items_updates_md(cf):
 def test_apply_writeback_items_emits_inspect_changed(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
-    cf.ctrl.analyze(tab_id, {})
+    cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
     items = cf.ctrl.get_tab_writeback_items(tab_id)
 
     cf.ctrl.apply_writeback_items(tab_id, items)
@@ -283,7 +288,7 @@ def test_save_image_without_figure_raises(cf):
 def test_save_image_calls_savefig(cf, tmp_path):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
-    cf.ctrl.analyze(tab_id, {})
+    cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
 
     out = str(tmp_path / "out.png")
     cf.ctrl.save_image(tab_id, out)
@@ -300,8 +305,10 @@ def test_save_image_calls_savefig(cf, tmp_path):
 
 def test_get_tab_analyze_params_returns_threshold(cf):
     tab_id = cf.ctrl.new_tab("fake")
+    _run_and_wait(cf, tab_id)
     params = cf.ctrl.get_tab_analyze_params(tab_id)
-    assert "threshold" in params
+    assert len(params) == 1
+    assert params[0].key == "threshold"
 
 
 def test_get_tab_save_paths_returns_save_paths(cf):

@@ -141,13 +141,13 @@ class Controller:
     # Analyze flow (TabService)
     # ------------------------------------------------------------------
 
-    def analyze(self, tab_id: str, user_params: dict) -> None:
+    def analyze(self, tab_id: str, analyze_params: dict[str, object]) -> None:
         if not self.has_context():
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
         try:
-            self._tab_svc.analyze(tab_id, user_params)
+            self._tab_svc.analyze(tab_id, analyze_params)
             self._bus.emit(GuiEvent.TAB_CONTENT_CHANGED, tab_id)
         except Exception as exc:
             logger.warning("analyze: failed tab_id=%r exc=%r", tab_id, exc)
@@ -353,10 +353,10 @@ class Controller:
             return []
         return self._writeback_svc.get_tab_writeback_items(tab_id)
 
-    def get_tab_analyze_params(self, tab_id: str) -> dict:
+    def get_tab_analyze_params(self, tab_id: str) -> list:
         if not self.has_tab(tab_id):
             logger.debug("get_tab_analyze_params: tab_id %r not found", tab_id)
-            return {}
+            return []
         return self._tab_svc.get_tab_analyze_params(tab_id)
 
     def get_tab_save_paths(self, tab_id: str) -> Any:

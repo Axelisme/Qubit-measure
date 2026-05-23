@@ -30,6 +30,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 )
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
+    AnalyzeParam,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -37,7 +38,6 @@ from zcu_tools.gui.adapter import (
     MetaDictWriteback,
     ModuleRefSpec,
     ModuleWriteback,
-    ParamSpec,
     ScalarSpec,
     ScalarValue,
     SweepSpec,
@@ -283,28 +283,38 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
             fast_mode=self._fast_mode,
         )
 
-    def get_analyze_params(self) -> dict[str, ParamSpec]:
-        return {
-            "model_type": ParamSpec(
+    def get_analyze_params(
+        self, result: FreqRunResult, ctx: ExpContext
+    ) -> list[AnalyzeParam]:
+        return [
+            AnalyzeParam(
+                key="model_type",
                 label="Model type",
-                default="hm",
                 type=str,
+                default="hm",
                 choices=["hm", "t", "auto"],
             ),
-            "fit_bg_slope": ParamSpec(
+            AnalyzeParam(
+                key="fit_bg_slope",
                 label="Fit background slope",
-                default=False,
                 type=bool,
-                choices=None,
+                default=False,
             ),
-        }
+        ]
 
     def analyze(
-        self, result: FreqRunResult, ctx: ExpContext, **user_params: Any
+        self,
+        result: FreqRunResult,
+        ctx: ExpContext,
+        analyze_params: dict[str, object],
     ) -> FakeFreqAnalyzeResult:
-        _model_type = str(user_params.get("model_type", "hm"))
-        fit_bg_slope = bool(user_params.get("fit_bg_slope", False))
-        model_type = cast(Literal["hm", "t", "auto"], _model_type)
+        model_type_value = analyze_params.get("model_type")
+        if model_type_value not in {"hm", "t", "auto"}:
+            raise RuntimeError("Analyze param 'model_type' must be hm, t, or auto")
+        fit_bg_slope = analyze_params.get("fit_bg_slope")
+        if not isinstance(fit_bg_slope, bool):
+            raise RuntimeError("Analyze param 'fit_bg_slope' must be bool")
+        model_type = cast(Literal["hm", "t", "auto"], model_type_value)
         freq, fwhm, params, figure = FreqExp().analyze(
             (result.freqs, result.signals),
             model_type=model_type,

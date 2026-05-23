@@ -1,5 +1,6 @@
 from .adapter import (
     AbsExpAdapter,
+    AnalyzeParam,
     CfgNodeSpec,
     CfgNodeValue,
     CfgSchema,
@@ -12,7 +13,6 @@ from .adapter import (
     ModuleWriteback,
     MultiSweepSpec,
     MultiSweepValue,
-    ParamSpec,
     SavePaths,
     ScalarSpec,
     ScalarValue,
@@ -33,6 +33,7 @@ from .ui import MainWindow
 
 __all__ = [
     "AbsExpAdapter",
+    "AnalyzeParam",
     "CfgNodeSpec",
     "CfgNodeValue",
     "CfgSchema",
@@ -48,7 +49,6 @@ __all__ = [
     "ModuleRefValue",
     "MultiSweepSpec",
     "MultiSweepValue",
-    "ParamSpec",
     "Registry",
     "SavePaths",
     "ScalarSpec",

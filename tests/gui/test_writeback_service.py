@@ -24,6 +24,11 @@ def _make_ctx() -> ExpContext:
     )
 
 
+def _default_analyze_params(adapter, result, ctx) -> dict[str, object]:
+    params = adapter.get_analyze_params(result, ctx)
+    return {param.key: param.default for param in params}
+
+
 def test_writeback_service_applies_md_items():
     ctx = _make_ctx()
     state = State(ctx)
@@ -34,7 +39,9 @@ def test_writeback_service_applies_md_items():
     state.add_tab(tab_id, adapter, ctx)
     schema = adapter.make_default_cfg(ctx)
     result = adapter.run(ctx, schema)
-    analyze_result = adapter.analyze(result, ctx)
+    analyze_result = adapter.analyze(
+        result, ctx, _default_analyze_params(adapter, result, ctx)
+    )
     state.update_tab_result(tab_id, result)
     state.update_tab_analyze(tab_id, analyze_result, analyze_result.figure)
 
@@ -61,7 +68,9 @@ def test_writeback_service_applies_module_and_waveform_items():
     state.add_tab(tab_id, adapter, ctx)
     schema = adapter.make_default_cfg(ctx)
     result = adapter.run(ctx, schema)
-    analyze_result = adapter.analyze(result, ctx)
+    analyze_result = adapter.analyze(
+        result, ctx, _default_analyze_params(adapter, result, ctx)
+    )
     state.update_tab_result(tab_id, result)
     state.update_tab_analyze(tab_id, analyze_result, analyze_result.figure)
 

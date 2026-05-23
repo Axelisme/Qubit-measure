@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from matplotlib.figure import Figure
 
-from zcu_tools.gui.adapter import CfgSchema
+from zcu_tools.gui.adapter import AnalyzeParam, CfgSchema
 from zcu_tools.gui.event_bus import GuiEvent
 
 logger = logging.getLogger(__name__)
@@ -60,22 +60,26 @@ class TabService:
     def get_tab_figure(self, tab_id: str) -> Figure | None:
         return self._state.get_tab(tab_id).figure
 
-    def get_tab_analyze_params(self, tab_id: str) -> dict:
+    def get_tab_analyze_params(self, tab_id: str) -> list[AnalyzeParam]:
         tab = self._state.get_tab(tab_id)
-        return tab.adapter.get_analyze_params()
+        if tab.run_result is None:
+            raise RuntimeError("No run result available to build analyze params")
+        return tab.adapter.get_analyze_params(tab.run_result, self._state.exp_context)
 
     def get_tab_save_paths(self, tab_id: str) -> Any:
         tab = self._state.get_tab(tab_id)
         ctx = self._state.exp_context
         return tab.adapter.make_save_paths(ctx)
 
-    def analyze(self, tab_id: str, user_params: dict) -> None:
+    def analyze(self, tab_id: str, analyze_params: dict[str, object]) -> None:
         tab = self._state.get_tab(tab_id)
         if tab.run_result is None:
             raise RuntimeError("No run result available to analyze")
-        logger.info("analyze: tab_id=%r user_params=%r", tab_id, list(user_params))
+        logger.info(
+            "analyze: tab_id=%r analyze_params=%r", tab_id, list(analyze_params)
+        )
         ctx = self._state.exp_context
-        analyze_result = tab.adapter.analyze(tab.run_result, ctx, **user_params)
+        analyze_result = tab.adapter.analyze(tab.run_result, ctx, analyze_params)
         self._state.update_tab_analyze(tab_id, analyze_result, analyze_result.figure)
 
     def save_data(self, tab_id: str, data_path: str) -> None:

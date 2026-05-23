@@ -39,35 +39,21 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from .analyze_form import AnalyzeFormWidget
 from .cfg_form import (
     CfgFormWidget,
 )
 from .fields import (
     _CollapsibleSection,
-    make_value_widget,
-    read_value_widget,
 )
 from .progress_stack import ProgressStack
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
-    from zcu_tools.gui.adapter import CfgSchema, ParamSpec, WritebackItem
+    from zcu_tools.gui.adapter import AnalyzeParam, CfgSchema, WritebackItem
     from zcu_tools.gui.controller import Controller
     from zcu_tools.meta_tool import ModuleLibrary
-
-
-# ---------------------------------------------------------------------------
-# Helpers: dynamic param widgets
-# ---------------------------------------------------------------------------
-
-
-def _make_param_widget(spec: "ParamSpec") -> QWidget:
-    return make_value_widget(spec.type, spec.default, spec.choices, editable=True)
-
-
-def _read_param_widget(w: QWidget, spec: "ParamSpec") -> Any:
-    return read_value_widget(w, spec.type, fallback=spec.default)
 
 
 # ---------------------------------------------------------------------------
@@ -136,8 +122,6 @@ class ExpTabWidget(QWidget):
         super().__init__(parent)
         self.tab_id = tab_id
         self._ctrl = ctrl
-        self._param_widgets: dict[str, QWidget] = {}  # analyze param key → widget
-        self._analyze_specs: dict[str, "ParamSpec"] = {}  # analyze param key → spec
         self._writeback_count: int = 0
         self._cfg_valid: bool = True  # False when any ChannelRow is unresolved
 
@@ -198,7 +182,8 @@ class ExpTabWidget(QWidget):
         self._analyze_section = _CollapsibleSection(
             "Analysis", collapsible=True, collapsed=False
         )
-        self._analyze_form = self._analyze_section.form
+        self.analyze_form = AnalyzeFormWidget()
+        self._analyze_section.body_layout.addWidget(self.analyze_form)
         analysis_layout.addWidget(self._analyze_section)
         self.analyze_btn = QPushButton("Analyze")
         analysis_layout.addWidget(self.analyze_btn)
@@ -332,17 +317,14 @@ class ExpTabWidget(QWidget):
 
     # ── populate / refresh helpers ────────────────────────────────────────
 
-    def populate_analyze_params(self, param_specs: dict[str, "ParamSpec"]) -> None:
-        """Rebuild the Analyze Params form from the adapter's ParamSpec dict."""
-        # clear old widgets
-        while self._analyze_form.rowCount():
-            self._analyze_form.removeRow(0)
-        self._param_widgets.clear()
+    def populate_analyze_params(self, params: list["AnalyzeParam"]) -> None:
+        self.analyze_form.populate(params)
 
-        for key, spec in param_specs.items():
-            w = _make_param_widget(spec)
-            self._analyze_form.addRow(spec.label + ":", w)
-            self._param_widgets[key] = w
+    def read_analyze_params(self) -> dict[str, object]:
+        return self.analyze_form.read_params()
+
+    def has_analyze_params(self) -> bool:
+        return self.analyze_form.has_params()
 
     def set_writeback_count(self, count: int) -> None:
         self._writeback_count = count
@@ -631,10 +613,9 @@ class MainWindow(QMainWindow):
             return
 
         # populate analyze params on first result (adapter is now known)
-        if not tab_w._param_widgets:
+        if not tab_w.has_analyze_params() and self._ctrl.has_run_result(tab_id):
             params = self._ctrl.get_tab_analyze_params(tab_id)
             tab_w.populate_analyze_params(params)
-            tab_w._analyze_specs = params
 
         items = self._ctrl.get_tab_writeback_items(tab_id)
         tab_w.set_writeback_count(sum(1 for item in items if item.selected))
@@ -824,14 +805,8 @@ class MainWindow(QMainWindow):
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        # collect current param values
-        user_params: dict[str, Any] = {}
-        for key, w in tab_w._param_widgets.items():
-            spec = tab_w._analyze_specs.get(key)
-            if spec is not None:
-                user_params[key] = _read_param_widget(w, spec)
         try:
-            self._ctrl.analyze(tab_id, user_params)
+            self._ctrl.analyze(tab_id, tab_w.read_analyze_params())
         except RuntimeError as exc:
             logger.warning("_on_analyze_clicked: blocked — %s", exc)
             self.show_status_message(str(exc))

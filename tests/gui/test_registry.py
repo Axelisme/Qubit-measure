@@ -9,12 +9,12 @@ import pytest
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
+    AnalyzeParam,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
     MetaDictWriteback,
-    ParamSpec,
 )
 from zcu_tools.gui.registry import Registry
 
@@ -35,10 +35,10 @@ class _DummyAdapter(AbsExpAdapter):
     def build_exp_cfg(self, raw_cfg, ctx):  # noqa: ARG002
         return _DummyCfg()
 
-    def get_analyze_params(self) -> dict[str, ParamSpec]:
-        return {}
+    def get_analyze_params(self, result, ctx) -> list[AnalyzeParam]:  # noqa: ARG002
+        return []
 
-    def analyze(self, result, ctx, **kw):  # noqa: ARG002
+    def analyze(self, result, ctx, analyze_params):  # noqa: ARG002
         return _DummyAnalyzeResult()
 
     def get_writeback_items(self, analyze_result, ctx) -> Sequence[MetaDictWriteback]:  # noqa: ARG002

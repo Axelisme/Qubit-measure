@@ -20,12 +20,19 @@ def _make_ctx() -> ExpContext:
     )
 
 
+def _default_analyze_params(adapter, result, ctx) -> dict[str, object]:
+    params = adapter.get_analyze_params(result, ctx)
+    return {param.key: param.default for param in params}
+
+
 def test_writeback_dialog_lists_items_and_edit_buttons(qapp):
     ctx = _make_ctx()
     adapter = FakeFreqAdapter(fast_mode=True)
     schema = adapter.make_default_cfg(ctx)
     result = adapter.run(ctx, schema)
-    analyze_result = adapter.analyze(result, ctx)
+    analyze_result = adapter.analyze(
+        result, ctx, _default_analyze_params(adapter, result, ctx)
+    )
     items = adapter.get_writeback_items(analyze_result, ctx)
 
     dialog = WritebackDialog(items, MagicMock())
@@ -48,7 +55,9 @@ def test_readout_writeback_drag_schema_is_initially_valid(qapp):
     adapter = FakeFreqAdapter(fast_mode=True)
     schema = adapter.make_default_cfg(ctx)
     result = adapter.run(ctx, schema)
-    analyze_result = adapter.analyze(result, ctx)
+    analyze_result = adapter.analyze(
+        result, ctx, _default_analyze_params(adapter, result, ctx)
+    )
     items = adapter.get_writeback_items(analyze_result, ctx)
     readout_item = next(item for item in items if item.key == "readout_rf")
 

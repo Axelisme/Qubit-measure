@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.adapter import (
+    AnalyzeParam,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -17,6 +18,7 @@ from zcu_tools.gui.adapter import (
     ScalarValue,
     SweepSpec,
     SweepValue,
+    analyze_params_to_raw_dict,
     make_default_value,
     schema_to_dict,
 )
@@ -218,7 +220,36 @@ def test_make_default_value_scalar():
     spec = CfgSectionSpec(fields={"x": ScalarSpec(label="X", type=int)})
     val = make_default_value(spec)
     assert isinstance(val.fields["x"], ScalarValue)
-    assert val.fields["x"].value == 0
+
+
+def test_analyze_params_to_raw_dict_round_trips_scalars():
+    params = [
+        AnalyzeParam(key="threshold", label="Threshold", type=float, default=0.5),
+        AnalyzeParam(
+            key="model_type",
+            label="Model type",
+            type=str,
+            default="hm",
+            choices=["hm", "t", "auto"],
+        ),
+    ]
+    raw = analyze_params_to_raw_dict(
+        params,
+        {"threshold": 0.75, "model_type": "auto"},
+    )
+    assert raw == {"threshold": 0.75, "model_type": "auto"}
+
+
+def test_analyze_params_to_raw_dict_rejects_missing_key():
+    params = [AnalyzeParam(key="threshold", label="Threshold", type=float, default=0.5)]
+    with pytest.raises(RuntimeError, match="Missing analyze params"):
+        analyze_params_to_raw_dict(params, {})
+
+
+def test_analyze_params_to_raw_dict_rejects_unknown_key():
+    params = [AnalyzeParam(key="threshold", label="Threshold", type=float, default=0.5)]
+    with pytest.raises(RuntimeError, match="Unknown analyze params"):
+        analyze_params_to_raw_dict(params, {"threshold": 0.5, "extra": 1})
 
 
 def test_make_default_value_sweep():

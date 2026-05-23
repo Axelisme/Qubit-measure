@@ -12,12 +12,12 @@ from zcu_tools.experiment.base import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
+    AnalyzeParam,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
     MetaDictWriteback,
-    ParamSpec,
     ScalarSpec,
     ScalarValue,
     SweepSpec,
@@ -100,20 +100,32 @@ class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult]):
             sweep=raw_cfg["sweep"],
         )
 
-    def get_analyze_params(self) -> dict[str, ParamSpec]:
-        return {
-            "threshold": ParamSpec(
-                label="Threshold", default=0.5, type=float, choices=None
-            ),
-        }
+    def get_analyze_params(
+        self,
+        result: FakeResult,  # noqa: ARG002
+        ctx: ExpContext,  # noqa: ARG002
+    ) -> list[AnalyzeParam]:
+        return [
+            AnalyzeParam(
+                key="threshold",
+                label="Threshold",
+                type=float,
+                default=0.5,
+            )
+        ]
 
     def analyze(
         self,
         result: FakeResult,
         ctx: ExpContext,  # noqa: ARG002
-        **user_params: Any,
+        analyze_params: dict[str, object],
     ) -> FakeAnalyzeResult:
-        threshold = float(user_params.get("threshold", 0.5))
+        threshold_value = analyze_params.get("threshold")
+        if not isinstance(threshold_value, (int, float)) or isinstance(
+            threshold_value, bool
+        ):
+            raise RuntimeError("Analyze param 'threshold' must be float")
+        threshold = float(threshold_value)
         peak = float(np.max(np.abs(result)))
         import matplotlib.pyplot as plt
 

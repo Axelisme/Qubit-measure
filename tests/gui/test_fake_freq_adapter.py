@@ -40,6 +40,13 @@ def _run(adapter: FakeFreqAdapter, ctx: ExpContext) -> FreqRunResult:
     return adapter.run(ctx, schema)
 
 
+def _default_analyze_params(
+    adapter: FakeFreqAdapter, result: FreqRunResult, ctx: ExpContext
+) -> dict[str, object]:
+    params = adapter.get_analyze_params(result, ctx)
+    return {param.key: param.default for param in params}
+
+
 # ---------------------------------------------------------------------------
 # make_default_cfg
 # ---------------------------------------------------------------------------
@@ -210,14 +217,25 @@ def test_run_noise_decreases_with_more_rounds():
 def test_analyze_returns_fake_freq_analyze_result():
     ctx = _make_ctx()
     result = _run(_adapter(), ctx)
-    analyze_result = _adapter().analyze(result, ctx)
+    analyze_result = _adapter().analyze(
+        result, ctx, _default_analyze_params(_adapter(), result, ctx)
+    )
     assert isinstance(analyze_result, FakeFreqAnalyzeResult)
+
+
+def test_get_analyze_params_returns_flat_param_list():
+    ctx = _make_ctx()
+    result = _run(_adapter(), ctx)
+    params = _adapter().get_analyze_params(result, ctx)
+    assert [param.key for param in params] == ["model_type", "fit_bg_slope"]
 
 
 def test_analyze_has_expected_fields():
     ctx = _make_ctx()
     result = _run(_adapter(), ctx)
-    ar = _adapter().analyze(result, ctx)
+    ar = _adapter().analyze(
+        result, ctx, _default_analyze_params(_adapter(), result, ctx)
+    )
     assert isinstance(ar.freq, float)
     assert isinstance(ar.fwhm, float)
     assert isinstance(ar.params, dict)
@@ -233,7 +251,7 @@ def test_analyze_freq_close_to_true_value():
     schema = adapter.make_default_cfg(ctx)
     schema.value.fields["rounds"] = ScalarValue(200)
     result = adapter.run(ctx, schema)
-    ar = adapter.analyze(result, ctx)
+    ar = adapter.analyze(result, ctx, _default_analyze_params(adapter, result, ctx))
     assert abs(ar.freq - 6000.0) < 5.0
 
 
@@ -242,7 +260,9 @@ def test_analyze_produces_figure():
 
     ctx = _make_ctx()
     result = _run(_adapter(), ctx)
-    ar = _adapter().analyze(result, ctx)
+    ar = _adapter().analyze(
+        result, ctx, _default_analyze_params(_adapter(), result, ctx)
+    )
     assert isinstance(ar.figure, Figure)
 
 
@@ -251,7 +271,9 @@ def test_analyze_result_carries_figure():
 
     ctx = _make_ctx()
     result = _run(_adapter(), ctx)
-    ar = _adapter().analyze(result, ctx)
+    ar = _adapter().analyze(
+        result, ctx, _default_analyze_params(_adapter(), result, ctx)
+    )
     assert isinstance(ar.figure, Figure)
 
 
@@ -263,7 +285,9 @@ def test_analyze_result_carries_figure():
 def test_get_writeback_items_has_r_f_and_rf_w():
     ctx = _make_ctx()
     result = _run(_adapter(), ctx)
-    ar = _adapter().analyze(result, ctx)
+    ar = _adapter().analyze(
+        result, ctx, _default_analyze_params(_adapter(), result, ctx)
+    )
     spec = _adapter().get_writeback_items(ar, ctx)
     keys = [item.key for item in spec]
     assert "r_f" in keys
@@ -311,7 +335,7 @@ def test_writeback_items_include_ml_targets():
     ctx = _make_ctx()
     adapter = _adapter()
     result = _run(adapter, ctx)
-    ar = adapter.analyze(result, ctx)
+    ar = adapter.analyze(result, ctx, _default_analyze_params(adapter, result, ctx))
     spec = adapter.get_writeback_items(ar, ctx)
     keys = [item.key for item in spec]
     assert "readout_rf" in keys
@@ -322,7 +346,7 @@ def test_writeback_items_include_ml_targets_when_missing():
     ctx = _make_ctx()
     adapter = _adapter()
     result = _run(adapter, ctx)
-    ar = adapter.analyze(result, ctx)
+    ar = adapter.analyze(result, ctx, _default_analyze_params(adapter, result, ctx))
     spec = adapter.get_writeback_items(ar, ctx)
     keys = [item.key for item in spec]
     assert "readout_rf" in keys
@@ -336,7 +360,7 @@ def test_writeback_edit_schema_provided():
     ctx = _make_ctx()
     adapter = _adapter()
     result = _run(adapter, ctx)
-    ar = adapter.analyze(result, ctx)
+    ar = adapter.analyze(result, ctx, _default_analyze_params(adapter, result, ctx))
     spec = adapter.get_writeback_items(ar, ctx)
 
     spec_by_key = {item.key: item for item in spec}

@@ -39,7 +39,7 @@ def test_fake_adapter_full_flow():
     assert len(result) == 11
 
     # 4. analyze
-    analyze_result = adapter.analyze(result, ctx, threshold=0.0)
+    analyze_result = adapter.analyze(result, ctx, {"threshold": 0.0})
     assert isinstance(analyze_result.peak, float)
     assert analyze_result.figure is not None
 
