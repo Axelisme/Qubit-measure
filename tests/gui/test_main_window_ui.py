@@ -146,3 +146,47 @@ def test_main_window_save_data_busy_does_not_reset_plot(qapp):
     mock_tab.reset_plot.assert_not_called()
     mock_tab.update_interaction_state.assert_called_once()
     assert window._new_tab_btn.isEnabled() is False
+
+
+def test_show_analysis_figure_draws_canvas(qapp, monkeypatch):
+    from matplotlib.figure import Figure
+    from zcu_tools.gui.ui.main_window import ExpTabWidget
+
+    del qapp
+    tab = ExpTabWidget("tab-1", MagicMock())
+    canvas = MagicMock()
+
+    monkeypatch.setattr(
+        "zcu_tools.gui.ui.main_window.attach_existing_figure_to_container",
+        lambda fig, container: canvas,
+    )
+
+    tab.show_analysis_figure(Figure())
+
+    canvas.draw.assert_called_once_with()
+    assert tab._canvas_widget is canvas
+
+
+def test_show_analysis_figure_keeps_new_canvas_current_when_replacing_old(qapp):
+    from matplotlib.figure import Figure
+    from qtpy.QtWidgets import QApplication
+    from zcu_tools.gui.ui.main_window import ExpTabWidget
+
+    del qapp
+    tab = ExpTabWidget("tab-1", MagicMock())
+    tab.show()
+    QApplication.processEvents()
+
+    fig1 = Figure()
+    fig2 = Figure()
+
+    tab.show_analysis_figure(fig1)
+    first_canvas = tab._canvas_widget
+    assert first_canvas is not None
+    assert tab._figure_container._stack.currentWidget() is first_canvas
+
+    tab.show_analysis_figure(fig2)
+    second_canvas = tab._canvas_widget
+    assert second_canvas is not None
+    assert second_canvas is not first_canvas
+    assert tab._figure_container._stack.currentWidget() is second_canvas

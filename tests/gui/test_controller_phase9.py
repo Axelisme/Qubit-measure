@@ -15,7 +15,8 @@ from zcu_tools.gui.controller import Controller
 from zcu_tools.gui.device_manager import DeviceManager
 from zcu_tools.gui.event_bus import GuiEvent
 from zcu_tools.gui.io_manager import IOManager
-from zcu_tools.gui.plot_host import FigureContainer, has_container
+from zcu_tools.gui.plot_host import FigureContainer
+from zcu_tools.gui.plot_routing import has_current_container
 from zcu_tools.gui.registry import Registry
 from zcu_tools.gui.runner import Runner
 from zcu_tools.gui.state import State
@@ -363,7 +364,7 @@ def test_analyze_clears_active_figure_container_after_finish(cf):
     cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
 
     assert _wait_for(lambda: not cf.state.is_analyzing)
-    assert has_container() is False
+    assert has_current_container() is False
 
 
 def test_save_data_is_async_and_sets_busy_flag(cf):

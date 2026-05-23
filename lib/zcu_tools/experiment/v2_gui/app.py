@@ -5,25 +5,22 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
-from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-
 if TYPE_CHECKING:
+    from zcu_tools.gui.adapter import ExpContext
     from zcu_tools.gui.controller import Controller
+    from zcu_tools.gui.device_manager import DeviceManager
+    from zcu_tools.gui.io_manager import IOManager
+    from zcu_tools.gui.registry import Registry
+    from zcu_tools.gui.runner import Runner
+    from zcu_tools.gui.state import State
+    from zcu_tools.gui.ui.main_window import MainWindow
 
-from zcu_tools.gui.adapter import ExpContext
-from zcu_tools.gui.controller import Controller
-from zcu_tools.gui.device_manager import DeviceManager
-from zcu_tools.gui.io_manager import IOManager
-from zcu_tools.gui.registry import Registry
-from zcu_tools.gui.runner import Runner
-from zcu_tools.gui.state import State
-from zcu_tools.gui.ui.main_window import MainWindow
-
-from .registry import register_all
+from zcu_tools.gui.mpl_backend_setup import configure_gui_matplotlib_backend
 
 
-def _make_empty_ctx() -> ExpContext:
+def _make_empty_ctx() -> "ExpContext":
     """Minimal startup context: real empty MetaDict/ModuleLibrary, no file sync."""
+    from zcu_tools.gui.adapter import ExpContext
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
     return ExpContext(
@@ -36,6 +33,18 @@ def _make_empty_ctx() -> ExpContext:
 
 def run_app() -> None:
     """Build and launch the GUI. Blocks until the window is closed."""
+    configure_gui_matplotlib_backend()
+
+    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+
+    from zcu_tools.gui.device_manager import DeviceManager
+    from zcu_tools.gui.io_manager import IOManager
+    from zcu_tools.gui.registry import Registry
+    from zcu_tools.gui.runner import Runner
+    from zcu_tools.gui.state import State
+
+    from .registry import register_all
+
     app = QApplication.instance() or QApplication(sys.argv)
 
     # --- wire up components ---
@@ -65,15 +74,17 @@ def _show_startup_dialog(ctrl: "Controller", parent: MainWindow) -> None:
 
 
 def _build_window(
-    state: State,
-    runner: Runner,
-    registry: Registry,
-    io_manager: IOManager,
-    device_manager: DeviceManager,
-) -> tuple[Controller, MainWindow]:
+    state: "State",
+    runner: "Runner",
+    registry: "Registry",
+    io_manager: "IOManager",
+    device_manager: "DeviceManager",
+) -> tuple["Controller", "MainWindow"]:
     """Create Controller + MainWindow in the correct order."""
 
+    from zcu_tools.gui.controller import Controller
     from zcu_tools.gui.event_bus import EventBus
+    from zcu_tools.gui.ui.main_window import MainWindow
 
     bus = EventBus()
 

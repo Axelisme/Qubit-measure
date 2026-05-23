@@ -31,7 +31,6 @@ class AnalyzeService(QObject):
         self._state = state
         self._runner = runner
         self._bus = bus
-        self._active_container: Optional[FigureContainer] = None
 
         self._runner.analyze_finished.connect(self._on_analyze_finished)
         self._runner.analyze_failed.connect(self._on_analyze_failed)
@@ -60,20 +59,14 @@ class AnalyzeService(QObject):
         logger.info(
             "start_analyze: tab_id=%r analyze_params=%r", tab_id, list(analyze_params)
         )
-        if figure_container is not None:
-            from zcu_tools.liveplot.backend.qt import register_pending_container
-
-            register_pending_container(figure_container)
-            self._active_container = figure_container
-        self._runner.start_analyze(tab_id, tab.adapter, req)
+        self._runner.start_analyze(
+            tab_id,
+            tab.adapter,
+            req,
+            figure_container=figure_container,
+        )
         self._state.set_analyzing(True)
         self._bus.emit(GuiEvent.RUN_STATE_CHANGED)
-
-    def _clear_live_container(self) -> None:
-        from zcu_tools.liveplot.backend.qt import clear_pending_container
-
-        clear_pending_container(self._active_container)
-        self._active_container = None
 
     def _on_analyze_finished(self, tab_id: str, analyze_result: Any) -> None:
         logger.info(
@@ -81,7 +74,6 @@ class AnalyzeService(QObject):
             tab_id,
             type(analyze_result).__name__,
         )
-        self._clear_live_container()
         self._state.update_tab_analyze(tab_id, analyze_result, analyze_result.figure)
         self._state.set_analyzing(False)
         self._bus.emit(GuiEvent.RUN_STATE_CHANGED)
@@ -89,7 +81,6 @@ class AnalyzeService(QObject):
 
     def _on_analyze_failed(self, tab_id: str, error: Exception) -> None:
         logger.warning("_on_analyze_failed: tab_id=%r error=%r", tab_id, error)
-        self._clear_live_container()
         self._state.set_analyzing(False)
         self._bus.emit(GuiEvent.RUN_STATE_CHANGED)
         self.analyze_failed.emit(tab_id, error)

@@ -28,7 +28,6 @@ class RunService(QObject):
         self._state = state
         self._runner = runner
         self._bus = bus
-        self._active_container: Optional[FigureContainer] = None
 
         self._runner.run_finished.connect(self._on_run_finished)
         self._runner.run_failed.connect(self._on_run_failed)
@@ -58,12 +57,6 @@ class RunService(QObject):
 
         tab = self._state.get_tab(tab_id)
 
-        if live_container is not None:
-            from zcu_tools.liveplot.backend.qt import register_pending_container
-
-            register_pending_container(live_container)
-            self._active_container = live_container
-
         try:
             self._runner.start_run(
                 tab_id,
@@ -72,9 +65,9 @@ class RunService(QObject):
                 schema,
                 user_params,
                 pbar_factory=pbar_factory,
+                figure_container=live_container,
             )
         except Exception:
-            self._clear_live_container()
             raise
         self._state.set_running(True)
         self._bus.emit(GuiEvent.RUN_STATE_CHANGED)
@@ -83,17 +76,10 @@ class RunService(QObject):
         logger.info("cancel_run")
         self._runner.cancel()
 
-    def _clear_live_container(self) -> None:
-        from zcu_tools.liveplot.backend.qt import clear_pending_container
-
-        clear_pending_container(self._active_container)
-        self._active_container = None
-
     def _on_run_finished(self, tab_id: str, result: Any) -> None:
         logger.info(
             "_on_run_finished: tab_id=%r result_type=%s", tab_id, type(result).__name__
         )
-        self._clear_live_container()
         self._state.update_tab_result(tab_id, result)
         self._state.set_running(False)
         self._bus.emit(GuiEvent.RUN_STATE_CHANGED)
@@ -101,7 +87,6 @@ class RunService(QObject):
 
     def _on_run_failed(self, tab_id: str, error: Exception) -> None:
         logger.warning("_on_run_failed: tab_id=%r error=%r", tab_id, error)
-        self._clear_live_container()
         self._state.set_running(False)
         self._bus.emit(GuiEvent.RUN_STATE_CHANGED)
         self.run_failed.emit(tab_id, error)

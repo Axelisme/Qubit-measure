@@ -8,12 +8,13 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
 from zcu_tools.gui.plot_host import FigureContainer
+from zcu_tools.gui.plot_routing import has_current_container
 
 from . import fallback, jupyter, qt
 
 
 def auto_select_backend() -> ModuleType:
-    if qt.has_container():
+    if has_current_container():
         return qt
     backend = mpl.get_backend().lower()
     if "nbagg" in backend:

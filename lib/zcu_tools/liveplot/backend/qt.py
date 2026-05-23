@@ -1,8 +1,8 @@
-"""Qt liveplot backend backed by the GUI plot host container stack."""
+"""Qt liveplot backend backed by the GUI plot routing + host layers."""
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
@@ -10,23 +10,11 @@ from matplotlib.figure import Figure
 from zcu_tools.gui.plot_host import (
     FigureContainer,
     attach_existing_figure_to_container,
-    create_figure_in_active_container,
-    has_container,
-    pop_container,
-    push_container,
+    create_figure_in_current_container,
 )
 from zcu_tools.gui.plot_host import (
     close_figure as close_figure_in_host,
 )
-
-
-def register_pending_container(container: FigureContainer) -> None:
-    push_container(container)
-
-
-def clear_pending_container(container: Optional[FigureContainer] = None) -> None:
-    if has_container():
-        pop_container(container)
 
 
 def set_figure_container(fig: Figure, container: FigureContainer) -> None:
@@ -39,7 +27,7 @@ def make_plot_frame(
     plot_instant: bool = False,  # noqa: ARG001
     **kwargs: Any,
 ) -> tuple[Figure, list[list[Axes]]]:
-    return create_figure_in_active_container(n_row, n_col, **kwargs)
+    return create_figure_in_current_container(n_row, n_col, **kwargs)
 
 
 def refresh_figure(fig: Figure) -> None:

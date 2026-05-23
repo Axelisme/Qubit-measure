@@ -4,11 +4,15 @@ import pytest
 from qtpy.QtWidgets import QLabel, QStackedWidget
 from zcu_tools.gui.plot_host import (
     FigureContainer,
+    assert_plot_invariants,
     attach_existing_figure_to_container,
-    create_figure_in_active_container,
-    has_container,
-    pop_container,
-    push_container,
+    create_figure_in_current_container,
+    dump_plot_state,
+)
+from zcu_tools.gui.plot_routing import (
+    get_current_container,
+    has_current_container,
+    routing_scope,
 )
 
 
@@ -19,50 +23,26 @@ def _make_container() -> FigureContainer:
     return FigureContainer(stack, placeholder)
 
 
-def _clear_container_stack() -> None:
-    while has_container():
-        pop_container()
-
-
-def test_push_pop_container_round_trip(qapp):
+def test_routing_scope_round_trip(qapp):
     del qapp
-    _clear_container_stack()
     container = _make_container()
 
-    push_container(container)
-    assert has_container() is True
-    popped = pop_container(container)
+    assert has_current_container() is False
+    with routing_scope(container):
+        assert has_current_container() is True
+        assert get_current_container() is container
 
-    assert popped is container
-    assert has_container() is False
-
-
-def test_pop_non_top_container_raises(qapp):
-    del qapp
-    _clear_container_stack()
-    container1 = _make_container()
-    container2 = _make_container()
-
-    push_container(container1)
-    push_container(container2)
-
-    with pytest.raises(RuntimeError, match="non-top pop"):
-        pop_container(container1)
-
-    pop_container(container2)
-    pop_container(container1)
+    assert has_current_container() is False
+    assert get_current_container() is None
 
 
-def test_create_figure_requires_active_container():
-    _clear_container_stack()
-
+def test_create_figure_requires_current_container():
     with pytest.raises(RuntimeError, match="No active FigureContainer"):
-        create_figure_in_active_container(1, 1)
+        create_figure_in_current_container(1, 1)
 
 
 def test_attach_existing_figure_to_container(qapp):
     del qapp
-    _clear_container_stack()
 
     import matplotlib.pyplot as plt
 
@@ -77,30 +57,37 @@ def test_attach_existing_figure_to_container(qapp):
     plt.close(fig)
 
 
-def test_create_figure_in_active_container(qapp):
+def test_create_figure_in_current_container(qapp):
     del qapp
-    _clear_container_stack()
 
-    push_container(_make_container())
-    fig, axs = create_figure_in_active_container(1, 1)
+    with routing_scope(_make_container()):
+        fig, axs = create_figure_in_current_container(1, 1)
 
     assert fig is not None
     assert len(axs) == 1
     assert len(axs[0]) == 1
 
-    pop_container()
-
 
 def test_auto_select_backend_prefers_qt_when_container_is_active(qapp):
     del qapp
-    _clear_container_stack()
 
     from zcu_tools.liveplot.backend import auto_select_backend
 
-    push_container(_make_container())
-
-    backend = auto_select_backend()
+    with routing_scope(_make_container()):
+        backend = auto_select_backend()
 
     assert backend.__name__.endswith(".qt")
 
-    pop_container()
+
+def test_plot_state_snapshot_and_invariants(qapp):
+    del qapp
+
+    container = _make_container()
+    with routing_scope(container):
+        fig, _ = create_figure_in_current_container(1, 1)
+
+    state = dump_plot_state()
+
+    assert state.active_figure_count >= 1
+    assert id(fig) in state.attached_figure_ids
+    assert_plot_invariants()

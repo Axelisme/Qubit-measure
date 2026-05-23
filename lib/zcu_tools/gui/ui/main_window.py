@@ -376,6 +376,10 @@ class ExpTabWidget(QWidget):
         if self._canvas_widget is not None and self._canvas_widget is not canvas:
             remove_canvas(self._canvas_widget)
         self._canvas_widget = canvas
+        draw = getattr(canvas, "draw", None)
+        if not callable(draw):
+            raise RuntimeError("Attached analysis canvas does not support draw()")
+        draw()
         logger.debug("show_analysis_figure: tab_id=%r canvas set", self.tab_id)
 
     def _on_cfg_validity_changed(self, valid: bool) -> None:

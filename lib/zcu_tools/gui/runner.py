@@ -16,6 +16,8 @@ from .adapter import (
     RunRequest,
     SaveDataRequest,
 )
+from .plot_host import FigureContainer
+from .plot_routing import routing_scope
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,7 @@ class RunWorker(QThread):
         schema: CfgSchema,
         user_params: dict[str, object],
         pbar_factory: Optional[Any] = None,
+        figure_container: Optional[FigureContainer] = None,
     ) -> None:
         super().__init__()
         self._adapter = adapter
@@ -38,18 +41,19 @@ class RunWorker(QThread):
         self._schema = schema
         self._user_params = user_params
         self._pbar_factory = pbar_factory
+        self._figure_container = figure_container
         self._stop_event = threading.Event()
 
     def run(self) -> None:
         logger.debug("RunWorker.run: start adapter=%s", type(self._adapter).__name__)
         try:
-            if self._pbar_factory is not None:
-                with ActiveTask(self._stop_event), use_pbar_factory(self._pbar_factory):
-                    result = self._adapter.run(
-                        self._req, self._schema, **self._user_params
-                    )
-            else:
-                with ActiveTask(self._stop_event):
+            with routing_scope(self._figure_container), ActiveTask(self._stop_event):
+                if self._pbar_factory is not None:
+                    with use_pbar_factory(self._pbar_factory):
+                        result = self._adapter.run(
+                            self._req, self._schema, **self._user_params
+                        )
+                else:
                     result = self._adapter.run(
                         self._req, self._schema, **self._user_params
                     )
@@ -70,17 +74,24 @@ class AnalyzeWorker(QThread):
     analyze_finished: Signal = Signal(object)
     analyze_failed: Signal = Signal(object)
 
-    def __init__(self, adapter: AbsExpAdapter, req: AnalyzeRequest) -> None:
+    def __init__(
+        self,
+        adapter: AbsExpAdapter,
+        req: AnalyzeRequest,
+        figure_container: Optional[FigureContainer] = None,
+    ) -> None:
         super().__init__()
         self._adapter = adapter
         self._req = req
+        self._figure_container = figure_container
 
     def run(self) -> None:
         logger.debug(
             "AnalyzeWorker.run: start adapter=%s", type(self._adapter).__name__
         )
         try:
-            result = self._adapter.analyze(self._req)
+            with routing_scope(self._figure_container):
+                result = self._adapter.analyze(self._req)
             logger.debug(
                 "AnalyzeWorker.run: finished result_type=%s", type(result).__name__
             )
@@ -136,6 +147,7 @@ class Runner(QObject):
         schema: CfgSchema,
         user_params: dict[str, object],
         pbar_factory: Optional[Any] = None,
+        figure_container: Optional[FigureContainer] = None,
     ) -> None:
         if self.is_running:
             raise RuntimeError(
@@ -145,7 +157,14 @@ class Runner(QObject):
             "Runner.start_run: tab_id=%r adapter=%s", tab_id, type(adapter).__name__
         )
         self._active_tab_id = tab_id
-        worker = RunWorker(adapter, req, schema, user_params, pbar_factory)
+        worker = RunWorker(
+            adapter,
+            req,
+            schema,
+            user_params,
+            pbar_factory,
+            figure_container,
+        )
         worker.run_finished.connect(self._on_worker_finished)
         worker.run_failed.connect(self._on_worker_failed)
         self._worker = worker
@@ -189,6 +208,7 @@ class AnalyzeRunner(QObject):
         tab_id: str,
         adapter: AbsExpAdapter,
         req: AnalyzeRequest,
+        figure_container: Optional[FigureContainer] = None,
     ) -> None:
         if self.is_running:
             raise RuntimeError(
@@ -200,7 +220,7 @@ class AnalyzeRunner(QObject):
             type(adapter).__name__,
         )
         self._active_tab_id = tab_id
-        worker = AnalyzeWorker(adapter, req)
+        worker = AnalyzeWorker(adapter, req, figure_container)
         worker.analyze_finished.connect(self._on_worker_finished)
         worker.analyze_failed.connect(self._on_worker_failed)
         self._worker = worker

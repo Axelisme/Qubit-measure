@@ -51,6 +51,10 @@ if __name__ == "__main__":
     no_log = "--no-log" in sys.argv
     _setup_logging(to_file=not no_log)
 
+    from zcu_tools.gui.mpl_backend_setup import configure_gui_matplotlib_backend
+
+    configure_gui_matplotlib_backend()
+
     from zcu_tools.experiment.v2_gui.app import run_app
 
     run_app()
