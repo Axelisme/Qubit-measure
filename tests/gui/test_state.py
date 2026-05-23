@@ -25,12 +25,16 @@ def _make_adapter():
 def test_tab_interaction_state_creation():
     s = TabInteractionState(
         is_running=True,
+        is_analyzing=False,
+        is_saving_data=False,
         has_context=False,
         has_soc=True,
         has_run_result=True,
         has_analyze_result=False,
     )
     assert s.is_running is True
+    assert s.is_analyzing is False
+    assert s.is_saving_data is False
     assert s.has_context is False
     assert s.has_soc is True
     assert s.has_run_result is True
@@ -119,6 +123,16 @@ def test_set_running_updates_is_running():
     assert state.is_running
     state.set_running(False)
     assert not state.is_running
+
+
+def test_long_task_flags_report_active_state():
+    state = State(_make_ctx())
+    assert state.has_active_long_task is False
+    state.set_analyzing(True)
+    assert state.has_active_long_task is True
+    state.set_analyzing(False)
+    state.set_saving_data(True)
+    assert state.has_active_long_task is True
 
 
 # ---------------------------------------------------------------------------

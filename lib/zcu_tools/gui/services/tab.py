@@ -71,25 +71,6 @@ class TabService:
         ctx = self._state.exp_context
         return tab.adapter.make_save_paths(ctx)
 
-    def analyze(self, tab_id: str, analyze_params: dict[str, object]) -> None:
-        tab = self._state.get_tab(tab_id)
-        if tab.run_result is None:
-            raise RuntimeError("No run result available to analyze")
-        logger.info(
-            "analyze: tab_id=%r analyze_params=%r", tab_id, list(analyze_params)
-        )
-        ctx = self._state.exp_context
-        analyze_result = tab.adapter.analyze(tab.run_result, ctx, analyze_params)
-        self._state.update_tab_analyze(tab_id, analyze_result, analyze_result.figure)
-
-    def save_data(self, tab_id: str, data_path: str) -> None:
-        tab = self._state.get_tab(tab_id)
-        if tab.run_result is None:
-            raise RuntimeError("No run result available to save")
-        logger.info("save_data: tab_id=%r path=%r", tab_id, data_path)
-        ctx = self._state.exp_context
-        tab.adapter.save(data_path, tab.run_result, ctx)
-
     def save_image(self, tab_id: str, image_path: str) -> None:
         tab = self._state.get_tab(tab_id)
         if tab.figure is None:

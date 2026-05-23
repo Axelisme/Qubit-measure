@@ -387,8 +387,10 @@ class ExpTabWidget(QWidget):
         self._cfg_valid = valid
 
     def update_interaction_state(self, state: TabInteractionState) -> None:
-        is_running = state.is_running
-        if is_running:
+        long_task_active = (
+            state.is_running or state.is_analyzing or state.is_saving_data
+        )
+        if state.is_running:
             self.run_btn.setText("Stop")
             self.run_btn.setEnabled(True)
             self.run_btn.setStyleSheet(
@@ -396,11 +398,16 @@ class ExpTabWidget(QWidget):
             )
         else:
             self.run_btn.setText("Run")
-            can_run = state.has_context and state.has_soc and self._cfg_valid
+            can_run = (
+                not long_task_active
+                and state.has_context
+                and state.has_soc
+                and self._cfg_valid
+            )
             self.run_btn.setEnabled(can_run)
             self.run_btn.setStyleSheet("")
 
-        idle = not is_running
+        idle = not long_task_active
         self.cfg_form.setEnabled(idle)
         self.analyze_btn.setEnabled(idle and state.has_context and state.has_run_result)
         self.save_data_btn.setEnabled(
@@ -514,7 +521,7 @@ class MainWindow(QMainWindow):
         bus.unsubscribe(GuiEvent.PREDICTOR_CHANGED, self._on_bus_predictor_changed)
 
     def _on_bus_run_state_changed(self) -> None:
-        self.refresh_run_state(self._ctrl.is_running())
+        self.refresh_run_state(self._ctrl.is_run_active())
 
     def _on_bus_context_changed(self, md: Any, ml: Any) -> None:
         self.refresh_context_panel()
@@ -537,14 +544,14 @@ class MainWindow(QMainWindow):
             tab_w.populate_cfg(schema, self._ctrl)
 
         # refresh state (enables/disables buttons based on context)
-        self.refresh_run_state(self._ctrl.is_running())
+        self.refresh_run_state(self._ctrl.is_run_active())
 
         # re-evaluate run_btn when channel validity changes
         tab_w.cfg_form.validity_changed.connect(
             lambda _valid, tid=tab_id, tw=tab_w: self._set_tab_running(
                 tid,
                 tw,
-                self._ctrl.is_running(),
+                self._ctrl.is_run_active(),
                 self._ctrl.has_context(),
                 self._ctrl.has_soc(),
             )
@@ -569,7 +576,7 @@ class MainWindow(QMainWindow):
                 self._tabs.removeTab(index)
             tab_w.deleteLater()
 
-        self.refresh_run_state(self._ctrl.is_running())
+        self.refresh_run_state(self._ctrl.is_run_active())
 
     def _on_bus_tab_content_changed(self, tab_id: str) -> None:
         self.refresh_tab(tab_id)
@@ -599,6 +606,8 @@ class MainWindow(QMainWindow):
 
         state = TabInteractionState(
             is_running=is_running,
+            is_analyzing=self._ctrl.is_analyzing(),
+            is_saving_data=self._ctrl.is_saving_data(),
             has_context=has_context,
             has_soc=has_soc,
             has_run_result=self._ctrl.has_run_result(tab_id),
@@ -640,19 +649,19 @@ class MainWindow(QMainWindow):
         self._set_tab_running(
             tab_id,
             tab_w,
-            self._ctrl.is_running(),
+            self._ctrl.is_run_active(),
             self._ctrl.has_context(),
             self._ctrl.has_soc(),
         )
 
-    def refresh_run_state(self, is_running: bool) -> None:
-        logger.debug("refresh_run_state: is_running=%s", is_running)
+    def refresh_run_state(self, is_run_active: bool) -> None:
+        logger.debug("refresh_run_state: is_run_active=%s", is_run_active)
         has_context = self._ctrl.has_context()
         has_soc = self._ctrl.has_soc()
-        self._new_tab_btn.setEnabled(not is_running)
+        self._new_tab_btn.setEnabled(not self._ctrl.is_running())
         for tab_id, tab_w in self._tab_widgets.items():
-            self._set_tab_running(tab_id, tab_w, is_running, has_context, has_soc)
-        if is_running:
+            self._set_tab_running(tab_id, tab_w, is_run_active, has_context, has_soc)
+        if is_run_active:
             # clear stale plot content before a new run starts
             for tab_w in self._tab_widgets.values():
                 tab_w.reset_plot()
@@ -683,9 +692,9 @@ class MainWindow(QMainWindow):
         else:
             self._ctx_label.setText("No project set — use Project… to configure")
             self._ctx_label.setStyleSheet("color: gray;")
-        is_running = self._ctrl.is_running()
+        is_run_active = self._ctrl.is_run_active()
         for tab_id, tab_w in self._tab_widgets.items():
-            self._set_tab_running(tab_id, tab_w, is_running, has_context, has_soc)
+            self._set_tab_running(tab_id, tab_w, is_run_active, has_context, has_soc)
 
     def refresh_config_panels(self) -> None:
         for tab_id, tab_w in self._tab_widgets.items():
@@ -780,7 +789,7 @@ class MainWindow(QMainWindow):
         self._ctrl.close_tab(tab_id)
 
     def _on_run_stop_clicked(self, tab_id: str) -> None:
-        if self._ctrl.is_running():
+        if self._ctrl.is_run_active():
             logger.info("_on_run_stop_clicked: stop requested tab_id=%r", tab_id)
             self._ctrl.cancel_run()
         else:
@@ -869,20 +878,13 @@ class MainWindow(QMainWindow):
         image_path = tab_w.get_image_path()
         errors = []
         try:
-            self._ctrl.save_data(tab_id, data_path)
+            self._ctrl.save_both(tab_id, data_path, image_path)
         except RuntimeError as exc:
-            errors.append(f"Data: {exc}")
-        try:
-            self._ctrl.save_image(tab_id, image_path)
-        except RuntimeError as exc:
-            errors.append(f"Image: {exc}")
-
+            errors.append(str(exc))
         if errors:
             msg = " / ".join(errors)
             logger.warning("_on_save_both_clicked: blocked/failed — %s", msg)
             self.show_status_message(msg)
-        else:
-            self.show_status_message("Data and image saved successfully.")
 
     def _on_setup_clicked(self) -> None:
         from .setup_dialog import SetupDialog

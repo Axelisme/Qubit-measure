@@ -7,13 +7,16 @@ from unittest.mock import MagicMock
 import numpy as np
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import ADAPTERS, register_all
-from zcu_tools.gui.adapter import schema_to_dict
+from zcu_tools.gui.adapter import AnalyzeRequest, RunRequest, schema_to_dict
 from zcu_tools.gui.registry import Registry
 
 
 def _make_ctx():
     ctx = MagicMock()
+    ctx.md = MagicMock()
     ctx.ml = MagicMock()
+    ctx.soc = MagicMock()
+    ctx.soccfg = MagicMock()
     ctx.ml.get_module.side_effect = lambda name, override=None: {"name": name}
     return ctx
 
@@ -34,12 +37,21 @@ def test_fake_adapter_full_flow():
 
     # 3. run
     schema.value.fields["noise_scale"].value = 0.05  # type: ignore[index,union-attr]
-    result = adapter.run(ctx, schema)
+    run_req = RunRequest(md=ctx.md, ml=ctx.ml, soc=ctx.soc, soccfg=ctx.soccfg)
+    result = adapter.run(run_req, schema)
     assert isinstance(result, np.ndarray)
     assert len(result) == 11
 
     # 4. analyze
-    analyze_result = adapter.analyze(result, ctx, {"threshold": 0.0})
+    analyze_result = adapter.analyze(
+        AnalyzeRequest(
+            run_result=result,
+            analyze_params={"threshold": 0.0},
+            md=ctx.md,
+            ml=ctx.ml,
+            predictor=getattr(ctx, "predictor", None),
+        )
+    )
     assert isinstance(analyze_result.peak, float)
     assert analyze_result.figure is not None
 

@@ -8,6 +8,7 @@ from zcu_tools.gui.adapter import (
     ModuleWriteback,
     WaveformWriteback,
     WritebackItem,
+    schema_to_dict,
 )
 from zcu_tools.gui.event_bus import GuiEvent
 from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
@@ -84,7 +85,7 @@ class WritebackService:
 
     def _resolve_module_item(self, item: ModuleWriteback) -> Any:
         if item.edited_schema is not None:
-            raw = item.edited_schema.to_raw_dict(self._state.exp_context)
+            raw = schema_to_dict(item.edited_schema, self._state.exp_context.ml)
             return ModuleCfgFactory.from_raw(raw, ml=self._state.exp_context.ml)
         if item.proposed_module is not None:
             return item.proposed_module
@@ -92,7 +93,7 @@ class WritebackService:
 
     def _resolve_waveform_item(self, item: WaveformWriteback) -> Any:
         if item.edited_schema is not None:
-            raw = item.edited_schema.to_raw_dict(self._state.exp_context)
+            raw = schema_to_dict(item.edited_schema, self._state.exp_context.ml)
             return WaveformCfgFactory.from_raw(raw, ml=self._state.exp_context.ml)
         if item.proposed_waveform is not None:
             return item.proposed_waveform

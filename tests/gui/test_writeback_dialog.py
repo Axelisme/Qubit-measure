@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 from qtpy.QtWidgets import QPushButton
 from zcu_tools.experiment.v2_gui.adapters.onetone.fakefreq import FakeFreqAdapter
-from zcu_tools.gui.adapter import ExpContext
+from zcu_tools.gui.adapter import AnalyzeRequest, ExpContext, RunRequest
 from zcu_tools.gui.event_bus import EventBus
 from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 from zcu_tools.gui.ui.writeback_dialog import WritebackDialog
@@ -29,9 +29,17 @@ def test_writeback_dialog_lists_items_and_edit_buttons(qapp):
     ctx = _make_ctx()
     adapter = FakeFreqAdapter(fast_mode=True)
     schema = adapter.make_default_cfg(ctx)
-    result = adapter.run(ctx, schema)
+    result = adapter.run(
+        RunRequest(md=ctx.md, ml=ctx.ml, soc=ctx.soc, soccfg=ctx.soccfg), schema
+    )
     analyze_result = adapter.analyze(
-        result, ctx, _default_analyze_params(adapter, result, ctx)
+        AnalyzeRequest(
+            run_result=result,
+            analyze_params=_default_analyze_params(adapter, result, ctx),
+            md=ctx.md,
+            ml=ctx.ml,
+            predictor=ctx.predictor,
+        )
     )
     items = adapter.get_writeback_items(analyze_result, ctx)
 
@@ -54,9 +62,17 @@ def test_readout_writeback_drag_schema_is_initially_valid(qapp):
 
     adapter = FakeFreqAdapter(fast_mode=True)
     schema = adapter.make_default_cfg(ctx)
-    result = adapter.run(ctx, schema)
+    result = adapter.run(
+        RunRequest(md=ctx.md, ml=ctx.ml, soc=ctx.soc, soccfg=ctx.soccfg), schema
+    )
     analyze_result = adapter.analyze(
-        result, ctx, _default_analyze_params(adapter, result, ctx)
+        AnalyzeRequest(
+            run_result=result,
+            analyze_params=_default_analyze_params(adapter, result, ctx),
+            md=ctx.md,
+            ml=ctx.ml,
+            predictor=ctx.predictor,
+        )
     )
     items = adapter.get_writeback_items(analyze_result, ctx)
     readout_item = next(item for item in items if item.key == "readout_rf")

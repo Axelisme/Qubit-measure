@@ -120,7 +120,7 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
     """FakeFreqAdapter.run() completes; leave=True outer bar stays, reset_all clears."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
     from zcu_tools.experiment.v2_gui.adapters.onetone.fakefreq import FakeFreqAdapter
-    from zcu_tools.gui.adapter import ExpContext
+    from zcu_tools.gui.adapter import ExpContext, RunRequest
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
     from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
     from zcu_tools.progress_bar.interface import use_pbar_factory
@@ -139,7 +139,9 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
     schema.value.fields["freq"] = SweepValue(start=5800.0, stop=5808.0, expts=5)
 
     with use_pbar_factory(factory):
-        run_result = adapter.run(ctx, schema)
+        run_result = adapter.run(
+            RunRequest(md=ctx.md, ml=ctx.ml, soc=ctx.soc, soccfg=ctx.soccfg), schema
+        )
         QApplication.processEvents()
 
     assert len(run_result.freqs) == 5

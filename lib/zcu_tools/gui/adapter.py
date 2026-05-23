@@ -11,11 +11,11 @@ from typing_extensions import Generic, TypeVar
 
 logger = logging.getLogger(__name__)
 
-if TYPE_CHECKING:
-    from zcu_tools.experiment.cfg_model import ExpCfgModel
-    from zcu_tools.meta_tool import ModuleLibrary
-    from zcu_tools.meta_tool.metadict import MetaDict
-    from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.meta_tool import ModuleLibrary
+from zcu_tools.meta_tool.metadict import MetaDict
+from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
+from zcu_tools.utils.datasaver import create_datafolder
 
 
 @dataclass(frozen=True)
@@ -31,6 +31,35 @@ class ExpContext:
     database_path: str = ""
     active_label: str = ""
     predictor: Optional["FluxoniumPredictor"] = None
+
+
+@dataclass(frozen=True)
+class RunRequest:
+    md: "MetaDict"
+    ml: "ModuleLibrary"
+    soc: object
+    soccfg: object
+
+
+@dataclass(frozen=True)
+class AnalyzeRequest:
+    run_result: object
+    analyze_params: dict[str, object]
+    md: "MetaDict"
+    ml: "ModuleLibrary"
+    predictor: Optional[object]
+
+
+@dataclass(frozen=True)
+class SaveDataRequest:
+    run_result: object
+    data_path: str
+    md: "MetaDict"
+    ml: "ModuleLibrary"
+    chip_name: str
+    qub_name: str
+    res_name: str
+    active_label: str
 
 
 def _normalize_analyze_value(type_: type, value: object) -> object:
@@ -285,9 +314,9 @@ class CfgSchema:
     spec: CfgSectionSpec
     value: CfgSectionValue
 
-    def to_raw_dict(self, ctx: ExpContext) -> dict[str, object]:
+    def to_raw_dict(self, req: RunRequest) -> dict[str, object]:
         """Lower the current schema into a raw experiment config dictionary."""
-        return _section_to_dict(self.spec, self.value, ctx.ml)
+        return _section_to_dict(self.spec, self.value, req.ml)
 
 
 # ---------------------------------------------------------------------------
@@ -447,9 +476,8 @@ def schema_to_dict(schema: CfgSchema, ml: "Optional[ModuleLibrary]") -> dict:
     """Compatibility wrapper around CfgSchema.to_raw_dict()."""
     if ml is None:
         return _section_to_dict(schema.spec, schema.value, None)
-    fake_ctx = ExpContext(md=cast(Any, None), ml=ml, soc=None, soccfg=None)
-    return schema.to_raw_dict(fake_ctx)
-    return _section_to_dict(schema.spec, schema.value, ml)
+    fake_req = RunRequest(md=cast(Any, None), ml=ml, soc=object(), soccfg=object())
+    return schema.to_raw_dict(fake_req)
 
 
 # ---------------------------------------------------------------------------
@@ -678,11 +706,11 @@ class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult]):
 
     @abstractmethod
     def build_exp_cfg(
-        self, raw_cfg: dict[str, object], ctx: ExpContext
+        self, raw_cfg: dict[str, object], req: RunRequest
     ) -> "ExpCfgModel":
         """Convert lowered raw cfg into the concrete experiment config model."""
 
-    def run(self, ctx: ExpContext, schema: CfgSchema, **user_params: Any) -> T_Result:
+    def run(self, req: RunRequest, schema: CfgSchema, **user_params: Any) -> T_Result:
         """Default run pipeline for adapters backed by an experiment class."""
         if user_params:
             keys = ", ".join(sorted(user_params))
@@ -694,8 +722,8 @@ class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult]):
             raise RuntimeError(
                 f"{type(self).__name__} must define exp_cls or override run()"
             )
-        raw_cfg = schema.to_raw_dict(ctx)
-        exp_cfg = self.build_exp_cfg(raw_cfg, ctx)
+        raw_cfg = schema.to_raw_dict(req)
+        exp_cfg = self.build_exp_cfg(raw_cfg, req)
         experiment = cast(Any, self.exp_cls())
         return cast(T_Result, experiment.run(exp_cfg))
 
@@ -708,9 +736,7 @@ class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult]):
     @abstractmethod
     def analyze(
         self,
-        result: T_Result,
-        ctx: ExpContext,
-        analyze_params: dict[str, object],
+        req: AnalyzeRequest,
     ) -> T_AnalyzeResult:
         """Run analysis."""
 
@@ -732,8 +758,6 @@ class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult]):
         if not ctx.active_label:
             raise RuntimeError("ExpContext.active_label is required for save paths")
 
-        from zcu_tools.utils.datasaver import create_datafolder
-
         stem = self.make_filename_stem(ctx)
         data_dir = create_datafolder(ctx.database_path)
         image_dir = os.path.join(ctx.result_dir, "exps", ctx.active_label, "image")
@@ -747,4 +771,4 @@ class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult]):
         return self.make_default_save_paths(ctx)
 
     @abstractmethod
-    def save(self, data_path: str, result: T_Result, ctx: ExpContext) -> None: ...
+    def save(self, req: SaveDataRequest) -> None: ...

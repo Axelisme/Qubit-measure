@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional, Protocol
 
 logger = logging.getLogger(__name__)
@@ -14,12 +15,14 @@ from .device_manager import DeviceManager
 from .event_bus import EventBus, GuiEvent
 from .io_manager import IOManager
 from .registry import Registry
-from .runner import Runner
+from .runner import AnalyzeRunner, Runner, SaveDataRunner
 from .services import (
+    AnalyzeService,
     ConnectionService,
     ContextService,
     DeviceService,
     RunService,
+    SaveService,
     TabService,
     WritebackService,
 )
@@ -27,6 +30,13 @@ from .state import State
 
 if TYPE_CHECKING:
     pass
+
+
+@dataclass
+class _PendingSaveBoth:
+    data_path: str
+    image_path: str
+    image_error: Optional[str] = None
 
 
 class ViewProtocol(Protocol):
@@ -60,10 +70,17 @@ class Controller:
         self._ctx_svc = ContextService(state, io_manager, bus)
         self._tab_svc = TabService(state, registry, bus)
         self._run_svc = RunService(state, runner, bus)
+        self._analyze_svc = AnalyzeService(state, AnalyzeRunner(), bus)
+        self._save_svc = SaveService(state, SaveDataRunner(), bus)
         self._writeback_svc = WritebackService(state, bus)
+        self._pending_save_both: dict[str, _PendingSaveBoth] = {}
 
         self._run_svc.run_finished.connect(self._on_run_finished)
         self._run_svc.run_failed.connect(self._on_run_failed)
+        self._analyze_svc.analyze_finished.connect(self._on_analyze_finished)
+        self._analyze_svc.analyze_failed.connect(self._on_analyze_failed)
+        self._save_svc.save_finished.connect(self._on_save_finished)
+        self._save_svc.save_failed.connect(self._on_save_failed)
 
     def set_view(self, view: ViewProtocol) -> None:
         self._view = view
@@ -79,6 +96,40 @@ class Controller:
 
     def _on_run_failed(self, _tab_id: str, error: Exception) -> None:
         self._require_view().show_status_message(f"Run failed: {error}")
+
+    def _on_analyze_finished(self, tab_id: str, _result: object) -> None:
+        self._bus.emit(GuiEvent.TAB_CONTENT_CHANGED, tab_id)
+
+    def _on_analyze_failed(self, _tab_id: str, error: Exception) -> None:
+        self._require_view().show_status_message(f"Analyze failed: {error}")
+
+    def _on_save_finished(self, tab_id: str, data_path: str) -> None:
+        pending = self._pending_save_both.pop(tab_id, None)
+        if pending is None:
+            self._require_view().show_status_message(f"Data saved to {data_path}")
+            return
+        if pending.image_error is None:
+            self._require_view().show_status_message(
+                f"Data saved to {data_path}; image saved to {pending.image_path}"
+            )
+        else:
+            self._require_view().show_status_message(
+                f"Data saved to {data_path}; image failed: {pending.image_error}"
+            )
+
+    def _on_save_failed(self, tab_id: str, data_path: str, error: Exception) -> None:
+        pending = self._pending_save_both.pop(tab_id, None)
+        if pending is None:
+            self._require_view().show_status_message(f"Save data failed: {error}")
+            return
+        if pending.image_error is None:
+            self._require_view().show_status_message(
+                f"Data failed: {error}; image saved to {pending.image_path}"
+            )
+        else:
+            self._require_view().show_status_message(
+                f"Data failed: {error}; image failed: {pending.image_error}"
+            )
 
     def get_bus(self) -> EventBus:
         return self._bus
@@ -112,7 +163,16 @@ class Controller:
         return self._ctx_svc.has_startup_context()
 
     def is_running(self) -> bool:
+        return self._state.has_active_long_task
+
+    def is_run_active(self) -> bool:
         return self._state.is_running
+
+    def is_analyzing(self) -> bool:
+        return self._state.is_analyzing
+
+    def is_saving_data(self) -> bool:
+        return self._state.is_saving_data
 
     def has_soc(self) -> bool:
         return self._conn_svc.has_soc()
@@ -147,8 +207,7 @@ class Controller:
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
         try:
-            self._tab_svc.analyze(tab_id, analyze_params)
-            self._bus.emit(GuiEvent.TAB_CONTENT_CHANGED, tab_id)
+            self._analyze_svc.start_analyze(tab_id, analyze_params)
         except Exception as exc:
             logger.warning("analyze: failed tab_id=%r exc=%r", tab_id, exc)
             self._require_view().show_status_message(f"Analyze failed: {exc}")
@@ -181,8 +240,7 @@ class Controller:
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
         try:
-            self._tab_svc.save_data(tab_id, data_path)
-            self._require_view().show_status_message(f"Data saved to {data_path}")
+            self._save_svc.start_save_data(tab_id, data_path)
         except Exception as exc:
             logger.warning("save_data: failed tab_id=%r exc=%r", tab_id, exc)
             self._require_view().show_status_message(f"Save data failed: {exc}")
@@ -198,6 +256,41 @@ class Controller:
         except Exception as exc:
             logger.warning("save_image: failed tab_id=%r exc=%r", tab_id, exc)
             self._require_view().show_status_message(f"Save image failed: {exc}")
+
+    def save_both(self, tab_id: str, data_path: str, image_path: str) -> None:
+        if not self.has_context():
+            raise RuntimeError(
+                "No experiment context. Use Project… to set up chip/qubit or load a project."
+            )
+        pending = _PendingSaveBoth(data_path=data_path, image_path=image_path)
+        data_started = False
+        try:
+            self._save_svc.start_save_data(tab_id, data_path)
+            self._pending_save_both[tab_id] = pending
+            data_started = True
+        except Exception as exc:
+            pending.image_error = None
+            logger.warning(
+                "save_both: save_data start failed tab_id=%r exc=%r", tab_id, exc
+            )
+            try:
+                self._tab_svc.save_image(tab_id, image_path)
+                self._require_view().show_status_message(
+                    f"Data failed: {exc}; image saved to {image_path}"
+                )
+            except Exception as image_exc:
+                self._require_view().show_status_message(
+                    f"Data failed: {exc}; image failed: {image_exc}"
+                )
+            return
+
+        try:
+            self._tab_svc.save_image(tab_id, image_path)
+        except Exception as exc:
+            pending.image_error = str(exc)
+            logger.warning("save_both: save_image failed tab_id=%r exc=%r", tab_id, exc)
+            if not data_started:
+                self._require_view().show_status_message(f"Save image failed: {exc}")
 
     # ------------------------------------------------------------------
     # Context / IO (ContextService)

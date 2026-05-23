@@ -110,6 +110,7 @@ def test_analyze_updates_tab_analyze_result(cf):
     _run_and_wait(cf, tab_id)
 
     cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
+    assert _wait_for(lambda: cf.state.get_tab(tab_id).analyze_result is not None)
 
     tab = cf.state.get_tab(tab_id)
     assert tab.analyze_result is not None
@@ -120,6 +121,7 @@ def test_analyze_result_has_peak_and_figure(cf):
     _run_and_wait(cf, tab_id)
 
     cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
+    assert _wait_for(lambda: cf.state.get_tab(tab_id).analyze_result is not None)
 
     tab = cf.state.get_tab(tab_id)
     assert isinstance(tab.analyze_result.peak, float)
@@ -131,6 +133,7 @@ def test_analyze_stores_figure_in_tab(cf):
     _run_and_wait(cf, tab_id)
 
     cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
+    assert _wait_for(lambda: cf.state.get_tab(tab_id).figure is not None)
 
     tab = cf.state.get_tab(tab_id)
     assert tab.figure is not None
@@ -142,6 +145,7 @@ def test_analyze_calls_refresh_tab(cf):
     cf.view.refresh_tab.reset_mock()
 
     cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
+    assert _wait_for(lambda: cf.state.get_tab(tab_id).analyze_result is not None)
 
     cf.bus.emit.assert_any_call(GuiEvent.TAB_CONTENT_CHANGED, tab_id)
 
@@ -161,6 +165,7 @@ def test_analyze_exception_shows_status_message(cf):
     cf.state.get_tab(tab_id).adapter = bad_adapter
 
     cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
+    assert _wait_for(lambda: not cf.state.is_analyzing)
 
     assert cf.view.show_status_message.called
     msg = cf.view.show_status_message.call_args[0][0]
@@ -175,9 +180,10 @@ def test_analyze_passes_user_params(cf):
     cf.state.get_tab(tab_id).adapter = spy_adapter
 
     cf.ctrl.analyze(tab_id, {"threshold": 0.99})
+    assert _wait_for(lambda: spy_adapter.analyze.called)
 
     call_args = spy_adapter.analyze.call_args[0]
-    assert call_args[2] == {"threshold": 0.99}
+    assert call_args[0].analyze_params == {"threshold": 0.99}
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +202,7 @@ def test_get_tab_writeback_items_after_analyze(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
     cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
+    assert _wait_for(lambda: cf.state.get_tab(tab_id).analyze_result is not None)
 
     spec = cf.ctrl.get_tab_writeback_items(tab_id)
     assert len(spec) == 1
@@ -211,6 +218,7 @@ def test_apply_writeback_items_updates_md(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
     cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
+    assert _wait_for(lambda: cf.state.get_tab(tab_id).analyze_result is not None)
     items = cf.ctrl.get_tab_writeback_items(tab_id)
 
     applied = cf.ctrl.apply_writeback_items(tab_id, items)
@@ -227,6 +235,7 @@ def test_apply_writeback_items_emits_inspect_changed(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
     cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
+    assert _wait_for(lambda: cf.state.get_tab(tab_id).analyze_result is not None)
     items = cf.ctrl.get_tab_writeback_items(tab_id)
 
     cf.ctrl.apply_writeback_items(tab_id, items)
@@ -260,10 +269,10 @@ def test_save_data_calls_adapter_save(cf):
     cf.state.get_tab(tab_id).adapter = spy
 
     cf.ctrl.save_data(tab_id, "/tmp/fake_data")
+    assert _wait_for(lambda: spy.save.called)
 
     spy.save.assert_called_once()
-    path_arg = spy.save.call_args[0][0]
-    assert path_arg == "/tmp/fake_data"
+    assert spy.save.call_args[0][0].data_path == "/tmp/fake_data"
 
 
 def test_save_data_shows_success_message(cf):
@@ -271,6 +280,7 @@ def test_save_data_shows_success_message(cf):
     _run_and_wait(cf, tab_id)
 
     cf.ctrl.save_data(tab_id, "/tmp/fake_data")
+    assert _wait_for(lambda: cf.view.show_status_message.called)
 
     msg = cf.view.show_status_message.call_args[0][0]
     assert "saved" in msg.lower()
@@ -289,6 +299,7 @@ def test_save_image_calls_savefig(cf, tmp_path):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
     cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
+    assert _wait_for(lambda: cf.state.get_tab(tab_id).figure is not None)
 
     out = str(tmp_path / "out.png")
     cf.ctrl.save_image(tab_id, out)
@@ -309,6 +320,108 @@ def test_get_tab_analyze_params_returns_threshold(cf):
     params = cf.ctrl.get_tab_analyze_params(tab_id)
     assert len(params) == 1
     assert params[0].key == "threshold"
+
+
+def test_analyze_is_async_and_sets_busy_flag(cf):
+    tab_id = cf.ctrl.new_tab("fake")
+    _run_and_wait(cf, tab_id)
+
+    slow_adapter = MagicMock(wraps=FakeAdapter())
+
+    def slow_analyze(req):
+        time.sleep(0.05)
+        return FakeAdapter().analyze(req)
+
+    slow_adapter.get_analyze_params.side_effect = lambda result, ctx: (
+        FakeAdapter().get_analyze_params(result, ctx)
+    )
+    slow_adapter.analyze.side_effect = slow_analyze
+    slow_adapter.get_writeback_items.side_effect = lambda analyze_result, ctx: (
+        FakeAdapter().get_writeback_items(analyze_result, ctx)
+    )
+    cf.state.get_tab(tab_id).adapter = slow_adapter
+
+    cf.ctrl.analyze(tab_id, {"threshold": 0.0})
+    assert cf.state.is_analyzing is True
+    assert _wait_for(lambda: not cf.state.is_analyzing)
+
+
+def test_save_data_is_async_and_sets_busy_flag(cf):
+    tab_id = cf.ctrl.new_tab("fake")
+    _run_and_wait(cf, tab_id)
+
+    slow_adapter = MagicMock(wraps=FakeAdapter())
+
+    def slow_save(req):
+        time.sleep(0.05)
+        return FakeAdapter().save(req)
+
+    slow_adapter.save.side_effect = slow_save
+    cf.state.get_tab(tab_id).adapter = slow_adapter
+
+    cf.ctrl.save_data(tab_id, "/tmp/fake_data")
+    assert cf.state.is_saving_data is True
+    assert _wait_for(lambda: not cf.state.is_saving_data)
+
+
+def test_save_both_reports_mixed_result(cf):
+    tab_id = cf.ctrl.new_tab("fake")
+    _run_and_wait(cf, tab_id)
+    cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
+    assert _wait_for(lambda: cf.state.get_tab(tab_id).figure is not None)
+
+    spy_adapter = MagicMock(wraps=cf.state.get_tab(tab_id).adapter)
+    cf.state.get_tab(tab_id).adapter = spy_adapter
+
+    cf.ctrl.save_both(tab_id, "/tmp/fake_data", "/tmp/does_not_exist/out.png")
+    assert _wait_for(lambda: spy_adapter.save.called)
+    assert _wait_for(
+        lambda: "image failed" in cf.view.show_status_message.call_args[0][0].lower()
+    )
+
+
+def test_start_run_blocked_while_analyzing(cf):
+    tab_id = cf.ctrl.new_tab("fake")
+    _run_and_wait(cf, tab_id)
+
+    slow_adapter = MagicMock(wraps=FakeAdapter())
+
+    def slow_analyze(req):
+        time.sleep(0.05)
+        return FakeAdapter().analyze(req)
+
+    slow_adapter.get_analyze_params.side_effect = lambda result, ctx: (
+        FakeAdapter().get_analyze_params(result, ctx)
+    )
+    slow_adapter.analyze.side_effect = slow_analyze
+    cf.state.get_tab(tab_id).adapter = slow_adapter
+
+    cf.ctrl.analyze(tab_id, {"threshold": 0.0})
+    assert cf.state.is_analyzing is True
+    with pytest.raises(RuntimeError, match="already active"):
+        cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context), {})
+    assert _wait_for(lambda: not cf.state.is_analyzing)
+
+
+def test_analyze_blocked_while_saving_data(cf):
+    tab_id = cf.ctrl.new_tab("fake")
+    _run_and_wait(cf, tab_id)
+
+    slow_adapter = MagicMock(wraps=FakeAdapter())
+
+    def slow_save(req):
+        time.sleep(0.05)
+        return FakeAdapter().save(req)
+
+    slow_adapter.save.side_effect = slow_save
+    cf.state.get_tab(tab_id).adapter = slow_adapter
+
+    cf.ctrl.save_data(tab_id, "/tmp/fake_data")
+    assert cf.state.is_saving_data is True
+    cf.ctrl.analyze(tab_id, {"threshold": 0.0})
+    assert _wait_for(lambda: cf.view.show_status_message.called)
+    assert "already active" in cf.view.show_status_message.call_args[0][0].lower()
+    assert _wait_for(lambda: not cf.state.is_saving_data)
 
 
 def test_get_tab_save_paths_returns_save_paths(cf):

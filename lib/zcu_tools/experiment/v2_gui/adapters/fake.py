@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any, Sequence, cast
 
 import numpy as np
+from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
 from zcu_tools.experiment.base import AbsExperiment
@@ -13,11 +14,14 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
     AnalyzeParam,
+    AnalyzeRequest,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
     MetaDictWriteback,
+    RunRequest,
+    SaveDataRequest,
     ScalarSpec,
     ScalarValue,
     SweepSpec,
@@ -91,7 +95,7 @@ class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult]):
         )
         return CfgSchema(spec=spec, value=value)
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], ctx: ExpContext) -> FakeExpCfg:  # noqa: ARG002
+    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FakeExpCfg:  # noqa: ARG002
         return FakeExpCfg(
             reps=_require_int(raw_cfg, "reps"),
             rounds=_require_int(raw_cfg, "rounds"),
@@ -116,20 +120,20 @@ class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult]):
 
     def analyze(
         self,
-        result: FakeResult,
-        ctx: ExpContext,  # noqa: ARG002
-        analyze_params: dict[str, object],
+        req: AnalyzeRequest,
     ) -> FakeAnalyzeResult:
-        threshold_value = analyze_params.get("threshold")
+        threshold_value = req.analyze_params.get("threshold")
         if not isinstance(threshold_value, (int, float)) or isinstance(
             threshold_value, bool
         ):
             raise RuntimeError("Analyze param 'threshold' must be float")
         threshold = float(threshold_value)
+        result = req.run_result
+        if not isinstance(result, np.ndarray):
+            raise RuntimeError("Analyze request run_result must be numpy.ndarray")
         peak = float(np.max(np.abs(result)))
-        import matplotlib.pyplot as plt
-
-        fig, ax = plt.subplots()
+        fig = Figure()
+        ax = cast(Axes, fig.subplots())
         xs = np.arange(len(result))
         ax.plot(xs, result, label="signal")
         if peak > threshold:
@@ -140,7 +144,6 @@ class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult]):
         )
         ax.set_title("FakeAdapter analysis")
         ax.legend()
-        plt.close(fig)
         return FakeAnalyzeResult(peak=peak, figure=fig)
 
     def get_writeback_items(
@@ -163,8 +166,6 @@ class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult]):
 
     def save(
         self,
-        data_path: str,  # noqa: ARG002
-        result: FakeResult,  # noqa: ARG002
-        ctx: ExpContext,  # noqa: ARG002
+        req: SaveDataRequest,  # noqa: ARG002
     ) -> None:
         pass  # nothing to save in fake mode

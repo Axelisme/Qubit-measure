@@ -9,7 +9,7 @@ from zcu_tools.experiment.v2_gui.adapters.onetone.fakefreq import (
     FreqRunResult,
 )
 from zcu_tools.experiment.v2_gui.registry import register_all
-from zcu_tools.gui.adapter import CfgSchema, ExpContext
+from zcu_tools.gui.adapter import AnalyzeRequest, CfgSchema, ExpContext, RunRequest
 from zcu_tools.gui.registry import Registry
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
@@ -37,7 +37,25 @@ def _adapter() -> FakeFreqAdapter:
 
 def _run(adapter: FakeFreqAdapter, ctx: ExpContext) -> FreqRunResult:
     schema = adapter.make_default_cfg(ctx)
-    return adapter.run(ctx, schema)
+    return adapter.run(_run_req(ctx), schema)
+
+
+def _run_req(ctx: ExpContext) -> RunRequest:
+    return RunRequest(md=ctx.md, ml=ctx.ml, soc=ctx.soc, soccfg=ctx.soccfg)
+
+
+def _analyze_req(
+    ctx: ExpContext,
+    result: FreqRunResult,
+    analyze_params: dict[str, object],
+) -> AnalyzeRequest:
+    return AnalyzeRequest(
+        run_result=result,
+        analyze_params=analyze_params,
+        md=ctx.md,
+        ml=ctx.ml,
+        predictor=ctx.predictor,
+    )
 
 
 def _default_analyze_params(
@@ -162,7 +180,7 @@ def test_run_freq_range_matches_cfg():
     adapter = _adapter()
     schema = adapter.make_default_cfg(ctx)
     # default SweepValue: start=5800.0, stop=6200.0, expts=201
-    result = adapter.run(ctx, schema)
+    result = adapter.run(_run_req(ctx), schema)
     assert abs(result.freqs[0] - 5800.0) < 1.0
     assert abs(result.freqs[-1] - 6200.0) < 1.0
     assert len(result.freqs) == 201
@@ -201,8 +219,8 @@ def test_run_noise_decreases_with_more_rounds():
         s.value.fields["noise_scale"] = ScalarValue(10.0)
         return s
 
-    res_low = adapter.run(ctx, _schema_with(1))
-    res_high = adapter.run(ctx, _schema_with(100))
+    res_low = adapter.run(_run_req(ctx), _schema_with(1))
+    res_high = adapter.run(_run_req(ctx), _schema_with(100))
 
     noise_low = float(np.std(np.abs(res_low.signals)))
     noise_high = float(np.std(np.abs(res_high.signals)))
@@ -218,7 +236,7 @@ def test_analyze_returns_fake_freq_analyze_result():
     ctx = _make_ctx()
     result = _run(_adapter(), ctx)
     analyze_result = _adapter().analyze(
-        result, ctx, _default_analyze_params(_adapter(), result, ctx)
+        _analyze_req(ctx, result, _default_analyze_params(_adapter(), result, ctx))
     )
     assert isinstance(analyze_result, FakeFreqAnalyzeResult)
 
@@ -234,7 +252,7 @@ def test_analyze_has_expected_fields():
     ctx = _make_ctx()
     result = _run(_adapter(), ctx)
     ar = _adapter().analyze(
-        result, ctx, _default_analyze_params(_adapter(), result, ctx)
+        _analyze_req(ctx, result, _default_analyze_params(_adapter(), result, ctx))
     )
     assert isinstance(ar.freq, float)
     assert isinstance(ar.fwhm, float)
@@ -250,8 +268,10 @@ def test_analyze_freq_close_to_true_value():
     adapter = FakeFreqAdapter(fast_mode=True)
     schema = adapter.make_default_cfg(ctx)
     schema.value.fields["rounds"] = ScalarValue(200)
-    result = adapter.run(ctx, schema)
-    ar = adapter.analyze(result, ctx, _default_analyze_params(adapter, result, ctx))
+    result = adapter.run(_run_req(ctx), schema)
+    ar = adapter.analyze(
+        _analyze_req(ctx, result, _default_analyze_params(adapter, result, ctx))
+    )
     assert abs(ar.freq - 6000.0) < 5.0
 
 
@@ -261,7 +281,7 @@ def test_analyze_produces_figure():
     ctx = _make_ctx()
     result = _run(_adapter(), ctx)
     ar = _adapter().analyze(
-        result, ctx, _default_analyze_params(_adapter(), result, ctx)
+        _analyze_req(ctx, result, _default_analyze_params(_adapter(), result, ctx))
     )
     assert isinstance(ar.figure, Figure)
 
@@ -272,7 +292,7 @@ def test_analyze_result_carries_figure():
     ctx = _make_ctx()
     result = _run(_adapter(), ctx)
     ar = _adapter().analyze(
-        result, ctx, _default_analyze_params(_adapter(), result, ctx)
+        _analyze_req(ctx, result, _default_analyze_params(_adapter(), result, ctx))
     )
     assert isinstance(ar.figure, Figure)
 
@@ -286,7 +306,7 @@ def test_get_writeback_items_has_r_f_and_rf_w():
     ctx = _make_ctx()
     result = _run(_adapter(), ctx)
     ar = _adapter().analyze(
-        result, ctx, _default_analyze_params(_adapter(), result, ctx)
+        _analyze_req(ctx, result, _default_analyze_params(_adapter(), result, ctx))
     )
     spec = _adapter().get_writeback_items(ar, ctx)
     keys = [item.key for item in spec]
@@ -335,7 +355,9 @@ def test_writeback_items_include_ml_targets():
     ctx = _make_ctx()
     adapter = _adapter()
     result = _run(adapter, ctx)
-    ar = adapter.analyze(result, ctx, _default_analyze_params(adapter, result, ctx))
+    ar = adapter.analyze(
+        _analyze_req(ctx, result, _default_analyze_params(adapter, result, ctx))
+    )
     spec = adapter.get_writeback_items(ar, ctx)
     keys = [item.key for item in spec]
     assert "readout_rf" in keys
@@ -346,7 +368,9 @@ def test_writeback_items_include_ml_targets_when_missing():
     ctx = _make_ctx()
     adapter = _adapter()
     result = _run(adapter, ctx)
-    ar = adapter.analyze(result, ctx, _default_analyze_params(adapter, result, ctx))
+    ar = adapter.analyze(
+        _analyze_req(ctx, result, _default_analyze_params(adapter, result, ctx))
+    )
     spec = adapter.get_writeback_items(ar, ctx)
     keys = [item.key for item in spec]
     assert "readout_rf" in keys
@@ -360,7 +384,9 @@ def test_writeback_edit_schema_provided():
     ctx = _make_ctx()
     adapter = _adapter()
     result = _run(adapter, ctx)
-    ar = adapter.analyze(result, ctx, _default_analyze_params(adapter, result, ctx))
+    ar = adapter.analyze(
+        _analyze_req(ctx, result, _default_analyze_params(adapter, result, ctx))
+    )
     spec = adapter.get_writeback_items(ar, ctx)
 
     spec_by_key = {item.key: item for item in spec}

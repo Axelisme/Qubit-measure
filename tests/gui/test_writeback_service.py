@@ -4,7 +4,12 @@ from unittest.mock import MagicMock
 
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.adapters.onetone.fakefreq import FakeFreqAdapter
-from zcu_tools.gui.adapter import ExpContext, ModuleWriteback
+from zcu_tools.gui.adapter import (
+    AnalyzeRequest,
+    ExpContext,
+    ModuleWriteback,
+    RunRequest,
+)
 from zcu_tools.gui.event_bus import GuiEvent
 from zcu_tools.gui.services.writeback import WritebackService
 from zcu_tools.gui.state import State
@@ -38,9 +43,17 @@ def test_writeback_service_applies_md_items():
 
     state.add_tab(tab_id, adapter, ctx)
     schema = adapter.make_default_cfg(ctx)
-    result = adapter.run(ctx, schema)
+    result = adapter.run(
+        RunRequest(md=ctx.md, ml=ctx.ml, soc=ctx.soc, soccfg=ctx.soccfg), schema
+    )
     analyze_result = adapter.analyze(
-        result, ctx, _default_analyze_params(adapter, result, ctx)
+        AnalyzeRequest(
+            run_result=result,
+            analyze_params=_default_analyze_params(adapter, result, ctx),
+            md=ctx.md,
+            ml=ctx.ml,
+            predictor=ctx.predictor,
+        )
     )
     state.update_tab_result(tab_id, result)
     state.update_tab_analyze(tab_id, analyze_result, analyze_result.figure)
@@ -67,9 +80,17 @@ def test_writeback_service_applies_module_and_waveform_items():
 
     state.add_tab(tab_id, adapter, ctx)
     schema = adapter.make_default_cfg(ctx)
-    result = adapter.run(ctx, schema)
+    result = adapter.run(
+        RunRequest(md=ctx.md, ml=ctx.ml, soc=ctx.soc, soccfg=ctx.soccfg), schema
+    )
     analyze_result = adapter.analyze(
-        result, ctx, _default_analyze_params(adapter, result, ctx)
+        AnalyzeRequest(
+            run_result=result,
+            analyze_params=_default_analyze_params(adapter, result, ctx),
+            md=ctx.md,
+            ml=ctx.ml,
+            predictor=ctx.predictor,
+        )
     )
     state.update_tab_result(tab_id, result)
     state.update_tab_analyze(tab_id, analyze_result, analyze_result.figure)

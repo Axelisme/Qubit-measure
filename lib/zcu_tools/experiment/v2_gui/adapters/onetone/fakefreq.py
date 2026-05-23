@@ -31,6 +31,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
     AnalyzeParam,
+    AnalyzeRequest,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -38,6 +39,8 @@ from zcu_tools.gui.adapter import (
     MetaDictWriteback,
     ModuleRefSpec,
     ModuleWriteback,
+    RunRequest,
+    SaveDataRequest,
     ScalarSpec,
     ScalarValue,
     SweepSpec,
@@ -261,7 +264,7 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
         )
         return CfgSchema(spec=root_spec, value=root_val)
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], ctx: ExpContext) -> FakeFreqCfg:
+    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FakeFreqCfg:
         exp_cfg: dict[str, object] = {
             "reps": raw_cfg["reps"],
             "rounds": raw_cfg["rounds"],
@@ -277,7 +280,7 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
             },
             "modules": raw_cfg.get("modules", {}),
         }
-        return ctx.ml.make_cfg(
+        return req.ml.make_cfg(
             exp_cfg,
             FakeFreqCfg,
             fast_mode=self._fast_mode,
@@ -304,14 +307,15 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
 
     def analyze(
         self,
-        result: FreqRunResult,
-        ctx: ExpContext,
-        analyze_params: dict[str, object],
+        req: AnalyzeRequest,
     ) -> FakeFreqAnalyzeResult:
-        model_type_value = analyze_params.get("model_type")
+        result = req.run_result
+        if not isinstance(result, FreqRunResult):
+            raise RuntimeError("Analyze request run_result must be FreqRunResult")
+        model_type_value = req.analyze_params.get("model_type")
         if model_type_value not in {"hm", "t", "auto"}:
             raise RuntimeError("Analyze param 'model_type' must be hm, t, or auto")
-        fit_bg_slope = analyze_params.get("fit_bg_slope")
+        fit_bg_slope = req.analyze_params.get("fit_bg_slope")
         if not isinstance(fit_bg_slope, bool):
             raise RuntimeError("Analyze param 'fit_bg_slope' must be bool")
         model_type = cast(Literal["hm", "t", "auto"], model_type_value)
@@ -398,5 +402,5 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.res_name}_freq_{time.strftime('%m%d')}"
 
-    def save(self, data_path: str, result: FreqRunResult, ctx: ExpContext) -> None:
+    def save(self, req: SaveDataRequest) -> None:
         pass  # no real hardware, skip HDF5 persistence

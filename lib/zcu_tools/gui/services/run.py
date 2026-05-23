@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
+from zcu_tools.gui.adapter import RunRequest
 from zcu_tools.gui.event_bus import GuiEvent
 
 logger = logging.getLogger(__name__)
@@ -38,29 +39,41 @@ class RunService(QObject):
         pbar_factory: Optional[Any] = None,
         live_container: Optional[Any] = None,
     ) -> None:
-        if self._state.is_running:
-            raise RuntimeError("Another run is already active")
+        if self._state.has_active_long_task:
+            raise RuntimeError("Another long-running task is already active")
+
+        ctx = self._state.exp_context
+        req = RunRequest(
+            md=ctx.md,
+            ml=ctx.ml,
+            soc=ctx.soc,
+            soccfg=ctx.soccfg,
+        )
 
         # Validate schema before starting the worker
-        schema.to_raw_dict(self._state.exp_context)
+        schema.to_raw_dict(req)
         logger.info("start_run: tab_id=%r user_params=%r", tab_id, list(user_params))
 
         tab = self._state.get_tab(tab_id)
-        self._state.set_running(True)
 
         if live_container is not None:
             from zcu_tools.liveplot.backend.qt import register_pending_container
 
             register_pending_container(live_container)
 
-        self._runner.start_run(
-            tab_id,
-            tab.adapter,
-            self._state.exp_context,
-            schema,
-            user_params,
-            pbar_factory=pbar_factory,
-        )
+        try:
+            self._runner.start_run(
+                tab_id,
+                tab.adapter,
+                req,
+                schema,
+                user_params,
+                pbar_factory=pbar_factory,
+            )
+        except Exception:
+            self._clear_live_container()
+            raise
+        self._state.set_running(True)
         self._bus.emit(GuiEvent.RUN_STATE_CHANGED)
 
     def cancel_run(self) -> None:

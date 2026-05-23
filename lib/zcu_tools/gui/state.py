@@ -24,6 +24,8 @@ class TabState:
 @dataclass(frozen=True)
 class TabInteractionState:
     is_running: bool
+    is_analyzing: bool
+    is_saving_data: bool
     has_context: bool
     has_soc: bool
     has_run_result: bool
@@ -38,6 +40,8 @@ class State:
         self.tabs: dict[str, TabState] = {}
         self.active_tab_id: Optional[str] = None
         self.is_running: bool = False
+        self.is_analyzing: bool = False
+        self.is_saving_data: bool = False
         self.has_startup_context: bool = False
 
     def set_context(self, ctx: ExpContext) -> None:
@@ -94,3 +98,15 @@ class State:
     def set_running(self, running: bool) -> None:
         logger.debug("set_running: %s", running)
         self.is_running = running
+
+    def set_analyzing(self, analyzing: bool) -> None:
+        logger.debug("set_analyzing: %s", analyzing)
+        self.is_analyzing = analyzing
+
+    def set_saving_data(self, saving_data: bool) -> None:
+        logger.debug("set_saving_data: %s", saving_data)
+        self.is_saving_data = saving_data
+
+    @property
+    def has_active_long_task(self) -> bool:
+        return self.is_running or self.is_analyzing or self.is_saving_data

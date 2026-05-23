@@ -9,8 +9,16 @@ from typing import Any
 import pytest
 from qtpy.QtCore import QCoreApplication, QEventLoop, QTimer
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
-from zcu_tools.gui.adapter import CfgSchema, ExpContext
-from zcu_tools.gui.runner import Runner, RunWorker
+from zcu_tools.gui.adapter import AnalyzeRequest, CfgSchema, ExpContext, RunRequest
+from zcu_tools.gui.runner import (
+    AnalyzeRunner,
+    AnalyzeWorker,
+    Runner,
+    RunWorker,
+    SaveDataRunner,
+    SaveDataWorker,
+)
+from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -18,16 +26,32 @@ from zcu_tools.gui.runner import Runner, RunWorker
 
 
 def _make_ctx():
-    from unittest.mock import MagicMock
+    return ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=object(), soccfg=object())
 
-    ctx = MagicMock(spec=ExpContext)
-    ctx.ml = MagicMock()
-    ctx.ml.get_module.side_effect = lambda name, override=None: {"name": name}
-    return ctx
+
+def _make_run_req() -> RunRequest:
+    ctx = _make_ctx()
+    return RunRequest(md=ctx.md, ml=ctx.ml, soc=ctx.soc, soccfg=ctx.soccfg)
 
 
 def _simple_schema() -> CfgSchema:
     return FakeAdapter().make_default_cfg(_make_ctx())
+
+
+def _analyze_req() -> AnalyzeRequest:
+    adapter = FakeAdapter()
+    ctx = _make_ctx()
+    schema = adapter.make_default_cfg(ctx)
+    result = adapter.run(
+        RunRequest(md=ctx.md, ml=ctx.ml, soc=ctx.soc, soccfg=ctx.soccfg), schema
+    )
+    return AnalyzeRequest(
+        run_result=result,
+        analyze_params={"threshold": 0.0},
+        md=ctx.md,
+        ml=ctx.ml,
+        predictor=ctx.predictor,
+    )
 
 
 def _wait_for(condition, timeout_ms: int = 3000, step_ms: int = 10) -> bool:
@@ -50,11 +74,10 @@ def _wait_for(condition, timeout_ms: int = 3000, step_ms: int = 10) -> bool:
 
 def test_runworker_emits_run_finished(qapp):
     adapter = FakeAdapter()
-    ctx = _make_ctx()
     schema = _simple_schema()
 
     results = []
-    worker = RunWorker(adapter, ctx, schema, {})
+    worker = RunWorker(adapter, _make_run_req(), schema, {})
     worker.run_finished.connect(lambda r: results.append(r))
 
     worker.start()
@@ -68,11 +91,10 @@ def test_runworker_emits_run_finished(qapp):
 def test_runworker_cancel_before_start_still_finishes(qapp):
     """cancel() before start should cause adapter to finish early (FakeAdapter ignores stop)."""
     adapter = FakeAdapter()
-    ctx = _make_ctx()
     schema = _simple_schema()
 
     finished = []
-    worker = RunWorker(adapter, ctx, schema, {})
+    worker = RunWorker(adapter, _make_run_req(), schema, {})
     worker.run_finished.connect(lambda r: finished.append(r))
     worker.cancel()  # set stop flag before start
     worker.start()
@@ -86,7 +108,7 @@ def test_runworker_emits_run_failed_on_exception(qapp):
     adapter.run.side_effect = RuntimeError("boom")
 
     errors: list[Exception] = []
-    worker = RunWorker(adapter, _make_ctx(), _simple_schema(), {})
+    worker = RunWorker(adapter, _make_run_req(), _simple_schema(), {})
     worker.run_failed.connect(lambda e: errors.append(e))
     worker.start()
     assert _wait_for(lambda: len(errors) > 0), "run_failed not emitted in time"
@@ -105,7 +127,7 @@ def test_runner_start_run_emits_run_finished(qapp):
     finished = []
     runner.run_finished.connect(lambda tid, r: finished.append((tid, r)))
 
-    runner.start_run("tab1", adapter, _make_ctx(), _simple_schema(), {})
+    runner.start_run("tab1", adapter, _make_run_req(), _simple_schema(), {})
     assert _wait_for(lambda: len(finished) > 0), "runner run_finished not emitted"
     assert finished[0][0] == "tab1"
 
@@ -117,7 +139,7 @@ def test_runner_run_finished_clears_is_running(qapp):
     done = []
     runner.run_finished.connect(lambda *_: done.append(True))
 
-    runner.start_run("tab1", adapter, _make_ctx(), _simple_schema(), {})
+    runner.start_run("tab1", adapter, _make_run_req(), _simple_schema(), {})
     assert runner.is_running or _wait_for(lambda: len(done) > 0)
     _wait_for(lambda: len(done) > 0)
     assert not runner.is_running
@@ -133,11 +155,11 @@ def test_runner_duplicate_start_raises(qapp):
     slow_adapter.run.side_effect = lambda *a, **kw: event.wait()
 
     runner = Runner()
-    runner.start_run("tab1", slow_adapter, _make_ctx(), _simple_schema(), {})
+    runner.start_run("tab1", slow_adapter, _make_run_req(), _simple_schema(), {})
 
     assert runner.is_running
     with pytest.raises(RuntimeError, match="already active"):
-        runner.start_run("tab2", FakeAdapter(), _make_ctx(), _simple_schema(), {})
+        runner.start_run("tab2", FakeAdapter(), _make_run_req(), _simple_schema(), {})
 
     # cleanup — unblock the slow worker
     event.set()
@@ -166,10 +188,85 @@ def test_runner_cancel_stops_active_run(qapp):
     runner = Runner()
     runner.run_finished.connect(lambda *_: finished.append(True))
 
-    runner.start_run("tab1", slow_adapter, _make_ctx(), _simple_schema(), {})
+    runner.start_run("tab1", slow_adapter, _make_run_req(), _simple_schema(), {})
     runner.cancel()
     assert _wait_for(lambda: len(finished) > 0, timeout_ms=3000)
     assert stop_seen and stop_seen[0]  # stop flag was set when run() saw it
+
+
+def test_analyzeworker_emits_analyze_finished(qapp):
+    adapter = FakeAdapter()
+    results = []
+    worker = AnalyzeWorker(adapter, _analyze_req())
+    worker.analyze_finished.connect(lambda r: results.append(r))
+
+    worker.start()
+    assert _wait_for(lambda: len(results) > 0), "analyze_finished not emitted in time"
+    assert len(results) == 1
+    assert results[0].figure is not None
+
+
+def test_savedataworker_emits_save_finished(qapp):
+    adapter = FakeAdapter()
+    req = _analyze_req()
+    from zcu_tools.gui.adapter import SaveDataRequest
+
+    finished = []
+    worker = SaveDataWorker(
+        adapter,
+        SaveDataRequest(
+            run_result=req.run_result,
+            data_path="/tmp/fake_data",
+            md=req.md,
+            ml=req.ml,
+            chip_name="chip",
+            qub_name="qubit",
+            res_name="res",
+            active_label="ctx001",
+        ),
+    )
+    worker.save_finished.connect(lambda: finished.append(True))
+
+    worker.start()
+    assert _wait_for(lambda: len(finished) > 0), "save_finished not emitted in time"
+
+
+def test_analyze_runner_emits_finished(qapp):
+    runner = AnalyzeRunner()
+    adapter = FakeAdapter()
+    finished = []
+    runner.analyze_finished.connect(lambda tid, r: finished.append((tid, r)))
+
+    runner.start_analyze("tab1", adapter, _analyze_req())
+    assert _wait_for(lambda: len(finished) > 0), "runner analyze_finished not emitted"
+    assert finished[0][0] == "tab1"
+
+
+def test_save_data_runner_emits_finished(qapp):
+    from zcu_tools.gui.adapter import SaveDataRequest
+
+    runner = SaveDataRunner()
+    adapter = FakeAdapter()
+    analyze_req = _analyze_req()
+    finished = []
+    runner.save_finished.connect(lambda tid: finished.append(tid))
+
+    runner.start_save(
+        "tab1",
+        adapter,
+        SaveDataRequest(
+            run_result=analyze_req.run_result,
+            data_path="/tmp/fake_data",
+            md=analyze_req.md,
+            ml=analyze_req.ml,
+            chip_name="chip",
+            qub_name="qubit",
+            res_name="res",
+            active_label="ctx001",
+        ),
+    )
+    assert _wait_for(lambda: len(finished) > 0), "runner save_finished not emitted"
+    assert finished[0] == "tab1"
 
 
 # ---------------------------------------------------------------------------
