@@ -178,13 +178,14 @@ class ScalarWidget(BaseLiveWidget):
         self._updating = True
         try:
             field = cast(ScalarLiveField, self._field)
+            inp = self._input
+            assert inp is not None
             if isinstance(field.get_value(), EvalValue):
-                assert isinstance(self._input, QLineEdit)
-                field.set_value(EvalValue(expr=self._input.text().strip()))
+                assert isinstance(inp, QLineEdit)
+                field.set_value(EvalValue(expr=inp.text().strip()))
                 self._sync_eval_ghost(field.get_value())
             else:
-                assert self._input is not None
-                val = read_value_widget(self._input, field.spec.type)
+                val = read_value_widget(inp, field.spec.type)
                 field.set_value(val)
         finally:
             self._updating = False
@@ -198,9 +199,11 @@ class ScalarWidget(BaseLiveWidget):
             return
         self._updating = True
         try:
+            inp = self._input
+            assert inp is not None
             if isinstance(val, EvalValue):
-                assert isinstance(self._input, QLineEdit)
-                self._input.setText(val.expr)
+                assert isinstance(inp, QLineEdit)
+                inp.setText(val.expr)
                 self._sync_eval_ghost(val)
                 return
 
@@ -208,18 +211,18 @@ class ScalarWidget(BaseLiveWidget):
                 return
             field = cast(ScalarLiveField, self._field)
             raw = _widget_default_for_direct_value(val, field.spec)
-            if isinstance(self._input, QComboBox):
-                idx = self._input.findText(str(raw))
+            if isinstance(inp, QComboBox):
+                idx = inp.findText(str(raw))
                 if idx >= 0:
-                    self._input.setCurrentIndex(idx)
-            elif isinstance(self._input, QCheckBox):
-                self._input.setChecked(bool(raw))
-            elif isinstance(self._input, QSpinBox):
-                self._input.setValue(int(raw))
-            elif isinstance(self._input, TrimDoubleSpinBox):
-                self._input.setValue(float(raw))
-            elif isinstance(self._input, QLineEdit):
-                self._input.setText(str(raw))
+                    inp.setCurrentIndex(idx)
+            elif isinstance(inp, QCheckBox):
+                inp.setChecked(bool(raw))
+            elif isinstance(inp, QSpinBox):
+                inp.setValue(int(raw))
+            elif isinstance(inp, TrimDoubleSpinBox):
+                inp.setValue(float(raw))
+            elif isinstance(inp, QLineEdit):
+                inp.setText(str(raw))
         finally:
             self._updating = False
 
@@ -231,11 +234,12 @@ class ScalarWidget(BaseLiveWidget):
         self._ghost = None
 
         if isinstance(value, EvalValue):
-            self._input = QLineEdit(value.expr)
-            self._input.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
-            self._input.setEnabled(field.spec.editable)
-            self._input.textChanged.connect(self._on_ui_changed)
-            self._layout.addWidget(self._input, stretch=1)
+            inp = QLineEdit(value.expr)
+            self._input = inp
+            inp.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
+            inp.setEnabled(field.spec.editable)
+            inp.textChanged.connect(self._on_ui_changed)
+            self._layout.addWidget(inp, stretch=1)
 
             self._ghost = QLabel()
             self._layout.addWidget(self._ghost)
@@ -263,14 +267,16 @@ class ScalarWidget(BaseLiveWidget):
                 widget.deleteLater()
 
     def _connect_direct_input(self) -> None:
-        if isinstance(self._input, QComboBox):
-            self._input.currentIndexChanged.connect(self._on_ui_changed)
-        elif isinstance(self._input, QCheckBox):
-            self._input.toggled.connect(self._on_ui_changed)
-        elif isinstance(self._input, (QSpinBox, TrimDoubleSpinBox)):
-            self._input.valueChanged.connect(self._on_ui_changed)
-        elif isinstance(self._input, QLineEdit):
-            self._input.textChanged.connect(self._on_ui_changed)
+        inp = self._input
+        assert inp is not None
+        if isinstance(inp, QComboBox):
+            inp.currentIndexChanged.connect(self._on_ui_changed)
+        elif isinstance(inp, QCheckBox):
+            inp.toggled.connect(self._on_ui_changed)
+        elif isinstance(inp, (QSpinBox, TrimDoubleSpinBox)):
+            inp.valueChanged.connect(self._on_ui_changed)
+        elif isinstance(inp, QLineEdit):
+            inp.textChanged.connect(self._on_ui_changed)
 
     def _sync_eval_ghost(self, value: object) -> None:
         if self._ghost is None or not isinstance(value, EvalValue):
