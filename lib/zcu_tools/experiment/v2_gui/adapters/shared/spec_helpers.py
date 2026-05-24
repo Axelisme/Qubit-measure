@@ -26,6 +26,16 @@ def make_readout_ref_spec(
     )
 
 
+def make_pulse_readout_ref_spec(
+    label: str = "Readout", optional: bool = False
+) -> ModuleRefSpec:
+    return ModuleRefSpec(
+        allowed=[make_pulse_readout_spec()],
+        label=label,
+        optional=optional,
+    )
+
+
 def make_pulse_ref_spec(
     label: str = "Init Pulse", optional: bool = False
 ) -> ModuleRefSpec:
