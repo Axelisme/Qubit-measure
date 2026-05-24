@@ -129,6 +129,8 @@ class DeviceManager(QObject):
         dev = GlobalDeviceManager.get_device(name)
         worker = _DeviceSetupWorker(dev, name, info, pbar_factory, parent=self)
         worker.finished.connect(worker.deleteLater)
+        worker.failed.connect(worker.deleteLater)
+        worker.cancelled.connect(worker.deleteLater)
         worker.start()
         return worker
 
