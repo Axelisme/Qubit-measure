@@ -25,7 +25,17 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
+    QComboBox,
+    QFormLayout,
+    QScrollArea,
+    QMessageBox,
 )
+
+from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+from zcu_tools.gui.adapter import CfgSchema, make_default_value, schema_to_dict
+from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
+from zcu_tools.gui.cfg_schemas import _MODULE_SPEC_FACTORIES
+from zcu_tools.gui.specs.waveform import make_waveform_spec_by_style
 
 from zcu_tools.gui.event_bus import GuiEvent, Payload
 
@@ -39,6 +49,121 @@ _MONO_FONT = QFont("Monospace")
 _MONO_FONT.setStyleHint(QFont.StyleHint.Monospace)
 
 _MAX_VALUE_LEN = 80
+
+
+class _MlAddDialog(QDialog):
+    """Helper dialog for adding a new Module or Waveform to the ModuleLibrary."""
+
+    def __init__(
+        self,
+        ctrl: "Controller",
+        item_kind: str,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self._ctrl = ctrl
+        self._item_kind = item_kind  # "module" or "waveform"
+        self.setWindowTitle(f"Add {item_kind.capitalize()}")
+        self.setMinimumSize(560, 500)
+
+        layout = QVBoxLayout(self)
+
+        form = QFormLayout()
+        self._name_edit = QLineEdit()
+        self._type_combo = QComboBox()
+
+        form.addRow("Name:", self._name_edit)
+        form.addRow("Type:" if item_kind == "module" else "Style:", self._type_combo)
+        layout.addLayout(form)
+
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._form_widget = CfgFormWidget()
+        self._scroll.setWidget(self._form_widget)
+        layout.addWidget(self._scroll, stretch=1)
+
+        self._warning_label = QLabel()
+        self._warning_label.setStyleSheet("color: red;")
+        layout.addWidget(self._warning_label)
+
+        btn_row = QHBoxLayout()
+        self._save_btn = QPushButton("Save")
+        cancel_btn = QPushButton("Cancel")
+        btn_row.addWidget(self._save_btn)
+        btn_row.addWidget(cancel_btn)
+        layout.addLayout(btn_row)
+
+        if item_kind == "module":
+            self._type_combo.addItems(list(_MODULE_SPEC_FACTORIES.keys()))
+        else:
+            self._type_combo.addItems(
+                ["const", "cosine", "gauss", "drag", "flat_top", "arb"]
+            )
+
+        self._name_edit.textChanged.connect(self._validate)
+        self._type_combo.currentTextChanged.connect(self._on_type_changed)
+        self._form_widget.validity_changed.connect(self._validate)
+        cancel_btn.clicked.connect(self.reject)
+        self._save_btn.clicked.connect(self._on_save)
+
+        self._on_type_changed(self._type_combo.currentText())
+        self._validate()
+
+    def _on_type_changed(self, type_str: str) -> None:
+        if self._item_kind == "module":
+            spec = _MODULE_SPEC_FACTORIES[type_str]()
+        else:
+            spec = make_waveform_spec_by_style(type_str)
+        value = make_default_value(spec)
+        schema = CfgSchema(spec=spec, value=value)
+        self._form_widget.populate(schema, self._ctrl)
+        self._validate()
+
+    def _validate(self, *_: Any) -> None:
+        name = self._name_edit.text().strip()
+        ml = self._ctrl.get_current_ml()
+        valid = True
+        warn_text = ""
+
+        if not name:
+            valid = False
+        else:
+            if self._item_kind == "module" and ml is not None and name in ml.modules:
+                warn_text = "Name already exists in modules!"
+                valid = False
+            elif (
+                self._item_kind == "waveform" and ml is not None and name in ml.waveforms
+            ):
+                warn_text = "Name already exists in waveforms!"
+                valid = False
+
+        if valid and not self._form_widget.is_valid():
+            valid = False
+            warn_text = "Configuration is invalid."
+
+        self._warning_label.setText(warn_text)
+        self._save_btn.setEnabled(valid)
+
+    def _on_save(self) -> None:
+        name = self._name_edit.text().strip()
+        if not name:
+            return
+
+        try:
+            schema = self._form_widget.read_schema()
+            ml = self._ctrl.get_current_ml()
+            raw_dict = schema_to_dict(schema, ml)
+
+            if self._item_kind == "module":
+                obj = ModuleCfgFactory.from_raw(raw_dict, ml=ml)
+                self._ctrl.set_ml_module(name, obj)
+            else:
+                obj = WaveformCfgFactory.from_raw(raw_dict, ml=ml)
+                self._ctrl.set_ml_waveform(name, obj)
+
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(self, "Validation Error", str(e))
 
 
 class InspectDialog(QDialog):
@@ -149,11 +274,32 @@ class InspectDialog(QDialog):
         splitter.setChildrenCollapsible(False)
 
         # left: tree (modules / waveforms groups)
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        
         self._ml_tree = QTreeWidget()
         self._ml_tree.setHeaderHidden(True)
         self._ml_tree.setRootIsDecorated(True)
         self._ml_tree.currentItemChanged.connect(self._on_ml_item_changed)
-        splitter.addWidget(self._ml_tree)
+        left_layout.addWidget(self._ml_tree)
+        
+        btn_layout = QHBoxLayout()
+        self._add_mod_btn = QPushButton("Add Module...")
+        self._add_wav_btn = QPushButton("Add Waveform...")
+        self._del_ml_btn = QPushButton("Delete")
+        self._del_ml_btn.setEnabled(False)
+        
+        btn_layout.addWidget(self._add_mod_btn)
+        btn_layout.addWidget(self._add_wav_btn)
+        btn_layout.addWidget(self._del_ml_btn)
+        left_layout.addLayout(btn_layout)
+        
+        self._add_mod_btn.clicked.connect(self._on_add_module_clicked)
+        self._add_wav_btn.clicked.connect(self._on_add_waveform_clicked)
+        self._del_ml_btn.clicked.connect(self._on_delete_ml_clicked)
+        
+        splitter.addWidget(left_panel)
 
         # right: YAML text
         self._ml_text = QPlainTextEdit()
@@ -297,6 +443,7 @@ class InspectDialog(QDialog):
     def _on_ml_item_changed(
         self, current: Optional[QTreeWidgetItem], _previous: Any
     ) -> None:
+        self._del_ml_btn.setEnabled(False)
         if current is None:
             self._ml_text.setPlainText("")
             return
@@ -304,6 +451,8 @@ class InspectDialog(QDialog):
         if data is None:
             self._ml_text.setPlainText("")
             return
+
+        self._del_ml_btn.setEnabled(True)
 
         group, name = data
         ml = self._ctrl.get_current_ml()
@@ -315,6 +464,38 @@ class InspectDialog(QDialog):
         cfg = store[name]
         text = yaml.dump(cfg.to_dict(), allow_unicode=True, sort_keys=False)
         self._ml_text.setPlainText(text)
+
+    def _on_add_module_clicked(self) -> None:
+        dlg = _MlAddDialog(self._ctrl, "module", self)
+        dlg.exec()
+
+    def _on_add_waveform_clicked(self) -> None:
+        dlg = _MlAddDialog(self._ctrl, "waveform", self)
+        dlg.exec()
+
+    def _on_delete_ml_clicked(self) -> None:
+        current = self._ml_tree.currentItem()
+        if current is None:
+            return
+        data = current.data(0, Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+        if data is None:
+            return
+            
+        group, name = data
+        ans = QMessageBox.question(
+            self,
+            "Confirm Deletion",
+            f"Are you sure you want to delete {group[:-1]} '{name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if ans != QMessageBox.StandardButton.Yes:
+            return
+            
+        if group == "modules":
+            self._ctrl.del_ml_module(name)
+        else:
+            self._ctrl.del_ml_waveform(name)
 
     # ------------------------------------------------------------------
     # Public API

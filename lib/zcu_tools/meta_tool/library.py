@@ -192,6 +192,20 @@ class ModuleLibrary(SyncFile):
 
         self._dirty = True
 
+    @auto_sync("write")
+    def delete_waveform(self, name: str) -> None:
+        self._check_can_write()
+        if name in self.waveforms:
+            del self.waveforms[name]
+            self._dirty = True
+
+    @auto_sync("write")
+    def delete_module(self, name: str) -> None:
+        self._check_can_write()
+        if name in self.modules:
+            del self.modules[name]
+            self._dirty = True
+
     @auto_sync("read")
     def get_waveform(
         self,

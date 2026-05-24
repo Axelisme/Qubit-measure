@@ -4,7 +4,7 @@ import dataclasses
 import logging
 from typing import TYPE_CHECKING, Any, Optional
 
-from zcu_tools.gui.event_bus import ContextSwitchedPayload, GuiEvent, MdChangedPayload
+from zcu_tools.gui.event_bus import ContextSwitchedPayload, GuiEvent, MdChangedPayload, MlChangedPayload
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 logger = logging.getLogger(__name__)
@@ -144,3 +144,31 @@ class ContextService:
         md = self._state.exp_context.md
         delattr(md, key)
         self._bus.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=md))
+
+    def set_ml_module(self, name: str, module: Any) -> None:
+        if not self.has_context():
+            raise RuntimeError("No experiment context.")
+        ml = self._state.exp_context.ml
+        ml.register_module(**{name: module})
+        self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
+
+    def del_ml_module(self, name: str) -> None:
+        if not self.has_context():
+            raise RuntimeError("No experiment context.")
+        ml = self._state.exp_context.ml
+        ml.delete_module(name)
+        self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
+
+    def set_ml_waveform(self, name: str, waveform: Any) -> None:
+        if not self.has_context():
+            raise RuntimeError("No experiment context.")
+        ml = self._state.exp_context.ml
+        ml.register_waveform(**{name: waveform})
+        self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
+
+    def del_ml_waveform(self, name: str) -> None:
+        if not self.has_context():
+            raise RuntimeError("No experiment context.")
+        ml = self._state.exp_context.ml
+        ml.delete_waveform(name)
+        self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))

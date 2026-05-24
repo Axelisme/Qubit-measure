@@ -312,6 +312,18 @@ class Controller:
     def get_current_ml(self) -> ModuleLibrary:
         return self._ctx_svc.get_current_ml()
 
+    def set_ml_module(self, name: str, module: Any) -> None:
+        self._ctx_svc.set_ml_module(name, module)
+
+    def del_ml_module(self, name: str) -> None:
+        self._ctx_svc.del_ml_module(name)
+
+    def set_ml_waveform(self, name: str, waveform: Any) -> None:
+        self._ctx_svc.set_ml_waveform(name, waveform)
+
+    def del_ml_waveform(self, name: str) -> None:
+        self._ctx_svc.del_ml_waveform(name)
+
     # ------------------------------------------------------------------
     # Device (DeviceService)
     # ------------------------------------------------------------------

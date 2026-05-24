@@ -57,3 +57,60 @@ def test_inspect_dialog_md_edit(qapp):
     dialog._set_btn.click()
 
     ctrl.set_md_attr.assert_called_with("key1", 20)
+
+
+def test_inspect_dialog_ml_delete(qapp, monkeypatch):
+    from qtpy.QtWidgets import QMessageBox
+
+    ctrl = MagicMock()
+    bus = MagicMock()
+
+    mock_ml = MagicMock()
+    mock_ml.modules = {"my_module": {"type": "readout"}}
+    mock_ml.waveforms = {"my_waveform": {"type": "square"}}
+    ctrl.get_current_ml.return_value = mock_ml
+
+    dialog = InspectDialog(ctrl, bus)
+
+    # By default, delete button should be disabled
+    assert not dialog._del_ml_btn.isEnabled()
+
+    # Expand top-level item and select child
+    modules_item = dialog._ml_tree.topLevelItem(0)
+    assert modules_item is not None
+    dialog._ml_tree.setCurrentItem(modules_item.child(0))
+
+    # Delete button should be enabled now
+    assert dialog._del_ml_btn.isEnabled()
+
+    # Mock QMessageBox.question to return Yes
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes)
+
+    # Click delete
+    dialog._del_ml_btn.click()
+
+    ctrl.del_ml_module.assert_called_with("my_module")
+
+
+def test_inspect_dialog_ml_delete_no(qapp, monkeypatch):
+    from qtpy.QtWidgets import QMessageBox
+
+    ctrl = MagicMock()
+    bus = MagicMock()
+
+    mock_ml = MagicMock()
+    mock_ml.modules = {"my_module": {"type": "readout"}}
+    mock_ml.waveforms = {}
+    ctrl.get_current_ml.return_value = mock_ml
+
+    dialog = InspectDialog(ctrl, bus)
+    modules_item = dialog._ml_tree.topLevelItem(0)
+    assert modules_item is not None
+    dialog._ml_tree.setCurrentItem(modules_item.child(0))
+
+    # Mock QMessageBox.question to return No
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.No)
+
+    dialog._del_ml_btn.click()
+
+    ctrl.del_ml_module.assert_not_called()

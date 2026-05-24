@@ -821,7 +821,7 @@ class MainWindow(QMainWindow):
         msg_box.setIcon(QMessageBox.Icon.Critical)
         msg_box.setWindowTitle(title)
         msg_box.setText(message)
-        msg_box.exec_()
+        msg_box.exec()
 
     def show_plot(self, tab_id: str, fig: Any) -> None:  # Phase 11
         logger.debug("show_plot: tab_id=%r fig=%s", tab_id, type(fig).__name__)

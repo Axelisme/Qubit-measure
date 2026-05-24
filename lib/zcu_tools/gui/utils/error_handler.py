@@ -24,7 +24,7 @@ def _show_error_dialog(
     msg_box.setWindowTitle("Unhandled Exception")
     msg_box.setText(f"{exc_type.__name__}: {exc_value}")
     msg_box.setDetailedText(tb_text)
-    msg_box.exec_()
+    msg_box.exec()
 
 
 def install_global_exception_hook() -> None:
