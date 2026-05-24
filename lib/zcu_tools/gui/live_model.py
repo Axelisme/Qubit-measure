@@ -478,18 +478,9 @@ class ModuleRefLiveField(LiveField):
 
     def set_chosen_key(self, key: str) -> None:
         if key != self._chosen_key or self.is_modified():
-            # When switching to a different key, seed sub_field from current values
-            # so fields shared between the old and new spec are preserved.
-            # When reverting to the same key (from MODIFIED state), pass no hint
-            # so the library value takes precedence.
-            hint = (
-                self.sub_field.get_value()
-                if key != self._chosen_key and self.sub_field is not None
-                else None
-            )
             self._chosen_key = key
             self._binding_state = _binding_state_for_key(key)
-            self._rebuild_sub_field(hint=hint)
+            self._rebuild_sub_field(hint=None)
             self.on_change.emit(self.get_value())
 
     def get_value(self) -> Union[ModuleRefValue, WaveformRefValue]:
