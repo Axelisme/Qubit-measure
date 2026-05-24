@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import ast
+import logging
 import operator
 from typing import Callable
+
+logger = logging.getLogger(__name__)
 
 from zcu_tools.meta_tool import MetaDict
 

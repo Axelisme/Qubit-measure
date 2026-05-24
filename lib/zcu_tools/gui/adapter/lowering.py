@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Optional, Union
+
+logger = logging.getLogger(__name__)
 
 from .types import (
     CfgSchema,
@@ -108,9 +111,7 @@ def _section_to_dict_inner(
 
         elif isinstance(node_spec, CfgSectionSpec):
             assert isinstance(node_val, CfgSectionValue)
-            result[key] = _section_to_dict_inner(
-                node_spec, node_val, ml, [*path, key]
-            )
+            result[key] = _section_to_dict_inner(node_spec, node_val, ml, [*path, key])
 
         else:
             raise TypeError(f"Unknown CfgNodeSpec type: {type(node_spec)}")

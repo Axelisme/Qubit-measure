@@ -111,6 +111,7 @@ class LiveField(ABC):
     def _set_valid(self, valid: bool) -> None:
         if valid != self._valid:
             self._valid = valid
+            logger.debug("%s._set_valid: spec=%r valid=%r", type(self).__name__, getattr(self.spec, "label", None) or type(self.spec).__name__, valid)
             self.on_validity_changed.emit(valid)
 
     def teardown(self) -> None:
@@ -196,9 +197,15 @@ class ScalarLiveField(LiveField):
 
     def _refresh_validity(self) -> None:
         if isinstance(self._value, DirectValue):
-            self._set_valid(not self._value.is_unset)
+            valid = not self._value.is_unset
+            if not valid:
+                logger.debug("ScalarLiveField: label=%r is unset → invalid", self.spec.label)
+            self._set_valid(valid)
         else:
-            self._set_valid(self._value.resolved is not None)
+            valid = self._value.resolved is not None
+            if not valid:
+                logger.debug("ScalarLiveField: label=%r expr=%r unresolved (error=%r) → invalid", self.spec.label, self._value.expr, self._value.error)
+            self._set_valid(valid)
 
 
 class LiteralLiveField(LiveField):
@@ -384,9 +391,7 @@ class ModuleRefLiveField(LiveField):
     def is_modified(self) -> bool:
         return self._binding_state is LibraryBindingState.MODIFIED
 
-    def _rebuild_sub_field(
-        self, hint: Optional[CfgSectionValue] = None
-    ) -> None:
+    def _rebuild_sub_field(self, hint: Optional[CfgSectionValue] = None) -> None:
         """Rebuild the sub-field for the current chosen_key.
 
         hint: explicit initial CfgSectionValue to seed the sub-field (takes
@@ -435,8 +440,14 @@ class ModuleRefLiveField(LiveField):
         self._refresh_validity()
 
     def _refresh_validity(self) -> None:
-        valid = self.sub_field.is_valid() if self.sub_field else True
-        self._set_valid(valid)
+        if self.sub_field is None:
+            logger.debug("ModuleRefLiveField._refresh_validity: key=%r sub_field=None → valid=True", self._chosen_key)
+            self._set_valid(True)
+        else:
+            valid = self.sub_field.is_valid()
+            if not valid:
+                logger.debug("ModuleRefLiveField._refresh_validity: key=%r sub_field invalid", self._chosen_key)
+            self._set_valid(valid)
 
     def _refresh_library_binding(self) -> None:
         if self._binding_state is not LibraryBindingState.LINKED:

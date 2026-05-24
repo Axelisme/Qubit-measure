@@ -8,7 +8,10 @@ REFACTORED (Phase 36.5):
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 from zcu_tools.gui.adapter import (
     CfgSectionSpec,
@@ -59,6 +62,7 @@ def waveform_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionVal
     else:
         raise TypeError(f"Expected dict or AbsWaveformCfg, got {type(cfg_input)}")
     style = cfg.get("style", "const")
+    logger.debug("waveform_cfg_to_value: style=%r keys=%r", style, list(cfg.keys()))
     spec = make_waveform_spec_by_style(style)
 
     if style == "const":
@@ -279,6 +283,7 @@ def module_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionValue
         cfg = cfg_input
     else:
         raise TypeError(f"Expected dict or ModuleCfg, got {type(cfg_input)}")
+    logger.debug("module_cfg_to_value: type=%r style=%r keys=%r", cfg.get("type"), cfg.get("style"), list(cfg.keys()))
 
     # 2. Check for waveform styles
     if "style" in cfg:

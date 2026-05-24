@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union, cast
+
+logger = logging.getLogger(__name__)
 
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
@@ -281,6 +284,8 @@ class ModuleRefWidget(BaseLiveWidget):
             self._sub_widget.teardown()
 
     def _on_validity_changed(self, valid: bool) -> None:
+        field = cast(ModuleRefLiveField, self._field)
+        logger.debug("ModuleRefWidget.validity_changed: key=%r valid=%r", field.get_chosen_key(), valid)
         style = "" if valid else "border: 1px solid red;"
         self._combo.setStyleSheet(style)
         self._expand_btn.setStyleSheet("" if valid else "color: red;")

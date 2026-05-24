@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import dataclasses
+import logging
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from zcu_tools.meta_tool import ExperimentManager
 
@@ -15,6 +18,7 @@ class IOManager:
         self._em: Optional[ExperimentManager] = None
 
     def setup(self, result_dir: str) -> None:
+        logger.info("setup: result_dir=%r", result_dir)
         self._em = ExperimentManager(result_dir)
 
     def list_contexts(self) -> list[str]:
@@ -24,6 +28,7 @@ class IOManager:
 
     def use_context(self, label: str, base_ctx: ExpContext) -> ExpContext:
         """Switch to an existing context; preserve soc/soccfg/predictor/database_path."""
+        logger.info("use_context: label=%r", label)
         if self._em is None:
             raise RuntimeError("IOManager not set up. Call setup() first.")
         ml, md = self._em.use_flux(label)

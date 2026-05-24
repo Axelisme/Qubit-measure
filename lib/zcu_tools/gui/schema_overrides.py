@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import copy
+import logging
 from dataclasses import replace
 from typing import Optional, cast
+
+logger = logging.getLogger(__name__)
 
 from zcu_tools.gui.adapter import (
     CfgNodeValue,

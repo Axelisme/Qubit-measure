@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any, Callable, Optional
+
+logger = logging.getLogger(__name__)
 
 from qtpy.QtCore import QThread, Signal  # type: ignore[attr-defined]
 
@@ -55,9 +58,11 @@ class DeviceManager:
 
     def register_device(self, name: str, device: Any) -> None:
         """Register an already-constructed device instance."""
+        logger.info("register_device: name=%r type=%s", name, type(device).__name__)
         GlobalDeviceManager.register_device(name, device)
 
     def drop_device(self, name: str) -> None:
+        logger.info("drop_device: name=%r", name)
         GlobalDeviceManager.drop_device(name)
 
     def list_devices(self) -> dict[str, str]:
