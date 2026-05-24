@@ -6,7 +6,7 @@ from copy import deepcopy
 from pathlib import Path
 from pprint import pformat
 
-from typing_extensions import Any, Optional, Self, Union
+from typing_extensions import Any, ItemsView, Optional, Self, Union
 
 from zcu_tools.utils import format_obj
 
@@ -119,9 +119,9 @@ class MetaDict(SyncFile):
     def __repr__(self) -> str:
         return self.__str__()
 
-    def items(self) -> dict[str, Any]:
+    def items(self) -> ItemsView[str, Any]:
         self.sync()
-        return dict(self._data)
+        return self._data.items()
 
     def __dir__(self) -> list[str]:
         self.sync()
