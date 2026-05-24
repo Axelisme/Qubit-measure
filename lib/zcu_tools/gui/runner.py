@@ -28,10 +28,9 @@ class RunWorker(QThread):
 
     def __init__(
         self,
-        adapter: AbsExpAdapter,
+        adapter: AbsExpAdapter[Any, Any],
         req: RunRequest,
         schema: CfgSchema,
-        user_params: dict[str, object],
         pbar_factory: Optional[Any] = None,
         figure_container: Optional[FigureContainer] = None,
     ) -> None:
@@ -39,7 +38,6 @@ class RunWorker(QThread):
         self._adapter = adapter
         self._req = req
         self._schema = schema
-        self._user_params = user_params
         self._pbar_factory = pbar_factory
         self._figure_container = figure_container
         self._stop_event = threading.Event()
@@ -50,13 +48,9 @@ class RunWorker(QThread):
             with routing_scope(self._figure_container), ActiveTask(self._stop_event):
                 if self._pbar_factory is not None:
                     with use_pbar_factory(self._pbar_factory):
-                        result = self._adapter.run(
-                            self._req, self._schema, **self._user_params
-                        )
+                        result = self._adapter.run(self._req, self._schema)
                 else:
-                    result = self._adapter.run(
-                        self._req, self._schema, **self._user_params
-                    )
+                    result = self._adapter.run(self._req, self._schema)
             logger.debug(
                 "RunWorker.run: finished result_type=%s", type(result).__name__
             )
@@ -76,8 +70,8 @@ class AnalyzeWorker(QThread):
 
     def __init__(
         self,
-        adapter: AbsExpAdapter,
-        req: AnalyzeRequest,
+        adapter: AbsExpAdapter[Any, Any],
+        req: AnalyzeRequest[Any],
         figure_container: Optional[FigureContainer] = None,
     ) -> None:
         super().__init__()
@@ -105,7 +99,9 @@ class SaveDataWorker(QThread):
     save_finished: Signal = Signal()
     save_failed: Signal = Signal(object)
 
-    def __init__(self, adapter: AbsExpAdapter, req: SaveDataRequest) -> None:
+    def __init__(
+        self, adapter: AbsExpAdapter[Any, Any], req: SaveDataRequest[Any]
+    ) -> None:
         super().__init__()
         self._adapter = adapter
         self._req = req
@@ -142,10 +138,9 @@ class Runner(QObject):
     def start_run(
         self,
         tab_id: str,
-        adapter: AbsExpAdapter,
+        adapter: AbsExpAdapter[Any, Any],
         req: RunRequest,
         schema: CfgSchema,
-        user_params: dict[str, object],
         pbar_factory: Optional[Any] = None,
         figure_container: Optional[FigureContainer] = None,
     ) -> None:
@@ -161,7 +156,6 @@ class Runner(QObject):
             adapter,
             req,
             schema,
-            user_params,
             pbar_factory,
             figure_container,
         )
@@ -205,8 +199,8 @@ class AnalyzeRunner(QObject):
     def start_analyze(
         self,
         tab_id: str,
-        adapter: AbsExpAdapter,
-        req: AnalyzeRequest,
+        adapter: AbsExpAdapter[Any, Any],
+        req: AnalyzeRequest[Any],
         figure_container: Optional[FigureContainer] = None,
     ) -> None:
         if tab_id in self._workers and self._workers[tab_id].isRunning():
@@ -252,8 +246,8 @@ class SaveDataRunner(QObject):
     def start_save(
         self,
         tab_id: str,
-        adapter: AbsExpAdapter,
-        req: SaveDataRequest,
+        adapter: AbsExpAdapter[Any, Any],
+        req: SaveDataRequest[Any],
     ) -> None:
         if tab_id in self._workers and self._workers[tab_id].isRunning():
             raise RuntimeError(

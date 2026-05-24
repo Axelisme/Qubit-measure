@@ -105,7 +105,7 @@ def _default_fake_schema(ctx: ExpContext) -> CfgSchema:
 
 def _run_and_wait(cf: ControllerFixture, tab_id: str) -> None:
     """Start a run and block until it finishes."""
-    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context), {})
+    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
 
@@ -188,7 +188,7 @@ def test_analyze_exception_shows_status_message(cf):
     assert "bad analysis" in msg
 
 
-def test_analyze_passes_user_params(cf):
+def test_analyze_passes_analyze_params(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
 
@@ -352,8 +352,8 @@ def test_analyze_is_async_and_sets_busy_flag(cf):
         FakeAdapter().get_analyze_params(result, ctx)
     )
     slow_adapter.analyze.side_effect = slow_analyze
-    slow_adapter.get_writeback_items.side_effect = lambda analyze_result, ctx: (
-        FakeAdapter().get_writeback_items(analyze_result, ctx)
+    slow_adapter.get_writeback_items.side_effect = lambda req: (
+        FakeAdapter().get_writeback_items(req)
     )
     cf.state.get_tab(tab_id).adapter = slow_adapter
 
@@ -426,7 +426,7 @@ def test_start_run_blocked_while_analyzing(cf):
     cf.ctrl.analyze(tab_id, {"threshold": 0.0})
     assert cf.state.is_tab_analyzing(tab_id) is True
     with pytest.raises(RuntimeError, match="Tab .* is busy"):
-        cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context), {})
+        cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
     assert _wait_for(lambda: not cf.state.is_tab_analyzing(tab_id))
 
 

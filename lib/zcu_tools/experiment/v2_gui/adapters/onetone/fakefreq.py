@@ -47,6 +47,7 @@ from zcu_tools.gui.adapter import (
     SweepSpec,
     SweepValue,
     WaveformWriteback,
+    WritebackRequest,
 )
 from zcu_tools.gui.specs.readout import (
     make_direct_readout_spec,
@@ -104,7 +105,6 @@ class FakeFreqAnalyzeResult:
     fwhm: float
     params: dict[str, Any]
     figure: Figure
-    run_result: FreqRunResult  # back-reference for writeback
 
 
 # ---------------------------------------------------------------------------
@@ -308,7 +308,7 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
 
     def analyze(
         self,
-        req: AnalyzeRequest,
+        req: AnalyzeRequest[FreqRunResult],
     ) -> FakeFreqAnalyzeResult:
         result = req.run_result
         if not isinstance(result, FreqRunResult):
@@ -330,17 +330,18 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
             fwhm=fwhm,
             params=params,
             figure=figure,
-            run_result=result,
         )
 
     def get_writeback_items(
-        self, analyze_result: FakeFreqAnalyzeResult, ctx: ExpContext
+        self, req: WritebackRequest[FreqRunResult, FakeFreqAnalyzeResult]
     ) -> Sequence[MetaDictWriteback | ModuleWriteback | WaveformWriteback]:
+        analyze_result = req.analyze_result
+        ctx = req.ctx
         freq = analyze_result.freq
         fwhm = analyze_result.fwhm
         md = ctx.md
 
-        cfg = analyze_result.run_result.cfg_snapshot
+        cfg = req.run_result.cfg_snapshot
         readout = cfg.modules.get("readout")
         pulse_ch = getattr(ctx.md, "res_ch", 0)
         ro_ch = getattr(ctx.md, "ro_ch", 0)
@@ -403,5 +404,5 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.res_name}_freq_{time.strftime('%m%d')}"
 
-    def save(self, req: SaveDataRequest) -> None:
+    def save(self, req: SaveDataRequest[FreqRunResult]) -> None:
         pass  # no real hardware, skip HDF5 persistence

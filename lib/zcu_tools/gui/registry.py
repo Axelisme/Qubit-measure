@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Type
+from typing import Any
 
 from .adapter import AbsExpAdapter
 
@@ -9,14 +9,14 @@ class Registry:
     """Maps experiment names to AbsExpAdapter subclasses."""
 
     def __init__(self) -> None:
-        self._mapping: dict[str, Type[AbsExpAdapter]] = {}
+        self._mapping: dict[str, type[AbsExpAdapter[Any, Any]]] = {}
 
-    def register(self, name: str, adapter_cls: Type[AbsExpAdapter]) -> None:
+    def register(self, name: str, adapter_cls: type[AbsExpAdapter[Any, Any]]) -> None:
         if name in self._mapping:
             raise ValueError(f"Adapter {name!r} is already registered")
         self._mapping[name] = adapter_cls
 
-    def create(self, name: str) -> AbsExpAdapter:
+    def create(self, name: str) -> AbsExpAdapter[Any, Any]:
         if name not in self._mapping:
             raise KeyError(
                 f"Adapter {name!r} not found; available: {list(self._mapping)}"

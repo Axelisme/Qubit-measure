@@ -14,13 +14,25 @@ from zcu_tools.meta_tool.metadict import MetaDict
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from zcu_tools.utils.datasaver import create_datafolder
 
+SocHandle: TypeAlias = object
+SocCfgHandle: TypeAlias = object
+T_Result = TypeVar("T_Result")
+
+
+class AnalyzeResultWithFigure(Protocol):
+    @property
+    def figure(self) -> Optional[Figure]: ...
+
+
+T_AnalyzeResult = TypeVar("T_AnalyzeResult", bound=AnalyzeResultWithFigure)
+
 
 @dataclass(frozen=True)
 class ExpContext:
     md: "MetaDict"
     ml: "ModuleLibrary"
-    soc: Any
-    soccfg: Any
+    soc: Optional[SocHandle]
+    soccfg: Optional[SocCfgHandle]
     chip_name: str = "unknown_chip"
     qub_name: str = "unknown_qubit"
     res_name: str = "unknown_resonator"
@@ -34,22 +46,22 @@ class ExpContext:
 class RunRequest:
     md: "MetaDict"
     ml: "ModuleLibrary"
-    soc: object
-    soccfg: object
+    soc: Optional[SocHandle]
+    soccfg: Optional[SocCfgHandle]
 
 
 @dataclass(frozen=True)
-class AnalyzeRequest:
-    run_result: object
+class AnalyzeRequest(Generic[T_Result]):
+    run_result: T_Result
     analyze_params: dict[str, object]
     md: "MetaDict"
     ml: "ModuleLibrary"
-    predictor: Optional[object]
+    predictor: Optional["FluxoniumPredictor"]
 
 
 @dataclass(frozen=True)
-class SaveDataRequest:
-    run_result: object
+class SaveDataRequest(Generic[T_Result]):
+    run_result: T_Result
     data_path: str
     md: "MetaDict"
     ml: "ModuleLibrary"
@@ -57,6 +69,13 @@ class SaveDataRequest:
     qub_name: str
     res_name: str
     active_label: str
+
+
+@dataclass(frozen=True)
+class WritebackRequest(Generic[T_Result, T_AnalyzeResult]):
+    run_result: T_Result
+    analyze_result: T_AnalyzeResult
+    ctx: ExpContext
 
 
 def _normalize_analyze_value(type_: type, value: object) -> object:
@@ -653,21 +672,6 @@ def inherit_from(
     return CfgSectionValue(fields=new_fields)
 
 
-# ---------------------------------------------------------------------------
-# Abstract base
-# ---------------------------------------------------------------------------
-
-T_Result = TypeVar("T_Result")
-
-
-class AnalyzeResultWithFigure(Protocol):
-    @property
-    def figure(self) -> Optional[Figure]: ...
-
-
-T_AnalyzeResult = TypeVar("T_AnalyzeResult", bound=AnalyzeResultWithFigure)
-
-
 class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult]):
     exp_cls: Optional[type[Any]] = None
 
@@ -681,14 +685,12 @@ class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult]):
     ) -> "ExpCfgModel":
         """Convert lowered raw cfg into the concrete experiment config model."""
 
-    def run(self, req: RunRequest, schema: CfgSchema, **user_params: Any) -> T_Result:
-        """Default run pipeline for adapters backed by an experiment class."""
-        if user_params:
-            keys = ", ".join(sorted(user_params))
-            raise RuntimeError(
-                "Run-time user params are not supported; move them into CfgSchema: "
-                f"{keys}"
-            )
+    def run(self, req: RunRequest, schema: CfgSchema) -> T_Result:
+        """Default run pipeline for experiment-class adapters.
+
+        Long-running experiment implementations must cooperate with GUI cancel by
+        checking the active task stop flag inside their own acquisition loop.
+        """
         if self.exp_cls is None:
             raise RuntimeError(
                 f"{type(self).__name__} must define exp_cls or override run()"
@@ -707,13 +709,13 @@ class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult]):
     @abstractmethod
     def analyze(
         self,
-        req: AnalyzeRequest,
+        req: AnalyzeRequest[T_Result],
     ) -> T_AnalyzeResult:
         """Run analysis."""
 
     @abstractmethod
     def get_writeback_items(
-        self, analyze_result: T_AnalyzeResult, ctx: ExpContext
+        self, req: WritebackRequest[T_Result, T_AnalyzeResult]
     ) -> Sequence[WritebackItem]: ...
 
     @abstractmethod
@@ -742,4 +744,4 @@ class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult]):
         return self.make_default_save_paths(ctx)
 
     @abstractmethod
-    def save(self, req: SaveDataRequest) -> None: ...
+    def save(self, req: SaveDataRequest[T_Result]) -> None: ...

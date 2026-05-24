@@ -27,6 +27,7 @@ from zcu_tools.gui.adapter import (
     ScalarValue,
     SweepSpec,
     SweepValue,
+    WritebackRequest,
 )
 
 FakeResult = np.ndarray
@@ -121,7 +122,7 @@ class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult]):
 
     def analyze(
         self,
-        req: AnalyzeRequest,
+        req: AnalyzeRequest[FakeResult],
     ) -> FakeAnalyzeResult:
         threshold_value = req.analyze_params.get("threshold")
         if not isinstance(threshold_value, (int, float)) or isinstance(
@@ -149,8 +150,7 @@ class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult]):
 
     def get_writeback_items(
         self,
-        analyze_result: FakeAnalyzeResult,
-        ctx: ExpContext,  # noqa: ARG002
+        req: WritebackRequest[FakeResult, FakeAnalyzeResult],
     ) -> Sequence[MetaDictWriteback]:
         return [
             MetaDictWriteback(
@@ -158,7 +158,7 @@ class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult]):
                 description="Fake peak value from FakeAdapter analysis",
                 current_value=0.0,
                 md_key="fake_peak",
-                proposed_value=analyze_result.peak,
+                proposed_value=req.analyze_result.peak,
             )
         ]
 
@@ -167,6 +167,6 @@ class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult]):
 
     def save(
         self,
-        req: SaveDataRequest,  # noqa: ARG002
+        req: SaveDataRequest[FakeResult],  # noqa: ARG002
     ) -> None:
         pass  # nothing to save in fake mode

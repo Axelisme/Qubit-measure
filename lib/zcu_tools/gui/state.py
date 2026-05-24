@@ -5,18 +5,29 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from matplotlib.figure import Figure
+from typing_extensions import Generic, TypeVar
 
-from .adapter import AbsExpAdapter, AnalyzeParam, CfgSchema, ExpContext, SavePaths
+from .adapter import (
+    AbsExpAdapter,
+    AnalyzeParam,
+    AnalyzeResultWithFigure,
+    CfgSchema,
+    ExpContext,
+    SavePaths,
+)
 
 logger = logging.getLogger(__name__)
 
+T_Result = TypeVar("T_Result")
+T_AnalyzeResult = TypeVar("T_AnalyzeResult", bound=AnalyzeResultWithFigure)
+
 
 @dataclass
-class TabState:
-    adapter: AbsExpAdapter[Any, Any]
+class TabState(Generic[T_Result, T_AnalyzeResult]):
+    adapter: AbsExpAdapter[T_Result, T_AnalyzeResult]
     cfg_schema: CfgSchema
-    run_result: Optional[object] = None
-    analyze_result: Optional[object] = None
+    run_result: Optional[T_Result] = None
+    analyze_result: Optional[T_AnalyzeResult] = None
     figure: Optional[Figure] = None
     analyze_params: list[AnalyzeParam] = field(default_factory=list)
     analyze_param_values: dict[str, object] = field(default_factory=dict)
@@ -45,7 +56,7 @@ class State:
 
     def __init__(self, ctx: ExpContext) -> None:
         self.exp_context: ExpContext = ctx
-        self.tabs: dict[str, TabState] = {}
+        self.tabs: dict[str, TabState[Any, Any]] = {}
         self.active_tab_id: Optional[str] = None
         self.running_tab_id: Optional[str] = None
         self.has_startup_context: bool = False

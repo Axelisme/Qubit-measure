@@ -4,7 +4,12 @@ from unittest.mock import MagicMock
 
 from qtpy.QtWidgets import QPushButton
 from zcu_tools.experiment.v2_gui.adapters.onetone.fakefreq import FakeFreqAdapter
-from zcu_tools.gui.adapter import AnalyzeRequest, ExpContext, RunRequest
+from zcu_tools.gui.adapter import (
+    AnalyzeRequest,
+    ExpContext,
+    RunRequest,
+    WritebackRequest,
+)
 from zcu_tools.gui.event_bus import EventBus
 from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 from zcu_tools.gui.ui.writeback_widget import WritebackWidget
@@ -41,7 +46,9 @@ def test_writeback_widget_lists_items_and_edit_buttons(qapp):
             predictor=ctx.predictor,
         )
     )
-    items = adapter.get_writeback_items(analyze_result, ctx)
+    items = adapter.get_writeback_items(
+        WritebackRequest(run_result=result, analyze_result=analyze_result, ctx=ctx)
+    )
 
     widget = WritebackWidget(MagicMock())
     widget.populate(items)
@@ -75,7 +82,9 @@ def test_readout_writeback_drag_schema_is_initially_valid(qapp):
             predictor=ctx.predictor,
         )
     )
-    items = adapter.get_writeback_items(analyze_result, ctx)
+    items = adapter.get_writeback_items(
+        WritebackRequest(run_result=result, analyze_result=analyze_result, ctx=ctx)
+    )
     readout_item = next(item for item in items if item.key == "readout_rf")
 
     form = CfgFormWidget()

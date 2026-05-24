@@ -204,9 +204,7 @@ class Controller:
     def has_soc(self) -> bool:
         return self._conn_svc.has_soc()
 
-    def start_run(
-        self, tab_id: str, schema: CfgSchema, user_params: dict[str, object]
-    ) -> None:
+    def start_run(self, tab_id: str, schema: CfgSchema) -> None:
         if not self.has_context():
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
@@ -217,9 +215,7 @@ class Controller:
         view = self._require_view()
         pbar_factory = view.make_pbar_factory(tab_id)
         live_container = view.make_live_container(tab_id)
-        self._run_svc.start_run(
-            tab_id, schema, user_params, pbar_factory, live_container
-        )
+        self._run_svc.start_run(tab_id, schema, pbar_factory, live_container)
 
     def cancel_run(self) -> None:
         self._run_svc.cancel_run()

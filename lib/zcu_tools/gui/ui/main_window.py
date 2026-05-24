@@ -854,7 +854,7 @@ class MainWindow(QMainWindow):
                 return
             try:
                 schema = tab_w.read_schema()
-                self._ctrl.start_run(tab_id, schema, {})
+                self._ctrl.start_run(tab_id, schema)
                 tab_w.reset_plot()
             except Exception as exc:
                 logger.warning("_on_run_stop_clicked: blocked — %s", exc)

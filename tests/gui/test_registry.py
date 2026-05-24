@@ -18,6 +18,7 @@ from zcu_tools.gui.adapter import (
     MetaDictWriteback,
     RunRequest,
     SaveDataRequest,
+    WritebackRequest,
 )
 from zcu_tools.gui.registry import Registry
 
@@ -31,7 +32,7 @@ class _DummyAnalyzeResult:
     figure: None = None
 
 
-class _DummyAdapter(AbsExpAdapter):
+class _DummyAdapter(AbsExpAdapter[object, _DummyAnalyzeResult]):
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:  # noqa: ARG002
         return CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
 
@@ -41,16 +42,19 @@ class _DummyAdapter(AbsExpAdapter):
     def get_analyze_params(self, result, ctx) -> list[AnalyzeParam]:  # noqa: ARG002
         return []
 
-    def analyze(self, req: AnalyzeRequest):  # noqa: ARG002
+    def analyze(self, req: AnalyzeRequest[object]):  # noqa: ARG002
         return _DummyAnalyzeResult()
 
-    def get_writeback_items(self, analyze_result, ctx) -> Sequence[MetaDictWriteback]:  # noqa: ARG002
+    def get_writeback_items(
+        self,
+        req: WritebackRequest[object, _DummyAnalyzeResult],  # noqa: ARG002
+    ) -> Sequence[MetaDictWriteback]:
         return []
 
     def make_filename_stem(self, ctx) -> str:  # noqa: ARG002
         return "dummy"
 
-    def save(self, req: SaveDataRequest) -> None:  # noqa: ARG002
+    def save(self, req: SaveDataRequest[object]) -> None:  # noqa: ARG002
         pass
 
 

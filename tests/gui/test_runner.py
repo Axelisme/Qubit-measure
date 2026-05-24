@@ -77,7 +77,7 @@ def test_runworker_emits_run_finished(qapp):
     schema = _simple_schema()
 
     results = []
-    worker = RunWorker(adapter, _make_run_req(), schema, {})
+    worker = RunWorker(adapter, _make_run_req(), schema)
     worker.run_finished.connect(lambda r: results.append(r))
 
     worker.start()
@@ -94,7 +94,7 @@ def test_runworker_cancel_before_start_still_finishes(qapp):
     schema = _simple_schema()
 
     finished = []
-    worker = RunWorker(adapter, _make_run_req(), schema, {})
+    worker = RunWorker(adapter, _make_run_req(), schema)
     worker.run_finished.connect(lambda r: finished.append(r))
     worker.cancel()  # set stop flag before start
     worker.start()
@@ -108,7 +108,7 @@ def test_runworker_emits_run_failed_on_exception(qapp):
     adapter.run.side_effect = RuntimeError("boom")
 
     errors: list[Exception] = []
-    worker = RunWorker(adapter, _make_run_req(), _simple_schema(), {})
+    worker = RunWorker(adapter, _make_run_req(), _simple_schema())
     worker.run_failed.connect(lambda e: errors.append(e))
     worker.start()
     assert _wait_for(lambda: len(errors) > 0), "run_failed not emitted in time"
@@ -127,7 +127,7 @@ def test_runner_start_run_emits_run_finished(qapp):
     finished = []
     runner.run_finished.connect(lambda tid, r: finished.append((tid, r)))
 
-    runner.start_run("tab1", adapter, _make_run_req(), _simple_schema(), {})
+    runner.start_run("tab1", adapter, _make_run_req(), _simple_schema())
     assert _wait_for(lambda: len(finished) > 0), "runner run_finished not emitted"
     assert finished[0][0] == "tab1"
 
@@ -139,7 +139,7 @@ def test_runner_run_finished_clears_is_running(qapp):
     done = []
     runner.run_finished.connect(lambda *_: done.append(True))
 
-    runner.start_run("tab1", adapter, _make_run_req(), _simple_schema(), {})
+    runner.start_run("tab1", adapter, _make_run_req(), _simple_schema())
     assert runner.is_running or _wait_for(lambda: len(done) > 0)
     _wait_for(lambda: len(done) > 0)
     assert not runner.is_running
@@ -155,11 +155,11 @@ def test_runner_duplicate_start_raises(qapp):
     slow_adapter.run.side_effect = lambda *a, **kw: event.wait()
 
     runner = Runner()
-    runner.start_run("tab1", slow_adapter, _make_run_req(), _simple_schema(), {})
+    runner.start_run("tab1", slow_adapter, _make_run_req(), _simple_schema())
 
     assert runner.is_running
     with pytest.raises(RuntimeError, match="already active"):
-        runner.start_run("tab2", FakeAdapter(), _make_run_req(), _simple_schema(), {})
+        runner.start_run("tab2", FakeAdapter(), _make_run_req(), _simple_schema())
 
     # cleanup — unblock the slow worker
     event.set()
@@ -174,7 +174,7 @@ def test_runner_cancel_stops_active_run(qapp):
     stop_seen = []
     event = threading.Event()
 
-    def slow_run(ctx, schema, **kw):
+    def slow_run(ctx, schema):
         from zcu_tools.experiment.v2.runner.base import _current_stop_flag
 
         if _current_stop_flag is not None:
@@ -188,7 +188,7 @@ def test_runner_cancel_stops_active_run(qapp):
     runner = Runner()
     runner.run_finished.connect(lambda *_: finished.append(True))
 
-    runner.start_run("tab1", slow_adapter, _make_run_req(), _simple_schema(), {})
+    runner.start_run("tab1", slow_adapter, _make_run_req(), _simple_schema())
     runner.cancel()
     assert _wait_for(lambda: len(finished) > 0, timeout_ms=3000)
     assert stop_seen and stop_seen[0]  # stop flag was set when run() saw it

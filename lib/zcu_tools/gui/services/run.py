@@ -40,7 +40,6 @@ class RunService(QObject):
         self,
         tab_id: str,
         schema: Any,
-        user_params: dict,
         pbar_factory: Optional[Any] = None,
         live_container: Optional[FigureContainer] = None,
     ) -> None:
@@ -59,22 +58,18 @@ class RunService(QObject):
 
         # Validate schema before starting the worker
         schema.to_raw_dict(req)
-        logger.info("start_run: tab_id=%r user_params=%r", tab_id, list(user_params))
+        logger.info("start_run: tab_id=%r", tab_id)
 
         tab = self._state.get_tab(tab_id)
 
-        try:
-            self._runner.start_run(
-                tab_id,
-                tab.adapter,
-                req,
-                schema,
-                user_params,
-                pbar_factory=pbar_factory,
-                figure_container=live_container,
-            )
-        except Exception:
-            raise
+        self._runner.start_run(
+            tab_id,
+            tab.adapter,
+            req,
+            schema,
+            pbar_factory=pbar_factory,
+            figure_container=live_container,
+        )
         self._state.set_tab_running(tab_id, True)
         self._bus.emit(
             GuiEvent.TAB_INTERACTION_CHANGED,

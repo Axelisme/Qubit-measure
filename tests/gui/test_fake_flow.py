@@ -11,6 +11,7 @@ from zcu_tools.gui.adapter import (
     AnalyzeRequest,
     DirectValue,
     RunRequest,
+    WritebackRequest,
     schema_to_dict,
 )
 from zcu_tools.gui.registry import Registry
@@ -61,7 +62,9 @@ def test_fake_adapter_full_flow():
     assert analyze_result.figure is not None
 
     # 5. get_writeback_items
-    items = adapter.get_writeback_items(analyze_result, ctx)
+    items = adapter.get_writeback_items(
+        WritebackRequest(run_result=result, analyze_result=analyze_result, ctx=ctx)
+    )
     assert len(items) == 1
     assert items[0].key == "fake_peak"
     assert items[0].proposed_value == analyze_result.peak
