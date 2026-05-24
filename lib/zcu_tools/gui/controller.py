@@ -3,13 +3,15 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional, Protocol
 
+from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
+
 logger = logging.getLogger(__name__)
 
 from matplotlib.figure import Figure
 
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
-from .adapter import CfgSchema, WritebackItem
+from .adapter import CfgSchema, SavePaths, SocCfgHandle, SocHandle, WritebackItem
 from .device_manager import DeviceManager
 from .event_bus import (
     EventBus,
@@ -263,8 +265,8 @@ class Controller:
 
     def set_startup_context(
         self,
-        md: Any,
-        ml: Any,
+        md: MetaDict,
+        ml: ModuleLibrary,
         chip_name: str = "unknown_chip",
         qub_name: str = "unknown_qubit",
         res_name: str = "unknown_resonator",
@@ -341,18 +343,20 @@ class Controller:
     # Connection / Predictor (ConnectionService)
     # ------------------------------------------------------------------
 
-    def set_connection(self, soc: Any, soccfg: Any) -> None:
+    def set_connection(
+        self, soc: Optional[SocHandle], soccfg: Optional[SocCfgHandle]
+    ) -> None:
         self._conn_svc.set_connection(soc, soccfg)
 
     def set_predictor(
-        self, predictor: Optional[Any], path: Optional[str] = None
+        self, predictor: Optional[FluxoniumPredictor], path: Optional[str] = None
     ) -> None:
         self._conn_svc.set_predictor(predictor, path)
 
-    def get_soccfg(self) -> Any:
+    def get_soccfg(self) -> Optional[SocCfgHandle]:
         return self._conn_svc.get_soccfg()
 
-    def get_predictor(self) -> Optional[Any]:
+    def get_predictor(self) -> Optional[FluxoniumPredictor]:
         return self._conn_svc.get_predictor()
 
     def get_predictor_info(self) -> Optional[dict]:
@@ -394,7 +398,7 @@ class Controller:
     def get_tab_analyze_param_values(self, tab_id: str) -> dict[str, object]:
         return self._tab_svc.get_tab_analyze_param_values(tab_id)
 
-    def get_tab_save_paths(self, tab_id: str) -> Any:
+    def get_tab_save_paths(self, tab_id: str) -> Optional[SavePaths]:
         return self._tab_svc.get_tab_save_paths(tab_id)
 
     def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None:

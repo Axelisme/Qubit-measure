@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Optional
 
+from zcu_tools.gui.adapter import SocCfgHandle, SocHandle
 from zcu_tools.gui.event_bus import GuiEvent, PredictorChangedPayload, SocChangedPayload
+from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import EventBus
@@ -21,23 +23,25 @@ class ConnectionService:
     def has_soc(self) -> bool:
         return self._state.exp_context.soc is not None
 
-    def get_soccfg(self) -> Any:
+    def get_soccfg(self) -> Optional[SocCfgHandle]:
         return self._state.exp_context.soccfg
 
-    def set_connection(self, soc: Any, soccfg: Any) -> None:
+    def set_connection(
+        self, soc: Optional[SocHandle], soccfg: Optional[SocCfgHandle]
+    ) -> None:
         new_ctx = dataclasses.replace(self._state.exp_context, soc=soc, soccfg=soccfg)
         self._state.set_context(new_ctx)
         self._bus.emit(GuiEvent.SOC_CHANGED, SocChangedPayload(soc=soc, soccfg=soccfg))
 
     def set_predictor(
-        self, predictor: Optional[Any], path: Optional[str] = None
+        self, predictor: Optional[FluxoniumPredictor], path: Optional[str] = None
     ) -> None:
         self._predictor_path = path
         new_ctx = dataclasses.replace(self._state.exp_context, predictor=predictor)
         self._state.set_context(new_ctx)
         self._bus.emit(GuiEvent.PREDICTOR_CHANGED, PredictorChangedPayload())
 
-    def get_predictor(self) -> Optional[Any]:
+    def get_predictor(self) -> Optional[FluxoniumPredictor]:
         return self._state.exp_context.predictor
 
     def get_predictor_info(self) -> Optional[dict]:

@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Optional
 
 from matplotlib.figure import Figure
 
-from zcu_tools.gui.adapter import AnalyzeParam, CfgSchema
-from zcu_tools.gui.event_bus import GuiEvent
+from zcu_tools.gui.adapter import AnalyzeParam, CfgSchema, SavePaths
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +96,7 @@ class TabService:
     ) -> None:
         self._state.update_tab_analyze_param_values(tab_id, values)
 
-    def get_tab_save_paths(self, tab_id: str) -> Any:
+    def get_tab_save_paths(self, tab_id: str) -> Optional[SavePaths]:
         self.refresh_tab_save_paths(tab_id)
         return self._state.get_effective_save_paths(tab_id)
 
