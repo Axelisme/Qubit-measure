@@ -672,7 +672,9 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
 
     from zcu_tools.gui.cfg_schemas import module_cfg_to_value
 
-    lib_spec, lib_val = module_cfg_to_value({"type": "readout/direct", "ro_freq": 7000.0})
+    lib_spec, lib_val = module_cfg_to_value(
+        {"type": "readout/direct", "ro_freq": 7000.0}
+    )
     schema = CfgSchema(
         spec=CfgSectionSpec(
             fields={"mod": ModuleRefSpec(allowed=[lib_spec], label="Module")}

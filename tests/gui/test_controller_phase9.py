@@ -454,7 +454,9 @@ def test_save_both_reports_both_failures(cf):
     cf.ctrl.save_both(tab_id, "/tmp/fake_data", "/tmp/does_not_exist/out.png")
     assert _wait_for(lambda: bad_adapter.save.called)
     msg_lower = lambda: cf.view.show_status_message.call_args[0][0].lower()  # noqa: E731
-    assert _wait_for(lambda: "data failed" in msg_lower() and "image failed" in msg_lower())
+    assert _wait_for(
+        lambda: "data failed" in msg_lower() and "image failed" in msg_lower()
+    )
 
 
 def test_start_run_blocked_while_analyzing(cf):

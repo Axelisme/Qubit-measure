@@ -57,9 +57,7 @@ class SaveService(QObject):
     def start_save_data(self, tab_id: str, data_path: str) -> None:
         self._start_save_data(tab_id, data_path)
 
-    def start_save_both(
-        self, tab_id: str, data_path: str, image_path: str
-    ) -> None:
+    def start_save_both(self, tab_id: str, data_path: str, image_path: str) -> None:
         """Save data (async) and image (sync) for a tab; emit save_both_finished.
 
         Image save runs in the calling (GUI) thread before the data worker

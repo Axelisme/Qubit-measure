@@ -151,4 +151,3 @@ class CfgFormWidget(QWidget):
             self.validity_changed.emit(self._model.is_valid())
 
         return _callback
-
