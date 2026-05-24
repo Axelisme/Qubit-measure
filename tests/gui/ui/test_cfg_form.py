@@ -698,8 +698,6 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     assert cast(ModuleRefLiveField, ref_widget._field).is_modified() is False
 
     # 2. Simulate user edits the inner value via spinbox
-    from qtpy.QtWidgets import QDoubleSpinBox
-
     spin = ref_widget.findChild(QDoubleSpinBox)
     assert spin is not None
     spin.setValue(8000.0)

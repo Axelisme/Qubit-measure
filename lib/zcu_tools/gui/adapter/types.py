@@ -168,6 +168,10 @@ class MetaDictWriteback(WritebackItem):
     md_key: str = ""
     proposed_value: Any = None
 
+    def __post_init__(self) -> None:
+        if not self.md_key:
+            raise RuntimeError("MetaDictWriteback.md_key must be non-empty")
+
 
 @dataclass
 class ModuleWriteback(WritebackItem):
@@ -176,6 +180,10 @@ class ModuleWriteback(WritebackItem):
     edit_schema: Optional["CfgSchema"] = None
     edited_schema: Optional["CfgSchema"] = None
 
+    def __post_init__(self) -> None:
+        if not self.module_name:
+            raise RuntimeError("ModuleWriteback.module_name must be non-empty")
+
 
 @dataclass
 class WaveformWriteback(WritebackItem):
@@ -183,6 +191,10 @@ class WaveformWriteback(WritebackItem):
     proposed_waveform: Any = None
     edit_schema: Optional["CfgSchema"] = None
     edited_schema: Optional["CfgSchema"] = None
+
+    def __post_init__(self) -> None:
+        if not self.waveform_name:
+            raise RuntimeError("WaveformWriteback.waveform_name must be non-empty")
 
 
 @dataclass

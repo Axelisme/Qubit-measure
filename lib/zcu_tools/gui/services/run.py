@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
-from zcu_tools.gui.adapter import RunRequest
+from zcu_tools.gui.adapter import CfgSchema, RunRequest
 from zcu_tools.gui.event_bus import (
     GuiEvent,
     RunLockChangedPayload,
@@ -39,7 +39,7 @@ class RunService(QObject):
     def start_run(
         self,
         tab_id: str,
-        schema: Any,
+        schema: CfgSchema,
         pbar_factory: Optional[Any] = None,
         live_container: Optional[FigureContainer] = None,
     ) -> None:

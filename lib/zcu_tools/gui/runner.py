@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from qtpy.QtCore import QObject, QThread, Signal  # type: ignore[attr-defined]
 
@@ -31,7 +31,7 @@ class RunWorker(QThread):
         adapter: AbsExpAdapter[Any, Any],
         req: RunRequest,
         schema: CfgSchema,
-        pbar_factory: Optional[Any] = None,
+        pbar_factory: Optional[Callable[..., Any]] = None,
         figure_container: Optional[FigureContainer] = None,
     ) -> None:
         super().__init__()
@@ -141,7 +141,7 @@ class Runner(QObject):
         adapter: AbsExpAdapter[Any, Any],
         req: RunRequest,
         schema: CfgSchema,
-        pbar_factory: Optional[Any] = None,
+        pbar_factory: Optional[Callable[..., Any]] = None,
         figure_container: Optional[FigureContainer] = None,
     ) -> None:
         if self.is_running:
