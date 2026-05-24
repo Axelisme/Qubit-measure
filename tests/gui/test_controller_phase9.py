@@ -402,6 +402,61 @@ def test_save_both_reports_mixed_result(cf):
     )
 
 
+def test_save_both_reports_data_only_failure(cf, tmp_path):
+    tab_id = cf.ctrl.new_tab("fake")
+    _run_and_wait(cf, tab_id)
+    cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
+    assert _wait_for(lambda: cf.state.get_tab(tab_id).figure is not None)
+
+    bad_adapter = MagicMock(wraps=cf.state.get_tab(tab_id).adapter)
+    bad_adapter.save.side_effect = RuntimeError("boom")
+    cf.state.get_tab(tab_id).adapter = bad_adapter
+
+    image_path = str(tmp_path / "good.png")
+    cf.ctrl.save_both(tab_id, "/tmp/fake_data", image_path)
+    assert _wait_for(lambda: bad_adapter.save.called)
+    assert _wait_for(
+        lambda: "data failed" in cf.view.show_status_message.call_args[0][0].lower()
+    )
+    msg = cf.view.show_status_message.call_args[0][0].lower()
+    assert "image saved" in msg
+
+
+def test_save_both_reports_both_success(cf, tmp_path):
+    tab_id = cf.ctrl.new_tab("fake")
+    _run_and_wait(cf, tab_id)
+    cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
+    assert _wait_for(lambda: cf.state.get_tab(tab_id).figure is not None)
+
+    image_path = str(tmp_path / "out.png")
+    cf.ctrl.save_both(tab_id, "/tmp/fake_data", image_path)
+
+    def _both_success() -> bool:
+        args = cf.view.show_status_message.call_args
+        if args is None:
+            return False
+        msg = args[0][0].lower()
+        return "data saved" in msg and "image saved" in msg
+
+    assert _wait_for(_both_success)
+
+
+def test_save_both_reports_both_failures(cf):
+    tab_id = cf.ctrl.new_tab("fake")
+    _run_and_wait(cf, tab_id)
+    cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
+    assert _wait_for(lambda: cf.state.get_tab(tab_id).figure is not None)
+
+    bad_adapter = MagicMock(wraps=cf.state.get_tab(tab_id).adapter)
+    bad_adapter.save.side_effect = RuntimeError("boom")
+    cf.state.get_tab(tab_id).adapter = bad_adapter
+
+    cf.ctrl.save_both(tab_id, "/tmp/fake_data", "/tmp/does_not_exist/out.png")
+    assert _wait_for(lambda: bad_adapter.save.called)
+    msg_lower = lambda: cf.view.show_status_message.call_args[0][0].lower()  # noqa: E731
+    assert _wait_for(lambda: "data failed" in msg_lower() and "image failed" in msg_lower())
+
+
 def test_start_run_blocked_while_analyzing(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)

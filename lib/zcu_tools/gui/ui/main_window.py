@@ -847,31 +847,44 @@ class MainWindow(QMainWindow):
         except RuntimeError as exc:
             self.show_status_message(str(exc))
 
+    def _resolve_tab_widget(self, tab_id: str, action: str) -> Optional[ExpTabWidget]:
+        """Look up the widget; log + bail if tab_id is unknown to the controller."""
+        if not self._ctrl.has_tab(tab_id):
+            logger.warning("%s: unknown tab_id=%r — ignoring", action, tab_id)
+            return None
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            logger.warning(
+                "%s: tab_id=%r missing in view registry — ignoring", action, tab_id
+            )
+            return None
+        return tab_w
+
     def _on_run_stop_clicked(self, tab_id: str) -> None:
+        tab_w = self._resolve_tab_widget(tab_id, "_on_run_stop_clicked")
+        if tab_w is None:
+            return
         if self._ctrl.is_tab_running(tab_id):
             logger.info("_on_run_stop_clicked: stop requested tab_id=%r", tab_id)
             self._ctrl.cancel_run()
-        else:
-            logger.info("_on_run_stop_clicked: run requested tab_id=%r", tab_id)
-            tab_w = self._tab_widgets.get(tab_id)
-            if tab_w is None:
-                return
-            if not tab_w.cfg_form.is_valid():
-                msg = "Config has unset fields — fill required values before running"
-                logger.warning("_on_run_stop_clicked: blocked — %s", msg)
-                self.show_status_message(msg)
-                return
-            try:
-                schema = tab_w.read_schema()
-                self._ctrl.start_run(tab_id, schema)
-                tab_w.reset_plot()
-            except Exception as exc:
-                logger.warning("_on_run_stop_clicked: blocked — %s", exc)
-                self.show_status_message(str(exc))
+            return
+        logger.info("_on_run_stop_clicked: run requested tab_id=%r", tab_id)
+        if not tab_w.cfg_form.is_valid():
+            msg = "Config has unset fields — fill required values before running"
+            logger.warning("_on_run_stop_clicked: blocked — %s", msg)
+            self.show_status_message(msg)
+            return
+        try:
+            schema = tab_w.read_schema()
+            self._ctrl.start_run(tab_id, schema)
+            tab_w.reset_plot()
+        except Exception as exc:
+            logger.warning("_on_run_stop_clicked: blocked — %s", exc)
+            self.show_status_message(str(exc))
 
     def _on_analyze_clicked(self, tab_id: str) -> None:
         logger.info("_on_analyze_clicked: tab_id=%r", tab_id)
-        tab_w = self._tab_widgets.get(tab_id)
+        tab_w = self._resolve_tab_widget(tab_id, "_on_analyze_clicked")
         if tab_w is None:
             return
         try:
@@ -886,6 +899,11 @@ class MainWindow(QMainWindow):
         logger.info("_on_writeback_inline_apply: tab_id=%r", tab_id)
         if not items:
             return
+        if not self._ctrl.has_tab(tab_id):
+            logger.warning(
+                "_on_writeback_inline_apply: unknown tab_id=%r — ignoring", tab_id
+            )
+            return
         try:
             applied_keys = self._ctrl.apply_writeback_items(tab_id, items)
             if applied_keys:
@@ -898,7 +916,7 @@ class MainWindow(QMainWindow):
 
     def _on_save_data_clicked(self, tab_id: str) -> None:
         logger.info("_on_save_data_clicked: tab_id=%r", tab_id)
-        tab_w = self._tab_widgets.get(tab_id)
+        tab_w = self._resolve_tab_widget(tab_id, "_on_save_data_clicked")
         if tab_w is None:
             return
         path = tab_w.get_data_path()
@@ -910,7 +928,7 @@ class MainWindow(QMainWindow):
 
     def _on_save_image_clicked(self, tab_id: str) -> None:
         logger.info("_on_save_image_clicked: tab_id=%r", tab_id)
-        tab_w = self._tab_widgets.get(tab_id)
+        tab_w = self._resolve_tab_widget(tab_id, "_on_save_image_clicked")
         if tab_w is None:
             return
         path = tab_w.get_image_path()
@@ -922,20 +940,16 @@ class MainWindow(QMainWindow):
 
     def _on_save_both_clicked(self, tab_id: str) -> None:
         logger.info("_on_save_both_clicked: tab_id=%r", tab_id)
-        tab_w = self._tab_widgets.get(tab_id)
+        tab_w = self._resolve_tab_widget(tab_id, "_on_save_both_clicked")
         if tab_w is None:
             return
         data_path = tab_w.get_data_path()
         image_path = tab_w.get_image_path()
-        errors = []
         try:
             self._ctrl.save_both(tab_id, data_path, image_path)
         except RuntimeError as exc:
-            errors.append(str(exc))
-        if errors:
-            msg = " / ".join(errors)
-            logger.warning("_on_save_both_clicked: blocked/failed — %s", msg)
-            self.show_status_message(msg)
+            logger.warning("_on_save_both_clicked: blocked/failed — %s", exc)
+            self.show_status_message(str(exc))
 
     def _state_running_tab_id(self) -> Optional[str]:
         for tab_id in self._tab_widgets:

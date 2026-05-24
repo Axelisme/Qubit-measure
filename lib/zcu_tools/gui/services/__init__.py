@@ -5,7 +5,7 @@ from .connection import ConnectionService
 from .context import ContextService
 from .device import DeviceService
 from .run import RunService
-from .save import SaveService
+from .save import SaveBothOutcome, SaveService
 from .tab import TabService
 from .writeback import WritebackService
 
@@ -15,6 +15,7 @@ __all__ = [
     "ContextService",
     "DeviceService",
     "RunService",
+    "SaveBothOutcome",
     "SaveService",
     "TabService",
     "WritebackService",

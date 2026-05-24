@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional, Protocol
+from typing import Any, Optional, Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -30,21 +29,12 @@ from .services import (
     ContextService,
     DeviceService,
     RunService,
+    SaveBothOutcome,
     SaveService,
     TabService,
     WritebackService,
 )
 from .state import State
-
-if TYPE_CHECKING:
-    pass
-
-
-@dataclass
-class _PendingSaveBoth:
-    data_path: str
-    image_path: str
-    image_error: Optional[str] = None
 
 
 class ViewProtocol(Protocol):
@@ -81,7 +71,6 @@ class Controller:
         self._analyze_svc = AnalyzeService(state, AnalyzeRunner(), bus)
         self._save_svc = SaveService(state, SaveDataRunner(), bus)
         self._writeback_svc = WritebackService(state, bus)
-        self._pending_save_both: dict[str, _PendingSaveBoth] = {}
 
         self._run_svc.run_finished.connect(self._on_run_finished)
         self._run_svc.run_failed.connect(self._on_run_failed)
@@ -89,6 +78,7 @@ class Controller:
         self._analyze_svc.analyze_failed.connect(self._on_analyze_failed)
         self._save_svc.save_finished.connect(self._on_save_finished)
         self._save_svc.save_failed.connect(self._on_save_failed)
+        self._save_svc.save_both_finished.connect(self._on_save_both_finished)
 
     def set_view(self, view: ViewProtocol) -> None:
         self._view = view
@@ -116,32 +106,35 @@ class Controller:
         self._require_view().show_status_message(f"Analyze failed: {error}")
 
     def _on_save_finished(self, tab_id: str, data_path: str) -> None:
-        pending = self._pending_save_both.pop(tab_id, None)
-        if pending is None:
-            self._require_view().show_status_message(f"Data saved to {data_path}")
-            return
-        if pending.image_error is None:
-            self._require_view().show_status_message(
-                f"Data saved to {data_path}; image saved to {pending.image_path}"
-            )
-        else:
-            self._require_view().show_status_message(
-                f"Data saved to {data_path}; image failed: {pending.image_error}"
-            )
+        del tab_id
+        self._require_view().show_status_message(f"Data saved to {data_path}")
 
     def _on_save_failed(self, tab_id: str, data_path: str, error: Exception) -> None:
-        pending = self._pending_save_both.pop(tab_id, None)
-        if pending is None:
-            self._require_view().show_status_message(f"Save data failed: {error}")
+        del tab_id, data_path
+        self._require_view().show_status_message(f"Save data failed: {error}")
+
+    def _on_save_both_finished(self, tab_id: str, outcome: SaveBothOutcome) -> None:
+        del tab_id
+        if outcome.data_error is None and outcome.image_error is None:
+            self._require_view().show_status_message(
+                f"Data saved to {outcome.data_path}; "
+                f"image saved to {outcome.image_path}"
+            )
             return
-        if pending.image_error is None:
+        if outcome.data_error is None:
             self._require_view().show_status_message(
-                f"Data failed: {error}; image saved to {pending.image_path}"
+                f"Data saved to {outcome.data_path}; image failed: {outcome.image_error}"
             )
-        else:
+            return
+        if outcome.image_error is None:
             self._require_view().show_status_message(
-                f"Data failed: {error}; image failed: {pending.image_error}"
+                f"Data failed: {outcome.data_error}; "
+                f"image saved to {outcome.image_path}"
             )
+            return
+        self._require_view().show_status_message(
+            f"Data failed: {outcome.data_error}; image failed: {outcome.image_error}"
+        )
 
     def get_bus(self) -> EventBus:
         return self._bus
@@ -163,7 +156,6 @@ class Controller:
             return
         if self._state.is_tab_busy(tab_id):
             raise RuntimeError("Cannot close a busy tab")
-        self._pending_save_both.pop(tab_id, None)
         self._tab_svc.close_tab(tab_id)
         self._bus.emit(GuiEvent.TAB_CLOSED, TabClosedPayload(tab_id=tab_id))
 
@@ -263,15 +255,7 @@ class Controller:
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
-        pending = _PendingSaveBoth(data_path=data_path, image_path=image_path)
-        self._save_svc.start_save_data(tab_id, data_path)
-        self._pending_save_both[tab_id] = pending
-
-        try:
-            self._tab_svc.save_image(tab_id, image_path)
-        except Exception as exc:
-            pending.image_error = str(exc)
-            logger.warning("save_both: save_image failed tab_id=%r exc=%r", tab_id, exc)
+        self._save_svc.start_save_both(tab_id, data_path, image_path)
 
     # ------------------------------------------------------------------
     # Context / IO (ContextService)
@@ -375,73 +359,45 @@ class Controller:
         return self._conn_svc.get_predictor_info()
 
     # ------------------------------------------------------------------
-    # View query interface (TabService) — Tolerant APIs
+    # View query interface (TabService) — strict APIs; callers must check
+    # has_tab() and short-circuit if false. State / TabService raise KeyError
+    # on unknown tab_id, which is a fatal contract violation.
     # ------------------------------------------------------------------
 
     def has_tab(self, tab_id: str) -> bool:
         return tab_id in self._state.tabs
 
-    def get_tab_default_cfg(self, tab_id: str) -> Optional[CfgSchema]:
-        if not self.has_tab(tab_id):
-            logger.debug("get_tab_default_cfg: tab_id %r not found", tab_id)
-            return None
+    def get_tab_default_cfg(self, tab_id: str) -> CfgSchema:
         return self._tab_svc.get_tab_default_cfg(tab_id)
 
-    def get_tab_fresh_cfg(self, tab_id: str) -> Optional[CfgSchema]:
-        if not self.has_tab(tab_id):
-            logger.debug("get_tab_fresh_cfg: tab_id %r not found", tab_id)
-            return None
+    def get_tab_fresh_cfg(self, tab_id: str) -> CfgSchema:
         return self._tab_svc.get_tab_fresh_cfg(tab_id)
 
     def get_tab_result(self, tab_id: str) -> Optional[object]:
-        if not self.has_tab(tab_id):
-            logger.debug("get_tab_result: tab_id %r not found", tab_id)
-            return None
         return self._tab_svc.get_tab_result(tab_id)
 
     def has_run_result(self, tab_id: str) -> bool:
-        if not self.has_tab(tab_id):
-            return False
         return self._tab_svc.has_run_result(tab_id)
 
     def has_analyze_result(self, tab_id: str) -> bool:
-        if not self.has_tab(tab_id):
-            return False
         return self._tab_svc.has_analyze_result(tab_id)
 
     def get_tab_figure(self, tab_id: str) -> Optional[Figure]:
-        if not self.has_tab(tab_id):
-            logger.debug("get_tab_figure: tab_id %r not found", tab_id)
-            return None
         return self._tab_svc.get_tab_figure(tab_id)
 
-    def get_tab_writeback_items(self, tab_id: str) -> list:
-        if not self.has_tab(tab_id):
-            logger.debug("get_tab_writeback_items: tab_id %r not found", tab_id)
-            return []
+    def get_tab_writeback_items(self, tab_id: str) -> list[WritebackItem]:
         return self._writeback_svc.get_tab_writeback_items(tab_id)
 
     def get_tab_analyze_params(self, tab_id: str) -> list:
-        if not self.has_tab(tab_id):
-            logger.debug("get_tab_analyze_params: tab_id %r not found", tab_id)
-            return []
         return self._tab_svc.get_tab_analyze_params(tab_id)
 
     def get_tab_analyze_param_values(self, tab_id: str) -> dict[str, object]:
-        if not self.has_tab(tab_id):
-            logger.debug("get_tab_analyze_param_values: tab_id %r not found", tab_id)
-            return {}
         return self._tab_svc.get_tab_analyze_param_values(tab_id)
 
     def get_tab_save_paths(self, tab_id: str) -> Any:
-        if not self.has_tab(tab_id):
-            logger.debug("get_tab_save_paths: tab_id %r not found", tab_id)
-            return None
         return self._tab_svc.get_tab_save_paths(tab_id)
 
     def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None:
-        if not self.has_tab(tab_id):
-            return
         self._tab_svc.update_tab_cfg(tab_id, schema)
         self._bus.emit(
             GuiEvent.TAB_INTERACTION_CHANGED,
@@ -449,8 +405,6 @@ class Controller:
         )
 
     def update_tab_analyze_params(self, tab_id: str, values: dict[str, object]) -> None:
-        if not self.has_tab(tab_id):
-            return
         self._tab_svc.update_tab_analyze_param_values(tab_id, values)
         self._bus.emit(
             GuiEvent.TAB_INTERACTION_CHANGED,
@@ -460,8 +414,6 @@ class Controller:
     def update_tab_save_paths(
         self, tab_id: str, data_path: str, image_path: str
     ) -> None:
-        if not self.has_tab(tab_id):
-            return
         self._tab_svc.update_tab_save_paths(tab_id, data_path, image_path)
         self._bus.emit(
             GuiEvent.TAB_INTERACTION_CHANGED,

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Optional
 
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
@@ -16,9 +17,26 @@ if TYPE_CHECKING:
     from zcu_tools.gui.state import State
 
 
+@dataclass(frozen=True)
+class SaveBothOutcome:
+    """Result envelope for a save_both operation."""
+
+    data_path: str
+    image_path: str
+    data_error: Optional[str] = None
+    image_error: Optional[str] = None
+
+
+@dataclass
+class _SaveBothPending:
+    image_path: str
+    image_error: Optional[str]
+
+
 class SaveService(QObject):
     save_finished: Signal = Signal(str, str)
     save_failed: Signal = Signal(str, str, object)
+    save_both_finished: Signal = Signal(str, object)
 
     def __init__(
         self,
@@ -31,11 +49,52 @@ class SaveService(QObject):
         self._runner = runner
         self._bus = bus
         self._active_paths: dict[str, str] = {}
+        self._pending_save_both: dict[str, _SaveBothPending] = {}
 
         self._runner.save_finished.connect(self._on_save_finished)
         self._runner.save_failed.connect(self._on_save_failed)
 
     def start_save_data(self, tab_id: str, data_path: str) -> None:
+        self._start_save_data(tab_id, data_path)
+
+    def start_save_both(
+        self, tab_id: str, data_path: str, image_path: str
+    ) -> None:
+        """Save data (async) and image (sync) for a tab; emit save_both_finished.
+
+        Image save runs in the calling (GUI) thread before the data worker
+        finishes. The outcome is reported as a single SaveBothOutcome carrying
+        both error slots so the caller does not need to reassemble state.
+        """
+        if tab_id in self._pending_save_both:
+            raise RuntimeError(f"Tab {tab_id!r} already has a save_both in flight")
+
+        image_error: Optional[str] = None
+        try:
+            self._save_image(tab_id, image_path)
+        except Exception as exc:
+            image_error = str(exc)
+            logger.warning(
+                "start_save_both: save_image failed tab_id=%r exc=%r", tab_id, exc
+            )
+
+        self._pending_save_both[tab_id] = _SaveBothPending(
+            image_path=image_path, image_error=image_error
+        )
+        try:
+            self._start_save_data(tab_id, data_path)
+        except Exception:
+            self._pending_save_both.pop(tab_id, None)
+            raise
+
+    def _save_image(self, tab_id: str, image_path: str) -> None:
+        tab = self._state.get_tab(tab_id)
+        if tab.figure is None:
+            raise RuntimeError("No figure available to save")
+        logger.info("_save_image: tab_id=%r path=%r", tab_id, image_path)
+        tab.figure.savefig(image_path)
+
+    def _start_save_data(self, tab_id: str, data_path: str) -> None:
         if self._state.is_tab_busy(tab_id):
             raise RuntimeError(f"Tab {tab_id!r} is busy")
 
@@ -71,7 +130,17 @@ class SaveService(QObject):
             GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
-        self.save_finished.emit(tab_id, path)
+        pending = self._pending_save_both.pop(tab_id, None)
+        if pending is None:
+            self.save_finished.emit(tab_id, path)
+            return
+        outcome = SaveBothOutcome(
+            data_path=path,
+            image_path=pending.image_path,
+            data_error=None,
+            image_error=pending.image_error,
+        )
+        self.save_both_finished.emit(tab_id, outcome)
 
     def _on_save_failed(self, tab_id: str, error: Exception) -> None:
         path = self._active_paths.pop(tab_id, "")
@@ -83,4 +152,14 @@ class SaveService(QObject):
             GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
-        self.save_failed.emit(tab_id, path, error)
+        pending = self._pending_save_both.pop(tab_id, None)
+        if pending is None:
+            self.save_failed.emit(tab_id, path, error)
+            return
+        outcome = SaveBothOutcome(
+            data_path=path,
+            image_path=pending.image_path,
+            data_error=str(error),
+            image_error=pending.image_error,
+        )
+        self.save_both_finished.emit(tab_id, outcome)
