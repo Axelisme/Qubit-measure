@@ -47,8 +47,9 @@ class RunWorker(QThread):
         schema: CfgSchema,
         pbar_factory: Optional[Callable[..., Any]] = None,
         figure_container: Optional[FigureContainer] = None,
+        parent: Optional[QObject] = None,
     ) -> None:
-        super().__init__()
+        super().__init__(parent)
         self._adapter = adapter
         self._req = req
         self._schema = schema
@@ -87,8 +88,9 @@ class AnalyzeWorker(QThread):
         adapter: AdapterHandle,
         req: AnalyzeRequest[Any],
         figure_container: Optional[FigureContainer] = None,
+        parent: Optional[QObject] = None,
     ) -> None:
-        super().__init__()
+        super().__init__(parent)
         self._adapter = adapter
         self._req = req
         self._figure_container = figure_container
@@ -113,8 +115,13 @@ class SaveDataWorker(QThread):
     save_finished: Signal = Signal()
     save_failed: Signal = Signal(object)
 
-    def __init__(self, adapter: AdapterHandle, req: SaveDataRequest[Any]) -> None:
-        super().__init__()
+    def __init__(
+        self,
+        adapter: AdapterHandle,
+        req: SaveDataRequest[Any],
+        parent: Optional[QObject] = None,
+    ) -> None:
+        super().__init__(parent)
         self._adapter = adapter
         self._req = req
 
@@ -141,8 +148,9 @@ class SaveBothWorker(QThread):
         req: SaveDataRequest[Any],
         figure: Figure,
         image_path: str,
+        parent: Optional[QObject] = None,
     ) -> None:
-        super().__init__()
+        super().__init__(parent)
         self._adapter = adapter
         self._req = req
         self._figure = figure
@@ -217,7 +225,9 @@ class Runner(QObject):
             schema,
             pbar_factory,
             figure_container,
+            parent=self,
         )
+        worker.finished.connect(worker.deleteLater)
         worker.run_finished.connect(self._on_worker_finished)
         worker.run_failed.connect(self._on_worker_failed)
         self._worker = worker
@@ -275,7 +285,8 @@ class AnalyzeRunner(QObject):
             tab_id,
             type(adapter).__name__,
         )
-        worker = AnalyzeWorker(adapter, req, figure_container)
+        worker = AnalyzeWorker(adapter, req, figure_container, parent=self)
+        worker.finished.connect(worker.deleteLater)
         worker.analyze_finished.connect(
             lambda result, tid=tab_id: self._on_worker_finished(tid, result)
         )
@@ -322,7 +333,8 @@ class SaveDataRunner(QObject):
             tab_id,
             type(adapter).__name__,
         )
-        worker = SaveDataWorker(adapter, req)
+        worker = SaveDataWorker(adapter, req, parent=self)
+        worker.finished.connect(worker.deleteLater)
         worker.save_finished.connect(lambda tid=tab_id: self._on_worker_finished(tid))
         worker.save_failed.connect(
             lambda exc, tid=tab_id: self._on_worker_failed(tid, exc)
@@ -347,7 +359,8 @@ class SaveDataRunner(QObject):
             tab_id,
             type(adapter).__name__,
         )
-        worker = SaveBothWorker(adapter, req, figure, image_path)
+        worker = SaveBothWorker(adapter, req, figure, image_path, parent=self)
+        worker.finished.connect(worker.deleteLater)
         worker.save_both_finished.connect(
             lambda outcome, tid=tab_id: self._on_save_both_finished(tid, outcome)
         )

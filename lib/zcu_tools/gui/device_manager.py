@@ -70,8 +70,11 @@ class _DeviceSetupWorker(QThread):
             self.failed.emit(self._name, str(exc))
 
 
-class DeviceManager:
+class DeviceManager(QObject):
     """Thin wrapper around GlobalDeviceManager for GUI use."""
+
+    def __init__(self, parent: Optional[QObject] = None) -> None:
+        super().__init__(parent)
 
     def register_device(self, name: str, device: DeviceProtocol) -> None:
         """Register an already-constructed device instance."""
@@ -124,7 +127,8 @@ class DeviceManager:
         from zcu_tools.device import GlobalDeviceManager
 
         dev = GlobalDeviceManager.get_device(name)
-        worker = _DeviceSetupWorker(dev, name, info, pbar_factory)
+        worker = _DeviceSetupWorker(dev, name, info, pbar_factory, parent=self)
+        worker.finished.connect(worker.deleteLater)
         worker.start()
         return worker
 
