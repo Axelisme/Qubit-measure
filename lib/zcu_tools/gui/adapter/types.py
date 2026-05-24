@@ -216,6 +216,7 @@ class ScalarSpec:
     choices: Optional[list] = None
     decimals: Optional[int] = None
     hidden: bool = False
+    required: bool = False
 
 
 @dataclass(frozen=True)

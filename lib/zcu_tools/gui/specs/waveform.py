@@ -60,7 +60,7 @@ def make_arb_waveform_spec() -> CfgSectionSpec:
         fields={
             "style": LiteralSpec("arb"),
             "length": ScalarSpec(label="Length (us)", type=float, decimals=3),
-            "data": ScalarSpec(label="Data key", type=str),
+            "data": ScalarSpec(label="Data key", type=str, required=True),
         },
     )
 
@@ -71,6 +71,7 @@ def make_flat_top_waveform_spec() -> CfgSectionSpec:
             make_cosine_waveform_spec(),
             make_gauss_waveform_spec(),
             make_drag_waveform_spec(),
+            make_arb_waveform_spec(),
         ],
         label="Raise Waveform",
     )
