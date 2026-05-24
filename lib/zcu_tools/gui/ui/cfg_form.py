@@ -143,20 +143,12 @@ class CfgFormWidget(QWidget):
         self._bus = None
 
     def _make_external_refresh_cb(self, event: "GuiEvent") -> "Callable[[Any], None]":
-        import weakref
-
-        weak_self = weakref.ref(self)
-
         def _callback(payload: Any) -> None:
             del payload
-            self_ref = weak_self()
-            if self_ref is None:
+            if self._model is None:
                 return
-
-            if self_ref._model is None:
-                return
-            self_ref._model.refresh_external(event)
-            self_ref.validity_changed.emit(self_ref._model.is_valid())
+            self._model.refresh_external(event)
+            self.validity_changed.emit(self._model.is_valid())
 
         return _callback
 

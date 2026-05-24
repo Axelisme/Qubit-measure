@@ -344,6 +344,6 @@ class CfgSchema:
 
     def to_raw_dict(self, req: RunRequest) -> dict[str, object]:
         """Lower the current schema into a raw experiment config dictionary."""
-        from .lowering import _section_to_dict
+        from .lowering import _section_to_dict_inner
 
-        return _section_to_dict(self.spec, self.value, req.ml)
+        return _section_to_dict_inner(self.spec, self.value, req.ml, [])

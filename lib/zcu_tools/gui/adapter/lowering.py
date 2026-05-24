@@ -24,14 +24,12 @@ if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
 
 
-def _section_to_dict(
+def _section_to_dict_inner(
     spec: CfgSectionSpec,
     value: CfgSectionValue,
     ml: "Optional[ModuleLibrary]",
-    path: Optional[list[str]] = None,
+    path: list[str],
 ) -> dict:
-    if path is None:
-        path = []
     result: dict[str, Any] = {}
     extra_keys = set(value.fields.keys()) - set(spec.fields.keys())
     if extra_keys:
@@ -101,21 +99,32 @@ def _section_to_dict(
                 label = node_spec.label or key
                 full_path = ".".join([*path, key])
                 raise RuntimeError(f"Config field '{full_path}' ({label}) is missing")
-            result[key] = _section_to_dict(
+            result[key] = _section_to_dict_inner(
                 _find_allowed_spec(node_spec, node_val, ml),
                 node_val.value,
                 ml,
-                path=[*path, key],
+                [*path, key],
             )
 
         elif isinstance(node_spec, CfgSectionSpec):
             assert isinstance(node_val, CfgSectionValue)
-            result[key] = _section_to_dict(node_spec, node_val, ml, path=[*path, key])
+            result[key] = _section_to_dict_inner(
+                node_spec, node_val, ml, [*path, key]
+            )
 
         else:
             raise TypeError(f"Unknown CfgNodeSpec type: {type(node_spec)}")
 
     return result
+
+
+def _section_to_dict(
+    spec: CfgSectionSpec,
+    value: CfgSectionValue,
+    ml: "Optional[ModuleLibrary]",
+) -> dict:
+    """Public entry point for lowering a section; path starts at root."""
+    return _section_to_dict_inner(spec, value, ml, [])
 
 
 def _find_allowed_spec(
@@ -165,4 +174,4 @@ def _find_allowed_spec(
 
 def schema_to_dict(schema: CfgSchema, ml: "Optional[ModuleLibrary]") -> dict:
     """Lower a CfgSchema using the same section lowerer as CfgSchema.to_raw_dict()."""
-    return _section_to_dict(schema.spec, schema.value, ml)
+    return _section_to_dict_inner(schema.spec, schema.value, ml, [])

@@ -158,17 +158,12 @@ class State:
     def update_tab_save_path_overrides(
         self,
         tab_id: str,
-        data_path: Optional[str] = None,
-        image_path: Optional[str] = None,
+        data_path: str,
+        image_path: str,
     ) -> None:
         logger.debug("update_tab_save_path_overrides: tab_id=%r", tab_id)
-        tab = self.tabs[tab_id]
-        current = (
-            tab.save_path_overrides or tab.suggested_save_paths or SavePaths("", "")
-        )
-        tab.save_path_overrides = SavePaths(
-            data_path=current.data_path if data_path is None else data_path,
-            image_path=current.image_path if image_path is None else image_path,
+        self.tabs[tab_id].save_path_overrides = SavePaths(
+            data_path=data_path, image_path=image_path
         )
 
     def get_effective_save_paths(self, tab_id: str) -> Optional[SavePaths]:

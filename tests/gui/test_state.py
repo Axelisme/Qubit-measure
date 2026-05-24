@@ -152,14 +152,13 @@ def test_update_tab_analyze_params_defaults_values_when_missing():
     assert state.get_tab("t1").analyze_param_values == {"threshold": 0.2}
 
 
-def test_update_tab_save_path_overrides_merges_paths():
+def test_update_tab_save_path_overrides_sets_both_paths():
     state = State(_make_ctx())
     adapter = _make_adapter()
     adapter.make_default_cfg.return_value = object()
     state.add_tab("t1", adapter, _make_ctx())
     state.update_tab_suggested_save_paths("t1", SavePaths("/tmp/data", "/tmp/image"))
-    state.update_tab_save_path_overrides("t1", data_path="/tmp/custom-data")
-    state.update_tab_save_path_overrides("t1", image_path="/tmp/custom-image")
+    state.update_tab_save_path_overrides("t1", "/tmp/custom-data", "/tmp/custom-image")
     assert state.get_effective_save_paths("t1") == SavePaths(
         "/tmp/custom-data", "/tmp/custom-image"
     )
