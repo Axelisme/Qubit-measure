@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional
 
 import yaml
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
@@ -32,7 +32,11 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.adapter import CfgSchema, make_default_value, schema_to_dict
-from zcu_tools.gui.cfg_schemas import _MODULE_SPEC_FACTORIES
+from zcu_tools.gui.cfg_schemas import (
+    _MODULE_SPEC_FACTORIES,
+    module_cfg_to_value,
+    waveform_cfg_to_value,
+)
 from zcu_tools.gui.event_bus import GuiEvent, Payload
 from zcu_tools.gui.specs.waveform import make_waveform_spec_by_style
 from zcu_tools.gui.ui.cfg_form import CfgFormWidget
@@ -50,19 +54,33 @@ _MONO_FONT.setStyleHint(QFont.StyleHint.Monospace)
 _MAX_VALUE_LEN = 80
 
 
-class _MlAddDialog(QDialog):
-    """Helper dialog for adding a new Module or Waveform to the ModuleLibrary."""
+_MlConfigMode = Literal["add", "modify"]
+_MlItemKind = Literal["module", "waveform"]
+
+
+class _MlConfigDialog(QDialog):
+    """Editor dialog for adding or modifying ModuleLibrary entries."""
 
     def __init__(
         self,
         ctrl: "Controller",
-        item_kind: str,
+        item_kind: _MlItemKind,
+        mode: _MlConfigMode,
+        name: Optional[str] = None,
+        cfg: Optional[Any] = None,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
+        if mode == "modify" and (not name or cfg is None):
+            raise ValueError("Modify mode requires both name and cfg.")
+
         self._ctrl = ctrl
-        self._item_kind = item_kind  # "module" or "waveform"
-        self.setWindowTitle(f"Add {item_kind.capitalize()}")
+        self._item_kind = item_kind
+        self._mode = mode
+        self._fixed_name = name if mode == "modify" else None
+        self._initial_cfg = cfg
+        self._initial_discriminator: Optional[str] = None
+        self.setWindowTitle(f"{mode.capitalize()} {item_kind.capitalize()}")
         self.setMinimumSize(560, 500)
 
         layout = QVBoxLayout(self)
@@ -70,6 +88,10 @@ class _MlAddDialog(QDialog):
         form = QFormLayout()
         self._name_edit = QLineEdit()
         self._type_combo = QComboBox()
+        if name is not None:
+            self._name_edit.setText(name)
+        if mode == "modify":
+            self._name_edit.setReadOnly(True)
 
         form.addRow("Name:", self._name_edit)
         form.addRow("Type:" if item_kind == "module" else "Style:", self._type_combo)
@@ -99,6 +121,17 @@ class _MlAddDialog(QDialog):
                 ["const", "cosine", "gauss", "drag", "flat_top", "arb"]
             )
 
+        if mode == "modify":
+            schema = self._schema_from_cfg()
+            discriminator = self._read_discriminator(schema)
+            self._initial_discriminator = discriminator
+            index = self._type_combo.findText(discriminator)
+            if index < 0:
+                raise RuntimeError(
+                    f"Unsupported {self._discriminator_label} {discriminator!r}"
+                )
+            self._type_combo.setCurrentIndex(index)
+
         self._name_edit.textChanged.connect(self._validate)
         self._type_combo.currentTextChanged.connect(self._on_type_changed)
         self._form_widget.validity_changed.connect(self._validate)
@@ -108,18 +141,50 @@ class _MlAddDialog(QDialog):
         self._on_type_changed(self._type_combo.currentText())
         self._validate()
 
-    def _on_type_changed(self, type_str: str) -> None:
+    @property
+    def _discriminator_label(self) -> str:
+        return "type" if self._item_kind == "module" else "style"
+
+    def _schema_from_cfg(self) -> CfgSchema:
+        if self._initial_cfg is None:
+            raise RuntimeError("No source config is available.")
         if self._item_kind == "module":
-            spec = _MODULE_SPEC_FACTORIES[type_str]()
+            spec, value = module_cfg_to_value(self._initial_cfg)
         else:
-            spec = make_waveform_spec_by_style(type_str)
+            spec, value = waveform_cfg_to_value(self._initial_cfg)
+        return CfgSchema(spec=spec, value=value)
+
+    def _read_discriminator(self, schema: CfgSchema) -> str:
+        value = schema.value.fields[self._discriminator_label]
+        raw_value = getattr(value, "value", None)
+        if not isinstance(raw_value, str):
+            raise RuntimeError(
+                f"Invalid {self._discriminator_label} value {raw_value!r}"
+            )
+        return raw_value
+
+    def _schema_for_discriminator(self, discriminator: str) -> CfgSchema:
+        if (
+            self._mode == "modify"
+            and discriminator == self._initial_discriminator
+            and self._initial_cfg is not None
+        ):
+            return self._schema_from_cfg()
+
+        if self._item_kind == "module":
+            spec = _MODULE_SPEC_FACTORIES[discriminator]()
+        else:
+            spec = make_waveform_spec_by_style(discriminator)
         value = make_default_value(spec)
-        schema = CfgSchema(spec=spec, value=value)
+        return CfgSchema(spec=spec, value=value)
+
+    def _on_type_changed(self, type_str: str) -> None:
+        schema = self._schema_for_discriminator(type_str)
         self._form_widget.populate(schema, self._ctrl)
         self._validate()
 
     def _validate(self, *_: Any) -> None:
-        name = self._name_edit.text().strip()
+        name = self._fixed_name or self._name_edit.text().strip()
         ml = self._ctrl.get_current_ml()
         valid = True
         warn_text = ""
@@ -127,11 +192,17 @@ class _MlAddDialog(QDialog):
         if not name:
             valid = False
         else:
-            if self._item_kind == "module" and ml is not None and name in ml.modules:
+            if (
+                self._mode == "add"
+                and self._item_kind == "module"
+                and ml is not None
+                and name in ml.modules
+            ):
                 warn_text = "Name already exists in modules!"
                 valid = False
             elif (
-                self._item_kind == "waveform"
+                self._mode == "add"
+                and self._item_kind == "waveform"
                 and ml is not None
                 and name in ml.waveforms
             ):
@@ -146,7 +217,7 @@ class _MlAddDialog(QDialog):
         self._save_btn.setEnabled(valid)
 
     def _on_save(self) -> None:
-        name = self._name_edit.text().strip()
+        name = self._fixed_name or self._name_edit.text().strip()
         if not name:
             return
 
@@ -166,6 +237,9 @@ class _MlAddDialog(QDialog):
         except Exception as e:
             logger.exception("Error saving %s '%s'", self._item_kind, name)
             QMessageBox.critical(self, "Validation Error", str(e))
+
+    def clear(self) -> None:
+        self._form_widget.clear()
 
 
 class InspectDialog(QDialog):
@@ -289,16 +363,20 @@ class InspectDialog(QDialog):
         btn_layout = QHBoxLayout()
         self._add_mod_btn = QPushButton("Add Module...")
         self._add_wav_btn = QPushButton("Add Waveform...")
+        self._modify_ml_btn = QPushButton("Modify...")
+        self._modify_ml_btn.setEnabled(False)
         self._del_ml_btn = QPushButton("Delete")
         self._del_ml_btn.setEnabled(False)
 
         btn_layout.addWidget(self._add_mod_btn)
         btn_layout.addWidget(self._add_wav_btn)
+        btn_layout.addWidget(self._modify_ml_btn)
         btn_layout.addWidget(self._del_ml_btn)
         left_layout.addLayout(btn_layout)
 
         self._add_mod_btn.clicked.connect(self._on_add_module_clicked)
         self._add_wav_btn.clicked.connect(self._on_add_waveform_clicked)
+        self._modify_ml_btn.clicked.connect(self._on_modify_ml_clicked)
         self._del_ml_btn.clicked.connect(self._on_delete_ml_clicked)
 
         splitter.addWidget(left_panel)
@@ -445,6 +523,7 @@ class InspectDialog(QDialog):
     def _on_ml_item_changed(
         self, current: Optional[QTreeWidgetItem], _previous: Any
     ) -> None:
+        self._modify_ml_btn.setEnabled(False)
         self._del_ml_btn.setEnabled(False)
         if current is None:
             self._ml_text.setPlainText("")
@@ -454,6 +533,7 @@ class InspectDialog(QDialog):
             self._ml_text.setPlainText("")
             return
 
+        self._modify_ml_btn.setEnabled(True)
         self._del_ml_btn.setEnabled(True)
 
         group, name = data
@@ -468,20 +548,67 @@ class InspectDialog(QDialog):
         self._ml_text.setPlainText(text)
 
     def _on_add_module_clicked(self) -> None:
-        dlg = _MlAddDialog(self._ctrl, "module", self)
-        dlg.exec()
-        dlg._form_widget.clear()
+        dlg = _MlConfigDialog(self._ctrl, "module", "add", parent=self)
+        try:
+            dlg.exec()
+        finally:
+            dlg.clear()
 
     def _on_add_waveform_clicked(self) -> None:
-        dlg = _MlAddDialog(self._ctrl, "waveform", self)
-        dlg.exec()
-        dlg._form_widget.clear()
+        dlg = _MlConfigDialog(self._ctrl, "waveform", "add", parent=self)
+        try:
+            dlg.exec()
+        finally:
+            dlg.clear()
 
-    def _on_delete_ml_clicked(self) -> None:
+    def _current_ml_item_data(self) -> Optional[tuple[str, str]]:
         current = self._ml_tree.currentItem()
         if current is None:
-            return
+            return None
         data = current.data(0, Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+        if data is None:
+            return None
+        group, name = data
+        if group not in {"modules", "waveforms"}:
+            raise RuntimeError(f"Unsupported ModuleLibrary group {group!r}")
+        if not isinstance(name, str):
+            raise RuntimeError(f"Invalid ModuleLibrary item name {name!r}")
+        return group, name
+
+    def _on_modify_ml_clicked(self) -> None:
+        data = self._current_ml_item_data()
+        if data is None:
+            return
+        group, name = data
+        ml = self._ctrl.get_current_ml()
+        if ml is None:
+            return
+
+        if group == "modules":
+            dlg = _MlConfigDialog(
+                self._ctrl,
+                "module",
+                "modify",
+                name=name,
+                cfg=ml.modules[name],
+                parent=self,
+            )
+        else:
+            dlg = _MlConfigDialog(
+                self._ctrl,
+                "waveform",
+                "modify",
+                name=name,
+                cfg=ml.waveforms[name],
+                parent=self,
+            )
+        try:
+            dlg.exec()
+        finally:
+            dlg.clear()
+
+    def _on_delete_ml_clicked(self) -> None:
+        data = self._current_ml_item_data()
         if data is None:
             return
 
