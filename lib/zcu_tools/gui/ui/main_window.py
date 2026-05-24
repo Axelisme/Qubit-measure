@@ -31,8 +31,8 @@ from zcu_tools.gui.state import TabInteractionState
 logger = logging.getLogger(__name__)
 
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
-from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtGui import (  # type: ignore[attr-defined]
+    QCloseEvent,  # type: ignore[attr-defined]
     QColor,
     QPainter,
     QPainterPath,
@@ -465,9 +465,7 @@ class ExpTabWidget(QWidget):
         )
         self._data_path_edit.textChanged.connect(save_paths_cb)
         self._image_path_edit.textChanged.connect(save_paths_cb)
-        self.run_btn.clicked.connect(
-            lambda: main_window._on_run_stop_clicked(tab_id)
-        )
+        self.run_btn.clicked.connect(lambda: main_window._on_run_stop_clicked(tab_id))
         self.analyze_btn.clicked.connect(
             lambda: main_window._on_analyze_clicked(tab_id)
         )
@@ -605,12 +603,18 @@ class MainWindow(QMainWindow):
         del payload
         self.refresh_context_panel()
         for tab_id in list(self._tab_widgets):
-            self.refresh_tab(tab_id)
+            self.refresh_tab_analyze_form(tab_id)
+            self.refresh_tab_writeback(tab_id)
+            self.refresh_tab_save_paths(tab_id)
+            self.refresh_tab_interaction(tab_id)
 
     def _on_bus_ml_changed(self, payload: MlChangedPayload) -> None:
         del payload
         for tab_id in list(self._tab_widgets):
-            self.refresh_tab(tab_id)
+            self.refresh_tab_analyze_form(tab_id)
+            self.refresh_tab_writeback(tab_id)
+            self.refresh_tab_save_paths(tab_id)
+            self.refresh_tab_interaction(tab_id)
 
     def _on_bus_tab_added(self, payload: TabAddedPayload) -> None:
         tab_id = payload.tab_id
@@ -654,7 +658,18 @@ class MainWindow(QMainWindow):
         self.refresh_run_lock(self._state_running_tab_id())
 
     def _on_bus_tab_content_changed(self, payload: TabContentChangedPayload) -> None:
-        self.refresh_tab(payload.tab_id)
+        tab_id = payload.tab_id
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return
+        self.refresh_tab_analyze_form(tab_id)
+        self.refresh_tab_writeback(tab_id)
+        self.refresh_tab_save_paths(tab_id)
+        self.refresh_tab_figure(tab_id)
+        # auto-switch to Analysis tab when a new run result first arrives
+        if self._ctrl.has_run_result(tab_id):
+            tab_w._left_tabs.setCurrentIndex(1)
+        self.refresh_tab_interaction(tab_id)
 
     def _on_bus_predictor_changed(self, payload: PredictorChangedPayload) -> None:
         del payload
@@ -687,38 +702,40 @@ class MainWindow(QMainWindow):
         )
         tab_w.update_interaction_state(state)
 
-    def refresh_tab(self, tab_id: str) -> None:
-        logger.debug("refresh_tab: tab_id=%r", tab_id)
+    def refresh_tab_analyze_form(self, tab_id: str) -> None:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
+        if not self._ctrl.has_run_result(tab_id):
+            return
+        params = self._ctrl.get_tab_analyze_params(tab_id)
+        tab_w.populate_analyze_params(params)
+        values = self._ctrl.get_tab_analyze_param_values(tab_id)
+        if values:
+            tab_w.analyze_form.populate_values(values)
 
-        # analyze params are part of per-tab state; rehydrate UI from state on refresh
-        if self._ctrl.has_run_result(tab_id):
-            params = self._ctrl.get_tab_analyze_params(tab_id)
-            tab_w.populate_analyze_params(params)
-            values = self._ctrl.get_tab_analyze_param_values(tab_id)
-            if values:
-                tab_w.analyze_form.populate_values(values)
-
+    def refresh_tab_writeback(self, tab_id: str) -> None:
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return
         items = self._ctrl.get_tab_writeback_items(tab_id)
         tab_w.update_writeback_items(items)
 
+    def refresh_tab_save_paths(self, tab_id: str) -> None:
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return
         save_paths = self._ctrl.get_tab_save_paths(tab_id)
         if save_paths is not None:
             tab_w.set_save_paths(save_paths.data_path, save_paths.image_path)
 
-        # show analysis figure if available
+    def refresh_tab_figure(self, tab_id: str) -> None:
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return
         figure = self._ctrl.get_tab_figure(tab_id)
         if figure is not None:
             self.show_analysis_image(tab_id, figure)
-
-        # auto-switch to Analysis tab when a run result first arrives
-        if self._ctrl.has_run_result(tab_id):
-            tab_w._left_tabs.setCurrentIndex(1)
-
-        # refresh button states to reflect new result availability
-        self.refresh_tab_interaction(tab_id)
 
     def refresh_run_lock(self, running_tab_id: Optional[str]) -> None:
         logger.debug("refresh_run_lock: running_tab_id=%r", running_tab_id)
