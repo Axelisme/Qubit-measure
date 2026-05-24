@@ -12,11 +12,7 @@ def _make_ml():
     ml = MagicMock()
     ml.modules = {}
     ml.waveforms = {}
-
-    def make_cfg(raw, cls, **kwargs):
-        return cls(**{**raw, **kwargs})
-
-    ml.make_cfg.side_effect = make_cfg
+    ml.make_cfg.return_value = MagicMock()
     return ml
 
 

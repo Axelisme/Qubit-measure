@@ -136,7 +136,10 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
     from zcu_tools.gui.adapter import DirectValue, SweepValue
 
     schema.value.fields["rounds"] = DirectValue(2)
-    schema.value.fields["freq"] = SweepValue(start=5800.0, stop=5808.0, expts=5)
+    from zcu_tools.gui.adapter import CfgSectionValue
+    schema.value.fields["sweep"] = CfgSectionValue(
+        fields={"freq": SweepValue(start=5800.0, stop=5808.0, expts=5)}
+    )
 
     with use_pbar_factory(factory):
         run_result = adapter.run(

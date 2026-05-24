@@ -415,9 +415,12 @@ def test_save_both_reports_data_only_failure(cf, tmp_path):
     image_path = str(tmp_path / "good.png")
     cf.ctrl.save_both(tab_id, "/tmp/fake_data", image_path)
     assert _wait_for(lambda: bad_adapter.save.called)
-    assert _wait_for(
-        lambda: "data failed" in cf.view.show_status_message.call_args[0][0].lower()
-    )
+
+    def _data_failed_msg() -> bool:
+        args = cf.view.show_status_message.call_args
+        return args is not None and "data failed" in args[0][0].lower()
+
+    assert _wait_for(_data_failed_msg)
     msg = cf.view.show_status_message.call_args[0][0].lower()
     assert "image saved" in msg
 
@@ -453,10 +456,15 @@ def test_save_both_reports_both_failures(cf):
 
     cf.ctrl.save_both(tab_id, "/tmp/fake_data", "/tmp/does_not_exist/out.png")
     assert _wait_for(lambda: bad_adapter.save.called)
-    msg_lower = lambda: cf.view.show_error_dialog.call_args[0][1].lower()  # noqa: E731
-    assert _wait_for(
-        lambda: "data failed" in msg_lower() and "image failed" in msg_lower()
-    )
+
+    def _both_failed_msg() -> bool:
+        args = cf.view.show_error_dialog.call_args
+        if args is None:
+            return False
+        msg = args[0][1].lower()
+        return "data failed" in msg and "image failed" in msg
+
+    assert _wait_for(_both_failed_msg)
 
 
 def test_start_run_blocked_while_analyzing(cf):

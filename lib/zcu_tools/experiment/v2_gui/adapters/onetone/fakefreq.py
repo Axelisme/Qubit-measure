@@ -17,6 +17,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typing_extensions import Callable
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.base import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.onetone.freq import FreqExp
@@ -26,7 +27,10 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     build_waveform_for_length,
     make_flat_top_waveform_edit_template,
     make_module_ref_default,
+    make_pulse_ref_spec,
     make_readout_edit_template,
+    make_readout_ref_spec,
+    make_reset_ref_spec,
 )
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
@@ -38,7 +42,6 @@ from zcu_tools.gui.adapter import (
     DirectValue,
     ExpContext,
     MetaDictWriteback,
-    ModuleRefSpec,
     ModuleWriteback,
     RunRequest,
     SaveDataRequest,
@@ -46,23 +49,15 @@ from zcu_tools.gui.adapter import (
     SweepSpec,
     SweepValue,
     WaveformWriteback,
+    WritebackItem,
     WritebackRequest,
-)
-from zcu_tools.gui.specs.pulse import make_pulse_spec
-from zcu_tools.gui.specs.readout import (
-    make_direct_readout_spec,
-    make_pulse_readout_spec,
-)
-from zcu_tools.gui.specs.reset import (
-    make_bath_reset_spec,
-    make_none_reset_spec,
-    make_pulse_reset_spec,
-    make_two_pulse_reset_spec,
 )
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     AbsReadoutCfg,
     ProgramV2Cfg,
+    PulseCfg,
+    ResetCfg,
 )
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.utils.fitting.resonance.hanger import HangerModel
@@ -86,10 +81,16 @@ class FakeFreqModelCfg(ProgramV2Cfg):  # type: ignore[misc]
     noise_scale: float = 0.05
 
 
+class FakeFreqModuleCfg(ConfigBase):
+    readout: AbsReadoutCfg
+    init_pulse: Optional[PulseCfg] = None
+    reset: Optional[ResetCfg] = None
+
+
 class FakeFreqCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: FakeFreqSweepCfg
     model: FakeFreqModelCfg = FakeFreqModelCfg()
-    modules: dict[str, Any] = {}
+    modules: FakeFreqModuleCfg
     fast_mode: bool = False  # skip per-point sleep; set True in tests
 
 
@@ -218,30 +219,10 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
             fields={
                 "modules": CfgSectionSpec(
                     label="Modules",
-                    collapsible=True,
                     fields={
-                        "readout": ModuleRefSpec(
-                            allowed=[
-                                make_direct_readout_spec(),
-                                make_pulse_readout_spec(),
-                            ],
-                            label="Readout",
-                        ),
-                        "init_pulse": ModuleRefSpec(
-                            allowed=[make_pulse_spec()],
-                            label="Init Pulse",
-                            optional=True,
-                        ),
-                        "reset": ModuleRefSpec(
-                            allowed=[
-                                make_none_reset_spec(),
-                                make_pulse_reset_spec(),
-                                make_two_pulse_reset_spec(),
-                                make_bath_reset_spec(),
-                            ],
-                            label="Reset",
-                            optional=True,
-                        ),
+                        "readout": make_readout_ref_spec(),
+                        "init_pulse": make_pulse_ref_spec(optional=True),
+                        "reset": make_reset_ref_spec(optional=True),
                     },
                 ),
                 "reps": ScalarSpec(label="Reps", type=int),
@@ -335,8 +316,6 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
         req: AnalyzeRequest[FreqRunResult],
     ) -> FakeFreqAnalyzeResult:
         result = req.run_result
-        if not isinstance(result, FreqRunResult):
-            raise RuntimeError("Analyze request run_result must be FreqRunResult")
         model_type_value = req.analyze_params.get("model_type")
         if model_type_value not in {"hm", "t", "auto"}:
             raise RuntimeError("Analyze param 'model_type' must be hm, t, or auto")
@@ -358,7 +337,7 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
 
     def get_writeback_items(
         self, req: WritebackRequest[FreqRunResult, FakeFreqAnalyzeResult]
-    ) -> Sequence[MetaDictWriteback | ModuleWriteback | WaveformWriteback]:
+    ) -> Sequence[WritebackItem]:
         analyze_result = req.analyze_result
         ctx = req.ctx
         freq = analyze_result.freq
@@ -366,7 +345,7 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
         md = ctx.md
 
         cfg = req.run_result.cfg_snapshot
-        readout = cfg.modules.get("readout")
+        readout = cfg.modules.readout
         pulse_ch = getattr(ctx.md, "res_ch", 0)
         ro_ch = getattr(ctx.md, "ro_ch", 0)
 

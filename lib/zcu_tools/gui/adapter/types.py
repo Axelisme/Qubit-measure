@@ -304,7 +304,6 @@ class WaveformRefSpec:
 class CfgSectionSpec:
     fields: dict[str, "CfgNodeSpec"] = field(default_factory=dict)
     label: str = ""
-    collapsible: bool = True
     inherit_hook: Optional[
         Callable[["CfgSectionValue", "CfgSectionSpec"], Optional["CfgSectionValue"]]
     ] = None
