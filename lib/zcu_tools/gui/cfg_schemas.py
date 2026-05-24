@@ -124,8 +124,7 @@ def waveform_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionVal
             }
         )
     else:
-        # Unknown style, fallback to generic
-        return _dict_to_spec_value(cfg)
+        raise RuntimeError(f"Unsupported waveform style {style!r}")
 
     return spec, val
 
@@ -292,33 +291,5 @@ def module_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionValue
     if spec_factory is not None and builder is not None:
         return spec_factory(), builder(cfg)
 
-    # 4. Generic fallback
-    return _dict_to_spec_value(cfg)
-
-
-def _dict_to_spec_value(data: dict) -> tuple[CfgSectionSpec, CfgSectionValue]:
-    spec_fields: dict = {}
-    val_fields: dict = {}
-    for k, v in data.items():
-        if isinstance(v, dict):
-            sub_spec, sub_val = _dict_to_spec_value(v)
-            spec_fields[k] = sub_spec
-            val_fields[k] = sub_val
-        elif isinstance(v, (int, float, bool, str)) or v is None:
-            is_discriminator = k in ("type", "style")
-            if is_discriminator and v is not None:
-                spec_fields[k] = LiteralSpec(v, label=k.replace("_", " ").title())
-            else:
-                from zcu_tools.gui.adapter import ScalarSpec
-
-                spec_fields[k] = ScalarSpec(
-                    label=k.replace("_", " ").title(),
-                    type=type(v) if v is not None else str,
-                    hidden=False,
-                )
-            val_fields[k] = DirectValue(v, is_unset=(v is None))
-        else:
-            raise RuntimeError(
-                f"Unsupported config value type at {k!r}: {type(v).__name__}"
-            )
-    return CfgSectionSpec(fields=spec_fields), CfgSectionValue(fields=val_fields)
+    # 4. Unknown module type — fast fail
+    raise RuntimeError(f"Unsupported module type {type_val!r}")

@@ -160,6 +160,3 @@ class CfgFormWidget(QWidget):
 
         return _callback
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convenience: return raw dict for experiment runner."""
-        return self._model.to_dict() if self._model else {}

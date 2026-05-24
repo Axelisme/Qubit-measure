@@ -105,11 +105,6 @@ class LiveField(ABC):
         """Update the current value and emit on_change."""
         ...
 
-    @abstractmethod
-    def to_dict(self) -> object:
-        """Return lowered config data for diagnostics and tests."""
-        ...
-
     def is_valid(self) -> bool:
         return self._valid
 
@@ -162,18 +157,6 @@ class ScalarLiveField(LiveField):
             self.on_change.emit(self.get_value())
         else:
             self._refresh_validity()
-
-    def to_dict(self) -> object:
-        if isinstance(self._value, DirectValue):
-            if self._value.is_unset:
-                raise RuntimeError(f"Scalar field {self.spec.label!r} is unset")
-            return self._value.value
-        if self._value.resolved is None:
-            raise RuntimeError(
-                f"Scalar field {self.spec.label!r} expression "
-                f"{self._value.expr!r} is unresolved"
-            )
-        return self._value.resolved
 
     def refresh_external(self, event: object) -> None:
         del event
@@ -232,9 +215,6 @@ class LiteralLiveField(LiveField):
     def set_value(self, val: object) -> None:
         pass
 
-    def to_dict(self) -> object:
-        return self.spec.value
-
 
 class SweepLiveField(LiveField):
     spec: SweepSpec
@@ -258,14 +238,6 @@ class SweepLiveField(LiveField):
             self.on_change.emit(val)
             return
         raise TypeError(f"SweepLiveField expects SweepValue, got {type(val).__name__}")
-
-    def to_dict(self) -> dict[str, float | int | None]:
-        return {
-            "start": self._value.start,
-            "stop": self._value.stop,
-            "expts": self._value.expts,
-            "step": self._value.step,
-        }
 
 
 class MultiSweepLiveField(LiveField):
@@ -302,9 +274,6 @@ class MultiSweepLiveField(LiveField):
         for k, field in self.fields.items():
             if k in val.axes:
                 field.set_value(val.axes[k])
-
-    def to_dict(self) -> dict[str, dict[str, float | int | None]]:
-        return {k: f.to_dict() for k, f in self.fields.items()}
 
 
 class SectionLiveField(LiveField):
@@ -361,14 +330,6 @@ class SectionLiveField(LiveField):
             if k in val.fields:
                 field.set_value(val.fields[k])
 
-    def to_dict(self) -> dict[str, object]:
-        from .adapter import CfgSchema, schema_to_dict
-
-        return schema_to_dict(
-            CfgSchema(spec=self.spec, value=self.get_value()),
-            self.env.ctrl.get_current_ml(),
-        )
-
     def teardown(self) -> None:
         for f in self.fields.values():
             f.on_change.disconnect(self._on_child_change)
@@ -408,22 +369,29 @@ class ModuleRefLiveField(LiveField):
 
         if isinstance(initial_val, (ModuleRefValue, WaveformRefValue)):
             self._chosen_key = initial_val.chosen_key
-            self._sub_value = initial_val.value
+            init_sub: Optional[CfgSectionValue] = initial_val.value
         else:
             # Default to first allowed
             self._chosen_key = (
                 f"<Custom:{spec.allowed[0].label}>" if spec.allowed else ""
             )
-            self._sub_value = None
+            init_sub = None
 
         self._binding_state = _binding_state_for_key(self._chosen_key)
         self.sub_field: Optional[SectionLiveField] = None
-        self._rebuild_sub_field()
+        self._rebuild_sub_field(hint=init_sub)
 
     def is_modified(self) -> bool:
         return self._binding_state is LibraryBindingState.MODIFIED
 
-    def _rebuild_sub_field(self) -> None:
+    def _rebuild_sub_field(
+        self, hint: Optional[CfgSectionValue] = None
+    ) -> None:
+        """Rebuild the sub-field for the current chosen_key.
+
+        hint: explicit initial CfgSectionValue to seed the sub-field (takes
+        priority over both library value and inherit_from inheritance).
+        """
         old_spec = self.sub_field.spec if self.sub_field else None
         old_val = self.sub_field.get_value() if self.sub_field else None
         if self.sub_field:
@@ -434,13 +402,14 @@ class ModuleRefLiveField(LiveField):
         from .ui.fields.utils import _spec_value_for_chosen
 
         ml = self.env.ctrl.get_current_ml()
-        chosen_spec, initial_val = _spec_value_for_chosen(
+        chosen_spec, lib_val = _spec_value_for_chosen(
             self._chosen_key, self.spec.allowed, ml
         )
         if chosen_spec:
-            # Use initial_val from library if available, otherwise fallback to self._sub_value
-            if initial_val is not None:
-                val = initial_val
+            if hint is not None:
+                val: Optional[CfgSectionValue] = hint
+            elif lib_val is not None:
+                val = lib_val
             elif isinstance(old_spec, CfgSectionSpec) and isinstance(
                 old_val, CfgSectionValue
             ):
@@ -448,7 +417,7 @@ class ModuleRefLiveField(LiveField):
 
                 val = inherit_from(old_val, old_spec, chosen_spec)
             else:
-                val = self._sub_value
+                val = None
             self.sub_field = SectionLiveField(chosen_spec, self.env, val)
             self.sub_field.on_change.connect(self._on_sub_change)
             self.sub_field.on_validity_changed.connect(self._on_sub_validity_change)
@@ -472,9 +441,6 @@ class ModuleRefLiveField(LiveField):
     def _refresh_library_binding(self) -> None:
         if self._binding_state is not LibraryBindingState.LINKED:
             return
-        self._sub_value = (
-            self.sub_field.get_value() if self.sub_field else self._sub_value
-        )
         self._rebuild_sub_field()
         self.on_change.emit(self.get_value())
 
@@ -483,12 +449,18 @@ class ModuleRefLiveField(LiveField):
 
     def set_chosen_key(self, key: str) -> None:
         if key != self._chosen_key or self.is_modified():
+            # When switching to a different key, seed sub_field from current values
+            # so fields shared between the old and new spec are preserved.
+            # When reverting to the same key (from MODIFIED state), pass no hint
+            # so the library value takes precedence.
+            hint = (
+                self.sub_field.get_value()
+                if key != self._chosen_key and self.sub_field is not None
+                else None
+            )
             self._chosen_key = key
             self._binding_state = _binding_state_for_key(key)
-            self._sub_value = (
-                self.sub_field.get_value() if self.sub_field is not None else None
-            )
-            self._rebuild_sub_field()
+            self._rebuild_sub_field(hint=hint)
             self.on_change.emit(self.get_value())
 
     def get_value(self) -> Union[ModuleRefValue, WaveformRefValue]:
@@ -507,16 +479,10 @@ class ModuleRefLiveField(LiveField):
         if val.chosen_key != self._chosen_key or self.is_modified():
             self._chosen_key = val.chosen_key
             self._binding_state = _binding_state_for_key(val.chosen_key)
-            self._sub_value = val.value
-            self._rebuild_sub_field()
+            self._rebuild_sub_field(hint=val.value)
         elif self.sub_field:
             self.sub_field.set_value(val.value)
         self.on_change.emit(self.get_value())
-
-    def to_dict(self) -> dict[str, object]:
-        if self.sub_field:
-            return self.sub_field.to_dict()
-        return {}
 
     def teardown(self) -> None:
         if self.sub_field:

@@ -56,7 +56,6 @@ def test_scalar_field_reactivity(env):
     value = field.get_value()
     assert isinstance(value, DirectValue)
     assert value.value == 20
-    assert field.to_dict() == 20
     assert cb.called
 
 
@@ -89,8 +88,6 @@ def test_section_field_propagation(env):
     assert isinstance(f2_val, DirectValue)
     assert f1_val.value == 10
     assert f2_val.value == 0.5
-
-    assert section.to_dict() == {"f1": 10, "f2": 0.5}
 
 
 def test_scalar_eval_field_resolves_from_md(env):
@@ -148,15 +145,17 @@ def test_scalar_eval_field_invalid_expression_marks_invalid(env):
     assert field.is_valid() is False
 
 
-def test_scalar_eval_to_dict_unresolved_raises(env):
+def test_scalar_eval_unresolved_marks_invalid(env):
     field = ScalarLiveField(
         ScalarSpec(label="Freq", type=float),
         env,
         initial_val=EvalValue("missing_name"),
     )
 
-    with pytest.raises(RuntimeError, match="unresolved"):
-        field.to_dict()
+    val = field.get_value()
+    assert isinstance(val, EvalValue)
+    assert val.resolved is None
+    assert field.is_valid() is False
 
 
 def test_callback_list_propagates_callback_exceptions():

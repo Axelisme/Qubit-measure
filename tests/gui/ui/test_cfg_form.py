@@ -667,23 +667,21 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     from zcu_tools.meta_tool import ModuleLibrary
 
     ml = ModuleLibrary()
-    # Populate a library module with raw dict
-    ml.modules["my_pulse"] = cast(Any, {"gain": 0.5})
+    ml.modules["my_pulse"] = cast(Any, {"type": "readout/direct", "ro_freq": 7000.0})
     ctrl.get_current_ml.return_value = ml
 
-    allowed_spec = CfgSectionSpec(
-        label="Pulse",
-        fields={"gain": ScalarSpec(label="Gain", type=float)},
-    )
+    from zcu_tools.gui.cfg_schemas import module_cfg_to_value
+
+    lib_spec, lib_val = module_cfg_to_value({"type": "readout/direct", "ro_freq": 7000.0})
     schema = CfgSchema(
         spec=CfgSectionSpec(
-            fields={"mod": ModuleRefSpec(allowed=[allowed_spec], label="Module")}
+            fields={"mod": ModuleRefSpec(allowed=[lib_spec], label="Module")}
         ),
         value=CfgSectionValue(
             fields={
                 "mod": ModuleRefValue(
                     chosen_key="my_pulse",
-                    value=CfgSectionValue(fields={"gain": DirectValue(0.5)}),
+                    value=lib_val,
                 )
             }
         ),
@@ -699,10 +697,12 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     assert ref_widget._combo.currentText() == "Lib: my_pulse"
     assert cast(ModuleRefLiveField, ref_widget._field).is_modified() is False
 
-    # 2. Simulate user edits the inner value
+    # 2. Simulate user edits the inner value via spinbox
+    from qtpy.QtWidgets import QDoubleSpinBox
+
     spin = ref_widget.findChild(QDoubleSpinBox)
     assert spin is not None
-    spin.setValue(0.6)
+    spin.setValue(8000.0)
 
     # Verify is_modified is True and combobox text has (modified) suffix
     assert cast(ModuleRefLiveField, ref_widget._field).is_modified() is True
@@ -715,12 +715,12 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     md = MetaDict()
     ctrl.get_bus.return_value.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=md))
 
-    # Should stay as user modified (0.6), not library default (0.5)
+    # Should stay as user modified (8000.0), not library default (7000.0)
     mod_val = w.read_values().fields["mod"]
     assert isinstance(mod_val, ModuleRefValue)
-    gain_val = mod_val.value.fields["gain"]
-    assert isinstance(gain_val, DirectValue)
-    assert gain_val.value == 0.6
+    freq_val = mod_val.value.fields["ro_freq"]
+    assert isinstance(freq_val, DirectValue)
+    assert freq_val.value == 8000.0
 
     # Verify both modified and clean items are present in combo box
     items_list = [
@@ -741,6 +741,6 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     assert cast(ModuleRefLiveField, ref_widget._field).is_modified() is False
     mod_val2 = w.read_values().fields["mod"]
     assert isinstance(mod_val2, ModuleRefValue)
-    gain_val2 = mod_val2.value.fields["gain"]
-    assert isinstance(gain_val2, DirectValue)
-    assert gain_val2.value == 0.5
+    freq_val2 = mod_val2.value.fields["ro_freq"]
+    assert isinstance(freq_val2, DirectValue)
+    assert freq_val2.value == 7000.0

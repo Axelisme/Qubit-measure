@@ -8,7 +8,6 @@ from typing import cast
 import pytest
 from zcu_tools.gui.adapter import CfgSectionValue, DirectValue, WaveformRefValue
 from zcu_tools.gui.cfg_schemas import (
-    _dict_to_spec_value,
     module_cfg_to_value,
     waveform_cfg_to_value,
 )
@@ -67,18 +66,14 @@ def test_module_cfg_to_value_pulse_reset():
     assert cast(DirectValue, pulse_val.fields["gain"]).is_unset is True
 
 
-def test_module_cfg_to_value_fallback():
-    cfg = {"unknown_key": "some_value", "nested": {"sub": 42}}
-    spec, val = module_cfg_to_value(cfg)
-
-    assert isinstance(val.fields["unknown_key"], DirectValue)
-    assert cast(DirectValue, val.fields["unknown_key"]).value == "some_value"
-    assert cast(CfgSectionValue, val.fields["nested"]).fields["sub"].value == 42
+def test_module_cfg_to_value_unknown_type_raises():
+    with pytest.raises(RuntimeError, match="Unsupported module type"):
+        module_cfg_to_value({"type": "unknown/custom", "some_key": "value"})
 
 
-def test_module_cfg_to_value_fallback_unsupported_list_raises():
-    with pytest.raises(RuntimeError, match="Unsupported config value type"):
-        module_cfg_to_value({"bad": [1, 2, 3]})
+def test_waveform_cfg_to_value_unknown_style_raises():
+    with pytest.raises(RuntimeError, match="Unsupported waveform style"):
+        waveform_cfg_to_value({"style": "unknown_style", "length": 1.0})
 
 
 def test_waveform_cfg_to_value_invalid_type():
