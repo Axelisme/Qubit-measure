@@ -8,7 +8,7 @@ from unittest.mock import ANY, MagicMock
 import pytest
 from qtpy.QtCore import QCoreApplication
 from qtpy.QtWidgets import QLabel, QStackedWidget
-from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
+from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter, FakeAnalyzeParams
 from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.adapter import CfgSchema, CfgSectionSpec, CfgSectionValue, ExpContext
 from zcu_tools.gui.controller import Controller
@@ -105,9 +105,8 @@ def _run_and_wait(cf: ControllerFixture, tab_id: str) -> None:
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
 
-def _default_analyze_params(cf: ControllerFixture, tab_id: str) -> dict[str, object]:
-    params = cf.ctrl.get_tab_analyze_params(tab_id)
-    return {param.key: param.default for param in params}
+def _default_analyze_params(cf: ControllerFixture, tab_id: str) -> object:
+    return cf.ctrl.get_tab_analyze_params(tab_id)
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +164,7 @@ def test_analyze_calls_refresh_tab(cf):
 def test_analyze_without_result_raises(cf):
     tab_id = cf.ctrl.new_tab("fake")
     with pytest.raises(RuntimeError, match="No run result"):
-        cf.ctrl.analyze(tab_id, {})
+        cf.ctrl.analyze(tab_id, FakeAnalyzeParams(threshold=0.5))
 
 
 def test_analyze_exception_shows_status_message(cf):
@@ -191,11 +190,11 @@ def test_analyze_passes_analyze_params(cf):
     spy_adapter = MagicMock(wraps=FakeAdapter())
     cf.state.get_tab(tab_id).adapter = spy_adapter
 
-    cf.ctrl.analyze(tab_id, {"threshold": 0.99})
+    cf.ctrl.analyze(tab_id, FakeAnalyzeParams(threshold=0.99))
     assert _wait_for(lambda: spy_adapter.analyze.called)
 
     call_args = spy_adapter.analyze.call_args[0]
-    assert call_args[0].analyze_params == {"threshold": 0.99}
+    assert call_args[0].analyze_params == FakeAnalyzeParams(threshold=0.99)
 
 
 # ---------------------------------------------------------------------------
@@ -329,8 +328,7 @@ def test_get_tab_analyze_params_returns_threshold(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
     params = cf.ctrl.get_tab_analyze_params(tab_id)
-    assert len(params) == 1
-    assert params[0].key == "threshold"
+    assert params == FakeAnalyzeParams(threshold=0.5)
 
 
 def test_analyze_is_async_and_sets_busy_flag(cf):
@@ -352,7 +350,7 @@ def test_analyze_is_async_and_sets_busy_flag(cf):
     )
     cf.state.get_tab(tab_id).adapter = slow_adapter
 
-    cf.ctrl.analyze(tab_id, {"threshold": 0.0})
+    cf.ctrl.analyze(tab_id, FakeAnalyzeParams(threshold=0.0))
     assert cf.state.is_tab_analyzing(tab_id) is True
     assert _wait_for(lambda: not cf.state.is_tab_analyzing(tab_id))
 
@@ -483,7 +481,7 @@ def test_start_run_blocked_while_analyzing(cf):
     slow_adapter.analyze.side_effect = slow_analyze
     cf.state.get_tab(tab_id).adapter = slow_adapter
 
-    cf.ctrl.analyze(tab_id, {"threshold": 0.0})
+    cf.ctrl.analyze(tab_id, FakeAnalyzeParams(threshold=0.0))
     assert cf.state.is_tab_analyzing(tab_id) is True
     with pytest.raises(RuntimeError, match="Tab .* is busy"):
         cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
@@ -507,7 +505,7 @@ def test_analyze_allowed_while_other_tab_saving_data(cf):
 
     cf.ctrl.save_data(other_tab_id, "/tmp/fake_data")
     assert cf.state.is_tab_saving_data(other_tab_id) is True
-    cf.ctrl.analyze(tab_id, {"threshold": 0.0})
+    cf.ctrl.analyze(tab_id, FakeAnalyzeParams(threshold=0.0))
     assert _wait_for(lambda: cf.state.get_tab(tab_id).analyze_result is not None)
     assert _wait_for(lambda: not cf.state.is_tab_saving_data(other_tab_id))
 
@@ -528,7 +526,7 @@ def test_close_busy_tab_shows_status_message(cf):
     slow_adapter.analyze.side_effect = slow_analyze
     cf.state.get_tab(tab_id).adapter = slow_adapter
 
-    cf.ctrl.analyze(tab_id, {"threshold": 0.0})
+    cf.ctrl.analyze(tab_id, FakeAnalyzeParams(threshold=0.0))
     assert cf.state.is_tab_analyzing(tab_id) is True
     with pytest.raises(RuntimeError, match="busy tab"):
         cf.ctrl.close_tab(tab_id)

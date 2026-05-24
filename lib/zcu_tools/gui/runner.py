@@ -23,7 +23,7 @@ from .plot_routing import routing_scope
 
 logger = logging.getLogger(__name__)
 
-AdapterHandle = AbsExpAdapter[Any, Any]
+AdapterHandle = AbsExpAdapter[Any, Any, Any]
 
 
 @dataclass(frozen=True)
@@ -86,7 +86,7 @@ class AnalyzeWorker(QThread):
     def __init__(
         self,
         adapter: AdapterHandle,
-        req: AnalyzeRequest[Any],
+        req: AnalyzeRequest[Any, Any],
         figure_container: Optional[FigureContainer] = None,
         parent: Optional[QObject] = None,
     ) -> None:
@@ -273,7 +273,7 @@ class AnalyzeRunner(QObject):
         self,
         tab_id: str,
         adapter: AdapterHandle,
-        req: AnalyzeRequest[Any],
+        req: AnalyzeRequest[Any, Any],
         figure_container: Optional[FigureContainer] = None,
     ) -> None:
         if tab_id in self._workers and self._workers[tab_id].isRunning():

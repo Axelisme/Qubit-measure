@@ -70,7 +70,7 @@ from .writeback_widget import WritebackWidget
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
-    from zcu_tools.gui.adapter import AnalyzeParam, CfgSchema, WritebackItem
+    from zcu_tools.gui.adapter import CfgSchema, WritebackItem
     from zcu_tools.gui.controller import Controller
     from zcu_tools.meta_tool import ModuleLibrary
 
@@ -342,10 +342,10 @@ class ExpTabWidget(QWidget):
 
     # ── populate / refresh helpers ────────────────────────────────────────
 
-    def populate_analyze_params(self, params: list["AnalyzeParam"]) -> None:
-        self.analyze_form.populate(params)
+    def populate_analyze_params(self, instance: object) -> None:
+        self.analyze_form.populate(instance)
 
-    def read_analyze_params(self) -> dict[str, object]:
+    def read_analyze_params(self) -> object:
         return self.analyze_form.read_params()
 
     def has_analyze_params(self) -> bool:
@@ -462,7 +462,9 @@ class ExpTabWidget(QWidget):
         self.cfg_form.validity_changed.connect(validity_cb)
         self.cfg_form.schema_changed.connect(schema_cb)
         self.analyze_form.params_changed.connect(
-            lambda values: self._ctrl.update_tab_analyze_param_values(tab_id, values)
+            lambda instance: self._ctrl.update_tab_analyze_param_instance(
+                tab_id, instance
+            )
         )
         self._data_path_edit.textChanged.connect(save_paths_cb)
         self._image_path_edit.textChanged.connect(save_paths_cb)
@@ -632,9 +634,9 @@ class MainWindow(QMainWindow):
         schema = self._ctrl.get_tab_default_cfg(tab_id)
         if schema is not None:
             tab_w.populate_cfg(schema, self._ctrl)
-        analyze_values = self._ctrl.get_tab_analyze_param_values(tab_id)
-        if analyze_values and tab_w.has_analyze_params():
-            tab_w.analyze_form.populate_values(analyze_values)
+        analyze_instance = self._ctrl.get_tab_analyze_param_instance(tab_id)
+        if analyze_instance is not None and tab_w.has_analyze_params():
+            tab_w.analyze_form.populate_values(analyze_instance)
 
         # refresh state (enables/disables buttons based on context)
         self.refresh_run_lock(self._state_running_tab_id())
@@ -707,11 +709,11 @@ class MainWindow(QMainWindow):
             return
         if not self._ctrl.has_run_result(tab_id):
             return
-        params = self._ctrl.get_tab_analyze_params(tab_id)
-        tab_w.populate_analyze_params(params)
-        values = self._ctrl.get_tab_analyze_param_values(tab_id)
-        if values:
-            tab_w.analyze_form.populate_values(values)
+        instance = self._ctrl.get_tab_analyze_params(tab_id)
+        tab_w.populate_analyze_params(instance)
+        saved = self._ctrl.get_tab_analyze_param_instance(tab_id)
+        if saved is not None:
+            tab_w.analyze_form.populate_values(saved)
 
     def refresh_tab_writeback(self, tab_id: str) -> None:
         tab_w = self._tab_widgets.get(tab_id)

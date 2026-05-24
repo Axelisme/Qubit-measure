@@ -9,7 +9,6 @@ import pytest
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
-    AnalyzeParam,
     AnalyzeRequest,
     CfgSchema,
     CfgSectionSpec,
@@ -32,17 +31,22 @@ class _DummyAnalyzeResult:
     figure: None = None
 
 
-class _DummyAdapter(AbsExpAdapter[object, _DummyAnalyzeResult]):
+@dataclass
+class _DummyAnalyzeParams:
+    threshold: float = 0.0
+
+
+class _DummyAdapter(AbsExpAdapter[object, _DummyAnalyzeResult, _DummyAnalyzeParams]):
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:  # noqa: ARG002
         return CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
 
     def build_exp_cfg(self, raw_cfg, req):  # noqa: ARG002
         return _DummyCfg()
 
-    def get_analyze_params(self, result, ctx) -> list[AnalyzeParam]:  # noqa: ARG002
-        return []
+    def get_analyze_params(self, result, ctx) -> _DummyAnalyzeParams:  # noqa: ARG002
+        return _DummyAnalyzeParams()
 
-    def analyze(self, req: AnalyzeRequest[object]):  # noqa: ARG002
+    def analyze(self, req: AnalyzeRequest[object, _DummyAnalyzeParams]):  # noqa: ARG002
         return _DummyAnalyzeResult()
 
     def get_writeback_items(

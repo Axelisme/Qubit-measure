@@ -2,8 +2,16 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
-from zcu_tools.experiment.v2_gui.adapters.onetone.fakefreq import FakeFreqAdapter
+from zcu_tools.experiment.v2_gui.adapters.fake import (
+    FakeAdapter,
+    FakeAnalyzeParams,
+    FakeResult,
+)
+from zcu_tools.experiment.v2_gui.adapters.onetone.fakefreq import (
+    FakeFreqAdapter,
+    FakeFreqAnalyzeParams,
+    FreqRunResult,
+)
 from zcu_tools.gui.adapter import (
     AnalyzeRequest,
     ExpContext,
@@ -29,9 +37,16 @@ def _make_ctx() -> ExpContext:
     )
 
 
-def _default_analyze_params(adapter, result, ctx) -> dict[str, object]:
-    params = adapter.get_analyze_params(result, ctx)
-    return {param.key: param.default for param in params}
+def _fake_analyze_params(
+    adapter: FakeAdapter, result: FakeResult, ctx: ExpContext
+) -> FakeAnalyzeParams:
+    return adapter.get_analyze_params(result, ctx)
+
+
+def _fakefreq_analyze_params(
+    adapter: FakeFreqAdapter, result: FreqRunResult, ctx: ExpContext
+) -> FakeFreqAnalyzeParams:
+    return adapter.get_analyze_params(result, ctx)
 
 
 def test_writeback_service_applies_md_items():
@@ -49,7 +64,7 @@ def test_writeback_service_applies_md_items():
     analyze_result = adapter.analyze(
         AnalyzeRequest(
             run_result=result,
-            analyze_params=_default_analyze_params(adapter, result, ctx),
+            analyze_params=_fake_analyze_params(adapter, result, ctx),
             md=ctx.md,
             ml=ctx.ml,
             predictor=ctx.predictor,
@@ -86,7 +101,7 @@ def test_writeback_service_applies_module_and_waveform_items():
     analyze_result = adapter.analyze(
         AnalyzeRequest(
             run_result=result,
-            analyze_params=_default_analyze_params(adapter, result, ctx),
+            analyze_params=_fakefreq_analyze_params(adapter, result, ctx),
             md=ctx.md,
             ml=ctx.ml,
             predictor=ctx.predictor,

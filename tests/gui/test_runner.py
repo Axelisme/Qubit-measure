@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 from qtpy.QtCore import QCoreApplication, QEventLoop, QTimer
-from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
+from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter, FakeAnalyzeParams
 from zcu_tools.gui.adapter import AnalyzeRequest, CfgSchema, ExpContext, RunRequest
 from zcu_tools.gui.runner import (
     AnalyzeRunner,
@@ -44,7 +44,7 @@ def _simple_schema() -> CfgSchema:
     return FakeAdapter().make_default_cfg(_make_ctx())
 
 
-def _analyze_req() -> AnalyzeRequest:
+def _analyze_req() -> AnalyzeRequest[Any, FakeAnalyzeParams]:
     adapter = FakeAdapter()
     ctx = _make_ctx()
     schema = adapter.make_default_cfg(ctx)
@@ -53,7 +53,7 @@ def _analyze_req() -> AnalyzeRequest:
     )
     return AnalyzeRequest(
         run_result=result,
-        analyze_params={"threshold": 0.0},
+        analyze_params=FakeAnalyzeParams(threshold=0.0),
         md=ctx.md,
         ml=ctx.ml,
         predictor=ctx.predictor,

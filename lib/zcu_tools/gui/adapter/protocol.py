@@ -7,13 +7,13 @@ from typing import TYPE_CHECKING, Any, Optional, Sequence, cast
 from typing_extensions import Generic
 
 from .types import (
-    AnalyzeParam,
     AnalyzeRequest,
     CfgSchema,
     ExpContext,
     RunRequest,
     SaveDataRequest,
     SavePaths,
+    T_AnalyzeParams,
     T_AnalyzeResult,
     T_Result,
     WritebackItem,
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from zcu_tools.experiment.cfg_model import ExpCfgModel
 
 
-class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult]):
+class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     exp_cls: Optional[type[Any]] = None
 
     @abstractmethod
@@ -49,15 +49,13 @@ class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult]):
         return cast(T_Result, experiment.run(exp_cfg))
 
     @abstractmethod
-    def get_analyze_params(
-        self, result: T_Result, ctx: ExpContext
-    ) -> list[AnalyzeParam]:
-        """Declare analysis params the GUI should collect for a run result."""
+    def get_analyze_params(self, result: T_Result, ctx: ExpContext) -> T_AnalyzeParams:
+        """Return a dataclass instance with current analysis parameters."""
 
     @abstractmethod
     def analyze(
         self,
-        req: AnalyzeRequest[T_Result],
+        req: AnalyzeRequest[T_Result, T_AnalyzeParams],
     ) -> T_AnalyzeResult:
         """Run analysis."""
 

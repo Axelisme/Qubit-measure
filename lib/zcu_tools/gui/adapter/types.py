@@ -9,7 +9,6 @@ from typing import (
     Mapping,
     Optional,
     Protocol,
-    Sequence,
     Union,
 )
 
@@ -63,6 +62,7 @@ class AnalyzeResultWithFigure(Protocol):
 
 
 T_AnalyzeResult = TypeVar("T_AnalyzeResult", bound=AnalyzeResultWithFigure)
+T_AnalyzeParams = TypeVar("T_AnalyzeParams")
 
 
 @dataclass(frozen=True)
@@ -89,9 +89,9 @@ class RunRequest:
 
 
 @dataclass(frozen=True)
-class AnalyzeRequest(Generic[T_Result]):
+class AnalyzeRequest(Generic[T_Result, T_AnalyzeParams]):
     run_result: T_Result
-    analyze_params: dict[str, object]
+    analyze_params: T_AnalyzeParams
     md: MetaDict
     ml: ModuleLibrary
     predictor: Optional[FluxoniumPredictor]
@@ -114,79 +114,6 @@ class WritebackRequest(Generic[T_Result, T_AnalyzeResult]):
     run_result: T_Result
     analyze_result: T_AnalyzeResult
     ctx: ExpContext
-
-
-def _normalize_analyze_value(type_: type, value: object) -> object:
-    if type_ is bool:
-        if not isinstance(value, bool):
-            raise RuntimeError(f"AnalyzeParam expects bool, got {type(value).__name__}")
-        return value
-    if type_ is int:
-        if not isinstance(value, int) or isinstance(value, bool):
-            raise RuntimeError(f"AnalyzeParam expects int, got {type(value).__name__}")
-        return value
-    if type_ is float:
-        if not isinstance(value, (int, float)) or isinstance(value, bool):
-            raise RuntimeError(
-                f"AnalyzeParam expects float, got {type(value).__name__}"
-            )
-        return float(value)
-    if type_ is str:
-        if not isinstance(value, str):
-            raise RuntimeError(f"AnalyzeParam expects str, got {type(value).__name__}")
-        return value
-    raise RuntimeError(f"Unsupported AnalyzeParam type: {type_!r}")
-
-
-@dataclass(frozen=True)
-class AnalyzeParam:
-    key: str
-    label: str
-    type: type
-    default: object
-    choices: Optional[list[object]] = None
-    decimals: Optional[int] = None
-
-    def __post_init__(self) -> None:
-        if not self.key:
-            raise RuntimeError("AnalyzeParam.key must be non-empty")
-        _normalize_analyze_value(self.type, self.default)
-        if self.choices is not None:
-            if not self.choices:
-                raise RuntimeError("AnalyzeParam.choices must not be empty")
-            for choice in self.choices:
-                _normalize_analyze_value(self.type, choice)
-
-
-def analyze_params_to_raw_dict(
-    params: Sequence["AnalyzeParam"],
-    values: dict[str, object],
-) -> dict[str, object]:
-    raw: dict[str, object] = {}
-    param_by_key: dict[str, AnalyzeParam] = {}
-    for param in params:
-        if param.key in param_by_key:
-            raise RuntimeError(f"Duplicate AnalyzeParam key: {param.key}")
-        param_by_key[param.key] = param
-
-    missing = set(param_by_key) - set(values)
-    if missing:
-        names = ", ".join(sorted(missing))
-        raise RuntimeError(f"Missing analyze params: {names}")
-
-    unknown = set(values) - set(param_by_key)
-    if unknown:
-        names = ", ".join(sorted(unknown))
-        raise RuntimeError(f"Unknown analyze params: {names}")
-
-    for key, param in param_by_key.items():
-        value = _normalize_analyze_value(param.type, values[key])
-        if param.choices is not None and value not in param.choices:
-            raise RuntimeError(
-                f"AnalyzeParam {key!r} must be one of {param.choices}, got {value!r}"
-            )
-        raw[key] = value
-    return raw
 
 
 @dataclass

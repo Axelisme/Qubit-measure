@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Optional
 
 from matplotlib.figure import Figure
 
-from zcu_tools.gui.adapter import AnalyzeParam, CfgSchema, SavePaths
+from zcu_tools.gui.adapter import CfgSchema, SavePaths
 
 logger = logging.getLogger(__name__)
 
@@ -66,31 +66,28 @@ class TabService:
     def get_tab_figure(self, tab_id: str) -> Figure | None:
         return self._state.get_tab(tab_id).figure
 
-    def get_tab_analyze_params(self, tab_id: str) -> list[AnalyzeParam]:
+    def get_tab_analyze_params(self, tab_id: str) -> object:
         tab = self._state.get_tab(tab_id)
         if tab.run_result is None:
             raise RuntimeError("No run result available to build analyze params")
-        params = tab.adapter.get_analyze_params(tab.run_result, self._state.exp_context)
-        if not tab.analyze_params or [param.key for param in tab.analyze_params] != [
-            param.key for param in params
-        ]:
-            self._state.update_tab_analyze_params(tab_id, params)
-        elif not tab.analyze_param_values:
-            self._state.update_tab_analyze_params(
-                tab_id,
-                params,
-                {param.key: param.default for param in params},
-            )
-        return params
+        instance = tab.adapter.get_analyze_params(
+            tab.run_result, self._state.exp_context
+        )
+        if tab.analyze_param_instance is None or type(instance) is not type(
+            tab.analyze_param_instance
+        ):
+            self._state.update_tab_analyze_params(tab_id, instance)
+        stored = tab.analyze_param_instance
+        if stored is None:
+            raise RuntimeError("Analyze params were not stored")
+        return stored
 
-    def get_tab_analyze_param_values(self, tab_id: str) -> dict[str, object]:
+    def get_tab_analyze_param_instance(self, tab_id: str) -> object | None:
         tab = self._state.get_tab(tab_id)
-        return dict(tab.analyze_param_values)
+        return tab.analyze_param_instance
 
-    def update_tab_analyze_param_values(
-        self, tab_id: str, values: dict[str, object]
-    ) -> None:
-        self._state.update_tab_analyze_param_values(tab_id, values)
+    def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:
+        self._state.update_tab_analyze_param_instance(tab_id, instance)
 
     def get_tab_save_paths(self, tab_id: str) -> Optional[SavePaths]:
         self.refresh_tab_save_paths(tab_id)

@@ -38,7 +38,7 @@ class AnalyzeService(QObject):
     def start_analyze(
         self,
         tab_id: str,
-        analyze_params: dict[str, object],
+        analyze_params_instance: object,
         figure_container: Optional[FigureContainer] = None,
     ) -> None:
         if self._state.is_tab_busy(tab_id):
@@ -51,13 +51,15 @@ class AnalyzeService(QObject):
         ctx = self._state.exp_context
         req = AnalyzeRequest(
             run_result=tab.run_result,
-            analyze_params=analyze_params,
+            analyze_params=analyze_params_instance,
             md=ctx.md,
             ml=ctx.ml,
             predictor=ctx.predictor,
         )
         logger.info(
-            "start_analyze: tab_id=%r analyze_params=%r", tab_id, list(analyze_params)
+            "start_analyze: tab_id=%r analyze_params_type=%s",
+            tab_id,
+            type(analyze_params_instance).__name__,
         )
         self._runner.start_analyze(
             tab_id,

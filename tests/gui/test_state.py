@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
-from zcu_tools.gui.adapter import AnalyzeParam, SavePaths
+from zcu_tools.gui.adapter import SavePaths
 from zcu_tools.gui.state import State, TabInteractionState, TabState
 
 
@@ -16,6 +17,11 @@ def _make_ctx():
 
 def _make_adapter():
     return MagicMock()
+
+
+@dataclass
+class _AnalyzeParams:
+    threshold: float
 
 
 def test_tab_interaction_state_creation():
@@ -116,16 +122,14 @@ def test_update_tab_result_stores_result_and_clears_stale_analyze_data():
     adapter = _make_adapter()
     adapter.make_default_cfg.return_value = object()
     state.add_tab("t1", adapter, _make_ctx())
-    param = AnalyzeParam(key="threshold", label="Threshold", type=float, default=0.0)
-    state.update_tab_analyze_params("t1", [param], {"threshold": 0.5})
+    state.update_tab_analyze_params("t1", _AnalyzeParams(threshold=0.5))
     state.update_tab_analyze("t1", object(), Figure())
     state.update_tab_suggested_save_paths("t1", SavePaths("/tmp/a", "/tmp/b"))
     state.update_tab_result("t1", object())
     tab = state.get_tab("t1")
     assert tab.analyze_result is None
     assert tab.figure is None
-    assert tab.analyze_params == []
-    assert tab.analyze_param_values == {}
+    assert tab.analyze_param_instance is None
     assert tab.suggested_save_paths is None
 
 
@@ -142,14 +146,14 @@ def test_update_tab_analyze_stores_analyze_result_and_figure():
     assert tab.figure is fig
 
 
-def test_update_tab_analyze_params_defaults_values_when_missing():
+def test_update_tab_analyze_params_stores_instance():
     state = State(_make_ctx())
     adapter = _make_adapter()
     adapter.make_default_cfg.return_value = object()
     state.add_tab("t1", adapter, _make_ctx())
-    params = [AnalyzeParam(key="threshold", label="Threshold", type=float, default=0.2)]
+    params = _AnalyzeParams(threshold=0.2)
     state.update_tab_analyze_params("t1", params)
-    assert state.get_tab("t1").analyze_param_values == {"threshold": 0.2}
+    assert state.get_tab("t1").analyze_param_instance is params
 
 
 def test_update_tab_save_path_overrides_sets_both_paths():

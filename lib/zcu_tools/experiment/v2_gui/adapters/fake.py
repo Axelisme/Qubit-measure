@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Sequence, cast
+from typing import Annotated, Any, Sequence, cast
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -13,7 +13,6 @@ from zcu_tools.experiment.base import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
-    AnalyzeParam,
     AnalyzeRequest,
     CfgSchema,
     CfgSectionSpec,
@@ -21,6 +20,7 @@ from zcu_tools.gui.adapter import (
     DirectValue,
     ExpContext,
     MetaDictWriteback,
+    ParamMeta,
     RunRequest,
     SaveDataRequest,
     ScalarSpec,
@@ -53,6 +53,11 @@ class FakeAnalyzeResult:
     figure: Figure
 
 
+@dataclass
+class FakeAnalyzeParams:
+    threshold: Annotated[float, ParamMeta(label="Threshold", decimals=2)]
+
+
 def _require_int(raw_cfg: dict[str, object], key: str) -> int:
     value = raw_cfg.get(key)
     if not isinstance(value, int):
@@ -71,7 +76,7 @@ def _require_float(raw_cfg: dict[str, object], key: str) -> float:
     return float(value)
 
 
-class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult]):
+class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult, FakeAnalyzeParams]):
     """Minimal stub adapter — drives the full GUI flow without hardware."""
 
     exp_cls = FakeExperiment
@@ -110,26 +115,14 @@ class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult]):
         self,
         result: FakeResult,  # noqa: ARG002
         ctx: ExpContext,  # noqa: ARG002
-    ) -> list[AnalyzeParam]:
-        return [
-            AnalyzeParam(
-                key="threshold",
-                label="Threshold",
-                type=float,
-                default=0.5,
-            )
-        ]
+    ) -> FakeAnalyzeParams:
+        return FakeAnalyzeParams(threshold=0.5)
 
     def analyze(
         self,
-        req: AnalyzeRequest[FakeResult],
+        req: AnalyzeRequest[FakeResult, FakeAnalyzeParams],
     ) -> FakeAnalyzeResult:
-        threshold_value = req.analyze_params.get("threshold")
-        if not isinstance(threshold_value, (int, float)) or isinstance(
-            threshold_value, bool
-        ):
-            raise RuntimeError("Analyze param 'threshold' must be float")
-        threshold = float(threshold_value)
+        threshold = req.analyze_params.threshold
         result = req.run_result
         if not isinstance(result, np.ndarray):
             raise RuntimeError("Analyze request run_result must be numpy.ndarray")

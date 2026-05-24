@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import numpy as np
-from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
+from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter, FakeAnalyzeParams
 from zcu_tools.experiment.v2_gui.registry import ADAPTERS, register_all
 from zcu_tools.gui.adapter import (
     AnalyzeRequest,
@@ -52,7 +52,7 @@ def test_fake_adapter_full_flow():
     analyze_result = adapter.analyze(
         AnalyzeRequest(
             run_result=result,
-            analyze_params={"threshold": 0.0},
+            analyze_params=FakeAnalyzeParams(threshold=0.0),
             md=ctx.md,
             ml=ctx.ml,
             predictor=getattr(ctx, "predictor", None),

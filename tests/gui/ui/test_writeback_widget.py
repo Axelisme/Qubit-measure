@@ -3,7 +3,11 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from qtpy.QtWidgets import QPushButton
-from zcu_tools.experiment.v2_gui.adapters.onetone.fakefreq import FakeFreqAdapter
+from zcu_tools.experiment.v2_gui.adapters.onetone.fakefreq import (
+    FakeFreqAdapter,
+    FakeFreqAnalyzeParams,
+    FreqRunResult,
+)
 from zcu_tools.gui.adapter import (
     AnalyzeRequest,
     ExpContext,
@@ -25,9 +29,10 @@ def _make_ctx() -> ExpContext:
     )
 
 
-def _default_analyze_params(adapter, result, ctx) -> dict[str, object]:
-    params = adapter.get_analyze_params(result, ctx)
-    return {param.key: param.default for param in params}
+def _default_analyze_params(
+    adapter: FakeFreqAdapter, result: FreqRunResult, ctx: ExpContext
+) -> FakeFreqAnalyzeParams:
+    return adapter.get_analyze_params(result, ctx)
 
 
 def test_writeback_widget_lists_items_and_edit_buttons(qapp):

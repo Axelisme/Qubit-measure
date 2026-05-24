@@ -8,11 +8,11 @@ from typing_extensions import Generic, TypeVar
 
 from .adapter import (
     AbsExpAdapter,
-    AnalyzeParam,
     AnalyzeResultWithFigure,
     CfgSchema,
     ExpContext,
     SavePaths,
+    T_AnalyzeParams,
 )
 
 logger = logging.getLogger(__name__)
@@ -25,14 +25,13 @@ T_AnalyzeResult = TypeVar("T_AnalyzeResult", bound=AnalyzeResultWithFigure)
 
 
 @dataclass
-class TabState(Generic[T_Result, T_AnalyzeResult]):
-    adapter: AbsExpAdapter[T_Result, T_AnalyzeResult]
+class TabState(Generic[T_Result, T_AnalyzeResult, T_AnalyzeParams]):
+    adapter: AbsExpAdapter[T_Result, T_AnalyzeResult, T_AnalyzeParams]
     cfg_schema: CfgSchema
     run_result: Optional[T_Result] = None
     analyze_result: Optional[T_AnalyzeResult] = None
     figure: Optional["Figure"] = None
-    analyze_params: list[AnalyzeParam] = field(default_factory=list)
-    analyze_param_values: dict[str, object] = field(default_factory=dict)
+    analyze_param_instance: Optional[T_AnalyzeParams] = None
     suggested_save_paths: Optional[SavePaths] = None
     save_path_overrides: Optional[SavePaths] = None
     applied_writeback_keys: set[str] = field(default_factory=set)
@@ -58,7 +57,7 @@ class State:
 
     def __init__(self, ctx: ExpContext) -> None:
         self.exp_context: ExpContext = ctx
-        self.tabs: dict[str, TabState[Any, Any]] = {}
+        self.tabs: dict[str, TabState[Any, Any, Any]] = {}
         self.active_tab_id: Optional[str] = None
         self.running_tab_id: Optional[str] = None
         self.has_startup_context: bool = False
@@ -67,7 +66,7 @@ class State:
         self.exp_context = ctx
 
     def add_tab(
-        self, tab_id: str, adapter: AbsExpAdapter[Any, Any], ctx: ExpContext
+        self, tab_id: str, adapter: AbsExpAdapter[Any, Any, Any], ctx: ExpContext
     ) -> None:
         if tab_id in self.tabs:
             raise ValueError(f"tab_id {tab_id!r} already exists")
@@ -100,8 +99,7 @@ class State:
         )
         tab = self.tabs[tab_id]
         tab.run_result = result
-        tab.analyze_params = []
-        tab.analyze_param_values = {}
+        tab.analyze_param_instance = None
         tab.suggested_save_paths = None
         # invalidate stale analyze results from the previous run
         tab.analyze_result = None
@@ -125,31 +123,21 @@ class State:
         logger.debug("update_tab_cfg_schema: tab_id=%r", tab_id)
         self.tabs[tab_id].cfg_schema = schema
 
-    def update_tab_analyze_params(
-        self,
-        tab_id: str,
-        params: list[AnalyzeParam],
-        values: Optional[dict[str, object]] = None,
-    ) -> None:
+    def update_tab_analyze_params(self, tab_id: str, instance: object) -> None:
         logger.debug(
-            "update_tab_analyze_params: tab_id=%r keys=%r",
+            "update_tab_analyze_params: tab_id=%r instance_type=%s",
             tab_id,
-            [p.key for p in params],
+            type(instance).__name__,
         )
-        tab = self.tabs[tab_id]
-        tab.analyze_params = list(params)
-        if values is None:
-            tab.analyze_param_values = {param.key: param.default for param in params}
-            return
-        tab.analyze_param_values = dict(values)
+        self.tabs[tab_id].analyze_param_instance = instance
 
-    def update_tab_analyze_param_values(
-        self, tab_id: str, values: dict[str, object]
-    ) -> None:
+    def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:
         logger.debug(
-            "update_tab_analyze_param_values: tab_id=%r keys=%r", tab_id, list(values)
+            "update_tab_analyze_param_instance: tab_id=%r instance_type=%s",
+            tab_id,
+            type(instance).__name__,
         )
-        self.tabs[tab_id].analyze_param_values = dict(values)
+        self.tabs[tab_id].analyze_param_instance = instance
 
     def update_tab_suggested_save_paths(
         self, tab_id: str, paths: Optional[SavePaths]

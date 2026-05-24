@@ -212,13 +212,15 @@ class Controller:
     # Analyze flow (TabService)
     # ------------------------------------------------------------------
 
-    def analyze(self, tab_id: str, analyze_params: dict[str, object]) -> None:
+    def analyze(self, tab_id: str, analyze_params_instance: object) -> None:
         if not self.has_context():
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
         figure_container = self._require_view().make_live_container(tab_id)
-        self._analyze_svc.start_analyze(tab_id, analyze_params, figure_container)
+        self._analyze_svc.start_analyze(
+            tab_id, analyze_params_instance, figure_container
+        )
 
     # ------------------------------------------------------------------
     # Writeback (TabService)
@@ -407,11 +409,11 @@ class Controller:
     def get_tab_writeback_items(self, tab_id: str) -> list[WritebackItem]:
         return self._writeback_svc.get_tab_writeback_items(tab_id)
 
-    def get_tab_analyze_params(self, tab_id: str) -> list:
+    def get_tab_analyze_params(self, tab_id: str) -> object:
         return self._tab_svc.get_tab_analyze_params(tab_id)
 
-    def get_tab_analyze_param_values(self, tab_id: str) -> dict[str, object]:
-        return self._tab_svc.get_tab_analyze_param_values(tab_id)
+    def get_tab_analyze_param_instance(self, tab_id: str) -> object | None:
+        return self._tab_svc.get_tab_analyze_param_instance(tab_id)
 
     def get_tab_save_paths(self, tab_id: str) -> Optional[SavePaths]:
         return self._tab_svc.get_tab_save_paths(tab_id)
@@ -423,10 +425,8 @@ class Controller:
             TabInteractionChangedPayload(tab_id=tab_id),
         )
 
-    def update_tab_analyze_param_values(
-        self, tab_id: str, values: dict[str, object]
-    ) -> None:
-        self._tab_svc.update_tab_analyze_param_values(tab_id, values)
+    def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:
+        self._tab_svc.update_tab_analyze_param_instance(tab_id, instance)
         self._bus.emit(
             GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),

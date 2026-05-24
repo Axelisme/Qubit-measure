@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, Sequence, cast
+from typing import Annotated, Any, Literal, Optional, Sequence, cast
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -34,7 +34,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 )
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
-    AnalyzeParam,
     AnalyzeRequest,
     CfgSchema,
     CfgSectionSpec,
@@ -43,6 +42,7 @@ from zcu_tools.gui.adapter import (
     ExpContext,
     MetaDictWriteback,
     ModuleWriteback,
+    ParamMeta,
     RunRequest,
     SaveDataRequest,
     ScalarSpec,
@@ -112,6 +112,12 @@ class FakeFreqAnalyzeResult:
     fwhm: float
     params: dict[str, Any]
     figure: Figure
+
+
+@dataclass
+class FakeFreqAnalyzeParams:
+    model_type: Annotated[Literal["hm", "t", "auto"], ParamMeta(label="Model type")]
+    fit_bg_slope: Annotated[bool, ParamMeta(label="Fit background slope")]
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +194,9 @@ class FakeFreqExp(AbsExperiment[FreqRunResult, FakeFreqCfg]):
 # ---------------------------------------------------------------------------
 
 
-class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
+class FakeFreqAdapter(
+    AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult, FakeFreqAnalyzeParams]
+):
     """Simulated one-tone frequency sweep.  No hardware required."""
 
     exp_cls = FakeFreqExp
@@ -294,44 +302,24 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
 
     def get_analyze_params(
         self, result: FreqRunResult, ctx: ExpContext
-    ) -> list[AnalyzeParam]:
-        return [
-            AnalyzeParam(
-                key="model_type",
-                label="Model type",
-                type=str,
-                default="hm",
-                choices=["hm", "t", "auto"],
-            ),
-            AnalyzeParam(
-                key="fit_bg_slope",
-                label="Fit background slope",
-                type=bool,
-                default=False,
-            ),
-        ]
+    ) -> FakeFreqAnalyzeParams:
+        return FakeFreqAnalyzeParams(model_type="hm", fit_bg_slope=False)
 
     def analyze(
         self,
-        req: AnalyzeRequest[FreqRunResult],
+        req: AnalyzeRequest[FreqRunResult, FakeFreqAnalyzeParams],
     ) -> FakeFreqAnalyzeResult:
         result = req.run_result
-        model_type_value = req.analyze_params.get("model_type")
-        if model_type_value not in {"hm", "t", "auto"}:
-            raise RuntimeError("Analyze param 'model_type' must be hm, t, or auto")
-        fit_bg_slope = req.analyze_params.get("fit_bg_slope")
-        if not isinstance(fit_bg_slope, bool):
-            raise RuntimeError("Analyze param 'fit_bg_slope' must be bool")
-        model_type = cast(Literal["hm", "t", "auto"], model_type_value)
-        freq, fwhm, params, figure = FakeFreqExp().analyze(
+        analyze_params = req.analyze_params
+        freq, fwhm, fit_params, figure = FakeFreqExp().analyze(
             result,
-            model_type=model_type,
-            fit_bg_slope=fit_bg_slope,
+            model_type=analyze_params.model_type,
+            fit_bg_slope=analyze_params.fit_bg_slope,
         )
         return FakeFreqAnalyzeResult(
             freq=freq,
             fwhm=fwhm,
-            params=params,
+            params=fit_params,
             figure=figure,
         )
 
