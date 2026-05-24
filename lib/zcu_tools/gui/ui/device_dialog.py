@@ -331,14 +331,11 @@ class DeviceDialog(QDialog):
 
         # Simple sync for now, or we can use QThread later if needed.
         # Original code used a DeviceSetupWorker which we don't have right now.
-        try:
-            dev = _instantiate_device(dtype, addr)
-            name = dtype.lower()
-            self._ctrl.register_device(name, cast(DeviceProtocol, dev))
-            self._ctrl.setup_device(name, {"address": addr})
-            self._refresh_list()
-        except Exception as e:
-            logger.error("Failed to add device: %s", e)
+        dev = _instantiate_device(dtype, addr)
+        name = dtype.lower()
+        self._ctrl.register_device(name, cast(DeviceProtocol, dev))
+        self._ctrl.setup_device(name, {"address": addr})
+        self._refresh_list()
 
     def _on_drop_clicked(self) -> None:
         item = self._list.currentItem()
@@ -363,8 +360,6 @@ class DeviceDialog(QDialog):
         try:
             for k, v in updates.items():
                 self._ctrl.set_device_value(name, {k: v})
-        except Exception as e:
-            logger.error("Failed to apply device updates: %s", e)
         finally:
             self._set_apply_busy(False)
 

@@ -200,8 +200,8 @@ def test_run_failed_shows_status_message(cf):
 
     cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
-    assert cf.view.show_status_message.called
-    msg = cf.view.show_status_message.call_args[0][0]
+    assert cf.view.show_error_dialog.called
+    msg = cf.view.show_error_dialog.call_args[0][1]
     assert "boom" in msg
 
 

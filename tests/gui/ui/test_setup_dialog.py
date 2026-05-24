@@ -22,6 +22,7 @@ def test_setup_dialog_init(qapp):
 
 def test_setup_dialog_apply_startup_context(qapp):
     ctrl = MagicMock()
+    ctrl.get_soccfg.return_value.description.return_value = "Mock SOC config"
     dialog = SetupDialog(ctrl)
 
     dialog._chip_edit.setText("Q1_Chip")
@@ -40,6 +41,7 @@ def test_setup_dialog_switch_context(qapp):
     ctrl = MagicMock()
     ctrl.get_context_labels.return_value = ["ctx1", "ctx2"]
     ctrl.get_active_context_label.return_value = "ctx1"
+    ctrl.get_soccfg.return_value.description.return_value = "Mock SOC config"
     dialog = SetupDialog(ctrl)
 
     dialog._ctx_list.setCurrentRow(1)  # select ctx2
@@ -50,6 +52,7 @@ def test_setup_dialog_switch_context(qapp):
 
 def test_setup_dialog_new_context(qapp):
     ctrl = MagicMock()
+    ctrl.get_soccfg.return_value.description.return_value = "Mock SOC config"
     dialog = SetupDialog(ctrl)
 
     dialog._clone_check.setChecked(True)
@@ -62,6 +65,7 @@ def test_setup_dialog_new_context(qapp):
 
 def test_setup_dialog_connect_mock(qapp):
     ctrl = MagicMock()
+    ctrl.get_soccfg.return_value.description.return_value = "Mock SOC config"
     dialog = SetupDialog(ctrl)
 
     dialog._mock_check.setChecked(True)
@@ -72,6 +76,7 @@ def test_setup_dialog_connect_mock(qapp):
     ):
         mock_soc = MagicMock()
         mock_cfg = MagicMock()
+        mock_cfg.description.return_value = "Mock cfg desc"
         make_soc.return_value = mock_soc
         make_cfg.return_value = mock_cfg
 

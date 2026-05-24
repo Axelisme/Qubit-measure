@@ -278,27 +278,21 @@ class InspectDialog(QDialog):
         if not key:
             return
         value = self._parse_value(self._edit_value.text())
-        try:
-            self._ctrl.set_md_attr(key, value)
-            self._populate_md(self._ctrl.get_current_md())
-            now = datetime.now().strftime("%H:%M:%S")
-            self._status_label.setText(f"Last updated: {now}")
-        except Exception as exc:
-            self._status_label.setText(f"Error: {exc}")
+        self._ctrl.set_md_attr(key, value)
+        self._populate_md(self._ctrl.get_current_md())
+        now = datetime.now().strftime("%H:%M:%S")
+        self._status_label.setText(f"Last updated: {now}")
 
     def _on_delete_clicked(self) -> None:
         key = self._edit_key.text().strip()
         if not key:
             return
-        try:
-            self._ctrl.del_md_attr(key)
-            self._edit_key.clear()
-            self._edit_value.clear()
-            self._populate_md(self._ctrl.get_current_md())
-            now = datetime.now().strftime("%H:%M:%S")
-            self._status_label.setText(f"Last updated: {now}")
-        except Exception as exc:
-            self._status_label.setText(f"Error: {exc}")
+        self._ctrl.del_md_attr(key)
+        self._edit_key.clear()
+        self._edit_value.clear()
+        self._populate_md(self._ctrl.get_current_md())
+        now = datetime.now().strftime("%H:%M:%S")
+        self._status_label.setText(f"Last updated: {now}")
 
     def _on_ml_item_changed(
         self, current: Optional[QTreeWidgetItem], _previous: Any
@@ -317,13 +311,10 @@ class InspectDialog(QDialog):
             self._ml_text.setPlainText("")
             return
 
-        try:
-            store = ml.modules if group == "modules" else ml.waveforms
-            cfg = store[name]
-            text = yaml.dump(cfg.to_dict(), allow_unicode=True, sort_keys=False)
-            self._ml_text.setPlainText(text)
-        except Exception as exc:
-            self._ml_text.setPlainText(f"(error reading {name}: {exc})")
+        store = ml.modules if group == "modules" else ml.waveforms
+        cfg = store[name]
+        text = yaml.dump(cfg.to_dict(), allow_unicode=True, sort_keys=False)
+        self._ml_text.setPlainText(text)
 
     # ------------------------------------------------------------------
     # Public API

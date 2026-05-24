@@ -179,8 +179,8 @@ def test_analyze_exception_shows_status_message(cf):
     cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
     assert _wait_for(lambda: not cf.state.is_tab_analyzing(tab_id))
 
-    assert cf.view.show_status_message.called
-    msg = cf.view.show_status_message.call_args[0][0]
+    assert cf.view.show_error_dialog.called
+    msg = cf.view.show_error_dialog.call_args[0][1]
     assert "bad analysis" in msg
 
 
@@ -453,7 +453,7 @@ def test_save_both_reports_both_failures(cf):
 
     cf.ctrl.save_both(tab_id, "/tmp/fake_data", "/tmp/does_not_exist/out.png")
     assert _wait_for(lambda: bad_adapter.save.called)
-    msg_lower = lambda: cf.view.show_status_message.call_args[0][0].lower()  # noqa: E731
+    msg_lower = lambda: cf.view.show_error_dialog.call_args[0][1].lower()  # noqa: E731
     assert _wait_for(
         lambda: "data failed" in msg_lower() and "image failed" in msg_lower()
     )

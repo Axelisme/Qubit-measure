@@ -814,6 +814,15 @@ class MainWindow(QMainWindow):
         logger.info("status: %s", message)
         self._status_bar.showMessage(message)
 
+    def show_error_dialog(self, title: str, message: str) -> None:
+        from qtpy.QtWidgets import QMessageBox
+
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Icon.Critical)
+        msg_box.setWindowTitle(title)
+        msg_box.setText(message)
+        msg_box.exec_()
+
     def show_plot(self, tab_id: str, fig: Any) -> None:  # Phase 11
         logger.debug("show_plot: tab_id=%r fig=%s", tab_id, type(fig).__name__)
 
@@ -866,10 +875,7 @@ class MainWindow(QMainWindow):
             return
         tab_id = tab_w.tab_id
         logger.info("_on_tab_close_requested: tab_id=%r", tab_id)
-        try:
-            self._ctrl.close_tab(tab_id)
-        except RuntimeError as exc:
-            self.show_status_message(str(exc))
+        self._ctrl.close_tab(tab_id)
 
     def _resolve_tab_widget(self, tab_id: str, action: str) -> Optional[ExpTabWidget]:
         """Look up the widget; log + bail if tab_id is unknown to the controller."""
@@ -898,24 +904,16 @@ class MainWindow(QMainWindow):
             logger.warning("_on_run_stop_clicked: blocked — %s", msg)
             self.show_status_message(msg)
             return
-        try:
-            schema = tab_w.read_schema()
-            self._ctrl.start_run(tab_id, schema)
-            tab_w.reset_plot()
-        except Exception as exc:
-            logger.warning("_on_run_stop_clicked: blocked — %s", exc)
-            self.show_status_message(str(exc))
+        schema = tab_w.read_schema()
+        self._ctrl.start_run(tab_id, schema)
+        tab_w.reset_plot()
 
     def _on_analyze_clicked(self, tab_id: str) -> None:
         logger.info("_on_analyze_clicked: tab_id=%r", tab_id)
         tab_w = self._resolve_tab_widget(tab_id, "_on_analyze_clicked")
         if tab_w is None:
             return
-        try:
-            self._ctrl.analyze(tab_id, tab_w.read_analyze_params())
-        except RuntimeError as exc:
-            logger.warning("_on_analyze_clicked: blocked — %s", exc)
-            self.show_status_message(str(exc))
+        self._ctrl.analyze(tab_id, tab_w.read_analyze_params())
 
     def _on_writeback_inline_apply(
         self, tab_id: str, items: list["WritebackItem"]
@@ -928,15 +926,9 @@ class MainWindow(QMainWindow):
                 "_on_writeback_inline_apply: unknown tab_id=%r — ignoring", tab_id
             )
             return
-        try:
-            applied_keys = self._ctrl.apply_writeback_items(tab_id, items)
-            if applied_keys:
-                self.show_status_message(
-                    f"Writeback applied: {', '.join(applied_keys)}"
-                )
-        except RuntimeError as exc:
-            logger.warning("_on_writeback_inline_apply: blocked — %s", exc)
-            self.show_status_message(str(exc))
+        applied_keys = self._ctrl.apply_writeback_items(tab_id, items)
+        if applied_keys:
+            self.show_status_message(f"Writeback applied: {', '.join(applied_keys)}")
 
     def _on_save_data_clicked(self, tab_id: str) -> None:
         logger.info("_on_save_data_clicked: tab_id=%r", tab_id)
@@ -944,11 +936,7 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         path = tab_w.get_data_path()
-        try:
-            self._ctrl.save_data(tab_id, path)
-        except RuntimeError as exc:
-            logger.warning("_on_save_data_clicked: blocked — %s", exc)
-            self.show_status_message(str(exc))
+        self._ctrl.save_data(tab_id, path)
 
     def _on_save_image_clicked(self, tab_id: str) -> None:
         logger.info("_on_save_image_clicked: tab_id=%r", tab_id)
@@ -956,11 +944,7 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         path = tab_w.get_image_path()
-        try:
-            self._ctrl.save_image(tab_id, path)
-        except RuntimeError as exc:
-            logger.warning("_on_save_image_clicked: blocked — %s", exc)
-            self.show_status_message(str(exc))
+        self._ctrl.save_image(tab_id, path)
 
     def _on_save_both_clicked(self, tab_id: str) -> None:
         logger.info("_on_save_both_clicked: tab_id=%r", tab_id)
@@ -969,11 +953,7 @@ class MainWindow(QMainWindow):
             return
         data_path = tab_w.get_data_path()
         image_path = tab_w.get_image_path()
-        try:
-            self._ctrl.save_both(tab_id, data_path, image_path)
-        except RuntimeError as exc:
-            logger.warning("_on_save_both_clicked: blocked/failed — %s", exc)
-            self.show_status_message(str(exc))
+        self._ctrl.save_both(tab_id, data_path, image_path)
 
     def _state_running_tab_id(self) -> Optional[str]:
         for tab_id in self._tab_widgets:

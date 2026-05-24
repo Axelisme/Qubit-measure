@@ -33,6 +33,10 @@ def _make_empty_ctx() -> "ExpContext":
 
 def run_app() -> None:
     """Build and launch the GUI. Blocks until the window is closed."""
+    from zcu_tools.gui.utils.error_handler import install_global_exception_hook
+
+    install_global_exception_hook()
+
     configure_gui_matplotlib_backend()
 
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]

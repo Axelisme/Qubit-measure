@@ -69,7 +69,7 @@ class AnalyzeFormWidget(QWidget):
     def is_valid(self) -> bool:
         try:
             self.read_params()
-        except Exception:
+        except (ValueError, TypeError):
             return False
         return True
 

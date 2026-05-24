@@ -45,6 +45,7 @@ class ViewProtocol(Protocol):
     def show_status_message(self, message: str) -> None: ...
     def make_pbar_factory(self, tab_id: str) -> Optional[object]: ...
     def make_live_container(self, tab_id: str) -> Optional[FigureContainer]: ...
+    def show_error_dialog(self, title: str, message: str) -> None: ...
 
 
 class Controller:
@@ -97,7 +98,7 @@ class Controller:
         )
 
     def _on_run_failed(self, _tab_id: str, error: Exception) -> None:
-        self._require_view().show_status_message(f"Run failed: {error}")
+        self._require_view().show_error_dialog("Run failed", str(error))
 
     def _on_analyze_finished(self, tab_id: str, _result: object) -> None:
         self._bus.emit(
@@ -105,7 +106,7 @@ class Controller:
         )
 
     def _on_analyze_failed(self, _tab_id: str, error: Exception) -> None:
-        self._require_view().show_status_message(f"Analyze failed: {error}")
+        self._require_view().show_error_dialog("Analyze failed", str(error))
 
     def _on_save_finished(self, tab_id: str, data_path: str) -> None:
         del tab_id
@@ -113,7 +114,7 @@ class Controller:
 
     def _on_save_failed(self, tab_id: str, data_path: str, error: Exception) -> None:
         del tab_id, data_path
-        self._require_view().show_status_message(f"Save data failed: {error}")
+        self._require_view().show_error_dialog("Save data failed", str(error))
 
     def _on_save_both_finished(self, tab_id: str, outcome: SaveBothOutcome) -> None:
         del tab_id
@@ -134,8 +135,9 @@ class Controller:
                 f"image saved to {outcome.image_path}"
             )
             return
-        self._require_view().show_status_message(
-            f"Data failed: {outcome.data_error}; image failed: {outcome.image_error}"
+        self._require_view().show_error_dialog(
+            "Save Both failed",
+            f"Data failed: {outcome.data_error}\nImage failed: {outcome.image_error}",
         )
 
     def get_bus(self) -> EventBus:

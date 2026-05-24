@@ -129,16 +129,12 @@ class PredictorDialog(QDialog):
     def _on_accepted(self) -> None:
         path = self._path_edit.text().strip()
         flux_bias = self._flux_bias_spin.value()
-        try:
-            from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
+        from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
-            predictor = FluxoniumPredictor.from_file(path, flux_bias=flux_bias)
-            self._ctrl.set_predictor(predictor, path=path)
-            self._set_status("Predictor loaded", error=False)
-            logger.info("PredictorDialog: loaded path=%r", path)
-        except Exception as exc:
-            self._set_status(str(exc), error=True)
-            logger.warning("PredictorDialog: load failed: %r", exc)
+        predictor = FluxoniumPredictor.from_file(path, flux_bias=flux_bias)
+        self._ctrl.set_predictor(predictor, path=path)
+        self._set_status("Predictor loaded", error=False)
+        logger.info("PredictorDialog: loaded path=%r", path)
 
     def _on_clear(self) -> None:
         self._ctrl.set_predictor(None)
@@ -155,22 +151,17 @@ class PredictorDialog(QDialog):
         from_lvl = self._from_spin.value()
         to_lvl = self._to_spin.value()
         transition = (from_lvl, to_lvl)
-        try:
-            freq = predictor.predict_freq(value, transition=transition)
-            self._predict_result_label.setText(f"{freq:.4f} MHz")
-            self._set_status(
-                f"Predicted ({from_lvl},{to_lvl}) @ {value:.6g}: {freq:.4f} MHz"
-            )
-            logger.info(
-                "PredictorDialog: predict value=%r transition=%r → %.4f MHz",
-                value,
-                transition,
-                freq,
-            )
-        except Exception as exc:
-            self._set_status(str(exc), error=True)
-            self._predict_result_label.setText("error")
-            logger.warning("PredictorDialog: predict failed: %r", exc)
+        freq = predictor.predict_freq(value, transition=transition)
+        self._predict_result_label.setText(f"{freq:.4f} MHz")
+        self._set_status(
+            f"Predicted ({from_lvl},{to_lvl}) @ {value:.6g}: {freq:.4f} MHz"
+        )
+        logger.info(
+            "PredictorDialog: predict value=%r transition=%r → %.4f MHz",
+            value,
+            transition,
+            freq,
+        )
 
     def _set_status(self, msg: str, error: bool = False) -> None:
         self._status_label.setText(msg)

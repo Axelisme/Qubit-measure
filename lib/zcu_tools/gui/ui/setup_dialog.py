@@ -61,7 +61,8 @@ def _detect_unit(device_name: str) -> str:
                 mode = dev.get_mode()
                 return "V" if mode == "voltage" else "A"
         return _DEVICE_DEFAULT_UNITS.get(dev_type, "none")
-    except Exception:
+    except Exception as exc:
+        logger.warning("_detect_unit failed for %r: %r", device_name, exc)
         return "none"
 
 
@@ -266,12 +267,9 @@ class SetupDialog(QDialog):
             self._db_path_edit.setText(path)
 
     def _refresh_device_list(self) -> None:
-        try:
-            from zcu_tools.device import GlobalDeviceManager
+        from zcu_tools.device import GlobalDeviceManager
 
-            devices = GlobalDeviceManager.get_all_devices()
-        except Exception:
-            devices = {}
+        devices = GlobalDeviceManager.get_all_devices()
 
         current = self._device_combo.currentText()
         self._device_combo.blockSignals(True)
@@ -304,37 +302,27 @@ class SetupDialog(QDialog):
         db_path = self._db_path_edit.text().strip()
         md = MetaDict()
         ml = ModuleLibrary()
-        try:
-            self._ctrl.set_startup_context(
-                md,
-                ml,
-                chip_name=chip,
-                qub_name=qub,
-                res_name=res,
-                result_dir=result_dir,
-                database_path=db_path,
-            )
-            self._set_project_status(
-                f"Startup context applied: {chip}/{qub} (res={res})"
-            )
-            logger.info(
-                "SetupDialog: startup context applied chip=%r qub=%r res=%r",
-                chip,
-                qub,
-                res,
-            )
-        except Exception as exc:
-            self._set_project_status(str(exc), error=True)
-            logger.warning("SetupDialog: apply startup failed: %r", exc)
-            return
+        self._ctrl.set_startup_context(
+            md,
+            ml,
+            chip_name=chip,
+            qub_name=qub,
+            res_name=res,
+            result_dir=result_dir,
+            database_path=db_path,
+        )
+        self._set_project_status(f"Startup context applied: {chip}/{qub} (res={res})")
+        logger.info(
+            "SetupDialog: startup context applied chip=%r qub=%r res=%r",
+            chip,
+            qub,
+            res,
+        )
 
         if result_dir:
-            try:
-                self._ctrl.setup_project(result_dir)
-                self._refresh_context_list()
-                logger.info("SetupDialog: auto-setup result_dir=%r", result_dir)
-            except Exception as exc:
-                logger.info("SetupDialog: auto-setup skipped (%r)", exc)
+            self._ctrl.setup_project(result_dir)
+            self._refresh_context_list()
+            logger.info("SetupDialog: auto-setup result_dir=%r", result_dir)
 
     def _on_switch_clicked(self) -> None:
         item = self._ctx_list.currentItem()
@@ -342,14 +330,10 @@ class SetupDialog(QDialog):
             self._set_project_status("Select a context first", error=True)
             return
         label = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
-        try:
-            self._ctrl.use_context(label)
-            self._refresh_context_list()
-            self._set_project_status(f"Switched to context: {label}")
-            logger.info("SetupDialog: switched to context=%r", label)
-        except Exception as exc:
-            self._set_project_status(str(exc), error=True)
-            logger.warning("SetupDialog: switch failed: %r", exc)
+        self._ctrl.use_context(label)
+        self._refresh_context_list()
+        self._set_project_status(f"Switched to context: {label}")
+        logger.info("SetupDialog: switched to context=%r", label)
 
     def _on_new_ctx_clicked(self) -> None:
         clone = self._clone_check.isChecked()
@@ -357,30 +341,23 @@ class SetupDialog(QDialog):
         unit = self._unit_label.text() if device_name else "none"
         value: Optional[float] = None
         if device_name:
-            try:
-                from zcu_tools.device import GlobalDeviceManager
+            from zcu_tools.device import GlobalDeviceManager
 
-                dev = GlobalDeviceManager.get_device(device_name)
-                # Proper float conversion check
-                raw_val = dev.get_value()  # type: ignore[attr-defined]
-                value = float(raw_val)
-            except Exception:
-                pass
-        try:
-            self._ctrl.new_context(value=value, unit=unit, clone_from_current=clone)
-            self._refresh_context_list()
-            val_str = f"{value} {unit}" if value is not None else "NoValue"
-            self._set_project_status(f"Created new context ({val_str})")
-            logger.info(
-                "SetupDialog: new_context value=%r unit=%r clone=%r device=%r",
-                value,
-                unit,
-                clone,
-                device_name,
-            )
-        except Exception as exc:
-            self._set_project_status(str(exc), error=True)
-            logger.warning("SetupDialog: new_context failed: %r", exc)
+            dev = GlobalDeviceManager.get_device(device_name)
+            # Proper float conversion check
+            raw_val = dev.get_value()  # type: ignore[attr-defined]
+            value = float(raw_val)
+        self._ctrl.new_context(value=value, unit=unit, clone_from_current=clone)
+        self._refresh_context_list()
+        val_str = f"{value} {unit}" if value is not None else "NoValue"
+        self._set_project_status(f"Created new context ({val_str})")
+        logger.info(
+            "SetupDialog: new_context value=%r unit=%r clone=%r device=%r",
+            value,
+            unit,
+            clone,
+            device_name,
+        )
 
     def _refresh_context_list(self) -> None:
         self._ctx_list.clear()
@@ -415,11 +392,8 @@ class SetupDialog(QDialog):
     def _maybe_show_current_cfg(self) -> None:
         soccfg = self._ctrl.get_soccfg()
         if isinstance(soccfg, SocConfigProtocol):
-            try:
-                self._show_cfg(soccfg.description())
-                self._set_conn_status("Currently connected", error=False)
-            except Exception:
-                pass
+            self._show_cfg(soccfg.description())
+            self._set_conn_status("Currently connected", error=False)
 
     def _on_mock_toggled(self, state: int) -> None:
         use_mock = bool(state)
@@ -456,9 +430,6 @@ class SetupDialog(QDialog):
             if isinstance(soccfg, SocConfigProtocol):
                 self._show_cfg(soccfg.description())
 
-        except Exception as exc:
-            self._set_conn_status(str(exc), error=True)
-            logger.warning("SetupDialog: connection failed: %r", exc)
         finally:
             self._connect_btn.setEnabled(True)
 
