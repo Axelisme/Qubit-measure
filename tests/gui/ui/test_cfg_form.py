@@ -18,7 +18,6 @@ from zcu_tools.gui.adapter import (
     MultiSweepSpec,
     MultiSweepValue,
     ScalarSpec,
-    ScalarValue,
     SweepSpec,
     SweepValue,
     WaveformRefSpec,

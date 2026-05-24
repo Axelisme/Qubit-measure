@@ -1,6 +1,5 @@
 from unittest.mock import MagicMock, patch
 
-import pytest
 from zcu_tools.gui.adapter import ModuleWriteback, WaveformWriteback
 from zcu_tools.gui.ui.writeback_widget import WritebackWidget
 

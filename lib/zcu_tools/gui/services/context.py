@@ -4,7 +4,12 @@ import dataclasses
 import logging
 from typing import TYPE_CHECKING, Any, Optional
 
-from zcu_tools.gui.event_bus import ContextSwitchedPayload, GuiEvent, MdChangedPayload, MlChangedPayload
+from zcu_tools.gui.event_bus import (
+    ContextSwitchedPayload,
+    GuiEvent,
+    MdChangedPayload,
+    MlChangedPayload,
+)
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 logger = logging.getLogger(__name__)

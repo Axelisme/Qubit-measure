@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from qtpy.QtWidgets import QTableWidgetItem  # type: ignore[attr-defined]
 from zcu_tools.gui.ui.inspect_dialog import InspectDialog
 
 
@@ -84,7 +83,9 @@ def test_inspect_dialog_ml_delete(qapp, monkeypatch):
     assert dialog._del_ml_btn.isEnabled()
 
     # Mock QMessageBox.question to return Yes
-    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes
+    )
 
     # Click delete
     dialog._del_ml_btn.click()
@@ -109,7 +110,9 @@ def test_inspect_dialog_ml_delete_no(qapp, monkeypatch):
     dialog._ml_tree.setCurrentItem(modules_item.child(0))
 
     # Mock QMessageBox.question to return No
-    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.No)
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.No
+    )
 
     dialog._del_ml_btn.click()
 
