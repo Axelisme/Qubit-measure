@@ -225,7 +225,12 @@ class WritebackWidget(QWidget):
         schema = copy.deepcopy(item.edited_schema or item.edit_schema)
         form_widget.populate(schema, self._ctrl)
         initial_valid = form_widget.is_valid()
-        logger.debug("_edit_cfg_item: key=%r initial_valid=%r schema_spec=%r", item.key, initial_valid, type(schema.spec).__name__)
+        logger.debug(
+            "_edit_cfg_item: key=%r initial_valid=%r schema_spec=%r",
+            item.key,
+            initial_valid,
+            type(schema.spec).__name__,
+        )
         scroll.setWidget(form_widget)
         layout.addWidget(scroll, stretch=1)
 

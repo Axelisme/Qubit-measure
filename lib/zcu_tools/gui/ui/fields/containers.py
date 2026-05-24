@@ -285,7 +285,11 @@ class ModuleRefWidget(BaseLiveWidget):
 
     def _on_validity_changed(self, valid: bool) -> None:
         field = cast(ModuleRefLiveField, self._field)
-        logger.debug("ModuleRefWidget.validity_changed: key=%r valid=%r", field.get_chosen_key(), valid)
+        logger.debug(
+            "ModuleRefWidget.validity_changed: key=%r valid=%r",
+            field.get_chosen_key(),
+            valid,
+        )
         style = "" if valid else "border: 1px solid red;"
         self._combo.setStyleSheet(style)
         self._expand_btn.setStyleSheet("" if valid else "color: red;")

@@ -32,7 +32,11 @@ class ConnectionService:
     def set_connection(
         self, soc: Optional[SocHandle], soccfg: Optional[SocCfgHandle]
     ) -> None:
-        logger.info("set_connection: soc=%s soccfg=%s", type(soc).__name__, type(soccfg).__name__)
+        logger.info(
+            "set_connection: soc=%s soccfg=%s",
+            type(soc).__name__,
+            type(soccfg).__name__,
+        )
         new_ctx = dataclasses.replace(self._state.exp_context, soc=soc, soccfg=soccfg)
         self._state.set_context(new_ctx)
         self._bus.emit(GuiEvent.SOC_CHANGED, SocChangedPayload(soc=soc, soccfg=soccfg))
@@ -40,7 +44,9 @@ class ConnectionService:
     def set_predictor(
         self, predictor: Optional[FluxoniumPredictor], path: Optional[str] = None
     ) -> None:
-        logger.info("set_predictor: path=%r predictor=%s", path, type(predictor).__name__)
+        logger.info(
+            "set_predictor: path=%r predictor=%s", path, type(predictor).__name__
+        )
         self._predictor_path = path
         new_ctx = dataclasses.replace(self._state.exp_context, predictor=predictor)
         self._state.set_context(new_ctx)

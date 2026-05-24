@@ -283,7 +283,12 @@ def module_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionValue
         cfg = cfg_input
     else:
         raise TypeError(f"Expected dict or ModuleCfg, got {type(cfg_input)}")
-    logger.debug("module_cfg_to_value: type=%r style=%r keys=%r", cfg.get("type"), cfg.get("style"), list(cfg.keys()))
+    logger.debug(
+        "module_cfg_to_value: type=%r style=%r keys=%r",
+        cfg.get("type"),
+        cfg.get("style"),
+        list(cfg.keys()),
+    )
 
     # 2. Check for waveform styles
     if "style" in cfg:

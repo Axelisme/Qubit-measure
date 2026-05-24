@@ -111,7 +111,12 @@ class LiveField(ABC):
     def _set_valid(self, valid: bool) -> None:
         if valid != self._valid:
             self._valid = valid
-            logger.debug("%s._set_valid: spec=%r valid=%r", type(self).__name__, getattr(self.spec, "label", None) or type(self.spec).__name__, valid)
+            logger.debug(
+                "%s._set_valid: spec=%r valid=%r",
+                type(self).__name__,
+                getattr(self.spec, "label", None) or type(self.spec).__name__,
+                valid,
+            )
             self.on_validity_changed.emit(valid)
 
     def teardown(self) -> None:
@@ -199,12 +204,19 @@ class ScalarLiveField(LiveField):
         if isinstance(self._value, DirectValue):
             valid = not self._value.is_unset
             if not valid:
-                logger.debug("ScalarLiveField: label=%r is unset → invalid", self.spec.label)
+                logger.debug(
+                    "ScalarLiveField: label=%r is unset → invalid", self.spec.label
+                )
             self._set_valid(valid)
         else:
             valid = self._value.resolved is not None
             if not valid:
-                logger.debug("ScalarLiveField: label=%r expr=%r unresolved (error=%r) → invalid", self.spec.label, self._value.expr, self._value.error)
+                logger.debug(
+                    "ScalarLiveField: label=%r expr=%r unresolved (error=%r) → invalid",
+                    self.spec.label,
+                    self._value.expr,
+                    self._value.error,
+                )
             self._set_valid(valid)
 
 
@@ -443,12 +455,18 @@ class ModuleRefLiveField(LiveField):
 
     def _refresh_validity(self) -> None:
         if self.sub_field is None:
-            logger.debug("ModuleRefLiveField._refresh_validity: key=%r sub_field=None → valid=True", self._chosen_key)
+            logger.debug(
+                "ModuleRefLiveField._refresh_validity: key=%r sub_field=None → valid=True",
+                self._chosen_key,
+            )
             self._set_valid(True)
         else:
             valid = self.sub_field.is_valid()
             if not valid:
-                logger.debug("ModuleRefLiveField._refresh_validity: key=%r sub_field invalid", self._chosen_key)
+                logger.debug(
+                    "ModuleRefLiveField._refresh_validity: key=%r sub_field invalid",
+                    self._chosen_key,
+                )
             self._set_valid(valid)
 
     def _refresh_library_binding(self) -> None:

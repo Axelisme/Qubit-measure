@@ -21,7 +21,11 @@ def _spec_value_for_chosen(
     """Find both Spec and initial Value for a chosen key (Custom or Named)."""
     from ...cfg_schemas import module_cfg_to_value, waveform_cfg_to_value
 
-    logger.debug("_spec_value_for_chosen: key=%r allowed_labels=%r", chosen_key, [s.label for s in allowed])
+    logger.debug(
+        "_spec_value_for_chosen: key=%r allowed_labels=%r",
+        chosen_key,
+        [s.label for s in allowed],
+    )
 
     # 1. Custom template from 'allowed' list
     if chosen_key.startswith("<Custom:"):
