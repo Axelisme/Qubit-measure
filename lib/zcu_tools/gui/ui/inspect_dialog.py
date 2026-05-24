@@ -470,10 +470,12 @@ class InspectDialog(QDialog):
     def _on_add_module_clicked(self) -> None:
         dlg = _MlAddDialog(self._ctrl, "module", self)
         dlg.exec()
+        dlg._form_widget.clear()
 
     def _on_add_waveform_clicked(self) -> None:
         dlg = _MlAddDialog(self._ctrl, "waveform", self)
         dlg.exec()
+        dlg._form_widget.clear()
 
     def _on_delete_ml_clicked(self) -> None:
         current = self._ml_tree.currentItem()

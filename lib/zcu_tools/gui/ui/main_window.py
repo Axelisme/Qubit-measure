@@ -491,6 +491,7 @@ class ExpTabWidget(QWidget):
             self.cfg_form.validity_changed.disconnect(self._validity_cb)
         if hasattr(self, "_schema_cb"):
             self.cfg_form.schema_changed.disconnect(self._schema_cb)
+        self.cfg_form.clear()
 
 
 # ---------------------------------------------------------------------------
