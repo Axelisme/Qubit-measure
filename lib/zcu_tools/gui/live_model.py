@@ -297,14 +297,16 @@ class SectionLiveField(LiveField):
         super().__init__(spec, env)
         self.fields: dict[str, LiveField] = {}
 
-        # If no initial value provided, use Spec defaults to avoid is_unset=True for all children
         from .adapter import make_default_value
 
-        val = initial_val if initial_val is not None else make_default_value(spec)
+        default_val = make_default_value(spec)
+        provided_val = initial_val if initial_val is not None else default_val
 
-        # Build child fields
+        # Build child fields; fall back to spec default for keys missing from provided_val
         for key, node_spec in spec.fields.items():
-            child_val = val.fields.get(key)
+            child_val = provided_val.fields.get(key)
+            if child_val is None:
+                child_val = default_val.fields.get(key)
             field = create_live_field(node_spec, env, child_val)
             self.fields[key] = field
             field.on_change.connect(self._on_child_change)
