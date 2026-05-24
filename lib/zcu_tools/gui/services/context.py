@@ -136,8 +136,6 @@ class ContextService:
             raise RuntimeError("No experiment context.")
         md = self._state.exp_context.md
         setattr(md, key, value)
-        if md._path is not None:
-            md.dump()
         self._bus.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=md))
 
     def del_md_attr(self, key: str) -> None:
@@ -145,6 +143,4 @@ class ContextService:
             raise RuntimeError("No experiment context.")
         md = self._state.exp_context.md
         delattr(md, key)
-        if md._path is not None:
-            md.dump()
         self._bus.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=md))

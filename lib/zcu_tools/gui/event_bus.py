@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, Literal, overload
+from typing import TYPE_CHECKING, Any, Callable, Literal, Optional, overload
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
@@ -382,5 +382,12 @@ class EventBus:
                 f"{event.value} expects {expected_payload.__name__}, "
                 f"got {type(payload).__name__}"
             )
+        first_exc: Optional[BaseException] = None
         for cb in list(self._subs.get(event, [])):
-            cb(payload)
+            try:
+                cb(payload)
+            except Exception as exc:
+                if first_exc is None:
+                    first_exc = exc
+        if first_exc is not None:
+            raise first_exc
