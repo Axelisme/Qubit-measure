@@ -14,7 +14,7 @@ def test_inspect_dialog_init_and_refresh(qapp):
 
     # Setup mock returns
     mock_md = MagicMock()
-    mock_md._data = {"scalar_int": 42, "scalar_float": 3.14, "nested": {"key": "value"}}
+    mock_md.items.return_value = {"scalar_int": 42, "scalar_float": 3.14, "nested": {"key": "value"}}.items()
     ctrl.get_current_md.return_value = mock_md
 
     mock_ml = MagicMock()
@@ -41,7 +41,7 @@ def test_inspect_dialog_md_edit(qapp):
     bus = MagicMock()
 
     mock_md = MagicMock()
-    mock_md._data = {"key1": 10}
+    mock_md.items.return_value = {"key1": 10}.items()
     ctrl.get_current_md.return_value = mock_md
     dialog = InspectDialog(ctrl, bus)
 

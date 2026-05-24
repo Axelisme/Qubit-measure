@@ -21,6 +21,12 @@ if TYPE_CHECKING:
 
 _fig_container_registry: dict[int, "FigureContainer"] = {}
 _bridge: Any = None
+_shutting_down: bool = False
+
+
+def set_shutting_down(value: bool) -> None:
+    global _shutting_down
+    _shutting_down = value
 
 
 class FigureContainer:
@@ -147,29 +153,26 @@ def attach_figure_to_current_container(
 
 
 def close_figure(fig: Figure) -> None:
-    done = threading.Event()
-    try:
-        _get_bridge().close_requested.emit({"fig": fig, "done": done})
-    except RuntimeError:
+    if _shutting_down:
         return
+    done = threading.Event()
+    _get_bridge().close_requested.emit({"fig": fig, "done": done})
     done.wait(timeout=5.0)
 
 
 def remove_canvas(canvas: QWidget) -> None:
-    done = threading.Event()
-    try:
-        _get_bridge().remove_canvas_requested.emit({"canvas": canvas, "done": done})
-    except RuntimeError:
+    if _shutting_down:
         return
+    done = threading.Event()
+    _get_bridge().remove_canvas_requested.emit({"canvas": canvas, "done": done})
     done.wait(timeout=5.0)
 
 
 def activate_figure(fig: Figure) -> None:
-    done = threading.Event()
-    try:
-        _get_bridge().activate_requested.emit({"fig": fig, "done": done})
-    except RuntimeError:
+    if _shutting_down:
         return
+    done = threading.Event()
+    _get_bridge().activate_requested.emit({"fig": fig, "done": done})
     done.wait(timeout=5.0)
 
 
@@ -239,15 +242,14 @@ def _attach_figure_canvas(
 
 def _remove_canvas_impl(canvas: QWidget) -> None:
     figure = getattr(canvas, "figure", None)
-    if isinstance(figure, Figure):
-        container = _fig_container_registry.pop(id(figure), None)
-        if container is not None:
-            container.detach_canvas(canvas)
-            return
-    for mapped_container in _fig_container_registry.values():
-        if mapped_container._stack.indexOf(canvas) >= 0:
-            mapped_container.detach_canvas(canvas)
-            return
+    if not isinstance(figure, Figure):
+        raise RuntimeError(f"Cannot remove canvas {canvas!r}: not a matplotlib canvas")
+    container = _fig_container_registry.pop(id(figure), None)
+    if container is None:
+        raise RuntimeError(
+            f"Cannot remove canvas {canvas!r}: figure not tracked in registry"
+        )
+    container.detach_canvas(canvas)
 
 
 def _get_bridge() -> Any:

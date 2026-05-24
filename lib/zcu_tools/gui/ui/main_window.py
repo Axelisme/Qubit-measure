@@ -24,12 +24,14 @@ from zcu_tools.gui.plot_host import (
     FigureContainer,
     attach_existing_figure_to_container,
     remove_canvas,
+    set_shutting_down,
 )
 from zcu_tools.gui.state import TabInteractionState
 
 logger = logging.getLogger(__name__)
 
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
+from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtGui import (  # type: ignore[attr-defined]
     QColor,
     QPainter,
@@ -442,6 +444,55 @@ class ExpTabWidget(QWidget):
             idle and state.has_context and state.has_analyze_result
         )
 
+    def bind_to_controller(self, main_window: "MainWindow") -> None:
+        tab_id = self.tab_id
+
+        def validity_cb(_valid: bool) -> None:
+            main_window.refresh_tab_interaction(tab_id)
+
+        def schema_cb(schema_obj: CfgSchema) -> None:
+            self._ctrl.update_tab_cfg(tab_id, schema_obj)
+
+        def save_paths_cb(_text: str) -> None:
+            self._ctrl.update_tab_save_paths(
+                tab_id, self.get_data_path(), self.get_image_path()
+            )
+
+        self.cfg_form.validity_changed.connect(validity_cb)
+        self.cfg_form.schema_changed.connect(schema_cb)
+        self.analyze_form.params_changed.connect(
+            lambda values: self._ctrl.update_tab_analyze_params(tab_id, values)
+        )
+        self._data_path_edit.textChanged.connect(save_paths_cb)
+        self._image_path_edit.textChanged.connect(save_paths_cb)
+        self.run_btn.clicked.connect(
+            lambda: main_window._on_run_stop_clicked(tab_id)
+        )
+        self.analyze_btn.clicked.connect(
+            lambda: main_window._on_analyze_clicked(tab_id)
+        )
+        self.writeback_widget.apply_requested.connect(
+            lambda items: main_window._on_writeback_inline_apply(tab_id, items)
+        )
+        self.save_data_btn.clicked.connect(
+            lambda: main_window._on_save_data_clicked(tab_id)
+        )
+        self.save_image_btn.clicked.connect(
+            lambda: main_window._on_save_image_clicked(tab_id)
+        )
+        self.save_both_btn.clicked.connect(
+            lambda: main_window._on_save_both_clicked(tab_id)
+        )
+
+        self._validity_cb = validity_cb
+        self._schema_cb = schema_cb
+
+    def unbind_from_controller(self) -> None:
+        if hasattr(self, "_validity_cb"):
+            self.cfg_form.validity_changed.disconnect(self._validity_cb)
+        if hasattr(self, "_schema_cb"):
+            self.cfg_form.schema_changed.disconnect(self._schema_cb)
+
 
 # ---------------------------------------------------------------------------
 # MainWindow — implements ViewProtocol
@@ -455,7 +506,6 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._ctrl = controller
         self._tab_widgets: dict[str, ExpTabWidget] = {}
-        self._tab_form_connections: dict[str, tuple[Any, Any]] = {}
         self._inspect_dialog: Any = None
 
         self.setWindowTitle("ZCU Qubit Measure — v2 GUI")
@@ -587,56 +637,15 @@ class MainWindow(QMainWindow):
         self.refresh_run_lock(self._state_running_tab_id())
         self.refresh_tab_interaction(tab_id)
 
-        # re-evaluate run_btn when channel validity changes
-        def validity_cb(_valid: bool, tid: str = tab_id) -> None:
-            self.refresh_tab_interaction(tid)
-
-        def schema_cb(schema_obj: CfgSchema, tid: str = tab_id) -> None:
-            self._ctrl.update_tab_cfg(tid, schema_obj)
-
-        self._tab_form_connections[tab_id] = (validity_cb, schema_cb)
-        tab_w.cfg_form.validity_changed.connect(validity_cb)
-        tab_w.cfg_form.schema_changed.connect(schema_cb)
-        tab_w.analyze_form.params_changed.connect(
-            lambda values, tid=tab_id: self._ctrl.update_tab_analyze_params(tid, values)
-        )
-        tab_w._data_path_edit.textChanged.connect(
-            lambda _text, tid=tab_id, tw=tab_w: self._ctrl.update_tab_save_paths(
-                tid,
-                tw.get_data_path(),
-                tw.get_image_path(),
-            )
-        )
-        tab_w._image_path_edit.textChanged.connect(
-            lambda _text, tid=tab_id, tw=tab_w: self._ctrl.update_tab_save_paths(
-                tid,
-                tw.get_data_path(),
-                tw.get_image_path(),
-            )
-        )
-
-        # wire buttons
-        tab_w.run_btn.clicked.connect(lambda: self._on_run_stop_clicked(tab_id))
-        tab_w.analyze_btn.clicked.connect(lambda: self._on_analyze_clicked(tab_id))
-        tab_w.writeback_widget.apply_requested.connect(
-            lambda items, tid=tab_id: self._on_writeback_inline_apply(tid, items)
-        )
-        tab_w.save_data_btn.clicked.connect(lambda: self._on_save_data_clicked(tab_id))
-        tab_w.save_image_btn.clicked.connect(
-            lambda: self._on_save_image_clicked(tab_id)
-        )
-        tab_w.save_both_btn.clicked.connect(lambda: self._on_save_both_clicked(tab_id))
+        # wire all signals/buttons for this tab
+        tab_w.bind_to_controller(self)
 
     def _on_bus_tab_closed(self, payload: TabClosedPayload) -> None:
         tab_id = payload.tab_id
         logger.info("_on_bus_tab_closed: tab_id=%r", tab_id)
         tab_w = self._tab_widgets.pop(tab_id, None)
         if tab_w is not None:
-            callbacks = self._tab_form_connections.pop(tab_id, None)
-            if callbacks is not None:
-                validity_cb, schema_cb = callbacks
-                tab_w.cfg_form.validity_changed.disconnect(validity_cb)
-                tab_w.cfg_form.schema_changed.disconnect(schema_cb)
+            tab_w.unbind_from_controller()
             index = self._tabs.indexOf(tab_w)
             if index >= 0:
                 self._tabs.removeTab(index)
@@ -985,3 +994,7 @@ class MainWindow(QMainWindow):
         self._inspect_dialog.show()
         self._inspect_dialog.raise_()
         self._inspect_dialog.activateWindow()
+
+    def closeEvent(self, a0: Optional[QCloseEvent]) -> None:
+        set_shutting_down(True)
+        super().closeEvent(a0)

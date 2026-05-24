@@ -37,7 +37,7 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
                 axes={axis: SweepValue(0.0, 1.0, 11) for axis in node_spec.axes}
             )
         elif isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
-            first = node_spec.allowed[0] if node_spec.allowed else CfgSectionSpec()
+            first = node_spec.allowed[0]
             label = first.label or "Custom"
             fields[key] = (
                 ModuleRefValue(f"<Custom:{label}>", make_default_value(first))
@@ -123,11 +123,7 @@ def inherit_from(
                     old_node_val.chosen_key, old_node_val.value
                 )
             else:
-                first = (
-                    new_node_spec.allowed[0]
-                    if new_node_spec.allowed
-                    else CfgSectionSpec()
-                )
+                first = new_node_spec.allowed[0]
                 label = first.label or "Custom"
                 new_fields[key] = ModuleRefValue(
                     f"<Custom:{label}>", make_default_value(first)
@@ -142,11 +138,7 @@ def inherit_from(
                     old_node_val.chosen_key, old_node_val.value
                 )
             else:
-                first = (
-                    new_node_spec.allowed[0]
-                    if new_node_spec.allowed
-                    else CfgSectionSpec()
-                )
+                first = new_node_spec.allowed[0]
                 label = first.label or "Custom"
                 new_fields[key] = WaveformRefValue(
                     f"<Custom:{label}>", make_default_value(first)

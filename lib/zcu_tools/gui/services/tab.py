@@ -85,10 +85,6 @@ class TabService:
 
     def get_tab_analyze_param_values(self, tab_id: str) -> dict[str, object]:
         tab = self._state.get_tab(tab_id)
-        if not tab.analyze_param_values and tab.analyze_params:
-            tab.analyze_param_values = {
-                param.key: param.default for param in tab.analyze_params
-            }
         return dict(tab.analyze_param_values)
 
     def update_tab_analyze_param_values(

@@ -243,11 +243,19 @@ class ModuleRefSpec:
     allowed: list["CfgSectionSpec"]
     label: str = "Module"
 
+    def __post_init__(self) -> None:
+        if not self.allowed:
+            raise RuntimeError("ModuleRefSpec.allowed must be non-empty")
+
 
 @dataclass(frozen=True)
 class WaveformRefSpec:
     allowed: list["CfgSectionSpec"]
     label: str = "Waveform"
+
+    def __post_init__(self) -> None:
+        if not self.allowed:
+            raise RuntimeError("WaveformRefSpec.allowed must be non-empty")
 
 
 @dataclass(frozen=True)

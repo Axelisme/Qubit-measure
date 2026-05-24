@@ -119,6 +119,10 @@ class MetaDict(SyncFile):
     def __repr__(self) -> str:
         return self.__str__()
 
+    def items(self) -> dict[str, Any]:
+        self.sync()
+        return dict(self._data)
+
     def __dir__(self) -> list[str]:
         self.sync()
         return list(self._data.keys()) + self._PROTECTED_KEYS

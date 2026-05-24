@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import replace
-from typing import Any, Optional, cast
+from typing import Optional, cast
 
 from zcu_tools.gui.adapter import (
     CfgNodeValue,
@@ -124,8 +124,8 @@ def _set_field_label(schema: CfgSchema, path: str, label: str) -> None:
     parts = _split_path(path)
     parent = _get_parent_section_spec(schema.spec, parts)
     leaf = parent.fields.get(parts[-1])
-    if leaf is None or not hasattr(leaf, "label"):
-        raise RuntimeError(f"Path '{path}' does not support labels")
+    if leaf is None:
+        raise RuntimeError(f"Path '{path}' not found")
     parent.fields[parts[-1]] = replace(leaf, label=label)
 
 

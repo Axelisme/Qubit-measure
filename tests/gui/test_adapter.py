@@ -8,20 +8,21 @@ import pytest
 from zcu_tools.gui.adapter import (
     AnalyzeParam,
     CfgSchema,
-    MetaDictWriteback,
-    ModuleWriteback,
-    WaveformWriteback,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
     EvalValue,
+    MetaDictWriteback,
     ModuleRefSpec,
     ModuleRefValue,
+    ModuleWriteback,
     MultiSweepSpec,
     MultiSweepValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
+    WaveformRefSpec,
+    WaveformWriteback,
     analyze_params_to_raw_dict,
     make_default_value,
     schema_to_dict,
@@ -364,3 +365,18 @@ def test_waveform_writeback_valid():
         proposed_waveform=None,
     )
     assert item.waveform_name == "gauss"
+
+
+# ---------------------------------------------------------------------------
+# ModuleRefSpec / WaveformRefSpec empty allowed raises
+# ---------------------------------------------------------------------------
+
+
+def test_module_ref_spec_empty_allowed_raises():
+    with pytest.raises(RuntimeError, match="allowed"):
+        ModuleRefSpec(allowed=[])
+
+
+def test_waveform_ref_spec_empty_allowed_raises():
+    with pytest.raises(RuntimeError, match="allowed"):
+        WaveformRefSpec(allowed=[])

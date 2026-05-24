@@ -177,13 +177,7 @@ class InspectDialog(QDialog):
             self._md_table.setSortingEnabled(True)
             return
 
-        try:
-            data: dict = md._data  # type: ignore[attr-defined]
-        except AttributeError:
-            self._md_table.setSortingEnabled(True)
-            return
-
-        for key, value in data.items():
+        for key, value in md.items():
             row = self._md_table.rowCount()
             self._md_table.insertRow(row)
 

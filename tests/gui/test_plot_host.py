@@ -6,8 +6,10 @@ from zcu_tools.gui.plot_host import (
     FigureContainer,
     assert_plot_invariants,
     attach_existing_figure_to_container,
+    close_figure,
     create_figure_in_current_container,
     dump_plot_state,
+    set_shutting_down,
 )
 from zcu_tools.gui.plot_routing import (
     get_current_container,
@@ -91,3 +93,15 @@ def test_plot_state_snapshot_and_invariants(qapp):
     assert state.active_figure_count >= 1
     assert id(fig) in state.attached_figure_ids
     assert_plot_invariants()
+
+
+def test_close_figure_noop_when_shutting_down(qapp):
+    del qapp
+    try:
+        set_shutting_down(True)
+        container = _make_container()
+        with routing_scope(container):
+            fig, _ = create_figure_in_current_container(1, 1)
+        close_figure(fig)
+    finally:
+        set_shutting_down(False)
