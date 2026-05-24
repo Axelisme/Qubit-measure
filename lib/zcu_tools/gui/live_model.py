@@ -1,9 +1,7 @@
-"""LiveModel — Reactive data layer for CfgSchema.
+"""LiveModel — reactive data layer for CfgSchema.
 
-REFACTORED (Phase 36/36.5):
-- Uses LiveModelEnv for dependency injection (SSOT enforcement).
-- Fields dynamically fetch md/ml from ControllerProtocol.
-- Supports 'is_unset' flag for Scalar fields to distinguish missing data.
+Uses LiveModelEnv for dependency injection, fetches md/ml through the
+controller boundary, and tracks unset Scalar fields explicitly.
 """
 
 from __future__ import annotations
@@ -32,6 +30,7 @@ from .adapter import (
     SweepValue,
     WaveformRefSpec,
     WaveformRefValue,
+    default_value_for_type,
 )
 
 if TYPE_CHECKING:
@@ -171,8 +170,7 @@ class ScalarLiveField(LiveField):
 
     def _make_direct_value(self, value: object, is_unset: bool) -> DirectValue:
         if is_unset:
-            defaults: dict[type, object] = {int: 0, float: 0.0, bool: False, str: ""}
-            value = defaults.get(self.spec.type)
+            value = default_value_for_type(self.spec.type)
         return DirectValue(value=value, is_unset=is_unset)
 
     def _resolved_eval_value(self, value: EvalValue) -> EvalValue:

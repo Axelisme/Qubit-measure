@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.device_manager import DeviceManager
+    from zcu_tools.gui.device_manager import (
+        DeviceManager,
+        DeviceProtocol,
+        _DeviceSetupWorker,
+    )
     from zcu_tools.gui.state import State
 
 
@@ -17,7 +21,7 @@ class DeviceService:
         self._state = state
         self._dm = device_manager
 
-    def register_device(self, name: str, device: Any) -> None:
+    def register_device(self, name: str, device: "DeviceProtocol") -> None:
         logger.info("register_device: name=%r type=%s", name, type(device).__name__)
         if self._state.is_run_active():
             raise RuntimeError("Cannot register device while a run is active")
@@ -32,20 +36,23 @@ class DeviceService:
     def list_devices(self) -> dict[str, str]:
         return self._dm.list_devices()
 
-    def set_device_value(self, name: str, value: Any) -> Any:
+    def set_device_value(self, name: str, value: Any) -> object:
         if self._state.is_run_active():
             raise RuntimeError("Cannot set device value while a run is active")
         return self._dm.set_device_value(name, value)
 
-    def get_device_value(self, name: str) -> Any:
+    def get_device_value(self, name: str) -> object:
         return self._dm.get_device_value(name)
 
-    def get_device_info(self, name: str) -> Any:
+    def get_device_info(self, name: str) -> object:
         return self._dm.get_device_info(name)
 
     def setup_device(
-        self, name: str, info: Any, pbar_factory: Optional[Any] = None
-    ) -> Any:
+        self,
+        name: str,
+        info: Any,
+        pbar_factory: Optional[Callable[..., Any]] = None,
+    ) -> "_DeviceSetupWorker":
         if self._state.is_run_active():
             raise RuntimeError("Cannot setup device while a run is active")
         return self._dm.setup_device(name, info, pbar_factory)

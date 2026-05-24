@@ -28,7 +28,9 @@ from .types import (
     ScalarSpec,
     ScalarValue,
     SocCfgHandle,
+    SocCfgProtocol,
     SocHandle,
+    SocProtocol,
     SweepSpec,
     SweepValue,
     T_AnalyzeResult,
@@ -39,6 +41,7 @@ from .types import (
     WritebackItem,
     WritebackRequest,
     analyze_params_to_raw_dict,
+    default_value_for_type,
 )
 
 __all__ = [
@@ -67,7 +70,9 @@ __all__ = [
     "ScalarSpec",
     "ScalarValue",
     "SocCfgHandle",
+    "SocCfgProtocol",
     "SocHandle",
+    "SocProtocol",
     "SweepSpec",
     "SweepValue",
     "T_AnalyzeResult",
@@ -78,6 +83,7 @@ __all__ = [
     "WritebackItem",
     "WritebackRequest",
     "analyze_params_to_raw_dict",
+    "default_value_for_type",
     "inherit_from",
     "make_default_value",
     "schema_to_dict",

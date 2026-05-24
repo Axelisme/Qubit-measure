@@ -1,9 +1,7 @@
 """cfg_schemas.py — convert Module/Waveform dicts to (spec, value) pairs.
 
-REFACTORED (Phase 36.5):
-- Now strictly expects dictionaries (dicts) as input.
-- Uses 'is_unset' flag for missing fields to avoid silent defaults.
-- No more getattr or _v hacks.
+Strictly accepts dictionaries or module config objects and represents missing
+fields with explicit unset scalar values.
 """
 
 from __future__ import annotations

@@ -260,7 +260,7 @@ class WritebackWidget(QWidget):
 
         save_btn.clicked.connect(save)
         dialog.exec()
-        form_widget._clear_inner()
+        form_widget.clear()
 
 
 def _coerce_scalar_input(text: str, original: Any) -> Any:

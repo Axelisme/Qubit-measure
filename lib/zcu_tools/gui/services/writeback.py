@@ -82,7 +82,7 @@ class WritebackService:
                 raise RuntimeError(f"Unsupported writeback item type: {type(item)}")
             applied_keys.append(item.key)
 
-        if touched_ml and ctx.ml._path is not None:
+        if touched_ml and ctx.ml.has_persistence:
             ctx.ml.dump()
         if touched_md:
             self._bus.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=ctx.md))

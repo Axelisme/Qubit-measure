@@ -142,7 +142,6 @@ class ExpTabWidget(QWidget):
         self.tab_id = tab_id
         self._ctrl = ctrl
         self._writeback_count: int = 0
-        self._cfg_valid: bool = True  # False when any ChannelRow is unresolved
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(4, 4, 4, 4)
@@ -405,7 +404,7 @@ class ExpTabWidget(QWidget):
         logger.debug("show_analysis_figure: tab_id=%r canvas set", self.tab_id)
 
     def _on_cfg_validity_changed(self, valid: bool) -> None:
-        self._cfg_valid = valid
+        del valid
 
     def update_interaction_state(self, state: TabInteractionState) -> None:
         local_busy = state.is_running or state.is_analyzing or state.is_saving_data
@@ -422,7 +421,7 @@ class ExpTabWidget(QWidget):
                 and not state.global_run_active
                 and state.has_context
                 and state.has_soc
-                and self._cfg_valid
+                and self.cfg_form.is_valid()
             )
             self.run_btn.setEnabled(can_run)
             self.run_btn.setStyleSheet("")
@@ -454,14 +453,16 @@ class ExpTabWidget(QWidget):
             self._ctrl.update_tab_cfg(tab_id, schema_obj)
 
         def save_paths_cb(_text: str) -> None:
-            self._ctrl.update_tab_save_paths(
-                tab_id, self.get_data_path(), self.get_image_path()
-            )
+            data_path = self.get_data_path()
+            image_path = self.get_image_path()
+            if bool(data_path) != bool(image_path):
+                return
+            self._ctrl.update_tab_save_paths(tab_id, data_path, image_path)
 
         self.cfg_form.validity_changed.connect(validity_cb)
         self.cfg_form.schema_changed.connect(schema_cb)
         self.analyze_form.params_changed.connect(
-            lambda values: self._ctrl.update_tab_analyze_params(tab_id, values)
+            lambda values: self._ctrl.update_tab_analyze_param_values(tab_id, values)
         )
         self._data_path_edit.textChanged.connect(save_paths_cb)
         self._image_path_edit.textChanged.connect(save_paths_cb)
@@ -603,7 +604,6 @@ class MainWindow(QMainWindow):
         del payload
         self.refresh_context_panel()
         for tab_id in list(self._tab_widgets):
-            self.refresh_tab_analyze_form(tab_id)
             self.refresh_tab_writeback(tab_id)
             self.refresh_tab_save_paths(tab_id)
             self.refresh_tab_interaction(tab_id)
@@ -611,9 +611,7 @@ class MainWindow(QMainWindow):
     def _on_bus_ml_changed(self, payload: MlChangedPayload) -> None:
         del payload
         for tab_id in list(self._tab_widgets):
-            self.refresh_tab_analyze_form(tab_id)
             self.refresh_tab_writeback(tab_id)
-            self.refresh_tab_save_paths(tab_id)
             self.refresh_tab_interaction(tab_id)
 
     def _on_bus_tab_added(self, payload: TabAddedPayload) -> None:

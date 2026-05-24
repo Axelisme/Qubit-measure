@@ -158,7 +158,9 @@ def test_update_tab_save_path_overrides_sets_both_paths():
     adapter.make_default_cfg.return_value = object()
     state.add_tab("t1", adapter, _make_ctx())
     state.update_tab_suggested_save_paths("t1", SavePaths("/tmp/data", "/tmp/image"))
-    state.update_tab_save_path_overrides("t1", "/tmp/custom-data", "/tmp/custom-image")
+    state.update_tab_save_path_overrides(
+        "t1", SavePaths("/tmp/custom-data", "/tmp/custom-image")
+    )
     assert state.get_effective_save_paths("t1") == SavePaths(
         "/tmp/custom-data", "/tmp/custom-image"
     )

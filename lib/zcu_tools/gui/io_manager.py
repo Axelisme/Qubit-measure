@@ -2,22 +2,25 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 logger = logging.getLogger(__name__)
 
-from zcu_tools.meta_tool import ExperimentManager
-
 from .adapter import ExpContext
+
+if TYPE_CHECKING:
+    from zcu_tools.meta_tool import ExperimentManager
 
 
 class IOManager:
     """Wraps ExperimentManager; returns new ExpContext objects to Controller."""
 
     def __init__(self) -> None:
-        self._em: Optional[ExperimentManager] = None
+        self._em: Optional["ExperimentManager"] = None
 
     def setup(self, result_dir: str) -> None:
+        from zcu_tools.meta_tool import ExperimentManager
+
         logger.info("setup: result_dir=%r", result_dir)
         self._em = ExperimentManager(result_dir)
 

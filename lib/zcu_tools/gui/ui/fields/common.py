@@ -21,7 +21,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from ...adapter import DirectValue, EvalValue
+from ...adapter import DirectValue, EvalValue, default_value_for_type
 from ...live_model import (
     LiteralLiveField,
     LiveField,
@@ -112,14 +112,10 @@ def read_scalar_widget(w: QWidget, spec: "ScalarSpec") -> Any:
     return read_value_widget(w, spec.type, fallback=None)
 
 
-def _default_value_for_type(type_: type) -> Any:
-    defaults: dict[type, object] = {int: 0, float: 0.0, bool: False, str: ""}
-    return defaults.get(type_, "")
-
-
 def _widget_default_for_direct_value(value: DirectValue, spec: "ScalarSpec") -> Any:
     if value.value is None:
-        return _default_value_for_type(spec.type)
+        default = default_value_for_type(spec.type)
+        return "" if default is None else default
     return value.value
 
 
@@ -307,7 +303,7 @@ class ScalarWidget(BaseLiveWidget):
         self, widget: "QAbstractSpinBox | QLineEdit", global_pos: Any
     ) -> None:
         if isinstance(widget, QAbstractSpinBox):
-            line_edit = cast(Any, widget).lineEdit()
+            line_edit = widget.lineEdit()
             if not isinstance(line_edit, QLineEdit):
                 return
         else:
@@ -447,10 +443,8 @@ class MultiSweepWidget(BaseLiveWidget):
         self._widgets: Dict[str, SweepWidget] = {}
 
         self._build_axes()
-        field.on_change.connect(self._on_model_changed)
 
     def teardown(self) -> None:
-        self._field.on_change.disconnect(self._on_model_changed)
         for w in self._widgets.values():
             w.teardown()
 
@@ -462,8 +456,3 @@ class MultiSweepWidget(BaseLiveWidget):
             w = SweepWidget(axis_field)
             layout.addRow(f"  {axis}:", w)
             self._widgets[axis] = w
-
-    def _on_model_changed(self, val: Any) -> None:
-        # MultiSweepLiveField.set_value already updates child fields.
-        # SweepWidget already listens to child field changes.
-        pass

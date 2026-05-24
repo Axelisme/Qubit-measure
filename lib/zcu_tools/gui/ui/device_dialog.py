@@ -27,6 +27,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.gui.device_manager import DeviceProtocol
+
 from .progress_stack import ProgressStack
 from .widgets import TrimDoubleSpinBox
 
@@ -316,7 +318,7 @@ class DeviceDialog(QDialog):
 
         # Map info.type to stack page
         page_map = {"FakeDevice": 1, "YOKOGS200": 2, "RohdeSchwarzSGS100A": 3}
-        page = page_map.get(info.type, 0)
+        page = page_map.get(getattr(info, "type", ""), 0)
         self._stack.setCurrentIndex(page)
 
         panel = self._stack.currentWidget()
@@ -332,7 +334,7 @@ class DeviceDialog(QDialog):
         try:
             dev = _instantiate_device(dtype, addr)
             name = dtype.lower()
-            self._ctrl.register_device(name, dev)
+            self._ctrl.register_device(name, cast(DeviceProtocol, dev))
             self._ctrl.setup_device(name, {"address": addr})
             self._refresh_list()
         except Exception as e:

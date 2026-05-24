@@ -105,16 +105,14 @@ class TabService:
         paths = tab.adapter.make_save_paths(ctx)
         self._state.update_tab_suggested_save_paths(tab_id, paths)
 
-    def update_tab_save_paths(
+    def update_tab_save_path_overrides(
         self, tab_id: str, data_path: str, image_path: str
     ) -> None:
+        if not data_path and not image_path:
+            self._state.clear_tab_save_path_overrides(tab_id)
+            return
+        if not data_path or not image_path:
+            raise RuntimeError("Save path overrides require both data and image paths")
         self._state.update_tab_save_path_overrides(
-            tab_id, data_path=data_path, image_path=image_path
+            tab_id, SavePaths(data_path=data_path, image_path=image_path)
         )
-
-    def save_image(self, tab_id: str, image_path: str) -> None:
-        tab = self._state.get_tab(tab_id)
-        if tab.figure is None:
-            raise RuntimeError("No figure available to save")
-        logger.info("save_image: tab_id=%r path=%r", tab_id, image_path)
-        tab.figure.savefig(image_path)

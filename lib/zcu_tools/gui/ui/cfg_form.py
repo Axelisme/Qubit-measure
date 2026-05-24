@@ -1,9 +1,7 @@
 """CfgFormWidget — renders a CfgSchema as an interactive reactive Qt form.
 
-REFACTORED (Phase 35/36):
-- Uses LiveModel as the active data layer.
-- Reactive fields handle their own UI synchronization via LiveModelEnv.
-- Decoupled widget implementation into lib/zcu_tools/gui/ui/fields/.
+Uses LiveModel as the active data layer and delegates field rendering to
+lib/zcu_tools/gui/ui/fields/.
 """
 
 from __future__ import annotations
@@ -66,7 +64,7 @@ class CfgFormWidget(QWidget):
         ctrl: Controller,
     ) -> None:
         """Build LiveModel and widget tree from schema."""
-        self._clear_inner()
+        self.clear()
 
         # 1. Create the environment and reactive data layer
         env = LiveModelEnv(ctrl=ctrl)
@@ -85,7 +83,7 @@ class CfgFormWidget(QWidget):
         self.validity_changed.emit(self._model.is_valid())
         logger.debug("CfgFormWidget.populate: built reactive form")
 
-    def _clear_inner(self) -> None:
+    def clear(self) -> None:
         self._unsubscribe_external_refresh()
         if self._model:
             self._model.on_change.disconnect(self._emit_schema_changed)

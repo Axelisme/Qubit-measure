@@ -528,6 +528,22 @@ def test_close_busy_tab_shows_status_message(cf):
     assert _wait_for(lambda: not cf.state.is_tab_analyzing(tab_id))
 
 
+def test_unknown_tab_status_queries_raise_key_error(cf):
+    with pytest.raises(KeyError):
+        cf.ctrl.is_tab_running("missing")
+    with pytest.raises(KeyError):
+        cf.ctrl.is_tab_analyzing("missing")
+    with pytest.raises(KeyError):
+        cf.ctrl.is_tab_saving_data("missing")
+    with pytest.raises(KeyError):
+        cf.ctrl.is_tab_busy("missing")
+
+
+def test_close_unknown_tab_raises_key_error(cf):
+    with pytest.raises(KeyError):
+        cf.ctrl.close_tab("missing")
+
+
 def test_get_tab_save_paths_returns_save_paths(cf):
     tab_id = cf.ctrl.new_tab("fake")
     paths = cf.ctrl.get_tab_save_paths(tab_id)

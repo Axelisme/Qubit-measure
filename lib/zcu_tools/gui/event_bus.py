@@ -5,12 +5,16 @@ All emits and subscribes happen on the main thread.  No Qt dependency.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Literal, Optional, overload
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.adapter import SocCfgHandle, SocHandle
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -54,8 +58,8 @@ class MlChangedPayload(Payload):
 class SocChangedPayload(Payload):
     """Payload for SOC_CHANGED: soc/soccfg connection changed."""
 
-    soc: object
-    soccfg: object
+    soc: "SocHandle | None"
+    soccfg: "SocCfgHandle | None"
 
 
 @dataclass(frozen=True)
@@ -382,12 +386,16 @@ class EventBus:
                 f"{event.value} expects {expected_payload.__name__}, "
                 f"got {type(payload).__name__}"
             )
-        first_exc: Optional[BaseException] = None
+        exceptions: list[BaseException] = []
         for cb in list(self._subs.get(event, [])):
             try:
                 cb(payload)
             except Exception as exc:
-                if first_exc is None:
-                    first_exc = exc
-        if first_exc is not None:
-            raise first_exc
+                exceptions.append(exc)
+                logger.exception(
+                    "EventBus subscriber failed: event=%s callback=%r",
+                    event.value,
+                    cb,
+                )
+        if exceptions:
+            raise exceptions[0]

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +20,7 @@ from .types import (
     SweepValue,
     WaveformRefSpec,
     WaveformRefValue,
+    default_value_for_type,
 )
 
 
@@ -34,8 +34,7 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
             if node_spec.required:
                 fields[key] = DirectValue(value=None, is_unset=True)
             else:
-                defaults: dict[type, Any] = {int: 0, float: 0.0, bool: False, str: ""}
-                fields[key] = DirectValue(defaults.get(node_spec.type, None))
+                fields[key] = DirectValue(default_value_for_type(node_spec.type))
         elif isinstance(node_spec, SweepSpec):
             fields[key] = SweepValue(start=0.0, stop=1.0, expts=11)
         elif isinstance(node_spec, MultiSweepSpec):
@@ -86,8 +85,9 @@ def inherit_from(
             elif new_node_spec.required:
                 new_fields[key] = DirectValue(value=None, is_unset=True)
             else:
-                defaults: dict[type, Any] = {int: 0, float: 0.0, bool: False, str: ""}
-                new_fields[key] = DirectValue(defaults.get(new_node_spec.type, None))
+                new_fields[key] = DirectValue(
+                    default_value_for_type(new_node_spec.type)
+                )
             continue
 
         if isinstance(new_node_spec, SweepSpec):

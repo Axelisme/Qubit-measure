@@ -57,6 +57,10 @@ class SyncFile(ABC):
         if path is not None and Path(path).exists():
             self.load()
 
+    @property
+    def has_persistence(self) -> bool:
+        return self._path is not None
+
     @abstractmethod
     def _load(self, path: str) -> None: ...
 

@@ -15,9 +15,10 @@ def test_device_service_success():
     )
     dm = MagicMock()
     svc = DeviceService(state, dm)
+    device = MagicMock()
 
-    svc.register_device("dev1", "instance")
-    dm.register_device.assert_called_with("dev1", "instance")
+    svc.register_device("dev1", device)
+    dm.register_device.assert_called_with("dev1", device)
 
     svc.drop_device("dev1")
     dm.drop_device.assert_called_with("dev1")
@@ -46,9 +47,10 @@ def test_device_service_blocks_when_running():
 
     dm = MagicMock()
     svc = DeviceService(state, dm)
+    device = MagicMock()
 
     with pytest.raises(RuntimeError, match="Cannot register device"):
-        svc.register_device("dev1", "inst")
+        svc.register_device("dev1", device)
 
     with pytest.raises(RuntimeError, match="Cannot drop device"):
         svc.drop_device("dev1")

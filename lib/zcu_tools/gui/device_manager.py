@@ -2,14 +2,29 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Protocol, cast, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
-from qtpy.QtCore import QThread, Signal  # type: ignore[attr-defined]
+from qtpy.QtCore import QObject, QThread, Signal  # type: ignore[attr-defined]
 
-from zcu_tools.device import GlobalDeviceManager
-from zcu_tools.progress_bar import use_pbar_factory
+
+@runtime_checkable
+class DeviceProtocol(Protocol):
+    def setup(
+        self,
+        cfg: Any,
+        *,
+        progress: bool = True,
+        stop_event: Optional[threading.Event] = None,
+    ) -> None: ...
+    def get_info(self) -> object: ...
+
+
+@runtime_checkable
+class ValueDeviceProtocol(DeviceProtocol, Protocol):
+    def get_value(self) -> object: ...
+    def set_value(self, value: object) -> object: ...
 
 
 class _DeviceSetupWorker(QThread):
@@ -21,11 +36,11 @@ class _DeviceSetupWorker(QThread):
 
     def __init__(
         self,
-        dev: Any,
+        dev: DeviceProtocol,
         name: str,
         info: Any,
         pbar_factory: Optional[Callable[..., Any]],
-        parent: Any = None,
+        parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
         self._dev = dev
@@ -38,6 +53,8 @@ class _DeviceSetupWorker(QThread):
         self._stop_event.set()
 
     def run(self) -> None:
+        from zcu_tools.progress_bar import use_pbar_factory
+
         try:
             if self._pbar_factory is not None:
                 with use_pbar_factory(self._pbar_factory):
@@ -56,34 +73,46 @@ class _DeviceSetupWorker(QThread):
 class DeviceManager:
     """Thin wrapper around GlobalDeviceManager for GUI use."""
 
-    def register_device(self, name: str, device: Any) -> None:
+    def register_device(self, name: str, device: DeviceProtocol) -> None:
         """Register an already-constructed device instance."""
+        from zcu_tools.device import GlobalDeviceManager
+
         logger.info("register_device: name=%r type=%s", name, type(device).__name__)
         GlobalDeviceManager.register_device(name, device)
 
     def drop_device(self, name: str) -> None:
+        from zcu_tools.device import GlobalDeviceManager
+
         logger.info("drop_device: name=%r", name)
         GlobalDeviceManager.drop_device(name)
 
     def list_devices(self) -> dict[str, str]:
         """Return {name: device_type_string} for display."""
+        from zcu_tools.device import GlobalDeviceManager
+
         devices = GlobalDeviceManager.get_all_devices()
         return {name: type(dev).__name__ for name, dev in devices.items()}
 
-    def get_device_value(self, name: str) -> Any:
+    def get_device_value(self, name: str) -> object:
         """Read the current value from a device via get_value()."""
-        dev = GlobalDeviceManager.get_device(name)
-        return dev.get_value()  # type: ignore[attr-defined]
+        from zcu_tools.device import GlobalDeviceManager
 
-    def set_device_value(self, name: str, value: Any) -> Any:
+        dev = cast(ValueDeviceProtocol, GlobalDeviceManager.get_device(name))
+        return dev.get_value()
+
+    def set_device_value(self, name: str, value: Any) -> object:
         """Set a device value via set_value(); return the actual value applied."""
-        dev = GlobalDeviceManager.get_device(name)
-        return dev.set_value(value)  # type: ignore[attr-defined]
+        from zcu_tools.device import GlobalDeviceManager
 
-    def get_device_info(self, name: str) -> Any:
+        dev = cast(ValueDeviceProtocol, GlobalDeviceManager.get_device(name))
+        return dev.set_value(value)
+
+    def get_device_info(self, name: str) -> object:
         """Return the DeviceInfo object for a registered device."""
+        from zcu_tools.device import GlobalDeviceManager
+
         dev = GlobalDeviceManager.get_device(name)
-        return dev.get_info()  # type: ignore[attr-defined]
+        return dev.get_info()
 
     def setup_device(
         self,
@@ -92,6 +121,8 @@ class DeviceManager:
         pbar_factory: Optional[Callable[..., Any]] = None,
     ) -> _DeviceSetupWorker:
         """Start an async worker that applies info to the device; return the worker."""
+        from zcu_tools.device import GlobalDeviceManager
+
         dev = GlobalDeviceManager.get_device(name)
         worker = _DeviceSetupWorker(dev, name, info, pbar_factory)
         worker.start()
@@ -99,4 +130,6 @@ class DeviceManager:
 
     def get_all_info(self) -> dict[str, Any]:
         """Delegate to GlobalDeviceManager.get_all_info()."""
+        from zcu_tools.device import GlobalDeviceManager
+
         return GlobalDeviceManager.get_all_info()

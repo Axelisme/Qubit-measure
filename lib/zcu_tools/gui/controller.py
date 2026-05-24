@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional, Protocol
+from typing import Any, Callable, Optional, Protocol
 
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
@@ -12,7 +12,7 @@ from matplotlib.figure import Figure
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 from .adapter import CfgSchema, SavePaths, SocCfgHandle, SocHandle, WritebackItem
-from .device_manager import DeviceManager
+from .device_manager import DeviceManager, DeviceProtocol, _DeviceSetupWorker
 from .event_bus import (
     EventBus,
     GuiEvent,
@@ -154,8 +154,6 @@ class Controller:
         return tab_id
 
     def close_tab(self, tab_id: str) -> None:
-        if not self.has_tab(tab_id):
-            return
         if self._state.is_tab_busy(tab_id):
             raise RuntimeError("Cannot close a busy tab")
         self._tab_svc.close_tab(tab_id)
@@ -178,16 +176,16 @@ class Controller:
         return self._state.is_run_active()
 
     def is_tab_running(self, tab_id: str) -> bool:
-        return self.has_tab(tab_id) and self._state.is_tab_running(tab_id)
+        return self._state.is_tab_running(tab_id)
 
     def is_tab_analyzing(self, tab_id: str) -> bool:
-        return self.has_tab(tab_id) and self._state.is_tab_analyzing(tab_id)
+        return self._state.is_tab_analyzing(tab_id)
 
     def is_tab_saving_data(self, tab_id: str) -> bool:
-        return self.has_tab(tab_id) and self._state.is_tab_saving_data(tab_id)
+        return self._state.is_tab_saving_data(tab_id)
 
     def is_tab_busy(self, tab_id: str) -> bool:
-        return self.has_tab(tab_id) and self._state.is_tab_busy(tab_id)
+        return self._state.is_tab_busy(tab_id)
 
     def has_soc(self) -> bool:
         return self._conn_svc.has_soc()
@@ -249,7 +247,7 @@ class Controller:
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
-        self._tab_svc.save_image(tab_id, image_path)
+        self._save_svc.save_image_sync(tab_id, image_path)
         self._require_view().show_status_message(f"Image saved to {image_path}")
 
     def save_both(self, tab_id: str, data_path: str, image_path: str) -> None:
@@ -316,7 +314,7 @@ class Controller:
     # Device (DeviceService)
     # ------------------------------------------------------------------
 
-    def register_device(self, name: str, device: Any) -> None:
+    def register_device(self, name: str, device: DeviceProtocol) -> None:
         self._dev_svc.register_device(name, device)
 
     def drop_device(self, name: str) -> None:
@@ -325,18 +323,21 @@ class Controller:
     def list_devices(self) -> dict[str, str]:
         return self._dev_svc.list_devices()
 
-    def set_device_value(self, name: str, value: Any) -> Any:
+    def set_device_value(self, name: str, value: Any) -> object:
         return self._dev_svc.set_device_value(name, value)
 
-    def get_device_value(self, name: str) -> Any:
+    def get_device_value(self, name: str) -> object:
         return self._dev_svc.get_device_value(name)
 
-    def get_device_info(self, name: str) -> Any:
+    def get_device_info(self, name: str) -> object:
         return self._dev_svc.get_device_info(name)
 
     def setup_device(
-        self, name: str, info: Any, pbar_factory: Optional[Any] = None
-    ) -> Any:
+        self,
+        name: str,
+        info: Any,
+        pbar_factory: Optional[Callable[..., Any]] = None,
+    ) -> _DeviceSetupWorker:
         return self._dev_svc.setup_device(name, info, pbar_factory)
 
     # ------------------------------------------------------------------
@@ -408,7 +409,9 @@ class Controller:
             TabInteractionChangedPayload(tab_id=tab_id),
         )
 
-    def update_tab_analyze_params(self, tab_id: str, values: dict[str, object]) -> None:
+    def update_tab_analyze_param_values(
+        self, tab_id: str, values: dict[str, object]
+    ) -> None:
         self._tab_svc.update_tab_analyze_param_values(tab_id, values)
         self._bus.emit(
             GuiEvent.TAB_INTERACTION_CHANGED,
@@ -418,7 +421,7 @@ class Controller:
     def update_tab_save_paths(
         self, tab_id: str, data_path: str, image_path: str
     ) -> None:
-        self._tab_svc.update_tab_save_paths(tab_id, data_path, image_path)
+        self._tab_svc.update_tab_save_path_overrides(tab_id, data_path, image_path)
         self._bus.emit(
             GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),

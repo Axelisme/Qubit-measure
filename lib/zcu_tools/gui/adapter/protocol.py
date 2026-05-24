@@ -2,12 +2,9 @@ from __future__ import annotations
 
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Sequence, cast
+from typing import TYPE_CHECKING, Any, Optional, Sequence, cast
 
 from typing_extensions import Generic
-
-from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.utils.datasaver import create_datafolder
 
 from .types import (
     AnalyzeParam,
@@ -22,6 +19,9 @@ from .types import (
     WritebackItem,
     WritebackRequest,
 )
+
+if TYPE_CHECKING:
+    from zcu_tools.experiment.cfg_model import ExpCfgModel
 
 
 class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult]):
@@ -72,6 +72,8 @@ class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult]):
 
     def make_default_save_paths(self, ctx: ExpContext) -> SavePaths:
         """Default save path policy shared by most adapters."""
+        from zcu_tools.utils.datasaver import create_datafolder
+
         if not ctx.database_path:
             raise RuntimeError("ExpContext.database_path is required for save paths")
         if not ctx.result_dir:

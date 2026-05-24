@@ -316,6 +316,11 @@ def test_meta_dict_writeback_empty_md_key_raises():
         )
 
 
+def test_meta_dict_writeback_requires_md_key_and_proposed_value():
+    with pytest.raises(TypeError):
+        MetaDictWriteback(key="k", description="d", current_value=None)  # type: ignore[call-arg]
+
+
 def test_meta_dict_writeback_valid():
     item = MetaDictWriteback(
         key="k", description="d", current_value=None, md_key="freq", proposed_value=1
@@ -332,6 +337,11 @@ def test_module_writeback_empty_module_name_raises():
             module_name="",
             proposed_module=None,
         )
+
+
+def test_module_writeback_requires_module_name_and_proposal():
+    with pytest.raises(TypeError):
+        ModuleWriteback(key="k", description="d", current_value=None)  # type: ignore[call-arg]
 
 
 def test_module_writeback_valid():
@@ -354,6 +364,11 @@ def test_waveform_writeback_empty_waveform_name_raises():
             waveform_name="",
             proposed_waveform=None,
         )
+
+
+def test_waveform_writeback_requires_waveform_name_and_proposal():
+    with pytest.raises(TypeError):
+        WaveformWriteback(key="k", description="d", current_value=None)  # type: ignore[call-arg]
 
 
 def test_waveform_writeback_valid():

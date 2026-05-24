@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
-from matplotlib.figure import Figure
 from typing_extensions import Generic, TypeVar
 
 from .adapter import (
@@ -18,6 +17,9 @@ from .adapter import (
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from matplotlib.figure import Figure
+
 T_Result = TypeVar("T_Result")
 T_AnalyzeResult = TypeVar("T_AnalyzeResult", bound=AnalyzeResultWithFigure)
 
@@ -28,7 +30,7 @@ class TabState(Generic[T_Result, T_AnalyzeResult]):
     cfg_schema: CfgSchema
     run_result: Optional[T_Result] = None
     analyze_result: Optional[T_AnalyzeResult] = None
-    figure: Optional[Figure] = None
+    figure: Optional["Figure"] = None
     analyze_params: list[AnalyzeParam] = field(default_factory=list)
     analyze_param_values: dict[str, object] = field(default_factory=dict)
     suggested_save_paths: Optional[SavePaths] = None
@@ -107,7 +109,7 @@ class State:
         tab.applied_writeback_keys.clear()
 
     def update_tab_analyze(
-        self, tab_id: str, analyze_result: object, figure: Optional[Figure]
+        self, tab_id: str, analyze_result: object, figure: Optional["Figure"]
     ) -> None:
         logger.debug(
             "update_tab_analyze: tab_id=%r figure=%s",
@@ -158,13 +160,17 @@ class State:
     def update_tab_save_path_overrides(
         self,
         tab_id: str,
-        data_path: str,
-        image_path: str,
+        paths: Optional[SavePaths],
     ) -> None:
         logger.debug("update_tab_save_path_overrides: tab_id=%r", tab_id)
-        self.tabs[tab_id].save_path_overrides = SavePaths(
-            data_path=data_path, image_path=image_path
-        )
+        self.tabs[tab_id].save_path_overrides = paths
+
+    def clear_tab_save_path_overrides(
+        self,
+        tab_id: str,
+    ) -> None:
+        logger.debug("clear_tab_save_path_overrides: tab_id=%r", tab_id)
+        self.tabs[tab_id].save_path_overrides = None
 
     def get_effective_save_paths(self, tab_id: str) -> Optional[SavePaths]:
         tab = self.tabs[tab_id]
