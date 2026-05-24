@@ -79,7 +79,7 @@ def test_context_service_set_startup_context():
     assert state.exp_context.chip_name == "C1"
     assert state.exp_context.result_dir == "/res"
     bus.emit.assert_called_once()
-    assert bus.emit.call_args[0][0] == GuiEvent.CONTEXT_CHANGED
+    assert bus.emit.call_args[0][0] == GuiEvent.CONTEXT_SWITCHED
 
 
 def test_context_service_use_context():
@@ -138,4 +138,4 @@ def test_context_service_new_context():
         base_ctx, value=1.5, unit="V", clone_from_current=True
     )
     bus.emit.assert_called_once()
-    assert bus.emit.call_args[0][0] == GuiEvent.CONTEXT_CHANGED
+    assert bus.emit.call_args[0][0] == GuiEvent.CONTEXT_SWITCHED

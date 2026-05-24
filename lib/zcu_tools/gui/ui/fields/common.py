@@ -283,9 +283,11 @@ class ScalarWidget(BaseLiveWidget):
             return
         if value.resolved is None:
             self._ghost.setText("= ?")
+            self._ghost.setToolTip(value.error or "Expression is unresolved")
             self._ghost.setStyleSheet("color: red; font-style: italic;")
             return
         self._ghost.setText(f"= {value.resolved}")
+        self._ghost.setToolTip("")
         self._ghost.setStyleSheet("color: gray; font-style: italic;")
 
     def _install_context_menu(self, widget: Optional[QWidget]) -> None:
@@ -415,6 +417,12 @@ class SweepWidget(BaseLiveWidget):
             return
         self._updating = True
         try:
+            if not (
+                self._start.minimum() <= val.start <= self._start.maximum()
+                and self._stop.minimum() <= val.stop <= self._stop.maximum()
+                and self._expts.minimum() <= val.expts <= self._expts.maximum()
+            ):
+                raise RuntimeError("SweepValue is outside widget range")
             self._start.setValue(val.start)
             self._stop.setValue(val.stop)
             self._expts.setValue(val.expts)

@@ -3,6 +3,8 @@ from __future__ import annotations
 import dataclasses
 from typing import TYPE_CHECKING, Any, Optional
 
+from zcu_tools.gui.event_bus import GuiEvent, PredictorChangedPayload, SocChangedPayload
+
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import EventBus
     from zcu_tools.gui.state import State
@@ -25,12 +27,7 @@ class ConnectionService:
     def set_connection(self, soc: Any, soccfg: Any) -> None:
         new_ctx = dataclasses.replace(self._state.exp_context, soc=soc, soccfg=soccfg)
         self._state.set_context(new_ctx)
-        from zcu_tools.gui.event_bus import ContextChangedPayload, GuiEvent
-
-        self._bus.emit(
-            GuiEvent.CONTEXT_CHANGED,
-            ContextChangedPayload(md=new_ctx.md, ml=new_ctx.ml),
-        )
+        self._bus.emit(GuiEvent.SOC_CHANGED, SocChangedPayload(soc=soc, soccfg=soccfg))
 
     def set_predictor(
         self, predictor: Optional[Any], path: Optional[str] = None
@@ -38,12 +35,7 @@ class ConnectionService:
         self._predictor_path = path
         new_ctx = dataclasses.replace(self._state.exp_context, predictor=predictor)
         self._state.set_context(new_ctx)
-        from zcu_tools.gui.event_bus import ContextChangedPayload, GuiEvent
-
-        self._bus.emit(
-            GuiEvent.CONTEXT_CHANGED,
-            ContextChangedPayload(md=new_ctx.md, ml=new_ctx.ml),
-        )
+        self._bus.emit(GuiEvent.PREDICTOR_CHANGED, PredictorChangedPayload())
 
     def get_predictor(self) -> Optional[Any]:
         return self._state.exp_context.predictor

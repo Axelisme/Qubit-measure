@@ -24,7 +24,7 @@ def _spec_value_for_chosen(
         for spec in allowed:
             if spec.label == label:
                 return spec, None
-        return (allowed[0] if allowed else None), None
+        raise RuntimeError(f"Unknown custom reference label: {label!r}")
 
     # 2. Named instance from Library
     if ml:
@@ -35,4 +35,4 @@ def _spec_value_for_chosen(
             cfg = ml.waveforms[chosen_key]
             return waveform_cfg_to_value(cfg)
 
-    return None, None
+    raise RuntimeError(f"Unknown library reference: {chosen_key!r}")

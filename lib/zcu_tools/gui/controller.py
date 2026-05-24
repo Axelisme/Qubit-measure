@@ -13,11 +13,8 @@ from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from .adapter import CfgSchema, WritebackItem
 from .device_manager import DeviceManager
 from .event_bus import (
-    ContextChangedPayload,
     EventBus,
     GuiEvent,
-    InspectChangedPayload,
-    PredictorChangedPayload,
     TabAddedPayload,
     TabClosedPayload,
     TabContentChangedPayload,
@@ -165,8 +162,8 @@ class Controller:
         if not self.has_tab(tab_id):
             return
         if self._state.is_tab_busy(tab_id):
-            self._require_view().show_status_message("Cannot close a busy tab")
-            return
+            raise RuntimeError("Cannot close a busy tab")
+        self._pending_save_both.pop(tab_id, None)
         self._tab_svc.close_tab(tab_id)
         self._bus.emit(GuiEvent.TAB_CLOSED, TabClosedPayload(tab_id=tab_id))
 
@@ -182,9 +179,6 @@ class Controller:
 
     def has_startup_context(self) -> bool:
         return self._ctx_svc.has_startup_context()
-
-    def is_running(self) -> bool:
-        return self._state.is_run_active()
 
     def is_run_active(self) -> bool:
         return self._state.is_run_active()
@@ -229,12 +223,8 @@ class Controller:
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
-        try:
-            figure_container = self._require_view().make_live_container(tab_id)
-            self._analyze_svc.start_analyze(tab_id, analyze_params, figure_container)
-        except Exception as exc:
-            logger.warning("analyze: failed tab_id=%r exc=%r", tab_id, exc)
-            self._require_view().show_status_message(f"Analyze failed: {exc}")
+        figure_container = self._require_view().make_live_container(tab_id)
+        self._analyze_svc.start_analyze(tab_id, analyze_params, figure_container)
 
     # ------------------------------------------------------------------
     # Writeback (TabService)
@@ -247,12 +237,7 @@ class Controller:
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
-        try:
-            return self._writeback_svc.apply_tab_writeback_items(tab_id, items)
-        except Exception as exc:
-            logger.warning("apply_writeback: failed tab_id=%r exc=%r", tab_id, exc)
-            self._require_view().show_status_message(f"Writeback failed: {exc}")
-            return []
+        return self._writeback_svc.apply_tab_writeback_items(tab_id, items)
 
     # ------------------------------------------------------------------
     # Save (TabService)
@@ -263,23 +248,15 @@ class Controller:
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
-        try:
-            self._save_svc.start_save_data(tab_id, data_path)
-        except Exception as exc:
-            logger.warning("save_data: failed tab_id=%r exc=%r", tab_id, exc)
-            self._require_view().show_status_message(f"Save data failed: {exc}")
+        self._save_svc.start_save_data(tab_id, data_path)
 
     def save_image(self, tab_id: str, image_path: str) -> None:
         if not self.has_context():
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
-        try:
-            self._tab_svc.save_image(tab_id, image_path)
-            self._require_view().show_status_message(f"Image saved to {image_path}")
-        except Exception as exc:
-            logger.warning("save_image: failed tab_id=%r exc=%r", tab_id, exc)
-            self._require_view().show_status_message(f"Save image failed: {exc}")
+        self._tab_svc.save_image(tab_id, image_path)
+        self._require_view().show_status_message(f"Image saved to {image_path}")
 
     def save_both(self, tab_id: str, data_path: str, image_path: str) -> None:
         if not self.has_context():
@@ -287,34 +264,14 @@ class Controller:
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
         pending = _PendingSaveBoth(data_path=data_path, image_path=image_path)
-        data_started = False
-        try:
-            self._save_svc.start_save_data(tab_id, data_path)
-            self._pending_save_both[tab_id] = pending
-            data_started = True
-        except Exception as exc:
-            pending.image_error = None
-            logger.warning(
-                "save_both: save_data start failed tab_id=%r exc=%r", tab_id, exc
-            )
-            try:
-                self._tab_svc.save_image(tab_id, image_path)
-                self._require_view().show_status_message(
-                    f"Data failed: {exc}; image saved to {image_path}"
-                )
-            except Exception as image_exc:
-                self._require_view().show_status_message(
-                    f"Data failed: {exc}; image failed: {image_exc}"
-                )
-            return
+        self._save_svc.start_save_data(tab_id, data_path)
+        self._pending_save_both[tab_id] = pending
 
         try:
             self._tab_svc.save_image(tab_id, image_path)
         except Exception as exc:
             pending.image_error = str(exc)
             logger.warning("save_both: save_image failed tab_id=%r exc=%r", tab_id, exc)
-            if not data_started:
-                self._require_view().show_status_message(f"Save image failed: {exc}")
 
     # ------------------------------------------------------------------
     # Context / IO (ContextService)
@@ -333,20 +290,12 @@ class Controller:
         self._ctx_svc.set_startup_context(
             md, ml, chip_name, qub_name, res_name, result_dir, database_path
         )
-        self._bus.emit(GuiEvent.INSPECT_CHANGED, InspectChangedPayload(md=md))
 
     def setup_project(self, result_dir: str) -> None:
         self._ctx_svc.setup_project(result_dir)
-        ctx = self._state.exp_context
-        self._bus.emit(
-            GuiEvent.CONTEXT_CHANGED, ContextChangedPayload(md=ctx.md, ml=ctx.ml)
-        )
 
     def use_context(self, label: str) -> None:
         self._ctx_svc.use_context(label)
-        self._bus.emit(
-            GuiEvent.INSPECT_CHANGED, InspectChangedPayload(md=self.get_current_md())
-        )
 
     def new_context(
         self,
@@ -355,9 +304,6 @@ class Controller:
         clone_from_current: bool = False,
     ) -> None:
         self._ctx_svc.new_context(value, unit, clone_from_current)
-        self._bus.emit(
-            GuiEvent.INSPECT_CHANGED, InspectChangedPayload(md=self.get_current_md())
-        )
 
     def get_active_context_label(self) -> Optional[str]:
         return self._ctx_svc.get_active_context_label()
@@ -418,7 +364,6 @@ class Controller:
         self, predictor: Optional[Any], path: Optional[str] = None
     ) -> None:
         self._conn_svc.set_predictor(predictor, path)
-        self._bus.emit(GuiEvent.PREDICTOR_CHANGED, PredictorChangedPayload())
 
     def get_soccfg(self) -> Any:
         return self._conn_svc.get_soccfg()
@@ -524,5 +469,4 @@ class Controller:
         )
 
     def get_adapter_names(self) -> list[str]:
-        # Simple passthrough to registry
-        return self._tab_svc._registry.list_names()
+        return self._tab_svc.list_adapter_names()

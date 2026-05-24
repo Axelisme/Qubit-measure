@@ -8,10 +8,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Optional
 
+from zcu_tools.gui.adapter import CfgSchema
 from zcu_tools.gui.event_bus import (
-    ContextChangedPayload,
+    ContextSwitchedPayload,
     GuiEvent,
-    InspectChangedPayload,
+    MlChangedPayload,
     PredictorChangedPayload,
     RunLockChangedPayload,
     TabAddedPayload,
@@ -454,6 +455,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._ctrl = controller
         self._tab_widgets: dict[str, ExpTabWidget] = {}
+        self._tab_form_connections: dict[str, tuple[Any, Any]] = {}
         self._inspect_dialog: Any = None
 
         self.setWindowTitle("ZCU Qubit Measure — v2 GUI")
@@ -518,11 +520,11 @@ class MainWindow(QMainWindow):
             GuiEvent.TAB_INTERACTION_CHANGED, self._on_bus_tab_interaction_changed
         )
         bus.subscribe(GuiEvent.RUN_LOCK_CHANGED, self._on_bus_run_lock_changed)
-        bus.subscribe(GuiEvent.CONTEXT_CHANGED, self._on_bus_context_changed)
+        bus.subscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_context_switched)
+        bus.subscribe(GuiEvent.ML_CHANGED, self._on_bus_ml_changed)
         bus.subscribe(GuiEvent.TAB_ADDED, self._on_bus_tab_added)
         bus.subscribe(GuiEvent.TAB_CLOSED, self._on_bus_tab_closed)
         bus.subscribe(GuiEvent.TAB_CONTENT_CHANGED, self._on_bus_tab_content_changed)
-        bus.subscribe(GuiEvent.INSPECT_CHANGED, self._on_bus_inspect_changed)
         bus.subscribe(GuiEvent.PREDICTOR_CHANGED, self._on_bus_predictor_changed)
 
         # Cleanup on destroy
@@ -534,11 +536,11 @@ class MainWindow(QMainWindow):
             GuiEvent.TAB_INTERACTION_CHANGED, self._on_bus_tab_interaction_changed
         )
         bus.unsubscribe(GuiEvent.RUN_LOCK_CHANGED, self._on_bus_run_lock_changed)
-        bus.unsubscribe(GuiEvent.CONTEXT_CHANGED, self._on_bus_context_changed)
+        bus.unsubscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_context_switched)
+        bus.unsubscribe(GuiEvent.ML_CHANGED, self._on_bus_ml_changed)
         bus.unsubscribe(GuiEvent.TAB_ADDED, self._on_bus_tab_added)
         bus.unsubscribe(GuiEvent.TAB_CLOSED, self._on_bus_tab_closed)
         bus.unsubscribe(GuiEvent.TAB_CONTENT_CHANGED, self._on_bus_tab_content_changed)
-        bus.unsubscribe(GuiEvent.INSPECT_CHANGED, self._on_bus_inspect_changed)
         bus.unsubscribe(GuiEvent.PREDICTOR_CHANGED, self._on_bus_predictor_changed)
 
     def _on_bus_tab_interaction_changed(
@@ -549,9 +551,14 @@ class MainWindow(QMainWindow):
     def _on_bus_run_lock_changed(self, payload: RunLockChangedPayload) -> None:
         self.refresh_run_lock(payload.running_tab_id)
 
-    def _on_bus_context_changed(self, payload: ContextChangedPayload) -> None:
+    def _on_bus_context_switched(self, payload: ContextSwitchedPayload) -> None:
         del payload
         self.refresh_context_panel()
+        for tab_id in list(self._tab_widgets):
+            self.refresh_tab(tab_id)
+
+    def _on_bus_ml_changed(self, payload: MlChangedPayload) -> None:
+        del payload
         for tab_id in list(self._tab_widgets):
             self.refresh_tab(tab_id)
 
@@ -581,12 +588,15 @@ class MainWindow(QMainWindow):
         self.refresh_tab_interaction(tab_id)
 
         # re-evaluate run_btn when channel validity changes
-        tab_w.cfg_form.validity_changed.connect(
-            lambda _valid, tid=tab_id: self.refresh_tab_interaction(tid)
-        )
-        tab_w.cfg_form.schema_changed.connect(
-            lambda schema_obj, tid=tab_id: self._ctrl.update_tab_cfg(tid, schema_obj)
-        )
+        def validity_cb(_valid: bool, tid: str = tab_id) -> None:
+            self.refresh_tab_interaction(tid)
+
+        def schema_cb(schema_obj: CfgSchema, tid: str = tab_id) -> None:
+            self._ctrl.update_tab_cfg(tid, schema_obj)
+
+        self._tab_form_connections[tab_id] = (validity_cb, schema_cb)
+        tab_w.cfg_form.validity_changed.connect(validity_cb)
+        tab_w.cfg_form.schema_changed.connect(schema_cb)
         tab_w.analyze_form.params_changed.connect(
             lambda values, tid=tab_id: self._ctrl.update_tab_analyze_params(tid, values)
         )
@@ -622,6 +632,11 @@ class MainWindow(QMainWindow):
         logger.info("_on_bus_tab_closed: tab_id=%r", tab_id)
         tab_w = self._tab_widgets.pop(tab_id, None)
         if tab_w is not None:
+            callbacks = self._tab_form_connections.pop(tab_id, None)
+            if callbacks is not None:
+                validity_cb, schema_cb = callbacks
+                tab_w.cfg_form.validity_changed.disconnect(validity_cb)
+                tab_w.cfg_form.schema_changed.disconnect(schema_cb)
             index = self._tabs.indexOf(tab_w)
             if index >= 0:
                 self._tabs.removeTab(index)
@@ -631,12 +646,6 @@ class MainWindow(QMainWindow):
 
     def _on_bus_tab_content_changed(self, payload: TabContentChangedPayload) -> None:
         self.refresh_tab(payload.tab_id)
-
-    def _on_bus_inspect_changed(self, payload: InspectChangedPayload) -> None:
-        del payload
-        self.refresh_inspect_panel()
-        for tab_id in list(self._tab_widgets):
-            self.refresh_tab(tab_id)
 
     def _on_bus_predictor_changed(self, payload: PredictorChangedPayload) -> None:
         del payload
@@ -686,12 +695,9 @@ class MainWindow(QMainWindow):
         items = self._ctrl.get_tab_writeback_items(tab_id)
         tab_w.update_writeback_items(items)
 
-        # populate save paths
-        try:
-            save_paths = self._ctrl.get_tab_save_paths(tab_id)
+        save_paths = self._ctrl.get_tab_save_paths(tab_id)
+        if save_paths is not None:
             tab_w.set_save_paths(save_paths.data_path, save_paths.image_path)
-        except Exception:
-            pass
 
         # show analysis figure if available
         figure = self._ctrl.get_tab_figure(tab_id)
@@ -836,7 +842,10 @@ class MainWindow(QMainWindow):
             return
         tab_id = tab_w.tab_id
         logger.info("_on_tab_close_requested: tab_id=%r", tab_id)
-        self._ctrl.close_tab(tab_id)
+        try:
+            self._ctrl.close_tab(tab_id)
+        except RuntimeError as exc:
+            self.show_status_message(str(exc))
 
     def _on_run_stop_clicked(self, tab_id: str) -> None:
         if self._ctrl.is_tab_running(tab_id):

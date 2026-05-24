@@ -88,6 +88,10 @@ class ExperimentManager:
         return self._label
 
     @property
+    def current_label(self) -> str | None:
+        return self._label
+
+    @property
     def flux_dir(self) -> Path:
         return self.exp_dir / self.label
 

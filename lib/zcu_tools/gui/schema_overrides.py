@@ -71,57 +71,77 @@ def _coerce_value_for_node(current: CfgNodeValue, value: object) -> CfgNodeValue
 
 def lock_field(schema: CfgSchema, path: str) -> CfgSchema:
     copied = copy.deepcopy(schema)
+    _lock_field(copied, path)
+    return copied
+
+
+def _lock_field(schema: CfgSchema, path: str) -> None:
     parts = _split_path(path)
-    parent = _get_parent_section_spec(copied.spec, parts)
+    parent = _get_parent_section_spec(schema.spec, parts)
     leaf = parent.fields.get(parts[-1])
     if not isinstance(leaf, ScalarSpec):
         raise RuntimeError(f"Path '{path}' does not point to a ScalarSpec")
     parent.fields[parts[-1]] = replace(leaf, editable=False)
-    return copied
 
 
 def hide_field(schema: CfgSchema, path: str) -> CfgSchema:
     copied = copy.deepcopy(schema)
+    _hide_field(copied, path)
+    return copied
+
+
+def _hide_field(schema: CfgSchema, path: str) -> None:
     parts = _split_path(path)
-    parent = _get_parent_section_spec(copied.spec, parts)
+    parent = _get_parent_section_spec(schema.spec, parts)
     leaf = parent.fields.get(parts[-1])
     if not isinstance(leaf, ScalarSpec):
         raise RuntimeError(f"Path '{path}' does not point to a ScalarSpec")
     parent.fields[parts[-1]] = replace(leaf, hidden=True)
-    return copied
 
 
 def set_default_value(schema: CfgSchema, path: str, value: object) -> CfgSchema:
     copied = copy.deepcopy(schema)
+    _set_default_value(copied, path, value)
+    return copied
+
+
+def _set_default_value(schema: CfgSchema, path: str, value: object) -> None:
     parts = _split_path(path)
-    parent = _get_parent_section_value(copied.value, parts)
+    parent = _get_parent_section_value(schema.value, parts)
     if parent is None or parts[-1] not in parent.fields:
         raise RuntimeError(f"Schema value path '{path}' does not exist")
     current = parent.fields[parts[-1]]
     parent.fields[parts[-1]] = _coerce_value_for_node(current, value)
-    return copied
 
 
 def set_field_label(schema: CfgSchema, path: str, label: str) -> CfgSchema:
     copied = copy.deepcopy(schema)
+    _set_field_label(copied, path, label)
+    return copied
+
+
+def _set_field_label(schema: CfgSchema, path: str, label: str) -> None:
     parts = _split_path(path)
-    parent = _get_parent_section_spec(copied.spec, parts)
+    parent = _get_parent_section_spec(schema.spec, parts)
     leaf = parent.fields.get(parts[-1])
     if leaf is None or not hasattr(leaf, "label"):
         raise RuntimeError(f"Path '{path}' does not support labels")
     parent.fields[parts[-1]] = replace(leaf, label=label)
-    return copied
 
 
 def set_field_choices(schema: CfgSchema, path: str, choices: list[object]) -> CfgSchema:
     copied = copy.deepcopy(schema)
+    _set_field_choices(copied, path, choices)
+    return copied
+
+
+def _set_field_choices(schema: CfgSchema, path: str, choices: list[object]) -> None:
     parts = _split_path(path)
-    parent = _get_parent_section_spec(copied.spec, parts)
+    parent = _get_parent_section_spec(schema.spec, parts)
     leaf = parent.fields.get(parts[-1])
     if not isinstance(leaf, ScalarSpec):
         raise RuntimeError(f"Path '{path}' does not point to a ScalarSpec")
     parent.fields[parts[-1]] = replace(leaf, choices=choices)
-    return copied
 
 
 def apply_schema_overrides(
@@ -130,19 +150,19 @@ def apply_schema_overrides(
     spec_overrides: Optional[dict[str, dict[str, object]]] = None,
     value_overrides: Optional[dict[str, object]] = None,
 ) -> CfgSchema:
-    updated = schema
+    updated = copy.deepcopy(schema)
     for path, overrides in (spec_overrides or {}).items():
         for key, value in overrides.items():
             if key == "editable":
                 if value is False:
-                    updated = lock_field(updated, path)
+                    _lock_field(updated, path)
                 elif value is not True:
                     raise RuntimeError(
                         f"Unsupported editable override at '{path}': {value!r}"
                     )
             elif key == "hidden":
                 if value is True:
-                    updated = hide_field(updated, path)
+                    _hide_field(updated, path)
                 elif value is not False:
                     raise RuntimeError(
                         f"Unsupported hidden override at '{path}': {value!r}"
@@ -150,14 +170,14 @@ def apply_schema_overrides(
             elif key == "label":
                 if not isinstance(value, str):
                     raise RuntimeError(f"Label override at '{path}' must be str")
-                updated = set_field_label(updated, path, value)
+                _set_field_label(updated, path, value)
             elif key == "choices":
                 if not isinstance(value, list):
                     raise RuntimeError(f"Choices override at '{path}' must be list")
-                updated = set_field_choices(updated, path, value)
+                _set_field_choices(updated, path, value)
             else:
                 raise RuntimeError(f"Unsupported spec override key '{key}' at '{path}'")
 
     for path, value in (value_overrides or {}).items():
-        updated = set_default_value(updated, path, value)
+        _set_default_value(updated, path, value)
     return updated

@@ -310,8 +310,8 @@ def test_cfg_form_unsubscribes_bus_on_repopulate(qapp, ctrl):
 
     bus = ctrl.get_bus.return_value
     assert len(bus._subs[GuiEvent.MD_CHANGED]) == 1
-    assert len(bus._subs[GuiEvent.CONTEXT_CHANGED]) == 1
-    assert len(bus._subs[GuiEvent.INSPECT_CHANGED]) == 1
+    assert len(bus._subs[GuiEvent.CONTEXT_SWITCHED]) == 1
+    assert len(bus._subs[GuiEvent.ML_CHANGED]) == 1
 
 
 def test_read_schema_returns_cfg_schema(qapp, ctrl):
@@ -727,12 +727,12 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
         ref_widget._combo.itemText(i) for i in range(ref_widget._combo.count())
     ]
     assert "Lib: my_pulse (modified)" in items_list
-    assert "Lib: my_pulse" in items_list
+    assert "Revert to Lib: my_pulse" in items_list
 
     # 4. Select the clean item to revert modifications
     clean_idx = -1
     for i in range(ref_widget._combo.count()):
-        if ref_widget._combo.itemText(i) == "Lib: my_pulse":
+        if ref_widget._combo.itemText(i) == "Revert to Lib: my_pulse":
             clean_idx = i
             break
     assert clean_idx >= 0

@@ -320,8 +320,8 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
         if not isinstance(fit_bg_slope, bool):
             raise RuntimeError("Analyze param 'fit_bg_slope' must be bool")
         model_type = cast(Literal["hm", "t", "auto"], model_type_value)
-        freq, fwhm, params, figure = FreqExp().analyze(
-            (result.freqs, result.signals),
+        freq, fwhm, params, figure = FakeFreqExp().analyze(
+            result,
             model_type=model_type,
             fit_bg_slope=fit_bg_slope,
         )

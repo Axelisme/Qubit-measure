@@ -10,7 +10,7 @@ from zcu_tools.gui.adapter import (
     ModuleWriteback,
     RunRequest,
 )
-from zcu_tools.gui.event_bus import GuiEvent, InspectChangedPayload, MdChangedPayload
+from zcu_tools.gui.event_bus import GuiEvent, MdChangedPayload, MlChangedPayload
 from zcu_tools.gui.services.writeback import WritebackService
 from zcu_tools.gui.state import State
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
@@ -107,7 +107,7 @@ def test_writeback_service_applies_module_and_waveform_items():
     assert applied == ["readout_rf", "ro_waveform"]
     assert "readout_rf" in ctx.ml.modules
     assert "ro_waveform" in ctx.ml.waveforms
-    bus.emit.assert_any_call(GuiEvent.INSPECT_CHANGED, InspectChangedPayload(md=ctx.md))
+    bus.emit.assert_any_call(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ctx.ml))
 
     items_after = svc.get_tab_writeback_items(tab_id)
     selected_keys = {item.key for item in items_after if item.selected}

@@ -13,11 +13,7 @@ from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.adapter import CfgSchema, CfgSectionSpec, CfgSectionValue, ExpContext
 from zcu_tools.gui.controller import Controller
 from zcu_tools.gui.device_manager import DeviceManager
-from zcu_tools.gui.event_bus import (
-    GuiEvent,
-    InspectChangedPayload,
-    TabContentChangedPayload,
-)
+from zcu_tools.gui.event_bus import GuiEvent, MdChangedPayload, TabContentChangedPayload
 from zcu_tools.gui.io_manager import IOManager
 from zcu_tools.gui.plot_host import FigureContainer
 from zcu_tools.gui.plot_routing import has_current_container
@@ -168,8 +164,8 @@ def test_analyze_calls_refresh_tab(cf):
 
 def test_analyze_without_result_raises(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.analyze(tab_id, {})
-    cf.view.show_status_message.assert_called()
+    with pytest.raises(RuntimeError, match="No run result"):
+        cf.ctrl.analyze(tab_id, {})
 
 
 def test_analyze_exception_shows_status_message(cf):
@@ -247,7 +243,7 @@ def test_apply_writeback_items_updates_md(cf):
     assert items_after[0].selected is False
 
 
-def test_apply_writeback_items_emits_inspect_changed(cf):
+def test_apply_writeback_items_emits_md_changed(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
     cf.ctrl.analyze(tab_id, _default_analyze_params(cf, tab_id))
@@ -256,14 +252,14 @@ def test_apply_writeback_items_emits_inspect_changed(cf):
 
     cf.ctrl.apply_writeback_items(tab_id, items)
 
-    cf.bus.emit.assert_any_call(GuiEvent.INSPECT_CHANGED, ANY)
+    cf.bus.emit.assert_any_call(GuiEvent.MD_CHANGED, ANY)
 
 
 def test_apply_writeback_items_without_analyze_raises(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
-    cf.ctrl.apply_writeback_items(tab_id, [])
-    cf.view.show_status_message.assert_called()
+    with pytest.raises(RuntimeError, match="No analyze result"):
+        cf.ctrl.apply_writeback_items(tab_id, [])
 
 
 # ---------------------------------------------------------------------------
@@ -273,8 +269,8 @@ def test_apply_writeback_items_without_analyze_raises(cf):
 
 def test_save_data_without_result_raises(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.save_data(tab_id, "/tmp/test")
-    cf.view.show_status_message.assert_called()
+    with pytest.raises(RuntimeError, match="No run result"):
+        cf.ctrl.save_data(tab_id, "/tmp/test")
 
 
 def test_save_data_calls_adapter_save(cf):
@@ -306,9 +302,8 @@ def test_save_image_without_figure_raises(cf):
     tab_id = cf.ctrl.new_tab("fake")
     _run_and_wait(cf, tab_id)
     # no analyze yet → no figure
-    cf.ctrl.save_image(tab_id, "/tmp/test.png")
-    cf.view.show_status_message.assert_called()
-    assert "No figure" in cf.view.show_status_message.call_args[0][0]
+    with pytest.raises(RuntimeError, match="No figure"):
+        cf.ctrl.save_image(tab_id, "/tmp/test.png")
 
 
 def test_save_image_calls_savefig(cf, tmp_path):
@@ -470,9 +465,9 @@ def test_close_busy_tab_shows_status_message(cf):
 
     cf.ctrl.analyze(tab_id, {"threshold": 0.0})
     assert cf.state.is_tab_analyzing(tab_id) is True
-    cf.ctrl.close_tab(tab_id)
+    with pytest.raises(RuntimeError, match="busy tab"):
+        cf.ctrl.close_tab(tab_id)
     assert tab_id in cf.state.tabs
-    assert cf.view.show_status_message.called
     assert _wait_for(lambda: not cf.state.is_tab_analyzing(tab_id))
 
 
@@ -481,3 +476,15 @@ def test_get_tab_save_paths_returns_save_paths(cf):
     paths = cf.ctrl.get_tab_save_paths(tab_id)
     assert hasattr(paths, "data_path")
     assert hasattr(paths, "image_path")
+
+
+def test_get_tab_save_paths_without_active_context_returns_none(cf):
+    cf.state.exp_context = ExpContext(
+        md=MagicMock(),
+        ml=MagicMock(),
+        soc=MagicMock(),
+        soccfg=MagicMock(),
+    )
+    tab_id = cf.ctrl.new_tab("fake")
+
+    assert cf.ctrl.get_tab_save_paths(tab_id) is None

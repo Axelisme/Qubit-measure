@@ -13,8 +13,8 @@ from zcu_tools.gui.adapter import (
 )
 from zcu_tools.gui.event_bus import (
     GuiEvent,
-    InspectChangedPayload,
     MdChangedPayload,
+    MlChangedPayload,
     TabContentChangedPayload,
 )
 from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
@@ -82,16 +82,14 @@ class WritebackService:
                 raise RuntimeError(f"Unsupported writeback item type: {type(item)}")
             applied_keys.append(item.key)
 
-        if touched_ml:
-            try:
-                ctx.ml.dump()
-            except Exception:
-                pass
+        if touched_ml and ctx.ml._path is not None:
+            ctx.ml.dump()
         if touched_md:
             self._bus.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=ctx.md))
+        if touched_ml:
+            self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ctx.ml))
         if touched_md or touched_ml:
             tab.applied_writeback_keys.update(applied_keys)
-            self._bus.emit(GuiEvent.INSPECT_CHANGED, InspectChangedPayload(md=ctx.md))
             self._bus.emit(
                 GuiEvent.TAB_CONTENT_CHANGED, TabContentChangedPayload(tab_id=tab_id)
             )

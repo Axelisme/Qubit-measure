@@ -149,7 +149,9 @@ class State:
         )
         self.tabs[tab_id].analyze_param_values = dict(values)
 
-    def update_tab_suggested_save_paths(self, tab_id: str, paths: SavePaths) -> None:
+    def update_tab_suggested_save_paths(
+        self, tab_id: str, paths: Optional[SavePaths]
+    ) -> None:
         logger.debug("update_tab_suggested_save_paths: tab_id=%r", tab_id)
         self.tabs[tab_id].suggested_save_paths = paths
 
@@ -176,8 +178,20 @@ class State:
     def set_tab_running(self, tab_id: str, running: bool) -> None:
         logger.debug("set_tab_running: tab_id=%r running=%s", tab_id, running)
         tab = self.tabs[tab_id]
+        if (
+            running
+            and self.running_tab_id is not None
+            and self.running_tab_id != tab_id
+        ):
+            raise RuntimeError(
+                f"Cannot mark tab {tab_id!r} running while "
+                f"{self.running_tab_id!r} is already running"
+            )
         tab.is_running = running
-        self.running_tab_id = tab_id if running else None
+        if running:
+            self.running_tab_id = tab_id
+        elif self.running_tab_id == tab_id:
+            self.running_tab_id = None
 
     def set_tab_analyzing(self, tab_id: str, analyzing: bool) -> None:
         logger.debug("set_tab_analyzing: tab_id=%r analyzing=%s", tab_id, analyzing)

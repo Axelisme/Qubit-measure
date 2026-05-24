@@ -76,6 +76,11 @@ def test_module_cfg_to_value_fallback():
     assert cast(CfgSectionValue, val.fields["nested"]).fields["sub"].value == 42
 
 
+def test_module_cfg_to_value_fallback_unsupported_list_raises():
+    with pytest.raises(RuntimeError, match="Unsupported config value type"):
+        module_cfg_to_value({"bad": [1, 2, 3]})
+
+
 def test_waveform_cfg_to_value_invalid_type():
     with pytest.raises(TypeError, match="Expected dict or AbsWaveformCfg"):
         waveform_cfg_to_value("not_a_dict")

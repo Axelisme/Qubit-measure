@@ -126,8 +126,8 @@ class CfgFormWidget(QWidget):
         self._bus = ctrl.get_bus()
         for event in (
             GuiEvent.MD_CHANGED,
-            GuiEvent.CONTEXT_CHANGED,
-            GuiEvent.INSPECT_CHANGED,
+            GuiEvent.CONTEXT_SWITCHED,
+            GuiEvent.ML_CHANGED,
         ):
             cb = self._make_external_refresh_cb(event)
             self._bus.subscribe(event, cb)
@@ -151,13 +151,6 @@ class CfgFormWidget(QWidget):
             del payload
             self_ref = weak_self()
             if self_ref is None:
-                return
-
-            try:
-                # Test if the C++ QWidget object is still alive
-                _ = self_ref.parent()
-            except RuntimeError:
-                # C++ object has been deleted, skip callback execution
                 return
 
             if self_ref._model is None:

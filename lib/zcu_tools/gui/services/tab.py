@@ -38,6 +38,9 @@ class TabService:
         self.refresh_tab_save_paths(tab_id)
         return tab_id
 
+    def list_adapter_names(self) -> list[str]:
+        return self._registry.list_names()
+
     def close_tab(self, tab_id: str) -> None:
         logger.info("close_tab: tab_id=%r", tab_id)
         self._state.remove_tab(tab_id)
@@ -96,14 +99,14 @@ class TabService:
 
     def get_tab_save_paths(self, tab_id: str) -> Any:
         self.refresh_tab_save_paths(tab_id)
-        paths = self._state.get_effective_save_paths(tab_id)
-        if paths is None:
-            raise RuntimeError("No save paths available")
-        return paths
+        return self._state.get_effective_save_paths(tab_id)
 
     def refresh_tab_save_paths(self, tab_id: str) -> None:
         tab = self._state.get_tab(tab_id)
         ctx = self._state.exp_context
+        if not ctx.database_path or not ctx.result_dir or not ctx.active_label:
+            self._state.update_tab_suggested_save_paths(tab_id, None)
+            return
         paths = tab.adapter.make_save_paths(ctx)
         self._state.update_tab_suggested_save_paths(tab_id, paths)
 

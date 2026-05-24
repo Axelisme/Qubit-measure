@@ -170,14 +170,18 @@ class Runner(QObject):
             self._worker.cancel()
 
     def _on_worker_finished(self, result: Any) -> None:
-        tab_id = self._active_tab_id or ""
+        if self._active_tab_id is None:
+            raise RuntimeError("RunWorker finished without an active tab id")
+        tab_id = self._active_tab_id
         logger.debug("Runner._on_worker_finished: tab_id=%r", tab_id)
         self._worker = None
         self._active_tab_id = None
         self.run_finished.emit(tab_id, result)
 
     def _on_worker_failed(self, exc: Exception) -> None:
-        tab_id = self._active_tab_id or ""
+        if self._active_tab_id is None:
+            raise RuntimeError("RunWorker failed without an active tab id")
+        tab_id = self._active_tab_id
         logger.warning("Runner._on_worker_failed: tab_id=%r exc=%r", tab_id, exc)
         self._worker = None
         self._active_tab_id = None

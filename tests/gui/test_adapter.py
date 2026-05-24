@@ -177,9 +177,10 @@ def test_multi_sweep_produces_dict_of_sweeps():
 # ---------------------------------------------------------------------------
 
 
-def test_module_ref_named_key_uses_value_tree():
-    """schema_to_dict always expands the value tree, regardless of Named vs Custom."""
+def test_module_ref_named_key_without_library_entry_raises():
     ml = _make_ml()
+    ml.modules = {}
+    ml.waveforms = {}
     inner_spec = CfgSectionSpec(
         label="Direct Readout",
         fields={"ro_ch": ScalarSpec(label="RO ch", type=int)},
@@ -193,9 +194,8 @@ def test_module_ref_named_key_uses_value_tree():
             )
         },
     )
-    result = schema_to_dict(s, ml)
-    # value tree (99) takes precedence — ml is not consulted for dict output
-    assert result["readout"] == {"ro_ch": 99}
+    with pytest.raises(RuntimeError, match="Unknown module reference"):
+        schema_to_dict(s, ml)
 
 
 def test_module_ref_custom_key_resolves_by_label():

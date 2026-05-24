@@ -4,7 +4,7 @@ import dataclasses
 import logging
 from typing import TYPE_CHECKING, Any, Optional
 
-from zcu_tools.gui.event_bus import ContextChangedPayload, GuiEvent, MdChangedPayload
+from zcu_tools.gui.event_bus import ContextSwitchedPayload, GuiEvent, MdChangedPayload
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 logger = logging.getLogger(__name__)
@@ -94,8 +94,8 @@ class ContextService:
         self._state.set_context(new_ctx)
         self._state.has_startup_context = True
         self._bus.emit(
-            GuiEvent.CONTEXT_CHANGED,
-            ContextChangedPayload(md=new_ctx.md, ml=new_ctx.ml),
+            GuiEvent.CONTEXT_SWITCHED,
+            ContextSwitchedPayload(md=new_ctx.md, ml=new_ctx.ml),
         )
 
     def use_context(self, label: str) -> None:
@@ -104,8 +104,8 @@ class ContextService:
         new_ctx = dataclasses.replace(new_ctx, active_label=label)
         self._state.set_context(new_ctx)
         self._bus.emit(
-            GuiEvent.CONTEXT_CHANGED,
-            ContextChangedPayload(md=new_ctx.md, ml=new_ctx.ml),
+            GuiEvent.CONTEXT_SWITCHED,
+            ContextSwitchedPayload(md=new_ctx.md, ml=new_ctx.ml),
         )
 
     def new_context(
@@ -127,8 +127,8 @@ class ContextService:
         new_ctx = dataclasses.replace(new_ctx, active_label=label)
         self._state.set_context(new_ctx)
         self._bus.emit(
-            GuiEvent.CONTEXT_CHANGED,
-            ContextChangedPayload(md=new_ctx.md, ml=new_ctx.ml),
+            GuiEvent.CONTEXT_SWITCHED,
+            ContextSwitchedPayload(md=new_ctx.md, ml=new_ctx.ml),
         )
 
     def set_md_attr(self, key: str, value: Any) -> None:

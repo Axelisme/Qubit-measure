@@ -13,12 +13,16 @@ from zcu_tools.gui.adapter import (
     EvalValue,
     ScalarSpec,
     ScalarValue,
+    SweepSpec,
+    SweepValue,
 )
 from zcu_tools.gui.event_bus import EventBus, GuiEvent
 from zcu_tools.gui.live_model import (
+    CallbackList,
     LiveModelEnv,
     ScalarLiveField,
     SectionLiveField,
+    SweepLiveField,
 )
 
 
@@ -140,4 +144,31 @@ def test_scalar_eval_field_invalid_expression_marks_invalid(env):
     val = field.get_value()
     assert isinstance(val, EvalValue)
     assert val.resolved is None
+    assert val.error
     assert field.is_valid() is False
+
+
+def test_scalar_eval_to_dict_unresolved_raises(env):
+    field = ScalarLiveField(
+        ScalarSpec(label="Freq", type=float),
+        env,
+        initial_val=EvalValue("missing_name"),
+    )
+
+    with pytest.raises(RuntimeError, match="unresolved"):
+        field.to_dict()
+
+
+def test_callback_list_propagates_callback_exceptions():
+    callbacks = CallbackList()
+    callbacks.connect(MagicMock(side_effect=RuntimeError("boom")))
+
+    with pytest.raises(RuntimeError, match="boom"):
+        callbacks.emit()
+
+
+def test_sweep_live_field_rejects_wrong_value_type(env):
+    field = SweepLiveField(SweepSpec(), env, initial_val=SweepValue(0.0, 1.0, 11))
+
+    with pytest.raises(TypeError, match="SweepValue"):
+        field.set_value(DirectValue(1))

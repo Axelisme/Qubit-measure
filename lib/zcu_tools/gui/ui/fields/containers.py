@@ -214,7 +214,7 @@ class ModuleRefWidget(BaseLiveWidget):
                 for name in sorted(store.keys()):
                     if name == current and field.is_modified():
                         self._combo.addItem(f"Lib: {name} (modified)", name)
-                        self._combo.addItem(f"Lib: {name}", name)
+                        self._combo.addItem(f"Revert to Lib: {name}", name)
                     else:
                         self._combo.addItem(f"Lib: {name}", name)
 

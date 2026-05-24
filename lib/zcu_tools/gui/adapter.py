@@ -3,7 +3,16 @@ from __future__ import annotations
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Optional, Protocol, Sequence, Union, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Optional,
+    Protocol,
+    Sequence,
+    Union,
+    cast,
+)
 
 from matplotlib.figure import Figure
 from typing_extensions import Generic, TypeAlias, TypeVar
@@ -241,6 +250,9 @@ class CfgSectionSpec:
     fields: dict[str, "CfgNodeSpec"] = field(default_factory=dict)
     label: str = ""
     collapsible: bool = True
+    inherit_hook: Optional[
+        Callable[["CfgSectionValue", "CfgSectionSpec"], Optional["CfgSectionValue"]]
+    ] = None
 
 
 CfgNodeSpec = Union[
@@ -269,6 +281,7 @@ class DirectValue:
 class EvalValue:
     expr: str
     resolved: Optional[Any] = None
+    error: Optional[str] = None
 
 
 ScalarValue: TypeAlias = Union[DirectValue, EvalValue]
@@ -412,7 +425,7 @@ def _section_to_dict(
                 full_path = ".".join([*path, key])
                 raise RuntimeError(f"Config field '{full_path}' ({label}) is missing")
             result[key] = _section_to_dict(
-                _find_allowed_spec(node_spec, node_val),
+                _find_allowed_spec(node_spec, node_val, ml),
                 node_val.value,
                 ml,
                 path=[*path, key],
@@ -431,55 +444,51 @@ def _section_to_dict(
 def _find_allowed_spec(
     ref_spec: Union[ModuleRefSpec, WaveformRefSpec],
     ref_val: Union[ModuleRefValue, WaveformRefValue],
+    ml: "Optional[ModuleLibrary]",
 ) -> CfgSectionSpec:
     """Return the CfgSectionSpec from allowed[] that matches chosen_key's label."""
     chosen = ref_val.chosen_key
-    # Strip "<Custom:...>" prefix to get the label
     if chosen.startswith("<Custom:"):
+        if not chosen.endswith(">"):
+            raise RuntimeError(f"Invalid custom reference key: {chosen!r}")
         label = chosen[len("<Custom:") : -1]
-    else:
-        label = chosen
-    for s in ref_spec.allowed:
-        if s.label == label:
-            return s
-    # Named module: match by LiteralSpec discriminators first (type/style)
-    if isinstance(ref_val.value, CfgSectionValue):
-        literal_matches = []
         for spec in ref_spec.allowed:
-            ok = True
-            for key, node_spec in spec.fields.items():
-                if isinstance(node_spec, LiteralSpec):
-                    node_val = ref_val.value.fields.get(key)
-                    if (
-                        not isinstance(node_val, DirectValue)
-                        or node_val.value != node_spec.value
-                    ):
-                        ok = False
-                        break
-            if ok:
-                literal_matches.append(spec)
-        if literal_matches:
-            return max(literal_matches, key=lambda s: len(s.fields))
-    # Named module: infer spec from value shape (prefer most specific match)
-    if isinstance(ref_val.value, CfgSectionValue):
-        value_keys = set(ref_val.value.fields.keys())
-        matches = [
-            s for s in ref_spec.allowed if set(s.fields.keys()).issubset(value_keys)
-        ]
-        if matches:
-            return max(matches, key=lambda s: len(s.fields))
-    # fallback: return first allowed spec
-    if ref_spec.allowed:
-        return ref_spec.allowed[0]
-    return CfgSectionSpec()
+            if spec.label == label:
+                return spec
+        allowed = ", ".join(spec.label for spec in ref_spec.allowed)
+        raise RuntimeError(
+            f"Unknown custom reference label {label!r}; allowed labels: {allowed}"
+        )
+
+    if ml is None:
+        raise RuntimeError(
+            f"Cannot resolve library reference {chosen!r} without ModuleLibrary"
+        )
+
+    from .cfg_schemas import module_cfg_to_value, waveform_cfg_to_value
+
+    if isinstance(ref_spec, ModuleRefSpec):
+        if chosen not in ml.modules:
+            raise RuntimeError(f"Unknown module reference: {chosen!r}")
+        chosen_spec, _ = module_cfg_to_value(ml.modules[chosen])
+    else:
+        if chosen not in ml.waveforms:
+            raise RuntimeError(f"Unknown waveform reference: {chosen!r}")
+        chosen_spec, _ = waveform_cfg_to_value(ml.waveforms[chosen])
+
+    for spec in ref_spec.allowed:
+        if spec.label == chosen_spec.label:
+            return spec
+    allowed = ", ".join(spec.label for spec in ref_spec.allowed)
+    raise RuntimeError(
+        f"Library reference {chosen!r} resolved to unsupported spec "
+        f"{chosen_spec.label!r}; allowed labels: {allowed}"
+    )
 
 
 def schema_to_dict(schema: CfgSchema, ml: "Optional[ModuleLibrary]") -> dict:
-    """Compatibility wrapper around CfgSchema.to_raw_dict()."""
-    if ml is None:
-        return _section_to_dict(schema.spec, schema.value, None)
-    fake_req = RunRequest(md=cast(Any, None), ml=ml, soc=object(), soccfg=object())
-    return schema.to_raw_dict(fake_req)
+    """Lower a CfgSchema using the same section lowerer as CfgSchema.to_raw_dict()."""
+    return _section_to_dict(schema.spec, schema.value, ml)
 
 
 # ---------------------------------------------------------------------------
@@ -539,24 +548,12 @@ def inherit_from(
 
     - No matching key / incompatible type: make_default_value for that field.
 
-    Special cross-spec rules (hardcoded by label pair):
-    - "Direct Readout" → "Pulse Readout": inject old_val into new ro_cfg sub-section.
-    - "Pulse Readout" → "Direct Readout": extract old ro_cfg sub-section as new top-level.
+    Spec-specific inheritance can be provided by new_spec.inherit_hook.
     """
-    # --- Hardcoded cross-spec rules (identified by spec label) ---
-    old_label = old_spec.label
-    new_label = new_spec.label
-
-    if old_label == "Direct Readout" and new_label == "Pulse Readout":
-        result = make_default_value(new_spec)
-        result.fields["ro_cfg"] = old_val
-        return result
-
-    if old_label == "Pulse Readout" and new_label == "Direct Readout":
-        ro_cfg_val = old_val.fields.get("ro_cfg")
-        if isinstance(ro_cfg_val, CfgSectionValue):
-            return ro_cfg_val
-        return make_default_value(new_spec)
+    if new_spec.inherit_hook is not None:
+        result = new_spec.inherit_hook(old_val, old_spec)
+        if result is not None:
+            return result
 
     # --- Generic field-by-field inheritance ---
     new_fields: dict[str, CfgNodeValue] = {}

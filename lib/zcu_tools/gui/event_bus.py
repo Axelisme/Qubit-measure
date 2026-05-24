@@ -5,12 +5,9 @@ All emits and subscribes happen on the main thread.  No Qt dependency.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Literal, overload
-
-logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
@@ -39,11 +36,26 @@ class MdChangedPayload(Payload):
 
 
 @dataclass(frozen=True)
-class ContextChangedPayload(Payload):
-    """Payload for CONTEXT_CHANGED: active ExpContext switched."""
+class ContextSwitchedPayload(Payload):
+    """Payload for CONTEXT_SWITCHED: active md/ml context switched."""
 
     md: "MetaDict"
     ml: "ModuleLibrary"
+
+
+@dataclass(frozen=True)
+class MlChangedPayload(Payload):
+    """Payload for ML_CHANGED: ModuleLibrary contents changed."""
+
+    ml: "ModuleLibrary"
+
+
+@dataclass(frozen=True)
+class SocChangedPayload(Payload):
+    """Payload for SOC_CHANGED: soc/soccfg connection changed."""
+
+    soc: object
+    soccfg: object
 
 
 @dataclass(frozen=True)
@@ -87,13 +99,6 @@ class PredictorChangedPayload(Payload):
     """Payload for PREDICTOR_CHANGED: predictor state or values changed."""
 
 
-@dataclass(frozen=True)
-class InspectChangedPayload(Payload):
-    """Payload for INSPECT_CHANGED: metadata/library changed via inspect dialog."""
-
-    md: "MetaDict | None" = None
-
-
 # ---------------------------------------------------------------------------
 # GuiEvent enum
 # ---------------------------------------------------------------------------
@@ -104,9 +109,9 @@ class GuiEvent(str, Enum):
 
     # Data layer
     MD_CHANGED = "md_changed"  # MetaDict attribute was set or deleted
-    CONTEXT_CHANGED = (
-        "context_changed"  # active ExpContext switched (project load or switch)
-    )
+    ML_CHANGED = "ml_changed"  # ModuleLibrary contents changed
+    CONTEXT_SWITCHED = "context_switched"  # active md/ml context switched
+    SOC_CHANGED = "soc_changed"  # soc/soccfg connection changed
 
     # Controller / Tab layer
     TAB_ADDED = "tab_added"  # payload: TabAddedPayload
@@ -119,7 +124,6 @@ class GuiEvent(str, Enum):
 
     # UI / Panel layer
     PREDICTOR_CHANGED = "predictor_changed"  # predictor state or values changed
-    INSPECT_CHANGED = "inspect_changed"  # metadata/library changed via inspect dialog
 
 
 # ---------------------------------------------------------------------------
@@ -129,14 +133,15 @@ class GuiEvent(str, Enum):
 # Mapping from GuiEvent to its payload type (for overload resolution)
 _EventPayloadMap = {
     GuiEvent.MD_CHANGED: MdChangedPayload,
-    GuiEvent.CONTEXT_CHANGED: ContextChangedPayload,
+    GuiEvent.ML_CHANGED: MlChangedPayload,
+    GuiEvent.CONTEXT_SWITCHED: ContextSwitchedPayload,
+    GuiEvent.SOC_CHANGED: SocChangedPayload,
     GuiEvent.TAB_ADDED: TabAddedPayload,
     GuiEvent.TAB_CLOSED: TabClosedPayload,
     GuiEvent.TAB_CONTENT_CHANGED: TabContentChangedPayload,
     GuiEvent.TAB_INTERACTION_CHANGED: TabInteractionChangedPayload,
     GuiEvent.RUN_LOCK_CHANGED: RunLockChangedPayload,
     GuiEvent.PREDICTOR_CHANGED: PredictorChangedPayload,
-    GuiEvent.INSPECT_CHANGED: InspectChangedPayload,
 }
 
 
@@ -158,8 +163,22 @@ class EventBus:
     @overload
     def subscribe(
         self,
-        event: "Literal[GuiEvent.CONTEXT_CHANGED]",
-        cb: Callable[[ContextChangedPayload], None],
+        event: "Literal[GuiEvent.CONTEXT_SWITCHED]",
+        cb: Callable[[ContextSwitchedPayload], None],
+    ) -> None: ...
+
+    @overload
+    def subscribe(
+        self,
+        event: "Literal[GuiEvent.ML_CHANGED]",
+        cb: Callable[[MlChangedPayload], None],
+    ) -> None: ...
+
+    @overload
+    def subscribe(
+        self,
+        event: "Literal[GuiEvent.SOC_CHANGED]",
+        cb: Callable[[SocChangedPayload], None],
     ) -> None: ...
 
     @overload
@@ -202,13 +221,6 @@ class EventBus:
         self,
         event: "Literal[GuiEvent.PREDICTOR_CHANGED]",
         cb: Callable[[PredictorChangedPayload], None],
-    ) -> None: ...
-
-    @overload
-    def subscribe(
-        self,
-        event: "Literal[GuiEvent.INSPECT_CHANGED]",
-        cb: Callable[[InspectChangedPayload], None],
     ) -> None: ...
 
     def subscribe(self, event: GuiEvent, cb: Callable[[Any], None]) -> None:
@@ -230,8 +242,22 @@ class EventBus:
     @overload
     def unsubscribe(
         self,
-        event: "Literal[GuiEvent.CONTEXT_CHANGED]",
-        cb: Callable[[ContextChangedPayload], None],
+        event: "Literal[GuiEvent.CONTEXT_SWITCHED]",
+        cb: Callable[[ContextSwitchedPayload], None],
+    ) -> None: ...
+
+    @overload
+    def unsubscribe(
+        self,
+        event: "Literal[GuiEvent.ML_CHANGED]",
+        cb: Callable[[MlChangedPayload], None],
+    ) -> None: ...
+
+    @overload
+    def unsubscribe(
+        self,
+        event: "Literal[GuiEvent.SOC_CHANGED]",
+        cb: Callable[[SocChangedPayload], None],
     ) -> None: ...
 
     @overload
@@ -276,13 +302,6 @@ class EventBus:
         cb: Callable[[PredictorChangedPayload], None],
     ) -> None: ...
 
-    @overload
-    def unsubscribe(
-        self,
-        event: "Literal[GuiEvent.INSPECT_CHANGED]",
-        cb: Callable[[InspectChangedPayload], None],
-    ) -> None: ...
-
     def unsubscribe(self, event: GuiEvent, cb: Callable[[Any], None]) -> None:
         lst = self._subs.get(event, [])
         try:
@@ -301,7 +320,19 @@ class EventBus:
 
     @overload
     def emit(
-        self, event: "Literal[GuiEvent.CONTEXT_CHANGED]", payload: ContextChangedPayload
+        self,
+        event: "Literal[GuiEvent.CONTEXT_SWITCHED]",
+        payload: ContextSwitchedPayload,
+    ) -> None: ...
+
+    @overload
+    def emit(
+        self, event: "Literal[GuiEvent.ML_CHANGED]", payload: MlChangedPayload
+    ) -> None: ...
+
+    @overload
+    def emit(
+        self, event: "Literal[GuiEvent.SOC_CHANGED]", payload: SocChangedPayload
     ) -> None: ...
 
     @overload
@@ -342,18 +373,14 @@ class EventBus:
         payload: PredictorChangedPayload,
     ) -> None: ...
 
-    @overload
-    def emit(
-        self, event: "Literal[GuiEvent.INSPECT_CHANGED]", payload: InspectChangedPayload
-    ) -> None: ...
-
     def emit(self, event: GuiEvent, payload: Payload) -> None:
         if not isinstance(event, GuiEvent):
             raise TypeError(f"event must be a GuiEvent, got {type(event)}")
+        expected_payload = _EventPayloadMap[event]
+        if not isinstance(payload, expected_payload):
+            raise TypeError(
+                f"{event.value} expects {expected_payload.__name__}, "
+                f"got {type(payload).__name__}"
+            )
         for cb in list(self._subs.get(event, [])):
-            try:
-                cb(payload)
-            except Exception:
-                logger.warning(
-                    "EventBus: exception in subscriber for %r", event, exc_info=True
-                )
+            cb(payload)
