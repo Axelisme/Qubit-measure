@@ -33,6 +33,8 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
         elif isinstance(node_spec, ScalarSpec):
             if node_spec.required:
                 fields[key] = DirectValue(value=None, is_unset=True)
+            elif node_spec.choices:
+                fields[key] = DirectValue(node_spec.choices[0])
             else:
                 fields[key] = DirectValue(default_value_for_type(node_spec.type))
         elif isinstance(node_spec, SweepSpec):
@@ -84,6 +86,8 @@ def inherit_from(
                 new_fields[key] = old_node_val
             elif new_node_spec.required:
                 new_fields[key] = DirectValue(value=None, is_unset=True)
+            elif new_node_spec.choices:
+                new_fields[key] = DirectValue(new_node_spec.choices[0])
             else:
                 new_fields[key] = DirectValue(
                     default_value_for_type(new_node_spec.type)

@@ -11,12 +11,16 @@ import yaml
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QFont  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QComboBox,
     QDialog,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -25,19 +29,14 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
-    QComboBox,
-    QFormLayout,
-    QScrollArea,
-    QMessageBox,
 )
 
-from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 from zcu_tools.gui.adapter import CfgSchema, make_default_value, schema_to_dict
-from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
 from zcu_tools.gui.cfg_schemas import _MODULE_SPEC_FACTORIES
-from zcu_tools.gui.specs.waveform import make_waveform_spec_by_style
-
 from zcu_tools.gui.event_bus import GuiEvent, Payload
+from zcu_tools.gui.specs.waveform import make_waveform_spec_by_style
+from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
 
 if TYPE_CHECKING:
     from zcu_tools.gui.controller import Controller
@@ -132,7 +131,9 @@ class _MlAddDialog(QDialog):
                 warn_text = "Name already exists in modules!"
                 valid = False
             elif (
-                self._item_kind == "waveform" and ml is not None and name in ml.waveforms
+                self._item_kind == "waveform"
+                and ml is not None
+                and name in ml.waveforms
             ):
                 warn_text = "Name already exists in waveforms!"
                 valid = False
@@ -163,6 +164,7 @@ class _MlAddDialog(QDialog):
 
             self.accept()
         except Exception as e:
+            logger.exception("Error saving %s '%s'", self._item_kind, name)
             QMessageBox.critical(self, "Validation Error", str(e))
 
 
@@ -277,28 +279,28 @@ class InspectDialog(QDialog):
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         self._ml_tree = QTreeWidget()
         self._ml_tree.setHeaderHidden(True)
         self._ml_tree.setRootIsDecorated(True)
         self._ml_tree.currentItemChanged.connect(self._on_ml_item_changed)
         left_layout.addWidget(self._ml_tree)
-        
+
         btn_layout = QHBoxLayout()
         self._add_mod_btn = QPushButton("Add Module...")
         self._add_wav_btn = QPushButton("Add Waveform...")
         self._del_ml_btn = QPushButton("Delete")
         self._del_ml_btn.setEnabled(False)
-        
+
         btn_layout.addWidget(self._add_mod_btn)
         btn_layout.addWidget(self._add_wav_btn)
         btn_layout.addWidget(self._del_ml_btn)
         left_layout.addLayout(btn_layout)
-        
+
         self._add_mod_btn.clicked.connect(self._on_add_module_clicked)
         self._add_wav_btn.clicked.connect(self._on_add_waveform_clicked)
         self._del_ml_btn.clicked.connect(self._on_delete_ml_clicked)
-        
+
         splitter.addWidget(left_panel)
 
         # right: YAML text
@@ -480,7 +482,7 @@ class InspectDialog(QDialog):
         data = current.data(0, Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
         if data is None:
             return
-            
+
         group, name = data
         ans = QMessageBox.question(
             self,
@@ -491,7 +493,7 @@ class InspectDialog(QDialog):
         )
         if ans != QMessageBox.StandardButton.Yes:
             return
-            
+
         if group == "modules":
             self._ctrl.del_ml_module(name)
         else:
