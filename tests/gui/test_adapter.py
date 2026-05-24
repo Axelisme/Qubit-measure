@@ -395,3 +395,63 @@ def test_module_ref_spec_empty_allowed_raises():
 def test_waveform_ref_spec_empty_allowed_raises():
     with pytest.raises(RuntimeError, match="allowed"):
         WaveformRefSpec(allowed=[])
+
+
+# ---------------------------------------------------------------------------
+# Phase 55 — optional ModuleRefSpec lowering
+# ---------------------------------------------------------------------------
+
+
+def _inner_module_spec() -> CfgSectionSpec:
+    return CfgSectionSpec(
+        label="Pulse",
+        fields={"ch": ScalarSpec(label="Ch", type=int)},
+    )
+
+
+def test_optional_module_ref_omitted_when_disabled():
+    inner_spec = _inner_module_spec()
+    outer_spec = CfgSectionSpec(
+        fields={
+            "module": ModuleRefSpec(allowed=[inner_spec], optional=True),
+            "reps": ScalarSpec(label="Reps", type=int),
+        }
+    )
+    # value omits "module" key → disabled optional
+    outer_val = CfgSectionValue(fields={"reps": DirectValue(100)})
+    s = CfgSchema(spec=outer_spec, value=outer_val)
+    result = schema_to_dict(s, _make_ml())
+
+    assert "module" not in result
+    assert result["reps"] == 100
+
+
+def test_optional_module_ref_included_when_enabled():
+    inner_spec = _inner_module_spec()
+    outer_spec = CfgSectionSpec(
+        fields={
+            "module": ModuleRefSpec(allowed=[inner_spec], optional=True),
+            "reps": ScalarSpec(label="Reps", type=int),
+        }
+    )
+    inner_val = CfgSectionValue(fields={"ch": DirectValue(3)})
+    outer_val = CfgSectionValue(
+        fields={
+            "module": ModuleRefValue(chosen_key="<Custom:Pulse>", value=inner_val),
+            "reps": DirectValue(100),
+        }
+    )
+    s = CfgSchema(spec=outer_spec, value=outer_val)
+    result = schema_to_dict(s, _make_ml())
+
+    assert result["reps"] == 100
+    assert result["module"]["ch"] == 3
+
+
+def test_non_optional_missing_raises():
+    outer_spec = CfgSectionSpec(fields={"reps": ScalarSpec(label="Reps", type=int)})
+    outer_val = CfgSectionValue(fields={})  # missing "reps"
+    s = CfgSchema(spec=outer_spec, value=outer_val)
+
+    with pytest.raises(RuntimeError, match="reps.*missing"):
+        schema_to_dict(s, _make_ml())

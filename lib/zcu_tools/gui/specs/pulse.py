@@ -18,9 +18,9 @@ from zcu_tools.gui.specs.waveform import (
 )
 
 
-def make_pulse_spec() -> CfgSectionSpec:
+def make_pulse_spec(label: str = "Pulse") -> CfgSectionSpec:
     return CfgSectionSpec(
-        label="Pulse",
+        label=label,
         fields={
             "type": LiteralSpec("pulse"),
             "waveform": WaveformRefSpec(

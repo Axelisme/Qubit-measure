@@ -7,7 +7,7 @@ fields with explicit unset scalar values.
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,6 @@ from zcu_tools.gui.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
-    LiteralSpec,
     ScalarValue,
     WaveformRefValue,
     make_default_value,
@@ -254,6 +253,7 @@ def _bath_reset_to_value(cfg: dict) -> CfgSectionValue:
 
 
 _MODULE_VALUE_BUILDERS = {
+    "pulse": _pulse_to_value,
     "readout/direct": _direct_readout_to_value,
     "readout/pulse": _pulse_readout_to_value,
     "reset/none": _none_reset_to_value,
@@ -263,6 +263,7 @@ _MODULE_VALUE_BUILDERS = {
 }
 
 _MODULE_SPEC_FACTORIES = {
+    "pulse": make_pulse_spec,
     "readout/direct": make_direct_readout_spec,
     "readout/pulse": make_pulse_readout_spec,
     "reset/none": make_none_reset_spec,

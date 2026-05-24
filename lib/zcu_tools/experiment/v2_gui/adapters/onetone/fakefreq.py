@@ -43,15 +43,21 @@ from zcu_tools.gui.adapter import (
     RunRequest,
     SaveDataRequest,
     ScalarSpec,
-    ScalarValue,
     SweepSpec,
     SweepValue,
     WaveformWriteback,
     WritebackRequest,
 )
+from zcu_tools.gui.specs.pulse import make_pulse_spec
 from zcu_tools.gui.specs.readout import (
     make_direct_readout_spec,
     make_pulse_readout_spec,
+)
+from zcu_tools.gui.specs.reset import (
+    make_bath_reset_spec,
+    make_none_reset_spec,
+    make_pulse_reset_spec,
+    make_two_pulse_reset_spec,
 )
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
@@ -220,23 +226,50 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
                                 make_pulse_readout_spec(),
                             ],
                             label="Readout",
-                        )
+                        ),
+                        "init_pulse": ModuleRefSpec(
+                            allowed=[make_pulse_spec()],
+                            label="Init Pulse",
+                            optional=True,
+                        ),
+                        "reset": ModuleRefSpec(
+                            allowed=[
+                                make_none_reset_spec(),
+                                make_pulse_reset_spec(),
+                                make_two_pulse_reset_spec(),
+                                make_bath_reset_spec(),
+                            ],
+                            label="Reset",
+                            optional=True,
+                        ),
                     },
                 ),
                 "reps": ScalarSpec(label="Reps", type=int),
                 "rounds": ScalarSpec(label="Rounds", type=int),
-                "freq": SweepSpec(label="Freq (MHz)"),
-                "res_freq": ScalarSpec(
-                    label="Resonator freq (MHz)", type=float, decimals=2
+                "sweep": CfgSectionSpec(
+                    label="Sweep",
+                    fields={"freq": SweepSpec(label="Freq (MHz)")},
                 ),
-                "Ql": ScalarSpec(label="Ql (loaded Q)", type=int),
-                "Qc_abs": ScalarSpec(label="|Qc| (coupling Q)", type=int),
-                "phi": ScalarSpec(label="phi (rad)", type=float, decimals=4),
-                "a0_abs": ScalarSpec(
-                    label="|a0| (bg amplitude)", type=float, decimals=4
+                "model": CfgSectionSpec(
+                    label="Model",
+                    fields={
+                        "freq": ScalarSpec(
+                            label="Resonator freq (MHz)", type=float, decimals=2
+                        ),
+                        "Ql": ScalarSpec(label="Ql (loaded Q)", type=int),
+                        "Qc_abs": ScalarSpec(label="|Qc| (coupling Q)", type=int),
+                        "phi": ScalarSpec(label="phi (rad)", type=float, decimals=4),
+                        "a0_abs": ScalarSpec(
+                            label="|a0| (bg amplitude)", type=float, decimals=4
+                        ),
+                        "edelay": ScalarSpec(
+                            label="edelay (us)", type=float, decimals=3
+                        ),
+                        "noise_scale": ScalarSpec(
+                            label="Noise scale", type=float, decimals=4
+                        ),
+                    },
                 ),
-                "edelay": ScalarSpec(label="edelay (us)", type=float, decimals=3),
-                "noise_scale": ScalarSpec(label="Noise scale", type=float, decimals=4),
             }
         )
 
@@ -244,14 +277,22 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
             fields={
                 "reps": DirectValue(100),
                 "rounds": DirectValue(100),
-                "freq": SweepValue(start=freq_start, stop=freq_stop, expts=201),
-                "res_freq": DirectValue(r_f),
-                "Ql": DirectValue(ql_default),
-                "Qc_abs": DirectValue(qc_default),
-                "phi": DirectValue(0.0),
-                "a0_abs": DirectValue(1.0),
-                "edelay": DirectValue(0.05),
-                "noise_scale": DirectValue(0.05),
+                "sweep": CfgSectionValue(
+                    fields={
+                        "freq": SweepValue(start=freq_start, stop=freq_stop, expts=201)
+                    }
+                ),
+                "model": CfgSectionValue(
+                    fields={
+                        "freq": DirectValue(r_f),
+                        "Ql": DirectValue(ql_default),
+                        "Qc_abs": DirectValue(qc_default),
+                        "phi": DirectValue(0.0),
+                        "a0_abs": DirectValue(1.0),
+                        "edelay": DirectValue(0.05),
+                        "noise_scale": DirectValue(0.05),
+                    }
+                ),
                 "modules": CfgSectionValue(
                     fields={
                         "readout": make_module_ref_default(
@@ -259,6 +300,8 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
                             module_type=AbsReadoutCfg,
                             preferred_names=["readout_rf", "readout", "res_readout"],
                         ),
+                        # init_pulse and reset are optional ModuleRefs; omitting their
+                        # keys here means they start as disabled (None) in the UI.
                     }
                 ),
             }
@@ -266,26 +309,7 @@ class FakeFreqAdapter(AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult]):
         return CfgSchema(spec=root_spec, value=root_val)
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FakeFreqCfg:
-        exp_cfg: dict[str, object] = {
-            "reps": raw_cfg["reps"],
-            "rounds": raw_cfg["rounds"],
-            "sweep": {"freq": raw_cfg["freq"]},
-            "model": {
-                "freq": raw_cfg["res_freq"],
-                "Ql": raw_cfg["Ql"],
-                "Qc_abs": raw_cfg["Qc_abs"],
-                "phi": raw_cfg["phi"],
-                "a0_abs": raw_cfg["a0_abs"],
-                "edelay": raw_cfg["edelay"],
-                "noise_scale": raw_cfg["noise_scale"],
-            },
-            "modules": raw_cfg.get("modules", {}),
-        }
-        return req.ml.make_cfg(
-            exp_cfg,
-            FakeFreqCfg,
-            fast_mode=self._fast_mode,
-        )
+        return req.ml.make_cfg(raw_cfg, FakeFreqCfg, fast_mode=self._fast_mode)
 
     def get_analyze_params(
         self, result: FreqRunResult, ctx: ExpContext

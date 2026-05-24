@@ -11,6 +11,8 @@ from zcu_tools.gui.adapter import (
     CfgSectionValue,
     DirectValue,
     EvalValue,
+    ModuleRefSpec,
+    ModuleRefValue,
     ScalarSpec,
     ScalarValue,
     SweepSpec,
@@ -20,6 +22,7 @@ from zcu_tools.gui.event_bus import EventBus, GuiEvent
 from zcu_tools.gui.live_model import (
     CallbackList,
     LiveModelEnv,
+    ModuleRefLiveField,
     ScalarLiveField,
     SectionLiveField,
     SweepLiveField,
@@ -171,3 +174,85 @@ def test_sweep_live_field_rejects_wrong_value_type(env):
 
     with pytest.raises(TypeError, match="SweepValue"):
         field.set_value(DirectValue(1))
+
+
+# ---------------------------------------------------------------------------
+# Phase 55 — optional ModuleRefSpec
+# ---------------------------------------------------------------------------
+
+
+def _make_optional_module_ref_spec() -> CfgSectionSpec:
+    inner = CfgSectionSpec(
+        label="Pulse",
+        fields={"ch": ScalarSpec(label="Ch", type=int)},
+    )
+    return CfgSectionSpec(
+        fields={
+            "module": ModuleRefSpec(allowed=[inner], label="Module", optional=True),
+            "reps": ScalarSpec(label="Reps", type=int),
+        }
+    )
+
+
+def test_optional_module_ref_disabled_is_valid(env):
+    spec = _make_optional_module_ref_spec()
+    # Value omits "module" key → field starts disabled
+    initial = CfgSectionValue(fields={"reps": DirectValue(10)})
+    parent = SectionLiveField(spec, env, initial_val=initial)
+    field = cast(ModuleRefLiveField, parent.fields["module"])
+
+    assert not field.is_enabled
+    assert field.is_valid()
+    assert parent.is_valid()
+
+
+def test_optional_module_ref_set_enabled_emits_signals(env):
+    spec = _make_optional_module_ref_spec()
+    initial = CfgSectionValue(fields={"reps": DirectValue(10)})
+    parent = SectionLiveField(spec, env, initial_val=initial)
+    field = cast(ModuleRefLiveField, parent.fields["module"])
+
+    on_enabled = MagicMock()
+    on_change = MagicMock()
+    field.on_enabled_changed.connect(on_enabled)
+    field.on_change.connect(on_change)
+
+    field.set_enabled(True)
+
+    on_enabled.assert_called_once_with(True)
+    on_change.assert_called_once()
+
+
+def test_optional_module_ref_noop_for_non_optional(env):
+    inner = CfgSectionSpec(
+        label="Pulse", fields={"ch": ScalarSpec(label="Ch", type=int)}
+    )
+    spec = CfgSectionSpec(
+        fields={
+            "module": ModuleRefSpec(allowed=[inner], label="Module", optional=False)
+        }
+    )
+    initial = CfgSectionValue(
+        fields={
+            "module": ModuleRefValue(
+                chosen_key="<Custom:Pulse>",
+                value=CfgSectionValue(fields={"ch": DirectValue(0)}),
+            )
+        }
+    )
+    parent = SectionLiveField(spec, env, initial_val=initial)
+    field = cast(ModuleRefLiveField, parent.fields["module"])
+
+    assert field.is_enabled is True
+    field.set_enabled(False)  # noop for non-optional
+    assert field.is_enabled is True
+
+
+def test_optional_module_ref_parent_skips_key_when_disabled(env):
+    spec = _make_optional_module_ref_spec()
+    initial = CfgSectionValue(fields={"reps": DirectValue(10)})
+    parent = SectionLiveField(spec, env, initial_val=initial)
+
+    val = parent.get_value()
+    assert "module" not in val.fields
+    assert val.fields["reps"] == DirectValue(10)

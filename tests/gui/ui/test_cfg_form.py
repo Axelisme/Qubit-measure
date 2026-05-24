@@ -620,10 +620,16 @@ def test_populate_full_fake_freq_schema(qapp, ctrl):
     w.populate(schema, ctrl)
     out = w.read_values()
 
-    for key in ("reps", "rounds", "freq", "res_freq", "Ql", "modules"):
+    for key in ("reps", "rounds", "sweep", "model", "modules"):
         assert key in out.fields, f"missing key: {key}"
 
-    assert isinstance(out.fields["freq"], SweepValue)
+    assert isinstance(out.fields["sweep"], CfgSectionValue)
+    assert isinstance(out.fields["sweep"].fields["freq"], SweepValue)
+    assert isinstance(out.fields["model"], CfgSectionValue)
+    for model_key in ("freq", "Ql", "Qc_abs", "phi", "a0_abs", "edelay", "noise_scale"):
+        assert model_key in out.fields["model"].fields, (
+            f"missing model key: {model_key}"
+        )
     # modules is a CfgSectionValue with readout as ModuleRefValue
     modules_val = out.fields["modules"]
     assert isinstance(modules_val, CfgSectionValue)
@@ -743,3 +749,76 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     freq_val2 = mod_val2.value.fields["ro_freq"]
     assert isinstance(freq_val2, DirectValue)
     assert freq_val2.value == 7000.0
+
+
+# ---------------------------------------------------------------------------
+# Phase 55 — optional ModuleRefSpec UI (None option in combo)
+# ---------------------------------------------------------------------------
+
+
+def _make_optional_module_ref_schema(enabled: bool = True) -> CfgSchema:
+    from zcu_tools.gui.adapter import ModuleRefSpec, ModuleRefValue
+
+    inner_spec = CfgSectionSpec(
+        label="Pulse",
+        fields={"ch": ScalarSpec(label="Ch", type=int)},
+    )
+    outer_spec = CfgSectionSpec(
+        fields={
+            "module": ModuleRefSpec(
+                allowed=[inner_spec], label="Module", optional=True
+            ),
+            "reps": ScalarSpec(label="Reps", type=int),
+        }
+    )
+    if enabled:
+        inner_val = CfgSectionValue(fields={"ch": DirectValue(0)})
+        outer_val = CfgSectionValue(
+            fields={
+                "module": ModuleRefValue(chosen_key="<Custom:Pulse>", value=inner_val),
+                "reps": DirectValue(10),
+            }
+        )
+    else:
+        outer_val = CfgSectionValue(fields={"reps": DirectValue(10)})
+    return CfgSchema(spec=outer_spec, value=outer_val)
+
+
+def test_optional_module_ref_renders_none_option(qapp, ctrl):
+    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.ui.fields.containers import ModuleRefWidget
+
+    schema = _make_optional_module_ref_schema(enabled=True)
+    w = CfgFormWidget()
+    w.populate(schema, ctrl)
+
+    module_widgets = w.findChildren(ModuleRefWidget)
+    assert len(module_widgets) >= 1
+    mw = module_widgets[0]
+
+    # None option should be at index 0
+    assert mw._combo.itemData(0) == ModuleRefWidget._NONE_KEY
+
+
+def test_optional_module_ref_select_none_disables_sub(qapp, ctrl):
+    from zcu_tools.gui.live_model import ModuleRefLiveField
+    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.ui.fields.containers import ModuleRefWidget
+
+    schema = _make_optional_module_ref_schema(enabled=True)
+    w = CfgFormWidget()
+    w.populate(schema, ctrl)
+
+    module_widgets = w.findChildren(ModuleRefWidget)
+    mw = module_widgets[0]
+    field = cast(ModuleRefLiveField, mw._field)
+
+    assert field.is_enabled is True
+
+    # Select the None option
+    none_idx = mw._combo.findData(ModuleRefWidget._NONE_KEY)
+    assert none_idx == 0
+    mw._combo.setCurrentIndex(none_idx)
+
+    assert field.is_enabled is False
+    assert not mw._sub_container.isEnabled()

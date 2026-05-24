@@ -79,3 +79,70 @@ def test_waveform_cfg_to_value_unknown_style_raises():
 def test_waveform_cfg_to_value_invalid_type():
     with pytest.raises(TypeError, match="Expected dict or AbsWaveformCfg"):
         waveform_cfg_to_value("not_a_dict")
+
+
+# ---------------------------------------------------------------------------
+# Phase 54.1 — "pulse" module spec registration
+# ---------------------------------------------------------------------------
+
+
+def test_pulse_spec_registered():
+    from zcu_tools.gui.cfg_schemas import _MODULE_SPEC_FACTORIES, _MODULE_VALUE_BUILDERS
+
+    assert "pulse" in _MODULE_SPEC_FACTORIES
+    assert "pulse" in _MODULE_VALUE_BUILDERS
+
+
+def test_module_cfg_to_value_pulse_basic():
+    cfg = {
+        "type": "pulse",
+        "ch": 1,
+        "freq": 5500.0,
+        "gain": 0.8,
+        "phase": 90.0,
+        "nqz": 1,
+        "pre_delay": 0.0,
+        "post_delay": 0.0,
+        "waveform": {"style": "const", "length": 2.0},
+    }
+    spec, val = module_cfg_to_value(cfg)
+
+    assert cast(DirectValue, val.fields["type"]).value == "pulse"
+    assert cast(DirectValue, val.fields["freq"]).value == 5500.0
+    assert cast(DirectValue, val.fields["gain"]).value == 0.8
+    assert cast(DirectValue, val.fields["freq"]).is_unset is False
+
+
+def test_module_cfg_to_value_pulse_missing_fields():
+    cfg = {"type": "pulse"}
+    spec, val = module_cfg_to_value(cfg)
+
+    assert cast(DirectValue, val.fields["freq"]).is_unset is True
+    assert cast(DirectValue, val.fields["freq"]).value == 6000.0
+    assert cast(DirectValue, val.fields["gain"]).is_unset is True
+
+
+def test_module_cfg_to_value_pulse_round_trip():
+    from unittest.mock import MagicMock
+
+    from zcu_tools.gui.adapter import CfgSchema, RunRequest, schema_to_dict
+
+    cfg = {
+        "type": "pulse",
+        "ch": 0,
+        "freq": 5000.0,
+        "gain": 0.5,
+        "phase": 0.0,
+        "nqz": 2,
+        "pre_delay": 0.0,
+        "post_delay": 0.0,
+        "waveform": {"style": "const", "length": 1.0},
+    }
+    spec, val = module_cfg_to_value(cfg)
+    schema = CfgSchema(spec=spec, value=val)
+    out = schema_to_dict(schema, ml=None)
+
+    assert out["freq"] == 5000.0
+    assert out["gain"] == 0.5
+    assert out["type"] == "pulse"
+    assert out["waveform"]["style"] == "const"

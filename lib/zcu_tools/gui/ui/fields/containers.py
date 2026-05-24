@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict, Optional, Union, cast
+from typing import Any, Dict, Optional, cast
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from ...adapter import LiteralSpec, ScalarSpec
-from ...live_model import LiveField, ModuleRefLiveField, SectionLiveField
+from ...live_model import ModuleRefLiveField, SectionLiveField
 from .common import BaseLiveWidget
 from .registry import FieldWidgetProtocol, get_widget_cls, register_widget
 
@@ -140,8 +140,8 @@ class SectionWidget(BaseLiveWidget):
             self._child_widgets[key] = w
 
     def teardown(self) -> None:
-        self._field.on_validity_changed.disconnect(self._on_validity_changed)
-        # Recursively teardown children
+        field = cast(SectionLiveField, self._field)
+        field.on_validity_changed.disconnect(self._on_validity_changed)
         for w in self._child_widgets.values():
             w.teardown()
 
@@ -191,6 +191,12 @@ class ModuleRefWidget(BaseLiveWidget):
         field.on_change.connect(self._on_model_changed)
         field.on_validity_changed.connect(self._on_validity_changed)
         self._on_validity_changed(field.is_valid())
+        if field.spec.optional:
+            field.on_enabled_changed.connect(self._on_model_enabled_changed)
+            if not field.is_enabled:
+                self._sub_container.setEnabled(False)
+
+    _NONE_KEY = "<None>"
 
     def _refresh_combo_items(self) -> None:
         self._combo.blockSignals(True)
@@ -199,36 +205,73 @@ class ModuleRefWidget(BaseLiveWidget):
         field = cast(ModuleRefLiveField, self._field)
         current = field.get_chosen_key()
 
+        # 0. None option for optional fields
+        if field.spec.optional:
+            self._combo.addItem("None", self._NONE_KEY)
+            self._combo.insertSeparator(self._combo.count())
+
         # 1. Custom specs from 'allowed'
         for spec in field.spec.allowed:
             label = spec.label or "Custom"
             key = f"<Custom:{label}>"
             self._combo.addItem(label, key)
 
-        # 2. Named modules from Library if available
+        # 2. Named modules from Library if available, filtered to allowed spec labels
         ml = field.env.ctrl.get_current_ml()
         if ml:
             from ...adapter import ModuleRefSpec
+            from ...cfg_schemas import module_cfg_to_value, waveform_cfg_to_value
 
             is_module = isinstance(field.spec, ModuleRefSpec)
             store = ml.modules if is_module else ml.waveforms
-            if store:
+            allowed_labels = {s.label for s in field.spec.allowed}
+            resolve_fn = module_cfg_to_value if is_module else waveform_cfg_to_value
+            compatible: list[str] = []
+            for name, cfg in store.items():
+                try:
+                    entry_spec, _ = resolve_fn(cfg)
+                except Exception:
+                    continue
+                if entry_spec.label in allowed_labels:
+                    compatible.append(name)
+            if compatible:
                 self._combo.insertSeparator(self._combo.count())
-                for name in sorted(store.keys()):
+                for name in sorted(compatible):
                     if name == current and field.is_modified():
                         self._combo.addItem(f"Lib: {name} (modified)", name)
                         self._combo.addItem(f"Revert to Lib: {name}", name)
                     else:
                         self._combo.addItem(f"Lib: {name}", name)
 
-        idx = self._combo.findData(current)
-        if idx >= 0:
-            self._combo.setCurrentIndex(idx)
+        if field.spec.optional and not field.is_enabled:
+            self._combo.setCurrentIndex(0)  # None option
+        else:
+            idx = self._combo.findData(current)
+            if idx >= 0:
+                self._combo.setCurrentIndex(idx)
         self._combo.blockSignals(False)
 
     def _on_combo_changed(self, index: int) -> None:
         key = self._combo.itemData(index)
-        cast(ModuleRefLiveField, self._field).set_chosen_key(key)
+        field = cast(ModuleRefLiveField, self._field)
+        if key == self._NONE_KEY:
+            field.set_enabled(False)
+        else:
+            if field.spec.optional and not field.is_enabled:
+                field.set_enabled(True)
+            field.set_chosen_key(key)
+
+    def _on_model_enabled_changed(self, enabled: bool) -> None:
+        self._combo.blockSignals(True)
+        if enabled:
+            field = cast(ModuleRefLiveField, self._field)
+            idx = self._combo.findData(field.get_chosen_key())
+            if idx >= 0:
+                self._combo.setCurrentIndex(idx)
+        else:
+            self._combo.setCurrentIndex(0)  # None option
+        self._combo.blockSignals(False)
+        self._sub_container.setEnabled(enabled)
 
     def _on_model_changed(self, *_: Any) -> None:
         self._refresh_combo_items()
@@ -278,8 +321,11 @@ class ModuleRefWidget(BaseLiveWidget):
         self._sync_expand_btn()
 
     def teardown(self) -> None:
-        self._field.on_change.disconnect(self._on_model_changed)
-        self._field.on_validity_changed.disconnect(self._on_validity_changed)
+        field = cast(ModuleRefLiveField, self._field)
+        field.on_change.disconnect(self._on_model_changed)
+        field.on_validity_changed.disconnect(self._on_validity_changed)
+        if field.spec.optional:
+            field.on_enabled_changed.disconnect(self._on_model_enabled_changed)
         if self._sub_widget:
             self._sub_widget.teardown()
 

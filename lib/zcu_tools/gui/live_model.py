@@ -77,6 +77,9 @@ class CallbackList:
         except ValueError:
             pass
 
+    def clear(self) -> None:
+        self._cbs.clear()
+
     def emit(self, *args: object, **kwargs: object) -> None:
         for cb in list(self._cbs):
             cb(*args, **kwargs)
@@ -312,11 +315,19 @@ class SectionLiveField(LiveField):
         default_val = make_default_value(spec)
         provided_val = initial_val if initial_val is not None else default_val
 
-        # Build child fields; fall back to spec default for keys missing from provided_val
+        # Build child fields; fall back to spec default for keys missing from provided_val.
+        # Optional ModuleRef/WaveformRef missing from provided_val → pass None so the
+        # field initialises as disabled (is_enabled=False).
         for key, node_spec in spec.fields.items():
             child_val = provided_val.fields.get(key)
             if child_val is None:
-                child_val = default_val.fields.get(key)
+                if (
+                    isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec))
+                    and node_spec.optional
+                ):
+                    child_val = None  # intentionally disabled
+                else:
+                    child_val = default_val.fields.get(key)
             field = create_live_field(node_spec, env, child_val)
             self.fields[key] = field
             field.on_change.connect(self._on_child_change)
@@ -334,11 +345,16 @@ class SectionLiveField(LiveField):
         self._set_valid(all(f.is_valid() for f in self.fields.values()))
 
     def get_value(self) -> CfgSectionValue:
-        return CfgSectionValue(
-            fields={
-                k: cast(CfgNodeValue, f.get_value()) for k, f in self.fields.items()
-            }
-        )
+        fields: dict[str, CfgNodeValue] = {}
+        for k, f in self.fields.items():
+            if (
+                isinstance(f, ModuleRefLiveField)
+                and f.spec.optional
+                and not f.is_enabled
+            ):
+                continue  # disabled optional ModuleRef → omit key
+            fields[k] = cast(CfgNodeValue, f.get_value())
+        return CfgSectionValue(fields=fields)
 
     def set_value(self, val: object) -> None:
         if not isinstance(val, CfgSectionValue):
@@ -398,6 +414,8 @@ class ModuleRefLiveField(LiveField):
 
         self._binding_state = _binding_state_for_key(self._chosen_key)
         self.sub_field: Optional[SectionLiveField] = None
+        self.is_enabled: bool = not (spec.optional and initial_val is None)
+        self.on_enabled_changed = CallbackList()
         self._rebuild_sub_field(hint=init_sub)
 
     def is_modified(self) -> bool:
@@ -451,7 +469,19 @@ class ModuleRefLiveField(LiveField):
     def _on_sub_validity_change(self, *_: object) -> None:
         self._refresh_validity()
 
+    def set_enabled(self, enabled: bool) -> None:
+        if not self.spec.optional:
+            return
+        if enabled != self.is_enabled:
+            self.is_enabled = enabled
+            self._refresh_validity()
+            self.on_enabled_changed.emit(enabled)
+            self.on_change.emit(self.get_value())
+
     def _refresh_validity(self) -> None:
+        if self.spec.optional and not self.is_enabled:
+            self._set_valid(True)
+            return
         if self.sub_field is None:
             logger.debug(
                 "ModuleRefLiveField._refresh_validity: key=%r sub_field=None → valid=True",
@@ -505,6 +535,8 @@ class ModuleRefLiveField(LiveField):
         self.on_change.emit(self.get_value())
 
     def teardown(self) -> None:
+        if self.spec.optional:
+            self.on_enabled_changed.clear()
         if self.sub_field:
             self.sub_field.on_change.disconnect(self._on_sub_change)
             self.sub_field.on_validity_changed.disconnect(self._on_sub_validity_change)

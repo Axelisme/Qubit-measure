@@ -30,8 +30,8 @@ def make_two_pulse_reset_spec() -> CfgSectionSpec:
         label="Two-Pulse Reset",
         fields={
             "type": LiteralSpec("reset/two_pulse"),
-            "pulse1_cfg": make_pulse_spec(),
-            "pulse2_cfg": make_pulse_spec(),
+            "pulse1_cfg": make_pulse_spec(label="Pulse 1"),
+            "pulse2_cfg": make_pulse_spec(label="Pulse 2"),
         },
     )
 
@@ -41,8 +41,8 @@ def make_bath_reset_spec() -> CfgSectionSpec:
         label="Bath Reset",
         fields={
             "type": LiteralSpec("reset/bath"),
-            "cavity_tone_cfg": make_pulse_spec(),
-            "qubit_tone_cfg": make_pulse_spec(),
-            "pi2_cfg": make_pulse_spec(),
+            "cavity_tone_cfg": make_pulse_spec(label="Cavity Tone"),
+            "qubit_tone_cfg": make_pulse_spec(label="Qubit Tone"),
+            "pi2_cfg": make_pulse_spec(label="Pi/2 Pulse"),
         },
     )

@@ -67,8 +67,8 @@ T_AnalyzeResult = TypeVar("T_AnalyzeResult", bound=AnalyzeResultWithFigure)
 
 @dataclass(frozen=True)
 class ExpContext:
-    md: "MetaDict"
-    ml: "ModuleLibrary"
+    md: MetaDict
+    ml: ModuleLibrary
     soc: Optional[SocHandle]
     soccfg: Optional[SocCfgHandle]
     chip_name: str = "unknown_chip"
@@ -77,13 +77,13 @@ class ExpContext:
     result_dir: str = ""
     database_path: str = ""
     active_label: str = ""
-    predictor: Optional["FluxoniumPredictor"] = None
+    predictor: Optional[FluxoniumPredictor] = None
 
 
 @dataclass(frozen=True)
 class RunRequest:
-    md: "MetaDict"
-    ml: "ModuleLibrary"
+    md: MetaDict
+    ml: ModuleLibrary
     soc: Optional[SocHandle]
     soccfg: Optional[SocCfgHandle]
 
@@ -92,9 +92,9 @@ class RunRequest:
 class AnalyzeRequest(Generic[T_Result]):
     run_result: T_Result
     analyze_params: dict[str, object]
-    md: "MetaDict"
-    ml: "ModuleLibrary"
-    predictor: Optional["FluxoniumPredictor"]
+    md: MetaDict
+    ml: ModuleLibrary
+    predictor: Optional[FluxoniumPredictor]
 
 
 @dataclass(frozen=True)
@@ -282,6 +282,7 @@ class MultiSweepSpec:
 class ModuleRefSpec:
     allowed: list["CfgSectionSpec"]
     label: str = "Module"
+    optional: bool = False
 
     def __post_init__(self) -> None:
         if not self.allowed:
@@ -292,6 +293,7 @@ class ModuleRefSpec:
 class WaveformRefSpec:
     allowed: list["CfgSectionSpec"]
     label: str = "Waveform"
+    optional: bool = False
 
     def __post_init__(self) -> None:
         if not self.allowed:
@@ -315,7 +317,7 @@ CfgNodeSpec = Union[
     MultiSweepSpec,
     ModuleRefSpec,
     WaveformRefSpec,
-    "CfgSectionSpec",
+    CfgSectionSpec,
 ]
 
 
@@ -376,7 +378,7 @@ CfgNodeValue = Union[
     MultiSweepValue,
     ModuleRefValue,
     WaveformRefValue,
-    "CfgSectionValue",
+    CfgSectionValue,
 ]
 
 

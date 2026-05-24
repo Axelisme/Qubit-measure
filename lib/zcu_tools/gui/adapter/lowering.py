@@ -45,6 +45,11 @@ def _section_to_dict_inner(
             if isinstance(node_spec, LiteralSpec):
                 result[key] = node_spec.value
                 continue
+            if (
+                isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec))
+                and node_spec.optional
+            ):
+                continue  # disabled optional ModuleRef/WaveformRef → omit from output
             label = getattr(node_spec, "label", "") or key
             full_path = ".".join([*path, key])
             raise RuntimeError(f"Config field '{full_path}' ({label}) is missing")
