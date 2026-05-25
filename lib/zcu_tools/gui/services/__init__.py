@@ -6,6 +6,11 @@ from .context import ContextService
 from .device import DeviceService
 from .run import RunService
 from .save import SaveBothOutcome, SaveService
+from .session_persistence import (
+    PersistedSession,
+    PersistedTab,
+    SessionPersistenceService,
+)
 from .tab import TabService
 from .writeback import WritebackService
 
@@ -17,6 +22,9 @@ __all__ = [
     "RunService",
     "SaveBothOutcome",
     "SaveService",
+    "PersistedSession",
+    "PersistedTab",
+    "SessionPersistenceService",
     "TabService",
     "WritebackService",
 ]

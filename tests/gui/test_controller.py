@@ -23,6 +23,7 @@ from zcu_tools.gui.plot_host import FigureContainer
 from zcu_tools.gui.plot_routing import has_current_container
 from zcu_tools.gui.registry import Registry
 from zcu_tools.gui.runner import Runner
+from zcu_tools.gui.services.session_persistence import SessionPersistenceService
 from zcu_tools.gui.state import State
 
 # ---------------------------------------------------------------------------
@@ -59,6 +60,8 @@ class ControllerFixture:
         self.runner = Runner()
         self.registry = Registry()
         register_all(self.registry)
+        if not self.registry.has("fake"):
+            self.registry.register("fake", FakeAdapter)
         self.view = _make_view()
         io_manager = IOManager()
         io_manager._em = MagicMock()  # simulate a project being set up
@@ -268,6 +271,31 @@ def test_get_tab_result_returns_last_result(cf):
 
 def test_get_adapter_names_includes_fake(cf):
     assert "fake" in cf.ctrl.get_adapter_names()
+
+
+def test_persist_then_restore_tabs_session(cf, tmp_path):
+    tab_id = cf.ctrl.new_tab("fake")
+    schema = _default_fake_schema(cf.state.exp_context)
+    cf.ctrl.update_tab_cfg(tab_id, schema)
+    cf.ctrl.update_tab_save_paths(tab_id, "/tmp/a.h5", "/tmp/b.png")
+
+    session_svc = SessionPersistenceService(cache_dir=tmp_path)
+    cf.ctrl._session_svc = session_svc
+    cf.ctrl.persist_tabs_session()
+
+    cf_restored = ControllerFixture()
+    cf_restored.ctrl._session_svc = SessionPersistenceService(cache_dir=tmp_path)
+    cf_restored.ctrl.restore_tabs_from_session()
+
+    assert len(cf_restored.state.tabs) == 1
+    restored_tab = next(iter(cf_restored.state.tabs.values()))
+    assert restored_tab.adapter_name == "fake"
+    save_paths = cf_restored.state.get_effective_save_paths(
+        next(iter(cf_restored.state.tabs.keys()))
+    )
+    assert save_paths is not None
+    assert save_paths.data_path == "/tmp/a.h5"
+    assert save_paths.image_path == "/tmp/b.png"
 
 
 # ---------------------------------------------------------------------------

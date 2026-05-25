@@ -73,9 +73,11 @@ def test_fake_adapter_full_flow():
 def test_registry_register_all_and_create():
     reg = Registry()
     register_all(reg)
-    assert reg.has("fake")
-    adapter = reg.create("fake")
-    assert isinstance(adapter, FakeAdapter)
+    assert reg.has("onetone/fake_freq")
+    adapter = reg.create("onetone/fake_freq")
+    from zcu_tools.experiment.v2_gui.adapters.onetone.fakefreq import FakeFreqAdapter
+
+    assert isinstance(adapter, FakeFreqAdapter)
 
 
 def test_all_adapters_in_registry_dict_are_registered():

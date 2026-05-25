@@ -30,9 +30,12 @@ from .services import (
     ConnectionService,
     ContextService,
     DeviceService,
+    PersistedSession,
+    PersistedTab,
     RunService,
     SaveBothOutcome,
     SaveService,
+    SessionPersistenceService,
     TabService,
     WritebackService,
 )
@@ -82,6 +85,7 @@ class Controller:
         self._analyze_svc = AnalyzeService(state, AnalyzeRunner(), bus)
         self._save_svc = SaveService(state, SaveDataRunner(), bus)
         self._writeback_svc = WritebackService(state, bus)
+        self._session_svc = SessionPersistenceService()
 
         self._run_svc.run_finished.connect(self._on_run_finished)
         self._run_svc.run_failed.connect(self._on_run_failed)
@@ -166,12 +170,99 @@ class Controller:
     def get_bus(self) -> EventBus:
         return self._bus
 
+    def restore_tabs_from_session(self) -> None:
+        try:
+            session = self._session_svc.load_session()
+        except Exception:
+            logger.exception("restore_tabs_from_session: failed to load session")
+            return
+        if session is None:
+            return
+        self._restore_session(session)
+
+    def persist_tabs_session(self) -> None:
+        tabs = list(self._state.tabs.items())
+        payload_tabs: list[PersistedTab] = []
+        tab_ids = [tab_id for tab_id, _ in tabs]
+        active_tab_index: Optional[int] = None
+        if self._state.active_tab_id in tab_ids:
+            active_tab_index = tab_ids.index(self._state.active_tab_id)
+        for tab_id, tab in tabs:
+            try:
+                raw_cfg = self._session_svc.schema_to_raw(
+                    tab.cfg_schema,
+                    ml=self._state.exp_context.ml,
+                )
+                payload_tabs.append(
+                    PersistedTab(
+                        adapter_name=tab.adapter_name,
+                        cfg_raw=raw_cfg,
+                        save_paths_override=tab.save_path_overrides,
+                    )
+                )
+            except Exception:
+                logger.exception(
+                    "persist_tabs_session: failed to snapshot tab_id=%r adapter=%r",
+                    tab_id,
+                    tab.adapter_name,
+                )
+        try:
+            self._session_svc.save_session(
+                PersistedSession(
+                    version=1,
+                    tabs=payload_tabs,
+                    active_tab_index=active_tab_index,
+                )
+            )
+        except Exception:
+            logger.exception("persist_tabs_session: failed to save session")
+
+    def _restore_session(self, session: PersistedSession) -> None:
+        for persisted_tab in session.tabs:
+            try:
+                tab_id = self._tab_svc.restore_tab(persisted_tab.adapter_name)
+            except Exception:
+                logger.exception(
+                    "restore_tabs_from_session: failed to create tab adapter=%r",
+                    persisted_tab.adapter_name,
+                )
+                continue
+            try:
+                default_schema = self._tab_svc.get_tab_default_cfg(tab_id)
+                restored_schema = self._session_svc.raw_to_schema(
+                    default_schema,
+                    persisted_tab.cfg_raw,
+                )
+                self._tab_svc.update_tab_cfg(tab_id, restored_schema)
+                if persisted_tab.save_paths_override is not None:
+                    self._state.update_tab_save_path_overrides(
+                        tab_id,
+                        persisted_tab.save_paths_override,
+                    )
+            except Exception:
+                logger.exception(
+                    "restore_tabs_from_session: failed to restore cfg adapter=%r tab_id=%r",
+                    persisted_tab.adapter_name,
+                    tab_id,
+                )
+            self._bus.emit(
+                GuiEvent.TAB_ADDED,
+                TabAddedPayload(tab_id=tab_id, adapter_name=persisted_tab.adapter_name),
+            )
+
+        if session.active_tab_index is not None and 0 <= session.active_tab_index < len(
+            self._state.tabs
+        ):
+            tab_id = list(self._state.tabs.keys())[session.active_tab_index]
+            self._state.set_active_tab(tab_id)
+
     # ------------------------------------------------------------------
     # ExpTab operations (TabService)
     # ------------------------------------------------------------------
 
     def new_tab(self, adapter_name: str) -> str:
         tab_id = self._tab_svc.new_tab(adapter_name)
+        self._state.set_active_tab(tab_id)
         self._bus.emit(
             GuiEvent.TAB_ADDED,
             TabAddedPayload(tab_id=tab_id, adapter_name=adapter_name),
@@ -183,6 +274,9 @@ class Controller:
             raise RuntimeError("Cannot close a busy tab")
         self._tab_svc.close_tab(tab_id)
         self._bus.emit(GuiEvent.TAB_CLOSED, TabClosedPayload(tab_id=tab_id))
+
+    def set_active_tab(self, tab_id: str) -> None:
+        self._state.set_active_tab(tab_id)
 
     # ------------------------------------------------------------------
     # Run flow (RunService & ContextService)

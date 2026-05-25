@@ -49,8 +49,9 @@ def test_device_service_registration():
     svc.set_device_value("test_dev", 42)
     dev.set_value.assert_called_with(42)
 
-    svc.get_device_value("test_dev")
-    dev.get_value.assert_called_once()
+    dev.get_info.return_value = FakeDeviceInfo(address="", value=42)
+    assert svc.get_device_value("test_dev") == 42
+    dev.get_info.assert_called()
 
     svc.drop_device("test_dev")
     assert "test_dev" not in svc.list_devices()

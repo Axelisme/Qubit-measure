@@ -33,9 +33,13 @@ class TabService:
         adapter = self._registry.create(adapter_name)
         tab_id = str(uuid.uuid4())
         logger.info("new_tab: adapter=%r tab_id=%r", adapter_name, tab_id)
-        self._state.add_tab(tab_id, adapter, self._state.exp_context)
+        self._state.add_tab(tab_id, adapter_name, adapter, self._state.exp_context)
         self.refresh_tab_save_paths(tab_id)
         return tab_id
+
+    def restore_tab(self, adapter_name: str) -> str:
+        """Create a tab for restore flow using the same lifecycle as new_tab."""
+        return self.new_tab(adapter_name)
 
     def list_adapter_names(self) -> list[str]:
         return self._registry.list_names()
@@ -56,6 +60,9 @@ class TabService:
 
     def get_tab_result(self, tab_id: str) -> object | None:
         return self._state.get_tab(tab_id).run_result
+
+    def get_tab_adapter_name(self, tab_id: str) -> str:
+        return self._state.get_tab(tab_id).adapter_name
 
     def has_run_result(self, tab_id: str) -> bool:
         return self._state.get_tab(tab_id).run_result is not None

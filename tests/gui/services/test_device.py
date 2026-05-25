@@ -58,11 +58,12 @@ def test_device_service_success():
 
     with patch("zcu_tools.device.GlobalDeviceManager.get_device") as mock_get:
         mock_get.return_value = device
+        device.get_info.return_value = FakeDeviceInfo(address="none", value=1.0)
         svc.set_device_value("dev1", 1.0)
         device.set_value.assert_called_with(1.0)
 
-        svc.get_device_value("dev1")
-        device.get_value.assert_called_once()
+        assert svc.get_device_value("dev1") == 1.0
+        device.get_info.assert_called()
 
     with patch("zcu_tools.device.GlobalDeviceManager.get_device", return_value=device):
         svc.get_device_info("dev1")

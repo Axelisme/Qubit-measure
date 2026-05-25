@@ -196,6 +196,21 @@ def test_main_window_cancel_setup_before_closing(qapp, monkeypatch):
     ctrl.cancel_device_setup.assert_called_once_with()
 
 
+def test_main_window_persists_session_on_close_when_idle(qapp):
+    from qtpy.QtGui import QCloseEvent
+    from zcu_tools.gui.ui.main_window import MainWindow
+
+    ctrl = MagicMock()
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.get_active_device_setup.return_value = None
+    window = MainWindow(ctrl)
+    event = QCloseEvent()
+
+    window.closeEvent(event)
+
+    ctrl.persist_tabs_session.assert_called_once_with()
+
+
 def test_show_analysis_figure_draws_canvas(qapp, monkeypatch):
     from matplotlib.figure import Figure
     from zcu_tools.gui.ui.main_window import ExpTabWidget

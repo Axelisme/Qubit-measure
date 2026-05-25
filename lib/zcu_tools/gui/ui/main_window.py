@@ -557,6 +557,7 @@ class MainWindow(QMainWindow):
         self._tabs = QTabWidget()
         self._tabs.setTabsClosable(True)
         self._tabs.tabCloseRequested.connect(self._on_tab_close_requested)
+        self._tabs.currentChanged.connect(self._on_current_tab_changed)
         main_layout.addWidget(self._tabs, stretch=1)
 
         # --- status bar ---
@@ -887,6 +888,14 @@ class MainWindow(QMainWindow):
         logger.info("_on_tab_close_requested: tab_id=%r", tab_id)
         self._ctrl.close_tab(tab_id)
 
+    def _on_current_tab_changed(self, index: int) -> None:
+        widget = self._tabs.widget(index)
+        if not isinstance(widget, ExpTabWidget):
+            return
+        if not self._ctrl.has_tab(widget.tab_id):
+            return
+        self._ctrl.set_active_tab(widget.tab_id)
+
     def _resolve_tab_widget(self, tab_id: str, action: str) -> Optional[ExpTabWidget]:
         """Look up the widget; log + bail if tab_id is unknown to the controller."""
         if not self._ctrl.has_tab(tab_id):
@@ -1022,5 +1031,6 @@ class MainWindow(QMainWindow):
             self._ctrl.cancel_device_setup()
             a0.ignore()
             return
+        self._ctrl.persist_tabs_session()
         set_shutting_down(True)
         super().closeEvent(a0)
