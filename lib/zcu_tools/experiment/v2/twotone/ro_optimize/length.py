@@ -92,6 +92,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
                 progress=False,
                 round_hook=lambda i, avg_d: update_hook(i, [tracker]),
                 trackers=[tracker],
+                stop_checkers=[ctx.is_stop],
                 **(acquire_kwargs or {}),
             )
             return [tracker]

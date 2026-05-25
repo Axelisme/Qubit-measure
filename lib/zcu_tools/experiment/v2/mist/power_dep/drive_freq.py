@@ -109,7 +109,11 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
                 ],
                 sweep=[("freq", freq_sweep), ("gain", gain_sweep)],
             ).acquire(
-                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
             )
 
         with LivePlot2D("Pulse frequency (MHz)", "Pulse gain (a.u.)") as viewer:

@@ -80,7 +80,11 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
             modules.qub_pulse.set_param("freq", freq_param)
 
             return TwoToneProgram(soccfg, cfg, sweep=[("freq", freq_sweep)]).acquire(
-                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
             )
 
         with LivePlot2DwithLine(

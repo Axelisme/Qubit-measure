@@ -87,6 +87,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                 progress=False,
                 round_hook=lambda i, _avg_d: update_hook(i, [tracker]),
                 trackers=[tracker],
+                stop_checkers=[ctx.is_stop],
             )
             return [tracker]
 

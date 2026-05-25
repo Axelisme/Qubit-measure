@@ -175,7 +175,11 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
                 ],
                 sweep=[("allxy_idx", len(ALLXY_SEQUENCE))],
             ).acquire(
-                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
             )
 
         with LivePlot1D(

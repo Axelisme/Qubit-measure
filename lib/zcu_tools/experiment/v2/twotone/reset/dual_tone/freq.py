@@ -112,6 +112,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                 soc,
                 progress=False,
                 round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
                 **(acquire_kwargs or {}),
             )
 
@@ -191,6 +192,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                 soc,
                 progress=False,
                 round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
                 **(acquire_kwargs or {}),
             )
 

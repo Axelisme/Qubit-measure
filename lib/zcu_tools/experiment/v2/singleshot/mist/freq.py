@@ -100,6 +100,7 @@ class FreqDepExp(AbsExperiment[FreqResult, FreqCfg]):
                 soc,
                 progress=False,
                 round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
                 g_center=g_center,
                 e_center=e_center,
                 ge_radius=radius,

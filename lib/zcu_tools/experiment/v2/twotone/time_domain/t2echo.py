@@ -126,6 +126,7 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
                 soc,
                 progress=False,
                 round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
                 **(acquire_kwargs or {}),
             )
 

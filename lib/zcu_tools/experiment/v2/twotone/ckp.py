@@ -156,6 +156,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
                 soc,
                 progress=False,
                 round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
                 **(acquire_kwargs or {}),
             )
 

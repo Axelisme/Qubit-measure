@@ -111,6 +111,7 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
                         soc,
                         progress=False,
                         round_hook=update_hook,
+                        stop_checkers=[ctx.is_stop],
                         **(acquire_kwargs or {}),
                     ),
                     result_shape=(2, len(freqs)),

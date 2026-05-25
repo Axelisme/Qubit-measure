@@ -117,7 +117,11 @@ class AccPhaseExp(AbsExperiment[AccPhaseResult, AccPhaseCfg]):
                     ("phase", phase_sweep),
                 ],
             ).acquire(
-                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
             )
 
         with LivePlot2D("Time (us)", "Phase (deg)") as viewer:

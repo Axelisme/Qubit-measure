@@ -81,6 +81,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                 soc,
                 progress=False,
                 round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
                 **(acquire_kwargs or {}),
             )
 
@@ -140,7 +141,11 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                 prog_cache[length] = TwoToneProgram(soccfg, cfg)
 
             return prog_cache[length].acquire(
-                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
             )
 
         def average_round(

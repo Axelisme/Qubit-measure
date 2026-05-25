@@ -66,7 +66,11 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             return TwoToneProgram(
                 soccfg, cfg, sweep=[("freq", cfg.sweep.freq)]
             ).acquire(
-                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
             )
 
         with LivePlot1D("Frequency (MHz)", "Amplitude") as viewer:

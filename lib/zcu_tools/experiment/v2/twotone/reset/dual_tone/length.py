@@ -123,6 +123,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
                 soc,
                 progress=False,
                 round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
                 **(acquire_kwargs or {}),
             )
 

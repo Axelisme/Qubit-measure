@@ -120,7 +120,11 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                 ],
                 sweep=[("length_idx", len(length_cycles))],
             ).acquire(
-                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
             )
 
         with LivePlot1D("Time (us)", "Amplitude") as viewer:
@@ -182,6 +186,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                     soc,
                     progress=False,
                     round_hook=update_hook,
+                    stop_checkers=[ctx.is_stop],
                     **(acquire_kwargs or {}),
                 )
 
@@ -370,6 +375,7 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
                         soc,
                         progress=False,
                         round_hook=update_hook,
+                        stop_checkers=[ctx.is_stop],
                         **(acquire_kwargs or {}),
                     ),
                     result_shape=(len(lengths),),
@@ -543,7 +549,11 @@ class ScanT1WithToneExp(AbsExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
                 ],
                 sweep=[("length", length_sweep)],
             ).acquire(
-                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
             )
 
         with LivePlot2DwithLine(
