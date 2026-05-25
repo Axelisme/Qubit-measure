@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import logging
 import threading
-from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-from matplotlib.figure import Figure
 from qtpy.QtCore import QObject, QThread, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.experiment.v2.runner.base import ActiveTask
@@ -24,16 +22,6 @@ from .plot_routing import routing_scope
 logger = logging.getLogger(__name__)
 
 AdapterHandle = AbsExpAdapter[Any, Any, Any]
-
-
-@dataclass(frozen=True)
-class SaveBothOutcome:
-    """Result envelope for a save_both operation."""
-
-    data_path: str
-    image_path: str
-    data_error: Optional[str] = None
-    image_error: Optional[str] = None
 
 
 class RunWorker(QThread):
@@ -137,54 +125,6 @@ class SaveDataWorker(QThread):
         except Exception as exc:
             logger.warning("SaveDataWorker.run: failed exc=%r", exc)
             self.save_failed.emit(exc)
-
-
-class SaveBothWorker(QThread):
-    save_both_finished: Signal = Signal(object)
-
-    def __init__(
-        self,
-        adapter: AdapterHandle,
-        req: SaveDataRequest[Any],
-        figure: Figure,
-        image_path: str,
-        parent: Optional[QObject] = None,
-    ) -> None:
-        super().__init__(parent)
-        self._adapter = adapter
-        self._req = req
-        self._figure = figure
-        self._image_path = image_path
-
-    def run(self) -> None:
-        logger.debug(
-            "SaveBothWorker.run: start adapter=%s data_path=%r image_path=%r",
-            type(self._adapter).__name__,
-            self._req.data_path,
-            self._image_path,
-        )
-        data_error: Optional[str] = None
-        image_error: Optional[str] = None
-        try:
-            self._figure.savefig(self._image_path)
-        except Exception as exc:
-            image_error = str(exc)
-            logger.warning("SaveBothWorker.run: image failed exc=%r", exc)
-
-        try:
-            self._adapter.save(self._req)
-        except Exception as exc:
-            data_error = str(exc)
-            logger.warning("SaveBothWorker.run: data failed exc=%r", exc)
-
-        self.save_both_finished.emit(
-            SaveBothOutcome(
-                data_path=self._req.data_path,
-                image_path=self._image_path,
-                data_error=data_error,
-                image_error=image_error,
-            )
-        )
 
 
 class Runner(QObject):
@@ -308,11 +248,10 @@ class AnalyzeRunner(QObject):
 class SaveDataRunner(QObject):
     save_finished: Signal = Signal(str)
     save_failed: Signal = Signal(str, object)
-    save_both_finished: Signal = Signal(str, object)
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
-        self._workers: dict[str, SaveDataWorker | SaveBothWorker] = {}
+        self._workers: dict[str, SaveDataWorker] = {}
 
     @property
     def is_running(self) -> bool:
@@ -342,31 +281,6 @@ class SaveDataRunner(QObject):
         self._workers[tab_id] = worker
         worker.start()
 
-    def start_save_both(
-        self,
-        tab_id: str,
-        adapter: AdapterHandle,
-        req: SaveDataRequest[Any],
-        figure: Figure,
-        image_path: str,
-    ) -> None:
-        if tab_id in self._workers and self._workers[tab_id].isRunning():
-            raise RuntimeError(
-                f"Cannot start save_both for tab {tab_id!r}: another save is already active for this tab"
-            )
-        logger.debug(
-            "SaveDataRunner.start_save_both: tab_id=%r adapter=%s",
-            tab_id,
-            type(adapter).__name__,
-        )
-        worker = SaveBothWorker(adapter, req, figure, image_path, parent=self)
-        worker.finished.connect(worker.deleteLater)
-        worker.save_both_finished.connect(
-            lambda outcome, tid=tab_id: self._on_save_both_finished(tid, outcome)
-        )
-        self._workers[tab_id] = worker
-        worker.start()
-
     def _on_worker_finished(self, tab_id: str) -> None:
         self._workers.pop(tab_id, None)
         self.save_finished.emit(tab_id)
@@ -374,7 +288,3 @@ class SaveDataRunner(QObject):
     def _on_worker_failed(self, tab_id: str, exc: Exception) -> None:
         self._workers.pop(tab_id, None)
         self.save_failed.emit(tab_id, exc)
-
-    def _on_save_both_finished(self, tab_id: str, outcome: SaveBothOutcome) -> None:
-        self._workers.pop(tab_id, None)
-        self.save_both_finished.emit(tab_id, outcome)

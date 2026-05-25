@@ -15,8 +15,6 @@ from zcu_tools.gui.runner import (
     AnalyzeWorker,
     Runner,
     RunWorker,
-    SaveBothOutcome,
-    SaveBothWorker,
     SaveDataRunner,
     SaveDataWorker,
 )
@@ -237,40 +235,6 @@ def test_savedataworker_emits_save_finished(qapp):
     assert _wait_for(lambda: len(finished) > 0), "save_finished not emitted in time"
 
 
-def test_savebothworker_reports_image_and_data_errors(qapp):
-    from unittest.mock import MagicMock
-
-    from matplotlib.figure import Figure
-    from zcu_tools.gui.adapter import SaveDataRequest
-
-    adapter = MagicMock(spec=FakeAdapter)
-    adapter.save.side_effect = RuntimeError("data boom")
-    req = _analyze_req()
-    figure = Figure()
-    outcomes: list[SaveBothOutcome] = []
-    worker = SaveBothWorker(
-        adapter,
-        SaveDataRequest(
-            run_result=req.run_result,
-            data_path="/tmp/fake_data",
-            md=req.md,
-            ml=req.ml,
-            chip_name="chip",
-            qub_name="qubit",
-            res_name="res",
-            active_label="ctx001",
-        ),
-        figure,
-        "/tmp/does_not_exist/out.png",
-    )
-    worker.save_both_finished.connect(lambda outcome: outcomes.append(outcome))
-
-    worker.start()
-    assert _wait_for(lambda: len(outcomes) > 0), "save_both_finished not emitted"
-    assert outcomes[0].data_error == "data boom"
-    assert outcomes[0].image_error is not None
-
-
 def test_analyze_runner_emits_finished(qapp):
     runner = AnalyzeRunner()
     adapter = FakeAdapter()
@@ -309,38 +273,11 @@ def test_save_data_runner_emits_finished(qapp):
     assert finished[0] == "tab1"
 
 
-def test_save_data_runner_emits_save_both_finished(qapp, tmp_path):
-    from matplotlib.figure import Figure
-    from zcu_tools.gui.adapter import SaveDataRequest
-
+def test_save_data_runner_does_not_have_save_both(qapp):
+    """SaveDataRunner no longer has start_save_both; save_both is handled by SaveService."""
     runner = SaveDataRunner()
-    adapter = FakeAdapter()
-    analyze_req = _analyze_req()
-    finished: list[tuple[str, SaveBothOutcome]] = []
-    runner.save_both_finished.connect(
-        lambda tid, outcome: finished.append((tid, outcome))
-    )
-
-    runner.start_save_both(
-        "tab1",
-        adapter,
-        SaveDataRequest(
-            run_result=analyze_req.run_result,
-            data_path="/tmp/fake_data",
-            md=analyze_req.md,
-            ml=analyze_req.ml,
-            chip_name="chip",
-            qub_name="qubit",
-            res_name="res",
-            active_label="ctx001",
-        ),
-        Figure(),
-        str(tmp_path / "out.png"),
-    )
-    assert _wait_for(lambda: len(finished) > 0), "runner save_both_finished not emitted"
-    assert finished[0][0] == "tab1"
-    assert finished[0][1].data_error is None
-    assert finished[0][1].image_error is None
+    assert not hasattr(runner, "start_save_both")
+    assert not hasattr(runner, "save_both_finished")
 
 
 # ---------------------------------------------------------------------------
