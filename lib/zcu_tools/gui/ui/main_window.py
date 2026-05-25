@@ -433,12 +433,8 @@ class ExpTabWidget(QWidget):
         self.save_data_btn.setEnabled(
             idle and state.has_context and state.has_run_result
         )
-        self.save_image_btn.setEnabled(
-            idle and state.has_context and state.has_analyze_result
-        )
-        self.save_both_btn.setEnabled(
-            idle and state.has_context and state.has_analyze_result
-        )
+        self.save_image_btn.setEnabled(idle and state.has_context and state.has_figure)
+        self.save_both_btn.setEnabled(idle and state.has_context and state.has_figure)
         self.writeback_widget.setEnabled(
             idle and state.has_context and state.has_analyze_result
         )
@@ -700,6 +696,7 @@ class MainWindow(QMainWindow):
             has_soc=has_soc,
             has_run_result=self._ctrl.has_run_result(tab_id),
             has_analyze_result=self._ctrl.has_analyze_result(tab_id),
+            has_figure=self._ctrl.has_figure(tab_id),
         )
         tab_w.update_interaction_state(state)
 

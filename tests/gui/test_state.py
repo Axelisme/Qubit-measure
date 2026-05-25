@@ -34,6 +34,7 @@ def test_tab_interaction_state_creation():
         has_soc=True,
         has_run_result=True,
         has_analyze_result=False,
+        has_figure=False,
     )
     assert state.global_run_active is True
     assert state.is_running is False

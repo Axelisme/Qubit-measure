@@ -50,6 +50,7 @@ class TabInteractionState:
     has_soc: bool
     has_run_result: bool
     has_analyze_result: bool
+    has_figure: bool
 
 
 class State:

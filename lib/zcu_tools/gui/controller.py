@@ -402,6 +402,9 @@ class Controller:
     def has_analyze_result(self, tab_id: str) -> bool:
         return self._tab_svc.has_analyze_result(tab_id)
 
+    def has_figure(self, tab_id: str) -> bool:
+        return self._tab_svc.get_tab_figure(tab_id) is not None
+
     def get_tab_figure(self, tab_id: str) -> Optional[Figure]:
         return self._tab_svc.get_tab_figure(tab_id)
 

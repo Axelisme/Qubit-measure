@@ -90,12 +90,13 @@ def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
             has_soc=True,
             has_run_result=True,
             has_analyze_result=True,
+            has_figure=True,
         )
     )
 
     assert tab.analyze_btn.isEnabled() is False
     assert tab.writeback_widget.isEnabled() is False
-    assert tab.save_image_btn.isEnabled() is False
+    assert tab.save_image_btn.isEnabled() is False  # disabled because is_analyzing
 
 
 def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(qapp):
@@ -112,6 +113,7 @@ def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(qapp):
             has_soc=True,
             has_run_result=True,
             has_analyze_result=True,
+            has_figure=True,
         )
     )
 
@@ -134,6 +136,7 @@ def test_exp_tab_disables_save_buttons_while_saving_data(qapp):
             has_soc=True,
             has_run_result=True,
             has_analyze_result=True,
+            has_figure=True,
         )
     )
 
