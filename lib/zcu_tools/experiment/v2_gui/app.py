@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from zcu_tools.gui.adapter import ExpContext
     from zcu_tools.gui.controller import Controller
-    from zcu_tools.gui.device_manager import DeviceManager
     from zcu_tools.gui.io_manager import IOManager
     from zcu_tools.gui.registry import Registry
     from zcu_tools.gui.runner import Runner
@@ -41,7 +40,6 @@ def run_app() -> None:
 
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 
-    from zcu_tools.gui.device_manager import DeviceManager
     from zcu_tools.gui.io_manager import IOManager
     from zcu_tools.gui.registry import Registry
     from zcu_tools.gui.runner import Runner
@@ -58,9 +56,8 @@ def run_app() -> None:
     state = State(_make_empty_ctx())
     runner = Runner()
     io_manager = IOManager()
-    device_manager = DeviceManager()
 
-    ctrl, window = _build_window(state, runner, registry, io_manager, device_manager)
+    ctrl, window = _build_window(state, runner, registry, io_manager)
     window.show()
 
     # Show startup dialog to let user set chip/qub names and derive paths.
@@ -70,7 +67,7 @@ def run_app() -> None:
     sys.exit(app.exec())
 
 
-def _show_startup_dialog(ctrl: "Controller", parent: MainWindow) -> None:
+def _show_startup_dialog(ctrl: "Controller", parent: "MainWindow") -> None:
     from zcu_tools.gui.ui.setup_dialog import SetupDialog
 
     dlg = SetupDialog(ctrl, parent=parent, startup_mode=True)
@@ -82,7 +79,6 @@ def _build_window(
     runner: "Runner",
     registry: "Registry",
     io_manager: "IOManager",
-    device_manager: "DeviceManager",
 ) -> tuple["Controller", "MainWindow"]:
     """Create Controller + MainWindow in the correct order."""
 
@@ -97,7 +93,6 @@ def _build_window(
         runner=runner,
         registry=registry,
         io_manager=io_manager,
-        device_manager=device_manager,
         view=None,
         bus=bus,
     )

@@ -12,7 +12,6 @@ from matplotlib.figure import Figure
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 from .adapter import CfgSchema, SavePaths, SocCfgHandle, SocHandle, WritebackItem
-from .device_manager import DeviceManager, DeviceProtocol, _DeviceSetupWorker
 from .event_bus import (
     EventBus,
     GuiEvent,
@@ -36,6 +35,7 @@ from .services import (
     TabService,
     WritebackService,
 )
+from .services.device import DeviceProtocol, _DeviceSetupWorker
 from .state import State
 
 
@@ -57,7 +57,6 @@ class Controller:
         runner: Runner,
         registry: Registry,
         io_manager: IOManager,
-        device_manager: DeviceManager,
         view: Optional[ViewProtocol],
         bus: EventBus,
     ) -> None:
@@ -66,7 +65,7 @@ class Controller:
         self._bus = bus
 
         # Initialize domain services
-        self._dev_svc = DeviceService(state, device_manager, bus)
+        self._dev_svc = DeviceService(state, bus)
         self._conn_svc = ConnectionService(state, bus)
         self._ctx_svc = ContextService(state, io_manager, bus)
         self._tab_svc = TabService(state, registry, bus)

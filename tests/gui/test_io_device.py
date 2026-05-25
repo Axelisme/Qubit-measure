@@ -7,7 +7,17 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.device import FakeDevice, GlobalDeviceManager
 from zcu_tools.gui.adapter import ExpContext
-from zcu_tools.gui.device_manager import DeviceManager
+from zcu_tools.gui.services.device import DeviceService
+
+
+def _make_svc() -> DeviceService:
+    from zcu_tools.gui.event_bus import EventBus
+    from zcu_tools.gui.state import ExpContext, State
+
+    state = State(
+        ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
+    )
+    return DeviceService(state, EventBus())
 from zcu_tools.gui.io_manager import IOManager
 
 # ---------------------------------------------------------------------------
@@ -160,37 +170,37 @@ def test_iomanager_new_context_clone_creates_separate_files(tmp_path):
 
 
 def test_devicemanager_register_and_list():
-    dm = DeviceManager()
+    svc = _make_svc()
     dev = FakeDevice()
-    dm.register_device("flux", dev)
-    devices = dm.list_devices()
+    svc.register_device("flux", dev)
+    devices = svc.list_devices()
     assert "flux" in devices
     assert devices["flux"] == "FakeDevice"
 
 
 def test_devicemanager_drop_device():
-    dm = DeviceManager()
-    dm.register_device("flux", FakeDevice())
-    dm.drop_device("flux")
-    assert "flux" not in dm.list_devices()
+    svc = _make_svc()
+    svc.register_device("flux", FakeDevice())
+    svc.drop_device("flux")
+    assert "flux" not in svc.list_devices()
 
 
 def test_devicemanager_get_set_value():
-    dm = DeviceManager()
+    svc = _make_svc()
     dev = FakeDevice()
     dev.set_value(3.14)
-    dm.register_device("flux", dev)
+    svc.register_device("flux", dev)
 
-    assert dm.get_device_value("flux") == pytest.approx(3.14)
-    dm.set_device_value("flux", 2.71)
-    assert dm.get_device_value("flux") == pytest.approx(2.71)
+    assert svc.get_device_value("flux") == pytest.approx(3.14)
+    svc.set_device_value("flux", 2.71)
+    assert svc.get_device_value("flux") == pytest.approx(2.71)
 
 
 def test_devicemanager_get_all_info():
-    dm = DeviceManager()
+    svc = _make_svc()
     dev = FakeDevice()
     dev.set_value(1.0)
-    dm.register_device("flux", dev)
-    info = dm.get_all_info()
+    svc.register_device("flux", dev)
+    info = GlobalDeviceManager.get_all_info()
     assert "flux" in info
     assert info["flux"].value == pytest.approx(1.0)

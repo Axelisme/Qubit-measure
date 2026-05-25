@@ -20,7 +20,6 @@ from zcu_tools.gui.adapter import (
     ScalarValue,
 )
 from zcu_tools.gui.controller import Controller
-from zcu_tools.gui.device_manager import DeviceManager
 from zcu_tools.gui.event_bus import (
     GuiEvent,
     RunLockChangedPayload,
@@ -79,7 +78,6 @@ class ControllerFixture:
             runner=self.runner,
             registry=self.registry,
             io_manager=io_manager,
-            device_manager=DeviceManager(),
             view=self.view,
             bus=self.bus,
         )

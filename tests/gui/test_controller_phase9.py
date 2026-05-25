@@ -12,7 +12,6 @@ from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter, FakeAnalyzePa
 from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.adapter import CfgSchema, CfgSectionSpec, CfgSectionValue, ExpContext
 from zcu_tools.gui.controller import Controller
-from zcu_tools.gui.device_manager import DeviceManager
 from zcu_tools.gui.event_bus import GuiEvent, MdChangedPayload, TabContentChangedPayload
 from zcu_tools.gui.io_manager import IOManager
 from zcu_tools.gui.plot_host import FigureContainer
@@ -65,7 +64,6 @@ class ControllerFixture:
             runner=self.runner,
             registry=self.registry,
             io_manager=io_manager,
-            device_manager=DeviceManager(),
             view=self.view,
             bus=self.bus,
         )

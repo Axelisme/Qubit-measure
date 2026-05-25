@@ -1,51 +1,51 @@
 # pyright: reportAttributeAccessIssue=false
-"""Tests for DeviceManager and _DeviceSetupWorker."""
+"""Tests for _DeviceSetupWorker and DeviceService device operations."""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from qtpy.QtCore import QEventLoop
 from zcu_tools.device import GlobalDeviceManager
-from zcu_tools.gui.device_manager import DeviceManager, _DeviceSetupWorker
+from zcu_tools.gui.services.device import DeviceService, _DeviceSetupWorker
 
 
-def test_device_manager_registration():
-    dm = DeviceManager()
+def _make_svc() -> DeviceService:
+    from zcu_tools.gui.event_bus import EventBus
+    from zcu_tools.gui.state import ExpContext, State
+
+    state = State(
+        ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
+    )
+    return DeviceService(state, EventBus())
+
+
+def test_device_service_registration():
+    svc = _make_svc()
     dev = MagicMock()
 
-    # Clean up before
     if "test_dev" in GlobalDeviceManager.get_all_devices():
         GlobalDeviceManager.drop_device("test_dev")
 
-    dm.register_device("test_dev", dev)
-    devices = dm.list_devices()
-    assert "test_dev" in devices
+    svc.register_device("test_dev", dev)
+    assert "test_dev" in svc.list_devices()
 
-    # get_device_info
-    dm.get_device_info("test_dev")
+    svc.get_device_info("test_dev")
     dev.get_info.assert_called_once()
 
-    # get/set value
-    dm.set_device_value("test_dev", 42)
+    svc.set_device_value("test_dev", 42)
     dev.set_value.assert_called_with(42)
 
-    dm.get_device_value("test_dev")
+    svc.get_device_value("test_dev")
     dev.get_value.assert_called_once()
 
-    # get_all_info
-    info = dm.get_all_info()
-    assert "test_dev" in info
-
-    # drop device
-    dm.drop_device("test_dev")
-    assert "test_dev" not in dm.list_devices()
+    svc.drop_device("test_dev")
+    assert "test_dev" not in svc.list_devices()
 
 
 def test_device_setup_worker_success(qapp):
     dev = MagicMock()
-    # dev.setup runs instantly
     dev.setup.return_value = None
 
     worker = _DeviceSetupWorker(dev, "test_dev", {"param": 1}, None)
@@ -83,7 +83,6 @@ def test_device_setup_worker_cancel(qapp):
     dev = MagicMock()
 
     def slow_setup(info, stop_event):
-        # wait a bit, checking stop_event
         stop_event.wait(0.1)
 
     dev.setup.side_effect = slow_setup
@@ -104,7 +103,6 @@ def test_device_setup_worker_cancel(qapp):
 
 def test_device_setup_worker_pbar_factory(qapp):
     dev = MagicMock()
-    MagicMock()
 
     def fake_factory(*args, **kwargs):
         class FakeCtx:
@@ -127,15 +125,15 @@ def test_device_setup_worker_pbar_factory(qapp):
     dev.setup.assert_called_once()
 
 
-def test_device_manager_setup_device(qapp):
-    dm = DeviceManager()
+def test_device_service_setup_device(qapp):
+    svc = _make_svc()
     dev = MagicMock()
 
     if "test_dev" in GlobalDeviceManager.get_all_devices():
         GlobalDeviceManager.drop_device("test_dev")
-    dm.register_device("test_dev", dev)
+    GlobalDeviceManager.register_device("test_dev", dev)
 
-    worker = dm.setup_device("test_dev", {"param": 2})
+    worker = svc.setup_device("test_dev", {"param": 2})
     assert isinstance(worker, _DeviceSetupWorker)
 
     loop = QEventLoop()
@@ -144,4 +142,4 @@ def test_device_manager_setup_device(qapp):
     loop.exec()
 
     dev.setup.assert_called_once()
-    dm.drop_device("test_dev")
+    GlobalDeviceManager.drop_device("test_dev")

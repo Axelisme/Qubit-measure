@@ -27,7 +27,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.device_manager import DeviceProtocol
+from zcu_tools.gui.services.device import DeviceProtocol
 
 from .progress_stack import ProgressStack
 from .widgets import TrimDoubleSpinBox

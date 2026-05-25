@@ -123,38 +123,42 @@ def test_refresh_external_device_changed_updates_validity():
 
 
 def test_device_service_emits_device_changed_on_register():
+    from unittest.mock import patch
+
     from zcu_tools.gui.services.device import DeviceService
     from zcu_tools.gui.state import ExpContext, State
 
     state = State(
         ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
     )
-    dm = MagicMock()
     bus = EventBus()
     received: list = []
     bus.subscribe(GuiEvent.DEVICE_CHANGED, lambda p: received.append(p))
 
-    svc = DeviceService(state, dm, bus)
-    svc.register_device("dev1", MagicMock())
+    svc = DeviceService(state, bus)
+    with patch("zcu_tools.device.GlobalDeviceManager.register_device"):
+        svc.register_device("dev1", MagicMock())
 
     assert len(received) == 1
     assert isinstance(received[0], DeviceChangedPayload)
 
 
 def test_device_service_emits_device_changed_on_drop():
+    from unittest.mock import patch
+
     from zcu_tools.gui.services.device import DeviceService
     from zcu_tools.gui.state import ExpContext, State
 
     state = State(
         ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
     )
-    dm = MagicMock()
     bus = EventBus()
     received: list = []
     bus.subscribe(GuiEvent.DEVICE_CHANGED, lambda p: received.append(p))
 
-    svc = DeviceService(state, dm, bus)
-    svc.drop_device("dev1")
+    svc = DeviceService(state, bus)
+    with patch("zcu_tools.device.GlobalDeviceManager.drop_device"):
+        svc.drop_device("dev1")
 
     assert len(received) == 1
     assert isinstance(received[0], DeviceChangedPayload)

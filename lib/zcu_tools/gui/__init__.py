@@ -30,7 +30,6 @@ from .adapter import (
     reconstruct_params,
     schema_to_dict,
 )
-from .device_manager import DeviceManager
 from .io_manager import IOManager
 from .registry import Registry
 from .state import State, TabState
@@ -42,7 +41,6 @@ __all__ = [
     "CfgSchema",
     "CfgSectionSpec",
     "CfgSectionValue",
-    "DeviceManager",
     "DirectValue",
     "EvalValue",
     "ExpContext",
