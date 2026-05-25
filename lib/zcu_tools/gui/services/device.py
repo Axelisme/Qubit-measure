@@ -44,7 +44,7 @@ class ValueDeviceProtocol(DeviceProtocol, Protocol):
 class _DeviceSetupWorker(QThread):
     """Runs dev.setup(info) on a background thread with optional pbar factory and cancellation."""
 
-    finished: Signal = Signal(str)  # name
+    setup_finished: Signal = Signal(str)  # name
     failed: Signal = Signal(str, str)  # name, error_message
     cancelled: Signal = Signal(str)  # name
 
@@ -62,6 +62,9 @@ class _DeviceSetupWorker(QThread):
         self._info = info
         self._pbar_factory = pbar_factory
         self._stop_event = threading.Event()
+        self._completed = False
+        self._error: Optional[str] = None
+        self.finished.connect(self._emit_outcome)
 
     def cancel(self) -> None:
         self._stop_event.set()
@@ -76,12 +79,19 @@ class _DeviceSetupWorker(QThread):
             else:
                 self._dev.setup(self._info, stop_event=self._stop_event)
 
-            if self._stop_event.is_set():
-                self.cancelled.emit(self._name)
-            else:
-                self.finished.emit(self._name)
+            self._completed = True
         except Exception as exc:
-            self.failed.emit(self._name, str(exc))
+            self._error = str(exc)
+
+    def _emit_outcome(self) -> None:
+        if self._error is not None:
+            self.failed.emit(self._name, self._error)
+        elif not self._completed:
+            raise RuntimeError("Device setup worker stopped without an outcome")
+        elif self._stop_event.is_set():
+            self.cancelled.emit(self._name)
+        else:
+            self.setup_finished.emit(self._name)
 
 
 class DeviceService(QObject):
@@ -166,7 +176,5 @@ class DeviceService(QObject):
         dev = GlobalDeviceManager.get_device(name)
         worker = _DeviceSetupWorker(dev, name, info, pbar_factory, parent=self)
         worker.finished.connect(worker.deleteLater)
-        worker.failed.connect(worker.deleteLater)
-        worker.cancelled.connect(worker.deleteLater)
         worker.start()
         return worker

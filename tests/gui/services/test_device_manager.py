@@ -51,7 +51,10 @@ def test_device_setup_worker_success(qapp):
     worker = _DeviceSetupWorker(dev, "test_dev", {"param": 1}, None)
 
     loop = QEventLoop()
-    worker.finished.connect(loop.quit)
+    running_at_notification = []
+    worker.setup_finished.connect(
+        lambda _: running_at_notification.append(worker.isRunning()) or loop.quit()
+    )
     worker.failed.connect(lambda n, err: loop.quit())
     worker.cancelled.connect(lambda n: loop.quit())
 
@@ -59,6 +62,7 @@ def test_device_setup_worker_success(qapp):
     loop.exec()
 
     dev.setup.assert_called_once()
+    assert running_at_notification == [False]
 
 
 def test_device_setup_worker_failure(qapp):
@@ -69,7 +73,14 @@ def test_device_setup_worker_failure(qapp):
 
     loop = QEventLoop()
     error_msg = []
-    worker.failed.connect(lambda n, err: error_msg.append(err) or loop.quit())
+    running_at_notification = []
+
+    def on_failure(_name, error):
+        error_msg.append(error)
+        running_at_notification.append(worker.isRunning())
+        loop.quit()
+
+    worker.failed.connect(on_failure)
 
     worker.start()
     loop.exec()
@@ -77,6 +88,7 @@ def test_device_setup_worker_failure(qapp):
     dev.setup.assert_called_once()
     assert len(error_msg) == 1
     assert error_msg[0] == "setup failed"
+    assert running_at_notification == [False]
 
 
 def test_device_setup_worker_cancel(qapp):
@@ -91,7 +103,14 @@ def test_device_setup_worker_cancel(qapp):
 
     loop = QEventLoop()
     was_cancelled = []
-    worker.cancelled.connect(lambda n: was_cancelled.append(True) or loop.quit())
+    running_at_notification = []
+
+    def on_cancelled(_name):
+        was_cancelled.append(True)
+        running_at_notification.append(worker.isRunning())
+        loop.quit()
+
+    worker.cancelled.connect(on_cancelled)
 
     worker.start()
     worker.cancel()
@@ -99,6 +118,7 @@ def test_device_setup_worker_cancel(qapp):
 
     dev.setup.assert_called_once()
     assert len(was_cancelled) == 1
+    assert running_at_notification == [False]
 
 
 def test_device_setup_worker_pbar_factory(qapp):
@@ -117,7 +137,7 @@ def test_device_setup_worker_pbar_factory(qapp):
     worker = _DeviceSetupWorker(dev, "test_dev", {}, fake_factory)
 
     loop = QEventLoop()
-    worker.finished.connect(loop.quit)
+    worker.setup_finished.connect(loop.quit)
 
     worker.start()
     loop.exec()
@@ -137,7 +157,7 @@ def test_device_service_setup_device(qapp):
     assert isinstance(worker, _DeviceSetupWorker)
 
     loop = QEventLoop()
-    worker.finished.connect(loop.quit)
+    worker.setup_finished.connect(loop.quit)
     worker.failed.connect(lambda n, err: loop.quit())
     loop.exec()
 

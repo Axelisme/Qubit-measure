@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.device import FakeDevice, GlobalDeviceManager
+from zcu_tools.device import FakeDevice, FakeDeviceInfo, GlobalDeviceManager
 from zcu_tools.gui.adapter import ExpContext
 from zcu_tools.gui.services.device import DeviceService
 
@@ -205,4 +205,6 @@ def test_devicemanager_get_all_info():
     svc.register_device("flux", dev)
     info = GlobalDeviceManager.get_all_info()
     assert "flux" in info
-    assert info["flux"].value == pytest.approx(1.0)
+    flux_info = info["flux"]
+    assert isinstance(flux_info, FakeDeviceInfo)
+    assert flux_info.value == pytest.approx(1.0)

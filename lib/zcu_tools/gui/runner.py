@@ -22,6 +22,7 @@ from .plot_routing import routing_scope
 logger = logging.getLogger(__name__)
 
 AdapterHandle = AbsExpAdapter[Any, Any, Any]
+_NO_RESULT = object()
 
 
 class RunWorker(QThread):
@@ -44,6 +45,9 @@ class RunWorker(QThread):
         self._pbar_factory = pbar_factory
         self._figure_container = figure_container
         self._stop_event = threading.Event()
+        self._result: object = _NO_RESULT
+        self._error: Optional[Exception] = None
+        self.finished.connect(self._emit_outcome)
 
     def run(self) -> None:
         logger.debug("RunWorker.run: start adapter=%s", type(self._adapter).__name__)
@@ -57,10 +61,18 @@ class RunWorker(QThread):
             logger.debug(
                 "RunWorker.run: finished result_type=%s", type(result).__name__
             )
-            self.run_finished.emit(result)
+            self._result = result
         except Exception as exc:
             logger.warning("RunWorker.run: failed exc=%r", exc)
-            self.run_failed.emit(exc)
+            self._error = exc
+
+    def _emit_outcome(self) -> None:
+        if self._error is not None:
+            self.run_failed.emit(self._error)
+        elif self._result is not _NO_RESULT:
+            self.run_finished.emit(self._result)
+        else:
+            raise RuntimeError("RunWorker stopped without an outcome")
 
     def cancel(self) -> None:
         logger.debug("RunWorker.cancel: setting stop event")
@@ -82,6 +94,9 @@ class AnalyzeWorker(QThread):
         self._adapter = adapter
         self._req = req
         self._figure_container = figure_container
+        self._result: object = _NO_RESULT
+        self._error: Optional[Exception] = None
+        self.finished.connect(self._emit_outcome)
 
     def run(self) -> None:
         logger.debug(
@@ -93,10 +108,18 @@ class AnalyzeWorker(QThread):
             logger.debug(
                 "AnalyzeWorker.run: finished result_type=%s", type(result).__name__
             )
-            self.analyze_finished.emit(result)
+            self._result = result
         except Exception as exc:
             logger.warning("AnalyzeWorker.run: failed exc=%r", exc)
-            self.analyze_failed.emit(exc)
+            self._error = exc
+
+    def _emit_outcome(self) -> None:
+        if self._error is not None:
+            self.analyze_failed.emit(self._error)
+        elif self._result is not _NO_RESULT:
+            self.analyze_finished.emit(self._result)
+        else:
+            raise RuntimeError("AnalyzeWorker stopped without an outcome")
 
 
 class SaveDataWorker(QThread):
@@ -112,6 +135,9 @@ class SaveDataWorker(QThread):
         super().__init__(parent)
         self._adapter = adapter
         self._req = req
+        self._completed = False
+        self._error: Optional[Exception] = None
+        self.finished.connect(self._emit_outcome)
 
     def run(self) -> None:
         logger.debug(
@@ -121,10 +147,18 @@ class SaveDataWorker(QThread):
         )
         try:
             self._adapter.save(self._req)
-            self.save_finished.emit()
+            self._completed = True
         except Exception as exc:
             logger.warning("SaveDataWorker.run: failed exc=%r", exc)
-            self.save_failed.emit(exc)
+            self._error = exc
+
+    def _emit_outcome(self) -> None:
+        if self._error is not None:
+            self.save_failed.emit(self._error)
+        elif self._completed:
+            self.save_finished.emit()
+        else:
+            raise RuntimeError("SaveDataWorker stopped without an outcome")
 
 
 class Runner(QObject):

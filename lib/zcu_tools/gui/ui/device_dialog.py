@@ -411,7 +411,7 @@ class DeviceDialog(QDialog):
         pbar_factory = QtProgressBarFactory(self._progress)
         worker = self._ctrl.setup_device(name, new_info, pbar_factory)
         self._active_worker = worker
-        worker.finished.connect(lambda _: self._on_setup_done())
+        worker.setup_finished.connect(lambda _: self._on_setup_done())
         worker.failed.connect(lambda _name, _msg: self._on_setup_done())
         worker.cancelled.connect(lambda _: self._on_setup_done())
         self._set_setup_running(True)

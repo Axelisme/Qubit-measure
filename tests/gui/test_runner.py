@@ -81,8 +81,14 @@ def test_runworker_emits_run_finished(qapp):
     schema = _simple_schema()
 
     results = []
+    running_at_notification = []
     worker = RunWorker(adapter, _make_run_req(), schema)
-    worker.run_finished.connect(lambda r: results.append(r))
+    worker.run_finished.connect(
+        lambda r: (
+            results.append(r),
+            running_at_notification.append(worker.isRunning()),
+        )
+    )
 
     worker.start()
     assert _wait_for(lambda: len(results) > 0), "run_finished not emitted in time"
@@ -90,6 +96,7 @@ def test_runworker_emits_run_finished(qapp):
     import numpy as np
 
     assert isinstance(results[0], np.ndarray)
+    assert running_at_notification == [False]
 
 
 def test_runworker_cancel_before_start_still_finishes(qapp):
@@ -201,13 +208,20 @@ def test_runner_cancel_stops_active_run(qapp):
 def test_analyzeworker_emits_analyze_finished(qapp):
     adapter = FakeAdapter()
     results = []
+    running_at_notification = []
     worker = AnalyzeWorker(adapter, _analyze_req())
-    worker.analyze_finished.connect(lambda r: results.append(r))
+    worker.analyze_finished.connect(
+        lambda r: (
+            results.append(r),
+            running_at_notification.append(worker.isRunning()),
+        )
+    )
 
     worker.start()
     assert _wait_for(lambda: len(results) > 0), "analyze_finished not emitted in time"
     assert len(results) == 1
     assert results[0].figure is not None
+    assert running_at_notification == [False]
 
 
 def test_savedataworker_emits_save_finished(qapp):
@@ -216,6 +230,7 @@ def test_savedataworker_emits_save_finished(qapp):
     from zcu_tools.gui.adapter import SaveDataRequest
 
     finished = []
+    running_at_notification = []
     worker = SaveDataWorker(
         adapter,
         SaveDataRequest(
@@ -229,10 +244,16 @@ def test_savedataworker_emits_save_finished(qapp):
             active_label="ctx001",
         ),
     )
-    worker.save_finished.connect(lambda: finished.append(True))
+    worker.save_finished.connect(
+        lambda: (
+            finished.append(True),
+            running_at_notification.append(worker.isRunning()),
+        )
+    )
 
     worker.start()
     assert _wait_for(lambda: len(finished) > 0), "save_finished not emitted in time"
+    assert running_at_notification == [False]
 
 
 def test_analyze_runner_emits_finished(qapp):
