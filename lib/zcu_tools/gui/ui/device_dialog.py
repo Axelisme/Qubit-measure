@@ -392,13 +392,22 @@ class DeviceDialog(QDialog):
             return
 
         updates = panel.read()
-        self._set_apply_busy(True)
+        info = self._ctrl.get_device_info(name)
+        if info is None:
+            return
+        from zcu_tools.device.base import BaseDeviceInfo
 
-        try:
-            for k, v in updates.items():
-                self._ctrl.set_device_value(name, {k: v})
-        finally:
-            self._set_apply_busy(False)
+        if not isinstance(info, BaseDeviceInfo):
+            return
+        new_info = info.with_updates(**updates)
+        from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
+
+        self._set_apply_busy(True)
+        pbar_factory = QtProgressBarFactory(self._progress)
+        worker = self._ctrl.setup_device(name, new_info, pbar_factory)
+        worker.finished.connect(lambda _: self._set_apply_busy(False))
+        worker.failed.connect(lambda _, msg: self._set_apply_busy(False))
+        worker.cancelled.connect(lambda _: self._set_apply_busy(False))
 
     def _set_apply_busy(self, busy: bool) -> None:
         self._drop_btn.setEnabled(not busy)

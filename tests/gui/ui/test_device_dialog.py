@@ -73,21 +73,24 @@ def test_device_dialog_drop_device(qapp):
 
 
 def test_device_dialog_apply_changes(qapp):
-    ctrl = MagicMock()
-    ctrl.list_devices.return_value = {"sgs": "RohdeSchwarzSGS100A"}
+    from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
 
-    info_mock = MagicMock()
-    info_mock.type = "RohdeSchwarzSGS100A"
-    ctrl.get_device_info.return_value = info_mock
+    ctrl = MagicMock()
+    ctrl.list_devices.return_value = {"fd": "FakeDevice"}
+
+    info = FakeDeviceInfo(address="none")
+    ctrl.get_device_info.return_value = info
+    ctrl.setup_device.return_value = MagicMock()  # worker mock
 
     dialog = DeviceDialog(ctrl)
     dialog._list.setCurrentRow(0)
 
-    # Stack index should be 3 for SGS100A
-    assert dialog._stack.currentIndex() == 3
+    assert dialog._stack.currentIndex() == 1  # FakeDevice page
 
-    # Click apply
     dialog._apply_btn.click()
 
-    # Should call set_device_value with extracted fields from panel
-    ctrl.set_device_value.assert_called()
+    # Should call setup_device with a FakeDeviceInfo built from with_updates
+    ctrl.setup_device.assert_called_once()
+    call_args = ctrl.setup_device.call_args
+    assert call_args.args[0] == "fd"
+    assert isinstance(call_args.args[1], FakeDeviceInfo)
