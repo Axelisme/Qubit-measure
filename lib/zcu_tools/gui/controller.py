@@ -12,7 +12,7 @@ from matplotlib.figure import Figure
 from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
-from .adapter import CfgSchema, SavePaths, SocCfgHandle, SocHandle, WritebackItem
+from .adapter import CfgSchema, SavePaths, SocCfgHandle, WritebackItem
 from .event_bus import (
     EventBus,
     GuiEvent,
@@ -36,7 +36,15 @@ from .services import (
     TabService,
     WritebackService,
 )
-from .services.device import DeviceProtocol, DeviceSetupSnapshot
+from .services.connection import (
+    ConnectRequest,
+    LoadPredictorRequest,
+    PredictFreqRequest,
+)
+from .services.device import (
+    DeviceSetupSnapshot,
+    RegisterDeviceRequest,
+)
 from .state import State
 
 
@@ -332,11 +340,20 @@ class Controller:
     def set_ml_module(self, name: str, module: Any) -> None:
         self._ctx_svc.set_ml_module(name, module)
 
+    def set_ml_module_from_raw(self, name: str, raw_dict: dict) -> None:
+        self._ctx_svc.set_ml_module_from_raw(name, raw_dict)
+
     def del_ml_module(self, name: str) -> None:
         self._ctx_svc.del_ml_module(name)
 
     def set_ml_waveform(self, name: str, waveform: Any) -> None:
         self._ctx_svc.set_ml_waveform(name, waveform)
+
+    def set_ml_waveform_from_raw(self, name: str, raw_dict: dict) -> None:
+        self._ctx_svc.set_ml_waveform_from_raw(name, raw_dict)
+
+    def coerce_md_value(self, key: str, text: str) -> Any:
+        return self._ctx_svc.coerce_md_value(key, text)
 
     def del_ml_waveform(self, name: str) -> None:
         self._ctx_svc.del_ml_waveform(name)
@@ -345,14 +362,23 @@ class Controller:
     # Device (DeviceService)
     # ------------------------------------------------------------------
 
-    def register_device(self, name: str, device: DeviceProtocol) -> None:
-        self._dev_svc.register_device(name, device)
+    def register_device(self, req: RegisterDeviceRequest) -> None:
+        self._dev_svc.register_device(req)
 
     def drop_device(self, name: str) -> None:
         self._dev_svc.drop_device(name)
 
     def list_devices(self) -> dict[str, str]:
         return self._dev_svc.list_devices()
+
+    def list_device_names(self) -> list[str]:
+        return self._dev_svc.list_device_names()
+
+    def get_device_unit(self, name: str) -> str:
+        return self._dev_svc.get_device_unit(name)
+
+    def get_device_value_for_new_context(self, name: str) -> Optional[float]:
+        return self._dev_svc.get_device_value_for_new_context(name)
 
     def set_device_value(self, name: str, value: Any) -> object:
         return self._dev_svc.set_device_value(name, value)
@@ -376,15 +402,21 @@ class Controller:
     # Connection / Predictor (ConnectionService)
     # ------------------------------------------------------------------
 
-    def set_connection(
-        self, soc: Optional[SocHandle], soccfg: Optional[SocCfgHandle]
-    ) -> None:
-        self._conn_svc.set_connection(soc, soccfg)
+    def start_connect(self, req: ConnectRequest) -> None:
+        self._conn_svc.start_connect(req)
 
-    def set_predictor(
-        self, predictor: Optional[FluxoniumPredictor], path: Optional[str] = None
-    ) -> None:
-        self._conn_svc.set_predictor(predictor, path)
+    def get_connection_service(self) -> ConnectionService:
+        """Return the ConnectionService so views can subscribe to its Qt signals."""
+        return self._conn_svc
+
+    def load_predictor(self, req: LoadPredictorRequest) -> None:
+        self._conn_svc.load_predictor(req)
+
+    def clear_predictor(self) -> None:
+        self._conn_svc.clear_predictor()
+
+    def predict_freq(self, req: PredictFreqRequest) -> float:
+        return self._conn_svc.predict_freq(req)
 
     def get_soccfg(self) -> Optional[SocCfgHandle]:
         return self._conn_svc.get_soccfg()

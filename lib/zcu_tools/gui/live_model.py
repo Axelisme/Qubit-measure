@@ -49,6 +49,7 @@ class ControllerProtocol(Protocol):
     def get_current_md(self) -> MetaDict: ...
     def get_current_ml(self) -> ModuleLibrary: ...
     def has_soc(self) -> bool: ...
+    def list_device_names(self) -> list[str]: ...
 
 
 @dataclass(frozen=True)
@@ -416,10 +417,8 @@ class DeviceRefLiveField(LiveField):
             self.on_change.emit(self.get_value())
 
     def _refresh_validity(self) -> None:
-        from zcu_tools.device import GlobalDeviceManager
-
-        devices = GlobalDeviceManager.get_all_devices()
-        self._set_valid(self._chosen_name in devices)
+        names = self.env.ctrl.list_device_names()
+        self._set_valid(self._chosen_name in names)
 
     def refresh_external(self, event: object) -> None:
         from .event_bus import GuiEvent

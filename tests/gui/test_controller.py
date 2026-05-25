@@ -278,19 +278,6 @@ def test_get_adapter_names_includes_fake(cf):
 
 
 # ---------------------------------------------------------------------------
-# set_connection / set_predictor
+# Connection / predictor — handled by ConnectionService.
+# (Direct controller setters are removed in Phase 62.2.)
 # ---------------------------------------------------------------------------
-
-
-def test_set_connection_updates_exp_context(cf):
-    soc = object()
-    soccfg = object()
-    cf.ctrl.set_connection(soc, soccfg)
-    assert cf.state.exp_context.soc is soc
-    assert cf.state.exp_context.soccfg is soccfg
-
-
-def test_set_predictor_updates_exp_context(cf):
-    pred = object()
-    cf.ctrl.set_predictor(pred)
-    assert cf.state.exp_context.predictor is pred

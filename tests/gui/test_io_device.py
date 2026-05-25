@@ -7,17 +7,28 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.device import FakeDevice, FakeDeviceInfo, GlobalDeviceManager
 from zcu_tools.gui.adapter import ExpContext
-from zcu_tools.gui.services.device import DeviceService
+from zcu_tools.gui.services.device import DeviceService, RegisterDeviceRequest
 
 
-def _make_svc() -> DeviceService:
+def _make_svc(driver: object | None = None) -> tuple[DeviceService, object]:
     from zcu_tools.gui.event_bus import EventBus
     from zcu_tools.gui.state import ExpContext, State
 
     state = State(
         ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
     )
-    return DeviceService(state, EventBus())
+    fake_device = driver if driver is not None else FakeDevice()
+
+    def factory(type_name: str, address: str) -> object:
+        return fake_device
+
+    return DeviceService(state, EventBus(), driver_factory=factory), fake_device  # type: ignore[arg-type]
+
+
+def _register(svc: DeviceService, name: str = "flux") -> None:
+    svc.register_device(
+        RegisterDeviceRequest(type_name="FakeDevice", name=name, address="")
+    )
 
 
 from zcu_tools.gui.io_manager import IOManager
@@ -172,26 +183,26 @@ def test_iomanager_new_context_clone_creates_separate_files(tmp_path):
 
 
 def test_devicemanager_register_and_list():
-    svc = _make_svc()
     dev = FakeDevice()
-    svc.register_device("flux", dev)
+    svc, _ = _make_svc(driver=dev)
+    _register(svc, "flux")
     devices = svc.list_devices()
     assert "flux" in devices
     assert devices["flux"] == "FakeDevice"
 
 
 def test_devicemanager_drop_device():
-    svc = _make_svc()
-    svc.register_device("flux", FakeDevice())
+    svc, _ = _make_svc()
+    _register(svc, "flux")
     svc.drop_device("flux")
     assert "flux" not in svc.list_devices()
 
 
 def test_devicemanager_get_set_value():
-    svc = _make_svc()
     dev = FakeDevice()
     dev.set_value(3.14)
-    svc.register_device("flux", dev)
+    svc, _ = _make_svc(driver=dev)
+    _register(svc, "flux")
 
     assert svc.get_device_value("flux") == pytest.approx(3.14)
     svc.set_device_value("flux", 2.71)
@@ -199,10 +210,10 @@ def test_devicemanager_get_set_value():
 
 
 def test_devicemanager_get_all_info():
-    svc = _make_svc()
     dev = FakeDevice()
     dev.set_value(1.0)
-    svc.register_device("flux", dev)
+    svc, _ = _make_svc(driver=dev)
+    _register(svc, "flux")
     info = GlobalDeviceManager.get_all_info()
     assert "flux" in info
     flux_info = info["flux"]

@@ -360,13 +360,10 @@ class DeviceRefWidget(BaseLiveWidget):
         field.on_validity_changed.connect(self._on_validity_changed)
 
     def _refresh_combo(self) -> None:
-        from zcu_tools.device import GlobalDeviceManager
-
         field = cast(DeviceRefLiveField, self._field)
         self._combo.blockSignals(True)
         self._combo.clear()
-        devices = GlobalDeviceManager.get_all_devices()
-        for name in sorted(devices):
+        for name in field.env.ctrl.list_device_names():
             self._combo.addItem(name)
         idx = self._combo.findText(field.get_chosen_name())
         self._combo.setCurrentIndex(idx if idx >= 0 else -1)

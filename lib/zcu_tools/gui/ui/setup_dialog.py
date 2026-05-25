@@ -34,36 +34,12 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 if TYPE_CHECKING:
     from zcu_tools.gui.controller import Controller
 
-_DEVICE_DEFAULT_UNITS: dict[str, str] = {
-    "FakeDevice": "none",
-    "YOKOGS200": "A",
-}
-
 
 @runtime_checkable
 class SocConfigProtocol(Protocol):
     """Protocol for QICK Soc configuration objects."""
 
     def description(self) -> str: ...
-
-
-def _detect_unit(device_name: str) -> str:
-    try:
-        from zcu_tools.device import GlobalDeviceManager
-
-        dev = GlobalDeviceManager.get_device(device_name)
-        dev_type = type(dev).__name__
-        if dev_type == "YOKOGS200":
-            # For YOKOGS200, we can use a protocol or specific check
-            from zcu_tools.device.yoko import YOKOGS200
-
-            if isinstance(dev, YOKOGS200):
-                mode = dev.get_mode()
-                return "V" if mode == "voltage" else "A"
-        return _DEVICE_DEFAULT_UNITS.get(dev_type, "none")
-    except Exception as exc:
-        logger.warning("_detect_unit failed for %r: %r", device_name, exc)
-        return "none"
 
 
 class SetupDialog(QDialog):
@@ -267,17 +243,14 @@ class SetupDialog(QDialog):
             self._db_path_edit.setText(path)
 
     def _refresh_device_list(self) -> None:
-        from zcu_tools.device import GlobalDeviceManager
-
-        devices = GlobalDeviceManager.get_all_devices()
+        summaries = self._ctrl.list_devices()
 
         current = self._device_combo.currentText()
         self._device_combo.blockSignals(True)
         self._device_combo.clear()
         self._device_combo.addItem("(none)")
-        for name in sorted(devices):
-            dev_type = type(devices[name]).__name__
-            self._device_combo.addItem(f"{name}  [{dev_type}]", userData=name)
+        for name in sorted(summaries):
+            self._device_combo.addItem(f"{name}  [{summaries[name]}]", userData=name)
         self._device_combo.blockSignals(False)
 
         idx = self._device_combo.findText(current)
@@ -287,8 +260,7 @@ class SetupDialog(QDialog):
     def _on_device_changed(self, _text: str) -> None:
         device_name = self._device_combo.currentData()
         if device_name:
-            unit = _detect_unit(device_name)
-            self._unit_label.setText(unit)
+            self._unit_label.setText(self._ctrl.get_device_unit(device_name))
         else:
             self._unit_label.setText("—")
 
@@ -341,12 +313,7 @@ class SetupDialog(QDialog):
         unit = self._unit_label.text() if device_name else "none"
         value: Optional[float] = None
         if device_name:
-            from zcu_tools.device import GlobalDeviceManager
-
-            dev = GlobalDeviceManager.get_device(device_name)
-            # Proper float conversion check
-            raw_val = dev.get_value()  # type: ignore[attr-defined]
-            value = float(raw_val)
+            value = self._ctrl.get_device_value_for_new_context(device_name)
         self._ctrl.new_context(value=value, unit=unit, clone_from_current=clone)
         self._refresh_context_list()
         val_str = f"{value} {unit}" if value is not None else "NoValue"
@@ -401,41 +368,48 @@ class SetupDialog(QDialog):
         self._port_spin.setEnabled(not use_mock)
 
     def _on_connect_clicked(self) -> None:
+        from zcu_tools.gui.services.connection import (
+            ConnectMockRequest,
+            ConnectRemoteRequest,
+        )
+
         use_mock = self._mock_check.isChecked()
+        req = (
+            ConnectMockRequest()
+            if use_mock
+            else ConnectRemoteRequest(
+                ip=self._ip_edit.text().strip(), port=self._port_spin.value()
+            )
+        )
+
+        conn_svc = self._ctrl.get_connection_service()
+        # Connect dialog-scoped subscriptions once; rebind every time we kick off
+        # a new request to keep the View stateless between attempts.
+        try:
+            conn_svc.connection_finished.disconnect(self._on_connect_finished)
+        except (TypeError, RuntimeError):
+            pass
+        try:
+            conn_svc.connection_failed.disconnect(self._on_connect_failed)
+        except (TypeError, RuntimeError):
+            pass
+        conn_svc.connection_finished.connect(self._on_connect_finished)
+        conn_svc.connection_failed.connect(self._on_connect_failed)
+
         self._connect_btn.setEnabled(False)
         self._set_conn_status("Connecting…", error=False)
-        try:
-            if use_mock:
-                from zcu_tools.program.v2.mocksoc import make_mock_soc, make_mock_soccfg
+        self._ctrl.start_connect(req)
 
-                soc = make_mock_soc()
-                soccfg = make_mock_soccfg()
-                logger.info("SetupDialog: using MockQickSoc")
-            else:
-                ip = self._ip_edit.text().strip()
-                port = self._port_spin.value()
-                try:
-                    from zcu_tools.remote import make_soc_proxy
-                except ImportError as e:
-                    raise RuntimeError(
-                        f"Cannot import ZCU client libraries: {e}\n"
-                        "Use MockSoc for offline testing."
-                    ) from e
-                soc, soccfg = make_soc_proxy(ip, port)
-                logger.info("SetupDialog: connected to %s:%d", ip, port)
+    def _on_connect_finished(self) -> None:
+        self._connect_btn.setEnabled(True)
+        self._set_conn_status("Connected", error=False)
+        soccfg = self._ctrl.get_soccfg()
+        if isinstance(soccfg, SocConfigProtocol):
+            self._show_cfg(soccfg.description())
 
-            self._ctrl.set_connection(soc, soccfg)
-            self._set_conn_status("Connected", error=False)
-
-            if isinstance(soccfg, SocConfigProtocol):
-                self._show_cfg(soccfg.description())
-
-        except (ConnectionRefusedError, TimeoutError, OSError) as e:
-            self._set_conn_status(f"Connection failed: {e}", error=True)
-        except Exception as e:
-            self._set_conn_status(f"Error: {e}", error=True)
-        finally:
-            self._connect_btn.setEnabled(True)
+    def _on_connect_failed(self, message: str) -> None:
+        self._connect_btn.setEnabled(True)
+        self._set_conn_status(message, error=True)
 
     def _show_cfg(self, text: str) -> None:
         self._cfg_text.setPlainText(text)

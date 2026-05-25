@@ -20,6 +20,63 @@ if TYPE_CHECKING:
     from zcu_tools.gui.state import State
 
 
+class MlEntryValidationError(RuntimeError):
+    """Expected failure when raw ML entry cannot be deserialised."""
+
+
+class MdValueError(ValueError):
+    """Expected failure when the MetaDict value text cannot be coerced safely."""
+
+
+def _coerce_scalar(text: str, current: Any) -> Any:
+    """Coerce text -> typed scalar.
+
+    If `current` is None (key not yet present), accept int/float/bool/str only.
+    Otherwise coerce to type(current); booleans must be 'true'/'false' (case
+    insensitive). Numeric coercion uses the standard constructors and re-raises
+    as MdValueError on failure.
+    """
+    stripped = text.strip()
+    if current is None:
+        # New key: try the most specific scalar first.
+        if stripped.lower() in ("true", "false"):
+            return stripped.lower() == "true"
+        try:
+            return int(stripped)
+        except ValueError:
+            pass
+        try:
+            return float(stripped)
+        except ValueError:
+            pass
+        return text  # raw string
+
+    target_type = type(current)
+    if target_type is bool:
+        low = stripped.lower()
+        if low in ("true", "1"):
+            return True
+        if low in ("false", "0"):
+            return False
+        raise MdValueError(f"Expected bool (true/false) for existing key, got {text!r}")
+    if target_type is int:
+        try:
+            return int(stripped)
+        except ValueError as exc:
+            raise MdValueError(f"Expected int, got {text!r}") from exc
+    if target_type is float:
+        try:
+            return float(stripped)
+        except ValueError as exc:
+            raise MdValueError(f"Expected float, got {text!r}") from exc
+    if target_type is str:
+        return text
+    raise MdValueError(
+        f"Unsupported existing value type {target_type.__name__!r} for key — "
+        "edit via structured tooling rather than the inline editor."
+    )
+
+
 class ContextService:
     """Encapsulates context switching, MetaDict/ModuleLibrary access, and project paths."""
 
@@ -157,6 +214,25 @@ class ContextService:
         ml.register_module(**{name: module})
         self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
 
+    def set_ml_module_from_raw(self, name: str, raw_dict: dict) -> None:
+        """Deserialise raw dict into a Module cfg and register it under name.
+
+        Raises MlEntryValidationError on validation / construction failure.
+        """
+        from zcu_tools.program.v2 import ModuleCfgFactory
+
+        if not self.has_context():
+            raise RuntimeError("No experiment context.")
+        ml = self._state.exp_context.ml
+        try:
+            module = ModuleCfgFactory.from_raw(raw_dict, ml=ml)
+        except Exception as exc:
+            raise MlEntryValidationError(
+                f"Invalid module configuration: {exc}"
+            ) from exc
+        ml.register_module(**{name: module})
+        self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
+
     def del_ml_module(self, name: str) -> None:
         if not self.has_context():
             raise RuntimeError("No experiment context.")
@@ -170,6 +246,43 @@ class ContextService:
         ml = self._state.exp_context.ml
         ml.register_waveform(**{name: waveform})
         self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
+
+    def set_ml_waveform_from_raw(self, name: str, raw_dict: dict) -> None:
+        """Deserialise raw dict into a Waveform cfg and register it under name.
+
+        Raises MlEntryValidationError on validation / construction failure.
+        """
+        from zcu_tools.program.v2 import WaveformCfgFactory
+
+        if not self.has_context():
+            raise RuntimeError("No experiment context.")
+        ml = self._state.exp_context.ml
+        try:
+            waveform = WaveformCfgFactory.from_raw(raw_dict, ml=ml)
+        except Exception as exc:
+            raise MlEntryValidationError(
+                f"Invalid waveform configuration: {exc}"
+            ) from exc
+        ml.register_waveform(**{name: waveform})
+        self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
+
+    def coerce_md_value(self, key: str, text: str) -> Any:
+        """Convert a user-typed string into a typed value for MetaDict[key].
+
+        - If the key exists in the live MetaDict, coerce to that key's existing
+          Python type (int/float/bool/str) and reject conversions that lose
+          information.
+        - If the key does not yet exist, accept only scalar text values: int,
+          float, bool, and bare strings. Reject complex literals (lists, tuples,
+          dicts) — those need to go through a structured editor, not a string
+          parser. This is intentionally narrower than ast.literal_eval, which
+          turned `"1, 2"` into a tuple silently.
+
+        Raises MdValueError on any conversion that cannot be performed safely.
+        """
+        existing = self._state.exp_context.md
+        current = getattr(existing, key, None) if self.has_context() else None
+        return _coerce_scalar(text, current)
 
     def del_ml_waveform(self, name: str) -> None:
         if not self.has_context():

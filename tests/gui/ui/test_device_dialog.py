@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
+import pytest
 from zcu_tools.gui.event_bus import DeviceSetupChangedPayload, EventBus, GuiEvent
-from zcu_tools.gui.services.device import DeviceSetupSnapshot
+from zcu_tools.gui.services.device import (
+    DeviceRegistrationError,
+    DeviceSetupSnapshot,
+    RegisterDeviceRequest,
+)
 from zcu_tools.gui.services.device_progress import ProgressEntrySnapshot
 from zcu_tools.gui.ui.device_dialog import DeviceDialog, _FakeDevicePanel
 
@@ -41,25 +46,50 @@ def test_device_dialog_init(qapp):
     assert dialog._stack.currentIndex() == 1
 
 
-def test_device_dialog_add_device(qapp):
+def test_device_dialog_add_device_dispatches_request(qapp):
     ctrl = _make_ctrl()
     ctrl.list_devices.return_value = {}
 
-    with patch("zcu_tools.gui.ui.device_dialog._instantiate_device") as mock_inst:
-        mock_inst.return_value = "mock_device_instance"
+    dialog = DeviceDialog(ctrl)
+    dialog._type_combo.setCurrentText("FakeDevice")
+    dialog._addr_edit.setText("TCPIP::127.0.0.1::INSTR")
+    dialog._name_edit.setText("fakedevice")
 
-        dialog = DeviceDialog(ctrl)
+    dialog._add_btn.click()
 
-        # Select FakeDevice and input address
-        dialog._type_combo.setCurrentText("FakeDevice")
-        dialog._addr_edit.setText("TCPIP::127.0.0.1::INSTR")
+    ctrl.register_device.assert_called_once()
+    (req,) = ctrl.register_device.call_args.args
+    assert isinstance(req, RegisterDeviceRequest)
+    assert req.type_name == "FakeDevice"
+    assert req.name == "fakedevice"
+    assert req.address == "TCPIP::127.0.0.1::INSTR"
+    ctrl.setup_device.assert_not_called()
 
-        # Click add button
-        dialog._add_btn.click()
 
-        mock_inst.assert_called_with("FakeDevice", "TCPIP::127.0.0.1::INSTR")
-        ctrl.register_device.assert_called_with("fakedevice", "mock_device_instance")
-        ctrl.setup_device.assert_not_called()
+def test_device_dialog_add_device_shows_registration_error(qapp):
+    ctrl = _make_ctrl()
+    ctrl.list_devices.return_value = {}
+    ctrl.register_device.side_effect = DeviceRegistrationError("boom")
+
+    dialog = DeviceDialog(ctrl)
+    dialog._type_combo.setCurrentText("FakeDevice")
+    dialog._addr_edit.setText("addr")
+    dialog._add_btn.click()
+
+    assert "boom" in dialog._add_status.text()
+
+
+def test_device_dialog_add_device_propagates_unexpected_errors(qapp):
+    """Programmer errors must not be swallowed by the dialog catch."""
+    ctrl = _make_ctrl()
+    ctrl.list_devices.return_value = {}
+    ctrl.register_device.side_effect = ValueError("contract violation")
+
+    dialog = DeviceDialog(ctrl)
+    dialog._type_combo.setCurrentText("FakeDevice")
+    dialog._addr_edit.setText("addr")
+    with pytest.raises(ValueError, match="contract violation"):
+        dialog._on_add_clicked()
 
 
 def test_device_dialog_drop_device(qapp):

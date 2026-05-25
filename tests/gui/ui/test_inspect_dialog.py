@@ -72,6 +72,7 @@ def test_inspect_dialog_md_edit(qapp):
     mock_md = MagicMock()
     mock_md.items.return_value = {"key1": 10}.items()
     ctrl.get_current_md.return_value = mock_md
+    ctrl.coerce_md_value.return_value = 20
     dialog = InspectDialog(ctrl, bus)
 
     # Select row to populate edit box
@@ -81,6 +82,7 @@ def test_inspect_dialog_md_edit(qapp):
     dialog._edit_value.setText("20")
     dialog._set_btn.click()
 
+    ctrl.coerce_md_value.assert_called_with("key1", "20")
     ctrl.set_md_attr.assert_called_with("key1", 20)
 
 
@@ -182,9 +184,9 @@ def test_ml_config_dialog_modify_module_keeps_name_and_changes_type(qapp):
 
     dialog._save_btn.click()
 
-    name, updated = ctrl.set_ml_module.call_args.args
+    name, raw = ctrl.set_ml_module_from_raw.call_args.args
     assert name == "readout_rf"
-    assert updated.to_dict()["type"] == "reset/none"
+    assert raw["type"] == "reset/none"
     dialog.clear()
 
 
@@ -206,9 +208,9 @@ def test_ml_config_dialog_modify_waveform_keeps_name_and_changes_style(qapp):
 
     dialog._save_btn.click()
 
-    name, updated = ctrl.set_ml_waveform.call_args.args
+    name, raw = ctrl.set_ml_waveform_from_raw.call_args.args
     assert name == "drive_wav"
-    assert updated.to_dict()["style"] == "cosine"
+    assert raw["style"] == "cosine"
     dialog.clear()
 
 

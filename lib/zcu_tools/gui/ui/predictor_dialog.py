@@ -127,31 +127,46 @@ class PredictorDialog(QDialog):
             self._path_edit.setText(path)
 
     def _on_accepted(self) -> None:
+        from zcu_tools.gui.services.connection import (
+            LoadPredictorRequest,
+            PredictorLoadError,
+        )
+
         path = self._path_edit.text().strip()
         flux_bias = self._flux_bias_spin.value()
-        from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
-
-        predictor = FluxoniumPredictor.from_file(path, flux_bias=flux_bias)
-        self._ctrl.set_predictor(predictor, path=path)
+        try:
+            self._ctrl.load_predictor(
+                LoadPredictorRequest(path=path, flux_bias=flux_bias)
+            )
+        except PredictorLoadError as exc:
+            self._set_status(str(exc), error=True)
+            return
         self._set_status("Predictor loaded", error=False)
         logger.info("PredictorDialog: loaded path=%r", path)
 
     def _on_clear(self) -> None:
-        self._ctrl.set_predictor(None)
+        self._ctrl.clear_predictor()
         self._predict_result_label.setText("—")
         self._set_status("Predictor cleared")
         logger.info("PredictorDialog: predictor cleared")
 
     def _on_predict_clicked(self) -> None:
-        predictor = self._ctrl.get_predictor()
-        if predictor is None:
-            self._set_status("No predictor loaded — load one first", error=True)
-            return
+        from zcu_tools.gui.services.connection import (
+            PredictFreqRequest,
+            PredictorNotLoaded,
+        )
+
         value = self._predict_value_spin.value()
         from_lvl = self._from_spin.value()
         to_lvl = self._to_spin.value()
         transition = (from_lvl, to_lvl)
-        freq = predictor.predict_freq(value, transition=transition)
+        try:
+            freq = self._ctrl.predict_freq(
+                PredictFreqRequest(value=value, transition=transition)
+            )
+        except PredictorNotLoaded as exc:
+            self._set_status(str(exc), error=True)
+            return
         self._predict_result_label.setText(f"{freq:.4f} MHz")
         self._set_status(
             f"Predicted ({from_lvl},{to_lvl}) @ {value:.6g}: {freq:.4f} MHz"

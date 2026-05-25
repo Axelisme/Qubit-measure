@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import importlib
 import logging
-from typing import TYPE_CHECKING, Any, Optional, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Any, Optional, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
@@ -28,20 +27,18 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.event_bus import DeviceSetupChangedPayload, GuiEvent
-from zcu_tools.gui.services.device import DeviceProtocol, DeviceSetupSnapshot
+from zcu_tools.gui.services.device import (
+    DeviceRegistrationError,
+    DeviceSetupSnapshot,
+    RegisterDeviceRequest,
+    list_supported_device_types,
+)
 
 from .progress_stack import ProgressStack
 from .widgets import TrimDoubleSpinBox
 
 if TYPE_CHECKING:
     from zcu_tools.gui.controller import Controller
-
-# Known device types: display name → (class_path, requires_address)
-_DEVICE_TYPES: dict[str, tuple[str, bool]] = {
-    "FakeDevice": ("zcu_tools.device.fake.FakeDevice", False),
-    "YOKOGS200": ("zcu_tools.device.yoko.YOKOGS200", True),
-    "RohdeSchwarzSGS100A": ("zcu_tools.device.sgs100a.RohdeSchwarzSGS100A", True),
-}
 
 
 @runtime_checkable
@@ -50,19 +47,6 @@ class DevicePanelProtocol(Protocol):
 
     def load(self, info: Any) -> None: ...
     def read(self) -> Any: ...
-
-
-def _instantiate_device(type_name: str, address: str) -> object:
-    class_path, requires_address = _DEVICE_TYPES[type_name]
-    module_path, cls_name = class_path.rsplit(".", 1)
-    mod = importlib.import_module(module_path)
-    cls = getattr(mod, cls_name)
-    if requires_address:
-        import pyvisa  # type: ignore[import-untyped]
-
-        rm = pyvisa.ResourceManager()
-        return cls(address, rm)
-    return cls()
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +227,7 @@ class DeviceDialog(QDialog):
         add_form = QFormLayout(add_box)
 
         self._type_combo = QComboBox()
-        self._type_combo.addItems(list(_DEVICE_TYPES.keys()))
+        self._type_combo.addItems(list_supported_device_types())
         self._type_combo.currentTextChanged.connect(self._on_type_changed)
         add_form.addRow("Type:", self._type_combo)
 
@@ -385,18 +369,17 @@ class DeviceDialog(QDialog):
         addr = self._addr_edit.text().strip()
         self._add_status.setText("")
 
+        req = RegisterDeviceRequest(type_name=dtype, name=name, address=addr)
         try:
-            dev = _instantiate_device(dtype, addr)
-            self._ctrl.register_device(name, cast(DeviceProtocol, dev))
-            self._add_status.setStyleSheet("color: green;")
-            self._add_status.setText(f"Added {name}; select it and Apply to configure.")
-            self._refresh_list()
-        except (ConnectionRefusedError, TimeoutError, OSError) as e:
+            self._ctrl.register_device(req)
+        except DeviceRegistrationError as e:
             self._add_status.setStyleSheet("color: red;")
-            self._add_status.setText(f"Connection failed: {e}")
-        except Exception as e:
-            self._add_status.setStyleSheet("color: red;")
-            self._add_status.setText(f"Error: {e}")
+            self._add_status.setText(str(e))
+            return
+
+        self._add_status.setStyleSheet("color: green;")
+        self._add_status.setText(f"Added {name}; select it and Apply to configure.")
+        self._refresh_list()
 
     def _on_drop_clicked(self) -> None:
         item = self._list.currentItem()

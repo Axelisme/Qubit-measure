@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, Optional
@@ -38,9 +37,9 @@ from zcu_tools.gui.cfg_schemas import (
     waveform_cfg_to_value,
 )
 from zcu_tools.gui.event_bus import GuiEvent, Payload
+from zcu_tools.gui.services.context import MdValueError, MlEntryValidationError
 from zcu_tools.gui.specs.waveform import make_waveform_spec_by_style
 from zcu_tools.gui.ui.cfg_form import CfgFormWidget
-from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
 
 if TYPE_CHECKING:
     from zcu_tools.gui.controller import Controller
@@ -221,22 +220,20 @@ class _MlConfigDialog(QDialog):
         if not name:
             return
 
+        schema = self._form_widget.read_schema()
+        ml = self._ctrl.get_current_ml()
+        raw_dict = schema_to_dict(schema, ml)
+
         try:
-            schema = self._form_widget.read_schema()
-            ml = self._ctrl.get_current_ml()
-            raw_dict = schema_to_dict(schema, ml)
-
             if self._item_kind == "module":
-                obj = ModuleCfgFactory.from_raw(raw_dict, ml=ml)
-                self._ctrl.set_ml_module(name, obj)
+                self._ctrl.set_ml_module_from_raw(name, raw_dict)
             else:
-                obj = WaveformCfgFactory.from_raw(raw_dict, ml=ml)
-                self._ctrl.set_ml_waveform(name, obj)
+                self._ctrl.set_ml_waveform_from_raw(name, raw_dict)
+        except MlEntryValidationError as exc:
+            QMessageBox.critical(self, "Validation Error", str(exc))
+            return
 
-            self.accept()
-        except Exception as e:
-            logger.exception("Error saving %s '%s'", self._item_kind, name)
-            QMessageBox.critical(self, "Validation Error", str(e))
+        self.accept()
 
     def clear(self) -> None:
         self._form_widget.clear()
@@ -492,18 +489,15 @@ class InspectDialog(QDialog):
         self._set_btn.setEnabled(has_key)
         self._delete_btn.setEnabled(has_key)
 
-    @staticmethod
-    def _parse_value(text: str) -> Any:
-        try:
-            return ast.literal_eval(text)
-        except (ValueError, SyntaxError):
-            return text
-
     def _on_set_clicked(self) -> None:
         key = self._edit_key.text().strip()
         if not key:
             return
-        value = self._parse_value(self._edit_value.text())
+        try:
+            value = self._ctrl.coerce_md_value(key, self._edit_value.text())
+        except MdValueError as exc:
+            QMessageBox.warning(self, "Invalid value", str(exc))
+            return
         self._ctrl.set_md_attr(key, value)
         self._populate_md(self._ctrl.get_current_md())
         now = datetime.now().strftime("%H:%M:%S")

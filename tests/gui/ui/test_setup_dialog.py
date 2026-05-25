@@ -2,9 +2,22 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
+from qtpy.QtCore import Signal  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
+from zcu_tools.gui.services.connection import (
+    ConnectMockRequest,
+    ConnectRemoteRequest,
+)
 from zcu_tools.gui.ui.setup_dialog import SetupDialog
+
+
+class _StubConnSvc(QWidget):
+    """Minimal Qt object exposing the two ConnectionService signals."""
+
+    connection_finished: Signal = Signal()
+    connection_failed: Signal = Signal(str)
 
 
 def test_setup_dialog_init(qapp):
@@ -63,23 +76,50 @@ def test_setup_dialog_new_context(qapp):
     )
 
 
-def test_setup_dialog_connect_mock(qapp):
+def test_setup_dialog_connect_mock_dispatches_request(qapp):
     ctrl = MagicMock()
     ctrl.get_soccfg.return_value.description.return_value = "Mock SOC config"
+    stub_conn = _StubConnSvc()
+    ctrl.get_connection_service.return_value = stub_conn
     dialog = SetupDialog(ctrl)
 
     dialog._mock_check.setChecked(True)
+    dialog._on_connect_clicked()
 
-    with (
-        patch("zcu_tools.program.v2.mocksoc.make_mock_soc") as make_soc,
-        patch("zcu_tools.program.v2.mocksoc.make_mock_soccfg") as make_cfg,
-    ):
-        mock_soc = MagicMock()
-        mock_cfg = MagicMock()
-        mock_cfg.description.return_value = "Mock cfg desc"
-        make_soc.return_value = mock_soc
-        make_cfg.return_value = mock_cfg
+    ctrl.start_connect.assert_called_once()
+    (req,) = ctrl.start_connect.call_args.args
+    assert isinstance(req, ConnectMockRequest)
 
-        dialog._on_connect_clicked()
 
-        ctrl.set_connection.assert_called_with(mock_soc, mock_cfg)
+def test_setup_dialog_connect_remote_dispatches_request(qapp):
+    ctrl = MagicMock()
+    ctrl.get_soccfg.return_value.description.return_value = "Mock SOC config"
+    stub_conn = _StubConnSvc()
+    ctrl.get_connection_service.return_value = stub_conn
+    dialog = SetupDialog(ctrl)
+
+    dialog._mock_check.setChecked(False)
+    dialog._ip_edit.setText("10.0.0.1")
+    dialog._port_spin.setValue(7000)
+    dialog._on_connect_clicked()
+
+    ctrl.start_connect.assert_called_once()
+    (req,) = ctrl.start_connect.call_args.args
+    assert isinstance(req, ConnectRemoteRequest)
+    assert req.ip == "10.0.0.1"
+    assert req.port == 7000
+
+
+def test_setup_dialog_connect_failure_signal_updates_status(qapp):
+    ctrl = MagicMock()
+    ctrl.get_soccfg.return_value.description.return_value = "Mock SOC config"
+    stub_conn = _StubConnSvc()
+    ctrl.get_connection_service.return_value = stub_conn
+    dialog = SetupDialog(ctrl)
+
+    dialog._mock_check.setChecked(True)
+    dialog._on_connect_clicked()
+    stub_conn.connection_failed.emit("network bad")
+
+    assert "network bad" in dialog._conn_status.text()
+    assert dialog._connect_btn.isEnabled()

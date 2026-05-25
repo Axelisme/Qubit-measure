@@ -10,27 +10,37 @@ from qtpy.QtCore import QEventLoop
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.gui.event_bus import DeviceSetupChangedPayload, GuiEvent
-from zcu_tools.gui.services.device import DeviceService, _DeviceSetupWorker
+from zcu_tools.gui.services.device import (
+    DeviceService,
+    RegisterDeviceRequest,
+    _DeviceSetupWorker,
+)
 
 
-def _make_svc() -> DeviceService:
+def _make_svc(driver: MagicMock | None = None) -> tuple[DeviceService, MagicMock]:
     from zcu_tools.gui.event_bus import EventBus
     from zcu_tools.gui.state import ExpContext, State
 
     state = State(
         ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
     )
-    return DeviceService(state, EventBus())
+    fake_device = driver if driver is not None else MagicMock()
+
+    def factory(type_name: str, address: str) -> object:
+        return fake_device
+
+    return DeviceService(state, EventBus(), driver_factory=factory), fake_device  # type: ignore[arg-type]
 
 
 def test_device_service_registration():
-    svc = _make_svc()
-    dev = MagicMock()
+    svc, dev = _make_svc()
 
     if "test_dev" in GlobalDeviceManager.get_all_devices():
         GlobalDeviceManager.drop_device("test_dev")
 
-    svc.register_device("test_dev", dev)
+    svc.register_device(
+        RegisterDeviceRequest(type_name="FakeDevice", name="test_dev", address="")
+    )
     assert "test_dev" in svc.list_devices()
 
     svc.get_device_info("test_dev")
@@ -150,7 +160,7 @@ def test_device_setup_worker_pbar_factory(qapp):
 
 
 def test_device_service_setup_device(qapp):
-    svc = _make_svc()
+    svc, _ = _make_svc()
     dev = MagicMock()
 
     if "test_dev" in GlobalDeviceManager.get_all_devices():
@@ -170,7 +180,7 @@ def test_device_service_setup_device(qapp):
 
 
 def test_device_service_emits_active_and_terminal_snapshots(qapp):
-    svc = _make_svc()
+    svc, _ = _make_svc()
     dev = MagicMock()
     events: list[DeviceSetupChangedPayload] = []
     svc._bus.subscribe(GuiEvent.DEVICE_SETUP_CHANGED, events.append)
