@@ -166,7 +166,7 @@ class ModuleRefWidget(BaseLiveWidget):
         self._expand_btn = QToolButton()
         self._expand_btn.setAutoRaise(True)
         self._expand_btn.setCheckable(True)
-        self._expand_btn.setChecked(True)
+        self._expand_btn.setChecked(self._should_expand_by_default())
         self._expand_btn.setArrowType(Qt.DownArrow)  # type: ignore[attr-defined]
         self._expand_btn.clicked.connect(self._on_toggle_subsection)
         header.addWidget(self._expand_btn)
@@ -260,6 +260,12 @@ class ModuleRefWidget(BaseLiveWidget):
             if field.spec.optional and not field.is_enabled:
                 field.set_enabled(True)
             field.set_chosen_key(key)
+            self._expand_btn.setChecked(str(key).startswith("<Custom:"))
+            self._on_toggle_subsection(self._expand_btn.isChecked())
+
+    def _should_expand_by_default(self) -> bool:
+        field = cast(ModuleRefLiveField, self._field)
+        return field.get_chosen_key().startswith("<Custom:")
 
     def _on_model_enabled_changed(self, enabled: bool) -> None:
         self._combo.blockSignals(True)

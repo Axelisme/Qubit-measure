@@ -29,7 +29,6 @@ from zcu_tools.gui.adapter import (
     WaveformRefSpec,
     WaveformRefValue,
     make_default_value,
-    schema_to_dict,
 )
 
 logger = logging.getLogger(__name__)
@@ -165,13 +164,90 @@ class SessionPersistenceService:
         )
 
     def schema_to_raw(self, schema: CfgSchema, *, ml: Any) -> dict[str, object]:
-        return schema_to_dict(schema, ml)
+        del ml
+        return self._section_value_to_raw(schema.spec, schema.value)
 
     def raw_to_schema(
         self, base_schema: CfgSchema, raw_cfg: dict[str, object]
     ) -> CfgSchema:
         value = self._section_value_from_raw(base_schema.spec, raw_cfg)
         return CfgSchema(spec=base_schema.spec, value=value)
+
+    def _section_value_to_raw(
+        self, spec: CfgSectionSpec, value: CfgSectionValue
+    ) -> dict[str, object]:
+        payload: dict[str, object] = {}
+        for key, node_spec in spec.fields.items():
+            node_val = value.fields.get(key)
+            if node_val is None:
+                continue
+            payload[key] = self._node_value_to_raw(node_spec, node_val)
+        return payload
+
+    def _node_value_to_raw(self, spec: CfgNodeSpec, value: CfgNodeValue) -> object:
+        if isinstance(spec, ScalarSpec):
+            assert isinstance(value, (DirectValue, EvalValue))
+            if isinstance(value, EvalValue):
+                return {
+                    "__kind": "eval",
+                    "expr": value.expr,
+                }
+            return {
+                "__kind": "direct",
+                "value": _to_json_compatible(value.value),
+                "is_unset": value.is_unset,
+            }
+        if isinstance(spec, SweepSpec):
+            assert isinstance(value, SweepValue)
+            return {
+                "start": self._sweep_edge_to_raw(value.start),
+                "stop": self._sweep_edge_to_raw(value.stop),
+                "expts": value.expts,
+                "step": value.step,
+            }
+        if isinstance(spec, MultiSweepSpec):
+            assert isinstance(value, MultiSweepValue)
+            return {
+                axis: self._node_value_to_raw(spec.axes[axis], sweep_val)
+                for axis, sweep_val in value.axes.items()
+                if axis in spec.axes
+            }
+        if isinstance(spec, DeviceRefSpec):
+            assert isinstance(value, DirectValue)
+            return {
+                "__kind": "direct",
+                "value": _to_json_compatible(value.value),
+                "is_unset": value.is_unset,
+            }
+        if isinstance(spec, CfgSectionSpec):
+            assert isinstance(value, CfgSectionValue)
+            return self._section_value_to_raw(spec, value)
+        if isinstance(spec, ModuleRefSpec):
+            assert isinstance(value, ModuleRefValue)
+            return {
+                "__kind": "module_ref",
+                "chosen_key": value.chosen_key,
+                "value": self._section_value_to_raw(
+                    self._select_allowed_spec_for_restore(spec, value.chosen_key),
+                    value.value,
+                ),
+            }
+        if isinstance(spec, WaveformRefSpec):
+            assert isinstance(value, WaveformRefValue)
+            return {
+                "__kind": "waveform_ref",
+                "chosen_key": value.chosen_key,
+                "value": self._section_value_to_raw(
+                    self._select_allowed_spec_for_restore(spec, value.chosen_key),
+                    value.value,
+                ),
+            }
+        return _to_json_compatible(value)
+
+    def _sweep_edge_to_raw(self, value: Union[float, EvalValue]) -> object:
+        if isinstance(value, EvalValue):
+            return {"__kind": "eval", "expr": value.expr}
+        return float(value)
 
     def _section_value_from_raw(
         self,
@@ -202,6 +278,16 @@ class SessionPersistenceService:
         raw: object,
     ) -> Optional[CfgNodeValue]:
         if isinstance(spec, ScalarSpec):
+            if (
+                isinstance(raw, dict)
+                and raw.get("__kind") == "eval"
+                and isinstance(raw.get("expr"), str)
+            ):
+                return EvalValue(expr=raw["expr"], resolved=None, error=None)
+            if isinstance(raw, dict) and raw.get("__kind") == "direct":
+                value = raw.get("value")
+                is_unset = bool(raw.get("is_unset", False))
+                return DirectValue(value=value, is_unset=is_unset)
             if isinstance(raw, str) and raw.strip().startswith("="):
                 return EvalValue(expr=raw.strip(), resolved=None, error=None)
             return DirectValue(raw)
@@ -249,6 +335,12 @@ class SessionPersistenceService:
         return None
 
     def _parse_sweep_edge(self, raw: object) -> Union[float, EvalValue]:
+        if (
+            isinstance(raw, dict)
+            and raw.get("__kind") == "eval"
+            and isinstance(raw.get("expr"), str)
+        ):
+            return EvalValue(expr=raw["expr"], resolved=None, error=None)
         if isinstance(raw, str) and raw.strip().startswith("="):
             return EvalValue(expr=raw.strip(), resolved=None, error=None)
         if isinstance(raw, (int, float)):
@@ -269,6 +361,16 @@ class SessionPersistenceService:
         spec: ModuleRefSpec,
         raw: object,
     ) -> ModuleRefValue:
+        if (
+            isinstance(raw, dict)
+            and raw.get("__kind") == "module_ref"
+            and isinstance(raw.get("chosen_key"), str)
+            and isinstance(raw.get("value"), dict)
+        ):
+            chosen_key = raw["chosen_key"]
+            value_spec = self._select_allowed_spec_for_restore(spec, chosen_key)
+            nested = self._section_value_from_raw(value_spec, raw["value"])
+            return ModuleRefValue(chosen_key=chosen_key, value=nested)
         if not isinstance(raw, dict):
             raise RuntimeError("Module reference payload must be an object")
         for allowed_spec in spec.allowed:
@@ -291,6 +393,16 @@ class SessionPersistenceService:
         spec: WaveformRefSpec,
         raw: object,
     ) -> WaveformRefValue:
+        if (
+            isinstance(raw, dict)
+            and raw.get("__kind") == "waveform_ref"
+            and isinstance(raw.get("chosen_key"), str)
+            and isinstance(raw.get("value"), dict)
+        ):
+            chosen_key = raw["chosen_key"]
+            value_spec = self._select_allowed_spec_for_restore(spec, chosen_key)
+            nested = self._section_value_from_raw(value_spec, raw["value"])
+            return WaveformRefValue(chosen_key=chosen_key, value=nested)
         if not isinstance(raw, dict):
             raise RuntimeError("Waveform reference payload must be an object")
         for allowed_spec in spec.allowed:
@@ -307,6 +419,16 @@ class SessionPersistenceService:
             chosen_key=f"<Custom:{fallback_spec.label}>",
             value=make_default_value(fallback_spec),
         )
+
+    def _select_allowed_spec_for_restore(
+        self, spec: Union[ModuleRefSpec, WaveformRefSpec], chosen_key: str
+    ) -> CfgSectionSpec:
+        if chosen_key.startswith("<Custom:") and chosen_key.endswith(">"):
+            label = chosen_key[len("<Custom:") : -1]
+            for allowed_spec in spec.allowed:
+                if allowed_spec.label == label:
+                    return allowed_spec
+        return spec.allowed[0]
 
 
 __all__ = [

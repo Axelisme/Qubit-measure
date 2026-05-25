@@ -16,7 +16,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 from zcu_tools.gui.adapter import (
     CfgSectionValue,
     DirectValue,
-    EvalValue,
     ModuleRefValue,
     ScalarValue,
 )
@@ -295,7 +294,7 @@ def test_make_readout_ref_default_prefers_readout_dpm_over_readout_rf():
     assert module_ref.chosen_key == "readout_dpm"
 
 
-def test_make_readout_ref_default_fallback_uses_evalvalue_for_r_f():
+def test_make_readout_ref_default_fallback_uses_directvalue_when_md_missing():
     ctx = _make_ctx(ModuleLibrary())
     module_ref = make_readout_ref_default(ctx)
     assert isinstance(module_ref, ModuleRefValue)
@@ -309,12 +308,10 @@ def test_make_readout_ref_default_fallback_uses_evalvalue_for_r_f():
 
     pulse_freq = pulse_cfg.fields["freq"]
     ro_freq = ro_cfg.fields["ro_freq"]
-    assert isinstance(pulse_freq, EvalValue)
-    assert isinstance(ro_freq, EvalValue)
-    assert pulse_freq.expr == "r_f"
-    assert ro_freq.expr == "r_f"
-    assert pulse_freq.resolved == 6000.0
-    assert ro_freq.resolved == 6000.0
+    assert isinstance(pulse_freq, DirectValue)
+    assert isinstance(ro_freq, DirectValue)
+    assert pulse_freq.value == 6000.0
+    assert ro_freq.value == 6000.0
 
 
 def test_make_readout_ref_default_fallback_prefers_ro_waveform_if_present():

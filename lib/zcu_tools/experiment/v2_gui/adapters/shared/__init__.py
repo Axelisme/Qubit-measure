@@ -1,4 +1,4 @@
-from .ctx_helpers import md_get_float, md_get_int
+from .ctx_helpers import md_get_float, md_get_int, md_has_key
 from .module_builders import build_readout_for_frequency, build_waveform_for_length
 from .module_defaults import NamedModuleValue, select_named_module_value
 from .module_ref_defaults import (
@@ -36,6 +36,7 @@ __all__ = [
     # ctx helpers
     "md_get_float",
     "md_get_int",
+    "md_has_key",
     # Module builders
     "build_readout_for_frequency",
     "build_waveform_for_length",

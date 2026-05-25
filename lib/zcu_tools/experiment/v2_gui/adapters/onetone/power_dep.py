@@ -14,6 +14,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_readout_module_spec,
     make_reset_module_spec,
     md_get_float,
+    md_has_key,
     require_soc_handles,
 )
 from zcu_tools.gui.adapter import (
@@ -22,6 +23,7 @@ from zcu_tools.gui.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
+    EvalValue,
     ExpContext,
     NoAnalysisResult,
     NoAnalyzeParams,
@@ -84,8 +86,24 @@ class OneTonePowerDepAdapter(
                     fields={
                         "gain": SweepValue(start=0.001, stop=0.5, expts=101),
                         "freq": SweepValue(
-                            start=r_f - half_span,
-                            stop=r_f + half_span,
+                            start=(
+                                EvalValue(
+                                    expr="r_f - 1.5 * rf_w",
+                                    resolved=r_f - half_span,
+                                    error=None,
+                                )
+                                if (md_has_key(ctx, "r_f") and md_has_key(ctx, "rf_w"))
+                                else (r_f - half_span)
+                            ),
+                            stop=(
+                                EvalValue(
+                                    expr="r_f + 1.5 * rf_w",
+                                    resolved=r_f + half_span,
+                                    error=None,
+                                )
+                                if (md_has_key(ctx, "r_f") and md_has_key(ctx, "rf_w"))
+                                else (r_f + half_span)
+                            ),
                             expts=201,
                         ),
                     }

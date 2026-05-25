@@ -768,6 +768,8 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
 
     ref_widget = w.findChild(ModuleRefWidget)
     assert ref_widget is not None
+    assert ref_widget._expand_btn.isChecked() is False
+    assert ref_widget._sub_container.isVisible() is False
     # 1. Initially unmodified
     assert ref_widget._combo.currentText() == "Lib: my_pulse"
     assert cast(ModuleRefLiveField, ref_widget._field).is_modified() is False

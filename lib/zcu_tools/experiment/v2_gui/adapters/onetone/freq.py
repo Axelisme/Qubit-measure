@@ -16,6 +16,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_readout_edit_template,
     make_reset_module_spec,
     md_get_float,
+    md_has_key,
 )
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
@@ -24,6 +25,7 @@ from zcu_tools.gui.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
+    EvalValue,
     ExpContext,
     MetaDictWriteback,
     ModuleWriteback,
@@ -98,8 +100,24 @@ class OneToneFreqAdapter(
                 "sweep": CfgSectionValue(
                     fields={
                         "freq": SweepValue(
-                            start=r_f - half_span,
-                            stop=r_f + half_span,
+                            start=(
+                                EvalValue(
+                                    expr="r_f - 1.5 * rf_w",
+                                    resolved=r_f - half_span,
+                                    error=None,
+                                )
+                                if (md_has_key(ctx, "r_f") and md_has_key(ctx, "rf_w"))
+                                else (r_f - half_span)
+                            ),
+                            stop=(
+                                EvalValue(
+                                    expr="r_f + 1.5 * rf_w",
+                                    resolved=r_f + half_span,
+                                    error=None,
+                                )
+                                if (md_has_key(ctx, "r_f") and md_has_key(ctx, "rf_w"))
+                                else (r_f + half_span)
+                            ),
                             expts=301,
                         )
                     }

@@ -97,6 +97,40 @@ def test_onetone_2d_build_exp_cfg_delegates_to_ml_make_cfg(adapter, cfg_model) -
     assert ml.make_cfg.call_args.args[1] is cfg_model
 
 
+def test_onetone_power_dep_default_sweep_freq_uses_eval_value() -> None:
+    from zcu_tools.gui.adapter import CfgSectionValue, EvalValue, SweepValue
+
+    ctx = _make_ctx(_make_ml())
+    ctx.md.r_f = 6100.0
+    ctx.md.rf_w = 25.0
+    schema = OneTonePowerDepAdapter().make_default_cfg(ctx)
+    sweep = schema.value.fields["sweep"]
+    assert isinstance(sweep, CfgSectionValue)
+    freq_sweep = sweep.fields["freq"]
+    assert isinstance(freq_sweep, SweepValue)
+    assert isinstance(freq_sweep.start, EvalValue)
+    assert isinstance(freq_sweep.stop, EvalValue)
+    assert freq_sweep.start.expr == "r_f - 1.5 * rf_w"
+    assert freq_sweep.stop.expr == "r_f + 1.5 * rf_w"
+
+
+def test_onetone_flux_dep_default_sweep_freq_uses_eval_value() -> None:
+    from zcu_tools.gui.adapter import CfgSectionValue, EvalValue, SweepValue
+
+    ctx = _make_ctx(_make_ml())
+    ctx.md.r_f = 6100.0
+    ctx.md.rf_w = 25.0
+    schema = OneToneFluxDepAdapter().make_default_cfg(ctx)
+    sweep = schema.value.fields["sweep"]
+    assert isinstance(sweep, CfgSectionValue)
+    freq_sweep = sweep.fields["freq"]
+    assert isinstance(freq_sweep, SweepValue)
+    assert isinstance(freq_sweep.start, EvalValue)
+    assert isinstance(freq_sweep.stop, EvalValue)
+    assert freq_sweep.start.expr == "r_f - rf_w"
+    assert freq_sweep.stop.expr == "r_f + rf_w"
+
+
 def test_power_dep_build_exp_cfg_strips_earlystop_snr() -> None:
     ml = _make_ml()
     adapter = OneTonePowerDepAdapter()
@@ -129,8 +163,13 @@ def test_real_onetone_run_without_soc_fast_fails(adapter) -> None:
         adapter.run(_make_req(ml), schema)
 
 
-def test_onetone_freq_default_readout_freq_uses_eval_value() -> None:
-    from zcu_tools.gui.adapter import CfgSectionValue, EvalValue, ModuleRefValue
+def test_onetone_freq_default_fallback_uses_direct_values_without_md_keys() -> None:
+    from zcu_tools.gui.adapter import (
+        CfgSectionValue,
+        DirectValue,
+        ModuleRefValue,
+        SweepValue,
+    )
 
     adapter = OneToneFreqAdapter()
     schema = adapter.make_default_cfg(_make_ctx(_make_ml()))
@@ -145,10 +184,59 @@ def test_onetone_freq_default_readout_freq_uses_eval_value() -> None:
     assert isinstance(ro_cfg, CfgSectionValue)
     pulse_freq = pulse_cfg.fields["freq"]
     ro_freq = ro_cfg.fields["ro_freq"]
-    assert isinstance(pulse_freq, EvalValue)
-    assert isinstance(ro_freq, EvalValue)
-    assert pulse_freq.expr == "r_f"
-    assert ro_freq.expr == "r_f"
+    assert isinstance(pulse_freq, DirectValue)
+    assert isinstance(ro_freq, DirectValue)
+
+    pulse_ch = pulse_cfg.fields["ch"]
+    ro_ch = ro_cfg.fields["ro_ch"]
+    trig_offset = ro_cfg.fields["trig_offset"]
+    assert isinstance(pulse_ch, DirectValue)
+    assert isinstance(ro_ch, DirectValue)
+    assert isinstance(trig_offset, DirectValue)
+
+    sweep = schema.value.fields["sweep"]
+    assert isinstance(sweep, CfgSectionValue)
+    freq_sweep = sweep.fields["freq"]
+    assert isinstance(freq_sweep, SweepValue)
+    assert isinstance(freq_sweep.start, float)
+    assert isinstance(freq_sweep.stop, float)
+
+
+def test_onetone_freq_default_uses_eval_when_md_keys_exist() -> None:
+    from zcu_tools.gui.adapter import (
+        CfgSectionValue,
+        EvalValue,
+        ModuleRefValue,
+        SweepValue,
+    )
+
+    ctx = _make_ctx(_make_ml())
+    ctx.md.r_f = 6100.0
+    ctx.md.rf_w = 25.0
+    ctx.md.res_ch = 3
+    ctx.md.ro_ch = 7
+    ctx.md.timeFly = 0.8
+    schema = OneToneFreqAdapter().make_default_cfg(ctx)
+    modules = schema.value.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    readout = modules.fields["readout"]
+    assert isinstance(readout, ModuleRefValue)
+    readout_val = readout.value
+    pulse_cfg = readout_val.fields["pulse_cfg"]
+    ro_cfg = readout_val.fields["ro_cfg"]
+    assert isinstance(pulse_cfg, CfgSectionValue)
+    assert isinstance(ro_cfg, CfgSectionValue)
+    assert isinstance(pulse_cfg.fields["freq"], EvalValue)
+    assert isinstance(ro_cfg.fields["ro_freq"], EvalValue)
+    assert isinstance(pulse_cfg.fields["ch"], EvalValue)
+    assert isinstance(ro_cfg.fields["ro_ch"], EvalValue)
+    assert isinstance(ro_cfg.fields["trig_offset"], EvalValue)
+    sweep = schema.value.fields["sweep"]
+    assert isinstance(sweep, CfgSectionValue)
+    freq_sweep = sweep.fields["freq"]
+    assert isinstance(freq_sweep, SweepValue)
+    assert isinstance(freq_sweep.start, EvalValue)
+    assert isinstance(freq_sweep.stop, EvalValue)
 
 
 def test_onetone_freq_default_ignores_library_readout() -> None:

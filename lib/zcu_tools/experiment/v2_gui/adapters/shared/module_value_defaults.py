@@ -32,7 +32,13 @@ from zcu_tools.gui.specs.reset import (
     make_two_pulse_reset_spec,
 )
 
-from .ctx_helpers import md_eval_float, md_get_float, md_get_int
+from .ctx_helpers import (
+    md_get_float,
+    md_get_int,
+    md_has_key,
+    md_scalar_float,
+    md_scalar_int,
+)
 
 # ---------------------------------------------------------------------------
 # Internal patch helpers
@@ -43,7 +49,7 @@ def _patch_pulse_fields(
     value: CfgSectionValue,
     *,
     freq: Union[float, ScalarValue],
-    ch: int,
+    ch: Union[int, ScalarValue],
     gain: float,
     length: float,
 ) -> None:
@@ -52,7 +58,9 @@ def _patch_pulse_fields(
     if isinstance(waveform_ref, (ModuleRefValue, WaveformRefValue)):
         waveform_ref.value.fields["length"] = DirectValue(length)
 
-    value.fields["ch"] = DirectValue(ch)
+    value.fields["ch"] = (
+        ch if isinstance(ch, (DirectValue, EvalValue)) else DirectValue(ch)
+    )
     value.fields["nqz"] = DirectValue(2)
     value.fields["freq"] = (
         freq if isinstance(freq, (DirectValue, EvalValue)) else DirectValue(freq)
@@ -64,8 +72,8 @@ def _patch_ro_cfg_fields(
     value: CfgSectionValue,
     *,
     ro_freq: Union[float, ScalarValue],
-    ro_ch: int,
-    trig_offset: float,
+    ro_ch: Union[int, ScalarValue],
+    trig_offset: Union[float, ScalarValue],
 ) -> None:
     """Patch a DirectReadout CfgSectionValue in-place with sensible values."""
     value.fields["ro_freq"] = (
@@ -73,9 +81,15 @@ def _patch_ro_cfg_fields(
         if isinstance(ro_freq, (DirectValue, EvalValue))
         else DirectValue(ro_freq)
     )
-    value.fields["ro_ch"] = DirectValue(ro_ch)
+    value.fields["ro_ch"] = (
+        ro_ch if isinstance(ro_ch, (DirectValue, EvalValue)) else DirectValue(ro_ch)
+    )
     value.fields["ro_length"] = DirectValue(0.9)
-    value.fields["trig_offset"] = DirectValue(trig_offset)
+    value.fields["trig_offset"] = (
+        trig_offset
+        if isinstance(trig_offset, (DirectValue, EvalValue))
+        else DirectValue(trig_offset)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -84,9 +98,16 @@ def _patch_ro_cfg_fields(
 
 
 def make_direct_readout_default(ctx: ExpContext) -> ModuleRefValue:
-    r_f = md_eval_float(ctx, "r_f", 6000.0)
-    ro_ch = md_get_int(ctx, "ro_ch", 0)
-    trig_offset = md_get_float(ctx, "timeFly", 0.5) + 0.05
+    r_f = md_scalar_float(ctx, "r_f", 6000.0)
+    ro_ch = md_scalar_int(ctx, "ro_ch", 0)
+    trig_resolved = md_get_float(ctx, "timeFly", 0.5) + 0.05
+    trig_offset: ScalarValue
+    if md_has_key(ctx, "timeFly"):
+        trig_offset = EvalValue(
+            expr="timeFly + 0.05", resolved=trig_resolved, error=None
+        )
+    else:
+        trig_offset = DirectValue(trig_resolved)
 
     spec = make_direct_readout_spec()
     value = make_default_value(spec)
@@ -95,10 +116,17 @@ def make_direct_readout_default(ctx: ExpContext) -> ModuleRefValue:
 
 
 def make_pulse_readout_default(ctx: ExpContext) -> ModuleRefValue:
-    r_f = md_eval_float(ctx, "r_f", 6000.0)
-    res_ch = md_get_int(ctx, "res_ch", 0)
-    ro_ch = md_get_int(ctx, "ro_ch", 0)
-    trig_offset = md_get_float(ctx, "timeFly", 0.5) + 0.05
+    r_f = md_scalar_float(ctx, "r_f", 6000.0)
+    res_ch = md_scalar_int(ctx, "res_ch", 0)
+    ro_ch = md_scalar_int(ctx, "ro_ch", 0)
+    trig_resolved = md_get_float(ctx, "timeFly", 0.5) + 0.05
+    trig_offset: ScalarValue
+    if md_has_key(ctx, "timeFly"):
+        trig_offset = EvalValue(
+            expr="timeFly + 0.05", resolved=trig_resolved, error=None
+        )
+    else:
+        trig_offset = DirectValue(trig_resolved)
 
     spec = make_pulse_readout_spec()
     value = make_default_value(spec)
@@ -184,7 +212,7 @@ def make_two_pulse_reset_default(ctx: ExpContext) -> ModuleRefValue:
 
 
 def make_bath_reset_default(ctx: ExpContext) -> ModuleRefValue:
-    r_f = md_eval_float(ctx, "r_f", 6000.0)
+    r_f = md_scalar_float(ctx, "r_f", 6000.0)
     q_f = md_get_float(ctx, "q_f", 4000.0)
     res_ch = md_get_int(ctx, "res_ch", 0)
     qub_ch = md_get_int(ctx, "qub_ch", 0)

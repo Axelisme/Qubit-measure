@@ -99,3 +99,52 @@ def test_session_persistence_restores_sweep_eval_edges(tmp_path: Path):
     assert isinstance(stop, EvalValue)
     assert start.expr == "=r_f - 10"
     assert stop.expr == "=r_f + 10"
+
+
+def test_session_persistence_roundtrip_preserves_eval_values(tmp_path: Path):
+    from zcu_tools.gui.adapter import (
+        CfgSchema,
+        CfgSectionSpec,
+        CfgSectionValue,
+        EvalValue,
+        ScalarSpec,
+        SweepSpec,
+        SweepValue,
+    )
+
+    svc = SessionPersistenceService(cache_dir=tmp_path)
+    schema = CfgSchema(
+        spec=CfgSectionSpec(
+            fields={
+                "freq": ScalarSpec(label="Freq", type=float),
+                "sweep": SweepSpec(label="Sweep"),
+            }
+        ),
+        value=CfgSectionValue(
+            fields={
+                "freq": EvalValue(expr="r_f", resolved=6000.0, error=None),
+                "sweep": SweepValue(
+                    start=EvalValue(expr="r_f - rf_w", resolved=5980.0, error=None),
+                    stop=EvalValue(expr="r_f + rf_w", resolved=6020.0, error=None),
+                    expts=101,
+                    step=0.4,
+                ),
+            }
+        ),
+    )
+
+    raw = svc.schema_to_raw(schema, ml=None)
+    restored = svc.raw_to_schema(
+        CfgSchema(spec=schema.spec, value=CfgSectionValue(fields={})),
+        raw,
+    )
+
+    freq = restored.value.fields["freq"]
+    sweep = restored.value.fields["sweep"]
+    assert isinstance(freq, EvalValue)
+    assert freq.expr == "r_f"
+    assert isinstance(sweep, SweepValue)
+    assert isinstance(sweep.start, EvalValue)
+    assert isinstance(sweep.stop, EvalValue)
+    assert sweep.start.expr == "r_f - rf_w"
+    assert sweep.stop.expr == "r_f + rf_w"
