@@ -110,11 +110,14 @@ class DeviceManager(QObject):
         dev = cast(ValueDeviceProtocol, GlobalDeviceManager.get_device(name))
         return dev.set_value(value)
 
-    def get_device_info(self, name: str) -> object:
-        """Return the DeviceInfo object for a registered device."""
+    def get_device_info(self, name: str) -> object | None:
+        """Return the DeviceInfo object for a registered device, or None if not found."""
         from zcu_tools.device import GlobalDeviceManager
 
-        dev = GlobalDeviceManager.get_device(name)
+        try:
+            dev = GlobalDeviceManager.get_device(name)
+        except ValueError:
+            return None
         return dev.get_info()
 
     def setup_device(

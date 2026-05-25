@@ -276,9 +276,13 @@ class DeviceDialog(QDialog):
         self._apply_btn = QPushButton("Apply Changes")
         self._apply_btn.clicked.connect(self._on_apply_clicked)
 
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+
         btn_row.addWidget(self._drop_btn)
         btn_row.addStretch()
         btn_row.addWidget(self._apply_btn)
+        btn_row.addWidget(close_btn)
         right_layout.addLayout(btn_row)
 
         splitter.addWidget(right_widget)
