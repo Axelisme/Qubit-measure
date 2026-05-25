@@ -31,9 +31,7 @@ def test_device_service_success():
         svc.drop_device("dev1")
         mock_drop.assert_called_with("dev1")
 
-    with patch(
-        "zcu_tools.device.GlobalDeviceManager.get_all_devices", return_value={}
-    ):
+    with patch("zcu_tools.device.GlobalDeviceManager.get_all_devices", return_value={}):
         result = svc.list_devices()
         assert isinstance(result, dict)
 
@@ -45,9 +43,7 @@ def test_device_service_success():
         svc.get_device_value("dev1")
         device.get_value.assert_called_once()
 
-    with patch(
-        "zcu_tools.device.GlobalDeviceManager.get_device", return_value=device
-    ):
+    with patch("zcu_tools.device.GlobalDeviceManager.get_device", return_value=device):
         svc.get_device_info("dev1")
         device.get_info.assert_called()
 
@@ -69,13 +65,9 @@ def test_device_service_blocks_when_running():
         svc.setup_device("dev1", {})
 
     # Non-mutating methods should still work when running
-    with patch(
-        "zcu_tools.device.GlobalDeviceManager.get_all_devices", return_value={}
-    ):
+    with patch("zcu_tools.device.GlobalDeviceManager.get_all_devices", return_value={}):
         svc.list_devices()
 
-    with patch(
-        "zcu_tools.device.GlobalDeviceManager.get_device", return_value=device
-    ):
+    with patch("zcu_tools.device.GlobalDeviceManager.get_device", return_value=device):
         svc.get_device_info("dev1")
         device.get_info.assert_called_once()

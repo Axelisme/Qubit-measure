@@ -18,6 +18,8 @@ def _make_svc() -> DeviceService:
         ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
     )
     return DeviceService(state, EventBus())
+
+
 from zcu_tools.gui.io_manager import IOManager
 
 # ---------------------------------------------------------------------------

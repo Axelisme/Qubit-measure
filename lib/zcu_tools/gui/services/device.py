@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol, cast, runtime_checkable
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Optional,
+    Protocol,
+    cast,
+    runtime_checkable,
+)
 
 logger = logging.getLogger(__name__)
 
