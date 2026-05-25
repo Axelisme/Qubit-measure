@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from zcu_tools.gui.adapter import SavePaths
 from zcu_tools.gui.services.session_persistence import (
     PersistedSession,
@@ -41,3 +42,25 @@ def test_session_persistence_save_and_load_roundtrip(tmp_path: Path):
 def test_session_persistence_missing_file_returns_none(tmp_path: Path):
     svc = SessionPersistenceService(cache_dir=tmp_path)
     assert svc.load_session() is None
+
+
+def test_session_persistence_restores_legacy_sweep_step_none(tmp_path: Path):
+    from zcu_tools.gui.adapter import (
+        CfgSchema,
+        CfgSectionSpec,
+        CfgSectionValue,
+        SweepSpec,
+    )
+
+    svc = SessionPersistenceService(cache_dir=tmp_path)
+    base = CfgSchema(
+        spec=CfgSectionSpec(fields={"sweep": SweepSpec(label="Sweep")}),
+        value=CfgSectionValue(fields={}),
+    )
+
+    restored = svc.raw_to_schema(
+        base,
+        {"sweep": {"start": 0.0, "stop": 1.0, "expts": 11, "step": None}},
+    )
+    sweep = restored.value.fields["sweep"]
+    assert sweep.step == pytest.approx(0.1)  # type: ignore[union-attr]

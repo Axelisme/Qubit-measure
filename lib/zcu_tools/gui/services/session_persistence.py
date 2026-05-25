@@ -211,7 +211,13 @@ class SessionPersistenceService:
                 stop = float(raw["stop"])
                 expts = int(raw["expts"])
                 step_raw = raw.get("step")
-                step = float(step_raw) if step_raw is not None else None
+                if step_raw is None:
+                    if expts == 1:
+                        step = 0.0
+                    else:
+                        step = (stop - start) / (expts - 1)
+                else:
+                    step = float(step_raw)
                 return SweepValue(start=start, stop=stop, expts=expts, step=step)
             raise RuntimeError("Sweep payload must be an object")
         if isinstance(spec, MultiSweepSpec):

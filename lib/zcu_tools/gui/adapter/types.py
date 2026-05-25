@@ -282,7 +282,7 @@ class SweepValue:
     start: float
     stop: float
     expts: int
-    step: Optional[float] = None
+    step: float = 0.1
 
 
 @dataclass

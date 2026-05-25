@@ -54,21 +54,22 @@ def _make_ctx():
 
 
 # ---------------------------------------------------------------------------
-# schema_to_dict — SweepValue modes
+# schema_to_dict — SweepValue
 # ---------------------------------------------------------------------------
 
 
-def test_sweep_value_expts_mode():
+def test_sweep_value_uses_expts_as_canonical():
     from zcu_tools.program.v2 import SweepCfg
 
     ml = MagicMock()
     schema = _schema(
         {"f": SweepSpec(label="Freq")},
-        {"f": SweepValue(start=1.0, stop=2.0, expts=5)},
+        {"f": SweepValue(start=1.0, stop=2.0, expts=5, step=999.0)},
     )
     result = schema_to_dict(schema, ml)
     assert isinstance(result["f"], SweepCfg)
     assert result["f"].expts == 5
+    assert result["f"].step == pytest.approx(0.25)
 
 
 def test_sweep_value_step_mode():
@@ -363,7 +364,7 @@ def test_populate_sweep_field_round_trip(qapp, ctrl):
     assert sv.start == pytest.approx(5.8)
     assert sv.stop == pytest.approx(6.2)
     assert sv.expts == 201
-    assert sv.step is None
+    assert sv.step == pytest.approx(0.1)
 
 
 def test_populate_sweep_field_step_preserved(qapp, ctrl):
@@ -380,6 +381,48 @@ def test_populate_sweep_field_step_preserved(qapp, ctrl):
     sv = out.fields["f"]
     assert isinstance(sv, SweepValue)
     assert sv.step == pytest.approx(0.1)
+
+
+def test_sweep_widget_step_change_recomputes_expts_and_stop(qapp, ctrl):
+    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.ui.fields.common import SweepWidget
+
+    schema = _schema(
+        {"f": SweepSpec(label="Freq")},
+        {"f": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)},
+    )
+    w = CfgFormWidget()
+    w.populate(schema, ctrl)
+    sweep_widget = w.findChild(SweepWidget)
+    assert sweep_widget is not None
+
+    sweep_widget._step.setValue(0.2)
+    out = w.read_values()
+    sv = out.fields["f"]
+    assert isinstance(sv, SweepValue)
+    assert sv.expts == 6
+    assert sv.stop == pytest.approx(1.0)
+    assert sv.step == pytest.approx(0.2)
+
+
+def test_sweep_widget_non_step_change_recomputes_step(qapp, ctrl):
+    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.ui.fields.common import SweepWidget
+
+    schema = _schema(
+        {"f": SweepSpec(label="Freq")},
+        {"f": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)},
+    )
+    w = CfgFormWidget()
+    w.populate(schema, ctrl)
+    sweep_widget = w.findChild(SweepWidget)
+    assert sweep_widget is not None
+
+    sweep_widget._expts.setValue(5)
+    out = w.read_values()
+    sv = out.fields["f"]
+    assert isinstance(sv, SweepValue)
+    assert sv.step == pytest.approx(0.25)
 
 
 def test_populate_nested_section_round_trip(qapp, ctrl):

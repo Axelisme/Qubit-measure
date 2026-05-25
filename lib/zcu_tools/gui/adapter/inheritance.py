@@ -39,10 +39,10 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
             else:
                 fields[key] = DirectValue(default_value_for_type(node_spec.type))
         elif isinstance(node_spec, SweepSpec):
-            fields[key] = SweepValue(start=0.0, stop=1.0, expts=11)
+            fields[key] = SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)
         elif isinstance(node_spec, MultiSweepSpec):
             fields[key] = MultiSweepValue(
-                axes={axis: SweepValue(0.0, 1.0, 11) for axis in node_spec.axes}
+                axes={axis: SweepValue(0.0, 1.0, 11, 0.1) for axis in node_spec.axes}
             )
         elif isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
             first = node_spec.allowed[0]
@@ -108,7 +108,7 @@ def inherit_from(
                     old_node_val.step,
                 )
             else:
-                new_fields[key] = SweepValue(start=0.0, stop=1.0, expts=11)
+                new_fields[key] = SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)
             continue
 
         if isinstance(new_node_spec, MultiSweepSpec):
@@ -126,7 +126,7 @@ def inherit_from(
                         old_sv.start, old_sv.stop, old_sv.expts, old_sv.step
                     )
                 else:
-                    new_axes[axis_key] = SweepValue(0.0, 1.0, 11)
+                    new_axes[axis_key] = SweepValue(0.0, 1.0, 11, 0.1)
             new_fields[key] = MultiSweepValue(axes=new_axes)
             continue
 

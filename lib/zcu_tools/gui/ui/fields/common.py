@@ -13,6 +13,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
     QComboBox,
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -347,13 +348,13 @@ class ScalarWidget(BaseLiveWidget):
 
 @register_widget(SweepLiveField)
 class SweepWidget(BaseLiveWidget):
-    """Inline input for start/stop/pts."""
+    """Inline 2x2 input for start/stop/expts/step with synchronized updates."""
 
     def __init__(self, field: SweepLiveField, parent: Optional[QWidget] = None):
         super().__init__(field, parent)
         self._updating = False
 
-        layout = QHBoxLayout(self)
+        layout = QGridLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
 
@@ -383,17 +384,28 @@ class SweepWidget(BaseLiveWidget):
         self._expts.setValue(sv.expts)
         self._expts.valueChanged.connect(self._on_ui_changed)
 
+        self._step = TrimDoubleSpinBox()
+        self._step.setRange(-1e12, 1e12)
+        self._step.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
+        if decimals is not None:
+            self._step.setDecimals(decimals)
+        self._step.setValue(sv.step)
+        self._step.valueChanged.connect(self._on_ui_changed)
+
         enabled = field.spec.editable
         self._start.setEnabled(enabled)
         self._stop.setEnabled(enabled)
         self._expts.setEnabled(enabled)
+        self._step.setEnabled(enabled)
 
-        layout.addWidget(QLabel("start"))
-        layout.addWidget(self._start, stretch=1)
-        layout.addWidget(QLabel("stop"))
-        layout.addWidget(self._stop, stretch=1)
-        layout.addWidget(QLabel("pts"))
-        layout.addWidget(self._expts)
+        layout.addWidget(QLabel("start"), 0, 0)
+        layout.addWidget(self._start, 0, 1)
+        layout.addWidget(QLabel("stop"), 0, 2)
+        layout.addWidget(self._stop, 0, 3)
+        layout.addWidget(QLabel("expts"), 1, 0)
+        layout.addWidget(self._expts, 1, 1)
+        layout.addWidget(QLabel("step"), 1, 2)
+        layout.addWidget(self._step, 1, 3)
 
         field.on_change.connect(self._on_model_changed)
 
@@ -407,11 +419,38 @@ class SweepWidget(BaseLiveWidget):
         try:
             from ...adapter import SweepValue
 
+            source = self.sender()
+            start = self._start.value()
+            stop = self._stop.value()
+            expts = self._expts.value()
+            step = self._step.value()
+
+            if source is self._step:
+                if step == 0.0:
+                    expts = 1
+                    stop = start
+                else:
+                    expts = int((stop - start) / step + 1)
+                    if expts < 1:
+                        expts = 1
+                    stop = start + step * (expts - 1)
+            else:
+                if expts == 1:
+                    step = 0.0
+                    stop = start
+                else:
+                    step = (stop - start) / (expts - 1)
+
+            self._start.setValue(start)
+            self._stop.setValue(stop)
+            self._expts.setValue(expts)
+            self._step.setValue(step)
+
             nv = SweepValue(
-                start=self._start.value(),
-                stop=self._stop.value(),
-                expts=self._expts.value(),
-                step=cast(SweepLiveField, self._field).get_value().step,
+                start=start,
+                stop=stop,
+                expts=expts,
+                step=step,
             )
             self._field.set_value(nv)
         finally:
@@ -426,11 +465,13 @@ class SweepWidget(BaseLiveWidget):
                 self._start.minimum() <= val.start <= self._start.maximum()
                 and self._stop.minimum() <= val.stop <= self._stop.maximum()
                 and self._expts.minimum() <= val.expts <= self._expts.maximum()
+                and self._step.minimum() <= val.step <= self._step.maximum()
             ):
                 raise RuntimeError("SweepValue is outside widget range")
             self._start.setValue(val.start)
             self._stop.setValue(val.stop)
             self._expts.setValue(val.expts)
+            self._step.setValue(val.step)
         finally:
             self._updating = False
 

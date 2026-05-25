@@ -249,7 +249,7 @@ class SweepLiveField(LiveField):
         if isinstance(initial_val, SweepValue):
             self._value = initial_val
         else:
-            self._value = SweepValue(start=0.0, stop=1.0, expts=11)
+            self._value = SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)
 
     def get_value(self) -> SweepValue:
         return self._value
@@ -277,7 +277,7 @@ class MultiSweepLiveField(LiveField):
             initial_axes = initial_val.axes
 
         for axis, axis_spec in spec.axes.items():
-            sv = initial_axes.get(axis, SweepValue(0.0, 1.0, 11))
+            sv = initial_axes.get(axis, SweepValue(0.0, 1.0, 11, 0.1))
             field = SweepLiveField(axis_spec, env, initial_val=sv)
             self.fields[axis] = field
             field.on_change.connect(self._on_child_change)

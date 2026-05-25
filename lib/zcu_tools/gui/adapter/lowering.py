@@ -80,25 +80,16 @@ def _section_to_dict_inner(
             assert isinstance(node_val, SweepValue)
             from zcu_tools.notebook.utils import make_sweep
 
-            if node_val.step is not None:
-                result[key] = make_sweep(
-                    node_val.start, node_val.stop, step=node_val.step
-                )
-            else:
-                result[key] = make_sweep(
-                    node_val.start, node_val.stop, expts=node_val.expts
-                )
+            result[key] = make_sweep(
+                node_val.start, node_val.stop, expts=node_val.expts
+            )
 
         elif isinstance(node_spec, MultiSweepSpec):
             assert isinstance(node_val, MultiSweepValue)
             from zcu_tools.notebook.utils import make_sweep
 
             result[key] = {
-                axis: (
-                    make_sweep(sv.start, sv.stop, step=sv.step)
-                    if sv.step is not None
-                    else make_sweep(sv.start, sv.stop, expts=sv.expts)
-                )
+                axis: make_sweep(sv.start, sv.stop, expts=sv.expts)
                 for axis, sv in node_val.axes.items()
             }
 

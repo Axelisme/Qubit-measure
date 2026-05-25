@@ -135,10 +135,13 @@ def test_sweep_step_mode():
 
     s = _schema(
         {"sweep": SweepSpec()},
-        {"sweep": SweepValue(start=0.0, stop=1.0, expts=0, step=0.1)},
+        {"sweep": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)},
     )
     result = schema_to_dict(s, _make_ml())
-    assert isinstance(result["sweep"], SweepCfg)
+    sweep = result["sweep"]
+    assert isinstance(sweep, SweepCfg)
+    assert sweep.expts == 11
+    assert sweep.step == pytest.approx(0.1)
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +251,7 @@ def test_make_default_value_sweep():
     sv = val.fields["s"]
     assert isinstance(sv, SweepValue)
     assert sv.expts == 11
+    assert sv.step == pytest.approx(0.1)
 
 
 def test_make_default_value_nested():
