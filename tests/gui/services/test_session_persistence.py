@@ -64,3 +64,38 @@ def test_session_persistence_restores_legacy_sweep_step_none(tmp_path: Path):
     )
     sweep = restored.value.fields["sweep"]
     assert sweep.step == pytest.approx(0.1)  # type: ignore[union-attr]
+
+
+def test_session_persistence_restores_sweep_eval_edges(tmp_path: Path):
+    from zcu_tools.gui.adapter import (
+        CfgSchema,
+        CfgSectionSpec,
+        CfgSectionValue,
+        EvalValue,
+        SweepSpec,
+    )
+
+    svc = SessionPersistenceService(cache_dir=tmp_path)
+    base = CfgSchema(
+        spec=CfgSectionSpec(fields={"sweep": SweepSpec(label="Sweep")}),
+        value=CfgSectionValue(fields={}),
+    )
+
+    restored = svc.raw_to_schema(
+        base,
+        {
+            "sweep": {
+                "start": "=r_f - 10",
+                "stop": "=r_f + 10",
+                "expts": 11,
+                "step": 2.0,
+            }
+        },
+    )
+    sweep = restored.value.fields["sweep"]
+    start = sweep.start  # type: ignore[union-attr]
+    stop = sweep.stop  # type: ignore[union-attr]
+    assert isinstance(start, EvalValue)
+    assert isinstance(stop, EvalValue)
+    assert start.expr == "=r_f - 10"
+    assert stop.expr == "=r_f + 10"

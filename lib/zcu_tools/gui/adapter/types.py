@@ -279,8 +279,8 @@ ScalarValue: TypeAlias = Union[DirectValue, EvalValue]
 
 @dataclass
 class SweepValue:
-    start: float
-    stop: float
+    start: Union[float, EvalValue]
+    stop: Union[float, EvalValue]
     expts: int
     step: float = 0.1
 

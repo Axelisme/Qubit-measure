@@ -28,6 +28,22 @@ if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
 
 
+def _resolve_sweep_edge(value: object, *, path: str, label: str) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, EvalValue):
+        if value.resolved is None:
+            raise RuntimeError(
+                f"Config field '{path}' ({label}) expression {value.expr!r} is unresolved"
+            )
+        if not isinstance(value.resolved, (int, float)):
+            raise RuntimeError(
+                f"Config field '{path}' ({label}) resolved to non-numeric value"
+            )
+        return float(value.resolved)
+    raise RuntimeError(f"Config field '{path}' ({label}) must be numeric")
+
+
 def _section_to_dict_inner(
     spec: CfgSectionSpec,
     value: CfgSectionValue,
@@ -80,16 +96,34 @@ def _section_to_dict_inner(
             assert isinstance(node_val, SweepValue)
             from zcu_tools.notebook.utils import make_sweep
 
-            result[key] = make_sweep(
-                node_val.start, node_val.stop, expts=node_val.expts
+            start = _resolve_sweep_edge(
+                node_val.start,
+                path=".".join([*path, key, "start"]),
+                label="Sweep start",
             )
+            stop = _resolve_sweep_edge(
+                node_val.stop, path=".".join([*path, key, "stop"]), label="Sweep stop"
+            )
+            result[key] = make_sweep(start, stop, expts=node_val.expts)
 
         elif isinstance(node_spec, MultiSweepSpec):
             assert isinstance(node_val, MultiSweepValue)
             from zcu_tools.notebook.utils import make_sweep
 
             result[key] = {
-                axis: make_sweep(sv.start, sv.stop, expts=sv.expts)
+                axis: make_sweep(
+                    _resolve_sweep_edge(
+                        sv.start,
+                        path=".".join([*path, key, axis, "start"]),
+                        label=f"{axis} start",
+                    ),
+                    _resolve_sweep_edge(
+                        sv.stop,
+                        path=".".join([*path, key, axis, "stop"]),
+                        label=f"{axis} stop",
+                    ),
+                    expts=sv.expts,
+                )
                 for axis, sv in node_val.axes.items()
             }
 

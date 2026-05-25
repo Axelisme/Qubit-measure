@@ -144,6 +144,41 @@ def test_sweep_step_mode():
     assert sweep.step == pytest.approx(0.1)
 
 
+def test_sweep_eval_edges_use_resolved_value():
+    from zcu_tools.program.v2 import SweepCfg
+
+    s = _schema(
+        {"sweep": SweepSpec()},
+        {
+            "sweep": SweepValue(
+                start=EvalValue(expr="r_f - 10", resolved=5990.0),
+                stop=EvalValue(expr="r_f + 10", resolved=6010.0),
+                expts=11,
+            )
+        },
+    )
+    result = schema_to_dict(s, _make_ml())
+    sweep = result["sweep"]
+    assert isinstance(sweep, SweepCfg)
+    assert sweep.start == pytest.approx(5990.0)
+    assert sweep.stop == pytest.approx(6010.0)
+
+
+def test_sweep_eval_unresolved_fails_fast():
+    s = _schema(
+        {"sweep": SweepSpec()},
+        {
+            "sweep": SweepValue(
+                start=EvalValue(expr="missing", resolved=None),
+                stop=1.0,
+                expts=11,
+            )
+        },
+    )
+    with pytest.raises(RuntimeError, match="unresolved"):
+        schema_to_dict(s, _make_ml())
+
+
 # ---------------------------------------------------------------------------
 # MultiSweepSpec / MultiSweepValue
 # ---------------------------------------------------------------------------

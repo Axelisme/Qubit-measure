@@ -120,6 +120,16 @@ def _widget_default_for_direct_value(value: DirectValue, spec: "ScalarSpec") -> 
     return value.value
 
 
+def _sweep_edge_to_float(value: object, edge_name: str) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, EvalValue):
+        if isinstance(value.resolved, (int, float)):
+            return float(value.resolved)
+        raise RuntimeError(f"Sweep {edge_name} expression is unresolved")
+    raise RuntimeError(f"Sweep {edge_name} must be numeric")
+
+
 class BaseLiveWidget(QWidget):
     """Base class implementing FieldWidgetProtocol."""
 
@@ -367,7 +377,7 @@ class SweepWidget(BaseLiveWidget):
         self._start.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
         if decimals is not None:
             self._start.setDecimals(decimals)
-        self._start.setValue(sv.start)
+        self._start.setValue(_sweep_edge_to_float(sv.start, "start"))
         self._start.valueChanged.connect(self._on_ui_changed)
 
         self._stop = TrimDoubleSpinBox()
@@ -375,7 +385,7 @@ class SweepWidget(BaseLiveWidget):
         self._stop.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
         if decimals is not None:
             self._stop.setDecimals(decimals)
-        self._stop.setValue(sv.stop)
+        self._stop.setValue(_sweep_edge_to_float(sv.stop, "stop"))
         self._stop.valueChanged.connect(self._on_ui_changed)
 
         self._expts = QSpinBox()
@@ -462,14 +472,18 @@ class SweepWidget(BaseLiveWidget):
         self._updating = True
         try:
             if not (
-                self._start.minimum() <= val.start <= self._start.maximum()
-                and self._stop.minimum() <= val.stop <= self._stop.maximum()
+                self._start.minimum()
+                <= _sweep_edge_to_float(val.start, "start")
+                <= self._start.maximum()
+                and self._stop.minimum()
+                <= _sweep_edge_to_float(val.stop, "stop")
+                <= self._stop.maximum()
                 and self._expts.minimum() <= val.expts <= self._expts.maximum()
                 and self._step.minimum() <= val.step <= self._step.maximum()
             ):
                 raise RuntimeError("SweepValue is outside widget range")
-            self._start.setValue(val.start)
-            self._stop.setValue(val.stop)
+            self._start.setValue(_sweep_edge_to_float(val.start, "start"))
+            self._stop.setValue(_sweep_edge_to_float(val.stop, "stop"))
             self._expts.setValue(val.expts)
             self._step.setValue(val.step)
         finally:

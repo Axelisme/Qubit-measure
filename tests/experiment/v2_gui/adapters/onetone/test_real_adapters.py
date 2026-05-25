@@ -69,6 +69,9 @@ def test_onetone_freq_build_exp_cfg_delegates_to_ml_make_cfg() -> None:
     assert isinstance(sweep["freq"], SweepCfg)
     assert "readout" in modules
     assert "reset" not in modules
+    readout = cast(dict[str, Any], modules["readout"])
+    ro_cfg = cast(dict[str, Any], readout["ro_cfg"])
+    assert "gen_ch" not in ro_cfg
 
     adapter.build_exp_cfg(raw, _make_req(ml))
     ml.make_cfg.assert_called_once_with(raw, FreqCfg)

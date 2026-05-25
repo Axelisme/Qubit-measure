@@ -16,6 +16,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 from zcu_tools.gui.adapter import (
     CfgSectionValue,
     DirectValue,
+    EvalValue,
     ModuleRefValue,
     ScalarValue,
 )
@@ -222,6 +223,76 @@ def test_make_readout_ref_default_falls_back_to_custom_when_lib_empty():
 
     assert isinstance(module_ref, ModuleRefValue)
     assert module_ref.chosen_key == "<Custom:Pulse Readout>"
+
+
+def test_make_readout_ref_default_prefers_readout_dpm_over_readout_rf():
+    ml = ModuleLibrary()
+    ml.register_module(
+        readout_rf=ModuleCfgFactory.from_raw(
+            {
+                "type": "readout/pulse",
+                "pulse_cfg": {
+                    "waveform": {"style": "const", "length": 1.0},
+                    "ch": 1,
+                    "nqz": 2,
+                    "freq": 6100.0,
+                    "gain": 0.2,
+                },
+                "ro_cfg": {
+                    "ro_ch": 2,
+                    "ro_freq": 6100.0,
+                    "ro_length": 1.0,
+                    "trig_offset": 0.5,
+                },
+            },
+            ml=ml,
+        ),
+        readout_dpm=ModuleCfgFactory.from_raw(
+            {
+                "type": "readout/pulse",
+                "pulse_cfg": {
+                    "waveform": {"style": "const", "length": 1.0},
+                    "ch": 3,
+                    "nqz": 2,
+                    "freq": 6200.0,
+                    "gain": 0.2,
+                },
+                "ro_cfg": {
+                    "ro_ch": 4,
+                    "ro_freq": 6200.0,
+                    "ro_length": 1.0,
+                    "trig_offset": 0.5,
+                },
+            },
+            ml=ml,
+        ),
+    )
+
+    module_ref = make_readout_ref_default(_make_ctx(ml))
+    assert isinstance(module_ref, ModuleRefValue)
+    assert module_ref.chosen_key == "readout_dpm"
+
+
+def test_make_readout_ref_default_fallback_uses_evalvalue_for_r_f():
+    ctx = _make_ctx(ModuleLibrary())
+    module_ref = make_readout_ref_default(ctx)
+    assert isinstance(module_ref, ModuleRefValue)
+    readout = module_ref.value
+    assert isinstance(readout, CfgSectionValue)
+
+    pulse_cfg = readout.fields["pulse_cfg"]
+    ro_cfg = readout.fields["ro_cfg"]
+    assert isinstance(pulse_cfg, CfgSectionValue)
+    assert isinstance(ro_cfg, CfgSectionValue)
+
+    pulse_freq = pulse_cfg.fields["freq"]
+    ro_freq = ro_cfg.fields["ro_freq"]
+    assert isinstance(pulse_freq, EvalValue)
+    assert isinstance(ro_freq, EvalValue)
+    assert pulse_freq.expr == "r_f"
+    assert ro_freq.expr == "r_f"
+    assert pulse_freq.resolved == 6000.0
+    assert ro_freq.resolved == 6000.0
 
 
 def test_make_readout_ref_default_returns_none_when_optional_and_empty():

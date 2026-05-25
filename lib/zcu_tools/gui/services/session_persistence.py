@@ -207,15 +207,17 @@ class SessionPersistenceService:
             return DirectValue(raw)
         if isinstance(spec, SweepSpec):
             if isinstance(raw, dict):
-                start = float(raw["start"])
-                stop = float(raw["stop"])
+                start = self._parse_sweep_edge(raw["start"])
+                stop = self._parse_sweep_edge(raw["stop"])
                 expts = int(raw["expts"])
                 step_raw = raw.get("step")
                 if step_raw is None:
                     if expts == 1:
                         step = 0.0
                     else:
-                        step = (stop - start) / (expts - 1)
+                        start_f = self._sweep_edge_resolved_float(start, "start")
+                        stop_f = self._sweep_edge_resolved_float(stop, "stop")
+                        step = (stop_f - start_f) / (expts - 1)
                 else:
                     step = float(step_raw)
                 return SweepValue(start=start, stop=stop, expts=expts, step=step)
@@ -245,6 +247,20 @@ class SessionPersistenceService:
         if isinstance(spec, WaveformRefSpec):
             return self._waveform_ref_value_from_raw(spec, raw)
         return None
+
+    def _parse_sweep_edge(self, raw: object) -> object:
+        if isinstance(raw, str) and raw.strip().startswith("="):
+            return EvalValue(expr=raw.strip(), resolved=None, error=None)
+        return float(raw)
+
+    def _sweep_edge_resolved_float(self, value: object, edge_name: str) -> float:
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, EvalValue):
+            if isinstance(value.resolved, (int, float)):
+                return float(value.resolved)
+            raise RuntimeError(f"Sweep {edge_name} expression is unresolved")
+        raise RuntimeError(f"Sweep {edge_name} must be numeric")
 
     def _ref_value_from_raw(
         self,

@@ -60,7 +60,12 @@ def make_readout_ref_default(
 
 def make_readout_ref_default(
     ctx: ExpContext,
-    preferred_names: list[str] = ["readout_rf", "readout", "res_readout"],
+    preferred_names: list[str] = [
+        "readout_dpm",
+        "readout_rf",
+        "readout",
+        "res_readout",
+    ],
     *,
     optional: bool = False,
 ) -> Optional[ModuleRefValue]:
@@ -92,7 +97,12 @@ def make_pulse_readout_ref_default(
 
 def make_pulse_readout_ref_default(
     ctx: ExpContext,
-    preferred_names: list[str] = ["readout_rf", "readout", "res_readout"],
+    preferred_names: list[str] = [
+        "readout_dpm",
+        "readout_rf",
+        "readout",
+        "res_readout",
+    ],
     *,
     optional: bool = False,
 ) -> Optional[ModuleRefValue]:

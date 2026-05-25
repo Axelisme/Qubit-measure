@@ -11,7 +11,9 @@ from typing import TYPE_CHECKING
 from zcu_tools.gui.adapter import (
     CfgSectionValue,
     DirectValue,
+    EvalValue,
     ModuleRefValue,
+    ScalarValue,
     WaveformRefValue,
     make_default_value,
 )
@@ -30,7 +32,7 @@ from zcu_tools.gui.specs.reset import (
     make_two_pulse_reset_spec,
 )
 
-from .ctx_helpers import md_get_float, md_get_int
+from .ctx_helpers import md_eval_float, md_get_float, md_get_int
 
 # ---------------------------------------------------------------------------
 # Internal patch helpers
@@ -40,7 +42,7 @@ from .ctx_helpers import md_get_float, md_get_int
 def _patch_pulse_fields(
     value: CfgSectionValue,
     *,
-    freq: float,
+    freq: ScalarValue,
     ch: int,
     gain: float,
     length: float,
@@ -52,19 +54,19 @@ def _patch_pulse_fields(
 
     value.fields["ch"] = DirectValue(ch)
     value.fields["nqz"] = DirectValue(2)
-    value.fields["freq"] = DirectValue(freq)
+    value.fields["freq"] = freq
     value.fields["gain"] = DirectValue(gain)
 
 
 def _patch_ro_cfg_fields(
     value: CfgSectionValue,
     *,
-    ro_freq: float,
+    ro_freq: ScalarValue,
     ro_ch: int,
     trig_offset: float,
 ) -> None:
     """Patch a DirectReadout CfgSectionValue in-place with sensible values."""
-    value.fields["ro_freq"] = DirectValue(ro_freq)
+    value.fields["ro_freq"] = ro_freq
     value.fields["ro_ch"] = DirectValue(ro_ch)
     value.fields["ro_length"] = DirectValue(0.9)
     value.fields["trig_offset"] = DirectValue(trig_offset)
@@ -76,7 +78,7 @@ def _patch_ro_cfg_fields(
 
 
 def make_direct_readout_default(ctx: ExpContext) -> ModuleRefValue:
-    r_f = md_get_float(ctx, "r_f", 6000.0)
+    r_f = md_eval_float(ctx, "r_f", 6000.0)
     ro_ch = md_get_int(ctx, "ro_ch", 0)
     trig_offset = md_get_float(ctx, "timeFly", 0.5) + 0.05
 
@@ -87,7 +89,7 @@ def make_direct_readout_default(ctx: ExpContext) -> ModuleRefValue:
 
 
 def make_pulse_readout_default(ctx: ExpContext) -> ModuleRefValue:
-    r_f = md_get_float(ctx, "r_f", 6000.0)
+    r_f = md_eval_float(ctx, "r_f", 6000.0)
     res_ch = md_get_int(ctx, "res_ch", 0)
     ro_ch = md_get_int(ctx, "ro_ch", 0)
     trig_offset = md_get_float(ctx, "timeFly", 0.5) + 0.05
@@ -166,7 +168,7 @@ def make_two_pulse_reset_default(ctx: ExpContext) -> ModuleRefValue:
 
 
 def make_bath_reset_default(ctx: ExpContext) -> ModuleRefValue:
-    r_f = md_get_float(ctx, "r_f", 6000.0)
+    r_f = md_eval_float(ctx, "r_f", 6000.0)
     q_f = md_get_float(ctx, "q_f", 4000.0)
     res_ch = md_get_int(ctx, "res_ch", 0)
     qub_ch = md_get_int(ctx, "qub_ch", 0)

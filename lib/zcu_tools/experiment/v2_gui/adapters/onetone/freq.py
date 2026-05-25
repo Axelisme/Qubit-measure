@@ -90,7 +90,7 @@ class OneToneFreqAdapter(
                 "modules": CfgSectionValue(
                     fields={
                         "readout": make_readout_ref_default(
-                            ctx, ["readout_rf", "readout_dpm"]
+                            ctx, ["readout_dpm", "readout_rf"]
                         ),
                     }
                 ),
