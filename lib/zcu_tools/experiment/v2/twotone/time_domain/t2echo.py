@@ -42,6 +42,7 @@ from zcu_tools.utils.process import rotate2real
 class T2EchoResult:
     times: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[T2EchoCfg] = None
 
 
 def t2echo_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -152,7 +153,9 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
 
         # record last cfg and result
         self.last_cfg = deepcopy(cfg)
-        self.last_result = T2EchoResult(times=lengths, signals=signals)
+        self.last_result = T2EchoResult(
+            times=lengths, signals=signals, cfg_snapshot=self.last_cfg
+        )
 
         return self.last_result, true_detune
 
@@ -216,7 +219,6 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
         self,
         filepath: str,
         result: Optional[T2EchoResult] = None,
-        cfg: Optional[T2EchoCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/t2echo",
         **kwargs,
@@ -226,9 +228,9 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
         assert result is not None, "no result found"
 
         Ts, signals = result.times, result.signals
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -251,11 +253,14 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
         Ts = Ts.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             _cfg, _, _ = parse_comment(comment)
 
             if _cfg is not None:
                 self.last_cfg = T2EchoCfg.validate_or_warn(_cfg, source=filepath)
-        self.last_result = T2EchoResult(times=Ts, signals=signals)
+        self.last_result = T2EchoResult(
+            times=Ts, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
         return self.last_result

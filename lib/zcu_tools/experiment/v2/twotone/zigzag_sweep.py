@@ -45,6 +45,7 @@ class ZigZagScanResult:
     times: NDArray[np.int64]
     values: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[ZigZagScanCfg] = None
 
 
 def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -175,7 +176,9 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
 
         # record last cfg and result
         self.last_cfg = original_cfg
-        self.last_result = ZigZagScanResult(times=times, values=values, signals=signals)
+        self.last_result = ZigZagScanResult(
+            times=times, values=values, signals=signals, cfg_snapshot=self.last_cfg
+        )
 
         return self.last_result
 
@@ -237,7 +240,6 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
         self,
         filepath: str,
         result: Optional[ZigZagScanResult] = None,
-        cfg: Optional[ZigZagScanCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/zigzag_scan",
         **kwargs,
@@ -246,9 +248,9 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
 
         times = result.times.astype(np.float64)
         values = result.values
@@ -279,11 +281,14 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
         values = values.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-                self.last_cfg = ZigZagScanCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = ZigZagScanResult(times=times, values=values, signals=signals)
+                cfg_snapshot = ZigZagScanCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = ZigZagScanResult(
+            times=times, values=values, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
         return self.last_result

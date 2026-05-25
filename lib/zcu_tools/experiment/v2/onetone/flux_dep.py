@@ -39,6 +39,7 @@ class FluxDepResult:
     values: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[FluxDepCfg] = None
 
 
 def fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -166,7 +167,6 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         self,
         filepath: str,
         result: Optional[FluxDepResult] = None,
-        cfg: Optional[FluxDepCfg] = None,
         comment: Optional[str] = None,
         tag: str = "onetone/flux_dep",
         **kwargs,
@@ -179,9 +179,9 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         freqs = result.freqs
         signals2D = result.signals
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -208,11 +208,14 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         freqs = freqs.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-                self.last_cfg = FluxDepCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = FluxDepResult(values=values, freqs=freqs, signals=signals2D)
+                cfg_snapshot = FluxDepCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = FluxDepResult(
+            values=values, freqs=freqs, signals=signals2D, cfg_snapshot=cfg_snapshot
+        )
 
         return self.last_result

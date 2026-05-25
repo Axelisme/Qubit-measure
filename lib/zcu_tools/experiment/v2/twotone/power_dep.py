@@ -30,6 +30,7 @@ class PowerResult:
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[PowerCfg] = None
 
 
 def gain_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -115,7 +116,9 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
 
         # Cache results
         self.last_cfg = deepcopy(cfg)
-        self.last_result = PowerResult(gains=gains, freqs=freqs, signals=signals)
+        self.last_result = PowerResult(
+            gains=gains, freqs=freqs, signals=signals, cfg_snapshot=self.last_cfg
+        )
 
         return self.last_result
 
@@ -131,7 +134,6 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         self,
         filepath: str,
         result: Optional[PowerResult] = None,
-        cfg: Optional[PowerCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/power_dep",
         **kwargs,
@@ -140,9 +142,9 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
 
         gains = result.gains
         freqs = result.freqs
@@ -173,11 +175,14 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         freqs = freqs.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-                self.last_cfg = PowerCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = PowerResult(gains=gains, freqs=freqs, signals=signals2D)
+                cfg_snapshot = PowerCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = PowerResult(
+            gains=gains, freqs=freqs, signals=signals2D, cfg_snapshot=cfg_snapshot
+        )
 
         return self.last_result

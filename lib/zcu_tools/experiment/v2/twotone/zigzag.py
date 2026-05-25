@@ -33,6 +33,7 @@ from zcu_tools.utils.process import rotate2real
 class ZigZagResult:
     times: NDArray[np.int64]
     signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[ZigZagCfg] = None
 
 
 def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -125,7 +126,9 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
 
         # record last cfg and result
         self.last_cfg = deepcopy(cfg)
-        self.last_result = ZigZagResult(times=times, signals=signals)
+        self.last_result = ZigZagResult(
+            times=times, signals=signals, cfg_snapshot=self.last_cfg
+        )
 
         return self.last_result
 
@@ -136,7 +139,6 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
         self,
         filepath: str,
         result: Optional[ZigZagResult] = None,
-        cfg: Optional[ZigZagCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/zigzag",
         **kwargs,
@@ -145,9 +147,9 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
 
         times = result.times.astype(np.float64)
         signals = result.signals
@@ -171,11 +173,14 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
         times = times.astype(np.int64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-                self.last_cfg = ZigZagCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = ZigZagResult(times=times, signals=signals)
+                cfg_snapshot = ZigZagCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = ZigZagResult(
+            times=times, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
         return self.last_result

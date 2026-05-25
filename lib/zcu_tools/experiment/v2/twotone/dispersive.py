@@ -44,6 +44,7 @@ from zcu_tools.utils.fitting.resonance import (
 class DispersiveResult:
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[DispersiveCfg] = None
 
 
 def dispersive_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -129,7 +130,9 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
 
         # Cache results
         self.last_cfg = deepcopy(cfg)
-        self.last_result = DispersiveResult(freqs=freqs, signals=signals)
+        self.last_result = DispersiveResult(
+            freqs=freqs, signals=signals, cfg_snapshot=self.last_cfg
+        )
 
         return self.last_result
 
@@ -234,7 +237,6 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
         self,
         filepath: str,
         result: Optional[DispersiveResult] = None,
-        cfg: Optional[DispersiveCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/dispersive",
         **kwargs,
@@ -243,9 +245,9 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
 
         freqs = result.freqs
         signals = result.signals
@@ -272,11 +274,14 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
         freqs = freqs.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-                self.last_cfg = DispersiveCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = DispersiveResult(freqs=freqs, signals=signals)
+                cfg_snapshot = DispersiveCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = DispersiveResult(
+            freqs=freqs, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
         return self.last_result

@@ -45,6 +45,7 @@ class CKP_Result:
     res_freqs: NDArray[np.float64]
     qub_freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[CKP_Cfg] = None
 
 
 def ckp_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -322,7 +323,6 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         self,
         filepath: str,
         result: Optional[CKP_Result] = None,
-        cfg: Optional[CKP_Cfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/ckp",
         **kwargs,
@@ -332,9 +332,9 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
             result = self.last_result
         assert result is not None, "No result found"
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
 
         res_freqs = result.res_freqs
         qub_freqs = result.qub_freqs
@@ -393,13 +393,17 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         qub_freqs = qub_freqs.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-                self.last_cfg = CKP_Cfg.validate_or_warn(cfg, source=g_filepath)
+                cfg_snapshot = CKP_Cfg.validate_or_warn(cfg, source=g_filepath)
         self.last_result = CKP_Result(
-            res_freqs=res_freqs, qub_freqs=qub_freqs, signals=signals
+            res_freqs=res_freqs,
+            qub_freqs=qub_freqs,
+            signals=signals,
+            cfg_snapshot=cfg_snapshot,
         )
 
         return self.last_result

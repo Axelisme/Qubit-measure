@@ -33,6 +33,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 class SA_FreqResult:
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[SA_FreqCfg] = None
 
 
 class SA_FreqModuleCfg(ConfigBase):
@@ -111,7 +112,9 @@ class SA_FreqExp(AbsExperiment[SA_FreqResult, SA_FreqCfg]):
 
         # record last cfg and result
         self.last_cfg = deepcopy(cfg)
-        self.last_result = SA_FreqResult(freqs=freqs, signals=signals)
+        self.last_result = SA_FreqResult(
+            freqs=freqs, signals=signals, cfg_snapshot=self.last_cfg
+        )
 
         return self.last_result
 
@@ -141,7 +144,6 @@ class SA_FreqExp(AbsExperiment[SA_FreqResult, SA_FreqCfg]):
         self,
         filepath: str,
         result: Optional[SA_FreqResult] = None,
-        cfg: Optional[SA_FreqCfg] = None,
         comment: Optional[str] = None,
         tag: str = "onetone/sa_freq",
         **kwargs,
@@ -153,9 +155,9 @@ class SA_FreqExp(AbsExperiment[SA_FreqResult, SA_FreqCfg]):
         freqs = result.freqs
         signals = result.signals
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -177,10 +179,13 @@ class SA_FreqExp(AbsExperiment[SA_FreqResult, SA_FreqCfg]):
         freqs = freqs.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
-                self.last_cfg = SA_FreqCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = SA_FreqResult(freqs=freqs, signals=signals)
+                cfg_snapshot = SA_FreqCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = SA_FreqResult(
+            freqs=freqs, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
         return self.last_result

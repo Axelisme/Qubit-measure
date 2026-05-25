@@ -52,6 +52,7 @@ class CPMG_Result:
     ns: NDArray[np.int64]
     delays: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[CPMG_Cfg] = None
 
 
 class CPMG_ModuleCfg(ConfigBase):
@@ -243,7 +244,9 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
 
         # record last cfg and result
         self.last_cfg = deepcopy(cfg)
-        self.last_result = CPMG_Result(ns=times, delays=lengths, signals=signals)
+        self.last_result = CPMG_Result(
+            ns=times, delays=lengths, signals=signals, cfg_snapshot=self.last_cfg
+        )
 
         return self.last_result
 
@@ -320,7 +323,6 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         self,
         filepath: str,
         result: Optional[CPMG_Result] = None,
-        cfg: Optional[CPMG_Cfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/cpmg",
         **kwargs,
@@ -332,9 +334,9 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         _filepath = Path(filepath)
 
         times, lengths, signals2D = result.ns, result.delays, result.signals
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
 
         comment = make_comment(cfg, comment)
 
@@ -384,10 +386,13 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         lengths = lengths.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
-                self.last_cfg = CPMG_Cfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = CPMG_Result(ns=times, delays=lengths, signals=signals2D)
+                cfg_snapshot = CPMG_Cfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = CPMG_Result(
+            ns=times, delays=lengths, signals=signals2D, cfg_snapshot=cfg_snapshot
+        )
 
         return self.last_result

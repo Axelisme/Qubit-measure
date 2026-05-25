@@ -33,6 +33,7 @@ class PowerDepResult:
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[PowerDepCfg] = None
 
 
 def gaindep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -148,7 +149,9 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
 
         # record last cfg and result
         self.last_cfg = deepcopy(cfg)
-        self.last_result = PowerDepResult(gains=gains, freqs=freqs, signals=signals)
+        self.last_result = PowerDepResult(
+            gains=gains, freqs=freqs, signals=signals, cfg_snapshot=self.last_cfg
+        )
 
         return self.last_result
 
@@ -162,7 +165,6 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         self,
         filepath: str,
         result: Optional[PowerDepResult] = None,
-        cfg: Optional[PowerDepCfg] = None,
         comment: Optional[str] = None,
         tag: str = "onetone/power_dep",
         **kwargs,
@@ -175,9 +177,9 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         freqs = result.freqs
         signals2D = result.signals
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -204,10 +206,13 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         freqs = freqs.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
-                self.last_cfg = PowerDepCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = PowerDepResult(gains=gains, freqs=freqs, signals=signals2D)
+                cfg_snapshot = PowerDepCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = PowerDepResult(
+            gains=gains, freqs=freqs, signals=signals2D, cfg_snapshot=cfg_snapshot
+        )
 
         return self.last_result

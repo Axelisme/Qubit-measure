@@ -34,6 +34,7 @@ from zcu_tools.utils.process import rotate2real
 @dataclass(frozen=True)
 class AllXY_Result:
     signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[AllXYCfg] = None
 
 
 # Standard AllXY sequence of 21 gate pairs
@@ -225,7 +226,7 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
 
         # Cache results
         self.last_cfg = deepcopy(cfg)
-        self.last_result = AllXY_Result(signals=signals)
+        self.last_result = AllXY_Result(signals=signals, cfg_snapshot=self.last_cfg)
 
         return self.last_result
 
@@ -343,7 +344,6 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
         self,
         filepath: str,
         result: Optional[AllXY_Result] = None,
-        cfg: Optional[AllXYCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/allxy",
         **kwargs,
@@ -354,9 +354,9 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
             "No measurement data available. Run experiment first."
         )
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
 
         gate_idxs = np.arange(len(ALLXY_SEQUENCE))
         signals = result.signals
@@ -381,11 +381,12 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
 
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-                self.last_cfg = AllXYCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = AllXY_Result(signals=signals)
+                cfg_snapshot = AllXYCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = AllXY_Result(signals=signals, cfg_snapshot=cfg_snapshot)
 
         return self.last_result

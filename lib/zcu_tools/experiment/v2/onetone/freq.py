@@ -33,6 +33,7 @@ from zcu_tools.utils.fitting import HangerModel, TransmissionModel, get_proper_m
 class FreqResult:
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[FreqCfg] = None
 
 
 class FreqModuleCfg(ConfigBase):
@@ -110,7 +111,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         # record last cfg and result
         self.last_cfg = deepcopy(cfg)
-        self.last_result = FreqResult(freqs=freqs, signals=signals)
+        self.last_result = FreqResult(
+            freqs=freqs, signals=signals, cfg_snapshot=self.last_cfg
+        )
 
         return self.last_result
 
@@ -156,7 +159,6 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         self,
         filepath: str,
         result: Optional[FreqResult] = None,
-        cfg: Optional[FreqCfg] = None,
         comment: Optional[str] = None,
         tag: str = "onetone/freq",
         **kwargs,
@@ -168,9 +170,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         freqs = result.freqs
         signals = result.signals
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -192,10 +194,13 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         freqs = freqs.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
-                self.last_cfg = FreqCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = FreqResult(freqs=freqs, signals=signals)
+                cfg_snapshot = FreqCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = FreqResult(
+            freqs=freqs, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
         return self.last_result

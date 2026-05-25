@@ -125,7 +125,6 @@ class LookbackAdapter(
             run_result.result,
             ratio=params.ratio,
             smooth=params.smooth,
-            ro_cfg=run_result.cfg_snapshot.modules.readout.ro_cfg,
             plot_fit=params.plot_fit,
         )
         return LookbackAnalyzeResult(predict_offset=offset, figure=figure)

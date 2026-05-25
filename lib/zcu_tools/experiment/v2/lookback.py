@@ -35,6 +35,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 class LookbackResult:
     times: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[LookbackCfg] = None
 
 
 class LookbackModuleCfg(ConfigBase):
@@ -92,7 +93,9 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
 
         # record last cfg and result
         self.last_cfg = deepcopy(cfg)
-        self.last_result = LookbackResult(times=Ts, signals=signals)
+        self.last_result = LookbackResult(
+            times=Ts, signals=signals, cfg_snapshot=self.last_cfg
+        )
 
         return self.last_result
 
@@ -102,7 +105,6 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
         *,
         ratio: float = 0.3,
         smooth: Optional[float] = None,
-        ro_cfg: Optional[DirectReadoutCfg] = None,
         plot_fit: bool = True,
     ) -> tuple[float, Figure]:
         if result is None:
@@ -111,6 +113,8 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
 
         Ts = result.times
         signals = result.signals
+        cfg = result.cfg_snapshot
+        ro_cfg = cfg.modules.readout.ro_cfg if cfg is not None else None
 
         if smooth is not None:
             signals = gaussian_filter1d(signals, smooth)
@@ -151,7 +155,6 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
         self,
         filepath: str,
         result: Optional[LookbackResult] = None,
-        cfg: Optional[LookbackCfg] = None,
         comment: Optional[str] = None,
         tag: str = "lookback",
         **kwargs,
@@ -163,9 +166,9 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
         Ts = result.times
         signals = result.signals
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -188,10 +191,13 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
         Ts = Ts.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
-                self.last_cfg = LookbackCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = LookbackResult(times=Ts, signals=signals)
+                cfg_snapshot = LookbackCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = LookbackResult(
+            times=Ts, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
         return self.last_result

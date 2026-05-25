@@ -32,6 +32,7 @@ from zcu_tools.utils.process import rotate2real
 class AmpRabiResult:
     amps: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[AmpRabiCfg] = None
 
 
 def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -91,7 +92,9 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
             )
 
         self.last_cfg = deepcopy(cfg)
-        self.last_result = AmpRabiResult(amps=gains, signals=signals)
+        self.last_result = AmpRabiResult(
+            amps=gains, signals=signals, cfg_snapshot=self.last_cfg
+        )
 
         return self.last_result
 
@@ -147,7 +150,6 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
         self,
         filepath: str,
         result: Optional[AmpRabiResult] = None,
-        cfg: Optional[AmpRabiCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/rabi_gain",
         **kwargs,
@@ -157,9 +159,9 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
         assert result is not None, "no result found"
 
         gains, signals = result.amps, result.signals
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -180,11 +182,14 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
         gains = gains.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-                self.last_cfg = AmpRabiCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = AmpRabiResult(amps=gains, signals=signals)
+                cfg_snapshot = AmpRabiCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = AmpRabiResult(
+            amps=gains, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
         return self.last_result

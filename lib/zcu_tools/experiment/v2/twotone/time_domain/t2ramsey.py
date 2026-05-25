@@ -43,6 +43,7 @@ def t2ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
 class T2RamseyResult:
     times: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[T2RamseyCfg] = None
 
 
 class T2RamseyModuleCfg(ConfigBase):
@@ -145,7 +146,9 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
 
         # record last cfg and result
         self.last_cfg = deepcopy(cfg)
-        self.last_result = T2RamseyResult(times=lengths, signals=signals)
+        self.last_result = T2RamseyResult(
+            times=lengths, signals=signals, cfg_snapshot=self.last_cfg
+        )
 
         return self.last_result, true_detune
 
@@ -199,7 +202,6 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
         self,
         filepath: str,
         result: Optional[T2RamseyResult] = None,
-        cfg: Optional[T2RamseyCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/t2ramsey",
         **kwargs,
@@ -209,9 +211,9 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
         assert result is not None, "no result found"
 
         Ts, signals = result.times, result.signals
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -234,11 +236,14 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
         Ts = Ts.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             _cfg, _, _ = parse_comment(comment)
 
             if _cfg is not None:
                 self.last_cfg = T2RamseyCfg.validate_or_warn(_cfg, source=filepath)
-        self.last_result = T2RamseyResult(times=Ts, signals=signals)
+        self.last_result = T2RamseyResult(
+            times=Ts, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
         return self.last_result

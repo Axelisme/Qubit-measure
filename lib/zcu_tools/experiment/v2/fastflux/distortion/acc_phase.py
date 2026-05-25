@@ -148,16 +148,15 @@ class AccPhaseExp(AbsExperiment[AccPhaseResult, AccPhaseCfg]):
 
     def analyze(
         self,
-        cfg: Optional[AccPhaseCfg] = None,
         result: Optional[AccPhaseResult] = None,
     ) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "No result found"
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = result.cfg_snapshot
-        assert cfg is not None, "No config found"
+            raise ValueError("cfg_snapshot is None")
         modules = cfg.modules
 
         flux_pulse = modules.flux_pulse

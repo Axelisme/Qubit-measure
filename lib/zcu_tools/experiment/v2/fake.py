@@ -20,6 +20,7 @@ from zcu_tools.liveplot import LivePlot1D, make_plot_frame
 class FakeResult:
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[FakeCfg] = None
 
 
 class FakeCfg(ExpCfgModel): ...
@@ -73,7 +74,9 @@ class FakeExp(AbsExperiment[FakeResult, FakeCfg]):
 
         # record last cfg and result
         self.last_cfg = deepcopy(cfg)
-        self.last_result = FakeResult(freqs=freqs, signals=signals)
+        self.last_result = FakeResult(
+            freqs=freqs, signals=signals, cfg_snapshot=self.last_cfg
+        )
 
         return self.last_result
 
@@ -99,7 +102,6 @@ class FakeExp(AbsExperiment[FakeResult, FakeCfg]):
         self,
         filepath: str,
         result: Optional[FakeResult] = None,
-        cfg: Optional[FakeCfg] = None,
         comment: Optional[str] = None,
         **kwargs,
     ) -> None:
@@ -107,9 +109,9 @@ class FakeExp(AbsExperiment[FakeResult, FakeCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
     def load(self, filepath: str, **kwargs) -> FakeResult:

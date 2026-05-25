@@ -34,6 +34,7 @@ class FreqFluxResult:
     values: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[FreqFluxCfg] = None
 
 
 def freqflux_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -163,7 +164,6 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
         self,
         filepath: str,
         result: Optional[FreqFluxResult] = None,
-        cfg: Optional[FreqFluxCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/flux_dep/freq",
         **kwargs,
@@ -172,9 +172,9 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
 
         values = result.values
         freqs = result.freqs
@@ -205,11 +205,14 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
         freqs = freqs.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-                self.last_cfg = FreqFluxCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = FreqFluxResult(values=values, freqs=freqs, signals=signals2D)
+                cfg_snapshot = FreqFluxCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = FreqFluxResult(
+            values=values, freqs=freqs, signals=signals2D, cfg_snapshot=cfg_snapshot
+        )
 
         return self.last_result

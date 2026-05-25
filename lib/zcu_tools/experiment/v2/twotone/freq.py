@@ -26,6 +26,7 @@ from zcu_tools.utils.process import minus_background
 class FreqResult:
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[FreqCfg] = None
 
 
 def qubfreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -91,7 +92,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         # cache
         self.last_cfg = original_cfg
-        self.last_result = FreqResult(freqs=freqs, signals=signals)
+        self.last_result = FreqResult(
+            freqs=freqs, signals=signals, cfg_snapshot=self.last_cfg
+        )
 
         return self.last_result
 
@@ -141,7 +144,6 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         self,
         filepath: str,
         result: Optional[FreqResult] = None,
-        cfg: Optional[FreqCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/freq",
         **kwargs,
@@ -150,9 +152,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
 
         freqs = result.freqs
         signals = result.signals
@@ -176,10 +178,13 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         freqs = freqs.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
-                self.last_cfg = FreqCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = FreqResult(freqs=freqs, signals=signals)
+                cfg_snapshot = FreqCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = FreqResult(
+            freqs=freqs, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
         return self.last_result

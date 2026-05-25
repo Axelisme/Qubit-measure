@@ -32,6 +32,7 @@ from zcu_tools.utils.process import rotate2real
 class LenRabiResult:
     lengths: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[LenRabiCfg] = None
 
 
 def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -258,7 +259,6 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         self,
         filepath: str,
         result: Optional[LenRabiResult] = None,
-        cfg: Optional[LenRabiCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/rabi_length",
         **kwargs,
@@ -268,9 +268,9 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         assert result is not None, "no result found"
 
         lens, signals = result.lengths, result.signals
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -293,11 +293,14 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         lens = lens.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             _cfg, _, _ = parse_comment(comment)
 
             if _cfg is not None:
                 self.last_cfg = LenRabiCfg.validate_or_warn(_cfg, source=filepath)
-        self.last_result = LenRabiResult(lengths=lens, signals=signals)
+        self.last_result = LenRabiResult(
+            lengths=lens, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
         return self.last_result
