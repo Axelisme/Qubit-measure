@@ -21,7 +21,7 @@ from zcu_tools.gui.adapter import (
     ScalarValue,
 )
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
-from zcu_tools.program.v2 import AbsReadoutCfg, ModuleCfgFactory
+from zcu_tools.program.v2 import AbsReadoutCfg, ModuleCfgFactory, WaveformCfgFactory
 
 
 def test_update_readout_value_frequency_updates_all_supported_paths():
@@ -175,6 +175,28 @@ def test_select_named_module_value_prefers_requested_name():
     assert selected.name == "readout_rf"
 
 
+def test_select_named_module_value_returns_none_when_preferred_missing():
+    ml = ModuleLibrary()
+    ml.register_module(
+        alt=ModuleCfgFactory.from_raw(
+            {
+                "type": "readout/direct",
+                "ro_ch": 1,
+                "ro_freq": 6000.0,
+                "ro_length": 1.0,
+                "trig_offset": 0.5,
+            },
+            ml=ml,
+        )
+    )
+    selected = select_named_module_value(
+        ml=ml,
+        module_type=AbsReadoutCfg,
+        preferred_names=["readout_dpm", "readout_rf"],
+    )
+    assert selected is None
+
+
 def _make_ctx(ml: ModuleLibrary) -> "ExpContext":
     from zcu_tools.gui.adapter import ExpContext
 
@@ -293,6 +315,25 @@ def test_make_readout_ref_default_fallback_uses_evalvalue_for_r_f():
     assert ro_freq.expr == "r_f"
     assert pulse_freq.resolved == 6000.0
     assert ro_freq.resolved == 6000.0
+
+
+def test_make_readout_ref_default_fallback_prefers_ro_waveform_if_present():
+    from zcu_tools.gui.adapter import WaveformRefValue
+
+    ml = ModuleLibrary()
+    ml.register_waveform(
+        ro_waveform=WaveformCfgFactory.from_raw(
+            {"style": "const", "length": 1.7}, ml=ml
+        )
+    )
+    module_ref = make_readout_ref_default(_make_ctx(ml))
+    assert isinstance(module_ref, ModuleRefValue)
+    readout = module_ref.value
+    pulse_cfg = readout.fields["pulse_cfg"]
+    assert isinstance(pulse_cfg, CfgSectionValue)
+    waveform = pulse_cfg.fields["waveform"]
+    assert isinstance(waveform, WaveformRefValue)
+    assert waveform.chosen_key == "ro_waveform"
 
 
 def test_make_readout_ref_default_returns_none_when_optional_and_empty():

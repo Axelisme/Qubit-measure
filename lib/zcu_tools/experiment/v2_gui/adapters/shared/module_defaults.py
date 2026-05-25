@@ -39,7 +39,7 @@ def select_named_module_value(
             chosen_name = preferred_name
             break
     if chosen_name is None:
-        chosen_name = next(iter(reversed(list(candidates.keys()))))
+        return None
 
     _, value = module_cfg_to_value(candidates[chosen_name])
     return NamedModuleValue(name=chosen_name, value=value)

@@ -25,6 +25,7 @@ from zcu_tools.gui.adapter import (
     schema_to_dict,
 )
 from zcu_tools.gui.event_bus import EventBus, MdChangedPayload
+from zcu_tools.gui.live_model import SweepLiveField
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -423,6 +424,30 @@ def test_sweep_widget_non_step_change_recomputes_step(qapp, ctrl):
     sv = out.fields["f"]
     assert isinstance(sv, SweepValue)
     assert sv.step == pytest.approx(0.25)
+
+
+def test_sweep_widget_start_supports_eval_mode(qapp, ctrl):
+    from zcu_tools.gui.adapter import EvalValue
+    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.ui.fields.common import SweepWidget
+
+    schema = _schema(
+        {"f": SweepSpec(label="Freq")},
+        {"f": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)},
+    )
+    w = CfgFormWidget()
+    w.populate(schema, ctrl)
+    sweep_widget = w.findChild(SweepWidget)
+    assert sweep_widget is not None
+
+    cast(SweepLiveField, sweep_widget._field).start_field.set_value(
+        EvalValue(expr="r_f - 1", resolved=5999.0)
+    )
+    out = w.read_values()
+    sv = out.fields["f"]
+    assert isinstance(sv, SweepValue)
+    assert isinstance(sv.start, EvalValue)
+    assert sv.start.expr == "r_f - 1"
 
 
 def test_populate_nested_section_round_trip(qapp, ctrl):

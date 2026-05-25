@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import gettempdir
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from platformdirs import user_cache_dir
 
@@ -248,10 +248,12 @@ class SessionPersistenceService:
             return self._waveform_ref_value_from_raw(spec, raw)
         return None
 
-    def _parse_sweep_edge(self, raw: object) -> object:
+    def _parse_sweep_edge(self, raw: object) -> Union[float, EvalValue]:
         if isinstance(raw, str) and raw.strip().startswith("="):
             return EvalValue(expr=raw.strip(), resolved=None, error=None)
-        return float(raw)
+        if isinstance(raw, (int, float)):
+            return float(raw)
+        raise RuntimeError("Sweep edge must be numeric or '=expr'")
 
     def _sweep_edge_resolved_float(self, value: object, edge_name: str) -> float:
         if isinstance(value, (int, float)):

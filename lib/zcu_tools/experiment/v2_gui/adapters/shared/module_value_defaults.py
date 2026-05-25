@@ -6,7 +6,7 @@ then patches fields with context-aware reasonable values from ctx.md.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 
 from zcu_tools.gui.adapter import (
     CfgSectionValue,
@@ -42,7 +42,7 @@ from .ctx_helpers import md_eval_float, md_get_float, md_get_int
 def _patch_pulse_fields(
     value: CfgSectionValue,
     *,
-    freq: ScalarValue,
+    freq: Union[float, ScalarValue],
     ch: int,
     gain: float,
     length: float,
@@ -54,19 +54,25 @@ def _patch_pulse_fields(
 
     value.fields["ch"] = DirectValue(ch)
     value.fields["nqz"] = DirectValue(2)
-    value.fields["freq"] = freq
+    value.fields["freq"] = (
+        freq if isinstance(freq, (DirectValue, EvalValue)) else DirectValue(freq)
+    )
     value.fields["gain"] = DirectValue(gain)
 
 
 def _patch_ro_cfg_fields(
     value: CfgSectionValue,
     *,
-    ro_freq: ScalarValue,
+    ro_freq: Union[float, ScalarValue],
     ro_ch: int,
     trig_offset: float,
 ) -> None:
     """Patch a DirectReadout CfgSectionValue in-place with sensible values."""
-    value.fields["ro_freq"] = ro_freq
+    value.fields["ro_freq"] = (
+        ro_freq
+        if isinstance(ro_freq, (DirectValue, EvalValue))
+        else DirectValue(ro_freq)
+    )
     value.fields["ro_ch"] = DirectValue(ro_ch)
     value.fields["ro_length"] = DirectValue(0.9)
     value.fields["trig_offset"] = DirectValue(trig_offset)
@@ -100,6 +106,16 @@ def make_pulse_readout_default(ctx: ExpContext) -> ModuleRefValue:
     pulse_cfg = value.fields.get("pulse_cfg")
     if isinstance(pulse_cfg, CfgSectionValue):
         _patch_pulse_fields(pulse_cfg, freq=r_f, ch=res_ch, gain=0.1, length=1.0)
+        waveform_ref = pulse_cfg.fields.get("waveform")
+        if (
+            isinstance(waveform_ref, WaveformRefValue)
+            and "ro_waveform" in ctx.ml.waveforms
+        ):
+            from zcu_tools.gui.cfg_schemas import waveform_cfg_to_value
+
+            _, wav_val = waveform_cfg_to_value(ctx.ml.waveforms["ro_waveform"])
+            waveform_ref = WaveformRefValue(chosen_key="ro_waveform", value=wav_val)
+            pulse_cfg.fields["waveform"] = waveform_ref
 
     ro_cfg = value.fields.get("ro_cfg")
     if isinstance(ro_cfg, CfgSectionValue):

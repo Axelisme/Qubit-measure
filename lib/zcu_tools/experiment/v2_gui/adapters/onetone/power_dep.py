@@ -10,8 +10,8 @@ from zcu_tools.experiment.v2.onetone.power_dep import (
     PowerDepResult,
 )
 from zcu_tools.experiment.v2_gui.adapters.shared import (
+    make_pulse_readout_default,
     make_pulse_readout_module_spec,
-    make_readout_ref_default,
     make_reset_module_spec,
     md_get_float,
     require_soc_handles,
@@ -73,7 +73,7 @@ class OneTonePowerDepAdapter(
             fields={
                 "modules": CfgSectionValue(
                     fields={
-                        "readout": make_readout_ref_default(ctx),
+                        "readout": make_pulse_readout_default(ctx),
                     }
                 ),
                 "reps": DirectValue(100),

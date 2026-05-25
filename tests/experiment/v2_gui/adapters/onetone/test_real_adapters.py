@@ -26,7 +26,7 @@ from zcu_tools.experiment.v2_gui.adapters.onetone.power_dep import (
 from zcu_tools.gui.adapter import AnalyzeRequest, CfgSchema, RunRequest
 from zcu_tools.gui.adapter.lowering import schema_to_dict
 from zcu_tools.meta_tool import MetaDict
-from zcu_tools.program.v2 import SweepCfg
+from zcu_tools.program.v2 import ModuleCfgFactory, SweepCfg
 
 
 def _make_ml() -> MagicMock:
@@ -127,3 +127,59 @@ def test_real_onetone_run_without_soc_fast_fails(adapter) -> None:
 
     with pytest.raises(RuntimeError, match="soc is required"):
         adapter.run(_make_req(ml), schema)
+
+
+def test_onetone_freq_default_readout_freq_uses_eval_value() -> None:
+    from zcu_tools.gui.adapter import CfgSectionValue, EvalValue, ModuleRefValue
+
+    adapter = OneToneFreqAdapter()
+    schema = adapter.make_default_cfg(_make_ctx(_make_ml()))
+    modules = schema.value.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    readout = modules.fields["readout"]
+    assert isinstance(readout, ModuleRefValue)
+    readout_val = readout.value
+    pulse_cfg = readout_val.fields["pulse_cfg"]
+    ro_cfg = readout_val.fields["ro_cfg"]
+    assert isinstance(pulse_cfg, CfgSectionValue)
+    assert isinstance(ro_cfg, CfgSectionValue)
+    pulse_freq = pulse_cfg.fields["freq"]
+    ro_freq = ro_cfg.fields["ro_freq"]
+    assert isinstance(pulse_freq, EvalValue)
+    assert isinstance(ro_freq, EvalValue)
+    assert pulse_freq.expr == "r_f"
+    assert ro_freq.expr == "r_f"
+
+
+def test_onetone_freq_default_ignores_library_readout() -> None:
+    from zcu_tools.gui.adapter import CfgSectionValue, ModuleRefValue
+    from zcu_tools.meta_tool import ModuleLibrary
+
+    ml = ModuleLibrary()
+    ml.register_module(
+        readout_dpm=ModuleCfgFactory.from_raw(
+            {
+                "type": "readout/pulse",
+                "pulse_cfg": {
+                    "waveform": {"style": "const", "length": 1.0},
+                    "ch": 1,
+                    "nqz": 2,
+                    "freq": 6111.0,
+                    "gain": 0.2,
+                },
+                "ro_cfg": {
+                    "ro_ch": 2,
+                    "ro_freq": 6111.0,
+                    "ro_length": 1.0,
+                    "trig_offset": 0.5,
+                },
+            },
+            ml=ml,
+        )
+    )
+    schema = OneToneFreqAdapter().make_default_cfg(_make_ctx(cast(Any, ml)))
+    modules = schema.value.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    readout = modules.fields["readout"]
+    assert isinstance(readout, ModuleRefValue)
+    assert readout.chosen_key == "<Custom:Pulse Readout>"

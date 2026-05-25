@@ -10,8 +10,8 @@ from zcu_tools.experiment.v2.twotone.freq import FreqCfg, FreqExp, FreqResult
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_module_spec,
     make_pulse_ref_default,
+    make_readout_default,
     make_readout_module_spec,
-    make_readout_ref_default,
     make_reset_module_spec,
     make_reset_ref_default,
     md_get_float,
@@ -82,7 +82,7 @@ class FreqAdapter(AbsExpAdapter[FreqRunResult, FreqAnalyzeResult, FreqAnalyzePar
         )
         _module_fields: dict[str, CfgNodeValue] = {
             "qub_pulse": make_pulse_ref_default(ctx),
-            "readout": make_readout_ref_default(ctx),
+            "readout": make_readout_default(ctx),
         }
         _reset = make_reset_ref_default(ctx, optional=True)
         if _reset is not None:

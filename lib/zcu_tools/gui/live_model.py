@@ -245,21 +245,93 @@ class SweepLiveField(LiveField):
         self, spec: SweepSpec, env: LiveModelEnv, initial_val: object = None
     ) -> None:
         super().__init__(spec, env)
-
+        self._updating = False
         if isinstance(initial_val, SweepValue):
-            self._value = initial_val
+            start_init = initial_val.start
+            stop_init = initial_val.stop
+            self._expts = initial_val.expts
+            self._step = initial_val.step
         else:
-            self._value = SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)
+            start_init = 0.0
+            stop_init = 1.0
+            self._expts = 11
+            self._step = 0.1
+
+        edge_spec = ScalarSpec(
+            label=spec.label,
+            type=float,
+            decimals=spec.decimals,
+            editable=spec.editable,
+        )
+        self.start_field = ScalarLiveField(
+            edge_spec, env, initial_val=self._coerce_edge(start_init)
+        )
+        self.stop_field = ScalarLiveField(
+            edge_spec, env, initial_val=self._coerce_edge(stop_init)
+        )
+        self.start_field.on_change.connect(self._on_child_change)
+        self.stop_field.on_change.connect(self._on_child_change)
+        self.start_field.on_validity_changed.connect(self._on_child_validity_changed)
+        self.stop_field.on_validity_changed.connect(self._on_child_validity_changed)
+        self._refresh_validity()
 
     def get_value(self) -> SweepValue:
-        return self._value
+        return SweepValue(
+            start=self._edge_value(self.start_field.get_value()),
+            stop=self._edge_value(self.stop_field.get_value()),
+            expts=self._expts,
+            step=self._step,
+        )
 
     def set_value(self, val: object) -> None:
         if isinstance(val, SweepValue):
-            self._value = val
-            self.on_change.emit(val)
+            self._updating = True
+            try:
+                self.start_field.set_value(self._coerce_edge(val.start))
+                self.stop_field.set_value(self._coerce_edge(val.stop))
+                self._expts = val.expts
+                self._step = val.step
+            finally:
+                self._updating = False
+            self._refresh_validity()
+            self.on_change.emit(self.get_value())
             return
         raise TypeError(f"SweepLiveField expects SweepValue, got {type(val).__name__}")
+
+    def teardown(self) -> None:
+        self.start_field.teardown()
+        self.stop_field.teardown()
+
+    def refresh_external(self, event: object) -> None:
+        self.start_field.refresh_external(event)
+        self.stop_field.refresh_external(event)
+        self._refresh_validity()
+
+    def _coerce_edge(self, value: object) -> ScalarValue:
+        if isinstance(value, EvalValue):
+            return value
+        if isinstance(value, (int, float)):
+            return DirectValue(value=float(value), is_unset=False)
+        raise TypeError(
+            f"Sweep edge expects float or EvalValue, got {type(value).__name__}"
+        )
+
+    def _edge_value(self, value: ScalarValue) -> Union[float, EvalValue]:
+        if isinstance(value, EvalValue):
+            return value
+        return float(value.value)
+
+    def _on_child_change(self, *_: object) -> None:
+        if self._updating:
+            return
+        self._refresh_validity()
+        self.on_change.emit(self.get_value())
+
+    def _on_child_validity_changed(self, *_: object) -> None:
+        self._refresh_validity()
+
+    def _refresh_validity(self) -> None:
+        self._set_valid(self.start_field.is_valid() and self.stop_field.is_valid())
 
 
 class MultiSweepLiveField(LiveField):

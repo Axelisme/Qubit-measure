@@ -25,7 +25,7 @@ from zcu_tools.experiment.v2_gui.adapters.twotone import (
 from zcu_tools.gui.adapter import CfgSchema, RunRequest
 from zcu_tools.gui.adapter.lowering import schema_to_dict
 from zcu_tools.meta_tool import MetaDict
-from zcu_tools.program.v2 import SweepCfg
+from zcu_tools.program.v2 import ModuleCfgFactory, SweepCfg
 
 
 def _make_ml() -> MagicMock:
@@ -164,3 +164,40 @@ def test_t2echo_modules_contain_both_pulses() -> None:
     assert "pi2_pulse" in modules
     assert "pi_pulse" in modules
     assert "readout" in modules
+
+
+@pytest.mark.parametrize(
+    "adapter", [FreqAdapter(), PowerDepAdapter(), FluxDepAdapter()]
+)
+def test_twotone_defaults_ignore_library_readout(adapter: Any) -> None:
+    from zcu_tools.gui.adapter import CfgSectionValue, ModuleRefValue
+    from zcu_tools.meta_tool import ModuleLibrary
+
+    ml = ModuleLibrary()
+    ml.register_module(
+        readout_dpm=ModuleCfgFactory.from_raw(
+            {
+                "type": "readout/pulse",
+                "pulse_cfg": {
+                    "waveform": {"style": "const", "length": 1.0},
+                    "ch": 1,
+                    "nqz": 2,
+                    "freq": 6100.0,
+                    "gain": 0.2,
+                },
+                "ro_cfg": {
+                    "ro_ch": 2,
+                    "ro_freq": 6100.0,
+                    "ro_length": 1.0,
+                    "trig_offset": 0.5,
+                },
+            },
+            ml=ml,
+        )
+    )
+    schema = adapter.make_default_cfg(_make_ctx(cast(Any, ml)))
+    modules = schema.value.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    readout = modules.fields["readout"]
+    assert isinstance(readout, ModuleRefValue)
+    assert readout.chosen_key == "<Custom:Pulse Readout>"
