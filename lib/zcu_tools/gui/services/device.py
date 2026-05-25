@@ -300,18 +300,21 @@ class DeviceService(QObject):
     def get_device_value_for_new_context(self, name: str) -> Optional[float]:
         """Read the device's current value as a float, for new-context creation.
 
-        Returns None when the device is not registered. Any read failure raises
-        as a contract violation (RuntimeError) because the caller will already
-        have validated the device exists via list_device_names() and the GUI
-        guard.
+        Returns None when the device is not registered or when the device info
+        has no scalar ``value`` field. Any other read failure raises as a
+        contract violation (RuntimeError).
         """
         from zcu_tools.device import GlobalDeviceManager
 
         try:
-            dev = cast(ValueDeviceProtocol, GlobalDeviceManager.get_device(name))
+            dev = GlobalDeviceManager.get_device(name)
         except ValueError:
             return None
-        return float(dev.get_value())  # type: ignore[arg-type]
+        info = dev.get_info()
+        raw = getattr(info, "value", None)
+        if raw is None:
+            return None
+        return float(raw)
 
     def get_device_info(self, name: str) -> BaseDeviceInfo | None:
         from zcu_tools.device import GlobalDeviceManager
@@ -325,14 +328,19 @@ class DeviceService(QObject):
     def get_device_value(self, name: str) -> object:
         from zcu_tools.device import GlobalDeviceManager
 
-        dev = cast(ValueDeviceProtocol, GlobalDeviceManager.get_device(name))
-        return dev.get_value()
+        dev = GlobalDeviceManager.get_device(name)
+        info = dev.get_info()
+        return getattr(info, "value", None)
 
     def set_device_value(self, name: str, value: Any) -> object:
         self._require_device_mutation_available("set device value")
         from zcu_tools.device import GlobalDeviceManager
 
-        dev = cast(ValueDeviceProtocol, GlobalDeviceManager.get_device(name))
+        dev = GlobalDeviceManager.get_device(name)
+        if not isinstance(dev, ValueDeviceProtocol):
+            raise RuntimeError(
+                f"Device {name!r} ({type(dev).__name__}) does not support set_value."
+            )
         return dev.set_value(value)
 
     # ------------------------------------------------------------------

@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from zcu_tools.device.fake import FakeDevice
+from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.event_bus import EventBus
 from zcu_tools.gui.services.device import DeviceService, RegisterDeviceRequest
 from zcu_tools.gui.state import ExpContext, State
@@ -66,4 +67,21 @@ def test_get_device_value_for_new_context_returns_float():
         RegisterDeviceRequest(type_name="FakeDevice", name="flux", address="")
     )
     assert svc.get_device_value_for_new_context("flux") == 2.5
+    svc.drop_device("flux")
+
+
+def test_get_device_value_for_new_context_yoko_reads_from_info():
+    """YOKOGS200 has no get_value(); value must be read via get_info().value."""
+    yoko_info = YOKOGS200Info(address="GPIB::1", mode="current", value=0.003)
+
+    fake_yoko = MagicMock()
+    fake_yoko.get_info.return_value = yoko_info
+
+    svc = _make_svc(driver=fake_yoko)
+    svc.register_device(
+        RegisterDeviceRequest(type_name="FakeDevice", name="flux", address="")
+    )
+    result = svc.get_device_value_for_new_context("flux")
+    assert result == 0.003
+    fake_yoko.get_value.assert_not_called()
     svc.drop_device("flux")
