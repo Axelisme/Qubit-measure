@@ -243,7 +243,11 @@ class DeviceDialog(QDialog):
 
         self._type_combo = QComboBox()
         self._type_combo.addItems(list(_DEVICE_TYPES.keys()))
+        self._type_combo.currentTextChanged.connect(self._on_type_changed)
         add_form.addRow("Type:", self._type_combo)
+
+        self._name_edit = QLineEdit()
+        add_form.addRow("Name:", self._name_edit)
 
         self._addr_edit = QLineEdit()
         self._addr_edit.setPlaceholderText("TCPIP::192.168.1.1::INSTR")
@@ -307,6 +311,10 @@ class DeviceDialog(QDialog):
             self._list.addItem(item)
 
         self._on_selection_changed(self._list.currentRow())
+        # refresh default name so it stays unique after any list change
+        dtype = self._type_combo.currentText()
+        existing = set(devices.keys())
+        self._name_edit.setText(self._unique_name(dtype.lower(), existing))
 
     def _on_selection_changed(self, row: int) -> None:
         item = self._list.currentItem()
@@ -333,14 +341,27 @@ class DeviceDialog(QDialog):
         if page > 0 and isinstance(panel, DevicePanelProtocol):
             panel.load(info)
 
+    @staticmethod
+    def _unique_name(base: str, existing: set[str]) -> str:
+        if base not in existing:
+            return base
+        i = 2
+        while f"{base}_{i}" in existing:
+            i += 1
+        return f"{base}_{i}"
+
+    def _on_type_changed(self, dtype: str) -> None:
+        existing = set(self._ctrl.list_devices().keys())
+        self._name_edit.setText(self._unique_name(dtype.lower(), existing))
+
     def _on_add_clicked(self) -> None:
         dtype = self._type_combo.currentText()
+        name = self._name_edit.text().strip() or dtype.lower()
         addr = self._addr_edit.text().strip()
         self._add_status.setText("")
 
         try:
             dev = _instantiate_device(dtype, addr)
-            name = dtype.lower()
             self._ctrl.register_device(name, cast(DeviceProtocol, dev))
             self._ctrl.setup_device(name, {"address": addr})
             self._add_status.setStyleSheet("color: green;")
