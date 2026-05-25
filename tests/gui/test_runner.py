@@ -95,7 +95,7 @@ def test_runworker_emits_run_finished(qapp):
     assert len(results) == 1
     import numpy as np
 
-    assert isinstance(results[0].result.data, np.ndarray)
+    assert isinstance(results[0].data, np.ndarray)
     assert running_at_notification == [False]
 
 

@@ -28,7 +28,7 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.base import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.v2.onetone.freq import FreqExp, FreqResult
+from zcu_tools.experiment.v2.onetone.freq import FreqCfg, FreqExp, FreqModuleCfg, FreqResult, FreqSweepCfg
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     build_readout_for_frequency,
@@ -36,8 +36,8 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_flat_top_waveform_edit_template,
     make_pulse_module_spec,
     make_readout_edit_template,
-    make_readout_ref_default,
     make_readout_module_spec,
+    make_readout_ref_default,
     make_reset_module_spec,
     md_get_float,
 )
@@ -66,6 +66,7 @@ from zcu_tools.program.v2 import (
     AbsReadoutCfg,
     ProgramV2Cfg,
     PulseCfg,
+    PulseReadoutCfg,
     ResetCfg,
 )
 from zcu_tools.program.v2.sweep import SweepCfg
@@ -214,7 +215,9 @@ class FakeFreqAdapter(
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
         r_f = md_get_float(ctx, "r_f", 6000.0)
         rf_w_raw = ctx.md.get("rf_w")
-        rf_w: Optional[float] = float(rf_w_raw) if isinstance(rf_w_raw, (int, float)) else None
+        rf_w: Optional[float] = (
+            float(rf_w_raw) if isinstance(rf_w_raw, (int, float)) else None
+        )
 
         # Sweep range: ±5× linewidth around r_f, or ±200 MHz if rf_w unknown
         half_span = (rf_w * 5.0) if rf_w is not None else 200.0
@@ -299,9 +302,19 @@ class FakeFreqAdapter(
         return req.ml.make_cfg(raw_cfg, FakeFreqCfg, fast_mode=self._fast_mode)
 
     def run(self, req: RunRequest, schema: CfgSchema) -> FakeFreqRunResult:
+        import dataclasses
+
         raw_cfg = schema.to_raw_dict(req)
         cfg = self.build_exp_cfg(raw_cfg, req)
-        return FakeFreqExp().run(cfg)
+        result = FakeFreqExp().run(cfg)
+        freq_cfg = FreqCfg(
+            reps=cfg.reps,
+            rounds=cfg.rounds,
+            relax_delay=cfg.relax_delay,
+            modules=FreqModuleCfg(readout=cast(PulseReadoutCfg, cfg.modules.readout), reset=cfg.modules.reset),
+            sweep=FreqSweepCfg(freq=cfg.sweep.freq),
+        )
+        return dataclasses.replace(result, cfg_snapshot=freq_cfg)
 
     def get_analyze_params(
         self, result: FakeFreqRunResult, ctx: ExpContext

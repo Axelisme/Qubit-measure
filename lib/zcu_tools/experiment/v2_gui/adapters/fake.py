@@ -22,7 +22,6 @@ from zcu_tools.gui.adapter import (
     MetaDictWriteback,
     ParamMeta,
     RunRequest,
-    SaveDataRequest,
     ScalarSpec,
     SweepSpec,
     SweepValue,
@@ -50,8 +49,7 @@ class FakeExp(AbsExperiment[FakeResult, FakeExpCfg]):
         signals = rng.normal(0.0, cfg.noise_scale, size=11)
         return FakeResult(data=signals)
 
-    def save(self, result: FakeResult, save_req: SaveDataRequest) -> None:
-        # No actual saving, but we could log or print if desired.
+    def save(self, filepath: str, result: Optional[FakeResult] = None) -> None:
         pass
 
 

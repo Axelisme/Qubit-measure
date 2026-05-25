@@ -263,7 +263,7 @@ def test_get_tab_result_returns_last_result(cf):
     cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     result = cf.ctrl.get_tab_result(tab_id)
-    assert isinstance(result.result.data, np.ndarray)
+    assert isinstance(result.data, np.ndarray)
 
 
 def test_get_adapter_names_includes_fake(cf):
