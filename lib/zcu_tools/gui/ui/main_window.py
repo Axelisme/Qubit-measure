@@ -916,7 +916,6 @@ class MainWindow(QMainWindow):
             return
         schema = tab_w.read_schema()
         self._ctrl.start_run(tab_id, schema)
-        tab_w.reset_plot()
 
     def _on_analyze_clicked(self, tab_id: str) -> None:
         logger.info("_on_analyze_clicked: tab_id=%r", tab_id)

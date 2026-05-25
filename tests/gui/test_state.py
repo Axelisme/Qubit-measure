@@ -134,12 +134,13 @@ def test_update_tab_result_stores_result_and_clears_stale_analyze_data():
     adapter.make_default_cfg.return_value = object()
     state.add_tab("t1", adapter, _make_ctx())
     state.update_tab_analyze_params("t1", _AnalyzeParams(threshold=0.5))
-    state.update_tab_analyze("t1", object(), Figure())
+    fig = Figure()
+    state.update_tab_analyze("t1", object(), fig)
     state.update_tab_suggested_save_paths("t1", SavePaths("/tmp/a", "/tmp/b"))
     state.update_tab_result("t1", object())
     tab = state.get_tab("t1")
     assert tab.analyze_result is None
-    assert tab.figure is None
+    assert tab.figure is fig
     assert tab.analyze_param_instance is None
     assert tab.suggested_save_paths is None
 
