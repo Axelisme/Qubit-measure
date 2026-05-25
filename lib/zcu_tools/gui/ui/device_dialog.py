@@ -27,7 +27,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.services.device import DeviceProtocol
+from zcu_tools.gui.services.device import DeviceProtocol, _DeviceSetupWorker
 
 from .progress_stack import ProgressStack
 from .widgets import TrimDoubleSpinBox
@@ -282,7 +282,7 @@ class DeviceDialog(QDialog):
         self._drop_btn.setStyleSheet("color: red;")
         self._drop_btn.clicked.connect(self._on_drop_clicked)
         self._apply_btn = QPushButton("Apply Changes")
-        self._apply_btn.clicked.connect(self._on_apply_clicked)
+        self._apply_btn.clicked.connect(self._on_apply_or_stop_clicked)
 
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.accept)
@@ -292,6 +292,8 @@ class DeviceDialog(QDialog):
         btn_row.addWidget(self._apply_btn)
         btn_row.addWidget(close_btn)
         right_layout.addLayout(btn_row)
+
+        self._active_worker: Optional[_DeviceSetupWorker] = None
 
         splitter.addWidget(right_widget)
         splitter.setSizes([300, 500])
@@ -382,7 +384,11 @@ class DeviceDialog(QDialog):
         self._ctrl.drop_device(name)
         self._refresh_list()
 
-    def _on_apply_clicked(self) -> None:
+    def _on_apply_or_stop_clicked(self) -> None:
+        if self._active_worker is not None:
+            self._active_worker.cancel()
+            return
+
         item = self._list.currentItem()
         if item is None:
             return
@@ -402,18 +408,27 @@ class DeviceDialog(QDialog):
         new_info = info.with_updates(**updates)
         from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
 
-        self._set_apply_busy(True)
         pbar_factory = QtProgressBarFactory(self._progress)
         worker = self._ctrl.setup_device(name, new_info, pbar_factory)
-        worker.finished.connect(lambda _: self._set_apply_busy(False))
-        worker.failed.connect(lambda _, msg: self._set_apply_busy(False))
-        worker.cancelled.connect(lambda _: self._set_apply_busy(False))
+        self._active_worker = worker
+        worker.finished.connect(lambda _: self._on_setup_done())
+        worker.failed.connect(lambda _name, _msg: self._on_setup_done())
+        worker.cancelled.connect(lambda _: self._on_setup_done())
+        self._set_setup_running(True)
 
-    def _set_apply_busy(self, busy: bool) -> None:
-        self._drop_btn.setEnabled(not busy)
-        self._apply_btn.setEnabled(not busy)
-        self._list.setEnabled(not busy)
-        if busy:
+    def _on_setup_done(self) -> None:
+        self._active_worker = None
+        self._set_setup_running(False)
+        self._on_selection_changed(self._list.currentRow())
+
+    def _set_setup_running(self, running: bool) -> None:
+        self._drop_btn.setEnabled(not running)
+        self._list.setEnabled(not running)
+        if running:
+            self._apply_btn.setText("Stop")
+            self._apply_btn.setStyleSheet("color: red;")
             self._progress.show()
         else:
+            self._apply_btn.setText("Apply Changes")
+            self._apply_btn.setStyleSheet("")
             self._progress.hide()

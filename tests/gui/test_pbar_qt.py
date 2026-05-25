@@ -91,9 +91,9 @@ def test_factory_two_layers(qapp):
 
 
 def test_total_setter(qapp):
-    """Integer totals use raw value as max; float totals use indeterminate (max=0)."""
+    """Integer totals use raw value as max; float totals use _FLOAT_SCALE for proportional fill."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-    from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
+    from zcu_tools.progress_bar.backend.qt import _FLOAT_SCALE, QtProgressBarFactory
 
     stack = _make_stack(qapp)
     factory = QtProgressBarFactory(stack)
@@ -109,10 +109,10 @@ def test_total_setter(qapp):
     assert stack._active[0].maximum() == 20
     assert pbar.total == 20
 
-    # changing to float → indeterminate
+    # changing to float → scaled max, bar can fill proportionally
     pbar.total = 3.14
     QApplication.processEvents()
-    assert stack._active[0].maximum() == 0
+    assert stack._active[0].maximum() == _FLOAT_SCALE
 
     pbar.close()
     QApplication.processEvents()

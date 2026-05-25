@@ -17,30 +17,35 @@ if TYPE_CHECKING:
     from zcu_tools.gui.ui.progress_stack import ProgressStack
 
 
-def _is_int_total(total: float) -> bool:
-    return total > 0 and total == int(total)
+_FLOAT_SCALE = 10000  # maps float [0, total] → int [0, _FLOAT_SCALE]
+
+
+def _is_int_total(total: object) -> bool:
+    return isinstance(total, int)
 
 
 class _StackBridge(QObject):
     """Lives in the main thread; receives signals and forwards to ProgressStack.
 
-    Integer totals are displayed as exact counts (%v/%m).
-    Float totals use an indeterminate bar (max=0) — only timing is shown.
+    Integer totals show exact counts (%v/%m) with a filled progress bar.
+    Float totals show only timing — bar still fills proportionally via _FLOAT_SCALE.
     """
 
-    push_requested: Signal = Signal(str, float)  # label, total
+    push_requested: Signal = Signal(str, object)  # label, total (int | float | None)
     pop_requested: Signal = Signal(object)  # QProgressBar
     update_requested: Signal = Signal(object, float)  # QProgressBar, delta
     set_value_requested: Signal = Signal(object, float)  # QProgressBar, value
-    set_max_requested: Signal = Signal(object, float)  # QProgressBar, total
+    set_max_requested: Signal = Signal(object, object)  # QProgressBar, total
     set_format_requested: Signal = Signal(object, str)  # QProgressBar, fmt
 
     def __init__(self, stack: "ProgressStack") -> None:
         super().__init__()
         self._stack = stack
         self._pending: dict[int, Any] = {}
-        # tracks whether each bar is in integer mode (True) or indeterminate (False)
+        # per-bar: True = int mode, False = float mode
         self._int_mode: dict[int, bool] = {}
+        # per-bar: float total (for computing scaled qt value)
+        self._float_total: dict[int, float] = {}
 
         self.push_requested.connect(self._on_push)
         self.pop_requested.connect(self._on_pop)
@@ -49,42 +54,70 @@ class _StackBridge(QObject):
         self.set_max_requested.connect(self._on_set_max)
         self.set_format_requested.connect(self._on_set_format)
 
-    def _on_push(self, label: str, total: float) -> None:
+    def _qt_max_and_mode(self, total: object) -> tuple[int, bool]:
+        """Return (qt_max, is_int_mode) for a given total."""
+        if total is None or total == 0:
+            return 0, False  # indeterminate
         if _is_int_total(total):
-            qt_max = int(total)
-        else:
-            qt_max = 0  # indeterminate
+            return int(total), True  # type: ignore[arg-type]
+        return _FLOAT_SCALE, False
+
+    def _on_push(self, label: str, total: object) -> None:
+        qt_max, is_int = self._qt_max_and_mode(total)
         bar = self._stack.push(label, qt_max)
         key = id(bar)
         self._pending[key] = bar
-        self._int_mode[key] = _is_int_total(total)
+        self._int_mode[key] = is_int
+        if not is_int and isinstance(total, (int, float)) and total > 0:
+            self._float_total[key] = float(total)
 
     def _on_pop(self, bar: object) -> None:
-        self._int_mode.pop(id(bar), None)
+        key = id(bar)
+        self._int_mode.pop(key, None)
+        self._float_total.pop(key, None)
         self._stack.pop(bar)  # type: ignore[arg-type]
+
+    def _scaled_value(self, bar: object, raw: float) -> int:
+        ft = self._float_total.get(id(bar))
+        if ft is None or ft == 0:
+            return 0
+        return int(round(raw / ft * _FLOAT_SCALE))
 
     def _on_update(self, bar: object, delta: float) -> None:
         from qtpy.QtWidgets import QProgressBar  # type: ignore[attr-defined]
 
-        if isinstance(bar, QProgressBar) and self._int_mode.get(id(bar), False):
+        if not isinstance(bar, QProgressBar):
+            return
+        key = id(bar)
+        if self._int_mode.get(key, False):
             bar.setValue(bar.value() + int(round(delta)))
+        elif key in self._float_total:
+            bar.setValue(bar.value() + self._scaled_value(bar, delta))
 
     def _on_set_value(self, bar: object, value: float) -> None:
         from qtpy.QtWidgets import QProgressBar  # type: ignore[attr-defined]
 
-        if isinstance(bar, QProgressBar) and self._int_mode.get(id(bar), False):
+        if not isinstance(bar, QProgressBar):
+            return
+        key = id(bar)
+        if self._int_mode.get(key, False):
             bar.setValue(int(round(value)))
+        elif key in self._float_total:
+            bar.setValue(self._scaled_value(bar, value))
 
-    def _on_set_max(self, bar: object, total: float) -> None:
+    def _on_set_max(self, bar: object, total: object) -> None:
         from qtpy.QtWidgets import QProgressBar  # type: ignore[attr-defined]
 
-        if isinstance(bar, QProgressBar):
-            if _is_int_total(total):
-                self._int_mode[id(bar)] = True
-                bar.setMaximum(int(total))
-            else:
-                self._int_mode[id(bar)] = False
-                bar.setMaximum(0)
+        if not isinstance(bar, QProgressBar):
+            return
+        key = id(bar)
+        qt_max, is_int = self._qt_max_and_mode(total)
+        self._int_mode[key] = is_int
+        if not is_int and isinstance(total, (int, float)) and total > 0:
+            self._float_total[key] = float(total)
+        else:
+            self._float_total.pop(key, None)
+        bar.setMaximum(qt_max)
 
     def _on_set_format(self, bar: object, fmt: str) -> None:
         from qtpy.QtWidgets import QProgressBar  # type: ignore[attr-defined]
@@ -131,13 +164,13 @@ class QtProgressBar(BaseProgressBar):
         self._leave = leave
         self._n: ProgressValue = 0
         self._start_time: float = time.monotonic()
-        bridge.push_requested.emit(label, float(total) if total is not None else 0.0)
+        bridge.push_requested.emit(label, total)
         self._bar = bridge.pop_pending()
 
     # ------------------------------------------------------------------
 
     def _is_int_total(self) -> bool:
-        return self._total is not None and _is_int_total(float(self._total))
+        return _is_int_total(self._total)
 
     def _build_format(self) -> str:
         import time
@@ -192,9 +225,7 @@ class QtProgressBar(BaseProgressBar):
     @total.setter
     def total(self, value: ProgressTotal) -> None:
         self._total = value
-        self._bridge.set_max_requested.emit(
-            self._bar, float(value) if value is not None else 0.0
-        )
+        self._bridge.set_max_requested.emit(self._bar, value)
 
     @property
     def n(self) -> ProgressValue:
