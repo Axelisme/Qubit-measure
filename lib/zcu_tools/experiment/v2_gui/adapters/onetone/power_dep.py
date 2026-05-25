@@ -48,8 +48,8 @@ class OneTonePowerDepAdapter(
                 "modules": CfgSectionSpec(
                     label="Modules",
                     fields={
-                        "readout": make_pulse_readout_module_spec(),
                         "reset": make_reset_module_spec(optional=True),
+                        "readout": make_pulse_readout_module_spec(),
                     },
                 ),
                 "reps": ScalarSpec(label="Reps", type=int),

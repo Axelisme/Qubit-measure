@@ -1,0 +1,148 @@
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass
+
+from matplotlib.figure import Figure
+from typing_extensions import Annotated, Sequence, TypeAlias
+
+from zcu_tools.experiment.v2.twotone.rabi.len_rabi import (
+    LenRabiCfg,
+    LenRabiExp,
+    LenRabiResult,
+)
+from zcu_tools.experiment.v2_gui.adapters.shared import (
+    make_pulse_module_spec,
+    make_pulse_ref_default,
+    make_readout_module_spec,
+    make_readout_ref_default,
+    make_reset_module_spec,
+    make_reset_ref_default,
+    md_get_float,
+)
+from zcu_tools.gui.adapter import (
+    AbsExpAdapter,
+    AnalyzeRequest,
+    CfgNodeValue,
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
+    DirectValue,
+    ExpContext,
+    MetaDictWriteback,
+    ParamMeta,
+    RunRequest,
+    ScalarSpec,
+    SweepSpec,
+    SweepValue,
+    WritebackItem,
+    WritebackRequest,
+)
+
+LenRabiRunResult: TypeAlias = LenRabiResult
+
+
+@dataclass
+class LenRabiAnalyzeParams:
+    decay: Annotated[bool, ParamMeta(label="Fit decay envelope")]
+
+
+@dataclass
+class LenRabiAnalyzeResult:
+    pi_len: float
+    pi2_len: float
+    figure: Figure
+
+
+class LenRabiAdapter(
+    AbsExpAdapter[LenRabiRunResult, LenRabiAnalyzeResult, LenRabiAnalyzeParams]
+):
+    exp_cls = LenRabiExp
+
+    def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
+        pi_len = md_get_float(ctx, "pi_len", 0.1)
+        root_spec = CfgSectionSpec(
+            fields={
+                "modules": CfgSectionSpec(
+                    label="Modules",
+                    fields={
+                        "reset": make_reset_module_spec(optional=True),
+                        "qub_pulse": make_pulse_module_spec(),
+                        "readout": make_readout_module_spec(),
+                    },
+                ),
+                "reps": ScalarSpec(label="Reps", type=int),
+                "rounds": ScalarSpec(label="Rounds", type=int),
+                "relax_delay": ScalarSpec(
+                    label="Relax delay (us)", type=float, decimals=3
+                ),
+                "sweep": CfgSectionSpec(
+                    label="Sweep",
+                    fields={"length": SweepSpec(label="Length (us)")},
+                ),
+            }
+        )
+        _module_fields: dict[str, CfgNodeValue] = {
+            "qub_pulse": make_pulse_ref_default(ctx),
+            "readout": make_readout_ref_default(ctx),
+        }
+        _reset = make_reset_ref_default(ctx, optional=True)
+        if _reset is not None:
+            _module_fields["reset"] = _reset
+        root_val = CfgSectionValue(
+            fields={
+                "modules": CfgSectionValue(fields=_module_fields),
+                "reps": DirectValue(100),
+                "rounds": DirectValue(100),
+                "relax_delay": DirectValue(1.0),
+                "sweep": CfgSectionValue(
+                    fields={
+                        "length": SweepValue(start=0.0, stop=pi_len * 4, expts=101),
+                    }
+                ),
+            }
+        )
+        return CfgSchema(spec=root_spec, value=root_val)
+
+    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> LenRabiCfg:
+        return req.ml.make_cfg(raw_cfg, LenRabiCfg)
+
+    def get_analyze_params(
+        self, result: LenRabiRunResult, ctx: ExpContext
+    ) -> LenRabiAnalyzeParams:
+        return LenRabiAnalyzeParams(decay=True)
+
+    def analyze(
+        self, req: AnalyzeRequest[LenRabiRunResult, LenRabiAnalyzeParams]
+    ) -> LenRabiAnalyzeResult:
+        params = req.analyze_params
+        pi_len, pi2_len, _, fig = LenRabiExp().analyze(
+            req.run_result,
+            decay=params.decay,
+        )
+        return LenRabiAnalyzeResult(pi_len=pi_len, pi2_len=pi2_len, figure=fig)
+
+    def get_writeback_items(
+        self, req: WritebackRequest[LenRabiRunResult, LenRabiAnalyzeResult]
+    ) -> Sequence[WritebackItem]:
+        result = req.analyze_result
+        ctx = req.ctx
+        return [
+            MetaDictWriteback(
+                key="pi_len",
+                description="Pi pulse length (us)",
+                current_value=ctx.md.get("pi_len"),
+                md_key="pi_len",
+                proposed_value=round(result.pi_len, 5),
+            ),
+            MetaDictWriteback(
+                key="pi2_len",
+                description="Pi/2 pulse length (us)",
+                current_value=ctx.md.get("pi2_len"),
+                md_key="pi2_len",
+                proposed_value=round(result.pi2_len, 5),
+            ),
+        ]
+
+    def make_filename_stem(self, ctx: ExpContext) -> str:
+        return f"{ctx.qub_name}_len_rabi_{time.strftime('%m%d')}"

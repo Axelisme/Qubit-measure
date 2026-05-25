@@ -12,6 +12,7 @@ from zcu_tools.gui.adapter import (
     CfgSectionValue,
     DirectValue,
     ModuleRefValue,
+    WaveformRefValue,
     make_default_value,
 )
 
@@ -46,7 +47,7 @@ def _patch_pulse_fields(
 ) -> None:
     """Patch a pulse CfgSectionValue (flat fields) in-place with sensible values."""
     waveform_ref = value.fields.get("waveform")
-    if isinstance(waveform_ref, ModuleRefValue):
+    if isinstance(waveform_ref, (ModuleRefValue, WaveformRefValue)):
         waveform_ref.value.fields["length"] = DirectValue(length)
 
     value.fields["ch"] = DirectValue(ch)
@@ -120,7 +121,7 @@ def make_pulse_default(ctx: ExpContext) -> ModuleRefValue:
 
     spec = make_pulse_spec()
     value = make_default_value(spec)
-    _patch_pulse_fields(value, freq=q_f, ch=qub_ch, gain=0.5, length=0.1)
+    _patch_pulse_fields(value, freq=q_f, ch=qub_ch, gain=0.2, length=1.0)
     return ModuleRefValue("<Custom:Pulse>", value)
 
 
@@ -144,7 +145,7 @@ def make_pulse_reset_default(ctx: ExpContext) -> ModuleRefValue:
 
     pulse_cfg = value.fields.get("pulse_cfg")
     if isinstance(pulse_cfg, CfgSectionValue):
-        _patch_pulse_fields(pulse_cfg, freq=q_f, ch=qub_ch, gain=0.5, length=0.1)
+        _patch_pulse_fields(pulse_cfg, freq=q_f, ch=qub_ch, gain=0.2, length=1.0)
 
     return ModuleRefValue("<Custom:Pulse Reset>", value)
 
@@ -159,7 +160,7 @@ def make_two_pulse_reset_default(ctx: ExpContext) -> ModuleRefValue:
     for key in ("pulse1_cfg", "pulse2_cfg"):
         pulse_cfg = value.fields.get(key)
         if isinstance(pulse_cfg, CfgSectionValue):
-            _patch_pulse_fields(pulse_cfg, freq=q_f, ch=qub_ch, gain=0.5, length=0.1)
+            _patch_pulse_fields(pulse_cfg, freq=q_f, ch=qub_ch, gain=0.2, length=1.0)
 
     return ModuleRefValue("<Custom:Two-Pulse Reset>", value)
 
@@ -179,11 +180,11 @@ def make_bath_reset_default(ctx: ExpContext) -> ModuleRefValue:
 
     qub = value.fields.get("qubit_tone_cfg")
     if isinstance(qub, CfgSectionValue):
-        _patch_pulse_fields(qub, freq=q_f, ch=qub_ch, gain=0.5, length=0.1)
+        _patch_pulse_fields(qub, freq=q_f, ch=qub_ch, gain=0.2, length=1.0)
 
     pi2 = value.fields.get("pi2_cfg")
     if isinstance(pi2, CfgSectionValue):
-        _patch_pulse_fields(pi2, freq=q_f, ch=qub_ch, gain=0.5, length=0.1)
+        _patch_pulse_fields(pi2, freq=q_f, ch=qub_ch, gain=0.2, length=1.0)
 
     return ModuleRefValue("<Custom:Bath Reset>", value)
 

@@ -2,19 +2,23 @@ from __future__ import annotations
 
 from typing_extensions import TypeAlias
 
-from zcu_tools.experiment.v2.onetone.flux_dep import (
-    FluxDepCfg,
-    FluxDepExp,
-    FluxDepResult,
+from zcu_tools.experiment.v2.twotone.fluxdep import (
+    FreqFluxCfg,
+    FreqFluxExp,
+    FreqFluxResult,
 )
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    make_pulse_readout_module_spec,
-    make_pulse_readout_ref_default,
+    make_pulse_module_spec,
+    make_pulse_ref_default,
+    make_readout_module_spec,
+    make_readout_ref_default,
     make_reset_module_spec,
+    make_reset_ref_default,
     md_get_float,
 )
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
+    CfgNodeValue,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -29,25 +33,26 @@ from zcu_tools.gui.adapter import (
     SweepValue,
 )
 
-OneToneFluxDepRunResult: TypeAlias = FluxDepResult
+FluxDepRunResult: TypeAlias = FreqFluxResult
 
 
-class OneToneFluxDepAdapter(
-    AbsExpAdapter[OneToneFluxDepRunResult, NoAnalysisResult, NoAnalyzeParams]
+class FluxDepAdapter(
+    AbsExpAdapter[FluxDepRunResult, NoAnalysisResult, NoAnalyzeParams]
 ):
-    exp_cls = FluxDepExp
+    exp_cls = FreqFluxExp
 
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
-        r_f = md_get_float(ctx, "r_f", 6000.0)
-        rf_w = md_get_float(ctx, "rf_w", 20.0)
-        half_span = rf_w if rf_w > 0 else 20.0
+        q_f = md_get_float(ctx, "q_f", 4000.0)
+        qf_w = md_get_float(ctx, "qf_w", 20.0)
+        half_span = qf_w if qf_w > 0 else 20.0
         root_spec = CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
                     label="Modules",
                     fields={
                         "reset": make_reset_module_spec(optional=True),
-                        "readout": make_pulse_readout_module_spec(),
+                        "qub_pulse": make_pulse_module_spec(),
+                        "readout": make_readout_module_spec(),
                     },
                 ),
                 "dev": CfgSectionSpec(
@@ -70,13 +75,16 @@ class OneToneFluxDepAdapter(
                 ),
             }
         )
+        _module_fields: dict[str, CfgNodeValue] = {
+            "qub_pulse": make_pulse_ref_default(ctx),
+            "readout": make_readout_ref_default(ctx),
+        }
+        _reset = make_reset_ref_default(ctx, optional=True)
+        if _reset is not None:
+            _module_fields["reset"] = _reset
         root_val = CfgSectionValue(
             fields={
-                "modules": CfgSectionValue(
-                    fields={
-                        "readout": make_pulse_readout_ref_default(ctx),
-                    }
-                ),
+                "modules": CfgSectionValue(fields=_module_fields),
                 "dev": CfgSectionValue(
                     fields={
                         "flux_dev": DirectValue("flux_yoko"),
@@ -89,8 +97,8 @@ class OneToneFluxDepAdapter(
                     fields={
                         "flux": SweepValue(start=3.57e-3, stop=3.61e-3, expts=101),
                         "freq": SweepValue(
-                            start=r_f - half_span,
-                            stop=r_f + half_span,
+                            start=q_f - half_span,
+                            stop=q_f + half_span,
                             expts=101,
                         ),
                     }
@@ -99,13 +107,11 @@ class OneToneFluxDepAdapter(
         )
         return CfgSchema(spec=root_spec, value=root_val)
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FluxDepCfg:
+    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FreqFluxCfg:
         cfg_raw = dict(raw_cfg)
         dev_raw = cfg_raw.pop("dev")
         if not isinstance(dev_raw, dict):
             raise RuntimeError("FluxDep dev section must lower to a dict")
-        # dev_raw = {"flux_dev": "flux_yoko", ...}
-        # convert to make_cfg patch format: {"flux_yoko": {"label": "flux_dev"}}
         dev_patch: dict[str, dict] = {}
         for label_key, device_name in dev_raw.items():
             if not isinstance(device_name, str) or not device_name:
@@ -114,7 +120,7 @@ class OneToneFluxDepAdapter(
                 )
             dev_patch[device_name] = {"label": label_key}
         cfg_raw["dev"] = dev_patch
-        return req.ml.make_cfg(cfg_raw, FluxDepCfg)
+        return req.ml.make_cfg(cfg_raw, FreqFluxCfg)
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
-        return f"{ctx.res_name}_flux"
+        return f"{ctx.qub_name}_qubit_flux"
