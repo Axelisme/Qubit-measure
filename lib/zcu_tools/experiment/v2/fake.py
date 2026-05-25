@@ -2,19 +2,24 @@ from __future__ import annotations
 
 import time
 from copy import deepcopy
+from dataclasses import dataclass
 
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, TypeAlias
+from typing_extensions import Callable, Optional
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import make_comment
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.liveplot import LivePlot1D, make_plot_frame
 
-# (freqs, signals)
-FakeResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
+
+@dataclass(frozen=True)
+class FakeResult:
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
 
 
 class FakeCfg(ExpCfgModel): ...
@@ -68,16 +73,17 @@ class FakeExp(AbsExperiment[FakeResult, FakeCfg]):
 
         # record last cfg and result
         self.last_cfg = deepcopy(cfg)
-        self.last_result = (freqs, signals)
+        self.last_result = FakeResult(freqs=freqs, signals=signals)
 
-        return freqs, signals
+        return self.last_result
 
     def analyze(self, result: Optional[FakeResult] = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        freqs, signals = result
+        freqs = result.freqs
+        signals = result.signals
 
         real_signals = fake_signal2real(signals)
 
@@ -90,11 +96,21 @@ class FakeExp(AbsExperiment[FakeResult, FakeCfg]):
         return fig
 
     def save(
-        self, filepath: str, result: Optional[FakeResult] = None, **kwargs
+        self,
+        filepath: str,
+        result: Optional[FakeResult] = None,
+        cfg: Optional[FakeCfg] = None,
+        comment: Optional[str] = None,
+        **kwargs,
     ) -> None:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
+
+        if cfg is None:
+            cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
 
     def load(self, filepath: str, **kwargs) -> FakeResult:
         freqs = np.linspace(4.5, 5.5, 201)  # MHz
@@ -108,6 +124,6 @@ class FakeExp(AbsExperiment[FakeResult, FakeCfg]):
         signals = signals.astype(np.complex128)
 
         self.last_cfg = None
-        self.last_result = (freqs, signals)
+        self.last_result = FakeResult(freqs=freqs, signals=signals)
 
-        return freqs, signals
+        return self.last_result

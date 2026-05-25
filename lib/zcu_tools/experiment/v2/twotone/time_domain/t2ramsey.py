@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import warnings as warn
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Optional, TypeAlias
+from typing_extensions import Any, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -38,7 +39,10 @@ def t2ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
     return rotate2real(signals).real
 
 
-T2RamseyResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
+@dataclass(frozen=True)
+class T2RamseyResult:
+    times: NDArray[np.float64]
+    signals: NDArray[np.complex128]
 
 
 class T2RamseyModuleCfg(ConfigBase):
@@ -141,9 +145,9 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
 
         # record last cfg and result
         self.last_cfg = deepcopy(cfg)
-        self.last_result = (lengths, signals)
+        self.last_result = T2RamseyResult(times=lengths, signals=signals)
 
-        return (lengths, signals), true_detune
+        return self.last_result, true_detune
 
     def analyze(
         self, result: Optional[T2RamseyResult] = None, *, fit_fringe: bool = True
@@ -152,7 +156,7 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        lengths, signals = result
+        lengths, signals = result.times, result.signals
 
         real_signals = t2ramsey_signal2real(signals)
 
@@ -195,6 +199,7 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
         self,
         filepath: str,
         result: Optional[T2RamseyResult] = None,
+        cfg: Optional[T2RamseyCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/t2ramsey",
         **kwargs,
@@ -203,8 +208,9 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        Ts, signals = result
-        cfg = self.last_cfg
+        Ts, signals = result.times, result.signals
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 
@@ -229,10 +235,10 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
         signals = signals.astype(np.complex128)
 
         if comment is not None:
-            cfg, _, _ = parse_comment(comment)
+            _cfg, _, _ = parse_comment(comment)
 
-            if cfg is not None:
-                self.last_cfg = T2RamseyCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (Ts, signals)
+            if _cfg is not None:
+                self.last_cfg = T2RamseyCfg.validate_or_warn(_cfg, source=filepath)
+        self.last_result = T2RamseyResult(times=Ts, signals=signals)
 
-        return Ts, signals
+        return self.last_result

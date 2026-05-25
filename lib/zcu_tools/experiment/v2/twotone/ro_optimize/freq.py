@@ -160,6 +160,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         self,
         filepath: str,
         result: Optional[FreqResult] = None,
+        cfg: Optional[FreqCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/ro_optimize/freq",
         **kwargs,
@@ -170,7 +171,8 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         freqs, singals = result
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 

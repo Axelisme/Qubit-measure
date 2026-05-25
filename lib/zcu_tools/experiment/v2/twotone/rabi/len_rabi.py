@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, TypeAlias
+from typing_extensions import Any, Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -26,8 +27,11 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
 
-# (lens, signals)
-LenRabiResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
+
+@dataclass(frozen=True)
+class LenRabiResult:
+    lengths: NDArray[np.float64]
+    signals: NDArray[np.complex128]
 
 
 def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -100,9 +104,9 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
         # record last cfg and result
         self.last_cfg = deepcopy(cfg)
-        self.last_result = (lengths, signals)
+        self.last_result = LenRabiResult(lengths=lengths, signals=signals)
 
-        return lengths, signals
+        return self.last_result
 
     def _run_for_arb(
         self,
@@ -177,9 +181,9 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
         # record last cfg and result
         self.last_cfg = deepcopy(cfg)
-        self.last_result = (lengths, signals)
+        self.last_result = LenRabiResult(lengths=lengths, signals=signals)
 
-        return lengths, signals
+        return self.last_result
 
     def run(
         self,
@@ -206,7 +210,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        lens, signals = result
+        lens, signals = result.lengths, result.signals
 
         real_signals = rabi_signal2real(signals)
 
@@ -254,6 +258,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         self,
         filepath: str,
         result: Optional[LenRabiResult] = None,
+        cfg: Optional[LenRabiCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/rabi_length",
         **kwargs,
@@ -262,8 +267,9 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        lens, signals = result
-        cfg = self.last_cfg
+        lens, signals = result.lengths, result.signals
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 
@@ -288,10 +294,10 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         signals = signals.astype(np.complex128)
 
         if comment is not None:
-            cfg, _, _ = parse_comment(comment)
+            _cfg, _, _ = parse_comment(comment)
 
-            if cfg is not None:
-                self.last_cfg = LenRabiCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (lens, signals)
+            if _cfg is not None:
+                self.last_cfg = LenRabiCfg.validate_or_warn(_cfg, source=filepath)
+        self.last_result = LenRabiResult(lengths=lens, signals=signals)
 
-        return lens, signals
+        return self.last_result

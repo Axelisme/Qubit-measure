@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -9,7 +10,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
-from typing_extensions import Any, Callable, Optional, TypeAlias, Union
+from typing_extensions import Any, Callable, Optional, Union
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -46,10 +47,11 @@ def cpmg_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return (real_signals - min_vals) / np.clip(max_vals - min_vals, 1e-12, None)
 
 
-# (times, lengths(time x length), signals)
-CPMG_Result: TypeAlias = tuple[
-    NDArray[np.int64], NDArray[np.float64], NDArray[np.complex128]
-]
+@dataclass(frozen=True)
+class CPMG_Result:
+    ns: NDArray[np.int64]
+    delays: NDArray[np.float64]
+    signals: NDArray[np.complex128]
 
 
 class CPMG_ModuleCfg(ConfigBase):
@@ -241,9 +243,9 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
 
         # record last cfg and result
         self.last_cfg = deepcopy(cfg)
-        self.last_result = (times, lengths, signals)
+        self.last_result = CPMG_Result(ns=times, delays=lengths, signals=signals)
 
-        return times, lengths, signals
+        return self.last_result
 
     def analyze(
         self,
@@ -256,7 +258,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        times, lengths, signals2D = result
+        times, lengths, signals2D = result.ns, result.delays, result.signals
 
         real_signals2D = rotate2real(signals2D).real
         norm_signals = cpmg_signal2real(signals2D)
@@ -318,6 +320,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         self,
         filepath: str,
         result: Optional[CPMG_Result] = None,
+        cfg: Optional[CPMG_Cfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/cpmg",
         **kwargs,
@@ -328,9 +331,11 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
 
         _filepath = Path(filepath)
 
-        times, lengths, signals2D = result
-        cfg = self.last_cfg
+        times, lengths, signals2D = result.ns, result.delays, result.signals
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
+
         comment = make_comment(cfg, comment)
 
         np.savez_compressed(
@@ -383,6 +388,6 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
                 self.last_cfg = CPMG_Cfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (times, lengths, signals2D)
+        self.last_result = CPMG_Result(ns=times, delays=lengths, signals=signals2D)
 
-        return times, lengths, signals2D
+        return self.last_result

@@ -375,6 +375,7 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
         self,
         filepath: str,
         result: Optional[GE_Result] = None,
+        cfg: Optional[GE_Cfg] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/ge",
         **kwargs,
@@ -387,7 +388,8 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
 
         signals = result
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 

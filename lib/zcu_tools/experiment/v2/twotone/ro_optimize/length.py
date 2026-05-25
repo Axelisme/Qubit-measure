@@ -161,6 +161,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         self,
         filepath: str,
         result: Optional[LengthResult] = None,
+        cfg: Optional[LengthCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/ro_optimize/length",
         **kwargs,
@@ -171,7 +172,8 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
 
         lengths, signals = result
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 

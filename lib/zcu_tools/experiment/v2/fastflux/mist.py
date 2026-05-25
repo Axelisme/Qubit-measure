@@ -181,6 +181,7 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
         self,
         filepath: str,
         result: Optional[MistResult] = None,
+        cfg: Optional[MistCfg] = None,
         comment: Optional[str] = None,
         tag: str = "fastflux/mist",
         **kwargs,
@@ -191,7 +192,8 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
 
         flux_gains, mist_gains, signals2D = result
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 

@@ -163,6 +163,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         self,
         filepath: str,
         result: Optional[PowerDepResult] = None,
+        cfg: Optional[PowerDepCfg] = None,
         comment: Optional[str] = None,
         tag: str = "mist/gain",
         **kwargs,
@@ -173,7 +174,8 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
 
         gains, signals = result
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 

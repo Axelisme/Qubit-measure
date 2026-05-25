@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Mapping, Optional, TypeAlias, cast
+from typing_extensions import Any, Callable, Mapping, Optional, cast
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
@@ -36,7 +37,11 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-PowerResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
+
+@dataclass(frozen=True)
+class PowerResult:
+    powers: NDArray[np.float64]
+    signals: NDArray[np.float64]
 
 
 class PowerModuleCfg(ConfigBase):
@@ -111,15 +116,16 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             signals = np.asarray(signals)
 
         self.last_cfg = deepcopy(cfg)
-        self.last_result = (jpa_powers, signals)
-        return jpa_powers, signals
+        self.last_result = PowerResult(powers=jpa_powers, signals=signals)
+        return self.last_result
 
     def analyze(self, result: Optional[PowerResult] = None) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        jpa_powers, signals = result
+        jpa_powers = result.powers
+        signals = result.signals
         snrs = np.abs(signals)
 
         max_idx = np.nanargmax(snrs)
@@ -145,6 +151,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         self,
         filepath: str,
         result: Optional[PowerResult] = None,
+        cfg: Optional[PowerCfg] = None,
         comment: Optional[str] = None,
         tag: str = "jpa/power",
         **kwargs,
@@ -153,9 +160,11 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        jpa_powers, signals = result
+        jpa_powers = result.powers
+        signals = result.signals
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 
@@ -180,10 +189,10 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         signals = signals.astype(np.float64)
 
         if comment is not None:
-            cfg, _, _ = parse_comment(comment)
+            _cfg, _, _ = parse_comment(comment)
 
-            if cfg is not None:
-                self.last_cfg = PowerCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (jpa_powers, signals)
+            if _cfg is not None:
+                self.last_cfg = PowerCfg.validate_or_warn(_cfg, source=filepath)
+        self.last_result = PowerResult(powers=jpa_powers, signals=signals)
 
-        return jpa_powers, signals
+        return self.last_result

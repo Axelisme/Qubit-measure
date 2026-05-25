@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, Mapping, Optional, TypeAlias
+from typing_extensions import Any, Mapping, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
@@ -27,9 +28,12 @@ from zcu_tools.program.v2 import SweepCfg, TwoToneCfg, TwoToneProgram, sweep2par
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background
 
-FreqFluxResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+
+@dataclass(frozen=True)
+class FreqFluxResult:
+    values: NDArray[np.float64]
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
 
 
 def freqflux_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -111,9 +115,11 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
 
         # Cache results
         self.last_cfg = original_cfg
-        self.last_result = (dev_values, freqs, signals)
+        self.last_result = FreqFluxResult(
+            values=dev_values, freqs=freqs, signals=signals
+        )
 
-        return dev_values, freqs, signals
+        return self.last_result
 
     def analyze(
         self,
@@ -125,7 +131,9 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, freqs, signals2D = result
+        values = result.values
+        freqs = result.freqs
+        signals2D = result.signals
 
         signals2D = minus_background(signals2D, axis=1)
 
@@ -143,7 +151,9 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, freqs, signals2D = result
+        values = result.values
+        freqs = result.freqs
+        signals2D = result.signals
 
         point_selector = InteractiveFindPoints(signals2D, values, freqs)
 
@@ -153,6 +163,7 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
         self,
         filepath: str,
         result: Optional[FreqFluxResult] = None,
+        cfg: Optional[FreqFluxCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/flux_dep/freq",
         **kwargs,
@@ -161,10 +172,13 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, freqs, signals2D = result
-
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
+
+        values = result.values
+        freqs = result.freqs
+        signals2D = result.signals
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -196,6 +210,6 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
 
             if cfg is not None:
                 self.last_cfg = FreqFluxCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (values, freqs, signals2D)
+        self.last_result = FreqFluxResult(values=values, freqs=freqs, signals=signals2D)
 
-        return values, freqs, signals2D
+        return self.last_result

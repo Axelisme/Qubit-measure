@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Optional, TypeAlias
+from typing_extensions import Any, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -26,8 +27,11 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
 
-# (amps, signals)
-AmpRabiResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
+
+@dataclass(frozen=True)
+class AmpRabiResult:
+    amps: NDArray[np.float64]
+    signals: NDArray[np.complex128]
 
 
 def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -87,9 +91,9 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
             )
 
         self.last_cfg = deepcopy(cfg)
-        self.last_result = (gains, signals)
+        self.last_result = AmpRabiResult(amps=gains, signals=signals)
 
-        return gains, signals
+        return self.last_result
 
     def analyze(
         self, result: Optional[AmpRabiResult] = None, skip: int = 0
@@ -98,7 +102,7 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, signals = result
+        gains, signals = result.amps, result.signals
         gains = gains[skip:]
         signals = signals[skip:]
 
@@ -143,6 +147,7 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
         self,
         filepath: str,
         result: Optional[AmpRabiResult] = None,
+        cfg: Optional[AmpRabiCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/rabi_gain",
         **kwargs,
@@ -151,8 +156,9 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, signals = result
-        cfg = self.last_cfg
+        gains, signals = result.amps, result.signals
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 
@@ -179,6 +185,6 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
 
             if cfg is not None:
                 self.last_cfg = AmpRabiCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (gains, signals)
+        self.last_result = AmpRabiResult(amps=gains, signals=signals)
 
-        return gains, signals
+        return self.last_result

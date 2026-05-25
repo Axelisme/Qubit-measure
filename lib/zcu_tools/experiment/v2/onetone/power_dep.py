@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, TypeAlias
+from typing_extensions import Any, Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -26,9 +27,12 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background, rescale
 
-PowerDepResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+
+@dataclass(frozen=True)
+class PowerDepResult:
+    gains: NDArray[np.float64]
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
 
 
 def gaindep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -144,9 +148,9 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
 
         # record last cfg and result
         self.last_cfg = deepcopy(cfg)
-        self.last_result = (gains, freqs, signals)
+        self.last_result = PowerDepResult(gains=gains, freqs=freqs, signals=signals)
 
-        return gains, freqs, signals
+        return self.last_result
 
     def analyze(
         self,
@@ -158,6 +162,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         self,
         filepath: str,
         result: Optional[PowerDepResult] = None,
+        cfg: Optional[PowerDepCfg] = None,
         comment: Optional[str] = None,
         tag: str = "onetone/power_dep",
         **kwargs,
@@ -166,9 +171,12 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, freqs, signals2D = result
+        gains = result.gains
+        freqs = result.freqs
+        signals2D = result.signals
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 
@@ -200,6 +208,6 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
                 self.last_cfg = PowerDepCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (gains, freqs, signals2D)
+        self.last_result = PowerDepResult(gains=gains, freqs=freqs, signals=signals2D)
 
-        return gains, freqs, signals2D
+        return self.last_result

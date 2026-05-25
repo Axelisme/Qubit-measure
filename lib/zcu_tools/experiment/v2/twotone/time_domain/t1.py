@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,7 +9,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
-from typing_extensions import Any, Callable, Optional, TypeAlias, Union
+from typing_extensions import Any, Callable, Optional, Union
 
 import zcu_tools.utils.fitting as ft
 from zcu_tools.cfg_model import ConfigBase
@@ -37,8 +38,11 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_decay, fit_dual_decay
 from zcu_tools.utils.process import rotate2real
 
-# (times, signals)
-T1Result: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
+
+@dataclass(frozen=True)
+class T1Result:
+    times: NDArray[np.float64]
+    signals: NDArray[np.complex128]
 
 
 def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -142,9 +146,9 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
         # record last cfg and result
         self.last_cfg = original_cfg
-        self.last_result = (lengths, signals)
+        self.last_result = T1Result(times=lengths, signals=signals)
 
-        return lengths, signals
+        return self.last_result
 
     def _run_uniform(
         self,
@@ -204,9 +208,9 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
         # record last cfg and result
         self.last_cfg = original_cfg
-        self.last_result = (lengths, signals)
+        self.last_result = T1Result(times=lengths, signals=signals)
 
-        return lengths, signals
+        return self.last_result
 
     def run(
         self,
@@ -235,7 +239,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        xs, signals = result
+        xs, signals = result.times, result.signals
 
         xs = xs[skip:]
         signals = signals[skip:]
@@ -276,6 +280,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         self,
         filepath: str,
         result: Optional[T1Result] = None,
+        cfg: Optional[T1Cfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/t1",
         **kwargs,
@@ -284,8 +289,9 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        Ts, signals = result
-        cfg = self.last_cfg
+        Ts, signals = result.times, result.signals
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 
@@ -310,13 +316,13 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         signals = signals.astype(np.complex128)
 
         if comment is not None:
-            cfg, _, _ = parse_comment(comment)
+            _cfg, _, _ = parse_comment(comment)
 
-            if cfg is not None:
-                self.last_cfg = T1Cfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (Ts, signals)
+            if _cfg is not None:
+                self.last_cfg = T1Cfg.validate_or_warn(_cfg, source=filepath)
+        self.last_result = T1Result(times=Ts, signals=signals)
 
-        return Ts, signals
+        return self.last_result
 
 
 class T1WithToneModuleCfg(ConfigBase):
@@ -389,9 +395,9 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
 
         # record last cfg and result
         self.last_cfg = deepcopy(cfg)
-        self.last_result = (lengths, signals)
+        self.last_result = T1Result(times=lengths, signals=signals)
 
-        return lengths, signals
+        return self.last_result
 
     def analyze(
         self, result: Optional[T1Result] = None, *, dual_exp: bool = False
@@ -400,7 +406,7 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        xs, signals = result
+        xs, signals = result.times, result.signals
 
         real_signals = t1_signal2real(signals)
 
@@ -440,6 +446,7 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
         self,
         filepath: str,
         result: Optional[T1Result] = None,
+        cfg: Optional[T1WithToneCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/t1_with_tone",
         **kwargs,
@@ -448,8 +455,9 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        Ts, signals = result
-        cfg = self.last_cfg
+        Ts, signals = result.times, result.signals
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 
@@ -474,19 +482,20 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
         signals = signals.astype(np.complex128)
 
         if comment is not None:
-            cfg, _, _ = parse_comment(comment)
+            _cfg, _, _ = parse_comment(comment)
 
-            if cfg is not None:
-                self.last_cfg = T1WithToneCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (Ts, signals)
+            if _cfg is not None:
+                self.last_cfg = T1WithToneCfg.validate_or_warn(_cfg, source=filepath)
+        self.last_result = T1Result(times=Ts, signals=signals)
 
-        return Ts, signals
+        return self.last_result
 
 
-# (values, times, signals)
-ScanT1WithToneResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+@dataclass(frozen=True)
+class ScanT1WithToneResult:
+    values: NDArray[np.float64]
+    times: NDArray[np.float64]
+    signals: NDArray[np.complex128]
 
 
 def t1_with_tone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -580,9 +589,11 @@ class ScanT1WithToneExp(AbsExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
 
         # record last cfg and result
         self.last_cfg = deepcopy(cfg)
-        self.last_result = (gains, lengths, signals)
+        self.last_result = ScanT1WithToneResult(
+            values=gains, times=lengths, signals=signals
+        )
 
-        return gains, lengths, signals
+        return self.last_result
 
     def analyze(
         self, result: Optional[ScanT1WithToneResult] = None
@@ -591,7 +602,7 @@ class ScanT1WithToneExp(AbsExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, ts, signals = result
+        gains, ts, signals = result.values, result.times, result.signals
 
         signals: NDArray[np.complex128] = gaussian_filter(signals, sigma=1)  # type: ignore
         real_signals = t1_with_tone_signal2real(signals)
@@ -651,6 +662,7 @@ class ScanT1WithToneExp(AbsExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
         self,
         filepath: str,
         result: Optional[ScanT1WithToneResult] = None,
+        cfg: Optional[ScanT1WithToneCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/t1_with_tone_sweep",
         **kwargs,
@@ -659,8 +671,9 @@ class ScanT1WithToneExp(AbsExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, Ts, signals = result
-        cfg = self.last_cfg
+        gains, Ts, signals = result.values, result.times, result.signals
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 
@@ -688,10 +701,12 @@ class ScanT1WithToneExp(AbsExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
         signals = signals.astype(np.complex128)
 
         if comment is not None:
-            cfg, _, _ = parse_comment(comment)
+            _cfg, _, _ = parse_comment(comment)
 
-            if cfg is not None:
-                self.last_cfg = ScanT1WithToneCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (gains, Ts, signals)
+            if _cfg is not None:
+                self.last_cfg = ScanT1WithToneCfg.validate_or_warn(
+                    _cfg, source=filepath
+                )
+        self.last_result = ScanT1WithToneResult(values=gains, times=Ts, signals=signals)
 
-        return gains, Ts, signals
+        return self.last_result

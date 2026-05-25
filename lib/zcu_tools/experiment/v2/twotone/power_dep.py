@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, TypeAlias
+from typing_extensions import Any, Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -23,9 +24,12 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background
 
-PowerResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+
+@dataclass(frozen=True)
+class PowerResult:
+    gains: NDArray[np.float64]
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
 
 
 def gain_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -111,9 +115,9 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
 
         # Cache results
         self.last_cfg = deepcopy(cfg)
-        self.last_result = (gains, freqs, signals)
+        self.last_result = PowerResult(gains=gains, freqs=freqs, signals=signals)
 
-        return gains, freqs, signals
+        return self.last_result
 
     def analyze(
         self,
@@ -127,6 +131,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         self,
         filepath: str,
         result: Optional[PowerResult] = None,
+        cfg: Optional[PowerCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/power_dep",
         **kwargs,
@@ -135,10 +140,13 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, freqs, signals2D = result
-
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
+
+        gains = result.gains
+        freqs = result.freqs
+        signals2D = result.signals
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -170,6 +178,6 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
 
             if cfg is not None:
                 self.last_cfg = PowerCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (gains, freqs, signals2D)
+        self.last_result = PowerResult(gains=gains, freqs=freqs, signals=signals2D)
 
-        return gains, freqs, signals2D
+        return self.last_result

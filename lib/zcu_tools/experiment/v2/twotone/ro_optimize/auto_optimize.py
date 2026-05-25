@@ -300,6 +300,7 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
         self,
         filepath: str,
         result: Optional[AutoOptResult] = None,
+        cfg: Optional[AutoOptCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/ro_optimize/auto",
         **kwargs,
@@ -309,6 +310,11 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
         assert result is not None, "no result found"
 
         params, signals = result
+
+        if cfg is None:
+            cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
 
         _filepath = Path(filepath)
 

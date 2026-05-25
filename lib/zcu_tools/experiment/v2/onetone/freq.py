@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Literal, Optional, TypeAlias, cast
+from typing_extensions import Any, Callable, Literal, Optional, cast
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -27,8 +28,11 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import HangerModel, TransmissionModel, get_proper_model
 
-# (freqs, signals)
-FreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
+
+@dataclass(frozen=True)
+class FreqResult:
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
 
 
 class FreqModuleCfg(ConfigBase):
@@ -106,9 +110,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         # record last cfg and result
         self.last_cfg = deepcopy(cfg)
-        self.last_result = (freqs, signals)
+        self.last_result = FreqResult(freqs=freqs, signals=signals)
 
-        return freqs, signals
+        return self.last_result
 
     def analyze(
         self,
@@ -122,7 +126,8 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        freqs, signals = result
+        freqs = result.freqs
+        signals = result.signals
 
         # remove first and last point, sometimes they have problems
         freqs = freqs[1:-1]
@@ -151,6 +156,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         self,
         filepath: str,
         result: Optional[FreqResult] = None,
+        cfg: Optional[FreqCfg] = None,
         comment: Optional[str] = None,
         tag: str = "onetone/freq",
         **kwargs,
@@ -159,9 +165,11 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        freqs, signals = result
+        freqs = result.freqs
+        signals = result.signals
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 
@@ -188,6 +196,6 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
                 self.last_cfg = FreqCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (freqs, signals)
+        self.last_result = FreqResult(freqs=freqs, signals=signals)
 
-        return freqs, signals
+        return self.last_result

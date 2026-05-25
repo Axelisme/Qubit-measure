@@ -160,6 +160,7 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
         self,
         filepath: str,
         result: Optional[RabiCheckResult] = None,
+        cfg: Optional[RabiCheckCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/reset/rabi_check",
         **kwargs,
@@ -170,7 +171,8 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
 
         gains, signals = result
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 

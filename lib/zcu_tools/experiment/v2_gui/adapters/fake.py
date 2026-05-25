@@ -29,7 +29,10 @@ from zcu_tools.gui.adapter import (
     WritebackRequest,
 )
 
-FakeResult = np.ndarray
+
+@dataclass(frozen=True)
+class FakeResult:
+    data: np.ndarray
 
 
 class FakeExpCfg(ExpCfgModel):
@@ -40,10 +43,17 @@ class FakeExpCfg(ExpCfgModel):
     sweep: object
 
 
-class FakeExperiment(AbsExperiment[FakeResult, FakeExpCfg]):
+class FakeExp(AbsExperiment[FakeResult, FakeExpCfg]):
     def run(self, cfg: FakeExpCfg) -> FakeResult:
         rng = np.random.default_rng(seed=42)
-        return rng.normal(0.0, cfg.noise_scale, size=11)
+        signals = rng.normal(0.0, cfg.noise_scale, size=11)
+        return FakeResult(data=signals)
+
+
+@dataclass
+class FakeRunResult:
+    result: FakeResult
+    cfg_snapshot: FakeExpCfg
 
 
 @dataclass
@@ -75,12 +85,12 @@ def _require_float(raw_cfg: dict[str, object], key: str) -> float:
     return float(value)
 
 
-class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult, FakeAnalyzeParams]):
+class FakeAdapter(AbsExpAdapter[FakeRunResult, FakeAnalyzeResult, FakeAnalyzeParams]):
     """Minimal stub adapter — drives the full GUI flow without hardware."""
 
-    exp_cls = FakeExperiment
+    exp_cls = FakeExp
 
-    def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:  # noqa: ARG002
+    def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
         spec = CfgSectionSpec(
             fields={
                 "reps": ScalarSpec(label="Reps", type=int),
@@ -101,7 +111,7 @@ class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult, FakeAnalyzeParams
         )
         return CfgSchema(spec=spec, value=value)
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FakeExpCfg:  # noqa: ARG002
+    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FakeExpCfg:
         return FakeExpCfg(
             reps=_require_int(raw_cfg, "reps"),
             rounds=_require_int(raw_cfg, "rounds"),
@@ -110,28 +120,32 @@ class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult, FakeAnalyzeParams
             sweep=raw_cfg["sweep"],
         )
 
+    def run(self, req: RunRequest, schema: CfgSchema) -> FakeRunResult:
+        raw_cfg = schema.to_raw_dict(req)
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = FakeExp().run(cfg)
+        return FakeRunResult(result=result, cfg_snapshot=cfg)
+
     def get_analyze_params(
-        self,
-        result: FakeResult,  # noqa: ARG002
-        ctx: ExpContext,  # noqa: ARG002
+        self, result: FakeRunResult, ctx: ExpContext
     ) -> FakeAnalyzeParams:
         return FakeAnalyzeParams(threshold=0.5)
 
     def analyze(
-        self,
-        req: AnalyzeRequest[FakeResult, FakeAnalyzeParams],
+        self, req: AnalyzeRequest[FakeRunResult, FakeAnalyzeParams]
     ) -> FakeAnalyzeResult:
         threshold = req.analyze_params.threshold
         result = req.run_result
-        if not isinstance(result, np.ndarray):
-            raise RuntimeError("Analyze request run_result must be numpy.ndarray")
-        peak = float(np.max(np.abs(result)))
+        if not isinstance(result, FakeRunResult):
+            raise RuntimeError("Analyze request run_result must be FakeRunResult")
+        data = result.result.data
+        peak = float(np.max(np.abs(data)))
         fig = Figure()
         ax = cast(Axes, fig.subplots())
-        xs = np.arange(len(result))
-        ax.plot(xs, result, label="signal")
+        xs = np.arange(len(data))
+        ax.plot(xs, data, label="signal")
         if peak > threshold:
-            idx = int(np.argmax(np.abs(result)))
+            idx = int(np.argmax(np.abs(data)))
             ax.axvline(idx, color="red", linestyle="--", label=f"peak={peak:.3f}")
         ax.axhline(
             threshold, color="gray", linestyle=":", label=f"threshold={threshold}"
@@ -141,8 +155,7 @@ class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult, FakeAnalyzeParams
         return FakeAnalyzeResult(peak=peak, figure=fig)
 
     def get_writeback_items(
-        self,
-        req: WritebackRequest[FakeResult, FakeAnalyzeResult],
+        self, req: WritebackRequest[FakeRunResult, FakeAnalyzeResult]
     ) -> Sequence[MetaDictWriteback]:
         return [
             MetaDictWriteback(
@@ -154,11 +167,8 @@ class FakeAdapter(AbsExpAdapter[FakeResult, FakeAnalyzeResult, FakeAnalyzeParams
             )
         ]
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:  # noqa: ARG002
+    def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.res_name}_fake"
 
-    def save(
-        self,
-        req: SaveDataRequest[FakeResult],  # noqa: ARG002
-    ) -> None:
+    def save(self, req: SaveDataRequest[FakeRunResult]) -> None:
         pass  # nothing to save in fake mode

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Mapping, Optional, TypeAlias
+from typing_extensions import Any, Callable, Mapping, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
@@ -31,9 +32,12 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-OneToneFluxResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+
+@dataclass(frozen=True)
+class OneToneFluxResult:
+    fluxes: NDArray[np.float64]
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
 
 
 class OneToneFluxModuleCfg(ConfigBase):
@@ -119,8 +123,10 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
             signals = np.asarray(signals)
 
         self.last_cfg = deepcopy(cfg)
-        self.last_result = (jpa_fluxs, freqs, signals)
-        return jpa_fluxs, freqs, signals
+        self.last_result = OneToneFluxResult(
+            fluxes=jpa_fluxs, freqs=freqs, signals=signals
+        )
+        return self.last_result
 
     def analyze(self, result: Optional[OneToneFluxResult] = None) -> None:
         if result is None:
@@ -132,6 +138,7 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
         self,
         filepath: str,
         result: Optional[OneToneFluxResult] = None,
+        cfg: Optional[OneToneFluxCfg] = None,
         comment: Optional[str] = None,
         tag: str = "jpa/flux_onetone",
         **kwargs,
@@ -140,9 +147,12 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        jpa_fluxs, freqs, signals = result
+        jpa_fluxs = result.fluxes
+        freqs = result.freqs
+        signals = result.signals
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 
@@ -172,9 +182,11 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
         signals = signals.astype(np.complex128)
 
         if comment is not None:
-            cfg, _, _ = parse_comment(comment)
+            _cfg, _, _ = parse_comment(comment)
 
-            if cfg is not None:
-                self.last_cfg = OneToneFluxCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (jpa_fluxs, freqs, signals)
-        return jpa_fluxs, freqs, signals
+            if _cfg is not None:
+                self.last_cfg = OneToneFluxCfg.validate_or_warn(_cfg, source=filepath)
+        self.last_result = OneToneFluxResult(
+            fluxes=jpa_fluxs, freqs=freqs, signals=signals
+        )
+        return self.last_result

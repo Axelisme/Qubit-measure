@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,7 +9,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from numpy.typing import NDArray
-from typing_extensions import Any, Optional, TypeAlias
+from typing_extensions import Any, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -38,7 +39,11 @@ from zcu_tools.utils.fitting.resonance import (
     remove_edelay,
 )
 
-DispersiveResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
+
+@dataclass(frozen=True)
+class DispersiveResult:
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
 
 
 def dispersive_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -124,9 +129,9 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
 
         # Cache results
         self.last_cfg = deepcopy(cfg)
-        self.last_result = (freqs, signals)
+        self.last_result = DispersiveResult(freqs=freqs, signals=signals)
 
-        return freqs, signals
+        return self.last_result
 
     def analyze(
         self, result: Optional[DispersiveResult] = None, fit_bg_slope: bool = False
@@ -135,7 +140,8 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        freqs, signals = result
+        freqs = result.freqs
+        signals = result.signals
         g_signals, e_signals = signals[0, :], signals[1, :]
         g_amps, e_amps = np.abs(g_signals), np.abs(e_signals)
 
@@ -228,6 +234,7 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
         self,
         filepath: str,
         result: Optional[DispersiveResult] = None,
+        cfg: Optional[DispersiveCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/dispersive",
         **kwargs,
@@ -236,10 +243,12 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        freqs, signals = result
-
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
+
+        freqs = result.freqs
+        signals = result.signals
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -268,6 +277,6 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
 
             if cfg is not None:
                 self.last_cfg = DispersiveCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (freqs, signals)
+        self.last_result = DispersiveResult(freqs=freqs, signals=signals)
 
-        return freqs, signals
+        return self.last_result

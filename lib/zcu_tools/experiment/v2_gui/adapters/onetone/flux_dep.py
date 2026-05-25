@@ -3,17 +3,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
-import numpy as np
 from matplotlib.figure import Figure
-from numpy.typing import NDArray
 
-from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepCfg, FluxDepExp
+from zcu_tools.experiment.v2.onetone.flux_dep import (
+    FluxDepCfg,
+    FluxDepExp,
+    FluxDepResult,
+)
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_module_ref_default,
     make_pulse_readout_ref_spec,
     make_reset_ref_spec,
     require_soc_handles,
-    save_with_last_state,
 )
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
@@ -38,9 +39,7 @@ from zcu_tools.program.v2 import PulseReadoutCfg
 
 @dataclass
 class OneToneFluxDepRunResult:
-    fluxes: NDArray[np.float64]
-    freqs: NDArray[np.float64]
-    signals: NDArray[np.complex128]
+    result: FluxDepResult
     cfg_snapshot: FluxDepCfg
 
 
@@ -159,13 +158,8 @@ class OneToneFluxDepAdapter(
         soc, soccfg = require_soc_handles(req)
         raw_cfg = schema.to_raw_dict(req)
         cfg = self.build_exp_cfg(raw_cfg, req)
-        fluxes, freqs, signals = FluxDepExp().run(soc, soccfg, cfg)
-        return OneToneFluxDepRunResult(
-            fluxes=fluxes,
-            freqs=freqs,
-            signals=signals,
-            cfg_snapshot=cfg,
-        )
+        result = FluxDepExp().run(soc, soccfg, cfg)
+        return OneToneFluxDepRunResult(result=result, cfg_snapshot=cfg)
 
     def get_analyze_params(
         self, result: OneToneFluxDepRunResult, ctx: ExpContext
@@ -186,10 +180,9 @@ class OneToneFluxDepAdapter(
         return f"{ctx.res_name}_flux"
 
     def save(self, req: SaveDataRequest[OneToneFluxDepRunResult]) -> None:
-        result = req.run_result
-        save_with_last_state(
-            exp_cls=FluxDepExp,
-            cfg=result.cfg_snapshot,
-            result=(result.fluxes, result.freqs, result.signals),
+        run_result = req.run_result
+        FluxDepExp().save(
             filepath=req.data_path,
+            result=run_result.result,
+            cfg=run_result.cfg_snapshot,
         )

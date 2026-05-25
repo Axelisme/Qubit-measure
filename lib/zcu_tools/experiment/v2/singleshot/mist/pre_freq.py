@@ -173,6 +173,7 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
         self,
         filepath: str,
         result: Optional[PreFreqResult] = None,
+        cfg: Optional[PreFreqCfg] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/mist/gain",
         **kwargs,
@@ -183,7 +184,8 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
 
         freqs, populations = result
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 

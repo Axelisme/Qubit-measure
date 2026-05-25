@@ -230,6 +230,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         self,
         filepath: str,
         result: Optional[FreqResult] = None,
+        cfg: Optional[FreqCfg] = None,
         comment: Optional[str] = None,
         tag: str = "fastflux/distortion/freq",
         **kwargs,
@@ -240,7 +241,8 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         lengths, freqs, signals2D = result
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 

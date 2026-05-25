@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import warnings
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
-from typing_extensions import Callable, Optional, TypeAlias
+from typing_extensions import Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -29,7 +30,11 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-LookbackResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
+
+@dataclass(frozen=True)
+class LookbackResult:
+    times: NDArray[np.float64]
+    signals: NDArray[np.complex128]
 
 
 class LookbackModuleCfg(ConfigBase):
@@ -87,9 +92,9 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
 
         # record last cfg and result
         self.last_cfg = deepcopy(cfg)
-        self.last_result = (Ts, signals)
+        self.last_result = LookbackResult(times=Ts, signals=signals)
 
-        return Ts, signals
+        return self.last_result
 
     def analyze(
         self,
@@ -104,7 +109,8 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        Ts, signals = result
+        Ts = result.times
+        signals = result.signals
 
         if smooth is not None:
             signals = gaussian_filter1d(signals, smooth)
@@ -145,6 +151,7 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
         self,
         filepath: str,
         result: Optional[LookbackResult] = None,
+        cfg: Optional[LookbackCfg] = None,
         comment: Optional[str] = None,
         tag: str = "lookback",
         **kwargs,
@@ -153,9 +160,11 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        Ts, signals = result
+        Ts = result.times
+        signals = result.signals
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 
@@ -183,6 +192,6 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
                 self.last_cfg = LookbackCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (Ts, signals)
+        self.last_result = LookbackResult(times=Ts, signals=signals)
 
-        return Ts, signals
+        return self.last_result

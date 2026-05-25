@@ -6,7 +6,7 @@ from qtpy.QtWidgets import QPushButton
 from zcu_tools.experiment.v2_gui.adapters.onetone.fakefreq import (
     FakeFreqAdapter,
     FakeFreqAnalyzeParams,
-    FreqRunResult,
+    FakeFreqRunResult,
 )
 from zcu_tools.gui.adapter import (
     AnalyzeRequest,
@@ -30,7 +30,7 @@ def _make_ctx() -> ExpContext:
 
 
 def _default_analyze_params(
-    adapter: FakeFreqAdapter, result: FreqRunResult, ctx: ExpContext
+    adapter: FakeFreqAdapter, result: FakeFreqRunResult, ctx: ExpContext
 ) -> FakeFreqAnalyzeParams:
     return adapter.get_analyze_params(result, ctx)
 

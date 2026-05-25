@@ -156,6 +156,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         self,
         filepath: str,
         result: Optional[LenRabiResult] = None,
+        cfg: Optional[LenRabiCfg] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/ge/rabi_length",
         **kwargs,
@@ -165,7 +166,8 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         assert result is not None, "no result found"
 
         lens, populations = result
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 

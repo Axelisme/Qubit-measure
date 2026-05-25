@@ -243,6 +243,7 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
         self,
         filepath: str,
         result: Optional[FreqPowerResult] = None,
+        cfg: Optional[FreqPowerCfg] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/mist/gain_freq",
         **kwargs,
@@ -255,7 +256,8 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
 
         gains, freqs, populations = result
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 

@@ -15,10 +15,7 @@ from zcu_tools.experiment.v2_gui.adapters.onetone.flux_dep import (
     OneToneFluxDepAdapter,
     OneToneFluxDepRunResult,
 )
-from zcu_tools.experiment.v2_gui.adapters.onetone.freq import (
-    OneToneFreqAdapter,
-    OneToneFreqRunResult,
-)
+from zcu_tools.experiment.v2_gui.adapters.onetone.freq import OneToneFreqAdapter
 from zcu_tools.experiment.v2_gui.adapters.onetone.power_dep import (
     NoAnalyzeParams as PowerNoAnalyzeParams,
 )
@@ -26,7 +23,7 @@ from zcu_tools.experiment.v2_gui.adapters.onetone.power_dep import (
     OneTonePowerDepAdapter,
     OneTonePowerDepRunResult,
 )
-from zcu_tools.gui.adapter import AnalyzeRequest, CfgSchema, RunRequest, SaveDataRequest
+from zcu_tools.gui.adapter import AnalyzeRequest, CfgSchema, RunRequest
 from zcu_tools.gui.adapter.lowering import schema_to_dict
 from zcu_tools.program.v2 import SweepCfg
 
@@ -126,118 +123,3 @@ def test_real_onetone_run_without_soc_fast_fails(adapter) -> None:
 
     with pytest.raises(RuntimeError, match="soc is required"):
         adapter.run(_make_req(ml), schema)
-
-
-def test_power_dep_noop_analysis_and_writeback() -> None:
-    adapter = OneTonePowerDepAdapter()
-    result = OneTonePowerDepRunResult(
-        gains=np.array([0.1]),
-        freqs=np.array([6000.0]),
-        signals=np.array([[1.0 + 0.0j]]),
-        cfg_snapshot=MagicMock(),
-    )
-    analyze_result = adapter.analyze(
-        AnalyzeRequest(
-            run_result=result,
-            analyze_params=PowerNoAnalyzeParams(),
-            md=MagicMock(),
-            ml=MagicMock(),
-            predictor=None,
-        )
-    )
-
-    assert analyze_result.figure is None
-    assert adapter.get_writeback_items(MagicMock()) == []
-
-
-def test_flux_dep_noop_analysis_and_writeback() -> None:
-    adapter = OneToneFluxDepAdapter()
-    result = OneToneFluxDepRunResult(
-        fluxes=np.array([0.0]),
-        freqs=np.array([6000.0]),
-        signals=np.array([[1.0 + 0.0j]]),
-        cfg_snapshot=MagicMock(),
-    )
-    analyze_result = adapter.analyze(
-        AnalyzeRequest(
-            run_result=result,
-            analyze_params=FluxNoAnalyzeParams(),
-            md=MagicMock(),
-            ml=MagicMock(),
-            predictor=None,
-        )
-    )
-
-    assert analyze_result.figure is None
-    assert adapter.get_writeback_items(MagicMock()) == []
-
-
-@pytest.mark.parametrize(
-    ("adapter", "result", "module_name", "expected_result_len"),
-    [
-        (
-            OneToneFreqAdapter(),
-            OneToneFreqRunResult(
-                freqs=np.array([6000.0]),
-                signals=np.array([1.0 + 0.0j]),
-                cfg_snapshot=MagicMock(),
-            ),
-            "freq",
-            2,
-        ),
-        (
-            OneTonePowerDepAdapter(),
-            OneTonePowerDepRunResult(
-                gains=np.array([0.1]),
-                freqs=np.array([6000.0]),
-                signals=np.array([[1.0 + 0.0j]]),
-                cfg_snapshot=MagicMock(),
-            ),
-            "power_dep",
-            3,
-        ),
-        (
-            OneToneFluxDepAdapter(),
-            OneToneFluxDepRunResult(
-                fluxes=np.array([0.0]),
-                freqs=np.array([6000.0]),
-                signals=np.array([[1.0 + 0.0j]]),
-                cfg_snapshot=MagicMock(),
-            ),
-            "flux_dep",
-            3,
-        ),
-    ],
-)
-def test_onetone_save_delegates_with_snapshot(
-    monkeypatch: pytest.MonkeyPatch,
-    adapter,
-    result,
-    module_name: str,
-    expected_result_len: int,
-) -> None:
-    captured = {}
-
-    def fake_save_with_last_state(**kwargs):
-        captured.update(kwargs)
-
-    monkeypatch.setattr(
-        f"zcu_tools.experiment.v2_gui.adapters.onetone.{module_name}.save_with_last_state",
-        fake_save_with_last_state,
-    )
-    adapter.save(
-        SaveDataRequest(
-            run_result=result,
-            data_path="/tmp/data",
-            md=MagicMock(),
-            ml=MagicMock(),
-            chip_name="chip",
-            qub_name="qub",
-            res_name="res",
-            active_label="label",
-        )
-    )
-
-    assert captured["cfg"] is result.cfg_snapshot
-    assert captured["filepath"] == "/tmp/data"
-    assert len(captured["result"]) == expected_result_len

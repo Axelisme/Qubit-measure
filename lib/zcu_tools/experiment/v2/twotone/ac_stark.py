@@ -310,6 +310,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         self,
         filepath: str,
         result: Optional[AcStarkResult] = None,
+        cfg: Optional[AcStarkCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/ac_stark",
         **kwargs,
@@ -321,7 +322,8 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
 
         gains, freqs, signals2D = result
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 
@@ -546,6 +548,7 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
         self,
         filepath: str,
         result: Optional[AcStarkResult] = None,
+        cfg: Optional[AcStarkRamseyCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/ac_stark_ramsey",
         **kwargs,
@@ -557,7 +560,8 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
 
         gains, lens, signals2D = result
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 

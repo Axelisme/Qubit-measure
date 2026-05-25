@@ -218,6 +218,7 @@ class AccPhaseExp(AbsExperiment[AccPhaseResult, AccPhaseCfg]):
         self,
         filepath: str,
         result: Optional[AccPhaseResult] = None,
+        cfg: Optional[AccPhaseCfg] = None,
         comment: Optional[str] = None,
         tag: str = "fastflux/distortion/acc_phase",
         **kwargs,
@@ -228,7 +229,8 @@ class AccPhaseExp(AbsExperiment[AccPhaseResult, AccPhaseCfg]):
 
         lengths, phases, signals2D = result
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 

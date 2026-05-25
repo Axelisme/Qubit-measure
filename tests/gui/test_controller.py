@@ -11,14 +11,7 @@ from qtpy.QtCore import QCoreApplication
 from qtpy.QtWidgets import QLabel, QStackedWidget
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
-from zcu_tools.gui.adapter import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    ExpContext,
-    ScalarSpec,
-    ScalarValue,
-)
+from zcu_tools.gui.adapter import CfgSchema, ExpContext
 from zcu_tools.gui.controller import Controller
 from zcu_tools.gui.event_bus import (
     GuiEvent,
@@ -270,7 +263,7 @@ def test_get_tab_result_returns_last_result(cf):
     cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     result = cf.ctrl.get_tab_result(tab_id)
-    assert isinstance(result, np.ndarray)
+    assert isinstance(result.result.data, np.ndarray)
 
 
 def test_get_adapter_names_includes_fake(cf):

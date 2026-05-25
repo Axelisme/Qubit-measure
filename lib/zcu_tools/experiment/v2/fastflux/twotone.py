@@ -169,6 +169,7 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
         self,
         filepath: str,
         result: Optional[TwoToneResult] = None,
+        cfg: Optional[TwotoneCfg] = None,
         comment: Optional[str] = None,
         tag: str = "fastflux/twotone",
         **kwargs,
@@ -179,7 +180,8 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
 
         gains, freqs, signals2D = result
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 

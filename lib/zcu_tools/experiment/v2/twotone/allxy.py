@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.optimize import curve_fit
-from typing_extensions import Any, Callable, Optional, TypeAlias
+from typing_extensions import Any, Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -29,8 +30,11 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
-# (signals in ALLXY_SEQUENCE order)
-AllXY_Result: TypeAlias = NDArray[np.complex128]
+
+@dataclass(frozen=True)
+class AllXY_Result:
+    signals: NDArray[np.complex128]
+
 
 # Standard AllXY sequence of 21 gate pairs
 ALLXY_SEQUENCE = [
@@ -221,9 +225,9 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
 
         # Cache results
         self.last_cfg = deepcopy(cfg)
-        self.last_result = signals
+        self.last_result = AllXY_Result(signals=signals)
 
-        return signals
+        return self.last_result
 
     def analyze(
         self, result: Optional[AllXY_Result] = None, fit_ge: bool = False
@@ -234,7 +238,7 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
             "No measurement data available. Run experiment first."
         )
 
-        signals = result
+        signals = result.signals
 
         # Rotate IQ data so that the contrast lies on the real axis and take only
         # the real part for further analysis.
@@ -339,6 +343,7 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
         self,
         filepath: str,
         result: Optional[AllXY_Result] = None,
+        cfg: Optional[AllXYCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/allxy",
         **kwargs,
@@ -349,11 +354,12 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
             "No measurement data available. Run experiment first."
         )
 
-        gate_idxs = np.arange(len(ALLXY_SEQUENCE))
-        signals = result
-
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
+
+        gate_idxs = np.arange(len(ALLXY_SEQUENCE))
+        signals = result.signals
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -380,6 +386,6 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
 
             if cfg is not None:
                 self.last_cfg = AllXYCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = signals
+        self.last_result = AllXY_Result(signals=signals)
 
-        return signals
+        return self.last_result

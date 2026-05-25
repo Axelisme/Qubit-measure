@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, TypeAlias
+from typing_extensions import Any, Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -27,8 +28,11 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-# (freqs, signals)
-SA_FreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
+
+@dataclass(frozen=True)
+class SA_FreqResult:
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
 
 
 class SA_FreqModuleCfg(ConfigBase):
@@ -107,16 +111,17 @@ class SA_FreqExp(AbsExperiment[SA_FreqResult, SA_FreqCfg]):
 
         # record last cfg and result
         self.last_cfg = deepcopy(cfg)
-        self.last_result = (freqs, signals)
+        self.last_result = SA_FreqResult(freqs=freqs, signals=signals)
 
-        return freqs, signals
+        return self.last_result
 
     def analyze(self, result: Optional[SA_FreqResult] = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        freqs, signals = result
+        freqs = result.freqs
+        signals = result.signals
 
         fig, ax = plt.subplots(figsize=config.figsize)
 
@@ -136,6 +141,7 @@ class SA_FreqExp(AbsExperiment[SA_FreqResult, SA_FreqCfg]):
         self,
         filepath: str,
         result: Optional[SA_FreqResult] = None,
+        cfg: Optional[SA_FreqCfg] = None,
         comment: Optional[str] = None,
         tag: str = "onetone/sa_freq",
         **kwargs,
@@ -144,9 +150,11 @@ class SA_FreqExp(AbsExperiment[SA_FreqResult, SA_FreqCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        freqs, signals = result
+        freqs = result.freqs
+        signals = result.signals
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 
@@ -173,6 +181,6 @@ class SA_FreqExp(AbsExperiment[SA_FreqResult, SA_FreqCfg]):
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
                 self.last_cfg = SA_FreqCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (freqs, signals)
+        self.last_result = SA_FreqResult(freqs=freqs, signals=signals)
 
-        return freqs, signals
+        return self.last_result

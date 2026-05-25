@@ -176,6 +176,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
         self,
         filepath: str,
         result: Optional[PhaseResult] = None,
+        cfg: Optional[PhaseCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/reset/bath/phase",
         **kwargs,
@@ -186,7 +187,8 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
 
         phases, signals = result
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 

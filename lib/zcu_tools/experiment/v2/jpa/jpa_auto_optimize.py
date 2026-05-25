@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -9,7 +10,7 @@ from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d import Axes3D
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Mapping, Optional, TypeAlias, cast
+from typing_extensions import Any, Callable, Mapping, Optional, cast
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
@@ -44,9 +45,12 @@ from zcu_tools.utils.datasaver import load_data, save_data
 
 from .jpa_optimizer import JPAOptimizer
 
-JPAOptimizeResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.int32], NDArray[np.float64]
-]
+
+@dataclass(frozen=True)
+class JPAOptimizeResult:
+    params: NDArray[np.float64]
+    phases: NDArray[np.int32]
+    signals: NDArray[np.float64]
 
 
 class JPAOptModuleCfg(ConfigBase):
@@ -205,9 +209,11 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
         plt.close(fig)
 
         self.last_cfg = deepcopy(cfg)
-        self.last_result = (params, phases, signals)
+        self.last_result = JPAOptimizeResult(
+            params=params, phases=phases, signals=signals
+        )
 
-        return params, phases, signals
+        return self.last_result
 
     def analyze(
         self, result: Optional[JPAOptimizeResult] = None
@@ -216,7 +222,9 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        params, phases, signals = result
+        params = result.params
+        phases = result.phases
+        signals = result.signals
         snrs = np.abs(signals)
 
         max_id = np.nanargmax(snrs)
@@ -265,7 +273,9 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        params, phases, signals = result
+        params = result.params
+        phases = result.phases
+        signals = result.signals
         snrs = np.abs(signals)
 
         max_snr = np.nanmax(snrs)
@@ -292,6 +302,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
         self,
         filepath: str,
         result: Optional[JPAOptimizeResult] = None,
+        cfg: Optional[JPAOptCfg] = None,
         comment: Optional[str] = None,
         tag: str = "jpa/auto_optimize",
         **kwargs,
@@ -300,7 +311,9 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        params, phases, signals = result
+        params = result.params
+        phases = result.phases
+        signals = result.signals
 
         _filepath = Path(filepath)
 
@@ -310,7 +323,8 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
             "values": np.arange(params.shape[0]),
         }
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 
@@ -374,9 +388,11 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
         signals = signals.astype(np.float64)
 
         if comment is not None:
-            cfg, _, _ = parse_comment(comment)
-            if cfg is not None:
-                self.last_cfg = JPAOptCfg.validate_or_warn(cfg, source=param_path)
-        self.last_result = (params, phases, signals)
+            _cfg, _, _ = parse_comment(comment)
+            if _cfg is not None:
+                self.last_cfg = JPAOptCfg.validate_or_warn(_cfg, source=param_path)
+        self.last_result = JPAOptimizeResult(
+            params=params, phases=phases, signals=signals
+        )
 
-        return params, phases, signals
+        return self.last_result

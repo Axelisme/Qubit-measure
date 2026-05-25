@@ -38,15 +38,7 @@ class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult, T_AnalyzeParams]):
         """Convert lowered raw cfg into the concrete experiment config model."""
 
     def run(self, req: RunRequest, schema: CfgSchema) -> T_Result:
-        """Default run pipeline for experiment-class adapters."""
-        if self.exp_cls is None:
-            raise RuntimeError(
-                f"{type(self).__name__} must define exp_cls or override run()"
-            )
-        raw_cfg = schema.to_raw_dict(req)
-        exp_cfg = self.build_exp_cfg(raw_cfg, req)
-        experiment = cast(Any, self.exp_cls())
-        return cast(T_Result, experiment.run(exp_cfg))
+        raise NotImplementedError("Run method is not implemented for this adapter")
 
     @abstractmethod
     def get_analyze_params(self, result: T_Result, ctx: ExpContext) -> T_AnalyzeParams:

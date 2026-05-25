@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,7 +13,6 @@ from typing_extensions import (
     Callable,
     Literal,
     Optional,
-    TypeAlias,
 )
 
 from zcu_tools.cfg_model import ConfigBase
@@ -39,10 +39,12 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
-# (times, values, signals)
-ZigZagScanResult: TypeAlias = tuple[
-    NDArray[np.int64], NDArray[np.float64], NDArray[np.complex128]
-]
+
+@dataclass(frozen=True)
+class ZigZagScanResult:
+    times: NDArray[np.int64]
+    values: NDArray[np.float64]
+    signals: NDArray[np.complex128]
 
 
 def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -173,9 +175,9 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
 
         # record last cfg and result
         self.last_cfg = original_cfg
-        self.last_result = (times, values, signals)
+        self.last_result = ZigZagScanResult(times=times, values=values, signals=signals)
 
-        return times, values, signals
+        return self.last_result
 
     def analyze(
         self,
@@ -186,7 +188,9 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        times, values, signals = result
+        times = result.times
+        values = result.values
+        signals = result.signals
 
         real_signals = zigzag_signal2real(signals)  # (times , values)
         valid_cutoff = np.min(np.sum(~np.isnan(real_signals), axis=0))
@@ -233,6 +237,7 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
         self,
         filepath: str,
         result: Optional[ZigZagScanResult] = None,
+        cfg: Optional[ZigZagScanCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/zigzag_scan",
         **kwargs,
@@ -241,12 +246,13 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        times, values, signals = result
-
-        times = times.astype(np.float64)
-
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
+
+        times = result.times.astype(np.float64)
+        values = result.values
+        signals = result.signals
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -278,6 +284,6 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
 
             if cfg is not None:
                 self.last_cfg = ZigZagScanCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (times, values, signals)
+        self.last_result = ZigZagScanResult(times=times, values=values, signals=signals)
 
-        return times, values, signals
+        return self.last_result

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,7 +11,6 @@ from typing_extensions import (
     Any,
     Literal,
     Optional,
-    TypeAlias,
 )
 
 from zcu_tools.cfg_model import ConfigBase
@@ -37,8 +37,11 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.utils.process import rotate2real
 
-# (times, signals)
-T2EchoResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
+
+@dataclass(frozen=True)
+class T2EchoResult:
+    times: NDArray[np.float64]
+    signals: NDArray[np.complex128]
 
 
 def t2echo_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -149,9 +152,9 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
 
         # record last cfg and result
         self.last_cfg = deepcopy(cfg)
-        self.last_result = (lengths, signals)
+        self.last_result = T2EchoResult(times=lengths, signals=signals)
 
-        return (lengths, signals), true_detune
+        return self.last_result, true_detune
 
     def analyze(
         self,
@@ -163,7 +166,7 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        xs, signals = result
+        xs, signals = result.times, result.signals
 
         xs = xs[1:]
         signals = signals[1:]
@@ -213,6 +216,7 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
         self,
         filepath: str,
         result: Optional[T2EchoResult] = None,
+        cfg: Optional[T2EchoCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/t2echo",
         **kwargs,
@@ -221,8 +225,9 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        Ts, signals = result
-        cfg = self.last_cfg
+        Ts, signals = result.times, result.signals
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 
@@ -247,10 +252,10 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
         signals = signals.astype(np.complex128)
 
         if comment is not None:
-            cfg, _, _ = parse_comment(comment)
+            _cfg, _, _ = parse_comment(comment)
 
-            if cfg is not None:
-                self.last_cfg = T2EchoCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (Ts, signals)
+            if _cfg is not None:
+                self.last_cfg = T2EchoCfg.validate_or_warn(_cfg, source=filepath)
+        self.last_result = T2EchoResult(times=Ts, signals=signals)
 
-        return Ts, signals
+        return self.last_result

@@ -354,6 +354,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         self,
         filepath: str,
         result: Optional[T1WithToneResult] = None,
+        cfg: Optional[T1WithToneCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/t1/t1_with_tone",
         **kwargs,
@@ -370,7 +371,8 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         _filepath = Path(filepath)
 
         # initial in g
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 

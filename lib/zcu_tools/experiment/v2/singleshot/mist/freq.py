@@ -176,6 +176,7 @@ class FreqDepExp(AbsExperiment[FreqResult, FreqCfg]):
         self,
         filepath: str,
         result: Optional[FreqResult] = None,
+        cfg: Optional[FreqCfg] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/mist/freq",
         **kwargs,
@@ -186,7 +187,8 @@ class FreqDepExp(AbsExperiment[FreqResult, FreqCfg]):
 
         freqs, populations = result
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 

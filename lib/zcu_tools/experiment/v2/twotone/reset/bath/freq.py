@@ -189,6 +189,7 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         self,
         filepath: str,
         result: Optional[FreqGainResult] = None,
+        cfg: Optional[FreqGainCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/reset/bath/freq_gain",
         **kwargs,
@@ -202,7 +203,8 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         _filepath = Path(filepath)
 
         # 0 signals
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 

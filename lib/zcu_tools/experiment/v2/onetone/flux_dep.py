@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Callable, Mapping, Optional, TypeAlias, cast
+from typing_extensions import Callable, Mapping, Optional, cast
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import DeviceInfo
@@ -32,9 +33,12 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-FluxDepResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+
+@dataclass(frozen=True)
+class FluxDepResult:
+    values: NDArray[np.float64]
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
 
 
 def fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -128,9 +132,11 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
 
         # record last cfg and result
         self.last_cfg = original_cfg
-        self.last_result = (dev_values, freqs, signals)
+        self.last_result = FluxDepResult(
+            values=dev_values, freqs=freqs, signals=signals
+        )
 
-        return dev_values, freqs, signals
+        return self.last_result
 
     def analyze(
         self,
@@ -142,7 +148,9 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, freqs, signals2D = result
+        values = result.values
+        freqs = result.freqs
+        signals2D = result.signals
 
         actline = InteractiveLines(
             signals2D,
@@ -158,6 +166,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         self,
         filepath: str,
         result: Optional[FluxDepResult] = None,
+        cfg: Optional[FluxDepCfg] = None,
         comment: Optional[str] = None,
         tag: str = "onetone/flux_dep",
         **kwargs,
@@ -166,9 +175,12 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, freqs, signals2D = result
+        values = result.values
+        freqs = result.freqs
+        signals2D = result.signals
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 
@@ -201,6 +213,6 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
 
             if cfg is not None:
                 self.last_cfg = FluxDepCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (values, freqs, signals2D)
+        self.last_result = FluxDepResult(values=values, freqs=freqs, signals=signals2D)
 
-        return values, freqs, signals2D
+        return self.last_result

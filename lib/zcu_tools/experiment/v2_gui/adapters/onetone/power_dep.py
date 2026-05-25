@@ -4,17 +4,18 @@ import time
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
-import numpy as np
 from matplotlib.figure import Figure
-from numpy.typing import NDArray
 
-from zcu_tools.experiment.v2.onetone.power_dep import PowerDepCfg, PowerDepExp
+from zcu_tools.experiment.v2.onetone.power_dep import (
+    PowerDepCfg,
+    PowerDepExp,
+    PowerDepResult,
+)
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_module_ref_default,
     make_pulse_readout_ref_spec,
     make_reset_ref_spec,
     require_soc_handles,
-    save_with_last_state,
 )
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
@@ -38,9 +39,7 @@ from zcu_tools.program.v2 import PulseReadoutCfg
 
 @dataclass
 class OneTonePowerDepRunResult:
-    gains: NDArray[np.float64]
-    freqs: NDArray[np.float64]
-    signals: NDArray[np.complex128]
+    result: PowerDepResult
     cfg_snapshot: PowerDepCfg
 
 
@@ -150,18 +149,8 @@ class OneTonePowerDepAdapter(
         raw_cfg = schema.to_raw_dict(req)
         cfg = self.build_exp_cfg(raw_cfg, req)
         earlystop_snr = self._earlystop_snr(raw_cfg)
-        gains, freqs, signals = PowerDepExp().run(
-            soc,
-            soccfg,
-            cfg,
-            earlystop_snr=earlystop_snr,
-        )
-        return OneTonePowerDepRunResult(
-            gains=gains,
-            freqs=freqs,
-            signals=signals,
-            cfg_snapshot=cfg,
-        )
+        result = PowerDepExp().run(soc, soccfg, cfg, earlystop_snr=earlystop_snr)
+        return OneTonePowerDepRunResult(result=result, cfg_snapshot=cfg)
 
     def get_analyze_params(
         self, result: OneTonePowerDepRunResult, ctx: ExpContext
@@ -182,10 +171,9 @@ class OneTonePowerDepAdapter(
         return f"{ctx.res_name}_gain_{time.strftime('%H%M')}"
 
     def save(self, req: SaveDataRequest[OneTonePowerDepRunResult]) -> None:
-        result = req.run_result
-        save_with_last_state(
-            exp_cls=PowerDepExp,
-            cfg=result.cfg_snapshot,
-            result=(result.gains, result.freqs, result.signals),
+        run_result = req.run_result
+        PowerDepExp().save(
             filepath=req.data_path,
+            result=run_result.result,
+            cfg=run_result.cfg_snapshot,
         )

@@ -205,6 +205,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         self,
         filepath: str,
         result: Optional[T1Result] = None,
+        cfg: Optional[T1Cfg] = None,
         comment: Optional[str] = None,
         tag: str = "fastflux/t1",
         **kwargs,
@@ -215,7 +216,8 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
         gains, lengths, signals2D = result
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 

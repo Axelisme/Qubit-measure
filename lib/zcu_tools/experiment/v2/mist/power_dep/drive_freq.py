@@ -164,6 +164,7 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
         self,
         filepath: str,
         result: Optional[DriveFreqResult] = None,
+        cfg: Optional[DriveFreqCfg] = None,
         comment: Optional[str] = None,
         tag: str = "mist/",
         **kwargs,
@@ -174,7 +175,8 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
 
         freqs, gains, signals = result
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 

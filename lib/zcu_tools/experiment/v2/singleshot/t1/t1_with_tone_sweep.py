@@ -529,6 +529,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         self,
         filepath: str,
         result: Optional[T1WithToneSweepResult] = None,
+        cfg: Optional[T1WithToneSweepCfg] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/t1/t1_with_tone_sweep",
         **kwargs,
@@ -537,7 +538,8 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
             result = self.last_result
         assert result is not None, "no result found"
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
 
         xs, Ts, populations = result

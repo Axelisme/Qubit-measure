@@ -4,9 +4,7 @@ import time
 from dataclasses import dataclass
 from typing import Annotated, Sequence
 
-import numpy as np
 from matplotlib.figure import Figure
-from numpy.typing import NDArray
 
 from zcu_tools.experiment.v2.lookback import LookbackCfg, LookbackExp, LookbackResult
 from zcu_tools.experiment.v2_gui.adapters.shared import (
@@ -15,7 +13,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_ref_spec,
     make_reset_ref_spec,
     require_soc_handles,
-    save_with_last_state,
 )
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
@@ -39,8 +36,7 @@ from zcu_tools.program.v2 import PulseReadoutCfg
 
 @dataclass
 class LookbackRunResult:
-    times: NDArray[np.float64]
-    signals: NDArray[np.complex128]
+    result: LookbackResult
     cfg_snapshot: LookbackCfg
 
 
@@ -55,13 +51,6 @@ class LookbackAnalyzeParams:
 class LookbackAnalyzeResult:
     predict_offset: float
     figure: Figure
-
-
-def _md_float(ctx: ExpContext, key: str, default: float) -> float:
-    value = getattr(ctx.md, key, None)
-    if isinstance(value, (int, float)):
-        return float(value)
-    return default
 
 
 def _pulse_readout_default(ctx: ExpContext):
@@ -118,8 +107,8 @@ class LookbackAdapter(
         soc, soccfg = require_soc_handles(req)
         raw_cfg = schema.to_raw_dict(req)
         cfg = self.build_exp_cfg(raw_cfg, req)
-        times, signals = LookbackExp().run(soc, soccfg, cfg)
-        return LookbackRunResult(times=times, signals=signals, cfg_snapshot=cfg)
+        result = LookbackExp().run(soc, soccfg, cfg)
+        return LookbackRunResult(result=result, cfg_snapshot=cfg)
 
     def get_analyze_params(
         self, result: LookbackRunResult, ctx: ExpContext
@@ -131,12 +120,12 @@ class LookbackAdapter(
         req: AnalyzeRequest[LookbackRunResult, LookbackAnalyzeParams],
     ) -> LookbackAnalyzeResult:
         params = req.analyze_params
-        result = req.run_result
+        run_result = req.run_result
         offset, figure = LookbackExp().analyze(
-            (result.times, result.signals),
+            run_result.result,
             ratio=params.ratio,
             smooth=params.smooth,
-            ro_cfg=result.cfg_snapshot.modules.readout.ro_cfg,
+            ro_cfg=run_result.cfg_snapshot.modules.readout.ro_cfg,
             plot_fit=params.plot_fit,
         )
         return LookbackAnalyzeResult(predict_offset=offset, figure=figure)
@@ -158,10 +147,9 @@ class LookbackAdapter(
         return f"lookback_{time.strftime('%H%M')}"
 
     def save(self, req: SaveDataRequest[LookbackRunResult]) -> None:
-        result = req.run_result
-        save_with_last_state(
-            exp_cls=LookbackExp,
-            cfg=result.cfg_snapshot,
-            result=(result.times, result.signals),
+        run_result = req.run_result
+        LookbackExp().save(
             filepath=req.data_path,
+            result=run_result.result,
+            cfg=run_result.cfg_snapshot,
         )

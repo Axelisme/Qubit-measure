@@ -4,11 +4,9 @@ import time
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, Sequence
 
-import numpy as np
 from matplotlib.figure import Figure
-from numpy.typing import NDArray
 
-from zcu_tools.experiment.v2.onetone.freq import FreqCfg, FreqExp
+from zcu_tools.experiment.v2.onetone.freq import FreqCfg, FreqExp, FreqResult
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     build_readout_for_frequency,
     build_waveform_for_length,
@@ -18,7 +16,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_readout_edit_template,
     make_reset_ref_spec,
     require_soc_handles,
-    save_with_last_state,
 )
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
@@ -46,8 +43,7 @@ from zcu_tools.program.v2 import PulseReadoutCfg
 
 @dataclass
 class OneToneFreqRunResult:
-    freqs: NDArray[np.float64]
-    signals: NDArray[np.complex128]
+    result: FreqResult
     cfg_snapshot: FreqCfg
 
 
@@ -143,8 +139,8 @@ class OneToneFreqAdapter(
         soc, soccfg = require_soc_handles(req)
         raw_cfg = schema.to_raw_dict(req)
         cfg = self.build_exp_cfg(raw_cfg, req)
-        freqs, signals = FreqExp().run(soc, soccfg, cfg)
-        return OneToneFreqRunResult(freqs=freqs, signals=signals, cfg_snapshot=cfg)
+        result = FreqExp().run(soc, soccfg, cfg)
+        return OneToneFreqRunResult(result=result, cfg_snapshot=cfg)
 
     def get_analyze_params(
         self, result: OneToneFreqRunResult, ctx: ExpContext
@@ -156,9 +152,9 @@ class OneToneFreqAdapter(
         req: AnalyzeRequest[OneToneFreqRunResult, OneToneFreqAnalyzeParams],
     ) -> OneToneFreqAnalyzeResult:
         params = req.analyze_params
-        result = req.run_result
+        run_result = req.run_result
         freq, fwhm, fit_params, figure = FreqExp().analyze(
-            (result.freqs, result.signals),
+            run_result.result,
             model_type=params.model_type,
             fit_bg_slope=params.fit_bg_slope,
         )
@@ -231,10 +227,9 @@ class OneToneFreqAdapter(
         return f"{ctx.res_name}_freq_{time.strftime('%m%d')}"
 
     def save(self, req: SaveDataRequest[OneToneFreqRunResult]) -> None:
-        result = req.run_result
-        save_with_last_state(
-            exp_cls=FreqExp,
-            cfg=result.cfg_snapshot,
-            result=(result.freqs, result.signals),
+        run_result = req.run_result
+        FreqExp().save(
             filepath=req.data_path,
+            result=run_result.result,
+            cfg=run_result.cfg_snapshot,
         )

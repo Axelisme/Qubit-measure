@@ -20,7 +20,7 @@ from typing_extensions import Callable
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.base import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.v2.onetone.freq import FreqExp
+from zcu_tools.experiment.v2.onetone.freq import FreqExp, FreqResult
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     build_readout_for_frequency,
@@ -100,10 +100,9 @@ class FakeFreqCfg(ProgramV2Cfg, ExpCfgModel):
 
 
 @dataclass
-class FreqRunResult:
-    freqs: NDArray[np.float64]
-    signals: NDArray[np.complex128]
-    cfg_snapshot: FakeFreqCfg  # immutable record of the run configuration
+class FakeFreqRunResult:
+    result: FreqResult
+    cfg_snapshot: FakeFreqCfg
 
 
 @dataclass
@@ -125,10 +124,10 @@ class FakeFreqAnalyzeParams:
 # ---------------------------------------------------------------------------
 
 
-class FakeFreqExp(AbsExperiment[FreqRunResult, FakeFreqCfg]):
+class FakeFreqExp(AbsExperiment[FreqResult, FakeFreqCfg]):
     """Simulated FreqExp: same run/analyze/save interface, no hardware required."""
 
-    def run(self, cfg: FakeFreqCfg) -> FreqRunResult:
+    def run(self, cfg: FakeFreqCfg) -> FreqResult:
         sweep = cfg.sweep.freq
         freqs = np.linspace(sweep.start, sweep.stop, sweep.expts)
 
@@ -173,19 +172,18 @@ class FakeFreqExp(AbsExperiment[FreqRunResult, FakeFreqCfg]):
                 on_update=lambda ctx: viewer.update(freqs, np.abs(ctx.root_data)),
             )
 
-        return FreqRunResult(freqs=freqs, signals=signals, cfg_snapshot=cfg)
+        return FreqResult(freqs=freqs, signals=signals)
 
     def analyze(
         self,
-        result: Optional[FreqRunResult] = None,
+        result: Optional[FreqResult] = None,
         *,
         model_type: Literal["hm", "t", "auto"] = "auto",
         fit_bg_slope: bool = False,
     ) -> tuple[float, float, dict[str, Any], Figure]:
         assert result is not None
-        raw_result = (result.freqs, result.signals)
         return FreqExp().analyze(
-            raw_result, model_type=model_type, fit_bg_slope=fit_bg_slope
+            result, model_type=model_type, fit_bg_slope=fit_bg_slope
         )
 
 
@@ -195,7 +193,7 @@ class FakeFreqExp(AbsExperiment[FreqRunResult, FakeFreqCfg]):
 
 
 class FakeFreqAdapter(
-    AbsExpAdapter[FreqRunResult, FakeFreqAnalyzeResult, FakeFreqAnalyzeParams]
+    AbsExpAdapter[FakeFreqRunResult, FakeFreqAnalyzeResult, FakeFreqAnalyzeParams]
 ):
     """Simulated one-tone frequency sweep.  No hardware required."""
 
@@ -300,19 +298,25 @@ class FakeFreqAdapter(
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FakeFreqCfg:
         return req.ml.make_cfg(raw_cfg, FakeFreqCfg, fast_mode=self._fast_mode)
 
+    def run(self, req: RunRequest, schema: CfgSchema) -> FakeFreqRunResult:
+        raw_cfg = schema.to_raw_dict(req)
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        result = FakeFreqExp().run(cfg)
+        return FakeFreqRunResult(result=result, cfg_snapshot=cfg)
+
     def get_analyze_params(
-        self, result: FreqRunResult, ctx: ExpContext
+        self, result: FakeFreqRunResult, ctx: ExpContext
     ) -> FakeFreqAnalyzeParams:
         return FakeFreqAnalyzeParams(model_type="hm", fit_bg_slope=False)
 
     def analyze(
         self,
-        req: AnalyzeRequest[FreqRunResult, FakeFreqAnalyzeParams],
+        req: AnalyzeRequest[FakeFreqRunResult, FakeFreqAnalyzeParams],
     ) -> FakeFreqAnalyzeResult:
-        result = req.run_result
+        run_result = req.run_result
         analyze_params = req.analyze_params
         freq, fwhm, fit_params, figure = FakeFreqExp().analyze(
-            result,
+            run_result.result,
             model_type=analyze_params.model_type,
             fit_bg_slope=analyze_params.fit_bg_slope,
         )
@@ -324,7 +328,7 @@ class FakeFreqAdapter(
         )
 
     def get_writeback_items(
-        self, req: WritebackRequest[FreqRunResult, FakeFreqAnalyzeResult]
+        self, req: WritebackRequest[FakeFreqRunResult, FakeFreqAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         analyze_result = req.analyze_result
         ctx = req.ctx
@@ -395,5 +399,5 @@ class FakeFreqAdapter(
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.res_name}_freq_{time.strftime('%m%d')}"
 
-    def save(self, req: SaveDataRequest[FreqRunResult]) -> None:
+    def save(self, req: SaveDataRequest[FakeFreqRunResult]) -> None:
         pass  # no real hardware, skip HDF5 persistence

@@ -403,6 +403,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         self,
         filepath: str,
         result: Optional[AcStarkResult] = None,
+        cfg: Optional[AcStarkCfg] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/ac_stark",
         **kwargs,
@@ -417,7 +418,8 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         gains, freqs, populations = result
 
         # Ground state population
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
         comment = make_comment(cfg, comment)
 

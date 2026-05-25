@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Literal, Optional, TypeAlias
+from typing_extensions import Any, Literal, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
@@ -20,7 +21,11 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import minus_background
 
-FreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
+
+@dataclass(frozen=True)
+class FreqResult:
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
 
 
 def qubfreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -86,9 +91,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         # cache
         self.last_cfg = original_cfg
-        self.last_result = (freqs, signals)
+        self.last_result = FreqResult(freqs=freqs, signals=signals)
 
-        return freqs, signals
+        return self.last_result
 
     def analyze(
         self,
@@ -101,7 +106,8 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        freqs, signals = result
+        freqs = result.freqs
+        signals = result.signals
 
         # discard NaNs (possible early abort)
         val_mask = ~np.isnan(signals)
@@ -135,6 +141,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         self,
         filepath: str,
         result: Optional[FreqResult] = None,
+        cfg: Optional[FreqCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/freq",
         **kwargs,
@@ -143,10 +150,12 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        cfg = self.last_cfg
+        if cfg is None:
+            cfg = self.last_cfg
         assert cfg is not None
 
-        freqs, signals = result
+        freqs = result.freqs
+        signals = result.signals
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -171,6 +180,6 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
                 self.last_cfg = FreqCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (freqs, signals)
+        self.last_result = FreqResult(freqs=freqs, signals=signals)
 
-        return freqs, signals
+        return self.last_result
