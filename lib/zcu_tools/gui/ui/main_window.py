@@ -850,22 +850,31 @@ class MainWindow(QMainWindow):
 
     def _on_new_tab_requested(self) -> None:
         menu = QMenu(self)
-        submenus: dict[str, QMenu] = {}
+        submenus: dict[tuple[str, ...], QMenu] = {}
+
+        def _get_or_create_submenu(path: tuple[str, ...]) -> QMenu:
+            cached = submenus.get(path)
+            if cached is not None:
+                return cached
+            if len(path) == 1:
+                parent_menu = menu
+            else:
+                parent_menu = _get_or_create_submenu(path[:-1])
+            sub_menu = parent_menu.addMenu(path[-1])
+            if sub_menu is None:
+                raise RuntimeError(f"Failed to create submenu: {'/'.join(path)}")
+            submenus[path] = sub_menu
+            return sub_menu
+
         for name in self._ctrl.get_adapter_names():
-            parts = name.split("/")
+            parts = tuple(name.split("/"))
             if len(parts) == 1:
                 action = menu.addAction(parts[0])
                 action.setData(name)  # type: ignore[union-attr]
-            else:
-                group = parts[0]
-                label = "/".join(parts[1:])
-                if group not in submenus:
-                    sub_menu = menu.addMenu(group)
-                    if sub_menu is not None:
-                        submenus[group] = sub_menu
-                if group in submenus:
-                    action = submenus[group].addAction(label)
-                    action.setData(name)  # type: ignore[union-attr]
+                continue
+            parent_menu = _get_or_create_submenu(parts[:-1])
+            action = parent_menu.addAction(parts[-1])
+            action.setData(name)  # type: ignore[union-attr]
 
         action = menu.exec(
             self._new_tab_btn.mapToGlobal(  # type: ignore[assignment]

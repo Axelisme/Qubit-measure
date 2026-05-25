@@ -211,6 +211,43 @@ def test_main_window_persists_session_on_close_when_idle(qapp):
     ctrl.persist_tabs_session.assert_called_once_with()
 
 
+def test_new_tab_menu_supports_nested_paths(qapp, monkeypatch):
+    from qtpy.QtWidgets import QMenu
+    from zcu_tools.gui.ui.main_window import MainWindow
+
+    del qapp
+    ctrl = MagicMock()
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.get_adapter_names.return_value = [
+        "fake",
+        "twotone/rabi/length",
+        "twotone/rabi/amp",
+    ]
+    window = MainWindow(ctrl)
+
+    def _find_action_by_data(menu: QMenu, target: str):
+        for action in menu.actions():
+            if action.data() == target:
+                return action
+            child = action.menu()
+            if child is not None:
+                found = _find_action_by_data(child, target)
+                if found is not None:
+                    return found
+        return None
+
+    def _fake_exec(self, *_args, **_kwargs):
+        action = _find_action_by_data(self, "twotone/rabi/length")
+        assert action is not None
+        return action
+
+    monkeypatch.setattr(QMenu, "exec", _fake_exec)
+
+    window._on_new_tab_requested()
+
+    ctrl.new_tab.assert_called_once_with("twotone/rabi/length")
+
+
 def test_show_analysis_figure_draws_canvas(qapp, monkeypatch):
     from matplotlib.figure import Figure
     from zcu_tools.gui.ui.main_window import ExpTabWidget
