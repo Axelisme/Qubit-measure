@@ -430,6 +430,10 @@ class SetupDialog(QDialog):
             if isinstance(soccfg, SocConfigProtocol):
                 self._show_cfg(soccfg.description())
 
+        except (ConnectionRefusedError, TimeoutError, OSError) as e:
+            self._set_conn_status(f"Connection failed: {e}", error=True)
+        except Exception as e:
+            self._set_conn_status(f"Error: {e}", error=True)
         finally:
             self._connect_btn.setEnabled(True)
 

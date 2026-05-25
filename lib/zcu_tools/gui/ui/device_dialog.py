@@ -253,6 +253,10 @@ class DeviceDialog(QDialog):
         self._add_btn.clicked.connect(self._on_add_clicked)
         add_form.addRow(self._add_btn)
 
+        self._add_status = QLabel("")
+        self._add_status.setWordWrap(True)
+        add_form.addRow(self._add_status)
+
         left_layout.addWidget(add_box)
         splitter.addWidget(left_widget)
 
@@ -332,14 +336,22 @@ class DeviceDialog(QDialog):
     def _on_add_clicked(self) -> None:
         dtype = self._type_combo.currentText()
         addr = self._addr_edit.text().strip()
+        self._add_status.setText("")
 
-        # Simple sync for now, or we can use QThread later if needed.
-        # Original code used a DeviceSetupWorker which we don't have right now.
-        dev = _instantiate_device(dtype, addr)
-        name = dtype.lower()
-        self._ctrl.register_device(name, cast(DeviceProtocol, dev))
-        self._ctrl.setup_device(name, {"address": addr})
-        self._refresh_list()
+        try:
+            dev = _instantiate_device(dtype, addr)
+            name = dtype.lower()
+            self._ctrl.register_device(name, cast(DeviceProtocol, dev))
+            self._ctrl.setup_device(name, {"address": addr})
+            self._add_status.setStyleSheet("color: green;")
+            self._add_status.setText(f"Added {name}")
+            self._refresh_list()
+        except (ConnectionRefusedError, TimeoutError, OSError) as e:
+            self._add_status.setStyleSheet("color: red;")
+            self._add_status.setText(f"Connection failed: {e}")
+        except Exception as e:
+            self._add_status.setStyleSheet("color: red;")
+            self._add_status.setText(f"Error: {e}")
 
     def _on_drop_clicked(self) -> None:
         item = self._list.currentItem()
