@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from zcu_tools.gui.adapter import CfgSchema
 from zcu_tools.gui.event_bus import (
     ContextSwitchedPayload,
+    DeviceSetupChangedPayload,
     GuiEvent,
     MlChangedPayload,
     PredictorChangedPayload,
@@ -505,6 +506,7 @@ class MainWindow(QMainWindow):
         self._ctrl = controller
         self._tab_widgets: dict[str, ExpTabWidget] = {}
         self._inspect_dialog: Any = None
+        self._shutdown_waiting_for_device_setup = False
 
         self.setWindowTitle("ZCU Qubit Measure — v2 GUI")
         self.resize(1280, 750)
@@ -574,6 +576,7 @@ class MainWindow(QMainWindow):
         bus.subscribe(GuiEvent.TAB_CLOSED, self._on_bus_tab_closed)
         bus.subscribe(GuiEvent.TAB_CONTENT_CHANGED, self._on_bus_tab_content_changed)
         bus.subscribe(GuiEvent.PREDICTOR_CHANGED, self._on_bus_predictor_changed)
+        bus.subscribe(GuiEvent.DEVICE_SETUP_CHANGED, self._on_bus_device_setup_changed)
 
         # Cleanup on destroy
         self.destroyed.connect(self._cleanup_bus_subscriptions)
@@ -590,6 +593,9 @@ class MainWindow(QMainWindow):
         bus.unsubscribe(GuiEvent.TAB_CLOSED, self._on_bus_tab_closed)
         bus.unsubscribe(GuiEvent.TAB_CONTENT_CHANGED, self._on_bus_tab_content_changed)
         bus.unsubscribe(GuiEvent.PREDICTOR_CHANGED, self._on_bus_predictor_changed)
+        bus.unsubscribe(
+            GuiEvent.DEVICE_SETUP_CHANGED, self._on_bus_device_setup_changed
+        )
 
     def _on_bus_tab_interaction_changed(
         self, payload: TabInteractionChangedPayload
@@ -598,6 +604,10 @@ class MainWindow(QMainWindow):
 
     def _on_bus_run_lock_changed(self, payload: RunLockChangedPayload) -> None:
         self.refresh_run_lock(payload.running_tab_id)
+
+    def _on_bus_device_setup_changed(self, payload: DeviceSetupChangedPayload) -> None:
+        if self._shutdown_waiting_for_device_setup and payload.active_setup is None:
+            QTimer.singleShot(0, self.close)
 
     def _on_bus_context_switched(self, payload: ContextSwitchedPayload) -> None:
         del payload
@@ -991,5 +1001,27 @@ class MainWindow(QMainWindow):
         self._inspect_dialog.activateWindow()
 
     def closeEvent(self, a0: Optional[QCloseEvent]) -> None:
+        if self._ctrl.get_active_device_setup() is not None:
+            if a0 is None:
+                return
+            if self._shutdown_waiting_for_device_setup:
+                a0.ignore()
+                return
+            from qtpy.QtWidgets import QMessageBox
+
+            answer = QMessageBox.question(
+                self,
+                "Device setup is running",
+                "Cancel the active device setup and close after it stops?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                a0.ignore()
+                return
+            self._shutdown_waiting_for_device_setup = True
+            self._ctrl.cancel_device_setup()
+            a0.ignore()
+            return
         set_shutting_down(True)
         super().closeEvent(a0)

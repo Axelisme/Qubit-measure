@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
+from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.gui.event_bus import EventBus
 from zcu_tools.gui.services.device import DeviceService
 from zcu_tools.gui.state import ExpContext, State
@@ -62,7 +63,7 @@ def test_device_service_blocks_when_running():
         svc.set_device_value("dev1", 1.0)
 
     with pytest.raises(RuntimeError, match="Cannot setup device"):
-        svc.setup_device("dev1", {})
+        svc.setup_device("dev1", FakeDeviceInfo(address="none"))
 
     # Non-mutating methods should still work when running
     with patch("zcu_tools.device.GlobalDeviceManager.get_all_devices", return_value={}):
@@ -71,3 +72,17 @@ def test_device_service_blocks_when_running():
     with patch("zcu_tools.device.GlobalDeviceManager.get_device", return_value=device):
         svc.get_device_info("dev1")
         device.get_info.assert_called_once()
+
+
+def test_device_service_blocks_mutation_while_setup_active():
+    svc = _make_svc()
+    svc._state.begin_device_setup("active")
+
+    with pytest.raises(RuntimeError, match="device setup is active"):
+        svc.register_device("dev1", MagicMock())
+    with pytest.raises(RuntimeError, match="device setup is active"):
+        svc.drop_device("dev1")
+    with pytest.raises(RuntimeError, match="device setup is active"):
+        svc.set_device_value("dev1", 1.0)
+    with pytest.raises(RuntimeError, match="device setup is active"):
+        svc.setup_device("dev1", FakeDeviceInfo(address="none"))

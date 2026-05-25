@@ -106,6 +106,16 @@ def test_set_tab_running_updates_running_tab_id():
     assert state.running_tab_id is None
 
 
+def test_device_setup_state_is_globally_exclusive_with_run():
+    state = State(_make_ctx())
+    state.begin_device_setup("flux")
+    assert state.is_device_setup_active() is True
+    with pytest.raises(RuntimeError, match="already active"):
+        state.begin_device_setup("rf")
+    state.end_device_setup("flux")
+    assert state.is_device_setup_active() is False
+
+
 def test_is_tab_busy_checks_per_tab_flags():
     state = State(_make_ctx())
     adapter = _make_adapter()

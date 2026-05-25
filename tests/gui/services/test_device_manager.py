@@ -8,6 +8,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from qtpy.QtCore import QEventLoop
 from zcu_tools.device import GlobalDeviceManager
+from zcu_tools.device.fake import FakeDeviceInfo
+from zcu_tools.gui.event_bus import DeviceSetupChangedPayload, GuiEvent
 from zcu_tools.gui.services.device import DeviceService, _DeviceSetupWorker
 
 
@@ -48,7 +50,7 @@ def test_device_setup_worker_success(qapp):
     dev = MagicMock()
     dev.setup.return_value = None
 
-    worker = _DeviceSetupWorker(dev, "test_dev", {"param": 1}, None)
+    worker = _DeviceSetupWorker(dev, "test_dev", FakeDeviceInfo(address="none"), None)
 
     loop = QEventLoop()
     running_at_notification = []
@@ -69,7 +71,7 @@ def test_device_setup_worker_failure(qapp):
     dev = MagicMock()
     dev.setup.side_effect = RuntimeError("setup failed")
 
-    worker = _DeviceSetupWorker(dev, "test_dev", {"param": 1}, None)
+    worker = _DeviceSetupWorker(dev, "test_dev", FakeDeviceInfo(address="none"), None)
 
     loop = QEventLoop()
     error_msg = []
@@ -99,7 +101,7 @@ def test_device_setup_worker_cancel(qapp):
 
     dev.setup.side_effect = slow_setup
 
-    worker = _DeviceSetupWorker(dev, "test_dev", {"param": 1}, None)
+    worker = _DeviceSetupWorker(dev, "test_dev", FakeDeviceInfo(address="none"), None)
 
     loop = QEventLoop()
     was_cancelled = []
@@ -134,7 +136,9 @@ def test_device_setup_worker_pbar_factory(qapp):
 
         return FakeCtx()
 
-    worker = _DeviceSetupWorker(dev, "test_dev", {}, fake_factory)
+    worker = _DeviceSetupWorker(
+        dev, "test_dev", FakeDeviceInfo(address="none"), fake_factory
+    )
 
     loop = QEventLoop()
     worker.setup_finished.connect(loop.quit)
@@ -153,13 +157,31 @@ def test_device_service_setup_device(qapp):
         GlobalDeviceManager.drop_device("test_dev")
     GlobalDeviceManager.register_device("test_dev", dev)
 
-    worker = svc.setup_device("test_dev", {"param": 2})
-    assert isinstance(worker, _DeviceSetupWorker)
-
     loop = QEventLoop()
-    worker.setup_finished.connect(loop.quit)
-    worker.failed.connect(lambda n, err: loop.quit())
+    svc.setup_finished.connect(loop.quit)
+    svc.setup_failed.connect(lambda n, err: loop.quit())
+    svc.setup_device("test_dev", FakeDeviceInfo(address="none"))
+    assert svc.get_active_setup() is not None
     loop.exec()
 
     dev.setup.assert_called_once()
+    assert svc.get_active_setup() is None
+    GlobalDeviceManager.drop_device("test_dev")
+
+
+def test_device_service_emits_active_and_terminal_snapshots(qapp):
+    svc = _make_svc()
+    dev = MagicMock()
+    events: list[DeviceSetupChangedPayload] = []
+    svc._bus.subscribe(GuiEvent.DEVICE_SETUP_CHANGED, events.append)
+    GlobalDeviceManager.register_device("test_dev", dev)
+    loop = QEventLoop()
+    svc.setup_finished.connect(loop.quit)
+
+    svc.setup_device("test_dev", FakeDeviceInfo(address="none"))
+    loop.exec()
+
+    assert events[0].active_setup is not None
+    assert events[0].active_setup.device_name == "test_dev"
+    assert events[-1].active_setup is None
     GlobalDeviceManager.drop_device("test_dev")

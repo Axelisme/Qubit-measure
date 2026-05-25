@@ -238,6 +238,16 @@ def test_start_run_while_running_raises(cf):
     _wait_for(lambda: not cf.state.is_tab_running(tab_id), timeout_ms=2000)
 
 
+def test_start_run_while_device_setup_active_raises(cf):
+    tab_id = cf.ctrl.new_tab("fake")
+    cf.state.begin_device_setup("flux")
+
+    with pytest.raises(RuntimeError, match="device setup is active"):
+        cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
+
+    cf.state.end_device_setup("flux")
+
+
 def test_run_clears_active_figure_container_after_finish(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.view.make_live_container.return_value = _make_figure_container()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -16,7 +17,18 @@ logger = logging.getLogger(__name__)
 
 from qtpy.QtCore import QObject, QThread, Signal  # type: ignore[attr-defined]
 
-from zcu_tools.gui.event_bus import DeviceChangedPayload, GuiEvent
+from zcu_tools.device.base import BaseDeviceInfo
+from zcu_tools.gui.event_bus import (
+    DeviceChangedPayload,
+    DeviceSetupChangedPayload,
+    GuiEvent,
+)
+
+from .device_progress import (
+    DeviceSetupProgressFactory,
+    DeviceSetupProgressModel,
+    ProgressEntrySnapshot,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import EventBus
@@ -32,13 +44,19 @@ class DeviceProtocol(Protocol):
         progress: bool = True,
         stop_event: Optional[threading.Event] = None,
     ) -> None: ...
-    def get_info(self) -> object: ...
+    def get_info(self) -> BaseDeviceInfo: ...
 
 
 @runtime_checkable
 class ValueDeviceProtocol(DeviceProtocol, Protocol):
     def get_value(self) -> object: ...
     def set_value(self, value: object) -> object: ...
+
+
+@dataclass(frozen=True)
+class DeviceSetupSnapshot:
+    device_name: str
+    progress: tuple[ProgressEntrySnapshot, ...]
 
 
 class _DeviceSetupWorker(QThread):
@@ -52,7 +70,7 @@ class _DeviceSetupWorker(QThread):
         self,
         dev: DeviceProtocol,
         name: str,
-        info: Any,
+        info: BaseDeviceInfo,
         pbar_factory: Optional[Callable[..., Any]],
         parent: Optional[QObject] = None,
     ) -> None:
@@ -97,12 +115,25 @@ class _DeviceSetupWorker(QThread):
 class DeviceService(QObject):
     """Device registration, setup, and value access for the GUI."""
 
+    setup_finished: Signal = Signal(str)
+    setup_failed: Signal = Signal(str, str)
+    setup_cancelled: Signal = Signal(str)
+
     def __init__(
         self, state: "State", bus: "EventBus", parent: Optional[QObject] = None
     ) -> None:
         super().__init__(parent)
         self._state = state
         self._bus = bus
+        self._progress = DeviceSetupProgressModel(parent=self)
+        self._progress.changed.connect(self._emit_setup_changed)
+        self._active_worker: Optional[_DeviceSetupWorker] = None
+
+    def _require_device_mutation_available(self, action: str) -> None:
+        if self._state.is_run_active():
+            raise RuntimeError(f"Cannot {action} while a run is active")
+        if self._state.is_device_setup_active():
+            raise RuntimeError(f"Cannot {action} while device setup is active")
 
     # ------------------------------------------------------------------
     # Registration
@@ -110,8 +141,7 @@ class DeviceService(QObject):
 
     def register_device(self, name: str, device: DeviceProtocol) -> None:
         logger.info("register_device: name=%r type=%s", name, type(device).__name__)
-        if self._state.is_run_active():
-            raise RuntimeError("Cannot register device while a run is active")
+        self._require_device_mutation_available("register device")
         from zcu_tools.device import GlobalDeviceManager
 
         GlobalDeviceManager.register_device(name, device)
@@ -119,8 +149,7 @@ class DeviceService(QObject):
 
     def drop_device(self, name: str) -> None:
         logger.info("drop_device: name=%r", name)
-        if self._state.is_run_active():
-            raise RuntimeError("Cannot drop device while a run is active")
+        self._require_device_mutation_available("drop device")
         from zcu_tools.device import GlobalDeviceManager
 
         GlobalDeviceManager.drop_device(name)
@@ -136,7 +165,7 @@ class DeviceService(QObject):
         devices = GlobalDeviceManager.get_all_devices()
         return {name: type(dev).__name__ for name, dev in devices.items()}
 
-    def get_device_info(self, name: str) -> object | None:
+    def get_device_info(self, name: str) -> BaseDeviceInfo | None:
         from zcu_tools.device import GlobalDeviceManager
 
         try:
@@ -152,8 +181,7 @@ class DeviceService(QObject):
         return dev.get_value()
 
     def set_device_value(self, name: str, value: Any) -> object:
-        if self._state.is_run_active():
-            raise RuntimeError("Cannot set device value while a run is active")
+        self._require_device_mutation_available("set device value")
         from zcu_tools.device import GlobalDeviceManager
 
         dev = cast(ValueDeviceProtocol, GlobalDeviceManager.get_device(name))
@@ -166,15 +194,61 @@ class DeviceService(QObject):
     def setup_device(
         self,
         name: str,
-        info: Any,
-        pbar_factory: Optional[Callable[..., Any]] = None,
-    ) -> _DeviceSetupWorker:
-        if self._state.is_run_active():
-            raise RuntimeError("Cannot setup device while a run is active")
+        info: BaseDeviceInfo,
+    ) -> None:
         from zcu_tools.device import GlobalDeviceManager
 
+        self._require_device_mutation_available("setup device")
         dev = GlobalDeviceManager.get_device(name)
-        worker = _DeviceSetupWorker(dev, name, info, pbar_factory, parent=self)
+        self._state.begin_device_setup(name)
+        worker = _DeviceSetupWorker(
+            dev,
+            name,
+            info,
+            DeviceSetupProgressFactory(self._progress),
+            parent=self,
+        )
+        self._active_worker = worker
+        worker.setup_finished.connect(self._on_setup_finished)
+        worker.failed.connect(self._on_setup_failed)
+        worker.cancelled.connect(self._on_setup_cancelled)
         worker.finished.connect(worker.deleteLater)
+        self._emit_setup_changed()
         worker.start()
-        return worker
+
+    def get_active_setup(self) -> Optional[DeviceSetupSnapshot]:
+        name = self._state.active_device_setup_name
+        if name is None:
+            return None
+        return DeviceSetupSnapshot(device_name=name, progress=self._progress.snapshot())
+
+    def cancel_setup(self) -> None:
+        if self._active_worker is None:
+            raise RuntimeError("No device setup is active")
+        self._active_worker.cancel()
+
+    def _emit_setup_changed(self) -> None:
+        self._bus.emit(
+            GuiEvent.DEVICE_SETUP_CHANGED,
+            DeviceSetupChangedPayload(active_setup=self.get_active_setup()),
+        )
+
+    def _clear_active_setup(self, name: str) -> None:
+        self._state.end_device_setup(name)
+        self._active_worker = None
+        had_progress = bool(self._progress.snapshot())
+        self._progress.clear()
+        if not had_progress:
+            self._emit_setup_changed()
+
+    def _on_setup_finished(self, name: str) -> None:
+        self._clear_active_setup(name)
+        self.setup_finished.emit(name)
+
+    def _on_setup_failed(self, name: str, error: str) -> None:
+        self._clear_active_setup(name)
+        self.setup_failed.emit(name, error)
+
+    def _on_setup_cancelled(self, name: str) -> None:
+        self._clear_active_setup(name)
+        self.setup_cancelled.emit(name)

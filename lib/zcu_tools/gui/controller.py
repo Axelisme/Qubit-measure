@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Optional, Protocol
+from typing import Any, Optional, Protocol
 
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 from matplotlib.figure import Figure
 
+from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 from .adapter import CfgSchema, SavePaths, SocCfgHandle, SocHandle, WritebackItem
@@ -35,7 +36,7 @@ from .services import (
     TabService,
     WritebackService,
 )
-from .services.device import DeviceProtocol, _DeviceSetupWorker
+from .services.device import DeviceProtocol, DeviceSetupSnapshot
 from .state import State
 
 
@@ -81,6 +82,9 @@ class Controller:
         self._save_svc.save_finished.connect(self._on_save_finished)
         self._save_svc.save_failed.connect(self._on_save_failed)
         self._save_svc.save_both_finished.connect(self._on_save_both_finished)
+        self._dev_svc.setup_finished.connect(self._on_device_setup_finished)
+        self._dev_svc.setup_failed.connect(self._on_device_setup_failed)
+        self._dev_svc.setup_cancelled.connect(self._on_device_setup_cancelled)
 
     def set_view(self, view: ViewProtocol) -> None:
         self._view = view
@@ -138,6 +142,18 @@ class Controller:
             "Save Both failed",
             f"Data failed: {outcome.data_error}\nImage failed: {outcome.image_error}",
         )
+
+    def _on_device_setup_finished(self, name: str) -> None:
+        self._require_view().show_status_message(f"Device setup completed: {name}")
+
+    def _on_device_setup_failed(self, name: str, error: str) -> None:
+        self._require_view().show_error_dialog(
+            f"Device setup failed: {name}",
+            error,
+        )
+
+    def _on_device_setup_cancelled(self, name: str) -> None:
+        self._require_view().show_status_message(f"Device setup cancelled: {name}")
 
     def get_bus(self) -> EventBus:
         return self._bus
@@ -344,16 +360,17 @@ class Controller:
     def get_device_value(self, name: str) -> object:
         return self._dev_svc.get_device_value(name)
 
-    def get_device_info(self, name: str) -> object:
+    def get_device_info(self, name: str) -> BaseDeviceInfo | None:
         return self._dev_svc.get_device_info(name)
 
-    def setup_device(
-        self,
-        name: str,
-        info: Any,
-        pbar_factory: Optional[Callable[..., Any]] = None,
-    ) -> _DeviceSetupWorker:
-        return self._dev_svc.setup_device(name, info, pbar_factory)
+    def setup_device(self, name: str, info: BaseDeviceInfo) -> None:
+        self._dev_svc.setup_device(name, info)
+
+    def get_active_device_setup(self) -> Optional[DeviceSetupSnapshot]:
+        return self._dev_svc.get_active_setup()
+
+    def cancel_device_setup(self) -> None:
+        self._dev_svc.cancel_setup()
 
     # ------------------------------------------------------------------
     # Connection / Predictor (ConnectionService)

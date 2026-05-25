@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 import logging
-from typing import TYPE_CHECKING, Any, Dict, Optional, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Any, Optional, Protocol, cast, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.services.device import DeviceProtocol, _DeviceSetupWorker
+from zcu_tools.gui.event_bus import DeviceSetupChangedPayload, GuiEvent
+from zcu_tools.gui.services.device import DeviceProtocol, DeviceSetupSnapshot
 
 from .progress_stack import ProgressStack
 from .widgets import TrimDoubleSpinBox
@@ -281,6 +282,8 @@ class DeviceDialog(QDialog):
         self._drop_btn = QPushButton("Drop Selected")
         self._drop_btn.setStyleSheet("color: red;")
         self._drop_btn.clicked.connect(self._on_drop_clicked)
+        self._refresh_btn = QPushButton("Refresh")
+        self._refresh_btn.clicked.connect(self._on_refresh_clicked)
         self._apply_btn = QPushButton("Apply Changes")
         self._apply_btn.clicked.connect(self._on_apply_or_stop_clicked)
 
@@ -289,11 +292,12 @@ class DeviceDialog(QDialog):
 
         btn_row.addWidget(self._drop_btn)
         btn_row.addStretch()
+        btn_row.addWidget(self._refresh_btn)
         btn_row.addWidget(self._apply_btn)
         btn_row.addWidget(close_btn)
         right_layout.addLayout(btn_row)
 
-        self._active_worker: Optional[_DeviceSetupWorker] = None
+        self._active_setup: Optional[DeviceSetupSnapshot] = None
 
         splitter.addWidget(right_widget)
         splitter.setSizes([300, 500])
@@ -302,7 +306,22 @@ class DeviceDialog(QDialog):
         self._progress = ProgressStack()
         layout.addWidget(self._progress)
 
+        bus = self._ctrl.get_bus()
+        bus.subscribe(GuiEvent.DEVICE_SETUP_CHANGED, self._on_setup_changed)
+        self._setup_subscription_active = True
+        self.finished.connect(self._cleanup_bus_subscription)
+        self.destroyed.connect(self._cleanup_bus_subscription)
+
         self._refresh_list()
+        self._render_setup(self._ctrl.get_active_device_setup())
+
+    def _cleanup_bus_subscription(self, *_args: object) -> None:
+        if not self._setup_subscription_active:
+            return
+        self._ctrl.get_bus().unsubscribe(
+            GuiEvent.DEVICE_SETUP_CHANGED, self._on_setup_changed
+        )
+        self._setup_subscription_active = False
 
     def _refresh_list(self) -> None:
         self._list.clear()
@@ -322,12 +341,16 @@ class DeviceDialog(QDialog):
         item = self._list.currentItem()
         if item is None:
             self._stack.setCurrentIndex(0)
-            self._drop_btn.setEnabled(False)
-            self._apply_btn.setEnabled(False)
+            if self._active_setup is None:
+                self._drop_btn.setEnabled(False)
+                self._refresh_btn.setEnabled(False)
+                self._apply_btn.setEnabled(False)
             return
 
-        self._drop_btn.setEnabled(True)
-        self._apply_btn.setEnabled(True)
+        if self._active_setup is None:
+            self._drop_btn.setEnabled(True)
+            self._refresh_btn.setEnabled(True)
+            self._apply_btn.setEnabled(True)
 
         name = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
         info = self._ctrl.get_device_info(name)
@@ -365,9 +388,8 @@ class DeviceDialog(QDialog):
         try:
             dev = _instantiate_device(dtype, addr)
             self._ctrl.register_device(name, cast(DeviceProtocol, dev))
-            self._ctrl.setup_device(name, {"address": addr})
             self._add_status.setStyleSheet("color: green;")
-            self._add_status.setText(f"Added {name}")
+            self._add_status.setText(f"Added {name}; select it and Apply to configure.")
             self._refresh_list()
         except (ConnectionRefusedError, TimeoutError, OSError) as e:
             self._add_status.setStyleSheet("color: red;")
@@ -384,9 +406,12 @@ class DeviceDialog(QDialog):
         self._ctrl.drop_device(name)
         self._refresh_list()
 
+    def _on_refresh_clicked(self) -> None:
+        self._on_selection_changed(self._list.currentRow())
+
     def _on_apply_or_stop_clicked(self) -> None:
-        if self._active_worker is not None:
-            self._active_worker.cancel()
+        if self._active_setup is not None:
+            self._ctrl.cancel_device_setup()
             return
 
         item = self._list.currentItem()
@@ -406,29 +431,41 @@ class DeviceDialog(QDialog):
         if not isinstance(info, BaseDeviceInfo):
             return
         new_info = info.with_updates(**updates)
-        from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
+        self._ctrl.setup_device(name, new_info)
 
-        pbar_factory = QtProgressBarFactory(self._progress)
-        worker = self._ctrl.setup_device(name, new_info, pbar_factory)
-        self._active_worker = worker
-        worker.setup_finished.connect(lambda _: self._on_setup_done())
-        worker.failed.connect(lambda _name, _msg: self._on_setup_done())
-        worker.cancelled.connect(lambda _: self._on_setup_done())
-        self._set_setup_running(True)
+    def _on_setup_changed(self, payload: DeviceSetupChangedPayload) -> None:
+        self._render_setup(payload.active_setup)
 
-    def _on_setup_done(self) -> None:
-        self._active_worker = None
+    def _render_setup(self, setup: Optional[DeviceSetupSnapshot]) -> None:
+        self._active_setup = setup
+        if setup is not None:
+            for row in range(self._list.count()):
+                item = self._list.item(row)
+                if item.data(Qt.ItemDataRole.UserRole) == setup.device_name:  # type: ignore[attr-defined]
+                    self._list.setCurrentRow(row)
+                    break
+            self._progress.render_snapshot(setup.progress)
+            self._progress.show()
+            self._set_setup_running(True)
+            return
+        self._progress.reset_all()
+        self._progress.hide()
         self._set_setup_running(False)
         self._on_selection_changed(self._list.currentRow())
 
     def _set_setup_running(self, running: bool) -> None:
-        self._drop_btn.setEnabled(not running)
+        has_selection = self._list.currentItem() is not None
+        self._drop_btn.setEnabled(has_selection and not running)
+        self._refresh_btn.setEnabled(has_selection and not running)
         self._list.setEnabled(not running)
+        self._type_combo.setEnabled(not running)
+        self._name_edit.setEnabled(not running)
+        self._addr_edit.setEnabled(not running)
+        self._add_btn.setEnabled(not running)
+        self._apply_btn.setEnabled(has_selection)
         if running:
             self._apply_btn.setText("Stop")
             self._apply_btn.setStyleSheet("color: red;")
-            self._progress.show()
         else:
             self._apply_btn.setText("Apply Changes")
             self._apply_btn.setStyleSheet("")
-            self._progress.hide()

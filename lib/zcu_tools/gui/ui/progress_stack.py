@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QProgressBar,
     QVBoxLayout,
     QWidget,
 )
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.services.device_progress import ProgressEntrySnapshot
 
 
 class ProgressStack(QWidget):
@@ -43,6 +46,7 @@ class ProgressStack(QWidget):
         bar.setMaximum(total)
         bar.setValue(0)
         self._layout.insertWidget(0, bar)
+        bar.show()
         self._active.append(bar)
         return bar
 
@@ -50,7 +54,8 @@ class ProgressStack(QWidget):
         if bar in self._active:
             self._active.remove(bar)
             self._layout.removeWidget(bar)
-            bar.setParent(None)  # type: ignore[call-overload]
+            bar.hide()
+            bar.setParent(self)
             bar.setValue(0)
             bar.setFormat("%v/%m")
             self._pool.append(bar)
@@ -59,8 +64,17 @@ class ProgressStack(QWidget):
         """Remove all active bars (called when a run ends)."""
         for bar in list(self._active):
             self._layout.removeWidget(bar)
-            bar.setParent(None)  # type: ignore[call-overload]
+            bar.hide()
+            bar.setParent(self)
             bar.setValue(0)
             bar.setFormat("%v/%m")
         self._pool.extend(self._active)
         self._active.clear()
+
+    def render_snapshot(self, entries: tuple["ProgressEntrySnapshot", ...]) -> None:
+        """Replace visible bars with a service-owned progress snapshot."""
+        self.reset_all()
+        for entry in entries[: self.MAX_LAYERS]:
+            bar = self.push(total=entry.maximum)
+            bar.setFormat(entry.format)
+            bar.setValue(entry.value)

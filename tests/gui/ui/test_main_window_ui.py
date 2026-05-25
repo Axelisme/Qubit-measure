@@ -173,6 +173,29 @@ def test_main_window_run_lock_disables_only_new_tab_and_run(qapp):
     tab_two.update_interaction_state.assert_called_once()
 
 
+def test_main_window_cancel_setup_before_closing(qapp, monkeypatch):
+    from qtpy.QtGui import QCloseEvent
+    from qtpy.QtWidgets import QMessageBox
+    from zcu_tools.gui.ui.main_window import MainWindow
+
+    ctrl = MagicMock()
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.get_active_device_setup.return_value = object()
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
+    window = MainWindow(ctrl)
+    event = QCloseEvent()
+
+    window.closeEvent(event)
+
+    assert event.isAccepted() is False
+    assert window._shutdown_waiting_for_device_setup is True
+    ctrl.cancel_device_setup.assert_called_once_with()
+
+
 def test_show_analysis_figure_draws_canvas(qapp, monkeypatch):
     from matplotlib.figure import Figure
     from zcu_tools.gui.ui.main_window import ExpTabWidget

@@ -44,6 +44,27 @@ def test_factory_push_and_pop_leave_false(qapp):
     assert len(stack._active) == 0  # bar was popped
 
 
+def test_reset_all_keeps_removed_bar_as_hidden_child(qapp):
+    """Clearing a visible bar must not turn it into a top-level window."""
+    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+    from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
+
+    stack = _make_stack(qapp)
+    stack.show()
+    factory = QtProgressBarFactory(stack)
+    factory(desc="test", total=10, leave=True)
+    QApplication.processEvents()
+    bar = stack._active[0]
+    assert bar.isVisible() is True
+
+    stack.reset_all()
+    QApplication.processEvents()
+
+    assert bar.parent() is stack
+    assert bar.isWindow() is False
+    assert bar.isVisible() is False
+
+
 def test_factory_push_and_pop_leave_true(qapp):
     """leave=True: close() leaves bar visible; reset_all() clears it."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]

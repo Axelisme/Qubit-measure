@@ -43,6 +43,8 @@ class RunService(QObject):
         pbar_factory: Optional[Any] = None,
         live_container: Optional[FigureContainer] = None,
     ) -> None:
+        if self._state.is_device_setup_active():
+            raise RuntimeError("Cannot start run while device setup is active")
         if self._state.is_run_active():
             raise RuntimeError("Another run is already active")
         if self._state.is_tab_busy(tab_id):
