@@ -2,16 +2,20 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass
+import typing
 from typing import (
-    Annotated,
     Any,
-    Literal,
     Optional,
     TypeVar,
     get_args,
     get_origin,
     get_type_hints,
 )
+
+import typing_extensions
+from typing_extensions import Annotated, Literal
+
+_LITERAL_ORIGINS = {typing.Literal, typing_extensions.Literal}
 
 
 @dataclass(frozen=True)
@@ -36,7 +40,7 @@ def _resolve_field_info(
         meta = None
 
     bare_origin = get_origin(bare)
-    if bare_origin is Literal:
+    if bare_origin in _LITERAL_ORIGINS:
         literal_args = get_args(bare)
         if not literal_args:
             raise TypeError(

@@ -34,11 +34,12 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     build_readout_for_frequency,
     build_waveform_for_length,
     make_flat_top_waveform_edit_template,
-    make_module_ref_default,
-    make_pulse_ref_spec,
+    make_pulse_module_spec,
     make_readout_edit_template,
-    make_readout_ref_spec,
-    make_reset_ref_spec,
+    make_readout_ref_default,
+    make_readout_module_spec,
+    make_reset_module_spec,
+    md_get_float,
 )
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
@@ -210,15 +211,10 @@ class FakeFreqAdapter(
     def __init__(self, fast_mode: bool = False) -> None:
         self._fast_mode = fast_mode
 
-    def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:  # noqa: ARG002
-        r_f: float = 6000.0
-        rf_w: Optional[float] = None
-        _r_f = getattr(ctx.md, "r_f", None)
-        if isinstance(_r_f, (int, float)):
-            r_f = float(_r_f)
-        _rf_w = getattr(ctx.md, "rf_w", None)
-        if isinstance(_rf_w, (int, float)):
-            rf_w = float(_rf_w)
+    def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
+        r_f = md_get_float(ctx, "r_f", 6000.0)
+        rf_w_raw = ctx.md.get("rf_w")
+        rf_w: Optional[float] = float(rf_w_raw) if isinstance(rf_w_raw, (int, float)) else None
 
         # Sweep range: ±5× linewidth around r_f, or ±200 MHz if rf_w unknown
         half_span = (rf_w * 5.0) if rf_w is not None else 200.0
@@ -234,9 +230,9 @@ class FakeFreqAdapter(
                 "modules": CfgSectionSpec(
                     label="Modules",
                     fields={
-                        "readout": make_readout_ref_spec(),
-                        "init_pulse": make_pulse_ref_spec(optional=True),
-                        "reset": make_reset_ref_spec(optional=True),
+                        "readout": make_readout_module_spec(),
+                        "init_pulse": make_pulse_module_spec(optional=True),
+                        "reset": make_reset_module_spec(optional=True),
                     },
                 ),
                 "reps": ScalarSpec(label="Reps", type=int),
@@ -290,11 +286,7 @@ class FakeFreqAdapter(
                 ),
                 "modules": CfgSectionValue(
                     fields={
-                        "readout": make_module_ref_default(
-                            ml=ctx.ml,
-                            module_type=AbsReadoutCfg,
-                            preferred_names=["readout_rf", "readout", "res_readout"],
-                        ),
+                        "readout": make_readout_ref_default(ctx),
                         # init_pulse and reset are optional ModuleRefs; omitting their
                         # keys here means they start as disabled (None) in the UI.
                     }

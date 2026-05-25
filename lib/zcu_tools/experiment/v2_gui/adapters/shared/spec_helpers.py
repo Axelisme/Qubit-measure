@@ -16,7 +16,7 @@ from zcu_tools.gui.specs.reset import (
 )
 
 
-def make_readout_ref_spec(
+def make_readout_module_spec(
     label: str = "Readout", optional: bool = False
 ) -> ModuleRefSpec:
     return ModuleRefSpec(
@@ -26,7 +26,7 @@ def make_readout_ref_spec(
     )
 
 
-def make_pulse_readout_ref_spec(
+def make_pulse_readout_module_spec(
     label: str = "Readout", optional: bool = False
 ) -> ModuleRefSpec:
     return ModuleRefSpec(
@@ -36,7 +36,7 @@ def make_pulse_readout_ref_spec(
     )
 
 
-def make_pulse_ref_spec(
+def make_pulse_module_spec(
     label: str = "Init Pulse", optional: bool = False
 ) -> ModuleRefSpec:
     return ModuleRefSpec(
@@ -46,7 +46,7 @@ def make_pulse_ref_spec(
     )
 
 
-def make_reset_ref_spec(label: str = "Reset", optional: bool = False) -> ModuleRefSpec:
+def make_reset_module_spec(label: str = "Reset", optional: bool = False) -> ModuleRefSpec:
     return ModuleRefSpec(
         allowed=[
             make_none_reset_spec(),

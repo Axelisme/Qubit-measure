@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 from zcu_tools.experiment.v2_gui.adapters.onetone.fakefreq import FakeFreqAdapter
 from zcu_tools.gui.adapter import CfgSchema, RunRequest
+from zcu_tools.meta_tool import MetaDict
 
 
 def _make_ml():
@@ -21,7 +22,7 @@ def _make_ctx(ml=None):
         ml = _make_ml()
     ctx = MagicMock()
     ctx.ml = ml
-    ctx.md = MagicMock(spec=[])
+    ctx.md = MetaDict()
     return ctx
 
 

@@ -10,9 +10,10 @@ from zcu_tools.experiment.v2.onetone.power_dep import (
     PowerDepResult,
 )
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    make_module_ref_default,
-    make_pulse_readout_ref_spec,
-    make_reset_ref_spec,
+    make_pulse_readout_module_spec,
+    make_readout_ref_default,
+    make_reset_module_spec,
+    md_get_float,
     require_soc_handles,
 )
 from zcu_tools.gui.adapter import (
@@ -29,27 +30,8 @@ from zcu_tools.gui.adapter import (
     SweepSpec,
     SweepValue,
 )
-from zcu_tools.gui.specs.readout import make_pulse_readout_spec
-from zcu_tools.program.v2 import PulseReadoutCfg
 
 OneTonePowerDepRunResult: TypeAlias = PowerDepResult
-
-
-def _md_float(ctx: ExpContext, key: str, default: float) -> float:
-    value = getattr(ctx.md, key, None)
-    if isinstance(value, (int, float)):
-        return float(value)
-    return default
-
-
-def _pulse_readout_default(ctx: ExpContext):
-    return make_module_ref_default(
-        ml=ctx.ml,
-        module_type=PulseReadoutCfg,
-        preferred_names=["readout_rf", "readout", "res_readout"],
-        fallback_key="<Custom:Pulse Readout>",
-        fallback_spec_factory=make_pulse_readout_spec,
-    )
 
 
 class OneTonePowerDepAdapter(
@@ -58,16 +40,16 @@ class OneTonePowerDepAdapter(
     exp_cls = PowerDepExp
 
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
-        r_f = _md_float(ctx, "r_f", 6000.0)
-        rf_w = _md_float(ctx, "rf_w", 20.0)
+        r_f = md_get_float(ctx, "r_f", 6000.0)
+        rf_w = md_get_float(ctx, "rf_w", 20.0)
         half_span = 1.5 * rf_w if rf_w > 0 else 30.0
         root_spec = CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
                     label="Modules",
                     fields={
-                        "readout": make_pulse_readout_ref_spec(),
-                        "reset": make_reset_ref_spec(optional=True),
+                        "readout": make_pulse_readout_module_spec(),
+                        "reset": make_reset_module_spec(optional=True),
                     },
                 ),
                 "reps": ScalarSpec(label="Reps", type=int),
@@ -91,7 +73,7 @@ class OneTonePowerDepAdapter(
             fields={
                 "modules": CfgSectionValue(
                     fields={
-                        "readout": _pulse_readout_default(ctx),
+                        "readout": make_readout_ref_default(ctx),
                     }
                 ),
                 "reps": DirectValue(100),

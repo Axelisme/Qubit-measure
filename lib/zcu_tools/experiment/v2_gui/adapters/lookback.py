@@ -6,17 +6,18 @@ from dataclasses import dataclass
 from matplotlib.figure import Figure
 from typing_extensions import Annotated, Sequence, TypeAlias
 
-from zcu_tools.experiment.v2.lookback import LookbackExp, LookbackResult
+from zcu_tools.experiment.v2.lookback import LookbackCfg, LookbackExp, LookbackResult
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    make_module_ref_default,
-    make_pulse_readout_ref_spec,
-    make_pulse_ref_spec,
-    make_reset_ref_spec,
+    make_pulse_readout_module_spec,
+    make_pulse_module_spec,
+    make_readout_ref_default,
+    make_reset_module_spec,
 )
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
     AnalyzeRequest,
     CfgSchema,
+    RunRequest,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
@@ -27,8 +28,6 @@ from zcu_tools.gui.adapter import (
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.specs.readout import make_pulse_readout_spec
-from zcu_tools.program.v2 import PulseReadoutCfg
 
 LookbackRunResult: TypeAlias = LookbackResult
 
@@ -46,16 +45,6 @@ class LookbackAnalyzeResult:
     figure: Figure
 
 
-def _pulse_readout_default(ctx: ExpContext):
-    return make_module_ref_default(
-        ml=ctx.ml,
-        module_type=PulseReadoutCfg,
-        preferred_names=["readout_rf", "readout", "res_readout"],
-        fallback_key="<Custom:Pulse Readout>",
-        fallback_spec_factory=make_pulse_readout_spec,
-    )
-
-
 class LookbackAdapter(
     AbsExpAdapter[LookbackRunResult, LookbackAnalyzeResult, LookbackAnalyzeParams]
 ):
@@ -67,9 +56,9 @@ class LookbackAdapter(
                 "modules": CfgSectionSpec(
                     label="Modules",
                     fields={
-                        "readout": make_pulse_readout_ref_spec(),
-                        "init_pulse": make_pulse_ref_spec(optional=True),
-                        "reset": make_reset_ref_spec(optional=True),
+                        "readout": make_pulse_readout_module_spec(),
+                        "init_pulse": make_pulse_module_spec(optional=True),
+                        "reset": make_reset_module_spec(optional=True),
                     },
                 ),
                 "reps": ScalarSpec(label="Reps", type=int),
@@ -83,7 +72,7 @@ class LookbackAdapter(
             fields={
                 "modules": CfgSectionValue(
                     fields={
-                        "readout": _pulse_readout_default(ctx),
+                        "readout": make_readout_ref_default(ctx),
                     }
                 ),
                 "reps": DirectValue(1),
@@ -92,6 +81,9 @@ class LookbackAdapter(
             }
         )
         return CfgSchema(spec=root_spec, value=root_val)
+
+    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> LookbackCfg:
+        return req.ml.make_cfg(raw_cfg, LookbackCfg)
 
     def get_analyze_params(
         self, result: LookbackRunResult, ctx: ExpContext

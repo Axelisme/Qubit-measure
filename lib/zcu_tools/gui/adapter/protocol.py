@@ -4,10 +4,9 @@ import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from typing_extensions import TYPE_CHECKING, Any, Optional, Sequence, Generic
+from typing_extensions import Any, ClassVar, Optional, Sequence, Generic
 from matplotlib.figure import Figure
 
-from zcu_tools.experiment.v2_gui.adapters.shared import require_soc_handles
 from .types import (
     AnalyzeRequest,
     CfgSchema,
@@ -22,8 +21,6 @@ from .types import (
     WritebackRequest,
 )
 
-if TYPE_CHECKING:
-    from zcu_tools.experiment.cfg_model import ExpCfgModel
 
 
 @dataclass
@@ -37,30 +34,31 @@ class NoAnalysisResult:
 
 
 class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult, T_AnalyzeParams]):
-    exp_cls: Optional[type[Any]] = None
+    exp_cls: ClassVar[type[Any]]
 
     @abstractmethod
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
         """Build a default CfgSchema from ctx."""
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> ExpCfgModel:
-        return req.ml.make_cfg(raw_cfg, self.exp_cls)
+    @abstractmethod
+    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> Any:
+        """Build experiment config from raw GUI dict."""
 
     def run(self, req: RunRequest, schema: CfgSchema) -> T_Result:
+        from zcu_tools.experiment.v2_gui.adapters.shared import require_soc_handles
+
         soc, soccfg = require_soc_handles(req)
 
         raw_cfg = schema.to_raw_dict(req)
         cfg = self.build_exp_cfg(raw_cfg, req)
         return self.exp_cls().run(soc, soccfg, cfg)
 
-    def get_analyze_params(self, result: T_Result, ctx: ExpContext) -> T_AnalyzeParams:
-        """Return a dataclass instance with current analysis parameters."""
+    def get_analyze_params(self, result: T_Result, ctx: ExpContext) -> Any:
         return NoAnalyzeParams()
 
     def analyze(
         self, req: AnalyzeRequest[T_Result, T_AnalyzeParams]
-    ) -> T_AnalyzeResult:
-        """Run analysis."""
+    ) -> Any:
         return NoAnalysisResult()
 
     def get_writeback_items(

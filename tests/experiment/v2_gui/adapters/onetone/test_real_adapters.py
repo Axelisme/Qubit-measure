@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepCfg
+from zcu_tools.meta_tool import MetaDict
 from zcu_tools.experiment.v2.onetone.freq import FreqCfg
 from zcu_tools.experiment.v2.onetone.power_dep import PowerDepCfg
 from zcu_tools.experiment.v2_gui.adapters.onetone.flux_dep import (
@@ -39,7 +40,7 @@ def _make_ml() -> MagicMock:
 def _make_ctx(ml: MagicMock | None = None) -> MagicMock:
     ctx = MagicMock()
     ctx.ml = ml or _make_ml()
-    ctx.md = MagicMock(spec=[])
+    ctx.md = MetaDict()
     ctx.res_name = "R1"
     return ctx
 

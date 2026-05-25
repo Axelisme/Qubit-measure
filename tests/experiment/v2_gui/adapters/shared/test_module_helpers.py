@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-import pytest
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.adapter import ExpContext
+
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     build_readout_for_frequency,
     build_waveform_for_length,
-    infer_module_ref_fallback,
-    make_module_ref_default,
     make_pulse_readout_edit_template,
+    make_readout_ref_default,
     select_named_module_value,
     update_readout_value_frequency,
 )
@@ -16,7 +19,7 @@ from zcu_tools.gui.adapter import (
     ModuleRefValue,
     ScalarValue,
 )
-from zcu_tools.meta_tool import ModuleLibrary
+from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import AbsReadoutCfg, ModuleCfgFactory
 
 
@@ -171,44 +174,58 @@ def test_select_named_module_value_prefers_requested_name():
     assert selected.name == "readout_rf"
 
 
-def test_make_module_ref_default_uses_library_selection_before_fallback():
+def _make_ctx(ml: ModuleLibrary) -> "ExpContext":
+    from zcu_tools.gui.adapter import ExpContext
+
+    return ExpContext(
+        md=MetaDict(),
+        ml=ml,
+        soc=None,
+        soccfg=None,
+    )
+
+
+def test_make_readout_ref_default_uses_library_selection_before_fallback():
     ml = ModuleLibrary()
     ml.register_module(
         readout_rf=ModuleCfgFactory.from_raw(
             {
-                "type": "readout/direct",
-                "ro_ch": 2,
-                "ro_freq": 6100.0,
-                "ro_length": 1.1,
-                "trig_offset": 0.6,
+                "type": "readout/pulse",
+                "pulse_cfg": {
+                    "waveform": {"style": "const", "length": 1.0},
+                    "ch": 1,
+                    "nqz": 2,
+                    "freq": 6100.0,
+                    "gain": 0.2,
+                },
+                "ro_cfg": {
+                    "ro_ch": 2,
+                    "ro_freq": 6100.0,
+                    "ro_length": 1.0,
+                    "trig_offset": 0.5,
+                },
             },
             ml=ml,
         )
     )
 
-    module_ref = make_module_ref_default(
-        ml=ml,
-        module_type=AbsReadoutCfg,
-        preferred_names=["readout_rf"],
-    )
+    ctx = _make_ctx(ml)
+    module_ref = make_readout_ref_default(ctx)
 
     assert isinstance(module_ref, ModuleRefValue)
     assert module_ref.chosen_key == "readout_rf"
 
 
-def test_make_module_ref_default_infers_supported_fallback():
-    module_ref = make_module_ref_default(
-        ml=ModuleLibrary(),
-        module_type=AbsReadoutCfg,
-        preferred_names=["readout_rf"],
-    )
+def test_make_readout_ref_default_falls_back_to_custom_when_lib_empty():
+    ctx = _make_ctx(ModuleLibrary())
+    module_ref = make_readout_ref_default(ctx)
 
-    assert module_ref.chosen_key == "<Custom:Direct Readout>"
+    assert isinstance(module_ref, ModuleRefValue)
+    assert module_ref.chosen_key == "<Custom:Pulse Readout>"
 
 
-def test_infer_module_ref_fallback_rejects_unsupported_type():
-    class UnsupportedModule:
-        pass
+def test_make_readout_ref_default_returns_none_when_optional_and_empty():
+    ctx = _make_ctx(ModuleLibrary())
+    module_ref = make_readout_ref_default(ctx, optional=True)
 
-    with pytest.raises(RuntimeError):
-        infer_module_ref_fallback(UnsupportedModule)
+    assert module_ref is None

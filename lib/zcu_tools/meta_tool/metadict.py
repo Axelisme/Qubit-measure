@@ -28,7 +28,15 @@ def _restore_complex(obj: Any) -> Any:
 
 
 class MetaDict(SyncFile):
-    _PROTECTED_KEYS = ["dump", "load", "sync", "update_modify_time", "clone"]
+    _PROTECTED_KEYS = [
+        "dump",
+        "load",
+        "sync",
+        "update_modify_time",
+        "clone",
+        "items",
+        "get",
+    ]
 
     def __init__(
         self, json_path: Optional[Union[str, Path]] = None, readonly: bool = False
@@ -119,9 +127,13 @@ class MetaDict(SyncFile):
     def __repr__(self) -> str:
         return self.__str__()
 
+    @auto_sync("read")
     def items(self) -> ItemsView[str, Any]:
-        self.sync()
         return self._data.items()
+
+    @auto_sync("read")
+    def get(self, name: str, default: Any = None) -> Any:
+        return self._data.get(name, default)
 
     def __dir__(self) -> list[str]:
         self.sync()
