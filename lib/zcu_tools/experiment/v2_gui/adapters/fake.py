@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated, Any, Sequence, cast
+from typing import Annotated, Sequence, cast
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -24,7 +24,6 @@ from zcu_tools.gui.adapter import (
     RunRequest,
     SaveDataRequest,
     ScalarSpec,
-    ScalarValue,
     SweepSpec,
     SweepValue,
     WritebackRequest,

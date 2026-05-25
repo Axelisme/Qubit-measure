@@ -270,6 +270,8 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
                 "Remember to turn value to zero before changing mode"
             )
 
+        self._rampstep = cfg.rampstep
+
         value = cfg.value
         if cur_mode == "current":
             self.set_current(value, progress=progress, stop_event=stop_event)
@@ -277,8 +279,6 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
             self.set_voltage(value, progress=progress, stop_event=stop_event)
         else:
             raise ValueError(f"Unknown mode {cur_mode} in device {self.address}")
-
-        self._rampstep = cfg.rampstep
 
     def get_info(self) -> YOKOGS200Info:
         return YOKOGS200Info(

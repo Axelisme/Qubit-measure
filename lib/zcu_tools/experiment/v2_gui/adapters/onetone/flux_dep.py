@@ -121,8 +121,8 @@ class OneToneFluxDepAdapter(
                         "flux_dev": DirectValue("flux_yoko"),
                     }
                 ),
-                "reps": DirectValue(1000),
-                "rounds": DirectValue(1),
+                "reps": DirectValue(100),
+                "rounds": DirectValue(100),
                 "relax_delay": DirectValue(1.0),
                 "sweep": CfgSectionValue(
                     fields={

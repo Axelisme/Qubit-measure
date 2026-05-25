@@ -76,7 +76,7 @@ def _pulse_readout_default(ctx: ExpContext):
     return make_module_ref_default(
         ml=ctx.ml,
         module_type=PulseReadoutCfg,
-        preferred_names=["readout_rf", "readout", "res_readout"],
+        preferred_names=["readout_rf", "readout_dpm"],
         fallback_key="<Custom:Pulse Readout>",
         fallback_spec_factory=make_pulse_readout_spec,
     )
