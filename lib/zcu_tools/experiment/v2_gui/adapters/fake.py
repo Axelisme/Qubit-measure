@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated, Sequence, cast
 
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from typing_extensions import Annotated, Optional, Sequence, TypeAlias, cast
 
 from zcu_tools.experiment.base import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -33,6 +33,7 @@ from zcu_tools.gui.adapter import (
 @dataclass(frozen=True)
 class FakeResult:
     data: np.ndarray
+    cfg_snapshot: Optional[FakeExpCfg] = None
 
 
 class FakeExpCfg(ExpCfgModel):
@@ -49,11 +50,12 @@ class FakeExp(AbsExperiment[FakeResult, FakeExpCfg]):
         signals = rng.normal(0.0, cfg.noise_scale, size=11)
         return FakeResult(data=signals)
 
+    def save(self, result: FakeResult, save_req: SaveDataRequest) -> None:
+        # No actual saving, but we could log or print if desired.
+        pass
 
-@dataclass
-class FakeRunResult:
-    result: FakeResult
-    cfg_snapshot: FakeExpCfg
+
+FakeRunResult: TypeAlias = FakeResult
 
 
 @dataclass
@@ -123,8 +125,7 @@ class FakeAdapter(AbsExpAdapter[FakeRunResult, FakeAnalyzeResult, FakeAnalyzePar
     def run(self, req: RunRequest, schema: CfgSchema) -> FakeRunResult:
         raw_cfg = schema.to_raw_dict(req)
         cfg = self.build_exp_cfg(raw_cfg, req)
-        result = FakeExp().run(cfg)
-        return FakeRunResult(result=result, cfg_snapshot=cfg)
+        return FakeExp().run(cfg)
 
     def get_analyze_params(
         self, result: FakeRunResult, ctx: ExpContext
@@ -135,10 +136,8 @@ class FakeAdapter(AbsExpAdapter[FakeRunResult, FakeAnalyzeResult, FakeAnalyzePar
         self, req: AnalyzeRequest[FakeRunResult, FakeAnalyzeParams]
     ) -> FakeAnalyzeResult:
         threshold = req.analyze_params.threshold
-        result = req.run_result
-        if not isinstance(result, FakeRunResult):
-            raise RuntimeError("Analyze request run_result must be FakeRunResult")
-        data = result.result.data
+        data = req.run_result.data
+
         peak = float(np.max(np.abs(data)))
         fig = Figure()
         ax = cast(Axes, fig.subplots())
@@ -169,6 +168,3 @@ class FakeAdapter(AbsExpAdapter[FakeRunResult, FakeAnalyzeResult, FakeAnalyzePar
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.res_name}_fake"
-
-    def save(self, req: SaveDataRequest[FakeRunResult]) -> None:
-        pass  # nothing to save in fake mode

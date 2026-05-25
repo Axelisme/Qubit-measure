@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import os
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Optional, Sequence, cast
+from dataclasses import dataclass
 
-from typing_extensions import Generic
+from typing_extensions import TYPE_CHECKING, Any, Optional, Sequence, Generic
+from matplotlib.figure import Figure
 
+from zcu_tools.experiment.v2_gui.adapters.shared import require_soc_handles
 from .types import (
     AnalyzeRequest,
     CfgSchema,
@@ -24,6 +26,16 @@ if TYPE_CHECKING:
     from zcu_tools.experiment.cfg_model import ExpCfgModel
 
 
+@dataclass
+class NoAnalyzeParams:
+    pass
+
+
+@dataclass
+class NoAnalysisResult:
+    figure: Optional[Figure] = None
+
+
 class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     exp_cls: Optional[type[Any]] = None
 
@@ -31,30 +43,30 @@ class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
         """Build a default CfgSchema from ctx."""
 
-    @abstractmethod
-    def build_exp_cfg(
-        self, raw_cfg: dict[str, object], req: RunRequest
-    ) -> "ExpCfgModel":
-        """Convert lowered raw cfg into the concrete experiment config model."""
+    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> ExpCfgModel:
+        return req.ml.make_cfg(raw_cfg, self.exp_cls)
 
     def run(self, req: RunRequest, schema: CfgSchema) -> T_Result:
-        raise NotImplementedError("Run method is not implemented for this adapter")
+        soc, soccfg = require_soc_handles(req)
 
-    @abstractmethod
+        raw_cfg = schema.to_raw_dict(req)
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        return self.exp_cls().run(soc, soccfg, cfg)
+
     def get_analyze_params(self, result: T_Result, ctx: ExpContext) -> T_AnalyzeParams:
         """Return a dataclass instance with current analysis parameters."""
+        return NoAnalyzeParams()
 
-    @abstractmethod
     def analyze(
-        self,
-        req: AnalyzeRequest[T_Result, T_AnalyzeParams],
+        self, req: AnalyzeRequest[T_Result, T_AnalyzeParams]
     ) -> T_AnalyzeResult:
         """Run analysis."""
+        return NoAnalysisResult()
 
-    @abstractmethod
     def get_writeback_items(
         self, req: WritebackRequest[T_Result, T_AnalyzeResult]
-    ) -> Sequence[WritebackItem]: ...
+    ) -> Sequence[WritebackItem]:
+        return []
 
     @abstractmethod
     def make_filename_stem(self, ctx: ExpContext) -> str:
@@ -83,5 +95,5 @@ class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     def make_save_paths(self, ctx: ExpContext) -> SavePaths:
         return self.make_default_save_paths(ctx)
 
-    @abstractmethod
-    def save(self, req: SaveDataRequest[T_Result]) -> None: ...
+    def save(self, req: SaveDataRequest[T_Result]) -> None:
+        self.exp_cls().save(filepath=req.data_path, result=req.run_result)

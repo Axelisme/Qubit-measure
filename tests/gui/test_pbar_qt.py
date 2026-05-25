@@ -176,8 +176,8 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
         )
         QApplication.processEvents()
 
-    assert len(run_result.result.freqs) == 5
-    assert len(run_result.result.signals) == 5
+    assert len(run_result.freqs) == 5
+    assert len(run_result.signals) == 5
     # run_task uses leave=True pbar; reset_all clears it
     stack.reset_all()
     assert len(stack._active) == 0

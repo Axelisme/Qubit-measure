@@ -2,17 +2,16 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Annotated, Sequence
 
 from matplotlib.figure import Figure
+from typing_extensions import Annotated, Sequence, TypeAlias
 
-from zcu_tools.experiment.v2.lookback import LookbackCfg, LookbackExp, LookbackResult
+from zcu_tools.experiment.v2.lookback import LookbackExp, LookbackResult
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_module_ref_default,
     make_pulse_readout_ref_spec,
     make_pulse_ref_spec,
     make_reset_ref_spec,
-    require_soc_handles,
 )
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
@@ -24,8 +23,6 @@ from zcu_tools.gui.adapter import (
     ExpContext,
     MetaDictWriteback,
     ParamMeta,
-    RunRequest,
-    SaveDataRequest,
     ScalarSpec,
     WritebackItem,
     WritebackRequest,
@@ -33,11 +30,7 @@ from zcu_tools.gui.adapter import (
 from zcu_tools.gui.specs.readout import make_pulse_readout_spec
 from zcu_tools.program.v2 import PulseReadoutCfg
 
-
-@dataclass
-class LookbackRunResult:
-    result: LookbackResult
-    cfg_snapshot: LookbackCfg
+LookbackRunResult: TypeAlias = LookbackResult
 
 
 @dataclass
@@ -100,16 +93,6 @@ class LookbackAdapter(
         )
         return CfgSchema(spec=root_spec, value=root_val)
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> LookbackCfg:
-        return req.ml.make_cfg(raw_cfg, LookbackCfg)
-
-    def run(self, req: RunRequest, schema: CfgSchema) -> LookbackRunResult:
-        soc, soccfg = require_soc_handles(req)
-        raw_cfg = schema.to_raw_dict(req)
-        cfg = self.build_exp_cfg(raw_cfg, req)
-        result = LookbackExp().run(soc, soccfg, cfg)
-        return LookbackRunResult(result=result, cfg_snapshot=cfg)
-
     def get_analyze_params(
         self, result: LookbackRunResult, ctx: ExpContext
     ) -> LookbackAnalyzeParams:
@@ -120,9 +103,8 @@ class LookbackAdapter(
         req: AnalyzeRequest[LookbackRunResult, LookbackAnalyzeParams],
     ) -> LookbackAnalyzeResult:
         params = req.analyze_params
-        run_result = req.run_result
         offset, figure = LookbackExp().analyze(
-            run_result.result,
+            req.run_result,
             ratio=params.ratio,
             smooth=params.smooth,
             plot_fit=params.plot_fit,
@@ -144,10 +126,3 @@ class LookbackAdapter(
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"lookback_{time.strftime('%H%M')}"
-
-    def save(self, req: SaveDataRequest[LookbackRunResult]) -> None:
-        run_result = req.run_result
-        LookbackExp().save(
-            filepath=req.data_path,
-            result=run_result.result,
-        )

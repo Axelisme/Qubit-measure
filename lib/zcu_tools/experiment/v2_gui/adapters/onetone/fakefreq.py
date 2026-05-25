@@ -10,12 +10,20 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal, Optional, Sequence, cast
 
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Callable
+from typing_extensions import (
+    Annotated,
+    Any,
+    Callable,
+    Literal,
+    Optional,
+    Sequence,
+    TypeAlias,
+    cast,
+)
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.base import AbsExperiment
@@ -99,10 +107,7 @@ class FakeFreqCfg(ProgramV2Cfg, ExpCfgModel):
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class FakeFreqRunResult:
-    result: FreqResult
-    cfg_snapshot: FakeFreqCfg
+FakeFreqRunResult: TypeAlias = FreqResult
 
 
 @dataclass
@@ -185,6 +190,9 @@ class FakeFreqExp(AbsExperiment[FreqResult, FakeFreqCfg]):
         return FreqExp().analyze(
             result, model_type=model_type, fit_bg_slope=fit_bg_slope
         )
+
+    def save(self, result: FreqResult) -> None:
+        pass  # no real hardware, skip HDF5 persistence
 
 
 # ---------------------------------------------------------------------------
@@ -301,8 +309,7 @@ class FakeFreqAdapter(
     def run(self, req: RunRequest, schema: CfgSchema) -> FakeFreqRunResult:
         raw_cfg = schema.to_raw_dict(req)
         cfg = self.build_exp_cfg(raw_cfg, req)
-        result = FakeFreqExp().run(cfg)
-        return FakeFreqRunResult(result=result, cfg_snapshot=cfg)
+        return FakeFreqExp().run(cfg)
 
     def get_analyze_params(
         self, result: FakeFreqRunResult, ctx: ExpContext
@@ -313,10 +320,9 @@ class FakeFreqAdapter(
         self,
         req: AnalyzeRequest[FakeFreqRunResult, FakeFreqAnalyzeParams],
     ) -> FakeFreqAnalyzeResult:
-        run_result = req.run_result
         analyze_params = req.analyze_params
         freq, fwhm, fit_params, figure = FakeFreqExp().analyze(
-            run_result.result,
+            req.run_result,
             model_type=analyze_params.model_type,
             fit_bg_slope=analyze_params.fit_bg_slope,
         )
@@ -337,6 +343,8 @@ class FakeFreqAdapter(
         md = ctx.md
 
         cfg = req.run_result.cfg_snapshot
+        assert cfg is not None, "cfg_snapshot is required for writeback"
+
         readout = cfg.modules.readout
         pulse_ch = getattr(ctx.md, "res_ch", 0)
         ro_ch = getattr(ctx.md, "ro_ch", 0)
@@ -398,6 +406,3 @@ class FakeFreqAdapter(
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.res_name}_freq_{time.strftime('%m%d')}"
-
-    def save(self, req: SaveDataRequest[FakeFreqRunResult]) -> None:
-        pass  # no real hardware, skip HDF5 persistence

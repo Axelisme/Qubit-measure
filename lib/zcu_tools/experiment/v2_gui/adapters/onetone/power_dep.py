@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
-from typing import Optional, Sequence
 
-from matplotlib.figure import Figure
+from typing_extensions import Optional, TypeAlias
 
 from zcu_tools.experiment.v2.onetone.power_dep import (
     PowerDepCfg,
@@ -18,39 +16,23 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     require_soc_handles,
 )
 from zcu_tools.gui.adapter import (
+    NoAnalyzeParams,
+    NoAnalysisResult,
     AbsExpAdapter,
-    AnalyzeRequest,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
     ExpContext,
     RunRequest,
-    SaveDataRequest,
     ScalarSpec,
     SweepSpec,
     SweepValue,
-    WritebackItem,
-    WritebackRequest,
 )
 from zcu_tools.gui.specs.readout import make_pulse_readout_spec
 from zcu_tools.program.v2 import PulseReadoutCfg
 
-
-@dataclass
-class OneTonePowerDepRunResult:
-    result: PowerDepResult
-    cfg_snapshot: PowerDepCfg
-
-
-@dataclass
-class NoAnalyzeParams:
-    pass
-
-
-@dataclass
-class NoAnalysisResult:
-    figure: Optional[Figure] = None
+OneTonePowerDepRunResult: TypeAlias = PowerDepResult
 
 
 def _md_float(ctx: ExpContext, key: str, default: float) -> float:
@@ -149,30 +131,7 @@ class OneTonePowerDepAdapter(
         raw_cfg = schema.to_raw_dict(req)
         cfg = self.build_exp_cfg(raw_cfg, req)
         earlystop_snr = self._earlystop_snr(raw_cfg)
-        result = PowerDepExp().run(soc, soccfg, cfg, earlystop_snr=earlystop_snr)
-        return OneTonePowerDepRunResult(result=result, cfg_snapshot=cfg)
-
-    def get_analyze_params(
-        self, result: OneTonePowerDepRunResult, ctx: ExpContext
-    ) -> NoAnalyzeParams:
-        return NoAnalyzeParams()
-
-    def analyze(
-        self, req: AnalyzeRequest[OneTonePowerDepRunResult, NoAnalyzeParams]
-    ) -> NoAnalysisResult:
-        return NoAnalysisResult()
-
-    def get_writeback_items(
-        self, req: WritebackRequest[OneTonePowerDepRunResult, NoAnalysisResult]
-    ) -> Sequence[WritebackItem]:
-        return []
+        return PowerDepExp().run(soc, soccfg, cfg, earlystop_snr=earlystop_snr)
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.res_name}_gain_{time.strftime('%H%M')}"
-
-    def save(self, req: SaveDataRequest[OneTonePowerDepRunResult]) -> None:
-        run_result = req.run_result
-        PowerDepExp().save(
-            filepath=req.data_path,
-            result=run_result.result,
-        )

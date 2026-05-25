@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal, Sequence
 
 from matplotlib.figure import Figure
+from typing_extensions import Annotated, Any, Literal, Sequence, TypeAlias
 
-from zcu_tools.experiment.v2.onetone.freq import FreqCfg, FreqExp, FreqResult
+from zcu_tools.experiment.v2.onetone.freq import FreqExp, FreqResult
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     build_readout_for_frequency,
     build_waveform_for_length,
@@ -15,7 +15,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_readout_ref_spec,
     make_readout_edit_template,
     make_reset_ref_spec,
-    require_soc_handles,
 )
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
@@ -28,8 +27,6 @@ from zcu_tools.gui.adapter import (
     MetaDictWriteback,
     ModuleWriteback,
     ParamMeta,
-    RunRequest,
-    SaveDataRequest,
     ScalarSpec,
     SweepSpec,
     SweepValue,
@@ -40,11 +37,7 @@ from zcu_tools.gui.adapter import (
 from zcu_tools.gui.specs.readout import make_pulse_readout_spec
 from zcu_tools.program.v2 import PulseReadoutCfg
 
-
-@dataclass
-class OneToneFreqRunResult:
-    result: FreqResult
-    cfg_snapshot: FreqCfg
+OneToneFreqRunResult: TypeAlias = FreqResult
 
 
 @dataclass
@@ -132,29 +125,17 @@ class OneToneFreqAdapter(
         )
         return CfgSchema(spec=root_spec, value=root_val)
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FreqCfg:
-        return req.ml.make_cfg(raw_cfg, FreqCfg)
-
-    def run(self, req: RunRequest, schema: CfgSchema) -> OneToneFreqRunResult:
-        soc, soccfg = require_soc_handles(req)
-        raw_cfg = schema.to_raw_dict(req)
-        cfg = self.build_exp_cfg(raw_cfg, req)
-        result = FreqExp().run(soc, soccfg, cfg)
-        return OneToneFreqRunResult(result=result, cfg_snapshot=cfg)
-
     def get_analyze_params(
         self, result: OneToneFreqRunResult, ctx: ExpContext
     ) -> OneToneFreqAnalyzeParams:
         return OneToneFreqAnalyzeParams(model_type="hm", fit_bg_slope=True)
 
     def analyze(
-        self,
-        req: AnalyzeRequest[OneToneFreqRunResult, OneToneFreqAnalyzeParams],
+        self, req: AnalyzeRequest[OneToneFreqRunResult, OneToneFreqAnalyzeParams]
     ) -> OneToneFreqAnalyzeResult:
         params = req.analyze_params
-        run_result = req.run_result
         freq, fwhm, fit_params, figure = FreqExp().analyze(
-            run_result.result,
+            req.run_result,
             model_type=params.model_type,
             fit_bg_slope=params.fit_bg_slope,
         )
@@ -169,8 +150,11 @@ class OneToneFreqAdapter(
         self, req: WritebackRequest[OneToneFreqRunResult, OneToneFreqAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
+        cfg = req.run_result.cfg_snapshot
+        assert cfg is not None, "cfg_snapshot is required for writeback"
+
         ctx = req.ctx
-        readout = req.run_result.cfg_snapshot.modules.readout
+        readout = cfg.modules.readout
         pulse_ch = getattr(ctx.md, "res_ch", 0)
         ro_ch = getattr(ctx.md, "ro_ch", 0)
         wav_len = _md_float(ctx, "res_probe_len", 5.0)
@@ -225,10 +209,3 @@ class OneToneFreqAdapter(
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.res_name}_freq_{time.strftime('%m%d')}"
-
-    def save(self, req: SaveDataRequest[OneToneFreqRunResult]) -> None:
-        run_result = req.run_result
-        FreqExp().save(
-            filepath=req.data_path,
-            result=run_result.result,
-        )

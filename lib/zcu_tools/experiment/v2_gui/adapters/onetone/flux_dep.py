@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional, Sequence
 
-from matplotlib.figure import Figure
+from typing_extensions import TypeAlias
 
 from zcu_tools.experiment.v2.onetone.flux_dep import (
     FluxDepCfg,
@@ -14,11 +12,11 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_module_ref_default,
     make_pulse_readout_ref_spec,
     make_reset_ref_spec,
-    require_soc_handles,
 )
 from zcu_tools.gui.adapter import (
+    NoAnalyzeParams,
+    NoAnalysisResult,
     AbsExpAdapter,
-    AnalyzeRequest,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -26,31 +24,14 @@ from zcu_tools.gui.adapter import (
     DirectValue,
     ExpContext,
     RunRequest,
-    SaveDataRequest,
     ScalarSpec,
     SweepSpec,
     SweepValue,
-    WritebackItem,
-    WritebackRequest,
 )
 from zcu_tools.gui.specs.readout import make_pulse_readout_spec
 from zcu_tools.program.v2 import PulseReadoutCfg
 
-
-@dataclass
-class OneToneFluxDepRunResult:
-    result: FluxDepResult
-    cfg_snapshot: FluxDepCfg
-
-
-@dataclass
-class NoAnalyzeParams:
-    pass
-
-
-@dataclass
-class NoAnalysisResult:
-    figure: Optional[Figure] = None
+OneToneFluxDepRunResult: TypeAlias = FluxDepResult
 
 
 def _md_float(ctx: ExpContext, key: str, default: float) -> float:
@@ -154,34 +135,5 @@ class OneToneFluxDepAdapter(
         cfg_raw["dev"] = dev_patch
         return req.ml.make_cfg(cfg_raw, FluxDepCfg)
 
-    def run(self, req: RunRequest, schema: CfgSchema) -> OneToneFluxDepRunResult:
-        soc, soccfg = require_soc_handles(req)
-        raw_cfg = schema.to_raw_dict(req)
-        cfg = self.build_exp_cfg(raw_cfg, req)
-        result = FluxDepExp().run(soc, soccfg, cfg)
-        return OneToneFluxDepRunResult(result=result, cfg_snapshot=cfg)
-
-    def get_analyze_params(
-        self, result: OneToneFluxDepRunResult, ctx: ExpContext
-    ) -> NoAnalyzeParams:
-        return NoAnalyzeParams()
-
-    def analyze(
-        self, req: AnalyzeRequest[OneToneFluxDepRunResult, NoAnalyzeParams]
-    ) -> NoAnalysisResult:
-        return NoAnalysisResult()
-
-    def get_writeback_items(
-        self, req: WritebackRequest[OneToneFluxDepRunResult, NoAnalysisResult]
-    ) -> Sequence[WritebackItem]:
-        return []
-
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.res_name}_flux"
-
-    def save(self, req: SaveDataRequest[OneToneFluxDepRunResult]) -> None:
-        run_result = req.run_result
-        FluxDepExp().save(
-            filepath=req.data_path,
-            result=run_result.result,
-        )
