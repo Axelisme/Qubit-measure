@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, Literal, Optional, overload
+from typing import TYPE_CHECKING, Any, Callable, Literal, overload
 
 if TYPE_CHECKING:
     from zcu_tools.gui.adapter import SocCfgHandle, SocHandle
@@ -103,6 +103,11 @@ class PredictorChangedPayload(Payload):
     """Payload for PREDICTOR_CHANGED: predictor state or values changed."""
 
 
+@dataclass(frozen=True)
+class DeviceChangedPayload(Payload):
+    """Payload for DEVICE_CHANGED: a device was registered or dropped."""
+
+
 # ---------------------------------------------------------------------------
 # GuiEvent enum
 # ---------------------------------------------------------------------------
@@ -129,6 +134,9 @@ class GuiEvent(str, Enum):
     # UI / Panel layer
     PREDICTOR_CHANGED = "predictor_changed"  # predictor state or values changed
 
+    # Device layer
+    DEVICE_CHANGED = "device_changed"  # device registered or dropped
+
 
 # ---------------------------------------------------------------------------
 # EventBus
@@ -146,6 +154,7 @@ _EventPayloadMap = {
     GuiEvent.TAB_INTERACTION_CHANGED: TabInteractionChangedPayload,
     GuiEvent.RUN_LOCK_CHANGED: RunLockChangedPayload,
     GuiEvent.PREDICTOR_CHANGED: PredictorChangedPayload,
+    GuiEvent.DEVICE_CHANGED: DeviceChangedPayload,
 }
 
 
@@ -227,6 +236,13 @@ class EventBus:
         cb: Callable[[PredictorChangedPayload], None],
     ) -> None: ...
 
+    @overload
+    def subscribe(
+        self,
+        event: "Literal[GuiEvent.DEVICE_CHANGED]",
+        cb: Callable[[DeviceChangedPayload], None],
+    ) -> None: ...
+
     def subscribe(self, event: GuiEvent, cb: Callable[[Any], None]) -> None:
         if not isinstance(event, GuiEvent):
             raise TypeError(f"event must be a GuiEvent, got {type(event)}")
@@ -306,6 +322,13 @@ class EventBus:
         cb: Callable[[PredictorChangedPayload], None],
     ) -> None: ...
 
+    @overload
+    def unsubscribe(
+        self,
+        event: "Literal[GuiEvent.DEVICE_CHANGED]",
+        cb: Callable[[DeviceChangedPayload], None],
+    ) -> None: ...
+
     def unsubscribe(self, event: GuiEvent, cb: Callable[[Any], None]) -> None:
         lst = self._subs.get(event, [])
         try:
@@ -375,6 +398,13 @@ class EventBus:
         self,
         event: "Literal[GuiEvent.PREDICTOR_CHANGED]",
         payload: PredictorChangedPayload,
+    ) -> None: ...
+
+    @overload
+    def emit(
+        self,
+        event: "Literal[GuiEvent.DEVICE_CHANGED]",
+        payload: DeviceChangedPayload,
     ) -> None: ...
 
     def emit(self, event: GuiEvent, payload: Payload) -> None:

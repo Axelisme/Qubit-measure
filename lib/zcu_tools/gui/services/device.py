@@ -5,33 +5,41 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
+from zcu_tools.gui.event_bus import DeviceChangedPayload, GuiEvent
+
 if TYPE_CHECKING:
     from zcu_tools.gui.device_manager import (
         DeviceManager,
         DeviceProtocol,
         _DeviceSetupWorker,
     )
+    from zcu_tools.gui.event_bus import EventBus
     from zcu_tools.gui.state import State
 
 
 class DeviceService:
     """Encapsulates device registration and manipulation."""
 
-    def __init__(self, state: "State", device_manager: "DeviceManager") -> None:
+    def __init__(
+        self, state: "State", device_manager: "DeviceManager", bus: "EventBus"
+    ) -> None:
         self._state = state
         self._dm = device_manager
+        self._bus = bus
 
     def register_device(self, name: str, device: "DeviceProtocol") -> None:
         logger.info("register_device: name=%r type=%s", name, type(device).__name__)
         if self._state.is_run_active():
             raise RuntimeError("Cannot register device while a run is active")
         self._dm.register_device(name, device)
+        self._bus.emit(GuiEvent.DEVICE_CHANGED, DeviceChangedPayload())
 
     def drop_device(self, name: str) -> None:
         logger.info("drop_device: name=%r", name)
         if self._state.is_run_active():
             raise RuntimeError("Cannot drop device while a run is active")
         self._dm.drop_device(name)
+        self._bus.emit(GuiEvent.DEVICE_CHANGED, DeviceChangedPayload())
 
     def list_devices(self) -> dict[str, str]:
         return self._dm.list_devices()

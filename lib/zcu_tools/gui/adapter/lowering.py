@@ -9,6 +9,7 @@ from .types import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
+    DeviceRefSpec,
     DirectValue,
     EvalValue,
     LiteralSpec,
@@ -113,6 +114,18 @@ def _section_to_dict_inner(
                 ml,
                 [*path, key],
             )
+
+        elif isinstance(node_spec, DeviceRefSpec):
+            assert isinstance(node_val, DirectValue)
+            if (
+                node_val.is_unset
+                or not isinstance(node_val.value, str)
+                or not node_val.value
+            ):
+                label = node_spec.label or key
+                full_path = ".".join([*path, key])
+                raise RuntimeError(f"Config field '{full_path}' ({label}) is unset")
+            result[key] = node_val.value
 
         elif isinstance(node_spec, CfgSectionSpec):
             assert isinstance(node_val, CfgSectionValue)

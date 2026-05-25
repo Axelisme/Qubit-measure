@@ -21,6 +21,7 @@ from zcu_tools.gui.adapter import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
+    DeviceRefSpec,
     DirectValue,
     ExpContext,
     RunRequest,
@@ -91,11 +92,7 @@ class OneToneFluxDepAdapter(
                 "dev": CfgSectionSpec(
                     label="Flux Device",
                     fields={
-                        "name": ScalarSpec(label="Device name", type=str),
-                        "label": ScalarSpec(label="Device label", type=str),
-                        "mode": ScalarSpec(
-                            label="Mode", type=str, choices=["current", "voltage"]
-                        ),
+                        "flux_dev": DeviceRefSpec(label="Flux Device"),
                     },
                 ),
                 "reps": ScalarSpec(label="Reps", type=int),
@@ -121,9 +118,7 @@ class OneToneFluxDepAdapter(
                 ),
                 "dev": CfgSectionValue(
                     fields={
-                        "name": DirectValue("flux_yoko"),
-                        "label": DirectValue("flux_dev"),
-                        "mode": DirectValue("current"),
+                        "flux_dev": DirectValue("flux_yoko"),
                     }
                 ),
                 "reps": DirectValue(1000),
@@ -148,16 +143,16 @@ class OneToneFluxDepAdapter(
         dev_raw = cfg_raw.pop("dev")
         if not isinstance(dev_raw, dict):
             raise RuntimeError("FluxDep dev section must lower to a dict")
-        name = dev_raw.get("name")
-        label = dev_raw.get("label")
-        mode = dev_raw.get("mode")
-        if not isinstance(name, str) or not name:
-            raise RuntimeError("FluxDep dev.name must be a non-empty string")
-        if not isinstance(label, str) or not label:
-            raise RuntimeError("FluxDep dev.label must be a non-empty string")
-        if not isinstance(mode, str) or not mode:
-            raise RuntimeError("FluxDep dev.mode must be a non-empty string")
-        cfg_raw["dev"] = {name: {"label": label, "mode": mode}}
+        # dev_raw = {"flux_dev": "flux_yoko", ...}
+        # convert to make_cfg patch format: {"flux_yoko": {"label": "flux_dev"}}
+        dev_patch: dict[str, dict] = {}
+        for label_key, device_name in dev_raw.items():
+            if not isinstance(device_name, str) or not device_name:
+                raise RuntimeError(
+                    f"FluxDep dev.{label_key} must be a non-empty device name"
+                )
+            dev_patch[device_name] = {"label": label_key}
+        cfg_raw["dev"] = dev_patch
         return req.ml.make_cfg(cfg_raw, FluxDepCfg)
 
     def run(self, req: RunRequest, schema: CfgSchema) -> OneToneFluxDepRunResult:

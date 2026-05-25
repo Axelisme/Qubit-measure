@@ -20,7 +20,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from ...adapter import LiteralSpec, ScalarSpec
-from ...live_model import ModuleRefLiveField, SectionLiveField
+from ...live_model import DeviceRefLiveField, ModuleRefLiveField, SectionLiveField
 from .common import BaseLiveWidget
 from .registry import FieldWidgetProtocol, get_widget_cls, register_widget
 
@@ -339,3 +339,50 @@ class ModuleRefWidget(BaseLiveWidget):
         style = "" if valid else "border: 1px solid red;"
         self._combo.setStyleSheet(style)
         self._expand_btn.setStyleSheet("" if valid else "color: red;")
+
+
+@register_widget(DeviceRefLiveField)
+class DeviceRefWidget(BaseLiveWidget):
+    """Combo box listing registered device names for DeviceRefLiveField."""
+
+    def __init__(
+        self, field: DeviceRefLiveField, parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(field, parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self._combo = QComboBox()
+        self._combo.setMinimumWidth(20)
+        layout.addWidget(self._combo, stretch=1)
+        self._refresh_combo()
+        self._combo.currentIndexChanged.connect(self._on_combo_changed)
+        field.on_change.connect(self._on_model_changed)
+        field.on_validity_changed.connect(self._on_validity_changed)
+
+    def _refresh_combo(self) -> None:
+        from zcu_tools.device import GlobalDeviceManager
+
+        field = cast(DeviceRefLiveField, self._field)
+        self._combo.blockSignals(True)
+        self._combo.clear()
+        devices = GlobalDeviceManager.get_all_devices()
+        for name in sorted(devices):
+            self._combo.addItem(name)
+        idx = self._combo.findText(field.get_chosen_name())
+        self._combo.setCurrentIndex(idx if idx >= 0 else -1)
+        self._combo.blockSignals(False)
+
+    def _on_combo_changed(self, _index: int) -> None:
+        name = self._combo.currentText()
+        cast(DeviceRefLiveField, self._field).set_chosen_name(name)
+
+    def _on_model_changed(self, _val: object) -> None:
+        self._refresh_combo()
+
+    def _on_validity_changed(self, valid: bool) -> None:
+        self._combo.setStyleSheet("" if valid else "border: 1px solid red;")
+
+    def teardown(self) -> None:
+        field = cast(DeviceRefLiveField, self._field)
+        field.on_change.disconnect(self._on_model_changed)
+        field.on_validity_changed.disconnect(self._on_validity_changed)

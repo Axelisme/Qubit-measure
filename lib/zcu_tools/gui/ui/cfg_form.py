@@ -126,6 +126,7 @@ class CfgFormWidget(QWidget):
             GuiEvent.MD_CHANGED,
             GuiEvent.CONTEXT_SWITCHED,
             GuiEvent.ML_CHANGED,
+            GuiEvent.DEVICE_CHANGED,
         ):
             cb = self._make_external_refresh_cb(event)
             self._bus.subscribe(event, cb)

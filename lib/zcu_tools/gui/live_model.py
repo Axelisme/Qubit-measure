@@ -17,6 +17,7 @@ from .adapter import (
     CfgNodeValue,
     CfgSectionSpec,
     CfgSectionValue,
+    DeviceRefSpec,
     DirectValue,
     EvalValue,
     LiteralSpec,
@@ -377,6 +378,60 @@ class SectionLiveField(LiveField):
         self._refresh_validity()
 
 
+class DeviceRefLiveField(LiveField):
+    """Reactive field for selecting a registered device by name."""
+
+    spec: DeviceRefSpec
+
+    def __init__(
+        self, spec: DeviceRefSpec, env: LiveModelEnv, initial_val: object = None
+    ) -> None:
+        super().__init__(spec, env)
+        chosen = initial_val.value if isinstance(initial_val, DirectValue) else None
+        self._chosen_name: str = chosen if isinstance(chosen, str) else ""
+        self._refresh_validity()
+
+    def get_value(self) -> DirectValue:
+        return DirectValue(self._chosen_name)
+
+    def set_value(self, val: object) -> None:
+        if isinstance(val, DirectValue) and isinstance(val.value, str):
+            self._chosen_name = val.value
+        elif isinstance(val, str):
+            self._chosen_name = val
+        else:
+            raise TypeError(
+                f"DeviceRefLiveField expects str or DirectValue(str), got {type(val).__name__}"
+            )
+        self._refresh_validity()
+        self.on_change.emit(self.get_value())
+
+    def get_chosen_name(self) -> str:
+        return self._chosen_name
+
+    def set_chosen_name(self, name: str) -> None:
+        if name != self._chosen_name:
+            self._chosen_name = name
+            self._refresh_validity()
+            self.on_change.emit(self.get_value())
+
+    def _refresh_validity(self) -> None:
+        from zcu_tools.device import GlobalDeviceManager
+
+        devices = GlobalDeviceManager.get_all_devices()
+        self._set_valid(self._chosen_name in devices)
+
+    def refresh_external(self, event: object) -> None:
+        from .event_bus import GuiEvent
+
+        if event is GuiEvent.DEVICE_CHANGED:
+            self._refresh_validity()
+            self.on_change.emit(self.get_value())
+
+    def teardown(self) -> None:
+        pass
+
+
 class LibraryBindingState(Enum):
     LINKED = "linked"
     MODIFIED = "modified"
@@ -572,6 +627,8 @@ def create_live_field(
         return MultiSweepLiveField(spec, env, initial_val)
     if isinstance(spec, (ModuleRefSpec, WaveformRefSpec)):
         return ModuleRefLiveField(spec, env, initial_val)
+    if isinstance(spec, DeviceRefSpec):
+        return DeviceRefLiveField(spec, env, initial_val)
     if isinstance(spec, CfgSectionSpec):
         return SectionLiveField(
             spec,

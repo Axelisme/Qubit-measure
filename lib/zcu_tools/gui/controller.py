@@ -66,7 +66,7 @@ class Controller:
         self._bus = bus
 
         # Initialize domain services
-        self._dev_svc = DeviceService(state, device_manager)
+        self._dev_svc = DeviceService(state, device_manager, bus)
         self._conn_svc = ConnectionService(state, bus)
         self._ctx_svc = ContextService(state, io_manager, bus)
         self._tab_svc = TabService(state, registry, bus)

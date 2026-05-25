@@ -8,6 +8,7 @@ from .types import (
     CfgNodeValue,
     CfgSectionSpec,
     CfgSectionValue,
+    DeviceRefSpec,
     DirectValue,
     EvalValue,
     LiteralSpec,
@@ -51,6 +52,8 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
                 if isinstance(node_spec, ModuleRefSpec)
                 else WaveformRefValue(f"<Custom:{label}>", make_default_value(first))
             )
+        elif isinstance(node_spec, DeviceRefSpec):
+            fields[key] = DirectValue("")
         elif isinstance(node_spec, CfgSectionSpec):
             fields[key] = make_default_value(node_spec)
     return CfgSectionValue(fields=fields)
@@ -155,6 +158,15 @@ def inherit_from(
                 new_fields[key] = WaveformRefValue(
                     f"<Custom:{label}>", make_default_value(first)
                 )
+            continue
+
+        if isinstance(new_node_spec, DeviceRefSpec):
+            if isinstance(old_node_spec, DeviceRefSpec) and isinstance(
+                old_node_val, DirectValue
+            ):
+                new_fields[key] = old_node_val
+            else:
+                new_fields[key] = DirectValue("")
             continue
 
         if isinstance(new_node_spec, CfgSectionSpec):

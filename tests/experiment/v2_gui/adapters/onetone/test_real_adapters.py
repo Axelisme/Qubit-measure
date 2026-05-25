@@ -113,7 +113,7 @@ def test_flux_dep_build_exp_cfg_converts_device_section() -> None:
 
     adapter.build_exp_cfg(raw, _make_req(ml))
     cfg_raw = ml.make_cfg.call_args.args[0]
-    assert cfg_raw["dev"] == {"flux_yoko": {"label": "flux_dev", "mode": "current"}}
+    assert cfg_raw["dev"] == {"flux_yoko": {"label": "flux_dev"}}
 
 
 @pytest.mark.parametrize(

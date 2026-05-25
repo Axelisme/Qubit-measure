@@ -236,6 +236,13 @@ class CfgSectionSpec:
     ] = None
 
 
+@dataclass(frozen=True)
+class DeviceRefSpec:
+    """A field that selects a registered device by name."""
+
+    label: str = "Device"
+
+
 CfgNodeSpec = Union[
     ScalarSpec,
     LiteralSpec,
@@ -244,6 +251,7 @@ CfgNodeSpec = Union[
     ModuleRefSpec,
     WaveformRefSpec,
     CfgSectionSpec,
+    DeviceRefSpec,
 ]
 
 

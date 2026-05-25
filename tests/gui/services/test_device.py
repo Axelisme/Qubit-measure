@@ -14,7 +14,7 @@ def test_device_service_success():
         ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
     )
     dm = MagicMock()
-    svc = DeviceService(state, dm)
+    svc = DeviceService(state, dm, MagicMock())
     device = MagicMock()
 
     svc.register_device("dev1", device)
@@ -46,7 +46,7 @@ def test_device_service_blocks_when_running():
     state.running_tab_id = "some_tab"
 
     dm = MagicMock()
-    svc = DeviceService(state, dm)
+    svc = DeviceService(state, dm, MagicMock())
     device = MagicMock()
 
     with pytest.raises(RuntimeError, match="Cannot register device"):
