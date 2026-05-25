@@ -359,15 +359,21 @@ class SweepWidget(BaseLiveWidget):
 
         sv = field.get_value()
 
+        decimals = field.spec.decimals
+
         self._start = TrimDoubleSpinBox()
         self._start.setRange(-1e12, 1e12)
         self._start.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
+        if decimals is not None:
+            self._start.setDecimals(decimals)
         self._start.setValue(sv.start)
         self._start.valueChanged.connect(self._on_ui_changed)
 
         self._stop = TrimDoubleSpinBox()
         self._stop.setRange(-1e12, 1e12)
         self._stop.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
+        if decimals is not None:
+            self._stop.setDecimals(decimals)
         self._stop.setValue(sv.stop)
         self._stop.valueChanged.connect(self._on_ui_changed)
 

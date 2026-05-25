@@ -197,6 +197,7 @@ class LiteralSpec:
 class SweepSpec:
     label: str = "Sweep"
     editable: bool = True
+    decimals: Optional[int] = None
 
 
 @dataclass(frozen=True)

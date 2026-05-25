@@ -69,7 +69,7 @@ class FluxDepAdapter(
                 "sweep": CfgSectionSpec(
                     label="Sweep",
                     fields={
-                        "flux": SweepSpec(label="Flux device value"),
+                        "flux": SweepSpec(label="Flux device value", decimals=6),
                         "freq": SweepSpec(label="Freq (MHz)"),
                     },
                 ),
