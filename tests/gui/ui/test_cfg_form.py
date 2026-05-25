@@ -892,3 +892,39 @@ def test_optional_module_ref_select_none_disables_sub(qapp, ctrl):
 
     assert field.is_enabled is False
     assert not mw._sub_container.isEnabled()
+
+
+def test_module_ref_missing_library_hint_visible_and_clear_on_switch(qapp, ctrl):
+    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.ui.fields.containers import ModuleRefWidget
+    from zcu_tools.meta_tool import ModuleLibrary
+
+    pulse_spec = CfgSectionSpec(
+        label="Pulse",
+        fields={"gain": ScalarSpec(label="Gain", type=float)},
+    )
+    schema = _schema(
+        {"pulse": ModuleRefSpec(label="Pulse", allowed=[pulse_spec])},
+        {
+            "pulse": ModuleRefValue(
+                chosen_key="missing_pulse",
+                value=CfgSectionValue(fields={"gain": DirectValue(0.2)}),
+            )
+        },
+    )
+    ctrl.get_current_ml.return_value = ModuleLibrary()
+
+    w = CfgFormWidget()
+    w.populate(schema, ctrl)
+    w.show()
+
+    ref_widget = w.findChild(ModuleRefWidget)
+    assert ref_widget is not None
+    assert ref_widget._combo.currentText() == "Missing: missing_pulse"
+    assert ref_widget._missing_ref_hint.isVisible() is True
+    assert "missing_pulse" in ref_widget._missing_ref_hint.text()
+
+    custom_idx = ref_widget._combo.findData("<Custom:Pulse>")
+    assert custom_idx >= 0
+    ref_widget._combo.setCurrentIndex(custom_idx)
+    assert ref_widget._missing_ref_hint.isVisible() is False

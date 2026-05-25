@@ -16,6 +16,7 @@ from zcu_tools.gui.event_bus import (
     MlChangedPayload,
     PredictorChangedPayload,
     RunLockChangedPayload,
+    SocChangedPayload,
     TabAddedPayload,
     TabClosedPayload,
     TabContentChangedPayload,
@@ -412,19 +413,36 @@ class ExpTabWidget(QWidget):
         if state.is_running:
             self.run_btn.setText("Stop")
             self.run_btn.setEnabled(True)
+            self.run_btn.setToolTip("Running")
             self.run_btn.setStyleSheet(
                 "background-color: #f44336; color: white; font-weight: bold;"
             )
         else:
             self.run_btn.setText("Run")
+            cfg_valid = self.cfg_form.is_valid()
             can_run = (
                 not local_busy
                 and not state.global_run_active
                 and state.has_context
                 and state.has_soc
-                and self.cfg_form.is_valid()
+                and cfg_valid
             )
             self.run_btn.setEnabled(can_run)
+            if can_run:
+                self.run_btn.setToolTip("")
+            elif local_busy:
+                self.run_btn.setToolTip("Tab is busy")
+            elif state.global_run_active:
+                self.run_btn.setToolTip("Another tab is running")
+            elif not state.has_context:
+                self.run_btn.setToolTip("No experiment context")
+            elif not state.has_soc:
+                self.run_btn.setToolTip("No SoC connection")
+            elif not cfg_valid:
+                reason = self.cfg_form.first_invalid_reason()
+                self.run_btn.setToolTip(
+                    f"Config invalid: {reason}" if reason else "Config invalid"
+                )
             self.run_btn.setStyleSheet("")
 
         idle = not local_busy
@@ -577,6 +595,7 @@ class MainWindow(QMainWindow):
         bus.subscribe(GuiEvent.TAB_CLOSED, self._on_bus_tab_closed)
         bus.subscribe(GuiEvent.TAB_CONTENT_CHANGED, self._on_bus_tab_content_changed)
         bus.subscribe(GuiEvent.PREDICTOR_CHANGED, self._on_bus_predictor_changed)
+        bus.subscribe(GuiEvent.SOC_CHANGED, self._on_bus_soc_changed)
         bus.subscribe(GuiEvent.DEVICE_SETUP_CHANGED, self._on_bus_device_setup_changed)
 
         # Cleanup on destroy
@@ -594,6 +613,7 @@ class MainWindow(QMainWindow):
         bus.unsubscribe(GuiEvent.TAB_CLOSED, self._on_bus_tab_closed)
         bus.unsubscribe(GuiEvent.TAB_CONTENT_CHANGED, self._on_bus_tab_content_changed)
         bus.unsubscribe(GuiEvent.PREDICTOR_CHANGED, self._on_bus_predictor_changed)
+        bus.unsubscribe(GuiEvent.SOC_CHANGED, self._on_bus_soc_changed)
         bus.unsubscribe(
             GuiEvent.DEVICE_SETUP_CHANGED, self._on_bus_device_setup_changed
         )
@@ -614,6 +634,9 @@ class MainWindow(QMainWindow):
         del payload
         self.refresh_context_panel()
         for tab_id in list(self._tab_widgets):
+            tab_w = self._tab_widgets.get(tab_id)
+            if tab_w is not None:
+                tab_w.cfg_form.refresh_external(GuiEvent.CONTEXT_SWITCHED)
             self.refresh_tab_writeback(tab_id)
             self.refresh_tab_save_paths(tab_id)
             self.refresh_tab_interaction(tab_id)
@@ -621,6 +644,9 @@ class MainWindow(QMainWindow):
     def _on_bus_ml_changed(self, payload: MlChangedPayload) -> None:
         del payload
         for tab_id in list(self._tab_widgets):
+            tab_w = self._tab_widgets.get(tab_id)
+            if tab_w is not None:
+                tab_w.cfg_form.refresh_external(GuiEvent.ML_CHANGED)
             self.refresh_tab_writeback(tab_id)
             self.refresh_tab_interaction(tab_id)
 
@@ -682,6 +708,10 @@ class MainWindow(QMainWindow):
     def _on_bus_predictor_changed(self, payload: PredictorChangedPayload) -> None:
         del payload
         self.refresh_predictor_panel()
+
+    def _on_bus_soc_changed(self, payload: SocChangedPayload) -> None:
+        del payload
+        self.refresh_run_lock(self._state_running_tab_id())
 
     # ------------------------------------------------------------------
     # ViewProtocol implementation
@@ -928,7 +958,11 @@ class MainWindow(QMainWindow):
             return
         logger.info("_on_run_stop_clicked: run requested tab_id=%r", tab_id)
         if not tab_w.cfg_form.is_valid():
-            msg = "Config has unset fields — fill required values before running"
+            reason = tab_w.cfg_form.first_invalid_reason()
+            if reason:
+                msg = f"Config invalid: {reason}"
+            else:
+                msg = "Config has unset fields — fill required values before running"
             logger.warning("_on_run_stop_clicked: blocked — %s", msg)
             self.show_status_message(msg)
             return

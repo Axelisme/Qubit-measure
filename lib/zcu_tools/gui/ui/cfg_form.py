@@ -16,7 +16,16 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from ..live_model import LiveModelEnv, SectionLiveField
+from zcu_tools.gui.adapter import EvalValue
+
+from ..live_model import (
+    LiveField,
+    LiveModelEnv,
+    ModuleRefLiveField,
+    ScalarLiveField,
+    SectionLiveField,
+    SweepLiveField,
+)
 from .fields import SectionWidget
 
 if TYPE_CHECKING:
@@ -113,6 +122,17 @@ class CfgFormWidget(QWidget):
     def is_valid(self) -> bool:
         return self._model.is_valid() if self._model else True
 
+    def first_invalid_reason(self) -> Optional[str]:
+        if self._model is None:
+            return None
+        return self._find_first_invalid(self._model, path="")
+
+    def refresh_external(self, event: "GuiEvent") -> None:
+        if self._model is None:
+            return
+        self._model.refresh_external(event)
+        self.validity_changed.emit(self._model.is_valid())
+
     def _emit_schema_changed(self, *_: object) -> None:
         if self._model is None:
             return
@@ -144,9 +164,56 @@ class CfgFormWidget(QWidget):
     def _make_external_refresh_cb(self, event: "GuiEvent") -> "Callable[[Any], None]":
         def _callback(payload: Any) -> None:
             del payload
-            if self._model is None:
-                return
-            self._model.refresh_external(event)
-            self.validity_changed.emit(self._model.is_valid())
+            self.refresh_external(event)
 
         return _callback
+
+    def _find_first_invalid(self, field: LiveField, *, path: str) -> Optional[str]:
+        if isinstance(field, ScalarLiveField):
+            if field.is_valid():
+                return None
+            val = field.get_value()
+            if isinstance(val, EvalValue) and val.error:
+                return f"{path or field.spec.label}: {val.error}"
+            return f"{path or field.spec.label}: invalid scalar value"
+
+        if isinstance(field, SweepLiveField):
+            if field.start_field.is_valid() and field.stop_field.is_valid():
+                return None
+            start_reason = self._find_first_invalid(
+                field.start_field,
+                path=f"{path}.start" if path else "sweep.start",
+            )
+            if start_reason:
+                return start_reason
+            return self._find_first_invalid(
+                field.stop_field,
+                path=f"{path}.stop" if path else "sweep.stop",
+            )
+
+        if isinstance(field, ModuleRefLiveField):
+            if field.is_valid():
+                return None
+            key = field.get_chosen_key()
+            label = path or field.spec.label
+            if field.has_missing_library_ref():
+                return f"{label}: missing library reference '{key}'"
+            if field.sub_field is not None:
+                nested = self._find_first_invalid(
+                    field.sub_field, path=f"{label}.{key}"
+                )
+                if nested:
+                    return nested
+            return f"{label}: invalid module reference '{key}'"
+
+        if isinstance(field, SectionLiveField):
+            for key, child in field.fields.items():
+                child_path = f"{path}.{key}" if path else key
+                reason = self._find_first_invalid(child, path=child_path)
+                if reason:
+                    return reason
+            return None
+
+        if not field.is_valid():
+            return f"{path or type(field.spec).__name__}: invalid field"
+        return None

@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from qtpy.QtCore import Qt
-from zcu_tools.gui.event_bus import EventBus
+from zcu_tools.gui.event_bus import EventBus, GuiEvent, SocChangedPayload
 from zcu_tools.gui.state import TabInteractionState
 
 
@@ -143,6 +143,55 @@ def test_exp_tab_disables_save_buttons_while_saving_data(qapp):
     assert tab.save_data_btn.isEnabled() is False
     assert tab.save_both_btn.isEnabled() is False
     assert tab.run_btn.text() == "Run"
+    assert tab.run_btn.toolTip() == "Tab is busy"
+
+
+def test_exp_tab_run_tooltip_shows_no_soc_reason(qapp):
+    from zcu_tools.gui.ui.main_window import ExpTabWidget
+
+    tab = ExpTabWidget("tab-1", MagicMock())
+    tab.update_interaction_state(
+        TabInteractionState(
+            global_run_active=False,
+            is_running=False,
+            is_analyzing=False,
+            is_saving_data=False,
+            has_context=True,
+            has_soc=False,
+            has_run_result=False,
+            has_analyze_result=False,
+            has_figure=False,
+        )
+    )
+
+    assert tab.run_btn.isEnabled() is False
+    assert tab.run_btn.toolTip() == "No SoC connection"
+
+
+def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(qapp):
+    from zcu_tools.gui.ui.main_window import ExpTabWidget
+
+    tab = ExpTabWidget("tab-1", MagicMock())
+    tab.cfg_form.first_invalid_reason = MagicMock(
+        return_value="modules.readout: invalid"
+    )
+    tab.cfg_form.is_valid = MagicMock(return_value=False)
+    tab.update_interaction_state(
+        TabInteractionState(
+            global_run_active=False,
+            is_running=False,
+            is_analyzing=False,
+            is_saving_data=False,
+            has_context=True,
+            has_soc=True,
+            has_run_result=False,
+            has_analyze_result=False,
+            has_figure=False,
+        )
+    )
+
+    assert tab.run_btn.isEnabled() is False
+    assert tab.run_btn.toolTip() == "Config invalid: modules.readout: invalid"
 
 
 def test_main_window_run_lock_disables_only_new_tab_and_run(qapp):
@@ -171,6 +220,32 @@ def test_main_window_run_lock_disables_only_new_tab_and_run(qapp):
     assert window._new_tab_btn.isEnabled() is False
     tab_one.update_interaction_state.assert_called_once()
     tab_two.update_interaction_state.assert_called_once()
+
+
+def test_main_window_soc_changed_refreshes_run_lock(qapp):
+    from zcu_tools.gui.ui.main_window import MainWindow
+
+    ctrl = MagicMock()
+    bus = EventBus()
+    ctrl.get_bus.return_value = bus
+    ctrl.is_run_active.return_value = False
+    ctrl.has_context.return_value = True
+    ctrl.has_soc.return_value = False
+    ctrl.has_tab.return_value = True
+    ctrl.has_run_result.return_value = False
+    ctrl.has_analyze_result.return_value = False
+    ctrl.is_tab_running.return_value = False
+    ctrl.is_tab_analyzing.return_value = False
+    ctrl.is_tab_saving_data.return_value = False
+    ctrl.has_figure.return_value = False
+
+    window = MainWindow(ctrl)
+    tab = MagicMock()
+    window._tab_widgets["tab-1"] = tab
+
+    bus.emit(GuiEvent.SOC_CHANGED, SocChangedPayload(soc=object(), soccfg=object()))
+
+    tab.update_interaction_state.assert_called()
 
 
 def test_main_window_cancel_setup_before_closing(qapp, monkeypatch):

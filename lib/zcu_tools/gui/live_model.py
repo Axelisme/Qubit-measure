@@ -540,12 +540,16 @@ class ModuleRefLiveField(LiveField):
 
         self._binding_state = _binding_state_for_key(self._chosen_key)
         self.sub_field: Optional[SectionLiveField] = None
+        self._missing_library_ref: bool = False
         self.is_enabled: bool = not (spec.optional and initial_val is None)
         self.on_enabled_changed = CallbackList()
         self._rebuild_sub_field(hint=init_sub)
 
     def is_modified(self) -> bool:
         return self._binding_state is LibraryBindingState.MODIFIED
+
+    def has_missing_library_ref(self) -> bool:
+        return self._missing_library_ref
 
     def _rebuild_sub_field(self, hint: Optional[CfgSectionValue] = None) -> None:
         """Rebuild the sub-field for the current chosen_key.
@@ -563,9 +567,23 @@ class ModuleRefLiveField(LiveField):
         from .ui.fields.utils import _spec_value_for_chosen
 
         ml = self.env.ctrl.get_current_ml()
-        chosen_spec, lib_val = _spec_value_for_chosen(
-            self._chosen_key, self.spec.allowed, ml
-        )
+        self._missing_library_ref = False
+        try:
+            chosen_spec, lib_val = _spec_value_for_chosen(
+                self._chosen_key, self.spec.allowed, ml
+            )
+        except RuntimeError as exc:
+            # Persisted sessions may reference a library key that no longer exists
+            # in the active ModuleLibrary. Keep the key and mark the value missing,
+            # so users can switch key or refresh library context explicitly.
+            if "Unknown library reference" in str(
+                exc
+            ) and not self._chosen_key.startswith("<Custom:"):
+                self._missing_library_ref = True
+                chosen_spec = None
+                lib_val = None
+            else:
+                raise
         if chosen_spec:
             if hint is not None:
                 val: Optional[CfgSectionValue] = hint
@@ -607,6 +625,13 @@ class ModuleRefLiveField(LiveField):
     def _refresh_validity(self) -> None:
         if self.spec.optional and not self.is_enabled:
             self._set_valid(True)
+            return
+        if self._missing_library_ref:
+            logger.debug(
+                "ModuleRefLiveField._refresh_validity: key=%r missing in library",
+                self._chosen_key,
+            )
+            self._set_valid(False)
             return
         if self.sub_field is None:
             logger.debug(

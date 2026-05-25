@@ -17,6 +17,8 @@ from zcu_tools.gui.adapter import (
     ScalarValue,
     SweepSpec,
     SweepValue,
+    WaveformRefSpec,
+    WaveformRefValue,
 )
 from zcu_tools.gui.event_bus import EventBus, GuiEvent
 from zcu_tools.gui.live_model import (
@@ -27,6 +29,8 @@ from zcu_tools.gui.live_model import (
     SectionLiveField,
     SweepLiveField,
 )
+from zcu_tools.meta_tool import ModuleLibrary
+from zcu_tools.program.v2 import WaveformCfgFactory
 
 
 @pytest.fixture()
@@ -256,3 +260,42 @@ def test_optional_module_ref_parent_skips_key_when_disabled(env):
     val = parent.get_value()
     assert "module" not in val.fields
     assert val.fields["reps"] == DirectValue(10)
+
+
+def test_waveform_ref_missing_library_key_waits_for_ml_update(env):
+    wav_spec = CfgSectionSpec(
+        label="Const",
+        fields={
+            "style": ScalarSpec(label="Style", type=str),
+            "length": ScalarSpec(label="Length", type=float),
+        },
+    )
+    spec = CfgSectionSpec(
+        fields={"waveform": WaveformRefSpec(allowed=[wav_spec], label="Waveform")}
+    )
+    initial = CfgSectionValue(
+        fields={
+            "waveform": WaveformRefValue(
+                chosen_key="ro_waveform",
+                value=CfgSectionValue(fields={"length": DirectValue(5.0)}),
+            )
+        }
+    )
+    ml = ModuleLibrary()
+    env.ctrl.get_current_ml.return_value = ml
+
+    section = SectionLiveField(spec, env, initial_val=initial)
+    field = cast(ModuleRefLiveField, section.fields["waveform"])
+    assert field.get_chosen_key() == "ro_waveform"
+    assert field.sub_field is None
+    assert field.is_valid() is False
+
+    ml.register_waveform(
+        ro_waveform=WaveformCfgFactory.from_raw(
+            {"style": "const", "length": 1.0}, ml=ml
+        )
+    )
+    field.refresh_external(GuiEvent.ML_CHANGED)
+
+    assert field.sub_field is not None
+    assert field.is_valid() is True
