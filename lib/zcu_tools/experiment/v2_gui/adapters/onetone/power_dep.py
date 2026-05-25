@@ -17,14 +17,14 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     require_soc_handles,
 )
 from zcu_tools.gui.adapter import (
-    NoAnalyzeParams,
-    NoAnalysisResult,
     AbsExpAdapter,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
     ExpContext,
+    NoAnalysisResult,
+    NoAnalyzeParams,
     RunRequest,
     ScalarSpec,
     SweepSpec,

@@ -28,7 +28,13 @@ from typing_extensions import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.base import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.v2.onetone.freq import FreqCfg, FreqExp, FreqModuleCfg, FreqResult, FreqSweepCfg
+from zcu_tools.experiment.v2.onetone.freq import (
+    FreqCfg,
+    FreqExp,
+    FreqModuleCfg,
+    FreqResult,
+    FreqSweepCfg,
+)
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     build_readout_for_frequency,
@@ -311,7 +317,10 @@ class FakeFreqAdapter(
             reps=cfg.reps,
             rounds=cfg.rounds,
             relax_delay=cfg.relax_delay,
-            modules=FreqModuleCfg(readout=cast(PulseReadoutCfg, cfg.modules.readout), reset=cfg.modules.reset),
+            modules=FreqModuleCfg(
+                readout=cast(PulseReadoutCfg, cfg.modules.readout),
+                reset=cfg.modules.reset,
+            ),
             sweep=FreqSweepCfg(freq=cfg.sweep.freq),
         )
         return dataclasses.replace(result, cfg_snapshot=freq_cfg)

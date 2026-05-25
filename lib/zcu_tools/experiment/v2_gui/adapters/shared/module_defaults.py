@@ -21,7 +21,9 @@ def select_named_module_value(
     module_type: Type[Any],
     preferred_names: list[str],
 ) -> Optional[NamedModuleValue]:
-    from zcu_tools.gui.cfg_schemas import module_cfg_to_value  # lazy: avoids circular import
+    from zcu_tools.gui.cfg_schemas import (
+        module_cfg_to_value,  # lazy: avoids circular import
+    )
 
     candidates = {
         name: module

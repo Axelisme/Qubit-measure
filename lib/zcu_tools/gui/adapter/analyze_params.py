@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import dataclasses
-from dataclasses import dataclass
 import typing
+from dataclasses import dataclass
 from typing import (
     Any,
     Optional,

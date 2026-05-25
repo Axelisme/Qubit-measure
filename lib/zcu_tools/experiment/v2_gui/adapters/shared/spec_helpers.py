@@ -46,7 +46,9 @@ def make_pulse_module_spec(
     )
 
 
-def make_reset_module_spec(label: str = "Reset", optional: bool = False) -> ModuleRefSpec:
+def make_reset_module_spec(
+    label: str = "Reset", optional: bool = False
+) -> ModuleRefSpec:
     return ModuleRefSpec(
         allowed=[
             make_none_reset_spec(),

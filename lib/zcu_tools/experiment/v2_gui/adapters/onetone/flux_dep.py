@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 from typing_extensions import TypeAlias
 
 from zcu_tools.experiment.v2.onetone.flux_dep import (
@@ -15,8 +14,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     md_get_float,
 )
 from zcu_tools.gui.adapter import (
-    NoAnalyzeParams,
-    NoAnalysisResult,
     AbsExpAdapter,
     CfgSchema,
     CfgSectionSpec,
@@ -24,6 +21,8 @@ from zcu_tools.gui.adapter import (
     DeviceRefSpec,
     DirectValue,
     ExpContext,
+    NoAnalysisResult,
+    NoAnalyzeParams,
     RunRequest,
     ScalarSpec,
     SweepSpec,

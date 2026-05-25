@@ -4,8 +4,8 @@ import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from typing_extensions import Any, ClassVar, Optional, Sequence, Generic
 from matplotlib.figure import Figure
+from typing_extensions import Any, ClassVar, Generic, Optional, Sequence
 
 from .types import (
     AnalyzeRequest,
@@ -20,7 +20,6 @@ from .types import (
     WritebackItem,
     WritebackRequest,
 )
-
 
 
 @dataclass
@@ -56,9 +55,7 @@ class AbsExpAdapter(ABC, Generic[T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     def get_analyze_params(self, result: T_Result, ctx: ExpContext) -> Any:
         return NoAnalyzeParams()
 
-    def analyze(
-        self, req: AnalyzeRequest[T_Result, T_AnalyzeParams]
-    ) -> Any:
+    def analyze(self, req: AnalyzeRequest[T_Result, T_AnalyzeParams]) -> Any:
         return NoAnalysisResult()
 
     def get_writeback_items(
