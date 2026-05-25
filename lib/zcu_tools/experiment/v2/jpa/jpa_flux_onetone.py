@@ -38,6 +38,7 @@ class OneToneFluxResult:
     fluxes: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[OneToneFluxCfg] = None
 
 
 class OneToneFluxModuleCfg(ConfigBase):
@@ -58,6 +59,7 @@ class OneToneFluxCfg(ProgramV2Cfg, ExpCfgModel):
 
 class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
     def run(self, soc, soccfg, cfg: OneToneFluxCfg) -> OneToneFluxResult:
+        cfg = deepcopy(cfg)
         modules = cfg.modules
         jpa_flux_sweep = cfg.sweep.jpa_flux
 
@@ -122,9 +124,8 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
             )
             signals = np.asarray(signals)
 
-        self.last_cfg = deepcopy(cfg)
         self.last_result = OneToneFluxResult(
-            fluxes=jpa_fluxs, freqs=freqs, signals=signals
+            fluxes=jpa_fluxs, freqs=freqs, signals=signals, cfg_snapshot=cfg
         )
         return self.last_result
 
@@ -138,7 +139,6 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
         self,
         filepath: str,
         result: Optional[OneToneFluxResult] = None,
-        cfg: Optional[OneToneFluxCfg] = None,
         comment: Optional[str] = None,
         tag: str = "jpa/flux_onetone",
         **kwargs,
@@ -151,9 +151,9 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
         freqs = result.freqs
         signals = result.signals
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -181,12 +181,12 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
         freqs = freqs.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             _cfg, _, _ = parse_comment(comment)
-
             if _cfg is not None:
-                self.last_cfg = OneToneFluxCfg.validate_or_warn(_cfg, source=filepath)
+                cfg_snapshot = OneToneFluxCfg.validate_or_warn(_cfg, source=filepath)
         self.last_result = OneToneFluxResult(
-            fluxes=jpa_fluxs, freqs=freqs, signals=signals
+            fluxes=jpa_fluxs, freqs=freqs, signals=signals, cfg_snapshot=cfg_snapshot
         )
         return self.last_result

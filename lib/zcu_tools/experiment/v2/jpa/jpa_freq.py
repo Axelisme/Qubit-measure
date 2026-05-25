@@ -41,6 +41,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 class FreqResult:
     freqs: NDArray[np.float64]
     signals: NDArray[np.float64]
+    cfg_snapshot: Optional[FreqCfg] = None
 
 
 class FreqModuleCfg(ConfigBase):
@@ -60,6 +61,7 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):
 
 class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
     def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
+        cfg = deepcopy(cfg)
         jpa_freqs = sweep2array(cfg.sweep.jpa_freq, allow_array=True)
         np.random.shuffle(jpa_freqs[1:-1])  # randomize permutation
 
@@ -113,8 +115,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             )
             signals = np.asarray(signals)
 
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = FreqResult(freqs=jpa_freqs, signals=signals)
+        self.last_result = FreqResult(
+            freqs=jpa_freqs, signals=signals, cfg_snapshot=cfg
+        )
         return self.last_result
 
     def analyze(self, result: Optional[FreqResult] = None) -> tuple[float, Figure]:
@@ -150,7 +153,6 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         self,
         filepath: str,
         result: Optional[FreqResult] = None,
-        cfg: Optional[FreqCfg] = None,
         comment: Optional[str] = None,
         tag: str = "jpa/freq",
         **kwargs,
@@ -162,9 +164,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         jpa_freqs = result.freqs
         signals = result.signals
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -189,11 +191,13 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         jpa_freqs = jpa_freqs.astype(np.float64)
         signals = signals.astype(np.float64)
 
+        cfg_snapshot = None
         if comment is not None:
             _cfg, _, _ = parse_comment(comment)
-
             if _cfg is not None:
-                self.last_cfg = FreqCfg.validate_or_warn(_cfg, source=filepath)
-        self.last_result = FreqResult(freqs=jpa_freqs, signals=signals)
+                cfg_snapshot = FreqCfg.validate_or_warn(_cfg, source=filepath)
+        self.last_result = FreqResult(
+            freqs=jpa_freqs, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
         return self.last_result

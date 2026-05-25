@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,8 +34,12 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
 
-# (freqs, signals)
-FreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
+
+@dataclass(frozen=True)
+class FreqResult:
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional["FreqCfg"] = None
 
 
 def reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -114,10 +119,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             )
 
         # Cache results
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (freqs, signals)
+        self.last_result = FreqResult(freqs, signals, cfg_snapshot=cfg)
 
-        return freqs, signals
+        return self.last_result
 
     def analyze(
         self, result: Optional[FreqResult] = None
@@ -126,7 +130,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        freqs, signals = result
+        freqs, signals = result.freqs, result.signals
 
         # Discard NaNs (possible early abort)
         val_mask = ~np.isnan(signals)
@@ -159,7 +163,6 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         self,
         filepath: str,
         result: Optional[FreqResult] = None,
-        cfg: Optional[FreqCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/reset/single_tone/freq",
         **kwargs,
@@ -168,11 +171,11 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        freqs, signals = result
+        freqs, signals = result.freqs, result.signals
 
-        if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+        if result.cfg_snapshot is None:
+            raise ValueError("Cannot save result without configuration snapshot")
+        cfg = result.cfg_snapshot
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -195,11 +198,11 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         freqs = freqs.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
-
             if cfg is not None:
-                self.last_cfg = FreqCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (freqs, signals)
+                cfg_snapshot = FreqCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = FreqResult(freqs, signals, cfg_snapshot=cfg_snapshot)
 
-        return freqs, signals
+        return self.last_result

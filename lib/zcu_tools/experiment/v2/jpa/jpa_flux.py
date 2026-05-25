@@ -42,6 +42,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 class FluxResult:
     fluxes: NDArray[np.float64]
     signals: NDArray[np.float64]
+    cfg_snapshot: Optional[FluxCfg] = None
 
 
 class FluxModuleCfg(ConfigBase):
@@ -61,6 +62,7 @@ class FluxCfg(ProgramV2Cfg, ExpCfgModel):
 
 class FluxExp(AbsExperiment[FluxResult, FluxCfg]):
     def run(self, soc, soccfg, cfg: FluxCfg) -> FluxResult:
+        cfg = deepcopy(cfg)
         jpa_fluxs = sweep2array(cfg.sweep.jpa_flux, allow_array=True)
 
         def measure_fn(
@@ -113,8 +115,9 @@ class FluxExp(AbsExperiment[FluxResult, FluxCfg]):
             )
             signals = np.asarray(signals)
 
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = FluxResult(fluxes=jpa_fluxs, signals=signals)
+        self.last_result = FluxResult(
+            fluxes=jpa_fluxs, signals=signals, cfg_snapshot=cfg
+        )
         return self.last_result
 
     def analyze(self, result: Optional[FluxResult] = None) -> tuple[float, Figure]:
@@ -150,7 +153,6 @@ class FluxExp(AbsExperiment[FluxResult, FluxCfg]):
         self,
         filepath: str,
         result: Optional[FluxResult] = None,
-        cfg: Optional[FluxCfg] = None,
         comment: Optional[str] = None,
         tag: str = "jpa/flux",
         **kwargs,
@@ -162,9 +164,9 @@ class FluxExp(AbsExperiment[FluxResult, FluxCfg]):
         jpa_fluxs = result.fluxes
         signals = result.signals
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -187,11 +189,13 @@ class FluxExp(AbsExperiment[FluxResult, FluxCfg]):
         jpa_fluxs = jpa_fluxs.astype(np.float64)
         signals = signals.astype(np.float64)
 
+        cfg_snapshot = None
         if comment is not None:
             _cfg, _, _ = parse_comment(comment)
-
             if _cfg is not None:
-                self.last_cfg = FluxCfg.validate_or_warn(_cfg, source=filepath)
-        self.last_result = FluxResult(fluxes=jpa_fluxs, signals=signals)
+                cfg_snapshot = FluxCfg.validate_or_warn(_cfg, source=filepath)
+        self.last_result = FluxResult(
+            fluxes=jpa_fluxs, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
         return self.last_result

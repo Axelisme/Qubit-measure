@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -29,7 +30,12 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-PowerDepResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
+
+@dataclass(frozen=True)
+class PowerDepResult:
+    gains: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[PowerDepCfg] = None
 
 
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -65,6 +71,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> PowerDepResult:
+        cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -117,10 +124,11 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
             )
 
         # record the last result
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (gains, signals)
+        self.last_result = PowerDepResult(
+            gains=gains, signals=signals, cfg_snapshot=cfg
+        )
 
-        return gains, signals
+        return self.last_result
 
     def analyze(
         self,
@@ -134,7 +142,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, signals = result
+        gains, signals = result.gains, result.signals
 
         if g0 is None:
             g0 = signals[0]
@@ -163,7 +171,6 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         self,
         filepath: str,
         result: Optional[PowerDepResult] = None,
-        cfg: Optional[PowerDepCfg] = None,
         comment: Optional[str] = None,
         tag: str = "mist/gain",
         **kwargs,
@@ -172,11 +179,11 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, signals = result
+        gains, signals = result.gains, result.signals
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -197,11 +204,13 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         gains = gains.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
-
             if cfg is not None:
-                self.last_cfg = PowerDepCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (gains, signals)
+                cfg_snapshot = PowerDepCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = PowerDepResult(
+            gains=gains, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
-        return gains, signals
+        return self.last_result

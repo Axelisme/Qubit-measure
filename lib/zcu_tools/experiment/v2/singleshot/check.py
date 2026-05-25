@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import warnings
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Optional, TypeAlias, cast
+from typing_extensions import Any, Optional, cast
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -28,8 +29,11 @@ from zcu_tools.utils.datasaver import load_data, save_data
 
 from .util import classify_result, plot_with_classified
 
-# (signals)
-CheckResult: TypeAlias = NDArray[np.complex128]
+
+@dataclass(frozen=True)
+class CheckResult:
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[CheckCfg] = None
 
 
 class CheckModuleCfg(ConfigBase):
@@ -97,10 +101,9 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
         )
 
         # Cache results
-        self.last_cfg = cfg
-        self.last_result = signals
+        self.last_result = CheckResult(signals=signals, cfg_snapshot=cfg)
 
-        return signals
+        return self.last_result
 
     def analyze(
         self,
@@ -114,7 +117,7 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        signals = result
+        signals = result.signals
 
         fig, ax = plt.subplots(figsize=(6, 6))
 
@@ -137,7 +140,6 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
         self,
         filepath: str,
         result: Optional[CheckResult] = None,
-        cfg: Optional[CheckCfg] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/check",
         **kwargs,
@@ -148,13 +150,13 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
             "No measurement data available. Run experiment first."
         )
 
-        signals = result
+        signals = result.signals
 
         shots = np.arange(signals.shape[0])
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("result.cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -168,13 +170,12 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
 
     def load(self, filepath: str, **kwargs) -> CheckResult:
         signals, _, _, comment = load_data(filepath, return_comment=True, **kwargs)
-        signals = cast(CheckResult, signals)
+        signals = cast(NDArray[np.complex128], signals)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
-
             if cfg is not None:
-                self.last_cfg = CheckCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = signals
-
-        return signals
+                cfg_snapshot = CheckCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = CheckResult(signals=signals, cfg_snapshot=cfg_snapshot)
+        return self.last_result

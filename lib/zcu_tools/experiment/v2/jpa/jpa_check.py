@@ -40,6 +40,7 @@ class CheckResult:
     outputs: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[CheckCfg] = None
 
 
 def check_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -65,6 +66,7 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
     OUTPUT_MAP = {0: "off", 1: "on"}
 
     def run(self, soc, soccfg, cfg: CheckCfg) -> CheckResult:
+        cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -129,8 +131,9 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
             )
             signals = np.asarray(signals)
 
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = CheckResult(outputs=outputs, freqs=freqs, signals=signals)
+        self.last_result = CheckResult(
+            outputs=outputs, freqs=freqs, signals=signals, cfg_snapshot=cfg
+        )
         return self.last_result
 
     def analyze(self, result: Optional[CheckResult] = None) -> Figure:
@@ -164,7 +167,6 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
         self,
         filepath: str,
         result: Optional[CheckResult] = None,
-        cfg: Optional[CheckCfg] = None,
         comment: Optional[str] = None,
         tag: str = "jpa/check",
         **kwargs,
@@ -177,9 +179,9 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
         freqs = result.freqs
         signals2D = result.signals
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -205,10 +207,13 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
         freqs = freqs.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             _cfg, _, _ = parse_comment(comment)
             if _cfg is not None:
-                self.last_cfg = CheckCfg.validate_or_warn(_cfg, source=filepath)
+                cfg_snapshot = CheckCfg.validate_or_warn(_cfg, source=filepath)
 
-        self.last_result = CheckResult(outputs=outputs, freqs=freqs, signals=signals2D)
+        self.last_result = CheckResult(
+            outputs=outputs, freqs=freqs, signals=signals2D, cfg_snapshot=cfg_snapshot
+        )
         return self.last_result

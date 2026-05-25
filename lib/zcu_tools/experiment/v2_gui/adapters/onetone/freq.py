@@ -231,5 +231,4 @@ class OneToneFreqAdapter(
         FreqExp().save(
             filepath=req.data_path,
             result=run_result.result,
-            cfg=run_result.cfg_snapshot,
         )

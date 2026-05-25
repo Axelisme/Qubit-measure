@@ -14,5 +14,4 @@ class AbsExperiment(Generic[T_Result, T_Config]):
     """
 
     def __init__(self) -> None:
-        self.last_cfg: Optional[T_Config] = None
         self.last_result: Optional[T_Result] = None

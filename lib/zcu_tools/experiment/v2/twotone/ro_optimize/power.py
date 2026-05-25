@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -32,7 +33,12 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-PowerResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
+
+@dataclass(frozen=True)
+class PowerResult:
+    gains: NDArray[np.float64]
+    signals: NDArray[np.float64]
+    cfg_snapshot: Optional["PowerCfg"] = None
 
 
 class PowerModuleCfg(ConfigBase):
@@ -120,10 +126,9 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             )
 
         # record the last cfg and result
-        self.last_cfg = original_cfg
-        self.last_result = (gains, signals)
+        self.last_result = PowerResult(gains, signals, cfg_snapshot=original_cfg)
 
-        return gains, signals
+        return self.last_result
 
     def analyze(
         self, result: Optional[PowerResult] = None, penalty_ratio: float = 0.0
@@ -132,7 +137,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        powers, snrs = result
+        powers, snrs = result.gains, result.signals
         snrs = np.abs(snrs)
 
         # fill NaNs with zeros
@@ -160,7 +165,6 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         self,
         filepath: str,
         result: Optional[PowerResult] = None,
-        cfg: Optional[PowerCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/ro_optimize/gain",
         **kwargs,
@@ -169,11 +173,11 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, signals = result
+        gains, signals = result.gains, result.signals
 
-        if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+        if result.cfg_snapshot is None:
+            raise ValueError("Cannot save result without configuration snapshot")
+        cfg = result.cfg_snapshot
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -194,11 +198,11 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         gains = gains.astype(np.float64)
         signals = signals.astype(np.float64)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
-
             if cfg is not None:
-                self.last_cfg = PowerCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (gains, signals)
+                cfg_snapshot = PowerCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = PowerResult(gains, signals, cfg_snapshot=cfg_snapshot)
 
-        return gains, signals
+        return self.last_result

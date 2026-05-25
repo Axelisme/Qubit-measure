@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -14,7 +12,7 @@ from typing_extensions import Any, Optional, TypeAlias, cast
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import (
     Task,
     TaskState,
@@ -38,7 +36,12 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-AutoOptResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
+
+@dataclass(frozen=True)
+class AutoOptResult:
+    params: NDArray[np.float64]
+    signals: NDArray[np.float64]
+    cfg_snapshot: Optional["AutoOptCfg"] = None
 
 
 class ReadoutOptimizer:
@@ -241,11 +244,10 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
             signals = np.asarray(results)
         plt.close(fig)
 
-        # record the last cfg and result
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (params, signals)
+        # record the last result
+        self.last_result = AutoOptResult(params, signals, cfg_snapshot=cfg)
 
-        return params, signals
+        return self.last_result
 
     def analyze(
         self, result: Optional[AutoOptResult] = None
@@ -254,7 +256,7 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        params, signals = result
+        params, signals = result.params, result.signals
         snrs = np.abs(signals)
 
         max_id = np.nanargmax(snrs)
@@ -300,7 +302,6 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
         self,
         filepath: str,
         result: Optional[AutoOptResult] = None,
-        cfg: Optional[AutoOptCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/ro_optimize/auto",
         **kwargs,
@@ -309,11 +310,11 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        params, signals = result
+        params, signals = result.params, result.signals
 
-        if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+        if result.cfg_snapshot is None:
+            raise ValueError("Cannot save result without configuration snapshot")
+        cfg = result.cfg_snapshot
         comment = make_comment(cfg, comment)
 
         _filepath = Path(filepath)
@@ -346,9 +347,9 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
     def load(self, filepath: str, **kwargs) -> AutoOptResult:
         _filepath = Path(filepath)
 
-        params_data, _, _ = load_data(
+        params_data, _, _, comment = load_data(
             filepath=str(_filepath.with_name(_filepath.name + "_params")),
-            return_comment=False,
+            return_comment=True,
             **kwargs,
         )
 
@@ -361,5 +362,11 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
         params = params_data.astype(np.float64)
         signals = signals_data.astype(np.float64)
 
-        self.last_result = (params, signals)
-        return params, signals
+        cfg_snapshot = None
+        if comment is not None:
+            cfg, _, _ = parse_comment(comment)
+            if cfg is not None:
+                cfg_snapshot = AutoOptCfg.validate_or_warn(cfg, source=filepath)
+
+        self.last_result = AutoOptResult(params, signals, cfg_snapshot=cfg_snapshot)
+        return self.last_result

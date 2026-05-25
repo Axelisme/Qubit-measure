@@ -43,6 +43,7 @@ class FluxDepResult:
     values: NDArray[np.float64]
     gains: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[FluxDepCfg] = None
 
 
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -87,6 +88,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> FluxDepResult:
+        cfg = deepcopy(cfg)
         modules = cfg.modules
 
         # predict sweep points
@@ -156,8 +158,9 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             signals = np.asarray(signals)
 
         # Cache results
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = FluxDepResult(values=values, gains=gains, signals=signals)
+        self.last_result = FluxDepResult(
+            values=values, gains=gains, signals=signals, cfg_snapshot=cfg
+        )
 
         return self.last_result
 
@@ -224,7 +227,6 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         self,
         filepath: str,
         result: Optional[FluxDepResult] = None,
-        cfg: Optional[FluxDepCfg] = None,
         comment: Optional[str] = None,
         tag: str = "mist/flux_dep",
         **kwargs,
@@ -235,9 +237,9 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
 
         values, gains, signals = result.values, result.gains, result.signals
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("No cfg_snapshot found in result")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -262,11 +264,14 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         gains = gains.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-                self.last_cfg = FluxDepCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = FluxDepResult(values=values, gains=gains, signals=signals)
+                cfg_snapshot = FluxDepCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = FluxDepResult(
+            values=values, gains=gains, signals=signals, cfg_snapshot=cfg_snapshot
+        )
 
         return self.last_result

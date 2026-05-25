@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -8,7 +9,7 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, TypeAlias, Union
+from typing_extensions import Any, Callable, Optional, Union
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -37,17 +38,13 @@ from zcu_tools.utils.fitting.multi_decay import fit_dual_transition_rates
 
 from .util import measure_with_sweep
 
-# (values, times, signals)
-T1WithToneSweepResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]
-]
 
-
-class T1WithToneSweepModuleCfg(ConfigBase):
-    reset: Optional[ResetCfg] = None
-    pi_pulse: PulseCfg
-    probe_pulse: PulseCfg
-    readout: ReadoutCfg
+@dataclass(frozen=True)
+class T1WithToneSweepResult:
+    xs: NDArray[np.float64]
+    lengths: NDArray[np.float64]
+    signals: NDArray[np.float64]
+    cfg_snapshot: Optional[T1WithToneSweepCfg] = None
 
 
 class T1WithToneSweepSweepCfg(ConfigBase):
@@ -59,6 +56,13 @@ class T1WithToneSweepSweepCfg(ConfigBase):
 class T1WithToneSweepCfg(ProgramV2Cfg, ExpCfgModel):
     modules: T1WithToneSweepModuleCfg
     sweep: T1WithToneSweepSweepCfg
+
+
+class T1WithToneSweepModuleCfg(ConfigBase):
+    reset: Optional[ResetCfg] = None
+    pi_pulse: PulseCfg
+    probe_pulse: PulseCfg
+    readout: ReadoutCfg
 
 
 class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
@@ -249,10 +253,11 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
             populations = np.asarray(populations)
         plt.close(fig)
 
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (xs, lengths, populations)
+        self.last_result = T1WithToneSweepResult(
+            xs=xs, lengths=lengths, signals=populations, cfg_snapshot=cfg
+        )
 
-        return xs, lengths, populations
+        return self.last_result
 
     def _run_non_uniform(
         self,
@@ -383,10 +388,11 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
             populations = np.asarray(populations)
         plt.close(fig)
 
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (xs, lengths, populations)
+        self.last_result = T1WithToneSweepResult(
+            xs=xs, lengths=lengths, signals=populations, cfg_snapshot=cfg
+        )
 
-        return xs, lengths, populations
+        return self.last_result
 
     def run(
         self,
@@ -416,7 +422,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
             result = self.last_result
         assert result is not None, "no result found"
 
-        xs, Ts, populations = result
+        xs, Ts, populations = result.xs, result.lengths, result.signals
 
         valid_mask = np.all(np.isfinite(populations), axis=(1, 2, 3))
         xs = xs[valid_mask]
@@ -529,7 +535,6 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         self,
         filepath: str,
         result: Optional[T1WithToneSweepResult] = None,
-        cfg: Optional[T1WithToneSweepCfg] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/t1/t1_with_tone_sweep",
         **kwargs,
@@ -538,11 +543,11 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
             result = self.last_result
         assert result is not None, "no result found"
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("result.cfg_snapshot is None")
 
-        xs, Ts, populations = result
+        xs, Ts, populations = result.xs, result.lengths, result.signals
         comment = make_comment(cfg, comment)
 
         _filepath = Path(filepath)
@@ -640,12 +645,15 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         Ts = Ts.astype(np.float64)
         populations = np.real(populations).astype(np.float64)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
             if cfg is not None:
-                self.last_cfg = T1WithToneSweepCfg.validate_or_warn(
+                cfg_snapshot = T1WithToneSweepCfg.validate_or_warn(
                     cfg, source=gg_filepath
                 )
-        self.last_result = (xs, Ts, populations)
+        self.last_result = T1WithToneSweepResult(
+            xs=xs, lengths=Ts, signals=populations, cfg_snapshot=cfg_snapshot
+        )
 
-        return xs, Ts, populations
+        return self.last_result

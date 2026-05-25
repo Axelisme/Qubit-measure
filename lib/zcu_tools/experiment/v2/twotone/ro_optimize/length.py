@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -31,7 +32,12 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-LengthResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
+
+@dataclass(frozen=True)
+class LengthResult:
+    lengths: NDArray[np.float64]
+    signals: NDArray[np.float64]
+    cfg_snapshot: Optional["LengthCfg"] = None
 
 
 class LengthModuleCfg(ConfigBase):
@@ -117,10 +123,9 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
             signals = np.asarray(signals)
 
         # record the last cfg and result
-        self.last_cfg = original_cfg
-        self.last_result = (lengths, signals)
+        self.last_result = LengthResult(lengths, signals, cfg_snapshot=original_cfg)
 
-        return lengths, signals
+        return self.last_result
 
     def analyze(
         self, result: Optional[LengthResult] = None, *, t0: Optional[float] = None
@@ -129,7 +134,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        lengths, signals = result
+        lengths, signals = result.lengths, result.signals
 
         snrs = np.abs(signals)
 
@@ -161,7 +166,6 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         self,
         filepath: str,
         result: Optional[LengthResult] = None,
-        cfg: Optional[LengthCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/ro_optimize/length",
         **kwargs,
@@ -170,11 +174,11 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        lengths, signals = result
+        lengths, signals = result.lengths, result.signals
 
-        if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+        if result.cfg_snapshot is None:
+            raise ValueError("Cannot save result without configuration snapshot")
+        cfg = result.cfg_snapshot
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -199,11 +203,11 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         lengths = lengths.astype(np.float64)
         signals = signals.astype(np.float64)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
-
             if cfg is not None:
-                self.last_cfg = LengthCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (lengths, signals)
+                cfg_snapshot = LengthCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = LengthResult(lengths, signals, cfg_snapshot=cfg_snapshot)
 
-        return lengths, signals
+        return self.last_result

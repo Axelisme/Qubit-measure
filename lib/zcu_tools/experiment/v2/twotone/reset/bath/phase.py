@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,8 +34,12 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting.base import cosfunc, fitcos
 from zcu_tools.utils.process import rotate2real
 
-# (phases, signals)
-PhaseResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
+
+@dataclass(frozen=True)
+class PhaseResult:
+    phases: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional["PhaseCfg"] = None
 
 
 def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -119,10 +124,9 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
             )
 
         # Cache results
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (phases, signals)
+        self.last_result = PhaseResult(phases, signals, cfg_snapshot=cfg)
 
-        return phases, signals
+        return self.last_result
 
     def analyze(
         self, result: Optional[PhaseResult] = None
@@ -131,7 +135,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        phases, signals = result
+        phases, signals = result.phases, result.signals
 
         real_signals = bathreset_signal2real(signals)
 
@@ -176,7 +180,6 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
         self,
         filepath: str,
         result: Optional[PhaseResult] = None,
-        cfg: Optional[PhaseCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/reset/bath/phase",
         **kwargs,
@@ -185,11 +188,11 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        phases, signals = result
+        phases, signals = result.phases, result.signals
 
-        if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+        if result.cfg_snapshot is None:
+            raise ValueError("Cannot save result without configuration snapshot")
+        cfg = result.cfg_snapshot
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -210,11 +213,11 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
         phases = phases.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
-
             if cfg is not None:
-                self.last_cfg = PhaseCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (phases, signals)
+                cfg_snapshot = PhaseCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = PhaseResult(phases, signals, cfg_snapshot=cfg_snapshot)
 
-        return phases, signals
+        return self.last_result

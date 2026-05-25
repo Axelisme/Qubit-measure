@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -10,7 +11,7 @@ from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
 from numpy import float64
 from numpy.typing import NDArray
-from typing_extensions import Any, Optional, TypeAlias
+from typing_extensions import Any, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -36,10 +37,13 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fitlor
 from zcu_tools.utils.process import minus_background
 
-# (gains, freqs, populations)
-AcStarkResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]
-]
+
+@dataclass(frozen=True)
+class AcStarkResult:
+    gains: NDArray[np.float64]
+    freqs: NDArray[np.float64]
+    populations: NDArray[np.float64]
+    cfg_snapshot: Optional[AcStarkCfg] = None
 
 
 def get_resonance_freq(
@@ -224,10 +228,11 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         plt.close(fig)
 
         # Cache results
-        self.last_cfg = cfg
-        self.last_result = (gains, freqs, signals)
+        self.last_result = AcStarkResult(
+            gains=gains, freqs=freqs, populations=signals, cfg_snapshot=cfg
+        )
 
-        return gains, freqs, signals
+        return self.last_result
 
     def analyze(
         self,
@@ -242,7 +247,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
             result = self.last_result
         assert result is not None, "No result found"
 
-        gains, freqs, populations = result
+        gains, freqs, populations = result.gains, result.freqs, result.populations
 
         # apply cutoff if provided
         if cutoff is not None:
@@ -336,7 +341,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
             result = self.last_result
         assert result is not None, "No result found"
 
-        gains, freqs, populations = result
+        gains, freqs, populations = result.gains, result.freqs, result.populations
 
         # apply cutoff if provided
         if cutoff is not None:
@@ -403,7 +408,6 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         self,
         filepath: str,
         result: Optional[AcStarkResult] = None,
-        cfg: Optional[AcStarkCfg] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/ac_stark",
         **kwargs,
@@ -415,12 +419,11 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
 
         _filepath = Path(filepath)
 
-        gains, freqs, populations = result
+        gains, freqs, populations = result.gains, result.freqs, result.populations
 
-        # Ground state population
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("result.cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -469,11 +472,13 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         freqs = freqs.astype(np.float64)
         populations = np.real(populations).astype(np.float64)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
-
             if cfg is not None:
-                self.last_cfg = AcStarkCfg.validate_or_warn(cfg, source=g_filepath)
-        self.last_result = (gains, freqs, populations)
+                cfg_snapshot = AcStarkCfg.validate_or_warn(cfg, source=g_filepath)
+        self.last_result = AcStarkResult(
+            gains=gains, freqs=freqs, populations=populations, cfg_snapshot=cfg_snapshot
+        )
 
-        return gains, freqs, populations
+        return self.last_result

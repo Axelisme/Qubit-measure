@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import warnings
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Literal, Optional, TypeAlias, cast
+from typing_extensions import Any, Literal, Optional, cast
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -159,8 +160,11 @@ def optimize_ge_radius(
 # Experiment
 # ------------------------------------------------------------
 
-# (signals)
-GE_Result: TypeAlias = NDArray[np.complex128]
+
+@dataclass(frozen=True)
+class GE_Result:
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional[GE_Cfg] = None
 
 
 class GEModuleCfg(ConfigBase):
@@ -239,10 +243,9 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
         signals = np.asarray(signals)
 
         # Cache results
-        self.last_cfg = cfg
-        self.last_result = signals
+        self.last_result = GE_Result(signals=signals, cfg_snapshot=cfg)
 
-        return signals
+        return self.last_result
 
     def analyze(
         self,
@@ -254,7 +257,7 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        signals = result
+        signals = result.signals
 
         return singleshot_ge_analysis(signals, backend=backend, **kwargs)
 
@@ -271,7 +274,7 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        signals = result
+        signals = result.signals
         g_signals, e_signals = signals[0], signals[1]
 
         A_init = make_init_matrix(init_pops)
@@ -375,7 +378,6 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
         self,
         filepath: str,
         result: Optional[GE_Result] = None,
-        cfg: Optional[GE_Cfg] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/ge",
         **kwargs,
@@ -386,11 +388,11 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
             "No measurement data available. Run experiment first."
         )
 
-        signals = result
+        signals = result.signals
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("result.cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -412,11 +414,10 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
 
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
-
             if cfg is not None:
-                self.last_cfg = GE_Cfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = signals.T
-
-        return signals
+                cfg_snapshot = GE_Cfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = GE_Result(signals=signals.T, cfg_snapshot=cfg_snapshot)
+        return self.last_result

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, TypeAlias, Union
+from typing_extensions import Any, Callable, Optional, Union
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -37,8 +38,12 @@ from zcu_tools.utils.fitting.multi_decay import calc_lambdas, fit_dual_transitio
 
 from ..util import calc_populations
 
-# (times, signals)
-T1Result: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
+
+@dataclass(frozen=True)
+class T1Result:
+    lengths: NDArray[np.float64]
+    signals: NDArray[np.float64]
+    cfg_snapshot: Optional[T1Cfg] = None
 
 
 class T1ModuleCfg(ConfigBase):
@@ -101,6 +106,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         e_center: complex,
         radius: float,
     ) -> T1Result:
+        cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
 
         length_sweep = cfg.sweep.length
@@ -164,10 +170,11 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             )
         plt.close(fig)
 
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (lengths, populations)
+        self.last_result = T1Result(
+            lengths=lengths, signals=populations, cfg_snapshot=cfg
+        )
 
-        return lengths, populations
+        return self.last_result
 
     def _run_non_uniform(
         self,
@@ -254,10 +261,11 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             )
         plt.close(fig)
 
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (lengths, populations)
+        self.last_result = T1Result(
+            lengths=lengths, signals=populations, cfg_snapshot=cfg
+        )
 
-        return lengths, populations
+        return self.last_result
 
     def run(
         self,
@@ -286,7 +294,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        lens, populations = result
+        lens, populations = result.lengths, result.signals
 
         lens = lens[skip:]
         populations = populations[skip:]
@@ -343,7 +351,6 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         self,
         filepath: str,
         result: Optional[T1Result] = None,
-        cfg: Optional[T1Cfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/t1",
         **kwargs,
@@ -352,7 +359,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        Ts, populations = result
+        Ts, populations = result.lengths, result.signals
 
         populations1 = populations[:, 0]  # init in g
         populations2 = populations[:, 1]  # init in e
@@ -360,9 +367,9 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         _filepath = Path(filepath)
 
         # initial in g
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("result.cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -407,11 +414,13 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         Ts = Ts.astype(np.float64)
         populations = np.real(populations).astype(np.float64)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
-
             if cfg is not None:
-                self.last_cfg = T1Cfg.validate_or_warn(cfg, source=g_filepath)
-        self.last_result = (Ts, populations)
+                cfg_snapshot = T1Cfg.validate_or_warn(cfg, source=g_filepath)
+        self.last_result = T1Result(
+            lengths=Ts, signals=populations, cfg_snapshot=cfg_snapshot
+        )
 
-        return Ts, populations
+        return self.last_result

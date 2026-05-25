@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Optional, TypeAlias
+from typing_extensions import Any, Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
@@ -32,9 +33,13 @@ from zcu_tools.utils.datasaver import load_data, save_data
 
 from ..util import calc_populations
 
-FreqPowerResult: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]
-]
+
+@dataclass(frozen=True)
+class FreqPowerResult:
+    gains: NDArray[np.float64]
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.float64]
+    cfg_snapshot: Optional[FreqPowerCfg] = None
 
 
 class FreqPowerModuleCfg(ConfigBase):
@@ -175,8 +180,9 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
             signals = np.asarray(signals)
 
         # record the last result
-        self.last_cfg = cfg
-        self.last_result = (gains, freqs, signals)
+        self.last_result = FreqPowerResult(
+            gains=gains, freqs=freqs, signals=signals, cfg_snapshot=cfg
+        )
 
         return self.last_result
 
@@ -192,7 +198,7 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, freqs, populations = result
+        gains, freqs, populations = result.gains, result.freqs, result.signals
 
         populations = calc_populations(populations)
 
@@ -243,7 +249,6 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
         self,
         filepath: str,
         result: Optional[FreqPowerResult] = None,
-        cfg: Optional[FreqPowerCfg] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/mist/gain_freq",
         **kwargs,
@@ -254,11 +259,11 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
 
         _filepath = Path(filepath)
 
-        gains, freqs, populations = result
+        gains, freqs, populations = result.gains, result.freqs, result.signals
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("result.cfg_snapshot is None")
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -315,11 +320,13 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
         freqs = freqs.astype(np.float64)
         populations = np.real(populations).astype(np.float64)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
-
             if cfg is not None:
-                self.last_cfg = FreqPowerCfg.validate_or_warn(cfg, source=g_filepath)
-        self.last_result = (gains, freqs, populations)
+                cfg_snapshot = FreqPowerCfg.validate_or_warn(cfg, source=g_filepath)
+        self.last_result = FreqPowerResult(
+            gains=gains, freqs=freqs, signals=populations, cfg_snapshot=cfg_snapshot
+        )
 
-        return gains, freqs, populations
+        return self.last_result

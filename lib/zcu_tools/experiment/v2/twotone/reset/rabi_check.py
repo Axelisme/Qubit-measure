@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -31,8 +32,12 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
-# (gains, signals_2d)  # signals shape: (2, len(gains)) for [w/o reset, w/ reset]
-RabiCheckResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
+
+@dataclass(frozen=True)
+class RabiCheckResult:
+    gains: NDArray[np.float64]
+    signals: NDArray[np.complex128]
+    cfg_snapshot: Optional["RabiCheckCfg"] = None
 
 
 def reset_rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -130,10 +135,9 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
             )
 
         # Cache results
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = (gains, signals)
+        self.last_result = RabiCheckResult(gains, signals, cfg_snapshot=cfg)
 
-        return gains, signals
+        return self.last_result
 
     def analyze(self, result: Optional[RabiCheckResult] = None) -> Figure:
         """Analyze reset rabi check results. (No specific analysis implemented)"""
@@ -141,7 +145,7 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, signals = result
+        gains, signals = result.gains, result.signals
         real_signals = reset_rabi_signal2real(signals)
 
         wo_signals, w_signals, wp_signals = real_signals
@@ -160,7 +164,6 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
         self,
         filepath: str,
         result: Optional[RabiCheckResult] = None,
-        cfg: Optional[RabiCheckCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/reset/rabi_check",
         **kwargs,
@@ -169,11 +172,11 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, signals = result
+        gains, signals = result.gains, result.signals
 
-        if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+        if result.cfg_snapshot is None:
+            raise ValueError("Cannot save result without configuration snapshot")
+        cfg = result.cfg_snapshot
         comment = make_comment(cfg, comment)
 
         save_data(
@@ -197,11 +200,11 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
         gains = gains.astype(np.float64)
         signals = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
-
             if cfg is not None:
-                self.last_cfg = RabiCheckCfg.validate_or_warn(cfg, source=filepath)
-        self.last_result = (gains, signals)
+                cfg_snapshot = RabiCheckCfg.validate_or_warn(cfg, source=filepath)
+        self.last_result = RabiCheckResult(gains, signals, cfg_snapshot=cfg_snapshot)
 
-        return gains, signals
+        return self.last_result

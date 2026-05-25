@@ -184,5 +184,4 @@ class OneToneFluxDepAdapter(
         FluxDepExp().save(
             filepath=req.data_path,
             result=run_result.result,
-            cfg=run_result.cfg_snapshot,
         )

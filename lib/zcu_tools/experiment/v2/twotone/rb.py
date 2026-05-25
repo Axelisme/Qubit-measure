@@ -40,6 +40,7 @@ class RB_Result:
     sub_seeds: NDArray[np.int64]
     depths: NDArray[np.int64]
     signals2D: NDArray[np.complex128]
+    cfg_snapshot: Optional["RBCfg"] = None
 
 
 # ==============================================================================
@@ -376,9 +377,11 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
             )
             signals2D = np.asarray(signals, dtype=np.complex128)  # (n_seeds, n_depths)
 
-        self.last_cfg = deepcopy(cfg)
         self.last_result = RB_Result(
-            sub_seeds=entropys, depths=depths, signals2D=signals2D
+            sub_seeds=entropys,
+            depths=depths,
+            signals2D=signals2D,
+            cfg_snapshot=cfg,
         )
 
         return self.last_result
@@ -393,7 +396,6 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
             "No measurement data available. Run experiment first."
         )
 
-        sub_seeds = result.sub_seeds
         depths = result.depths
         signals2D = result.signals2D
 
@@ -452,7 +454,6 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
         self,
         filepath: str,
         result: Optional[RB_Result] = None,
-        cfg: Optional[RBCfg] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/rb",
         **kwargs,
@@ -463,9 +464,9 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
             "No measurement data available. Run experiment first."
         )
 
+        cfg = result.cfg_snapshot
         if cfg is None:
-            cfg = self.last_cfg
-        assert cfg is not None
+            raise ValueError("No config snapshot available in result.")
 
         sub_seeds = result.sub_seeds
         depths = result.depths
@@ -504,13 +505,17 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
         depths = depths.astype(np.int64)
         signals2D = signals.astype(np.complex128)
 
+        cfg_snapshot = None
         if comment is not None:
             cfg, _, _ = parse_comment(comment)
 
             if cfg is not None:
-                self.last_cfg = RBCfg.validate_or_warn(cfg, source=filepath)
+                cfg_snapshot = RBCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = RB_Result(
-            sub_seeds=sub_seeds, depths=depths, signals2D=signals2D
+            sub_seeds=sub_seeds,
+            depths=depths,
+            signals2D=signals2D,
+            cfg_snapshot=cfg_snapshot,
         )
 
         return self.last_result
