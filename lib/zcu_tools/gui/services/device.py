@@ -46,6 +46,7 @@ class DeviceProtocol(Protocol):
         stop_event: Optional[threading.Event] = None,
     ) -> None: ...
     def get_info(self) -> BaseDeviceInfo: ...
+    def close(self) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -278,6 +279,8 @@ class DeviceService(QObject):
         from zcu_tools.device.manager import GlobalDeviceManager
 
         info = GlobalDeviceManager.get_info(name)
+        device = GlobalDeviceManager.get_device(name)
+        device.close()
         GlobalDeviceManager.drop_device(name)
         self._memory_entries[name] = DeviceMemoryInfo(
             type_name=info.type, name=name, address=info.address

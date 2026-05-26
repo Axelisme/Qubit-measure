@@ -52,6 +52,9 @@ class FakeDevice(BaseDevice[FakeDeviceInfo]):
         self.value = value
         return self.value
 
+    def close(self) -> None:
+        """Fake devices own no external session."""
+
     def _set_value_smart(
         self,
         value: float,

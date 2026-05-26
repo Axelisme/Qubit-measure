@@ -26,6 +26,7 @@ from .plot_host import FigureContainer
 from .registry import Registry
 from .runner import AnalyzeRunner, Runner, SaveDataRunner
 from .services import (
+    SESSION_VERSION,
     AnalyzeService,
     ConnectionService,
     ContextService,
@@ -37,7 +38,9 @@ from .services import (
     RunService,
     SaveBothOutcome,
     SaveService,
+    SessionPersistenceError,
     SessionPersistenceService,
+    StartupPersistenceError,
     StartupPersistenceService,
     TabService,
     WritebackService,
@@ -112,6 +115,9 @@ class Controller:
             raise RuntimeError("Controller view is not attached")
         return self._view
 
+    def _report_persistence_error(self, title: str, error: Exception) -> None:
+        self._require_view().show_error_dialog(title, str(error))
+
     def _on_run_finished(self, tab_id: str, _result: object) -> None:
         # State is already updated in RunService/Runner
         self._bus.emit(
@@ -179,8 +185,8 @@ class Controller:
     def restore_tabs_from_session(self) -> None:
         try:
             session = self._session_svc.load_session()
-        except Exception:
-            logger.exception("restore_tabs_from_session: failed to load session")
+        except SessionPersistenceError as exc:
+            self._report_persistence_error("Session restore failed", exc)
             return
         if session is None:
             return
@@ -194,73 +200,72 @@ class Controller:
         if self._state.active_tab_id in tab_ids:
             active_tab_index = tab_ids.index(self._state.active_tab_id)
         for tab_id, tab in tabs:
-            try:
-                raw_cfg = self._session_svc.schema_to_raw(
-                    tab.cfg_schema,
-                    ml=self._state.exp_context.ml,
+            raw_cfg = self._session_svc.schema_to_raw(
+                tab.cfg_schema,
+                ml=self._state.exp_context.ml,
+            )
+            payload_tabs.append(
+                PersistedTab(
+                    adapter_name=tab.adapter_name,
+                    cfg_raw=raw_cfg,
+                    save_paths_override=tab.save_path_overrides,
                 )
-                payload_tabs.append(
-                    PersistedTab(
-                        adapter_name=tab.adapter_name,
-                        cfg_raw=raw_cfg,
-                        save_paths_override=tab.save_path_overrides,
-                    )
-                )
-            except Exception:
-                logger.exception(
-                    "persist_tabs_session: failed to snapshot tab_id=%r adapter=%r",
-                    tab_id,
-                    tab.adapter_name,
-                )
+            )
         try:
             self._session_svc.save_session(
                 PersistedSession(
-                    version=1,
+                    version=SESSION_VERSION,
                     tabs=payload_tabs,
                     active_tab_index=active_tab_index,
                 )
             )
-        except Exception:
-            logger.exception("persist_tabs_session: failed to save session")
+        except SessionPersistenceError as exc:
+            self._report_persistence_error("Session save failed", exc)
 
     def _restore_session(self, session: PersistedSession) -> None:
-        for persisted_tab in session.tabs:
+        restored_by_index: dict[int, str] = {}
+        rejected: list[str] = []
+        for index, persisted_tab in enumerate(session.tabs):
             try:
                 tab_id = self._tab_svc.restore_tab(persisted_tab.adapter_name)
-            except Exception:
-                logger.exception(
-                    "restore_tabs_from_session: failed to create tab adapter=%r",
-                    persisted_tab.adapter_name,
+            except KeyError as exc:
+                rejected.append(
+                    f"{persisted_tab.adapter_name}: adapter unavailable ({exc})"
                 )
                 continue
+            default_schema = self._tab_svc.get_tab_default_cfg(tab_id)
             try:
-                default_schema = self._tab_svc.get_tab_default_cfg(tab_id)
                 restored_schema = self._session_svc.raw_to_schema(
                     default_schema,
                     persisted_tab.cfg_raw,
                 )
-                self._tab_svc.update_tab_cfg(tab_id, restored_schema)
-                if persisted_tab.save_paths_override is not None:
-                    self._state.update_tab_save_path_overrides(
-                        tab_id,
-                        persisted_tab.save_paths_override,
-                    )
-            except Exception:
-                logger.exception(
-                    "restore_tabs_from_session: failed to restore cfg adapter=%r tab_id=%r",
-                    persisted_tab.adapter_name,
-                    tab_id,
+            except SessionPersistenceError as exc:
+                self._tab_svc.close_tab(tab_id)
+                rejected.append(
+                    f"{persisted_tab.adapter_name}: invalid saved configuration ({exc})"
                 )
+                continue
+            self._tab_svc.update_tab_cfg(tab_id, restored_schema)
+            if persisted_tab.save_paths_override is not None:
+                self._state.update_tab_save_path_overrides(
+                    tab_id,
+                    persisted_tab.save_paths_override,
+                )
+            restored_by_index[index] = tab_id
             self._bus.emit(
                 GuiEvent.TAB_ADDED,
                 TabAddedPayload(tab_id=tab_id, adapter_name=persisted_tab.adapter_name),
             )
 
-        if session.active_tab_index is not None and 0 <= session.active_tab_index < len(
-            self._state.tabs
-        ):
-            tab_id = list(self._state.tabs.keys())[session.active_tab_index]
-            self._state.set_active_tab(tab_id)
+        if session.active_tab_index is not None:
+            active_tab_id = restored_by_index.get(session.active_tab_index)
+            if active_tab_id is not None:
+                self._state.set_active_tab(active_tab_id)
+        if rejected:
+            self._require_view().show_error_dialog(
+                "Some session tabs were not restored",
+                "\n".join(rejected),
+            )
 
     # ------------------------------------------------------------------
     # ExpTab operations (TabService)
@@ -297,6 +302,15 @@ class Controller:
     def has_startup_context(self) -> bool:
         return self._ctx_svc.has_startup_context()
 
+    def has_active_context(self) -> bool:
+        return self._ctx_svc.is_active_context()
+
+    def _require_active_context(self, operation: str) -> None:
+        if not self.has_active_context():
+            raise RuntimeError(
+                f"Cannot {operation} without an active file-backed context."
+            )
+
     def is_run_active(self) -> bool:
         return self._state.is_run_active()
 
@@ -320,6 +334,7 @@ class Controller:
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
+        self._require_active_context("run")
         if not self.has_soc():
             raise RuntimeError("No ZCU connection. Please connect first.")
 
@@ -367,6 +382,7 @@ class Controller:
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
+        self._require_active_context("save data")
         self._save_svc.start_save_data(tab_id, data_path)
 
     def save_image(self, tab_id: str, image_path: str) -> None:
@@ -374,6 +390,7 @@ class Controller:
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
+        self._require_active_context("save image")
         self._save_svc.save_image_sync(tab_id, image_path)
         self._require_view().show_status_message(f"Image saved to {image_path}")
 
@@ -382,6 +399,7 @@ class Controller:
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
+        self._require_active_context("save data and image")
         self._save_svc.start_save_both(tab_id, data_path, image_path)
 
     # ------------------------------------------------------------------
@@ -503,7 +521,10 @@ class Controller:
 
     def forget_device(self, name: str) -> None:
         self._dev_svc.forget_device(name)
-        self._startup_svc.remove_device(name)
+        try:
+            self._startup_svc.remove_device(name)
+        except StartupPersistenceError as exc:
+            self._report_persistence_error("Startup settings save failed", exc)
 
     def is_memory_device(self, name: str) -> bool:
         return self._dev_svc.is_memory_device(name)
@@ -517,7 +538,11 @@ class Controller:
     # ------------------------------------------------------------------
 
     def restore_startup_settings(self) -> None:
-        data = self._startup_svc.load()
+        try:
+            data = self._startup_svc.load()
+        except StartupPersistenceError as exc:
+            self._report_persistence_error("Startup settings restore failed", exc)
+            return
         if data is None:
             return
         from .services.device import DeviceMemoryInfo
@@ -533,7 +558,11 @@ class Controller:
         self._dev_svc.register_remembered_devices(entries)
 
     def get_persisted_startup(self) -> Optional[PersistedStartup]:
-        return self._startup_svc.load()
+        try:
+            return self._startup_svc.load()
+        except StartupPersistenceError as exc:
+            self._report_persistence_error("Startup settings restore failed", exc)
+            return None
 
     def save_startup_project(
         self,
@@ -544,25 +573,41 @@ class Controller:
         result_dir: str,
         database_path: str,
     ) -> None:
-        self._startup_svc.update_project(
-            chip_name=chip_name,
-            qub_name=qub_name,
-            res_name=res_name,
-            result_dir=result_dir,
-            database_path=database_path,
-        )
+        try:
+            self._startup_svc.update_project(
+                chip_name=chip_name,
+                qub_name=qub_name,
+                res_name=res_name,
+                result_dir=result_dir,
+                database_path=database_path,
+            )
+        except StartupPersistenceError as exc:
+            self._report_persistence_error("Startup settings save failed", exc)
 
     def save_startup_connection(self, *, ip: str, port: int) -> None:
-        self._startup_svc.update_connection(ip=ip, port=port)
+        try:
+            self._startup_svc.update_connection(ip=ip, port=port)
+        except StartupPersistenceError as exc:
+            self._report_persistence_error("Startup settings save failed", exc)
 
     def save_startup_device(self, entry: PersistedDeviceEntry) -> None:
-        self._startup_svc.add_device(entry)
+        try:
+            self._startup_svc.add_device(entry)
+        except StartupPersistenceError as exc:
+            self._report_persistence_error("Startup settings save failed", exc)
 
     def remove_startup_device(self, name: str) -> None:
-        self._startup_svc.remove_device(name)
+        try:
+            self._startup_svc.remove_device(name)
+        except StartupPersistenceError as exc:
+            self._report_persistence_error("Startup settings save failed", exc)
 
     def get_persisted_left_panel_width(self) -> int:
-        data = self._startup_svc.load()
+        try:
+            data = self._startup_svc.load()
+        except StartupPersistenceError as exc:
+            self._report_persistence_error("Startup settings restore failed", exc)
+            data = None
         if data is None:
             from .services.startup_persistence import _DEFAULT_LEFT_PANEL_WIDTH
 
@@ -570,7 +615,10 @@ class Controller:
         return data.left_panel_width
 
     def save_left_panel_width(self, width: int) -> None:
-        self._startup_svc.update_left_panel_width(width)
+        try:
+            self._startup_svc.update_left_panel_width(width)
+        except StartupPersistenceError as exc:
+            self._report_persistence_error("Startup settings save failed", exc)
 
     # ------------------------------------------------------------------
     # Connection / Predictor (ConnectionService)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 from unittest.mock import MagicMock
 
+from zcu_tools.gui.adapter import ContextReadiness
 from zcu_tools.gui.event_bus import GuiEvent
 from zcu_tools.gui.services.context import ContextService
 from zcu_tools.gui.state import ExpContext, State
@@ -55,7 +56,15 @@ def test_context_service_get_flux_dir():
 
 def test_context_service_set_startup_context():
     state = State(
-        ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
+        ExpContext(
+            md=MagicMock(),
+            ml=MagicMock(),
+            soc=None,
+            soccfg=None,
+            result_dir="",
+            active_label="old_flux",
+            readiness=ContextReadiness.ACTIVE,
+        )
     )
     bus = MagicMock()
     io_mock = MagicMock()
@@ -78,6 +87,9 @@ def test_context_service_set_startup_context():
     assert state.has_startup_context
     assert state.exp_context.chip_name == "C1"
     assert state.exp_context.result_dir == "/res"
+    assert state.exp_context.active_label == ""
+    assert state.exp_context.readiness is ContextReadiness.DRAFT
+    assert not svc.is_active_context()
     bus.emit.assert_called_once()
     assert bus.emit.call_args[0][0] == GuiEvent.CONTEXT_SWITCHED
 
@@ -108,6 +120,9 @@ def test_context_service_use_context():
     assert state.exp_context.md == mock_md
     assert state.exp_context.ml == mock_ml
     assert state.exp_context.result_dir == "/base"
+    assert state.exp_context.active_label == "flux_1.0_A"
+    assert state.exp_context.readiness is ContextReadiness.ACTIVE
+    assert svc.is_active_context()
     bus.emit.assert_called_once()
 
 
@@ -139,3 +154,5 @@ def test_context_service_new_context():
     )
     bus.emit.assert_called_once()
     assert bus.emit.call_args[0][0] == GuiEvent.CONTEXT_SWITCHED
+    assert state.exp_context.active_label == "flux_1.5_V"
+    assert state.exp_context.readiness is ContextReadiness.ACTIVE

@@ -93,6 +93,7 @@ def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
             is_analyzing=True,
             is_saving_data=False,
             has_context=True,
+            has_active_context=True,
             has_soc=True,
             has_run_result=True,
             has_analyze_result=True,
@@ -116,6 +117,7 @@ def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(qapp):
             is_analyzing=False,
             is_saving_data=False,
             has_context=True,
+            has_active_context=True,
             has_soc=True,
             has_run_result=True,
             has_analyze_result=True,
@@ -139,6 +141,7 @@ def test_exp_tab_disables_save_buttons_while_saving_data(qapp):
             is_analyzing=False,
             is_saving_data=True,
             has_context=True,
+            has_active_context=True,
             has_soc=True,
             has_run_result=True,
             has_analyze_result=True,
@@ -163,6 +166,7 @@ def test_exp_tab_run_tooltip_shows_no_soc_reason(qapp):
             is_analyzing=False,
             is_saving_data=False,
             has_context=True,
+            has_active_context=True,
             has_soc=False,
             has_run_result=False,
             has_analyze_result=False,
@@ -189,6 +193,7 @@ def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(qapp):
             is_analyzing=False,
             is_saving_data=False,
             has_context=True,
+            has_active_context=True,
             has_soc=True,
             has_run_result=False,
             has_analyze_result=False,
@@ -200,6 +205,35 @@ def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(qapp):
     assert tab.run_btn.toolTip() == "Config invalid: modules.readout: invalid"
 
 
+def test_exp_tab_draft_context_allows_analysis_but_disables_run_and_save(qapp):
+    from zcu_tools.gui.ui.main_window import ExpTabWidget
+
+    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab.update_writeback_items([MagicMock(selected=True)])
+    tab.update_interaction_state(
+        TabInteractionState(
+            global_run_active=False,
+            is_running=False,
+            is_analyzing=False,
+            is_saving_data=False,
+            has_context=True,
+            has_active_context=False,
+            has_soc=True,
+            has_run_result=True,
+            has_analyze_result=True,
+            has_figure=True,
+        )
+    )
+
+    assert tab.run_btn.isEnabled() is False
+    assert tab.run_btn.toolTip() == "Select or create a file-backed context"
+    assert tab.analyze_btn.isEnabled() is True
+    assert tab.writeback_widget.isEnabled() is True
+    assert tab.save_data_btn.isEnabled() is False
+    assert tab.save_image_btn.isEnabled() is False
+    assert tab.save_both_btn.isEnabled() is False
+
+
 def test_main_window_run_lock_disables_only_new_tab_and_run(qapp):
     from zcu_tools.gui.ui.main_window import MainWindow
 
@@ -207,6 +241,7 @@ def test_main_window_run_lock_disables_only_new_tab_and_run(qapp):
     ctrl.get_bus.return_value = EventBus()
     ctrl.is_run_active.return_value = True
     ctrl.has_context.return_value = True
+    ctrl.has_active_context.return_value = True
     ctrl.has_soc.return_value = True
     ctrl.has_tab.return_value = True
     ctrl.has_run_result.return_value = True
@@ -236,6 +271,7 @@ def test_main_window_soc_changed_refreshes_run_lock(qapp):
     ctrl.get_bus.return_value = bus
     ctrl.is_run_active.return_value = False
     ctrl.has_context.return_value = True
+    ctrl.has_active_context.return_value = True
     ctrl.has_soc.return_value = False
     ctrl.has_tab.return_value = True
     ctrl.has_run_result.return_value = False

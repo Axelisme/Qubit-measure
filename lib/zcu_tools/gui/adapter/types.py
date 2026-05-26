@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -56,6 +57,14 @@ SocCfgHandle: TypeAlias = SocCfgProtocol
 T_Result = TypeVar("T_Result")
 
 
+class ContextReadiness(Enum):
+    """Lifecycle readiness for operations that need a persisted context."""
+
+    EMPTY = "empty"
+    DRAFT = "draft"
+    ACTIVE = "active"
+
+
 class AnalyzeResultWithFigure(Protocol):
     @property
     def figure(self) -> Optional["Figure"]: ...
@@ -78,6 +87,7 @@ class ExpContext:
     database_path: str = ""
     active_label: str = ""
     predictor: Optional[FluxoniumPredictor] = None
+    readiness: ContextReadiness = ContextReadiness.EMPTY
 
 
 @dataclass(frozen=True)

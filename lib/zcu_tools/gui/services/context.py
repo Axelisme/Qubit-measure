@@ -4,6 +4,7 @@ import dataclasses
 import logging
 from typing import TYPE_CHECKING, Any, Optional
 
+from zcu_tools.gui.adapter import ContextReadiness
 from zcu_tools.gui.event_bus import (
     ContextSwitchedPayload,
     GuiEvent,
@@ -100,6 +101,10 @@ class ContextService:
     def has_startup_context(self) -> bool:
         return self._state.has_startup_context
 
+    def is_active_context(self) -> bool:
+        """True only for a file-backed context eligible for run and save."""
+        return self._state.exp_context.readiness is ContextReadiness.ACTIVE
+
     def get_active_context_label(self) -> Optional[str]:
         return self._io.get_active_label()
 
@@ -152,6 +157,8 @@ class ContextService:
             res_name=res_name,
             result_dir=result_dir,
             database_path=database_path,
+            active_label="",
+            readiness=ContextReadiness.DRAFT,
         )
         self._state.set_context(new_ctx)
         self._state.has_startup_context = True
@@ -163,7 +170,9 @@ class ContextService:
     def use_context(self, label: str) -> None:
         logger.info("use_context: label=%r", label)
         new_ctx = self._io.use_context(label, self._state.exp_context)
-        new_ctx = dataclasses.replace(new_ctx, active_label=label)
+        new_ctx = dataclasses.replace(
+            new_ctx, active_label=label, readiness=ContextReadiness.ACTIVE
+        )
         self._state.set_context(new_ctx)
         self._bus.emit(
             GuiEvent.CONTEXT_SWITCHED,
@@ -186,7 +195,9 @@ class ContextService:
             clone_from_current=clone_from_current,
         )
         label = self._io.get_active_label() or ""
-        new_ctx = dataclasses.replace(new_ctx, active_label=label)
+        new_ctx = dataclasses.replace(
+            new_ctx, active_label=label, readiness=ContextReadiness.ACTIVE
+        )
         self._state.set_context(new_ctx)
         self._bus.emit(
             GuiEvent.CONTEXT_SWITCHED,

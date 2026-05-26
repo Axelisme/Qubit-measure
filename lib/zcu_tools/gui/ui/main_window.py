@@ -442,7 +442,7 @@ class ExpTabWidget(QWidget):
             can_run = (
                 not local_busy
                 and not state.global_run_active
-                and state.has_context
+                and state.has_active_context
                 and state.has_soc
                 and cfg_valid
             )
@@ -455,6 +455,8 @@ class ExpTabWidget(QWidget):
                 self.run_btn.setToolTip("Another tab is running")
             elif not state.has_context:
                 self.run_btn.setToolTip("No experiment context")
+            elif not state.has_active_context:
+                self.run_btn.setToolTip("Select or create a file-backed context")
             elif not state.has_soc:
                 self.run_btn.setToolTip("No SoC connection")
             elif not cfg_valid:
@@ -469,10 +471,14 @@ class ExpTabWidget(QWidget):
         self.analyze_form.setEnabled(idle)
         self.analyze_btn.setEnabled(idle and state.has_context and state.has_run_result)
         self.save_data_btn.setEnabled(
-            idle and state.has_context and state.has_run_result
+            idle and state.has_active_context and state.has_run_result
         )
-        self.save_image_btn.setEnabled(idle and state.has_context and state.has_figure)
-        self.save_both_btn.setEnabled(idle and state.has_context and state.has_figure)
+        self.save_image_btn.setEnabled(
+            idle and state.has_active_context and state.has_figure
+        )
+        self.save_both_btn.setEnabled(
+            idle and state.has_active_context and state.has_figure
+        )
         self.writeback_widget.setEnabled(
             idle and state.has_context and state.has_analyze_result
         )
@@ -741,6 +747,7 @@ class MainWindow(QMainWindow):
         tab_id: str,
         tab_w: "ExpTabWidget",
         has_context: bool,
+        has_active_context: bool,
         has_soc: bool,
     ) -> None:
         if not self._ctrl.has_tab(tab_id):
@@ -753,6 +760,7 @@ class MainWindow(QMainWindow):
             is_analyzing=self._ctrl.is_tab_analyzing(tab_id),
             is_saving_data=self._ctrl.is_tab_saving_data(tab_id),
             has_context=has_context,
+            has_active_context=has_active_context,
             has_soc=has_soc,
             has_run_result=self._ctrl.has_run_result(tab_id),
             has_analyze_result=self._ctrl.has_analyze_result(tab_id),
@@ -798,10 +806,13 @@ class MainWindow(QMainWindow):
     def refresh_run_lock(self, running_tab_id: Optional[str]) -> None:
         logger.debug("refresh_run_lock: running_tab_id=%r", running_tab_id)
         has_context = self._ctrl.has_context()
+        has_active_context = self._ctrl.has_active_context()
         has_soc = self._ctrl.has_soc()
         self._new_tab_btn.setEnabled(running_tab_id is None)
         for tab_id, tab_w in self._tab_widgets.items():
-            self._set_tab_running(tab_id, tab_w, has_context, has_soc)
+            self._set_tab_running(
+                tab_id, tab_w, has_context, has_active_context, has_soc
+            )
         if running_tab_id is None:
             for tab_w in self._tab_widgets.values():
                 tab_w.progress_stack.reset_all()
@@ -814,12 +825,14 @@ class MainWindow(QMainWindow):
             tab_id,
             tab_w,
             self._ctrl.has_context(),
+            self._ctrl.has_active_context(),
             self._ctrl.has_soc(),
         )
 
     def refresh_context_panel(self) -> None:
         label = self._ctrl.get_active_context_label()
         has_context = self._ctrl.has_context()
+        has_active_context = self._ctrl.has_active_context()
         has_soc = self._ctrl.has_soc()
         if label is not None:
             # file-backed flux context is active
@@ -840,7 +853,9 @@ class MainWindow(QMainWindow):
             self._ctx_label.setText("No project set — use Project… to configure")
             self._ctx_label.setStyleSheet("color: gray;")
         for tab_id, tab_w in self._tab_widgets.items():
-            self._set_tab_running(tab_id, tab_w, has_context, has_soc)
+            self._set_tab_running(
+                tab_id, tab_w, has_context, has_active_context, has_soc
+            )
 
     def refresh_inspect_panel(self) -> None:
         if self._inspect_dialog is not None and self._inspect_dialog.isVisible():

@@ -118,6 +118,19 @@ def test_device_dialog_drop_device(qapp):
     ctrl.remove_startup_device.assert_not_called()
 
 
+def test_device_dialog_forget_memory_device_dispatches_single_transaction(qapp):
+    ctrl = _make_ctrl()
+    ctrl.list_devices.return_value = [_entry("remembered", connected=False)]
+    ctrl.is_memory_device.return_value = True
+
+    dialog = DeviceDialog(ctrl)
+    dialog._list.setCurrentRow(0)
+    dialog._drop_btn.click()
+
+    ctrl.forget_device.assert_called_once_with("remembered")
+    ctrl.remove_startup_device.assert_not_called()
+
+
 def test_device_dialog_refresh_reloads_selected_device_info(qapp):
     from zcu_tools.device.fake import FakeDeviceInfo
 

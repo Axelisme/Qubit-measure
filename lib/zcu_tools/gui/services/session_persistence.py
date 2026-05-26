@@ -4,7 +4,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import gettempdir
+from tempfile import NamedTemporaryFile, gettempdir
 from typing import Any, Optional, Union
 
 from platformdirs import user_cache_dir
@@ -34,8 +34,13 @@ from zcu_tools.gui.adapter import (
 logger = logging.getLogger(__name__)
 
 
-_SESSION_VERSION = 1
+# Retain the existing filename so an old payload can be rejected explicitly.
+SESSION_VERSION = 2
 _SESSION_FILENAME = "tab_session_v1.json"
+
+
+class SessionPersistenceError(RuntimeError):
+    """Expected failure while reading, writing, or restoring a GUI session."""
 
 
 @dataclass(frozen=True)
@@ -87,6 +92,11 @@ class SessionPersistenceService:
         return self._session_path
 
     def save_session(self, session: PersistedSession) -> None:
+        if session.version != SESSION_VERSION:
+            raise SessionPersistenceError(
+                f"Unsupported session version for save: {session.version!r}; "
+                f"expected {SESSION_VERSION}"
+            )
         payload = {
             "version": session.version,
             "active_tab_index": session.active_tab_index,
@@ -106,34 +116,42 @@ class SessionPersistenceService:
                 for tab in session.tabs
             ],
         }
-        self._session_path.parent.mkdir(parents=True, exist_ok=True)
-        self._session_path.write_text(
-            json.dumps(payload, ensure_ascii=True, indent=2),
-            encoding="utf-8",
-        )
+        self._write_payload(payload)
 
     def load_session(self) -> Optional[PersistedSession]:
         if not self._session_path.exists():
             return None
-        data = json.loads(self._session_path.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(self._session_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SessionPersistenceError(
+                f"Failed to read session settings: {exc}"
+            ) from exc
         if not isinstance(data, dict):
-            raise RuntimeError("Session file payload must be a JSON object")
-        if data.get("version") != _SESSION_VERSION:
-            raise RuntimeError("Unsupported session version")
+            raise SessionPersistenceError("Session file payload must be a JSON object")
+        if data.get("version") != SESSION_VERSION:
+            raise SessionPersistenceError(
+                f"Unsupported session version: {data.get('version')!r}; "
+                f"expected {SESSION_VERSION}"
+            )
         raw_tabs = data.get("tabs")
         if not isinstance(raw_tabs, list):
-            raise RuntimeError("Session tabs must be a list")
+            raise SessionPersistenceError("Session tabs must be a list")
         tabs: list[PersistedTab] = []
         for item in raw_tabs:
             if not isinstance(item, dict):
-                raise RuntimeError("Session tab entry must be a JSON object")
+                raise SessionPersistenceError("Session tab entry must be a JSON object")
             adapter_name = item.get("adapter_name")
             cfg_raw = item.get("cfg_raw")
             raw_override = item.get("save_paths_override")
             if not isinstance(adapter_name, str) or not adapter_name:
-                raise RuntimeError("Session tab adapter_name must be non-empty")
+                raise SessionPersistenceError(
+                    "Session tab adapter_name must be non-empty"
+                )
             if not isinstance(cfg_raw, dict):
-                raise RuntimeError("Session tab cfg_raw must be a JSON object")
+                raise SessionPersistenceError(
+                    "Session tab cfg_raw must be a JSON object"
+                )
             override: Optional[SavePaths]
             if raw_override is None:
                 override = None
@@ -141,12 +159,14 @@ class SessionPersistenceService:
                 data_path = raw_override.get("data_path")
                 image_path = raw_override.get("image_path")
                 if not isinstance(data_path, str) or not isinstance(image_path, str):
-                    raise RuntimeError(
+                    raise SessionPersistenceError(
                         "Session save_paths_override must contain string paths"
                     )
                 override = SavePaths(data_path=data_path, image_path=image_path)
             else:
-                raise RuntimeError("Session save_paths_override must be an object")
+                raise SessionPersistenceError(
+                    "Session save_paths_override must be an object"
+                )
             tabs.append(
                 PersistedTab(
                     adapter_name=adapter_name,
@@ -156,12 +176,32 @@ class SessionPersistenceService:
             )
         active_tab_index = data.get("active_tab_index")
         if active_tab_index is not None and not isinstance(active_tab_index, int):
-            raise RuntimeError("Session active_tab_index must be an integer")
+            raise SessionPersistenceError("Session active_tab_index must be an integer")
         return PersistedSession(
-            version=_SESSION_VERSION,
+            version=SESSION_VERSION,
             tabs=tabs,
             active_tab_index=active_tab_index,
         )
+
+    def _write_payload(self, payload: dict[str, object]) -> None:
+        temp_path: Optional[Path] = None
+        try:
+            self._session_path.parent.mkdir(parents=True, exist_ok=True)
+            with NamedTemporaryFile(
+                "w",
+                encoding="utf-8",
+                dir=self._session_path.parent,
+                delete=False,
+            ) as file:
+                file.write(json.dumps(payload, ensure_ascii=True, indent=2))
+                temp_path = Path(file.name)
+            temp_path.replace(self._session_path)
+        except (OSError, TypeError, ValueError) as exc:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
+            raise SessionPersistenceError(
+                f"Failed to save session settings: {exc}"
+            ) from exc
 
     def schema_to_raw(self, schema: CfgSchema, *, ml: Any) -> dict[str, object]:
         del ml
@@ -170,7 +210,12 @@ class SessionPersistenceService:
     def raw_to_schema(
         self, base_schema: CfgSchema, raw_cfg: dict[str, object]
     ) -> CfgSchema:
-        value = self._section_value_from_raw(base_schema.spec, raw_cfg)
+        try:
+            value = self._section_value_from_raw(base_schema.spec, raw_cfg)
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            raise SessionPersistenceError(
+                f"Invalid session cfg payload: {exc}"
+            ) from exc
         return CfgSchema(spec=base_schema.spec, value=value)
 
     def _section_value_to_raw(
@@ -258,16 +303,7 @@ class SessionPersistenceService:
         for key, node_spec in spec.fields.items():
             if key not in raw:
                 continue
-            try:
-                parsed = self._node_value_from_raw(node_spec, raw[key])
-            except Exception:
-                logger.warning(
-                    "restore schema field failed: key=%r spec=%s",
-                    key,
-                    type(node_spec).__name__,
-                    exc_info=True,
-                )
-                continue
+            parsed = self._node_value_from_raw(node_spec, raw[key])
             if parsed is not None:
                 value.fields[key] = parsed
         return value
@@ -289,7 +325,7 @@ class SessionPersistenceService:
                 is_unset = bool(raw.get("is_unset", False))
                 return DirectValue(value=value, is_unset=is_unset)
             if isinstance(raw, str) and raw.strip().startswith("="):
-                return EvalValue(expr=raw.strip(), resolved=None, error=None)
+                raise RuntimeError("Legacy scalar '=expr' payload is unsupported")
             return DirectValue(raw)
         if isinstance(spec, SweepSpec):
             if isinstance(raw, dict):
@@ -298,14 +334,8 @@ class SessionPersistenceService:
                 expts = int(raw["expts"])
                 step_raw = raw.get("step")
                 if step_raw is None:
-                    if expts == 1:
-                        step = 0.0
-                    else:
-                        start_f = self._sweep_edge_resolved_float(start, "start")
-                        stop_f = self._sweep_edge_resolved_float(stop, "stop")
-                        step = (stop_f - start_f) / (expts - 1)
-                else:
-                    step = float(step_raw)
+                    raise RuntimeError("Sweep step is required in session payload")
+                step = float(step_raw)
                 return SweepValue(start=start, stop=stop, expts=expts, step=step)
             raise RuntimeError("Sweep payload must be an object")
         if isinstance(spec, MultiSweepSpec):
@@ -321,9 +351,12 @@ class SessionPersistenceService:
                     axes[axis] = parsed
             return MultiSweepValue(axes=axes)
         if isinstance(spec, DeviceRefSpec):
-            if not isinstance(raw, str):
-                raise RuntimeError("Device reference must be string")
-            return DirectValue(raw)
+            if isinstance(raw, dict) and raw.get("__kind") == "direct":
+                value = raw.get("value")
+                if not isinstance(value, str):
+                    raise RuntimeError("Device reference value must be string")
+                return DirectValue(value, is_unset=bool(raw.get("is_unset", False)))
+            raise RuntimeError("Device reference must use direct payload encoding")
         if isinstance(spec, CfgSectionSpec):
             if not isinstance(raw, dict):
                 raise RuntimeError("Section payload must be an object")
@@ -342,19 +375,10 @@ class SessionPersistenceService:
         ):
             return EvalValue(expr=raw["expr"], resolved=None, error=None)
         if isinstance(raw, str) and raw.strip().startswith("="):
-            return EvalValue(expr=raw.strip(), resolved=None, error=None)
+            raise RuntimeError("Legacy sweep '=expr' payload is unsupported")
         if isinstance(raw, (int, float)):
             return float(raw)
         raise RuntimeError("Sweep edge must be numeric or '=expr'")
-
-    def _sweep_edge_resolved_float(self, value: object, edge_name: str) -> float:
-        if isinstance(value, (int, float)):
-            return float(value)
-        if isinstance(value, EvalValue):
-            if isinstance(value.resolved, (int, float)):
-                return float(value.resolved)
-            raise RuntimeError(f"Sweep {edge_name} expression is unresolved")
-        raise RuntimeError(f"Sweep {edge_name} must be numeric")
 
     def _ref_value_from_raw(
         self,
@@ -371,22 +395,7 @@ class SessionPersistenceService:
             value_spec = self._select_allowed_spec_for_restore(spec, chosen_key)
             nested = self._section_value_from_raw(value_spec, raw["value"])
             return ModuleRefValue(chosen_key=chosen_key, value=nested)
-        if not isinstance(raw, dict):
-            raise RuntimeError("Module reference payload must be an object")
-        for allowed_spec in spec.allowed:
-            try:
-                nested = self._section_value_from_raw(allowed_spec, raw)
-                return ModuleRefValue(
-                    chosen_key=f"<Custom:{allowed_spec.label}>",
-                    value=nested,
-                )
-            except Exception:
-                continue
-        fallback_spec = spec.allowed[0]
-        return ModuleRefValue(
-            chosen_key=f"<Custom:{fallback_spec.label}>",
-            value=make_default_value(fallback_spec),
-        )
+        raise RuntimeError("Module reference must use module_ref payload encoding")
 
     def _waveform_ref_value_from_raw(
         self,
@@ -403,22 +412,7 @@ class SessionPersistenceService:
             value_spec = self._select_allowed_spec_for_restore(spec, chosen_key)
             nested = self._section_value_from_raw(value_spec, raw["value"])
             return WaveformRefValue(chosen_key=chosen_key, value=nested)
-        if not isinstance(raw, dict):
-            raise RuntimeError("Waveform reference payload must be an object")
-        for allowed_spec in spec.allowed:
-            try:
-                nested = self._section_value_from_raw(allowed_spec, raw)
-                return WaveformRefValue(
-                    chosen_key=f"<Custom:{allowed_spec.label}>",
-                    value=nested,
-                )
-            except Exception:
-                continue
-        fallback_spec = spec.allowed[0]
-        return WaveformRefValue(
-            chosen_key=f"<Custom:{fallback_spec.label}>",
-            value=make_default_value(fallback_spec),
-        )
+        raise RuntimeError("Waveform reference must use waveform_ref payload encoding")
 
     def _select_allowed_spec_for_restore(
         self, spec: Union[ModuleRefSpec, WaveformRefSpec], chosen_key: str
@@ -434,5 +428,7 @@ class SessionPersistenceService:
 __all__ = [
     "PersistedSession",
     "PersistedTab",
+    "SESSION_VERSION",
+    "SessionPersistenceError",
     "SessionPersistenceService",
 ]

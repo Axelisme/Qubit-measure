@@ -48,6 +48,7 @@ class TabInteractionState:
     is_analyzing: bool
     is_saving_data: bool
     has_context: bool
+    has_active_context: bool
     has_soc: bool
     has_run_result: bool
     has_analyze_result: bool

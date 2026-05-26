@@ -54,6 +54,7 @@ def test_device_service_registration():
     dev.get_info.assert_called()
 
     svc.drop_device("test_dev")
+    dev.close.assert_called_once_with()
     # drop moves device to memory-only; it still appears but disconnected
     entries = svc.list_devices()
     test_dev_entry = next((e for e in entries if e.name == "test_dev"), None)

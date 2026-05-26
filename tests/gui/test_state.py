@@ -31,6 +31,7 @@ def test_tab_interaction_state_creation():
         is_analyzing=True,
         is_saving_data=False,
         has_context=False,
+        has_active_context=False,
         has_soc=True,
         has_run_result=True,
         has_analyze_result=False,

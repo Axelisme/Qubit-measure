@@ -138,14 +138,20 @@ def test_device_service_emits_device_changed_on_drop():
     from zcu_tools.device.fake import FakeDeviceInfo
 
     svc = DeviceService(state, bus)
+    device = MagicMock()
     with (
         patch(
             "zcu_tools.device.manager.GlobalDeviceManager.get_info",
             return_value=FakeDeviceInfo(address=""),
         ),
+        patch(
+            "zcu_tools.device.manager.GlobalDeviceManager.get_device",
+            return_value=device,
+        ),
         patch("zcu_tools.device.GlobalDeviceManager.drop_device"),
     ):
         svc.drop_device("dev1")
 
+    device.close.assert_called_once_with()
     assert len(received) == 1
     assert isinstance(received[0], DeviceChangedPayload)

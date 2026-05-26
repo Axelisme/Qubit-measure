@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 from zcu_tools.gui.adapter import SavePaths
 from zcu_tools.gui.services.session_persistence import (
+    SESSION_VERSION,
     PersistedSession,
     PersistedTab,
+    SessionPersistenceError,
     SessionPersistenceService,
 )
 
@@ -14,7 +17,7 @@ from zcu_tools.gui.services.session_persistence import (
 def test_session_persistence_save_and_load_roundtrip(tmp_path: Path):
     svc = SessionPersistenceService(cache_dir=tmp_path)
     session = PersistedSession(
-        version=1,
+        version=SESSION_VERSION,
         active_tab_index=0,
         tabs=[
             PersistedTab(
@@ -29,7 +32,7 @@ def test_session_persistence_save_and_load_roundtrip(tmp_path: Path):
     loaded = svc.load_session()
 
     assert loaded is not None
-    assert loaded.version == 1
+    assert loaded.version == SESSION_VERSION
     assert loaded.active_tab_index == 0
     assert len(loaded.tabs) == 1
     assert loaded.tabs[0].adapter_name == "fake"
@@ -44,7 +47,7 @@ def test_session_persistence_missing_file_returns_none(tmp_path: Path):
     assert svc.load_session() is None
 
 
-def test_session_persistence_restores_legacy_sweep_step_none(tmp_path: Path):
+def test_session_persistence_rejects_legacy_sweep_step_none(tmp_path: Path):
     from zcu_tools.gui.adapter import (
         CfgSchema,
         CfgSectionSpec,
@@ -58,20 +61,18 @@ def test_session_persistence_restores_legacy_sweep_step_none(tmp_path: Path):
         value=CfgSectionValue(fields={}),
     )
 
-    restored = svc.raw_to_schema(
-        base,
-        {"sweep": {"start": 0.0, "stop": 1.0, "expts": 11, "step": None}},
-    )
-    sweep = restored.value.fields["sweep"]
-    assert sweep.step == pytest.approx(0.1)  # type: ignore[union-attr]
+    with pytest.raises(SessionPersistenceError, match="Sweep step is required"):
+        svc.raw_to_schema(
+            base,
+            {"sweep": {"start": 0.0, "stop": 1.0, "expts": 11, "step": None}},
+        )
 
 
-def test_session_persistence_restores_sweep_eval_edges(tmp_path: Path):
+def test_session_persistence_rejects_legacy_sweep_eval_edges(tmp_path: Path):
     from zcu_tools.gui.adapter import (
         CfgSchema,
         CfgSectionSpec,
         CfgSectionValue,
-        EvalValue,
         SweepSpec,
     )
 
@@ -81,24 +82,30 @@ def test_session_persistence_restores_sweep_eval_edges(tmp_path: Path):
         value=CfgSectionValue(fields={}),
     )
 
-    restored = svc.raw_to_schema(
-        base,
-        {
-            "sweep": {
-                "start": "=r_f - 10",
-                "stop": "=r_f + 10",
-                "expts": 11,
-                "step": 2.0,
-            }
-        },
+    with pytest.raises(SessionPersistenceError, match="Legacy sweep"):
+        svc.raw_to_schema(
+            base,
+            {
+                "sweep": {
+                    "start": "=r_f - 10",
+                    "stop": "=r_f + 10",
+                    "expts": 11,
+                    "step": 2.0,
+                }
+            },
+        )
+
+
+def test_session_persistence_rejects_previous_cache_version(tmp_path: Path):
+    svc = SessionPersistenceService(cache_dir=tmp_path)
+    svc.session_path.parent.mkdir(parents=True, exist_ok=True)
+    svc.session_path.write_text(
+        json.dumps({"version": 1, "tabs": [], "active_tab_index": None}),
+        encoding="utf-8",
     )
-    sweep = restored.value.fields["sweep"]
-    start = sweep.start  # type: ignore[union-attr]
-    stop = sweep.stop  # type: ignore[union-attr]
-    assert isinstance(start, EvalValue)
-    assert isinstance(stop, EvalValue)
-    assert start.expr == "=r_f - 10"
-    assert stop.expr == "=r_f + 10"
+
+    with pytest.raises(SessionPersistenceError, match="Unsupported session version"):
+        svc.load_session()
 
 
 def test_session_persistence_roundtrip_preserves_eval_values(tmp_path: Path):

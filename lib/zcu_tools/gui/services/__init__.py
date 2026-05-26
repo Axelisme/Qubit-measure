@@ -7,13 +7,17 @@ from .device import DeviceService
 from .run import RunService
 from .save import SaveBothOutcome, SaveService
 from .session_persistence import (
+    SESSION_VERSION,
     PersistedSession,
     PersistedTab,
+    SessionPersistenceError,
     SessionPersistenceService,
 )
 from .startup_persistence import (
+    STARTUP_VERSION,
     PersistedDeviceEntry,
     PersistedStartup,
+    StartupPersistenceError,
     StartupPersistenceService,
 )
 from .tab import TabService
@@ -29,9 +33,13 @@ __all__ = [
     "SaveService",
     "PersistedSession",
     "PersistedTab",
+    "SESSION_VERSION",
+    "SessionPersistenceError",
     "SessionPersistenceService",
     "PersistedDeviceEntry",
     "PersistedStartup",
+    "STARTUP_VERSION",
+    "StartupPersistenceError",
     "StartupPersistenceService",
     "TabService",
     "WritebackService",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import threading
 import time
 from unittest.mock import MagicMock
@@ -11,7 +12,7 @@ from qtpy.QtCore import QCoreApplication
 from qtpy.QtWidgets import QLabel, QStackedWidget
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
-from zcu_tools.gui.adapter import CfgSchema, ExpContext
+from zcu_tools.gui.adapter import CfgSchema, ContextReadiness, ExpContext
 from zcu_tools.gui.controller import Controller
 from zcu_tools.gui.event_bus import (
     GuiEvent,
@@ -23,7 +24,13 @@ from zcu_tools.gui.plot_host import FigureContainer
 from zcu_tools.gui.plot_routing import has_current_container
 from zcu_tools.gui.registry import Registry
 from zcu_tools.gui.runner import Runner
-from zcu_tools.gui.services.session_persistence import SessionPersistenceService
+from zcu_tools.gui.services.session_persistence import (
+    SESSION_VERSION,
+    PersistedSession,
+    PersistedTab,
+    SessionPersistenceError,
+    SessionPersistenceService,
+)
 from zcu_tools.gui.state import State
 
 # ---------------------------------------------------------------------------
@@ -41,6 +48,7 @@ def _make_ctx() -> ExpContext:
         result_dir="/tmp/zcu_result",
         database_path="/tmp/zcu_db/fake_chip/fake_qubit",
         active_label="ctx001",
+        readiness=ContextReadiness.ACTIVE,
     )
 
 
@@ -244,6 +252,26 @@ def test_start_run_while_device_setup_active_raises(cf):
     cf.state.end_device_setup("flux")
 
 
+def test_draft_context_rejects_real_run_and_save(cf):
+    tab_id = cf.ctrl.new_tab("fake")
+    cf.state.set_context(
+        dataclasses.replace(
+            cf.state.exp_context,
+            active_label="",
+            readiness=ContextReadiness.DRAFT,
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="active file-backed context"):
+        cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
+    with pytest.raises(RuntimeError, match="active file-backed context"):
+        cf.ctrl.save_data(tab_id, "/tmp/data.h5")
+    with pytest.raises(RuntimeError, match="active file-backed context"):
+        cf.ctrl.save_image(tab_id, "/tmp/image.png")
+    with pytest.raises(RuntimeError, match="active file-backed context"):
+        cf.ctrl.save_both(tab_id, "/tmp/data.h5", "/tmp/image.png")
+
+
 def test_run_clears_active_figure_container_after_finish(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.view.make_live_container.return_value = _make_figure_container()
@@ -296,6 +324,37 @@ def test_persist_then_restore_tabs_session(cf, tmp_path):
     assert save_paths is not None
     assert save_paths.data_path == "/tmp/a.h5"
     assert save_paths.image_path == "/tmp/b.png"
+
+
+def test_restore_session_failure_is_visible_to_user(cf):
+    cf.ctrl._session_svc = MagicMock()
+    cf.ctrl._session_svc.load_session.side_effect = SessionPersistenceError(
+        "unsupported cache"
+    )
+
+    cf.ctrl.restore_tabs_from_session()
+
+    cf.view.show_error_dialog.assert_called_with(
+        "Session restore failed", "unsupported cache"
+    )
+
+
+def test_restore_invalid_tab_is_rejected_and_reported(cf):
+    cf.ctrl._session_svc = MagicMock()
+    cf.ctrl._session_svc.raw_to_schema.side_effect = SessionPersistenceError("bad cfg")
+
+    cf.ctrl._restore_session(
+        PersistedSession(
+            version=SESSION_VERSION,
+            tabs=[PersistedTab("fake", {}, None)],
+            active_tab_index=0,
+        )
+    )
+
+    assert not cf.state.tabs
+    title, message = cf.view.show_error_dialog.call_args.args
+    assert title == "Some session tabs were not restored"
+    assert "invalid saved configuration" in message
 
 
 # ---------------------------------------------------------------------------
