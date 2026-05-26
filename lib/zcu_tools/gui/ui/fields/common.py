@@ -13,12 +13,12 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
     QComboBox,
     QGridLayout,
-    QVBoxLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMenu,
     QSpinBox,
+    QVBoxLayout,
     QWidget,
 )
 

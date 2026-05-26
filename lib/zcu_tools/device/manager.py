@@ -54,6 +54,13 @@ class GlobalDeviceManager:
                 cls._devices[name].setup(cfg, progress=progress)
 
     @classmethod
+    def get_info(cls, name: str) -> DeviceInfo:
+        with cls._lock:
+            if name not in cls._devices:
+                raise ValueError(f"Device {name} not found")
+            return cls._devices[name].get_info()
+
+    @classmethod
     def get_all_info(cls) -> dict[str, DeviceInfo]:
         with cls._lock:
             return {name: device.get_info() for name, device in cls._devices.items()}  # type: ignore
