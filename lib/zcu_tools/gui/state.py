@@ -63,7 +63,6 @@ class State:
         self.tabs: dict[str, TabState[Any, Any, Any]] = {}
         self.active_tab_id: Optional[str] = None
         self.running_tab_id: Optional[str] = None
-        self.active_device_setup_name: Optional[str] = None
         self.has_startup_context: bool = False
 
     def set_context(self, ctx: ExpContext) -> None:
@@ -206,23 +205,6 @@ class State:
 
     def is_run_active(self) -> bool:
         return self.running_tab_id is not None
-
-    def begin_device_setup(self, name: str) -> None:
-        if self.is_run_active():
-            raise RuntimeError("Cannot setup device while a run is active")
-        if self.active_device_setup_name is not None:
-            raise RuntimeError(
-                f"Device setup {self.active_device_setup_name!r} is already active"
-            )
-        self.active_device_setup_name = name
-
-    def end_device_setup(self, name: str) -> None:
-        if self.active_device_setup_name != name:
-            raise RuntimeError(f"Device setup {name!r} is not active")
-        self.active_device_setup_name = None
-
-    def is_device_setup_active(self) -> bool:
-        return self.active_device_setup_name is not None
 
     def is_tab_running(self, tab_id: str) -> bool:
         return self.tabs[tab_id].is_running

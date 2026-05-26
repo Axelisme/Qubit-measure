@@ -1,149 +1,173 @@
-"""Tests for DeviceService."""
+"""Tests for async DeviceService commands and snapshot boundaries."""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
+from qtpy.QtCore import QEventLoop
+from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDeviceInfo
-from zcu_tools.gui.event_bus import EventBus
+from zcu_tools.gui.event_bus import EventBus, GuiEvent
 from zcu_tools.gui.services.device import (
-    DeviceRegistrationError,
+    ConnectDeviceRequest,
     DeviceService,
-    RegisterDeviceRequest,
+    DeviceStatus,
+    DisconnectDeviceRequest,
+    SetDeviceValueRequest,
+    SetupDeviceRequest,
 )
-from zcu_tools.gui.state import ExpContext, State
+from zcu_tools.gui.services.operation_gate import (
+    OperationConflictError,
+    OperationGate,
+    OperationKind,
+)
+
+
+@pytest.fixture(autouse=True)
+def _clean_devices():
+    for name in list(GlobalDeviceManager.get_all_devices()):
+        GlobalDeviceManager.drop_device(name)
+    yield
+    for name in list(GlobalDeviceManager.get_all_devices()):
+        GlobalDeviceManager.drop_device(name)
 
 
 def _make_svc(
-    running: bool = False, driver: MagicMock | None = None
+    driver: MagicMock | None = None, gate: OperationGate | None = None
 ) -> tuple[DeviceService, MagicMock]:
-    """Build a DeviceService with an injected fake driver factory.
-
-    Returns the service and the driver instance the factory yields, so tests
-    can introspect calls on the resulting device.
-    """
-    state = State(
-        ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
+    device = driver or MagicMock()
+    device.get_info.return_value = FakeDeviceInfo(address="addr", value=0.0)
+    return (
+        DeviceService(
+            EventBus(),
+            gate,
+            driver_factory=lambda _type, _address: device,
+        ),
+        device,
     )
-    if running:
-        state.running_tab_id = "some_tab"
-    fake_device = driver if driver is not None else MagicMock()
-
-    def factory(type_name: str, address: str) -> object:
-        return fake_device
-
-    svc = DeviceService(state, EventBus(), driver_factory=factory)  # type: ignore[arg-type]
-    return svc, fake_device
 
 
-def _req(name: str = "dev1", type_name: str = "FakeDevice") -> RegisterDeviceRequest:
-    return RegisterDeviceRequest(type_name=type_name, name=name, address="addr")
+def _req(name: str = "dev1") -> ConnectDeviceRequest:
+    return ConnectDeviceRequest(type_name="FakeDevice", name=name, address="addr")
 
 
-def test_device_service_success():
+def _connect(svc: DeviceService, req: ConnectDeviceRequest) -> None:
+    loop = QEventLoop()
+    svc.device_connected.connect(lambda _request: loop.quit())
+    svc.operation_failed.connect(lambda _name, _error: loop.quit())
+    svc.start_connect_device(req)
+    loop.exec()
+
+
+def test_device_connect_disconnect_and_set_value_update_snapshot(qapp):
     svc, device = _make_svc()
+    _connect(svc, _req())
+    assert svc.get_device_snapshot("dev1").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
 
-    with patch("zcu_tools.device.GlobalDeviceManager.register_device") as mock_reg:
-        svc.register_device(_req("dev1"))
-        mock_reg.assert_called_with("dev1", device)
+    device.get_info.return_value = FakeDeviceInfo(address="addr", value=1.0)
+    value_loop = QEventLoop()
+    svc.value_set.connect(lambda _name: value_loop.quit())
+    svc.start_set_device_value(SetDeviceValueRequest(name="dev1", value=1.0))
+    value_loop.exec()
+    device.set_value.assert_called_once_with(1.0)
+    assert svc.get_device_snapshot("dev1").info.value == 1.0  # type: ignore[union-attr]
 
-    with (
-        patch(
-            "zcu_tools.device.manager.GlobalDeviceManager.get_info",
-            return_value=FakeDeviceInfo(address="addr"),
-        ),
-        patch(
-            "zcu_tools.device.manager.GlobalDeviceManager.get_device",
-            return_value=device,
-        ),
-        patch("zcu_tools.device.GlobalDeviceManager.drop_device") as mock_drop,
-    ):
-        svc.drop_device("dev1")
-        device.close.assert_called_once_with()
-        mock_drop.assert_called_with("dev1")
-
-    with patch("zcu_tools.device.GlobalDeviceManager.get_all_devices", return_value={}):
-        result = svc.list_devices()
-        assert isinstance(result, list)
-
-    fake_info = FakeDeviceInfo(address="none", value=1.0)
-    with patch("zcu_tools.device.GlobalDeviceManager.get_device", return_value=device):
-        device.set_value.reset_mock()
-        svc.set_device_value("dev1", 1.0)
-        device.set_value.assert_called_with(1.0)
-
-    with patch(
-        "zcu_tools.device.manager.GlobalDeviceManager.get_info", return_value=fake_info
-    ):
-        assert svc.get_device_value("dev1") == 1.0
-
-    with patch(
-        "zcu_tools.device.manager.GlobalDeviceManager.get_info", return_value=fake_info
-    ):
-        result = svc.get_device_info("dev1")
-        assert result == fake_info
+    drop_loop = QEventLoop()
+    svc.device_disconnected.connect(lambda _request: drop_loop.quit())
+    svc.start_disconnect_device(DisconnectDeviceRequest(name="dev1"))
+    drop_loop.exec()
+    device.close.assert_called_once_with()
+    assert svc.get_device_snapshot("dev1").status is DeviceStatus.MEMORY_ONLY  # type: ignore[union-attr]
 
 
-def test_device_service_blocks_when_running():
-    svc, _device = _make_svc(running=True)
-
-    with pytest.raises(RuntimeError, match="Cannot register device"):
-        svc.register_device(_req("dev1"))
-
-    with pytest.raises(RuntimeError, match="Cannot drop device"):
-        svc.drop_device("dev1")
-
-    with pytest.raises(RuntimeError, match="Cannot set device value"):
-        svc.set_device_value("dev1", 1.0)
-
-    with pytest.raises(RuntimeError, match="Cannot setup device"):
-        svc.setup_device("dev1", FakeDeviceInfo(address="none"))
-
-    # Non-mutating methods should still work when running
-    with patch("zcu_tools.device.GlobalDeviceManager.get_all_devices", return_value={}):
-        svc.list_devices()
-
-    fake_info = FakeDeviceInfo(address="none", value=0.0)
-    with patch(
-        "zcu_tools.device.manager.GlobalDeviceManager.get_info", return_value=fake_info
-    ):
-        result = svc.get_device_info("dev1")
-        assert result == fake_info
-
-
-def test_device_service_blocks_mutation_while_setup_active():
-    svc, _device = _make_svc()
-    svc._state.begin_device_setup("active")
-
-    with pytest.raises(RuntimeError, match="device setup is active"):
-        svc.register_device(_req("dev1"))
-    with pytest.raises(RuntimeError, match="device setup is active"):
-        svc.drop_device("dev1")
-    with pytest.raises(RuntimeError, match="device setup is active"):
-        svc.set_device_value("dev1", 1.0)
-    with pytest.raises(RuntimeError, match="device setup is active"):
-        svc.setup_device("dev1", FakeDeviceInfo(address="none"))
-
-
-def test_device_service_wraps_driver_factory_failures_as_registration_error():
-    state = State(
-        ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
+def test_device_mutation_is_globally_exclusive_and_blocks_same_device_read(qapp):
+    gate = OperationGate()
+    svc, _device = _make_svc(gate=gate)
+    _connect(svc, _req())
+    lease = gate.acquire(
+        OperationKind.DEVICE_SETUP, owner_id="held", resource_id="dev1"
     )
 
-    def failing_factory(type_name: str, address: str) -> object:
-        raise OSError("VISA timeout")
+    with pytest.raises(OperationConflictError, match="Cannot start"):
+        svc.start_set_device_value(SetDeviceValueRequest(name="dev1", value=1.0))
+    with pytest.raises(OperationConflictError, match="Cannot read"):
+        svc.get_device_info("dev1")
+    gate.release(lease)
 
-    svc = DeviceService(state, EventBus(), driver_factory=failing_factory)  # type: ignore[arg-type]
-    with pytest.raises(DeviceRegistrationError, match="VISA timeout"):
-        svc.register_device(_req("dev1"))
 
-
-def test_device_service_register_request_unknown_type_raises_registration_error():
-    svc, _device = _make_svc()
-    # Use the default factory path to validate unknown type guard.
-    svc._driver_factory = lambda type_name, address: (_ for _ in ()).throw(
-        DeviceRegistrationError(f"Unknown device type: {type_name!r}")
+def test_device_connect_failure_is_reported_without_live_registration(qapp):
+    svc, device = _make_svc()
+    device.get_info.side_effect = RuntimeError("cannot query")
+    errors: list[str] = []
+    loop = QEventLoop()
+    svc.operation_failed.connect(
+        lambda _name, error: errors.append(error) or loop.quit()
     )
-    with pytest.raises(DeviceRegistrationError, match="Unknown device type"):
-        svc.register_device(_req("dev1", type_name="Nope"))
+
+    svc.start_connect_device(_req())
+    loop.exec()
+
+    assert errors
+    assert "cannot query" in errors[0]
+    assert "dev1" not in GlobalDeviceManager.get_all_devices()
+    device.close.assert_called_once_with()
+    assert svc.get_device_snapshot("dev1") is None
+
+
+def test_setup_uses_gate_and_returns_to_connected_snapshot(qapp):
+    svc, device = _make_svc()
+    _connect(svc, _req())
+    device.get_info.return_value = FakeDeviceInfo(address="addr", value=2.0)
+    loop = QEventLoop()
+    svc.setup_finished.connect(lambda _name: loop.quit())
+
+    svc.start_setup_device(
+        SetupDeviceRequest(name="dev1", info=FakeDeviceInfo(address="addr", value=2.0))
+    )
+    assert svc.get_active_setup() is not None
+    loop.exec()
+
+    device.setup.assert_called_once()
+    assert svc.get_active_setup() is None
+    assert svc.get_device_snapshot("dev1").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
+
+
+def test_disconnect_close_failure_retains_connected_device_and_releases_gate(qapp):
+    svc, device = _make_svc()
+    _connect(svc, _req())
+    device.close.side_effect = OSError("close failed")
+    loop = QEventLoop()
+    errors: list[str] = []
+    svc.operation_failed.connect(
+        lambda _name, error: errors.append(error) or loop.quit()
+    )
+
+    svc.start_disconnect_device(DisconnectDeviceRequest(name="dev1"))
+    loop.exec()
+
+    assert "close failed" in errors[0]
+    assert "dev1" in GlobalDeviceManager.get_all_devices()
+    assert svc.get_device_snapshot("dev1").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
+    device.close.side_effect = None
+    retry_loop = QEventLoop()
+    svc.device_disconnected.connect(lambda _request: retry_loop.quit())
+    svc.start_disconnect_device(DisconnectDeviceRequest(name="dev1"))
+    retry_loop.exec()
+
+
+def test_event_failure_before_worker_start_does_not_leak_device_lease(qapp):
+    bus = EventBus()
+    svc = DeviceService(
+        bus,
+        driver_factory=lambda _type, _address: MagicMock(),
+    )
+    bus.subscribe(
+        GuiEvent.DEVICE_CHANGED,
+        MagicMock(side_effect=RuntimeError("render failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="render failed"):
+        svc.start_connect_device(_req())
+
+    assert svc.get_device_snapshot("dev1") is None

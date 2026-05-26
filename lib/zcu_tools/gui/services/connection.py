@@ -11,6 +11,11 @@ from qtpy.QtCore import QObject, QThread, QTimer, Signal  # type: ignore[attr-de
 
 from zcu_tools.gui.adapter import SocCfgHandle, SocHandle
 from zcu_tools.gui.event_bus import GuiEvent, PredictorChangedPayload, SocChangedPayload
+from zcu_tools.gui.services.operation_gate import (
+    OperationGate,
+    OperationKind,
+    OperationLease,
+)
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 if TYPE_CHECKING:
@@ -129,13 +134,19 @@ class ConnectionService(QObject):
     connection_failed: Signal = Signal(str)
 
     def __init__(
-        self, state: "State", bus: "EventBus", parent: Optional[QObject] = None
+        self,
+        state: "State",
+        bus: "EventBus",
+        gate: OperationGate,
+        parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
         self._state = state
         self._bus = bus
+        self._gate = gate
         self._predictor_path: Optional[str] = None
         self._active_worker: Optional[_ConnectWorker] = None
+        self._active_lease: Optional[OperationLease] = None
 
     # ------------------------------------------------------------------
     # Queries
@@ -148,7 +159,7 @@ class ConnectionService(QObject):
         return self._state.exp_context.soccfg
 
     def is_connect_active(self) -> bool:
-        return self._active_worker is not None
+        return self._active_lease is not None
 
     def get_predictor(self) -> Optional[FluxoniumPredictor]:
         return self._state.exp_context.predictor
@@ -170,8 +181,11 @@ class ConnectionService(QObject):
         QTimer.singleShot(0, ...) so the View sees a consistent async flow.
         Remote connects run on a background _ConnectWorker.
         """
-        if self._active_worker is not None:
-            raise RuntimeError("A SoC connect is already in progress")
+        if not isinstance(req, (ConnectMockRequest, ConnectRemoteRequest)):
+            raise TypeError(f"Unsupported connect request: {type(req).__name__}")
+
+        lease = self._gate.acquire(OperationKind.SOC_CONNECT, owner_id="soc")
+        self._active_lease = lease
 
         if isinstance(req, ConnectMockRequest):
             logger.info("start_connect: mock")
@@ -185,10 +199,9 @@ class ConnectionService(QObject):
                 soccfg = make_mock_soccfg()
             except Exception as exc:
                 error = f"Mock SoC initialisation failed: {exc}"
-                QTimer.singleShot(0, lambda: self.connection_failed.emit(error))
+                QTimer.singleShot(0, lambda err=error: self._finish_failure(err))
                 return
-            self._apply_connection(soc, soccfg)
-            QTimer.singleShot(0, self.connection_finished.emit)
+            QTimer.singleShot(0, lambda: self._finish_success(soc, soccfg))
             return
 
         if isinstance(req, ConnectRemoteRequest):
@@ -206,24 +219,44 @@ class ConnectionService(QObject):
                     ) from exc
                 return make_soc_proxy(ip, port)
 
-            worker = _ConnectWorker(connect_callable, parent=self)
-            self._active_worker = worker
-            worker.connected.connect(self._on_remote_connected)
-            worker.failed.connect(self._on_remote_failed)
-            worker.finished.connect(worker.deleteLater)
-            worker.start()
+            try:
+                worker = _ConnectWorker(connect_callable, parent=self)
+                self._active_worker = worker
+                worker.connected.connect(self._on_remote_connected)
+                worker.failed.connect(self._on_remote_failed)
+                worker.finished.connect(worker.deleteLater)
+                worker.start()
+            except Exception:
+                self._active_worker = None
+                self._release_lease()
+                raise
             return
-
-        raise TypeError(f"Unsupported connect request: {type(req).__name__}")
 
     def _on_remote_connected(self, soc: object, soccfg: object) -> None:
         self._active_worker = None
-        self._apply_connection(soc, soccfg)  # type: ignore[arg-type]
-        self.connection_finished.emit()
+        self._finish_success(soc, soccfg)  # type: ignore[arg-type]
 
     def _on_remote_failed(self, error: str) -> None:
         self._active_worker = None
+        self._finish_failure(error)
+
+    def _finish_success(self, soc: SocHandle, soccfg: SocCfgHandle) -> None:
+        try:
+            self._apply_connection(soc, soccfg)
+        finally:
+            self._release_lease()
+        self.connection_finished.emit()
+
+    def _finish_failure(self, error: str) -> None:
+        self._release_lease()
         self.connection_failed.emit(error)
+
+    def _release_lease(self) -> None:
+        lease = self._active_lease
+        if lease is None:
+            raise RuntimeError("Connection completed without an active operation lease")
+        self._active_lease = None
+        self._gate.release(lease)
 
     def _apply_connection(self, soc: SocHandle, soccfg: SocCfgHandle) -> None:
         new_ctx = dataclasses.replace(self._state.exp_context, soc=soc, soccfg=soccfg)

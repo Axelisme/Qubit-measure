@@ -108,6 +108,8 @@ class PredictorChangedPayload(Payload):
 class DeviceChangedPayload(Payload):
     """Payload for DEVICE_CHANGED: a device was registered or dropped."""
 
+    name: str | None = None
+
 
 @dataclass(frozen=True)
 class DeviceSetupChangedPayload(Payload):

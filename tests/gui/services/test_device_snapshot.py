@@ -1,87 +1,75 @@
-"""Tests for DeviceService registry snapshot API (list_device_names / get_device_unit)."""
+"""Tests for cached DeviceService render queries."""
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+from qtpy.QtCore import QEventLoop
+from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDevice
 from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.event_bus import EventBus
-from zcu_tools.gui.services.device import DeviceService, RegisterDeviceRequest
-from zcu_tools.gui.state import ExpContext, State
+from zcu_tools.gui.services.device import ConnectDeviceRequest, DeviceService
+
+
+@pytest.fixture(autouse=True)
+def _clean_devices():
+    for name in list(GlobalDeviceManager.get_all_devices()):
+        GlobalDeviceManager.drop_device(name)
+    yield
+    for name in list(GlobalDeviceManager.get_all_devices()):
+        GlobalDeviceManager.drop_device(name)
 
 
 def _make_svc(driver: object | None = None) -> DeviceService:
-    state = State(
-        ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
-    )
     fake = driver if driver is not None else FakeDevice()
-
-    def factory(type_name: str, address: str) -> object:
-        return fake
-
-    return DeviceService(state, EventBus(), driver_factory=factory)  # type: ignore[arg-type]
-
-
-def test_list_device_names_returns_sorted_keys():
-    svc = _make_svc()
-    svc.register_device(
-        RegisterDeviceRequest(type_name="FakeDevice", name="z", address="")
+    return DeviceService(
+        EventBus(),
+        driver_factory=lambda _type, _address: fake,  # type: ignore[arg-type]
     )
-    svc.register_device(
-        RegisterDeviceRequest(type_name="FakeDevice", name="a", address="")
+
+
+def _connect(
+    svc: DeviceService, name: str = "flux", type_name: str = "FakeDevice"
+) -> None:
+    loop = QEventLoop()
+    svc.device_connected.connect(lambda _request: loop.quit())
+    svc.start_connect_device(
+        ConnectDeviceRequest(type_name=type_name, name=name, address="")
     )
-    names = svc.list_device_names()
-    # Both names should be present and sorted.
-    assert "a" in names
-    assert "z" in names
-    assert names == sorted(names)
-    svc.drop_device("z")
-    svc.drop_device("a")
+    loop.exec()
 
 
-def test_get_device_unit_unknown_returns_none():
+def test_list_device_names_uses_connected_snapshot(qapp):
     svc = _make_svc()
-    assert svc.get_device_unit("missing") == "none"
+    _connect(svc, "z")
+    svc.register_remembered_devices([])
+    assert svc.list_device_names() == ["z"]
 
 
-def test_get_device_unit_for_fake_device_returns_none():
-    svc = _make_svc()
-    svc.register_device(
-        RegisterDeviceRequest(type_name="FakeDevice", name="flux", address="")
-    )
-    assert svc.get_device_unit("flux") == "none"
-    svc.drop_device("flux")
-
-
-def test_get_device_value_for_new_context_unknown_returns_none():
-    svc = _make_svc()
-    assert svc.get_device_value_for_new_context("missing") is None
-
-
-def test_get_device_value_for_new_context_returns_float():
-    fake = FakeDevice()
-    fake.set_value(2.5)
-    svc = _make_svc(driver=fake)
-    svc.register_device(
-        RegisterDeviceRequest(type_name="FakeDevice", name="flux", address="")
-    )
-    assert svc.get_device_value_for_new_context("flux") == 2.5
-    svc.drop_device("flux")
-
-
-def test_get_device_value_for_new_context_yoko_reads_from_info():
-    """YOKOGS200 has no get_value(); value must be read via get_info().value."""
-    yoko_info = YOKOGS200Info(address="GPIB::1", mode="current", value=0.003)
-
+def test_get_device_unit_for_cached_yoko_info(qapp):
+    yoko_info = YOKOGS200Info(address="GPIB::1", mode="voltage", value=0.003)
     fake_yoko = MagicMock()
     fake_yoko.get_info.return_value = yoko_info
-
     svc = _make_svc(driver=fake_yoko)
-    svc.register_device(
-        RegisterDeviceRequest(type_name="FakeDevice", name="flux", address="")
+
+    _connect(svc, type_name="YOKOGS200")
+
+    assert svc.get_device_unit("flux") == "V"
+    assert svc.get_device_value_for_new_context("flux") == 0.003
+
+
+def test_list_snapshots_does_not_read_hardware(qapp):
+    fake = MagicMock()
+    fake.get_info.return_value = YOKOGS200Info(
+        address="GPIB::1", mode="current", value=0.003
     )
-    result = svc.get_device_value_for_new_context("flux")
-    assert result == 0.003
-    fake_yoko.get_value.assert_not_called()
-    svc.drop_device("flux")
+    svc = _make_svc(driver=fake)
+    _connect(svc)
+    fake.get_info.reset_mock()
+
+    snapshots = svc.list_device_snapshots()
+
+    assert snapshots[0].name == "flux"
+    fake.get_info.assert_not_called()

@@ -5,30 +5,49 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from qtpy.QtCore import QEventLoop
 from zcu_tools.device import FakeDevice, FakeDeviceInfo, GlobalDeviceManager
 from zcu_tools.gui.adapter import ExpContext
-from zcu_tools.gui.services.device import DeviceService, RegisterDeviceRequest
+from zcu_tools.gui.services.device import (
+    ConnectDeviceRequest,
+    DeviceService,
+    DisconnectDeviceRequest,
+    SetDeviceValueRequest,
+)
 
 
 def _make_svc(driver: object | None = None) -> tuple[DeviceService, object]:
     from zcu_tools.gui.event_bus import EventBus
-    from zcu_tools.gui.state import ExpContext, State
 
-    state = State(
-        ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
-    )
     fake_device = driver if driver is not None else FakeDevice()
 
     def factory(type_name: str, address: str) -> object:
         return fake_device
 
-    return DeviceService(state, EventBus(), driver_factory=factory), fake_device  # type: ignore[arg-type]
+    return DeviceService(EventBus(), driver_factory=factory), fake_device  # type: ignore[arg-type]
 
 
 def _register(svc: DeviceService, name: str = "flux") -> None:
-    svc.register_device(
-        RegisterDeviceRequest(type_name="FakeDevice", name=name, address="")
+    loop = QEventLoop()
+    svc.device_connected.connect(lambda _request: loop.quit())
+    svc.start_connect_device(
+        ConnectDeviceRequest(type_name="FakeDevice", name=name, address="")
     )
+    loop.exec()
+
+
+def _disconnect(svc: DeviceService, name: str = "flux") -> None:
+    loop = QEventLoop()
+    svc.device_disconnected.connect(lambda _request: loop.quit())
+    svc.start_disconnect_device(DisconnectDeviceRequest(name=name))
+    loop.exec()
+
+
+def _set_value(svc: DeviceService, name: str, value: float) -> None:
+    loop = QEventLoop()
+    svc.value_set.connect(lambda _name: loop.quit())
+    svc.start_set_device_value(SetDeviceValueRequest(name=name, value=value))
+    loop.exec()
 
 
 from zcu_tools.gui.io_manager import IOManager
@@ -182,7 +201,7 @@ def test_iomanager_new_context_clone_creates_separate_files(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_devicemanager_register_and_list():
+def test_devicemanager_register_and_list(qapp):
     dev = FakeDevice()
     svc, _ = _make_svc(driver=dev)
     _register(svc, "flux")
@@ -193,10 +212,10 @@ def test_devicemanager_register_and_list():
     assert entry.is_connected is True
 
 
-def test_devicemanager_drop_device():
+def test_devicemanager_drop_device(qapp):
     svc, _ = _make_svc()
     _register(svc, "flux")
-    svc.drop_device("flux")
+    _disconnect(svc)
     # drop moves device to memory-only; it still appears but disconnected
     entries = svc.list_devices()
     flux_entry = next((e for e in entries if e.name == "flux"), None)
@@ -204,18 +223,18 @@ def test_devicemanager_drop_device():
     assert not flux_entry.is_connected
 
 
-def test_devicemanager_get_set_value():
+def test_devicemanager_get_set_value(qapp):
     dev = FakeDevice()
     dev.set_value(3.14)
     svc, _ = _make_svc(driver=dev)
     _register(svc, "flux")
 
     assert svc.get_device_value("flux") == pytest.approx(3.14)
-    svc.set_device_value("flux", 2.71)
+    _set_value(svc, "flux", 2.71)
     assert svc.get_device_value("flux") == pytest.approx(2.71)
 
 
-def test_devicemanager_get_all_info():
+def test_devicemanager_get_all_info(qapp):
     dev = FakeDevice()
     dev.set_value(1.0)
     svc, _ = _make_svc(driver=dev)

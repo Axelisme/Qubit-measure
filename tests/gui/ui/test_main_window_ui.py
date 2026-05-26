@@ -293,11 +293,14 @@ def test_main_window_soc_changed_refreshes_run_lock(qapp):
 def test_main_window_cancel_setup_before_closing(qapp, monkeypatch):
     from qtpy.QtGui import QCloseEvent
     from qtpy.QtWidgets import QMessageBox
+    from zcu_tools.gui.services.device import DeviceSetupSnapshot
     from zcu_tools.gui.ui.main_window import MainWindow
 
     ctrl = MagicMock()
     ctrl.get_bus.return_value = EventBus()
-    ctrl.get_active_device_setup.return_value = object()
+    ctrl.get_active_device_setup.return_value = DeviceSetupSnapshot(
+        device_name="flux", progress=()
+    )
     monkeypatch.setattr(
         QMessageBox,
         "question",
@@ -310,7 +313,7 @@ def test_main_window_cancel_setup_before_closing(qapp, monkeypatch):
 
     assert event.isAccepted() is False
     assert window._shutdown_waiting_for_device_setup is True
-    ctrl.cancel_device_setup.assert_called_once_with()
+    ctrl.cancel_device_operation.assert_called_once_with("flux")
 
 
 def test_main_window_persists_session_on_close_when_idle(qapp):

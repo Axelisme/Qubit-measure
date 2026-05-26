@@ -28,9 +28,13 @@ from .runner import AnalyzeRunner, Runner, SaveDataRunner
 from .services import (
     SESSION_VERSION,
     AnalyzeService,
+    ConnectDeviceRequest,
     ConnectionService,
     ContextService,
     DeviceService,
+    DeviceSnapshot,
+    DisconnectDeviceRequest,
+    OperationGate,
     PersistedDeviceEntry,
     PersistedSession,
     PersistedStartup,
@@ -40,6 +44,8 @@ from .services import (
     SaveService,
     SessionPersistenceError,
     SessionPersistenceService,
+    SetDeviceValueRequest,
+    SetupDeviceRequest,
     StartupPersistenceError,
     StartupPersistenceService,
     TabService,
@@ -53,7 +59,6 @@ from .services.connection import (
 from .services.device import (
     DeviceEntry,
     DeviceSetupSnapshot,
-    RegisterDeviceRequest,
 )
 from .state import State
 
@@ -82,13 +87,14 @@ class Controller:
         self._state = state
         self._view = view
         self._bus = bus
+        self._operation_gate = OperationGate()
 
         # Initialize domain services
-        self._dev_svc = DeviceService(state, bus)
-        self._conn_svc = ConnectionService(state, bus)
+        self._dev_svc = DeviceService(bus, self._operation_gate)
+        self._conn_svc = ConnectionService(state, bus, self._operation_gate)
         self._ctx_svc = ContextService(state, io_manager, bus)
         self._tab_svc = TabService(state, registry, bus)
-        self._run_svc = RunService(state, runner, bus)
+        self._run_svc = RunService(state, runner, bus, self._operation_gate)
         self._analyze_svc = AnalyzeService(state, AnalyzeRunner(), bus)
         self._save_svc = SaveService(state, SaveDataRunner(), bus)
         self._writeback_svc = WritebackService(state, bus)
@@ -106,6 +112,10 @@ class Controller:
         self._dev_svc.setup_finished.connect(self._on_device_setup_finished)
         self._dev_svc.setup_failed.connect(self._on_device_setup_failed)
         self._dev_svc.setup_cancelled.connect(self._on_device_setup_cancelled)
+        self._dev_svc.device_connected.connect(self._on_device_connected)
+        self._dev_svc.device_disconnected.connect(self._on_device_disconnected)
+        self._dev_svc.value_set.connect(self._on_device_value_set)
+        self._dev_svc.operation_failed.connect(self._on_device_operation_failed)
 
     def set_view(self, view: ViewProtocol) -> None:
         self._view = view
@@ -178,6 +188,31 @@ class Controller:
 
     def _on_device_setup_cancelled(self, name: str) -> None:
         self._require_view().show_status_message(f"Device setup cancelled: {name}")
+
+    def _on_device_connected(self, req: ConnectDeviceRequest) -> None:
+        if req.remember:
+            self.save_startup_device(
+                PersistedDeviceEntry(
+                    type_name=req.type_name,
+                    name=req.name,
+                    address=req.address,
+                )
+            )
+        self._require_view().show_status_message(f"Device connected: {req.name}")
+
+    def _on_device_disconnected(self, req: DisconnectDeviceRequest) -> None:
+        if not req.remember:
+            self.remove_startup_device(req.name)
+        self._require_view().show_status_message(f"Device disconnected: {req.name}")
+
+    def _on_device_value_set(self, name: str) -> None:
+        self._require_view().show_status_message(f"Device value set: {name}")
+
+    def _on_device_operation_failed(self, name: str, error: str) -> None:
+        self._require_view().show_error_dialog(
+            f"Device operation failed: {name}",
+            error,
+        )
 
     def get_bus(self) -> EventBus:
         return self._bus
@@ -480,11 +515,11 @@ class Controller:
     # Device (DeviceService)
     # ------------------------------------------------------------------
 
-    def register_device(self, req: RegisterDeviceRequest) -> None:
-        self._dev_svc.register_device(req)
+    def start_connect_device(self, req: ConnectDeviceRequest) -> None:
+        self._dev_svc.start_connect_device(req)
 
-    def drop_device(self, name: str) -> None:
-        self._dev_svc.drop_device(name)
+    def start_disconnect_device(self, req: DisconnectDeviceRequest) -> None:
+        self._dev_svc.start_disconnect_device(req)
 
     def list_devices(self) -> list[DeviceEntry]:
         return self._dev_svc.list_devices()
@@ -498,8 +533,8 @@ class Controller:
     def get_device_value_for_new_context(self, name: str) -> Optional[float]:
         return self._dev_svc.get_device_value_for_new_context(name)
 
-    def set_device_value(self, name: str, value: Any) -> object:
-        return self._dev_svc.set_device_value(name, value)
+    def start_set_device_value(self, req: SetDeviceValueRequest) -> None:
+        self._dev_svc.start_set_device_value(req)
 
     def get_device_value(self, name: str) -> object:
         return self._dev_svc.get_device_value(name)
@@ -507,17 +542,17 @@ class Controller:
     def get_device_info(self, name: str) -> BaseDeviceInfo | None:
         return self._dev_svc.get_device_info(name)
 
-    def setup_device(self, name: str, info: BaseDeviceInfo) -> None:
-        self._dev_svc.setup_device(name, info)
+    def start_setup_device(self, req: SetupDeviceRequest) -> None:
+        self._dev_svc.start_setup_device(req)
 
     def get_active_device_setup(self) -> Optional[DeviceSetupSnapshot]:
         return self._dev_svc.get_active_setup()
 
-    def cancel_device_setup(self) -> None:
-        self._dev_svc.cancel_setup()
+    def cancel_device_operation(self, name: str) -> None:
+        self._dev_svc.cancel_device_operation(name)
 
-    def reconnect_device(self, name: str) -> None:
-        self._dev_svc.reconnect_device(name)
+    def start_reconnect_device(self, name: str) -> None:
+        self._dev_svc.start_reconnect_device(name)
 
     def forget_device(self, name: str) -> None:
         self._dev_svc.forget_device(name)
@@ -532,6 +567,12 @@ class Controller:
     def get_memory_device_address(self, name: str) -> Optional[str]:
         """Return the persisted address for a memory-only device, or None."""
         return self._dev_svc.get_memory_device_address(name)
+
+    def get_device_snapshot(self, name: str) -> DeviceSnapshot | None:
+        return self._dev_svc.get_device_snapshot(name)
+
+    def get_active_device_operation(self) -> DeviceSnapshot | None:
+        return self._dev_svc.get_active_device_operation()
 
     # ------------------------------------------------------------------
     # Startup persistence (StartupPersistenceService)

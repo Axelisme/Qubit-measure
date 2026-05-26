@@ -3,7 +3,21 @@
 from .analyze import AnalyzeService
 from .connection import ConnectionService
 from .context import ContextService
-from .device import DeviceService
+from .device import (
+    ConnectDeviceRequest,
+    DeviceService,
+    DeviceSnapshot,
+    DeviceStatus,
+    DisconnectDeviceRequest,
+    SetDeviceValueRequest,
+    SetupDeviceRequest,
+)
+from .operation_gate import (
+    OperationConflictError,
+    OperationGate,
+    OperationKind,
+    OperationLease,
+)
 from .run import RunService
 from .save import SaveBothOutcome, SaveService
 from .session_persistence import (
@@ -28,6 +42,16 @@ __all__ = [
     "ConnectionService",
     "ContextService",
     "DeviceService",
+    "ConnectDeviceRequest",
+    "DeviceSnapshot",
+    "DeviceStatus",
+    "DisconnectDeviceRequest",
+    "SetDeviceValueRequest",
+    "SetupDeviceRequest",
+    "OperationConflictError",
+    "OperationGate",
+    "OperationKind",
+    "OperationLease",
     "RunService",
     "SaveBothOutcome",
     "SaveService",

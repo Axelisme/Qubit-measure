@@ -1087,7 +1087,8 @@ class MainWindow(QMainWindow):
         self._inspect_dialog.activateWindow()
 
     def closeEvent(self, a0: Optional[QCloseEvent]) -> None:
-        if self._ctrl.get_active_device_setup() is not None:
+        active_setup = self._ctrl.get_active_device_setup()
+        if active_setup is not None:
             if a0 is None:
                 return
             if self._shutdown_waiting_for_device_setup:
@@ -1106,7 +1107,7 @@ class MainWindow(QMainWindow):
                 a0.ignore()
                 return
             self._shutdown_waiting_for_device_setup = True
-            self._ctrl.cancel_device_setup()
+            self._ctrl.cancel_device_operation(active_setup.device_name)
             a0.ignore()
             return
         self._ctrl.persist_tabs_session()

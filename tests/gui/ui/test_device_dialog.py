@@ -7,10 +7,13 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.gui.event_bus import DeviceSetupChangedPayload, EventBus, GuiEvent
 from zcu_tools.gui.services.device import (
+    ConnectDeviceRequest,
     DeviceEntry,
-    DeviceRegistrationError,
     DeviceSetupSnapshot,
-    RegisterDeviceRequest,
+    DeviceSnapshot,
+    DeviceStatus,
+    DisconnectDeviceRequest,
+    SetupDeviceRequest,
 )
 from zcu_tools.gui.services.device_progress import ProgressEntrySnapshot
 from zcu_tools.gui.ui.device_dialog import DeviceDialog, _FakeDevicePanel
@@ -29,7 +32,18 @@ def _make_ctrl() -> MagicMock:
     ctrl.list_devices.return_value = []
     ctrl.is_memory_device.return_value = False
     ctrl.get_memory_device_address.return_value = None
+    ctrl.get_device_snapshot.return_value = None
     return ctrl
+
+
+def _connected_snapshot(name: str, info: object) -> DeviceSnapshot:
+    return DeviceSnapshot(
+        name=name,
+        type_name=getattr(info, "type", "FakeDevice"),
+        address=getattr(info, "address", ""),
+        status=DeviceStatus.CONNECTED,
+        info=info,  # type: ignore[arg-type]
+    )
 
 
 def test_device_dialog_init(qapp):
@@ -39,7 +53,7 @@ def test_device_dialog_init(qapp):
     # Mock get_device_info to return a simple mock with type
     info_mock = MagicMock()
     info_mock.type = "FakeDevice"
-    ctrl.get_device_info.return_value = info_mock
+    ctrl.get_device_snapshot.return_value = _connected_snapshot("fakedevice", info_mock)
 
     dialog = DeviceDialog(ctrl)
 
@@ -48,9 +62,6 @@ def test_device_dialog_init(qapp):
     assert dialog._list.count() == 1
 
     dialog._list.setCurrentRow(0)
-
-    # Since an item is added and selected, get_device_info should be called
-    ctrl.get_device_info.assert_called_with("fakedevice")
 
     # The current stack index should map to FakeDevice (1)
     assert dialog._stack.currentIndex() == 1
@@ -66,31 +77,27 @@ def test_device_dialog_add_device_dispatches_request(qapp):
 
     dialog._add_btn.click()
 
-    ctrl.register_device.assert_called_once()
-    (req,) = ctrl.register_device.call_args.args
-    assert isinstance(req, RegisterDeviceRequest)
+    ctrl.start_connect_device.assert_called_once()
+    (req,) = ctrl.start_connect_device.call_args.args
+    assert isinstance(req, ConnectDeviceRequest)
     assert req.type_name == "FakeDevice"
     assert req.name == "fakedevice"
     assert req.address == "TCPIP::127.0.0.1::INSTR"
-    ctrl.setup_device.assert_not_called()
+    ctrl.start_setup_device.assert_not_called()
 
 
-def test_device_dialog_add_device_shows_registration_error(qapp):
+def test_device_dialog_add_device_does_not_persist_before_async_success(qapp):
     ctrl = _make_ctrl()
-    ctrl.register_device.side_effect = DeviceRegistrationError("boom")
-
     dialog = DeviceDialog(ctrl)
-    dialog._type_combo.setCurrentText("FakeDevice")
-    dialog._addr_edit.setText("addr")
     dialog._add_btn.click()
 
-    assert "boom" in dialog._add_status.text()
+    ctrl.save_startup_device.assert_not_called()
 
 
 def test_device_dialog_add_device_propagates_unexpected_errors(qapp):
     """Programmer errors must not be swallowed by the dialog catch."""
     ctrl = _make_ctrl()
-    ctrl.register_device.side_effect = ValueError("contract violation")
+    ctrl.start_connect_device.side_effect = ValueError("contract violation")
 
     dialog = DeviceDialog(ctrl)
     dialog._type_combo.setCurrentText("FakeDevice")
@@ -105,7 +112,7 @@ def test_device_dialog_drop_device(qapp):
 
     info_mock = MagicMock()
     info_mock.type = "YOKOGS200"
-    ctrl.get_device_info.return_value = info_mock
+    ctrl.get_device_snapshot.return_value = _connected_snapshot("yoko", info_mock)
 
     dialog = DeviceDialog(ctrl)
 
@@ -114,7 +121,10 @@ def test_device_dialog_drop_device(qapp):
 
     # Drop disconnects but keeps startup memory
     dialog._drop_btn.click()
-    ctrl.drop_device.assert_called_with("yoko")
+    ctrl.start_disconnect_device.assert_called_once()
+    (req,) = ctrl.start_disconnect_device.call_args.args
+    assert isinstance(req, DisconnectDeviceRequest)
+    assert req.name == "yoko"
     ctrl.remove_startup_device.assert_not_called()
 
 
@@ -122,6 +132,12 @@ def test_device_dialog_forget_memory_device_dispatches_single_transaction(qapp):
     ctrl = _make_ctrl()
     ctrl.list_devices.return_value = [_entry("remembered", connected=False)]
     ctrl.is_memory_device.return_value = True
+    ctrl.get_device_snapshot.return_value = DeviceSnapshot(
+        name="remembered",
+        type_name="FakeDevice",
+        address="addr",
+        status=DeviceStatus.MEMORY_ONLY,
+    )
 
     dialog = DeviceDialog(ctrl)
     dialog._list.setCurrentRow(0)
@@ -136,9 +152,9 @@ def test_device_dialog_refresh_reloads_selected_device_info(qapp):
 
     ctrl = _make_ctrl()
     ctrl.list_devices.return_value = [_entry("fd")]
-    ctrl.get_device_info.side_effect = [
-        FakeDeviceInfo(address="none", value=1.0),
-        FakeDeviceInfo(address="none", value=2.0),
+    ctrl.get_device_snapshot.side_effect = [
+        _connected_snapshot("fd", FakeDeviceInfo(address="none", value=1.0)),
+        _connected_snapshot("fd", FakeDeviceInfo(address="none", value=2.0)),
     ]
     dialog = DeviceDialog(ctrl)
     dialog._list.setCurrentRow(0)
@@ -149,7 +165,7 @@ def test_device_dialog_refresh_reloads_selected_device_info(qapp):
     dialog._refresh_btn.click()
 
     assert panel._value_spin.value() == 2.0
-    assert ctrl.get_device_info.call_count == 2
+    ctrl.get_device_info.assert_called_once_with("fd")
 
 
 def test_device_dialog_apply_changes(qapp):
@@ -159,6 +175,7 @@ def test_device_dialog_apply_changes(qapp):
     ctrl.list_devices.return_value = [_entry("fd")]
 
     info = FakeDeviceInfo(address="none")
+    ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
     ctrl.get_device_info.return_value = info
     dialog = DeviceDialog(ctrl)
     dialog._list.setCurrentRow(0)
@@ -167,12 +184,11 @@ def test_device_dialog_apply_changes(qapp):
 
     dialog._apply_btn.click()
 
-    # Should call setup_device with a FakeDeviceInfo built from with_updates
-    ctrl.setup_device.assert_called_once()
-    call_args = ctrl.setup_device.call_args
-    assert call_args.args[0] == "fd"
-    assert isinstance(call_args.args[1], FakeDeviceInfo)
-    assert len(call_args.args) == 2
+    ctrl.start_setup_device.assert_called_once()
+    (req,) = ctrl.start_setup_device.call_args.args
+    assert isinstance(req, SetupDeviceRequest)
+    assert req.name == "fd"
+    assert isinstance(req.info, FakeDeviceInfo)
 
 
 def test_device_dialog_restores_background_setup_and_stops_it(qapp):
@@ -180,7 +196,9 @@ def test_device_dialog_restores_background_setup_and_stops_it(qapp):
     ctrl.list_devices.return_value = [_entry("fd")]
     from zcu_tools.device.fake import FakeDeviceInfo
 
-    ctrl.get_device_info.return_value = FakeDeviceInfo(address="none")
+    ctrl.get_device_snapshot.return_value = _connected_snapshot(
+        "fd", FakeDeviceInfo(address="none")
+    )
     snapshot = DeviceSetupSnapshot(
         device_name="fd",
         progress=(
@@ -202,7 +220,7 @@ def test_device_dialog_restores_background_setup_and_stops_it(qapp):
     assert dialog._progress._active[0].value() == 5000
 
     dialog._apply_btn.click()
-    ctrl.cancel_device_setup.assert_called_once_with()
+    ctrl.cancel_device_operation.assert_called_once_with("fd")
 
     ctrl.get_bus.return_value.emit(
         GuiEvent.DEVICE_SETUP_CHANGED, DeviceSetupChangedPayload(active_setup=None)
@@ -217,7 +235,9 @@ def test_device_dialog_close_keeps_setup_running_and_unsubscribes(qapp):
     ctrl.list_devices.return_value = [_entry("fd")]
     from zcu_tools.device.fake import FakeDeviceInfo
 
-    ctrl.get_device_info.return_value = FakeDeviceInfo(address="none")
+    ctrl.get_device_snapshot.return_value = _connected_snapshot(
+        "fd", FakeDeviceInfo(address="none")
+    )
     ctrl.get_active_device_setup.return_value = DeviceSetupSnapshot(
         device_name="fd", progress=()
     )
@@ -225,5 +245,5 @@ def test_device_dialog_close_keeps_setup_running_and_unsubscribes(qapp):
 
     dialog.accept()
 
-    ctrl.cancel_device_setup.assert_not_called()
+    ctrl.cancel_device_operation.assert_not_called()
     assert ctrl.get_bus.return_value._subs[GuiEvent.DEVICE_SETUP_CHANGED] == []

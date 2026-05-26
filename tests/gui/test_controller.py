@@ -8,8 +8,10 @@ import time
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QCoreApplication
+from qtpy.QtCore import QCoreApplication, QEventLoop
 from qtpy.QtWidgets import QLabel, QStackedWidget
+from zcu_tools.device import GlobalDeviceManager
+from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.adapter import CfgSchema, ContextReadiness, ExpContext
@@ -24,6 +26,8 @@ from zcu_tools.gui.plot_host import FigureContainer
 from zcu_tools.gui.plot_routing import has_current_container
 from zcu_tools.gui.registry import Registry
 from zcu_tools.gui.runner import Runner
+from zcu_tools.gui.services.device import ConnectDeviceRequest
+from zcu_tools.gui.services.operation_gate import OperationConflictError, OperationKind
 from zcu_tools.gui.services.session_persistence import (
     SESSION_VERSION,
     PersistedSession,
@@ -234,7 +238,7 @@ def test_start_run_while_running_raises(cf):
 
     assert cf.state.is_tab_running(tab_id)
     other_tab_id = cf.ctrl.new_tab("fake")
-    with pytest.raises(RuntimeError, match="Another run is already active"):
+    with pytest.raises(OperationConflictError, match="run is active"):
         cf.ctrl.start_run(other_tab_id, _default_fake_schema(cf.state.exp_context))
 
     # cleanup
@@ -244,12 +248,14 @@ def test_start_run_while_running_raises(cf):
 
 def test_start_run_while_device_setup_active_raises(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.state.begin_device_setup("flux")
+    lease = cf.ctrl._operation_gate.acquire(
+        OperationKind.DEVICE_SETUP, owner_id="flux", resource_id="flux"
+    )
 
-    with pytest.raises(RuntimeError, match="device setup is active"):
+    with pytest.raises(OperationConflictError, match="device_setup is active"):
         cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
 
-    cf.state.end_device_setup("flux")
+    cf.ctrl._operation_gate.release(lease)
 
 
 def test_draft_context_rejects_real_run_and_save(cf):
@@ -270,6 +276,34 @@ def test_draft_context_rejects_real_run_and_save(cf):
         cf.ctrl.save_image(tab_id, "/tmp/image.png")
     with pytest.raises(RuntimeError, match="active file-backed context"):
         cf.ctrl.save_both(tab_id, "/tmp/data.h5", "/tmp/image.png")
+
+
+def test_run_rejected_while_soc_connect_lease_active(cf):
+    tab_id = cf.ctrl.new_tab("fake")
+    lease = cf.ctrl._operation_gate.acquire(OperationKind.SOC_CONNECT, owner_id="soc")
+
+    with pytest.raises(OperationConflictError, match="soc_connect is active"):
+        cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
+
+    cf.ctrl._operation_gate.release(lease)
+
+
+def test_device_connect_persists_only_after_terminal_success(cf):
+    driver = MagicMock()
+    driver.get_info.return_value = FakeDeviceInfo(address="addr")
+    cf.ctrl._dev_svc._driver_factory = lambda _type, _address: driver
+    cf.ctrl._startup_svc = MagicMock()
+    loop = QEventLoop()
+    cf.ctrl._dev_svc.device_connected.connect(lambda _request: loop.quit())
+
+    cf.ctrl.start_connect_device(
+        ConnectDeviceRequest(type_name="FakeDevice", name="flux", address="addr")
+    )
+    cf.ctrl._startup_svc.add_device.assert_not_called()
+    loop.exec()
+
+    cf.ctrl._startup_svc.add_device.assert_called_once()
+    GlobalDeviceManager.drop_device("flux", ignore_error=True)
 
 
 def test_run_clears_active_figure_container_after_finish(cf):

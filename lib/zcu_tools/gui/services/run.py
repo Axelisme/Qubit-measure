@@ -12,6 +12,11 @@ from zcu_tools.gui.event_bus import (
     TabInteractionChangedPayload,
 )
 from zcu_tools.gui.plot_host import FigureContainer
+from zcu_tools.gui.services.operation_gate import (
+    OperationGate,
+    OperationKind,
+    OperationLease,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +32,19 @@ class RunService(QObject):
     run_finished: Signal = Signal(str, object)
     run_failed: Signal = Signal(str, object)
 
-    def __init__(self, state: "State", runner: "Runner", bus: "EventBus") -> None:
+    def __init__(
+        self,
+        state: "State",
+        runner: "Runner",
+        bus: "EventBus",
+        gate: OperationGate,
+    ) -> None:
         super().__init__()
         self._state = state
         self._runner = runner
         self._bus = bus
+        self._gate = gate
+        self._active_lease: Optional[OperationLease] = None
 
         self._runner.run_finished.connect(self._on_run_finished)
         self._runner.run_failed.connect(self._on_run_failed)
@@ -43,10 +56,6 @@ class RunService(QObject):
         pbar_factory: Optional[Any] = None,
         live_container: Optional[FigureContainer] = None,
     ) -> None:
-        if self._state.is_device_setup_active():
-            raise RuntimeError("Cannot start run while device setup is active")
-        if self._state.is_run_active():
-            raise RuntimeError("Another run is already active")
         if self._state.is_tab_busy(tab_id):
             raise RuntimeError(f"Tab {tab_id!r} is busy")
 
@@ -63,15 +72,21 @@ class RunService(QObject):
         logger.info("start_run: tab_id=%r", tab_id)
 
         tab = self._state.get_tab(tab_id)
-
-        self._runner.start_run(
-            tab_id,
-            tab.adapter,
-            req,
-            schema,
-            pbar_factory=pbar_factory,
-            figure_container=live_container,
-        )
+        lease = self._gate.acquire(OperationKind.RUN, owner_id=tab_id)
+        self._active_lease = lease
+        try:
+            self._runner.start_run(
+                tab_id,
+                tab.adapter,
+                req,
+                schema,
+                pbar_factory=pbar_factory,
+                figure_container=live_container,
+            )
+        except Exception:
+            self._active_lease = None
+            self._gate.release(lease)
+            raise
         self._state.set_tab_running(tab_id, True)
         self._bus.emit(
             GuiEvent.TAB_INTERACTION_CHANGED,
@@ -91,6 +106,7 @@ class RunService(QObject):
         )
         self._state.update_tab_result(tab_id, result)
         self._state.set_tab_running(tab_id, False)
+        self._release_lease()
         self._bus.emit(
             GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
@@ -103,6 +119,7 @@ class RunService(QObject):
     def _on_run_failed(self, tab_id: str, error: Exception) -> None:
         logger.warning("_on_run_failed: tab_id=%r error=%r", tab_id, error)
         self._state.set_tab_running(tab_id, False)
+        self._release_lease()
         self._bus.emit(
             GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
@@ -111,3 +128,10 @@ class RunService(QObject):
             GuiEvent.RUN_LOCK_CHANGED, RunLockChangedPayload(running_tab_id=None)
         )
         self.run_failed.emit(tab_id, error)
+
+    def _release_lease(self) -> None:
+        lease = self._active_lease
+        if lease is None:
+            raise RuntimeError("Run completed without an active operation lease")
+        self._active_lease = None
+        self._gate.release(lease)

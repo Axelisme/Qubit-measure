@@ -27,12 +27,18 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.event_bus import DeviceSetupChangedPayload, GuiEvent
+from zcu_tools.gui.event_bus import (
+    DeviceChangedPayload,
+    DeviceSetupChangedPayload,
+    GuiEvent,
+)
 from zcu_tools.gui.services.device import (
+    ConnectDeviceRequest,
     DeviceEntry,
-    DeviceRegistrationError,
     DeviceSetupSnapshot,
-    RegisterDeviceRequest,
+    DeviceStatus,
+    DisconnectDeviceRequest,
+    SetupDeviceRequest,
     list_supported_device_types,
 )
 
@@ -321,6 +327,7 @@ class DeviceDialog(QDialog):
         layout.addWidget(self._progress)
 
         bus = self._ctrl.get_bus()
+        bus.subscribe(GuiEvent.DEVICE_CHANGED, self._on_device_changed)
         bus.subscribe(GuiEvent.DEVICE_SETUP_CHANGED, self._on_setup_changed)
         self._setup_subscription_active = True
         self.finished.connect(self._cleanup_bus_subscription)
@@ -334,6 +341,9 @@ class DeviceDialog(QDialog):
             return
         self._ctrl.get_bus().unsubscribe(
             GuiEvent.DEVICE_SETUP_CHANGED, self._on_setup_changed
+        )
+        self._ctrl.get_bus().unsubscribe(
+            GuiEvent.DEVICE_CHANGED, self._on_device_changed
         )
         self._setup_subscription_active = False
 
@@ -375,28 +385,31 @@ class DeviceDialog(QDialog):
             return
 
         name = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
-        is_memory = self._ctrl.is_memory_device(name)
+        snapshot = self._ctrl.get_device_snapshot(name)
+        if snapshot is None:
+            return
+        is_memory = snapshot.status is DeviceStatus.MEMORY_ONLY
+        is_busy = snapshot.status not in {
+            DeviceStatus.MEMORY_ONLY,
+            DeviceStatus.CONNECTED,
+        }
 
         if self._active_setup is None:
-            self._drop_btn.setEnabled(True)
+            self._drop_btn.setEnabled(not is_busy)
             self._drop_btn.setText("Forget" if is_memory else "Drop")
-            self._refresh_btn.setEnabled(not is_memory)
-            self._apply_btn.setEnabled(True)
+            self._refresh_btn.setEnabled(not is_memory and not is_busy)
+            self._apply_btn.setEnabled(not is_busy)
             self._apply_btn.setText("Reconnect" if is_memory else "Apply Changes")
             self._apply_btn.setStyleSheet("")
 
         if is_memory:
-            entries = self._ctrl.list_devices()
-            mem_entry = next((e for e in entries if e.name == name), None)
-            addr = self._ctrl.get_memory_device_address(name) or ""
-            if mem_entry is not None:
-                self._memory_panel.load_memory(
-                    mem_entry.type_name, mem_entry.name, addr
-                )
+            self._memory_panel.load_memory(
+                snapshot.type_name, snapshot.name, snapshot.address
+            )
             self._stack.setCurrentIndex(4)
             return
 
-        info = self._ctrl.get_device_info(name)
+        info = snapshot.info
         if info is None:
             return
 
@@ -428,24 +441,11 @@ class DeviceDialog(QDialog):
         addr = self._addr_edit.text().strip()
         self._add_status.setText("")
 
-        req = RegisterDeviceRequest(type_name=dtype, name=name, address=addr)
-        try:
-            self._ctrl.register_device(req)
-        except DeviceRegistrationError as e:
-            self._add_status.setStyleSheet("color: red;")
-            self._add_status.setText(str(e))
-            return
-
-        from zcu_tools.gui.services.startup_persistence import (
-            PersistedDeviceEntry,  # noqa: PLC0415
+        self._ctrl.start_connect_device(
+            ConnectDeviceRequest(type_name=dtype, name=name, address=addr)
         )
-
-        self._ctrl.save_startup_device(
-            PersistedDeviceEntry(type_name=dtype, name=name, address=addr)
-        )
-        self._add_status.setStyleSheet("color: green;")
-        self._add_status.setText(f"Added {name}; select it and Apply to configure.")
-        self._refresh_list()
+        self._add_status.setStyleSheet("color: gray;")
+        self._add_status.setText(f"Connecting {name}...")
 
     def _on_forget_clicked(self) -> None:
         item = self._list.currentItem()
@@ -457,15 +457,18 @@ class DeviceDialog(QDialog):
             self._ctrl.forget_device(name)
         else:
             # Disconnect only — keep in startup memory so it reappears as gray on next launch
-            self._ctrl.drop_device(name)
-        self._refresh_list()
+            self._ctrl.start_disconnect_device(DisconnectDeviceRequest(name=name))
 
     def _on_refresh_clicked(self) -> None:
+        item = self._list.currentItem()
+        if item is not None:
+            name = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+            self._ctrl.get_device_info(name)
         self._on_selection_changed(self._list.currentRow())
 
     def _on_apply_or_stop_clicked(self) -> None:
         if self._active_setup is not None:
-            self._ctrl.cancel_device_setup()
+            self._ctrl.cancel_device_operation(self._active_setup.device_name)
             return
 
         item = self._list.currentItem()
@@ -475,15 +478,9 @@ class DeviceDialog(QDialog):
 
         if self._ctrl.is_memory_device(name):
             self._add_status.setText("")
-            try:
-                self._ctrl.reconnect_device(name)
-            except DeviceRegistrationError as e:
-                self._add_status.setStyleSheet("color: red;")
-                self._add_status.setText(str(e))
-                return
-            self._add_status.setStyleSheet("color: green;")
-            self._add_status.setText(f"Reconnected {name}.")
-            self._refresh_list(select_name=name)
+            self._ctrl.start_reconnect_device(name)
+            self._add_status.setStyleSheet("color: gray;")
+            self._add_status.setText(f"Reconnecting {name}...")
             return
 
         panel = self._stack.currentWidget()
@@ -499,7 +496,31 @@ class DeviceDialog(QDialog):
         if not isinstance(info, BaseDeviceInfo):
             return
         new_info = info.with_updates(**updates)
-        self._ctrl.setup_device(name, new_info)
+        self._ctrl.start_setup_device(SetupDeviceRequest(name=name, info=new_info))
+
+    def _on_device_changed(self, payload: DeviceChangedPayload) -> None:
+        name = payload.name
+        self._refresh_list(select_name=name)
+        if name is None:
+            return
+        snapshot = self._ctrl.get_device_snapshot(name)
+        if snapshot is None:
+            return
+        if snapshot.error is not None:
+            self._add_status.setStyleSheet("color: red;")
+            self._add_status.setText(snapshot.error)
+        elif snapshot.status is DeviceStatus.CONNECTED:
+            self._add_status.setStyleSheet("color: green;")
+            self._add_status.setText(f"Connected {name}.")
+        elif snapshot.status in {
+            DeviceStatus.CONNECTING,
+            DeviceStatus.DISCONNECTING,
+            DeviceStatus.SETTING_VALUE,
+        }:
+            self._add_status.setStyleSheet("color: gray;")
+            self._add_status.setText(
+                f"{snapshot.status.value.replace('_', ' ').title()}: {name}..."
+            )
 
     def _on_setup_changed(self, payload: DeviceSetupChangedPayload) -> None:
         self._render_setup(payload.active_setup)

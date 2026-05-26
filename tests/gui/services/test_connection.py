@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QEventLoop
-from zcu_tools.gui.event_bus import EventBus
+from zcu_tools.gui.event_bus import EventBus, GuiEvent
 from zcu_tools.gui.services.connection import (
     ConnectionService,
     ConnectMockRequest,
@@ -16,14 +16,19 @@ from zcu_tools.gui.services.connection import (
     PredictorLoadError,
     PredictorNotLoaded,
 )
+from zcu_tools.gui.services.operation_gate import (
+    OperationConflictError,
+    OperationGate,
+    OperationKind,
+)
 from zcu_tools.gui.state import ExpContext, State
 
 
-def _make_svc() -> ConnectionService:
+def _make_svc(gate: OperationGate | None = None) -> ConnectionService:
     state = State(
         ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
     )
-    return ConnectionService(state, EventBus())
+    return ConnectionService(state, EventBus(), gate or OperationGate())
 
 
 def test_start_connect_mock_emits_finished_and_updates_context(qapp):
@@ -40,12 +45,10 @@ def test_start_connect_mock_emits_finished_and_updates_context(qapp):
 
 
 def test_start_connect_rejects_concurrent_calls(qapp):
-    svc = _make_svc()
-    # First mock dispatches via QTimer.singleShot, so the worker slot is empty
-    # by the time we call again — instead, exercise the remote path which holds
-    # the worker until its QThread finishes.
-    svc._active_worker = MagicMock()
-    with pytest.raises(RuntimeError, match="already in progress"):
+    gate = OperationGate()
+    svc = _make_svc(gate)
+    gate.acquire(OperationKind.SOC_CONNECT, owner_id="existing")
+    with pytest.raises(OperationConflictError, match="soc_connect is active"):
         svc.start_connect(ConnectMockRequest())
 
 
@@ -110,3 +113,28 @@ def test_start_connect_remote_failure_emits_failed(qapp, monkeypatch):
     assert errors
     assert "nope" in errors[0]
     assert not svc.is_connect_active()
+
+
+def test_start_connect_rejected_while_run_active(qapp):
+    gate = OperationGate()
+    svc = _make_svc(gate)
+    gate.acquire(OperationKind.RUN, owner_id="tab")
+
+    with pytest.raises(OperationConflictError, match="run is active"):
+        svc.start_connect(ConnectMockRequest())
+
+
+def test_soc_changed_subscriber_failure_releases_connection_lease(qapp):
+    gate = OperationGate()
+    state = State(
+        ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
+    )
+    bus = EventBus()
+    bus.subscribe(
+        GuiEvent.SOC_CHANGED, MagicMock(side_effect=RuntimeError("render failed"))
+    )
+    svc = ConnectionService(state, bus, gate)
+    svc._active_lease = gate.acquire(OperationKind.SOC_CONNECT, owner_id="soc")
+    with pytest.raises(RuntimeError, match="render failed"):
+        svc._finish_success(MagicMock(), MagicMock())
+    assert not gate.has_active(OperationKind.SOC_CONNECT)
