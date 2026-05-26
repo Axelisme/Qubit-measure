@@ -3,8 +3,14 @@
 from .analyze_params import ParamMeta, reconstruct_params
 from .inheritance import inherit_from, make_default_value
 from .lowering import _find_allowed_spec, _section_to_dict, schema_to_dict
-from .protocol import AbsExpAdapter, NoAnalysisResult, NoAnalyzeParams
+from .protocol import (
+    AbsExpAdapter,
+    NoAnalysisAdapterMixin,
+    NoAnalysisResult,
+    NoAnalyzeParams,
+)
 from .types import (
+    AdapterCapabilities,
     AnalyzeRequest,
     AnalyzeResultWithFigure,
     CfgNodeSpec,
@@ -17,6 +23,7 @@ from .types import (
     DirectValue,
     EvalValue,
     ExpContext,
+    ExperimentProtocol,
     LiteralSpec,
     MetaDictWriteback,
     ModuleRefSpec,
@@ -37,6 +44,7 @@ from .types import (
     SweepValue,
     T_AnalyzeParams,
     T_AnalyzeResult,
+    T_Cfg,
     T_Result,
     WaveformRefSpec,
     WaveformRefValue,
@@ -45,3 +53,4 @@ from .types import (
     WritebackRequest,
     default_value_for_type,
 )
+from .validation import require_soc_handles

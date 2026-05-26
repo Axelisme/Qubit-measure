@@ -1,23 +1,19 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional, Protocol
+from typing import Any, Callable, Optional, Protocol
 
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 logger = logging.getLogger(__name__)
 
-from matplotlib.figure import Figure
-
 from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
-from .adapter import CfgSchema, SavePaths, SocCfgHandle, WritebackItem
+from .adapter import CfgSchema, SocCfgHandle, WritebackItem
 from .event_bus import (
     EventBus,
     GuiEvent,
-    TabAddedPayload,
-    TabClosedPayload,
     TabContentChangedPayload,
     TabInteractionChangedPayload,
 )
@@ -26,7 +22,7 @@ from .plot_host import FigureContainer
 from .registry import Registry
 from .runner import AnalyzeRunner, Runner, SaveDataRunner
 from .services import (
-    SESSION_VERSION,
+    DEFAULT_LEFT_PANEL_WIDTH,
     AnalyzeService,
     ConnectDeviceRequest,
     ConnectionService,
@@ -35,10 +31,8 @@ from .services import (
     DeviceSnapshot,
     DisconnectDeviceRequest,
     OperationGate,
-    PersistedDeviceEntry,
-    PersistedSession,
     PersistedStartup,
-    PersistedTab,
+    RestoreReport,
     RunService,
     SaveBothOutcome,
     SaveService,
@@ -46,9 +40,15 @@ from .services import (
     SessionPersistenceService,
     SetDeviceValueRequest,
     SetupDeviceRequest,
+    StartupConnectionRequest,
     StartupPersistenceError,
     StartupPersistenceService,
+    StartupProjectRequest,
+    StartupService,
     TabService,
+    TabViewService,
+    TabViewSnapshot,
+    WorkspaceService,
     WritebackService,
 )
 from .services.connection import (
@@ -93,14 +93,28 @@ class Controller:
         self._dev_svc = DeviceService(bus, self._operation_gate)
         self._conn_svc = ConnectionService(state, bus, self._operation_gate)
         self._ctx_svc = ContextService(state, io_manager, bus)
-        self._tab_svc = TabService(state, registry, bus)
+        self._tab_svc = TabService(state, registry)
         self._run_svc = RunService(state, runner, bus, self._operation_gate)
         self._analyze_svc = AnalyzeService(state, AnalyzeRunner(), bus)
         self._save_svc = SaveService(state, SaveDataRunner(), bus)
         self._writeback_svc = WritebackService(state, bus)
-        self._session_svc = SessionPersistenceService()
-
-        self._startup_svc = StartupPersistenceService()
+        self._tab_view_svc = TabViewService(
+            state,
+            self._tab_svc,
+            self._writeback_svc,
+            self._ctx_svc,
+        )
+        self._workspace_svc = WorkspaceService(
+            state,
+            self._tab_svc,
+            SessionPersistenceService(),
+            bus,
+        )
+        self._startup_svc = StartupService(
+            self._ctx_svc,
+            self._dev_svc,
+            StartupPersistenceService(),
+        )
 
         self._run_svc.run_finished.connect(self._on_run_finished)
         self._run_svc.run_failed.connect(self._on_run_failed)
@@ -130,6 +144,7 @@ class Controller:
 
     def _on_run_finished(self, tab_id: str, _result: object) -> None:
         # State is already updated in RunService/Runner
+        self._tab_svc.initialize_tab_analyze_params(tab_id)
         self._bus.emit(
             GuiEvent.TAB_CONTENT_CHANGED, TabContentChangedPayload(tab_id=tab_id)
         )
@@ -191,18 +206,18 @@ class Controller:
 
     def _on_device_connected(self, req: ConnectDeviceRequest) -> None:
         if req.remember:
-            self.save_startup_device(
-                PersistedDeviceEntry(
-                    type_name=req.type_name,
-                    name=req.name,
-                    address=req.address,
-                )
-            )
+            try:
+                self._startup_svc.remember_device(req)
+            except StartupPersistenceError as exc:
+                self._report_persistence_error("Startup settings save failed", exc)
         self._require_view().show_status_message(f"Device connected: {req.name}")
 
     def _on_device_disconnected(self, req: DisconnectDeviceRequest) -> None:
         if not req.remember:
-            self.remove_startup_device(req.name)
+            try:
+                self._startup_svc.forget_device(req.name)
+            except StartupPersistenceError as exc:
+                self._report_persistence_error("Startup settings save failed", exc)
         self._require_view().show_status_message(f"Device disconnected: {req.name}")
 
     def _on_device_value_set(self, name: str) -> None:
@@ -219,87 +234,26 @@ class Controller:
 
     def restore_tabs_from_session(self) -> None:
         try:
-            session = self._session_svc.load_session()
+            report = self._workspace_svc.restore_session()
         except SessionPersistenceError as exc:
             self._report_persistence_error("Session restore failed", exc)
             return
-        if session is None:
-            return
-        self._restore_session(session)
+        self._present_restore_report(report)
 
     def persist_tabs_session(self) -> None:
-        tabs = list(self._state.tabs.items())
-        payload_tabs: list[PersistedTab] = []
-        tab_ids = [tab_id for tab_id, _ in tabs]
-        active_tab_index: Optional[int] = None
-        if self._state.active_tab_id in tab_ids:
-            active_tab_index = tab_ids.index(self._state.active_tab_id)
-        for tab_id, tab in tabs:
-            raw_cfg = self._session_svc.schema_to_raw(
-                tab.cfg_schema,
-                ml=self._state.exp_context.ml,
-            )
-            payload_tabs.append(
-                PersistedTab(
-                    adapter_name=tab.adapter_name,
-                    cfg_raw=raw_cfg,
-                    save_paths_override=tab.save_path_overrides,
-                )
-            )
         try:
-            self._session_svc.save_session(
-                PersistedSession(
-                    version=SESSION_VERSION,
-                    tabs=payload_tabs,
-                    active_tab_index=active_tab_index,
-                )
-            )
+            self._workspace_svc.persist_session()
         except SessionPersistenceError as exc:
             self._report_persistence_error("Session save failed", exc)
 
-    def _restore_session(self, session: PersistedSession) -> None:
-        restored_by_index: dict[int, str] = {}
-        rejected: list[str] = []
-        for index, persisted_tab in enumerate(session.tabs):
-            try:
-                tab_id = self._tab_svc.restore_tab(persisted_tab.adapter_name)
-            except KeyError as exc:
-                rejected.append(
-                    f"{persisted_tab.adapter_name}: adapter unavailable ({exc})"
-                )
-                continue
-            default_schema = self._tab_svc.get_tab_default_cfg(tab_id)
-            try:
-                restored_schema = self._session_svc.raw_to_schema(
-                    default_schema,
-                    persisted_tab.cfg_raw,
-                )
-            except SessionPersistenceError as exc:
-                self._tab_svc.close_tab(tab_id)
-                rejected.append(
-                    f"{persisted_tab.adapter_name}: invalid saved configuration ({exc})"
-                )
-                continue
-            self._tab_svc.update_tab_cfg(tab_id, restored_schema)
-            if persisted_tab.save_paths_override is not None:
-                self._state.update_tab_save_path_overrides(
-                    tab_id,
-                    persisted_tab.save_paths_override,
-                )
-            restored_by_index[index] = tab_id
-            self._bus.emit(
-                GuiEvent.TAB_ADDED,
-                TabAddedPayload(tab_id=tab_id, adapter_name=persisted_tab.adapter_name),
-            )
-
-        if session.active_tab_index is not None:
-            active_tab_id = restored_by_index.get(session.active_tab_index)
-            if active_tab_id is not None:
-                self._state.set_active_tab(active_tab_id)
-        if rejected:
+    def _present_restore_report(self, report: RestoreReport) -> None:
+        if report.rejected_tabs:
             self._require_view().show_error_dialog(
                 "Some session tabs were not restored",
-                "\n".join(rejected),
+                "\n".join(
+                    f"{issue.subject}: {issue.message}"
+                    for issue in report.rejected_tabs
+                ),
             )
 
     # ------------------------------------------------------------------
@@ -307,22 +261,13 @@ class Controller:
     # ------------------------------------------------------------------
 
     def new_tab(self, adapter_name: str) -> str:
-        tab_id = self._tab_svc.new_tab(adapter_name)
-        self._state.set_active_tab(tab_id)
-        self._bus.emit(
-            GuiEvent.TAB_ADDED,
-            TabAddedPayload(tab_id=tab_id, adapter_name=adapter_name),
-        )
-        return tab_id
+        return self._workspace_svc.new_tab(adapter_name)
 
     def close_tab(self, tab_id: str) -> None:
-        if self._state.is_tab_busy(tab_id):
-            raise RuntimeError("Cannot close a busy tab")
-        self._tab_svc.close_tab(tab_id)
-        self._bus.emit(GuiEvent.TAB_CLOSED, TabClosedPayload(tab_id=tab_id))
+        self._workspace_svc.close_tab(tab_id)
 
     def set_active_tab(self, tab_id: str) -> None:
-        self._state.set_active_tab(tab_id)
+        self._workspace_svc.set_active_tab(tab_id)
 
     # ------------------------------------------------------------------
     # Run flow (RunService & ContextService)
@@ -346,20 +291,8 @@ class Controller:
                 f"Cannot {operation} without an active file-backed context."
             )
 
-    def is_run_active(self) -> bool:
-        return self._state.is_run_active()
-
-    def is_tab_running(self, tab_id: str) -> bool:
-        return self._state.is_tab_running(tab_id)
-
-    def is_tab_analyzing(self, tab_id: str) -> bool:
-        return self._state.is_tab_analyzing(tab_id)
-
-    def is_tab_saving_data(self, tab_id: str) -> bool:
-        return self._state.is_tab_saving_data(tab_id)
-
-    def is_tab_busy(self, tab_id: str) -> bool:
-        return self._state.is_tab_busy(tab_id)
+    def get_running_tab_id(self) -> Optional[str]:
+        return self._state.running_tab_id
 
     def has_soc(self) -> bool:
         return self._conn_svc.has_soc()
@@ -441,22 +374,13 @@ class Controller:
     # Context / IO (ContextService)
     # ------------------------------------------------------------------
 
-    def set_startup_context(
-        self,
-        md: MetaDict,
-        ml: ModuleLibrary,
-        chip_name: str = "unknown_chip",
-        qub_name: str = "unknown_qubit",
-        res_name: str = "unknown_resonator",
-        result_dir: str = "",
-        database_path: str = "",
-    ) -> None:
-        self._ctx_svc.set_startup_context(
-            md, ml, chip_name, qub_name, res_name, result_dir, database_path
-        )
-
-    def setup_project(self, result_dir: str) -> None:
-        self._ctx_svc.setup_project(result_dir)
+    def apply_startup_project(self, req: StartupProjectRequest) -> bool:
+        try:
+            self._startup_svc.apply_project(req)
+        except StartupPersistenceError as exc:
+            self._report_persistence_error("Startup settings save failed", exc)
+            return False
+        return True
 
     def use_context(self, label: str) -> None:
         self._ctx_svc.use_context(label)
@@ -557,7 +481,7 @@ class Controller:
     def forget_device(self, name: str) -> None:
         self._dev_svc.forget_device(name)
         try:
-            self._startup_svc.remove_device(name)
+            self._startup_svc.forget_device(name)
         except StartupPersistenceError as exc:
             self._report_persistence_error("Startup settings save failed", exc)
 
@@ -575,89 +499,38 @@ class Controller:
         return self._dev_svc.get_active_device_operation()
 
     # ------------------------------------------------------------------
-    # Startup persistence (StartupPersistenceService)
+    # Startup application workflow (StartupService)
     # ------------------------------------------------------------------
 
     def restore_startup_settings(self) -> None:
         try:
-            data = self._startup_svc.load()
+            self._startup_svc.restore_devices()
         except StartupPersistenceError as exc:
             self._report_persistence_error("Startup settings restore failed", exc)
-            return
-        if data is None:
-            return
-        from .services.device import DeviceMemoryInfo
-
-        entries = [
-            DeviceMemoryInfo(
-                type_name=d.type_name,
-                name=d.name,
-                address=d.address,
-            )
-            for d in data.devices
-        ]
-        self._dev_svc.register_remembered_devices(entries)
 
     def get_persisted_startup(self) -> Optional[PersistedStartup]:
         try:
-            return self._startup_svc.load()
+            return self._startup_svc.get_persisted()
         except StartupPersistenceError as exc:
             self._report_persistence_error("Startup settings restore failed", exc)
             return None
 
-    def save_startup_project(
-        self,
-        *,
-        chip_name: str,
-        qub_name: str,
-        res_name: str,
-        result_dir: str,
-        database_path: str,
-    ) -> None:
+    def remember_startup_connection(self, req: StartupConnectionRequest) -> None:
         try:
-            self._startup_svc.update_project(
-                chip_name=chip_name,
-                qub_name=qub_name,
-                res_name=res_name,
-                result_dir=result_dir,
-                database_path=database_path,
-            )
-        except StartupPersistenceError as exc:
-            self._report_persistence_error("Startup settings save failed", exc)
-
-    def save_startup_connection(self, *, ip: str, port: int) -> None:
-        try:
-            self._startup_svc.update_connection(ip=ip, port=port)
-        except StartupPersistenceError as exc:
-            self._report_persistence_error("Startup settings save failed", exc)
-
-    def save_startup_device(self, entry: PersistedDeviceEntry) -> None:
-        try:
-            self._startup_svc.add_device(entry)
-        except StartupPersistenceError as exc:
-            self._report_persistence_error("Startup settings save failed", exc)
-
-    def remove_startup_device(self, name: str) -> None:
-        try:
-            self._startup_svc.remove_device(name)
+            self._startup_svc.remember_connection(req)
         except StartupPersistenceError as exc:
             self._report_persistence_error("Startup settings save failed", exc)
 
     def get_persisted_left_panel_width(self) -> int:
         try:
-            data = self._startup_svc.load()
+            return self._startup_svc.get_left_panel_width()
         except StartupPersistenceError as exc:
             self._report_persistence_error("Startup settings restore failed", exc)
-            data = None
-        if data is None:
-            from .services.startup_persistence import _DEFAULT_LEFT_PANEL_WIDTH
-
-            return _DEFAULT_LEFT_PANEL_WIDTH
-        return data.left_panel_width
+            return DEFAULT_LEFT_PANEL_WIDTH
 
     def save_left_panel_width(self, width: int) -> None:
         try:
-            self._startup_svc.update_left_panel_width(width)
+            self._startup_svc.save_left_panel_width(width)
         except StartupPersistenceError as exc:
             self._report_persistence_error("Startup settings save failed", exc)
 
@@ -668,9 +541,22 @@ class Controller:
     def start_connect(self, req: ConnectRequest) -> None:
         self._conn_svc.start_connect(req)
 
-    def get_connection_service(self) -> ConnectionService:
-        """Return the ConnectionService so views can subscribe to its Qt signals."""
-        return self._conn_svc
+    def bind_connection_outcome(
+        self,
+        on_finished: Callable[[], None],
+        on_failed: Callable[[str], None],
+    ) -> None:
+        """Bind one dialog observer without exposing the connection service."""
+        try:
+            self._conn_svc.connection_finished.disconnect(on_finished)
+        except (TypeError, RuntimeError):
+            pass
+        try:
+            self._conn_svc.connection_failed.disconnect(on_failed)
+        except (TypeError, RuntimeError):
+            pass
+        self._conn_svc.connection_finished.connect(on_finished)
+        self._conn_svc.connection_failed.connect(on_failed)
 
     def load_predictor(self, req: LoadPredictorRequest) -> None:
         self._conn_svc.load_predictor(req)
@@ -699,38 +585,11 @@ class Controller:
     def has_tab(self, tab_id: str) -> bool:
         return tab_id in self._state.tabs
 
-    def get_tab_default_cfg(self, tab_id: str) -> CfgSchema:
-        return self._tab_svc.get_tab_default_cfg(tab_id)
-
-    def get_tab_fresh_cfg(self, tab_id: str) -> CfgSchema:
-        return self._tab_svc.get_tab_fresh_cfg(tab_id)
-
     def get_tab_result(self, tab_id: str) -> Optional[object]:
         return self._tab_svc.get_tab_result(tab_id)
 
-    def has_run_result(self, tab_id: str) -> bool:
-        return self._tab_svc.has_run_result(tab_id)
-
-    def has_analyze_result(self, tab_id: str) -> bool:
-        return self._tab_svc.has_analyze_result(tab_id)
-
-    def has_figure(self, tab_id: str) -> bool:
-        return self._tab_svc.get_tab_figure(tab_id) is not None
-
-    def get_tab_figure(self, tab_id: str) -> Optional[Figure]:
-        return self._tab_svc.get_tab_figure(tab_id)
-
-    def get_tab_writeback_items(self, tab_id: str) -> list[WritebackItem]:
-        return self._writeback_svc.get_tab_writeback_items(tab_id)
-
-    def get_tab_analyze_params(self, tab_id: str) -> object:
-        return self._tab_svc.get_tab_analyze_params(tab_id)
-
-    def get_tab_analyze_param_instance(self, tab_id: str) -> object | None:
-        return self._tab_svc.get_tab_analyze_param_instance(tab_id)
-
-    def get_tab_save_paths(self, tab_id: str) -> Optional[SavePaths]:
-        return self._tab_svc.get_tab_save_paths(tab_id)
+    def get_tab_snapshot(self, tab_id: str) -> TabViewSnapshot:
+        return self._tab_view_svc.get_snapshot(tab_id)
 
     def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None:
         self._tab_svc.update_tab_cfg(tab_id, schema)

@@ -33,6 +33,7 @@ from .adapter import (
 from .io_manager import IOManager
 from .registry import Registry
 from .state import State, TabState
+from .sweep_model import SweepEditor
 
 __all__ = [
     "AbsExpAdapter",
@@ -58,6 +59,7 @@ __all__ = [
     "ScalarValue",
     "State",
     "SweepSpec",
+    "SweepEditor",
     "SweepValue",
     "TabState",
     "WaveformRefSpec",

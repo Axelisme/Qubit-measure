@@ -18,6 +18,7 @@ from typing_extensions import Generic, TypeAlias, TypeVar
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
+    from zcu_tools.experiment.cfg_model import ExpCfgModel
     from zcu_tools.meta_tool import ModuleLibrary
     from zcu_tools.meta_tool.metadict import MetaDict
     from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
@@ -55,6 +56,25 @@ class SocCfgProtocol(Protocol):
 SocHandle: TypeAlias = SocProtocol
 SocCfgHandle: TypeAlias = SocCfgProtocol
 T_Result = TypeVar("T_Result")
+T_Cfg = TypeVar("T_Cfg", bound="ExpCfgModel")
+T_Cfg_contra = TypeVar("T_Cfg_contra", bound="ExpCfgModel", contravariant=True)
+T_Result_co = TypeVar("T_Result_co")
+
+
+class ExperimentProtocol(Protocol, Generic[T_Cfg_contra, T_Result_co]):
+    """Structural contract for experiment classes referenced by adapters."""
+
+    def run(self, soc: Any, soccfg: Any, cfg: T_Cfg_contra) -> T_Result_co: ...
+
+    def save(self, filepath: str, result: T_Result_co) -> None: ...
+
+
+@dataclass(frozen=True)
+class AdapterCapabilities:
+    """Declared capability flags an adapter exposes to the framework."""
+
+    requires_soc: bool = True
+    supports_analysis: bool = True
 
 
 class ContextReadiness(Enum):
@@ -293,6 +313,10 @@ class SweepValue:
     stop: Union[float, EvalValue]
     expts: int
     step: float = 0.1
+
+    def __post_init__(self) -> None:
+        if self.expts < 1:
+            raise ValueError("SweepValue.expts must be >= 1")
 
 
 @dataclass

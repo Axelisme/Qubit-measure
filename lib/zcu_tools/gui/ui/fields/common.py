@@ -149,20 +149,6 @@ def _widget_default_for_direct_value(value: DirectValue, spec: "ScalarSpec") -> 
     return value.value
 
 
-def _sweep_edge_to_float(value: object, edge_name: str) -> float:
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, DirectValue):
-        if isinstance(value.value, (int, float)):
-            return float(value.value)
-        raise RuntimeError(f"Sweep {edge_name} must be numeric")
-    if isinstance(value, EvalValue):
-        if isinstance(value.resolved, (int, float)):
-            return float(value.resolved)
-        raise RuntimeError(f"Sweep {edge_name} expression is unresolved")
-    raise RuntimeError(f"Sweep {edge_name} must be numeric")
-
-
 class BaseLiveWidget(QWidget):
     """Base class implementing FieldWidgetProtocol."""
 
@@ -418,21 +404,19 @@ class SweepWidget(BaseLiveWidget):
 
         self._start_widget = ScalarWidget(field.start_field, self)
         self._stop_widget = ScalarWidget(field.stop_field, self)
-        field.start_field.on_change.connect(self._on_start_changed)
-        field.stop_field.on_change.connect(self._on_stop_changed)
 
         self._expts = QSpinBox()
         self._expts.setRange(1, 2**31 - 1)
         self._expts.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
         self._expts.setValue(sv.expts)
-        self._expts.valueChanged.connect(self._on_ui_changed)
+        self._expts.valueChanged.connect(self._on_expts_changed)
 
         self._step = TrimDoubleSpinBox()
         self._step.setRange(-1e12, 1e12)
         self._step.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
         self._step.setDecimals(decimals if decimals is not None else 6)
         self._step.setValue(sv.step)
-        self._step.valueChanged.connect(self._on_ui_changed)
+        self._step.valueChanged.connect(self._on_step_changed)
 
         enabled = field.spec.editable
         self._start_widget.setEnabled(enabled)
@@ -454,60 +438,18 @@ class SweepWidget(BaseLiveWidget):
     def teardown(self) -> None:
         field = cast(SweepLiveField, self._field)
         field.on_change.disconnect(self._on_model_changed)
-        field.start_field.on_change.disconnect(self._on_start_changed)
-        field.stop_field.on_change.disconnect(self._on_stop_changed)
         self._start_widget.teardown()
         self._stop_widget.teardown()
 
-    def _on_start_changed(self, *_: Any) -> None:
-        self._on_ui_changed()
-
-    def _on_stop_changed(self, *_: Any) -> None:
-        self._on_ui_changed()
-
-    def _on_ui_changed(self, *_: Any) -> None:
+    def _on_expts_changed(self, expts: int) -> None:
         if self._updating:
             return
-        self._updating = True
-        try:
-            from ...adapter import SweepValue
+        cast(SweepLiveField, self._field).update_expts(expts)
 
-            field = cast(SweepLiveField, self._field)
-            source = self.sender()
-            try:
-                start = _sweep_edge_to_float(field.start_field.get_value(), "start")
-                stop = _sweep_edge_to_float(field.stop_field.get_value(), "stop")
-            except RuntimeError:
-                return
-            expts = self._expts.value()
-            step = self._step.value()
-
-            if source is self._step:
-                # step changed → only recompute expts, then back-calculate step
-                # to match the integer expts value
-                if step == 0.0:
-                    expts = 1
-                else:
-                    expts = max(1, round((stop - start) / step + 1))
-                step = 0.0 if expts == 1 else (stop - start) / (expts - 1)
-                self._expts.setValue(expts)
-                self._step.setValue(step)
-            else:
-                # start / stop / expts changed → only recompute step
-                step = 0.0 if expts == 1 else (stop - start) / (expts - 1)
-                self._step.setValue(step)
-
-            # start and stop are never touched here; take them directly from the field
-            current = field.get_value()
-            nv = SweepValue(
-                start=current.start,
-                stop=current.stop,
-                expts=expts,
-                step=step,
-            )
-            self._field.set_value(nv)
-        finally:
-            self._updating = False
+    def _on_step_changed(self, step: float) -> None:
+        if self._updating:
+            return
+        cast(SweepLiveField, self._field).update_step(step)
 
     def _on_model_changed(self, val: Any) -> None:
         if self._updating:

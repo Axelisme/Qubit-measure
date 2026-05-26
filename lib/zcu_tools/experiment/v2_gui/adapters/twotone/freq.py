@@ -52,7 +52,9 @@ class FreqAnalyzeResult:
     figure: Figure
 
 
-class FreqAdapter(AbsExpAdapter[FreqRunResult, FreqAnalyzeResult, FreqAnalyzeParams]):
+class FreqAdapter(
+    AbsExpAdapter[FreqCfg, FreqRunResult, FreqAnalyzeResult, FreqAnalyzeParams]
+):
     exp_cls = FreqExp
 
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:

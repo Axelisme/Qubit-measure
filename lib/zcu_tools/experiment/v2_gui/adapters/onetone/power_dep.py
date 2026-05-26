@@ -15,29 +15,27 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_reset_module_spec,
     md_get_float,
     md_has_key,
-    require_soc_handles,
 )
 from zcu_tools.gui.adapter import (
-    AbsExpAdapter,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
     EvalValue,
     ExpContext,
-    NoAnalysisResult,
-    NoAnalyzeParams,
+    NoAnalysisAdapterMixin,
     RunRequest,
     ScalarSpec,
     SweepSpec,
     SweepValue,
+    require_soc_handles,
 )
 
 OneTonePowerDepRunResult: TypeAlias = PowerDepResult
 
 
 class OneTonePowerDepAdapter(
-    AbsExpAdapter[OneTonePowerDepRunResult, NoAnalysisResult, NoAnalyzeParams]
+    NoAnalysisAdapterMixin[PowerDepCfg, OneTonePowerDepRunResult]
 ):
     exp_cls = PowerDepExp
 

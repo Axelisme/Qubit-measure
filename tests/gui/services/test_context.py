@@ -27,12 +27,20 @@ def test_context_service_has_context():
     io_mock.has_context = False
 
     state = State(
-        ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
+        ExpContext(
+            md=MagicMock(),
+            ml=MagicMock(),
+            soc=None,
+            soccfg=None,
+            result_dir="",
+            readiness=ContextReadiness.DRAFT,
+        )
     )
-    state.has_startup_context = True
 
     svc = ContextService(state, io_mock, MagicMock())
     assert svc.has_context()
+    assert svc.has_startup_context()
+    assert not svc.is_active_context()
 
 
 def test_context_service_get_flux_dir():
@@ -84,7 +92,7 @@ def test_context_service_set_startup_context():
         database_path="/db",
     )
 
-    assert state.has_startup_context
+    assert svc.has_startup_context()
     assert state.exp_context.chip_name == "C1"
     assert state.exp_context.result_dir == "/res"
     assert state.exp_context.active_label == ""
@@ -156,3 +164,33 @@ def test_context_service_new_context():
     assert bus.emit.call_args[0][0] == GuiEvent.CONTEXT_SWITCHED
     assert state.exp_context.active_label == "flux_1.5_V"
     assert state.exp_context.readiness is ContextReadiness.ACTIVE
+
+
+def test_context_service_readiness_transitions_drive_has_context_queries():
+    """has_context / has_startup_context / is_active_context all derive from readiness."""
+    state = State(
+        ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
+    )
+    io_mock = MagicMock()
+    io_mock.has_context = False
+    svc = ContextService(state, io_mock, MagicMock())
+
+    # EMPTY
+    assert not svc.has_context()
+    assert not svc.has_startup_context()
+    assert not svc.is_active_context()
+
+    # DRAFT
+    svc.set_startup_context(MagicMock(), MagicMock(), "C", "Q", "R", "/res", "/db")
+    assert svc.has_context()
+    assert svc.has_startup_context()
+    assert not svc.is_active_context()
+
+    # ACTIVE
+    io_mock.use_context.return_value = ExpContext(
+        md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="/res"
+    )
+    svc.use_context("flux_1.0_A")
+    assert svc.has_context()
+    assert not svc.has_startup_context()
+    assert svc.is_active_context()

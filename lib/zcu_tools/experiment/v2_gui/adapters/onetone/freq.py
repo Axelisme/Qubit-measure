@@ -58,7 +58,10 @@ class OneToneFreqAnalyzeResult:
 
 class OneToneFreqAdapter(
     AbsExpAdapter[
-        OneToneFreqRunResult, OneToneFreqAnalyzeResult, OneToneFreqAnalyzeParams
+        FreqCfg,
+        OneToneFreqRunResult,
+        OneToneFreqAnalyzeResult,
+        OneToneFreqAnalyzeParams,
     ]
 ):
     exp_cls = FreqExp

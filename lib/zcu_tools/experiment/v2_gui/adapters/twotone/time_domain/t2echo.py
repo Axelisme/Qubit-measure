@@ -58,7 +58,12 @@ class T2EchoAnalyzeResult:
 
 
 class T2EchoAdapter(
-    AbsExpAdapter[T2EchoRunResult, T2EchoAnalyzeResult, T2EchoAnalyzeParams]
+    AbsExpAdapter[
+        T2EchoCfg,
+        T2EchoRunResult,
+        T2EchoAnalyzeResult,
+        T2EchoAnalyzeParams,
+    ]
 ):
     exp_cls = T2EchoExp
 

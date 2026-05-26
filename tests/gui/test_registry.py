@@ -22,6 +22,17 @@ from zcu_tools.gui.adapter import (
 from zcu_tools.gui.registry import Registry
 
 
+class _DummyExp:
+    """Structural ExperimentProtocol stub for the Registry-level test."""
+
+    def run(self, soc, soccfg, cfg, **kwargs):
+        del soc, soccfg, cfg, kwargs
+        return object()
+
+    def save(self, filepath, result, **kwargs):
+        del filepath, result, kwargs
+
+
 class _DummyCfg(ExpCfgModel):
     pass
 
@@ -36,7 +47,11 @@ class _DummyAnalyzeParams:
     threshold: float = 0.0
 
 
-class _DummyAdapter(AbsExpAdapter[object, _DummyAnalyzeResult, _DummyAnalyzeParams]):
+class _DummyAdapter(
+    AbsExpAdapter[_DummyCfg, object, _DummyAnalyzeResult, _DummyAnalyzeParams]
+):
+    exp_cls = _DummyExp
+
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:  # noqa: ARG002
         return CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
 

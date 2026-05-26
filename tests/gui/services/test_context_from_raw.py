@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from zcu_tools.gui.adapter import ContextReadiness
 from zcu_tools.gui.event_bus import EventBus
 from zcu_tools.gui.io_manager import IOManager
 from zcu_tools.gui.services.context import ContextService, MlEntryValidationError
@@ -18,9 +19,9 @@ def _make_svc() -> ContextService:
             soc=None,
             soccfg=None,
             result_dir="",
+            readiness=ContextReadiness.DRAFT,
         )
     )
-    state.has_startup_context = True
     return ContextService(state, IOManager(), EventBus())
 
 

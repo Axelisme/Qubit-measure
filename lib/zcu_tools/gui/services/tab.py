@@ -4,16 +4,14 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Optional
 
-from matplotlib.figure import Figure
-
 from zcu_tools.gui.adapter import CfgSchema, SavePaths
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.event_bus import EventBus
     from zcu_tools.gui.registry import Registry
     from zcu_tools.gui.state import State
+from zcu_tools.gui.state import TabState
 
 
 class TabService:
@@ -23,18 +21,22 @@ class TabService:
         self,
         state: "State",
         registry: "Registry",
-        bus: "EventBus",
     ) -> None:
         self._state = state
         self._registry = registry
-        self._bus = bus
 
     def new_tab(self, adapter_name: str) -> str:
         adapter = self._registry.create(adapter_name)
         tab_id = str(uuid.uuid4())
         logger.info("new_tab: adapter=%r tab_id=%r", adapter_name, tab_id)
-        self._state.add_tab(tab_id, adapter_name, adapter, self._state.exp_context)
-        self.refresh_tab_save_paths(tab_id)
+        self._state.add_tab(
+            tab_id,
+            TabState(
+                adapter_name=adapter_name,
+                adapter=adapter,
+                cfg_schema=adapter.make_default_cfg(self._state.exp_context),
+            ),
+        )
         return tab_id
 
     def restore_tab(self, adapter_name: str) -> str:
@@ -51,10 +53,6 @@ class TabService:
     def get_tab_default_cfg(self, tab_id: str) -> CfgSchema:
         return self._state.get_tab(tab_id).cfg_schema
 
-    def get_tab_fresh_cfg(self, tab_id: str) -> CfgSchema:
-        tab = self._state.get_tab(tab_id)
-        return tab.adapter.make_default_cfg(self._state.exp_context)
-
     def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None:
         self._state.update_tab_cfg_schema(tab_id, schema)
 
@@ -64,50 +62,27 @@ class TabService:
     def get_tab_adapter_name(self, tab_id: str) -> str:
         return self._state.get_tab(tab_id).adapter_name
 
-    def has_run_result(self, tab_id: str) -> bool:
-        return self._state.get_tab(tab_id).run_result is not None
-
-    def has_analyze_result(self, tab_id: str) -> bool:
-        return self._state.get_tab(tab_id).analyze_result is not None
-
-    def get_tab_figure(self, tab_id: str) -> Figure | None:
-        return self._state.get_tab(tab_id).figure
-
-    def get_tab_analyze_params(self, tab_id: str) -> object:
+    def initialize_tab_analyze_params(self, tab_id: str) -> object:
         tab = self._state.get_tab(tab_id)
         if tab.run_result is None:
             raise RuntimeError("No run result available to build analyze params")
         instance = tab.adapter.get_analyze_params(
             tab.run_result, self._state.exp_context
         )
-        if tab.analyze_param_instance is None or type(instance) is not type(
-            tab.analyze_param_instance
-        ):
-            self._state.update_tab_analyze_params(tab_id, instance)
-        stored = tab.analyze_param_instance
-        if stored is None:
-            raise RuntimeError("Analyze params were not stored")
-        return stored
-
-    def get_tab_analyze_param_instance(self, tab_id: str) -> object | None:
-        tab = self._state.get_tab(tab_id)
-        return tab.analyze_param_instance
+        self._state.update_tab_analyze_params(tab_id, instance)
+        return instance
 
     def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:
         self._state.update_tab_analyze_param_instance(tab_id, instance)
 
     def get_tab_save_paths(self, tab_id: str) -> Optional[SavePaths]:
-        self.refresh_tab_save_paths(tab_id)
-        return self._state.get_effective_save_paths(tab_id)
-
-    def refresh_tab_save_paths(self, tab_id: str) -> None:
         tab = self._state.get_tab(tab_id)
+        if tab.save_path_overrides is not None:
+            return tab.save_path_overrides
         ctx = self._state.exp_context
         if not ctx.database_path or not ctx.result_dir or not ctx.active_label:
-            self._state.update_tab_suggested_save_paths(tab_id, None)
-            return
-        paths = tab.adapter.make_save_paths(ctx)
-        self._state.update_tab_suggested_save_paths(tab_id, paths)
+            return None
+        return tab.adapter.make_save_paths(ctx)
 
     def update_tab_save_path_overrides(
         self, tab_id: str, data_path: str, image_path: str

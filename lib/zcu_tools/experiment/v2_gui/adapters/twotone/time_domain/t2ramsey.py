@@ -59,7 +59,12 @@ class T2RamseyAnalyzeResult:
 
 
 class T2RamseyAdapter(
-    AbsExpAdapter[T2RamseyRunResult, T2RamseyAnalyzeResult, T2RamseyAnalyzeParams]
+    AbsExpAdapter[
+        T2RamseyCfg,
+        T2RamseyRunResult,
+        T2RamseyAnalyzeResult,
+        T2RamseyAnalyzeParams,
+    ]
 ):
     exp_cls = T2RamseyExp
 

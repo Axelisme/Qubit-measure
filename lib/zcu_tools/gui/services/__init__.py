@@ -27,7 +27,9 @@ from .session_persistence import (
     SessionPersistenceError,
     SessionPersistenceService,
 )
+from .startup import StartupConnectionRequest, StartupProjectRequest, StartupService
 from .startup_persistence import (
+    DEFAULT_LEFT_PANEL_WIDTH,
     STARTUP_VERSION,
     PersistedDeviceEntry,
     PersistedStartup,
@@ -35,6 +37,8 @@ from .startup_persistence import (
     StartupPersistenceService,
 )
 from .tab import TabService
+from .tab_view import TabViewService, TabViewSnapshot
+from .workspace import RestoreIssue, RestoreReport, WorkspaceService
 from .writeback import WritebackService
 
 __all__ = [
@@ -62,9 +66,18 @@ __all__ = [
     "SessionPersistenceService",
     "PersistedDeviceEntry",
     "PersistedStartup",
+    "DEFAULT_LEFT_PANEL_WIDTH",
     "STARTUP_VERSION",
     "StartupPersistenceError",
     "StartupPersistenceService",
+    "StartupConnectionRequest",
+    "StartupProjectRequest",
+    "StartupService",
     "TabService",
+    "TabViewService",
+    "TabViewSnapshot",
+    "RestoreIssue",
+    "RestoreReport",
+    "WorkspaceService",
     "WritebackService",
 ]

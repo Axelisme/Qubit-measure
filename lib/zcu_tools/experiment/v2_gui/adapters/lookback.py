@@ -15,6 +15,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 )
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
+    AdapterCapabilities,
     AnalyzeRequest,
     CfgSchema,
     CfgSectionSpec,
@@ -46,8 +47,14 @@ class LookbackAnalyzeResult:
 
 
 class LookbackAdapter(
-    AbsExpAdapter[LookbackRunResult, LookbackAnalyzeResult, LookbackAnalyzeParams]
+    AbsExpAdapter[
+        LookbackCfg,
+        LookbackRunResult,
+        LookbackAnalyzeResult,
+        LookbackAnalyzeParams,
+    ]
 ):
+    capabilities = AdapterCapabilities(requires_soc=False)
     exp_cls = LookbackExp
 
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:

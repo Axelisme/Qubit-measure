@@ -17,7 +17,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     md_get_float,
 )
 from zcu_tools.gui.adapter import (
-    AbsExpAdapter,
     CfgNodeValue,
     CfgSchema,
     CfgSectionSpec,
@@ -25,8 +24,7 @@ from zcu_tools.gui.adapter import (
     DeviceRefSpec,
     DirectValue,
     ExpContext,
-    NoAnalysisResult,
-    NoAnalyzeParams,
+    NoAnalysisAdapterMixin,
     RunRequest,
     ScalarSpec,
     SweepSpec,
@@ -36,9 +34,7 @@ from zcu_tools.gui.adapter import (
 FluxDepRunResult: TypeAlias = FreqFluxResult
 
 
-class FluxDepAdapter(
-    AbsExpAdapter[FluxDepRunResult, NoAnalysisResult, NoAnalyzeParams]
-):
+class FluxDepAdapter(NoAnalysisAdapterMixin[FreqFluxCfg, FluxDepRunResult]):
     exp_cls = FreqFluxExp
 
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:

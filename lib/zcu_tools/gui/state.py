@@ -13,6 +13,7 @@ from .adapter import (
     ExpContext,
     SavePaths,
     T_AnalyzeParams,
+    T_Cfg,
 )
 
 logger = logging.getLogger(__name__)
@@ -25,15 +26,14 @@ T_AnalyzeResult = TypeVar("T_AnalyzeResult", bound=AnalyzeResultWithFigure)
 
 
 @dataclass
-class TabState(Generic[T_Result, T_AnalyzeResult, T_AnalyzeParams]):
+class TabState(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     adapter_name: str
-    adapter: AbsExpAdapter[T_Result, T_AnalyzeResult, T_AnalyzeParams]
+    adapter: AbsExpAdapter[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]
     cfg_schema: CfgSchema
     run_result: Optional[T_Result] = None
     analyze_result: Optional[T_AnalyzeResult] = None
     figure: Optional["Figure"] = None
     analyze_param_instance: Optional[T_AnalyzeParams] = None
-    suggested_save_paths: Optional[SavePaths] = None
     save_path_overrides: Optional[SavePaths] = None
     applied_writeback_keys: set[str] = field(default_factory=set)
     is_running: bool = False
@@ -60,10 +60,9 @@ class State:
 
     def __init__(self, ctx: ExpContext) -> None:
         self.exp_context: ExpContext = ctx
-        self.tabs: dict[str, TabState[Any, Any, Any]] = {}
+        self.tabs: dict[str, TabState[Any, Any, Any, Any]] = {}
         self.active_tab_id: Optional[str] = None
         self.running_tab_id: Optional[str] = None
-        self.has_startup_context: bool = False
 
     def set_context(self, ctx: ExpContext) -> None:
         self.exp_context = ctx
@@ -71,17 +70,14 @@ class State:
     def add_tab(
         self,
         tab_id: str,
-        adapter_name: str,
-        adapter: AbsExpAdapter[Any, Any, Any],
-        ctx: ExpContext,
+        tab: TabState[Any, Any, Any, Any],
     ) -> None:
         if tab_id in self.tabs:
             raise ValueError(f"tab_id {tab_id!r} already exists")
-        logger.debug("add_tab: tab_id=%r adapter=%s", tab_id, type(adapter).__name__)
-        tab = TabState(
-            adapter_name=adapter_name,
-            adapter=adapter,
-            cfg_schema=adapter.make_default_cfg(ctx),
+        logger.debug(
+            "add_tab: tab_id=%r adapter=%s",
+            tab_id,
+            type(tab.adapter).__name__,
         )
         self.tabs[tab_id] = tab
 
@@ -111,7 +107,6 @@ class State:
         tab = self.tabs[tab_id]
         tab.run_result = result
         tab.analyze_param_instance = None
-        tab.suggested_save_paths = None
         # invalidate stale analyze results and figure from the previous run
         tab.analyze_result = None
         tab.figure = None
@@ -150,12 +145,6 @@ class State:
         )
         self.tabs[tab_id].analyze_param_instance = instance
 
-    def update_tab_suggested_save_paths(
-        self, tab_id: str, paths: Optional[SavePaths]
-    ) -> None:
-        logger.debug("update_tab_suggested_save_paths: tab_id=%r", tab_id)
-        self.tabs[tab_id].suggested_save_paths = paths
-
     def update_tab_save_path_overrides(
         self,
         tab_id: str,
@@ -172,8 +161,7 @@ class State:
         self.tabs[tab_id].save_path_overrides = None
 
     def get_effective_save_paths(self, tab_id: str) -> Optional[SavePaths]:
-        tab = self.tabs[tab_id]
-        return tab.save_path_overrides or tab.suggested_save_paths
+        return self.tabs[tab_id].save_path_overrides
 
     def set_tab_running(self, tab_id: str, running: bool) -> None:
         logger.debug("set_tab_running: tab_id=%r running=%s", tab_id, running)

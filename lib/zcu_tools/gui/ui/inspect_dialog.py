@@ -543,17 +543,15 @@ class InspectDialog(QDialog):
 
     def _on_add_module_clicked(self) -> None:
         dlg = _MlConfigDialog(self._ctrl, "module", "add", parent=self)
-        try:
-            dlg.exec()
-        finally:
-            dlg.clear()
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.finished.connect(lambda _: dlg.clear())
+        dlg.open()
 
     def _on_add_waveform_clicked(self) -> None:
         dlg = _MlConfigDialog(self._ctrl, "waveform", "add", parent=self)
-        try:
-            dlg.exec()
-        finally:
-            dlg.clear()
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.finished.connect(lambda _: dlg.clear())
+        dlg.open()
 
     def _current_ml_item_data(self) -> Optional[tuple[str, str]]:
         current = self._ml_tree.currentItem()
@@ -596,10 +594,9 @@ class InspectDialog(QDialog):
                 cfg=ml.waveforms[name],
                 parent=self,
             )
-        try:
-            dlg.exec()
-        finally:
-            dlg.clear()
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.finished.connect(lambda _: dlg.clear())
+        dlg.open()
 
     def _on_delete_ml_clicked(self) -> None:
         data = self._current_ml_item_data()

@@ -9,10 +9,20 @@ from numpy.typing import NDArray
 from typing_extensions import Any, Literal, Optional, overload
 
 
-def create_datafolder(database_dir: str, name: str = "") -> str:
+def get_datafolder_path(
+    database_dir: str,
+    name: str = "",
+    now: Optional[datetime] = None,
+) -> str:
+    """Return today's data-folder path without creating it."""
     database_dir = os.path.abspath(database_dir)
-    yy, mm, dd = datetime.today().strftime("%Y-%m-%d").split("-")
-    save_dir = os.path.join(database_dir, name, os.path.join(yy, mm, f"Data_{mm}{dd}"))
+    timestamp = datetime.today() if now is None else now
+    yy, mm, dd = timestamp.strftime("%Y-%m-%d").split("-")
+    return os.path.join(database_dir, name, os.path.join(yy, mm, f"Data_{mm}{dd}"))
+
+
+def create_datafolder(database_dir: str, name: str = "") -> str:
+    save_dir = get_datafolder_path(database_dir, name)
     os.makedirs(save_dir, exist_ok=True)
     return save_dir
 

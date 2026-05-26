@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
@@ -53,6 +54,7 @@ class SaveService(QObject):
         req = self._make_save_data_request(tab_id, data_path)
         tab = self._state.get_tab(tab_id)
         logger.info("start_save_data: tab_id=%r path=%r", tab_id, data_path)
+        self._ensure_parent_directory(data_path)
         self._runner.start_save(tab_id, tab.adapter, req)
         self._active_paths[tab_id] = data_path
         self._mark_saving(tab_id, True)
@@ -69,6 +71,7 @@ class SaveService(QObject):
             logger.info(
                 "start_save_both: savefig tab_id=%r image_path=%r", tab_id, image_path
             )
+            self._ensure_parent_directory(image_path)
             tab.figure.savefig(image_path)
         except Exception as exc:
             image_error = str(exc)
@@ -80,6 +83,7 @@ class SaveService(QObject):
         logger.info(
             "start_save_both: start_save tab_id=%r data_path=%r", tab_id, data_path
         )
+        self._ensure_parent_directory(data_path)
         self._runner.start_save(tab_id, tab.adapter, req)
         self._active_paths[tab_id] = data_path
         self._pending_image[tab_id] = (image_path, image_error)
@@ -90,7 +94,12 @@ class SaveService(QObject):
         if tab.figure is None:
             raise RuntimeError("No figure available to save")
         logger.info("save_image_sync: tab_id=%r path=%r", tab_id, image_path)
+        self._ensure_parent_directory(image_path)
         tab.figure.savefig(image_path)
+
+    @staticmethod
+    def _ensure_parent_directory(path: str) -> None:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
 
     def _make_save_data_request(self, tab_id: str, data_path: str) -> SaveDataRequest:
         if self._state.is_tab_busy(tab_id):

@@ -9,16 +9,10 @@ from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepCfg
 from zcu_tools.experiment.v2.onetone.freq import FreqCfg
 from zcu_tools.experiment.v2.onetone.power_dep import PowerDepCfg
 from zcu_tools.experiment.v2_gui.adapters.onetone.flux_dep import (
-    NoAnalyzeParams as FluxNoAnalyzeParams,
-)
-from zcu_tools.experiment.v2_gui.adapters.onetone.flux_dep import (
     OneToneFluxDepAdapter,
     OneToneFluxDepRunResult,
 )
 from zcu_tools.experiment.v2_gui.adapters.onetone.freq import OneToneFreqAdapter
-from zcu_tools.experiment.v2_gui.adapters.onetone.power_dep import (
-    NoAnalyzeParams as PowerNoAnalyzeParams,
-)
 from zcu_tools.experiment.v2_gui.adapters.onetone.power_dep import (
     OneTonePowerDepAdapter,
     OneTonePowerDepRunResult,

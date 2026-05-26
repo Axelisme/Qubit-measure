@@ -1,10 +1,5 @@
 from .fakefreq import FakeFreqAdapter, FakeFreqAnalyzeResult, FakeFreqRunResult
-from .flux_dep import (
-    NoAnalysisResult,
-    NoAnalyzeParams,
-    OneToneFluxDepAdapter,
-    OneToneFluxDepRunResult,
-)
+from .flux_dep import OneToneFluxDepAdapter, OneToneFluxDepRunResult
 from .freq import (
     OneToneFreqAdapter,
     OneToneFreqAnalyzeResult,
@@ -16,8 +11,6 @@ __all__ = [
     "FakeFreqAdapter",
     "FakeFreqAnalyzeResult",
     "FakeFreqRunResult",
-    "NoAnalysisResult",
-    "NoAnalyzeParams",
     "OneToneFluxDepAdapter",
     "OneToneFluxDepRunResult",
     "OneToneFreqAdapter",

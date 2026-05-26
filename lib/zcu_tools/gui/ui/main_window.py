@@ -74,6 +74,7 @@ if TYPE_CHECKING:
 
     from zcu_tools.gui.adapter import CfgSchema, WritebackItem
     from zcu_tools.gui.controller import Controller
+    from zcu_tools.gui.services import TabViewSnapshot
     from zcu_tools.meta_tool import ModuleLibrary
 
 
@@ -427,7 +428,9 @@ class ExpTabWidget(QWidget):
     def _on_cfg_validity_changed(self, valid: bool) -> None:
         del valid
 
-    def update_interaction_state(self, state: TabInteractionState) -> None:
+    def update_interaction_state(self, snapshot: TabViewSnapshot) -> None:
+        state = snapshot.interaction
+        capabilities = snapshot.capabilities
         local_busy = state.is_running or state.is_analyzing or state.is_saving_data
         if state.is_running:
             self.run_btn.setText("Stop")
@@ -443,7 +446,7 @@ class ExpTabWidget(QWidget):
                 not local_busy
                 and not state.global_run_active
                 and state.has_active_context
-                and state.has_soc
+                and (not capabilities.requires_soc or state.has_soc)
                 and cfg_valid
             )
             self.run_btn.setEnabled(can_run)
@@ -457,7 +460,7 @@ class ExpTabWidget(QWidget):
                 self.run_btn.setToolTip("No experiment context")
             elif not state.has_active_context:
                 self.run_btn.setToolTip("Select or create a file-backed context")
-            elif not state.has_soc:
+            elif capabilities.requires_soc and not state.has_soc:
                 self.run_btn.setToolTip("No SoC connection")
             elif not cfg_valid:
                 reason = self.cfg_form.first_invalid_reason()
@@ -468,8 +471,14 @@ class ExpTabWidget(QWidget):
 
         idle = not local_busy
         self.cfg_form.setEnabled(idle)
-        self.analyze_form.setEnabled(idle)
-        self.analyze_btn.setEnabled(idle and state.has_context and state.has_run_result)
+
+        has_analysis = capabilities.supports_analysis
+        self._left_tabs.setTabVisible(1, has_analysis)
+        self.analyze_form.setEnabled(idle and has_analysis)
+        self.analyze_btn.setEnabled(
+            idle and has_analysis and state.has_context and state.has_run_result
+        )
+
         self.save_data_btn.setEnabled(
             idle and state.has_active_context and state.has_run_result
         )
@@ -662,9 +671,10 @@ class MainWindow(QMainWindow):
             tab_w = self._tab_widgets.get(tab_id)
             if tab_w is not None:
                 tab_w.cfg_form.refresh_external(GuiEvent.CONTEXT_SWITCHED)
-            self.refresh_tab_writeback(tab_id)
-            self.refresh_tab_save_paths(tab_id)
-            self.refresh_tab_interaction(tab_id)
+            snapshot = self._ctrl.get_tab_snapshot(tab_id)
+            self.refresh_tab_writeback(tab_id, snapshot)
+            self.refresh_tab_save_paths(tab_id, snapshot)
+            self.refresh_tab_interaction(tab_id, snapshot)
 
     def _on_bus_ml_changed(self, payload: MlChangedPayload) -> None:
         del payload
@@ -672,8 +682,9 @@ class MainWindow(QMainWindow):
             tab_w = self._tab_widgets.get(tab_id)
             if tab_w is not None:
                 tab_w.cfg_form.refresh_external(GuiEvent.ML_CHANGED)
-            self.refresh_tab_writeback(tab_id)
-            self.refresh_tab_interaction(tab_id)
+            snapshot = self._ctrl.get_tab_snapshot(tab_id)
+            self.refresh_tab_writeback(tab_id, snapshot)
+            self.refresh_tab_interaction(tab_id, snapshot)
 
     def _on_bus_tab_added(self, payload: TabAddedPayload) -> None:
         tab_id = payload.tab_id
@@ -688,17 +699,19 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(tab_w, tab_label)
         self._tabs.setCurrentWidget(tab_w)
 
-        # populate cfg form from adapter default
-        schema = self._ctrl.get_tab_default_cfg(tab_id)
-        if schema is not None:
-            tab_w.populate_cfg(schema, self._ctrl)
-        analyze_instance = self._ctrl.get_tab_analyze_param_instance(tab_id)
-        if analyze_instance is not None and tab_w.has_analyze_params():
-            tab_w.analyze_form.populate_values(analyze_instance)
+        snapshot = self._ctrl.get_tab_snapshot(tab_id)
+        tab_w.populate_cfg(snapshot.cfg_schema, self._ctrl)
+        if snapshot.analyze_params is not None and tab_w.has_analyze_params():
+            tab_w.analyze_form.populate_values(snapshot.analyze_params)
+        if snapshot.save_paths is not None:
+            tab_w.set_save_paths(
+                snapshot.save_paths.data_path,
+                snapshot.save_paths.image_path,
+            )
 
         # refresh state (enables/disables buttons based on context)
-        self.refresh_run_lock(self._state_running_tab_id())
-        self.refresh_tab_interaction(tab_id)
+        self._new_tab_btn.setEnabled(self._ctrl.get_running_tab_id() is None)
+        tab_w.update_interaction_state(snapshot)
 
         # wire all signals/buttons for this tab
         tab_w.bind_to_controller(self)
@@ -714,21 +727,22 @@ class MainWindow(QMainWindow):
                 self._tabs.removeTab(index)
             tab_w.deleteLater()
 
-        self.refresh_run_lock(self._state_running_tab_id())
+        self.refresh_run_lock(self._ctrl.get_running_tab_id())
 
     def _on_bus_tab_content_changed(self, payload: TabContentChangedPayload) -> None:
         tab_id = payload.tab_id
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        self.refresh_tab_analyze_form(tab_id)
-        self.refresh_tab_writeback(tab_id)
-        self.refresh_tab_save_paths(tab_id)
-        self.refresh_tab_figure(tab_id)
+        snapshot = self._ctrl.get_tab_snapshot(tab_id)
+        self.refresh_tab_analyze_form(tab_id, snapshot)
+        self.refresh_tab_writeback(tab_id, snapshot)
+        self.refresh_tab_save_paths(tab_id, snapshot)
+        self.refresh_tab_figure(tab_id, snapshot)
         # auto-switch to Analysis tab when a new run result first arrives
-        if self._ctrl.has_run_result(tab_id):
+        if snapshot.interaction.has_run_result:
             tab_w._left_tabs.setCurrentIndex(1)
-        self.refresh_tab_interaction(tab_id)
+        self.refresh_tab_interaction(tab_id, snapshot)
 
     def _on_bus_predictor_changed(self, payload: PredictorChangedPayload) -> None:
         del payload
@@ -736,7 +750,7 @@ class MainWindow(QMainWindow):
 
     def _on_bus_soc_changed(self, payload: SocChangedPayload) -> None:
         del payload
-        self.refresh_run_lock(self._state_running_tab_id())
+        self.refresh_run_lock(self._ctrl.get_running_tab_id())
 
     # ------------------------------------------------------------------
     # ViewProtocol implementation
@@ -744,96 +758,76 @@ class MainWindow(QMainWindow):
 
     def _set_tab_running(
         self,
-        tab_id: str,
         tab_w: "ExpTabWidget",
-        has_context: bool,
-        has_active_context: bool,
-        has_soc: bool,
+        snapshot: "TabViewSnapshot",
     ) -> None:
-        if not self._ctrl.has_tab(tab_id):
-            return
+        tab_w.update_interaction_state(snapshot)
 
-        state = TabInteractionState(
-            global_run_active=self._ctrl.is_run_active()
-            and not self._ctrl.is_tab_running(tab_id),
-            is_running=self._ctrl.is_tab_running(tab_id),
-            is_analyzing=self._ctrl.is_tab_analyzing(tab_id),
-            is_saving_data=self._ctrl.is_tab_saving_data(tab_id),
-            has_context=has_context,
-            has_active_context=has_active_context,
-            has_soc=has_soc,
-            has_run_result=self._ctrl.has_run_result(tab_id),
-            has_analyze_result=self._ctrl.has_analyze_result(tab_id),
-            has_figure=self._ctrl.has_figure(tab_id),
-        )
-        tab_w.update_interaction_state(state)
-
-    def refresh_tab_analyze_form(self, tab_id: str) -> None:
+    def refresh_tab_analyze_form(
+        self, tab_id: str, snapshot: Optional["TabViewSnapshot"] = None
+    ) -> None:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        if not self._ctrl.has_run_result(tab_id):
+        current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
+        if not current.interaction.has_run_result:
             return
-        instance = self._ctrl.get_tab_analyze_params(tab_id)
-        tab_w.populate_analyze_params(instance)
-        saved = self._ctrl.get_tab_analyze_param_instance(tab_id)
-        if saved is not None:
-            tab_w.analyze_form.populate_values(saved)
+        if current.analyze_params is None:
+            raise RuntimeError("Run result has no initialized analyze parameters")
+        tab_w.populate_analyze_params(current.analyze_params)
+        tab_w.analyze_form.populate_values(current.analyze_params)
 
-    def refresh_tab_writeback(self, tab_id: str) -> None:
+    def refresh_tab_writeback(
+        self, tab_id: str, snapshot: Optional["TabViewSnapshot"] = None
+    ) -> None:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        items = self._ctrl.get_tab_writeback_items(tab_id)
-        tab_w.update_writeback_items(items)
+        current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
+        tab_w.update_writeback_items(list(current.writeback_items))
 
-    def refresh_tab_save_paths(self, tab_id: str) -> None:
+    def refresh_tab_save_paths(
+        self, tab_id: str, snapshot: Optional["TabViewSnapshot"] = None
+    ) -> None:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        save_paths = self._ctrl.get_tab_save_paths(tab_id)
+        current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
+        save_paths = current.save_paths
         if save_paths is not None:
             tab_w.set_save_paths(save_paths.data_path, save_paths.image_path)
 
-    def refresh_tab_figure(self, tab_id: str) -> None:
+    def refresh_tab_figure(
+        self, tab_id: str, snapshot: Optional["TabViewSnapshot"] = None
+    ) -> None:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        figure = self._ctrl.get_tab_figure(tab_id)
+        current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
+        figure = current.figure
         if figure is not None:
             self.show_analysis_image(tab_id, figure)
 
     def refresh_run_lock(self, running_tab_id: Optional[str]) -> None:
         logger.debug("refresh_run_lock: running_tab_id=%r", running_tab_id)
-        has_context = self._ctrl.has_context()
-        has_active_context = self._ctrl.has_active_context()
-        has_soc = self._ctrl.has_soc()
         self._new_tab_btn.setEnabled(running_tab_id is None)
         for tab_id, tab_w in self._tab_widgets.items():
-            self._set_tab_running(
-                tab_id, tab_w, has_context, has_active_context, has_soc
-            )
+            if self._ctrl.has_tab(tab_id):
+                self._set_tab_running(tab_w, self._ctrl.get_tab_snapshot(tab_id))
         if running_tab_id is None:
             for tab_w in self._tab_widgets.values():
                 tab_w.progress_stack.reset_all()
 
-    def refresh_tab_interaction(self, tab_id: str) -> None:
+    def refresh_tab_interaction(
+        self, tab_id: str, snapshot: Optional["TabViewSnapshot"] = None
+    ) -> None:
         tab_w = self._tab_widgets.get(tab_id)
-        if tab_w is None:
+        if tab_w is None or not self._ctrl.has_tab(tab_id):
             return
-        self._set_tab_running(
-            tab_id,
-            tab_w,
-            self._ctrl.has_context(),
-            self._ctrl.has_active_context(),
-            self._ctrl.has_soc(),
-        )
+        self._set_tab_running(tab_w, snapshot or self._ctrl.get_tab_snapshot(tab_id))
 
     def refresh_context_panel(self) -> None:
         label = self._ctrl.get_active_context_label()
-        has_context = self._ctrl.has_context()
-        has_active_context = self._ctrl.has_active_context()
-        has_soc = self._ctrl.has_soc()
         if label is not None:
             # file-backed flux context is active
             self._ctx_label.setText(label)
@@ -853,9 +847,8 @@ class MainWindow(QMainWindow):
             self._ctx_label.setText("No project set — use Project… to configure")
             self._ctx_label.setStyleSheet("color: gray;")
         for tab_id, tab_w in self._tab_widgets.items():
-            self._set_tab_running(
-                tab_id, tab_w, has_context, has_active_context, has_soc
-            )
+            if self._ctrl.has_tab(tab_id):
+                self._set_tab_running(tab_w, self._ctrl.get_tab_snapshot(tab_id))
 
     def refresh_inspect_panel(self) -> None:
         if self._inspect_dialog is not None and self._inspect_dialog.isVisible():
@@ -987,7 +980,7 @@ class MainWindow(QMainWindow):
         tab_w = self._resolve_tab_widget(tab_id, "_on_run_stop_clicked")
         if tab_w is None:
             return
-        if self._ctrl.is_tab_running(tab_id):
+        if self._ctrl.get_tab_snapshot(tab_id).interaction.is_running:
             logger.info("_on_run_stop_clicked: stop requested tab_id=%r", tab_id)
             self._ctrl.cancel_run()
             return
@@ -1051,29 +1044,26 @@ class MainWindow(QMainWindow):
         image_path = tab_w.get_image_path()
         self._ctrl.save_both(tab_id, data_path, image_path)
 
-    def _state_running_tab_id(self) -> Optional[str]:
-        for tab_id in self._tab_widgets:
-            if self._ctrl.is_tab_running(tab_id):
-                return tab_id
-        return None
-
     def _on_setup_clicked(self) -> None:
         from .setup_dialog import SetupDialog
 
         dlg = SetupDialog(self._ctrl, parent=self)
-        dlg.exec()
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.open()
 
     def _on_devices_clicked(self) -> None:
         from .device_dialog import DeviceDialog
 
         dlg = DeviceDialog(self._ctrl, parent=self)
-        dlg.exec()
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.open()
 
     def _on_predictor_clicked(self) -> None:
         from .predictor_dialog import PredictorDialog
 
         dlg = PredictorDialog(self._ctrl, parent=self)
-        dlg.exec()
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.open()
 
     def _on_inspect_clicked(self) -> None:
         from .inspect_dialog import InspectDialog

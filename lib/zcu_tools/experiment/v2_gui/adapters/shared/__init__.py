@@ -30,7 +30,6 @@ from .module_value_defaults import (
     make_reset_default,
     make_two_pulse_reset_default,
 )
-from .real_experiment import require_soc_handles
 from .spec_helpers import (
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
@@ -71,8 +70,6 @@ __all__ = [
     "make_pulse_readout_edit_template",
     "make_readout_edit_template",
     "update_readout_value_frequency",
-    # Real experiment helpers
-    "require_soc_handles",
     # Spec helpers
     "make_pulse_readout_module_spec",
     "make_pulse_module_spec",

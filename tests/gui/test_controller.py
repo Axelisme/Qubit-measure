@@ -29,12 +29,10 @@ from zcu_tools.gui.runner import Runner
 from zcu_tools.gui.services.device import ConnectDeviceRequest
 from zcu_tools.gui.services.operation_gate import OperationConflictError, OperationKind
 from zcu_tools.gui.services.session_persistence import (
-    SESSION_VERSION,
-    PersistedSession,
-    PersistedTab,
     SessionPersistenceError,
     SessionPersistenceService,
 )
+from zcu_tools.gui.services.workspace import RestoreIssue, RestoreReport
 from zcu_tools.gui.state import State
 
 # ---------------------------------------------------------------------------
@@ -299,10 +297,10 @@ def test_device_connect_persists_only_after_terminal_success(cf):
     cf.ctrl.start_connect_device(
         ConnectDeviceRequest(type_name="FakeDevice", name="flux", address="addr")
     )
-    cf.ctrl._startup_svc.add_device.assert_not_called()
+    cf.ctrl._startup_svc.remember_device.assert_not_called()
     loop.exec()
 
-    cf.ctrl._startup_svc.add_device.assert_called_once()
+    cf.ctrl._startup_svc.remember_device.assert_called_once()
     GlobalDeviceManager.drop_device("flux", ignore_error=True)
 
 
@@ -331,6 +329,17 @@ def test_get_tab_result_returns_last_result(cf):
     assert isinstance(result.data, np.ndarray)
 
 
+def test_run_completion_prepares_pure_tab_snapshot(cf):
+    tab_id = cf.ctrl.new_tab("fake")
+    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
+    assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
+
+    snapshot = cf.ctrl.get_tab_snapshot(tab_id)
+
+    assert snapshot.interaction.has_run_result is True
+    assert snapshot.analyze_params is not None
+
+
 def test_get_adapter_names_includes_fake(cf):
     assert "fake" in cf.ctrl.get_adapter_names()
 
@@ -342,11 +351,13 @@ def test_persist_then_restore_tabs_session(cf, tmp_path):
     cf.ctrl.update_tab_save_paths(tab_id, "/tmp/a.h5", "/tmp/b.png")
 
     session_svc = SessionPersistenceService(cache_dir=tmp_path)
-    cf.ctrl._session_svc = session_svc
+    cf.ctrl._workspace_svc._persistence = session_svc
     cf.ctrl.persist_tabs_session()
 
     cf_restored = ControllerFixture()
-    cf_restored.ctrl._session_svc = SessionPersistenceService(cache_dir=tmp_path)
+    cf_restored.ctrl._workspace_svc._persistence = SessionPersistenceService(
+        cache_dir=tmp_path
+    )
     cf_restored.ctrl.restore_tabs_from_session()
 
     assert len(cf_restored.state.tabs) == 1
@@ -361,8 +372,8 @@ def test_persist_then_restore_tabs_session(cf, tmp_path):
 
 
 def test_restore_session_failure_is_visible_to_user(cf):
-    cf.ctrl._session_svc = MagicMock()
-    cf.ctrl._session_svc.load_session.side_effect = SessionPersistenceError(
+    cf.ctrl._workspace_svc = MagicMock()
+    cf.ctrl._workspace_svc.restore_session.side_effect = SessionPersistenceError(
         "unsupported cache"
     )
 
@@ -374,18 +385,13 @@ def test_restore_session_failure_is_visible_to_user(cf):
 
 
 def test_restore_invalid_tab_is_rejected_and_reported(cf):
-    cf.ctrl._session_svc = MagicMock()
-    cf.ctrl._session_svc.raw_to_schema.side_effect = SessionPersistenceError("bad cfg")
-
-    cf.ctrl._restore_session(
-        PersistedSession(
-            version=SESSION_VERSION,
-            tabs=[PersistedTab("fake", {}, None)],
-            active_tab_index=0,
-        )
+    cf.ctrl._workspace_svc = MagicMock()
+    cf.ctrl._workspace_svc.restore_session.return_value = RestoreReport(
+        restored_tabs=0,
+        rejected_tabs=(RestoreIssue("fake", "invalid saved configuration (bad cfg)"),),
     )
+    cf.ctrl.restore_tabs_from_session()
 
-    assert not cf.state.tabs
     title, message = cf.view.show_error_dialog.call_args.args
     assert title == "Some session tabs were not restored"
     assert "invalid saved configuration" in message

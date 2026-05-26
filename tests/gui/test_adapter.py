@@ -23,6 +23,7 @@ from zcu_tools.gui.adapter import (
     WaveformRefSpec,
     WaveformWriteback,
     make_default_value,
+    require_soc_handles,
     schema_to_dict,
 )
 
@@ -40,6 +41,15 @@ def _schema(spec_fields: dict, val_fields: dict | None = None) -> CfgSchema:
     spec = CfgSectionSpec(fields=spec_fields)
     value = CfgSectionValue(fields=val_fields or {})
     return CfgSchema(spec=spec, value=value)
+
+
+def test_require_soc_handles_is_framework_request_validation() -> None:
+    from zcu_tools.gui.adapter import RunRequest
+
+    with pytest.raises(RuntimeError, match="soc is required"):
+        require_soc_handles(
+            RunRequest(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=MagicMock())
+        )
 
 
 # ---------------------------------------------------------------------------

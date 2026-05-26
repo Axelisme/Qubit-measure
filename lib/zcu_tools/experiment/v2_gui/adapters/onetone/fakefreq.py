@@ -49,6 +49,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 )
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
+    AdapterCapabilities,
     AnalyzeRequest,
     CfgSchema,
     CfgSectionSpec,
@@ -209,10 +210,16 @@ class FakeFreqExp(AbsExperiment[FreqResult, FakeFreqCfg]):
 
 
 class FakeFreqAdapter(
-    AbsExpAdapter[FakeFreqRunResult, FakeFreqAnalyzeResult, FakeFreqAnalyzeParams]
+    AbsExpAdapter[
+        FakeFreqCfg,
+        FakeFreqRunResult,
+        FakeFreqAnalyzeResult,
+        FakeFreqAnalyzeParams,
+    ]
 ):
     """Simulated one-tone frequency sweep.  No hardware required."""
 
+    capabilities = AdapterCapabilities(requires_soc=False)
     exp_cls = FakeFreqExp
 
     def __init__(self, fast_mode: bool = False) -> None:

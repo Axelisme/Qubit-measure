@@ -55,7 +55,12 @@ class LenRabiAnalyzeResult:
 
 
 class LenRabiAdapter(
-    AbsExpAdapter[LenRabiRunResult, LenRabiAnalyzeResult, LenRabiAnalyzeParams]
+    AbsExpAdapter[
+        LenRabiCfg,
+        LenRabiRunResult,
+        LenRabiAnalyzeResult,
+        LenRabiAnalyzeParams,
+    ]
 ):
     exp_cls = LenRabiExp
 

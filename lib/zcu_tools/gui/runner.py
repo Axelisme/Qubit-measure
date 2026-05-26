@@ -21,7 +21,7 @@ from .plot_routing import routing_scope
 
 logger = logging.getLogger(__name__)
 
-AdapterHandle = AbsExpAdapter[Any, Any, Any]
+AdapterHandle = AbsExpAdapter[Any, Any, Any, Any]
 _NO_RESULT = object()
 
 

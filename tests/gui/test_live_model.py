@@ -180,6 +180,25 @@ def test_sweep_live_field_rejects_wrong_value_type(env):
         field.set_value(DirectValue(1))
 
 
+def test_sweep_live_field_canonicalizes_stale_initial_step(env):
+    field = SweepLiveField(
+        SweepSpec(), env, initial_val=SweepValue(0.0, 1.0, 5, step=999.0)
+    )
+
+    assert field.get_value().step == pytest.approx(0.25)
+
+
+def test_sweep_live_field_updates_step_through_pure_model(env):
+    field = SweepLiveField(
+        SweepSpec(), env, initial_val=SweepValue(0.0, 1.0, 11, step=0.1)
+    )
+
+    field.update_step(0.2)
+
+    assert field.get_value().expts == 6
+    assert field.get_value().step == pytest.approx(0.2)
+
+
 # ---------------------------------------------------------------------------
 # Phase 55 — optional ModuleRefSpec
 # ---------------------------------------------------------------------------

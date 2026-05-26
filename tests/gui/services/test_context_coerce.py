@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.gui.adapter import ContextReadiness
 from zcu_tools.gui.event_bus import EventBus
 from zcu_tools.gui.io_manager import IOManager
 from zcu_tools.gui.services.context import ContextService, MdValueError
@@ -15,9 +16,15 @@ from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 def _make_svc(md: MetaDict | None = None) -> ContextService:
     md = md if md is not None else MetaDict()
     state = State(
-        ExpContext(md=md, ml=ModuleLibrary(), soc=None, soccfg=None, result_dir="")
+        ExpContext(
+            md=md,
+            ml=ModuleLibrary(),
+            soc=None,
+            soccfg=None,
+            result_dir="",
+            readiness=ContextReadiness.DRAFT,
+        )
     )
-    state.has_startup_context = True
     return ContextService(state, IOManager(), EventBus())
 
 

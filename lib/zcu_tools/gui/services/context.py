@@ -95,11 +95,11 @@ class ContextService:
         return self._io.has_project
 
     def has_context(self) -> bool:
-        """True when any valid context exists (startup empty ctx or file-backed flux ctx)."""
-        return self._io.has_context or self._state.has_startup_context
+        """True when any valid context exists (startup DRAFT or file-backed ACTIVE)."""
+        return self._state.exp_context.readiness is not ContextReadiness.EMPTY
 
     def has_startup_context(self) -> bool:
-        return self._state.has_startup_context
+        return self._state.exp_context.readiness is ContextReadiness.DRAFT
 
     def is_active_context(self) -> bool:
         """True only for a file-backed context eligible for run and save."""
@@ -161,7 +161,6 @@ class ContextService:
             readiness=ContextReadiness.DRAFT,
         )
         self._state.set_context(new_ctx)
-        self._state.has_startup_context = True
         self._bus.emit(
             GuiEvent.CONTEXT_SWITCHED,
             ContextSwitchedPayload(md=new_ctx.md, ml=new_ctx.ml),

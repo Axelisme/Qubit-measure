@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
-from zcu_tools.gui.adapter import SavePaths
+from zcu_tools.gui.adapter import CfgSchema, CfgSectionSpec, CfgSectionValue, SavePaths
 from zcu_tools.gui.state import State, TabInteractionState, TabState
 
 
@@ -17,6 +17,15 @@ def _make_ctx():
 
 def _make_adapter():
     return MagicMock()
+
+
+def _add_tab(state: State, tab_id: str, adapter: MagicMock) -> object:
+    cfg_schema = CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
+    state.add_tab(
+        tab_id,
+        TabState(adapter_name="fake", adapter=adapter, cfg_schema=cfg_schema),
+    )
+    return cfg_schema
 
 
 @dataclass
@@ -46,9 +55,7 @@ def test_tab_interaction_state_creation():
 def test_add_tab_then_get_tab_returns_correct_tabstate():
     state = State(_make_ctx())
     adapter = _make_adapter()
-    cfg_schema = object()
-    adapter.make_default_cfg.return_value = cfg_schema
-    state.add_tab("t1", "fake", adapter, _make_ctx())
+    cfg_schema = _add_tab(state, "t1", adapter)
     tab = state.get_tab("t1")
     assert isinstance(tab, TabState)
     assert tab.adapter_name == "fake"
@@ -59,19 +66,16 @@ def test_add_tab_then_get_tab_returns_correct_tabstate():
 def test_add_tab_duplicate_raises():
     state = State(_make_ctx())
     adapter = _make_adapter()
-    adapter.make_default_cfg.return_value = object()
-    state.add_tab("t1", "fake", adapter, _make_ctx())
+    _add_tab(state, "t1", adapter)
     with pytest.raises(ValueError, match="already exists"):
         dup_adapter = _make_adapter()
-        dup_adapter.make_default_cfg.return_value = object()
-        state.add_tab("t1", "fake", dup_adapter, _make_ctx())
+        _add_tab(state, "t1", dup_adapter)
 
 
 def test_remove_tab_clears_active_tab_id():
     state = State(_make_ctx())
     adapter = _make_adapter()
-    adapter.make_default_cfg.return_value = object()
-    state.add_tab("t1", "fake", adapter, _make_ctx())
+    _add_tab(state, "t1", adapter)
     state.set_active_tab("t1")
     state.remove_tab("t1")
     assert state.active_tab_id is None
@@ -80,8 +84,7 @@ def test_remove_tab_clears_active_tab_id():
 def test_remove_busy_tab_raises():
     state = State(_make_ctx())
     adapter = _make_adapter()
-    adapter.make_default_cfg.return_value = object()
-    state.add_tab("t1", "fake", adapter, _make_ctx())
+    _add_tab(state, "t1", adapter)
     state.set_tab_analyzing("t1", True)
     with pytest.raises(RuntimeError, match="busy tab"):
         state.remove_tab("t1")
@@ -96,8 +99,7 @@ def test_set_active_tab_unknown_raises():
 def test_set_tab_running_updates_running_tab_id():
     state = State(_make_ctx())
     adapter = _make_adapter()
-    adapter.make_default_cfg.return_value = object()
-    state.add_tab("t1", "fake", adapter, _make_ctx())
+    _add_tab(state, "t1", adapter)
     assert state.is_run_active() is False
     state.set_tab_running("t1", True)
     assert state.is_run_active() is True
@@ -111,9 +113,8 @@ def test_set_tab_running_updates_running_tab_id():
 def test_is_tab_busy_checks_per_tab_flags():
     state = State(_make_ctx())
     adapter = _make_adapter()
-    adapter.make_default_cfg.return_value = object()
-    state.add_tab("t1", "fake", adapter, _make_ctx())
-    state.add_tab("t2", "fake", adapter, _make_ctx())
+    _add_tab(state, "t1", adapter)
+    _add_tab(state, "t2", adapter)
     assert state.is_tab_busy("t1") is False
     state.set_tab_saving_data("t1", True)
     assert state.is_tab_busy("t1") is True
@@ -123,25 +124,21 @@ def test_is_tab_busy_checks_per_tab_flags():
 def test_update_tab_result_stores_result_and_clears_stale_analyze_data():
     state = State(_make_ctx())
     adapter = _make_adapter()
-    adapter.make_default_cfg.return_value = object()
-    state.add_tab("t1", "fake", adapter, _make_ctx())
+    _add_tab(state, "t1", adapter)
     state.update_tab_analyze_params("t1", _AnalyzeParams(threshold=0.5))
     fig = Figure()
     state.update_tab_analyze("t1", object(), fig)
-    state.update_tab_suggested_save_paths("t1", SavePaths("/tmp/a", "/tmp/b"))
     state.update_tab_result("t1", object())
     tab = state.get_tab("t1")
     assert tab.analyze_result is None
     assert tab.figure is None  # figure is cleared with stale analyze data
     assert tab.analyze_param_instance is None
-    assert tab.suggested_save_paths is None
 
 
 def test_update_tab_analyze_stores_analyze_result_and_figure():
     state = State(_make_ctx())
     adapter = _make_adapter()
-    adapter.make_default_cfg.return_value = object()
-    state.add_tab("t1", "fake", adapter, _make_ctx())
+    _add_tab(state, "t1", adapter)
     analyze_result = object()
     fig = Figure()
     state.update_tab_analyze("t1", analyze_result, fig)
@@ -153,8 +150,7 @@ def test_update_tab_analyze_stores_analyze_result_and_figure():
 def test_update_tab_analyze_params_stores_instance():
     state = State(_make_ctx())
     adapter = _make_adapter()
-    adapter.make_default_cfg.return_value = object()
-    state.add_tab("t1", "fake", adapter, _make_ctx())
+    _add_tab(state, "t1", adapter)
     params = _AnalyzeParams(threshold=0.2)
     state.update_tab_analyze_params("t1", params)
     assert state.get_tab("t1").analyze_param_instance is params
@@ -163,9 +159,7 @@ def test_update_tab_analyze_params_stores_instance():
 def test_update_tab_save_path_overrides_sets_both_paths():
     state = State(_make_ctx())
     adapter = _make_adapter()
-    adapter.make_default_cfg.return_value = object()
-    state.add_tab("t1", "fake", adapter, _make_ctx())
-    state.update_tab_suggested_save_paths("t1", SavePaths("/tmp/data", "/tmp/image"))
+    _add_tab(state, "t1", adapter)
     state.update_tab_save_path_overrides(
         "t1", SavePaths("/tmp/custom-data", "/tmp/custom-image")
     )

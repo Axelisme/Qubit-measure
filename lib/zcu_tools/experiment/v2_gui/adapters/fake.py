@@ -13,6 +13,7 @@ from zcu_tools.experiment.base import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
+    AdapterCapabilities,
     AnalyzeRequest,
     CfgSchema,
     CfgSectionSpec,
@@ -85,9 +86,12 @@ def _require_float(raw_cfg: dict[str, object], key: str) -> float:
     return float(value)
 
 
-class FakeAdapter(AbsExpAdapter[FakeRunResult, FakeAnalyzeResult, FakeAnalyzeParams]):
+class FakeAdapter(
+    AbsExpAdapter[FakeExpCfg, FakeRunResult, FakeAnalyzeResult, FakeAnalyzeParams]
+):
     """Minimal stub adapter — drives the full GUI flow without hardware."""
 
+    capabilities = AdapterCapabilities(requires_soc=False)
     exp_cls = FakeExp
 
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:

@@ -33,6 +33,7 @@ from .adapter import (
     WaveformRefValue,
     default_value_for_type,
 )
+from .sweep_model import SweepEditor
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
@@ -247,15 +248,13 @@ class SweepLiveField(LiveField):
         super().__init__(spec, env)
         self._updating = False
         if isinstance(initial_val, SweepValue):
-            start_init = initial_val.start
-            stop_init = initial_val.stop
-            self._expts = initial_val.expts
-            self._step = initial_val.step
+            initial = SweepEditor.canonicalize(initial_val)
         else:
-            start_init = 0.0
-            stop_init = 1.0
-            self._expts = 11
-            self._step = 0.1
+            initial = SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)
+        start_init = initial.start
+        stop_init = initial.stop
+        self._expts = initial.expts
+        self._step = initial.step
 
         edge_spec = ScalarSpec(
             label=spec.label,
@@ -285,18 +284,25 @@ class SweepLiveField(LiveField):
 
     def set_value(self, val: object) -> None:
         if isinstance(val, SweepValue):
+            canonical = SweepEditor.canonicalize(val)
             self._updating = True
             try:
-                self.start_field.set_value(self._coerce_edge(val.start))
-                self.stop_field.set_value(self._coerce_edge(val.stop))
-                self._expts = val.expts
-                self._step = val.step
+                self.start_field.set_value(self._coerce_edge(canonical.start))
+                self.stop_field.set_value(self._coerce_edge(canonical.stop))
+                self._expts = canonical.expts
+                self._step = canonical.step
             finally:
                 self._updating = False
             self._refresh_validity()
             self.on_change.emit(self.get_value())
             return
         raise TypeError(f"SweepLiveField expects SweepValue, got {type(val).__name__}")
+
+    def update_expts(self, expts: int) -> None:
+        self.set_value(SweepEditor.update_expts(self.get_value(), expts))
+
+    def update_step(self, step: float) -> None:
+        self.set_value(SweepEditor.update_step(self.get_value(), step))
 
     def teardown(self) -> None:
         self.start_field.teardown()
@@ -324,8 +330,11 @@ class SweepLiveField(LiveField):
     def _on_child_change(self, *_: object) -> None:
         if self._updating:
             return
+        canonical = SweepEditor.canonicalize(self.get_value())
+        self._expts = canonical.expts
+        self._step = canonical.step
         self._refresh_validity()
-        self.on_change.emit(self.get_value())
+        self.on_change.emit(canonical)
 
     def _on_child_validity_changed(self, *_: object) -> None:
         self._refresh_validity()

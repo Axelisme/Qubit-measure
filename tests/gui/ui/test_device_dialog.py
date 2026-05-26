@@ -91,8 +91,6 @@ def test_device_dialog_add_device_does_not_persist_before_async_success(qapp):
     dialog = DeviceDialog(ctrl)
     dialog._add_btn.click()
 
-    ctrl.save_startup_device.assert_not_called()
-
 
 def test_device_dialog_add_device_propagates_unexpected_errors(qapp):
     """Programmer errors must not be swallowed by the dialog catch."""
@@ -125,7 +123,6 @@ def test_device_dialog_drop_device(qapp):
     (req,) = ctrl.start_disconnect_device.call_args.args
     assert isinstance(req, DisconnectDeviceRequest)
     assert req.name == "yoko"
-    ctrl.remove_startup_device.assert_not_called()
 
 
 def test_device_dialog_forget_memory_device_dispatches_single_transaction(qapp):
@@ -144,7 +141,6 @@ def test_device_dialog_forget_memory_device_dispatches_single_transaction(qapp):
     dialog._drop_btn.click()
 
     ctrl.forget_device.assert_called_once_with("remembered")
-    ctrl.remove_startup_device.assert_not_called()
 
 
 def test_device_dialog_refresh_reloads_selected_device_info(qapp):

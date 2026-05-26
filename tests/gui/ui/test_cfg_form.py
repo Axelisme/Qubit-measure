@@ -365,7 +365,7 @@ def test_populate_sweep_field_round_trip(qapp, ctrl):
     assert sv.start == pytest.approx(5.8)
     assert sv.stop == pytest.approx(6.2)
     assert sv.expts == 201
-    assert sv.step == pytest.approx(0.1)
+    assert sv.step == pytest.approx(0.002)
 
 
 def test_populate_sweep_field_step_preserved(qapp, ctrl):

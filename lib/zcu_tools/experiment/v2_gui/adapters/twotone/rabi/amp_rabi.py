@@ -55,7 +55,12 @@ class AmpRabiAnalyzeResult:
 
 
 class AmpRabiAdapter(
-    AbsExpAdapter[AmpRabiRunResult, AmpRabiAnalyzeResult, AmpRabiAnalyzeParams]
+    AbsExpAdapter[
+        AmpRabiCfg,
+        AmpRabiRunResult,
+        AmpRabiAnalyzeResult,
+        AmpRabiAnalyzeParams,
+    ]
 ):
     exp_cls = AmpRabiExp
 

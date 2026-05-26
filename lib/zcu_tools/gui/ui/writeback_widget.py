@@ -4,7 +4,7 @@ import copy
 import logging
 from typing import TYPE_CHECKING, Any, Optional, Sequence
 
-from qtpy.QtCore import Signal  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt, Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
     QDialog,
@@ -194,7 +194,8 @@ class WritebackWidget(QWidget):
                 QMessageBox.critical(dialog, "Validation Error", str(exc))
 
         save_btn.clicked.connect(save)
-        dialog.exec()
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.open()
 
     def _edit_cfg_item(
         self,
@@ -259,8 +260,9 @@ class WritebackWidget(QWidget):
                 QMessageBox.critical(dialog, "Validation Error", str(exc))
 
         save_btn.clicked.connect(save)
-        dialog.exec()
-        form_widget.clear()
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.finished.connect(lambda _: form_widget.clear())
+        dialog.open()
 
 
 def _coerce_scalar_input(text: str, original: Any) -> Any:

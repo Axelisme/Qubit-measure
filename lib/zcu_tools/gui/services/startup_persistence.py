@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 STARTUP_VERSION = 3
 _STARTUP_FILENAME = "startup_v2.json"
 
-_DEFAULT_LEFT_PANEL_WIDTH = 500
+DEFAULT_LEFT_PANEL_WIDTH = 500
 
 
 class StartupPersistenceError(RuntimeError):
@@ -42,7 +42,7 @@ class PersistedStartup:
     ip: str
     port: int
     devices: list[PersistedDeviceEntry]
-    left_panel_width: int = _DEFAULT_LEFT_PANEL_WIDTH
+    left_panel_width: int = DEFAULT_LEFT_PANEL_WIDTH
 
 
 def _safe_cache_root() -> Path:
@@ -63,7 +63,7 @@ def _make_default() -> PersistedStartup:
         ip="192.168.10.1",
         port=8887,
         devices=[],
-        left_panel_width=_DEFAULT_LEFT_PANEL_WIDTH,
+        left_panel_width=DEFAULT_LEFT_PANEL_WIDTH,
     )
 
 
@@ -128,7 +128,7 @@ class StartupPersistenceService:
                 port=int(raw.get("port", 8887)),
                 devices=devices,
                 left_panel_width=int(
-                    raw.get("left_panel_width", _DEFAULT_LEFT_PANEL_WIDTH)
+                    raw.get("left_panel_width", DEFAULT_LEFT_PANEL_WIDTH)
                 ),
             )
         except (TypeError, ValueError) as exc:
@@ -267,6 +267,7 @@ class StartupPersistenceService:
 __all__ = [
     "PersistedDeviceEntry",
     "PersistedStartup",
+    "DEFAULT_LEFT_PANEL_WIDTH",
     "STARTUP_VERSION",
     "StartupPersistenceError",
     "StartupPersistenceService",

@@ -15,7 +15,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     md_has_key,
 )
 from zcu_tools.gui.adapter import (
-    AbsExpAdapter,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -23,8 +22,7 @@ from zcu_tools.gui.adapter import (
     DirectValue,
     EvalValue,
     ExpContext,
-    NoAnalysisResult,
-    NoAnalyzeParams,
+    NoAnalysisAdapterMixin,
     RunRequest,
     ScalarSpec,
     ScalarValue,
@@ -36,7 +34,7 @@ OneToneFluxDepRunResult: TypeAlias = FluxDepResult
 
 
 class OneToneFluxDepAdapter(
-    AbsExpAdapter[OneToneFluxDepRunResult, NoAnalysisResult, NoAnalyzeParams]
+    NoAnalysisAdapterMixin[FluxDepCfg, OneToneFluxDepRunResult]
 ):
     exp_cls = FluxDepExp
 

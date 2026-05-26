@@ -243,10 +243,21 @@ def test_inspect_dialog_modify_clears_form_widget_after_exec(qapp, monkeypatch):
 
     class FakeDialog:
         def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            class DummySignal:
+                def connect(self, cb: Any) -> None:
+                    self.cb = cb
+
+                def emit(self) -> None:
+                    if hasattr(self, "cb"):
+                        self.cb(None)
+
+            self.finished = DummySignal()
+
+        def setAttribute(self, *args: Any) -> None:
             pass
 
-        def exec(self) -> int:
-            return 0
+        def open(self) -> None:
+            self.finished.emit()
 
         def clear(self) -> None:
             clear_calls.append("clear")

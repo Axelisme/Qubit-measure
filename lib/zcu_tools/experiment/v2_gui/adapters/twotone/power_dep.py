@@ -15,15 +15,13 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     md_get_float,
 )
 from zcu_tools.gui.adapter import (
-    AbsExpAdapter,
     CfgNodeValue,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
     ExpContext,
-    NoAnalysisResult,
-    NoAnalyzeParams,
+    NoAnalysisAdapterMixin,
     RunRequest,
     ScalarSpec,
     SweepSpec,
@@ -33,9 +31,7 @@ from zcu_tools.gui.adapter import (
 PowerDepRunResult: TypeAlias = PowerResult
 
 
-class PowerDepAdapter(
-    AbsExpAdapter[PowerDepRunResult, NoAnalysisResult, NoAnalyzeParams]
-):
+class PowerDepAdapter(NoAnalysisAdapterMixin[PowerCfg, PowerDepRunResult]):
     exp_cls = PowerExp
 
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:

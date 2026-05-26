@@ -31,6 +31,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.gui.services import StartupConnectionRequest, StartupProjectRequest
+
 if TYPE_CHECKING:
     from zcu_tools.gui.controller import Controller
 
@@ -289,31 +291,21 @@ class SetupDialog(QDialog):
             self._unit_label.setText("—")
 
     def _on_apply_startup_clicked(self) -> None:
-        from zcu_tools.meta_tool import MetaDict, ModuleLibrary
-
         chip = self._chip_edit.text().strip() or "unknown_chip"
         qub = self._qub_edit.text().strip() or "unknown_qubit"
         res = self._res_edit.text().strip() or "unknown_resonator"
         result_dir = self._result_dir_edit.text().strip()
         db_path = self._db_path_edit.text().strip()
-        md = MetaDict()
-        ml = ModuleLibrary()
-        self._ctrl.set_startup_context(
-            md,
-            ml,
-            chip_name=chip,
-            qub_name=qub,
-            res_name=res,
-            result_dir=result_dir,
-            database_path=db_path,
-        )
-        self._ctrl.save_startup_project(
-            chip_name=chip,
-            qub_name=qub,
-            res_name=res,
-            result_dir=result_dir,
-            database_path=db_path,
-        )
+        if not self._ctrl.apply_startup_project(
+            StartupProjectRequest(
+                chip_name=chip,
+                qub_name=qub,
+                res_name=res,
+                result_dir=result_dir,
+                database_path=db_path,
+            )
+        ):
+            return
         self._set_project_status(f"Startup context applied: {chip}/{qub} (res={res})")
         logger.info(
             "SetupDialog: startup context applied chip=%r qub=%r res=%r",
@@ -323,9 +315,8 @@ class SetupDialog(QDialog):
         )
 
         if result_dir:
-            self._ctrl.setup_project(result_dir)
             self._refresh_context_list()
-            logger.info("SetupDialog: auto-setup result_dir=%r", result_dir)
+            logger.info("SetupDialog: project available result_dir=%r", result_dir)
 
     def _on_switch_clicked(self) -> None:
         item = self._ctx_list.currentItem()
@@ -413,24 +404,17 @@ class SetupDialog(QDialog):
             )
         )
 
-        conn_svc = self._ctrl.get_connection_service()
-        # Connect dialog-scoped subscriptions once; rebind every time we kick off
-        # a new request to keep the View stateless between attempts.
-        try:
-            conn_svc.connection_finished.disconnect(self._on_connect_finished)
-        except (TypeError, RuntimeError):
-            pass
-        try:
-            conn_svc.connection_failed.disconnect(self._on_connect_failed)
-        except (TypeError, RuntimeError):
-            pass
-        conn_svc.connection_finished.connect(self._on_connect_finished)
-        conn_svc.connection_failed.connect(self._on_connect_failed)
+        self._ctrl.bind_connection_outcome(
+            self._on_connect_finished,
+            self._on_connect_failed,
+        )
 
         if not use_mock:
-            self._ctrl.save_startup_connection(
-                ip=self._ip_edit.text().strip(),
-                port=self._port_spin.value(),
+            self._ctrl.remember_startup_connection(
+                StartupConnectionRequest(
+                    ip=self._ip_edit.text().strip(),
+                    port=self._port_spin.value(),
+                )
             )
         self._connect_btn.setEnabled(False)
         self._set_conn_status("Connecting…", error=False)

@@ -5,7 +5,9 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from qtpy.QtCore import Qt
+from zcu_tools.gui.adapter import AdapterCapabilities
 from zcu_tools.gui.event_bus import EventBus, GuiEvent, SocChangedPayload
+from zcu_tools.gui.services import TabViewSnapshot
 from zcu_tools.gui.state import TabInteractionState
 
 
@@ -13,6 +15,43 @@ def _mock_ctrl() -> MagicMock:
     ctrl = MagicMock()
     ctrl.get_persisted_left_panel_width.return_value = 500
     return ctrl
+
+
+def _snapshot(
+    tab_id: str,
+    *,
+    global_run_active: bool = False,
+    is_running: bool = False,
+    is_analyzing: bool = False,
+    is_saving_data: bool = False,
+    has_context: bool = True,
+    has_active_context: bool = True,
+    has_soc: bool = True,
+    has_run_result: bool = True,
+    has_analyze_result: bool = True,
+    has_figure: bool = True,
+) -> TabViewSnapshot:
+    return TabViewSnapshot(
+        tab_id=tab_id,
+        interaction=TabInteractionState(
+            global_run_active=global_run_active,
+            is_running=is_running,
+            is_analyzing=is_analyzing,
+            is_saving_data=is_saving_data,
+            has_context=has_context,
+            has_active_context=has_active_context,
+            has_soc=has_soc,
+            has_run_result=has_run_result,
+            has_analyze_result=has_analyze_result,
+            has_figure=has_figure,
+        ),
+        cfg_schema=MagicMock(),
+        capabilities=AdapterCapabilities(),
+        analyze_params=MagicMock(),
+        writeback_items=(),
+        save_paths=None,
+        figure=None,
+    )
 
 
 def test_left_panel_toggle_is_attached_to_tab_bar(qapp):
@@ -87,7 +126,8 @@ def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
     tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.update_writeback_items([MagicMock(selected=True)])
     tab.update_interaction_state(
-        TabInteractionState(
+        _snapshot(
+            "tab-1",
             global_run_active=False,
             is_running=False,
             is_analyzing=True,
@@ -111,7 +151,8 @@ def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(qapp):
 
     tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.update_interaction_state(
-        TabInteractionState(
+        _snapshot(
+            "tab-1",
             global_run_active=True,
             is_running=False,
             is_analyzing=False,
@@ -135,7 +176,8 @@ def test_exp_tab_disables_save_buttons_while_saving_data(qapp):
 
     tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.update_interaction_state(
-        TabInteractionState(
+        _snapshot(
+            "tab-1",
             global_run_active=False,
             is_running=False,
             is_analyzing=False,
@@ -160,7 +202,8 @@ def test_exp_tab_run_tooltip_shows_no_soc_reason(qapp):
 
     tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.update_interaction_state(
-        TabInteractionState(
+        _snapshot(
+            "tab-1",
             global_run_active=False,
             is_running=False,
             is_analyzing=False,
@@ -187,7 +230,8 @@ def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(qapp):
     )
     tab.cfg_form.is_valid = MagicMock(return_value=False)
     tab.update_interaction_state(
-        TabInteractionState(
+        _snapshot(
+            "tab-1",
             global_run_active=False,
             is_running=False,
             is_analyzing=False,
@@ -211,7 +255,8 @@ def test_exp_tab_draft_context_allows_analysis_but_disables_run_and_save(qapp):
     tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.update_writeback_items([MagicMock(selected=True)])
     tab.update_interaction_state(
-        TabInteractionState(
+        _snapshot(
+            "tab-1",
             global_run_active=False,
             is_running=False,
             is_analyzing=False,
@@ -239,16 +284,12 @@ def test_main_window_run_lock_disables_only_new_tab_and_run(qapp):
 
     ctrl = MagicMock()
     ctrl.get_bus.return_value = EventBus()
-    ctrl.is_run_active.return_value = True
-    ctrl.has_context.return_value = True
-    ctrl.has_active_context.return_value = True
-    ctrl.has_soc.return_value = True
     ctrl.has_tab.return_value = True
-    ctrl.has_run_result.return_value = True
-    ctrl.has_analyze_result.return_value = True
-    ctrl.is_tab_running.side_effect = lambda tab_id: tab_id == "tab-1"
-    ctrl.is_tab_analyzing.return_value = False
-    ctrl.is_tab_saving_data.return_value = False
+    ctrl.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
+        tab_id,
+        global_run_active=tab_id != "tab-1",
+        is_running=tab_id == "tab-1",
+    )
 
     window = MainWindow(ctrl)
     tab_one = MagicMock()
@@ -269,17 +310,9 @@ def test_main_window_soc_changed_refreshes_run_lock(qapp):
     ctrl = MagicMock()
     bus = EventBus()
     ctrl.get_bus.return_value = bus
-    ctrl.is_run_active.return_value = False
-    ctrl.has_context.return_value = True
-    ctrl.has_active_context.return_value = True
-    ctrl.has_soc.return_value = False
+    ctrl.get_running_tab_id.return_value = None
     ctrl.has_tab.return_value = True
-    ctrl.has_run_result.return_value = False
-    ctrl.has_analyze_result.return_value = False
-    ctrl.is_tab_running.return_value = False
-    ctrl.is_tab_analyzing.return_value = False
-    ctrl.is_tab_saving_data.return_value = False
-    ctrl.has_figure.return_value = False
+    ctrl.get_tab_snapshot.return_value = _snapshot("tab-1", has_soc=False)
 
     window = MainWindow(ctrl)
     tab = MagicMock()
@@ -288,6 +321,22 @@ def test_main_window_soc_changed_refreshes_run_lock(qapp):
     bus.emit(GuiEvent.SOC_CHANGED, SocChangedPayload(soc=None, soccfg=None))
 
     tab.update_interaction_state.assert_called()
+
+
+def test_main_window_content_event_queries_single_tab_snapshot(qapp):
+    from zcu_tools.gui.event_bus import TabContentChangedPayload
+    from zcu_tools.gui.ui.main_window import MainWindow
+
+    ctrl = MagicMock()
+    bus = EventBus()
+    ctrl.get_bus.return_value = bus
+    ctrl.get_tab_snapshot.return_value = _snapshot("tab-1")
+    window = MainWindow(ctrl)
+    window._tab_widgets["tab-1"] = MagicMock()
+
+    bus.emit(GuiEvent.TAB_CONTENT_CHANGED, TabContentChangedPayload(tab_id="tab-1"))
+
+    ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
 
 
 def test_main_window_cancel_setup_before_closing(qapp, monkeypatch):

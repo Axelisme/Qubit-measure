@@ -52,7 +52,7 @@ class T1AnalyzeResult:
     figure: Figure
 
 
-class T1Adapter(AbsExpAdapter[T1RunResult, T1AnalyzeResult, T1AnalyzeParams]):
+class T1Adapter(AbsExpAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams]):
     exp_cls = T1Exp
 
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
