@@ -453,10 +453,12 @@ class DeviceDialog(QDialog):
             return
         name = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
         if self._ctrl.is_memory_device(name):
+            # Remove from memory entirely — won't appear after restart
             self._ctrl.forget_device(name)
-        else:
-            self._ctrl.drop_device(name)
             self._ctrl.remove_startup_device(name)
+        else:
+            # Disconnect only — keep in startup memory so it reappears as gray on next launch
+            self._ctrl.drop_device(name)
         self._refresh_list()
 
     def _on_refresh_clicked(self) -> None:

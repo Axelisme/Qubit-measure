@@ -112,9 +112,10 @@ def test_device_dialog_drop_device(qapp):
     assert dialog._list.count() == 1
     dialog._list.setCurrentRow(0)
 
-    # Click forget (was drop)
+    # Drop disconnects but keeps startup memory
     dialog._drop_btn.click()
     ctrl.drop_device.assert_called_with("yoko")
+    ctrl.remove_startup_device.assert_not_called()
 
 
 def test_device_dialog_refresh_reloads_selected_device_info(qapp):
