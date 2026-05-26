@@ -12,8 +12,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QAbstractSpinBox,
     QCheckBox,
     QComboBox,
-    QFormLayout,
     QGridLayout,
+    QVBoxLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -532,7 +532,7 @@ class MultiSweepWidget(BaseLiveWidget):
     def __init__(self, field: MultiSweepLiveField, parent: Optional[QWidget] = None):
         super().__init__(field, parent)
 
-        layout = QFormLayout(self)
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
 
@@ -545,10 +545,11 @@ class MultiSweepWidget(BaseLiveWidget):
             w.teardown()
 
     def _build_axes(self) -> None:
-        layout = cast(QFormLayout, self.layout())
+        layout = cast(QVBoxLayout, self.layout())
         field = cast(MultiSweepLiveField, self._field)
 
         for axis, axis_field in field.fields.items():
             w = SweepWidget(axis_field)
-            layout.addRow(f"  {axis}:", w)
+            layout.addWidget(QLabel(f"{axis}:"))
+            layout.addWidget(w)
             self._widgets[axis] = w

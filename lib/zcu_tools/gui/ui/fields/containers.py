@@ -20,7 +20,13 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from ...adapter import LiteralSpec, ScalarSpec
-from ...live_model import DeviceRefLiveField, ModuleRefLiveField, SectionLiveField
+from ...live_model import (
+    DeviceRefLiveField,
+    ModuleRefLiveField,
+    MultiSweepLiveField,
+    SectionLiveField,
+    SweepLiveField,
+)
 from .common import BaseLiveWidget, ElidedLabel
 from .registry import FieldWidgetProtocol, get_widget_cls, register_widget
 
@@ -136,8 +142,12 @@ class SectionWidget(BaseLiveWidget):
             w = widget_cls(child_field)  # type: ignore
 
             label = spec.label or key
-            row_label = ElidedLabel(f"{label}:")
-            self._container.form.addRow(row_label, cast(QWidget, w))
+            if isinstance(child_field, (SweepLiveField, MultiSweepLiveField)):
+                # Sweep widgets get their own full-width row; label goes on the line above
+                self._container.form.addRow(ElidedLabel(f"{label}:"))
+                self._container.form.addRow(cast(QWidget, w))
+            else:
+                self._container.form.addRow(ElidedLabel(f"{label}:"), cast(QWidget, w))
             self._child_widgets[key] = w
 
     def teardown(self) -> None:
