@@ -329,7 +329,18 @@ class ScalarWidget(BaseLiveWidget):
             self._ghost.setToolTip(value.error or "Expression is unresolved")
             self._ghost.setStyleSheet("color: red; font-style: italic;")
             return
-        self._ghost.setText(f"= {value.resolved}")
+        spec = cast(ScalarLiveField, self._field).spec
+        if spec.type is float and isinstance(value.resolved, (int, float)):
+            decimals = spec.decimals if spec.decimals is not None else 6
+            raw = f"{value.resolved:.{decimals}f}"
+            if "." in raw:
+                raw = raw.rstrip("0")
+                if raw.endswith("."):
+                    raw += "0"
+            text = f"= {raw}"
+        else:
+            text = f"= {value.resolved}"
+        self._ghost.setText(text)
         self._ghost.setToolTip("")
         self._ghost.setStyleSheet("color: gray; font-style: italic;")
 
