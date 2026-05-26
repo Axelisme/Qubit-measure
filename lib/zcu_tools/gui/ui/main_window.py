@@ -281,7 +281,21 @@ class ExpTabWidget(QWidget):
 
     def resizeEvent(self, a0) -> None:
         super().resizeEvent(a0)
+        self._fix_splitter_on_resize()
         self._schedule_handle_layout()
+
+    def _fix_splitter_on_resize(self) -> None:
+        if self._left_panel_collapsed:
+            return
+        sizes = self._splitter.sizes()
+        total = sizes[0] + sizes[1]
+        if total <= 0:
+            return
+        max_left = int(total * 0.8)
+        left = min(self._splitter_left_saved, max_left)
+        right = total - left
+        if sizes[0] != left:
+            self._splitter.setSizes([left, right])
 
     def showEvent(self, a0) -> None:
         super().showEvent(a0)

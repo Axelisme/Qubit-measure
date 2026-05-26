@@ -277,7 +277,13 @@ class DeviceService(QObject):
         self._require_device_mutation_available("drop device")
         from zcu_tools.device import GlobalDeviceManager
 
+        dev = GlobalDeviceManager.get_device(name)
+        type_name = type(dev).__name__
+        address = getattr(dev, "address", "")
         GlobalDeviceManager.drop_device(name)
+        self._memory_entries[name] = DeviceMemoryInfo(
+            type_name=type_name, name=name, address=address
+        )
         self._bus.emit(GuiEvent.DEVICE_CHANGED, DeviceChangedPayload())
 
     # ------------------------------------------------------------------

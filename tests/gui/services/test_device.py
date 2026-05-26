@@ -48,7 +48,8 @@ def test_device_service_success():
         svc.register_device(_req("dev1"))
         mock_reg.assert_called_with("dev1", device)
 
-    with patch("zcu_tools.device.GlobalDeviceManager.drop_device") as mock_drop:
+    with patch("zcu_tools.device.GlobalDeviceManager.get_device", return_value=device), \
+         patch("zcu_tools.device.GlobalDeviceManager.drop_device") as mock_drop:
         svc.drop_device("dev1")
         mock_drop.assert_called_with("dev1")
 

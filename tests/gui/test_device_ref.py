@@ -136,7 +136,8 @@ def test_device_service_emits_device_changed_on_drop():
     bus.subscribe(GuiEvent.DEVICE_CHANGED, lambda p: received.append(p))
 
     svc = DeviceService(state, bus)
-    with patch("zcu_tools.device.GlobalDeviceManager.drop_device"):
+    with patch("zcu_tools.device.GlobalDeviceManager.get_device", return_value=MagicMock(address="")), \
+         patch("zcu_tools.device.GlobalDeviceManager.drop_device"):
         svc.drop_device("dev1")
 
     assert len(received) == 1

@@ -197,7 +197,11 @@ def test_devicemanager_drop_device():
     svc, _ = _make_svc()
     _register(svc, "flux")
     svc.drop_device("flux")
-    assert not any(e.name == "flux" for e in svc.list_devices())
+    # drop moves device to memory-only; it still appears but disconnected
+    entries = svc.list_devices()
+    flux_entry = next((e for e in entries if e.name == "flux"), None)
+    assert flux_entry is not None
+    assert not flux_entry.is_connected
 
 
 def test_devicemanager_get_set_value():
