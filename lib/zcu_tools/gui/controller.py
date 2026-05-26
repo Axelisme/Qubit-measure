@@ -561,6 +561,17 @@ class Controller:
     def remove_startup_device(self, name: str) -> None:
         self._startup_svc.remove_device(name)
 
+    def get_persisted_left_panel_width(self) -> int:
+        data = self._startup_svc.load()
+        if data is None:
+            from .services.startup_persistence import _DEFAULT_LEFT_PANEL_WIDTH
+
+            return _DEFAULT_LEFT_PANEL_WIDTH
+        return data.left_panel_width
+
+    def save_left_panel_width(self, width: int) -> None:
+        self._startup_svc.update_left_panel_width(width)
+
     # ------------------------------------------------------------------
     # Connection / Predictor (ConnectionService)
     # ------------------------------------------------------------------

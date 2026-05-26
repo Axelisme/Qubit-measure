@@ -166,7 +166,7 @@ class ExpTabWidget(QWidget):
         content_row.addWidget(splitter, stretch=1)
 
         self._splitter = splitter
-        self._splitter_left_saved = 350
+        self._splitter_left_saved = ctrl.get_persisted_left_panel_width()
         self._left_panel_collapsed = False
         self._splitter.splitterMoved.connect(self._on_splitter_moved)
 
@@ -275,7 +275,8 @@ class ExpTabWidget(QWidget):
         splitter.addWidget(plot_panel)
 
         splitter.setCollapsible(0, True)
-        splitter.setSizes([350, 650])
+        initial_left = self._splitter_left_saved
+        splitter.setSizes([initial_left, max(0, 1000 - initial_left)])
         self._update_left_panel_controls()
         self._schedule_handle_layout()
 
@@ -347,6 +348,7 @@ class ExpTabWidget(QWidget):
             sizes = self._splitter.sizes()
             if sizes[0] > 0:
                 self._splitter_left_saved = sizes[0]
+                self._ctrl.save_left_panel_width(sizes[0])
         self._schedule_handle_layout()
 
     def _schedule_handle_layout(self) -> None:

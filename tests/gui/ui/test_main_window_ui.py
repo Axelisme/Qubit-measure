@@ -9,11 +9,17 @@ from zcu_tools.gui.event_bus import EventBus, GuiEvent, SocChangedPayload
 from zcu_tools.gui.state import TabInteractionState
 
 
+def _mock_ctrl() -> MagicMock:
+    ctrl = MagicMock()
+    ctrl.get_persisted_left_panel_width.return_value = 500
+    return ctrl
+
+
 def test_left_panel_toggle_is_attached_to_tab_bar(qapp):
     from qtpy.QtWidgets import QApplication
     from zcu_tools.gui.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", MagicMock())
+    tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.show()
     QApplication.processEvents()
 
@@ -26,7 +32,7 @@ def test_left_panel_toggle_uses_collapsed_boundary_handle(qapp):
     from qtpy.QtWidgets import QApplication
     from zcu_tools.gui.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", MagicMock())
+    tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.resize(1000, 700)
     tab.show()
     QApplication.processEvents()
@@ -55,7 +61,7 @@ def test_left_panel_handle_tracks_splitter_boundary(qapp):
     from qtpy.QtWidgets import QApplication
     from zcu_tools.gui.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", MagicMock())
+    tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.resize(1000, 700)
     tab.show()
     QApplication.processEvents()
@@ -78,7 +84,7 @@ def test_left_panel_handle_tracks_splitter_boundary(qapp):
 def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
     from zcu_tools.gui.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", MagicMock())
+    tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.update_writeback_items([MagicMock(selected=True)])
     tab.update_interaction_state(
         TabInteractionState(
@@ -102,7 +108,7 @@ def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
 def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(qapp):
     from zcu_tools.gui.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", MagicMock())
+    tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.update_interaction_state(
         TabInteractionState(
             global_run_active=True,
@@ -125,7 +131,7 @@ def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(qapp):
 def test_exp_tab_disables_save_buttons_while_saving_data(qapp):
     from zcu_tools.gui.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", MagicMock())
+    tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.update_interaction_state(
         TabInteractionState(
             global_run_active=False,
@@ -149,7 +155,7 @@ def test_exp_tab_disables_save_buttons_while_saving_data(qapp):
 def test_exp_tab_run_tooltip_shows_no_soc_reason(qapp):
     from zcu_tools.gui.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", MagicMock())
+    tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.update_interaction_state(
         TabInteractionState(
             global_run_active=False,
@@ -171,7 +177,7 @@ def test_exp_tab_run_tooltip_shows_no_soc_reason(qapp):
 def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(qapp):
     from zcu_tools.gui.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", MagicMock())
+    tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.cfg_form.first_invalid_reason = MagicMock(
         return_value="modules.readout: invalid"
     )
@@ -328,7 +334,7 @@ def test_show_analysis_figure_draws_canvas(qapp, monkeypatch):
     from zcu_tools.gui.ui.main_window import ExpTabWidget
 
     del qapp
-    tab = ExpTabWidget("tab-1", MagicMock())
+    tab = ExpTabWidget("tab-1", _mock_ctrl())
     canvas = MagicMock()
 
     monkeypatch.setattr(
@@ -348,7 +354,7 @@ def test_show_analysis_figure_keeps_new_canvas_current_when_replacing_old(qapp):
     from zcu_tools.gui.ui.main_window import ExpTabWidget
 
     del qapp
-    tab = ExpTabWidget("tab-1", MagicMock())
+    tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.show()
     QApplication.processEvents()
 

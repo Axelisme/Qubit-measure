@@ -13,8 +13,10 @@ from platformdirs import user_cache_dir
 
 logger = logging.getLogger(__name__)
 
-_STARTUP_VERSION = 1
-_STARTUP_FILENAME = "startup_v1.json"
+_STARTUP_VERSION = 2
+_STARTUP_FILENAME = "startup_v2.json"
+
+_DEFAULT_LEFT_PANEL_WIDTH = 500
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,7 @@ class PersistedStartup:
     ip: str
     port: int
     devices: list[PersistedDeviceEntry]
+    left_panel_width: int = _DEFAULT_LEFT_PANEL_WIDTH
 
 
 def _safe_cache_root() -> Path:
@@ -55,6 +58,7 @@ def _make_default() -> PersistedStartup:
         ip="192.168.10.1",
         port=8887,
         devices=[],
+        left_panel_width=_DEFAULT_LEFT_PANEL_WIDTH,
     )
 
 
@@ -71,8 +75,9 @@ class StartupPersistenceService:
             raw = json.loads(self._path.read_text(encoding="utf-8"))
             if not isinstance(raw, dict):
                 raise ValueError("payload must be a JSON object")
-            if raw.get("version") != _STARTUP_VERSION:
-                raise ValueError(f"unsupported version: {raw.get('version')!r}")
+            version = raw.get("version")
+            if version not in (1, _STARTUP_VERSION):
+                raise ValueError(f"unsupported version: {version!r}")
             devices: list[PersistedDeviceEntry] = []
             for entry in raw.get("devices", []):
                 if not isinstance(entry, dict):
@@ -101,6 +106,9 @@ class StartupPersistenceService:
                 ip=str(raw.get("ip", "192.168.10.1")),
                 port=int(raw.get("port", 8887)),
                 devices=devices,
+                left_panel_width=int(
+                    raw.get("left_panel_width", _DEFAULT_LEFT_PANEL_WIDTH)
+                ),
             )
             self._current = result
             return result
@@ -124,6 +132,7 @@ class StartupPersistenceService:
                 "ip": data.ip,
                 "port": data.port,
                 "devices": [asdict(d) for d in data.devices],
+                "left_panel_width": data.left_panel_width,
             }
             self._path.write_text(
                 json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8"
@@ -155,6 +164,7 @@ class StartupPersistenceService:
             ip=self._current.ip,
             port=self._current.port,
             devices=self._current.devices,
+            left_panel_width=self._current.left_panel_width,
         )
         self.save(updated)
 
@@ -169,6 +179,7 @@ class StartupPersistenceService:
             ip=ip,
             port=port,
             devices=self._current.devices,
+            left_panel_width=self._current.left_panel_width,
         )
         self.save(updated)
 
@@ -184,6 +195,7 @@ class StartupPersistenceService:
             ip=self._current.ip,
             port=self._current.port,
             devices=[*existing, entry],
+            left_panel_width=self._current.left_panel_width,
         )
         self.save(updated)
 
@@ -198,6 +210,22 @@ class StartupPersistenceService:
             ip=self._current.ip,
             port=self._current.port,
             devices=[d for d in self._current.devices if d.name != name],
+            left_panel_width=self._current.left_panel_width,
+        )
+        self.save(updated)
+
+    def update_left_panel_width(self, width: int) -> None:
+        updated = PersistedStartup(
+            version=_STARTUP_VERSION,
+            chip_name=self._current.chip_name,
+            qub_name=self._current.qub_name,
+            res_name=self._current.res_name,
+            result_dir=self._current.result_dir,
+            database_path=self._current.database_path,
+            ip=self._current.ip,
+            port=self._current.port,
+            devices=self._current.devices,
+            left_panel_width=width,
         )
         self.save(updated)
 
