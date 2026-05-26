@@ -74,6 +74,7 @@ def _patch_ro_cfg_fields(
     ro_freq: Union[float, ScalarValue],
     ro_ch: Union[int, ScalarValue],
     trig_offset: Union[float, ScalarValue],
+    ro_length: Union[float, ScalarValue] = 0.9,
 ) -> None:
     """Patch a DirectReadout CfgSectionValue in-place with sensible values."""
     value.fields["ro_freq"] = (
@@ -84,7 +85,11 @@ def _patch_ro_cfg_fields(
     value.fields["ro_ch"] = (
         ro_ch if isinstance(ro_ch, (DirectValue, EvalValue)) else DirectValue(ro_ch)
     )
-    value.fields["ro_length"] = DirectValue(0.9)
+    value.fields["ro_length"] = (
+        ro_length
+        if isinstance(ro_length, (DirectValue, EvalValue))
+        else DirectValue(ro_length)
+    )
     value.fields["trig_offset"] = (
         trig_offset
         if isinstance(trig_offset, (DirectValue, EvalValue))
@@ -100,14 +105,12 @@ def _patch_ro_cfg_fields(
 def make_direct_readout_default(ctx: ExpContext) -> ModuleRefValue:
     r_f = md_scalar_float(ctx, "r_f", 6000.0)
     ro_ch = md_scalar_int(ctx, "ro_ch", 0)
-    trig_resolved = md_get_float(ctx, "timeFly", 0.5) + 0.05
-    trig_offset: ScalarValue
-    if md_has_key(ctx, "timeFly"):
-        trig_offset = EvalValue(
-            expr="timeFly + 0.05", resolved=trig_resolved, error=None
-        )
-    else:
-        trig_offset = DirectValue(trig_resolved)
+    trig_offset = _make_trig_offset(
+        ctx,
+        trig_expr="timeFly + 0.05",
+        trig_delta=0.05,
+        trig_fallback=0.55,
+    )
 
     spec = make_direct_readout_spec()
     value = make_default_value(spec)
@@ -115,25 +118,45 @@ def make_direct_readout_default(ctx: ExpContext) -> ModuleRefValue:
     return ModuleRefValue("<Custom:Direct Readout>", value)
 
 
-def make_pulse_readout_default(ctx: ExpContext) -> ModuleRefValue:
+def _make_trig_offset(
+    ctx: ExpContext,
+    *,
+    trig_expr: str,
+    trig_delta: float,
+    trig_fallback: float,
+) -> ScalarValue:
+    """Build a trig_offset ScalarValue: EvalValue if timeFly exists, else DirectValue."""
+    if md_has_key(ctx, "timeFly"):
+        resolved = md_get_float(ctx, "timeFly", trig_fallback - trig_delta) + trig_delta
+        return EvalValue(expr=trig_expr, resolved=resolved, error=None)
+    return DirectValue(trig_fallback)
+
+
+def make_pulse_readout_default(
+    ctx: ExpContext,
+    *,
+    gain: float = 0.1,
+    ro_length: Union[float, ScalarValue] = 0.9,
+    trig_expr: str = "timeFly + 0.05",
+    trig_delta: float = 0.05,
+    trig_fallback: float = 0.55,
+) -> ModuleRefValue:
     r_f = md_scalar_float(ctx, "r_f", 6000.0)
     res_ch = md_scalar_int(ctx, "res_ch", 0)
     ro_ch = md_scalar_int(ctx, "ro_ch", 0)
-    trig_resolved = md_get_float(ctx, "timeFly", 0.5) + 0.05
-    trig_offset: ScalarValue
-    if md_has_key(ctx, "timeFly"):
-        trig_offset = EvalValue(
-            expr="timeFly + 0.05", resolved=trig_resolved, error=None
-        )
-    else:
-        trig_offset = DirectValue(trig_resolved)
+    trig_offset = _make_trig_offset(
+        ctx,
+        trig_expr=trig_expr,
+        trig_delta=trig_delta,
+        trig_fallback=trig_fallback,
+    )
 
     spec = make_pulse_readout_spec()
     value = make_default_value(spec)
 
     pulse_cfg = value.fields.get("pulse_cfg")
     if isinstance(pulse_cfg, CfgSectionValue):
-        _patch_pulse_fields(pulse_cfg, freq=r_f, ch=res_ch, gain=0.1, length=1.0)
+        _patch_pulse_fields(pulse_cfg, freq=r_f, ch=res_ch, gain=gain, length=1.0)
         waveform_ref = pulse_cfg.fields.get("waveform")
         if (
             isinstance(waveform_ref, WaveformRefValue)
@@ -147,7 +170,13 @@ def make_pulse_readout_default(ctx: ExpContext) -> ModuleRefValue:
 
     ro_cfg = value.fields.get("ro_cfg")
     if isinstance(ro_cfg, CfgSectionValue):
-        _patch_ro_cfg_fields(ro_cfg, ro_freq=r_f, ro_ch=ro_ch, trig_offset=trig_offset)
+        _patch_ro_cfg_fields(
+            ro_cfg,
+            ro_freq=r_f,
+            ro_ch=ro_ch,
+            trig_offset=trig_offset,
+            ro_length=ro_length,
+        )
 
     return ModuleRefValue("<Custom:Pulse Readout>", value)
 
@@ -161,13 +190,15 @@ def make_readout_default(ctx: ExpContext) -> ModuleRefValue:
 # ---------------------------------------------------------------------------
 
 
-def make_pulse_default(ctx: ExpContext) -> ModuleRefValue:
+def make_pulse_default(
+    ctx: ExpContext, *, gain: float = 0.05, length: float = 0.1
+) -> ModuleRefValue:
     q_f = md_get_float(ctx, "q_f", 4000.0)
     qub_ch = md_get_int(ctx, "qub_ch", 0)
 
     spec = make_pulse_spec()
     value = make_default_value(spec)
-    _patch_pulse_fields(value, freq=q_f, ch=qub_ch, gain=0.2, length=1.0)
+    _patch_pulse_fields(value, freq=q_f, ch=qub_ch, gain=gain, length=length)
     return ModuleRefValue("<Custom:Pulse>", value)
 
 

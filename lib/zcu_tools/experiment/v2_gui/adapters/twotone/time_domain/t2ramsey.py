@@ -19,6 +19,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_reset_module_spec,
     make_reset_ref_default,
     md_get_float,
+    md_has_key,
 )
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
@@ -28,11 +29,13 @@ from zcu_tools.gui.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
+    EvalValue,
     ExpContext,
     MetaDictWriteback,
     ParamMeta,
     RunRequest,
     ScalarSpec,
+    ScalarValue,
     SweepSpec,
     SweepValue,
     WritebackItem,
@@ -61,7 +64,13 @@ class T2RamseyAdapter(
     exp_cls = T2RamseyExp
 
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
+        t1 = md_get_float(ctx, "t1", 100.0)
         t2r = md_get_float(ctx, "t2r", 20.0)
+        relax_delay: ScalarValue = (
+            EvalValue(expr="5 * t1", resolved=5.0 * t1, error=None)
+            if md_has_key(ctx, "t1")
+            else DirectValue(100.0)
+        )
         root_spec = CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
@@ -84,7 +93,9 @@ class T2RamseyAdapter(
             }
         )
         _module_fields: dict[str, CfgNodeValue] = {
-            "pi2_pulse": make_pulse_ref_default(ctx),
+            "pi2_pulse": make_pulse_ref_default(
+                ctx, preferred_names=["pi2_amp", "pi2_len", "pi_amp", "pi_len"]
+            ),
             "readout": make_readout_ref_default(ctx),
         }
         _reset = make_reset_ref_default(ctx, optional=True)
@@ -95,7 +106,7 @@ class T2RamseyAdapter(
                 "modules": CfgSectionValue(fields=_module_fields),
                 "reps": DirectValue(100),
                 "rounds": DirectValue(100),
-                "relax_delay": DirectValue(1.0),
+                "relax_delay": relax_delay,
                 "sweep": CfgSectionValue(
                     fields={
                         "length": SweepValue(start=0.0, stop=t2r * 4, expts=101),

@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass
 
 from matplotlib.figure import Figure
-from typing_extensions import Annotated, Any, Literal, Sequence, TypeAlias
+from typing_extensions import Annotated, Any, Literal, Sequence, TypeAlias, Union
 
 from zcu_tools.experiment.v2.onetone.freq import FreqCfg, FreqExp, FreqResult
 from zcu_tools.experiment.v2_gui.adapters.shared import (
@@ -67,6 +67,16 @@ class OneToneFreqAdapter(
         r_f = md_get_float(ctx, "r_f", 6000.0)
         rf_w = md_get_float(ctx, "rf_w", 20.0)
         half_span = 1.5 * rf_w if rf_w > 0 else 30.0
+        probe_len = md_get_float(ctx, "res_probe_len", 1.0)
+        ro_length: Union[float, EvalValue] = (
+            EvalValue(
+                expr="res_probe_len - 0.1",
+                resolved=probe_len - 0.1,
+                error=None,
+            )
+            if md_has_key(ctx, "res_probe_len")
+            else probe_len - 0.1
+        )
         root_spec = CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
@@ -91,7 +101,9 @@ class OneToneFreqAdapter(
             fields={
                 "modules": CfgSectionValue(
                     fields={
-                        "readout": make_pulse_readout_default(ctx),
+                        "readout": make_pulse_readout_default(
+                            ctx, gain=0.05, ro_length=ro_length
+                        ),
                     }
                 ),
                 "reps": DirectValue(100),

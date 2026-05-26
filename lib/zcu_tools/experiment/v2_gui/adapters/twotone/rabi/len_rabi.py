@@ -94,10 +94,10 @@ class LenRabiAdapter(
                 "modules": CfgSectionValue(fields=_module_fields),
                 "reps": DirectValue(100),
                 "rounds": DirectValue(100),
-                "relax_delay": DirectValue(1.0),
+                "relax_delay": DirectValue(10.5),
                 "sweep": CfgSectionValue(
                     fields={
-                        "length": SweepValue(start=0.0, stop=pi_len * 4, expts=101),
+                        "length": SweepValue(start=0.03, stop=pi_len * 4, expts=101),
                     }
                 ),
             }

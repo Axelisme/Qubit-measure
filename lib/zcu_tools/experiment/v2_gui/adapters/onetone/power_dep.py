@@ -79,7 +79,7 @@ class OneTonePowerDepAdapter(
                     }
                 ),
                 "reps": DirectValue(100),
-                "rounds": DirectValue(100),
+                "rounds": DirectValue(10),
                 "relax_delay": DirectValue(10.0),
                 "earlystop_snr": DirectValue(0.0),
                 "sweep": CfgSectionValue(

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing_extensions import TypeAlias
+from typing_extensions import TypeAlias, Union
 
 from zcu_tools.experiment.v2.onetone.flux_dep import (
     FluxDepCfg,
@@ -27,6 +27,7 @@ from zcu_tools.gui.adapter import (
     NoAnalyzeParams,
     RunRequest,
     ScalarSpec,
+    ScalarValue,
     SweepSpec,
     SweepValue,
 )
@@ -43,6 +44,16 @@ class OneToneFluxDepAdapter(
         r_f = md_get_float(ctx, "r_f", 6000.0)
         rf_w = md_get_float(ctx, "rf_w", 20.0)
         half_span = rf_w if rf_w > 0 else 20.0
+        probe_len = md_get_float(ctx, "res_probe_len", 1.0)
+        ro_length: Union[float, ScalarValue] = (
+            EvalValue(
+                expr="res_probe_len - 0.1",
+                resolved=probe_len - 0.1,
+                error=None,
+            )
+            if md_has_key(ctx, "res_probe_len")
+            else probe_len - 0.1
+        )
         root_spec = CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
@@ -76,7 +87,9 @@ class OneToneFluxDepAdapter(
             fields={
                 "modules": CfgSectionValue(
                     fields={
-                        "readout": make_pulse_readout_default(ctx),
+                        "readout": make_pulse_readout_default(
+                            ctx, gain=0.005, ro_length=ro_length
+                        ),
                     }
                 ),
                 "dev": CfgSectionValue(
@@ -84,8 +97,8 @@ class OneToneFluxDepAdapter(
                         "flux_dev": DirectValue("flux_yoko"),
                     }
                 ),
-                "reps": DirectValue(100),
-                "rounds": DirectValue(100),
+                "reps": DirectValue(1000),
+                "rounds": DirectValue(1),
                 "relax_delay": DirectValue(1.0),
                 "sweep": CfgSectionValue(
                     fields={

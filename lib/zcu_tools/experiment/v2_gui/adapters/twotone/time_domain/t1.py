@@ -24,11 +24,13 @@ from zcu_tools.gui.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
+    EvalValue,
     ExpContext,
     MetaDictWriteback,
     ParamMeta,
     RunRequest,
     ScalarSpec,
+    ScalarValue,
     SweepSpec,
     SweepValue,
     WritebackItem,
@@ -54,7 +56,14 @@ class T1Adapter(AbsExpAdapter[T1RunResult, T1AnalyzeResult, T1AnalyzeParams]):
     exp_cls = T1Exp
 
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
+        from zcu_tools.experiment.v2_gui.adapters.shared import md_has_key
+
         t1 = md_get_float(ctx, "t1", 100.0)
+        relax_delay: ScalarValue = (
+            EvalValue(expr="5 * t1", resolved=5.0 * t1, error=None)
+            if md_has_key(ctx, "t1")
+            else DirectValue(100.0)
+        )
         root_spec = CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
@@ -88,7 +97,7 @@ class T1Adapter(AbsExpAdapter[T1RunResult, T1AnalyzeResult, T1AnalyzeParams]):
                 "modules": CfgSectionValue(fields=_module_fields),
                 "reps": DirectValue(100),
                 "rounds": DirectValue(100),
-                "relax_delay": DirectValue(1.0),
+                "relax_delay": relax_delay,
                 "sweep": CfgSectionValue(
                     fields={
                         "length": SweepValue(start=0.0, stop=t1 * 5, expts=101),

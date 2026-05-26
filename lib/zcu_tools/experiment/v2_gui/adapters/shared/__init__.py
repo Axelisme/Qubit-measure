@@ -1,4 +1,10 @@
-from .ctx_helpers import md_get_float, md_get_int, md_has_key
+from .ctx_helpers import (
+    md_get_float,
+    md_get_int,
+    md_has_key,
+    md_scalar_float,
+    md_scalar_int,
+)
 from .module_builders import build_readout_for_frequency, build_waveform_for_length
 from .module_defaults import NamedModuleValue, select_named_module_value
 from .module_ref_defaults import (
@@ -37,6 +43,8 @@ __all__ = [
     "md_get_float",
     "md_get_int",
     "md_has_key",
+    "md_scalar_float",
+    "md_scalar_int",
     # Module builders
     "build_readout_for_frequency",
     "build_waveform_for_length",
