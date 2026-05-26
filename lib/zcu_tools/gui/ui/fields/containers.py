@@ -164,6 +164,12 @@ class ModuleRefWidget(BaseLiveWidget):
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(4)
 
+        # Declare before _refresh_combo_items so _sync_expand_btn can read them
+        self._sub_widget: Optional[FieldWidgetProtocol] = None
+        self._sub_container = QWidget()
+        self._sub_layout = QVBoxLayout(self._sub_container)
+        self._sub_layout.setContentsMargins(0, 0, 0, 0)
+
         self._expand_btn = QToolButton()
         self._expand_btn.setAutoRaise(True)
         self._expand_btn.setCheckable(True)
@@ -185,13 +191,7 @@ class ModuleRefWidget(BaseLiveWidget):
         self._missing_ref_hint.setVisible(False)
         layout.addWidget(self._missing_ref_hint)
 
-        # Sub-section container
-        self._sub_container = QWidget()
-        self._sub_layout = QVBoxLayout(self._sub_container)
-        self._sub_layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._sub_container)
-
-        self._sub_widget: Optional[FieldWidgetProtocol] = None
         self._refresh_sub_widget()
 
         # Reactive sync
@@ -304,9 +304,6 @@ class ModuleRefWidget(BaseLiveWidget):
 
     def _sync_expand_btn(self) -> None:
         field = cast(ModuleRefLiveField, self._field)
-        # _sub_widget is set after _refresh_combo_items in __init__; guard early calls
-        if not hasattr(self, "_sub_widget"):
-            return
         has_subsection = self._sub_widget is not None
         visible = has_subsection and (not field.spec.optional or field.is_enabled)
         self._expand_btn.setVisible(visible)
