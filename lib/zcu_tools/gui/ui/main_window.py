@@ -275,8 +275,6 @@ class ExpTabWidget(QWidget):
         splitter.addWidget(plot_panel)
 
         splitter.setCollapsible(0, True)
-        initial_left = self._splitter_left_saved
-        splitter.setSizes([initial_left, max(0, 1000 - initial_left)])
         self._update_left_panel_controls()
         self._schedule_handle_layout()
 
@@ -300,6 +298,7 @@ class ExpTabWidget(QWidget):
 
     def showEvent(self, a0) -> None:
         super().showEvent(a0)
+        self._fix_splitter_on_resize()
         self._schedule_handle_layout()
 
     def _toggle_left_panel(self) -> None:
