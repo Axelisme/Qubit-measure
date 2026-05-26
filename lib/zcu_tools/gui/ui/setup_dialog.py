@@ -176,12 +176,12 @@ class SetupDialog(QDialog):
         conn_group = QGroupBox("ZCU Connection")
         conn_form = QFormLayout(conn_group)
 
-        self._ip_edit = QLineEdit("192.168.1.1")
+        self._ip_edit = QLineEdit("192.168.10.1")
         conn_form.addRow("IP address:", self._ip_edit)
 
         self._port_spin = QSpinBox()
         self._port_spin.setRange(1, 65535)
-        self._port_spin.setValue(9898)
+        self._port_spin.setValue(8887)
         conn_form.addRow("Port:", self._port_spin)
 
         right_layout.addWidget(conn_group)

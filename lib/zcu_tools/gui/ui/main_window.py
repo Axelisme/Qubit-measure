@@ -657,7 +657,7 @@ class MainWindow(QMainWindow):
         if tab_id in self._tab_widgets:
             return
 
-        tab_label = adapter_name.split("/")[-1]
+        tab_label = adapter_name
         tab_w = ExpTabWidget(tab_id, self._ctrl)
         self._tab_widgets[tab_id] = tab_w
         self._tabs.addTab(tab_w, tab_label)
@@ -849,6 +849,7 @@ class MainWindow(QMainWindow):
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return None
+        tab_w.reset_plot()  # clear prior liveplot before new run/analyze
         return tab_w._figure_container
 
     def show_status_message(self, message: str) -> None:

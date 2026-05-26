@@ -112,8 +112,9 @@ class State:
         tab.run_result = result
         tab.analyze_param_instance = None
         tab.suggested_save_paths = None
-        # invalidate stale analyze results from the previous run
+        # invalidate stale analyze results and figure from the previous run
         tab.analyze_result = None
+        tab.figure = None
         tab.applied_writeback_keys.clear()
 
     def update_tab_analyze(

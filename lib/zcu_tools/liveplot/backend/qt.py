@@ -12,9 +12,6 @@ from zcu_tools.gui.plot_host import (
     attach_existing_figure_to_container,
     create_figure_in_current_container,
 )
-from zcu_tools.gui.plot_host import (
-    close_figure as close_figure_in_host,
-)
 
 
 def set_figure_container(fig: Figure, container: FigureContainer) -> None:
@@ -35,4 +32,4 @@ def refresh_figure(fig: Figure) -> None:
 
 
 def close_figure(fig: Figure) -> None:
-    close_figure_in_host(fig)
+    del fig  # Qt host manages figure lifetime; cleared on next run start
