@@ -343,6 +343,10 @@ class ExpTabWidget(QWidget):
         self._left_edge_handle.move(x, y)
 
     def _on_splitter_moved(self, _pos: int, _index: int) -> None:
+        if not self._left_panel_collapsed:
+            sizes = self._splitter.sizes()
+            if sizes[0] > 0:
+                self._splitter_left_saved = sizes[0]
         self._schedule_handle_layout()
 
     def _schedule_handle_layout(self) -> None:
