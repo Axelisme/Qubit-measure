@@ -139,7 +139,10 @@ def test_device_service_emits_device_changed_on_drop():
 
     svc = DeviceService(state, bus)
     with (
-        patch("zcu_tools.device.manager.GlobalDeviceManager.get_info", return_value=FakeDeviceInfo(address="")),
+        patch(
+            "zcu_tools.device.manager.GlobalDeviceManager.get_info",
+            return_value=FakeDeviceInfo(address=""),
+        ),
         patch("zcu_tools.device.GlobalDeviceManager.drop_device"),
     ):
         svc.drop_device("dev1")

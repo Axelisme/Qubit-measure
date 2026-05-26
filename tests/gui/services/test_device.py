@@ -49,7 +49,10 @@ def test_device_service_success():
         mock_reg.assert_called_with("dev1", device)
 
     with (
-        patch("zcu_tools.device.manager.GlobalDeviceManager.get_info", return_value=FakeDeviceInfo(address="addr")),
+        patch(
+            "zcu_tools.device.manager.GlobalDeviceManager.get_info",
+            return_value=FakeDeviceInfo(address="addr"),
+        ),
         patch("zcu_tools.device.GlobalDeviceManager.drop_device") as mock_drop,
     ):
         svc.drop_device("dev1")
@@ -65,10 +68,14 @@ def test_device_service_success():
         svc.set_device_value("dev1", 1.0)
         device.set_value.assert_called_with(1.0)
 
-    with patch("zcu_tools.device.manager.GlobalDeviceManager.get_info", return_value=fake_info):
+    with patch(
+        "zcu_tools.device.manager.GlobalDeviceManager.get_info", return_value=fake_info
+    ):
         assert svc.get_device_value("dev1") == 1.0
 
-    with patch("zcu_tools.device.manager.GlobalDeviceManager.get_info", return_value=fake_info):
+    with patch(
+        "zcu_tools.device.manager.GlobalDeviceManager.get_info", return_value=fake_info
+    ):
         result = svc.get_device_info("dev1")
         assert result == fake_info
 
@@ -93,7 +100,9 @@ def test_device_service_blocks_when_running():
         svc.list_devices()
 
     fake_info = FakeDeviceInfo(address="none", value=0.0)
-    with patch("zcu_tools.device.manager.GlobalDeviceManager.get_info", return_value=fake_info):
+    with patch(
+        "zcu_tools.device.manager.GlobalDeviceManager.get_info", return_value=fake_info
+    ):
         result = svc.get_device_info("dev1")
         assert result == fake_info
 
