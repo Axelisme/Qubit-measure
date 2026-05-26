@@ -367,7 +367,6 @@ class SweepWidget(BaseLiveWidget):
     def __init__(self, field: SweepLiveField, parent: Optional[QWidget] = None):
         super().__init__(field, parent)
         self._updating = False
-        self._edge_change_source: Optional[str] = None
 
         layout = QGridLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -422,11 +421,9 @@ class SweepWidget(BaseLiveWidget):
         self._stop_widget.teardown()
 
     def _on_start_changed(self, *_: Any) -> None:
-        self._edge_change_source = "start"
         self._on_ui_changed()
 
     def _on_stop_changed(self, *_: Any) -> None:
-        self._edge_change_source = "stop"
         self._on_ui_changed()
 
     def _on_ui_changed(self, *_: Any) -> None:
@@ -438,8 +435,6 @@ class SweepWidget(BaseLiveWidget):
 
             field = cast(SweepLiveField, self._field)
             source = self.sender()
-            edge_source = self._edge_change_source
-            self._edge_change_source = None
             try:
                 start = _sweep_edge_to_float(field.start_field.get_value(), "start")
                 stop = _sweep_edge_to_float(field.stop_field.get_value(), "stop")
@@ -449,34 +444,25 @@ class SweepWidget(BaseLiveWidget):
             step = self._step.value()
 
             if source is self._step:
+                # step changed → only recompute expts, then back-calculate step
+                # to match the integer expts value
                 if step == 0.0:
                     expts = 1
-                    stop = start
                 else:
-                    expts = int((stop - start) / step + 1)
-                    if expts < 1:
-                        expts = 1
-                    stop = start + step * (expts - 1)
+                    expts = max(1, round((stop - start) / step + 1))
+                step = 0.0 if expts == 1 else (stop - start) / (expts - 1)
+                self._expts.setValue(expts)
+                self._step.setValue(step)
             else:
-                if expts == 1:
-                    step = 0.0
-                    stop = start
-                else:
-                    step = (stop - start) / (expts - 1)
+                # start / stop / expts changed → only recompute step
+                step = 0.0 if expts == 1 else (stop - start) / (expts - 1)
+                self._step.setValue(step)
 
-            if source is self._step or edge_source == "start":
-                field.stop_field.set_value(DirectValue(value=stop, is_unset=False))
-            self._expts.setValue(expts)
-            self._step.setValue(step)
-
+            # start and stop are never touched here; take them directly from the field
             current = field.get_value()
-            nv_start = current.start
-            nv_stop = current.stop
-            if source is self._step or edge_source == "start":
-                nv_stop = stop
             nv = SweepValue(
-                start=nv_start,
-                stop=nv_stop,
+                start=current.start,
+                stop=current.stop,
                 expts=expts,
                 step=step,
             )
