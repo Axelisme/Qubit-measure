@@ -259,6 +259,11 @@ class ModuleRefWidget(BaseLiveWidget):
             if idx >= 0:
                 self._combo.setCurrentIndex(idx)
         self._combo.blockSignals(False)
+        self._sync_expand_btn_visibility()
+
+    def _sync_expand_btn_visibility(self) -> None:
+        field = cast(ModuleRefLiveField, self._field)
+        self._expand_btn.setVisible(field.spec.optional is False or field.is_enabled)
 
     def _on_combo_changed(self, index: int) -> None:
         key = self._combo.itemData(index)
@@ -287,6 +292,7 @@ class ModuleRefWidget(BaseLiveWidget):
             self._combo.setCurrentIndex(0)  # None option
         self._combo.blockSignals(False)
         self._sub_container.setEnabled(enabled)
+        self._sync_expand_btn_visibility()
 
     def _on_model_changed(self, *_: Any) -> None:
         self._refresh_combo_items()

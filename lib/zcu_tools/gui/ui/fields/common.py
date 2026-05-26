@@ -390,8 +390,7 @@ class SweepWidget(BaseLiveWidget):
         self._step = TrimDoubleSpinBox()
         self._step.setRange(-1e12, 1e12)
         self._step.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
-        if decimals is not None:
-            self._step.setDecimals(decimals)
+        self._step.setDecimals(decimals if decimals is not None else 6)
         self._step.setValue(sv.step)
         self._step.valueChanged.connect(self._on_ui_changed)
 
