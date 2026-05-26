@@ -391,32 +391,29 @@ class DeviceService(QObject):
         has no scalar ``value`` field. Any other read failure raises as a
         contract violation (RuntimeError).
         """
-        from zcu_tools.device import GlobalDeviceManager
+        from zcu_tools.device.manager import GlobalDeviceManager
 
         try:
-            dev = GlobalDeviceManager.get_device(name)
+            info = GlobalDeviceManager.get_info(name)
         except ValueError:
             return None
-        info = dev.get_info()
         raw = getattr(info, "value", None)
         if raw is None:
             return None
         return float(raw)
 
     def get_device_info(self, name: str) -> BaseDeviceInfo | None:
-        from zcu_tools.device import GlobalDeviceManager
+        from zcu_tools.device.manager import GlobalDeviceManager
 
         try:
-            dev = GlobalDeviceManager.get_device(name)
+            return GlobalDeviceManager.get_info(name)
         except ValueError:
             return None
-        return dev.get_info()
 
     def get_device_value(self, name: str) -> object:
-        from zcu_tools.device import GlobalDeviceManager
+        from zcu_tools.device.manager import GlobalDeviceManager
 
-        dev = GlobalDeviceManager.get_device(name)
-        info = dev.get_info()
+        info = GlobalDeviceManager.get_info(name)
         return getattr(info, "value", None)
 
     def set_device_value(self, name: str, value: Any) -> object:
