@@ -21,7 +21,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 
 from ...adapter import LiteralSpec, ScalarSpec
 from ...live_model import DeviceRefLiveField, ModuleRefLiveField, SectionLiveField
-from .common import BaseLiveWidget
+from .common import BaseLiveWidget, ElidedLabel
 from .registry import FieldWidgetProtocol, get_widget_cls, register_widget
 
 
@@ -136,7 +136,8 @@ class SectionWidget(BaseLiveWidget):
             w = widget_cls(child_field)  # type: ignore
 
             label = spec.label or key
-            self._container.form.addRow(f"{label}:", cast(QWidget, w))
+            row_label = ElidedLabel(f"{label}:")
+            self._container.form.addRow(row_label, cast(QWidget, w))
             self._child_widgets[key] = w
 
     def teardown(self) -> None:
