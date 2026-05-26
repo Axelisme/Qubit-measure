@@ -6,11 +6,12 @@ wheels/
 *.egg-info
 .ipynb_checkpoints
 .env
-.cursor
-.claude
 .vscode
 .github
 .coverage
+.cursor
+.claude
+.codex
 .gemini
 
 Database/
