@@ -260,11 +260,7 @@ class ModuleRefWidget(BaseLiveWidget):
             if idx >= 0:
                 self._combo.setCurrentIndex(idx)
         self._combo.blockSignals(False)
-        self._sync_expand_btn_visibility()
-
-    def _sync_expand_btn_visibility(self) -> None:
-        field = cast(ModuleRefLiveField, self._field)
-        self._expand_btn.setVisible(field.spec.optional is False or field.is_enabled)
+        self._sync_expand_btn()
 
     def _on_combo_changed(self, index: int) -> None:
         key = self._combo.itemData(index)
@@ -293,7 +289,7 @@ class ModuleRefWidget(BaseLiveWidget):
             self._combo.setCurrentIndex(0)  # None option
         self._combo.blockSignals(False)
         self._sub_container.setEnabled(enabled)
-        self._sync_expand_btn_visibility()
+        self._sync_expand_btn()
 
     def _on_model_changed(self, *_: Any) -> None:
         self._refresh_combo_items()
@@ -307,10 +303,15 @@ class ModuleRefWidget(BaseLiveWidget):
         )
 
     def _sync_expand_btn(self) -> None:
+        field = cast(ModuleRefLiveField, self._field)
+        # _sub_widget is set after _refresh_combo_items in __init__; guard early calls
+        if not hasattr(self, "_sub_widget"):
+            return
         has_subsection = self._sub_widget is not None
-        self._expand_btn.setVisible(has_subsection)
-        self._expand_btn.setEnabled(has_subsection)
-        if not has_subsection:
+        visible = has_subsection and (not field.spec.optional or field.is_enabled)
+        self._expand_btn.setVisible(visible)
+        self._expand_btn.setEnabled(visible)
+        if not visible:
             self._sub_container.setVisible(False)
             return
         expanded = self._expand_btn.isChecked()
