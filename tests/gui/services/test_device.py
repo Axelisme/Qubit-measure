@@ -49,7 +49,7 @@ def test_device_service_success():
         mock_reg.assert_called_with("dev1", device)
 
     with (
-        patch("zcu_tools.device.GlobalDeviceManager.get_device", return_value=device),
+        patch("zcu_tools.device.manager.GlobalDeviceManager.get_info", return_value=FakeDeviceInfo(address="addr")),
         patch("zcu_tools.device.GlobalDeviceManager.drop_device") as mock_drop,
     ):
         svc.drop_device("dev1")

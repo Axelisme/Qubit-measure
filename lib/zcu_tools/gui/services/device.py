@@ -275,14 +275,12 @@ class DeviceService(QObject):
     def drop_device(self, name: str) -> None:
         logger.info("drop_device: name=%r", name)
         self._require_device_mutation_available("drop device")
-        from zcu_tools.device import GlobalDeviceManager
+        from zcu_tools.device.manager import GlobalDeviceManager
 
-        dev = GlobalDeviceManager.get_device(name)
-        type_name = type(dev).__name__
-        address = getattr(dev, "address", "")
+        info = GlobalDeviceManager.get_info(name)
         GlobalDeviceManager.drop_device(name)
         self._memory_entries[name] = DeviceMemoryInfo(
-            type_name=type_name, name=name, address=address
+            type_name=info.type, name=name, address=info.address
         )
         self._bus.emit(GuiEvent.DEVICE_CHANGED, DeviceChangedPayload())
 
