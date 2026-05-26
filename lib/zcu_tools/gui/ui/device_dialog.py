@@ -293,7 +293,7 @@ class DeviceDialog(QDialog):
 
         # Bottom buttons for right side
         btn_row = QHBoxLayout()
-        self._drop_btn = QPushButton("Forget")
+        self._drop_btn = QPushButton("Drop")
         self._drop_btn.setStyleSheet("color: red;")
         self._drop_btn.clicked.connect(self._on_forget_clicked)
         self._refresh_btn = QPushButton("Refresh")
@@ -379,6 +379,7 @@ class DeviceDialog(QDialog):
 
         if self._active_setup is None:
             self._drop_btn.setEnabled(True)
+            self._drop_btn.setText("Forget" if is_memory else "Drop")
             self._refresh_btn.setEnabled(not is_memory)
             self._apply_btn.setEnabled(True)
             self._apply_btn.setText("Reconnect" if is_memory else "Apply Changes")
