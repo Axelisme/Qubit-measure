@@ -243,7 +243,7 @@ def test_main_window_soc_changed_refreshes_run_lock(qapp):
     tab = MagicMock()
     window._tab_widgets["tab-1"] = tab
 
-    bus.emit(GuiEvent.SOC_CHANGED, SocChangedPayload(soc=object(), soccfg=object()))
+    bus.emit(GuiEvent.SOC_CHANGED, SocChangedPayload(soc=None, soccfg=None))
 
     tab.update_interaction_state.assert_called()
 
