@@ -57,6 +57,24 @@ class RegisterDeviceRequest:
     address: str
 
 
+@dataclass(frozen=True)
+class DeviceMemoryInfo:
+    """Remembered but not yet connected device — no live driver."""
+
+    type_name: str
+    name: str
+    address: str
+
+
+@dataclass(frozen=True)
+class DeviceEntry:
+    """Summary of a device (connected or memory-only) for display in the UI."""
+
+    name: str
+    type_name: str
+    is_connected: bool
+
+
 class DeviceRegistrationError(RuntimeError):
     """Expected failure raised by DeviceService.register_device for user-facing errors.
 
@@ -197,6 +215,7 @@ class DeviceService(QObject):
         self._driver_factory: Callable[[str, str], DeviceProtocol] = (
             driver_factory or _default_driver_factory
         )
+        self._memory_entries: dict[str, DeviceMemoryInfo] = {}
 
     def _require_device_mutation_available(self, action: str) -> None:
         if self._state.is_run_active():
@@ -250,6 +269,7 @@ class DeviceService(QObject):
                         "Failed to close device %r after register failure", req.name
                     )
             raise
+        self._memory_entries.pop(req.name, None)
         self._bus.emit(GuiEvent.DEVICE_CHANGED, DeviceChangedPayload())
 
     def drop_device(self, name: str) -> None:
@@ -264,17 +284,78 @@ class DeviceService(QObject):
     # Query
     # ------------------------------------------------------------------
 
-    def list_devices(self) -> dict[str, str]:
+    def list_devices(self) -> list[DeviceEntry]:
         from zcu_tools.device import GlobalDeviceManager
 
         devices = GlobalDeviceManager.get_all_devices()
-        return {name: type(dev).__name__ for name, dev in devices.items()}
+        connected = {
+            name: DeviceEntry(
+                name=name, type_name=type(dev).__name__, is_connected=True
+            )
+            for name, dev in devices.items()
+        }
+        memory = {
+            name: DeviceEntry(name=name, type_name=info.type_name, is_connected=False)
+            for name, info in self._memory_entries.items()
+            if name not in connected
+        }
+        all_entries = {**connected, **memory}
+        return sorted(all_entries.values(), key=lambda e: e.name)
 
     def list_device_names(self) -> list[str]:
         """Return sorted registered device names. Single read boundary for views/models."""
         from zcu_tools.device import GlobalDeviceManager
 
         return sorted(GlobalDeviceManager.get_all_devices().keys())
+
+    def register_remembered_devices(self, entries: list[DeviceMemoryInfo]) -> None:
+        """Load persisted device entries as memory-only (no live connection)."""
+        from zcu_tools.device import GlobalDeviceManager
+
+        existing_live = set(GlobalDeviceManager.get_all_devices().keys())
+        for entry in entries:
+            if entry.name in existing_live:
+                logger.warning(
+                    "register_remembered_devices: skipping %r — already connected",
+                    entry.name,
+                )
+                continue
+            self._memory_entries[entry.name] = entry
+            logger.debug(
+                "register_remembered_devices: registered memory device %r (%s)",
+                entry.name,
+                entry.type_name,
+            )
+
+    def reconnect_device(self, name: str) -> None:
+        """Promote a memory-only device to a live connection (synchronous)."""
+        mem = self._memory_entries.get(name)
+        if mem is None:
+            raise RuntimeError(f"Device {name!r} is not in memory — cannot reconnect")
+        req = RegisterDeviceRequest(
+            type_name=mem.type_name, name=mem.name, address=mem.address
+        )
+        self.register_device(req)
+
+    def forget_device(self, name: str) -> None:
+        """Remove a memory-only device from the remembered list."""
+        logger.info("forget_device: name=%r", name)
+        if name not in self._memory_entries:
+            raise RuntimeError(f"Device {name!r} is not a memory-only device")
+        self._memory_entries.pop(name)
+        self._bus.emit(GuiEvent.DEVICE_CHANGED, DeviceChangedPayload())
+
+    def is_memory_device(self, name: str) -> bool:
+        return name in self._memory_entries and name not in self._get_live_names()
+
+    def get_memory_device_address(self, name: str) -> Optional[str]:
+        mem = self._memory_entries.get(name)
+        return mem.address if mem is not None else None
+
+    def _get_live_names(self) -> set[str]:
+        from zcu_tools.device import GlobalDeviceManager
+
+        return set(GlobalDeviceManager.get_all_devices().keys())
 
     def get_device_unit(self, name: str) -> str:
         """Return the unit string for a registered device.

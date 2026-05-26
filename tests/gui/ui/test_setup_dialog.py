@@ -20,11 +20,23 @@ class _StubConnSvc(QWidget):
     connection_failed: Signal = Signal(str)
 
 
-def test_setup_dialog_init(qapp):
+def _make_ctrl(**overrides: object) -> MagicMock:
     ctrl = MagicMock()
-    ctrl.get_context_labels.return_value = ["ctx1", "ctx2"]
-    ctrl.get_active_context_label.return_value = "ctx1"
+    ctrl.get_persisted_startup.return_value = None
+    ctrl.list_devices.return_value = []
+    ctrl.get_context_labels.return_value = []
+    ctrl.get_active_context_label.return_value = None
     ctrl.get_soccfg.return_value = None
+    for k, v in overrides.items():
+        getattr(ctrl, k).return_value = v
+    return ctrl
+
+
+def test_setup_dialog_init(qapp):
+    ctrl = _make_ctrl(
+        get_context_labels=["ctx1", "ctx2"],
+        get_active_context_label="ctx1",
+    )
 
     dialog = SetupDialog(ctrl)
 
@@ -34,8 +46,7 @@ def test_setup_dialog_init(qapp):
 
 
 def test_setup_dialog_apply_startup_context(qapp):
-    ctrl = MagicMock()
-    ctrl.get_soccfg.return_value.description.return_value = "Mock SOC config"
+    ctrl = _make_ctrl()
     dialog = SetupDialog(ctrl)
 
     dialog._chip_edit.setText("Q1_Chip")
@@ -51,10 +62,10 @@ def test_setup_dialog_apply_startup_context(qapp):
 
 
 def test_setup_dialog_switch_context(qapp):
-    ctrl = MagicMock()
-    ctrl.get_context_labels.return_value = ["ctx1", "ctx2"]
-    ctrl.get_active_context_label.return_value = "ctx1"
-    ctrl.get_soccfg.return_value.description.return_value = "Mock SOC config"
+    ctrl = _make_ctrl(
+        get_context_labels=["ctx1", "ctx2"],
+        get_active_context_label="ctx1",
+    )
     dialog = SetupDialog(ctrl)
 
     dialog._ctx_list.setCurrentRow(1)  # select ctx2
@@ -64,8 +75,7 @@ def test_setup_dialog_switch_context(qapp):
 
 
 def test_setup_dialog_new_context(qapp):
-    ctrl = MagicMock()
-    ctrl.get_soccfg.return_value.description.return_value = "Mock SOC config"
+    ctrl = _make_ctrl()
     dialog = SetupDialog(ctrl)
 
     dialog._clone_check.setChecked(True)
@@ -77,8 +87,7 @@ def test_setup_dialog_new_context(qapp):
 
 
 def test_setup_dialog_connect_mock_dispatches_request(qapp):
-    ctrl = MagicMock()
-    ctrl.get_soccfg.return_value.description.return_value = "Mock SOC config"
+    ctrl = _make_ctrl()
     stub_conn = _StubConnSvc()
     ctrl.get_connection_service.return_value = stub_conn
     dialog = SetupDialog(ctrl)
@@ -92,8 +101,7 @@ def test_setup_dialog_connect_mock_dispatches_request(qapp):
 
 
 def test_setup_dialog_connect_remote_dispatches_request(qapp):
-    ctrl = MagicMock()
-    ctrl.get_soccfg.return_value.description.return_value = "Mock SOC config"
+    ctrl = _make_ctrl()
     stub_conn = _StubConnSvc()
     ctrl.get_connection_service.return_value = stub_conn
     dialog = SetupDialog(ctrl)
@@ -111,8 +119,7 @@ def test_setup_dialog_connect_remote_dispatches_request(qapp):
 
 
 def test_setup_dialog_connect_failure_signal_updates_status(qapp):
-    ctrl = MagicMock()
-    ctrl.get_soccfg.return_value.description.return_value = "Mock SOC config"
+    ctrl = _make_ctrl()
     stub_conn = _StubConnSvc()
     ctrl.get_connection_service.return_value = stub_conn
     dialog = SetupDialog(ctrl)

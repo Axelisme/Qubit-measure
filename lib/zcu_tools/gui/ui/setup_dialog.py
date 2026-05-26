@@ -216,6 +216,7 @@ class SetupDialog(QDialog):
 
         # initialise
         self._on_names_changed()
+        self._prefill_from_persistence()
         self._refresh_device_list()
         self._refresh_context_list()
         self._maybe_show_current_cfg()
@@ -223,6 +224,26 @@ class SetupDialog(QDialog):
     # ------------------------------------------------------------------
     # Project panel handlers
     # ------------------------------------------------------------------
+
+    def _prefill_from_persistence(self) -> None:
+        data = self._ctrl.get_persisted_startup()
+        if data is None:
+            return
+        if data.chip_name:
+            self._chip_edit.setText(data.chip_name)
+        if data.qub_name:
+            self._qub_edit.setText(data.qub_name)
+        if data.res_name:
+            self._res_edit.setText(data.res_name)
+        # Overwrite auto-computed paths with persisted ones (if non-empty)
+        if data.result_dir:
+            self._result_dir_edit.setText(data.result_dir)
+        if data.database_path:
+            self._db_path_edit.setText(data.database_path)
+        if data.ip:
+            self._ip_edit.setText(data.ip)
+        if data.port:
+            self._port_spin.setValue(data.port)
 
     def _on_names_changed(self) -> None:
         chip = self._chip_edit.text().strip()
@@ -243,14 +264,17 @@ class SetupDialog(QDialog):
             self._db_path_edit.setText(path)
 
     def _refresh_device_list(self) -> None:
-        summaries = self._ctrl.list_devices()
+        entries = self._ctrl.list_devices()
 
         current = self._device_combo.currentText()
         self._device_combo.blockSignals(True)
         self._device_combo.clear()
         self._device_combo.addItem("(none)")
-        for name in sorted(summaries):
-            self._device_combo.addItem(f"{name}  [{summaries[name]}]", userData=name)
+        for entry in entries:
+            if entry.is_connected:
+                self._device_combo.addItem(
+                    f"{entry.name}  [{entry.type_name}]", userData=entry.name
+                )
         self._device_combo.blockSignals(False)
 
         idx = self._device_combo.findText(current)
@@ -277,6 +301,13 @@ class SetupDialog(QDialog):
         self._ctrl.set_startup_context(
             md,
             ml,
+            chip_name=chip,
+            qub_name=qub,
+            res_name=res,
+            result_dir=result_dir,
+            database_path=db_path,
+        )
+        self._ctrl.save_startup_project(
             chip_name=chip,
             qub_name=qub,
             res_name=res,
@@ -396,6 +427,11 @@ class SetupDialog(QDialog):
         conn_svc.connection_finished.connect(self._on_connect_finished)
         conn_svc.connection_failed.connect(self._on_connect_failed)
 
+        if not use_mock:
+            self._ctrl.save_startup_connection(
+                ip=self._ip_edit.text().strip(),
+                port=self._port_spin.value(),
+            )
         self._connect_btn.setEnabled(False)
         self._set_conn_status("Connecting…", error=False)
         self._ctrl.start_connect(req)

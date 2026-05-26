@@ -30,12 +30,15 @@ from .services import (
     ConnectionService,
     ContextService,
     DeviceService,
+    PersistedDeviceEntry,
     PersistedSession,
+    PersistedStartup,
     PersistedTab,
     RunService,
     SaveBothOutcome,
     SaveService,
     SessionPersistenceService,
+    StartupPersistenceService,
     TabService,
     WritebackService,
 )
@@ -45,6 +48,7 @@ from .services.connection import (
     PredictFreqRequest,
 )
 from .services.device import (
+    DeviceEntry,
     DeviceSetupSnapshot,
     RegisterDeviceRequest,
 )
@@ -86,6 +90,8 @@ class Controller:
         self._save_svc = SaveService(state, SaveDataRunner(), bus)
         self._writeback_svc = WritebackService(state, bus)
         self._session_svc = SessionPersistenceService()
+
+        self._startup_svc = StartupPersistenceService()
 
         self._run_svc.run_finished.connect(self._on_run_finished)
         self._run_svc.run_failed.connect(self._on_run_failed)
@@ -462,7 +468,7 @@ class Controller:
     def drop_device(self, name: str) -> None:
         self._dev_svc.drop_device(name)
 
-    def list_devices(self) -> dict[str, str]:
+    def list_devices(self) -> list[DeviceEntry]:
         return self._dev_svc.list_devices()
 
     def list_device_names(self) -> list[str]:
@@ -491,6 +497,69 @@ class Controller:
 
     def cancel_device_setup(self) -> None:
         self._dev_svc.cancel_setup()
+
+    def reconnect_device(self, name: str) -> None:
+        self._dev_svc.reconnect_device(name)
+
+    def forget_device(self, name: str) -> None:
+        self._dev_svc.forget_device(name)
+        self._startup_svc.remove_device(name)
+
+    def is_memory_device(self, name: str) -> bool:
+        return self._dev_svc.is_memory_device(name)
+
+    def get_memory_device_address(self, name: str) -> Optional[str]:
+        """Return the persisted address for a memory-only device, or None."""
+        return self._dev_svc.get_memory_device_address(name)
+
+    # ------------------------------------------------------------------
+    # Startup persistence (StartupPersistenceService)
+    # ------------------------------------------------------------------
+
+    def restore_startup_settings(self) -> None:
+        data = self._startup_svc.load()
+        if data is None:
+            return
+        from .services.device import DeviceMemoryInfo
+
+        entries = [
+            DeviceMemoryInfo(
+                type_name=d.type_name,
+                name=d.name,
+                address=d.address,
+            )
+            for d in data.devices
+        ]
+        self._dev_svc.register_remembered_devices(entries)
+
+    def get_persisted_startup(self) -> Optional[PersistedStartup]:
+        return self._startup_svc.load()
+
+    def save_startup_project(
+        self,
+        *,
+        chip_name: str,
+        qub_name: str,
+        res_name: str,
+        result_dir: str,
+        database_path: str,
+    ) -> None:
+        self._startup_svc.update_project(
+            chip_name=chip_name,
+            qub_name=qub_name,
+            res_name=res_name,
+            result_dir=result_dir,
+            database_path=database_path,
+        )
+
+    def save_startup_connection(self, *, ip: str, port: int) -> None:
+        self._startup_svc.update_connection(ip=ip, port=port)
+
+    def save_startup_device(self, entry: PersistedDeviceEntry) -> None:
+        self._startup_svc.add_device(entry)
+
+    def remove_startup_device(self, name: str) -> None:
+        self._startup_svc.remove_device(name)
 
     # ------------------------------------------------------------------
     # Connection / Predictor (ConnectionService)

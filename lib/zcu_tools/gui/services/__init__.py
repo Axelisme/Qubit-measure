@@ -11,6 +11,11 @@ from .session_persistence import (
     PersistedTab,
     SessionPersistenceService,
 )
+from .startup_persistence import (
+    PersistedDeviceEntry,
+    PersistedStartup,
+    StartupPersistenceService,
+)
 from .tab import TabService
 from .writeback import WritebackService
 
@@ -25,6 +30,9 @@ __all__ = [
     "PersistedSession",
     "PersistedTab",
     "SessionPersistenceService",
+    "PersistedDeviceEntry",
+    "PersistedStartup",
+    "StartupPersistenceService",
     "TabService",
     "WritebackService",
 ]

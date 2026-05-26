@@ -59,6 +59,7 @@ def run_app() -> None:
 
     ctrl, window = _build_window(state, runner, registry, io_manager)
     ctrl.restore_tabs_from_session()
+    ctrl.restore_startup_settings()
     window.show()
 
     # Show startup dialog to let user set chip/qub names and derive paths.

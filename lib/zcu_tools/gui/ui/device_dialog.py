@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Optional, Protocol, runtime_checkable
 logger = logging.getLogger(__name__)
 
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+from qtpy.QtGui import QColor  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QComboBox,
     QDialog,
@@ -28,6 +29,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 
 from zcu_tools.gui.event_bus import DeviceSetupChangedPayload, GuiEvent
 from zcu_tools.gui.services.device import (
+    DeviceEntry,
     DeviceRegistrationError,
     DeviceSetupSnapshot,
     RegisterDeviceRequest,
@@ -191,6 +193,32 @@ class _SGS100APanel(QWidget):
         }
 
 
+class _MemoryDevicePanel(QWidget):
+    """Read-only info panel for a remembered-but-not-connected device."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        form = QFormLayout(self)
+
+        self._type_label = QLabel()
+        form.addRow("Type:", self._type_label)
+
+        self._name_label = QLabel()
+        form.addRow("Name:", self._name_label)
+
+        self._addr_label = QLabel()
+        form.addRow("Address:", self._addr_label)
+
+        note = QLabel("Not connected. Press Reconnect to connect.")
+        note.setStyleSheet("color: gray;")
+        form.addRow(note)
+
+    def load_memory(self, type_name: str, name: str, address: str) -> None:
+        self._type_label.setText(type_name)
+        self._name_label.setText(name)
+        self._addr_label.setText(address or "(none)")
+
+
 # ---------------------------------------------------------------------------
 # Main dialog
 # ---------------------------------------------------------------------------
@@ -259,13 +287,15 @@ class DeviceDialog(QDialog):
         self._stack.addWidget(_FakeDevicePanel())  # Page 1
         self._stack.addWidget(_YOKOGS200Panel())  # Page 2
         self._stack.addWidget(_SGS100APanel())  # Page 3
+        self._memory_panel = _MemoryDevicePanel()
+        self._stack.addWidget(self._memory_panel)  # Page 4: memory-only
         right_layout.addWidget(self._stack, stretch=1)
 
         # Bottom buttons for right side
         btn_row = QHBoxLayout()
-        self._drop_btn = QPushButton("Drop Selected")
+        self._drop_btn = QPushButton("Forget")
         self._drop_btn.setStyleSheet("color: red;")
-        self._drop_btn.clicked.connect(self._on_drop_clicked)
+        self._drop_btn.clicked.connect(self._on_forget_clicked)
         self._refresh_btn = QPushButton("Refresh")
         self._refresh_btn.clicked.connect(self._on_refresh_clicked)
         self._apply_btn = QPushButton("Apply Changes")
@@ -307,21 +337,34 @@ class DeviceDialog(QDialog):
         )
         self._setup_subscription_active = False
 
-    def _refresh_list(self) -> None:
+    def _refresh_list(self, select_name: Optional[str] = None) -> None:
         self._list.clear()
-        devices = self._ctrl.list_devices()
-        for name, type_ in devices.items():
-            item = QListWidgetItem(f"{name} ({type_})")
-            item.setData(Qt.ItemDataRole.UserRole, name)  # type: ignore[attr-defined]
+        entries = self._ctrl.list_devices()
+        for entry in entries:
+            if entry.is_connected:
+                item = QListWidgetItem(f"{entry.name} ({entry.type_name})")
+            else:
+                item = QListWidgetItem(
+                    f"{entry.name} ({entry.type_name}) [not connected]"
+                )
+                item.setForeground(QColor("gray"))
+            item.setData(Qt.ItemDataRole.UserRole, entry.name)  # type: ignore[attr-defined]
             self._list.addItem(item)
+
+        if select_name is not None:
+            for row in range(self._list.count()):
+                it = self._list.item(row)
+                if it is not None and it.data(Qt.ItemDataRole.UserRole) == select_name:  # type: ignore[attr-defined]
+                    self._list.setCurrentRow(row)
+                    break
 
         self._on_selection_changed(self._list.currentRow())
         # refresh default name so it stays unique after any list change
         dtype = self._type_combo.currentText()
-        existing = set(devices.keys())
+        existing = {e.name for e in entries}
         self._name_edit.setText(self._unique_name(dtype.lower(), existing))
 
-    def _on_selection_changed(self, row: int) -> None:
+    def _on_selection_changed(self, _row: int) -> None:
         item = self._list.currentItem()
         if item is None:
             self._stack.setCurrentIndex(0)
@@ -331,12 +374,27 @@ class DeviceDialog(QDialog):
                 self._apply_btn.setEnabled(False)
             return
 
+        name = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+        is_memory = self._ctrl.is_memory_device(name)
+
         if self._active_setup is None:
             self._drop_btn.setEnabled(True)
-            self._refresh_btn.setEnabled(True)
+            self._refresh_btn.setEnabled(not is_memory)
             self._apply_btn.setEnabled(True)
+            self._apply_btn.setText("Reconnect" if is_memory else "Apply Changes")
+            self._apply_btn.setStyleSheet("")
 
-        name = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+        if is_memory:
+            entries = self._ctrl.list_devices()
+            mem_entry = next((e for e in entries if e.name == name), None)
+            addr = self._ctrl.get_memory_device_address(name) or ""
+            if mem_entry is not None:
+                self._memory_panel.load_memory(
+                    mem_entry.type_name, mem_entry.name, addr
+                )
+            self._stack.setCurrentIndex(4)
+            return
+
         info = self._ctrl.get_device_info(name)
         if info is None:
             return
@@ -360,7 +418,7 @@ class DeviceDialog(QDialog):
         return f"{base}_{i}"
 
     def _on_type_changed(self, dtype: str) -> None:
-        existing = set(self._ctrl.list_devices().keys())
+        existing = {e.name for e in self._ctrl.list_devices()}
         self._name_edit.setText(self._unique_name(dtype.lower(), existing))
 
     def _on_add_clicked(self) -> None:
@@ -377,16 +435,27 @@ class DeviceDialog(QDialog):
             self._add_status.setText(str(e))
             return
 
+        from zcu_tools.gui.services.startup_persistence import (
+            PersistedDeviceEntry,  # noqa: PLC0415
+        )
+
+        self._ctrl.save_startup_device(
+            PersistedDeviceEntry(type_name=dtype, name=name, address=addr)
+        )
         self._add_status.setStyleSheet("color: green;")
         self._add_status.setText(f"Added {name}; select it and Apply to configure.")
         self._refresh_list()
 
-    def _on_drop_clicked(self) -> None:
+    def _on_forget_clicked(self) -> None:
         item = self._list.currentItem()
         if item is None:
             return
         name = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
-        self._ctrl.drop_device(name)
+        if self._ctrl.is_memory_device(name):
+            self._ctrl.forget_device(name)
+        else:
+            self._ctrl.drop_device(name)
+            self._ctrl.remove_startup_device(name)
         self._refresh_list()
 
     def _on_refresh_clicked(self) -> None:
@@ -401,6 +470,20 @@ class DeviceDialog(QDialog):
         if item is None:
             return
         name = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+
+        if self._ctrl.is_memory_device(name):
+            self._add_status.setText("")
+            try:
+                self._ctrl.reconnect_device(name)
+            except DeviceRegistrationError as e:
+                self._add_status.setStyleSheet("color: red;")
+                self._add_status.setText(str(e))
+                return
+            self._add_status.setStyleSheet("color: green;")
+            self._add_status.setText(f"Reconnected {name}.")
+            self._refresh_list(select_name=name)
+            return
+
         panel = self._stack.currentWidget()
         if not isinstance(panel, DevicePanelProtocol):
             return

@@ -54,7 +54,7 @@ def test_device_service_success():
 
     with patch("zcu_tools.device.GlobalDeviceManager.get_all_devices", return_value={}):
         result = svc.list_devices()
-        assert isinstance(result, dict)
+        assert isinstance(result, list)
 
     with patch("zcu_tools.device.GlobalDeviceManager.get_device") as mock_get:
         mock_get.return_value = device

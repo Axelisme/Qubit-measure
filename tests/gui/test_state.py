@@ -141,7 +141,7 @@ def test_update_tab_result_stores_result_and_clears_stale_analyze_data():
     state.update_tab_result("t1", object())
     tab = state.get_tab("t1")
     assert tab.analyze_result is None
-    assert tab.figure is fig
+    assert tab.figure is None  # figure is cleared with stale analyze data
     assert tab.analyze_param_instance is None
     assert tab.suggested_save_paths is None
 

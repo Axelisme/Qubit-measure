@@ -186,16 +186,18 @@ def test_devicemanager_register_and_list():
     dev = FakeDevice()
     svc, _ = _make_svc(driver=dev)
     _register(svc, "flux")
-    devices = svc.list_devices()
-    assert "flux" in devices
-    assert devices["flux"] == "FakeDevice"
+    entries = svc.list_devices()
+    entry = next((e for e in entries if e.name == "flux"), None)
+    assert entry is not None
+    assert entry.type_name == "FakeDevice"
+    assert entry.is_connected is True
 
 
 def test_devicemanager_drop_device():
     svc, _ = _make_svc()
     _register(svc, "flux")
     svc.drop_device("flux")
-    assert "flux" not in svc.list_devices()
+    assert not any(e.name == "flux" for e in svc.list_devices())
 
 
 def test_devicemanager_get_set_value():

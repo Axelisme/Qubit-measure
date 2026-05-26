@@ -41,7 +41,7 @@ def test_device_service_registration():
     svc.register_device(
         RegisterDeviceRequest(type_name="FakeDevice", name="test_dev", address="")
     )
-    assert "test_dev" in svc.list_devices()
+    assert any(e.name == "test_dev" for e in svc.list_devices())
 
     svc.get_device_info("test_dev")
     dev.get_info.assert_called_once()
@@ -54,7 +54,7 @@ def test_device_service_registration():
     dev.get_info.assert_called()
 
     svc.drop_device("test_dev")
-    assert "test_dev" not in svc.list_devices()
+    assert not any(e.name == "test_dev" for e in svc.list_devices())
 
 
 def test_device_setup_worker_success(qapp):

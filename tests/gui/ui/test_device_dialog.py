@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.gui.event_bus import DeviceSetupChangedPayload, EventBus, GuiEvent
 from zcu_tools.gui.services.device import (
+    DeviceEntry,
     DeviceRegistrationError,
     DeviceSetupSnapshot,
     RegisterDeviceRequest,
@@ -15,16 +16,25 @@ from zcu_tools.gui.services.device_progress import ProgressEntrySnapshot
 from zcu_tools.gui.ui.device_dialog import DeviceDialog, _FakeDevicePanel
 
 
+def _entry(
+    name: str, type_name: str = "FakeDevice", connected: bool = True
+) -> DeviceEntry:
+    return DeviceEntry(name=name, type_name=type_name, is_connected=connected)
+
+
 def _make_ctrl() -> MagicMock:
     ctrl = MagicMock()
     ctrl.get_bus.return_value = EventBus()
     ctrl.get_active_device_setup.return_value = None
+    ctrl.list_devices.return_value = []
+    ctrl.is_memory_device.return_value = False
+    ctrl.get_memory_device_address.return_value = None
     return ctrl
 
 
 def test_device_dialog_init(qapp):
     ctrl = _make_ctrl()
-    ctrl.list_devices.return_value = {"fakedevice": "FakeDevice"}
+    ctrl.list_devices.return_value = [_entry("fakedevice")]
 
     # Mock get_device_info to return a simple mock with type
     info_mock = MagicMock()
@@ -48,7 +58,6 @@ def test_device_dialog_init(qapp):
 
 def test_device_dialog_add_device_dispatches_request(qapp):
     ctrl = _make_ctrl()
-    ctrl.list_devices.return_value = {}
 
     dialog = DeviceDialog(ctrl)
     dialog._type_combo.setCurrentText("FakeDevice")
@@ -68,7 +77,6 @@ def test_device_dialog_add_device_dispatches_request(qapp):
 
 def test_device_dialog_add_device_shows_registration_error(qapp):
     ctrl = _make_ctrl()
-    ctrl.list_devices.return_value = {}
     ctrl.register_device.side_effect = DeviceRegistrationError("boom")
 
     dialog = DeviceDialog(ctrl)
@@ -82,7 +90,6 @@ def test_device_dialog_add_device_shows_registration_error(qapp):
 def test_device_dialog_add_device_propagates_unexpected_errors(qapp):
     """Programmer errors must not be swallowed by the dialog catch."""
     ctrl = _make_ctrl()
-    ctrl.list_devices.return_value = {}
     ctrl.register_device.side_effect = ValueError("contract violation")
 
     dialog = DeviceDialog(ctrl)
@@ -94,7 +101,7 @@ def test_device_dialog_add_device_propagates_unexpected_errors(qapp):
 
 def test_device_dialog_drop_device(qapp):
     ctrl = _make_ctrl()
-    ctrl.list_devices.return_value = {"yoko": "YOKOGS200"}
+    ctrl.list_devices.return_value = [_entry("yoko", "YOKOGS200")]
 
     info_mock = MagicMock()
     info_mock.type = "YOKOGS200"
@@ -105,7 +112,7 @@ def test_device_dialog_drop_device(qapp):
     assert dialog._list.count() == 1
     dialog._list.setCurrentRow(0)
 
-    # Click drop
+    # Click forget (was drop)
     dialog._drop_btn.click()
     ctrl.drop_device.assert_called_with("yoko")
 
@@ -114,7 +121,7 @@ def test_device_dialog_refresh_reloads_selected_device_info(qapp):
     from zcu_tools.device.fake import FakeDeviceInfo
 
     ctrl = _make_ctrl()
-    ctrl.list_devices.return_value = {"fd": "FakeDevice"}
+    ctrl.list_devices.return_value = [_entry("fd")]
     ctrl.get_device_info.side_effect = [
         FakeDeviceInfo(address="none", value=1.0),
         FakeDeviceInfo(address="none", value=2.0),
@@ -132,10 +139,10 @@ def test_device_dialog_refresh_reloads_selected_device_info(qapp):
 
 
 def test_device_dialog_apply_changes(qapp):
-    from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
+    from zcu_tools.device.fake import FakeDeviceInfo
 
     ctrl = _make_ctrl()
-    ctrl.list_devices.return_value = {"fd": "FakeDevice"}
+    ctrl.list_devices.return_value = [_entry("fd")]
 
     info = FakeDeviceInfo(address="none")
     ctrl.get_device_info.return_value = info
@@ -156,7 +163,7 @@ def test_device_dialog_apply_changes(qapp):
 
 def test_device_dialog_restores_background_setup_and_stops_it(qapp):
     ctrl = _make_ctrl()
-    ctrl.list_devices.return_value = {"fd": "FakeDevice"}
+    ctrl.list_devices.return_value = [_entry("fd")]
     from zcu_tools.device.fake import FakeDeviceInfo
 
     ctrl.get_device_info.return_value = FakeDeviceInfo(address="none")
@@ -193,7 +200,7 @@ def test_device_dialog_restores_background_setup_and_stops_it(qapp):
 
 def test_device_dialog_close_keeps_setup_running_and_unsubscribes(qapp):
     ctrl = _make_ctrl()
-    ctrl.list_devices.return_value = {"fd": "FakeDevice"}
+    ctrl.list_devices.return_value = [_entry("fd")]
     from zcu_tools.device.fake import FakeDeviceInfo
 
     ctrl.get_device_info.return_value = FakeDeviceInfo(address="none")
