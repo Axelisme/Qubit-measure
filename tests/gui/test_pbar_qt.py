@@ -181,3 +181,119 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
     # run_task uses leave=True pbar; reset_all clears it
     stack.reset_all()
     assert len(stack._active) == 0
+
+
+# ---------------------------------------------------------------------------
+# disable=True behaviour
+# ---------------------------------------------------------------------------
+
+
+def test_disabled_pbar_does_not_push_to_stack(qapp):
+    """factory(disable=True) must not add any bar to stack._active."""
+    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+    from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
+
+    stack = _make_stack(qapp)
+    factory = QtProgressBarFactory(stack)
+
+    factory(desc="hidden", total=10, leave=False, disable=True)
+    QApplication.processEvents()
+    assert len(stack._active) == 0
+
+
+def test_disabled_pbar_methods_are_noop_no_exception(qapp):
+    """All mutating methods on a disabled pbar must not raise and must not touch the stack."""
+    from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
+
+    stack = _make_stack(qapp)
+    factory = QtProgressBarFactory(stack)
+
+    pbar = factory(desc="hidden", total=10, leave=False, disable=True)
+    pbar.update(3)
+    pbar.reset()
+    pbar.refresh()
+    pbar.set_description("new label")
+    pbar.total = 20
+    pbar.close()
+
+    assert len(stack._active) == 0
+
+
+def test_disabled_pbar_internal_state_updates(qapp):
+    """Mutating methods on a disabled pbar still update internal state (no Qt signals)."""
+    from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
+
+    stack = _make_stack(qapp)
+    factory = QtProgressBarFactory(stack)
+
+    pbar = factory(desc="hidden", total=10, disable=True)
+    pbar.update(3)
+    pbar.update(2)
+    assert pbar.n == 5
+
+    pbar.total = 20
+    assert pbar.total == 20
+
+    pbar.set_description("updated")
+    assert pbar.desc == "updated"
+
+    assert len(stack._active) == 0
+
+
+def test_disabled_pbar_close_does_not_pop_stack(qapp):
+    """close() on a disabled pbar (leave=False) must not affect the stack."""
+    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+    from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
+
+    stack = _make_stack(qapp)
+    factory = QtProgressBarFactory(stack)
+
+    pbar = factory(desc="hidden", total=5, leave=False, disable=True)
+    pbar.close()
+    QApplication.processEvents()
+    assert len(stack._active) == 0
+
+
+def test_explicit_disable_false_behaves_normally(qapp):
+    """Explicitly passing disable=False must behave identically to the default."""
+    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+    from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
+
+    stack = _make_stack(qapp)
+    factory = QtProgressBarFactory(stack)
+
+    pbar = factory(desc="normal", total=5, leave=False, disable=False)
+    QApplication.processEvents()
+    assert len(stack._active) == 1
+
+    pbar.update(2)
+    assert pbar.n == 2
+
+    pbar.close()
+    QApplication.processEvents()
+    assert len(stack._active) == 0
+
+
+def test_disabled_and_enabled_pbars_coexist(qapp):
+    """A disabled pbar alongside an enabled one must not interfere with the stack."""
+    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+    from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
+
+    stack = _make_stack(qapp)
+    factory = QtProgressBarFactory(stack)
+
+    enabled = factory(desc="active", total=10, leave=True, disable=False)
+    QApplication.processEvents()
+    disabled = factory(desc="hidden", total=10, leave=False, disable=True)
+    QApplication.processEvents()
+
+    assert len(stack._active) == 1
+
+    disabled.update(5)
+    disabled.close()
+    QApplication.processEvents()
+    assert len(stack._active) == 1  # enabled still in stack; disabled close is no-op
+
+    stack.reset_all()
+    assert len(stack._active) == 0
+    del enabled

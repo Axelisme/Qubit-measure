@@ -154,16 +154,21 @@ class QtProgressBar(BaseProgressBar):
         label: str = "",
         total: Optional[ProgressTotal] = None,
         leave: bool = True,
+        disabled: bool = False,
         **_kwargs: Any,
     ) -> None:
         import time
 
+        self._disabled = disabled
         self._bridge = bridge
         self._label = label
         self._total: ProgressTotal = total
         self._leave = leave
         self._n: ProgressValue = 0
         self._start_time: float = time.monotonic()
+        if disabled:
+            self._bar: Any = None
+            return
         bridge.push_requested.emit(label, total)
         self._bar = bridge.pop_pending()
 
@@ -196,10 +201,14 @@ class QtProgressBar(BaseProgressBar):
 
     def set_description(self, description: str) -> None:
         self._label = description
+        if self._disabled:
+            return
         self._bridge.set_format_requested.emit(self._bar, self._build_format())
 
     def update(self, value: ProgressValue = 1) -> None:
         self._n = self._n + value
+        if self._disabled:
+            return
         self._bridge.update_requested.emit(self._bar, float(value))
         self._bridge.set_format_requested.emit(self._bar, self._build_format())
 
@@ -208,6 +217,8 @@ class QtProgressBar(BaseProgressBar):
 
         self._n = 0
         self._start_time = time.monotonic()
+        if self._disabled:
+            return
         self._bridge.set_value_requested.emit(self._bar, 0)
         self._bridge.set_format_requested.emit(self._bar, self._build_format())
 
@@ -215,6 +226,8 @@ class QtProgressBar(BaseProgressBar):
         pass  # Qt repaints automatically
 
     def close(self) -> None:
+        if self._disabled:
+            return
         if not self._leave:
             self._bridge.pop_requested.emit(self._bar)
 
@@ -225,6 +238,8 @@ class QtProgressBar(BaseProgressBar):
     @total.setter
     def total(self, value: ProgressTotal) -> None:
         self._total = value
+        if self._disabled:
+            return
         self._bridge.set_max_requested.emit(self._bar, value)
 
     @property
@@ -247,9 +262,11 @@ class QtProgressBarFactory:
         label = kwargs.pop("desc", "") or (args[1] if len(args) > 1 else "")
         total = kwargs.pop("total", None) or (args[2] if len(args) > 2 else None)
         leave = kwargs.pop("leave", True)
+        disabled = bool(kwargs.pop("disable", False))
         return QtProgressBar(
             self._bridge,
             label=str(label) if label else "",
             total=total,
             leave=leave,
+            disabled=disabled,
         )
