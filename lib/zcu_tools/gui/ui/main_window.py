@@ -1101,4 +1101,10 @@ class MainWindow(QMainWindow):
             return
         self._ctrl.persist_tabs_session()
         set_shutting_down(True)
+        # Tear down remote control before the Qt main loop exits so any in-flight
+        # RPC sees a clean shutdown (timeout / EPIPE) rather than a dead Controller.
+        remote = getattr(self, "remote_control_service", None)
+        if remote is not None:
+            remote.stop()
+            self.remote_control_service = None
         super().closeEvent(a0)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from zcu_tools.gui.adapter import ExpContext
@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.io_manager import IOManager
     from zcu_tools.gui.registry import Registry
     from zcu_tools.gui.runner import Runner
+    from zcu_tools.gui.services.remote import ControlOptions
     from zcu_tools.gui.state import State
     from zcu_tools.gui.ui.main_window import MainWindow
 
@@ -30,8 +31,12 @@ def _make_empty_ctx() -> "ExpContext":
     )
 
 
-def run_app() -> None:
-    """Build and launch the GUI. Blocks until the window is closed."""
+def run_app(control_opts: Optional["ControlOptions"] = None) -> None:
+    """Build and launch the GUI. Blocks until the window is closed.
+
+    ``control_opts`` (if provided) starts a ``RemoteControlService`` after the
+    window is constructed; the service is stopped from ``MainWindow.closeEvent``.
+    """
     from zcu_tools.gui.utils.error_handler import install_global_exception_hook
 
     install_global_exception_hook()
@@ -61,6 +66,15 @@ def run_app() -> None:
     ctrl.restore_tabs_from_session()
     ctrl.restore_startup_settings()
     window.show()
+
+    if control_opts is not None:
+        from zcu_tools.gui.services.remote import RemoteControlService
+
+        service = RemoteControlService(controller=ctrl, opts=control_opts)
+        service.start()
+        # Stash on the window so MainWindow.closeEvent can stop it; keep a
+        # strong ref so the GC does not retire the daemon thread early.
+        window.remote_control_service = service  # type: ignore[attr-defined]
 
     # Show startup dialog to let user set chip/qub names and derive paths.
     # Non-blocking: user can close it and still use the app (with empty context).

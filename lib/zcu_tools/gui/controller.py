@@ -587,6 +587,15 @@ class Controller:
     def has_tab(self, tab_id: str) -> bool:
         return tab_id in self._state.tabs
 
+    def list_tab_ids(self) -> list[str]:
+        return list(self._state.tabs.keys())
+
+    def get_tab_adapter_name(self, tab_id: str) -> str:
+        return self._state.get_tab(tab_id).adapter_name
+
+    def get_tab_cfg_schema(self, tab_id: str) -> CfgSchema:
+        return self._state.get_tab(tab_id).cfg_schema
+
     def get_tab_result(self, tab_id: str) -> Optional[object]:
         return self._tab_svc.get_tab_result(tab_id)
 
