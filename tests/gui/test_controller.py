@@ -14,7 +14,7 @@ from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
-from zcu_tools.gui.adapter import CfgSchema, ContextReadiness, ExpContext
+from zcu_tools.gui.adapter import CfgSchema, ContextReadiness, DirectValue, ExpContext
 from zcu_tools.gui.controller import Controller
 from zcu_tools.gui.event_bus import (
     GuiEvent,
@@ -152,14 +152,48 @@ def test_close_tab_removes_from_state(cf):
 
 def test_start_run_sets_is_running(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
+    cf.ctrl.start_run(tab_id)
     assert cf.state.is_tab_running(tab_id)
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))  # cleanup
 
 
+def test_start_run_uses_committed_state_schema(cf):
+    """Phase 78-A: start_run reads cfg from State, not from a passed-in schema."""
+    tab_id = cf.ctrl.new_tab("fake")
+
+    # Mutate committed cfg in State after tab creation.
+    base = cf.state.get_tab(tab_id).cfg_schema
+    mutated_value = dataclasses.replace(
+        base.value,
+        fields={**base.value.fields, "reps": DirectValue(42)},
+    )
+    mutated = dataclasses.replace(base, value=mutated_value)
+    cf.ctrl.update_tab_cfg(tab_id, mutated)
+
+    # Intercept run to capture the schema the adapter actually receives.
+    captured: dict[str, CfgSchema] = {}
+    real_adapter = cf.state.get_tab(tab_id).adapter
+
+    def _capture_run(req, schema):
+        captured["schema"] = schema
+        return real_adapter.run(req, schema)
+
+    spy = MagicMock(spec=FakeAdapter)
+    spy.capabilities = real_adapter.capabilities
+    spy.run.side_effect = _capture_run
+    cf.state.get_tab(tab_id).adapter = spy
+
+    cf.ctrl.start_run(tab_id)
+    assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
+
+    reps_value = captured["schema"].value.fields["reps"]
+    assert isinstance(reps_value, DirectValue)
+    assert reps_value.value == 42
+
+
 def test_start_run_emits_run_lock_changed(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
+    cf.ctrl.start_run(tab_id)
     cf.bus.emit.assert_any_call(
         GuiEvent.RUN_LOCK_CHANGED, RunLockChangedPayload(running_tab_id=tab_id)
     )
@@ -168,14 +202,14 @@ def test_start_run_emits_run_lock_changed(cf):
 
 def test_run_finished_updates_tab_state(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
+    cf.ctrl.start_run(tab_id)
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     assert cf.state.get_tab(tab_id).run_result is not None
 
 
 def test_run_finished_emits_run_lock_release(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
+    cf.ctrl.start_run(tab_id)
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     cf.bus.emit.assert_any_call(
         GuiEvent.RUN_LOCK_CHANGED, RunLockChangedPayload(running_tab_id=None)
@@ -184,7 +218,7 @@ def test_run_finished_emits_run_lock_release(cf):
 
 def test_run_finished_calls_refresh_tab(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
+    cf.ctrl.start_run(tab_id)
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     cf.bus.emit.assert_any_call(
         GuiEvent.TAB_CONTENT_CHANGED, TabContentChangedPayload(tab_id=tab_id)
@@ -202,7 +236,7 @@ def test_run_failed_shows_status_message(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.get_tab(tab_id).adapter = bad_adapter
 
-    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
+    cf.ctrl.start_run(tab_id)
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     assert cf.view.show_error_dialog.called
     msg = cf.view.show_error_dialog.call_args[0][1]
@@ -215,7 +249,7 @@ def test_run_failed_clears_run_lock(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.get_tab(tab_id).adapter = bad_adapter
 
-    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
+    cf.ctrl.start_run(tab_id)
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     assert cf.state.is_run_active() is False
 
@@ -232,12 +266,12 @@ def test_start_run_while_running_raises(cf):
 
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.get_tab(tab_id).adapter = slow
-    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
+    cf.ctrl.start_run(tab_id)
 
     assert cf.state.is_tab_running(tab_id)
     other_tab_id = cf.ctrl.new_tab("fake")
     with pytest.raises(OperationConflictError, match="run is active"):
-        cf.ctrl.start_run(other_tab_id, _default_fake_schema(cf.state.exp_context))
+        cf.ctrl.start_run(other_tab_id)
 
     # cleanup
     ev.set()
@@ -251,7 +285,7 @@ def test_start_run_while_device_setup_active_raises(cf):
     )
 
     with pytest.raises(OperationConflictError, match="device_setup is active"):
-        cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
+        cf.ctrl.start_run(tab_id)
 
     cf.ctrl._operation_gate.release(lease)
 
@@ -267,7 +301,7 @@ def test_draft_context_rejects_real_run_and_save(cf):
     )
 
     with pytest.raises(RuntimeError, match="active file-backed context"):
-        cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
+        cf.ctrl.start_run(tab_id)
     with pytest.raises(RuntimeError, match="active file-backed context"):
         cf.ctrl.save_data(tab_id, "/tmp/data.h5")
     with pytest.raises(RuntimeError, match="active file-backed context"):
@@ -281,7 +315,7 @@ def test_run_rejected_while_soc_connect_lease_active(cf):
     lease = cf.ctrl._operation_gate.acquire(OperationKind.SOC_CONNECT, owner_id="soc")
 
     with pytest.raises(OperationConflictError, match="soc_connect is active"):
-        cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
+        cf.ctrl.start_run(tab_id)
 
     cf.ctrl._operation_gate.release(lease)
 
@@ -308,7 +342,7 @@ def test_run_clears_active_figure_container_after_finish(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.view.make_live_container.return_value = _make_figure_container()
 
-    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
+    cf.ctrl.start_run(tab_id)
 
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     assert has_current_container() is False
@@ -323,7 +357,7 @@ def test_get_tab_result_returns_last_result(cf):
     import numpy as np
 
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
+    cf.ctrl.start_run(tab_id)
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     result = cf.ctrl.get_tab_result(tab_id)
     assert isinstance(result.data, np.ndarray)
@@ -331,13 +365,32 @@ def test_get_tab_result_returns_last_result(cf):
 
 def test_run_completion_prepares_pure_tab_snapshot(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id, _default_fake_schema(cf.state.exp_context))
+    cf.ctrl.start_run(tab_id)
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
     snapshot = cf.ctrl.get_tab_snapshot(tab_id)
 
     assert snapshot.interaction.has_run_result is True
     assert snapshot.analyze_params is not None
+
+
+def test_update_tab_cfg_does_not_emit_interaction_changed(cf):
+    """Phase 78-C: cfg keystrokes must not trigger a full snapshot rebuild.
+
+    update_tab_cfg writes to State but emits no TAB_INTERACTION_CHANGED;
+    validity refreshes come from CfgFormWidget.validity_changed instead.
+    """
+    tab_id = cf.ctrl.new_tab("fake")
+    base = cf.state.get_tab(tab_id).cfg_schema
+    cf.bus.emit.reset_mock()
+
+    cf.ctrl.update_tab_cfg(tab_id, base)
+
+    for call in cf.bus.emit.call_args_list:
+        event = call.args[0] if call.args else None
+        assert event != GuiEvent.TAB_INTERACTION_CHANGED, (
+            f"update_tab_cfg emitted TAB_INTERACTION_CHANGED unexpectedly: {call}"
+        )
 
 
 def test_get_adapter_names_includes_fake(cf):

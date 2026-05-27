@@ -37,9 +37,20 @@ logger = logging.getLogger(__name__)
 
 
 class CfgFormWidget(QWidget):
-    """Container for the reactive experiment configuration form."""
+    """Container for the reactive experiment configuration form.
+
+    Builds and owns a LiveModel (the runtime *draft* SSOT). Whether changes
+    propagate to ``State.cfg_schema`` depends on who handles ``schema_changed``:
+
+    - In the tab pane (``ExpTabWidget``), ``schema_changed`` is bound to
+      ``Controller.update_tab_cfg`` — this is the auto-commit boundary.
+    - In inspect / writeback dialogs, the host stores the draft locally and
+      only commits on an explicit Apply.
+    """
 
     validity_changed: Signal = Signal(bool)
+    # Auto-commit signal (in tab mode) / draft-change notification (in dialog
+    # mode). Payload is a freshly built CfgSchema snapshot of the LiveModel.
     schema_changed: Signal = Signal(object)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -112,7 +123,13 @@ class CfgFormWidget(QWidget):
         return self._model.get_value()
 
     def read_schema(self) -> CfgSchema:
-        """Return a new CfgSchema combining the stored spec with current model state."""
+        """Snapshot the LiveModel draft as a fresh ``CfgSchema``.
+
+        Tab callers should normally read ``State.cfg_schema`` instead (the
+        committed truth, kept in sync by auto-commit). This method exists for
+        local-draft hosts (inspect / writeback dialogs) that need to capture
+        the unsaved draft at their own Apply boundary.
+        """
         from zcu_tools.gui.adapter import CfgSchema
 
         if self._model is None:

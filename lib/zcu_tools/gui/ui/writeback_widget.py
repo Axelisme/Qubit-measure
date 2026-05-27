@@ -222,6 +222,9 @@ class WritebackWidget(QWidget):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        # Local-draft CfgFormWidget / LiveModel. Edits stay in this dialog and
+        # only get stored on the WritebackItem at Save below — they never
+        # auto-commit to State.cfg_schema.
         form_widget = CfgFormWidget()
         schema = copy.deepcopy(item.edited_schema or item.edit_schema)
         form_widget.populate(schema, self._ctrl)

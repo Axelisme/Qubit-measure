@@ -54,6 +54,11 @@ class TabService:
         return self._state.get_tab(tab_id).cfg_schema
 
     def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None:
+        """Commit boundary: store the latest draft as the committed cfg.
+
+        Idempotent. Called from ``Controller.update_tab_cfg`` whenever the
+        tab's CfgFormWidget reports a change.
+        """
         self._state.update_tab_cfg_schema(tab_id, schema)
 
     def get_tab_result(self, tab_id: str) -> object | None:

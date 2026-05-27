@@ -29,6 +29,10 @@ T_AnalyzeResult = TypeVar("T_AnalyzeResult", bound=AnalyzeResultWithFigure)
 class TabState(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     adapter_name: str
     adapter: AbsExpAdapter[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]
+    # Committed cfg SSOT for this tab. The tab's CfgFormWidget LiveModel is the
+    # runtime draft; it auto-commits here through Controller.update_tab_cfg on
+    # every change. Run / Save / Session persistence read this field, never
+    # the live form.
     cfg_schema: CfgSchema
     run_result: Optional[T_Result] = None
     analyze_result: Optional[T_AnalyzeResult] = None

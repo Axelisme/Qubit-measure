@@ -98,6 +98,8 @@ class _MlConfigDialog(QDialog):
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
+        # Local-draft CfgFormWidget / LiveModel. Edits stay in this dialog's
+        # draft and only enter the live ModuleLibrary on Save below.
         self._form_widget = CfgFormWidget()
         self._scroll.setWidget(self._form_widget)
         layout.addWidget(self._scroll, stretch=1)

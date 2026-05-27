@@ -297,13 +297,17 @@ class Controller:
     def has_soc(self) -> bool:
         return self._conn_svc.has_soc()
 
-    def start_run(self, tab_id: str, schema: CfgSchema) -> None:
+    def start_run(self, tab_id: str) -> None:
         if not self.has_context():
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
         self._require_active_context("run")
 
+        # Read committed cfg from State, not from the live form. The tab's
+        # CfgFormWidget auto-commits every change via update_tab_cfg, so the
+        # State value is authoritative.
+        schema = self._state.get_tab(tab_id).cfg_schema
         view = self._require_view()
         pbar_factory = view.make_pbar_factory(tab_id)
         live_container = view.make_live_container(tab_id)
@@ -590,11 +594,17 @@ class Controller:
         return self._tab_view_svc.get_snapshot(tab_id)
 
     def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None:
+        """Auto-commit boundary for tab CfgFormWidget.
+
+        Writes the latest form draft into ``State.cfg_schema`` as the committed
+        truth. Cfg edits do not change ``TabInteractionState`` (run / analyze /
+        save availability), so no ``TAB_INTERACTION_CHANGED`` is emitted here;
+        the form's own ``validity_changed`` signal drives any UI refresh.
+
+        Do not call from dialog / writeback local LiveModel paths — those keep
+        their drafts off of ``State`` until their own Apply boundary.
+        """
         self._tab_svc.update_tab_cfg(tab_id, schema)
-        self._bus.emit(
-            GuiEvent.TAB_INTERACTION_CHANGED,
-            TabInteractionChangedPayload(tab_id=tab_id),
-        )
 
     def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:
         self._tab_svc.update_tab_analyze_param_instance(tab_id, instance)

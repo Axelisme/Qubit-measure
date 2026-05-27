@@ -1,4 +1,23 @@
-"""LiveModel — reactive data layer for CfgSchema.
+"""LiveModel — runtime *draft* SSOT for one CfgSchema editing surface.
+
+The ``SectionLiveField`` tree built by ``CfgFormWidget.populate`` is the
+authoritative live state while a form is being edited: it owns
+``DirectValue``/``EvalValue`` resolution, validity, dirty bubbling, ModuleRef
+binding and SweepEditor canonicalization. There are two distinct draft surfaces
+using this same machinery:
+
+- **Tab form (auto-commit draft)** — every ``on_change`` flows through
+  ``CfgFormWidget._emit_schema_changed`` → ``Controller.update_tab_cfg`` and
+  is committed into ``State.cfg_schema`` immediately. The tab's LiveModel and
+  the committed State value are kept in lockstep.
+- **Dialog / writeback (local draft)** — ``inspect_dialog.py`` and
+  ``writeback_widget.py`` each construct their own ``CfgFormWidget`` /
+  LiveModel; their drafts never reach ``State.cfg_schema`` until an explicit
+  Apply path writes to ``ModuleLibrary`` or to a ``WritebackItem``.
+
+LiveModel itself is not the persisted truth. ``State.cfg_schema`` is the
+committed SSOT used by run / save / session persistence; this module produces
+the draft that auto-commits (tab) or stays local (dialog).
 
 Uses LiveModelEnv for dependency injection, fetches md/ml through the
 controller boundary, and tracks unset Scalar fields explicitly.
