@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
-from zcu_tools.gui.adapter import CfgSchema, RunRequest
+from zcu_tools.gui.adapter import CfgSchema, RunRequest, require_soc_handles
 from zcu_tools.gui.event_bus import (
     GuiEvent,
     RunLockChangedPayload,
@@ -72,6 +72,8 @@ class RunService(QObject):
         logger.info("start_run: tab_id=%r", tab_id)
 
         tab = self._state.get_tab(tab_id)
+        if tab.adapter.capabilities.requires_soc:
+            require_soc_handles(req)
         lease = self._gate.acquire(OperationKind.RUN, owner_id=tab_id)
         self._active_lease = lease
         try:

@@ -303,8 +303,6 @@ class Controller:
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
         self._require_active_context("run")
-        if not self.has_soc():
-            raise RuntimeError("No ZCU connection. Please connect first.")
 
         view = self._require_view()
         pbar_factory = view.make_pbar_factory(tab_id)
