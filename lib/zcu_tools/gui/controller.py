@@ -49,6 +49,7 @@ from .services import (
     TabService,
     TabViewService,
     TabViewSnapshot,
+    ViewQueryService,
     WorkspaceService,
     WritebackService,
 )
@@ -107,6 +108,7 @@ class Controller:
 
         # Initialize domain services
         self._guard_svc = GuardService(state)
+        self._view_query_svc = ViewQueryService(self._require_view)
         self._dev_svc = DeviceService(bus, self._operation_gate)
         self._conn_svc = ConnectionService(state, bus, self._operation_gate)
         self._ctx_svc = ContextService(state, io_manager, bus)
@@ -668,31 +670,28 @@ class Controller:
         return list(self._require_view().list_open_dialogs())
 
     def get_view_snapshot(self) -> dict[str, object]:
-        return self._require_view().get_view_snapshot()
+        return self._view_query_svc.snapshot()
 
     def take_screenshot(self, tab_id: Optional[str] = None) -> bytes:
-        return self._require_view().take_screenshot(tab_id)
+        return self._view_query_svc.screenshot(tab_id)
 
     def take_figure_screenshot(self, tab_id: str) -> bytes:
-        return self._require_view().take_figure_screenshot(tab_id)
+        return self._view_query_svc.figure_screenshot(tab_id)
 
     def take_dialog_screenshot(self, dialog_name: Any) -> bytes:
-        return self._require_view().take_dialog_screenshot(dialog_name)
+        return self._view_query_svc.dialog_screenshot(dialog_name)
 
     def get_tab_live_model_root(self, tab_id: str):
-        return self._require_view().get_tab_live_model_root(tab_id)
+        return self._view_query_svc.live_model_root(tab_id)
 
     def set_tab_field(self, tab_id: str, path: str, value: object) -> None:
         """Mutate a single cfg field on the tab's live LiveModel (Phase 81b).
 
-        Goes through the form's live tree so the change auto-commits to
-        ``State.cfg_schema`` via the existing ``schema_changed`` path,
-        keeping the visible widget in sync (WYSIWYG).
+        Delegates to ViewQueryService, which goes through the form's live tree
+        so the change auto-commits to ``State.cfg_schema`` via the existing
+        ``schema_changed`` path, keeping the visible widget in sync (WYSIWYG).
         """
-        from .services.remote.path_resolver import resolve_and_set
-
-        root = self._require_view().get_tab_live_model_root(tab_id)
-        resolve_and_set(root, path, value)
+        self._view_query_svc.set_field(tab_id, path, value)
 
     def get_adapter_names(self) -> list[str]:
         return self._tab_svc.list_adapter_names()
