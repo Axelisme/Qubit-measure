@@ -30,6 +30,7 @@ from .services import (
     DeviceService,
     DeviceSnapshot,
     DisconnectDeviceRequest,
+    GuardService,
     OperationGate,
     PersistedStartup,
     RestoreReport,
@@ -105,6 +106,7 @@ class Controller:
         self._operation_gate = OperationGate()
 
         # Initialize domain services
+        self._guard_svc = GuardService(state)
         self._dev_svc = DeviceService(bus, self._operation_gate)
         self._conn_svc = ConnectionService(state, bus, self._operation_gate)
         self._ctx_svc = ContextService(state, io_manager, bus)
@@ -300,12 +302,6 @@ class Controller:
     def has_active_context(self) -> bool:
         return self._ctx_svc.is_active_context()
 
-    def _require_active_context(self, operation: str) -> None:
-        if not self.has_active_context():
-            raise RuntimeError(
-                f"Cannot {operation} without an active file-backed context."
-            )
-
     def get_running_tab_id(self) -> Optional[str]:
         return self._state.running_tab_id
 
@@ -313,20 +309,14 @@ class Controller:
         return self._conn_svc.has_soc()
 
     def start_run(self, tab_id: str) -> None:
-        if not self.has_context():
-            raise RuntimeError(
-                "No experiment context. Use Project… to set up chip/qubit or load a project."
-            )
-        self._require_active_context("run")
-
-        # Read committed cfg from State, not from the live form. The tab's
-        # CfgFormWidget auto-commits every change via update_tab_cfg, so the
-        # State value is authoritative.
-        schema = self._state.get_tab(tab_id).cfg_schema
+        # GuardService proves context readiness + committed-cfg validity + soc
+        # capability, and carries the worker payload in the permit. Both clients
+        # acquire through the same path so guard logic cannot drift.
+        permit = self._guard_svc.acquire_run_permit(tab_id)
         view = self._require_view()
         pbar_factory = view.make_pbar_factory(tab_id)
         live_container = view.make_live_container(tab_id)
-        self._run_svc.start_run(tab_id, schema, pbar_factory, live_container)
+        self._run_svc.start_run(permit, pbar_factory, live_container)
 
     def cancel_run(self) -> None:
         self._run_svc.cancel_run()
@@ -342,13 +332,10 @@ class Controller:
     # ------------------------------------------------------------------
 
     def analyze(self, tab_id: str, analyze_params_instance: object) -> None:
-        if not self.has_context():
-            raise RuntimeError(
-                "No experiment context. Use Project… to set up chip/qubit or load a project."
-            )
+        permit = self._guard_svc.acquire_analyze_permit(tab_id)
         figure_container = self._require_view().make_live_container(tab_id)
         self._analyze_svc.start_analyze(
-            tab_id, analyze_params_instance, figure_container
+            permit, analyze_params_instance, figure_container
         )
 
     # ------------------------------------------------------------------
@@ -358,11 +345,8 @@ class Controller:
     def apply_writeback_items(
         self, tab_id: str, items: list[WritebackItem]
     ) -> list[str]:
-        if not self.has_context():
-            raise RuntimeError(
-                "No experiment context. Use Project… to set up chip/qubit or load a project."
-            )
-        return self._writeback_svc.apply_tab_writeback_items(tab_id, items)
+        permit = self._guard_svc.acquire_writeback_permit(tab_id)
+        return self._writeback_svc.apply_tab_writeback_items(permit, items)
 
     # ------------------------------------------------------------------
     # Save (TabService)
@@ -380,22 +364,14 @@ class Controller:
     def save_data(
         self, tab_id: str, data_path: Optional[str] = None, comment: str = ""
     ) -> None:
-        if not self.has_context():
-            raise RuntimeError(
-                "No experiment context. Use Project… to set up chip/qubit or load a project."
-            )
-        self._require_active_context("save data")
+        permit = self._guard_svc.acquire_save_permit(tab_id)
         resolved = data_path or self._resolve_save_paths(tab_id).data_path
-        self._save_svc.start_save_data(tab_id, resolved, comment=comment)
+        self._save_svc.start_save_data(permit, resolved, comment=comment)
 
     def save_image(self, tab_id: str, image_path: Optional[str] = None) -> None:
-        if not self.has_context():
-            raise RuntimeError(
-                "No experiment context. Use Project… to set up chip/qubit or load a project."
-            )
-        self._require_active_context("save image")
+        permit = self._guard_svc.acquire_save_permit(tab_id)
         resolved = image_path or self._resolve_save_paths(tab_id).image_path
-        self._save_svc.save_image_sync(tab_id, resolved)
+        self._save_svc.save_image_sync(permit, resolved)
         self._require_view().show_status_message(f"Image saved to {resolved}")
 
     def save_both(
@@ -405,16 +381,12 @@ class Controller:
         image_path: Optional[str] = None,
         comment: str = "",
     ) -> None:
-        if not self.has_context():
-            raise RuntimeError(
-                "No experiment context. Use Project… to set up chip/qubit or load a project."
-            )
-        self._require_active_context("save data and image")
+        permit = self._guard_svc.acquire_save_permit(tab_id)
         paths = self._resolve_save_paths(tab_id)
         resolved_data = data_path or paths.data_path
         resolved_image = image_path or paths.image_path
         self._save_svc.start_save_both(
-            tab_id, resolved_data, resolved_image, comment=comment
+            permit, resolved_data, resolved_image, comment=comment
         )
 
     # ------------------------------------------------------------------

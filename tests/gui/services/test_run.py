@@ -1,4 +1,9 @@
-"""Tests for RunService capability-aware SoC validation."""
+"""Tests for RunService — operation-boundary behavior given a RunPermit.
+
+Static preconditions (context readiness, committed-cfg validity, soc capability)
+are GuardService's responsibility (see test_guard.py). RunService only handles
+the dynamic boundary: tab-busy, lease acquisition, worker start.
+"""
 
 from __future__ import annotations
 
@@ -10,8 +15,10 @@ from zcu_tools.gui.adapter import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
+    RunRequest,
 )
 from zcu_tools.gui.event_bus import EventBus
+from zcu_tools.gui.services.guard import RunPermit
 from zcu_tools.gui.services.operation_gate import OperationGate, OperationKind
 from zcu_tools.gui.services.run import RunService
 from zcu_tools.gui.state import ExpContext, State, TabState
@@ -21,22 +28,28 @@ def _empty_schema() -> CfgSchema:
     return CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
 
 
-def _make_state(*, soc_attached: bool, requires_soc: bool = True) -> tuple[State, str]:
+def _make_state() -> tuple[State, str, MagicMock]:
     md = MagicMock()
     ml = MagicMock()
-    soc = MagicMock() if soc_attached else None
-    soccfg = MagicMock() if soc_attached else None
-    state = State(ExpContext(md=md, ml=ml, soc=soc, soccfg=soccfg, result_dir=""))
+    state = State(ExpContext(md=md, ml=ml, soc=MagicMock(), soccfg=MagicMock()))
     tab_id = "tab-1"
     adapter = MagicMock()
-    # Use a plain object whose `capabilities` is read by RunService; bypassing the
-    # ClassVar guard while keeping the runtime contract intact for the test.
-    adapter.capabilities = AdapterCapabilities(requires_soc=requires_soc)
+    adapter.capabilities = AdapterCapabilities(requires_soc=True)
     state.add_tab(
         tab_id,
         TabState(adapter_name="any", adapter=adapter, cfg_schema=_empty_schema()),
     )
-    return state, tab_id
+    return state, tab_id, adapter
+
+
+def _make_permit(state: State, tab_id: str, adapter: MagicMock) -> RunPermit:
+    ctx = state.exp_context
+    return RunPermit(
+        tab_id=tab_id,
+        request=RunRequest(md=ctx.md, ml=ctx.ml, soc=ctx.soc, soccfg=ctx.soccfg),
+        schema=state.get_tab(tab_id).cfg_schema,
+        adapter=adapter,
+    )
 
 
 def _make_run_service(state: State) -> tuple[RunService, OperationGate, MagicMock]:
@@ -48,29 +61,36 @@ def _make_run_service(state: State) -> tuple[RunService, OperationGate, MagicMoc
     return svc, gate, runner
 
 
-def test_start_run_fast_fails_before_acquire_when_capability_requires_soc():
-    """requires_soc=True adapter with no soc must raise before acquiring a lease."""
-    state, tab_id = _make_state(soc_attached=False)
+def test_start_run_acquires_lease_and_starts_worker():
+    state, tab_id, adapter = _make_state()
     svc, gate, runner = _make_run_service(state)
 
-    with pytest.raises(RuntimeError, match="soc"):
-        svc.start_run(tab_id, _empty_schema())
-
-    # Did not acquire a lease and did not start the worker
-    assert not gate.has_active(OperationKind.RUN)
-    runner.start_run.assert_not_called()
-    # Tab not marked running
-    assert not state.is_tab_running(tab_id)
-
-
-def test_start_run_proceeds_when_capability_does_not_require_soc():
-    """requires_soc=False adapter must start even without an active soc handle."""
-    state, tab_id = _make_state(soc_attached=False, requires_soc=False)
-
-    svc, gate, runner = _make_run_service(state)
-
-    svc.start_run(tab_id, _empty_schema())
+    svc.start_run(_make_permit(state, tab_id, adapter))
 
     runner.start_run.assert_called_once()
     assert gate.has_active(OperationKind.RUN)
     assert state.is_tab_running(tab_id)
+
+
+def test_start_run_rejects_when_tab_busy():
+    state, tab_id, adapter = _make_state()
+    state.set_tab_analyzing(tab_id, True)
+    svc, gate, runner = _make_run_service(state)
+
+    with pytest.raises(RuntimeError, match="busy"):
+        svc.start_run(_make_permit(state, tab_id, adapter))
+
+    assert not gate.has_active(OperationKind.RUN)
+    runner.start_run.assert_not_called()
+
+
+def test_start_run_releases_lease_when_worker_start_raises():
+    state, tab_id, adapter = _make_state()
+    svc, gate, runner = _make_run_service(state)
+    runner.start_run.side_effect = RuntimeError("worker boom")
+
+    with pytest.raises(RuntimeError, match="worker boom"):
+        svc.start_run(_make_permit(state, tab_id, adapter))
+
+    assert not gate.has_active(OperationKind.RUN)
+    assert not state.is_tab_running(tab_id)

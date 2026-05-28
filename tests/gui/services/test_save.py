@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from zcu_tools.gui.event_bus import EventBus
+from zcu_tools.gui.services.guard import SavePermit
 from zcu_tools.gui.services.save import SaveService
 from zcu_tools.gui.state import State, TabState
 
@@ -28,7 +29,7 @@ def test_start_save_data_creates_parent_at_command_boundary(
     svc, _, runner = _make_service()
     data_path = tmp_path / "data" / "measurement"
 
-    svc.start_save_data("tab", str(data_path))
+    svc.start_save_data(SavePermit(tab_id="tab"), str(data_path))
 
     assert data_path.parent.is_dir()
     runner.start_save.assert_called_once()
@@ -43,7 +44,7 @@ def test_save_image_creates_parent_at_command_boundary(
     state.get_tab("tab").figure = figure
     image_path = tmp_path / "images" / "plot.png"
 
-    svc.save_image_sync("tab", str(image_path))
+    svc.save_image_sync(SavePermit(tab_id="tab"), str(image_path))
 
     assert image_path.parent.is_dir()
     figure.savefig.assert_called_once_with(str(image_path))

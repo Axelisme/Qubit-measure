@@ -17,6 +17,7 @@ from zcu_tools.gui.event_bus import (
     MlChangedPayload,
     TabContentChangedPayload,
 )
+from zcu_tools.gui.services.guard import WritebackPermit
 from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
 
 logger = logging.getLogger(__name__)
@@ -52,13 +53,13 @@ class WritebackService:
 
     def apply_tab_writeback_items(
         self,
-        tab_id: str,
+        permit: WritebackPermit,
         items: list[WritebackItem],
     ) -> list[str]:
+        # Context + analyze-result preconditions are proven by the
+        # WritebackPermit.
+        tab_id = permit.tab_id
         tab = self._state.get_tab(tab_id)
-        if tab.analyze_result is None:
-            raise RuntimeError("No analyze result available for writeback")
-
         ctx = self._state.exp_context
         applied_keys: list[str] = []
         touched_ml = False

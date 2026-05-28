@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any, Optional, Tuple
 
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
-from zcu_tools.gui.adapter import CfgSchema, RunRequest, require_soc_handles
 from zcu_tools.gui.event_bus import (
     GuiEvent,
     RunFailedPayload,
@@ -14,6 +13,7 @@ from zcu_tools.gui.event_bus import (
     TabInteractionChangedPayload,
 )
 from zcu_tools.gui.plot_host import FigureContainer
+from zcu_tools.gui.services.guard import RunPermit
 from zcu_tools.gui.services.operation_gate import (
     OperationGate,
     OperationKind,
@@ -54,39 +54,29 @@ class RunService(QObject):
 
     def start_run(
         self,
-        tab_id: str,
-        schema: CfgSchema,
+        permit: RunPermit,
         pbar_factory: Optional[Any] = None,
         live_container: Optional[FigureContainer] = None,
     ) -> None:
+        # Static preconditions (context readiness, committed-cfg validity, soc
+        # capability) are proven by the RunPermit. Dynamic resource availability
+        # (tab busy, hardware exclusion) is checked here at the operation
+        # boundary — see docs/adr/0001.
+        tab_id = permit.tab_id
         if self._state.is_tab_busy(tab_id):
             raise RuntimeError(f"Tab {tab_id!r} is busy")
 
-        ctx = self._state.exp_context
-        req = RunRequest(
-            md=ctx.md,
-            ml=ctx.ml,
-            soc=ctx.soc,
-            soccfg=ctx.soccfg,
-        )
-
         self._active_pbar_factory = pbar_factory
-
-        # Validate schema before starting the worker
-        schema.to_raw_dict(req)
         logger.info("start_run: tab_id=%r", tab_id)
 
-        tab = self._state.get_tab(tab_id)
-        if tab.adapter.capabilities.requires_soc:
-            require_soc_handles(req)
         lease = self._gate.acquire(OperationKind.RUN, owner_id=tab_id)
         self._active_lease = lease
         try:
             self._runner.start_run(
                 tab_id,
-                tab.adapter,
-                req,
-                schema,
+                permit.adapter,
+                permit.request,
+                permit.schema,
                 pbar_factory=pbar_factory,
                 figure_container=live_container,
             )

@@ -9,6 +9,7 @@ from zcu_tools.gui.adapter import AnalyzeRequest
 from zcu_tools.gui.event_bus import GuiEvent, TabInteractionChangedPayload
 from zcu_tools.gui.plot_host import FigureContainer
 from zcu_tools.gui.runner import AnalyzeRunner
+from zcu_tools.gui.services.guard import AnalyzePermit
 
 logger = logging.getLogger(__name__)
 
@@ -37,17 +38,17 @@ class AnalyzeService(QObject):
 
     def start_analyze(
         self,
-        tab_id: str,
+        permit: AnalyzePermit,
         analyze_params_instance: object,
         figure_container: Optional[FigureContainer] = None,
     ) -> None:
+        # Context + run-result preconditions are proven by the AnalyzePermit;
+        # tab-busy is the dynamic check that stays at the operation boundary.
+        tab_id = permit.tab_id
         if self._state.is_tab_busy(tab_id):
             raise RuntimeError(f"Tab {tab_id!r} is busy")
 
         tab = self._state.get_tab(tab_id)
-        if tab.run_result is None:
-            raise RuntimeError("No run result available to analyze")
-
         ctx = self._state.exp_context
         req = AnalyzeRequest(
             run_result=tab.run_result,

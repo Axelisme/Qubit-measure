@@ -12,6 +12,14 @@ from .device import (
     SetDeviceValueRequest,
     SetupDeviceRequest,
 )
+from .guard import (
+    AnalyzePermit,
+    GuardError,
+    GuardService,
+    RunPermit,
+    SavePermit,
+    WritebackPermit,
+)
 from .operation_gate import (
     OperationConflictError,
     OperationGate,
@@ -56,6 +64,12 @@ __all__ = [
     "OperationGate",
     "OperationKind",
     "OperationLease",
+    "GuardError",
+    "GuardService",
+    "RunPermit",
+    "SavePermit",
+    "AnalyzePermit",
+    "WritebackPermit",
     "RunService",
     "SaveBothOutcome",
     "SaveService",

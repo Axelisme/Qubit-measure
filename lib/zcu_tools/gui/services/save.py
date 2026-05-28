@@ -10,6 +10,7 @@ from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 from zcu_tools.gui.adapter import SaveDataRequest
 from zcu_tools.gui.event_bus import GuiEvent, TabInteractionChangedPayload
 from zcu_tools.gui.runner import SaveDataRunner
+from zcu_tools.gui.services.guard import SavePermit
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,10 @@ class SaveService(QObject):
         self._runner.save_finished.connect(self._on_save_finished)
         self._runner.save_failed.connect(self._on_save_failed)
 
-    def start_save_data(self, tab_id: str, data_path: str, comment: str = "") -> None:
+    def start_save_data(
+        self, permit: SavePermit, data_path: str, comment: str = ""
+    ) -> None:
+        tab_id = permit.tab_id
         req = self._make_save_data_request(tab_id, data_path, comment=comment)
         tab = self._state.get_tab(tab_id)
         logger.info("start_save_data: tab_id=%r path=%r", tab_id, data_path)
@@ -60,9 +64,10 @@ class SaveService(QObject):
         self._mark_saving(tab_id, True)
 
     def start_save_both(
-        self, tab_id: str, data_path: str, image_path: str, comment: str = ""
+        self, permit: SavePermit, data_path: str, image_path: str, comment: str = ""
     ) -> None:
         """Sync-save image on the main thread, then async-save data on a worker thread."""
+        tab_id = permit.tab_id
         tab = self._state.get_tab(tab_id)
         if tab.figure is None:
             raise RuntimeError("No figure available to save")
@@ -91,7 +96,8 @@ class SaveService(QObject):
         self._pending_image[tab_id] = (image_path, image_error)
         self._mark_saving(tab_id, True)
 
-    def save_image_sync(self, tab_id: str, image_path: str) -> None:
+    def save_image_sync(self, permit: SavePermit, image_path: str) -> None:
+        tab_id = permit.tab_id
         tab = self._state.get_tab(tab_id)
         if tab.figure is None:
             raise RuntimeError("No figure available to save")
@@ -106,13 +112,12 @@ class SaveService(QObject):
     def _make_save_data_request(
         self, tab_id: str, data_path: str, comment: str = ""
     ) -> SaveDataRequest:
+        # Run-result presence is proven by the SavePermit; tab-busy is the
+        # dynamic check that stays at the operation boundary.
         if self._state.is_tab_busy(tab_id):
             raise RuntimeError(f"Tab {tab_id!r} is busy")
 
         tab = self._state.get_tab(tab_id)
-        if tab.run_result is None:
-            raise RuntimeError("No run result available to save")
-
         ctx = self._state.exp_context
         req = SaveDataRequest(
             run_result=tab.run_result,
