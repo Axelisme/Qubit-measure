@@ -29,7 +29,6 @@ from .wire import (
     coerce_connect_request,
     coerce_disconnect_device_request,
     coerce_set_device_value_request,
-    coerce_startup_project_request,
 )
 
 logger = logging.getLogger(__name__)
@@ -511,7 +510,18 @@ def _h_connect_start(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
 
 
 def _h_startup_apply(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    req = coerce_startup_project_request(params)
+    # Params are ParamSpec-validated; result_dir/database_path are optional and
+    # default to "" (empty result_dir leaves the context in DRAFT — editable but
+    # not runnable until a result_dir is set).
+    from zcu_tools.gui.services.startup import StartupProjectRequest
+
+    req = StartupProjectRequest(
+        chip_name=str(params["chip_name"]),
+        qub_name=str(params["qub_name"]),
+        res_name=str(params["res_name"]),
+        result_dir=str(params["result_dir"] or ""),
+        database_path=str(params["database_path"] or ""),
+    )
     ok = ctrl.apply_startup_project(req)
     return {"ok": bool(ok)}
 

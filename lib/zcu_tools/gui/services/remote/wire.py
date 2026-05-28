@@ -20,7 +20,6 @@ from zcu_tools.gui.services.device import (
     DisconnectDeviceRequest,
     SetDeviceValueRequest,
 )
-from zcu_tools.gui.services.startup import StartupProjectRequest
 
 from .errors import ErrorCode, ErrorEnvelope, RemoteError
 
@@ -189,21 +188,6 @@ def coerce_connect_request(params: Mapping[str, object]) -> ConnectRequest:
             port=_require_int(params, "port"),
         )
     raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown connect kind: {kind!r}")
-
-
-def coerce_startup_project_request(
-    params: Mapping[str, object],
-) -> StartupProjectRequest:
-    try:
-        return StartupProjectRequest(
-            chip_name=_require_str(params, "chip_name"),
-            qub_name=_require_str(params, "qub_name"),
-            res_name=_require_str(params, "res_name"),
-            result_dir=_require_str(params, "result_dir"),
-            database_path=_require_str(params, "database_path"),
-        )
-    except ValueError as exc:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
 
 
 def coerce_connect_device_request(

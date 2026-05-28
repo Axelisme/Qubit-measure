@@ -83,6 +83,10 @@ def _int_default(name: str, default: int, desc: str = "") -> ParamSpec:
     )
 
 
+def _int_opt(name: str, desc: str = "") -> ParamSpec:
+    return ParamSpec(name, JsonType.INTEGER, required=False, description=desc)
+
+
 def _comment() -> ParamSpec:
     return ParamSpec(
         "comment", JsonType.STRING, required=False, default="", description="Comment"
@@ -224,9 +228,31 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     # Session
     "session.persist": MethodSpec(10.0, "Persist tab session"),
     "session.restore": MethodSpec(10.0, "Restore tab session"),
-    # Connection / startup (multi-field coercion at the handler)
-    "connect.start": MethodSpec(30.0, "Connect to SoC"),
-    "startup.apply": MethodSpec(30.0, "Apply startup project"),
+    # Connection / startup
+    "connect.start": MethodSpec(
+        30.0,
+        "Connect the SoC. kind='mock' for an offline mock board, or "
+        "kind='remote' with ip + port for a real board (ip/port required only "
+        "when kind='remote').",
+        (
+            _str("kind", "'mock' or 'remote'"),
+            _str_opt("ip", "Board IP (required when kind='remote')"),
+            _int_opt("port", "Board port (required when kind='remote')"),
+        ),
+    ),
+    "startup.apply": MethodSpec(
+        30.0,
+        "Set the project: chip / qubit / resonator names, plus optional "
+        "result_dir and database_path. Omit result_dir to leave the context in "
+        "DRAFT (editable but not runnable); set it to enable runs/saves.",
+        (
+            _str("chip_name"),
+            _str("qub_name"),
+            _str("res_name"),
+            _str_opt("result_dir", "Result directory; omit → DRAFT context"),
+            _str_opt("database_path", "Database path; optional"),
+        ),
+    ),
     # Device
     "device.connect": MethodSpec(30.0, "Connect device"),
     "device.disconnect": MethodSpec(30.0, "Disconnect device"),

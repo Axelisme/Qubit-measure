@@ -418,18 +418,20 @@ def tool_gui_stop(arguments: Dict[str, Any]) -> str:
 
 
 def tool_gui_connect_mock(arguments: Dict[str, Any]) -> str:
-    del arguments
+    # Convenience wrapper around connect.start + startup.apply + context setup.
+    # chip/qub/res and the directories are optional; sensible defaults are used
+    # when omitted.
+    repo_root = Path.cwd()
+    chip = str(arguments.get("chip_name") or "Q1_Chip")
+    qub = str(arguments.get("qub_name") or "Q1")
+    res = str(arguments.get("res_name") or "R1")
+    result_dir = str(arguments.get("result_dir") or (repo_root / "result"))
+    db_path = str(arguments.get("database_path") or (repo_root / "Database"))
+
     # 1. connect.start
     send_gui_rpc("connect.start", {"kind": "mock"})
 
-    # 2. Apply startup project parameters (same as driver.py connect-mock)
-    repo_root = Path.cwd()
-    chip = "Q1_Chip"
-    qub = "Q1"
-    res = "R1"
-    result_dir = str(repo_root / "result")
-    db_path = str(repo_root / "Database")
-
+    # 2. Apply startup project parameters.
     send_gui_rpc(
         "startup.apply",
         {
@@ -470,25 +472,6 @@ def tool_gui_connect_mock(arguments: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 # Workflow tools (thin pass-through wrappers)
 # ---------------------------------------------------------------------------
-
-
-def tool_gui_startup_apply(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    params = {
-        "chip_name": str(arguments["chip_name"]),
-        "qub_name": str(arguments["qub_name"]),
-        "res_name": str(arguments["res_name"]),
-        "result_dir": str(arguments["result_dir"]),
-        "database_path": str(arguments["database_path"]),
-    }
-    return send_gui_rpc("startup.apply", params)
-
-
-def tool_gui_connect_start(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    params: Dict[str, Any] = {"kind": str(arguments["kind"])}
-    if params["kind"] == "remote":
-        params["ip"] = str(arguments["ip"])
-        params["port"] = int(arguments["port"])
-    return send_gui_rpc("connect.start", params)
 
 
 def tool_gui_state_check(arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -630,10 +613,6 @@ def tool_gui_device_set_value(arguments: Dict[str, Any]) -> Dict[str, Any]:
 # stop/disconnect) have no RPC method and are hand-written too.
 _NON_GENERATED_METHODS = frozenset(
     {
-        # connect.start kind-branching + the mock convenience flow
-        "connect.start",
-        # 5-field startup project (declares no ParamSpec; coerced explicitly)
-        "startup.apply",
         # coerce_* → frozen request (multi-field)
         "device.connect",
         "device.disconnect",
@@ -792,19 +771,13 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
     "gui_connect_mock": {
         "handler": tool_gui_connect_mock,
         "description": (
-            "One-shot setup for testing/offline use: starts a Mock FPGA SoC, "
-            "applies default project startup parameters (chip=Q1_Chip, qub=Q1, res=R1), "
-            "waits for SoC to be ready, then activates the first existing context "
-            "(or creates one at 1.0 A). Requires gui_connect first."
-        ),
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    "gui_startup_apply": {
-        "handler": tool_gui_startup_apply,
-        "description": (
-            "Apply project startup settings: chip/qubit/resonator names, result directory, "
-            "and database path. Must be called once after SoC connects before running experiments. "
-            "Use gui_connect_mock instead for mock/testing workflows."
+            "One-shot setup for testing/offline use: starts a Mock FPGA SoC "
+            "(connect.start kind=mock), applies project startup parameters, waits "
+            "for the SoC to be ready, then activates the first existing context "
+            "(or creates one at 1.0 A). chip_name/qub_name/res_name/result_dir/"
+            "database_path are optional (defaults Q1_Chip/Q1/R1 + ./result + "
+            "./Database). For finer control call gui_connect_start + "
+            "gui_startup_apply directly. Requires gui_connect first."
         ),
         "inputSchema": {
             "type": "object",
@@ -815,36 +788,6 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
                 "result_dir": {"type": "string"},
                 "database_path": {"type": "string"},
             },
-            "required": [
-                "chip_name",
-                "qub_name",
-                "res_name",
-                "result_dir",
-                "database_path",
-            ],
-        },
-    },
-    "gui_connect_start": {
-        "handler": tool_gui_connect_start,
-        "description": (
-            "Start an FPGA SoC hardware connection. kind='mock' uses a software-simulated SoC "
-            "(no real hardware needed); kind='remote' connects to a real ZCU216 board at ip:port. "
-            "This controls the SoC/FPGA link, not the MCP socket — see gui_connect for that."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "kind": {"type": "string", "description": "'mock' or 'remote'"},
-                "ip": {
-                    "type": "string",
-                    "description": "Board IP address (required when kind='remote')",
-                },
-                "port": {
-                    "type": "integer",
-                    "description": "Board port (required when kind='remote')",
-                },
-            },
-            "required": ["kind"],
         },
     },
     "gui_state_check": {
@@ -1061,8 +1004,6 @@ _OVERRIDE_NAMES = frozenset(
         "gui_launch",
         "gui_stop",
         "gui_connect_mock",
-        "gui_connect_start",
-        "gui_startup_apply",
         "gui_device_connect",
         "gui_device_disconnect",
         "gui_device_set_value",

@@ -298,3 +298,63 @@ def test_mcp_wrappers_map_to_expected_rpc(monkeypatch):
         ("device.setup", {"name": "bias", "updates": {"value": 1.0}}),
         ("save.image", {"tab_id": "tab1", "image_path": "/tmp/a.png"}),
     ]
+
+
+# ---------------------------------------------------------------------------
+# Split startup + connect tools (generated from ParamSpec)
+# ---------------------------------------------------------------------------
+
+
+def test_startup_apply_optional_dirs_default_to_empty(fx):
+    captured = {}
+
+    def _apply(req):
+        captured["req"] = req
+        return True
+
+    fx.ctrl.apply_startup_project = MagicMock(side_effect=_apply)  # type: ignore[method-assign]
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(
+            sock,
+            "startup.apply",
+            {"chip_name": "C", "qub_name": "Q", "res_name": "R"},
+        )
+        assert resp["ok"] is True
+        req = captured["req"]
+        assert req.chip_name == "C"
+        assert req.result_dir == ""  # omitted -> empty (DRAFT context)
+        assert req.database_path == ""
+    finally:
+        sock.close()
+
+
+def test_startup_apply_missing_required_rejected(fx):
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "startup.apply", {"chip_name": "C", "qub_name": "Q"})
+        assert resp["ok"] is False
+        assert resp["error"]["code"] == "invalid_params"
+    finally:
+        sock.close()
+
+
+def test_connect_start_remote_missing_ip_rejected(fx):
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "connect.start", {"kind": "remote"})
+        assert resp["ok"] is False
+        assert resp["error"]["code"] == "invalid_params"
+    finally:
+        sock.close()
+
+
+def test_connect_start_mock_ok(fx):
+    fx.ctrl.start_connect = MagicMock()  # type: ignore[method-assign]
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "connect.start", {"kind": "mock"})
+        assert resp["ok"] is True
+        fx.ctrl.start_connect.assert_called_once()
+    finally:
+        sock.close()
