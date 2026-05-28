@@ -411,7 +411,9 @@ class Controller:
         paths = self._resolve_save_paths(tab_id)
         resolved_data = data_path or paths.data_path
         resolved_image = image_path or paths.image_path
-        self._save_svc.start_save_both(tab_id, resolved_data, resolved_image, comment=comment)
+        self._save_svc.start_save_both(
+            tab_id, resolved_data, resolved_image, comment=comment
+        )
 
     # ------------------------------------------------------------------
     # Context / IO (ContextService)

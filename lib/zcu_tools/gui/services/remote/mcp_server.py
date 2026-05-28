@@ -328,8 +328,10 @@ def tool_gui_stop(arguments: Dict[str, Any]) -> str:
         proc = None  # no Popen object available
 
     force = bool(arguments.get("force", False))
-    sig = signal.SIGKILL if force else (
-        signal.SIGTERM if hasattr(signal, "SIGTERM") else signal.SIGINT
+    sig = (
+        signal.SIGKILL
+        if force
+        else (signal.SIGTERM if hasattr(signal, "SIGTERM") else signal.SIGINT)
     )
     try:
         os.kill(pid, sig)
@@ -1639,7 +1641,10 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "inputSchema": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Absolute path to params.json"},
+                "path": {
+                    "type": "string",
+                    "description": "Absolute path to params.json",
+                },
                 "flux_bias": {
                     "type": "number",
                     "default": 0.0,

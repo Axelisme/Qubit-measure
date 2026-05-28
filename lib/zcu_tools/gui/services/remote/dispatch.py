@@ -739,7 +739,9 @@ def _h_analyze_start(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
         raise RemoteError(ErrorCode.INVALID_PARAMS, "'updates' must be a dict")
     ap = snap.analyze_params
     if not dataclasses.is_dataclass(ap) or isinstance(ap, type):
-        raise RemoteError(ErrorCode.INTERNAL, "analyze_params is not a dataclass instance")
+        raise RemoteError(
+            ErrorCode.INTERNAL, "analyze_params is not a dataclass instance"
+        )
     try:
         updated = dataclasses.replace(ap, **raw_updates)
     except (TypeError, ValueError) as exc:

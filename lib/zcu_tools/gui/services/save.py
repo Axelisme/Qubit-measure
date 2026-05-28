@@ -59,7 +59,9 @@ class SaveService(QObject):
         self._active_paths[tab_id] = data_path
         self._mark_saving(tab_id, True)
 
-    def start_save_both(self, tab_id: str, data_path: str, image_path: str, comment: str = "") -> None:
+    def start_save_both(
+        self, tab_id: str, data_path: str, image_path: str, comment: str = ""
+    ) -> None:
         """Sync-save image on the main thread, then async-save data on a worker thread."""
         tab = self._state.get_tab(tab_id)
         if tab.figure is None:
@@ -101,7 +103,9 @@ class SaveService(QObject):
     def _ensure_parent_directory(path: str) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
 
-    def _make_save_data_request(self, tab_id: str, data_path: str, comment: str = "") -> SaveDataRequest:
+    def _make_save_data_request(
+        self, tab_id: str, data_path: str, comment: str = ""
+    ) -> SaveDataRequest:
         if self._state.is_tab_busy(tab_id):
             raise RuntimeError(f"Tab {tab_id!r} is busy")
 

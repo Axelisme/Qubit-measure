@@ -193,7 +193,9 @@ class PredictorDialog(QDialog):
             return
         from zcu_tools.gui.event_bus import GuiEvent
 
-        self._ctrl.get_bus().unsubscribe(GuiEvent.PREDICTOR_CHANGED, self._on_predictor_changed)
+        self._ctrl.get_bus().unsubscribe(
+            GuiEvent.PREDICTOR_CHANGED, self._on_predictor_changed
+        )
         self._bus_subscribed = False
 
     def _on_predictor_changed(self, payload: object) -> None:

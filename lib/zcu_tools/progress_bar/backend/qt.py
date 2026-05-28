@@ -95,8 +95,13 @@ class _StackBridge(QObject):
         self._bar_start_times[key] = time.monotonic()
         total_int = int(total) if isinstance(total, int) else None
         self._bar_snapshots[key] = RunProgressSnapshot(
-            token=key, desc=label, n=0, total=total_int,
-            elapsed=0.0, remaining=None, format=label,
+            token=key,
+            desc=label,
+            n=0,
+            total=total_int,
+            elapsed=0.0,
+            remaining=None,
+            format=label,
         )
 
     def _on_pop(self, bar: object) -> None:
@@ -185,9 +190,7 @@ class _StackBridge(QObject):
         ):
             self._on_progress_step()
 
-    def set_progress_callback(
-        self, cb: Callable[[], None], interval: int = 10
-    ) -> None:
+    def set_progress_callback(self, cb: Callable[[], None], interval: int = 10) -> None:
         """Register a callback invoked every ``interval`` format updates (main-thread only)."""
         self._on_progress_step = cb
         self._step_interval = max(1, interval)
@@ -343,9 +346,7 @@ class QtProgressBarFactory:
             disabled=disabled,
         )
 
-    def set_progress_callback(
-        self, cb: Callable[[], None], interval: int = 10
-    ) -> None:
+    def set_progress_callback(self, cb: Callable[[], None], interval: int = 10) -> None:
         """Delegate to the bridge's step callback mechanism."""
         self._bridge.set_progress_callback(cb, interval)
 
