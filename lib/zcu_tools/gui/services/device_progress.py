@@ -3,13 +3,17 @@ from __future__ import annotations
 import itertools
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any, Optional
 
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.progress_bar.base import BaseProgressBar, ProgressTotal, ProgressValue
 
+if TYPE_CHECKING:
+    from zcu_tools.gui.ui.progress_stack import ProgressStack
+
 _FLOAT_SCALE = 10000
+_PUBLISH_INTERVAL = 0.033  # ~30 fps max for cross-thread Qt signal updates
 
 
 @dataclass(frozen=True)
@@ -41,20 +45,44 @@ def _fmt_seconds(secs: float) -> str:
     return f"{minutes}:{seconds:02d}"
 
 
-class DeviceSetupProgressModel(QObject):
-    """Thread-safe Qt bridge retaining setup progress independently of dialogs."""
+class ProgressModel(QObject):
+    """Thread-safe Qt bridge: worker threads emit signals; main thread updates entries.
+
+    Optionally connected to a ProgressStack widget via attach_stack() — when
+    attached, the stack renders itself on every ``changed`` emit.
+    """
 
     changed: Signal = Signal()
     _push_requested: Signal = Signal(int, str, object, object)
     _update_requested: Signal = Signal(int, str, object, object)
     _pop_requested: Signal = Signal(int)
 
-    def __init__(self, parent: QObject | None = None) -> None:
+    def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._entries: dict[int, ProgressEntrySnapshot] = {}
         self._push_requested.connect(self._on_update)
         self._update_requested.connect(self._on_update)
         self._pop_requested.connect(self._on_pop)
+        self._stack: Optional[ProgressStack] = None
+
+    def attach_stack(self, stack: ProgressStack) -> None:
+        """Connect this model to a ProgressStack widget (main thread only)."""
+        if self._stack is stack:
+            return
+        if self._stack is not None:
+            self.changed.disconnect(self._render_stack)
+        self._stack = stack
+        self.changed.connect(self._render_stack)
+
+    def detach_stack(self) -> None:
+        """Disconnect the attached ProgressStack (main thread only)."""
+        if self._stack is not None:
+            self.changed.disconnect(self._render_stack)
+            self._stack = None
+
+    def _render_stack(self) -> None:
+        if self._stack is not None:
+            self._stack.render_snapshot(self.snapshot())
 
     def snapshot(self) -> tuple[ProgressEntrySnapshot, ...]:
         return tuple(self._entries.values())
@@ -80,23 +108,31 @@ class DeviceSetupProgressModel(QObject):
             self.changed.emit()
 
 
-class DeviceSetupProgressBar(BaseProgressBar):
+# Backward-compat alias used by device.py and tests
+DeviceSetupProgressModel = ProgressModel
+
+
+class ProgressBar(BaseProgressBar):
     def __init__(
         self,
-        model: DeviceSetupProgressModel,
+        model: ProgressModel,
         token: int,
         label: str = "",
         total: ProgressTotal = None,
         leave: bool = True,
+        disabled: bool = False,
     ) -> None:
         self._model = model
         self._token = token
         self._label = label
         self._total = total
         self._leave = leave
+        self._disabled = disabled
         self._n: ProgressValue = 0
         self._start_time = time.monotonic()
-        self._publish(initial=True)
+        self._last_publish: float = 0.0
+        if not disabled:
+            self._publish(initial=True)
 
     def _build_format(self) -> str:
         elapsed = time.monotonic() - self._start_time
@@ -110,7 +146,11 @@ class DeviceSetupProgressBar(BaseProgressBar):
             return f"{prefix}%v/%m {time_part}"
         return f"{prefix}{time_part}"
 
-    def _publish(self, *, initial: bool = False) -> None:
+    def _publish(self, *, initial: bool = False, force: bool = False) -> None:
+        now = time.monotonic()
+        if not initial and not force and now - self._last_publish < _PUBLISH_INTERVAL:
+            return
+        self._last_publish = now
         signal = (
             self._model._push_requested if initial else self._model._update_requested
         )
@@ -118,22 +158,26 @@ class DeviceSetupProgressBar(BaseProgressBar):
 
     def set_description(self, description: str) -> None:
         self._label = description
-        self._publish()
+        if not self._disabled:
+            self._publish(force=True)
 
     def update(self, value: ProgressValue = 1) -> None:
         self._n += value
-        self._publish()
+        if not self._disabled:
+            self._publish()
 
     def reset(self) -> None:
         self._n = 0
         self._start_time = time.monotonic()
-        self._publish()
+        if not self._disabled:
+            self._publish(force=True)
 
     def refresh(self) -> None:
-        self._publish()
+        if not self._disabled:
+            self._publish(force=True)
 
     def close(self) -> None:
-        if not self._leave:
+        if not self._disabled and not self._leave:
             self._model._pop_requested.emit(self._token)
 
     @property
@@ -143,7 +187,8 @@ class DeviceSetupProgressBar(BaseProgressBar):
     @total.setter
     def total(self, value: ProgressTotal) -> None:
         self._total = value
-        self._publish()
+        if not self._disabled:
+            self._publish(force=True)
 
     @property
     def n(self) -> ProgressValue:
@@ -154,19 +199,29 @@ class DeviceSetupProgressBar(BaseProgressBar):
         return self._label
 
 
-class DeviceSetupProgressFactory:
-    def __init__(self, model: DeviceSetupProgressModel) -> None:
+# Backward-compat alias
+DeviceSetupProgressBar = ProgressBar
+
+
+class ProgressFactory:
+    def __init__(self, model: ProgressModel) -> None:
         self._model = model
         self._tokens = itertools.count()
 
-    def __call__(self, *args: Any, **kwargs: Any) -> DeviceSetupProgressBar:
+    def __call__(self, *args: Any, **kwargs: Any) -> ProgressBar:
         label = kwargs.pop("desc", "") or (args[1] if len(args) > 1 else "")
         total = kwargs.pop("total", None) or (args[2] if len(args) > 2 else None)
         leave = kwargs.pop("leave", True)
-        return DeviceSetupProgressBar(
+        disabled = bool(kwargs.pop("disable", False))
+        return ProgressBar(
             self._model,
             next(self._tokens),
             label=str(label) if label else "",
             total=total,
             leave=leave,
+            disabled=disabled,
         )
+
+
+# Backward-compat alias
+DeviceSetupProgressFactory = ProgressFactory

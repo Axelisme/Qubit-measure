@@ -11,7 +11,6 @@ from zcu_tools.gui.event_bus import (
     RunFailedPayload,
     RunFinishedPayload,
     RunLockChangedPayload,
-    RunProgressChangedPayload,
     TabInteractionChangedPayload,
 )
 from zcu_tools.gui.plot_host import FigureContainer
@@ -72,8 +71,6 @@ class RunService(QObject):
         )
 
         self._active_pbar_factory = pbar_factory
-        if pbar_factory is not None and hasattr(pbar_factory, "set_progress_callback"):
-            pbar_factory.set_progress_callback(self._emit_progress_changed)
 
         # Validate schema before starting the worker
         schema.to_raw_dict(req)
@@ -120,12 +117,6 @@ class RunService(QObject):
 
     def _clear_active_factory(self) -> None:
         self._active_pbar_factory = None
-
-    def _emit_progress_changed(self) -> None:
-        tab_id = self._state.running_tab_id or ""
-        self._bus.emit(
-            GuiEvent.RUN_PROGRESS_CHANGED, RunProgressChangedPayload(tab_id=tab_id)
-        )
 
     def _on_run_finished(self, tab_id: str, result: Any) -> None:
         logger.info(

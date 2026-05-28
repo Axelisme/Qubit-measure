@@ -329,15 +329,17 @@ class DeviceDialog(QDialog):
         bus = self._ctrl.get_bus()
         bus.subscribe(GuiEvent.DEVICE_CHANGED, self._on_device_changed)
         bus.subscribe(GuiEvent.DEVICE_SETUP_CHANGED, self._on_setup_changed)
-        self._setup_subscription_active = True
-        self.finished.connect(self._cleanup_bus_subscription)
-        self.destroyed.connect(self._cleanup_bus_subscription)
+        self._bus_subs_active = True
+        self.finished.connect(self._cleanup_bus_subscriptions)
+        self.destroyed.connect(self._cleanup_bus_subscriptions)
+
+        self._ctrl.get_device_progress_model().attach_stack(self._progress)
 
         self._refresh_list()
         self._render_setup(self._ctrl.get_active_device_setup())
 
-    def _cleanup_bus_subscription(self, *_args: object) -> None:
-        if not self._setup_subscription_active:
+    def _cleanup_bus_subscriptions(self, *_args: object) -> None:
+        if not self._bus_subs_active:
             return
         self._ctrl.get_bus().unsubscribe(
             GuiEvent.DEVICE_SETUP_CHANGED, self._on_setup_changed
@@ -345,7 +347,8 @@ class DeviceDialog(QDialog):
         self._ctrl.get_bus().unsubscribe(
             GuiEvent.DEVICE_CHANGED, self._on_device_changed
         )
-        self._setup_subscription_active = False
+        self._ctrl.get_device_progress_model().detach_stack()
+        self._bus_subs_active = False
 
     def _refresh_list(self, select_name: Optional[str] = None) -> None:
         self._list.clear()
@@ -537,7 +540,6 @@ class DeviceDialog(QDialog):
             self._progress.show()
             self._set_setup_running(True)
             return
-        self._progress.reset_all()
         self._progress.hide()
         self._set_setup_running(False)
         self._on_selection_changed(self._list.currentRow())

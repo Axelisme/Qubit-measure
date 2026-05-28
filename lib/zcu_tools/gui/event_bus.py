@@ -116,13 +116,6 @@ class RunFailedPayload(Payload):
 
 
 @dataclass(frozen=True)
-class RunProgressChangedPayload(Payload):
-    """Payload for RUN_PROGRESS_CHANGED: progress bar stepped N times."""
-
-    tab_id: str
-
-
-@dataclass(frozen=True)
 class PredictorChangedPayload(Payload):
     """Payload for PREDICTOR_CHANGED: predictor state or values changed."""
 
@@ -165,7 +158,6 @@ class GuiEvent(str, Enum):
     RUN_LOCK_CHANGED = "run_lock_changed"  # payload: RunLockChangedPayload
     RUN_FINISHED = "run_finished"  # payload: RunFinishedPayload
     RUN_FAILED = "run_failed"  # payload: RunFailedPayload
-    RUN_PROGRESS_CHANGED = "run_progress_changed"  # payload: RunProgressChangedPayload
 
     # UI / Panel layer
     PREDICTOR_CHANGED = "predictor_changed"  # predictor state or values changed
@@ -192,7 +184,6 @@ _EventPayloadMap = {
     GuiEvent.RUN_LOCK_CHANGED: RunLockChangedPayload,
     GuiEvent.RUN_FINISHED: RunFinishedPayload,
     GuiEvent.RUN_FAILED: RunFailedPayload,
-    GuiEvent.RUN_PROGRESS_CHANGED: RunProgressChangedPayload,
     GuiEvent.PREDICTOR_CHANGED: PredictorChangedPayload,
     GuiEvent.DEVICE_CHANGED: DeviceChangedPayload,
     GuiEvent.DEVICE_SETUP_CHANGED: DeviceSetupChangedPayload,
@@ -305,13 +296,6 @@ class EventBus:
         cb: Callable[[RunFailedPayload], None],
     ) -> None: ...
 
-    @overload
-    def subscribe(
-        self,
-        event: "Literal[GuiEvent.RUN_PROGRESS_CHANGED]",
-        cb: Callable[[RunProgressChangedPayload], None],
-    ) -> None: ...
-
     def subscribe(self, event: GuiEvent, cb: Callable[[Any], None]) -> None:
         if not isinstance(event, GuiEvent):
             raise TypeError(f"event must be a GuiEvent, got {type(event)}")
@@ -419,13 +403,6 @@ class EventBus:
         cb: Callable[[RunFailedPayload], None],
     ) -> None: ...
 
-    @overload
-    def unsubscribe(
-        self,
-        event: "Literal[GuiEvent.RUN_PROGRESS_CHANGED]",
-        cb: Callable[[RunProgressChangedPayload], None],
-    ) -> None: ...
-
     def unsubscribe(self, event: GuiEvent, cb: Callable[[Any], None]) -> None:
         lst = self._subs.get(event, [])
         try:
@@ -519,13 +496,6 @@ class EventBus:
     @overload
     def emit(
         self, event: "Literal[GuiEvent.RUN_FAILED]", payload: RunFailedPayload
-    ) -> None: ...
-
-    @overload
-    def emit(
-        self,
-        event: "Literal[GuiEvent.RUN_PROGRESS_CHANGED]",
-        payload: RunProgressChangedPayload,
     ) -> None: ...
 
     def emit(self, event: GuiEvent, payload: Payload) -> None:

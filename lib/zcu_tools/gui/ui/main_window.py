@@ -164,6 +164,11 @@ class ExpTabWidget(QWidget):
         self.progress_stack = ProgressStack()
         root_layout.addWidget(self.progress_stack, stretch=0)
 
+        from zcu_tools.gui.services.device_progress import ProgressModel
+
+        self.progress_model = ProgressModel(parent=self)
+        self.progress_model.attach_stack(self.progress_stack)
+
         # splitter holds two panes: left (tab panel) | right (plot)
         splitter = QSplitter(Qt.Horizontal)  # type: ignore[attr-defined]
 
@@ -831,7 +836,7 @@ class MainWindow(QMainWindow):
                 self._set_tab_running(tab_w, self._ctrl.get_tab_snapshot(tab_id))
         if running_tab_id is None:
             for tab_w in self._tab_widgets.values():
-                tab_w.progress_stack.reset_all()
+                tab_w.progress_model.clear()
 
     def refresh_tab_interaction(
         self, tab_id: str, snapshot: Optional["TabViewSnapshot"] = None
@@ -890,7 +895,7 @@ class MainWindow(QMainWindow):
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return None
-        return QtProgressBarFactory(tab_w.progress_stack)
+        return QtProgressBarFactory(tab_w.progress_model)
 
     def make_live_container(self, tab_id: str) -> Any:
         tab_w = self._tab_widgets.get(tab_id)

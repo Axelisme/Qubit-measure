@@ -60,6 +60,7 @@ from .services.device import (
     DeviceEntry,
     DeviceSetupSnapshot,
 )
+from .services.device_progress import DeviceSetupProgressModel
 from .services.remote.dialogs import DialogName
 from .state import State
 
@@ -543,6 +544,12 @@ class Controller:
 
     def get_active_device_operation(self) -> DeviceSnapshot | None:
         return self._dev_svc.get_active_device_operation()
+
+    def get_device_progress_model(self) -> "DeviceSetupProgressModel":
+        return self._dev_svc.progress_model
+
+    def wait_device_setup_done(self, name: str, timeout: float = 120.0) -> None:
+        self._dev_svc.wait_setup_done(name, timeout)
 
     # ------------------------------------------------------------------
     # Startup application workflow (StartupService)

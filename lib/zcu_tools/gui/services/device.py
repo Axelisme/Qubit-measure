@@ -262,7 +262,7 @@ class DeviceService(QObject):
         self._driver_factory = driver_factory or _default_driver_factory
         self._snapshots: dict[str, DeviceSnapshot] = {}
         self._progress = DeviceSetupProgressModel(parent=self)
-        self._progress.changed.connect(self._emit_setup_changed)
+        self.progress_model = self._progress  # public read-only alias for UI attachment
         self._active_lease: OperationLease | None = None
         self._active_name: str | None = None
         self._active_prior: DeviceSnapshot | None = None
@@ -313,7 +313,7 @@ class DeviceService(QObject):
         )
         worker = _DeviceCommandWorker(lambda: self._disconnect(req.name), parent=self)
         self._command_worker = worker
-        worker.succeeded.connect(lambda _unused: self._on_disconnect_succeeded(req))
+        worker.succeeded.connect(lambda _: self._on_disconnect_succeeded(req))
         worker.failed.connect(lambda error: self._on_operation_failed(req.name, error))
         worker.finished.connect(worker.deleteLater)
         self._start_command_worker(worker, req.name)
@@ -357,8 +357,11 @@ class DeviceService(QObject):
         worker.cancelled.connect(self._on_setup_cancelled)
         worker.finished.connect(worker.deleteLater)
         try:
-            self._emit_setup_changed()
             worker.start()
+            self._bus.emit(
+                GuiEvent.DEVICE_SETUP_CHANGED,
+                DeviceSetupChangedPayload(active_setup=self.get_active_setup()),
+            )
         except Exception:
             self._abort_unstarted_operation(req.name)
             raise
@@ -633,7 +636,10 @@ class DeviceService(QObject):
         self._finish_operation(name)
         self._clear_progress()
         self._emit_device_changed(name)
-        self._emit_setup_changed()
+        self._bus.emit(
+            GuiEvent.DEVICE_SETUP_CHANGED,
+            DeviceSetupChangedPayload(active_setup=None),
+        )
         self.setup_finished.emit(name)
 
     def _on_setup_failed(self, name: str, error: str) -> None:
@@ -641,7 +647,10 @@ class DeviceService(QObject):
         self._finish_operation(name)
         self._clear_progress()
         self._emit_device_changed(name)
-        self._emit_setup_changed()
+        self._bus.emit(
+            GuiEvent.DEVICE_SETUP_CHANGED,
+            DeviceSetupChangedPayload(active_setup=None),
+        )
         self.setup_failed.emit(name, error)
 
     def _on_setup_cancelled(self, name: str) -> None:
@@ -649,7 +658,10 @@ class DeviceService(QObject):
         self._finish_operation(name)
         self._clear_progress()
         self._emit_device_changed(name)
-        self._emit_setup_changed()
+        self._bus.emit(
+            GuiEvent.DEVICE_SETUP_CHANGED,
+            DeviceSetupChangedPayload(active_setup=None),
+        )
         self.setup_cancelled.emit(name)
 
     def _on_operation_failed(self, name: str, error: object) -> None:
@@ -682,24 +694,43 @@ class DeviceService(QObject):
     def _emit_device_changed(self, name: str) -> None:
         self._bus.emit(GuiEvent.DEVICE_CHANGED, DeviceChangedPayload(name=name))
 
-    def _emit_setup_changed(self) -> None:
-        if self._active_name is not None:
-            snapshot = self._snapshots.get(self._active_name)
-            if snapshot is not None and snapshot.status is DeviceStatus.SETTING_UP:
-                self._snapshots[self._active_name] = replace(
-                    snapshot, progress=self._progress.snapshot()
-                )
-                self._emit_device_changed(self._active_name)
-        self._bus.emit(
-            GuiEvent.DEVICE_SETUP_CHANGED,
-            DeviceSetupChangedPayload(active_setup=self.get_active_setup()),
-        )
+    def wait_setup_done(self, name: str, timeout: float = 120.0) -> None:
+        """Block the calling thread until the named device's active setup completes.
+
+        Raises RuntimeError on setup failure or timeout.
+        Safe to call from the RPC worker thread — does not block Qt main thread.
+        Returns immediately if no setup is active for the device.
+        """
+        snap = self._snapshots.get(name)
+        if snap is None or snap.status is not DeviceStatus.SETTING_UP:
+            return
+
+        evt = threading.Event()
+        result: list[str | None] = [None]
+
+        def on_finished(finished_name: str) -> None:
+            if finished_name == name:
+                result[0] = None
+                evt.set()
+
+        def on_failed(failed_name: str, error: str) -> None:
+            if failed_name == name:
+                result[0] = error
+                evt.set()
+
+        self.setup_finished.connect(on_finished)
+        self.setup_failed.connect(on_failed)
+        try:
+            if not evt.wait(timeout=timeout):
+                raise RuntimeError(f"device {name!r} setup timed out after {timeout}s")
+            if result[0] is not None:
+                raise RuntimeError(f"device {name!r} setup failed: {result[0]}")
+        finally:
+            self.setup_finished.disconnect(on_finished)
+            self.setup_failed.disconnect(on_failed)
 
     def _clear_progress(self) -> None:
-        had_progress = bool(self._progress.snapshot())
         self._progress.clear()
-        if not had_progress:
-            self._emit_setup_changed()
 
     def _reject_mutating_read(self, name: str) -> None:
         if self._gate.is_device_mutating(name):

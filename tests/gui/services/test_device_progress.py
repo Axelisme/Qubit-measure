@@ -14,6 +14,7 @@ def test_device_setup_progress_model_retains_progress_without_widget(qapp):
     QCoreApplication.processEvents()
 
     pbar.update(1.0)
+    pbar.refresh()  # force flush past throttle
     QCoreApplication.processEvents()
 
     snapshot = model.snapshot()

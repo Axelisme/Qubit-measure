@@ -791,6 +791,13 @@ def tool_gui_device_active_operation(arguments: Dict[str, Any]) -> Dict[str, Any
     return send_gui_rpc("device.active_operation", {})
 
 
+def tool_gui_device_wait_setup(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    params: Dict[str, Any] = {"name": str(arguments["name"])}
+    if "timeout" in arguments:
+        params["timeout"] = float(arguments["timeout"])
+    return send_gui_rpc("device.wait_setup", params, timeout_seconds=130.0)
+
+
 # ---------------------------------------------------------------------------
 # Tool registry
 # ---------------------------------------------------------------------------
@@ -1636,6 +1643,29 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "handler": tool_gui_device_active_operation,
         "description": "Poll the progress of an ongoing device connect/disconnect operation.",
         "inputSchema": {"type": "object", "properties": {}},
+    },
+    "gui_device_wait_setup": {
+        "handler": tool_gui_device_wait_setup,
+        "description": (
+            "Block until the named device's active setup (ramp/configure) completes. "
+            "Returns immediately with done=true if no setup is currently active. "
+            "Raises PRECONDITION_FAILED if the setup fails or times out. "
+            "Use this instead of polling gui_device_active_setup in a loop."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Device name from gui_device_list",
+                },
+                "timeout": {
+                    "type": "number",
+                    "description": "Max wait time in seconds (default 120)",
+                },
+            },
+            "required": ["name"],
+        },
     },
     "gui_run_progress": {
         "handler": lambda args: send_gui_rpc("run.progress", {}),

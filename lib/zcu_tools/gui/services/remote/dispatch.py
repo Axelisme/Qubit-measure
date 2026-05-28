@@ -617,6 +617,19 @@ def _h_device_active_operation(
     }
 
 
+def _h_device_wait_setup(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    name = _require_str(params, "name")
+    timeout_raw = params.get("timeout", 120.0)
+    if not isinstance(timeout_raw, (int, float)):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "'timeout' must be a number")
+    timeout = float(timeout_raw)
+    try:
+        ctrl.wait_device_setup_done(name, timeout)
+    except RuntimeError as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    return {"done": True}
+
+
 # ---------------------------------------------------------------------------
 # Dialog / view-query handlers (Phase 81a)
 # ---------------------------------------------------------------------------
@@ -996,6 +1009,9 @@ METHOD_REGISTRY: dict[str, MethodSpec] = {
     ),
     "device.active_operation": MethodSpec(
         _h_device_active_operation, 5.0, "Read active device operation"
+    ),
+    "device.wait_setup": MethodSpec(
+        _h_device_wait_setup, 130.0, "Block until device setup completes"
     ),
     "device.list": MethodSpec(_h_device_list, 5.0, "List registered devices"),
     "device.snapshot": MethodSpec(

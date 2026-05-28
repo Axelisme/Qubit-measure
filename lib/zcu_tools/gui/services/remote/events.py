@@ -32,7 +32,6 @@ from zcu_tools.gui.event_bus import (
     RunFailedPayload,
     RunFinishedPayload,
     RunLockChangedPayload,
-    RunProgressChangedPayload,
     SocChangedPayload,
     TabAddedPayload,
     TabClosedPayload,
@@ -128,11 +127,6 @@ def _ser_run_failed(payload: Payload) -> WirePayload:
     return {"tab_id": payload.tab_id, "error_message": payload.error_message}
 
 
-def _ser_run_progress_changed(payload: Payload) -> WirePayload:
-    assert isinstance(payload, RunProgressChangedPayload)
-    return {"tab_id": payload.tab_id, "requery": ["run.progress"]}
-
-
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -153,7 +147,6 @@ EVENT_SERIALIZERS: dict[GuiEvent, Serializer] = {
     GuiEvent.SOC_CHANGED: _ser_soc_changed,
     GuiEvent.RUN_FINISHED: _ser_run_finished,
     GuiEvent.RUN_FAILED: _ser_run_failed,
-    GuiEvent.RUN_PROGRESS_CHANGED: _ser_run_progress_changed,
 }
 
 
