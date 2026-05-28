@@ -53,6 +53,44 @@ from zcu_tools.gui.services.remote.param_spec import (  # noqa: E402
 )
 
 # ---------------------------------------------------------------------------
+# Server usage instructions (returned in the MCP `initialize` result)
+# ---------------------------------------------------------------------------
+
+_SERVER_INSTRUCTIONS = """\
+Drive a live qubit-measure GUI over a TCP control socket.
+
+Getting started:
+  1. gui_launch (auto-connects). For offline/testing use gui_connect_mock to
+     start a mock SoC + default project + active context in one call.
+  2. gui_state_check — all four flags (has_project / has_context /
+     has_active_context / has_soc) should be true before running experiments.
+
+Typical experiment loop:
+  - gui_adapter_list -> gui_tab_new(adapter_name) -> note the returned tab_id.
+  - Inspect/edit config: gui_tab_get_cfg, then gui_cfg_set_field(tab_id, path,
+    value) for single fields. Paths are dotted and must match gui_tab_get_cfg
+    keys exactly, e.g. 'reps', 'sweep.gain.expts', 'modules.qub_pulse.value.freq'.
+    Nested module fields need the 'modules.' prefix; an unknown path fails with
+    invalid_params rather than silently no-op'ing.
+  - gui_run_start(tab_id) is fire-and-forget (returns immediately).
+  - gui_analyze_start(tab_id) after a run; gui_save_data / gui_save_image /
+    gui_save_both to persist.
+
+Detecting completion — prefer events over polling:
+  - gui_events_subscribe(['run_lock_changed','tab_content_changed']) then
+    gui_events_poll (blocks up to timeout_seconds) to receive pushes. A
+    run_lock_changed with running_tab=null means the run finished;
+    tab_content_changed fires when a run/analyze result becomes available.
+  - gui_run_progress gives in-flight bar snapshots but is a fallback; do not
+    busy-poll gui_run_running_tab in a sleep loop.
+
+Preconditions are enforced server-side and identical to the GUI buttons:
+  - Run/save require an active file-backed context; save/analyze require an
+    existing run result. Violations return precondition_failed with a message.
+  - Editing cfg while a tab is running returns precondition_failed.
+"""
+
+# ---------------------------------------------------------------------------
 # Connection state (module-level so tools are thin wrappers)
 # ---------------------------------------------------------------------------
 
@@ -1100,6 +1138,7 @@ def main() -> None:
                             "name": "qubit-measure-control",
                             "version": "1.1.0",
                         },
+                        "instructions": _SERVER_INSTRUCTIONS,
                     },
                 }
                 sys.stdout.write(json.dumps(resp) + "\n")

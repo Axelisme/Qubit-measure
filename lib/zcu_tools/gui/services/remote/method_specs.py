@@ -124,7 +124,14 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "run.start": MethodSpec(5.0, "Start a run (fire-and-forget)", (_str("tab_id"),)),
     "run.cancel": MethodSpec(5.0, "Cancel current run"),
     "run.running_tab": MethodSpec(5.0, "Current running tab"),
-    "run.progress": MethodSpec(5.0, "Read current run progress bar snapshots"),
+    "run.progress": MethodSpec(
+        5.0,
+        "Read current run progress bars. Returns active=false, bars=[] when idle. "
+        "When active=true, each bar has: token (stable id), format (human-readable "
+        "string e.g. 'Rounds 23/100 [0:25<1:15]'), maximum (total steps; 0 if "
+        "unknown), value (current step). Prefer subscribing to 'run_lock_changed' "
+        "via gui_events_subscribe to detect completion rather than polling this.",
+    ),
     # Save
     "save.data": MethodSpec(
         30.0,

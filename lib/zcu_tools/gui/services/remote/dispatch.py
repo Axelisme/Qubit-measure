@@ -808,17 +808,17 @@ def _h_run_progress(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     bars = ctrl.get_run_progress()
     if not bars:
         return {"active": False, "bars": []}
+    # bars are ProgressEntrySnapshot(token, format, maximum, value). `format` is
+    # the human-readable bar string (e.g. "Rounds 23/100 [0:25<1:15]"); maximum
+    # is the Qt-scaled total (0 when unknown), value the current scaled position.
     return {
         "active": True,
         "bars": [
             {
                 "token": s.token,
-                "desc": s.desc,
-                "n": s.n,
-                "total": s.total,
-                "elapsed": s.elapsed,
-                "remaining": s.remaining,
                 "format": s.format,
+                "maximum": s.maximum,
+                "value": s.value,
             }
             for s in bars
         ],

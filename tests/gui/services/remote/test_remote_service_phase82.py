@@ -64,6 +64,38 @@ def test_device_active_setup_serializes_scalar_progress(fx):
         sock.close()
 
 
+def test_run_progress_idle_returns_empty(fx):
+    fx.ctrl.get_run_progress = MagicMock(return_value=())  # type: ignore[method-assign]
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "run.progress")
+        assert resp["ok"] is True
+        assert resp["result"] == {"active": False, "bars": []}
+    finally:
+        sock.close()
+
+
+def test_run_progress_serializes_scalar_bars(fx):
+    bars = (
+        ProgressEntrySnapshot(token=1, format="Rounds 23/100", maximum=100, value=23),
+        ProgressEntrySnapshot(token=2, format="Reps 5/500", maximum=500, value=5),
+    )
+    fx.ctrl.get_run_progress = MagicMock(return_value=bars)  # type: ignore[method-assign]
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "run.progress")
+        assert resp["ok"] is True
+        assert resp["result"] == {
+            "active": True,
+            "bars": [
+                {"token": 1, "format": "Rounds 23/100", "maximum": 100, "value": 23},
+                {"token": 2, "format": "Reps 5/500", "maximum": 500, "value": 5},
+            ],
+        }
+    finally:
+        sock.close()
+
+
 def test_device_setup_builds_request_from_live_info_and_updates(fx):
     fx.ctrl.get_device_info = MagicMock(  # type: ignore[method-assign]
         return_value=FakeDeviceInfo(address="none", value=0.0)
