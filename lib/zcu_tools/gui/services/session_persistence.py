@@ -18,6 +18,7 @@ from zcu_tools.gui.adapter import (
     DeviceRefSpec,
     DirectValue,
     EvalValue,
+    LiteralSpec,
     ModuleRefSpec,
     ModuleRefValue,
     MultiSweepSpec,
@@ -230,6 +231,13 @@ class SessionPersistenceService:
         return payload
 
     def _node_value_to_raw(self, spec: CfgNodeSpec, value: CfgNodeValue) -> object:
+        if isinstance(spec, LiteralSpec):
+            # Fixed-value field; the literal value is canonical.
+            return {
+                "__kind": "direct",
+                "value": _to_json_compatible(spec.value),
+                "is_unset": False,
+            }
         if isinstance(spec, ScalarSpec):
             assert isinstance(value, (DirectValue, EvalValue))
             if isinstance(value, EvalValue):

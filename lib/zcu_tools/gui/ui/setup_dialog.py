@@ -223,18 +223,33 @@ class SetupDialog(QDialog):
         self._refresh_context_list()
         self._maybe_show_current_cfg()
 
-        # EventBus subscription for live context list updates
+        # EventBus subscriptions for live updates
         from zcu_tools.gui.event_bus import GuiEvent
 
         bus = controller.get_bus()
         bus.subscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_context_switched)
+        bus.subscribe(GuiEvent.SOC_CHANGED, self._on_bus_soc_changed)
         self.destroyed.connect(
             lambda: bus.unsubscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_context_switched)
+        )
+        self.destroyed.connect(
+            lambda: bus.unsubscribe(GuiEvent.SOC_CHANGED, self._on_bus_soc_changed)
         )
 
     def _on_bus_context_switched(self, payload: object) -> None:
         del payload
         self._refresh_context_list()
+
+    def _on_bus_soc_changed(self, payload: object) -> None:
+        from zcu_tools.gui.event_bus import SocChangedPayload
+
+        self._connect_btn.setEnabled(True)
+        if isinstance(payload, SocChangedPayload) and payload.soc is not None:
+            self._set_conn_status("Connected", error=False)
+            self._maybe_show_current_cfg()
+        else:
+            self._set_conn_status("Disconnected", error=False)
+            self._cfg_text.setVisible(False)
 
     # ------------------------------------------------------------------
     # Project panel handlers

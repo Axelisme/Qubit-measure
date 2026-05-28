@@ -426,5 +426,8 @@ class FakeFreqAdapter(
             ),
         ]
 
+    def save(self, req: SaveDataRequest[FakeFreqRunResult]) -> None:
+        del req  # fake experiment — no HDF5 persistence
+
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.res_name}_freq_{time.strftime('%m%d')}"
