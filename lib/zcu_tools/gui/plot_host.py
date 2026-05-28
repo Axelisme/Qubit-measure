@@ -179,6 +179,13 @@ def activate_figure(fig: Figure) -> None:
     done.wait(timeout=5.0)
 
 
+def refresh_figure_in_main_thread(fig: Figure) -> None:
+    """Dispatch draw_idle() to the main thread via the Qt bridge (fire-and-forget)."""
+    if _shutting_down:
+        return
+    _get_bridge().refresh_requested.emit(fig)
+
+
 def get_figure_container(fig: Figure) -> Optional[FigureContainer]:
     return _fig_container_registry.get(id(fig))
 
@@ -274,6 +281,7 @@ def _get_bridge() -> Any:
             close_requested = Signal(object)
             remove_canvas_requested = Signal(object)
             activate_requested = Signal(object)
+            refresh_requested = Signal(object)
 
             def __init__(self) -> None:
                 super().__init__()
@@ -282,6 +290,7 @@ def _get_bridge() -> Any:
                 self.close_requested.connect(self._on_close)
                 self.remove_canvas_requested.connect(self._on_remove_canvas)
                 self.activate_requested.connect(self._on_activate)
+                self.refresh_requested.connect(self._on_refresh)
 
             def _on_create(self, payload: Any) -> None:
                 try:
@@ -357,6 +366,10 @@ def _get_bridge() -> Any:
                 container.set_current_canvas(canvas)
                 done.set()
 
+            def _on_refresh(self, fig: object) -> None:
+                if isinstance(fig, Figure):
+                    fig.canvas.draw_idle()
+
         _bridge = _Bridge()
     return _bridge
 
@@ -377,5 +390,6 @@ __all__ = [
     "ensure_bridge",
     "get_figure_container",
     "PlotStateSnapshot",
+    "refresh_figure_in_main_thread",
     "remove_canvas",
 ]

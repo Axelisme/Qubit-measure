@@ -11,6 +11,7 @@ from zcu_tools.gui.plot_host import (
     FigureContainer,
     attach_existing_figure_to_container,
     create_figure_in_current_container,
+    refresh_figure_in_main_thread,
 )
 
 
@@ -28,7 +29,7 @@ def make_plot_frame(
 
 
 def refresh_figure(fig: Figure) -> None:
-    fig.canvas.draw_idle()
+    refresh_figure_in_main_thread(fig)
 
 
 def close_figure(fig: Figure) -> None:
