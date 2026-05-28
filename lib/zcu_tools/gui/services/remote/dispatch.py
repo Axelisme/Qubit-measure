@@ -22,7 +22,8 @@ from zcu_tools.gui.services.device import SetupDeviceRequest
 from zcu_tools.gui.services.session_persistence import SessionPersistenceService
 
 from .errors import ErrorCode, RemoteError
-from .param_spec import JsonType, ParamSpec
+from .method_specs import METHOD_SPECS, MethodSpec
+from .param_spec import ParamSpec
 from .wire import (
     coerce_connect_device_request,
     coerce_connect_request,
@@ -41,17 +42,22 @@ _SCHEMA_CODEC = SessionPersistenceService()
 
 
 # ---------------------------------------------------------------------------
-# Method classification (used by the service for per-method timeouts)
+# Runtime registry entry — binds a synchronous handler to a Qt-free MethodSpec.
 # ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
-class MethodSpec:
+class BoundMethod:
     handler: Handler
-    timeout_seconds: float
-    description: str
-    params: tuple[ParamSpec, ...] = ()
-    tool_name: str = ""
+    spec: MethodSpec
+
+    @property
+    def timeout_seconds(self) -> float:
+        return self.spec.timeout_seconds
+
+    @property
+    def params(self) -> tuple[ParamSpec, ...]:
+        return self.spec.params
 
 
 # ---------------------------------------------------------------------------
@@ -899,351 +905,87 @@ def _h_predictor_info(ctrl, params: Mapping[str, object]) -> Mapping[str, object
 # ---------------------------------------------------------------------------
 
 
-# ParamSpec factory shorthands — keep registry entries readable.
-def _p_str(name: str, desc: str = "") -> ParamSpec:
-    return ParamSpec(name, JsonType.STRING, required=True, description=desc)
+# Each wire method maps to a synchronous handler; the parameter contract,
+# timeout and description live in the Qt-free METHOD_SPECS table.
+_HANDLERS: dict[str, Handler] = {
+    "tab.new": _h_tab_new,
+    "tab.close": _h_tab_close,
+    "tab.set_active": _h_tab_set_active,
+    "tab.list": _h_tab_list,
+    "tab.snapshot": _h_tab_snapshot,
+    "tab.get_cfg": _h_tab_get_cfg,
+    "tab.update_cfg": _h_tab_update_cfg,
+    "cfg.set_field": _h_cfg_set_field,
+    "run.start": _h_run_start,
+    "run.cancel": _h_run_cancel,
+    "run.running_tab": _h_run_running_tab,
+    "run.progress": _h_run_progress,
+    "save.data": _h_save_data,
+    "save.image": _h_save_image,
+    "save.both": _h_save_both,
+    "save.set_paths": _h_save_set_paths,
+    "context.use": _h_context_use,
+    "context.new": _h_context_new,
+    "context.labels": _h_context_labels,
+    "context.active": _h_context_active,
+    "context.get_md": _h_context_get_md,
+    "context.get_md_attr": _h_context_get_md_attr,
+    "context.get_ml": _h_context_get_ml,
+    "context.set_md_attr": _h_context_set_md_attr,
+    "context.del_md_attr": _h_context_del_md_attr,
+    "context.set_ml_module": _h_context_set_ml_module,
+    "context.del_ml_module": _h_context_del_ml_module,
+    "context.set_ml_waveform": _h_context_set_ml_waveform,
+    "context.del_ml_waveform": _h_context_del_ml_waveform,
+    "state.has_project": _h_state_has_project,
+    "state.has_context": _h_state_has_context,
+    "state.has_active_context": _h_state_has_active_context,
+    "state.has_soc": _h_state_has_soc,
+    "session.persist": _h_session_persist,
+    "session.restore": _h_session_restore,
+    "connect.start": _h_connect_start,
+    "startup.apply": _h_startup_apply,
+    "device.connect": _h_device_connect,
+    "device.disconnect": _h_device_disconnect,
+    "device.reconnect": _h_device_reconnect,
+    "device.forget": _h_device_forget,
+    "device.set_value": _h_device_set_value,
+    "device.setup": _h_device_setup,
+    "device.cancel_operation": _h_device_cancel_operation,
+    "device.active_setup": _h_device_active_setup,
+    "device.active_operation": _h_device_active_operation,
+    "device.wait_setup": _h_device_wait_setup,
+    "device.list": _h_device_list,
+    "device.snapshot": _h_device_snapshot,
+    "adapter.list": _h_adapter_list,
+    "dialog.open": _h_dialog_open,
+    "dialog.close": _h_dialog_close,
+    "dialog.list_open": _h_dialog_list_open,
+    "dialog.screenshot": _h_dialog_screenshot,
+    "view.snapshot": _h_view_snapshot,
+    "view.screenshot": _h_view_screenshot,
+    "tab.figure_screenshot": _h_tab_figure_screenshot,
+    "predictor.load": _h_predictor_load,
+    "predictor.clear": _h_predictor_clear,
+    "predictor.predict": _h_predictor_predict,
+    "predictor.info": _h_predictor_info,
+    "tab.get_analyze_result": _h_tab_get_analyze_result,
+    "tab.get_analyze_params": _h_tab_get_analyze_params,
+    "analyze.start": _h_analyze_start,
+    "tab.get_cfg_summary": _h_tab_get_cfg_summary,
+}
 
-
-def _p_str_opt(name: str, desc: str = "") -> ParamSpec:
-    return ParamSpec(name, JsonType.STRING, required=False, description=desc)
-
-
-def _p_obj(name: str, desc: str = "") -> ParamSpec:
-    return ParamSpec(name, JsonType.OBJECT, required=True, description=desc)
-
-
-def _p_json(name: str, desc: str = "") -> ParamSpec:
-    return ParamSpec(name, JsonType.JSON, required=True, description=desc)
-
-
-def _p_comment() -> ParamSpec:
-    return ParamSpec(
-        "comment", JsonType.STRING, required=False, default="", description="Comment"
+# Every spec must have a handler and vice versa — fail fast on drift.
+if set(_HANDLERS) != set(METHOD_SPECS):
+    missing_spec = sorted(set(_HANDLERS) - set(METHOD_SPECS))
+    missing_handler = sorted(set(METHOD_SPECS) - set(_HANDLERS))
+    raise RuntimeError(
+        "dispatch/method_specs drift — "
+        f"handlers without spec: {missing_spec}; specs without handler: {missing_handler}"
     )
-
-
-def _p_num_opt(name: str, desc: str = "") -> ParamSpec:
-    return ParamSpec(name, JsonType.NUMBER, required=False, description=desc)
-
-
-def _p_bool_opt(name: str, default: bool, desc: str = "") -> ParamSpec:
-    return ParamSpec(
-        name, JsonType.BOOLEAN, required=False, default=default, description=desc
-    )
-
-
-def _p_str_default(name: str, default: str, desc: str = "") -> ParamSpec:
-    return ParamSpec(
-        name, JsonType.STRING, required=False, default=default, description=desc
-    )
-
-
-def _p_num(name: str, desc: str = "") -> ParamSpec:
-    return ParamSpec(name, JsonType.NUMBER, required=True, description=desc)
-
-
-def _p_num_default(name: str, default: float, desc: str = "") -> ParamSpec:
-    return ParamSpec(
-        name, JsonType.NUMBER, required=False, default=default, description=desc
-    )
-
-
-def _p_int_default(name: str, default: int, desc: str = "") -> ParamSpec:
-    return ParamSpec(
-        name, JsonType.INTEGER, required=False, default=default, description=desc
-    )
-
-
-def _p_obj_default(name: str, desc: str = "") -> ParamSpec:
-    return ParamSpec(
-        name, JsonType.OBJECT, required=False, default={}, description=desc
-    )
-
 
 # `auth` is a sentinel handled by the service before the registry — left out here.
-METHOD_REGISTRY: dict[str, MethodSpec] = {
-    "tab.new": MethodSpec(
-        _h_tab_new,
-        10.0,
-        "Create a new tab",
-        params=(_p_str("adapter_name", "Adapter to instantiate"),),
-    ),
-    "tab.close": MethodSpec(
-        _h_tab_close, 5.0, "Close a tab", params=(_p_str("tab_id"),)
-    ),
-    "tab.set_active": MethodSpec(
-        _h_tab_set_active, 5.0, "Activate a tab", params=(_p_str("tab_id"),)
-    ),
-    "tab.list": MethodSpec(_h_tab_list, 5.0, "List tabs"),
-    "tab.snapshot": MethodSpec(
-        _h_tab_snapshot,
-        5.0,
-        "Tab summary",
-        params=(_p_str_opt("tab_id", "Tab to inspect; omit for all tabs"),),
-    ),
-    "tab.get_cfg": MethodSpec(
-        _h_tab_get_cfg, 5.0, "Read tab cfg raw", params=(_p_str("tab_id"),)
-    ),
-    "tab.update_cfg": MethodSpec(
-        _h_tab_update_cfg,
-        10.0,
-        "Replace tab cfg raw",
-        params=(_p_str("tab_id"), _p_obj("raw", "Full tagged cfg form")),
-    ),
-    "cfg.set_field": MethodSpec(
-        _h_cfg_set_field,
-        5.0,
-        "Set a single cfg field by dotted path",
-        params=(
-            _p_str("tab_id"),
-            _p_str("path", "Dotted field path"),
-            _p_json("value", "New field value"),
-        ),
-    ),
-    "run.start": MethodSpec(
-        _h_run_start,
-        5.0,
-        "Start a run (fire-and-forget)",
-        params=(_p_str("tab_id"),),
-    ),
-    "run.cancel": MethodSpec(_h_run_cancel, 5.0, "Cancel current run"),
-    "run.running_tab": MethodSpec(_h_run_running_tab, 5.0, "Current running tab"),
-    "save.data": MethodSpec(
-        _h_save_data,
-        30.0,
-        "Save data file",
-        params=(
-            _p_str("tab_id"),
-            _p_str_opt("data_path", "Override data path"),
-            _p_comment(),
-        ),
-    ),
-    "save.image": MethodSpec(
-        _h_save_image,
-        30.0,
-        "Save image file",
-        params=(_p_str("tab_id"), _p_str_opt("image_path", "Override image path")),
-    ),
-    "save.both": MethodSpec(
-        _h_save_both,
-        30.0,
-        "Save data and image",
-        params=(
-            _p_str("tab_id"),
-            _p_str_opt("data_path", "Override data path"),
-            _p_str_opt("image_path", "Override image path"),
-            _p_comment(),
-        ),
-    ),
-    "save.set_paths": MethodSpec(
-        _h_save_set_paths,
-        5.0,
-        "Set tab save path overrides",
-        params=(_p_str("tab_id"), _p_str("data_path"), _p_str("image_path")),
-    ),
-    "context.use": MethodSpec(
-        _h_context_use,
-        5.0,
-        "Switch context",
-        params=(_p_str("label", "Context label to switch to"),),
-    ),
-    "context.new": MethodSpec(
-        _h_context_new,
-        10.0,
-        "Create new context",
-        params=(
-            _p_num_opt("value", "Flux value"),
-            _p_str_default("unit", "A", "Flux unit"),
-            _p_bool_opt("clone_from_current", False, "Clone current context"),
-        ),
-    ),
-    "context.labels": MethodSpec(_h_context_labels, 5.0, "List context labels"),
-    "context.active": MethodSpec(_h_context_active, 5.0, "Active context label"),
-    "context.get_md": MethodSpec(_h_context_get_md, 5.0, "List MetaDict keys"),
-    "context.get_md_attr": MethodSpec(
-        _h_context_get_md_attr,
-        5.0,
-        "Read one MetaDict attribute",
-        params=(_p_str("key", "MetaDict key"),),
-    ),
-    "context.get_ml": MethodSpec(
-        _h_context_get_ml, 5.0, "List ModuleLibrary module/waveform names"
-    ),
-    "context.set_md_attr": MethodSpec(
-        _h_context_set_md_attr,
-        5.0,
-        "Set one MetaDict attribute",
-        params=(_p_str("key", "MetaDict key"), _p_json("value", "JSON-safe value")),
-    ),
-    "context.del_md_attr": MethodSpec(
-        _h_context_del_md_attr,
-        5.0,
-        "Delete one MetaDict attribute",
-        params=(_p_str("key", "MetaDict key"),),
-    ),
-    "context.set_ml_module": MethodSpec(
-        _h_context_set_ml_module,
-        10.0,
-        "Set one ModuleLibrary module from raw dict",
-        params=(_p_str("name", "Module name"), _p_obj("raw", "Module cfg dict")),
-    ),
-    "context.del_ml_module": MethodSpec(
-        _h_context_del_ml_module,
-        5.0,
-        "Delete one ModuleLibrary module",
-        params=(_p_str("name", "Module name"),),
-    ),
-    "context.set_ml_waveform": MethodSpec(
-        _h_context_set_ml_waveform,
-        10.0,
-        "Set one ModuleLibrary waveform from raw dict",
-        params=(_p_str("name", "Waveform name"), _p_obj("raw", "Waveform cfg dict")),
-    ),
-    "context.del_ml_waveform": MethodSpec(
-        _h_context_del_ml_waveform,
-        5.0,
-        "Delete one ModuleLibrary waveform",
-        params=(_p_str("name", "Waveform name"),),
-    ),
-    "state.has_project": MethodSpec(_h_state_has_project, 5.0, ""),
-    "state.has_context": MethodSpec(_h_state_has_context, 5.0, ""),
-    "state.has_active_context": MethodSpec(_h_state_has_active_context, 5.0, ""),
-    "state.has_soc": MethodSpec(_h_state_has_soc, 5.0, ""),
-    "session.persist": MethodSpec(_h_session_persist, 10.0, "Persist tab session"),
-    "session.restore": MethodSpec(_h_session_restore, 10.0, "Restore tab session"),
-    "connect.start": MethodSpec(_h_connect_start, 30.0, "Connect to SoC"),
-    "startup.apply": MethodSpec(_h_startup_apply, 30.0, "Apply startup project"),
-    "device.connect": MethodSpec(_h_device_connect, 30.0, "Connect device"),
-    "device.disconnect": MethodSpec(_h_device_disconnect, 30.0, "Disconnect device"),
-    "device.reconnect": MethodSpec(
-        _h_device_reconnect,
-        30.0,
-        "Reconnect device",
-        params=(_p_str("name", "Device name"),),
-    ),
-    "device.forget": MethodSpec(
-        _h_device_forget,
-        5.0,
-        "Forget memory-only device",
-        params=(_p_str("name", "Device name"),),
-    ),
-    "device.set_value": MethodSpec(_h_device_set_value, 30.0, "Set device value"),
-    "device.setup": MethodSpec(
-        _h_device_setup,
-        30.0,
-        "Setup device",
-        params=(_p_str("name", "Device name"), _p_obj("updates", "Field updates")),
-    ),
-    "device.cancel_operation": MethodSpec(
-        _h_device_cancel_operation,
-        5.0,
-        "Cancel active device setup",
-        params=(_p_str("name", "Device name"),),
-    ),
-    "device.active_setup": MethodSpec(
-        _h_device_active_setup, 5.0, "Read active device setup progress"
-    ),
-    "device.active_operation": MethodSpec(
-        _h_device_active_operation, 5.0, "Read active device operation"
-    ),
-    "device.wait_setup": MethodSpec(
-        _h_device_wait_setup,
-        130.0,
-        "Block until device setup completes",
-        params=(
-            _p_str("name", "Device name"),
-            _p_num_default("timeout", 120.0, "Seconds to wait"),
-        ),
-    ),
-    "device.list": MethodSpec(_h_device_list, 5.0, "List registered devices"),
-    "device.snapshot": MethodSpec(
-        _h_device_snapshot,
-        5.0,
-        "Read one device cached snapshot",
-        params=(_p_str("name", "Device name"),),
-    ),
-    "adapter.list": MethodSpec(_h_adapter_list, 5.0, "List available adapters"),
-    "dialog.open": MethodSpec(
-        _h_dialog_open,
-        10.0,
-        "Open a named dialog",
-        params=(_p_str("name", "Dialog name"),),
-    ),
-    "dialog.close": MethodSpec(
-        _h_dialog_close,
-        5.0,
-        "Close a named dialog",
-        params=(_p_str("name", "Dialog name"),),
-    ),
-    "dialog.list_open": MethodSpec(_h_dialog_list_open, 5.0, "List open dialogs"),
-    "dialog.screenshot": MethodSpec(
-        _h_dialog_screenshot,
-        10.0,
-        "Capture a named dialog as base64 PNG",
-        params=(_p_str("dialog_name", "Dialog name"),),
-    ),
-    "view.snapshot": MethodSpec(_h_view_snapshot, 5.0, "Capture view state summary"),
-    "view.screenshot": MethodSpec(
-        _h_view_screenshot,
-        10.0,
-        "Capture window or tab as base64 PNG",
-        params=(_p_str_opt("tab_id", "Tab to capture; omit for whole window"),),
-    ),
-    "run.progress": MethodSpec(
-        _h_run_progress, 5.0, "Read current run progress bar snapshots"
-    ),
-    "tab.figure_screenshot": MethodSpec(
-        _h_tab_figure_screenshot,
-        10.0,
-        "Capture tab figure area as PNG",
-        params=(
-            _p_str("tab_id"),
-            _p_str_opt("out_path", "Write PNG here instead of returning base64"),
-        ),
-    ),
-    "predictor.load": MethodSpec(
-        _h_predictor_load,
-        30.0,
-        "Load FluxoniumPredictor",
-        params=(
-            _p_str("path", "Predictor file path"),
-            _p_num_default("flux_bias", 0.0, "Flux bias"),
-        ),
-    ),
-    "predictor.clear": MethodSpec(_h_predictor_clear, 5.0, "Clear predictor"),
-    "predictor.predict": MethodSpec(
-        _h_predictor_predict,
-        10.0,
-        "Predict transition frequency",
-        params=(
-            _p_num("value", "Flux value"),
-            _p_int_default("from_lvl", 0, "From level"),
-            _p_int_default("to_lvl", 1, "To level"),
-        ),
-    ),
-    "predictor.info": MethodSpec(_h_predictor_info, 5.0, "Get predictor info"),
-    "tab.get_analyze_result": MethodSpec(
-        _h_tab_get_analyze_result,
-        5.0,
-        "Read tab analyze result scalar summary",
-        params=(_p_str("tab_id"),),
-    ),
-    "tab.get_analyze_params": MethodSpec(
-        _h_tab_get_analyze_params,
-        5.0,
-        "Read current analyze params",
-        params=(_p_str("tab_id"),),
-    ),
-    "analyze.start": MethodSpec(
-        _h_analyze_start,
-        30.0,
-        "Start analyze (fire-and-forget)",
-        params=(_p_str("tab_id"), _p_obj_default("updates", "Analyze param updates")),
-    ),
-    "tab.get_cfg_summary": MethodSpec(
-        _h_tab_get_cfg_summary,
-        5.0,
-        "Read tab cfg as clean scalar dict",
-        params=(_p_str("tab_id"),),
-    ),
+METHOD_REGISTRY: dict[str, BoundMethod] = {
+    method: BoundMethod(handler=_HANDLERS[method], spec=METHOD_SPECS[method])
+    for method in METHOD_SPECS
 }

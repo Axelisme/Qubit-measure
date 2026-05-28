@@ -34,6 +34,24 @@ from pathlib import Path
 from tempfile import gettempdir
 from typing import Any, Callable, Deque, Dict, List, Optional
 
+# This bridge is launched standalone (``python .../mcp_server.py``), so the repo
+# ``lib`` dir is not on sys.path by default. Add it so the wire-contract modules
+# import cleanly. Importing under ``zcu_tools.gui`` runs ``gui/__init__`` which
+# eagerly loads Qt; the bridge tolerates this (it never builds a QApplication),
+# trading a heavier import for a single MethodSpec source of truth shared with
+# the dispatcher.
+_LIB_DIR = Path(__file__).resolve().parents[4]
+if str(_LIB_DIR) not in sys.path:
+    sys.path.insert(0, str(_LIB_DIR))
+
+from zcu_tools.gui.services.remote.method_specs import (  # noqa: E402
+    METHOD_SPECS,
+)
+from zcu_tools.gui.services.remote.param_spec import (  # noqa: E402
+    JsonType,
+    build_input_schema,
+)
+
 # ---------------------------------------------------------------------------
 # Connection state (module-level so tools are thin wrappers)
 # ---------------------------------------------------------------------------
@@ -423,90 +441,12 @@ def tool_gui_startup_apply(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return send_gui_rpc("startup.apply", params)
 
 
-def tool_gui_adapter_list(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    del arguments
-    return send_gui_rpc("adapter.list", {})
-
-
 def tool_gui_connect_start(arguments: Dict[str, Any]) -> Dict[str, Any]:
     params: Dict[str, Any] = {"kind": str(arguments["kind"])}
     if params["kind"] == "remote":
         params["ip"] = str(arguments["ip"])
         params["port"] = int(arguments["port"])
     return send_gui_rpc("connect.start", params)
-
-
-def tool_gui_tab_list(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    del arguments
-    return send_gui_rpc("tab.list", {})
-
-
-def tool_gui_tab_new(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc("tab.new", {"adapter_name": str(arguments["adapter_name"])})
-
-
-def tool_gui_tab_close(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc("tab.close", {"tab_id": str(arguments["tab_id"])})
-
-
-def tool_gui_tab_set_active(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc("tab.set_active", {"tab_id": str(arguments["tab_id"])})
-
-
-def tool_gui_tab_snapshot(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc("tab.snapshot", {"tab_id": str(arguments["tab_id"])})
-
-
-def tool_gui_tab_get_cfg(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc("tab.get_cfg", {"tab_id": str(arguments["tab_id"])})
-
-
-def tool_gui_tab_update_cfg(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc(
-        "tab.update_cfg",
-        {"tab_id": str(arguments["tab_id"]), "raw": dict(arguments["raw"])},
-    )
-
-
-def tool_gui_run_start(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc("run.start", {"tab_id": str(arguments["tab_id"])})
-
-
-def tool_gui_run_cancel(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    del arguments
-    return send_gui_rpc("run.cancel", {})
-
-
-def tool_gui_run_running_tab(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    del arguments
-    return send_gui_rpc("run.running_tab", {})
-
-
-def tool_gui_save_both(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    params: Dict[str, Any] = {"tab_id": str(arguments["tab_id"])}
-    if arguments.get("data_path") is not None:
-        params["data_path"] = str(arguments["data_path"])
-    if arguments.get("image_path") is not None:
-        params["image_path"] = str(arguments["image_path"])
-    if arguments.get("comment") is not None:
-        params["comment"] = str(arguments["comment"])
-    return send_gui_rpc("save.both", params)
-
-
-def tool_gui_save_data(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    params: Dict[str, Any] = {"tab_id": str(arguments["tab_id"])}
-    if arguments.get("data_path") is not None:
-        params["data_path"] = str(arguments["data_path"])
-    if arguments.get("comment") is not None:
-        params["comment"] = str(arguments["comment"])
-    return send_gui_rpc("save.data", params)
-
-
-def tool_gui_save_image(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    params: Dict[str, Any] = {"tab_id": str(arguments["tab_id"])}
-    if arguments.get("image_path") is not None:
-        params["image_path"] = str(arguments["image_path"])
-    return send_gui_rpc("save.image", params)
 
 
 def tool_gui_state_check(arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -521,41 +461,6 @@ def tool_gui_state_check(arguments: Dict[str, Any]) -> Dict[str, Any]:
         "has_active_context": has_act,
         "has_soc": has_soc,
     }
-
-
-def tool_gui_context_labels(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    del arguments
-    return send_gui_rpc("context.labels", {})
-
-
-def tool_gui_context_active(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    del arguments
-    return send_gui_rpc("context.active", {})
-
-
-def tool_gui_context_use(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc("context.use", {"label": str(arguments["label"])})
-
-
-def tool_gui_context_new(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    params: Dict[str, Any] = {}
-    if "value" in arguments and arguments["value"] is not None:
-        params["value"] = float(arguments["value"])
-    if "unit" in arguments and arguments["unit"] is not None:
-        params["unit"] = str(arguments["unit"])
-    if "clone_from_current" in arguments:
-        params["clone_from_current"] = bool(arguments["clone_from_current"])
-    return send_gui_rpc("context.new", params)
-
-
-def tool_gui_session_persist(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    del arguments
-    return send_gui_rpc("session.persist", {})
-
-
-def tool_gui_session_restore(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    del arguments
-    return send_gui_rpc("session.restore", {})
 
 
 # ---------------------------------------------------------------------------
@@ -605,24 +510,6 @@ def tool_gui_events_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return {"events": out}
 
 
-def tool_gui_dialog_open(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc("dialog.open", {"name": str(arguments["name"])})
-
-
-def tool_gui_dialog_close(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc("dialog.close", {"name": str(arguments["name"])})
-
-
-def tool_gui_dialog_list_open(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    del arguments
-    return send_gui_rpc("dialog.list_open", {})
-
-
-def tool_gui_view_snapshot(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    del arguments
-    return send_gui_rpc("view.snapshot", {})
-
-
 def tool_gui_view_screenshot(arguments: Dict[str, Any]) -> Dict[str, Any]:
     """Capture window/tab as PNG; optionally write to ``out_path`` and strip b64."""
     params: Dict[str, Any] = {}
@@ -664,77 +551,6 @@ def tool_gui_dialog_screenshot(arguments: Dict[str, Any]) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def tool_gui_cfg_set_field(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    if "value" not in arguments:
-        raise ValueError("missing 'value'")
-    return send_gui_rpc(
-        "cfg.set_field",
-        {
-            "tab_id": str(arguments["tab_id"]),
-            "path": str(arguments["path"]),
-            "value": arguments["value"],
-        },
-    )
-
-
-def tool_gui_context_get_md(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    del arguments
-    return send_gui_rpc("context.get_md", {})
-
-
-def tool_gui_context_get_md_attr(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc("context.get_md_attr", {"key": str(arguments["key"])})
-
-
-def tool_gui_context_get_ml(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    del arguments
-    return send_gui_rpc("context.get_ml", {})
-
-
-def tool_gui_context_set_md_attr(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    if "value" not in arguments:
-        raise ValueError("missing 'value'")
-    return send_gui_rpc(
-        "context.set_md_attr",
-        {"key": str(arguments["key"]), "value": arguments["value"]},
-    )
-
-
-def tool_gui_context_del_md_attr(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc("context.del_md_attr", {"key": str(arguments["key"])})
-
-
-def tool_gui_context_set_ml_module(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc(
-        "context.set_ml_module",
-        {"name": str(arguments["name"]), "raw": dict(arguments["raw"])},
-    )
-
-
-def tool_gui_context_del_ml_module(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc("context.del_ml_module", {"name": str(arguments["name"])})
-
-
-def tool_gui_context_set_ml_waveform(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc(
-        "context.set_ml_waveform",
-        {"name": str(arguments["name"]), "raw": dict(arguments["raw"])},
-    )
-
-
-def tool_gui_context_del_ml_waveform(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc("context.del_ml_waveform", {"name": str(arguments["name"])})
-
-
-def tool_gui_device_list(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    del arguments
-    return send_gui_rpc("device.list", {})
-
-
-def tool_gui_device_snapshot(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc("device.snapshot", {"name": str(arguments["name"])})
-
-
 def tool_gui_device_connect(arguments: Dict[str, Any]) -> Dict[str, Any]:
     params: Dict[str, Any] = {
         "type_name": str(arguments["type_name"]),
@@ -753,14 +569,6 @@ def tool_gui_device_disconnect(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return send_gui_rpc("device.disconnect", params)
 
 
-def tool_gui_device_reconnect(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc("device.reconnect", {"name": str(arguments["name"])})
-
-
-def tool_gui_device_forget(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc("device.forget", {"name": str(arguments["name"])})
-
-
 def tool_gui_device_set_value(arguments: Dict[str, Any]) -> Dict[str, Any]:
     if "value" not in arguments:
         raise ValueError("missing 'value'")
@@ -770,40 +578,103 @@ def tool_gui_device_set_value(arguments: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
-def tool_gui_device_setup(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc(
-        "device.setup",
-        {"name": str(arguments["name"]), "updates": dict(arguments["updates"])},
-    )
+# ---------------------------------------------------------------------------
+# Generated tools — derived from dispatch.METHOD_REGISTRY (the wire SSOT)
+# ---------------------------------------------------------------------------
+
+# Methods that must NOT be auto-generated: they need extra client-side work
+# (file writes, fan-out, MCP-side queues) or multi-field coercion, and are
+# hand-written in _OVERRIDE_TOOLS below. Lifecycle tools (gui_connect/launch/
+# stop/disconnect) have no RPC method and are hand-written too.
+_NON_GENERATED_METHODS = frozenset(
+    {
+        # connect.start kind-branching + the mock convenience flow
+        "connect.start",
+        # 5-field startup project (declares no ParamSpec; coerced explicitly)
+        "startup.apply",
+        # coerce_* → frozen request (multi-field)
+        "device.connect",
+        "device.disconnect",
+        "device.set_value",
+        # client-side file write of base64 PNG
+        "view.screenshot",
+        "dialog.screenshot",
+        "tab.figure_screenshot",
+        # fan-out / MCP-side queue (handled at the service, not the registry)
+        "state.has_project",
+        "state.has_context",
+        "state.has_active_context",
+        "state.has_soc",
+        "events.subscribe",
+        "events.unsubscribe",
+        "events.list",
+    }
+)
 
 
-def tool_gui_device_cancel_operation(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc("device.cancel_operation", {"name": str(arguments["name"])})
+def _tool_name_for(method: str, spec) -> str:
+    return spec.tool_name or "gui_" + method.replace(".", "_")
 
 
-def tool_gui_device_active_setup(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    del arguments
-    return send_gui_rpc("device.active_setup", {})
+def _coerce_arg(value: object, json_type: "JsonType") -> object:
+    if value is None:
+        return None
+    if json_type is JsonType.STRING:
+        return str(value)
+    if json_type is JsonType.INTEGER:
+        return int(value)  # type: ignore[arg-type]
+    if json_type is JsonType.NUMBER:
+        return float(value)  # type: ignore[arg-type]
+    if json_type is JsonType.BOOLEAN:
+        return bool(value)
+    if json_type is JsonType.OBJECT:
+        return dict(value)  # type: ignore[call-overload]
+    return value  # JSON: pass through
 
 
-def tool_gui_device_active_operation(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    del arguments
-    return send_gui_rpc("device.active_operation", {})
+def _make_forwarder(method: str, spec):
+    """Build an MCP forwarder that projects arguments into RPC params per spec.
+
+    Required params are coerced and always sent. Optional params are coerced and
+    sent only when present and non-None, matching the legacy hand-written
+    forwarders (which used ``if arguments.get(k) is not None``).
+    """
+    rpc_timeout = max(float(spec.timeout_seconds), 30.0)
+
+    def _forwarder(arguments: Dict[str, Any]) -> Dict[str, Any]:
+        rpc_params: Dict[str, Any] = {}
+        for p in spec.params:
+            if p.required:
+                if p.name not in arguments or arguments[p.name] is None:
+                    raise ValueError(f"missing {p.name!r}")
+                rpc_params[p.name] = _coerce_arg(arguments[p.name], p.json_type)
+            elif arguments.get(p.name) is not None:
+                rpc_params[p.name] = _coerce_arg(arguments[p.name], p.json_type)
+        return send_gui_rpc(method, rpc_params, timeout_seconds=rpc_timeout)
+
+    return _forwarder
 
 
-def tool_gui_device_wait_setup(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    params: Dict[str, Any] = {"name": str(arguments["name"])}
-    if "timeout" in arguments:
-        params["timeout"] = float(arguments["timeout"])
-    return send_gui_rpc("device.wait_setup", params, timeout_seconds=130.0)
+def _generate_tools() -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    for method, spec in METHOD_SPECS.items():
+        if method in _NON_GENERATED_METHODS:
+            continue
+        tool_name = _tool_name_for(method, spec)
+        out[tool_name] = {
+            "handler": _make_forwarder(method, spec),
+            "description": spec.description or method,
+            "inputSchema": build_input_schema(spec.params),
+        }
+    return out
 
 
 # ---------------------------------------------------------------------------
-# Tool registry
+# Hand-written tools — lifecycle + overrides that the generator cannot express
 # ---------------------------------------------------------------------------
 
 
-TOOLS: Dict[str, Dict[str, Any]] = {
+_OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
     "gui_connect": {
         "handler": tool_gui_connect,
         "description": (
@@ -911,11 +782,6 @@ TOOLS: Dict[str, Dict[str, Any]] = {
             ],
         },
     },
-    "gui_adapter_list": {
-        "handler": tool_gui_adapter_list,
-        "description": "List available experiment adapter names.",
-        "inputSchema": {"type": "object", "properties": {}},
-    },
     "gui_connect_start": {
         "handler": tool_gui_connect_start,
         "description": (
@@ -939,221 +805,6 @@ TOOLS: Dict[str, Dict[str, Any]] = {
             "required": ["kind"],
         },
     },
-    "gui_tab_list": {
-        "handler": tool_gui_tab_list,
-        "description": (
-            "List all open experiment tabs with their tab_id and adapter_name. "
-            "Use tab_id from this response in all other gui_tab_* and gui_run_* calls."
-        ),
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    "gui_tab_new": {
-        "handler": tool_gui_tab_new,
-        "description": (
-            "Open a new experiment tab for the given adapter. "
-            "Get valid adapter names from gui_adapter_list first. "
-            "Returns the new tab_id."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "adapter_name": {
-                    "type": "string",
-                    "description": "Adapter name from gui_adapter_list, e.g. 'onetone/fake_freq'",
-                }
-            },
-            "required": ["adapter_name"],
-        },
-    },
-    "gui_tab_close": {
-        "handler": tool_gui_tab_close,
-        "description": "Close an experiment tab. Any unsaved data will be lost.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"tab_id": {"type": "string"}},
-            "required": ["tab_id"],
-        },
-    },
-    "gui_tab_set_active": {
-        "handler": tool_gui_tab_set_active,
-        "description": "Bring an experiment tab to the foreground in the GUI view.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"tab_id": {"type": "string"}},
-            "required": ["tab_id"],
-        },
-    },
-    "gui_tab_snapshot": {
-        "handler": tool_gui_tab_snapshot,
-        "description": (
-            "Get a scalar summary of a tab's current state: run status, "
-            "has_run_result, has_analyze_result, has_figure, save_paths, adapter_name. "
-            "If tab_id is omitted, returns all tabs as a list under 'tabs'. "
-            "If tab_id is given, returns a single tab snapshot directly."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "tab_id": {
-                    "type": "string",
-                    "description": "Omit to get all tabs",
-                }
-            },
-        },
-    },
-    "gui_tab_get_cfg": {
-        "handler": tool_gui_tab_get_cfg,
-        "description": (
-            "Read the full configuration dict of a tab. "
-            "Use the returned keys and paths with gui_cfg_set_field for targeted edits, "
-            "or pass the modified dict to gui_tab_update_cfg."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {"tab_id": {"type": "string"}},
-            "required": ["tab_id"],
-        },
-    },
-    "gui_tab_update_cfg": {
-        "handler": tool_gui_tab_update_cfg,
-        "description": (
-            "Merge a partial config dict into a tab's configuration. "
-            "Only the keys present in 'raw' are updated; omitted keys keep their current values. "
-            "Call gui_tab_get_cfg first to see the full structure. "
-            "For single-field edits, prefer gui_cfg_set_field instead. "
-            "Fails with PRECONDITION_FAILED if the tab is currently running."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "tab_id": {"type": "string"},
-                "raw": {
-                    "type": "object",
-                    "description": "Partial config dict — only provided keys are updated",
-                },
-            },
-            "required": ["tab_id", "raw"],
-        },
-    },
-    "gui_run_start": {
-        "handler": tool_gui_run_start,
-        "description": (
-            "Start running the experiment in the given tab. "
-            "Returns immediately (async); the run continues in the background. "
-            "Poll gui_run_running_tab or subscribe to 'run_lock_changed' to detect completion. "
-            "Editing cfg (gui_cfg_set_field / gui_tab_update_cfg) is rejected while the tab is running."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {"tab_id": {"type": "string"}},
-            "required": ["tab_id"],
-        },
-    },
-    "gui_run_cancel": {
-        "handler": tool_gui_run_cancel,
-        "description": "Cancel the currently running experiment. No-op if nothing is running.",
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    "gui_run_running_tab": {
-        "handler": tool_gui_run_running_tab,
-        "description": "Return the tab_id of the currently running experiment, or null if idle.",
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    "gui_save_set_paths": {
-        "handler": lambda args: send_gui_rpc("save.set_paths", args),
-        "description": (
-            "Set the save path overrides for a tab (mirrors the UI path fields). "
-            "After calling this, gui_save_data / gui_save_image / gui_save_both "
-            "can be called without explicit paths and will use these values. "
-            "The paths are also visible in gui_tab_snapshot under 'save_paths'."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "tab_id": {"type": "string"},
-                "data_path": {
-                    "type": "string",
-                    "description": "Absolute path for HDF5 data file",
-                },
-                "image_path": {
-                    "type": "string",
-                    "description": "Absolute path for PNG image file",
-                },
-            },
-            "required": ["tab_id", "data_path", "image_path"],
-        },
-    },
-    "gui_save_both": {
-        "handler": tool_gui_save_both,
-        "description": (
-            "Save experiment data and analysis plot image in one call. "
-            "Paths are optional — if omitted, uses the tab's configured save_paths "
-            "(set via gui_save_set_paths or the UI path fields; visible in gui_tab_snapshot). "
-            "Optional comment is stored in the HDF5 file metadata."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "tab_id": {"type": "string"},
-                "data_path": {
-                    "type": "string",
-                    "description": "Override data path (optional; uses tab save_paths if omitted)",
-                },
-                "image_path": {
-                    "type": "string",
-                    "description": "Override image path (optional; uses tab save_paths if omitted)",
-                },
-                "comment": {
-                    "type": "string",
-                    "description": "Optional comment stored in HDF5 metadata",
-                },
-            },
-            "required": ["tab_id"],
-        },
-    },
-    "gui_save_data": {
-        "handler": tool_gui_save_data,
-        "description": (
-            "Save only the experiment data (HDF5) for a tab. "
-            "data_path is optional — if omitted, uses the tab's configured save_paths "
-            "(set via gui_save_set_paths or the UI path fields; visible in gui_tab_snapshot). "
-            "Optional comment is stored in the HDF5 file metadata."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "tab_id": {"type": "string"},
-                "data_path": {
-                    "type": "string",
-                    "description": "Override data path (optional; uses tab save_paths if omitted)",
-                },
-                "comment": {
-                    "type": "string",
-                    "description": "Optional comment stored in HDF5 metadata",
-                },
-            },
-            "required": ["tab_id"],
-        },
-    },
-    "gui_save_image": {
-        "handler": tool_gui_save_image,
-        "description": (
-            "Save only the analysis plot image (PNG) for a tab. "
-            "image_path is optional — if omitted, uses the tab's configured save_paths "
-            "(set via gui_save_set_paths or the UI path fields; visible in gui_tab_snapshot)."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "tab_id": {"type": "string"},
-                "image_path": {
-                    "type": "string",
-                    "description": "Override image path (optional; uses tab save_paths if omitted)",
-                },
-            },
-            "required": ["tab_id"],
-        },
-    },
     "gui_state_check": {
         "handler": tool_gui_state_check,
         "description": (
@@ -1161,69 +812,6 @@ TOOLS: Dict[str, Dict[str, Any]] = {
             "has_active_context, has_soc. Call this to verify the GUI is ready before "
             "running experiments. All four should be true for a normal workflow."
         ),
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    "gui_context_labels": {
-        "handler": tool_gui_context_labels,
-        "description": (
-            "List all context labels in the current project. "
-            "Each label encodes the flux bias point, e.g. '052621_1.000A' means "
-            "date 05/26/21 at 1.000 A. Use gui_context_use to switch between them."
-        ),
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    "gui_context_active": {
-        "handler": tool_gui_context_active,
-        "description": "Return the currently active context label (flux bias point).",
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    "gui_context_use": {
-        "handler": tool_gui_context_use,
-        "description": (
-            "Switch the active context to an existing label. "
-            "Get available labels from gui_context_labels first."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "label": {
-                    "type": "string",
-                    "description": "Exact label string from gui_context_labels",
-                }
-            },
-            "required": ["label"],
-        },
-    },
-    "gui_context_new": {
-        "handler": tool_gui_context_new,
-        "description": (
-            "Create a new flux-bias context at the given current value and unit "
-            "(e.g. value=1.5, unit='A'). Optionally clone settings from the current context. "
-            "The new context becomes active automatically."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "value": {"type": "number", "description": "Flux bias current value"},
-                "unit": {
-                    "type": "string",
-                    "description": "Unit string, e.g. 'A' or 'mA'",
-                },
-                "clone_from_current": {
-                    "type": "boolean",
-                    "description": "Copy MetaDict and ModuleLibrary from active context",
-                },
-            },
-        },
-    },
-    "gui_session_persist": {
-        "handler": tool_gui_session_persist,
-        "description": "Save the current set of open tabs to disk so they can be restored after a restart.",
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    "gui_session_restore": {
-        "handler": tool_gui_session_restore,
-        "description": "Reopen tabs from the last persisted session (saved by gui_session_persist).",
         "inputSchema": {"type": "object", "properties": {}},
     },
     "gui_events_subscribe": {
@@ -1284,45 +872,6 @@ TOOLS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
-    "gui_dialog_open": {
-        "handler": tool_gui_dialog_open,
-        "description": (
-            "Open a named dialog panel in the GUI. "
-            "Valid names: 'setup', 'device', 'predictor', 'inspect', 'startup'."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "One of: setup, device, predictor, inspect, startup",
-                }
-            },
-            "required": ["name"],
-        },
-    },
-    "gui_dialog_close": {
-        "handler": tool_gui_dialog_close,
-        "description": "Close a named dialog if it is currently open. No-op if already closed.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"name": {"type": "string"}},
-            "required": ["name"],
-        },
-    },
-    "gui_dialog_list_open": {
-        "handler": tool_gui_dialog_list_open,
-        "description": "List the names of all dialogs currently open in the GUI.",
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    "gui_view_snapshot": {
-        "handler": tool_gui_view_snapshot,
-        "description": (
-            "Return a JSON summary of the current GUI window state: "
-            "active tab, context label, run status, and open dialogs."
-        ),
-        "inputSchema": {"type": "object", "properties": {}},
-    },
     "gui_view_screenshot": {
         "handler": tool_gui_view_screenshot,
         "description": (
@@ -1367,156 +916,6 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                 },
             },
             "required": ["dialog_name"],
-        },
-    },
-    "gui_cfg_set_field": {
-        "handler": tool_gui_cfg_set_field,
-        "description": (
-            "Set a single cfg field on a tab by dotted path. "
-            "Use gui_tab_get_cfg to discover valid paths first. "
-            "Examples: 'reps' (integer), 'sweep.expts' (integer), 'qubit_pulse.value.freq' (float). "
-            "Prefer this over gui_tab_update_cfg for single-field edits. "
-            "Fails with PRECONDITION_FAILED if the tab is currently running."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "tab_id": {"type": "string"},
-                "path": {
-                    "type": "string",
-                    "description": "Dotted path from gui_tab_get_cfg, e.g. 'sweep.expts'",
-                },
-                "value": {
-                    "type": ["number", "string", "boolean", "object", "array", "null"],
-                    "description": "New value (number / string / bool)",
-                },
-            },
-            "required": ["tab_id", "path", "value"],
-        },
-    },
-    "gui_context_get_md": {
-        "handler": tool_gui_context_get_md,
-        "description": (
-            "List all MetaDict attribute keys in the active context. "
-            "MetaDict stores qubit experiment parameters (e.g. resonator frequency 'r_f', "
-            "waveform width 'rf_w'). Use gui_context_get_md_attr to read individual values."
-        ),
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    "gui_context_get_md_attr": {
-        "handler": tool_gui_context_get_md_attr,
-        "description": (
-            "Read one MetaDict attribute value by key. "
-            "Get available keys from gui_context_get_md first."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "key": {
-                    "type": "string",
-                    "description": "MetaDict key from gui_context_get_md",
-                }
-            },
-            "required": ["key"],
-        },
-    },
-    "gui_context_set_md_attr": {
-        "handler": tool_gui_context_set_md_attr,
-        "description": (
-            "Set one MetaDict attribute to a new value. "
-            "Changes are persisted to the context's JSON file immediately."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "key": {"type": "string"},
-                "value": {
-                    "type": ["number", "string", "boolean", "object", "array", "null"]
-                },
-            },
-            "required": ["key", "value"],
-        },
-    },
-    "gui_context_del_md_attr": {
-        "handler": tool_gui_context_del_md_attr,
-        "description": "Delete one MetaDict attribute from the active context.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"key": {"type": "string"}},
-            "required": ["key"],
-        },
-    },
-    "gui_context_get_ml": {
-        "handler": tool_gui_context_get_ml,
-        "description": (
-            "List all module and waveform names in the active context's ModuleLibrary. "
-            "ModuleLibrary stores QICK pulse definitions (waveforms, reset sequences, etc.)."
-        ),
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    "gui_context_set_ml_module": {
-        "handler": tool_gui_context_set_ml_module,
-        "description": "Add or replace one ModuleLibrary module entry from a raw config dict.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string", "description": "Module name"},
-                "raw": {"type": "object", "description": "Module configuration dict"},
-            },
-            "required": ["name", "raw"],
-        },
-    },
-    "gui_context_del_ml_module": {
-        "handler": tool_gui_context_del_ml_module,
-        "description": "Delete one module from the active context's ModuleLibrary.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"name": {"type": "string"}},
-            "required": ["name"],
-        },
-    },
-    "gui_context_set_ml_waveform": {
-        "handler": tool_gui_context_set_ml_waveform,
-        "description": "Add or replace one waveform in the active context's ModuleLibrary.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string", "description": "Waveform name"},
-                "raw": {"type": "object", "description": "Waveform configuration dict"},
-            },
-            "required": ["name", "raw"],
-        },
-    },
-    "gui_context_del_ml_waveform": {
-        "handler": tool_gui_context_del_ml_waveform,
-        "description": "Delete one waveform from the active context's ModuleLibrary.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"name": {"type": "string"}},
-            "required": ["name"],
-        },
-    },
-    "gui_device_list": {
-        "handler": tool_gui_device_list,
-        "description": (
-            "List all registered hardware devices with their name, type, and connection status. "
-            "Devices include signal generators, flux bias sources, etc. "
-            "Use device name in all other gui_device_* calls."
-        ),
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    "gui_device_snapshot": {
-        "handler": tool_gui_device_snapshot,
-        "description": "Read the cached state snapshot (settings, last known value) for one device by name.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Device name from gui_device_list",
-                }
-            },
-            "required": ["name"],
         },
     },
     "gui_device_connect": {
@@ -1569,24 +968,6 @@ TOOLS: Dict[str, Dict[str, Any]] = {
             "required": ["name"],
         },
     },
-    "gui_device_reconnect": {
-        "handler": tool_gui_device_reconnect,
-        "description": "Reconnect a previously remembered device using its stored address.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"name": {"type": "string"}},
-            "required": ["name"],
-        },
-    },
-    "gui_device_forget": {
-        "handler": tool_gui_device_forget,
-        "description": "Remove a device from persistent storage. It will not appear after restart.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"name": {"type": "string"}},
-            "required": ["name"],
-        },
-    },
     "gui_device_set_value": {
         "handler": tool_gui_device_set_value,
         "description": (
@@ -1604,81 +985,6 @@ TOOLS: Dict[str, Dict[str, Any]] = {
             },
             "required": ["name", "value"],
         },
-    },
-    "gui_device_setup": {
-        "handler": tool_gui_device_setup,
-        "description": (
-            "Update device configuration fields and apply them (async). "
-            "Returns immediately; the setup continues in the background. "
-            "Poll gui_device_active_setup to track progress. "
-            "'updates' is a partial dict of field names to new values, merged into the current device info."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "updates": {
-                    "type": "object",
-                    "description": "Partial device info dict to apply",
-                },
-            },
-            "required": ["name", "updates"],
-        },
-    },
-    "gui_device_cancel_operation": {
-        "handler": tool_gui_device_cancel_operation,
-        "description": "Cancel an in-progress device connect/setup operation.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"name": {"type": "string"}},
-            "required": ["name"],
-        },
-    },
-    "gui_device_active_setup": {
-        "handler": tool_gui_device_active_setup,
-        "description": "Poll the progress of an ongoing device setup operation started by gui_device_setup.",
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    "gui_device_active_operation": {
-        "handler": tool_gui_device_active_operation,
-        "description": "Poll the progress of an ongoing device connect/disconnect operation.",
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    "gui_device_wait_setup": {
-        "handler": tool_gui_device_wait_setup,
-        "description": (
-            "Block until the named device's active setup (ramp/configure) completes. "
-            "Returns immediately with done=true if no setup is currently active. "
-            "Raises PRECONDITION_FAILED if the setup fails or times out. "
-            "Use this instead of polling gui_device_active_setup in a loop."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Device name from gui_device_list",
-                },
-                "timeout": {
-                    "type": "number",
-                    "description": "Max wait time in seconds (default 120)",
-                },
-            },
-            "required": ["name"],
-        },
-    },
-    "gui_run_progress": {
-        "handler": lambda args: send_gui_rpc("run.progress", {}),
-        "description": (
-            "Read the current run progress bar state. "
-            "Returns active=false and bars=[] if no run is in progress. "
-            "When active=true, 'bars' is a list of progress bar snapshots — one per "
-            "active nesting level (e.g. outer rounds + inner averages). "
-            "Each entry has: desc (label), n (steps done), total (total steps or null), "
-            "elapsed (seconds), remaining (estimated seconds left or null), "
-            "format (human-readable string like 'Rounds 23/100 [0:25<1:15]')."
-        ),
-        "inputSchema": {"type": "object", "properties": {}},
     },
     "gui_tab_figure_screenshot": {
         "handler": lambda args: send_gui_rpc("tab.figure_screenshot", args),
@@ -1701,138 +1007,54 @@ TOOLS: Dict[str, Dict[str, Any]] = {
             "required": ["tab_id"],
         },
     },
-    "gui_predictor_load": {
-        "handler": lambda args: send_gui_rpc("predictor.load", args),
-        "description": (
-            "Load a FluxoniumPredictor from a params.json file. "
-            "path must be an absolute path to the params.json file. "
-            "flux_bias is the DC flux bias offset in Amperes (default 0.0). "
-            "Fails with PRECONDITION_FAILED if the file cannot be loaded."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to params.json",
-                },
-                "flux_bias": {
-                    "type": "number",
-                    "default": 0.0,
-                    "description": "DC flux bias offset in Amperes",
-                },
-            },
-            "required": ["path"],
-        },
-    },
-    "gui_predictor_clear": {
-        "handler": lambda args: send_gui_rpc("predictor.clear", {}),
-        "description": "Clear the currently loaded FluxoniumPredictor.",
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    "gui_predictor_predict": {
-        "handler": lambda args: send_gui_rpc("predictor.predict", args),
-        "description": (
-            "Predict a qubit transition frequency at a given flux value. "
-            "value is the flux in Amperes. "
-            "from_lvl and to_lvl select the energy level transition (default 0→1). "
-            "Returns freq_mhz (float). "
-            "Fails with PRECONDITION_FAILED if no predictor is loaded."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "value": {"type": "number", "description": "Flux value in Amperes"},
-                "from_lvl": {
-                    "type": "integer",
-                    "default": 0,
-                    "description": "Lower energy level (default 0)",
-                },
-                "to_lvl": {
-                    "type": "integer",
-                    "default": 1,
-                    "description": "Upper energy level (default 1)",
-                },
-            },
-            "required": ["value"],
-        },
-    },
-    "gui_predictor_info": {
-        "handler": lambda args: send_gui_rpc("predictor.info", {}),
-        "description": (
-            "Get the currently loaded predictor info. "
-            "Returns info={path, flux_bias} if loaded, or info=null if not loaded."
-        ),
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    "gui_tab_get_analyze_result": {
-        "handler": lambda args: send_gui_rpc("tab.get_analyze_result", args),
-        "description": (
-            "Read the scalar summary of a tab's latest analyze result. "
-            "Returns summary=null if no analyze result is available yet. "
-            "Fields vary by adapter (e.g. onetone: freq_mhz, fwhm_mhz; T1: t1_us, t1_err_us). "
-            "Call after gui_analyze_start completes (wait for tab_interaction_changed event)."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {"tab_id": {"type": "string"}},
-            "required": ["tab_id"],
-        },
-    },
-    "gui_tab_get_analyze_params": {
-        "handler": lambda args: send_gui_rpc("tab.get_analyze_params", args),
-        "description": (
-            "Read the current analyze parameters for a tab as a flat dict. "
-            "Returns analyze_params=null if no run result exists yet (analyze params are "
-            "initialized from the run result). Use the returned keys/values as the "
-            "base for gui_analyze_start updates."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {"tab_id": {"type": "string"}},
-            "required": ["tab_id"],
-        },
-    },
-    "gui_analyze_start": {
-        "handler": lambda args: send_gui_rpc("analyze.start", args),
-        "description": (
-            "Start analyzing the run result in a tab (fire-and-forget, async). "
-            "Returns immediately; analysis continues in the background. "
-            "The tab must have a run result (has_run_result=true in gui_tab_snapshot). "
-            "Optional 'updates' is a partial dict of analyze param overrides merged into "
-            "the current analyze params (get current params via gui_tab_get_analyze_params). "
-            "Subscribe to 'tab_interaction_changed' or poll gui_tab_snapshot to detect "
-            "completion (has_analyze_result=true)."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "tab_id": {"type": "string"},
-                "updates": {
-                    "type": "object",
-                    "description": "Partial analyze param overrides (optional)",
-                },
-            },
-            "required": ["tab_id"],
-        },
-    },
-    "gui_tab_get_cfg_summary": {
-        "handler": lambda args: send_gui_rpc("tab.get_cfg_summary", args),
-        "description": (
-            "Read the tab's current cfg as a clean, human-readable dict. "
-            "Unlike gui_tab_get_cfg, this strips all internal tags (__kind, is_unset) "
-            "and returns only scalar values: numbers, strings, null (for unset fields), "
-            "eval expressions as strings, sweep ranges as {start,stop,expts,step} dicts, "
-            "and module/waveform refs as {chosen, value} dicts. "
-            "Use this to understand what parameters the tab is currently configured with."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {"tab_id": {"type": "string"}},
-            "required": ["tab_id"],
-        },
-    },
 }
+
+
+# Tool names served by the hand-written overrides rather than the generator:
+# lifecycle tools (no RPC method) + the convenience/coercion/file-write tools.
+_OVERRIDE_NAMES = frozenset(
+    {
+        "gui_connect",
+        "gui_disconnect",
+        "gui_launch",
+        "gui_stop",
+        "gui_connect_mock",
+        "gui_connect_start",
+        "gui_startup_apply",
+        "gui_device_connect",
+        "gui_device_disconnect",
+        "gui_device_set_value",
+        "gui_view_screenshot",
+        "gui_dialog_screenshot",
+        "gui_tab_figure_screenshot",
+        "gui_state_check",
+        "gui_events_subscribe",
+        "gui_events_unsubscribe",
+        "gui_events_list",
+        "gui_events_poll",
+    }
+)
+
+
+def _assemble_tools() -> Dict[str, Dict[str, Any]]:
+    """Generated tools overlaid with the hand-written override subset.
+
+    The generator owns every 1:1 RPC tool (schema from the ParamSpec SSOT);
+    overrides own lifecycle / fan-out / file-write / coercion tools. The two
+    sets are disjoint by name — a collision means an override leaked into the
+    generatable set and is a programming error.
+    """
+    generated = _generate_tools()
+    overrides = {
+        name: spec for name, spec in _OVERRIDE_TOOLS.items() if name in _OVERRIDE_NAMES
+    }
+    collisions = set(generated) & set(overrides)
+    if collisions:
+        raise RuntimeError(f"override/generated tool collision: {sorted(collisions)}")
+    return {**generated, **overrides}
+
+
+TOOLS: Dict[str, Dict[str, Any]] = _assemble_tools()
 
 
 # ---------------------------------------------------------------------------

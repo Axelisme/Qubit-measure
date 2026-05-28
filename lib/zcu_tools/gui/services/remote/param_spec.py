@@ -120,19 +120,20 @@ def validate_params(
     return out
 
 
+_ANY_JSON_TYPE = ["number", "string", "boolean", "object", "array", "null"]
+
+
 def schema_property(spec: ParamSpec) -> dict[str, object]:
     """Render one ParamSpec as a JSON-schema property (for MCP inputSchema)."""
-    json_schema_type = {
+    json_schema_type: object = {
         JsonType.STRING: "string",
         JsonType.INTEGER: "integer",
         JsonType.NUMBER: "number",
         JsonType.BOOLEAN: "boolean",
         JsonType.OBJECT: "object",
-        JsonType.JSON: None,  # any type
+        JsonType.JSON: _ANY_JSON_TYPE,  # any JSON value
     }[spec.json_type]
-    prop: dict[str, object] = {}
-    if json_schema_type is not None:
-        prop["type"] = json_schema_type
+    prop: dict[str, object] = {"type": json_schema_type}
     if spec.description:
         prop["description"] = spec.description
     return prop

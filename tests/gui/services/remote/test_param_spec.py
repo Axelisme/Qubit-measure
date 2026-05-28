@@ -104,5 +104,13 @@ def test_build_input_schema_marks_required_and_types():
     props = schema["properties"]
     assert props["tab_id"] == {"type": "string"}
     assert props["flag"] == {"type": "boolean"}
-    assert props["payload"] == {}  # JSON => any type, no "type" key
+    # JSON => a type-union covering any JSON value.
+    assert props["payload"]["type"] == [
+        "number",
+        "string",
+        "boolean",
+        "object",
+        "array",
+        "null",
+    ]
     assert set(schema["required"]) == {"tab_id", "payload"}
