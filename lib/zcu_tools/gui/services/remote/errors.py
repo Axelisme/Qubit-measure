@@ -26,22 +26,33 @@ class ErrorCode(str, Enum):
 
 
 class RemoteError(Exception):
-    """Raised inside handlers / coercion to short-circuit with a typed code."""
+    """Raised inside handlers / coercion to short-circuit with a typed code.
 
-    def __init__(self, code: ErrorCode, message: str) -> None:
+    ``reason`` is an optional stable machine-readable sub-tag carried alongside
+    the closed ``code`` enum (e.g. ``code=precondition_failed`` +
+    ``reason="no_run_result"``), so agents can branch on it without parsing the
+    human ``message`` or widening the closed code set.
+    """
+
+    def __init__(self, code: ErrorCode, message: str, *, reason: str = "") -> None:
         super().__init__(message)
         self.code = code
         self.message = message
+        self.reason = reason
 
 
 @dataclass(frozen=True)
 class ErrorEnvelope:
     code: str
     message: str
+    reason: str = ""
 
     @classmethod
     def from_remote_error(cls, exc: RemoteError) -> "ErrorEnvelope":
-        return cls(code=exc.code.value, message=exc.message)
+        return cls(code=exc.code.value, message=exc.message, reason=exc.reason)
 
     def to_wire(self) -> dict[str, str]:
-        return {"code": self.code, "message": self.message}
+        wire = {"code": self.code, "message": self.message}
+        if self.reason:
+            wire["reason"] = self.reason
+        return wire

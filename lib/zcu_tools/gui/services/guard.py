@@ -24,7 +24,15 @@ class GuardError(RuntimeError):
     This is the single failure mode both clients (View and remote) see when a
     Permit cannot be issued. It is a domain-readiness failure, never a dynamic
     resource conflict (that is OperationGate's OperationConflictError).
+
+    ``reason_code`` is a stable machine-readable tag (e.g. ``"no_run_result"``)
+    so a remote client can decide the next action without parsing the human
+    ``message``. Empty when unset.
     """
+
+    def __init__(self, message: str, *, reason_code: str = "") -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
 
 
 @dataclass(frozen=True)
@@ -84,7 +92,7 @@ class GuardService:
 
     def _require_tab(self, tab_id: str) -> Any:
         if tab_id not in self._state.tabs:
-            raise GuardError(f"Unknown tab: {tab_id!r}")
+            raise GuardError(f"Unknown tab: {tab_id!r}", reason_code="unknown_tab")
         return self._state.get_tab(tab_id)
 
     def _require_readiness(self, expected: ContextReadiness, operation: str) -> None:
@@ -94,11 +102,13 @@ class GuardService:
         if expected is ContextReadiness.ACTIVE:
             raise GuardError(
                 f"Cannot {operation} without an active file-backed context "
-                f"(current readiness: {readiness.value})."
+                f"(current readiness: {readiness.value}).",
+                reason_code="no_active_context",
             )
         raise GuardError(
             f"Cannot {operation}: context readiness {readiness.value} "
-            f"(required: {expected.value})."
+            f"(required: {expected.value}).",
+            reason_code="wrong_readiness",
         )
 
     def _require_context(self, operation: str) -> None:
@@ -106,7 +116,8 @@ class GuardService:
         if self._state.exp_context.readiness is ContextReadiness.EMPTY:
             raise GuardError(
                 f"Cannot {operation}: no experiment context. Use Project… to set "
-                "up chip/qubit or load a project."
+                "up chip/qubit or load a project.",
+                reason_code="no_context",
             )
 
     def acquire_run_permit(self, tab_id: str) -> RunPermit:
@@ -120,13 +131,15 @@ class GuardService:
         try:
             tab.cfg_schema.to_raw_dict(req)
         except Exception as exc:
-            raise GuardError(f"Config invalid: {exc}") from exc
+            raise GuardError(
+                f"Config invalid: {exc}", reason_code="invalid_cfg"
+            ) from exc
 
         if tab.adapter.capabilities.requires_soc:
             try:
                 require_soc_handles(req)
             except RuntimeError as exc:
-                raise GuardError(str(exc)) from exc
+                raise GuardError(str(exc), reason_code="no_soc") from exc
 
         logger.debug("acquire_run_permit: tab_id=%r", tab_id)
         return RunPermit(
@@ -137,7 +150,9 @@ class GuardService:
         tab = self._require_tab(tab_id)
         self._require_readiness(ContextReadiness.ACTIVE, "save")
         if tab.run_result is None:
-            raise GuardError("No run result available to save.")
+            raise GuardError(
+                "No run result available to save.", reason_code="no_run_result"
+            )
         logger.debug("acquire_save_permit: tab_id=%r", tab_id)
         return SavePermit(tab_id=tab_id)
 
@@ -145,7 +160,9 @@ class GuardService:
         tab = self._require_tab(tab_id)
         self._require_context("analyze")
         if tab.run_result is None:
-            raise GuardError("No run result available to analyze.")
+            raise GuardError(
+                "No run result available to analyze.", reason_code="no_run_result"
+            )
         logger.debug("acquire_analyze_permit: tab_id=%r", tab_id)
         return AnalyzePermit(tab_id=tab_id)
 
@@ -153,6 +170,9 @@ class GuardService:
         tab = self._require_tab(tab_id)
         self._require_context("write back")
         if tab.analyze_result is None:
-            raise GuardError("No analyze result available for writeback.")
+            raise GuardError(
+                "No analyze result available for writeback.",
+                reason_code="no_analyze_result",
+            )
         logger.debug("acquire_writeback_permit: tab_id=%r", tab_id)
         return WritebackPermit(tab_id=tab_id)

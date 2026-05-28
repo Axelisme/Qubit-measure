@@ -182,7 +182,11 @@ def _h_cfg_set_field(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
     try:
         ctrl.set_tab_field(tab_id, path, value)
     except (KeyError, RuntimeError) as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     return {}
 
 
@@ -198,7 +202,11 @@ def _h_run_start(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     try:
         ctrl.start_run(tab_id)
     except RuntimeError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     return {}
 
 
@@ -222,7 +230,11 @@ def _h_save_data(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
             tab_id, str(data_path) if data_path is not None else None, comment=comment
         )
     except RuntimeError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     return {}
 
 
@@ -232,7 +244,11 @@ def _h_save_image(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     try:
         ctrl.save_image(tab_id, str(image_path) if image_path is not None else None)
     except RuntimeError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     return {}
 
 
@@ -249,7 +265,11 @@ def _h_save_both(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
             comment=comment,
         )
     except RuntimeError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     return {}
 
 
@@ -337,7 +357,11 @@ def _h_context_set_md_attr(ctrl, params: Mapping[str, object]) -> Mapping[str, o
     try:
         ctrl.set_md_attr(key, value)
     except RuntimeError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     return {}
 
 
@@ -346,7 +370,11 @@ def _h_context_del_md_attr(ctrl, params: Mapping[str, object]) -> Mapping[str, o
     try:
         ctrl.del_md_attr(key)
     except (AttributeError, RuntimeError) as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     return {}
 
 
@@ -361,7 +389,11 @@ def _h_context_set_ml_module(
     except MlEntryValidationError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     except RuntimeError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     return {}
 
 
@@ -372,7 +404,11 @@ def _h_context_del_ml_module(
     try:
         ctrl.del_ml_module(name)
     except (KeyError, RuntimeError) as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     return {}
 
 
@@ -387,7 +423,11 @@ def _h_context_set_ml_waveform(
     except MlEntryValidationError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     except RuntimeError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     return {}
 
 
@@ -398,7 +438,11 @@ def _h_context_del_ml_waveform(
     try:
         ctrl.del_ml_waveform(name)
     except (KeyError, RuntimeError) as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     return {}
 
 
@@ -458,7 +502,11 @@ def _h_device_connect(ctrl, params: Mapping[str, object]) -> Mapping[str, object
     try:
         ctrl.start_connect_device(req)
     except RuntimeError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     return {}
 
 
@@ -467,7 +515,11 @@ def _h_device_disconnect(ctrl, params: Mapping[str, object]) -> Mapping[str, obj
     try:
         ctrl.start_disconnect_device(req)
     except RuntimeError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     return {}
 
 
@@ -476,7 +528,11 @@ def _h_device_reconnect(ctrl, params: Mapping[str, object]) -> Mapping[str, obje
     try:
         ctrl.start_reconnect_device(name)
     except RuntimeError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     return {}
 
 
@@ -485,7 +541,11 @@ def _h_device_forget(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
     try:
         ctrl.forget_device(name)
     except RuntimeError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     return {}
 
 
@@ -494,7 +554,11 @@ def _h_device_set_value(ctrl, params: Mapping[str, object]) -> Mapping[str, obje
     try:
         ctrl.start_set_device_value(req)
     except RuntimeError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     return {}
 
 
@@ -505,7 +569,11 @@ def _h_device_setup(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     try:
         info = ctrl.get_device_info(name)
     except RuntimeError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     if info is None:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -518,7 +586,11 @@ def _h_device_setup(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     try:
         ctrl.start_setup_device(SetupDeviceRequest(name=name, info=updated))
     except RuntimeError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     return {}
 
 
@@ -529,7 +601,11 @@ def _h_device_cancel_operation(
     try:
         ctrl.cancel_device_operation(name)
     except RuntimeError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     return {}
 
 
@@ -618,7 +694,11 @@ def _h_device_wait_setup(ctrl, params: Mapping[str, object]) -> Mapping[str, obj
     try:
         ctrl.wait_device_setup_done(name, timeout)
     except RuntimeError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     return {"done": True}
 
 
@@ -678,7 +758,11 @@ def _h_dialog_screenshot(ctrl, params: Mapping[str, object]) -> Mapping[str, obj
         dialog_name = parse_dialog_name(name_str)
         png = ctrl.take_dialog_screenshot(dialog_name)
     except (ValueError, RuntimeError) as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     if not isinstance(png, (bytes, bytearray)):
         raise RemoteError(
             ErrorCode.INTERNAL,
@@ -696,7 +780,11 @@ def _h_view_screenshot(ctrl, params: Mapping[str, object]) -> Mapping[str, objec
     try:
         png = ctrl.take_screenshot(tab_id)
     except RuntimeError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     if not isinstance(png, (bytes, bytearray)):
         raise RemoteError(
             ErrorCode.INTERNAL,
@@ -768,7 +856,11 @@ def _h_analyze_start(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
     try:
         ctrl.analyze(tab_id, updated)
     except RuntimeError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     return {}
 
 
@@ -846,7 +938,11 @@ def _h_tab_figure_screenshot(
     try:
         png = ctrl.take_figure_screenshot(tab_id)
     except RuntimeError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     if not isinstance(png, (bytes, bytearray)):
         raise RemoteError(
             ErrorCode.INTERNAL,
@@ -874,7 +970,11 @@ def _h_predictor_load(ctrl, params: Mapping[str, object]) -> Mapping[str, object
     try:
         ctrl.load_predictor(LoadPredictorRequest(path=path, flux_bias=flux_bias))
     except PredictorLoadError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     return {}
 
 
@@ -895,7 +995,11 @@ def _h_predictor_predict(ctrl, params: Mapping[str, object]) -> Mapping[str, obj
             PredictFreqRequest(value=value, transition=(from_lvl, to_lvl))
         )
     except PredictorNotLoaded as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
     return {"freq_mhz": freq}
 
 

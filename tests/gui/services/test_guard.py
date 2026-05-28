@@ -71,8 +71,27 @@ def test_run_permit_rejected_when_not_active(readiness: ContextReadiness):
     state, tab_id = _make_state(readiness=readiness)
     guard = GuardService(state)
 
-    with pytest.raises(GuardError, match="active file-backed context"):
+    with pytest.raises(GuardError, match="active file-backed context") as exc:
         guard.acquire_run_permit(tab_id)
+    assert exc.value.reason_code == "no_active_context"
+
+
+def test_save_permit_reason_code_no_run_result():
+    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, run_result=None)
+    guard = GuardService(state)
+
+    with pytest.raises(GuardError) as exc:
+        guard.acquire_save_permit(tab_id)
+    assert exc.value.reason_code == "no_run_result"
+
+
+def test_analyze_permit_reason_code_no_context():
+    state, tab_id = _make_state(readiness=ContextReadiness.EMPTY)
+    guard = GuardService(state)
+
+    with pytest.raises(GuardError) as exc:
+        guard.acquire_analyze_permit(tab_id)
+    assert exc.value.reason_code == "no_context"
 
 
 def test_run_permit_rejected_on_invalid_cfg():

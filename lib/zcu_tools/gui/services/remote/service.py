@@ -594,7 +594,9 @@ class RemoteControlService:
                 handler_params = req.params
             self._dispatch_on_main(state, req.id, spec, handler_params)
         except RemoteError as exc:
-            self._reply_error(state, rid=rid, code=exc.code, message=exc.message)
+            self._reply_error(
+                state, rid=rid, code=exc.code, message=exc.message, reason=exc.reason
+            )
 
     def _handle_auth(
         self,
@@ -683,7 +685,9 @@ class RemoteControlService:
         if "remote_error" in holder:
             exc = holder["remote_error"]
             assert isinstance(exc, RemoteError)
-            self._reply_error(state, rid=rid, code=exc.code, message=exc.message)
+            self._reply_error(
+                state, rid=rid, code=exc.code, message=exc.message, reason=exc.reason
+            )
             return
         if "controller_error" in holder:
             err = holder["controller_error"]
@@ -718,8 +722,9 @@ class RemoteControlService:
         rid: str,
         code: ErrorCode,
         message: str,
+        reason: str = "",
     ) -> None:
-        env = ErrorEnvelope(code=code.value, message=message)
+        env = ErrorEnvelope(code=code.value, message=message, reason=reason)
         resp = Response(id=rid, ok=False, error=env)
         try:
             line = encode_line(resp.to_wire())

@@ -93,6 +93,8 @@ def test_save_data_draft_context_symmetry(qapp):  # noqa: ARG001
     with pytest.raises(RemoteError) as excinfo:
         _dispatch(ctrl, "save.data", {"tab_id": tab_id, "data_path": "/tmp/data.h5"})
     assert excinfo.value.code is ErrorCode.PRECONDITION_FAILED
+    # DRAFT context fails the readiness guard before the run-result check.
+    assert excinfo.value.reason == "no_active_context"
 
 
 def test_analyze_without_run_result_symmetry(qapp):  # noqa: ARG001
@@ -108,6 +110,17 @@ def test_analyze_without_run_result_symmetry(qapp):  # noqa: ARG001
     # snapshot has none, so the handler short-circuits before guard. Assert the
     # UI-path guard directly covers the no-result case (the authoritative guard).
     assert snap.analyze_params is None
+
+
+def test_save_no_run_result_carries_reason(qapp):  # noqa: ARG001
+    """ACTIVE context, no run result: save fails with reason='no_run_result'."""
+    ctrl = _make_controller(ContextReadiness.ACTIVE)
+    tab_id = ctrl.new_tab("fake")
+
+    with pytest.raises(RemoteError) as excinfo:
+        _dispatch(ctrl, "save.data", {"tab_id": tab_id, "data_path": "/tmp/d.h5"})
+    assert excinfo.value.code is ErrorCode.PRECONDITION_FAILED
+    assert excinfo.value.reason == "no_run_result"
 
 
 def test_run_permit_issued_for_active_valid_context(qapp):  # noqa: ARG001
