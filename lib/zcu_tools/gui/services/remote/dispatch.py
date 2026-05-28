@@ -93,10 +93,7 @@ def _h_tab_list(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     return {"tabs": tabs}
 
 
-def _h_tab_snapshot(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    tab_id = _require_str(params, "tab_id")
-    if not ctrl.has_tab(tab_id):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+def _tab_snapshot_wire(ctrl, tab_id: str) -> dict[str, object]:
     snap = ctrl.get_tab_snapshot(tab_id)
     interaction = snap.interaction
     return {
@@ -116,6 +113,18 @@ def _h_tab_snapshot(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
         },
         "save_paths": _save_paths_wire(snap.save_paths),
     }
+
+
+def _h_tab_snapshot(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    tab_id_raw = params.get("tab_id")
+    if tab_id_raw is None:
+        # batch: return all tabs
+        return {"tabs": [_tab_snapshot_wire(ctrl, tid) for tid in ctrl.list_tab_ids()]}
+    if not isinstance(tab_id_raw, str):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "'tab_id' must be a string")
+    if not ctrl.has_tab(tab_id_raw):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id_raw!r}")
+    return _tab_snapshot_wire(ctrl, tab_id_raw)
 
 
 def _save_paths_wire(paths) -> Optional[dict[str, str]]:
@@ -203,9 +212,12 @@ def _h_run_running_tab(ctrl, params: Mapping[str, object]) -> Mapping[str, objec
 
 def _h_save_data(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     tab_id = _require_str(params, "tab_id")
-    data_path = _require_str(params, "data_path")
+    data_path: Optional[str] = None
+    if "data_path" in params and params["data_path"] is not None:
+        data_path = _require_str(params, "data_path")
+    comment = str(params.get("comment", ""))
     try:
-        ctrl.save_data(tab_id, data_path)
+        ctrl.save_data(tab_id, data_path, comment=comment)
     except RuntimeError as exc:
         raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
     return {}
@@ -213,7 +225,9 @@ def _h_save_data(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
 
 def _h_save_image(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     tab_id = _require_str(params, "tab_id")
-    image_path = _require_str(params, "image_path")
+    image_path: Optional[str] = None
+    if "image_path" in params and params["image_path"] is not None:
+        image_path = _require_str(params, "image_path")
     try:
         ctrl.save_image(tab_id, image_path)
     except RuntimeError as exc:
@@ -223,12 +237,27 @@ def _h_save_image(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
 
 def _h_save_both(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     tab_id = _require_str(params, "tab_id")
-    data_path = _require_str(params, "data_path")
-    image_path = _require_str(params, "image_path")
+    data_path: Optional[str] = None
+    image_path: Optional[str] = None
+    if "data_path" in params and params["data_path"] is not None:
+        data_path = _require_str(params, "data_path")
+    if "image_path" in params and params["image_path"] is not None:
+        image_path = _require_str(params, "image_path")
+    comment = str(params.get("comment", ""))
     try:
-        ctrl.save_both(tab_id, data_path, image_path)
+        ctrl.save_both(tab_id, data_path, image_path, comment=comment)
     except RuntimeError as exc:
         raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    return {}
+
+
+def _h_save_set_paths(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    tab_id = _require_str(params, "tab_id")
+    if not ctrl.has_tab(tab_id):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    data_path = _require_str(params, "data_path")
+    image_path = _require_str(params, "image_path")
+    ctrl.update_tab_save_paths(tab_id, data_path, image_path)
     return {}
 
 
@@ -658,6 +687,97 @@ def _h_view_screenshot(ctrl, params: Mapping[str, object]) -> Mapping[str, objec
 
 
 # ---------------------------------------------------------------------------
+# Tab analyze result + analyze start + cfg summary handlers
+# ---------------------------------------------------------------------------
+
+
+def _h_tab_get_analyze_result(
+    ctrl, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    tab_id = _require_str(params, "tab_id")
+    if not ctrl.has_tab(tab_id):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    result = ctrl.get_tab_analyze_result(tab_id)
+    if result is None:
+        return {"summary": None}
+    if not hasattr(result, "to_summary_dict"):
+        raise RemoteError(
+            ErrorCode.INTERNAL,
+            "analyze result does not implement to_summary_dict()",
+        )
+    return {"summary": result.to_summary_dict()}
+
+
+def _h_tab_get_analyze_params(
+    ctrl, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    import dataclasses
+
+    tab_id = _require_str(params, "tab_id")
+    if not ctrl.has_tab(tab_id):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    snap = ctrl.get_tab_snapshot(tab_id)
+    if snap.analyze_params is None:
+        return {"analyze_params": None}
+    ap = snap.analyze_params
+    if not dataclasses.is_dataclass(ap) or isinstance(ap, type):
+        return {"analyze_params": {}}
+    return {"analyze_params": dataclasses.asdict(ap)}
+
+
+def _h_analyze_start(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    import dataclasses
+
+    tab_id = _require_str(params, "tab_id")
+    if not ctrl.has_tab(tab_id):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    snap = ctrl.get_tab_snapshot(tab_id)
+    if snap.analyze_params is None:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, "no analyze params available")
+    raw_updates = params.get("updates", {})
+    if not isinstance(raw_updates, dict):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "'updates' must be a dict")
+    ap = snap.analyze_params
+    if not dataclasses.is_dataclass(ap) or isinstance(ap, type):
+        raise RemoteError(ErrorCode.INTERNAL, "analyze_params is not a dataclass instance")
+    try:
+        updated = dataclasses.replace(ap, **raw_updates)
+    except (TypeError, ValueError) as exc:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    try:
+        ctrl.analyze(tab_id, updated)
+    except RuntimeError as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    return {}
+
+
+def _strip_cfg_tags(raw: object) -> object:
+    if isinstance(raw, dict):
+        kind = raw.get("__kind")
+        if kind == "direct":
+            return raw.get("value") if not raw.get("is_unset") else None
+        elif kind == "eval":
+            return raw.get("expr")
+        elif kind in ("module_ref", "waveform_ref"):
+            return {
+                "chosen": raw.get("chosen_key"),
+                "value": _strip_cfg_tags(raw.get("value", {})),
+            }
+        else:
+            return {k: _strip_cfg_tags(v) for k, v in raw.items()}
+    return raw
+
+
+def _h_tab_get_cfg_summary(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    tab_id = _require_str(params, "tab_id")
+    if not ctrl.has_tab(tab_id):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    schema = ctrl.get_tab_cfg_schema(tab_id)
+    raw = _SCHEMA_CODEC.schema_to_raw(schema, ml=None)
+    return {"summary": _strip_cfg_tags(raw)}
+
+
+# ---------------------------------------------------------------------------
 # Run progress handler
 # ---------------------------------------------------------------------------
 
@@ -800,6 +920,7 @@ METHOD_REGISTRY: dict[str, MethodSpec] = {
     "save.data": MethodSpec(_h_save_data, 30.0, "Save data file"),
     "save.image": MethodSpec(_h_save_image, 30.0, "Save image file"),
     "save.both": MethodSpec(_h_save_both, 30.0, "Save data and image"),
+    "save.set_paths": MethodSpec(_h_save_set_paths, 5.0, "Set tab save path overrides"),
     "context.use": MethodSpec(_h_context_use, 5.0, "Switch context"),
     "context.new": MethodSpec(_h_context_new, 10.0, "Create new context"),
     "context.labels": MethodSpec(_h_context_labels, 5.0, "List context labels"),
@@ -878,6 +999,18 @@ METHOD_REGISTRY: dict[str, MethodSpec] = {
         _h_predictor_predict, 10.0, "Predict transition frequency"
     ),
     "predictor.info": MethodSpec(_h_predictor_info, 5.0, "Get predictor info"),
+    "tab.get_analyze_result": MethodSpec(
+        _h_tab_get_analyze_result, 5.0, "Read tab analyze result scalar summary"
+    ),
+    "tab.get_analyze_params": MethodSpec(
+        _h_tab_get_analyze_params, 5.0, "Read current analyze params"
+    ),
+    "analyze.start": MethodSpec(
+        _h_analyze_start, 30.0, "Start analyze (fire-and-forget)"
+    ),
+    "tab.get_cfg_summary": MethodSpec(
+        _h_tab_get_cfg_summary, 5.0, "Read tab cfg as clean scalar dict"
+    ),
 }
 
 

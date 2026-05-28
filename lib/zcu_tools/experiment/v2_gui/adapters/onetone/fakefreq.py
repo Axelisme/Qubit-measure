@@ -51,6 +51,7 @@ from zcu_tools.gui.adapter import (
     AbsExpAdapter,
     AdapterCapabilities,
     AnalyzeRequest,
+    AnalyzeResultBase,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -120,7 +121,7 @@ FakeFreqRunResult: TypeAlias = FreqResult
 
 
 @dataclass
-class FakeFreqAnalyzeResult:
+class FakeFreqAnalyzeResult(AnalyzeResultBase):
     freq: float
     fwhm: float
     params: dict[str, Any]

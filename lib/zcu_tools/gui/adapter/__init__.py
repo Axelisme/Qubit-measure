@@ -12,6 +12,7 @@ from .protocol import (
 from .types import (
     AdapterCapabilities,
     AnalyzeRequest,
+    AnalyzeResultBase,
     AnalyzeResultWithFigure,
     CfgNodeSpec,
     CfgNodeValue,

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
@@ -64,6 +64,10 @@ class _StackBridge(QObject):
         # snapshot tracking (main-thread only)
         self._bar_start_times: dict[int, float] = {}
         self._bar_snapshots: dict[int, RunProgressSnapshot] = {}
+        # progress step callback (main-thread only)
+        self._on_progress_step: Optional[Callable[[], None]] = None
+        self._step_counter: int = 0
+        self._step_interval: int = 10
 
         self.push_requested.connect(self._on_push)
         self.pop_requested.connect(self._on_pop)
@@ -174,6 +178,20 @@ class _StackBridge(QObject):
             remaining=remaining,
             format=fmt,
         )
+        self._step_counter += 1
+        if (
+            self._on_progress_step is not None
+            and self._step_counter % self._step_interval == 0
+        ):
+            self._on_progress_step()
+
+    def set_progress_callback(
+        self, cb: Callable[[], None], interval: int = 10
+    ) -> None:
+        """Register a callback invoked every ``interval`` format updates (main-thread only)."""
+        self._on_progress_step = cb
+        self._step_interval = max(1, interval)
+        self._step_counter = 0
 
     def get_all_snapshots(self) -> tuple[RunProgressSnapshot, ...]:
         """Return snapshots of all currently active bars (main-thread only)."""
@@ -324,6 +342,12 @@ class QtProgressBarFactory:
             leave=leave,
             disabled=disabled,
         )
+
+    def set_progress_callback(
+        self, cb: Callable[[], None], interval: int = 10
+    ) -> None:
+        """Delegate to the bridge's step callback mechanism."""
+        self._bridge.set_progress_callback(cb, interval)
 
     def get_all_snapshots(self) -> tuple[RunProgressSnapshot, ...]:
         """Return snapshots of all active progress bars (main-thread only)."""

@@ -50,8 +50,8 @@ class SaveService(QObject):
         self._runner.save_finished.connect(self._on_save_finished)
         self._runner.save_failed.connect(self._on_save_failed)
 
-    def start_save_data(self, tab_id: str, data_path: str) -> None:
-        req = self._make_save_data_request(tab_id, data_path)
+    def start_save_data(self, tab_id: str, data_path: str, comment: str = "") -> None:
+        req = self._make_save_data_request(tab_id, data_path, comment=comment)
         tab = self._state.get_tab(tab_id)
         logger.info("start_save_data: tab_id=%r path=%r", tab_id, data_path)
         self._ensure_parent_directory(data_path)
@@ -59,7 +59,7 @@ class SaveService(QObject):
         self._active_paths[tab_id] = data_path
         self._mark_saving(tab_id, True)
 
-    def start_save_both(self, tab_id: str, data_path: str, image_path: str) -> None:
+    def start_save_both(self, tab_id: str, data_path: str, image_path: str, comment: str = "") -> None:
         """Sync-save image on the main thread, then async-save data on a worker thread."""
         tab = self._state.get_tab(tab_id)
         if tab.figure is None:
@@ -79,7 +79,7 @@ class SaveService(QObject):
                 "start_save_both: image failed tab_id=%r exc=%r", tab_id, exc
             )
 
-        req = self._make_save_data_request(tab_id, data_path)
+        req = self._make_save_data_request(tab_id, data_path, comment=comment)
         logger.info(
             "start_save_both: start_save tab_id=%r data_path=%r", tab_id, data_path
         )
@@ -101,7 +101,7 @@ class SaveService(QObject):
     def _ensure_parent_directory(path: str) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
 
-    def _make_save_data_request(self, tab_id: str, data_path: str) -> SaveDataRequest:
+    def _make_save_data_request(self, tab_id: str, data_path: str, comment: str = "") -> SaveDataRequest:
         if self._state.is_tab_busy(tab_id):
             raise RuntimeError(f"Tab {tab_id!r} is busy")
 
@@ -119,6 +119,7 @@ class SaveService(QObject):
             qub_name=ctx.qub_name,
             res_name=ctx.res_name,
             active_label=ctx.active_label,
+            comment=comment,
         )
         return req
 

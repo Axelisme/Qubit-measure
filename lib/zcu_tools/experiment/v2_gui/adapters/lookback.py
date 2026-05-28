@@ -17,6 +17,7 @@ from zcu_tools.gui.adapter import (
     AbsExpAdapter,
     AdapterCapabilities,
     AnalyzeRequest,
+    AnalyzeResultBase,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -41,7 +42,7 @@ class LookbackAnalyzeParams:
 
 
 @dataclass
-class LookbackAnalyzeResult:
+class LookbackAnalyzeResult(AnalyzeResultBase):
     predict_offset: float
     figure: Figure
 

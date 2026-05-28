@@ -85,9 +85,40 @@ class ContextReadiness(Enum):
     ACTIVE = "active"
 
 
+def _is_json_safe(val: object) -> bool:
+    """Return True if val can be serialized to JSON without loss."""
+    if isinstance(val, (int, float, str, bool, type(None))):
+        return True
+    if isinstance(val, dict):
+        return all(isinstance(k, str) and _is_json_safe(v) for k, v in val.items())
+    if isinstance(val, (list, tuple)):
+        return all(_is_json_safe(v) for v in val)
+    return False
+
+
+class AnalyzeResultBase:
+    """Mixin providing a default to_summary_dict() via dataclass reflection.
+
+    Automatically skips fields whose values are not JSON-safe (Figure, ndarray,
+    etc.). Adapter authors may override for custom formatting.
+    """
+
+    def to_summary_dict(self) -> dict[str, object]:
+        import dataclasses
+
+        result: dict[str, object] = {}
+        for f in dataclasses.fields(self):  # type: ignore[arg-type]
+            val = getattr(self, f.name)
+            if _is_json_safe(val):
+                result[f.name] = val
+        return result
+
+
 class AnalyzeResultWithFigure(Protocol):
     @property
     def figure(self) -> Optional["Figure"]: ...
+
+    def to_summary_dict(self) -> dict[str, object]: ...
 
 
 T_AnalyzeResult = TypeVar("T_AnalyzeResult", bound=AnalyzeResultWithFigure)
@@ -137,6 +168,7 @@ class SaveDataRequest(Generic[T_Result]):
     qub_name: str
     res_name: str
     active_label: str
+    comment: str = ""
 
 
 @dataclass(frozen=True)

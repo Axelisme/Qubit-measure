@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
-from .adapter import CfgSchema, SocCfgHandle, WritebackItem
+from .adapter import CfgSchema, SavePaths, SocCfgHandle, WritebackItem
 from .event_bus import (
     EventBus,
     GuiEvent,
@@ -332,6 +332,9 @@ class Controller:
     def get_run_progress(self) -> tuple:
         return self._run_svc.get_run_progress()
 
+    def get_tab_analyze_result(self, tab_id: str) -> object | None:
+        return self._tab_svc.get_tab_analyze_result(tab_id)
+
     # ------------------------------------------------------------------
     # Analyze flow (TabService)
     # ------------------------------------------------------------------
@@ -363,30 +366,52 @@ class Controller:
     # Save (TabService)
     # ------------------------------------------------------------------
 
-    def save_data(self, tab_id: str, data_path: str) -> None:
+    def _resolve_save_paths(self, tab_id: str) -> "SavePaths":
+        paths = self._tab_svc.get_tab_save_paths(tab_id)
+        if paths is None:
+            raise RuntimeError(
+                f"Tab {tab_id!r} has no save paths configured — "
+                "set paths via the Save panel or update_tab_save_paths()."
+            )
+        return paths
+
+    def save_data(
+        self, tab_id: str, data_path: Optional[str] = None, comment: str = ""
+    ) -> None:
         if not self.has_context():
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
         self._require_active_context("save data")
-        self._save_svc.start_save_data(tab_id, data_path)
+        resolved = data_path or self._resolve_save_paths(tab_id).data_path
+        self._save_svc.start_save_data(tab_id, resolved, comment=comment)
 
-    def save_image(self, tab_id: str, image_path: str) -> None:
+    def save_image(self, tab_id: str, image_path: Optional[str] = None) -> None:
         if not self.has_context():
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
         self._require_active_context("save image")
-        self._save_svc.save_image_sync(tab_id, image_path)
-        self._require_view().show_status_message(f"Image saved to {image_path}")
+        resolved = image_path or self._resolve_save_paths(tab_id).image_path
+        self._save_svc.save_image_sync(tab_id, resolved)
+        self._require_view().show_status_message(f"Image saved to {resolved}")
 
-    def save_both(self, tab_id: str, data_path: str, image_path: str) -> None:
+    def save_both(
+        self,
+        tab_id: str,
+        data_path: Optional[str] = None,
+        image_path: Optional[str] = None,
+        comment: str = "",
+    ) -> None:
         if not self.has_context():
             raise RuntimeError(
                 "No experiment context. Use Project… to set up chip/qubit or load a project."
             )
         self._require_active_context("save data and image")
-        self._save_svc.start_save_both(tab_id, data_path, image_path)
+        paths = self._resolve_save_paths(tab_id)
+        resolved_data = data_path or paths.data_path
+        resolved_image = image_path or paths.image_path
+        self._save_svc.start_save_both(tab_id, resolved_data, resolved_image, comment=comment)
 
     # ------------------------------------------------------------------
     # Context / IO (ContextService)

@@ -23,6 +23,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
     AnalyzeRequest,
+    AnalyzeResultBase,
     CfgNodeValue,
     CfgSchema,
     CfgSectionSpec,
@@ -48,7 +49,7 @@ class AmpRabiAnalyzeParams:
 
 
 @dataclass
-class AmpRabiAnalyzeResult:
+class AmpRabiAnalyzeResult(AnalyzeResultBase):
     pi_amp: float
     pi2_amp: float
     figure: Figure

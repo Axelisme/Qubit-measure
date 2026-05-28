@@ -24,6 +24,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
     AnalyzeRequest,
+    AnalyzeResultBase,
     CfgNodeValue,
     CfgSchema,
     CfgSectionSpec,
@@ -51,7 +52,7 @@ class T2RamseyAnalyzeParams:
 
 
 @dataclass
-class T2RamseyAnalyzeResult:
+class T2RamseyAnalyzeResult(AnalyzeResultBase):
     t2r: float
     t2r_err: float
     detune: float

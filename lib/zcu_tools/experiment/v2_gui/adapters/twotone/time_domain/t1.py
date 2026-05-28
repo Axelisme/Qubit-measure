@@ -19,6 +19,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
     AnalyzeRequest,
+    AnalyzeResultBase,
     CfgNodeValue,
     CfgSchema,
     CfgSectionSpec,
@@ -46,7 +47,7 @@ class T1AnalyzeParams:
 
 
 @dataclass
-class T1AnalyzeResult:
+class T1AnalyzeResult(AnalyzeResultBase):
     t1: float
     t1_err: float
     figure: Figure

@@ -15,6 +15,7 @@ from zcu_tools.gui.adapter import (
     AbsExpAdapter,
     AdapterCapabilities,
     AnalyzeRequest,
+    AnalyzeResultBase,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -58,7 +59,7 @@ FakeRunResult: TypeAlias = FakeResult
 
 
 @dataclass
-class FakeAnalyzeResult:
+class FakeAnalyzeResult(AnalyzeResultBase):
     peak: float
     figure: Figure
 

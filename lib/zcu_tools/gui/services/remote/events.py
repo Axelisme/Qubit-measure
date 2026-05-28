@@ -29,7 +29,10 @@ from zcu_tools.gui.event_bus import (
     MlChangedPayload,
     Payload,
     PredictorChangedPayload,
+    RunFailedPayload,
+    RunFinishedPayload,
     RunLockChangedPayload,
+    RunProgressChangedPayload,
     SocChangedPayload,
     TabAddedPayload,
     TabClosedPayload,
@@ -115,6 +118,21 @@ def _ser_soc_changed(payload: Payload) -> WirePayload:
     return {"connected": payload.soc is not None}
 
 
+def _ser_run_finished(payload: Payload) -> WirePayload:
+    assert isinstance(payload, RunFinishedPayload)
+    return {"tab_id": payload.tab_id, "requery": ["tab.snapshot"]}
+
+
+def _ser_run_failed(payload: Payload) -> WirePayload:
+    assert isinstance(payload, RunFailedPayload)
+    return {"tab_id": payload.tab_id, "error_message": payload.error_message}
+
+
+def _ser_run_progress_changed(payload: Payload) -> WirePayload:
+    assert isinstance(payload, RunProgressChangedPayload)
+    return {"tab_id": payload.tab_id, "requery": ["run.progress"]}
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -133,6 +151,9 @@ EVENT_SERIALIZERS: dict[GuiEvent, Serializer] = {
     GuiEvent.MD_CHANGED: _ser_md_changed,
     GuiEvent.ML_CHANGED: _ser_ml_changed,
     GuiEvent.SOC_CHANGED: _ser_soc_changed,
+    GuiEvent.RUN_FINISHED: _ser_run_finished,
+    GuiEvent.RUN_FAILED: _ser_run_failed,
+    GuiEvent.RUN_PROGRESS_CHANGED: _ser_run_progress_changed,
 }
 
 

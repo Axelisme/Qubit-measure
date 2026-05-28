@@ -10,6 +10,7 @@ from typing_extensions import Any, ClassVar, Generic, Optional, Sequence
 from .types import (
     AdapterCapabilities,
     AnalyzeRequest,
+    AnalyzeResultBase,
     CfgSchema,
     ExpContext,
     RunRequest,
@@ -31,7 +32,7 @@ class NoAnalyzeParams:
 
 
 @dataclass
-class NoAnalysisResult:
+class NoAnalysisResult(AnalyzeResultBase):
     figure: Optional[Figure] = None
 
 

@@ -23,6 +23,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
     AnalyzeRequest,
+    AnalyzeResultBase,
     CfgNodeValue,
     CfgSchema,
     CfgSectionSpec,
@@ -48,7 +49,7 @@ class LenRabiAnalyzeParams:
 
 
 @dataclass
-class LenRabiAnalyzeResult:
+class LenRabiAnalyzeResult(AnalyzeResultBase):
     pi_len: float
     pi2_len: float
     figure: Figure

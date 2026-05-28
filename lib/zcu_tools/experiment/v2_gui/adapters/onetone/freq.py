@@ -21,6 +21,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
     AnalyzeRequest,
+    AnalyzeResultBase,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -49,7 +50,7 @@ class OneToneFreqAnalyzeParams:
 
 
 @dataclass
-class OneToneFreqAnalyzeResult:
+class OneToneFreqAnalyzeResult(AnalyzeResultBase):
     freq: float
     fwhm: float
     params: dict[str, Any]

@@ -64,6 +64,9 @@ class TabService:
     def get_tab_result(self, tab_id: str) -> object | None:
         return self._state.get_tab(tab_id).run_result
 
+    def get_tab_analyze_result(self, tab_id: str) -> object | None:
+        return self._state.get_tab(tab_id).analyze_result
+
     def get_tab_adapter_name(self, tab_id: str) -> str:
         return self._state.get_tab(tab_id).adapter_name
 

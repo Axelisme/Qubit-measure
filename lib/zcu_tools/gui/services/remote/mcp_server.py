@@ -927,12 +927,18 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "handler": tool_gui_tab_snapshot,
         "description": (
             "Get a scalar summary of a tab's current state: run status, "
-            "analysis results, sweep progress. Lightweight alternative to gui_tab_get_cfg."
+            "has_run_result, has_analyze_result, has_figure, save_paths, adapter_name. "
+            "If tab_id is omitted, returns all tabs as a list under 'tabs'. "
+            "If tab_id is given, returns a single tab snapshot directly."
         ),
         "inputSchema": {
             "type": "object",
-            "properties": {"tab_id": {"type": "string"}},
-            "required": ["tab_id"],
+            "properties": {
+                "tab_id": {
+                    "type": "string",
+                    "description": "Omit to get all tabs",
+                }
+            },
         },
     },
     "gui_tab_get_cfg": {
@@ -993,34 +999,13 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "description": "Return the tab_id of the currently running experiment, or null if idle.",
         "inputSchema": {"type": "object", "properties": {}},
     },
-    "gui_save_both": {
-        "handler": tool_gui_save_both,
+    "gui_save_set_paths": {
+        "handler": lambda args: send_gui_rpc("save.set_paths", args),
         "description": (
-            "Save experiment data and analysis plot image in one call. "
-            "data_path should be an absolute path with .h5 extension; "
-            "image_path should be an absolute path with .png extension."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "tab_id": {"type": "string"},
-                "data_path": {
-                    "type": "string",
-                    "description": "Absolute path for HDF5 data file, e.g. '/path/to/result.h5'",
-                },
-                "image_path": {
-                    "type": "string",
-                    "description": "Absolute path for PNG image file, e.g. '/path/to/result.png'",
-                },
-            },
-            "required": ["tab_id", "data_path", "image_path"],
-        },
-    },
-    "gui_save_data": {
-        "handler": tool_gui_save_data,
-        "description": (
-            "Save only the experiment data (HDF5) for a tab. "
-            "data_path must be an absolute path with .h5 extension."
+            "Set the save path overrides for a tab (mirrors the UI path fields). "
+            "After calling this, gui_save_data / gui_save_image / gui_save_both "
+            "can be called without explicit paths and will use these values. "
+            "The paths are also visible in gui_tab_snapshot under 'save_paths'."
         ),
         "inputSchema": {
             "type": "object",
@@ -1030,15 +1015,72 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                     "type": "string",
                     "description": "Absolute path for HDF5 data file",
                 },
+                "image_path": {
+                    "type": "string",
+                    "description": "Absolute path for PNG image file",
+                },
             },
-            "required": ["tab_id", "data_path"],
+            "required": ["tab_id", "data_path", "image_path"],
+        },
+    },
+    "gui_save_both": {
+        "handler": tool_gui_save_both,
+        "description": (
+            "Save experiment data and analysis plot image in one call. "
+            "Paths are optional — if omitted, uses the tab's configured save_paths "
+            "(set via gui_save_set_paths or the UI path fields; visible in gui_tab_snapshot). "
+            "Optional comment is stored in the HDF5 file metadata."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tab_id": {"type": "string"},
+                "data_path": {
+                    "type": "string",
+                    "description": "Override data path (optional; uses tab save_paths if omitted)",
+                },
+                "image_path": {
+                    "type": "string",
+                    "description": "Override image path (optional; uses tab save_paths if omitted)",
+                },
+                "comment": {
+                    "type": "string",
+                    "description": "Optional comment stored in HDF5 metadata",
+                },
+            },
+            "required": ["tab_id"],
+        },
+    },
+    "gui_save_data": {
+        "handler": tool_gui_save_data,
+        "description": (
+            "Save only the experiment data (HDF5) for a tab. "
+            "data_path is optional — if omitted, uses the tab's configured save_paths "
+            "(set via gui_save_set_paths or the UI path fields; visible in gui_tab_snapshot). "
+            "Optional comment is stored in the HDF5 file metadata."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tab_id": {"type": "string"},
+                "data_path": {
+                    "type": "string",
+                    "description": "Override data path (optional; uses tab save_paths if omitted)",
+                },
+                "comment": {
+                    "type": "string",
+                    "description": "Optional comment stored in HDF5 metadata",
+                },
+            },
+            "required": ["tab_id"],
         },
     },
     "gui_save_image": {
         "handler": tool_gui_save_image,
         "description": (
             "Save only the analysis plot image (PNG) for a tab. "
-            "image_path must be an absolute path with .png extension."
+            "image_path is optional — if omitted, uses the tab's configured save_paths "
+            "(set via gui_save_set_paths or the UI path fields; visible in gui_tab_snapshot)."
         ),
         "inputSchema": {
             "type": "object",
@@ -1046,10 +1088,10 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                 "tab_id": {"type": "string"},
                 "image_path": {
                     "type": "string",
-                    "description": "Absolute path for PNG image file",
+                    "description": "Override image path (optional; uses tab save_paths if omitted)",
                 },
             },
-            "required": ["tab_id", "image_path"],
+            "required": ["tab_id"],
         },
     },
     "gui_state_check": {
@@ -1612,6 +1654,73 @@ TOOLS: Dict[str, Dict[str, Any]] = {
             "Returns info={path, flux_bias} if loaded, or info=null if not loaded."
         ),
         "inputSchema": {"type": "object", "properties": {}},
+    },
+    "gui_tab_get_analyze_result": {
+        "handler": lambda args: send_gui_rpc("tab.get_analyze_result", args),
+        "description": (
+            "Read the scalar summary of a tab's latest analyze result. "
+            "Returns summary=null if no analyze result is available yet. "
+            "Fields vary by adapter (e.g. onetone: freq_mhz, fwhm_mhz; T1: t1_us, t1_err_us). "
+            "Call after gui_analyze_start completes (wait for tab_interaction_changed event)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"tab_id": {"type": "string"}},
+            "required": ["tab_id"],
+        },
+    },
+    "gui_tab_get_analyze_params": {
+        "handler": lambda args: send_gui_rpc("tab.get_analyze_params", args),
+        "description": (
+            "Read the current analyze parameters for a tab as a flat dict. "
+            "Returns analyze_params=null if no run result exists yet (analyze params are "
+            "initialized from the run result). Use the returned keys/values as the "
+            "base for gui_analyze_start updates."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"tab_id": {"type": "string"}},
+            "required": ["tab_id"],
+        },
+    },
+    "gui_analyze_start": {
+        "handler": lambda args: send_gui_rpc("analyze.start", args),
+        "description": (
+            "Start analyzing the run result in a tab (fire-and-forget, async). "
+            "Returns immediately; analysis continues in the background. "
+            "The tab must have a run result (has_run_result=true in gui_tab_snapshot). "
+            "Optional 'updates' is a partial dict of analyze param overrides merged into "
+            "the current analyze params (get current params via gui_tab_get_analyze_params). "
+            "Subscribe to 'tab_interaction_changed' or poll gui_tab_snapshot to detect "
+            "completion (has_analyze_result=true)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tab_id": {"type": "string"},
+                "updates": {
+                    "type": "object",
+                    "description": "Partial analyze param overrides (optional)",
+                },
+            },
+            "required": ["tab_id"],
+        },
+    },
+    "gui_tab_get_cfg_summary": {
+        "handler": lambda args: send_gui_rpc("tab.get_cfg_summary", args),
+        "description": (
+            "Read the tab's current cfg as a clean, human-readable dict. "
+            "Unlike gui_tab_get_cfg, this strips all internal tags (__kind, is_unset) "
+            "and returns only scalar values: numbers, strings, null (for unset fields), "
+            "eval expressions as strings, sweep ranges as {start,stop,expts,step} dicts, "
+            "and module/waveform refs as {chosen, value} dicts. "
+            "Use this to understand what parameters the tab is currently configured with."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"tab_id": {"type": "string"}},
+            "required": ["tab_id"],
+        },
     },
 }
 

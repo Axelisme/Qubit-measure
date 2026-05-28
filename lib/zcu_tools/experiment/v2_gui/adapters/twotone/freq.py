@@ -19,6 +19,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 from zcu_tools.gui.adapter import (
     AbsExpAdapter,
     AnalyzeRequest,
+    AnalyzeResultBase,
     CfgNodeValue,
     CfgSchema,
     CfgSectionSpec,
@@ -45,7 +46,7 @@ class FreqAnalyzeParams:
 
 
 @dataclass
-class FreqAnalyzeResult:
+class FreqAnalyzeResult(AnalyzeResultBase):
     freq: float
     fwhm: float
     params: dict[str, Any]

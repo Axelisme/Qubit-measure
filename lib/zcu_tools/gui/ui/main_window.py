@@ -242,6 +242,10 @@ class ExpTabWidget(QWidget):
         image_path_row.addWidget(browse_image_btn)
         save_layout.addRow("Image path:", image_path_row)
 
+        self._comment_edit = QLineEdit()
+        self._comment_edit.setPlaceholderText("Optional comment…")
+        save_layout.addRow("Comment:", self._comment_edit)
+
         btn_row = QHBoxLayout()
         self.save_data_btn = QPushButton("Save Data")
         self.save_image_btn = QPushButton("Save Image")
@@ -410,6 +414,9 @@ class ExpTabWidget(QWidget):
 
     def get_image_path(self) -> str:
         return self._image_path_edit.text()
+
+    def get_comment(self) -> str:
+        return self._comment_edit.text()
 
     def reset_plot(self) -> None:
         """Remove all canvases from plot_stack, revert to placeholder."""
@@ -1035,7 +1042,7 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         path = tab_w.get_data_path()
-        self._ctrl.save_data(tab_id, path)
+        self._ctrl.save_data(tab_id, path, comment=tab_w.get_comment())
 
     def _on_save_image_clicked(self, tab_id: str) -> None:
         logger.info("_on_save_image_clicked: tab_id=%r", tab_id)
@@ -1052,7 +1059,7 @@ class MainWindow(QMainWindow):
             return
         data_path = tab_w.get_data_path()
         image_path = tab_w.get_image_path()
-        self._ctrl.save_both(tab_id, data_path, image_path)
+        self._ctrl.save_both(tab_id, data_path, image_path, comment=tab_w.get_comment())
 
     def _on_setup_clicked(self) -> None:
         self.open_dialog(DialogName.SETUP)
