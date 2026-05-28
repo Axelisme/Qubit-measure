@@ -443,34 +443,30 @@ def tool_gui_run_running_tab(arguments: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def tool_gui_save_both(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc(
-        "save.both",
-        {
-            "tab_id": str(arguments["tab_id"]),
-            "data_path": str(arguments["data_path"]),
-            "image_path": str(arguments["image_path"]),
-        },
-    )
+    params: Dict[str, Any] = {"tab_id": str(arguments["tab_id"])}
+    if arguments.get("data_path") is not None:
+        params["data_path"] = str(arguments["data_path"])
+    if arguments.get("image_path") is not None:
+        params["image_path"] = str(arguments["image_path"])
+    if arguments.get("comment") is not None:
+        params["comment"] = str(arguments["comment"])
+    return send_gui_rpc("save.both", params)
 
 
 def tool_gui_save_data(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc(
-        "save.data",
-        {
-            "tab_id": str(arguments["tab_id"]),
-            "data_path": str(arguments["data_path"]),
-        },
-    )
+    params: Dict[str, Any] = {"tab_id": str(arguments["tab_id"])}
+    if arguments.get("data_path") is not None:
+        params["data_path"] = str(arguments["data_path"])
+    if arguments.get("comment") is not None:
+        params["comment"] = str(arguments["comment"])
+    return send_gui_rpc("save.data", params)
 
 
 def tool_gui_save_image(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    return send_gui_rpc(
-        "save.image",
-        {
-            "tab_id": str(arguments["tab_id"]),
-            "image_path": str(arguments["image_path"]),
-        },
-    )
+    params: Dict[str, Any] = {"tab_id": str(arguments["tab_id"])}
+    if arguments.get("image_path") is not None:
+        params["image_path"] = str(arguments["image_path"])
+    return send_gui_rpc("save.image", params)
 
 
 def tool_gui_state_check(arguments: Dict[str, Any]) -> Dict[str, Any]:
