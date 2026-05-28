@@ -1100,7 +1100,7 @@ class MainWindow(QMainWindow):
         if name is DialogName.INSPECT:
             from .inspect_dialog import InspectDialog
 
-            return InspectDialog(self._ctrl, bus=self._ctrl.get_bus(), parent=None)
+            return InspectDialog(self._ctrl, bus=self._ctrl.get_bus(), parent=self)
         if name is DialogName.STARTUP:
             # STARTUP dialog needs ``startup_mode=True`` and is normally opened
             # by the application bootstrap, not by this generic factory. We
@@ -1236,6 +1236,22 @@ class MainWindow(QMainWindow):
         buf.open(QIODevice.OpenModeFlag.WriteOnly)
         if not pixmap.save(buf, "PNG"):
             raise RuntimeError("Qt failed to encode the figure pixmap as PNG")
+        return bytes(buf.data().data())  # type: ignore[arg-type]
+
+    def take_dialog_screenshot(self, dialog_name: "DialogName") -> bytes:
+        """Grab a currently-open dialog and return raw PNG bytes."""
+        from qtpy.QtCore import QBuffer, QIODevice  # type: ignore[attr-defined]
+
+        dlg = self._open_dialogs.get(dialog_name)
+        if dlg is None:
+            raise RuntimeError(f"dialog {dialog_name.value!r} is not currently open")
+        pixmap = dlg.grab()
+        buf = QBuffer()
+        buf.open(QIODevice.OpenModeFlag.WriteOnly)
+        if not pixmap.save(buf, "PNG"):
+            raise RuntimeError(
+                f"Qt failed to encode {dialog_name.value!r} dialog as PNG"
+            )
         return bytes(buf.data().data())  # type: ignore[arg-type]
 
     def get_tab_live_model_root(self, tab_id: str) -> "SectionLiveField":

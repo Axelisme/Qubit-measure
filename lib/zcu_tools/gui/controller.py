@@ -82,6 +82,7 @@ class ViewProtocol(Protocol):
     def get_view_snapshot(self) -> dict[str, object]: ...
     def take_screenshot(self, tab_id: Optional[str] = None) -> bytes: ...
     def take_figure_screenshot(self, tab_id: str) -> bytes: ...
+    def take_dialog_screenshot(self, dialog_name: Any) -> bytes: ...
     def get_tab_live_model_root(self, tab_id: str) -> Any: ...
 
 
@@ -695,6 +696,9 @@ class Controller:
 
     def take_figure_screenshot(self, tab_id: str) -> bytes:
         return self._require_view().take_figure_screenshot(tab_id)
+
+    def take_dialog_screenshot(self, dialog_name: Any) -> bytes:
+        return self._require_view().take_dialog_screenshot(dialog_name)
 
     def get_tab_live_model_root(self, tab_id: str):
         return self._require_view().get_tab_live_model_root(tab_id)

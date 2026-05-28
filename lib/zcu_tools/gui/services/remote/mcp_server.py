@@ -642,6 +642,23 @@ def tool_gui_view_screenshot(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return res
 
 
+def tool_gui_dialog_screenshot(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Capture a currently-open dialog as PNG; optionally write to out_path."""
+    params: Dict[str, Any] = {"dialog_name": str(arguments["dialog_name"])}
+    res = send_gui_rpc("dialog.screenshot", params)
+    out_path = arguments.get("out_path")
+    if out_path:
+        import base64
+
+        png = base64.b64decode(res["png_b64"])
+        Path(out_path).write_bytes(png)
+        res = {
+            "bytes": res.get("bytes", len(png)),
+            "saved_to": str(out_path),
+        }
+    return res
+
+
 # ---------------------------------------------------------------------------
 # Phase 81b tools — cfg.set_field / context queries / device queries
 # ---------------------------------------------------------------------------
@@ -1319,6 +1336,30 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                     "description": "Absolute path to save PNG (omits base64 from reply)",
                 },
             },
+        },
+    },
+    "gui_dialog_screenshot": {
+        "handler": tool_gui_dialog_screenshot,
+        "description": (
+            "Capture a currently-open dialog as a PNG image. "
+            "dialog_name must be one of: setup, device, predictor, inspect, startup. "
+            "Fails with PRECONDITION_FAILED if the named dialog is not currently open. "
+            "If out_path (absolute path) is given, the image is written to disk and "
+            "the base64 payload is omitted from the reply."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "dialog_name": {
+                    "type": "string",
+                    "description": "One of: setup, device, predictor, inspect, startup",
+                },
+                "out_path": {
+                    "type": "string",
+                    "description": "Absolute path to save PNG (omits base64 from reply)",
+                },
+            },
+            "required": ["dialog_name"],
         },
     },
     "gui_cfg_set_field": {

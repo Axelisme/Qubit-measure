@@ -663,6 +663,26 @@ def _h_view_snapshot(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
     return snap
 
 
+def _h_dialog_screenshot(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    import base64
+
+    from .dialogs import parse_dialog_name
+
+    name_str = _require_str(params, "dialog_name")
+    try:
+        dialog_name = parse_dialog_name(name_str)
+        png = ctrl.take_dialog_screenshot(dialog_name)
+    except (ValueError, RuntimeError) as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    if not isinstance(png, (bytes, bytearray)):
+        raise RemoteError(
+            ErrorCode.INTERNAL,
+            f"screenshot returned non-bytes {type(png).__name__}",
+        )
+    payload = base64.b64encode(bytes(png)).decode("ascii")
+    return {"png_b64": payload, "bytes": len(png)}
+
+
 def _h_view_screenshot(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     import base64
 
@@ -985,6 +1005,9 @@ METHOD_REGISTRY: dict[str, MethodSpec] = {
     "dialog.open": MethodSpec(_h_dialog_open, 10.0, "Open a named dialog"),
     "dialog.close": MethodSpec(_h_dialog_close, 5.0, "Close a named dialog"),
     "dialog.list_open": MethodSpec(_h_dialog_list_open, 5.0, "List open dialogs"),
+    "dialog.screenshot": MethodSpec(
+        _h_dialog_screenshot, 10.0, "Capture a named dialog as base64 PNG"
+    ),
     "view.snapshot": MethodSpec(_h_view_snapshot, 5.0, "Capture view state summary"),
     "view.screenshot": MethodSpec(
         _h_view_screenshot, 10.0, "Capture window or tab as base64 PNG"
