@@ -264,9 +264,11 @@ def test_run_lifecycle_pushes_run_lock_changes(fx):
         call(sock, "events.subscribe", {"events": ["run_lock_changed"]})
         tab_id = call(sock, "tab.new", {"adapter_name": "fake"})["result"]["tab_id"]
         call(sock, "run.start", {"tab_id": tab_id})
-        # Two pushes expected: start (running_tab_id=tab_id), end (None).
+        # Two pushes expected: start (running_tab_id=tab_id, no outcome),
+        # end (running_tab_id=None, outcome='finished').
         first = recv_push(sock, "run_lock_changed")
         assert first["payload"]["running_tab_id"] == tab_id
+        assert "outcome" not in first["payload"]
         deadline = time.monotonic() + 5.0
         end_msg = None
         while time.monotonic() < deadline:
@@ -275,6 +277,8 @@ def test_run_lifecycle_pushes_run_lock_changes(fx):
                 end_msg = msg
                 break
         assert end_msg is not None, "expected a release push (running_tab_id=null)"
+        assert end_msg["payload"]["outcome"] == "finished"
+        assert end_msg["payload"]["tab_id"] == tab_id
     finally:
         sock.close()
 

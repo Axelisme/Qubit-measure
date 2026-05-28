@@ -94,3 +94,67 @@ def test_start_run_releases_lease_when_worker_start_raises():
 
     assert not gate.has_active(OperationKind.RUN)
     assert not state.is_tab_running(tab_id)
+
+
+def _last_run_lock_payload(bus_emit: MagicMock):
+    from zcu_tools.gui.event_bus import GuiEvent, RunLockChangedPayload
+
+    for call in reversed(bus_emit.call_args_list):
+        event, payload = call.args
+        if event is GuiEvent.RUN_LOCK_CHANGED and isinstance(
+            payload, RunLockChangedPayload
+        ):
+            return payload
+    raise AssertionError("no RUN_LOCK_CHANGED emitted")
+
+
+def test_run_finished_emits_outcome_finished():
+    state, tab_id, adapter = _make_state()
+    svc, _gate, _runner = _make_run_service(state)
+    svc.start_run(_make_permit(state, tab_id, adapter))
+
+    svc._on_run_finished(tab_id, object())
+
+    payload = _last_run_lock_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    assert payload.running_tab_id is None
+    assert payload.tab_id == tab_id
+    assert payload.outcome == "finished"
+
+
+def test_run_failed_emits_outcome_failed_with_message():
+    state, tab_id, adapter = _make_state()
+    svc, _gate, _runner = _make_run_service(state)
+    svc.start_run(_make_permit(state, tab_id, adapter))
+
+    svc._on_run_failed(tab_id, RuntimeError("boom"))
+
+    payload = _last_run_lock_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    assert payload.outcome == "failed"
+    assert payload.error_message == "boom"
+
+
+def test_cancelled_run_reports_cancelled_via_finished_path():
+    # Worker may return a partial result after a cancel; outcome must be cancelled.
+    state, tab_id, adapter = _make_state()
+    svc, _gate, _runner = _make_run_service(state)
+    svc.start_run(_make_permit(state, tab_id, adapter))
+
+    svc.cancel_run()  # records tab via state.running_tab_id
+    svc._on_run_finished(tab_id, object())
+
+    payload = _last_run_lock_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    assert payload.outcome == "cancelled"
+
+
+def test_cancelled_run_reports_cancelled_via_failed_path():
+    # Worker may raise after a cancel; outcome must still be cancelled (no error).
+    state, tab_id, adapter = _make_state()
+    svc, _gate, _runner = _make_run_service(state)
+    svc.start_run(_make_permit(state, tab_id, adapter))
+
+    svc.cancel_run()
+    svc._on_run_failed(tab_id, RuntimeError("interrupted"))
+
+    payload = _last_run_lock_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    assert payload.outcome == "cancelled"
+    assert payload.error_message is None

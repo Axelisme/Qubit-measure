@@ -195,7 +195,8 @@ def test_start_run_emits_run_lock_changed(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.ctrl.start_run(tab_id)
     cf.bus.emit.assert_any_call(
-        GuiEvent.RUN_LOCK_CHANGED, RunLockChangedPayload(running_tab_id=tab_id)
+        GuiEvent.RUN_LOCK_CHANGED,
+        RunLockChangedPayload(running_tab_id=tab_id, tab_id=tab_id, outcome=None),
     )
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
@@ -212,7 +213,8 @@ def test_run_finished_emits_run_lock_release(cf):
     cf.ctrl.start_run(tab_id)
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     cf.bus.emit.assert_any_call(
-        GuiEvent.RUN_LOCK_CHANGED, RunLockChangedPayload(running_tab_id=None)
+        GuiEvent.RUN_LOCK_CHANGED,
+        RunLockChangedPayload(running_tab_id=None, tab_id=tab_id, outcome="finished"),
     )
 
 

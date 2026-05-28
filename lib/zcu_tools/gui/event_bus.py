@@ -95,24 +95,18 @@ class TabInteractionChangedPayload(Payload):
 
 @dataclass(frozen=True)
 class RunLockChangedPayload(Payload):
-    """Payload for RUN_LOCK_CHANGED."""
+    """Payload for RUN_LOCK_CHANGED.
+
+    Emitted both when a run *starts* (running_tab_id set, outcome=None) and when
+    it *ends* (running_tab_id=None, outcome in {finished, failed, cancelled}).
+    Folding the terminal outcome here lets a subscriber distinguish success /
+    failure / cancellation from a single event stream.
+    """
 
     running_tab_id: str | None
-
-
-@dataclass(frozen=True)
-class RunFinishedPayload(Payload):
-    """Payload for RUN_FINISHED: a run completed successfully."""
-
-    tab_id: str
-
-
-@dataclass(frozen=True)
-class RunFailedPayload(Payload):
-    """Payload for RUN_FAILED: a run ended with an error."""
-
-    tab_id: str
-    error_message: str
+    tab_id: str | None = None
+    outcome: str | None = None  # 'finished' | 'failed' | 'cancelled' | None
+    error_message: str | None = None
 
 
 @dataclass(frozen=True)
@@ -156,8 +150,6 @@ class GuiEvent(str, Enum):
         "tab_interaction_changed"  # payload: TabInteractionChangedPayload
     )
     RUN_LOCK_CHANGED = "run_lock_changed"  # payload: RunLockChangedPayload
-    RUN_FINISHED = "run_finished"  # payload: RunFinishedPayload
-    RUN_FAILED = "run_failed"  # payload: RunFailedPayload
 
     # UI / Panel layer
     PREDICTOR_CHANGED = "predictor_changed"  # predictor state or values changed
@@ -182,8 +174,6 @@ _EventPayloadMap = {
     GuiEvent.TAB_CONTENT_CHANGED: TabContentChangedPayload,
     GuiEvent.TAB_INTERACTION_CHANGED: TabInteractionChangedPayload,
     GuiEvent.RUN_LOCK_CHANGED: RunLockChangedPayload,
-    GuiEvent.RUN_FINISHED: RunFinishedPayload,
-    GuiEvent.RUN_FAILED: RunFailedPayload,
     GuiEvent.PREDICTOR_CHANGED: PredictorChangedPayload,
     GuiEvent.DEVICE_CHANGED: DeviceChangedPayload,
     GuiEvent.DEVICE_SETUP_CHANGED: DeviceSetupChangedPayload,
@@ -282,20 +272,6 @@ class EventBus:
         cb: Callable[[DeviceSetupChangedPayload], None],
     ) -> None: ...
 
-    @overload
-    def subscribe(
-        self,
-        event: "Literal[GuiEvent.RUN_FINISHED]",
-        cb: Callable[[RunFinishedPayload], None],
-    ) -> None: ...
-
-    @overload
-    def subscribe(
-        self,
-        event: "Literal[GuiEvent.RUN_FAILED]",
-        cb: Callable[[RunFailedPayload], None],
-    ) -> None: ...
-
     def subscribe(self, event: GuiEvent, cb: Callable[[Any], None]) -> None:
         if not isinstance(event, GuiEvent):
             raise TypeError(f"event must be a GuiEvent, got {type(event)}")
@@ -389,20 +365,6 @@ class EventBus:
         cb: Callable[[DeviceSetupChangedPayload], None],
     ) -> None: ...
 
-    @overload
-    def unsubscribe(
-        self,
-        event: "Literal[GuiEvent.RUN_FINISHED]",
-        cb: Callable[[RunFinishedPayload], None],
-    ) -> None: ...
-
-    @overload
-    def unsubscribe(
-        self,
-        event: "Literal[GuiEvent.RUN_FAILED]",
-        cb: Callable[[RunFailedPayload], None],
-    ) -> None: ...
-
     def unsubscribe(self, event: GuiEvent, cb: Callable[[Any], None]) -> None:
         lst = self._subs.get(event, [])
         try:
@@ -486,16 +448,6 @@ class EventBus:
         self,
         event: "Literal[GuiEvent.DEVICE_SETUP_CHANGED]",
         payload: DeviceSetupChangedPayload,
-    ) -> None: ...
-
-    @overload
-    def emit(
-        self, event: "Literal[GuiEvent.RUN_FINISHED]", payload: RunFinishedPayload
-    ) -> None: ...
-
-    @overload
-    def emit(
-        self, event: "Literal[GuiEvent.RUN_FAILED]", payload: RunFailedPayload
     ) -> None: ...
 
     def emit(self, event: GuiEvent, payload: Payload) -> None:

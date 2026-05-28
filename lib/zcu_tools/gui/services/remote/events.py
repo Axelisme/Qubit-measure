@@ -29,8 +29,6 @@ from zcu_tools.gui.event_bus import (
     MlChangedPayload,
     Payload,
     PredictorChangedPayload,
-    RunFailedPayload,
-    RunFinishedPayload,
     RunLockChangedPayload,
     SocChangedPayload,
     TabAddedPayload,
@@ -71,7 +69,17 @@ def _ser_tab_interaction_changed(payload: Payload) -> WirePayload:
 
 def _ser_run_lock_changed(payload: Payload) -> WirePayload:
     assert isinstance(payload, RunLockChangedPayload)
-    return {"running_tab_id": payload.running_tab_id}
+    out: dict[str, object] = {"running_tab_id": payload.running_tab_id}
+    # Terminal emits carry an outcome (finished/failed/cancelled); the run-start
+    # emit leaves it None. Surface the outcome so a single event stream lets the
+    # agent distinguish success / failure / cancellation.
+    if payload.outcome is not None:
+        out["tab_id"] = payload.tab_id
+        out["outcome"] = payload.outcome
+        if payload.error_message is not None:
+            out["error_message"] = payload.error_message
+        out["requery"] = ["tab.snapshot"]
+    return out
 
 
 def _ser_predictor_changed(payload: Payload) -> WirePayload:
@@ -117,16 +125,6 @@ def _ser_soc_changed(payload: Payload) -> WirePayload:
     return {"connected": payload.soc is not None}
 
 
-def _ser_run_finished(payload: Payload) -> WirePayload:
-    assert isinstance(payload, RunFinishedPayload)
-    return {"tab_id": payload.tab_id, "requery": ["tab.snapshot"]}
-
-
-def _ser_run_failed(payload: Payload) -> WirePayload:
-    assert isinstance(payload, RunFailedPayload)
-    return {"tab_id": payload.tab_id, "error_message": payload.error_message}
-
-
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -145,8 +143,6 @@ EVENT_SERIALIZERS: dict[GuiEvent, Serializer] = {
     GuiEvent.MD_CHANGED: _ser_md_changed,
     GuiEvent.ML_CHANGED: _ser_ml_changed,
     GuiEvent.SOC_CHANGED: _ser_soc_changed,
-    GuiEvent.RUN_FINISHED: _ser_run_finished,
-    GuiEvent.RUN_FAILED: _ser_run_failed,
 }
 
 

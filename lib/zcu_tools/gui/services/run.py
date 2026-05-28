@@ -7,8 +7,6 @@ from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.event_bus import (
     GuiEvent,
-    RunFailedPayload,
-    RunFinishedPayload,
     RunLockChangedPayload,
     TabInteractionChangedPayload,
 )
@@ -48,6 +46,9 @@ class RunService(QObject):
         self._gate = gate
         self._active_lease: Optional[OperationLease] = None
         self._active_pbar_factory: Optional[Any] = None
+        # Tabs whose current run was explicitly cancelled, so the terminal
+        # handler can report outcome='cancelled' instead of finished/failed.
+        self._cancel_requested_tabs: set[str] = set()
 
         self._runner.run_finished.connect(self._on_run_finished)
         self._runner.run_failed.connect(self._on_run_failed)
@@ -90,7 +91,8 @@ class RunService(QObject):
             TabInteractionChangedPayload(tab_id=tab_id),
         )
         self._bus.emit(
-            GuiEvent.RUN_LOCK_CHANGED, RunLockChangedPayload(running_tab_id=tab_id)
+            GuiEvent.RUN_LOCK_CHANGED,
+            RunLockChangedPayload(running_tab_id=tab_id, tab_id=tab_id, outcome=None),
         )
 
     def get_run_progress(self) -> Tuple[Any, ...]:
@@ -103,6 +105,11 @@ class RunService(QObject):
 
     def cancel_run(self) -> None:
         logger.info("cancel_run")
+        # Record the running tab so the terminal handler reports 'cancelled'
+        # regardless of whether the worker returns a partial result or raises.
+        running = self._state.running_tab_id
+        if running is not None:
+            self._cancel_requested_tabs.add(running)
         self._runner.cancel()
 
     def _clear_active_factory(self) -> None:
@@ -120,10 +127,16 @@ class RunService(QObject):
             GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
+        was_cancelled = tab_id in self._cancel_requested_tabs
+        self._cancel_requested_tabs.discard(tab_id)
         self._bus.emit(
-            GuiEvent.RUN_LOCK_CHANGED, RunLockChangedPayload(running_tab_id=None)
+            GuiEvent.RUN_LOCK_CHANGED,
+            RunLockChangedPayload(
+                running_tab_id=None,
+                tab_id=tab_id,
+                outcome="cancelled" if was_cancelled else "finished",
+            ),
         )
-        self._bus.emit(GuiEvent.RUN_FINISHED, RunFinishedPayload(tab_id=tab_id))
         self.run_finished.emit(tab_id, result)
 
     def _on_run_failed(self, tab_id: str, error: Exception) -> None:
@@ -135,12 +148,16 @@ class RunService(QObject):
             GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
+        was_cancelled = tab_id in self._cancel_requested_tabs
+        self._cancel_requested_tabs.discard(tab_id)
         self._bus.emit(
-            GuiEvent.RUN_LOCK_CHANGED, RunLockChangedPayload(running_tab_id=None)
-        )
-        self._bus.emit(
-            GuiEvent.RUN_FAILED,
-            RunFailedPayload(tab_id=tab_id, error_message=str(error)),
+            GuiEvent.RUN_LOCK_CHANGED,
+            RunLockChangedPayload(
+                running_tab_id=None,
+                tab_id=tab_id,
+                outcome="cancelled" if was_cancelled else "failed",
+                error_message=None if was_cancelled else str(error),
+            ),
         )
         self.run_failed.emit(tab_id, error)
 
