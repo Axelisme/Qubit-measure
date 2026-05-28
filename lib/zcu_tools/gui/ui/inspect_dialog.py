@@ -282,6 +282,8 @@ class InspectDialog(QDialog):
         bus.subscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_refresh)
         bus.subscribe(GuiEvent.MD_CHANGED, self._on_bus_refresh)
         bus.subscribe(GuiEvent.ML_CHANGED, self._on_bus_refresh)
+        self._bus_subs_active = True
+        self.finished.connect(self._cleanup_bus_subscriptions)
         self.destroyed.connect(self._cleanup_bus_subscriptions)
 
         self.refresh()
@@ -616,10 +618,14 @@ class InspectDialog(QDialog):
     # Public API
     # ------------------------------------------------------------------
 
-    def _cleanup_bus_subscriptions(self) -> None:
+    def _cleanup_bus_subscriptions(self, *_args: object) -> None:
+        if not self._bus_subs_active:
+            logger.debug("_cleanup_bus_subscriptions called but already inactive")
+            return
         self._bus.unsubscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_refresh)
         self._bus.unsubscribe(GuiEvent.MD_CHANGED, self._on_bus_refresh)
         self._bus.unsubscribe(GuiEvent.ML_CHANGED, self._on_bus_refresh)
+        self._bus_subs_active = False
 
     def _on_bus_refresh(self, payload: Payload) -> None:
         """EventBus subscriber wrapper; payload is ignored, delegates to refresh()."""

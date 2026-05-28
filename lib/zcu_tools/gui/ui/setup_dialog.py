@@ -230,15 +230,21 @@ class SetupDialog(QDialog):
         bus.subscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_context_switched)
         bus.subscribe(GuiEvent.SOC_CHANGED, self._on_bus_soc_changed)
         bus.subscribe(GuiEvent.DEVICE_CHANGED, self._on_bus_device_changed)
+        self._bus_subs_active = True
+        self.finished.connect(self._cleanup_bus_subscriptions)
         self.destroyed.connect(self._cleanup_bus_subscriptions)
 
-    def _cleanup_bus_subscriptions(self) -> None:
+    def _cleanup_bus_subscriptions(self, *_args: object) -> None:
+        if not self._bus_subs_active:
+            logger.debug("_cleanup_bus_subscriptions called but already inactive")
+            return
         from zcu_tools.gui.event_bus import GuiEvent
 
         bus = self._ctrl.get_bus()
         bus.unsubscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_context_switched)
         bus.unsubscribe(GuiEvent.SOC_CHANGED, self._on_bus_soc_changed)
         bus.unsubscribe(GuiEvent.DEVICE_CHANGED, self._on_bus_device_changed)
+        self._bus_subs_active = False
 
     def _on_bus_context_switched(self, payload: object) -> None:
         del payload
