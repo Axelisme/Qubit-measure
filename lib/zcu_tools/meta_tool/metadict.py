@@ -35,6 +35,7 @@ class MetaDict(SyncFile):
         "update_modify_time",
         "clone",
         "items",
+        "keys",
         "get",
     ]
 
@@ -126,6 +127,10 @@ class MetaDict(SyncFile):
 
     def __repr__(self) -> str:
         return self.__str__()
+
+    @auto_sync("read")
+    def keys(self):
+        return self._data.keys()
 
     @auto_sync("read")
     def items(self) -> ItemsView[str, Any]:

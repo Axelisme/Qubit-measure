@@ -15,11 +15,14 @@ from zcu_tools.gui.services.connection import (
     ConnectRemoteRequest,
     ConnectRequest,
 )
-from zcu_tools.gui.services.device import ConnectDeviceRequest
+from zcu_tools.gui.services.device import (
+    ConnectDeviceRequest,
+    DisconnectDeviceRequest,
+    SetDeviceValueRequest,
+)
 from zcu_tools.gui.services.startup import StartupProjectRequest
 
 from .errors import ErrorCode, ErrorEnvelope, RemoteError
-
 
 # ---------------------------------------------------------------------------
 # Wire envelopes
@@ -155,6 +158,21 @@ def require_object(params: Mapping[str, object], key: str) -> Mapping[str, objec
     return val
 
 
+def require_json_safe(params: Mapping[str, object], key: str) -> object:
+    import json
+
+    val = params.get(key)
+    if key not in params:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"missing '{key}'")
+    try:
+        json.dumps(val)
+    except (TypeError, ValueError) as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, f"'{key}' must be JSON-serializable"
+        ) from exc
+    return val
+
+
 # ---------------------------------------------------------------------------
 # Typed-request coercion
 # ---------------------------------------------------------------------------
@@ -196,4 +214,22 @@ def coerce_connect_device_request(
         name=_require_str(params, "name"),
         address=_require_str(params, "address"),
         remember=_optional_bool(params, "remember", True),
+    )
+
+
+def coerce_disconnect_device_request(
+    params: Mapping[str, object],
+) -> DisconnectDeviceRequest:
+    return DisconnectDeviceRequest(
+        name=_require_str(params, "name"),
+        remember=_optional_bool(params, "remember", True),
+    )
+
+
+def coerce_set_device_value_request(
+    params: Mapping[str, object],
+) -> SetDeviceValueRequest:
+    return SetDeviceValueRequest(
+        name=_require_str(params, "name"),
+        value=require_json_safe(params, "value"),
     )

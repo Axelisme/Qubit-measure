@@ -223,6 +223,19 @@ class SetupDialog(QDialog):
         self._refresh_context_list()
         self._maybe_show_current_cfg()
 
+        # EventBus subscription for live context list updates
+        from zcu_tools.gui.event_bus import GuiEvent
+
+        bus = controller.get_bus()
+        bus.subscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_context_switched)
+        self.destroyed.connect(
+            lambda: bus.unsubscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_context_switched)
+        )
+
+    def _on_bus_context_switched(self, payload: object) -> None:
+        del payload
+        self._refresh_context_list()
+
     # ------------------------------------------------------------------
     # Project panel handlers
     # ------------------------------------------------------------------

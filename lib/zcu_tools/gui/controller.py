@@ -81,6 +81,7 @@ class ViewProtocol(Protocol):
     # Remote query helpers.
     def get_view_snapshot(self) -> dict[str, object]: ...
     def take_screenshot(self, tab_id: Optional[str] = None) -> bytes: ...
+    def take_figure_screenshot(self, tab_id: str) -> bytes: ...
     def get_tab_live_model_root(self, tab_id: str) -> Any: ...
 
 
@@ -327,6 +328,9 @@ class Controller:
 
     def cancel_run(self) -> None:
         self._run_svc.cancel_run()
+
+    def get_run_progress(self) -> tuple:
+        return self._run_svc.get_run_progress()
 
     # ------------------------------------------------------------------
     # Analyze flow (TabService)
@@ -661,6 +665,9 @@ class Controller:
 
     def take_screenshot(self, tab_id: Optional[str] = None) -> bytes:
         return self._require_view().take_screenshot(tab_id)
+
+    def take_figure_screenshot(self, tab_id: str) -> bytes:
+        return self._require_view().take_figure_screenshot(tab_id)
 
     def get_tab_live_model_root(self, tab_id: str):
         return self._require_view().get_tab_live_model_root(tab_id)

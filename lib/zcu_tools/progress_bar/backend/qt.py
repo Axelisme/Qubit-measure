@@ -7,6 +7,8 @@ in the main thread) to push/pop/update the _ProgressStack widget.
 
 from __future__ import annotations
 
+import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional
 
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
@@ -15,6 +17,19 @@ from ..base import BaseProgressBar, ProgressTotal, ProgressValue
 
 if TYPE_CHECKING:
     from zcu_tools.gui.ui.progress_stack import ProgressStack
+
+
+@dataclass(frozen=True)
+class RunProgressSnapshot:
+    """Snapshot of one active progress bar, safe to read from any thread."""
+
+    token: int
+    desc: str
+    n: int
+    total: Optional[int]
+    elapsed: float
+    remaining: Optional[float]
+    format: str
 
 
 _FLOAT_SCALE = 10000  # maps float [0, total] → int [0, _FLOAT_SCALE]
@@ -46,6 +61,9 @@ class _StackBridge(QObject):
         self._int_mode: dict[int, bool] = {}
         # per-bar: float total (for computing scaled qt value)
         self._float_total: dict[int, float] = {}
+        # snapshot tracking (main-thread only)
+        self._bar_start_times: dict[int, float] = {}
+        self._bar_snapshots: dict[int, RunProgressSnapshot] = {}
 
         self.push_requested.connect(self._on_push)
         self.pop_requested.connect(self._on_pop)
@@ -70,11 +88,19 @@ class _StackBridge(QObject):
         self._int_mode[key] = is_int
         if not is_int and isinstance(total, (int, float)) and total > 0:
             self._float_total[key] = float(total)
+        self._bar_start_times[key] = time.monotonic()
+        total_int = int(total) if isinstance(total, int) else None
+        self._bar_snapshots[key] = RunProgressSnapshot(
+            token=key, desc=label, n=0, total=total_int,
+            elapsed=0.0, remaining=None, format=label,
+        )
 
     def _on_pop(self, bar: object) -> None:
         key = id(bar)
         self._int_mode.pop(key, None)
         self._float_total.pop(key, None)
+        self._bar_start_times.pop(key, None)
+        self._bar_snapshots.pop(key, None)
         self._stack.pop(bar)  # type: ignore[arg-type]
 
     def _scaled_value(self, bar: object, raw: float) -> int:
@@ -122,8 +148,36 @@ class _StackBridge(QObject):
     def _on_set_format(self, bar: object, fmt: str) -> None:
         from qtpy.QtWidgets import QProgressBar  # type: ignore[attr-defined]
 
-        if isinstance(bar, QProgressBar):
-            bar.setFormat(fmt)
+        if not isinstance(bar, QProgressBar):
+            return
+        bar.setFormat(fmt)
+        key = id(bar)
+        if key not in self._bar_snapshots:
+            return
+        start = self._bar_start_times.get(key, time.monotonic())
+        elapsed = round(time.monotonic() - start, 1)
+        n = bar.value() if self._int_mode.get(key, False) else 0
+        total_qt = bar.maximum() if self._int_mode.get(key, False) else None
+        total_int = total_qt if total_qt and total_qt > 0 else None
+        remaining: Optional[float] = None
+        if total_int and n > 0 and elapsed > 0:
+            rate = n / elapsed
+            if rate > 0:
+                remaining = round((total_int - n) / rate, 1)
+        prev = self._bar_snapshots[key]
+        self._bar_snapshots[key] = RunProgressSnapshot(
+            token=key,
+            desc=prev.desc,
+            n=n,
+            total=total_int,
+            elapsed=elapsed,
+            remaining=remaining,
+            format=fmt,
+        )
+
+    def get_all_snapshots(self) -> tuple[RunProgressSnapshot, ...]:
+        """Return snapshots of all currently active bars (main-thread only)."""
+        return tuple(self._bar_snapshots.values())
 
     def pop_pending(self) -> Any:
         """Called from worker thread after push_requested; blocks until bar appears."""
@@ -270,3 +324,7 @@ class QtProgressBarFactory:
             leave=leave,
             disabled=disabled,
         )
+
+    def get_all_snapshots(self) -> tuple[RunProgressSnapshot, ...]:
+        """Return snapshots of all active progress bars (main-thread only)."""
+        return self._bridge.get_all_snapshots()

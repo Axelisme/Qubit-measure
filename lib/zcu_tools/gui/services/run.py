@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, Tuple
 
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
@@ -45,6 +45,7 @@ class RunService(QObject):
         self._bus = bus
         self._gate = gate
         self._active_lease: Optional[OperationLease] = None
+        self._active_pbar_factory: Optional[Any] = None
 
         self._runner.run_finished.connect(self._on_run_finished)
         self._runner.run_failed.connect(self._on_run_failed)
@@ -66,6 +67,8 @@ class RunService(QObject):
             soc=ctx.soc,
             soccfg=ctx.soccfg,
         )
+
+        self._active_pbar_factory = pbar_factory
 
         # Validate schema before starting the worker
         schema.to_raw_dict(req)
@@ -98,14 +101,26 @@ class RunService(QObject):
             GuiEvent.RUN_LOCK_CHANGED, RunLockChangedPayload(running_tab_id=tab_id)
         )
 
+    def get_run_progress(self) -> Tuple[Any, ...]:
+        from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
+
+        factory = self._active_pbar_factory
+        if not isinstance(factory, QtProgressBarFactory):
+            return ()
+        return factory.get_all_snapshots()
+
     def cancel_run(self) -> None:
         logger.info("cancel_run")
         self._runner.cancel()
+
+    def _clear_active_factory(self) -> None:
+        self._active_pbar_factory = None
 
     def _on_run_finished(self, tab_id: str, result: Any) -> None:
         logger.info(
             "_on_run_finished: tab_id=%r result_type=%s", tab_id, type(result).__name__
         )
+        self._clear_active_factory()
         self._state.update_tab_result(tab_id, result)
         self._state.set_tab_running(tab_id, False)
         self._release_lease()
@@ -120,6 +135,7 @@ class RunService(QObject):
 
     def _on_run_failed(self, tab_id: str, error: Exception) -> None:
         logger.warning("_on_run_failed: tab_id=%r error=%r", tab_id, error)
+        self._clear_active_factory()
         self._state.set_tab_running(tab_id, False)
         self._release_lease()
         self._bus.emit(

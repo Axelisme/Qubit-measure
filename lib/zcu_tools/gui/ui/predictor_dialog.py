@@ -119,6 +119,16 @@ class PredictorDialog(QDialog):
             self._flux_bias_spin.setValue(info["flux_bias"])
             self._set_status("Currently loaded", error=False)
 
+        # EventBus subscription for live predictor state updates
+        from zcu_tools.gui.event_bus import GuiEvent
+
+        self._bus_subscribed = False
+        bus = controller.get_bus()
+        bus.subscribe(GuiEvent.PREDICTOR_CHANGED, self._on_predictor_changed)
+        self._bus_subscribed = True
+        self.finished.connect(self._cleanup_bus)
+        self.destroyed.connect(self._cleanup_bus)
+
     def _on_browse_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, "Select params.json", "", "JSON files (*.json);;All files (*)"
@@ -177,6 +187,25 @@ class PredictorDialog(QDialog):
             transition,
             freq,
         )
+
+    def _cleanup_bus(self, *_args: object) -> None:
+        if not self._bus_subscribed:
+            return
+        from zcu_tools.gui.event_bus import GuiEvent
+
+        self._ctrl.get_bus().unsubscribe(GuiEvent.PREDICTOR_CHANGED, self._on_predictor_changed)
+        self._bus_subscribed = False
+
+    def _on_predictor_changed(self, payload: object) -> None:
+        del payload
+        info = self._ctrl.get_predictor_info()
+        if info is not None:
+            if info["path"]:
+                self._path_edit.setText(info["path"])
+            self._flux_bias_spin.setValue(info["flux_bias"])
+            self._set_status("Currently loaded", error=False)
+        else:
+            self._set_status("Not loaded", error=False)
 
     def _set_status(self, msg: str, error: bool = False) -> None:
         self._status_label.setText(msg)

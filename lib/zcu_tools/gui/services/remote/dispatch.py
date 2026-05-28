@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from typing import Callable, Mapping, Optional
 
 from zcu_tools.gui.adapter import CfgSchema
+from zcu_tools.gui.services.context import MlEntryValidationError
+from zcu_tools.gui.services.device import SetupDeviceRequest
 from zcu_tools.gui.services.session_persistence import SessionPersistenceService
 
 from .errors import ErrorCode, RemoteError
@@ -25,7 +27,10 @@ from .wire import (
     _require_str,
     coerce_connect_device_request,
     coerce_connect_request,
+    coerce_disconnect_device_request,
+    coerce_set_device_value_request,
     coerce_startup_project_request,
+    require_json_safe,
     require_object,
 )
 
@@ -132,6 +137,11 @@ def _h_tab_update_cfg(ctrl, params: Mapping[str, object]) -> Mapping[str, object
     tab_id = _require_str(params, "tab_id")
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    if ctrl.get_running_tab_id() == tab_id:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            f"tab {tab_id!r} is currently running; cancel the run before editing cfg",
+        )
     raw = require_object(params, "raw")
     base = ctrl.get_tab_cfg_schema(tab_id)
     try:
@@ -148,6 +158,11 @@ def _h_cfg_set_field(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
     tab_id = _require_str(params, "tab_id")
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    if ctrl.get_running_tab_id() == tab_id:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            f"tab {tab_id!r} is currently running; cancel the run before editing cfg",
+        )
     path = _require_str(params, "path")
     if "value" not in params:
         raise RemoteError(ErrorCode.INVALID_PARAMS, "missing 'value'")
@@ -295,6 +310,75 @@ def _h_context_get_ml(ctrl, params: Mapping[str, object]) -> Mapping[str, object
     }
 
 
+def _h_context_set_md_attr(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    key = _require_str(params, "key")
+    value = require_json_safe(params, "value")
+    try:
+        ctrl.set_md_attr(key, value)
+    except RuntimeError as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    return {}
+
+
+def _h_context_del_md_attr(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    key = _require_str(params, "key")
+    try:
+        ctrl.del_md_attr(key)
+    except (AttributeError, RuntimeError) as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    return {}
+
+
+def _h_context_set_ml_module(
+    ctrl, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    name = _require_str(params, "name")
+    raw = require_object(params, "raw")
+    try:
+        ctrl.set_ml_module_from_raw(name, dict(raw))
+    except MlEntryValidationError as exc:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    except RuntimeError as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    return {}
+
+
+def _h_context_del_ml_module(
+    ctrl, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    name = _require_str(params, "name")
+    try:
+        ctrl.del_ml_module(name)
+    except (KeyError, RuntimeError) as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    return {}
+
+
+def _h_context_set_ml_waveform(
+    ctrl, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    name = _require_str(params, "name")
+    raw = require_object(params, "raw")
+    try:
+        ctrl.set_ml_waveform_from_raw(name, dict(raw))
+    except MlEntryValidationError as exc:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    except RuntimeError as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    return {}
+
+
+def _h_context_del_ml_waveform(
+    ctrl, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    name = _require_str(params, "name")
+    try:
+        ctrl.del_ml_waveform(name)
+    except (KeyError, RuntimeError) as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    return {}
+
+
 def _h_state_has_project(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     del params
     return {"value": bool(ctrl.has_project())}
@@ -348,7 +432,80 @@ def _h_startup_apply(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
 
 def _h_device_connect(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     req = coerce_connect_device_request(params)
-    ctrl.start_connect_device(req)
+    try:
+        ctrl.start_connect_device(req)
+    except RuntimeError as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    return {}
+
+
+def _h_device_disconnect(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    req = coerce_disconnect_device_request(params)
+    try:
+        ctrl.start_disconnect_device(req)
+    except RuntimeError as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    return {}
+
+
+def _h_device_reconnect(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    name = _require_str(params, "name")
+    try:
+        ctrl.start_reconnect_device(name)
+    except RuntimeError as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    return {}
+
+
+def _h_device_forget(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    name = _require_str(params, "name")
+    try:
+        ctrl.forget_device(name)
+    except RuntimeError as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    return {}
+
+
+def _h_device_set_value(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    req = coerce_set_device_value_request(params)
+    try:
+        ctrl.start_set_device_value(req)
+    except RuntimeError as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    return {}
+
+
+def _h_device_setup(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    name = _require_str(params, "name")
+    updates = require_object(params, "updates")
+    try:
+        info = ctrl.get_device_info(name)
+    except RuntimeError as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    if info is None:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            f"Device {name!r} has no live info to update",
+        )
+    try:
+        updated = info.with_updates(**dict(updates))
+    except ValueError as exc:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    try:
+        ctrl.start_setup_device(SetupDeviceRequest(name=name, info=updated))
+    except RuntimeError as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    return {}
+
+
+def _h_device_cancel_operation(
+    ctrl, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    name = _require_str(params, "name")
+    try:
+        ctrl.cancel_device_operation(name)
+    except RuntimeError as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
     return {}
 
 
@@ -383,6 +540,50 @@ def _h_device_snapshot(ctrl, params: Mapping[str, object]) -> Mapping[str, objec
             "address": snap.address,
             "status": snap.status.value,
             "error": snap.error,
+        }
+    }
+
+
+def _progress_wire(progress) -> list[dict[str, object]]:
+    return [
+        {
+            "token": entry.token,
+            "format": entry.format,
+            "maximum": entry.maximum,
+            "value": entry.value,
+        }
+        for entry in progress
+    ]
+
+
+def _h_device_active_setup(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    del params
+    setup = ctrl.get_active_device_setup()
+    if setup is None:
+        return {"active_setup": None}
+    return {
+        "active_setup": {
+            "device_name": setup.device_name,
+            "progress": _progress_wire(setup.progress),
+        }
+    }
+
+
+def _h_device_active_operation(
+    ctrl, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    del params
+    snap = ctrl.get_active_device_operation()
+    if snap is None:
+        return {"active_operation": None}
+    return {
+        "active_operation": {
+            "name": snap.name,
+            "type_name": snap.type_name,
+            "address": snap.address,
+            "status": snap.status.value,
+            "error": snap.error,
+            "progress": _progress_wire(snap.progress),
         }
     }
 
@@ -457,6 +658,126 @@ def _h_view_screenshot(ctrl, params: Mapping[str, object]) -> Mapping[str, objec
 
 
 # ---------------------------------------------------------------------------
+# Run progress handler
+# ---------------------------------------------------------------------------
+
+
+def _h_run_progress(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    del params
+    bars = ctrl.get_run_progress()
+    if not bars:
+        return {"active": False, "bars": []}
+    return {
+        "active": True,
+        "bars": [
+            {
+                "token": s.token,
+                "desc": s.desc,
+                "n": s.n,
+                "total": s.total,
+                "elapsed": s.elapsed,
+                "remaining": s.remaining,
+                "format": s.format,
+            }
+            for s in bars
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tab figure screenshot handler
+# ---------------------------------------------------------------------------
+
+
+def _h_tab_figure_screenshot(
+    ctrl, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    import base64
+    from pathlib import Path
+
+    tab_id = _require_str(params, "tab_id")
+    out_path: Optional[str] = None
+    if "out_path" in params and params["out_path"] is not None:
+        if not isinstance(params["out_path"], str):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, "'out_path' must be a string if present"
+            )
+        out_path = params["out_path"]
+    try:
+        png = ctrl.take_figure_screenshot(tab_id)
+    except RuntimeError as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    if not isinstance(png, (bytes, bytearray)):
+        raise RemoteError(
+            ErrorCode.INTERNAL,
+            f"figure screenshot returned non-bytes {type(png).__name__}",
+        )
+    if out_path:
+        Path(out_path).write_bytes(png)
+        return {"bytes": len(png), "saved_to": out_path}
+    return {"png_b64": base64.b64encode(bytes(png)).decode("ascii"), "bytes": len(png)}
+
+
+# ---------------------------------------------------------------------------
+# Predictor handlers
+# ---------------------------------------------------------------------------
+
+
+def _h_predictor_load(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    from zcu_tools.gui.services.connection import (
+        LoadPredictorRequest,
+        PredictorLoadError,
+    )
+
+    path = _require_str(params, "path")
+    flux_bias_raw = params.get("flux_bias", 0.0)
+    if not isinstance(flux_bias_raw, (int, float)):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "'flux_bias' must be a number")
+    try:
+        ctrl.load_predictor(
+            LoadPredictorRequest(path=path, flux_bias=float(flux_bias_raw))
+        )
+    except PredictorLoadError as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    return {}
+
+
+def _h_predictor_clear(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    del params
+    ctrl.clear_predictor()
+    return {}
+
+
+def _h_predictor_predict(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    from zcu_tools.gui.services.connection import PredictFreqRequest, PredictorNotLoaded
+
+    value_raw = params.get("value")
+    if not isinstance(value_raw, (int, float)):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "'value' is required (number)")
+    from_lvl_raw = params.get("from_lvl", 0)
+    to_lvl_raw = params.get("to_lvl", 1)
+    if not isinstance(from_lvl_raw, int) or not isinstance(to_lvl_raw, int):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "'from_lvl' and 'to_lvl' must be integers"
+        )
+    try:
+        freq = ctrl.predict_freq(
+            PredictFreqRequest(
+                value=float(value_raw),
+                transition=(int(from_lvl_raw), int(to_lvl_raw)),
+            )
+        )
+    except PredictorNotLoaded as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    return {"freq_mhz": freq}
+
+
+def _h_predictor_info(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    del params
+    return {"info": ctrl.get_predictor_info()}
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -490,6 +811,26 @@ METHOD_REGISTRY: dict[str, MethodSpec] = {
     "context.get_ml": MethodSpec(
         _h_context_get_ml, 5.0, "List ModuleLibrary module/waveform names"
     ),
+    "context.set_md_attr": MethodSpec(
+        _h_context_set_md_attr, 5.0, "Set one MetaDict attribute"
+    ),
+    "context.del_md_attr": MethodSpec(
+        _h_context_del_md_attr, 5.0, "Delete one MetaDict attribute"
+    ),
+    "context.set_ml_module": MethodSpec(
+        _h_context_set_ml_module, 10.0, "Set one ModuleLibrary module from raw dict"
+    ),
+    "context.del_ml_module": MethodSpec(
+        _h_context_del_ml_module, 5.0, "Delete one ModuleLibrary module"
+    ),
+    "context.set_ml_waveform": MethodSpec(
+        _h_context_set_ml_waveform,
+        10.0,
+        "Set one ModuleLibrary waveform from raw dict",
+    ),
+    "context.del_ml_waveform": MethodSpec(
+        _h_context_del_ml_waveform, 5.0, "Delete one ModuleLibrary waveform"
+    ),
     "state.has_project": MethodSpec(_h_state_has_project, 5.0, ""),
     "state.has_context": MethodSpec(_h_state_has_context, 5.0, ""),
     "state.has_active_context": MethodSpec(_h_state_has_active_context, 5.0, ""),
@@ -499,6 +840,20 @@ METHOD_REGISTRY: dict[str, MethodSpec] = {
     "connect.start": MethodSpec(_h_connect_start, 30.0, "Connect to SoC"),
     "startup.apply": MethodSpec(_h_startup_apply, 30.0, "Apply startup project"),
     "device.connect": MethodSpec(_h_device_connect, 30.0, "Connect device"),
+    "device.disconnect": MethodSpec(_h_device_disconnect, 30.0, "Disconnect device"),
+    "device.reconnect": MethodSpec(_h_device_reconnect, 30.0, "Reconnect device"),
+    "device.forget": MethodSpec(_h_device_forget, 5.0, "Forget memory-only device"),
+    "device.set_value": MethodSpec(_h_device_set_value, 30.0, "Set device value"),
+    "device.setup": MethodSpec(_h_device_setup, 30.0, "Setup device"),
+    "device.cancel_operation": MethodSpec(
+        _h_device_cancel_operation, 5.0, "Cancel active device setup"
+    ),
+    "device.active_setup": MethodSpec(
+        _h_device_active_setup, 5.0, "Read active device setup progress"
+    ),
+    "device.active_operation": MethodSpec(
+        _h_device_active_operation, 5.0, "Read active device operation"
+    ),
     "device.list": MethodSpec(_h_device_list, 5.0, "List registered devices"),
     "device.snapshot": MethodSpec(
         _h_device_snapshot, 5.0, "Read one device cached snapshot"
@@ -511,6 +866,18 @@ METHOD_REGISTRY: dict[str, MethodSpec] = {
     "view.screenshot": MethodSpec(
         _h_view_screenshot, 10.0, "Capture window or tab as base64 PNG"
     ),
+    "run.progress": MethodSpec(
+        _h_run_progress, 5.0, "Read current run progress bar snapshots"
+    ),
+    "tab.figure_screenshot": MethodSpec(
+        _h_tab_figure_screenshot, 10.0, "Capture tab figure area as PNG"
+    ),
+    "predictor.load": MethodSpec(_h_predictor_load, 30.0, "Load FluxoniumPredictor"),
+    "predictor.clear": MethodSpec(_h_predictor_clear, 5.0, "Clear predictor"),
+    "predictor.predict": MethodSpec(
+        _h_predictor_predict, 10.0, "Predict transition frequency"
+    ),
+    "predictor.info": MethodSpec(_h_predictor_info, 5.0, "Get predictor info"),
 }
 
 

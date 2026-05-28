@@ -20,7 +20,6 @@ from zcu_tools.gui.live_model import (
 
 from ._helpers import Fixture, call, open_client
 
-
 # ---------------------------------------------------------------------------
 # Fixture: wire a real live model behind the mock View
 # ---------------------------------------------------------------------------

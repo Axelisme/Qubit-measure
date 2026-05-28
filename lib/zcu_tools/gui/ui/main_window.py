@@ -71,9 +71,8 @@ from .progress_stack import ProgressStack
 from .writeback_widget import WritebackWidget
 
 if TYPE_CHECKING:
-    from qtpy.QtWidgets import QDialog  # type: ignore[attr-defined]
-
     from matplotlib.figure import Figure
+    from qtpy.QtWidgets import QDialog  # type: ignore[attr-defined]
 
     from zcu_tools.gui.adapter import CfgSchema, WritebackItem
     from zcu_tools.gui.controller import Controller
@@ -1212,6 +1211,23 @@ class MainWindow(QMainWindow):
         # produces native ``bytes``.
         ba = buf.data()
         return bytes(ba.data())  # type: ignore[arg-type]
+
+    def take_figure_screenshot(self, tab_id: str) -> bytes:
+        """Grab only the figure/plot area of a tab and return raw PNG bytes."""
+        from qtpy.QtCore import QBuffer, QIODevice  # type: ignore[attr-defined]
+
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            raise RuntimeError(f"unknown tab_id: {tab_id!r}")
+        canvas = tab_w._plot_stack.currentWidget()
+        if canvas is None or canvas is tab_w._plot_placeholder:
+            raise RuntimeError(f"tab {tab_id!r} has no figure yet")
+        pixmap = canvas.grab()
+        buf = QBuffer()
+        buf.open(QIODevice.OpenModeFlag.WriteOnly)
+        if not pixmap.save(buf, "PNG"):
+            raise RuntimeError("Qt failed to encode the figure pixmap as PNG")
+        return bytes(buf.data().data())  # type: ignore[arg-type]
 
     def get_tab_live_model_root(self, tab_id: str) -> "SectionLiveField":
         """Return the tab's live ``SectionLiveField`` root.

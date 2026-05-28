@@ -1,0 +1,244 @@
+"""Phase 82 — full MCP-facing remote toolchain coverage."""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+from zcu_tools.device.fake import FakeDeviceInfo
+from zcu_tools.gui.event_bus import DeviceSetupChangedPayload, GuiEvent
+from zcu_tools.gui.services.device import DeviceSetupSnapshot, SetupDeviceRequest
+from zcu_tools.gui.services.device_progress import ProgressEntrySnapshot
+from zcu_tools.gui.services.remote.dispatch import METHOD_REGISTRY
+from zcu_tools.gui.services.remote.mcp_server import TOOLS
+
+from ._helpers import Fixture, call, open_client, recv_push
+
+
+@pytest.fixture()
+def fx(qapp):  # noqa: ARG001
+    f = Fixture()
+    f.start()
+    yield f
+    f.stop()
+
+
+def test_event_requery_hints_point_to_registered_methods():
+    assert "device.active_setup" in METHOD_REGISTRY
+    assert "context.get_md_attr" in METHOD_REGISTRY
+    assert "context.get_ml" in METHOD_REGISTRY
+
+
+def test_device_setup_changed_push_requeries_active_setup(fx):
+    sock = open_client(fx.service.port)
+    try:
+        call(sock, "events.subscribe", {"events": ["device_setup_changed"]})
+        fx.bus.emit(
+            GuiEvent.DEVICE_SETUP_CHANGED,
+            DeviceSetupChangedPayload(active_setup=None),
+        )
+        msg = recv_push(sock, "device_setup_changed")
+        assert msg["payload"] == {"requery": ["device.active_setup"]}
+    finally:
+        sock.close()
+
+
+def test_device_active_setup_serializes_scalar_progress(fx):
+    progress = (
+        ProgressEntrySnapshot(token=1, format="Ramp %v/%m", maximum=10, value=3),
+    )
+    fx.ctrl.get_active_device_setup = MagicMock(  # type: ignore[method-assign]
+        return_value=DeviceSetupSnapshot(device_name="bias", progress=progress)
+    )
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "device.active_setup")
+        assert resp["ok"] is True
+        assert resp["result"]["active_setup"] == {
+            "device_name": "bias",
+            "progress": [
+                {"token": 1, "format": "Ramp %v/%m", "maximum": 10, "value": 3}
+            ],
+        }
+    finally:
+        sock.close()
+
+
+def test_device_setup_builds_request_from_live_info_and_updates(fx):
+    fx.ctrl.get_device_info = MagicMock(  # type: ignore[method-assign]
+        return_value=FakeDeviceInfo(address="none", value=0.0)
+    )
+    fx.ctrl.start_setup_device = MagicMock()  # type: ignore[method-assign]
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "device.setup", {"name": "bias", "updates": {"value": 1.5}})
+        assert resp["ok"] is True
+        req = fx.ctrl.start_setup_device.call_args.args[0]
+        assert isinstance(req, SetupDeviceRequest)
+        assert req.name == "bias"
+        assert isinstance(req.info, FakeDeviceInfo)
+        assert req.info.value == 1.5
+        assert req.info.address == "none"
+    finally:
+        sock.close()
+
+
+def test_device_setup_rejects_protected_info_update(fx):
+    fx.ctrl.get_device_info = MagicMock(  # type: ignore[method-assign]
+        return_value=FakeDeviceInfo(address="none", value=0.0)
+    )
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "device.setup", {"name": "bias", "updates": {"type": "x"}})
+        assert resp["ok"] is False
+        assert resp["error"]["code"] == "invalid_params"
+    finally:
+        sock.close()
+
+
+def test_device_mutation_error_path_is_precondition_failed(fx):
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "device.disconnect", {"name": "missing"})
+        assert resp["ok"] is False
+        assert resp["error"]["code"] == "precondition_failed"
+    finally:
+        sock.close()
+
+
+def test_context_md_write_and_delete(fx):
+    md = fx.state.exp_context.md
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "context.set_md_attr", {"key": "bias", "value": 0.25})
+        assert resp["ok"] is True
+        assert getattr(md, "bias") == 0.25
+
+        resp = call(sock, "context.del_md_attr", {"key": "bias"}, rid="2")
+        assert resp["ok"] is True
+        assert not hasattr(md, "bias")
+    finally:
+        sock.close()
+
+
+def test_context_ml_write_delete_delegates_raw_dict(fx):
+    fx.ctrl.set_ml_module_from_raw = MagicMock()  # type: ignore[method-assign]
+    fx.ctrl.del_ml_module = MagicMock()  # type: ignore[method-assign]
+    fx.ctrl.set_ml_waveform_from_raw = MagicMock()  # type: ignore[method-assign]
+    fx.ctrl.del_ml_waveform = MagicMock()  # type: ignore[method-assign]
+    sock = open_client(fx.service.port)
+    try:
+        assert call(sock, "context.set_ml_module", {"name": "m", "raw": {"a": 1}})["ok"]
+        fx.ctrl.set_ml_module_from_raw.assert_called_once_with("m", {"a": 1})
+
+        assert call(sock, "context.del_ml_module", {"name": "m"}, rid="2")["ok"]
+        fx.ctrl.del_ml_module.assert_called_once_with("m")
+
+        assert call(
+            sock, "context.set_ml_waveform", {"name": "w", "raw": {"b": 2}}, rid="3"
+        )["ok"]
+        fx.ctrl.set_ml_waveform_from_raw.assert_called_once_with("w", {"b": 2})
+
+        assert call(sock, "context.del_ml_waveform", {"name": "w"}, rid="4")["ok"]
+        fx.ctrl.del_ml_waveform.assert_called_once_with("w")
+    finally:
+        sock.close()
+
+
+def test_mcp_tool_schemas_include_required_phase82_tools():
+    expected = {
+        "gui_adapter_list",
+        "gui_connect_start",
+        "gui_context_labels",
+        "gui_context_active",
+        "gui_context_use",
+        "gui_context_new",
+        "gui_save_data",
+        "gui_save_image",
+        "gui_session_persist",
+        "gui_session_restore",
+        "gui_device_connect",
+        "gui_device_disconnect",
+        "gui_device_setup",
+        "gui_device_active_setup",
+        "gui_device_active_operation",
+        "gui_state_check",
+    }
+    assert expected <= set(TOOLS)
+    for name, info in TOOLS.items():
+        schema = info["inputSchema"]
+        assert schema["type"] == "object", name
+        for prop_name, prop_schema in schema.get("properties", {}).items():
+            assert "type" in prop_schema, f"{name}.{prop_name}"
+    assert TOOLS["gui_context_use"]["inputSchema"]["required"] == ["label"]
+    assert TOOLS["gui_device_setup"]["inputSchema"]["required"] == [
+        "name",
+        "updates",
+    ]
+
+
+def _add_fake_tab(fx, tab_id: str) -> None:
+    """Register a minimal TabState so has_tab(tab_id) is True."""
+    from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
+    from zcu_tools.gui.state import TabState
+
+    adapter = FakeAdapter()
+    cfg = adapter.make_default_cfg(fx.state.exp_context)
+    fx.state.add_tab(
+        tab_id, TabState(adapter_name="fake", adapter=adapter, cfg_schema=cfg)
+    )
+
+
+def test_cfg_set_field_blocked_while_running(fx):
+    tab_id = "tab-run"
+    _add_fake_tab(fx, tab_id)
+    sock = open_client(fx.service.port)
+    try:
+        with patch.object(fx.ctrl, "get_running_tab_id", return_value=tab_id):
+            resp = call(
+                sock, "cfg.set_field", {"tab_id": tab_id, "path": "reps", "value": 10}
+            )
+        assert resp["ok"] is False
+        assert resp["error"]["code"] == "precondition_failed"
+    finally:
+        sock.close()
+
+
+def test_tab_update_cfg_blocked_while_running(fx):
+    tab_id = "tab-run"
+    _add_fake_tab(fx, tab_id)
+    sock = open_client(fx.service.port)
+    try:
+        with patch.object(fx.ctrl, "get_running_tab_id", return_value=tab_id):
+            resp = call(sock, "tab.update_cfg", {"tab_id": tab_id, "raw": {}})
+        assert resp["ok"] is False
+        assert resp["error"]["code"] == "precondition_failed"
+    finally:
+        sock.close()
+
+
+def test_mcp_wrappers_map_to_expected_rpc(monkeypatch):
+    from zcu_tools.gui.services.remote import mcp_server
+
+    calls: list[tuple[str, dict]] = []
+
+    def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        del timeout_seconds
+        calls.append((method, params))
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+
+    mcp_server.TOOLS["gui_context_use"]["handler"]({"label": "ctx1"})
+    mcp_server.TOOLS["gui_device_setup"]["handler"](
+        {"name": "bias", "updates": {"value": 1.0}}
+    )
+    mcp_server.TOOLS["gui_save_image"]["handler"](
+        {"tab_id": "tab1", "image_path": "/tmp/a.png"}
+    )
+
+    assert calls == [
+        ("context.use", {"label": "ctx1"}),
+        ("device.setup", {"name": "bias", "updates": {"value": 1.0}}),
+        ("save.image", {"tab_id": "tab1", "image_path": "/tmp/a.png"}),
+    ]
