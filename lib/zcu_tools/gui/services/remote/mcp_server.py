@@ -31,6 +31,7 @@ import time
 import traceback
 from collections import deque
 from pathlib import Path
+from tempfile import gettempdir
 from typing import Any, Callable, Deque, Dict, List, Optional
 
 # ---------------------------------------------------------------------------
@@ -56,6 +57,27 @@ _READER_STOP = threading.Event()
 
 # GUI subprocess (when launched via gui_launch tool).
 _GUI_PROC: Optional[subprocess.Popen] = None
+
+# PID file for cross-session GUI process tracking.
+_GUI_PID_FILE = Path(gettempdir()) / "zcu_tools_gui.pid"
+
+
+def _write_pid_file(pid: int) -> None:
+    try:
+        _GUI_PID_FILE.write_text(str(pid))
+    except OSError:
+        pass
+
+
+def _read_pid_file() -> Optional[int]:
+    try:
+        return int(_GUI_PID_FILE.read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _clear_pid_file() -> None:
+    _GUI_PID_FILE.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +282,7 @@ def tool_gui_launch(arguments: Dict[str, Any]) -> str:
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
+    _write_pid_file(_GUI_PROC.pid)
 
     # Wait until the port is listening (up to 15 s).
     deadline = time.monotonic() + 15.0
@@ -291,29 +314,44 @@ def tool_gui_stop(arguments: Dict[str, Any]) -> str:
     global _GUI_PROC
     tool_gui_disconnect({})
 
-    if _GUI_PROC is None:
-        return "No GUI process managed by this MCP server."
+    proc = _GUI_PROC
+    pid: Optional[int] = None
 
-    pid = _GUI_PROC.pid
-    if _GUI_PROC.poll() is not None:
-        _GUI_PROC = None
-        return f"GUI process (pid={pid}) had already exited."
+    if proc is not None and proc.poll() is None:
+        pid = proc.pid
+    else:
+        # Fallback: recover pid from file (handles cross-session restarts).
+        pid = _read_pid_file()
+        if pid is None:
+            _GUI_PROC = None
+            return "No GUI process managed by this MCP server."
+        proc = None  # no Popen object available
 
     force = bool(arguments.get("force", False))
+    sig = signal.SIGKILL if force else (
+        signal.SIGTERM if hasattr(signal, "SIGTERM") else signal.SIGINT
+    )
     try:
-        if force:
-            _GUI_PROC.kill()
+        os.kill(pid, sig)
+        if proc is not None:
+            try:
+                proc.wait(timeout=8.0)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
         else:
-            sig = signal.SIGTERM if hasattr(signal, "SIGTERM") else signal.SIGINT
-            os.kill(pid, sig)
-        _GUI_PROC.wait(timeout=8.0)
-    except subprocess.TimeoutExpired:
-        _GUI_PROC.kill()
-        _GUI_PROC.wait()
+            deadline = time.monotonic() + 8.0
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(pid, 0)
+                    time.sleep(0.3)
+                except ProcessLookupError:
+                    break
     except ProcessLookupError:
         pass
 
     _GUI_PROC = None
+    _clear_pid_file()
     return f"GUI process (pid={pid}) stopped."
 
 
@@ -1726,6 +1764,14 @@ TOOLS: Dict[str, Dict[str, Any]] = {
 # ---------------------------------------------------------------------------
 
 
+def _cleanup_on_exit() -> None:
+    """Stop the GUI process when the MCP host disconnects (stdin EOF)."""
+    try:
+        tool_gui_stop({"force": False})
+    except Exception:
+        pass
+
+
 def main() -> None:
     # Set stdin/stdout to UTF-8 encoded mode.
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
@@ -1735,6 +1781,7 @@ def main() -> None:
         try:
             line = sys.stdin.readline()
             if not line:
+                _cleanup_on_exit()
                 break
             line = line.strip()
             if not line:

@@ -668,7 +668,9 @@ class MainWindow(QMainWindow):
     def _on_bus_tab_interaction_changed(
         self, payload: TabInteractionChangedPayload
     ) -> None:
-        self.refresh_tab_interaction(payload.tab_id)
+        snapshot = self._ctrl.get_tab_snapshot(payload.tab_id)
+        self.refresh_tab_writeback(payload.tab_id, snapshot)
+        self.refresh_tab_interaction(payload.tab_id, snapshot)
 
     def _on_bus_run_lock_changed(self, payload: RunLockChangedPayload) -> None:
         self.refresh_run_lock(payload.running_tab_id)

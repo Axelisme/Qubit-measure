@@ -61,6 +61,7 @@ class SocChangedPayload(Payload):
 
     soc: "SocHandle | None"
     soccfg: "SocCfgHandle | None"
+    is_mock: bool = False
 
 
 @dataclass(frozen=True)

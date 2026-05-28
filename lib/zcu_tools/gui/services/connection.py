@@ -147,6 +147,7 @@ class ConnectionService(QObject):
         self._predictor_path: Optional[str] = None
         self._active_worker: Optional[_ConnectWorker] = None
         self._active_lease: Optional[OperationLease] = None
+        self._pending_is_mock: bool = False
 
     # ------------------------------------------------------------------
     # Queries
@@ -186,6 +187,7 @@ class ConnectionService(QObject):
 
         lease = self._gate.acquire(OperationKind.SOC_CONNECT, owner_id="soc")
         self._active_lease = lease
+        self._pending_is_mock = isinstance(req, ConnectMockRequest)
 
         if isinstance(req, ConnectMockRequest):
             logger.info("start_connect: mock")
@@ -261,7 +263,10 @@ class ConnectionService(QObject):
     def _apply_connection(self, soc: SocHandle, soccfg: SocCfgHandle) -> None:
         new_ctx = dataclasses.replace(self._state.exp_context, soc=soc, soccfg=soccfg)
         self._state.set_context(new_ctx)
-        self._bus.emit(GuiEvent.SOC_CHANGED, SocChangedPayload(soc=soc, soccfg=soccfg))
+        self._bus.emit(
+            GuiEvent.SOC_CHANGED,
+            SocChangedPayload(soc=soc, soccfg=soccfg, is_mock=self._pending_is_mock),
+        )
 
     # ------------------------------------------------------------------
     # Predictor (sync)

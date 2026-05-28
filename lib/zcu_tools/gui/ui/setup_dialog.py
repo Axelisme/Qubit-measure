@@ -229,12 +229,16 @@ class SetupDialog(QDialog):
         bus = controller.get_bus()
         bus.subscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_context_switched)
         bus.subscribe(GuiEvent.SOC_CHANGED, self._on_bus_soc_changed)
-        self.destroyed.connect(
-            lambda: bus.unsubscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_context_switched)
-        )
-        self.destroyed.connect(
-            lambda: bus.unsubscribe(GuiEvent.SOC_CHANGED, self._on_bus_soc_changed)
-        )
+        bus.subscribe(GuiEvent.DEVICE_CHANGED, self._on_bus_device_changed)
+        self.destroyed.connect(self._cleanup_bus_subscriptions)
+
+    def _cleanup_bus_subscriptions(self) -> None:
+        from zcu_tools.gui.event_bus import GuiEvent
+
+        bus = self._ctrl.get_bus()
+        bus.unsubscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_context_switched)
+        bus.unsubscribe(GuiEvent.SOC_CHANGED, self._on_bus_soc_changed)
+        bus.unsubscribe(GuiEvent.DEVICE_CHANGED, self._on_bus_device_changed)
 
     def _on_bus_context_switched(self, payload: object) -> None:
         del payload
@@ -247,9 +251,16 @@ class SetupDialog(QDialog):
         if isinstance(payload, SocChangedPayload) and payload.soc is not None:
             self._set_conn_status("Connected", error=False)
             self._maybe_show_current_cfg()
+            self._mock_check.blockSignals(True)
+            self._mock_check.setChecked(payload.is_mock)
+            self._mock_check.blockSignals(False)
         else:
             self._set_conn_status("Disconnected", error=False)
             self._cfg_text.setVisible(False)
+
+    def _on_bus_device_changed(self, payload: object) -> None:
+        del payload
+        self._refresh_device_list()
 
     # ------------------------------------------------------------------
     # Project panel handlers

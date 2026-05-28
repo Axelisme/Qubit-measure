@@ -282,16 +282,7 @@ class InspectDialog(QDialog):
         bus.subscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_refresh)
         bus.subscribe(GuiEvent.MD_CHANGED, self._on_bus_refresh)
         bus.subscribe(GuiEvent.ML_CHANGED, self._on_bus_refresh)
-        # Unsubscribe when dialog is destroyed
-        self.destroyed.connect(
-            lambda: bus.unsubscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_refresh)
-        )
-        self.destroyed.connect(
-            lambda: bus.unsubscribe(GuiEvent.MD_CHANGED, self._on_bus_refresh)
-        )
-        self.destroyed.connect(
-            lambda: bus.unsubscribe(GuiEvent.ML_CHANGED, self._on_bus_refresh)
-        )
+        self.destroyed.connect(self._cleanup_bus_subscriptions)
 
         self.refresh()
 
@@ -624,6 +615,11 @@ class InspectDialog(QDialog):
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def _cleanup_bus_subscriptions(self) -> None:
+        self._bus.unsubscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_refresh)
+        self._bus.unsubscribe(GuiEvent.MD_CHANGED, self._on_bus_refresh)
+        self._bus.unsubscribe(GuiEvent.ML_CHANGED, self._on_bus_refresh)
 
     def _on_bus_refresh(self, payload: Payload) -> None:
         """EventBus subscriber wrapper; payload is ignored, delegates to refresh()."""
