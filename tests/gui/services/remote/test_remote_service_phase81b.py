@@ -314,3 +314,62 @@ def test_device_list_and_snapshot(lf):
         assert resp["result"]["snapshot"] is None
     finally:
         sock.close()
+
+
+# ---------------------------------------------------------------------------
+# tab.list_paths
+# ---------------------------------------------------------------------------
+
+
+def test_list_paths_enumerates_settable_leaves(lf):
+    sock = open_client(lf.service.port)
+    try:
+        resp = call(sock, "tab.list_paths", {"tab_id": lf._tab_id})
+        assert resp["ok"] is True
+        paths = resp["result"]["paths"]
+        by_path = {p["path"]: p for p in paths}
+
+        # Scalar leaf present with value + type.
+        assert "reps" in by_path
+        assert by_path["reps"]["kind"] == "scalar"
+        assert by_path["reps"]["type"] in ("int", "float")
+
+        # A sweep edge is exposed as <path>.expts (integer) etc.
+        sweep_edges = [p for p in paths if p["kind"] == "sweep_edge"]
+        assert sweep_edges, "expected at least one sweep edge"
+        assert any(p["path"].endswith(".expts") for p in sweep_edges)
+
+        # Every listed path is non-empty and dotted-or-plain.
+        assert all(p["path"] for p in paths)
+    finally:
+        sock.close()
+
+
+def test_list_paths_round_trips_through_set_field(lf):
+    sock = open_client(lf.service.port)
+    try:
+        resp = call(sock, "tab.list_paths", {"tab_id": lf._tab_id})
+        scalar = next(
+            p
+            for p in resp["result"]["paths"]
+            if p["kind"] == "scalar" and p["type"] in ("int", "float")
+        )
+        new_value = 7 if scalar["type"] == "int" else 0.5
+        set_resp = call(
+            sock,
+            "cfg.set_field",
+            {"tab_id": lf._tab_id, "path": scalar["path"], "value": new_value},
+        )
+        assert set_resp["ok"] is True, scalar["path"]
+    finally:
+        sock.close()
+
+
+def test_list_paths_unknown_tab_rejected(lf):
+    sock = open_client(lf.service.port)
+    try:
+        resp = call(sock, "tab.list_paths", {"tab_id": "nope"})
+        assert resp["ok"] is False
+        assert resp["error"]["code"] == "invalid_params"
+    finally:
+        sock.close()

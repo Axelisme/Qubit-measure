@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from zcu_tools.gui.adapter import DirectValue, EvalValue
 from zcu_tools.gui.live_model import (
     DeviceRefLiveField,
     LiteralLiveField,
@@ -227,3 +228,111 @@ def _set_moduleref(
         ErrorCode.INVALID_PARAMS,
         f"module ref segment must be 'ref' or 'value', got {head!r} in {full_path!r}",
     )
+
+
+# ---------------------------------------------------------------------------
+# Path discovery — the inverse of resolve_and_set
+# ---------------------------------------------------------------------------
+
+
+def _scalar_wire_value(field: ScalarLiveField) -> object:
+    """Return a JSON-safe current value for a scalar field.
+
+    DirectValue → its value (or None when unset); EvalValue → its expression
+    string (so the agent sees what to overwrite).
+    """
+    val = field.get_value()
+    if isinstance(val, EvalValue):
+        return val.expr
+    if isinstance(val, DirectValue):
+        return None if val.is_unset else val.value
+    return None
+
+
+def _scalar_entry(path: str, field: ScalarLiveField) -> dict[str, object]:
+    entry: dict[str, object] = {
+        "path": path,
+        "kind": "scalar",
+        "value": _scalar_wire_value(field),
+        "type": field.spec.type.__name__,
+    }
+    if field.spec.choices is not None:
+        entry["choices"] = list(field.spec.choices)
+    return entry
+
+
+def _sweep_entries(path: str, field: SweepLiveField) -> list[dict[str, object]]:
+    sweep = field.get_value()
+    edges = {
+        "start": sweep.start,
+        "stop": sweep.stop,
+        "expts": sweep.expts,
+        "step": sweep.step,
+    }
+    out: list[dict[str, object]] = []
+    for edge, raw in edges.items():
+        value: object = raw.expr if isinstance(raw, EvalValue) else raw
+        out.append(
+            {
+                "path": f"{path}.{edge}",
+                "kind": "sweep_edge",
+                "value": value,
+                "type": "integer" if edge == "expts" else "number",
+            }
+        )
+    return out
+
+
+def _list_field(path: str, field: "LiveField") -> list[dict[str, object]]:
+    """Recurse one LiveField, returning the settable leaves beneath it."""
+    if isinstance(field, LiteralLiveField):
+        return []  # immutable — resolve_and_set rejects it
+    if isinstance(field, ScalarLiveField):
+        return [_scalar_entry(path, field)]
+    if isinstance(field, SweepLiveField):
+        return _sweep_entries(path, field)
+    if isinstance(field, MultiSweepLiveField):
+        out: list[dict[str, object]] = []
+        for axis, axis_field in field.fields.items():
+            out.extend(_sweep_entries(f"{path}.{axis}", axis_field))
+        return out
+    if isinstance(field, DeviceRefLiveField):
+        return [
+            {
+                "path": f"{path}.device",
+                "kind": "deviceref",
+                "value": field.get_chosen_name(),
+                "type": "string",
+            }
+        ]
+    if isinstance(field, ModuleRefLiveField):
+        out = [
+            {
+                "path": f"{path}.ref",
+                "kind": "moduleref_key",
+                "value": field.get_chosen_key(),
+                "type": "string",
+                "choices": [s.label for s in field.spec.allowed],
+            }
+        ]
+        sub = field.sub_field
+        if sub is not None:
+            for key, child in sub.fields.items():
+                out.extend(_list_field(f"{path}.value.{key}", child))
+        return out
+    if isinstance(field, SectionLiveField):
+        out = []
+        for key, child in field.fields.items():
+            out.extend(_list_field(f"{path}.{key}" if path else key, child))
+        return out
+    return []
+
+
+def list_settable_paths(root: SectionLiveField) -> list[dict[str, object]]:
+    """Enumerate every dotted path that ``resolve_and_set`` can mutate.
+
+    Each entry is ``{path, kind, value, type[, choices]}``. The path grammar is
+    identical to resolve_and_set's, so every listed path round-trips through
+    ``cfg.set_field``. Literal (immutable) leaves are omitted.
+    """
+    return _list_field("", root)

@@ -146,6 +146,25 @@ def _h_tab_get_cfg(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     return {"raw": raw}
 
 
+def _h_tab_list_paths(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    from .path_resolver import list_settable_paths
+
+    tab_id = str(params["tab_id"])
+    if not ctrl.has_tab(tab_id):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    # Walk the same live LiveModel that cfg.set_field mutates, so every listed
+    # path is guaranteed settable. Requires the tab's form to be populated.
+    try:
+        root = ctrl.get_tab_live_model_root(tab_id)
+    except (KeyError, RuntimeError) as exc:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
+    return {"paths": list_settable_paths(root)}
+
+
 def _h_tab_update_cfg(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     if not ctrl.has_tab(tab_id):
@@ -1022,6 +1041,7 @@ _HANDLERS: dict[str, Handler] = {
     "tab.list": _h_tab_list,
     "tab.snapshot": _h_tab_snapshot,
     "tab.get_cfg": _h_tab_get_cfg,
+    "tab.list_paths": _h_tab_list_paths,
     "tab.update_cfg": _h_tab_update_cfg,
     "cfg.set_field": _h_cfg_set_field,
     "run.start": _h_run_start,

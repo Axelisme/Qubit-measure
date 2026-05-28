@@ -106,6 +106,13 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0, "Tab summary", (_str_opt("tab_id", "Tab to inspect; omit for all tabs"),)
     ),
     "tab.get_cfg": MethodSpec(5.0, "Read tab cfg raw", (_str("tab_id"),)),
+    "tab.list_paths": MethodSpec(
+        5.0,
+        "List every settable cfg dotted path with its current value, type and "
+        "(when applicable) choices. Each path is guaranteed usable with "
+        "cfg.set_field. kind ∈ scalar / sweep_edge / moduleref_key / deviceref.",
+        (_str("tab_id"),),
+    ),
     "tab.update_cfg": MethodSpec(
         10.0,
         "Replace tab cfg raw",
