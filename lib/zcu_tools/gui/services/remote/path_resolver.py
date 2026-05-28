@@ -1,0 +1,229 @@
+"""Dotted-path resolver for remote ``cfg.set_field``.
+
+Walks a live ``SectionLiveField`` tree and mutates a single leaf using the
+field's existing public mutation surface, so a remote edit behaves exactly
+like a user edit (auto-commit via the form's ``on_change`` -> ``schema_changed``
+-> ``Controller.update_tab_cfg`` chain).
+
+Path grammar (segments split on ``.``):
+
+  - Scalar leaf:        ``section.sub.field``           -> ``ScalarLiveField.set_value(value)``
+  - Sweep sub-field:    ``...path.sweep.start|stop|expts|step``
+  - Multi-sweep axis:   ``...path.<axis>.start|stop|expts|step`` (axis is a key
+                         in a ``MultiSweepLiveField``)
+  - ModuleRef key:      ``...path.ref``                  -> ``set_chosen_key(value)``
+  - ModuleRef sub:      ``...path.value.<sub>...``       -> recurse into ``.sub_field``
+  - DeviceRef:          ``...path.device``               -> ``set_chosen_name(value)``
+  - Literal:            rejected (immutable)
+
+Unknown paths, type mismatches, and immutable targets raise
+``RemoteError(INVALID_PARAMS, ...)`` with a discriminating message.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from zcu_tools.gui.live_model import (
+    DeviceRefLiveField,
+    LiteralLiveField,
+    ModuleRefLiveField,
+    MultiSweepLiveField,
+    ScalarLiveField,
+    SectionLiveField,
+    SweepLiveField,
+)
+from zcu_tools.gui.sweep_model import SweepEditor
+
+from .errors import ErrorCode, RemoteError
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.live_model import LiveField
+
+_SWEEP_EDGES = {"start", "stop", "expts", "step"}
+
+
+def resolve_and_set(root: SectionLiveField, path: str, value: object) -> None:
+    """Resolve ``path`` against ``root`` and set the leaf to ``value``.
+
+    ``root`` must be the live tab ``SectionLiveField``; mutations propagate
+    through its existing ``on_change`` bubbling.
+    """
+    if not path:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "empty path")
+    segments = path.split(".")
+    _set_recursive(root, segments, path, value)
+
+
+def _set_recursive(
+    field: "LiveField", segments: list[str], full_path: str, value: object
+) -> None:
+    head = segments[0]
+    rest = segments[1:]
+
+    if isinstance(field, SectionLiveField):
+        child = field.fields.get(head)
+        if child is None:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"unknown field {head!r} in path {full_path!r}",
+            )
+        if not rest:
+            _set_leaf(child, full_path, value)
+            return
+        _set_recursive(child, rest, full_path, value)
+        return
+
+    # Reached a non-section field but still have segments to consume.
+    if isinstance(field, SweepLiveField):
+        _set_sweep_edge(field, head, rest, full_path, value)
+        return
+
+    if isinstance(field, MultiSweepLiveField):
+        axis = field.fields.get(head)
+        if axis is None:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"unknown sweep axis {head!r} in path {full_path!r}",
+            )
+        if not rest:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"multi-sweep axis {head!r} needs a sub-field (start/stop/expts/step)",
+            )
+        _set_sweep_edge(axis, rest[0], rest[1:], full_path, value)
+        return
+
+    if isinstance(field, ModuleRefLiveField):
+        _set_moduleref(field, head, rest, full_path, value)
+        return
+
+    raise RemoteError(
+        ErrorCode.INVALID_PARAMS,
+        f"path {full_path!r} descends into non-container {type(field).__name__}",
+    )
+
+
+def _set_leaf(field: "LiveField", full_path: str, value: object) -> None:
+    if isinstance(field, LiteralLiveField):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"path {full_path!r} targets an immutable literal field",
+        )
+    if isinstance(field, ScalarLiveField):
+        field.set_value(value)
+        return
+    if isinstance(field, DeviceRefLiveField):
+        if not isinstance(value, str):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"device ref at {full_path!r} expects a string name",
+            )
+        field.set_chosen_name(value)
+        return
+    if isinstance(field, ModuleRefLiveField):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"path {full_path!r} targets a module ref; set "
+            f"'{full_path}.ref' (key) or '{full_path}.value.<sub>' instead",
+        )
+    if isinstance(field, (SweepLiveField, MultiSweepLiveField)):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"path {full_path!r} targets a sweep; set "
+            f"'{full_path}.start|stop|expts|step' instead",
+        )
+    if isinstance(field, SectionLiveField):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"path {full_path!r} targets a section; descend to a leaf field",
+        )
+    raise RemoteError(
+        ErrorCode.INVALID_PARAMS,
+        f"path {full_path!r} targets unsupported field {type(field).__name__}",
+    )
+
+
+def _set_sweep_edge(
+    sweep: SweepLiveField,
+    edge: str,
+    rest: list[str],
+    full_path: str,
+    value: object,
+) -> None:
+    # Allow an optional ``sweep`` qualifier: ``path.sweep.start`` and
+    # ``path.start`` are both accepted for ergonomics.
+    if edge == "sweep" and rest:
+        edge = rest[0]
+        rest = rest[1:]
+    if rest:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"path {full_path!r} has trailing segments after sweep edge",
+        )
+    if edge not in _SWEEP_EDGES:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"sweep edge must be one of {sorted(_SWEEP_EDGES)}, got {edge!r}",
+        )
+    current = sweep.get_value()
+    if edge == "expts":
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, "sweep 'expts' must be an integer"
+            )
+        sweep.set_value(SweepEditor.update_expts(current, value))
+        return
+    if edge == "step":
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise RemoteError(ErrorCode.INVALID_PARAMS, "sweep 'step' must be a number")
+        sweep.set_value(SweepEditor.update_step(current, float(value)))
+        return
+    # start / stop accept a number (EvalValue editing is out of scope here).
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"sweep '{edge}' must be a number")
+    if edge == "start":
+        sweep.set_value(SweepEditor.update_start(current, float(value)))
+    else:
+        sweep.set_value(SweepEditor.update_stop(current, float(value)))
+
+
+def _set_moduleref(
+    ref: ModuleRefLiveField,
+    head: str,
+    rest: list[str],
+    full_path: str,
+    value: object,
+) -> None:
+    if head == "ref":
+        if rest:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"path {full_path!r} has trailing segments after 'ref'",
+            )
+        if not isinstance(value, str):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"module ref key at {full_path!r} expects a string",
+            )
+        ref.set_chosen_key(value)
+        return
+    if head == "value":
+        sub = ref.sub_field
+        if sub is None:
+            raise RemoteError(
+                ErrorCode.PRECONDITION_FAILED,
+                f"module ref at {full_path!r} has no editable sub-fields for "
+                "the current key",
+            )
+        if not rest:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"path {full_path!r} must name a sub-field after 'value'",
+            )
+        _set_recursive(sub, rest, full_path, value)
+        return
+    raise RemoteError(
+        ErrorCode.INVALID_PARAMS,
+        f"module ref segment must be 'ref' or 'value', got {head!r} in {full_path!r}",
+    )

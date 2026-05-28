@@ -448,6 +448,47 @@ def tool_gui_view_screenshot(arguments: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Phase 81b tools — cfg.set_field / context queries / device queries
+# ---------------------------------------------------------------------------
+
+
+def tool_gui_cfg_set_field(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    if "value" not in arguments:
+        raise ValueError("missing 'value'")
+    return send_gui_rpc(
+        "cfg.set_field",
+        {
+            "tab_id": str(arguments["tab_id"]),
+            "path": str(arguments["path"]),
+            "value": arguments["value"],
+        },
+    )
+
+
+def tool_gui_context_get_md(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    del arguments
+    return send_gui_rpc("context.get_md", {})
+
+
+def tool_gui_context_get_md_attr(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    return send_gui_rpc("context.get_md_attr", {"key": str(arguments["key"])})
+
+
+def tool_gui_context_get_ml(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    del arguments
+    return send_gui_rpc("context.get_ml", {})
+
+
+def tool_gui_device_list(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    del arguments
+    return send_gui_rpc("device.list", {})
+
+
+def tool_gui_device_snapshot(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    return send_gui_rpc("device.snapshot", {"name": str(arguments["name"])})
+
+
+# ---------------------------------------------------------------------------
 # Tool registry
 # ---------------------------------------------------------------------------
 
@@ -694,6 +735,58 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                 "tab_id": {"type": "string"},
                 "out_path": {"type": "string"},
             },
+        },
+    },
+    # ---- Phase 81b — cfg.set_field / context / device -------------------
+    "gui_cfg_set_field": {
+        "handler": tool_gui_cfg_set_field,
+        "description": (
+            "Set a single cfg field on a tab by dotted path (e.g. 'reps', "
+            "'sweep.expts', 'qubit_pulse.value.freq'). Mirrors a UI edit."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tab_id": {"type": "string"},
+                "path": {"type": "string"},
+                "value": {
+                    "description": "New value (number / string / bool)",
+                },
+            },
+            "required": ["tab_id", "path", "value"],
+        },
+    },
+    "gui_context_get_md": {
+        "handler": tool_gui_context_get_md,
+        "description": "List MetaDict attribute keys in the active context.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    "gui_context_get_md_attr": {
+        "handler": tool_gui_context_get_md_attr,
+        "description": "Read one MetaDict attribute value by key.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"key": {"type": "string"}},
+            "required": ["key"],
+        },
+    },
+    "gui_context_get_ml": {
+        "handler": tool_gui_context_get_ml,
+        "description": "List ModuleLibrary module and waveform names.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    "gui_device_list": {
+        "handler": tool_gui_device_list,
+        "description": "List registered devices (name / type / connected).",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    "gui_device_snapshot": {
+        "handler": tool_gui_device_snapshot,
+        "description": "Read one device's cached snapshot by name.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
         },
     },
 }

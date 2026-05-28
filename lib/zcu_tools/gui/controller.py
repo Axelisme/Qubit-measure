@@ -665,5 +665,17 @@ class Controller:
     def get_tab_live_model_root(self, tab_id: str):
         return self._require_view().get_tab_live_model_root(tab_id)
 
+    def set_tab_field(self, tab_id: str, path: str, value: object) -> None:
+        """Mutate a single cfg field on the tab's live LiveModel (Phase 81b).
+
+        Goes through the form's live tree so the change auto-commits to
+        ``State.cfg_schema`` via the existing ``schema_changed`` path,
+        keeping the visible widget in sync (WYSIWYG).
+        """
+        from .services.remote.path_resolver import resolve_and_set
+
+        root = self._require_view().get_tab_live_model_root(tab_id)
+        resolve_and_set(root, path, value)
+
     def get_adapter_names(self) -> list[str]:
         return self._tab_svc.list_adapter_names()

@@ -144,6 +144,21 @@ def _h_tab_update_cfg(ctrl, params: Mapping[str, object]) -> Mapping[str, object
     return {}
 
 
+def _h_cfg_set_field(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    tab_id = _require_str(params, "tab_id")
+    if not ctrl.has_tab(tab_id):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    path = _require_str(params, "path")
+    if "value" not in params:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "missing 'value'")
+    value = params["value"]
+    try:
+        ctrl.set_tab_field(tab_id, path, value)
+    except (KeyError, RuntimeError) as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    return {}
+
+
 # ---------------------------------------------------------------------------
 # Run / Save handlers
 # ---------------------------------------------------------------------------
@@ -244,6 +259,42 @@ def _h_context_active(ctrl, params: Mapping[str, object]) -> Mapping[str, object
     return {"label": ctrl.get_active_context_label()}
 
 
+def _json_safe(value: object) -> object:
+    """Return ``value`` if it round-trips through JSON, else its ``repr``."""
+    import json
+
+    try:
+        json.dumps(value)
+        return value
+    except (TypeError, ValueError):
+        return {"__repr__": repr(value)}
+
+
+def _h_context_get_md(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    del params
+    md = ctrl.get_current_md()
+    return {"keys": sorted(str(k) for k in md.keys())}
+
+
+def _h_context_get_md_attr(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    key = _require_str(params, "key")
+    md = ctrl.get_current_md()
+    sentinel = object()
+    value = md.get(key, sentinel)
+    if value is sentinel:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown md key: {key!r}")
+    return {"key": key, "value": _json_safe(value)}
+
+
+def _h_context_get_ml(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    del params
+    ml = ctrl.get_current_ml()
+    return {
+        "modules": sorted(ml.modules.keys()),
+        "waveforms": sorted(ml.waveforms.keys()),
+    }
+
+
 def _h_state_has_project(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     del params
     return {"value": bool(ctrl.has_project())}
@@ -304,6 +355,36 @@ def _h_device_connect(ctrl, params: Mapping[str, object]) -> Mapping[str, object
 def _h_adapter_list(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     del params
     return {"adapters": list(ctrl.get_adapter_names())}
+
+
+def _h_device_list(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    del params
+    devices = [
+        {
+            "name": e.name,
+            "type_name": e.type_name,
+            "is_connected": bool(e.is_connected),
+        }
+        for e in ctrl.list_devices()
+    ]
+    return {"devices": devices}
+
+
+def _h_device_snapshot(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    name = _require_str(params, "name")
+    snap = ctrl.get_device_snapshot(name)
+    if snap is None:
+        return {"snapshot": None}
+    # BaseDeviceInfo is intentionally omitted (not JSON-friendly).
+    return {
+        "snapshot": {
+            "name": snap.name,
+            "type_name": snap.type_name,
+            "address": snap.address,
+            "status": snap.status.value,
+            "error": snap.error,
+        }
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -389,6 +470,9 @@ METHOD_REGISTRY: dict[str, MethodSpec] = {
     "tab.snapshot": MethodSpec(_h_tab_snapshot, 5.0, "Tab summary"),
     "tab.get_cfg": MethodSpec(_h_tab_get_cfg, 5.0, "Read tab cfg raw"),
     "tab.update_cfg": MethodSpec(_h_tab_update_cfg, 10.0, "Replace tab cfg raw"),
+    "cfg.set_field": MethodSpec(
+        _h_cfg_set_field, 5.0, "Set a single cfg field by dotted path"
+    ),
     "run.start": MethodSpec(_h_run_start, 5.0, "Start a run (fire-and-forget)"),
     "run.cancel": MethodSpec(_h_run_cancel, 5.0, "Cancel current run"),
     "run.running_tab": MethodSpec(_h_run_running_tab, 5.0, "Current running tab"),
@@ -399,6 +483,13 @@ METHOD_REGISTRY: dict[str, MethodSpec] = {
     "context.new": MethodSpec(_h_context_new, 10.0, "Create new context"),
     "context.labels": MethodSpec(_h_context_labels, 5.0, "List context labels"),
     "context.active": MethodSpec(_h_context_active, 5.0, "Active context label"),
+    "context.get_md": MethodSpec(_h_context_get_md, 5.0, "List MetaDict keys"),
+    "context.get_md_attr": MethodSpec(
+        _h_context_get_md_attr, 5.0, "Read one MetaDict attribute"
+    ),
+    "context.get_ml": MethodSpec(
+        _h_context_get_ml, 5.0, "List ModuleLibrary module/waveform names"
+    ),
     "state.has_project": MethodSpec(_h_state_has_project, 5.0, ""),
     "state.has_context": MethodSpec(_h_state_has_context, 5.0, ""),
     "state.has_active_context": MethodSpec(_h_state_has_active_context, 5.0, ""),
@@ -408,6 +499,10 @@ METHOD_REGISTRY: dict[str, MethodSpec] = {
     "connect.start": MethodSpec(_h_connect_start, 30.0, "Connect to SoC"),
     "startup.apply": MethodSpec(_h_startup_apply, 30.0, "Apply startup project"),
     "device.connect": MethodSpec(_h_device_connect, 30.0, "Connect device"),
+    "device.list": MethodSpec(_h_device_list, 5.0, "List registered devices"),
+    "device.snapshot": MethodSpec(
+        _h_device_snapshot, 5.0, "Read one device cached snapshot"
+    ),
     "adapter.list": MethodSpec(_h_adapter_list, 5.0, "List available adapters"),
     "dialog.open": MethodSpec(_h_dialog_open, 10.0, "Open a named dialog"),
     "dialog.close": MethodSpec(_h_dialog_close, 5.0, "Close a named dialog"),
