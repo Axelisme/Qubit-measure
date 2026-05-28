@@ -88,10 +88,34 @@ def test_run_progress_serializes_scalar_bars(fx):
         assert resp["result"] == {
             "active": True,
             "bars": [
-                {"token": 1, "format": "Rounds 23/100", "maximum": 100, "value": 23},
-                {"token": 2, "format": "Reps 5/500", "maximum": 500, "value": 5},
+                {
+                    "token": 1,
+                    "format": "Rounds 23/100",
+                    "maximum": 100,
+                    "value": 23,
+                    "percent": 23.0,
+                },
+                {
+                    "token": 2,
+                    "format": "Reps 5/500",
+                    "maximum": 500,
+                    "value": 5,
+                    "percent": 1.0,
+                },
             ],
         }
+    finally:
+        sock.close()
+
+
+def test_run_progress_unknown_total_has_null_percent(fx):
+    bars = (ProgressEntrySnapshot(token=1, format="working", maximum=0, value=0),)
+    fx.ctrl.get_run_progress = MagicMock(return_value=bars)  # type: ignore[method-assign]
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "run.progress")
+        assert resp["ok"] is True
+        assert resp["result"]["bars"][0]["percent"] is None
     finally:
         sock.close()
 

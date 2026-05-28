@@ -811,6 +811,7 @@ def _h_run_progress(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     # bars are ProgressEntrySnapshot(token, format, maximum, value). `format` is
     # the human-readable bar string (e.g. "Rounds 23/100 [0:25<1:15]"); maximum
     # is the Qt-scaled total (0 when unknown), value the current scaled position.
+    # `percent` is the convenience 0-100 derivation (None when total unknown).
     return {
         "active": True,
         "bars": [
@@ -819,6 +820,9 @@ def _h_run_progress(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
                 "format": s.format,
                 "maximum": s.maximum,
                 "value": s.value,
+                "percent": (
+                    None if s.maximum == 0 else round(s.value / s.maximum * 100, 1)
+                ),
             }
             for s in bars
         ],
