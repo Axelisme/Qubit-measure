@@ -48,6 +48,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QLabel,
     QLineEdit,
     QMainWindow,
+    QTextEdit,
     QMenu,
     QPushButton,
     QScrollArea,
@@ -247,8 +248,9 @@ class ExpTabWidget(QWidget):
         image_path_row.addWidget(browse_image_btn)
         save_layout.addRow("Image path:", image_path_row)
 
-        self._comment_edit = QLineEdit()
+        self._comment_edit = QTextEdit()
         self._comment_edit.setPlaceholderText("Optional comment…")
+        self._comment_edit.setFixedHeight(60)
         save_layout.addRow("Comment:", self._comment_edit)
 
         btn_row = QHBoxLayout()
@@ -421,7 +423,7 @@ class ExpTabWidget(QWidget):
         return self._image_path_edit.text()
 
     def get_comment(self) -> str:
-        return self._comment_edit.text()
+        return self._comment_edit.toPlainText()
 
     def reset_plot(self) -> None:
         """Remove all canvases from plot_stack, revert to placeholder."""

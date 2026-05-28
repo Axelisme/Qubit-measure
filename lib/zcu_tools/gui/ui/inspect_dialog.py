@@ -262,21 +262,24 @@ class InspectDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
 
+        # --- top toolbar: status on the left, Refresh + Close on the right ---
+        toolbar = QHBoxLayout()
+        self._status_label = QLabel("No context")
+        toolbar.addWidget(self._status_label)
+        toolbar.addStretch()
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.clicked.connect(self.refresh)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.close)
+        toolbar.addWidget(refresh_btn)
+        toolbar.addWidget(close_btn)
+        layout.addLayout(toolbar)
+
         # --- tabs ---
         self._tabs = QTabWidget()
         self._tabs.addTab(self._build_md_tab(), "Parameters")
         self._tabs.addTab(self._build_ml_tab(), "Modules")
         layout.addWidget(self._tabs)
-
-        # --- bottom bar ---
-        bottom = QHBoxLayout()
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.clicked.connect(self.refresh)
-        bottom.addWidget(refresh_btn)
-        bottom.addStretch()
-        self._status_label = QLabel("No context")
-        bottom.addWidget(self._status_label)
-        layout.addLayout(bottom)
 
         # Subscribe to EventBus for auto-refresh
         bus.subscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_refresh)
