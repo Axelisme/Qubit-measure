@@ -136,6 +136,15 @@ class CfgFormWidget(QWidget):
             raise RuntimeError("populate() must be called before read_schema()")
         return CfgSchema(spec=self._model.spec, value=self.read_values())
 
+    def get_live_root(self) -> Optional[SectionLiveField]:
+        """Return the live ``SectionLiveField`` root, or ``None`` if unpopulated.
+
+        Exposed so the remote-control path resolver (Phase 81b) can mutate
+        the draft tree directly — preserving WYSIWYG with the form widget,
+        which auto-commits via ``schema_changed`` exactly as a UI edit would.
+        """
+        return self._model
+
     def is_valid(self) -> bool:
         return self._model.is_valid() if self._model else True
 

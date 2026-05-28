@@ -84,10 +84,23 @@ def run_app(control_opts: Optional["ControlOptions"] = None) -> None:
 
 
 def _show_startup_dialog(ctrl: "Controller", parent: "MainWindow") -> None:
+    """Show the bootstrap startup dialog non-modally.
+
+    Non-modal is required so the Qt event loop keeps pumping while the
+    dialog is visible — this is what lets ``RemoteControlService`` accept
+    further RPCs (e.g. ``dialog.close STARTUP``) while a remote agent is
+    driving onboarding. The dialog registers in ``window._open_dialogs``
+    so it shows up in ``dialog.list_open`` queries.
+    """
+    from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+
+    from zcu_tools.gui.services.remote.dialogs import DialogName
     from zcu_tools.gui.ui.setup_dialog import SetupDialog
 
     dlg = SetupDialog(ctrl, parent=parent, startup_mode=True)
-    dlg.exec()
+    dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+    parent.register_dialog(DialogName.STARTUP, dlg)
+    dlg.open()
 
 
 def _build_window(

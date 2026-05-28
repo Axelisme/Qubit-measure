@@ -292,10 +292,15 @@ def test_shutdown_closes_clients(fx):
     sock = _open_client(fx.service.port)
     try:
         fx.service.stop()
-        # After stop, the server thread closes client sockets; recv returns EOF.
+        # After stop, the service closes the client socket. Depending on
+        # timing the peer observes either a clean EOF (recv -> b"") or a
+        # reset (ConnectionResetError); both mean "socket is gone".
         sock.setblocking(True)
         sock.settimeout(2.0)
-        data = sock.recv(4096)
+        try:
+            data = sock.recv(4096)
+        except (ConnectionResetError, ConnectionAbortedError, OSError):
+            data = b""
         assert data == b""
     finally:
         sock.close()

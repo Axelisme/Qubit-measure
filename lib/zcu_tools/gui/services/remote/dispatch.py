@@ -307,6 +307,75 @@ def _h_adapter_list(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
 
 
 # ---------------------------------------------------------------------------
+# Dialog / view-query handlers (Phase 81a)
+# ---------------------------------------------------------------------------
+
+
+def _h_dialog_open(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    from .dialogs import DialogName, parse_dialog_name
+
+    name_raw = _require_str(params, "name")
+    try:
+        name: DialogName = parse_dialog_name(name_raw)
+    except ValueError as exc:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    ctrl.open_dialog(name)
+    return {"opened": name.value}
+
+
+def _h_dialog_close(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    from .dialogs import DialogName, parse_dialog_name
+
+    name_raw = _require_str(params, "name")
+    try:
+        name: DialogName = parse_dialog_name(name_raw)
+    except ValueError as exc:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    ctrl.close_dialog(name)
+    return {"closed": name.value}
+
+
+def _h_dialog_list_open(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    del params
+    open_names = [n.value for n in ctrl.list_open_dialogs()]
+    return {"open": open_names}
+
+
+def _h_view_snapshot(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    del params
+    snap = ctrl.get_view_snapshot()
+    if not isinstance(snap, dict):
+        raise RemoteError(
+            ErrorCode.INTERNAL,
+            f"view snapshot returned non-dict {type(snap).__name__}",
+        )
+    return snap
+
+
+def _h_view_screenshot(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    import base64
+
+    tab_id: Optional[str] = None
+    if "tab_id" in params and params["tab_id"] is not None:
+        if not isinstance(params["tab_id"], str):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, "'tab_id' must be a string if present"
+            )
+        tab_id = params["tab_id"]
+    try:
+        png = ctrl.take_screenshot(tab_id)
+    except RuntimeError as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    if not isinstance(png, (bytes, bytearray)):
+        raise RemoteError(
+            ErrorCode.INTERNAL,
+            f"screenshot returned non-bytes {type(png).__name__}",
+        )
+    payload = base64.b64encode(bytes(png)).decode("ascii")
+    return {"png_b64": payload, "bytes": len(png)}
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -340,6 +409,13 @@ METHOD_REGISTRY: dict[str, MethodSpec] = {
     "startup.apply": MethodSpec(_h_startup_apply, 30.0, "Apply startup project"),
     "device.connect": MethodSpec(_h_device_connect, 30.0, "Connect device"),
     "adapter.list": MethodSpec(_h_adapter_list, 5.0, "List available adapters"),
+    "dialog.open": MethodSpec(_h_dialog_open, 10.0, "Open a named dialog"),
+    "dialog.close": MethodSpec(_h_dialog_close, 5.0, "Close a named dialog"),
+    "dialog.list_open": MethodSpec(_h_dialog_list_open, 5.0, "List open dialogs"),
+    "view.snapshot": MethodSpec(_h_view_snapshot, 5.0, "Capture view state summary"),
+    "view.screenshot": MethodSpec(
+        _h_view_screenshot, 10.0, "Capture window or tab as base64 PNG"
+    ),
 }
 
 

@@ -60,6 +60,7 @@ from .services.device import (
     DeviceEntry,
     DeviceSetupSnapshot,
 )
+from .services.remote.dialogs import DialogName
 from .state import State
 
 
@@ -70,6 +71,17 @@ class ViewProtocol(Protocol):
     def make_pbar_factory(self, tab_id: str) -> Optional[object]: ...
     def make_live_container(self, tab_id: str) -> Optional[FigureContainer]: ...
     def show_error_dialog(self, title: str, message: str) -> None: ...
+
+    # Dialog API — shared between UI clicks and RemoteControlService.
+    def open_dialog(self, name: DialogName) -> None: ...
+    def close_dialog(self, name: DialogName) -> None: ...
+    def list_open_dialogs(self) -> list[DialogName]: ...
+    def register_dialog(self, name: DialogName, dialog: Any) -> None: ...
+
+    # Remote query helpers.
+    def get_view_snapshot(self) -> dict[str, object]: ...
+    def take_screenshot(self, tab_id: Optional[str] = None) -> bytes: ...
+    def get_tab_live_model_root(self, tab_id: str) -> Any: ...
 
 
 class Controller:
@@ -630,6 +642,28 @@ class Controller:
             GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
+
+    # ------------------------------------------------------------------
+    # Dialog / view-query facades (Phase 81a)
+    # ------------------------------------------------------------------
+
+    def open_dialog(self, name: DialogName) -> None:
+        self._require_view().open_dialog(name)
+
+    def close_dialog(self, name: DialogName) -> None:
+        self._require_view().close_dialog(name)
+
+    def list_open_dialogs(self) -> list[DialogName]:
+        return list(self._require_view().list_open_dialogs())
+
+    def get_view_snapshot(self) -> dict[str, object]:
+        return self._require_view().get_view_snapshot()
+
+    def take_screenshot(self, tab_id: Optional[str] = None) -> bytes:
+        return self._require_view().take_screenshot(tab_id)
+
+    def get_tab_live_model_root(self, tab_id: str):
+        return self._require_view().get_tab_live_model_root(tab_id)
 
     def get_adapter_names(self) -> list[str]:
         return self._tab_svc.list_adapter_names()

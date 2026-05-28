@@ -28,6 +28,7 @@ from zcu_tools.gui.plot_host import (
     remove_canvas,
     set_shutting_down,
 )
+from zcu_tools.gui.services.remote.dialogs import DialogName
 from zcu_tools.gui.state import TabInteractionState
 
 logger = logging.getLogger(__name__)
@@ -70,10 +71,13 @@ from .progress_stack import ProgressStack
 from .writeback_widget import WritebackWidget
 
 if TYPE_CHECKING:
+    from qtpy.QtWidgets import QDialog  # type: ignore[attr-defined]
+
     from matplotlib.figure import Figure
 
     from zcu_tools.gui.adapter import CfgSchema, WritebackItem
     from zcu_tools.gui.controller import Controller
+    from zcu_tools.gui.live_model import SectionLiveField
     from zcu_tools.gui.services import TabViewSnapshot
     from zcu_tools.meta_tool import ModuleLibrary
 
@@ -557,7 +561,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._ctrl = controller
         self._tab_widgets: dict[str, ExpTabWidget] = {}
-        self._inspect_dialog: Any = None
+        # ``DialogName -> live QDialog`` registry. ``InspectDialog`` is also
+        # tracked through this dict (the legacy ``_inspect_dialog`` attribute
+        # is gone — there is now exactly one entry point).
+        self._open_dialogs: dict[DialogName, "QDialog"] = {}
         self._shutdown_waiting_for_device_setup = False
 
         self.setWindowTitle("ZCU Qubit Measure — v2 GUI")
@@ -851,8 +858,13 @@ class MainWindow(QMainWindow):
                 self._set_tab_running(tab_w, self._ctrl.get_tab_snapshot(tab_id))
 
     def refresh_inspect_panel(self) -> None:
-        if self._inspect_dialog is not None and self._inspect_dialog.isVisible():
-            self._inspect_dialog.refresh()
+        inspect = self._open_dialogs.get(DialogName.INSPECT)
+        if inspect is not None and inspect.isVisible():
+            # InspectDialog defines ``refresh``; cast through ``Any`` to avoid
+            # importing the concrete class in the hot signature surface.
+            from typing import cast
+
+            cast(Any, inspect).refresh()
 
     def refresh_predictor_panel(self) -> None:
         info = self._ctrl.get_predictor_info()
@@ -1044,36 +1056,177 @@ class MainWindow(QMainWindow):
         self._ctrl.save_both(tab_id, data_path, image_path)
 
     def _on_setup_clicked(self) -> None:
-        from .setup_dialog import SetupDialog
-
-        dlg = SetupDialog(self._ctrl, parent=self)
-        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dlg.open()
+        self.open_dialog(DialogName.SETUP)
 
     def _on_devices_clicked(self) -> None:
-        from .device_dialog import DeviceDialog
-
-        dlg = DeviceDialog(self._ctrl, parent=self)
-        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dlg.open()
+        self.open_dialog(DialogName.DEVICE)
 
     def _on_predictor_clicked(self) -> None:
-        from .predictor_dialog import PredictorDialog
-
-        dlg = PredictorDialog(self._ctrl, parent=self)
-        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dlg.open()
+        self.open_dialog(DialogName.PREDICTOR)
 
     def _on_inspect_clicked(self) -> None:
-        from .inspect_dialog import InspectDialog
+        self.open_dialog(DialogName.INSPECT)
 
-        if self._inspect_dialog is None:
-            self._inspect_dialog = InspectDialog(
-                self._ctrl, bus=self._ctrl.get_bus(), parent=None
-            )
-        self._inspect_dialog.show()
-        self._inspect_dialog.raise_()
-        self._inspect_dialog.activateWindow()
+    # ------------------------------------------------------------------
+    # Dialog API — single entry point shared by UI clicks and remote control
+    # ------------------------------------------------------------------
+
+    def _build_dialog(self, name: DialogName) -> "QDialog":
+        """Construct a fresh QDialog for ``name``.
+
+        Per-name imports are deferred to avoid heavy front-loading and to
+        keep test fixtures from pulling in unused dialog modules.
+        """
+        if name is DialogName.SETUP:
+            from .setup_dialog import SetupDialog
+
+            return SetupDialog(self._ctrl, parent=self)
+        if name is DialogName.DEVICE:
+            from .device_dialog import DeviceDialog
+
+            return DeviceDialog(self._ctrl, parent=self)
+        if name is DialogName.PREDICTOR:
+            from .predictor_dialog import PredictorDialog
+
+            return PredictorDialog(self._ctrl, parent=self)
+        if name is DialogName.INSPECT:
+            from .inspect_dialog import InspectDialog
+
+            return InspectDialog(self._ctrl, bus=self._ctrl.get_bus(), parent=None)
+        if name is DialogName.STARTUP:
+            # STARTUP dialog needs ``startup_mode=True`` and is normally opened
+            # by the application bootstrap, not by this generic factory. We
+            # still build one here so a remote ``dialog.open STARTUP`` works
+            # after the initial bootstrap has dismissed the original.
+            from .setup_dialog import SetupDialog
+
+            return SetupDialog(self._ctrl, parent=self, startup_mode=True)
+        raise ValueError(f"Unknown DialogName: {name!r}")  # pragma: no cover
+
+    def open_dialog(self, name: DialogName) -> None:
+        """Open the named dialog non-modally, or raise it if already open.
+
+        Idempotent: a second ``open_dialog(name)`` while the dialog is
+        visible just brings it to the front (``raise_`` + ``activateWindow``).
+        """
+        existing = self._open_dialogs.get(name)
+        if existing is not None:
+            try:
+                existing.raise_()
+                existing.activateWindow()
+                if not existing.isVisible():
+                    existing.show()
+                return
+            except RuntimeError:
+                # Underlying Qt object was destroyed but registry was not
+                # cleaned up — drop the stale entry and fall through to
+                # rebuild.
+                self._open_dialogs.pop(name, None)
+
+        dlg = self._build_dialog(name)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._open_dialogs[name] = dlg
+        # ``finished`` fires for both accept and reject; the lambda must
+        # tolerate signal payload (status code) being passed through.
+        dlg.finished.connect(lambda _status, n=name: self._open_dialogs.pop(n, None))
+        dlg.open()
+
+    def close_dialog(self, name: DialogName) -> None:
+        """Close the named dialog if it is currently open."""
+        existing = self._open_dialogs.get(name)
+        if existing is None:
+            return
+        try:
+            existing.reject()
+        except RuntimeError:
+            # Dialog already destroyed; tidy the registry.
+            self._open_dialogs.pop(name, None)
+
+    def list_open_dialogs(self) -> list[DialogName]:
+        return list(self._open_dialogs.keys())
+
+    def register_dialog(self, name: DialogName, dialog: "QDialog") -> None:
+        """Register a dialog that was constructed outside ``open_dialog``.
+
+        ``app.py`` uses this for the bootstrap startup dialog so the remote
+        ``dialog.list_open`` query and ``dialog.close STARTUP`` work
+        uniformly. The caller is responsible for ``setAttribute
+        (WA_DeleteOnClose)`` and for ``open()`` / ``show()`` — this helper
+        only wires the registry cleanup on ``finished``.
+        """
+        self._open_dialogs[name] = dialog
+        dialog.finished.connect(lambda _status, n=name: self._open_dialogs.pop(n, None))
+
+    # ------------------------------------------------------------------
+    # Remote view query helpers
+    # ------------------------------------------------------------------
+
+    def get_view_snapshot(self) -> dict[str, object]:
+        """Capture the visible window state as a JSON-friendly dict."""
+        active_id: Optional[str] = None
+        if self._tabs.count() > 0:
+            current = self._tabs.currentWidget()
+            for tid, tab_w in self._tab_widgets.items():
+                if tab_w is current:
+                    active_id = tid
+                    break
+        return {
+            "active_tab_id": active_id,
+            "tab_ids": list(self._tab_widgets.keys()),
+            "context_label": self._ctx_label.text() if self._ctx_label else "",
+            "predictor_label": (
+                self._predictor_label.text() if self._predictor_label else ""
+            ),
+            "status": self._status_bar.currentMessage() if self._status_bar else "",
+            "open_dialogs": [n.value for n in self._open_dialogs.keys()],
+        }
+
+    def take_screenshot(self, tab_id: Optional[str] = None) -> bytes:
+        """Grab the window (or a single tab) and return raw PNG bytes.
+
+        ``tab_id`` must be the active tab; off-screen tabs grab as blank,
+        so we refuse them explicitly. Returning bytes (not base64) keeps
+        this helper Qt-only; the dispatcher base64-encodes for the wire.
+        """
+        from qtpy.QtCore import QBuffer, QIODevice  # type: ignore[attr-defined]
+
+        target: QWidget
+        if tab_id is None:
+            target = self
+        else:
+            tab_w = self._tab_widgets.get(tab_id)
+            if tab_w is None:
+                raise RuntimeError(f"unknown tab_id: {tab_id!r}")
+            if self._tabs.currentWidget() is not tab_w:
+                raise RuntimeError(
+                    f"tab {tab_id!r} is not the active tab; "
+                    "remote screenshot requires it to be active first"
+                )
+            target = tab_w
+        pixmap = target.grab()
+        buf = QBuffer()
+        buf.open(QIODevice.OpenModeFlag.WriteOnly)
+        if not pixmap.save(buf, "PNG"):
+            raise RuntimeError("Qt failed to encode the grabbed pixmap as PNG")
+        # ``QBuffer.data()`` returns ``QByteArray``; its ``.data()`` method
+        # produces native ``bytes``.
+        ba = buf.data()
+        return bytes(ba.data())  # type: ignore[arg-type]
+
+    def get_tab_live_model_root(self, tab_id: str) -> "SectionLiveField":
+        """Return the tab's live ``SectionLiveField`` root.
+
+        Used by the remote ``cfg.set_field`` path resolver to mutate the
+        draft directly (Phase 81b). Raises ``KeyError`` if the tab does
+        not exist, ``RuntimeError`` if the form has not been populated yet.
+        """
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            raise KeyError(tab_id)
+        root = tab_w.cfg_form.get_live_root()
+        if root is None:
+            raise RuntimeError(f"tab {tab_id!r} cfg form has no live model yet")
+        return root
 
     def closeEvent(self, a0: Optional[QCloseEvent]) -> None:
         active_setup = self._ctrl.get_active_device_setup()
