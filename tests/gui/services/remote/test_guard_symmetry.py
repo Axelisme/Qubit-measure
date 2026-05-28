@@ -23,6 +23,7 @@ from zcu_tools.gui.runner import Runner
 from zcu_tools.gui.services.guard import GuardError
 from zcu_tools.gui.services.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.services.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.services.remote.param_spec import validate_params
 from zcu_tools.gui.state import State
 
 
@@ -59,7 +60,11 @@ def _make_controller(readiness: ContextReadiness) -> Controller:
 
 
 def _dispatch(ctrl: Controller, method: str, params: dict) -> object:
-    return METHOD_REGISTRY[method].handler(ctrl, params)
+    """Mirror the service path: validate params against the method's ParamSpec
+    before invoking the handler."""
+    spec = METHOD_REGISTRY[method]
+    handler_params = validate_params(spec.params, params) if spec.params else params
+    return spec.handler(ctrl, handler_params)
 
 
 def test_run_start_draft_context_symmetry(qapp):  # noqa: ARG001

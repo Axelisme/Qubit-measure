@@ -22,16 +22,13 @@ from zcu_tools.gui.services.device import SetupDeviceRequest
 from zcu_tools.gui.services.session_persistence import SessionPersistenceService
 
 from .errors import ErrorCode, RemoteError
+from .param_spec import JsonType, ParamSpec
 from .wire import (
-    _require_int,
-    _require_str,
     coerce_connect_device_request,
     coerce_connect_request,
     coerce_disconnect_device_request,
     coerce_set_device_value_request,
     coerce_startup_project_request,
-    require_json_safe,
-    require_object,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,6 +50,8 @@ class MethodSpec:
     handler: Handler
     timeout_seconds: float
     description: str
+    params: tuple[ParamSpec, ...] = ()
+    tool_name: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +60,7 @@ class MethodSpec:
 
 
 def _h_tab_new(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    name = _require_str(params, "adapter_name")
+    name = str(params["adapter_name"])
     if name not in ctrl.get_adapter_names():
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown adapter: {name!r}")
     tab_id = ctrl.new_tab(name)
@@ -69,7 +68,7 @@ def _h_tab_new(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
 
 
 def _h_tab_close(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    tab_id = _require_str(params, "tab_id")
+    tab_id = str(params["tab_id"])
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     ctrl.close_tab(tab_id)
@@ -77,7 +76,7 @@ def _h_tab_close(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
 
 
 def _h_tab_set_active(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    tab_id = _require_str(params, "tab_id")
+    tab_id = str(params["tab_id"])
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     ctrl.set_active_tab(tab_id)
@@ -120,11 +119,10 @@ def _h_tab_snapshot(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     if tab_id_raw is None:
         # batch: return all tabs
         return {"tabs": [_tab_snapshot_wire(ctrl, tid) for tid in ctrl.list_tab_ids()]}
-    if not isinstance(tab_id_raw, str):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, "'tab_id' must be a string")
-    if not ctrl.has_tab(tab_id_raw):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id_raw!r}")
-    return _tab_snapshot_wire(ctrl, tab_id_raw)
+    tab_id = str(tab_id_raw)
+    if not ctrl.has_tab(tab_id):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    return _tab_snapshot_wire(ctrl, tab_id)
 
 
 def _save_paths_wire(paths) -> Optional[dict[str, str]]:
@@ -134,7 +132,7 @@ def _save_paths_wire(paths) -> Optional[dict[str, str]]:
 
 
 def _h_tab_get_cfg(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    tab_id = _require_str(params, "tab_id")
+    tab_id = str(params["tab_id"])
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     schema = ctrl.get_tab_cfg_schema(tab_id)
@@ -143,7 +141,7 @@ def _h_tab_get_cfg(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
 
 
 def _h_tab_update_cfg(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    tab_id = _require_str(params, "tab_id")
+    tab_id = str(params["tab_id"])
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     if ctrl.get_running_tab_id() == tab_id:
@@ -151,7 +149,8 @@ def _h_tab_update_cfg(ctrl, params: Mapping[str, object]) -> Mapping[str, object
             ErrorCode.PRECONDITION_FAILED,
             f"tab {tab_id!r} is currently running; cancel the run before editing cfg",
         )
-    raw = require_object(params, "raw")
+    raw = params["raw"]
+    assert isinstance(raw, dict)
     base = ctrl.get_tab_cfg_schema(tab_id)
     try:
         schema: CfgSchema = _SCHEMA_CODEC.raw_to_schema(base, dict(raw))
@@ -164,7 +163,7 @@ def _h_tab_update_cfg(ctrl, params: Mapping[str, object]) -> Mapping[str, object
 
 
 def _h_cfg_set_field(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    tab_id = _require_str(params, "tab_id")
+    tab_id = str(params["tab_id"])
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     if ctrl.get_running_tab_id() == tab_id:
@@ -172,9 +171,7 @@ def _h_cfg_set_field(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
             ErrorCode.PRECONDITION_FAILED,
             f"tab {tab_id!r} is currently running; cancel the run before editing cfg",
         )
-    path = _require_str(params, "path")
-    if "value" not in params:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, "missing 'value'")
+    path = str(params["path"])
     value = params["value"]
     try:
         ctrl.set_tab_field(tab_id, path, value)
@@ -189,7 +186,7 @@ def _h_cfg_set_field(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
 
 
 def _h_run_start(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    tab_id = _require_str(params, "tab_id")
+    tab_id = str(params["tab_id"])
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     try:
@@ -211,52 +208,51 @@ def _h_run_running_tab(ctrl, params: Mapping[str, object]) -> Mapping[str, objec
 
 
 def _h_save_data(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    tab_id = _require_str(params, "tab_id")
-    data_path: Optional[str] = None
-    if "data_path" in params and params["data_path"] is not None:
-        data_path = _require_str(params, "data_path")
-    comment = str(params.get("comment", ""))
+    tab_id = str(params["tab_id"])
+    data_path = params["data_path"]
+    comment = str(params["comment"])
     try:
-        ctrl.save_data(tab_id, data_path, comment=comment)
+        ctrl.save_data(
+            tab_id, str(data_path) if data_path is not None else None, comment=comment
+        )
     except RuntimeError as exc:
         raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
     return {}
 
 
 def _h_save_image(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    tab_id = _require_str(params, "tab_id")
-    image_path: Optional[str] = None
-    if "image_path" in params and params["image_path"] is not None:
-        image_path = _require_str(params, "image_path")
+    tab_id = str(params["tab_id"])
+    image_path = params["image_path"]
     try:
-        ctrl.save_image(tab_id, image_path)
+        ctrl.save_image(tab_id, str(image_path) if image_path is not None else None)
     except RuntimeError as exc:
         raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
     return {}
 
 
 def _h_save_both(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    tab_id = _require_str(params, "tab_id")
-    data_path: Optional[str] = None
-    image_path: Optional[str] = None
-    if "data_path" in params and params["data_path"] is not None:
-        data_path = _require_str(params, "data_path")
-    if "image_path" in params and params["image_path"] is not None:
-        image_path = _require_str(params, "image_path")
-    comment = str(params.get("comment", ""))
+    tab_id = str(params["tab_id"])
+    data_path = params["data_path"]
+    image_path = params["image_path"]
+    comment = str(params["comment"])
     try:
-        ctrl.save_both(tab_id, data_path, image_path, comment=comment)
+        ctrl.save_both(
+            tab_id,
+            str(data_path) if data_path is not None else None,
+            str(image_path) if image_path is not None else None,
+            comment=comment,
+        )
     except RuntimeError as exc:
         raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
     return {}
 
 
 def _h_save_set_paths(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    tab_id = _require_str(params, "tab_id")
+    tab_id = str(params["tab_id"])
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    data_path = _require_str(params, "data_path")
-    image_path = _require_str(params, "image_path")
+    data_path = str(params["data_path"])
+    image_path = str(params["image_path"])
     ctrl.update_tab_save_paths(tab_id, data_path, image_path)
     return {}
 
@@ -267,26 +263,16 @@ def _h_save_set_paths(ctrl, params: Mapping[str, object]) -> Mapping[str, object
 
 
 def _h_context_use(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    ctrl.use_context(_require_str(params, "label"))
+    ctrl.use_context(str(params["label"]))
     return {}
 
 
 def _h_context_new(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    value = params.get("value")
-    if value is not None and not isinstance(value, (int, float)):
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS, "'value' must be a number if present"
-        )
-    unit = params.get("unit", "A")
-    if not isinstance(unit, str):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, "'unit' must be a string")
-    clone = params.get("clone_from_current", False)
-    if not isinstance(clone, bool):
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS, "'clone_from_current' must be boolean"
-        )
+    value = params["value"]
+    unit = str(params["unit"])
+    clone = bool(params["clone_from_current"])
     ctrl.new_context(
-        value=float(value) if value is not None else None,
+        value=float(value) if value is not None else None,  # type: ignore[arg-type]
         unit=unit,
         clone_from_current=clone,
     )
@@ -321,7 +307,7 @@ def _h_context_get_md(ctrl, params: Mapping[str, object]) -> Mapping[str, object
 
 
 def _h_context_get_md_attr(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    key = _require_str(params, "key")
+    key = str(params["key"])
     md = ctrl.get_current_md()
     sentinel = object()
     value = md.get(key, sentinel)
@@ -340,8 +326,8 @@ def _h_context_get_ml(ctrl, params: Mapping[str, object]) -> Mapping[str, object
 
 
 def _h_context_set_md_attr(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    key = _require_str(params, "key")
-    value = require_json_safe(params, "value")
+    key = str(params["key"])
+    value = params["value"]
     try:
         ctrl.set_md_attr(key, value)
     except RuntimeError as exc:
@@ -350,7 +336,7 @@ def _h_context_set_md_attr(ctrl, params: Mapping[str, object]) -> Mapping[str, o
 
 
 def _h_context_del_md_attr(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    key = _require_str(params, "key")
+    key = str(params["key"])
     try:
         ctrl.del_md_attr(key)
     except (AttributeError, RuntimeError) as exc:
@@ -361,8 +347,9 @@ def _h_context_del_md_attr(ctrl, params: Mapping[str, object]) -> Mapping[str, o
 def _h_context_set_ml_module(
     ctrl, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    name = _require_str(params, "name")
-    raw = require_object(params, "raw")
+    name = str(params["name"])
+    raw = params["raw"]
+    assert isinstance(raw, dict)
     try:
         ctrl.set_ml_module_from_raw(name, dict(raw))
     except MlEntryValidationError as exc:
@@ -375,7 +362,7 @@ def _h_context_set_ml_module(
 def _h_context_del_ml_module(
     ctrl, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    name = _require_str(params, "name")
+    name = str(params["name"])
     try:
         ctrl.del_ml_module(name)
     except (KeyError, RuntimeError) as exc:
@@ -386,8 +373,9 @@ def _h_context_del_ml_module(
 def _h_context_set_ml_waveform(
     ctrl, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    name = _require_str(params, "name")
-    raw = require_object(params, "raw")
+    name = str(params["name"])
+    raw = params["raw"]
+    assert isinstance(raw, dict)
     try:
         ctrl.set_ml_waveform_from_raw(name, dict(raw))
     except MlEntryValidationError as exc:
@@ -400,7 +388,7 @@ def _h_context_set_ml_waveform(
 def _h_context_del_ml_waveform(
     ctrl, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    name = _require_str(params, "name")
+    name = str(params["name"])
     try:
         ctrl.del_ml_waveform(name)
     except (KeyError, RuntimeError) as exc:
@@ -478,7 +466,7 @@ def _h_device_disconnect(ctrl, params: Mapping[str, object]) -> Mapping[str, obj
 
 
 def _h_device_reconnect(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    name = _require_str(params, "name")
+    name = str(params["name"])
     try:
         ctrl.start_reconnect_device(name)
     except RuntimeError as exc:
@@ -487,7 +475,7 @@ def _h_device_reconnect(ctrl, params: Mapping[str, object]) -> Mapping[str, obje
 
 
 def _h_device_forget(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    name = _require_str(params, "name")
+    name = str(params["name"])
     try:
         ctrl.forget_device(name)
     except RuntimeError as exc:
@@ -505,8 +493,9 @@ def _h_device_set_value(ctrl, params: Mapping[str, object]) -> Mapping[str, obje
 
 
 def _h_device_setup(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    name = _require_str(params, "name")
-    updates = require_object(params, "updates")
+    name = str(params["name"])
+    updates = params["updates"]
+    assert isinstance(updates, dict)
     try:
         info = ctrl.get_device_info(name)
     except RuntimeError as exc:
@@ -530,7 +519,7 @@ def _h_device_setup(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
 def _h_device_cancel_operation(
     ctrl, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    name = _require_str(params, "name")
+    name = str(params["name"])
     try:
         ctrl.cancel_device_operation(name)
     except RuntimeError as exc:
@@ -557,7 +546,7 @@ def _h_device_list(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
 
 
 def _h_device_snapshot(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    name = _require_str(params, "name")
+    name = str(params["name"])
     snap = ctrl.get_device_snapshot(name)
     if snap is None:
         return {"snapshot": None}
@@ -618,11 +607,8 @@ def _h_device_active_operation(
 
 
 def _h_device_wait_setup(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    name = _require_str(params, "name")
-    timeout_raw = params.get("timeout", 120.0)
-    if not isinstance(timeout_raw, (int, float)):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, "'timeout' must be a number")
-    timeout = float(timeout_raw)
+    name = str(params["name"])
+    timeout = float(params["timeout"])  # type: ignore[arg-type]
     try:
         ctrl.wait_device_setup_done(name, timeout)
     except RuntimeError as exc:
@@ -638,7 +624,7 @@ def _h_device_wait_setup(ctrl, params: Mapping[str, object]) -> Mapping[str, obj
 def _h_dialog_open(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     from .dialogs import DialogName, parse_dialog_name
 
-    name_raw = _require_str(params, "name")
+    name_raw = str(params["name"])
     try:
         name: DialogName = parse_dialog_name(name_raw)
     except ValueError as exc:
@@ -650,7 +636,7 @@ def _h_dialog_open(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
 def _h_dialog_close(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     from .dialogs import DialogName, parse_dialog_name
 
-    name_raw = _require_str(params, "name")
+    name_raw = str(params["name"])
     try:
         name: DialogName = parse_dialog_name(name_raw)
     except ValueError as exc:
@@ -681,7 +667,7 @@ def _h_dialog_screenshot(ctrl, params: Mapping[str, object]) -> Mapping[str, obj
 
     from .dialogs import parse_dialog_name
 
-    name_str = _require_str(params, "dialog_name")
+    name_str = str(params["dialog_name"])
     try:
         dialog_name = parse_dialog_name(name_str)
         png = ctrl.take_dialog_screenshot(dialog_name)
@@ -699,13 +685,8 @@ def _h_dialog_screenshot(ctrl, params: Mapping[str, object]) -> Mapping[str, obj
 def _h_view_screenshot(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     import base64
 
-    tab_id: Optional[str] = None
-    if "tab_id" in params and params["tab_id"] is not None:
-        if not isinstance(params["tab_id"], str):
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS, "'tab_id' must be a string if present"
-            )
-        tab_id = params["tab_id"]
+    tab_id_raw = params.get("tab_id")
+    tab_id: Optional[str] = str(tab_id_raw) if tab_id_raw is not None else None
     try:
         png = ctrl.take_screenshot(tab_id)
     except RuntimeError as exc:
@@ -727,7 +708,7 @@ def _h_view_screenshot(ctrl, params: Mapping[str, object]) -> Mapping[str, objec
 def _h_tab_get_analyze_result(
     ctrl, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    tab_id = _require_str(params, "tab_id")
+    tab_id = str(params["tab_id"])
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     result = ctrl.get_tab_analyze_result(tab_id)
@@ -746,7 +727,7 @@ def _h_tab_get_analyze_params(
 ) -> Mapping[str, object]:
     import dataclasses
 
-    tab_id = _require_str(params, "tab_id")
+    tab_id = str(params["tab_id"])
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     snap = ctrl.get_tab_snapshot(tab_id)
@@ -761,15 +742,14 @@ def _h_tab_get_analyze_params(
 def _h_analyze_start(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     import dataclasses
 
-    tab_id = _require_str(params, "tab_id")
+    tab_id = str(params["tab_id"])
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     snap = ctrl.get_tab_snapshot(tab_id)
     if snap.analyze_params is None:
         raise RemoteError(ErrorCode.PRECONDITION_FAILED, "no analyze params available")
-    raw_updates = params.get("updates", {})
-    if not isinstance(raw_updates, dict):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, "'updates' must be a dict")
+    raw_updates = params["updates"]
+    assert isinstance(raw_updates, dict)
     ap = snap.analyze_params
     if not dataclasses.is_dataclass(ap) or isinstance(ap, type):
         raise RemoteError(
@@ -804,7 +784,7 @@ def _strip_cfg_tags(raw: object) -> object:
 
 
 def _h_tab_get_cfg_summary(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    tab_id = _require_str(params, "tab_id")
+    tab_id = str(params["tab_id"])
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     schema = ctrl.get_tab_cfg_schema(tab_id)
@@ -850,14 +830,9 @@ def _h_tab_figure_screenshot(
     import base64
     from pathlib import Path
 
-    tab_id = _require_str(params, "tab_id")
-    out_path: Optional[str] = None
-    if "out_path" in params and params["out_path"] is not None:
-        if not isinstance(params["out_path"], str):
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS, "'out_path' must be a string if present"
-            )
-        out_path = params["out_path"]
+    tab_id = str(params["tab_id"])
+    out_path_raw = params.get("out_path")
+    out_path: Optional[str] = str(out_path_raw) if out_path_raw is not None else None
     try:
         png = ctrl.take_figure_screenshot(tab_id)
     except RuntimeError as exc:
@@ -884,14 +859,10 @@ def _h_predictor_load(ctrl, params: Mapping[str, object]) -> Mapping[str, object
         PredictorLoadError,
     )
 
-    path = _require_str(params, "path")
-    flux_bias_raw = params.get("flux_bias", 0.0)
-    if not isinstance(flux_bias_raw, (int, float)):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, "'flux_bias' must be a number")
+    path = str(params["path"])
+    flux_bias = float(params["flux_bias"])  # type: ignore[arg-type]
     try:
-        ctrl.load_predictor(
-            LoadPredictorRequest(path=path, flux_bias=float(flux_bias_raw))
-        )
+        ctrl.load_predictor(LoadPredictorRequest(path=path, flux_bias=flux_bias))
     except PredictorLoadError as exc:
         raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
     return {}
@@ -906,21 +877,12 @@ def _h_predictor_clear(ctrl, params: Mapping[str, object]) -> Mapping[str, objec
 def _h_predictor_predict(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     from zcu_tools.gui.services.connection import PredictFreqRequest, PredictorNotLoaded
 
-    value_raw = params.get("value")
-    if not isinstance(value_raw, (int, float)):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, "'value' is required (number)")
-    from_lvl_raw = params.get("from_lvl", 0)
-    to_lvl_raw = params.get("to_lvl", 1)
-    if not isinstance(from_lvl_raw, int) or not isinstance(to_lvl_raw, int):
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS, "'from_lvl' and 'to_lvl' must be integers"
-        )
+    value = float(params["value"])  # type: ignore[arg-type]
+    from_lvl = int(params["from_lvl"])  # type: ignore[arg-type]
+    to_lvl = int(params["to_lvl"])  # type: ignore[arg-type]
     try:
         freq = ctrl.predict_freq(
-            PredictFreqRequest(
-                value=float(value_raw),
-                transition=(int(from_lvl_raw), int(to_lvl_raw)),
-            )
+            PredictFreqRequest(value=value, transition=(from_lvl, to_lvl))
         )
     except PredictorNotLoaded as exc:
         raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
@@ -937,55 +899,211 @@ def _h_predictor_info(ctrl, params: Mapping[str, object]) -> Mapping[str, object
 # ---------------------------------------------------------------------------
 
 
+# ParamSpec factory shorthands — keep registry entries readable.
+def _p_str(name: str, desc: str = "") -> ParamSpec:
+    return ParamSpec(name, JsonType.STRING, required=True, description=desc)
+
+
+def _p_str_opt(name: str, desc: str = "") -> ParamSpec:
+    return ParamSpec(name, JsonType.STRING, required=False, description=desc)
+
+
+def _p_obj(name: str, desc: str = "") -> ParamSpec:
+    return ParamSpec(name, JsonType.OBJECT, required=True, description=desc)
+
+
+def _p_json(name: str, desc: str = "") -> ParamSpec:
+    return ParamSpec(name, JsonType.JSON, required=True, description=desc)
+
+
+def _p_comment() -> ParamSpec:
+    return ParamSpec(
+        "comment", JsonType.STRING, required=False, default="", description="Comment"
+    )
+
+
+def _p_num_opt(name: str, desc: str = "") -> ParamSpec:
+    return ParamSpec(name, JsonType.NUMBER, required=False, description=desc)
+
+
+def _p_bool_opt(name: str, default: bool, desc: str = "") -> ParamSpec:
+    return ParamSpec(
+        name, JsonType.BOOLEAN, required=False, default=default, description=desc
+    )
+
+
+def _p_str_default(name: str, default: str, desc: str = "") -> ParamSpec:
+    return ParamSpec(
+        name, JsonType.STRING, required=False, default=default, description=desc
+    )
+
+
+def _p_num(name: str, desc: str = "") -> ParamSpec:
+    return ParamSpec(name, JsonType.NUMBER, required=True, description=desc)
+
+
+def _p_num_default(name: str, default: float, desc: str = "") -> ParamSpec:
+    return ParamSpec(
+        name, JsonType.NUMBER, required=False, default=default, description=desc
+    )
+
+
+def _p_int_default(name: str, default: int, desc: str = "") -> ParamSpec:
+    return ParamSpec(
+        name, JsonType.INTEGER, required=False, default=default, description=desc
+    )
+
+
+def _p_obj_default(name: str, desc: str = "") -> ParamSpec:
+    return ParamSpec(
+        name, JsonType.OBJECT, required=False, default={}, description=desc
+    )
+
+
 # `auth` is a sentinel handled by the service before the registry — left out here.
 METHOD_REGISTRY: dict[str, MethodSpec] = {
-    "tab.new": MethodSpec(_h_tab_new, 10.0, "Create a new tab"),
-    "tab.close": MethodSpec(_h_tab_close, 5.0, "Close a tab"),
-    "tab.set_active": MethodSpec(_h_tab_set_active, 5.0, "Activate a tab"),
-    "tab.list": MethodSpec(_h_tab_list, 5.0, "List tabs"),
-    "tab.snapshot": MethodSpec(_h_tab_snapshot, 5.0, "Tab summary"),
-    "tab.get_cfg": MethodSpec(_h_tab_get_cfg, 5.0, "Read tab cfg raw"),
-    "tab.update_cfg": MethodSpec(_h_tab_update_cfg, 10.0, "Replace tab cfg raw"),
-    "cfg.set_field": MethodSpec(
-        _h_cfg_set_field, 5.0, "Set a single cfg field by dotted path"
+    "tab.new": MethodSpec(
+        _h_tab_new,
+        10.0,
+        "Create a new tab",
+        params=(_p_str("adapter_name", "Adapter to instantiate"),),
     ),
-    "run.start": MethodSpec(_h_run_start, 5.0, "Start a run (fire-and-forget)"),
+    "tab.close": MethodSpec(
+        _h_tab_close, 5.0, "Close a tab", params=(_p_str("tab_id"),)
+    ),
+    "tab.set_active": MethodSpec(
+        _h_tab_set_active, 5.0, "Activate a tab", params=(_p_str("tab_id"),)
+    ),
+    "tab.list": MethodSpec(_h_tab_list, 5.0, "List tabs"),
+    "tab.snapshot": MethodSpec(
+        _h_tab_snapshot,
+        5.0,
+        "Tab summary",
+        params=(_p_str_opt("tab_id", "Tab to inspect; omit for all tabs"),),
+    ),
+    "tab.get_cfg": MethodSpec(
+        _h_tab_get_cfg, 5.0, "Read tab cfg raw", params=(_p_str("tab_id"),)
+    ),
+    "tab.update_cfg": MethodSpec(
+        _h_tab_update_cfg,
+        10.0,
+        "Replace tab cfg raw",
+        params=(_p_str("tab_id"), _p_obj("raw", "Full tagged cfg form")),
+    ),
+    "cfg.set_field": MethodSpec(
+        _h_cfg_set_field,
+        5.0,
+        "Set a single cfg field by dotted path",
+        params=(
+            _p_str("tab_id"),
+            _p_str("path", "Dotted field path"),
+            _p_json("value", "New field value"),
+        ),
+    ),
+    "run.start": MethodSpec(
+        _h_run_start,
+        5.0,
+        "Start a run (fire-and-forget)",
+        params=(_p_str("tab_id"),),
+    ),
     "run.cancel": MethodSpec(_h_run_cancel, 5.0, "Cancel current run"),
     "run.running_tab": MethodSpec(_h_run_running_tab, 5.0, "Current running tab"),
-    "save.data": MethodSpec(_h_save_data, 30.0, "Save data file"),
-    "save.image": MethodSpec(_h_save_image, 30.0, "Save image file"),
-    "save.both": MethodSpec(_h_save_both, 30.0, "Save data and image"),
-    "save.set_paths": MethodSpec(_h_save_set_paths, 5.0, "Set tab save path overrides"),
-    "context.use": MethodSpec(_h_context_use, 5.0, "Switch context"),
-    "context.new": MethodSpec(_h_context_new, 10.0, "Create new context"),
+    "save.data": MethodSpec(
+        _h_save_data,
+        30.0,
+        "Save data file",
+        params=(
+            _p_str("tab_id"),
+            _p_str_opt("data_path", "Override data path"),
+            _p_comment(),
+        ),
+    ),
+    "save.image": MethodSpec(
+        _h_save_image,
+        30.0,
+        "Save image file",
+        params=(_p_str("tab_id"), _p_str_opt("image_path", "Override image path")),
+    ),
+    "save.both": MethodSpec(
+        _h_save_both,
+        30.0,
+        "Save data and image",
+        params=(
+            _p_str("tab_id"),
+            _p_str_opt("data_path", "Override data path"),
+            _p_str_opt("image_path", "Override image path"),
+            _p_comment(),
+        ),
+    ),
+    "save.set_paths": MethodSpec(
+        _h_save_set_paths,
+        5.0,
+        "Set tab save path overrides",
+        params=(_p_str("tab_id"), _p_str("data_path"), _p_str("image_path")),
+    ),
+    "context.use": MethodSpec(
+        _h_context_use,
+        5.0,
+        "Switch context",
+        params=(_p_str("label", "Context label to switch to"),),
+    ),
+    "context.new": MethodSpec(
+        _h_context_new,
+        10.0,
+        "Create new context",
+        params=(
+            _p_num_opt("value", "Flux value"),
+            _p_str_default("unit", "A", "Flux unit"),
+            _p_bool_opt("clone_from_current", False, "Clone current context"),
+        ),
+    ),
     "context.labels": MethodSpec(_h_context_labels, 5.0, "List context labels"),
     "context.active": MethodSpec(_h_context_active, 5.0, "Active context label"),
     "context.get_md": MethodSpec(_h_context_get_md, 5.0, "List MetaDict keys"),
     "context.get_md_attr": MethodSpec(
-        _h_context_get_md_attr, 5.0, "Read one MetaDict attribute"
+        _h_context_get_md_attr,
+        5.0,
+        "Read one MetaDict attribute",
+        params=(_p_str("key", "MetaDict key"),),
     ),
     "context.get_ml": MethodSpec(
         _h_context_get_ml, 5.0, "List ModuleLibrary module/waveform names"
     ),
     "context.set_md_attr": MethodSpec(
-        _h_context_set_md_attr, 5.0, "Set one MetaDict attribute"
+        _h_context_set_md_attr,
+        5.0,
+        "Set one MetaDict attribute",
+        params=(_p_str("key", "MetaDict key"), _p_json("value", "JSON-safe value")),
     ),
     "context.del_md_attr": MethodSpec(
-        _h_context_del_md_attr, 5.0, "Delete one MetaDict attribute"
+        _h_context_del_md_attr,
+        5.0,
+        "Delete one MetaDict attribute",
+        params=(_p_str("key", "MetaDict key"),),
     ),
     "context.set_ml_module": MethodSpec(
-        _h_context_set_ml_module, 10.0, "Set one ModuleLibrary module from raw dict"
+        _h_context_set_ml_module,
+        10.0,
+        "Set one ModuleLibrary module from raw dict",
+        params=(_p_str("name", "Module name"), _p_obj("raw", "Module cfg dict")),
     ),
     "context.del_ml_module": MethodSpec(
-        _h_context_del_ml_module, 5.0, "Delete one ModuleLibrary module"
+        _h_context_del_ml_module,
+        5.0,
+        "Delete one ModuleLibrary module",
+        params=(_p_str("name", "Module name"),),
     ),
     "context.set_ml_waveform": MethodSpec(
         _h_context_set_ml_waveform,
         10.0,
         "Set one ModuleLibrary waveform from raw dict",
+        params=(_p_str("name", "Waveform name"), _p_obj("raw", "Waveform cfg dict")),
     ),
     "context.del_ml_waveform": MethodSpec(
-        _h_context_del_ml_waveform, 5.0, "Delete one ModuleLibrary waveform"
+        _h_context_del_ml_waveform,
+        5.0,
+        "Delete one ModuleLibrary waveform",
+        params=(_p_str("name", "Waveform name"),),
     ),
     "state.has_project": MethodSpec(_h_state_has_project, 5.0, ""),
     "state.has_context": MethodSpec(_h_state_has_context, 5.0, ""),
@@ -997,12 +1115,30 @@ METHOD_REGISTRY: dict[str, MethodSpec] = {
     "startup.apply": MethodSpec(_h_startup_apply, 30.0, "Apply startup project"),
     "device.connect": MethodSpec(_h_device_connect, 30.0, "Connect device"),
     "device.disconnect": MethodSpec(_h_device_disconnect, 30.0, "Disconnect device"),
-    "device.reconnect": MethodSpec(_h_device_reconnect, 30.0, "Reconnect device"),
-    "device.forget": MethodSpec(_h_device_forget, 5.0, "Forget memory-only device"),
+    "device.reconnect": MethodSpec(
+        _h_device_reconnect,
+        30.0,
+        "Reconnect device",
+        params=(_p_str("name", "Device name"),),
+    ),
+    "device.forget": MethodSpec(
+        _h_device_forget,
+        5.0,
+        "Forget memory-only device",
+        params=(_p_str("name", "Device name"),),
+    ),
     "device.set_value": MethodSpec(_h_device_set_value, 30.0, "Set device value"),
-    "device.setup": MethodSpec(_h_device_setup, 30.0, "Setup device"),
+    "device.setup": MethodSpec(
+        _h_device_setup,
+        30.0,
+        "Setup device",
+        params=(_p_str("name", "Device name"), _p_obj("updates", "Field updates")),
+    ),
     "device.cancel_operation": MethodSpec(
-        _h_device_cancel_operation, 5.0, "Cancel active device setup"
+        _h_device_cancel_operation,
+        5.0,
+        "Cancel active device setup",
+        params=(_p_str("name", "Device name"),),
     ),
     "device.active_setup": MethodSpec(
         _h_device_active_setup, 5.0, "Read active device setup progress"
@@ -1011,49 +1147,103 @@ METHOD_REGISTRY: dict[str, MethodSpec] = {
         _h_device_active_operation, 5.0, "Read active device operation"
     ),
     "device.wait_setup": MethodSpec(
-        _h_device_wait_setup, 130.0, "Block until device setup completes"
+        _h_device_wait_setup,
+        130.0,
+        "Block until device setup completes",
+        params=(
+            _p_str("name", "Device name"),
+            _p_num_default("timeout", 120.0, "Seconds to wait"),
+        ),
     ),
     "device.list": MethodSpec(_h_device_list, 5.0, "List registered devices"),
     "device.snapshot": MethodSpec(
-        _h_device_snapshot, 5.0, "Read one device cached snapshot"
+        _h_device_snapshot,
+        5.0,
+        "Read one device cached snapshot",
+        params=(_p_str("name", "Device name"),),
     ),
     "adapter.list": MethodSpec(_h_adapter_list, 5.0, "List available adapters"),
-    "dialog.open": MethodSpec(_h_dialog_open, 10.0, "Open a named dialog"),
-    "dialog.close": MethodSpec(_h_dialog_close, 5.0, "Close a named dialog"),
+    "dialog.open": MethodSpec(
+        _h_dialog_open,
+        10.0,
+        "Open a named dialog",
+        params=(_p_str("name", "Dialog name"),),
+    ),
+    "dialog.close": MethodSpec(
+        _h_dialog_close,
+        5.0,
+        "Close a named dialog",
+        params=(_p_str("name", "Dialog name"),),
+    ),
     "dialog.list_open": MethodSpec(_h_dialog_list_open, 5.0, "List open dialogs"),
     "dialog.screenshot": MethodSpec(
-        _h_dialog_screenshot, 10.0, "Capture a named dialog as base64 PNG"
+        _h_dialog_screenshot,
+        10.0,
+        "Capture a named dialog as base64 PNG",
+        params=(_p_str("dialog_name", "Dialog name"),),
     ),
     "view.snapshot": MethodSpec(_h_view_snapshot, 5.0, "Capture view state summary"),
     "view.screenshot": MethodSpec(
-        _h_view_screenshot, 10.0, "Capture window or tab as base64 PNG"
+        _h_view_screenshot,
+        10.0,
+        "Capture window or tab as base64 PNG",
+        params=(_p_str_opt("tab_id", "Tab to capture; omit for whole window"),),
     ),
     "run.progress": MethodSpec(
         _h_run_progress, 5.0, "Read current run progress bar snapshots"
     ),
     "tab.figure_screenshot": MethodSpec(
-        _h_tab_figure_screenshot, 10.0, "Capture tab figure area as PNG"
+        _h_tab_figure_screenshot,
+        10.0,
+        "Capture tab figure area as PNG",
+        params=(
+            _p_str("tab_id"),
+            _p_str_opt("out_path", "Write PNG here instead of returning base64"),
+        ),
     ),
-    "predictor.load": MethodSpec(_h_predictor_load, 30.0, "Load FluxoniumPredictor"),
+    "predictor.load": MethodSpec(
+        _h_predictor_load,
+        30.0,
+        "Load FluxoniumPredictor",
+        params=(
+            _p_str("path", "Predictor file path"),
+            _p_num_default("flux_bias", 0.0, "Flux bias"),
+        ),
+    ),
     "predictor.clear": MethodSpec(_h_predictor_clear, 5.0, "Clear predictor"),
     "predictor.predict": MethodSpec(
-        _h_predictor_predict, 10.0, "Predict transition frequency"
+        _h_predictor_predict,
+        10.0,
+        "Predict transition frequency",
+        params=(
+            _p_num("value", "Flux value"),
+            _p_int_default("from_lvl", 0, "From level"),
+            _p_int_default("to_lvl", 1, "To level"),
+        ),
     ),
     "predictor.info": MethodSpec(_h_predictor_info, 5.0, "Get predictor info"),
     "tab.get_analyze_result": MethodSpec(
-        _h_tab_get_analyze_result, 5.0, "Read tab analyze result scalar summary"
+        _h_tab_get_analyze_result,
+        5.0,
+        "Read tab analyze result scalar summary",
+        params=(_p_str("tab_id"),),
     ),
     "tab.get_analyze_params": MethodSpec(
-        _h_tab_get_analyze_params, 5.0, "Read current analyze params"
+        _h_tab_get_analyze_params,
+        5.0,
+        "Read current analyze params",
+        params=(_p_str("tab_id"),),
     ),
     "analyze.start": MethodSpec(
-        _h_analyze_start, 30.0, "Start analyze (fire-and-forget)"
+        _h_analyze_start,
+        30.0,
+        "Start analyze (fire-and-forget)",
+        params=(_p_str("tab_id"), _p_obj_default("updates", "Analyze param updates")),
     ),
     "tab.get_cfg_summary": MethodSpec(
-        _h_tab_get_cfg_summary, 5.0, "Read tab cfg as clean scalar dict"
+        _h_tab_get_cfg_summary,
+        5.0,
+        "Read tab cfg as clean scalar dict",
+        params=(_p_str("tab_id"),),
     ),
 }
-
-
-# Silence "unused" hint for helpers re-exported by Phase 81 dispatch additions.
-_ = _require_int  # noqa: PLW0123

@@ -40,6 +40,7 @@ from .dispatch import METHOD_REGISTRY
 from .errors import ErrorCode, ErrorEnvelope, RemoteError
 from .events import EVENT_SERIALIZERS, wire_event_name
 from .framing import LINE_TERMINATOR, MAX_LINE_BYTES, decode_line, encode_line
+from .param_spec import validate_params
 from .wire import Response, _require_str, parse_request
 
 logger = logging.getLogger(__name__)
@@ -583,7 +584,15 @@ class RemoteControlService:
                     message=f"unknown method: {req.method!r}",
                 )
                 return
-            self._dispatch_on_main(state, req.id, spec, req.params)
+            # Validate params against the method's ParamSpec contract on the IO
+            # thread (pure, no Qt needed) so malformed requests fail fast without
+            # consuming a main-thread hop. Methods that have not declared params
+            # yet pass their raw params through unchanged.
+            if spec.params:
+                handler_params = validate_params(spec.params, req.params)
+            else:
+                handler_params = req.params
+            self._dispatch_on_main(state, req.id, spec, handler_params)
         except RemoteError as exc:
             self._reply_error(state, rid=rid, code=exc.code, message=exc.message)
 
