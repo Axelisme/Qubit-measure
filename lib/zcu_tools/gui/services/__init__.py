@@ -1,6 +1,7 @@
 """Services encapsulating domain logic, decoupled from the Controller Façade."""
 
 from .analyze import AnalyzeService
+from .app_services import AppServices, build_app_services
 from .connection import ConnectionService
 from .context import ContextService
 from .device import (
@@ -52,6 +53,8 @@ from .writeback import WritebackService
 
 __all__ = [
     "AnalyzeService",
+    "AppServices",
+    "build_app_services",
     "ConnectionService",
     "ContextService",
     "DeviceService",

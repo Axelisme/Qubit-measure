@@ -23,35 +23,20 @@ from .registry import Registry
 from .runner import AnalyzeRunner, Runner, SaveDataRunner
 from .services import (
     DEFAULT_LEFT_PANEL_WIDTH,
-    AnalyzeService,
     ConnectDeviceRequest,
-    ConnectionService,
-    ContextService,
-    DeviceService,
     DeviceSnapshot,
     DisconnectDeviceRequest,
-    GuardService,
-    OperationGate,
     PersistedStartup,
     RestoreReport,
-    RunService,
     SaveBothOutcome,
-    SaveService,
     SessionPersistenceError,
-    SessionPersistenceService,
     SetDeviceValueRequest,
     SetupDeviceRequest,
     StartupConnectionRequest,
     StartupPersistenceError,
-    StartupPersistenceService,
     StartupProjectRequest,
-    StartupService,
-    TabService,
-    TabViewService,
     TabViewSnapshot,
-    ViewQueryService,
-    WorkspaceService,
-    WritebackService,
+    build_app_services,
 )
 from .services.connection import (
     ConnectRequest,
@@ -104,36 +89,34 @@ class Controller:
         self._state = state
         self._view = view
         self._bus = bus
-        self._operation_gate = OperationGate()
 
-        # Initialize domain services
-        self._guard_svc = GuardService(state)
-        self._view_query_svc = ViewQueryService(self._require_view)
-        self._dev_svc = DeviceService(bus, self._operation_gate)
-        self._conn_svc = ConnectionService(state, bus, self._operation_gate)
-        self._ctx_svc = ContextService(state, io_manager, bus)
-        self._tab_svc = TabService(state, registry)
-        self._run_svc = RunService(state, runner, bus, self._operation_gate)
-        self._analyze_svc = AnalyzeService(state, AnalyzeRunner(), bus)
-        self._save_svc = SaveService(state, SaveDataRunner(), bus)
-        self._writeback_svc = WritebackService(state, bus)
-        self._tab_view_svc = TabViewService(
-            state,
-            self._tab_svc,
-            self._writeback_svc,
-            self._ctx_svc,
+        # Construct and wire every domain service into an immutable bundle, then
+        # alias them onto self for the façade's call sites.
+        services = build_app_services(
+            state=state,
+            bus=bus,
+            registry=registry,
+            io_manager=io_manager,
+            runner=runner,
+            analyze_runner=AnalyzeRunner(),
+            save_runner=SaveDataRunner(),
+            view_provider=self._require_view,
         )
-        self._workspace_svc = WorkspaceService(
-            state,
-            self._tab_svc,
-            SessionPersistenceService(),
-            bus,
-        )
-        self._startup_svc = StartupService(
-            self._ctx_svc,
-            self._dev_svc,
-            StartupPersistenceService(),
-        )
+        self._services = services
+        self._operation_gate = services.operation_gate
+        self._guard_svc = services.guard
+        self._view_query_svc = services.view_query
+        self._dev_svc = services.device
+        self._conn_svc = services.connection
+        self._ctx_svc = services.context
+        self._tab_svc = services.tab
+        self._run_svc = services.run
+        self._analyze_svc = services.analyze
+        self._save_svc = services.save
+        self._writeback_svc = services.writeback
+        self._tab_view_svc = services.tab_view
+        self._workspace_svc = services.workspace
+        self._startup_svc = services.startup
 
         self._run_svc.run_finished.connect(self._on_run_finished)
         self._run_svc.run_failed.connect(self._on_run_failed)
