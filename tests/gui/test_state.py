@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from unittest.mock import MagicMock
 
 import pytest
@@ -247,16 +247,30 @@ def test_set_device_remember_bumps():
     assert state.version.get("device:dev") == 2
 
 
-def test_refresh_device_info_cache_does_not_bump():
+def test_refresh_device_info_cache_unchanged_does_not_bump():
     state = State(_make_ctx())
-    state.put_device(_dev(status=DeviceStatus.CONNECTED))
-    assert state.version.get("device:dev") == 1
     info = BaseDeviceInfo(address="addr", type="FakeDevice")
-    state.refresh_device_info_cache("dev", info)
-    dev = state.get_device("dev")
-    assert dev is not None and dev.info is info
-    # Cache refresh on read is NOT a semantic write — version must not advance.
+    state.put_device(replace(_dev(status=DeviceStatus.CONNECTED), info=info))
     assert state.version.get("device:dev") == 1
+    same = BaseDeviceInfo(address="addr", type="FakeDevice")
+    changed = state.refresh_device_info_cache("dev", same)
+    # Unchanged value → pure cache sync: no change reported, no version bump.
+    assert changed is False
+    assert state.version.get("device:dev") == 1
+
+
+def test_refresh_device_info_cache_changed_bumps():
+    state = State(_make_ctx())
+    info = BaseDeviceInfo(address="addr", type="FakeDevice", label="old")
+    state.put_device(replace(_dev(status=DeviceStatus.CONNECTED), info=info))
+    assert state.version.get("device:dev") == 1
+    moved = BaseDeviceInfo(address="addr", type="FakeDevice", label="new")
+    changed = state.refresh_device_info_cache("dev", moved)
+    dev = state.get_device("dev")
+    assert dev is not None and dev.info is moved
+    # Driver value moved underneath us → genuine state change: bump + report.
+    assert changed is True
+    assert state.version.get("device:dev") == 2
 
 
 def test_remove_device_drops_version_prefix():

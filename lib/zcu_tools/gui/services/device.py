@@ -498,9 +498,11 @@ class DeviceService(QObject):
             info = GlobalDeviceManager.get_info(name)
         except ValueError:
             return None
-        # Read-time cache refresh — NOT a semantic write, so this must not bump
-        # the device version (would spuriously invalidate other clients).
-        self._state.refresh_device_info_cache(name, info)
+        # Read-time cache refresh: silent when unchanged (no bump), but if the
+        # driver value moved underneath us this is a genuine state change — State
+        # bumps device:<name> and we emit DEVICE_CHANGED so readers re-query.
+        if self._state.refresh_device_info_cache(name, info):
+            self._emit_device_changed(name)
         return info
 
     def get_device_value(self, name: str) -> object:

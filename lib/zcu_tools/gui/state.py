@@ -205,15 +205,26 @@ class State:
         self.devices[name] = replace(self.devices[name], remember=remember)
         self.version.bump(f"device:{name}")
 
-    def refresh_device_info_cache(self, name: str, info: BaseDeviceInfo) -> None:
-        """Refresh the cached driver info on a *read* — NOT a semantic write.
+    def refresh_device_info_cache(self, name: str, info: BaseDeviceInfo) -> bool:
+        """Refresh the cached driver info on a *read*; return whether it changed.
 
         A live read (``get_device_info``) caches the freshest driver info back
-        into State. No client intended to change the device, so this must not
-        bump ``device:<name>`` (would spuriously invalidate other clients'
-        ``expected_versions``). Version bump == semantic write, not cache refresh.
+        into State. The principle is "bump == state actually changed", not "bump
+        == a client wrote":
+
+        - **info unchanged** → pure cache sync; do NOT bump (a redundant refresh
+          must not spuriously invalidate other clients' ``expected_versions``).
+        - **info changed** → the device's real value moved underneath us (e.g.
+          external hardware change). That *is* a genuine state change, so bump
+          ``device:<name>`` and return True so the caller can emit DEVICE_CHANGED.
+          Compared by full ``BaseDeviceInfo`` value equality (pydantic ``==``).
         """
-        self.devices[name] = replace(self.devices[name], info=info, error=None)
+        current = self.devices[name]
+        changed = current.info != info
+        self.devices[name] = replace(current, info=info, error=None)
+        if changed:
+            self.version.bump(f"device:{name}")
+        return changed
 
     def remove_device(self, name: str) -> None:
         logger.debug("remove_device: name=%r", name)

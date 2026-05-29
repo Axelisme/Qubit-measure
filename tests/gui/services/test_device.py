@@ -271,20 +271,44 @@ def test_connect_writes_device_state_to_state_with_remember(qapp):
     assert dev.remember is False
 
 
-def test_get_device_info_read_does_not_bump_version(qapp):
+def test_get_device_info_unchanged_does_not_bump_or_emit(qapp):
     svc, device = _make_svc()
     state = svc._state
-    _connect(svc, _req())
+    _connect(svc, _req())  # connected with FakeDeviceInfo(value=0.0)
     before = state.version.get("device:dev1")
+    events: list[object] = []
+    svc._bus.subscribe(GuiEvent.DEVICE_CHANGED, lambda p: events.append(p.name))
 
+    # Driver returns the same value already cached → pure cache sync.
+    device.get_info.return_value = FakeDeviceInfo(address="addr", value=0.0)
+    info = svc.get_device_info("dev1")
+
+    assert info is not None
+    # Read of an unchanged value must not advance the version (would spuriously
+    # invalidate another client's expected_versions) nor emit a change event.
+    assert state.version.get("device:dev1") == before
+    assert events == []
+
+
+def test_get_device_info_changed_bumps_and_emits(qapp):
+    svc, device = _make_svc()
+    state = svc._state
+    _connect(svc, _req())  # connected with FakeDeviceInfo(value=0.0)
+    before = state.version.get("device:dev1")
+    events: list[object] = []
+    svc._bus.subscribe(GuiEvent.DEVICE_CHANGED, lambda p: events.append(p.name))
+
+    # Driver value moved underneath us (e.g. external hardware change).
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=2.0)
     info = svc.get_device_info("dev1")
 
     assert info is not None and getattr(info, "value", None) == 2.0
-    # Read-time cache refresh must not advance the version (decision: bump ==
-    # semantic write, not cache refresh) — else a pure read would spuriously
-    # invalidate another client's expected_versions.
-    assert state.version.get("device:dev1") == before
+    # A genuine state change discovered on read: bump + DEVICE_CHANGED so readers
+    # re-query and dependent guards can catch the external change.
+    assert state.version.get("device:dev1") == before + 1
+    assert events == ["dev1"]
+    cached = state.get_device("dev1")
+    assert cached is not None and getattr(cached.info, "value", None) == 2.0
     # but the cached info on State is refreshed
     cached = state.get_device("dev1")
     assert cached is not None and getattr(cached.info, "value", None) == 2.0
