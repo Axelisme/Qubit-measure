@@ -710,6 +710,13 @@ def tool_gui_events_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
             if remaining <= 0:
                 break
             _EVENT_COND.wait(timeout=remaining)
+    # Receiving an event is the point at which the agent "observed" a GUI change
+    # (including async terminals like run/device/connect completion, whose version
+    # bumps happen outside any RPC the bridge issues). Resync the baseline now —
+    # done outside the _EVENT_COND lock since it makes a synchronous RPC — so a
+    # following guarded op isn't blocked by the agent's own just-finished work.
+    if out:
+        _refresh_versions()
     return {"events": out}
 
 

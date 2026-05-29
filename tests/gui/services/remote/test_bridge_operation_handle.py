@@ -94,6 +94,37 @@ def test_wait_setup_propagates_failure(wired):
         mcp_server.TOOLS["gui_device_wait_setup"]["handler"]({"name": "flux"})
 
 
+def test_events_poll_refreshes_last_seen(wired, monkeypatch):
+    # Receiving an event = the agent observed a (possibly async-terminal) change;
+    # the version baseline must resync so a following guarded op isn't blocked by
+    # the agent's own just-finished work. The async run bumped tab:t:result.
+    monkeypatch.setattr(
+        mcp_server, "_EVENT_QUEUE",
+        mcp_server.deque([{"event": "run_lock_changed", "payload": {}}]),
+        raising=False,
+    )
+    wired["resources.versions"] = _versions({"tab:t:result": 9})
+
+    out = mcp_server.TOOLS["gui_events_poll"]["handler"]({"timeout_seconds": 0.1})
+
+    assert out["events"]  # delivered the queued event
+    assert mcp_server._LAST_SEEN.get("tab:t:result") == 9  # baseline resynced
+
+
+def test_events_poll_empty_does_not_refresh(wired, monkeypatch):
+    # No events -> no resync RPC (avoid a needless round-trip on every empty poll).
+    monkeypatch.setattr(mcp_server, "_EVENT_QUEUE", mcp_server.deque(), raising=False)
+    called: list[bool] = []
+    monkeypatch.setattr(
+        mcp_server, "_refresh_versions", lambda: called.append(True)
+    )
+
+    out = mcp_server.TOOLS["gui_events_poll"]["handler"]({"timeout_seconds": 0.05})
+
+    assert out["events"] == []
+    assert called == []  # no refresh on an empty poll
+
+
 def test_run_start_captures_operation_id_under_tab_key(wired):
     # run.start is also a guarded op; expected_versions ride along, and the
     # returned operation_id is captured under the tab key.
