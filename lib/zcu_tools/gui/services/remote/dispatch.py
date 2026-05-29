@@ -16,7 +16,12 @@ import logging
 from dataclasses import dataclass
 from typing import Callable, Mapping, Optional
 
-from zcu_tools.gui.adapter import CfgSchema
+from zcu_tools.gui.adapter import (
+    CfgSchema,
+    MetaDictWriteback,
+    ModuleWriteback,
+    WaveformWriteback,
+)
 from zcu_tools.gui.services.context import MlEntryValidationError
 from zcu_tools.gui.services.device import SetupDeviceRequest
 from zcu_tools.gui.services.session_persistence import SessionPersistenceService
@@ -937,6 +942,109 @@ def _h_tab_get_cfg_summary(ctrl, params: Mapping[str, object]) -> Mapping[str, o
 
 
 # ---------------------------------------------------------------------------
+# Writeback preview / apply handlers
+# ---------------------------------------------------------------------------
+
+
+def _writeback_item_wire(item) -> dict[str, object]:
+    base: dict[str, object] = {
+        "key": item.key,
+        "description": item.description,
+        "selected": bool(item.selected),
+        "current_value": _json_safe(item.current_value),
+    }
+    if isinstance(item, MetaDictWriteback):
+        base["kind"] = "metadict"
+        base["md_key"] = item.md_key
+        base["proposed_value"] = _json_safe(item.proposed_value)
+    elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
+        is_module = isinstance(item, ModuleWriteback)
+        base["kind"] = "module" if is_module else "waveform"
+        base["name"] = item.module_name if is_module else item.waveform_name
+        base["has_edit_schema"] = item.edit_schema is not None
+        if item.edit_schema is not None:
+            base["edit_schema_raw"] = _SCHEMA_CODEC.schema_to_raw(
+                item.edit_schema, ml=None
+            )
+    else:
+        base["kind"] = "unknown"
+    return base
+
+
+def _h_writeback_preview(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    tab_id = str(params["tab_id"])
+    if not ctrl.has_tab(tab_id):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    items = ctrl.get_tab_writeback_items(tab_id)
+    return {"items": [_writeback_item_wire(it) for it in items]}
+
+
+def _h_writeback_apply(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    tab_id = str(params["tab_id"])
+    if not ctrl.has_tab(tab_id):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    raw_selections = params["selections"]
+    if not isinstance(raw_selections, list):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "'selections' must be a list")
+
+    # Recompute live items; apply each selection's mutation by stable key.
+    items = ctrl.get_tab_writeback_items(tab_id)
+    by_key = {it.key: it for it in items}
+    for sel in raw_selections:
+        if not isinstance(sel, dict) or "key" not in sel:
+            raise RemoteError(ErrorCode.INVALID_PARAMS, "each selection needs a 'key'")
+        key = str(sel["key"])
+        item = by_key.get(key)
+        if item is None:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, f"unknown writeback key: {key!r}"
+            )
+        if "selected" in sel:
+            item.selected = bool(sel["selected"])
+        if "proposed_value" in sel:
+            if not isinstance(item, MetaDictWriteback):
+                raise RemoteError(
+                    ErrorCode.INVALID_PARAMS,
+                    f"{key!r} is not a metadict item; proposed_value not allowed",
+                )
+            item.proposed_value = sel["proposed_value"]
+        if "edited_raw" in sel:
+            if not isinstance(item, (ModuleWriteback, WaveformWriteback)):
+                raise RemoteError(
+                    ErrorCode.INVALID_PARAMS,
+                    f"{key!r} is not a module/waveform item; edited_raw not allowed",
+                )
+            if item.edit_schema is None:
+                raise RemoteError(
+                    ErrorCode.PRECONDITION_FAILED,
+                    f"{key!r} has no editable schema",
+                )
+            edited = sel["edited_raw"]
+            if not isinstance(edited, dict):
+                raise RemoteError(
+                    ErrorCode.INVALID_PARAMS, f"{key!r} edited_raw must be an object"
+                )
+            try:
+                item.edited_schema = _SCHEMA_CODEC.raw_to_schema(
+                    item.edit_schema, dict(edited)
+                )
+            except Exception as exc:
+                raise RemoteError(
+                    ErrorCode.INVALID_PARAMS, f"invalid edited_raw for {key!r}: {exc}"
+                ) from exc
+
+    try:
+        applied = ctrl.apply_writeback_items(tab_id, items)
+    except RuntimeError as exc:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
+    return {"applied_keys": list(applied)}
+
+
+# ---------------------------------------------------------------------------
 # Run progress handler
 # ---------------------------------------------------------------------------
 
@@ -1130,6 +1238,8 @@ _HANDLERS: dict[str, Handler] = {
     "tab.get_analyze_params": _h_tab_get_analyze_params,
     "analyze.start": _h_analyze_start,
     "tab.get_cfg_summary": _h_tab_get_cfg_summary,
+    "writeback.preview": _h_writeback_preview,
+    "writeback.apply": _h_writeback_apply,
 }
 
 # Every spec must have a handler and vice versa — fail fast on drift.

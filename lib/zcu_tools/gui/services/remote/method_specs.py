@@ -362,4 +362,21 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "tab.get_cfg_summary": MethodSpec(
         5.0, "Read tab cfg as clean scalar dict", (_str("tab_id"),)
     ),
+    # Writeback workflow
+    "writeback.preview": MethodSpec(
+        5.0,
+        "List the adapter's proposed writeback items after analyze. Each item: "
+        "key (stable id), kind (metadict|module|waveform), description, selected, "
+        "current_value; metadict adds md_key+proposed_value; module/waveform add "
+        "name + has_edit_schema + edit_schema_raw (tagged cfg, like tab.get_cfg).",
+        (_str("tab_id"),),
+    ),
+    "writeback.apply": MethodSpec(
+        10.0,
+        "Apply writeback items. 'selections' is a list of "
+        "{key, selected?, proposed_value? (metadict), edited_raw? (module/"
+        "waveform, tagged cfg over edit_schema)}. Items recomputed server-side; "
+        "unlisted keys keep their default selected state. Returns applied_keys.",
+        (_str("tab_id"), _json("selections", "List of per-key adjustments")),
+    ),
 }

@@ -327,6 +327,13 @@ class Controller:
     # Writeback (TabService)
     # ------------------------------------------------------------------
 
+    def get_tab_writeback_items(self, tab_id: str) -> list[WritebackItem]:
+        """Recompute the tab's writeback proposals (read-only, no permit).
+
+        Returns [] when the tab has no run/analyze result yet.
+        """
+        return list(self._writeback_svc.get_tab_writeback_items(tab_id))
+
     def apply_writeback_items(
         self, tab_id: str, items: list[WritebackItem]
     ) -> list[str]:
