@@ -112,6 +112,7 @@ class _ClientState:
         "writer_thread",
         "consecutive_drops",
         "closing",
+        "editor_ids",
     )
 
     def __init__(self, peer: str, token_required: bool) -> None:
@@ -124,6 +125,8 @@ class _ClientState:
         self.writer_thread: Optional[threading.Thread] = None
         self.consecutive_drops: int = 0
         self.closing: bool = False
+        # CfgEditor session ids opened by this connection; reclaimed on drop.
+        self.editor_ids: set[str] = set()
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +229,8 @@ class RemoteControlService:
         with self._clients_lock:
             client_snapshot = list(self._clients.items())
         for _sock, state in client_snapshot:
+            # stop() runs on the main thread, so reclaim editors directly.
+            self._reclaim_editors(state, marshal=False)
             state.closing = True
             try:
                 state.outbound.put_nowait(_SHUTDOWN_SENTINEL)
@@ -535,7 +540,37 @@ class RemoteControlService:
             pass
         with self._clients_lock:
             self._clients.pop(sock, None)
+        # Reclaim this connection's CfgEditor sessions on the main thread
+        # (LiveModel teardown is main-thread-owned). Fire-and-forget: the
+        # client is already gone, so no reply is awaited.
+        self._reclaim_editors(state, marshal=True)
         logger.info("remote client disconnected: %s", state.peer)
+
+    def _reclaim_editors(self, state: _ClientState, *, marshal: bool) -> None:
+        """Discard CfgEditor sessions opened by ``state``; clears its id set.
+
+        ``marshal=True`` schedules the discard on the Qt main thread (use from
+        the IO/server thread, e.g. ``_drop_client``); ``marshal=False`` calls
+        directly (use from the main thread, e.g. ``stop``).
+        """
+        ids = list(state.editor_ids)
+        state.editor_ids.clear()
+        if not ids:
+            return
+        discard = getattr(self._ctrl, "discard_cfg_editors", None)
+        if discard is None:
+            return
+
+        def _run() -> None:
+            try:
+                discard(ids)
+            except Exception:  # pragma: no cover — best-effort cleanup
+                logger.exception("failed to reclaim editor sessions %r", ids)
+
+        if marshal:
+            self._dispatcher.invoke.emit(_run)
+        else:
+            _run()
 
     # ------------------------------------------------------------------
     # Per-request handling
@@ -592,7 +627,7 @@ class RemoteControlService:
                 handler_params = validate_params(spec.params, req.params)
             else:
                 handler_params = req.params
-            self._dispatch_on_main(state, req.id, spec, handler_params)
+            self._dispatch_on_main(state, req.id, req.method, spec, handler_params)
         except RemoteError as exc:
             self._reply_error(
                 state, rid=rid, code=exc.code, message=exc.message, reason=exc.reason
@@ -658,7 +693,7 @@ class RemoteControlService:
                 state.subscribed.discard(ev)
         self._reply_ok(state, rid=rid, result={"subscribed": sorted(state.subscribed)})
 
-    def _dispatch_on_main(self, state: _ClientState, rid, spec, params) -> None:
+    def _dispatch_on_main(self, state: _ClientState, rid, method, spec, params) -> None:
         done = threading.Event()
         holder: dict[str, object] = {}
 
@@ -700,7 +735,27 @@ class RemoteControlService:
             return
         result = holder["result"]
         assert isinstance(result, dict) or hasattr(result, "items")
+        self._track_editor_lifecycle(state, method, params, result)
         self._reply_ok(state, rid=rid, result=result)  # type: ignore[arg-type]
+
+    def _track_editor_lifecycle(
+        self, state: _ClientState, method: str, params, result
+    ) -> None:
+        """Record/forget CfgEditor session ids per connection.
+
+        ``editor.open`` binds the returned id to this client so a disconnect
+        reclaims it; ``commit``/``discard`` forget it (the session is already
+        gone server-side). Runs on the IO thread, where ``state.editor_ids``
+        lives.
+        """
+        if method == "editor.open":
+            editor_id = result.get("editor_id") if isinstance(result, dict) else None
+            if isinstance(editor_id, str):
+                state.editor_ids.add(editor_id)
+        elif method in ("editor.commit", "editor.discard"):
+            editor_id = params.get("editor_id") if hasattr(params, "get") else None
+            if isinstance(editor_id, str):
+                state.editor_ids.discard(editor_id)
 
     # ------------------------------------------------------------------
     # Reply helpers (enqueue onto outbound queue; never write directly)
