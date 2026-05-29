@@ -7,8 +7,15 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
+from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.gui.adapter import CfgSchema, CfgSectionSpec, CfgSectionValue, SavePaths
-from zcu_tools.gui.state import State, TabInteractionState, TabState
+from zcu_tools.gui.state import (
+    DeviceState,
+    DeviceStatus,
+    State,
+    TabInteractionState,
+    TabState,
+)
 
 
 def _make_ctx():
@@ -175,3 +182,102 @@ def test_set_context_replaces_exp_context():
     assert state.exp_context is ctx1
     state.set_context(ctx2)
     assert state.exp_context is ctx2
+
+
+# ----------------------------------------------------------------------
+# Device state mutators / version bumps
+# ----------------------------------------------------------------------
+
+
+def _dev(
+    name: str = "dev", *, status: DeviceStatus, remember: bool = True
+) -> DeviceState:
+    return DeviceState(
+        name=name,
+        type_name="FakeDevice",
+        address="addr",
+        status=status,
+        remember=remember,
+    )
+
+
+def test_put_device_inserts_and_bumps():
+    state = State(_make_ctx())
+    state.put_device(_dev(status=DeviceStatus.CONNECTED))
+    assert state.get_device("dev") is not None
+    assert state.has_device("dev") is True
+    assert state.version.get("device:dev") == 1
+
+
+def test_put_device_replaces_existing():
+    state = State(_make_ctx())
+    state.put_device(_dev(status=DeviceStatus.CONNECTING))
+    state.put_device(_dev(status=DeviceStatus.CONNECTED))
+    dev = state.get_device("dev")
+    assert dev is not None and dev.status is DeviceStatus.CONNECTED
+    assert state.version.get("device:dev") == 2
+
+
+def test_set_device_status_replaces_and_bumps():
+    state = State(_make_ctx())
+    state.put_device(_dev(status=DeviceStatus.CONNECTING))
+    state.set_device_status("dev", DeviceStatus.CONNECTED)
+    dev = state.get_device("dev")
+    assert dev is not None and dev.status is DeviceStatus.CONNECTED
+    assert dev.error is None
+    assert state.version.get("device:dev") == 2
+
+
+def test_set_device_info_bumps():
+    state = State(_make_ctx())
+    state.put_device(_dev(status=DeviceStatus.CONNECTED))
+    info = BaseDeviceInfo(address="addr", type="FakeDevice")
+    state.set_device_info("dev", info)
+    dev = state.get_device("dev")
+    assert dev is not None and dev.info is info
+    assert state.version.get("device:dev") == 2
+
+
+def test_set_device_remember_bumps():
+    state = State(_make_ctx())
+    state.put_device(_dev(status=DeviceStatus.CONNECTED, remember=True))
+    state.set_device_remember("dev", False)
+    dev = state.get_device("dev")
+    assert dev is not None and dev.remember is False
+    assert state.version.get("device:dev") == 2
+
+
+def test_refresh_device_info_cache_does_not_bump():
+    state = State(_make_ctx())
+    state.put_device(_dev(status=DeviceStatus.CONNECTED))
+    assert state.version.get("device:dev") == 1
+    info = BaseDeviceInfo(address="addr", type="FakeDevice")
+    state.refresh_device_info_cache("dev", info)
+    dev = state.get_device("dev")
+    assert dev is not None and dev.info is info
+    # Cache refresh on read is NOT a semantic write — version must not advance.
+    assert state.version.get("device:dev") == 1
+
+
+def test_remove_device_drops_version_prefix():
+    state = State(_make_ctx())
+    state.put_device(_dev(status=DeviceStatus.CONNECTED))
+    assert state.version.get("device:dev") == 1
+    state.remove_device("dev")
+    assert state.has_device("dev") is False
+    # Dropped key reads as version 0 (gone) — guard treats a dep on it as stale.
+    assert state.version.get("device:dev") == 0
+
+
+def test_list_devices_sorted_by_name():
+    state = State(_make_ctx())
+    state.put_device(_dev("zeta", status=DeviceStatus.CONNECTED))
+    state.put_device(_dev("alpha", status=DeviceStatus.MEMORY_ONLY))
+    names = [d.name for d in state.list_devices()]
+    assert names == ["alpha", "zeta"]
+
+
+def test_get_device_unknown_returns_none():
+    state = State(_make_ctx())
+    assert state.get_device("nope") is None
+    assert state.has_device("nope") is False

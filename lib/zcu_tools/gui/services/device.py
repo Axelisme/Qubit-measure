@@ -4,7 +4,6 @@ import importlib
 import logging
 import threading
 from dataclasses import dataclass, replace
-from enum import Enum
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -23,6 +22,7 @@ from zcu_tools.gui.event_bus import (
     DeviceSetupChangedPayload,
     GuiEvent,
 )
+from zcu_tools.gui.state import DeviceStatus
 
 from .device_progress import (
     DeviceSetupProgressFactory,
@@ -94,15 +94,6 @@ class DeviceMemoryInfo:
     type_name: str
     name: str
     address: str
-
-
-class DeviceStatus(Enum):
-    MEMORY_ONLY = "memory_only"
-    CONNECTING = "connecting"
-    CONNECTED = "connected"
-    DISCONNECTING = "disconnecting"
-    SETTING_UP = "setting_up"
-    SETTING_VALUE = "setting_value"
 
 
 @dataclass(frozen=True)

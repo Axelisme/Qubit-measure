@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional
 
 from typing_extensions import Generic, TypeVar
@@ -21,8 +22,57 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
+    # Imported only for typing: zcu_tools.device.base pulls in matplotlib.pyplot
+    # at import time, which would break the GUI's "configure backend before
+    # pyplot import" invariant if loaded eagerly here. ``from __future__ import
+    # annotations`` keeps all annotations as strings, so a TYPE_CHECKING import
+    # is sufficient.
+    from zcu_tools.device.base import BaseDeviceInfo
+
 T_Result = TypeVar("T_Result")
 T_AnalyzeResult = TypeVar("T_AnalyzeResult", bound=AnalyzeResultWithFigure)
+
+
+class DeviceStatus(Enum):
+    """Lifecycle status of a device entry held in State.
+
+    ``MEMORY_ONLY`` is a remembered-but-not-live entry (no driver in
+    GlobalDeviceManager). All other values are *live* statuses: the device has
+    a driver registered and is either idle (``CONNECTED``) or in a transient
+    operation. The cross-object invariant is: a device is in GlobalDeviceManager
+    iff its State status is a live status.
+    """
+
+    MEMORY_ONLY = "memory_only"
+    CONNECTING = "connecting"
+    CONNECTED = "connected"
+    DISCONNECTING = "disconnecting"
+    SETTING_UP = "setting_up"
+    SETTING_VALUE = "setting_value"
+
+
+@dataclass(frozen=True)
+class DeviceState:
+    """Serializable device state — the SSOT for one device.
+
+    State owns this; DeviceService holds only the live driver (in
+    GlobalDeviceManager), the worker threads and the progress model. ``info`` is
+    a ``BaseDeviceInfo`` value snapshot (not a live driver) and so lives here.
+    ``remember`` is the persistent flag that drives the startup persistence
+    projection — it is no longer a transient connect-request attribute.
+
+    There is deliberately no ``progress`` field: setup progress is live
+    (``DeviceSetupProgressModel`` in DeviceService) and is spliced in only at the
+    ``DeviceSnapshot`` projection boundary.
+    """
+
+    name: str
+    type_name: str
+    address: str
+    status: DeviceStatus
+    remember: bool
+    info: BaseDeviceInfo | None = None
+    error: str | None = None
 
 
 @dataclass
@@ -112,15 +162,73 @@ class State:
         self.tabs: dict[str, TabState[Any, Any, Any, Any]] = {}
         self.active_tab_id: Optional[str] = None
         self.running_tab_id: Optional[str] = None
+        # Device state SSOT. DeviceService writes here (on the Qt main thread,
+        # at its terminal slots) and holds only the live driver / worker / progress.
+        self.devices: dict[str, DeviceState] = {}
         # Optimistic-concurrency version counters. Owned by State but bumped by
         # whichever main-thread writer actually mutates a resource (State's own
-        # mutators below for context/tab/cfg/save_path; connection/device/run
-        # services for soc/device/result at their terminal slots).
+        # mutators below for context/tab/cfg/save_path/device; connection/run
+        # services for soc/result at their terminal slots).
         self.version = VersionTable()
 
     def set_context(self, ctx: ExpContext) -> None:
         self.exp_context = ctx
         self.version.bump("context")
+
+    # ------------------------------------------------------------------
+    # Device state (DeviceService writes these on the Qt main thread).
+    # Every *semantic write* bumps device:<name>; cache refresh does not
+    # (see refresh_device_info_cache).
+    # ------------------------------------------------------------------
+
+    def put_device(self, dev: DeviceState) -> None:
+        """Insert or replace a device entry (create / status transition)."""
+        logger.debug("put_device: name=%r status=%s", dev.name, dev.status.value)
+        self.devices[dev.name] = dev
+        self.version.bump(f"device:{dev.name}")
+
+    def set_device_status(
+        self, name: str, status: DeviceStatus, *, error: Optional[str] = None
+    ) -> None:
+        logger.debug("set_device_status: name=%r status=%s", name, status.value)
+        self.devices[name] = replace(self.devices[name], status=status, error=error)
+        self.version.bump(f"device:{name}")
+
+    def set_device_info(self, name: str, info: BaseDeviceInfo | None) -> None:
+        """Semantic info update (after set-value / setup); bumps version."""
+        logger.debug("set_device_info: name=%r info=%s", name, info is not None)
+        self.devices[name] = replace(self.devices[name], info=info)
+        self.version.bump(f"device:{name}")
+
+    def set_device_remember(self, name: str, remember: bool) -> None:
+        logger.debug("set_device_remember: name=%r remember=%s", name, remember)
+        self.devices[name] = replace(self.devices[name], remember=remember)
+        self.version.bump(f"device:{name}")
+
+    def refresh_device_info_cache(self, name: str, info: BaseDeviceInfo) -> None:
+        """Refresh the cached driver info on a *read* — NOT a semantic write.
+
+        A live read (``get_device_info``) caches the freshest driver info back
+        into State. No client intended to change the device, so this must not
+        bump ``device:<name>`` (would spuriously invalidate other clients'
+        ``expected_versions``). Version bump == semantic write, not cache refresh.
+        """
+        self.devices[name] = replace(self.devices[name], info=info, error=None)
+
+    def remove_device(self, name: str) -> None:
+        logger.debug("remove_device: name=%r", name)
+        del self.devices[name]
+        # A stale dependency on a removed device now reads as version 0 (gone).
+        self.version.drop_prefix(f"device:{name}")
+
+    def get_device(self, name: str) -> Optional[DeviceState]:
+        return self.devices.get(name)
+
+    def has_device(self, name: str) -> bool:
+        return name in self.devices
+
+    def list_devices(self) -> tuple[DeviceState, ...]:
+        return tuple(self.devices[name] for name in sorted(self.devices))
 
     def add_tab(
         self,
