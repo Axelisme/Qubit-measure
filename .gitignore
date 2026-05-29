@@ -28,6 +28,9 @@ findings.md
 progress.md
 task_plan.md
 task_plans/
+docs/adr/
+CONTEXT.md
+scratch/
 
 notebook_md/plot/*
 
