@@ -22,12 +22,21 @@ class MethodSpec:
     parameter contract used both for runtime validation (dispatch/service) and
     MCP ``inputSchema`` generation (mcp_server). ``tool_name`` overrides the
     derived ``gui_<method>`` MCP tool name when non-empty.
+
+    ``off_main_thread`` marks a blocking handler that must NOT be marshalled
+    onto the Qt main thread — it runs on the IO worker thread instead. Required
+    for handlers that block waiting on a worker-thread completion (e.g.
+    ``device.wait_setup``): marshalling them onto the main thread would deadlock
+    (the handler occupies the event loop that must dispatch the very signal it
+    awaits). Off-main handlers must only do thread-safe waiting and must not
+    touch main-thread-owned state, the stale guard, or the origin scope.
     """
 
     timeout_seconds: float
     description: str
     params: tuple[ParamSpec, ...] = ()
     tool_name: str = ""
+    off_main_thread: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +289,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
             _str("name", "Device name"),
             _num_default("timeout", 120.0, "Seconds to wait"),
         ),
+        off_main_thread=True,
     ),
     "device.list": MethodSpec(5.0, "List registered devices"),
     "device.snapshot": MethodSpec(

@@ -133,6 +133,93 @@ def test_setup_uses_gate_and_returns_to_connected_snapshot(qapp):
     assert svc.get_device_snapshot("dev1").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
 
 
+def test_wait_setup_done_wakes_from_worker_thread_without_deadlock(qapp):
+    """wait_setup_done runs off the main thread; with the main event loop
+    spinning, the setup terminal wakes it promptly (regression: previously it
+    deadlocked because the handler occupied the main thread it needed)."""
+    import threading
+    import time
+
+    svc, device = _make_svc()
+    _connect(svc, _req())
+
+    # Make setup take ~0.5s so the waiter genuinely has to block.
+    def slow_setup(_info, stop_event=None):
+        time.sleep(0.5)
+
+    device.setup.side_effect = slow_setup
+    device.get_info.return_value = FakeDeviceInfo(address="addr", value=2.0)
+
+    svc.start_setup_device(
+        SetupDeviceRequest(name="dev1", info=FakeDeviceInfo(address="addr", value=2.0))
+    )
+
+    result: dict[str, object] = {}
+
+    def waiter() -> None:
+        t0 = time.monotonic()
+        try:
+            svc.wait_setup_done("dev1", timeout=3.0)
+            result["error"] = None
+        except RuntimeError as exc:
+            result["error"] = str(exc)
+        result["dt"] = time.monotonic() - t0
+
+    wt = threading.Thread(target=waiter)
+    wt.start()
+
+    # Spin the main event loop (as the real GUI does) so the worker's
+    # setup_finished signal is dispatched and the gate lease is released.
+    deadline = time.monotonic() + 3.0
+    while wt.is_alive() and time.monotonic() < deadline:
+        qapp.processEvents()
+        time.sleep(0.01)
+    wt.join(timeout=1.0)
+
+    assert result.get("error") is None
+    dt = result.get("dt")
+    assert isinstance(dt, float)
+    assert dt < 2.0  # woke shortly after the 0.5s setup, not on timeout
+
+
+def test_wait_setup_done_raises_on_setup_failure(qapp):
+    import threading
+    import time
+
+    svc, device = _make_svc()
+    _connect(svc, _req())
+
+    def failing_setup(_info, stop_event=None):
+        time.sleep(0.2)
+        raise RuntimeError("hardware boom")
+
+    device.setup.side_effect = failing_setup
+
+    svc.start_setup_device(
+        SetupDeviceRequest(name="dev1", info=FakeDeviceInfo(address="addr", value=2.0))
+    )
+
+    result: dict[str, object] = {}
+
+    def waiter() -> None:
+        try:
+            svc.wait_setup_done("dev1", timeout=3.0)
+            result["error"] = None
+        except RuntimeError as exc:
+            result["error"] = str(exc)
+
+    wt = threading.Thread(target=waiter)
+    wt.start()
+    deadline = time.monotonic() + 3.0
+    while wt.is_alive() and time.monotonic() < deadline:
+        qapp.processEvents()
+        time.sleep(0.01)
+    wt.join(timeout=1.0)
+
+    assert result.get("error") is not None
+    assert "hardware boom" in str(result["error"])
+
+
 def test_disconnect_close_failure_retains_connected_device_and_releases_gate(qapp):
     svc, device = _make_svc()
     _connect(svc, _req())

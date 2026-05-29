@@ -1,7 +1,15 @@
 from __future__ import annotations
 
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from enum import Enum
+
+# Upper bound on how many released-token completion Events are retained so that
+# ``await_release`` can return immediately for an operation that finished before
+# the caller began waiting. LRU-evicted past this — eviction only degrades a
+# late waiter to "treat as already-done" (still correct, just non-blocking).
+_DONE_EVENT_LIMIT = 32
 
 
 class OperationKind(Enum):
@@ -23,6 +31,11 @@ class OperationLease:
     kind: OperationKind
     owner_id: str
     resource_id: str | None = None
+    # Who initiated the operation, as a neutral string the gate never
+    # interprets (like ``owner_id``). Carried so a terminal event emitted after
+    # the operation completes can be attributed to its initiator. Set at
+    # acquire time and never mutated.
+    origin: str = ""
 
 
 _DEVICE_MUTATIONS = frozenset(
@@ -41,6 +54,13 @@ class OperationGate:
     def __init__(self) -> None:
         self._next_token = 1
         self._active: dict[int, OperationLease] = {}
+        # Per-token completion Event: created on acquire, set on release. A
+        # blocking off-main handler (e.g. device.wait_setup) can wait on it
+        # thread-safely without touching any main-thread-owned state.
+        self._events: dict[int, threading.Event] = {}
+        # Released tokens' already-set Events, retained briefly (LRU) so a
+        # caller that begins awaiting after release still returns immediately.
+        self._done: OrderedDict[int, threading.Event] = OrderedDict()
 
     def acquire(
         self,
@@ -48,6 +68,7 @@ class OperationGate:
         *,
         owner_id: str,
         resource_id: str | None = None,
+        origin: str = "",
     ) -> OperationLease:
         if not owner_id:
             raise ValueError("owner_id must not be empty")
@@ -56,6 +77,7 @@ class OperationGate:
             kind=kind,
             owner_id=owner_id,
             resource_id=resource_id,
+            origin=origin,
         )
         conflicting = next(
             (
@@ -72,6 +94,7 @@ class OperationGate:
             )
         self._next_token += 1
         self._active[candidate.token] = candidate
+        self._events[candidate.token] = threading.Event()
         return candidate
 
     def release(self, lease: OperationLease) -> None:
@@ -79,6 +102,26 @@ class OperationGate:
         if active != lease:
             raise RuntimeError(f"Operation lease {lease.token} is not active")
         del self._active[lease.token]
+        evt = self._events.pop(lease.token, None)
+        if evt is not None:
+            evt.set()
+            self._done[lease.token] = evt
+            while len(self._done) > _DONE_EVENT_LIMIT:
+                self._done.popitem(last=False)
+
+    def await_release(self, token: int, timeout: float) -> bool:
+        """Block until the operation holding ``token`` is released.
+
+        Thread-safe; intended for off-main blocking handlers. Returns True once
+        released (or if already released / unknown — a token with no live or
+        retained Event is treated as already-done, so callers never hang on an
+        operation that finished before they began waiting). Returns False on
+        timeout while the operation is still active.
+        """
+        evt = self._events.get(token) or self._done.get(token)
+        if evt is None:
+            return True
+        return evt.wait(timeout=timeout)
 
     def has_active(self, kind: OperationKind) -> bool:
         return any(lease.kind is kind for lease in self._active.values())

@@ -11,6 +11,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.event_bus import (
+    DeviceChangedPayload,
+    EventBus,
     GuiEvent,
     MlChangedPayload,
     TabClosedPayload,
@@ -18,6 +20,7 @@ from zcu_tools.gui.event_bus import (
 from zcu_tools.gui.services.remote import ControlOptions, RemoteControlService
 from zcu_tools.gui.services.remote.change_categories import (
     CAT_CONTEXT_CHANGED,
+    CAT_DEVICE_CHANGED,
     CAT_TAB_CHANGED,
     assert_exhaustive,
     category_for,
@@ -35,6 +38,20 @@ def _service():
     ctrl = MagicMock()
     ctrl.get_bus.return_value = None
     return RemoteControlService(controller=ctrl, opts=ControlOptions(port=0))
+
+
+def _service_with_bus():
+    """Service wired to a real EventBus, with bus callbacks subscribed.
+
+    Exercises the real bump path (_on_event reads bus.current_origin to decide
+    whether a change is the agent's own).
+    """
+    bus = EventBus()
+    ctrl = MagicMock()
+    ctrl.get_bus.return_value = bus
+    svc = RemoteControlService(controller=ctrl, opts=ControlOptions(port=0))
+    svc._subscribe_event_bus()
+    return svc, bus
 
 
 def _client(svc, peer="127.0.0.1:1"):
@@ -75,15 +92,34 @@ def test_bump_tallies_all_clients():
     assert b.change_buffer[(CAT_TAB_CHANGED, "tab-1")] == 1
 
 
-def test_bump_skips_originating_client():
-    svc = _service()
+def test_agent_origin_emit_excluded_from_buffer():
+    # A change emitted while acting as "agent" is the agent's own action and
+    # must not tally into any agent client's buffer.
+    svc, bus = _service_with_bus()
     a = _client(svc, "a")
-    b = _client(svc, "b")
-    svc._originating_state = a  # a is mid-RPC; its own change must not tally
-    svc._bump_change_buffer(CAT_CONTEXT_CHANGED, None)
-    svc._originating_state = None
-    assert (CAT_CONTEXT_CHANGED, None) not in a.change_buffer
-    assert b.change_buffer[(CAT_CONTEXT_CHANGED, None)] == 1
+    with bus.acting_as("agent"):
+        bus.emit(GuiEvent.DEVICE_CHANGED, DeviceChangedPayload(name="X"))
+    assert (CAT_DEVICE_CHANGED, "X") not in a.change_buffer
+
+
+def test_non_agent_origin_emit_tallies():
+    # A change with no agent origin (UI / system) tallies into the buffer.
+    svc, bus = _service_with_bus()
+    a = _client(svc, "a")
+    bus.emit(GuiEvent.DEVICE_CHANGED, DeviceChangedPayload(name="X"))
+    assert a.change_buffer[(CAT_DEVICE_CHANGED, "X")] == 1
+
+
+def test_async_terminal_with_agent_origin_excluded():
+    # Regression (Phase 93 bug 2): an async terminal emitted AFTER the agent's
+    # RPC sync scope closed, but carrying the operation's "agent" lease origin,
+    # must still be excluded from the agent's own buffer.
+    svc, bus = _service_with_bus()
+    a = _client(svc, "a")
+    # Outside any acting_as scope (simulating worker callback), but the emit
+    # explicitly carries the originating operation's lease origin.
+    bus.emit(GuiEvent.DEVICE_CHANGED, DeviceChangedPayload(name="X"), origin="agent")
+    assert (CAT_DEVICE_CHANGED, "X") not in a.change_buffer
 
 
 def test_bump_accumulates_count():

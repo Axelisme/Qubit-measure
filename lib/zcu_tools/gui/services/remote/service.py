@@ -23,6 +23,7 @@ Threading:
 from __future__ import annotations
 
 import base64
+import contextlib
 import hmac
 import logging
 import queue
@@ -63,6 +64,13 @@ _OUTBOUND_QUEUE_MAX = 256
 _QUEUE_DROP_BUDGET = 8
 
 _SHUTDOWN_SENTINEL: bytes = b""
+
+# EventBus origin string marking a change as caused by an RPC client (the
+# agent). Synchronous emits inside an RPC handler are tagged via
+# ``bus.acting_as(_AGENT_ORIGIN)``; async terminal emits carry it on their
+# operation's lease. Changes with this origin are not tallied into agent
+# clients' change buffers (they already know about their own actions).
+_AGENT_ORIGIN = "agent"
 
 
 @dataclass(frozen=True)
@@ -183,10 +191,6 @@ class RemoteControlService:
         # EventBus subscriptions registered in start(); unsubscribed in stop().
         self._bus: Optional[EventBus] = None
         self._bus_subs: list[tuple[GuiEvent, Callable[[Payload], None]]] = []
-        # The client whose RPC handler is currently executing on the main
-        # thread (set around each marshalled handler). Change-buffer bumps skip
-        # it so a connection is not "notified" of its own RPC-caused changes.
-        self._originating_state: Optional[_ClientState] = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -355,17 +359,20 @@ class RemoteControlService:
         wire_name = wire_event_name(event)
 
         def _on_event(payload: Payload) -> None:
-            # Runs on the Qt main thread (EventBus emits synchronously).
-            # Tally into every client's change buffer first (independent of
-            # whether they subscribed to the push), skipping the originator.
+            # Runs on the Qt main thread (EventBus emits synchronously, so the
+            # bus's current_origin still reflects the change being emitted).
+            # Tally into every agent client's change buffer first (independent
+            # of whether they subscribed to the push), skipping changes the
+            # agent itself caused (origin == "agent").
             cat = category_for(event, payload)
+            origin = self._bus.current_origin if self._bus is not None else ""
             logger.debug(
-                "event-flow: bus event=%s -> category=%s (originating=%s)",
+                "event-flow: bus event=%s -> category=%s (origin=%s)",
                 event.value,
                 cat,
-                self._originating_state.peer if self._originating_state else None,
+                origin,
             )
-            if cat is not None:
+            if cat is not None and origin != _AGENT_ORIGIN:
                 self._bump_change_buffer(cat[0], cat[1])
             try:
                 wire_payload = serializer(payload)
@@ -386,29 +393,20 @@ class RemoteControlService:
         return _on_event
 
     def _bump_change_buffer(self, category: str, object_id: Optional[str]) -> None:
-        """Tally a GUI change into every client's buffer, skipping originator.
+        """Tally a GUI change into every client's buffer.
 
-        Runs on the Qt main thread. The originating connection (the one whose
-        RPC handler caused this change) is skipped so it is not notified of /
-        guarded against its own action.
+        Runs on the Qt main thread. Caller (``_on_event``) has already excluded
+        changes the agent itself caused (origin == "agent"), so every change
+        reaching here is "by someone else" from each agent client's viewpoint.
         """
         key = (category, object_id)
         with self._clients_lock:
             clients = list(self._clients.values())
-        bumped = 0
-        skipped_originator = 0
         for state in clients:
-            if state is self._originating_state:
-                skipped_originator += 1
-                continue
             state.change_buffer[key] = state.change_buffer.get(key, 0) + 1
-            bumped += 1
         logger.debug(
-            "event-flow: bump %s -> %d client(s) tallied, %d skipped (originator), "
-            "%d total clients",
+            "event-flow: bump %s -> %d client(s) tallied",
             key,
-            bumped,
-            skipped_originator,
             len(clients),
         )
 
@@ -849,36 +847,59 @@ class RemoteControlService:
         self._reply_ok(state, rid=rid, result={"subscribed": sorted(state.subscribed)})
 
     def _dispatch_on_main(self, state: _ClientState, rid, method, spec, params) -> None:
-        done = threading.Event()
         holder: dict[str, object] = {}
 
-        def _run() -> None:
-            # Runs on the Qt main thread (where the change buffer is written and
-            # CfgEditorService lives), so the stale guard reads consistent state.
-            # Mark this client as the originator so synchronous EventBus emits
-            # inside the handler don't bump its own change buffer.
-            self._originating_state = state
+        if spec.off_main_thread:
+            # Blocking handler (e.g. device.wait_setup): run on THIS IO worker
+            # thread, never the main thread — marshalling it onto the main
+            # thread would deadlock (it would occupy the event loop that must
+            # dispatch the worker signal it awaits). It must only do thread-safe
+            # waiting and must not touch the change buffer / stale guard /
+            # origin scope, so none of those are set here.
             try:
-                self._guard_stale(state, method, params)
                 holder["result"] = spec.handler(self._ctrl, params)
             except RemoteError as exc:
                 holder["remote_error"] = exc
             except Exception as exc:  # noqa: BLE001 — Controller error envelope
-                logger.exception("handler raised: %s", exc)
+                logger.exception("off-main handler raised: %s", exc)
                 holder["controller_error"] = exc
-            finally:
-                self._originating_state = None
-                done.set()
+        else:
+            done = threading.Event()
 
-        self._dispatcher.invoke.emit(_run)
-        if not done.wait(timeout=spec.timeout_seconds):
-            self._reply_error(
-                state,
-                rid=rid,
-                code=ErrorCode.TIMEOUT,
-                message=f"handler did not complete within {spec.timeout_seconds}s",
-            )
-            return
+            def _run() -> None:
+                # Runs on the Qt main thread (where the change buffer is written
+                # and CfgEditorService lives), so the stale guard reads
+                # consistent state. ``acting_as`` tags synchronous EventBus emits
+                # inside the handler as agent-caused so they don't bump the
+                # agent's own change buffer; operations that start async work
+                # also acquire their lease inside this scope, carrying the
+                # origin onto the lease for the later terminal emit.
+                origin_scope = (
+                    self._bus.acting_as(_AGENT_ORIGIN)
+                    if self._bus is not None
+                    else contextlib.nullcontext()
+                )
+                try:
+                    with origin_scope:
+                        self._guard_stale(state, method, params)
+                        holder["result"] = spec.handler(self._ctrl, params)
+                except RemoteError as exc:
+                    holder["remote_error"] = exc
+                except Exception as exc:  # noqa: BLE001 — Controller error envelope
+                    logger.exception("handler raised: %s", exc)
+                    holder["controller_error"] = exc
+                finally:
+                    done.set()
+
+            self._dispatcher.invoke.emit(_run)
+            if not done.wait(timeout=spec.timeout_seconds):
+                self._reply_error(
+                    state,
+                    rid=rid,
+                    code=ErrorCode.TIMEOUT,
+                    message=f"handler did not complete within {spec.timeout_seconds}s",
+                )
+                return
         if "remote_error" in holder:
             exc = holder["remote_error"]
             assert isinstance(exc, RemoteError)

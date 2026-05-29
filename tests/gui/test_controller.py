@@ -215,6 +215,7 @@ def test_run_finished_emits_run_lock_release(cf):
     cf.bus.emit.assert_any_call(
         GuiEvent.RUN_LOCK_CHANGED,
         RunLockChangedPayload(running_tab_id=None, tab_id=tab_id, outcome="finished"),
+        origin="",
     )
 
 

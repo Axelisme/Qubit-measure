@@ -70,7 +70,9 @@ class RunService(QObject):
         self._active_pbar_factory = pbar_factory
         logger.info("start_run: tab_id=%r", tab_id)
 
-        lease = self._gate.acquire(OperationKind.RUN, owner_id=tab_id)
+        lease = self._gate.acquire(
+            OperationKind.RUN, owner_id=tab_id, origin=self._bus.current_origin
+        )
         self._active_lease = lease
         try:
             self._runner.start_run(
@@ -122,10 +124,11 @@ class RunService(QObject):
         self._clear_active_factory()
         self._state.update_tab_result(tab_id, result)
         self._state.set_tab_running(tab_id, False)
-        self._release_lease()
+        origin = self._release_lease()
         self._bus.emit(
             GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
+            origin=origin,
         )
         was_cancelled = tab_id in self._cancel_requested_tabs
         self._cancel_requested_tabs.discard(tab_id)
@@ -136,6 +139,7 @@ class RunService(QObject):
                 tab_id=tab_id,
                 outcome="cancelled" if was_cancelled else "finished",
             ),
+            origin=origin,
         )
         self.run_finished.emit(tab_id, result)
 
@@ -143,10 +147,11 @@ class RunService(QObject):
         logger.warning("_on_run_failed: tab_id=%r error=%r", tab_id, error)
         self._clear_active_factory()
         self._state.set_tab_running(tab_id, False)
-        self._release_lease()
+        origin = self._release_lease()
         self._bus.emit(
             GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
+            origin=origin,
         )
         was_cancelled = tab_id in self._cancel_requested_tabs
         self._cancel_requested_tabs.discard(tab_id)
@@ -158,12 +163,21 @@ class RunService(QObject):
                 outcome="cancelled" if was_cancelled else "failed",
                 error_message=None if was_cancelled else str(error),
             ),
+            origin=origin,
         )
         self.run_failed.emit(tab_id, error)
 
-    def _release_lease(self) -> None:
+    def _release_lease(self) -> str:
+        """Release the active RUN lease and return its origin.
+
+        The origin lets the terminal RUN_LOCK_CHANGED / TAB_INTERACTION_CHANGED
+        emits be attributed to whoever started the run, even though they fire
+        after the lease is released (run worker callback, outside the sync RPC
+        scope).
+        """
         lease = self._active_lease
         if lease is None:
             raise RuntimeError("Run completed without an active operation lease")
         self._active_lease = None
         self._gate.release(lease)
+        return lease.origin

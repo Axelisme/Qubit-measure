@@ -63,6 +63,10 @@ class BoundMethod:
     def params(self) -> tuple[ParamSpec, ...]:
         return self.spec.params
 
+    @property
+    def off_main_thread(self) -> bool:
+        return self.spec.off_main_thread
+
 
 # ---------------------------------------------------------------------------
 # Tab handlers
