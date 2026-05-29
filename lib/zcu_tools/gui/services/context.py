@@ -17,8 +17,9 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import EventBus
-    from zcu_tools.gui.io_manager import IOManager
     from zcu_tools.gui.state import State
+
+    from .ports import ProjectIOPort
 
 
 class MlEntryValidationError(RuntimeError):
@@ -84,7 +85,7 @@ class ContextService:
     def __init__(
         self,
         state: "State",
-        io_manager: "IOManager",
+        io_manager: "ProjectIOPort",
         bus: "EventBus",
     ) -> None:
         self._state = state

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from zcu_tools.gui.event_bus import (
     EventBus,
@@ -15,9 +16,11 @@ from .session_persistence import (
     PersistedSession,
     PersistedTab,
     SessionPersistenceError,
-    SessionPersistenceService,
 )
 from .tab import TabService
+
+if TYPE_CHECKING:
+    from .ports import SessionStorePort
 
 
 @dataclass(frozen=True)
@@ -39,7 +42,7 @@ class WorkspaceService:
         self,
         state: State,
         tabs: TabService,
-        persistence: SessionPersistenceService,
+        persistence: "SessionStorePort",
         bus: EventBus,
     ) -> None:
         self._state = state

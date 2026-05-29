@@ -41,6 +41,8 @@ if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import EventBus
     from zcu_tools.gui.state import State
 
+    from .ports import DriverFactoryPort
+
 logger = logging.getLogger(__name__)
 
 
@@ -256,7 +258,7 @@ class DeviceService(QObject):
         state: "State",
         gate: OperationGate | None = None,
         parent: Optional[QObject] = None,
-        driver_factory: Optional[Callable[[str, str], DeviceProtocol]] = None,
+        driver_factory: Optional["DriverFactoryPort"] = None,
     ) -> None:
         super().__init__(parent)
         self._bus = bus

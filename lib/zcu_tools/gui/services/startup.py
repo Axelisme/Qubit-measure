@@ -15,11 +15,12 @@ from .startup_persistence import (
     PersistedDeviceEntry,
     PersistedStartup,
     StartupPersistenceError,
-    StartupPersistenceService,
 )
 
 if TYPE_CHECKING:
     from zcu_tools.gui.state import State
+
+    from .ports import StartupStorePort
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ class StartupService:
         self,
         context: ContextService,
         devices: DeviceService,
-        persistence: StartupPersistenceService,
+        persistence: "StartupStorePort",
         state: "State",
         bus: EventBus,
     ) -> None:
