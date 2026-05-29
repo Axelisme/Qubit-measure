@@ -118,6 +118,13 @@ class Controller:
         self._workspace_svc = services.workspace
         self._startup_svc = services.startup
 
+        # CfgEditorService needs the Controller itself (as LiveModel env +
+        # ModuleLibrary registration surface), so it is built here rather than
+        # in build_app_services, which has no Controller reference yet.
+        from .services.cfg_editor import CfgEditorService
+
+        self._cfg_editor_svc = CfgEditorService(self)
+
         self._run_svc.run_finished.connect(self._on_run_finished)
         self._run_svc.run_failed.connect(self._on_run_failed)
         self._analyze_svc.analyze_finished.connect(self._on_analyze_finished)
@@ -445,6 +452,38 @@ class Controller:
 
     def del_ml_waveform(self, name: str) -> None:
         self._ctx_svc.del_ml_waveform(name)
+
+    # ------------------------------------------------------------------
+    # CfgEditor sessions (CfgEditorService) — headless ml editing for RPC
+    # ------------------------------------------------------------------
+
+    def open_cfg_editor(
+        self,
+        item_kind: str,
+        *,
+        discriminator: Optional[str] = None,
+        from_name: Optional[str] = None,
+    ) -> tuple[str, list[dict[str, object]]]:
+        return self._cfg_editor_svc.open(
+            item_kind, discriminator=discriminator, from_name=from_name
+        )
+
+    def cfg_editor_set_field(
+        self, editor_id: str, path: str, value: object
+    ) -> dict[str, object]:
+        return self._cfg_editor_svc.set_field(editor_id, path, value)
+
+    def cfg_editor_get(self, editor_id: str) -> list[dict[str, object]]:
+        return self._cfg_editor_svc.get(editor_id)
+
+    def commit_cfg_editor(self, editor_id: str, name: str) -> None:
+        self._cfg_editor_svc.commit(editor_id, name)
+
+    def discard_cfg_editor(self, editor_id: str) -> None:
+        self._cfg_editor_svc.discard(editor_id)
+
+    def discard_cfg_editors(self, editor_ids: list[str]) -> None:
+        self._cfg_editor_svc.discard_for_client(editor_ids)
 
     # ------------------------------------------------------------------
     # Device (DeviceService)

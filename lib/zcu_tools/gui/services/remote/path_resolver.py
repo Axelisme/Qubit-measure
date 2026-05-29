@@ -427,3 +427,75 @@ def list_spec_paths(spec: CfgSectionSpec) -> list[dict[str, object]]:
     introspection; use ``list_settable_paths`` for a live tab's current values.
     """
     return _list_spec_field("", spec)
+
+
+# ---------------------------------------------------------------------------
+# Sub-tree discovery — list the leaves beneath the field a path points at
+# ---------------------------------------------------------------------------
+
+
+def _navigate(root: SectionLiveField, segments: list[str]) -> tuple["LiveField", str]:
+    """Walk ``segments`` from ``root`` to the addressed field and its root path.
+
+    Returns ``(field, base_path)`` where ``base_path`` is the dotted path that
+    ``_list_field`` should prepend so the re-listed sub-tree round-trips through
+    ``set_field``. For a ModuleRef, a trailing ``ref`` (the key) resolves back to
+    the ref *field itself* (base path without ``.ref``), because switching the
+    key rebuilds the whole ref sub-tree — that is what callers want re-listed.
+    A ``value`` segment descends into the bound sub-section.
+    """
+    field: "LiveField" = root
+    consumed: list[str] = []
+    i = 0
+    while i < len(segments):
+        head = segments[i]
+        if isinstance(field, SectionLiveField):
+            child = field.fields.get(head)
+            if child is None:
+                raise RemoteError(
+                    ErrorCode.INVALID_PARAMS,
+                    f"unknown field {head!r} in path {'.'.join(segments)!r}",
+                )
+            field = child
+            consumed.append(head)
+            i += 1
+            continue
+        if isinstance(field, ModuleRefLiveField):
+            if head == "ref":
+                # The key segment maps back to the ref field itself; its
+                # sub-tree is re-listed at the ref's own base path.
+                i += 1
+                continue
+            if head == "value":
+                sub = field.sub_field
+                if sub is None:
+                    raise RemoteError(
+                        ErrorCode.PRECONDITION_FAILED,
+                        f"module ref at {'.'.join(consumed)!r} has no sub-fields",
+                    )
+                field = sub
+                consumed.append("value")
+                i += 1
+                continue
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"module ref segment must be 'ref' or 'value', got {head!r}",
+            )
+        # Sweep / multi-sweep edges are leaves — stop here; the caller lists
+        # the sweep node itself.
+        break
+    return field, ".".join(consumed)
+
+
+def list_subtree_paths(root: SectionLiveField, path: str) -> list[dict[str, object]]:
+    """Return the settable leaves beneath the field addressed by ``path``.
+
+    After a ``resolve_and_set`` mutation (especially a ModuleRef key switch that
+    rebuilds the sub-tree), this re-lists only what changed. A scalar path
+    returns its own single entry; a ref/section path returns the freshly-bound
+    sub-tree. Paths are rooted so they round-trip through ``set_field``.
+    """
+    if not path:
+        return list_settable_paths(root)
+    field, base_path = _navigate(root, path.split("."))
+    return _list_field(base_path, field)
