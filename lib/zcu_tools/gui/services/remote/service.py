@@ -36,6 +36,14 @@ from qtpy.QtCore import QObject, Qt, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.event_bus import EventBus, GuiEvent, Payload
 
+from .change_categories import (
+    CAT_CFG_EDITED,
+    CAT_CONTEXT_CHANGED,
+    CAT_DEVICE_CHANGED,
+    CAT_SOC_CHANGED,
+    CAT_TAB_CHANGED,
+    category_for,
+)
 from .dispatch import METHOD_REGISTRY
 from .errors import ErrorCode, ErrorEnvelope, RemoteError
 from .events import EVENT_SERIALIZERS, wire_event_name
@@ -114,6 +122,7 @@ class _ClientState:
         "closing",
         "editor_ids",
         "subscribed_editors",
+        "change_buffer",
     )
 
     def __init__(self, peer: str, token_required: bool) -> None:
@@ -130,6 +139,10 @@ class _ClientState:
         self.editor_ids: set[str] = set()
         # CfgEditor session ids this connection subscribed to for change push.
         self.subscribed_editors: set[str] = set()
+        # Coarse GUI-change tally caused by *others* since this connection last
+        # received a summary: (category, object_id) -> count. Drives the
+        # per-reply gui_changes notification and the stale-operation guard.
+        self.change_buffer: dict[tuple[str, Optional[str]], int] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +183,10 @@ class RemoteControlService:
         # EventBus subscriptions registered in start(); unsubscribed in stop().
         self._bus: Optional[EventBus] = None
         self._bus_subs: list[tuple[GuiEvent, Callable[[Payload], None]]] = []
+        # The client whose RPC handler is currently executing on the main
+        # thread (set around each marshalled handler). Change-buffer bumps skip
+        # it so a connection is not "notified" of its own RPC-caused changes.
+        self._originating_state: Optional[_ClientState] = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -316,6 +333,11 @@ class RemoteControlService:
                 logger.exception("Failed to subscribe %s on EventBus", event)
                 continue
             self._bus_subs.append((event, cb))
+        logger.debug(
+            "event-flow: subscribed %d EventBus events for push+buffer: %s",
+            len(self._bus_subs),
+            [e.value for e, _ in self._bus_subs],
+        )
 
     def _unsubscribe_event_bus(self) -> None:
         if self._bus is None:
@@ -334,6 +356,17 @@ class RemoteControlService:
 
         def _on_event(payload: Payload) -> None:
             # Runs on the Qt main thread (EventBus emits synchronously).
+            # Tally into every client's change buffer first (independent of
+            # whether they subscribed to the push), skipping the originator.
+            cat = category_for(event, payload)
+            logger.debug(
+                "event-flow: bus event=%s -> category=%s (originating=%s)",
+                event.value,
+                cat,
+                self._originating_state.peer if self._originating_state else None,
+            )
+            if cat is not None:
+                self._bump_change_buffer(cat[0], cat[1])
             try:
                 wire_payload = serializer(payload)
             except Exception:  # pragma: no cover — serializer must not raise
@@ -351,6 +384,33 @@ class RemoteControlService:
             self._broadcast(wire_name, line)
 
         return _on_event
+
+    def _bump_change_buffer(self, category: str, object_id: Optional[str]) -> None:
+        """Tally a GUI change into every client's buffer, skipping originator.
+
+        Runs on the Qt main thread. The originating connection (the one whose
+        RPC handler caused this change) is skipped so it is not notified of /
+        guarded against its own action.
+        """
+        key = (category, object_id)
+        with self._clients_lock:
+            clients = list(self._clients.values())
+        bumped = 0
+        skipped_originator = 0
+        for state in clients:
+            if state is self._originating_state:
+                skipped_originator += 1
+                continue
+            state.change_buffer[key] = state.change_buffer.get(key, 0) + 1
+            bumped += 1
+        logger.debug(
+            "event-flow: bump %s -> %d client(s) tallied, %d skipped (originator), "
+            "%d total clients",
+            key,
+            bumped,
+            skipped_originator,
+            len(clients),
+        )
 
     def _broadcast(self, wire_name: str, line: bytes) -> None:
         with self._clients_lock:
@@ -387,6 +447,14 @@ class RemoteControlService:
         subscribed to ``editor_id`` receive it. On editor_closed we also drop
         the id from every client's subscription set.
         """
+        # Tally cfg edits into the change buffer (skip originator). editor_closed
+        # is a tab/session lifecycle signal -> tab_changed; editor_changed is a
+        # cfg edit -> cfg_edited, keyed by editor_id so the stale guard can match
+        # a run/commit that depends on that editor.
+        if event_name == "editor_changed":
+            self._bump_change_buffer(CAT_CFG_EDITED, editor_id)
+        elif event_name == "editor_closed":
+            self._bump_change_buffer(CAT_TAB_CHANGED, editor_id)
         body = dict(payload)
         body["editor_id"] = editor_id
         try:
@@ -670,6 +738,12 @@ class RemoteControlService:
                     state, req.id, req.params, subscribe=False
                 )
                 return
+            # changes.poll drains this connection's change buffer on demand
+            # (state-owning). Like any reply it read-clears via _reply_ok, so
+            # "polling" counts as being informed and releases the stale guard.
+            if req.method == "changes.poll":
+                self._reply_ok(state, rid=req.id, result={})
+                return
             spec = METHOD_REGISTRY.get(req.method)
             if spec is None:
                 self._reply_error(
@@ -779,7 +853,13 @@ class RemoteControlService:
         holder: dict[str, object] = {}
 
         def _run() -> None:
+            # Runs on the Qt main thread (where the change buffer is written and
+            # CfgEditorService lives), so the stale guard reads consistent state.
+            # Mark this client as the originator so synchronous EventBus emits
+            # inside the handler don't bump its own change buffer.
+            self._originating_state = state
             try:
+                self._guard_stale(state, method, params)
                 holder["result"] = spec.handler(self._ctrl, params)
             except RemoteError as exc:
                 holder["remote_error"] = exc
@@ -787,6 +867,7 @@ class RemoteControlService:
                 logger.exception("handler raised: %s", exc)
                 holder["controller_error"] = exc
             finally:
+                self._originating_state = None
                 done.set()
 
         self._dispatcher.invoke.emit(_run)
@@ -819,6 +900,101 @@ class RemoteControlService:
         self._track_editor_lifecycle(state, method, params, result)
         self._reply_ok(state, rid=rid, result=result)  # type: ignore[arg-type]
 
+    def _guard_stale(self, state: _ClientState, method: str, params) -> None:
+        """Block a high-risk op if a *dependency* was changed by someone else.
+
+        An inform-once gate: it raises ``PRECONDITION_FAILED`` only while the
+        change buffer still holds an un-surfaced change affecting the op's
+        dependency. The error reply drains the buffer (``_reply_error`` →
+        ``_drain_change_buffer``), so the agent is informed and an immediate
+        retry passes — past that point it is the agent's responsibility.
+
+        Runs on the Qt main thread (called from the marshalled handler), so
+        reading ``change_buffer`` and resolving tab→editor is consistent.
+        """
+        if method == "run.start":
+            tab_id = params.get("tab_id") if hasattr(params, "get") else None
+            if not isinstance(tab_id, str):
+                return
+            editor_id = self._safe_editor_id_for_owner(tab_id)
+            # A run depends on everything that affects its result: the tab's own
+            # cfg (keyed by its editor) and existence, plus the global inputs it
+            # lowers/runs against — SoC (hardware), active context (cfg evals
+            # against md / references ml) and devices (flux bias / sources used
+            # by the run). Derived categories (run_changed, predictor_changed)
+            # are NOT inputs and are excluded (they'd self-block / false-positive).
+            tab_stale = self._buffer_has(
+                state, CAT_CFG_EDITED, editor_id
+            ) or self._buffer_has(state, CAT_TAB_CHANGED, tab_id)
+            global_stale = (
+                self._buffer_has_global(state, CAT_SOC_CHANGED)
+                or self._buffer_has_global(state, CAT_CONTEXT_CHANGED)
+                or self._buffer_has_device(state)
+            )
+            if tab_stale or global_stale:
+                logger.debug(
+                    "event-flow: stale guard BLOCK run.start tab=%s editor=%s "
+                    "tab_stale=%s global_stale=%s (buffer=%s)",
+                    tab_id,
+                    editor_id,
+                    tab_stale,
+                    global_stale,
+                    dict(state.change_buffer),
+                )
+                raise RemoteError(
+                    ErrorCode.PRECONDITION_FAILED,
+                    f"tab {tab_id!r} or a global resource (SoC / active context) "
+                    "was changed in the GUI since you last saw it; review then retry",
+                    reason="stale_tab",
+                )
+        elif method == "editor.commit":
+            editor_id = params.get("editor_id") if hasattr(params, "get") else None
+            if not isinstance(editor_id, str):
+                return
+            # commit lowers the draft's EvalValues against the current MetaDict
+            # (e.g. freq=r_f -> concrete), so a context/md/ml change shifts what
+            # the commit lands — same reasoning as run depending on context.
+            # (SoC/device don't affect lowering, so they don't block commit.)
+            if self._buffer_has(
+                state, CAT_CFG_EDITED, editor_id
+            ) or self._buffer_has_global(state, CAT_CONTEXT_CHANGED):
+                raise RemoteError(
+                    ErrorCode.PRECONDITION_FAILED,
+                    f"editor {editor_id!r} or the active context was changed in "
+                    "the GUI since you last saw it; review then retry",
+                    reason="stale_editor",
+                )
+
+    @staticmethod
+    def _buffer_has(
+        state: _ClientState, category: str, object_id: Optional[str]
+    ) -> bool:
+        if object_id is None:
+            return False
+        return state.change_buffer.get((category, object_id), 0) > 0
+
+    @staticmethod
+    def _buffer_has_global(state: _ClientState, category: str) -> bool:
+        """True if a global (object-less) change of ``category`` is buffered."""
+        return state.change_buffer.get((category, None), 0) > 0
+
+    @staticmethod
+    def _buffer_has_device(state: _ClientState) -> bool:
+        """True if any device change is buffered (keyed by device name or None)."""
+        return any(
+            cat == CAT_DEVICE_CHANGED and count > 0
+            for (cat, _obj), count in state.change_buffer.items()
+        )
+
+    def _safe_editor_id_for_owner(self, owner_key: str) -> Optional[str]:
+        getter = getattr(self._ctrl, "editor_id_for_owner", None)
+        if getter is None:
+            return None
+        try:
+            return getter(owner_key)
+        except Exception:  # pragma: no cover — defensive
+            return None
+
     def _track_editor_lifecycle(
         self, state: _ClientState, method: str, params, result
     ) -> None:
@@ -842,8 +1018,36 @@ class RemoteControlService:
     # Reply helpers (enqueue onto outbound queue; never write directly)
     # ------------------------------------------------------------------
 
+    def _drain_change_buffer(
+        self, state: _ClientState
+    ) -> Optional[list[dict[str, object]]]:
+        """Snapshot + clear a client's change buffer for a reply (read-clears).
+
+        Returns a JSON-safe summary list, or ``None`` when empty. Draining here
+        is what counts as the agent "having been informed" — it both surfaces
+        the notification and releases the stale guard for those items.
+        """
+        if not state.change_buffer:
+            return None
+        summary = [
+            {"category": cat, "object_id": obj, "count": count}
+            for (cat, obj), count in sorted(
+                state.change_buffer.items(), key=lambda kv: (kv[0][0], kv[0][1] or "")
+            )
+        ]
+        logger.debug(
+            "event-flow: drain %d change(s) to client %s (read-clears): %s",
+            len(summary),
+            state.peer,
+            summary,
+        )
+        state.change_buffer.clear()
+        return summary
+
     def _reply_ok(self, state: _ClientState, *, rid: str, result) -> None:
-        resp = Response(id=rid, ok=True, result=result)
+        resp = Response(
+            id=rid, ok=True, result=result, gui_changes=self._drain_change_buffer(state)
+        )
         try:
             line = encode_line(resp.to_wire())
         except Exception:
@@ -861,7 +1065,9 @@ class RemoteControlService:
         reason: str = "",
     ) -> None:
         env = ErrorEnvelope(code=code.value, message=message, reason=reason)
-        resp = Response(id=rid, ok=False, error=env)
+        resp = Response(
+            id=rid, ok=False, error=env, gui_changes=self._drain_change_buffer(state)
+        )
         try:
             line = encode_line(resp.to_wire())
         except Exception:
