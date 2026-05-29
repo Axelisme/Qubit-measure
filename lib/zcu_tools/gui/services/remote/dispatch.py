@@ -1045,6 +1045,89 @@ def _h_writeback_apply(ctrl, params: Mapping[str, object]) -> Mapping[str, objec
 
 
 # ---------------------------------------------------------------------------
+# CfgEditor session handlers (headless ml editing)
+# ---------------------------------------------------------------------------
+
+
+def _h_editor_open(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    from zcu_tools.gui.services.cfg_editor import CfgEditorError
+
+    item_kind = str(params["item_kind"])
+    disc_raw = params.get("discriminator")
+    from_raw = params.get("from_name")
+    discriminator = str(disc_raw) if disc_raw is not None else None
+    from_name = str(from_raw) if from_raw is not None else None
+    try:
+        editor_id, paths = ctrl.open_cfg_editor(
+            item_kind, discriminator=discriminator, from_name=from_name
+        )
+    except CfgEditorError as exc:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    return {"editor_id": editor_id, "paths": paths}
+
+
+def _h_editor_set_field(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    from zcu_tools.gui.services.cfg_editor import CfgEditorError
+
+    editor_id = str(params["editor_id"])
+    path = str(params["path"])
+    value = params["value"]
+    try:
+        return ctrl.cfg_editor_set_field(editor_id, path, value)
+    except CfgEditorError as exc:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    except RemoteError:
+        raise
+    except (KeyError, RuntimeError) as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
+
+
+def _h_editor_get(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    from zcu_tools.gui.services.cfg_editor import CfgEditorError
+
+    editor_id = str(params["editor_id"])
+    try:
+        return {"paths": ctrl.cfg_editor_get(editor_id)}
+    except CfgEditorError as exc:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+
+
+def _h_editor_commit(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    from zcu_tools.gui.services.cfg_editor import CfgEditorError
+
+    editor_id = str(params["editor_id"])
+    name = str(params["name"])
+    try:
+        ctrl.commit_cfg_editor(editor_id, name)
+    except CfgEditorError as exc:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    except MlEntryValidationError as exc:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    except RuntimeError as exc:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
+    return {}
+
+
+def _h_editor_discard(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    from zcu_tools.gui.services.cfg_editor import CfgEditorError
+
+    editor_id = str(params["editor_id"])
+    try:
+        ctrl.discard_cfg_editor(editor_id)
+    except CfgEditorError as exc:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    return {}
+
+
+# ---------------------------------------------------------------------------
 # Run progress handler
 # ---------------------------------------------------------------------------
 
@@ -1240,6 +1323,11 @@ _HANDLERS: dict[str, Handler] = {
     "tab.get_cfg_summary": _h_tab_get_cfg_summary,
     "writeback.preview": _h_writeback_preview,
     "writeback.apply": _h_writeback_apply,
+    "editor.open": _h_editor_open,
+    "editor.set_field": _h_editor_set_field,
+    "editor.get": _h_editor_get,
+    "editor.commit": _h_editor_commit,
+    "editor.discard": _h_editor_discard,
 }
 
 # Every spec must have a handler and vice versa — fail fast on drift.

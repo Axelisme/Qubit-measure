@@ -379,4 +379,54 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "unlisted keys keep their default selected state. Returns applied_keys.",
         (_str("tab_id"), _json("selections", "List of per-key adjustments")),
     ),
+    # CfgEditor sessions — headless, stateful ml-entry editing for the agent.
+    "editor.open": MethodSpec(
+        5.0,
+        "Open a stateful editing session for a ModuleLibrary module/waveform. "
+        "item_kind is 'module' or 'waveform'. Provide 'discriminator' (module "
+        "type e.g. 'pulse'/'readout/direct', or waveform style e.g. 'const'/"
+        "'gauss') for a blank entry, OR 'from_name' to load an existing ml entry "
+        "for editing. Returns {editor_id, paths} (paths = settable dotted paths "
+        "with current values, same shape as tab.list_paths).",
+        (
+            _str("item_kind", "'module' or 'waveform'"),
+            _str_opt(
+                "discriminator", "Module type or waveform style for a blank entry"
+            ),
+            _str_opt("from_name", "Existing ml entry name to load for editing"),
+        ),
+    ),
+    "editor.set_field": MethodSpec(
+        5.0,
+        "Set one field in an editing session. 'path' is a dotted path from "
+        "editor.open/get; 'value' is a JSON scalar, or an md-reference expression "
+        'as {"__kind":"eval","expr":"r_f - 0.1"} (resolved against MetaDict '
+        "at commit). Returns {paths, valid}: 'paths' is the sub-tree rooted at the "
+        "changed path (a ModuleRef key switch via '<path>.ref' rebuilds and returns "
+        "the newly-available sub-fields); 'valid' is whether the whole draft is "
+        "currently valid.",
+        (
+            _str("editor_id"),
+            _str("path", "Dotted field path"),
+            _json("value", "JSON scalar or {__kind:eval, expr}"),
+        ),
+    ),
+    "editor.get": MethodSpec(
+        5.0,
+        "List all settable paths + current values of an editing session.",
+        (_str("editor_id"),),
+    ),
+    "editor.commit": MethodSpec(
+        10.0,
+        "Lower the session (eval expressions resolved against MetaDict to concrete "
+        "numbers) and register it into the ModuleLibrary under 'name'. On success "
+        "the session is destroyed; on validation failure it is kept so you can fix "
+        "and retry.",
+        (_str("editor_id"), _str("name", "ml entry name to register under")),
+    ),
+    "editor.discard": MethodSpec(
+        5.0,
+        "Discard an editing session without writing to the ModuleLibrary.",
+        (_str("editor_id"),),
+    ),
 }

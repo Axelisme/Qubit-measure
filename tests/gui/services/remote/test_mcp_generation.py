@@ -54,3 +54,24 @@ def test_generated_optional_param_not_required():
     tool = m.TOOLS["gui_tab_snapshot"]
     assert "required" not in tool["inputSchema"]
     assert "tab_id" in tool["inputSchema"]["properties"]
+
+
+def test_cfg_editor_tools_generated():
+    expected = {
+        "gui_editor_open",
+        "gui_editor_set_field",
+        "gui_editor_get",
+        "gui_editor_commit",
+        "gui_editor_discard",
+    }
+    assert expected.issubset(set(m.TOOLS))
+
+    open_tool = m.TOOLS["gui_editor_open"]
+    assert open_tool["inputSchema"]["required"] == ["item_kind"]
+    props = open_tool["inputSchema"]["properties"]
+    assert "discriminator" in props and "from_name" in props
+
+    # 'value' is a JSON kind (scalar OR the tagged eval object) — its schema
+    # must not pin a single type.
+    value_schema = m.TOOLS["gui_editor_set_field"]["inputSchema"]["properties"]["value"]
+    assert "type" not in value_schema or isinstance(value_schema.get("type"), list)
