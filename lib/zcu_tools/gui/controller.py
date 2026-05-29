@@ -468,6 +468,21 @@ class Controller:
             item_kind, discriminator=discriminator, from_name=from_name
         )
 
+    def register_delegated_cfg_editor(self, owner_key: str, root: Any) -> str:
+        """Register a widget's live LiveModel as a shared cfg-editor session."""
+        return self._cfg_editor_svc.register_delegated_session(owner_key, root)
+
+    def close_cfg_editor(self, editor_id: str) -> None:
+        """Close a session registration without tearing down its LiveModel."""
+        self._cfg_editor_svc.close(editor_id)
+
+    def editor_id_for_owner(self, owner_key: str) -> Optional[str]:
+        return self._cfg_editor_svc.editor_id_for_owner(owner_key)
+
+    def set_cfg_editor_change_listener(self, listener: Any) -> None:
+        """Wire the per-session push listener (remote layer injects this)."""
+        self._cfg_editor_svc.set_change_listener(listener)
+
     def cfg_editor_set_field(
         self, editor_id: str, path: str, value: object
     ) -> dict[str, object]:
