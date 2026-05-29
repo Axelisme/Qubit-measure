@@ -66,6 +66,35 @@ def _resolve_field_info(
 T = TypeVar("T")
 
 
+def describe_analyze_params(params_cls: type) -> list[dict[str, Any]]:
+    """Reflect an analyze-params dataclass into a JSON-safe field spec list.
+
+    Each entry: ``{name, type, label, choices?, decimals?, default?}``. Reuses
+    ``_resolve_field_info`` so the description matches the runtime contract.
+    Returns ``[]`` for non-dataclass types (e.g. ``NoAnalyzeParams``).
+    """
+    if not dataclasses.is_dataclass(params_cls):
+        return []
+    fields = dataclasses.fields(params_cls)
+    hints = get_type_hints(params_cls, include_extras=True)
+    out: list[dict[str, Any]] = []
+    for field in fields:
+        bare_type, choices, label, decimals = _resolve_field_info(field, hints)
+        entry: dict[str, Any] = {
+            "name": field.name,
+            "type": bare_type.__name__,
+            "label": label,
+        }
+        if choices is not None:
+            entry["choices"] = list(choices)
+        if decimals is not None:
+            entry["decimals"] = decimals
+        if field.default is not dataclasses.MISSING:
+            entry["default"] = field.default
+        out.append(entry)
+    return out
+
+
 def reconstruct_params(params_cls: type[T], form_values: dict[str, Any]) -> T:
     if not dataclasses.is_dataclass(params_cls):
         raise TypeError(f"Analyze params must be a dataclass type: {params_cls!r}")

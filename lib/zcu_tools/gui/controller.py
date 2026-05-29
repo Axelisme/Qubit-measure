@@ -678,3 +678,11 @@ class Controller:
 
     def get_adapter_names(self) -> list[str]:
         return self._tab_svc.list_adapter_names()
+
+    def get_adapter_cfg_spec(self, adapter_name: str):
+        """Static cfg spec of an adapter (no tab/context needed)."""
+        return self._tab_svc.adapter_cfg_spec(adapter_name)
+
+    def get_adapter_analyze_params(self, adapter_name: str) -> list[dict]:
+        """Static analyze-params field spec of an adapter ([] if unsupported)."""
+        return self._tab_svc.adapter_analyze_params(adapter_name)

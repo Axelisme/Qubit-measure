@@ -286,6 +286,20 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0, "Read one device cached snapshot", (_str("name", "Device name"),)
     ),
     "adapter.list": MethodSpec(5.0, "List available adapters"),
+    "adapter.cfg_spec": MethodSpec(
+        5.0,
+        "List an adapter's static cfg paths (path/kind/type/choices/label) "
+        "without building a tab. ModuleRef/WaveformRef expose every allowed "
+        "option's sub-fields under value.<label>. Use tab.list_paths for a "
+        "live tab's current values.",
+        (_str("adapter_name", "Adapter to introspect"),),
+    ),
+    "adapter.analyze_spec": MethodSpec(
+        5.0,
+        "Describe an adapter's analyze params (name/type/choices/label/default). "
+        "Returns empty params when the adapter has no analysis.",
+        (_str("adapter_name", "Adapter to introspect"),),
+    ),
     # Dialog / view
     "dialog.open": MethodSpec(
         10.0, "Open a named dialog", (_str("name", "Dialog name"),)

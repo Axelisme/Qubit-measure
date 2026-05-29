@@ -4,7 +4,7 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Optional
 
-from zcu_tools.gui.adapter import CfgSchema, SavePaths
+from zcu_tools.gui.adapter import CfgSchema, CfgSectionSpec, SavePaths
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,19 @@ class TabService:
 
     def list_adapter_names(self) -> list[str]:
         return self._registry.list_names()
+
+    def adapter_cfg_spec(self, adapter_name: str) -> "CfgSectionSpec":
+        """Static cfg spec of an adapter — no tab/context needed."""
+        return self._registry.create(adapter_name).cfg_spec()
+
+    def adapter_analyze_params(self, adapter_name: str) -> list[dict]:
+        """Static analyze-params field spec, or [] when analysis unsupported."""
+        from zcu_tools.gui.adapter import describe_analyze_params
+
+        adapter = self._registry.create(adapter_name)
+        if not adapter.capabilities.supports_analysis:
+            return []
+        return describe_analyze_params(adapter.analyze_params_cls())
 
     def close_tab(self, tab_id: str) -> None:
         logger.info("close_tab: tab_id=%r", tab_id)

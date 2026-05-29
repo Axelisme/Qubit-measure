@@ -358,3 +358,59 @@ def test_connect_start_mock_ok(fx):
         fx.ctrl.start_connect.assert_called_once()
     finally:
         sock.close()
+
+
+# ---------------------------------------------------------------------------
+# Adapter spec queries (no tab needed)
+# ---------------------------------------------------------------------------
+
+
+def test_adapter_cfg_spec_lists_paths_without_tab(fx):
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "adapter.cfg_spec", {"adapter_name": "onetone/fake_freq"})
+        assert resp["ok"] is True
+        paths = {p["path"] for p in resp["result"]["paths"]}
+        assert "sweep.freq.expts" in paths
+        assert "model.freq" in paths
+        # a sweep edge carries integer/number type
+        expts = next(
+            p for p in resp["result"]["paths"] if p["path"] == "sweep.freq.expts"
+        )
+        assert expts["kind"] == "sweep_edge"
+        assert expts["type"] == "integer"
+    finally:
+        sock.close()
+
+
+def test_adapter_cfg_spec_unknown_rejected(fx):
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "adapter.cfg_spec", {"adapter_name": "nope/nope"})
+        assert resp["ok"] is False
+        assert resp["error"]["code"] == "invalid_params"
+    finally:
+        sock.close()
+
+
+def test_adapter_analyze_spec_reflects_params(fx):
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "adapter.analyze_spec", {"adapter_name": "onetone/fake_freq"})
+        assert resp["ok"] is True
+        params = {p["name"]: p for p in resp["result"]["params"]}
+        assert params["model_type"]["choices"] == ["hm", "t", "auto"]
+        assert params["fit_bg_slope"]["type"] == "bool"
+    finally:
+        sock.close()
+
+
+def test_adapter_analyze_spec_empty_for_no_analysis(fx):
+    # onetone/power_dep declares supports_analysis=False.
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "adapter.analyze_spec", {"adapter_name": "onetone/power_dep"})
+        assert resp["ok"] is True
+        assert resp["result"]["params"] == []
+    finally:
+        sock.close()

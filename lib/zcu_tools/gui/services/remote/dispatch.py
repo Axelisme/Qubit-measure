@@ -643,6 +643,23 @@ def _h_adapter_list(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     return {"adapters": list(ctrl.get_adapter_names())}
 
 
+def _h_adapter_cfg_spec(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    from .path_resolver import list_spec_paths
+
+    name = str(params["adapter_name"])
+    if name not in ctrl.get_adapter_names():
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown adapter: {name!r}")
+    spec = ctrl.get_adapter_cfg_spec(name)
+    return {"paths": list_spec_paths(spec)}
+
+
+def _h_adapter_analyze_spec(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    name = str(params["adapter_name"])
+    if name not in ctrl.get_adapter_names():
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown adapter: {name!r}")
+    return {"params": ctrl.get_adapter_analyze_params(name)}
+
+
 def _h_device_list(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     del params
     devices = [
@@ -1096,6 +1113,8 @@ _HANDLERS: dict[str, Handler] = {
     "device.list": _h_device_list,
     "device.snapshot": _h_device_snapshot,
     "adapter.list": _h_adapter_list,
+    "adapter.cfg_spec": _h_adapter_cfg_spec,
+    "adapter.analyze_spec": _h_adapter_analyze_spec,
     "dialog.open": _h_dialog_open,
     "dialog.close": _h_dialog_close,
     "dialog.list_open": _h_dialog_list_open,

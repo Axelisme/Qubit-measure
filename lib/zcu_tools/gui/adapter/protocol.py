@@ -72,6 +72,22 @@ class AbsExpAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzePara
             return self.exp_cls().run(soc, soccfg, cfg)
         return self.exp_cls().run(req.soc, req.soccfg, cfg)
 
+    @classmethod
+    def analyze_params_cls(cls) -> type:
+        """Return the analyze-params dataclass type (static, no instance/result).
+
+        Reflected from the concrete ``get_analyze_params`` return annotation, so
+        agents can query the param schema without running an experiment. Falls
+        back to ``NoAnalyzeParams`` when the return is not annotated.
+        """
+        import typing
+
+        try:
+            hints = typing.get_type_hints(cls.get_analyze_params)
+        except Exception:
+            return NoAnalyzeParams
+        return hints.get("return", NoAnalyzeParams)
+
     @abstractmethod
     def get_analyze_params(self, result: T_Result, ctx: ExpContext) -> T_AnalyzeParams:
         """Build the analyze parameter instance presented to the user."""

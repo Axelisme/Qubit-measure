@@ -24,7 +24,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.adapter import DirectValue, EvalValue
+from zcu_tools.gui.adapter import (
+    CfgSectionSpec,
+    DeviceRefSpec,
+    DirectValue,
+    EvalValue,
+    LiteralSpec,
+    ModuleRefSpec,
+    MultiSweepSpec,
+    ScalarSpec,
+    SweepSpec,
+    WaveformRefSpec,
+)
 from zcu_tools.gui.live_model import (
     DeviceRefLiveField,
     LiteralLiveField,
@@ -39,6 +50,7 @@ from zcu_tools.gui.sweep_model import SweepEditor
 from .errors import ErrorCode, RemoteError
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.adapter import CfgNodeSpec
     from zcu_tools.gui.live_model import LiveField
 
 _SWEEP_EDGES = {"start", "stop", "expts", "step"}
@@ -336,3 +348,82 @@ def list_settable_paths(root: SectionLiveField) -> list[dict[str, object]]:
     ``cfg.set_field``. Literal (immutable) leaves are omitted.
     """
     return _list_field("", root)
+
+
+# ---------------------------------------------------------------------------
+# Static spec-tree path discovery — no context, no values (for adapter.cfg_spec)
+# ---------------------------------------------------------------------------
+
+
+def _sweep_spec_entries(path: str) -> list[dict[str, object]]:
+    return [
+        {
+            "path": f"{path}.{edge}",
+            "kind": "sweep_edge",
+            "type": "integer" if edge == "expts" else "number",
+        }
+        for edge in ("start", "stop", "expts", "step")
+    ]
+
+
+def _list_spec_field(path: str, node: "CfgNodeSpec") -> list[dict[str, object]]:
+    """Recurse one spec node, returning settable leaves (no current value).
+
+    The static analogue of ``_list_field``: it walks the spec tree instead of a
+    live LiveModel, so an adapter's shape can be listed without a tab/context.
+    ModuleRef/WaveformRef expose *every* allowed option's sub-fields under
+    ``value.<label>`` (the live version only shows the chosen one).
+    """
+    if isinstance(node, LiteralSpec):
+        return []  # immutable
+    if isinstance(node, ScalarSpec):
+        entry: dict[str, object] = {
+            "path": path,
+            "kind": "scalar",
+            "type": node.type.__name__,
+            "label": node.label,
+        }
+        if node.choices is not None:
+            entry["choices"] = list(node.choices)
+        return [entry]
+    if isinstance(node, SweepSpec):
+        return _sweep_spec_entries(path)
+    if isinstance(node, MultiSweepSpec):
+        out: list[dict[str, object]] = []
+        for axis in node.axes:
+            out.extend(_sweep_spec_entries(f"{path}.{axis}"))
+        return out
+    if isinstance(node, DeviceRefSpec):
+        return [{"path": f"{path}.device", "kind": "deviceref", "type": "string"}]
+    if isinstance(node, (ModuleRefSpec, WaveformRefSpec)):
+        kind = "moduleref_key" if isinstance(node, ModuleRefSpec) else "waveformref_key"
+        out = [
+            {
+                "path": f"{path}.ref",
+                "kind": kind,
+                "type": "string",
+                "choices": [s.label for s in node.allowed],
+            }
+        ]
+        for section in node.allowed:
+            for key, child in section.fields.items():
+                out.extend(
+                    _list_spec_field(f"{path}.value.{section.label}.{key}", child)
+                )
+        return out
+    if isinstance(node, CfgSectionSpec):
+        out = []
+        for key, child in node.fields.items():
+            out.extend(_list_spec_field(f"{path}.{key}" if path else key, child))
+        return out
+    return []
+
+
+def list_spec_paths(spec: CfgSectionSpec) -> list[dict[str, object]]:
+    """Enumerate an adapter's settable cfg paths from its static spec tree.
+
+    Like ``list_settable_paths`` but over a pure ``CfgSectionSpec`` (no values,
+    no live model), so it works without building a tab. Use for adapter
+    introspection; use ``list_settable_paths`` for a live tab's current values.
+    """
+    return _list_spec_field("", spec)
