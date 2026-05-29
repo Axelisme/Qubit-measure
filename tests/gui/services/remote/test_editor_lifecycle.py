@@ -81,3 +81,73 @@ def test_reclaim_noop_when_no_sessions():
     state = _state()
     svc._reclaim_editors(state, marshal=False)
     ctrl.discard_cfg_editors.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Per-editor change stream routing (_on_editor_event)
+# ---------------------------------------------------------------------------
+
+
+def _enqueued_events(state):
+    """Decode every line currently queued on a client's outbound queue."""
+    import json
+
+    out = []
+    while not state.outbound.empty():
+        line = state.outbound.get_nowait()
+        out.append(json.loads(line.decode("utf-8")))
+    return out
+
+
+def test_editor_event_only_to_subscribers():
+    svc, _ = _service()
+    sub = _state()
+    sub.subscribed_editors.add("editor-1")
+    other = _state()
+    with svc._clients_lock:
+        svc._clients[object()] = sub  # type: ignore[index]
+        svc._clients[object()] = other  # type: ignore[index]
+
+    svc._on_editor_event("editor-1", "editor_changed", {"paths": []})
+
+    sub_events = _enqueued_events(sub)
+    assert len(sub_events) == 1
+    assert sub_events[0]["event"] == "editor_changed"
+    assert sub_events[0]["payload"]["editor_id"] == "editor-1"
+    # non-subscriber got nothing.
+    assert _enqueued_events(other) == []
+
+
+def test_editor_closed_clears_subscription():
+    svc, _ = _service()
+    state = _state()
+    state.subscribed_editors.add("editor-1")
+    with svc._clients_lock:
+        svc._clients[object()] = state  # type: ignore[index]
+
+    svc._on_editor_event("editor-1", "editor_closed", {"reason": "tab_closed"})
+
+    events = _enqueued_events(state)
+    assert events[0]["event"] == "editor_closed"
+    assert events[0]["payload"]["reason"] == "tab_closed"
+    # subscription auto-dropped after close push.
+    assert "editor-1" not in state.subscribed_editors
+
+
+def test_editor_subscribe_handler_updates_state():
+    svc, _ = _service()
+    state = _state()
+    svc._handle_editor_subscribe(state, "1", {"editor_id": "editor-9"}, subscribe=True)
+    assert state.subscribed_editors == {"editor-9"}
+    svc._handle_editor_subscribe(state, "2", {"editor_id": "editor-9"}, subscribe=False)
+    assert state.subscribed_editors == set()
+
+
+def test_editor_subscribe_rejects_bad_id():
+    from zcu_tools.gui.services.remote.errors import ErrorCode, RemoteError
+
+    svc, _ = _service()
+    state = _state()
+    with pytest.raises(RemoteError) as ei:
+        svc._handle_editor_subscribe(state, "1", {"editor_id": ""}, subscribe=True)
+    assert ei.value.code == ErrorCode.INVALID_PARAMS

@@ -113,6 +113,7 @@ class _ClientState:
         "consecutive_drops",
         "closing",
         "editor_ids",
+        "subscribed_editors",
     )
 
     def __init__(self, peer: str, token_required: bool) -> None:
@@ -127,6 +128,8 @@ class _ClientState:
         self.closing: bool = False
         # CfgEditor session ids opened by this connection; reclaimed on drop.
         self.editor_ids: set[str] = set()
+        # CfgEditor session ids this connection subscribed to for change push.
+        self.subscribed_editors: set[str] = set()
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +202,7 @@ class RemoteControlService:
         self._wake_r, self._wake_w = wake_r, wake_w
 
         self._subscribe_event_bus()
+        self._wire_editor_change_listener()
 
         self._thread = threading.Thread(
             target=self._serve_forever, name="RemoteControlServer", daemon=True
@@ -222,8 +226,9 @@ class RemoteControlService:
             return
         self._stopping.set()
 
-        # 1) Unsubscribe EventBus first so no more push enqueues happen.
+        # 1) Unsubscribe EventBus + editor change stream so no more enqueues.
         self._unsubscribe_event_bus()
+        self._unwire_editor_change_listener()
 
         # 2) Signal every writer to exit; join them.
         with self._clients_lock:
@@ -354,6 +359,51 @@ class RemoteControlService:
             if wire_name not in state.subscribed:
                 continue
             self._enqueue(state, line, is_push=True)
+
+    # ------------------------------------------------------------------
+    # CfgEditor per-session change stream (independent of EventBus)
+    # ------------------------------------------------------------------
+
+    def _wire_editor_change_listener(self) -> None:
+        """Inject ``_on_editor_event`` into the CfgEditorService (via ctrl)."""
+        setter = getattr(self._ctrl, "set_cfg_editor_change_listener", None)
+        if setter is None:
+            logger.warning(
+                "Controller has no set_cfg_editor_change_listener(); "
+                "editor change push disabled"
+            )
+            return
+        setter(self._on_editor_event)
+
+    def _unwire_editor_change_listener(self) -> None:
+        setter = getattr(self._ctrl, "set_cfg_editor_change_listener", None)
+        if setter is not None:
+            setter(None)
+
+    def _on_editor_event(self, editor_id: str, event_name: str, payload: dict) -> None:
+        """Push a per-editor notification. Runs on the Qt main thread.
+
+        ``event_name`` ∈ {editor_changed, editor_closed}. Only clients that
+        subscribed to ``editor_id`` receive it. On editor_closed we also drop
+        the id from every client's subscription set.
+        """
+        body = dict(payload)
+        body["editor_id"] = editor_id
+        try:
+            line = encode_line({"event": event_name, "payload": body})
+        except Exception:
+            logger.exception(
+                "failed to encode editor push %s/%s", editor_id, event_name
+            )
+            return
+        with self._clients_lock:
+            clients = list(self._clients.values())
+        for state in clients:
+            if editor_id not in state.subscribed_editors:
+                continue
+            self._enqueue(state, line, is_push=True)
+            if event_name == "editor_closed":
+                state.subscribed_editors.discard(editor_id)
 
     def _enqueue(self, state: _ClientState, line: bytes, *, is_push: bool) -> None:
         if state.closing:
@@ -610,6 +660,16 @@ class RemoteControlService:
                     },
                 )
                 return
+            # editor.subscribe/unsubscribe are state-owning (per-connection
+            # editor subscription set), so handled here, not via dispatch.
+            if req.method == "editor.subscribe":
+                self._handle_editor_subscribe(state, req.id, req.params, subscribe=True)
+                return
+            if req.method == "editor.unsubscribe":
+                self._handle_editor_subscribe(
+                    state, req.id, req.params, subscribe=False
+                )
+                return
             spec = METHOD_REGISTRY.get(req.method)
             if spec is None:
                 self._reply_error(
@@ -659,6 +719,27 @@ class RemoteControlService:
                 code=ErrorCode.UNAUTHORIZED,
                 message="invalid token",
             )
+
+    def _handle_editor_subscribe(
+        self, state: _ClientState, rid: str, params, *, subscribe: bool
+    ) -> None:
+        editor_id = params.get("editor_id")
+        if not isinstance(editor_id, str) or not editor_id:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, "'editor_id' must be a non-empty string"
+            )
+        # No existence check: subscription is a pure per-connection filter. A
+        # client may subscribe before/around open; pushes only flow for live
+        # sessions, and editor_closed cleans the set.
+        if subscribe:
+            state.subscribed_editors.add(editor_id)
+        else:
+            state.subscribed_editors.discard(editor_id)
+        self._reply_ok(
+            state,
+            rid=rid,
+            result={"subscribed_editors": sorted(state.subscribed_editors)},
+        )
 
     def _handle_subscribe(self, state: _ClientState, rid: str, params) -> None:
         events = params.get("events")

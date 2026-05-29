@@ -514,6 +514,16 @@ def tool_gui_events_list(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return send_gui_rpc("events.list", {})
 
 
+def tool_gui_editor_subscribe(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    editor_id = str(arguments["editor_id"])
+    return send_gui_rpc("editor.subscribe", {"editor_id": editor_id})
+
+
+def tool_gui_editor_unsubscribe(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    editor_id = str(arguments["editor_id"])
+    return send_gui_rpc("editor.unsubscribe", {"editor_id": editor_id})
+
+
 def tool_gui_events_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
     """Drain up to ``max_events`` queued event pushes, blocking briefly."""
     timeout_seconds = float(arguments.get("timeout_seconds", 5.0))
@@ -835,6 +845,37 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },
+    "gui_editor_subscribe": {
+        "handler": tool_gui_editor_subscribe,
+        "description": (
+            "Subscribe to a cfg-editor session's change stream. After this, "
+            "editor_changed (any field edit, by you OR a GUI user) and "
+            "editor_closed (session ended: committed/discarded/tab_closed/"
+            "evicted/disconnected) pushes for this editor_id are delivered to "
+            "gui_events_poll. Get a tab's editor_id from gui_tab_snapshot. "
+            "Essential when editing a tab cfg an interactive user may also touch: "
+            "it lets you notice your value being overwritten."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "editor_id": {
+                    "type": "string",
+                    "description": "Editor session id (from gui_tab_snapshot or gui_editor_open)",
+                }
+            },
+            "required": ["editor_id"],
+        },
+    },
+    "gui_editor_unsubscribe": {
+        "handler": tool_gui_editor_unsubscribe,
+        "description": "Stop receiving a cfg-editor session's change/close pushes.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"editor_id": {"type": "string"}},
+            "required": ["editor_id"],
+        },
+    },
     "gui_events_poll": {
         "handler": tool_gui_events_poll,
         "description": (
@@ -1015,6 +1056,8 @@ _OVERRIDE_NAMES = frozenset(
         "gui_events_unsubscribe",
         "gui_events_list",
         "gui_events_poll",
+        "gui_editor_subscribe",
+        "gui_editor_unsubscribe",
     }
 )
 

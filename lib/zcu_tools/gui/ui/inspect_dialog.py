@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, Optional
 
@@ -133,14 +134,26 @@ class _MlConfigDialog(QDialog):
                 )
             self._type_combo.setCurrentIndex(index)
 
+        # Stable owner key for this dialog's delegated cfg-editor session, so
+        # re-populate (type switch) re-registers the same logical owner.
+        self._cfg_editor_owner = f"inspect-{uuid.uuid4().hex[:8]}"
+
         self._name_edit.textChanged.connect(self._validate)
         self._type_combo.currentTextChanged.connect(self._on_type_changed)
         self._form_widget.validity_changed.connect(self._validate)
         cancel_btn.clicked.connect(self.reject)
         self._save_btn.clicked.connect(self._on_save)
+        # Drop the delegated session when the dialog closes (the form's own
+        # teardown happens via Qt destruction; close only unregisters).
+        self.finished.connect(self._close_cfg_editor)
 
         self._on_type_changed(self._type_combo.currentText())
         self._validate()
+
+    def _close_cfg_editor(self, *_: Any) -> None:
+        editor_id = self._ctrl.editor_id_for_owner(self._cfg_editor_owner)
+        if editor_id is not None:
+            self._ctrl.close_cfg_editor(editor_id)
 
     @property
     def _discriminator_label(self) -> str:
@@ -182,6 +195,11 @@ class _MlConfigDialog(QDialog):
     def _on_type_changed(self, type_str: str) -> None:
         schema = self._schema_for_discriminator(type_str)
         self._form_widget.populate(schema, self._ctrl)
+        # Re-register the freshly-built model under the same owner key (the
+        # previous registration, if any, is closed by register_delegated).
+        root = self._form_widget.get_live_root()
+        if root is not None:
+            self._ctrl.register_delegated_cfg_editor(self._cfg_editor_owner, root)
         self._validate()
 
     def _validate(self, *_: Any) -> None:

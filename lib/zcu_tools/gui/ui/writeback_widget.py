@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import uuid
 from typing import TYPE_CHECKING, Any, Optional, Sequence
 
 from qtpy.QtCore import Qt, Signal  # type: ignore[attr-defined]
@@ -228,6 +229,13 @@ class WritebackWidget(QWidget):
         form_widget = CfgFormWidget()
         schema = copy.deepcopy(item.edited_schema or item.edit_schema)
         form_widget.populate(schema, self._ctrl)
+        # Register this local-draft model as a delegated cfg-editor session so
+        # all cfg editing surfaces go through one mechanism (uniform change
+        # stream). Owner key is unique per edit dialog; closed on finish below.
+        editor_owner = f"writeback-{uuid.uuid4().hex[:8]}"
+        editor_root = form_widget.get_live_root()
+        if editor_root is not None:
+            self._ctrl.register_delegated_cfg_editor(editor_owner, editor_root)
         initial_valid = form_widget.is_valid()
         logger.debug(
             "_edit_cfg_item: key=%r initial_valid=%r schema_spec=%r",
@@ -245,6 +253,11 @@ class WritebackWidget(QWidget):
         btn_row.addWidget(save_btn)
         btn_row.addWidget(cancel_btn)
         layout.addLayout(btn_row)
+
+        def _close_editor(*_: Any) -> None:
+            editor_id = self._ctrl.editor_id_for_owner(editor_owner)
+            if editor_id is not None:
+                self._ctrl.close_cfg_editor(editor_id)
 
         form_widget.validity_changed.connect(save_btn.setEnabled)
         cancel_btn.clicked.connect(dialog.reject)
@@ -264,6 +277,7 @@ class WritebackWidget(QWidget):
 
         save_btn.clicked.connect(save)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.finished.connect(_close_editor)
         dialog.finished.connect(lambda _: form_widget.clear())
         dialog.open()
 
