@@ -22,7 +22,7 @@ from zcu_tools.gui.event_bus import (
     DeviceSetupChangedPayload,
     GuiEvent,
 )
-from zcu_tools.gui.state import DeviceStatus
+from zcu_tools.gui.state import DeviceState, DeviceStatus
 
 from .device_progress import (
     DeviceSetupProgressFactory,
@@ -98,6 +98,14 @@ class DeviceMemoryInfo:
 
 @dataclass(frozen=True)
 class DeviceSnapshot:
+    """Read-time projection of a device for View / remote readers.
+
+    Assembled by ``DeviceService._project`` from the State-owned ``DeviceState``
+    (name/type/address/status/info/error) plus the live setup ``progress``
+    (owned by ``DeviceSetupProgressModel``, spliced only for the active setup).
+    It is never stored — State is the device-state SSOT.
+    """
+
     name: str
     type_name: str
     address: str
@@ -255,24 +263,29 @@ class DeviceService(QObject):
         self._state = state
         self._gate = gate or OperationGate()
         self._driver_factory = driver_factory or _default_driver_factory
-        self._snapshots: dict[str, DeviceSnapshot] = {}
+        # Device state lives in State (the SSOT). This service holds only the
+        # live driver (in GlobalDeviceManager), the worker threads, the setup
+        # progress model and the in-flight operation transient below.
         self._progress = DeviceSetupProgressModel(parent=self)
         self.progress_model = self._progress  # public read-only alias for UI attachment
         self._active_lease: OperationLease | None = None
         self._active_name: str | None = None
-        self._active_prior: DeviceSnapshot | None = None
+        # Rollback buffer for the in-flight transition (worker-bound, not
+        # serializable, so it stays here rather than in State).
+        self._active_prior: DeviceState | None = None
         self._command_worker: _DeviceCommandWorker | None = None
         self._setup_worker: _DeviceSetupWorker | None = None
 
     def start_connect_device(self, req: ConnectDeviceRequest) -> None:
-        current = self._snapshots.get(req.name)
+        current = self._state.get_device(req.name)
         if current is not None and current.status is not DeviceStatus.MEMORY_ONLY:
             raise RuntimeError(f"Device {req.name!r} is already connected or busy")
-        initial = current or DeviceSnapshot(
+        initial = current or DeviceState(
             name=req.name,
             type_name=req.type_name,
             address=req.address,
             status=DeviceStatus.MEMORY_ONLY,
+            remember=req.remember,
         )
         self._begin_operation(
             OperationKind.DEVICE_CONNECT,
@@ -287,20 +300,20 @@ class DeviceService(QObject):
         self._start_command_worker(worker, req.name)
 
     def start_reconnect_device(self, name: str) -> None:
-        snapshot = self._require_snapshot(name)
-        if snapshot.status is not DeviceStatus.MEMORY_ONLY:
+        dev = self._require_device(name)
+        if dev.status is not DeviceStatus.MEMORY_ONLY:
             raise RuntimeError(f"Device {name!r} is not a memory-only device")
         self.start_connect_device(
             ConnectDeviceRequest(
-                type_name=snapshot.type_name,
-                name=snapshot.name,
-                address=snapshot.address,
+                type_name=dev.type_name,
+                name=dev.name,
+                address=dev.address,
                 remember=True,
             )
         )
 
     def start_disconnect_device(self, req: DisconnectDeviceRequest) -> None:
-        current = self._require_connected_snapshot(req.name)
+        current = self._require_connected_device(req.name)
         self._begin_operation(
             OperationKind.DEVICE_DISCONNECT,
             req.name,
@@ -314,7 +327,7 @@ class DeviceService(QObject):
         self._start_command_worker(worker, req.name)
 
     def start_set_device_value(self, req: SetDeviceValueRequest) -> None:
-        current = self._require_connected_snapshot(req.name)
+        current = self._require_connected_device(req.name)
         self._begin_operation(
             OperationKind.DEVICE_SET_VALUE,
             req.name,
@@ -332,17 +345,17 @@ class DeviceService(QObject):
     def start_setup_device(self, req: SetupDeviceRequest) -> int:
         from zcu_tools.device import GlobalDeviceManager
 
-        current = self._require_connected_snapshot(req.name)
-        dev = cast(DeviceProtocol, GlobalDeviceManager.get_device(req.name))
+        current = self._require_connected_device(req.name)
+        driver = cast(DeviceProtocol, GlobalDeviceManager.get_device(req.name))
         self._begin_operation(
             OperationKind.DEVICE_SETUP,
             req.name,
-            replace(current, status=DeviceStatus.SETTING_UP, error=None, progress=()),
+            replace(current, status=DeviceStatus.SETTING_UP, error=None),
         )
         assert self._active_lease is not None  # set by _begin_operation
         token = self._active_lease.token
         worker = _DeviceSetupWorker(
-            dev,
+            driver,
             req.name,
             req.info,
             DeviceSetupProgressFactory(self._progress),
@@ -371,34 +384,58 @@ class DeviceService(QObject):
 
     def register_remembered_devices(self, entries: list[DeviceMemoryInfo]) -> None:
         for entry in entries:
-            current = self._snapshots.get(entry.name)
+            current = self._state.get_device(entry.name)
             if current is not None and current.status is not DeviceStatus.MEMORY_ONLY:
                 logger.warning("Ignoring remembered live device %r", entry.name)
                 continue
-            self._snapshots[entry.name] = DeviceSnapshot(
-                name=entry.name,
-                type_name=entry.type_name,
-                address=entry.address,
-                status=DeviceStatus.MEMORY_ONLY,
+            self._state.put_device(
+                DeviceState(
+                    name=entry.name,
+                    type_name=entry.type_name,
+                    address=entry.address,
+                    status=DeviceStatus.MEMORY_ONLY,
+                    remember=True,
+                )
             )
 
     def forget_device(self, name: str) -> None:
-        snapshot = self._require_snapshot(name)
-        if snapshot.status is not DeviceStatus.MEMORY_ONLY:
+        dev = self._require_device(name)
+        if dev.status is not DeviceStatus.MEMORY_ONLY:
             raise RuntimeError(f"Device {name!r} is not a memory-only device")
-        del self._snapshots[name]
+        self._state.remove_device(name)
         self._emit_device_changed(name)
 
+    def _project(self, dev: DeviceState) -> DeviceSnapshot:
+        """Assemble the read-time projection of a device-state entry.
+
+        Splices live setup ``progress`` only for the device that is the active
+        setup; every other field comes straight from State.
+        """
+        progress: tuple[ProgressEntrySnapshot, ...] = ()
+        if dev.status is DeviceStatus.SETTING_UP and dev.name == self._active_name:
+            progress = self._progress.snapshot()
+        return DeviceSnapshot(
+            name=dev.name,
+            type_name=dev.type_name,
+            address=dev.address,
+            status=dev.status,
+            info=dev.info,
+            progress=progress,
+            error=dev.error,
+        )
+
     def list_device_snapshots(self) -> tuple[DeviceSnapshot, ...]:
-        return tuple(self._snapshots[name] for name in sorted(self._snapshots))
+        return tuple(self._project(dev) for dev in self._state.list_devices())
 
     def get_device_snapshot(self, name: str) -> DeviceSnapshot | None:
-        return self._snapshots.get(name)
+        dev = self._state.get_device(name)
+        return None if dev is None else self._project(dev)
 
     def get_active_device_operation(self) -> DeviceSnapshot | None:
         if self._active_name is None:
             return None
-        return self._snapshots.get(self._active_name)
+        dev = self._state.get_device(self._active_name)
+        return None if dev is None else self._project(dev)
 
     def get_active_setup(self) -> Optional[DeviceSetupSnapshot]:
         snapshot = self.get_active_device_operation()
@@ -433,35 +470,37 @@ class DeviceService(QObject):
         ]
 
     def is_memory_device(self, name: str) -> bool:
-        snapshot = self._snapshots.get(name)
-        return snapshot is not None and snapshot.status is DeviceStatus.MEMORY_ONLY
+        dev = self._state.get_device(name)
+        return dev is not None and dev.status is DeviceStatus.MEMORY_ONLY
 
     def get_memory_device_address(self, name: str) -> Optional[str]:
-        snapshot = self._snapshots.get(name)
-        if snapshot is None or snapshot.status is not DeviceStatus.MEMORY_ONLY:
+        dev = self._state.get_device(name)
+        if dev is None or dev.status is not DeviceStatus.MEMORY_ONLY:
             return None
-        return snapshot.address
+        return dev.address
 
     def get_device_unit(self, name: str) -> str:
-        snapshot = self._snapshots.get(name)
-        if snapshot is None:
+        dev = self._state.get_device(name)
+        if dev is None:
             return "none"
-        if snapshot.type_name == "YOKOGS200" and snapshot.info is not None:
-            return "V" if getattr(snapshot.info, "mode", None) == "voltage" else "A"
-        return _DEVICE_DEFAULT_UNITS.get(snapshot.type_name, "none")
+        if dev.type_name == "YOKOGS200" and dev.info is not None:
+            return "V" if getattr(dev.info, "mode", None) == "voltage" else "A"
+        return _DEVICE_DEFAULT_UNITS.get(dev.type_name, "none")
 
     def get_device_info(self, name: str) -> BaseDeviceInfo | None:
         from zcu_tools.device.manager import GlobalDeviceManager
 
         self._reject_mutating_read(name)
-        snapshot = self._snapshots.get(name)
-        if snapshot is None or snapshot.status is DeviceStatus.MEMORY_ONLY:
+        dev = self._state.get_device(name)
+        if dev is None or dev.status is DeviceStatus.MEMORY_ONLY:
             return None
         try:
             info = GlobalDeviceManager.get_info(name)
         except ValueError:
             return None
-        self._snapshots[name] = replace(snapshot, info=info, error=None)
+        # Read-time cache refresh — NOT a semantic write, so this must not bump
+        # the device version (would spuriously invalidate other clients).
+        self._state.refresh_device_info_cache(name, info)
         return info
 
     def get_device_value(self, name: str) -> object:
@@ -534,21 +573,21 @@ class DeviceService(QObject):
         return device.get_info()
 
     def _begin_operation(
-        self, kind: OperationKind, name: str, pending: DeviceSnapshot
+        self, kind: OperationKind, name: str, pending: DeviceState
     ) -> None:
         lease = self._gate.acquire(kind, owner_id=name, resource_id=name)
-        prior = self._snapshots.get(name)
+        prior = self._state.get_device(name)
         self._active_lease = lease
         self._active_name = name
         self._active_prior = prior
-        self._snapshots[name] = pending
+        self._state.put_device(pending)
         try:
             self._emit_device_changed(name)
         except Exception:
             if prior is None:
-                del self._snapshots[name]
+                self._state.remove_device(name)
             else:
-                self._snapshots[name] = prior
+                self._state.put_device(prior)
             self._active_name = None
             self._active_lease = None
             self._active_prior = None
@@ -578,62 +617,71 @@ class DeviceService(QObject):
     def _abort_unstarted_operation(self, name: str) -> None:
         prior = self._active_prior
         if prior is None:
-            self._snapshots.pop(name, None)
+            if self._state.has_device(name):
+                self._state.remove_device(name)
         else:
-            self._snapshots[name] = prior
+            self._state.put_device(prior)
         self._finish_operation(
             name, OperationOutcome("failed", "operation failed to start")
         )
         self._emit_device_changed(name)
 
     def _on_connect_succeeded(self, req: ConnectDeviceRequest, info: object) -> None:
-        self._snapshots[req.name] = DeviceSnapshot(
-            name=req.name,
-            type_name=req.type_name,
-            address=req.address,
-            status=DeviceStatus.CONNECTED,
-            info=cast(BaseDeviceInfo, info),
+        self._state.put_device(
+            DeviceState(
+                name=req.name,
+                type_name=req.type_name,
+                address=req.address,
+                status=DeviceStatus.CONNECTED,
+                remember=req.remember,
+                info=cast(BaseDeviceInfo, info),
+            )
         )
         self._finish_operation(req.name, OperationOutcome("finished"))
         self._emit_device_changed(req.name)
         self.device_connected.emit(req)
 
     def _on_disconnect_succeeded(self, req: DisconnectDeviceRequest) -> None:
-        current = self._require_snapshot(req.name)
+        current = self._require_device(req.name)
         if req.remember:
-            self._snapshots[req.name] = replace(
-                current,
-                status=DeviceStatus.MEMORY_ONLY,
-                info=None,
-                progress=(),
-                error=None,
+            self._state.put_device(
+                replace(
+                    current,
+                    status=DeviceStatus.MEMORY_ONLY,
+                    info=None,
+                    error=None,
+                    remember=True,
+                )
             )
         else:
-            del self._snapshots[req.name]
+            self._state.remove_device(req.name)
         self._finish_operation(req.name, OperationOutcome("finished"))
         self._emit_device_changed(req.name)
         self.device_disconnected.emit(req)
 
     def _on_value_set_succeeded(self, name: str, info: object) -> None:
-        current = self._require_snapshot(name)
-        self._snapshots[name] = replace(
-            current,
-            status=DeviceStatus.CONNECTED,
-            info=cast(BaseDeviceInfo, info),
-            error=None,
+        current = self._require_device(name)
+        self._state.put_device(
+            replace(
+                current,
+                status=DeviceStatus.CONNECTED,
+                info=cast(BaseDeviceInfo, info),
+                error=None,
+            )
         )
         self._finish_operation(name, OperationOutcome("finished"))
         self._emit_device_changed(name)
         self.value_set.emit(name)
 
     def _on_setup_finished(self, name: str, info: object) -> None:
-        current = self._require_snapshot(name)
-        self._snapshots[name] = replace(
-            current,
-            status=DeviceStatus.CONNECTED,
-            info=cast(BaseDeviceInfo, info),
-            progress=(),
-            error=None,
+        current = self._require_device(name)
+        self._state.put_device(
+            replace(
+                current,
+                status=DeviceStatus.CONNECTED,
+                info=cast(BaseDeviceInfo, info),
+                error=None,
+            )
         )
         # release() settles the operation handle (sets the token Event and stores
         # the outcome) — may wake an off-main operation.await waiter.
@@ -647,7 +695,7 @@ class DeviceService(QObject):
         self.setup_finished.emit(name)
 
     def _on_setup_failed(self, name: str, error: str) -> None:
-        self._restore_prior_snapshot(name, error)
+        self._restore_prior_device(name, error)
         self._finish_operation(name, OperationOutcome("failed", error))
         self._clear_progress()
         self._emit_device_changed(name)
@@ -658,7 +706,7 @@ class DeviceService(QObject):
         self.setup_failed.emit(name, error)
 
     def _on_setup_cancelled(self, name: str) -> None:
-        self._restore_prior_snapshot(name, None)
+        self._restore_prior_device(name, None)
         self._finish_operation(
             name, OperationOutcome("cancelled", f"device {name!r} setup was cancelled")
         )
@@ -678,31 +726,28 @@ class DeviceService(QObject):
             and lease.kind is OperationKind.DEVICE_CONNECT
             and self._active_prior is None
         ):
-            del self._snapshots[name]
+            self._state.remove_device(name)
         else:
-            self._restore_prior_snapshot(name, message)
+            self._restore_prior_device(name, message)
         self._finish_operation(name, OperationOutcome("failed", message))
         self._emit_device_changed(name)
         self.operation_failed.emit(name, message)
 
-    def _restore_prior_snapshot(self, name: str, error: str | None) -> None:
+    def _restore_prior_device(self, name: str, error: str | None) -> None:
         prior = self._active_prior
         if prior is None:
-            pending = self._require_snapshot(name)
+            pending = self._require_device(name)
             prior = replace(
                 pending,
                 status=DeviceStatus.MEMORY_ONLY,
                 info=None,
-                progress=(),
             )
-        self._snapshots[name] = replace(prior, error=error, progress=())
+        self._state.put_device(replace(prior, error=error))
 
     def _emit_device_changed(self, name: str) -> None:
-        # Single chokepoint for every device state transition (begin / connect /
-        # disconnect / value-set / setup terminal / errors). Each caller has
-        # already written self._snapshots[name], so this is the "device resource
-        # written" point; bump its version here, on the main thread.
-        self._state.version.bump(f"device:{name}")
+        # Pure signal: every caller has already written device state through a
+        # State mutator (which bumps device:<name> on the main thread). This is
+        # the notification half only — no state write, no version bump here.
         self._bus.emit(GuiEvent.DEVICE_CHANGED, DeviceChangedPayload(name=name))
 
     def _clear_progress(self) -> None:
@@ -714,14 +759,14 @@ class DeviceService(QObject):
                 f"Cannot read device {name!r} while it is being mutated"
             )
 
-    def _require_snapshot(self, name: str) -> DeviceSnapshot:
-        snapshot = self._snapshots.get(name)
-        if snapshot is None:
+    def _require_device(self, name: str) -> DeviceState:
+        dev = self._state.get_device(name)
+        if dev is None:
             raise RuntimeError(f"Device {name!r} is not known")
-        return snapshot
+        return dev
 
-    def _require_connected_snapshot(self, name: str) -> DeviceSnapshot:
-        snapshot = self._require_snapshot(name)
-        if snapshot.status is not DeviceStatus.CONNECTED:
+    def _require_connected_device(self, name: str) -> DeviceState:
+        dev = self._require_device(name)
+        if dev.status is not DeviceStatus.CONNECTED:
             raise RuntimeError(f"Device {name!r} is not connected")
-        return snapshot
+        return dev

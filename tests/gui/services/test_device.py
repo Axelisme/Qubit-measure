@@ -258,3 +258,33 @@ def test_event_failure_before_worker_start_does_not_leak_device_lease(qapp):
         svc.start_connect_device(_req())
 
     assert svc.get_device_snapshot("dev1") is None
+
+
+def test_connect_writes_device_state_to_state_with_remember(qapp):
+    svc, _device = _make_svc()
+    state = svc._state  # white-box: State is the device-state SSOT
+    _connect(svc, ConnectDeviceRequest("FakeDevice", "dev1", "addr", remember=False))
+    dev = state.get_device("dev1")
+    assert dev is not None
+    assert dev.status is DeviceStatus.CONNECTED
+    # `remember` is now persistent device state, not a transient request attribute.
+    assert dev.remember is False
+
+
+def test_get_device_info_read_does_not_bump_version(qapp):
+    svc, device = _make_svc()
+    state = svc._state
+    _connect(svc, _req())
+    before = state.version.get("device:dev1")
+
+    device.get_info.return_value = FakeDeviceInfo(address="addr", value=2.0)
+    info = svc.get_device_info("dev1")
+
+    assert info is not None and getattr(info, "value", None) == 2.0
+    # Read-time cache refresh must not advance the version (decision: bump ==
+    # semantic write, not cache refresh) — else a pure read would spuriously
+    # invalidate another client's expected_versions.
+    assert state.version.get("device:dev1") == before
+    # but the cached info on State is refreshed
+    cached = state.get_device("dev1")
+    assert cached is not None and getattr(cached.info, "value", None) == 2.0
