@@ -124,7 +124,7 @@ def test_device_setup_builds_request_from_live_info_and_updates(fx):
     fx.ctrl.get_device_info = MagicMock(  # type: ignore[method-assign]
         return_value=FakeDeviceInfo(address="none", value=0.0)
     )
-    fx.ctrl.start_setup_device = MagicMock()  # type: ignore[method-assign]
+    fx.ctrl.start_setup_device = MagicMock(return_value=7)  # type: ignore[method-assign]
     sock = open_client(fx.service.port)
     try:
         resp = call(sock, "device.setup", {"name": "bias", "updates": {"value": 1.5}})
@@ -350,7 +350,7 @@ def test_connect_start_remote_missing_ip_rejected(fx):
 
 
 def test_connect_start_mock_ok(fx):
-    fx.ctrl.start_connect = MagicMock()  # type: ignore[method-assign]
+    fx.ctrl.start_connect = MagicMock(return_value=3)  # type: ignore[method-assign]
     sock = open_client(fx.service.port)
     try:
         resp = call(sock, "connect.start", {"kind": "mock"})

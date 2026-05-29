@@ -231,14 +231,14 @@ def _h_run_start(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     try:
-        ctrl.start_run(tab_id)
+        operation_id = ctrl.start_run(tab_id)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
             str(exc),
             reason=getattr(exc, "reason_code", ""),
         ) from exc
-    return {}
+    return {"operation_id": operation_id}
 
 
 def _h_run_cancel(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
@@ -523,8 +523,8 @@ def _h_session_restore(ctrl, params: Mapping[str, object]) -> Mapping[str, objec
 
 def _h_connect_start(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     req = coerce_connect_request(params)
-    ctrl.start_connect(req)
-    return {}
+    operation_id = ctrl.start_connect(req)
+    return {"operation_id": operation_id}
 
 
 def _h_startup_apply(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
@@ -631,14 +631,16 @@ def _h_device_setup(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     except ValueError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     try:
-        ctrl.start_setup_device(SetupDeviceRequest(name=name, info=updated))
+        operation_id = ctrl.start_setup_device(
+            SetupDeviceRequest(name=name, info=updated)
+        )
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
             str(exc),
             reason=getattr(exc, "reason_code", ""),
         ) from exc
-    return {}
+    return {"operation_id": operation_id}
 
 
 def _h_device_cancel_operation(
@@ -752,18 +754,26 @@ def _h_device_active_operation(
     }
 
 
-def _h_device_wait_setup(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    name = str(params["name"])
+def _h_operation_await(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    # off_main_thread handler: blocks the IO worker thread on the gate's
+    # thread-safe registry (never touches main-thread-owned state). Returns the
+    # terminal outcome; failed/cancelled become a PRECONDITION_FAILED so the
+    # caller's await raises (mirrors the old wait_setup "failed -> raise").
+    operation_id = int(params["operation_id"])  # type: ignore[arg-type]
     timeout = float(params["timeout"])  # type: ignore[arg-type]
-    try:
-        ctrl.wait_device_setup_done(name, timeout)
-    except RuntimeError as exc:
+    outcome = ctrl.await_operation(operation_id, timeout)
+    if outcome is None:
+        raise RemoteError(
+            ErrorCode.TIMEOUT,
+            f"operation {operation_id} did not complete within {timeout}s",
+        )
+    if outcome.status in ("failed", "cancelled"):
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
-    return {"done": True}
+            outcome.error or f"operation {outcome.status}",
+            reason=outcome.status,
+        )
+    return {"status": outcome.status}
 
 
 # ---------------------------------------------------------------------------
@@ -1314,7 +1324,7 @@ _HANDLERS: dict[str, Handler] = {
     "device.cancel_operation": _h_device_cancel_operation,
     "device.active_setup": _h_device_active_setup,
     "device.active_operation": _h_device_active_operation,
-    "device.wait_setup": _h_device_wait_setup,
+    "operation.await": _h_operation_await,
     "device.list": _h_device_list,
     "device.snapshot": _h_device_snapshot,
     "adapter.list": _h_adapter_list,

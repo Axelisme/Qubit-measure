@@ -15,6 +15,7 @@ from zcu_tools.gui.services.operation_gate import (
     OperationGate,
     OperationKind,
     OperationLease,
+    OperationOutcome,
 )
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
@@ -175,12 +176,13 @@ class ConnectionService(QObject):
     # Connect (async-shaped API)
     # ------------------------------------------------------------------
 
-    def start_connect(self, req: ConnectRequest) -> None:
+    def start_connect(self, req: ConnectRequest) -> int:
         """Start a SoC connect; outcome always arrives via signals.
 
         Mock connects complete synchronously and dispatch their signal via
         QTimer.singleShot(0, ...) so the View sees a consistent async flow.
-        Remote connects run on a background _ConnectWorker.
+        Remote connects run on a background _ConnectWorker. Returns the
+        operation token (handle).
         """
         if not isinstance(req, (ConnectMockRequest, ConnectRemoteRequest)):
             raise TypeError(f"Unsupported connect request: {type(req).__name__}")
@@ -202,37 +204,37 @@ class ConnectionService(QObject):
             except Exception as exc:
                 error = f"Mock SoC initialisation failed: {exc}"
                 QTimer.singleShot(0, lambda err=error: self._finish_failure(err))
-                return
+                return lease.token
             QTimer.singleShot(0, lambda: self._finish_success(soc, soccfg))
-            return
+            return lease.token
 
-        if isinstance(req, ConnectRemoteRequest):
-            ip = req.ip
-            port = req.port
-            logger.info("start_connect: remote %s:%d", ip, port)
+        # ConnectRemoteRequest
+        ip = req.ip
+        port = req.port
+        logger.info("start_connect: remote %s:%d", ip, port)
 
-            def connect_callable() -> Tuple[SocHandle, SocCfgHandle]:
-                try:
-                    from zcu_tools.remote import make_soc_proxy
-                except ImportError as exc:
-                    raise SoCConnectionError(
-                        f"Cannot import ZCU client libraries: {exc}. "
-                        "Use MockSoc for offline testing."
-                    ) from exc
-                return make_soc_proxy(ip, port)
-
+        def connect_callable() -> Tuple[SocHandle, SocCfgHandle]:
             try:
-                worker = _ConnectWorker(connect_callable, parent=self)
-                self._active_worker = worker
-                worker.connected.connect(self._on_remote_connected)
-                worker.failed.connect(self._on_remote_failed)
-                worker.finished.connect(worker.deleteLater)
-                worker.start()
-            except Exception:
-                self._active_worker = None
-                self._release_lease()
-                raise
-            return
+                from zcu_tools.remote import make_soc_proxy
+            except ImportError as exc:
+                raise SoCConnectionError(
+                    f"Cannot import ZCU client libraries: {exc}. "
+                    "Use MockSoc for offline testing."
+                ) from exc
+            return make_soc_proxy(ip, port)
+
+        try:
+            worker = _ConnectWorker(connect_callable, parent=self)
+            self._active_worker = worker
+            worker.connected.connect(self._on_remote_connected)
+            worker.failed.connect(self._on_remote_failed)
+            worker.finished.connect(worker.deleteLater)
+            worker.start()
+        except Exception:
+            self._active_worker = None
+            self._release_lease(OperationOutcome("failed", "connect failed to start"))
+            raise
+        return lease.token
 
     def _on_remote_connected(self, soc: object, soccfg: object) -> None:
         self._active_worker = None
@@ -246,19 +248,19 @@ class ConnectionService(QObject):
         try:
             self._apply_connection(soc, soccfg)
         finally:
-            self._release_lease()
+            self._release_lease(OperationOutcome("finished"))
         self.connection_finished.emit()
 
     def _finish_failure(self, error: str) -> None:
-        self._release_lease()
+        self._release_lease(OperationOutcome("failed", error))
         self.connection_failed.emit(error)
 
-    def _release_lease(self) -> None:
+    def _release_lease(self, outcome: OperationOutcome) -> None:
         lease = self._active_lease
         if lease is None:
             raise RuntimeError("Connection completed without an active operation lease")
         self._active_lease = None
-        self._gate.release(lease)
+        self._gate.release(lease, outcome)
 
     def _apply_connection(self, soc: SocHandle, soccfg: SocCfgHandle) -> None:
         new_ctx = dataclasses.replace(self._state.exp_context, soc=soc, soccfg=soccfg)

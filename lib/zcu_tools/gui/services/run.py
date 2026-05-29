@@ -16,6 +16,7 @@ from zcu_tools.gui.services.operation_gate import (
     OperationGate,
     OperationKind,
     OperationLease,
+    OperationOutcome,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,11 +59,11 @@ class RunService(QObject):
         permit: RunPermit,
         pbar_factory: Optional[Any] = None,
         live_container: Optional[FigureContainer] = None,
-    ) -> None:
+    ) -> int:
         # Static preconditions (context readiness, committed-cfg validity, soc
         # capability) are proven by the RunPermit. Dynamic resource availability
         # (tab busy, hardware exclusion) is checked here at the operation
-        # boundary — see docs/adr/0001.
+        # boundary — see docs/adr/0001. Returns the operation token (handle).
         tab_id = permit.tab_id
         if self._state.is_tab_busy(tab_id):
             raise RuntimeError(f"Tab {tab_id!r} is busy")
@@ -83,7 +84,8 @@ class RunService(QObject):
             )
         except Exception:
             self._active_lease = None
-            self._gate.release(lease)
+            # The run never started; settle the handle as failed.
+            self._gate.release(lease, OperationOutcome("failed", "run failed to start"))
             raise
         self._state.set_tab_running(tab_id, True)
         self._bus.emit(
@@ -94,6 +96,7 @@ class RunService(QObject):
             GuiEvent.RUN_LOCK_CHANGED,
             RunLockChangedPayload(running_tab_id=tab_id, tab_id=tab_id, outcome=None),
         )
+        return lease.token
 
     def get_run_progress(self) -> Tuple[Any, ...]:
         from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
@@ -122,12 +125,14 @@ class RunService(QObject):
         self._clear_active_factory()
         self._state.update_tab_result(tab_id, result)
         self._state.set_tab_running(tab_id, False)
-        self._release_lease()
+        was_cancelled = tab_id in self._cancel_requested_tabs
+        self._release_lease(
+            OperationOutcome("cancelled" if was_cancelled else "finished")
+        )
         self._bus.emit(
             GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
-        was_cancelled = tab_id in self._cancel_requested_tabs
         self._cancel_requested_tabs.discard(tab_id)
         self._bus.emit(
             GuiEvent.RUN_LOCK_CHANGED,
@@ -143,12 +148,17 @@ class RunService(QObject):
         logger.warning("_on_run_failed: tab_id=%r error=%r", tab_id, error)
         self._clear_active_factory()
         self._state.set_tab_running(tab_id, False)
-        self._release_lease()
+        was_cancelled = tab_id in self._cancel_requested_tabs
+        self._release_lease(
+            OperationOutcome(
+                "cancelled" if was_cancelled else "failed",
+                None if was_cancelled else str(error),
+            )
+        )
         self._bus.emit(
             GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
-        was_cancelled = tab_id in self._cancel_requested_tabs
         self._cancel_requested_tabs.discard(tab_id)
         self._bus.emit(
             GuiEvent.RUN_LOCK_CHANGED,
@@ -161,9 +171,9 @@ class RunService(QObject):
         )
         self.run_failed.emit(tab_id, error)
 
-    def _release_lease(self) -> None:
+    def _release_lease(self, outcome: OperationOutcome) -> None:
         lease = self._active_lease
         if lease is None:
             raise RuntimeError("Run completed without an active operation lease")
         self._active_lease = None
-        self._gate.release(lease)
+        self._gate.release(lease, outcome)

@@ -8,7 +8,10 @@ from zcu_tools.gui.services.operation_gate import (
     OperationConflictError,
     OperationGate,
     OperationKind,
+    OperationOutcome,
 )
+
+_FINISHED = OperationOutcome("finished")
 
 
 @pytest.mark.parametrize(
@@ -41,7 +44,7 @@ def test_operation_gate_allows_soc_connect_during_device_mutation() -> None:
     lease = gate.acquire(OperationKind.SOC_CONNECT, owner_id="soc")
 
     assert gate.has_active(OperationKind.SOC_CONNECT)
-    gate.release(lease)
+    gate.release(lease, _FINISHED)
 
 
 def test_operation_gate_tracks_device_mutation_by_name() -> None:
@@ -52,64 +55,93 @@ def test_operation_gate_tracks_device_mutation_by_name() -> None:
 
     assert gate.is_device_mutating("flux")
     assert not gate.is_device_mutating("rf")
-    gate.release(lease)
+    gate.release(lease, _FINISHED)
     assert not gate.is_device_mutating("flux")
+
+
+def test_release_frees_hardware_immediately() -> None:
+    # Exclusion is removed on release so a conflicting op can start at once,
+    # even though the handle is retained for late awaiters.
+    gate = OperationGate()
+    lease = gate.acquire(OperationKind.RUN, owner_id="tab")
+    gate.release(lease, _FINISHED)
+    # No conflict now — RUN exclusion was dropped.
+    gate.acquire(OperationKind.RUN, owner_id="tab2")
 
 
 def test_operation_gate_rejects_double_release() -> None:
     gate = OperationGate()
     lease = gate.acquire(OperationKind.RUN, owner_id="tab")
-    gate.release(lease)
+    gate.release(lease, _FINISHED)
 
     with pytest.raises(RuntimeError, match="not active"):
-        gate.release(lease)
+        gate.release(lease, _FINISHED)
 
 
 # ---------------------------------------------------------------------------
-# await_release (Phase 93) — thread-safe wait for off-main blocking handlers
+# await_outcome — thread-safe wait for off-main blocking handlers
 # ---------------------------------------------------------------------------
 
 
-def test_await_release_unblocks_on_release() -> None:
+def test_await_outcome_unblocks_on_release_with_outcome() -> None:
     gate = OperationGate()
     lease = gate.acquire(OperationKind.DEVICE_SETUP, owner_id="d", resource_id="d")
 
-    ok: list[bool] = []
+    got: list[object] = []
     dt: list[float] = []
 
     def waiter() -> None:
         t0 = time.monotonic()
-        ok.append(gate.await_release(lease.token, timeout=3.0))
+        got.append(gate.await_outcome(lease.token, timeout=3.0))
         dt.append(time.monotonic() - t0)
 
     wt = threading.Thread(target=waiter)
     wt.start()
     time.sleep(0.1)
-    gate.release(lease)  # from "main" thread
+    gate.release(lease, OperationOutcome("failed", "boom"))  # from "main" thread
     wt.join(timeout=2.0)
 
-    assert ok == [True]
+    assert got and got[0] == OperationOutcome("failed", "boom")
     assert dt[0] < 1.0  # woke promptly, not on timeout
 
 
-def test_await_release_returns_immediately_for_already_released() -> None:
+def test_await_outcome_immediate_for_already_released() -> None:
     gate = OperationGate()
     lease = gate.acquire(OperationKind.DEVICE_SETUP, owner_id="d")
-    gate.release(lease)
+    gate.release(lease, OperationOutcome("finished"))
 
     t0 = time.monotonic()
-    assert gate.await_release(lease.token, timeout=5.0) is True
+    assert gate.await_outcome(lease.token, timeout=5.0) == OperationOutcome("finished")
     assert time.monotonic() - t0 < 0.5
 
 
-def test_await_release_returns_immediately_for_unknown_token() -> None:
+def test_await_outcome_immediate_for_unknown_token() -> None:
     gate = OperationGate()
     t0 = time.monotonic()
-    assert gate.await_release(99999, timeout=5.0) is True
+    # Unknown/evicted token is treated as already finished (never hangs).
+    assert gate.await_outcome(99999, timeout=5.0) == OperationOutcome("finished")
     assert time.monotonic() - t0 < 0.5
 
 
-def test_await_release_times_out_while_active() -> None:
+def test_await_outcome_times_out_while_active() -> None:
     gate = OperationGate()
     lease = gate.acquire(OperationKind.DEVICE_SETUP, owner_id="d")
-    assert gate.await_release(lease.token, timeout=0.1) is False
+    assert gate.await_outcome(lease.token, timeout=0.1) is None
+
+
+# ---------------------------------------------------------------------------
+# poll — non-blocking status
+# ---------------------------------------------------------------------------
+
+
+def test_poll_pending_then_settled() -> None:
+    gate = OperationGate()
+    lease = gate.acquire(OperationKind.DEVICE_SETUP, owner_id="d")
+    assert gate.poll(lease.token) is None  # still pending
+    gate.release(lease, OperationOutcome("finished"))
+    assert gate.poll(lease.token) == OperationOutcome("finished")
+
+
+def test_poll_unknown_token_is_finished() -> None:
+    gate = OperationGate()
+    assert gate.poll(99999) == OperationOutcome("finished")

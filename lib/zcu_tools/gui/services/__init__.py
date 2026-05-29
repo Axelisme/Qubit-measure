@@ -26,6 +26,7 @@ from .operation_gate import (
     OperationGate,
     OperationKind,
     OperationLease,
+    OperationOutcome,
 )
 from .run import RunService
 from .save import SaveBothOutcome, SaveService
@@ -68,6 +69,7 @@ __all__ = [
     "OperationGate",
     "OperationKind",
     "OperationLease",
+    "OperationOutcome",
     "GuardError",
     "GuardService",
     "RunPermit",

@@ -304,15 +304,16 @@ class Controller:
         """Full resource-version snapshot (the resources.versions RPC payload)."""
         return self._state.version.snapshot()
 
-    def start_run(self, tab_id: str) -> None:
+    def start_run(self, tab_id: str) -> int:
         # GuardService proves context readiness + committed-cfg validity + soc
         # capability, and carries the worker payload in the permit. Both clients
-        # acquire through the same path so guard logic cannot drift.
+        # acquire through the same path so guard logic cannot drift. Returns the
+        # operation token (handle for operation.await).
         permit = self._guard_svc.acquire_run_permit(tab_id)
         view = self._require_view()
         pbar_factory = view.make_pbar_factory(tab_id)
         live_container = view.make_live_container(tab_id)
-        self._run_svc.start_run(permit, pbar_factory, live_container)
+        return self._run_svc.start_run(permit, pbar_factory, live_container)
 
     def cancel_run(self) -> None:
         self._run_svc.cancel_run()
@@ -539,8 +540,8 @@ class Controller:
     def get_device_info(self, name: str) -> BaseDeviceInfo | None:
         return self._dev_svc.get_device_info(name)
 
-    def start_setup_device(self, req: SetupDeviceRequest) -> None:
-        self._dev_svc.start_setup_device(req)
+    def start_setup_device(self, req: SetupDeviceRequest) -> int:
+        return self._dev_svc.start_setup_device(req)
 
     def get_active_device_setup(self) -> Optional[DeviceSetupSnapshot]:
         return self._dev_svc.get_active_setup()
@@ -574,8 +575,13 @@ class Controller:
     def get_device_progress_model(self) -> "DeviceSetupProgressModel":
         return self._dev_svc.progress_model
 
-    def wait_device_setup_done(self, name: str, timeout: float = 120.0) -> None:
-        self._dev_svc.wait_setup_done(name, timeout)
+    def await_operation(self, operation_id: int, timeout: float):
+        """Block until an async operation settles; return its OperationOutcome.
+
+        Runs on an off-main IO thread (operation.await is off_main_thread) — only
+        touches the gate's thread-safe registry, no main-thread-owned state.
+        """
+        return self._operation_gate.await_outcome(operation_id, timeout)
 
     # ------------------------------------------------------------------
     # Startup application workflow (StartupService)
@@ -617,8 +623,8 @@ class Controller:
     # Connection / Predictor (ConnectionService)
     # ------------------------------------------------------------------
 
-    def start_connect(self, req: ConnectRequest) -> None:
-        self._conn_svc.start_connect(req)
+    def start_connect(self, req: ConnectRequest) -> int:
+        return self._conn_svc.start_connect(req)
 
     def bind_connection_outcome(
         self,

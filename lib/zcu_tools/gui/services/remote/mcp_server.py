@@ -135,6 +135,23 @@ _GUARD_DEPS: Dict[str, tuple[str, ...]] = {
     "editor.commit": ("editor:{editor_id}", "context"),
 }
 
+# --- Async-operation handle bookkeeping (operation_id <-> semantic name) ------
+#
+# Start ops (device.setup / run.start / connect.start) return an ``operation_id``
+# the agent never sees (mcp/RPC bookkeeping, like version numbers). The agent
+# refers to an in-flight operation by a name it understands; mcp maps that
+# semantic key to the latest operation_id for it. ``operation.await`` then
+# blocks on that id. "Latest wins": starting overwrites the key, since the agent
+# semantically means "the current operation for this resource".
+_OP_BY_KEY: Dict[str, int] = {}
+
+# Which semantic key a start RPC's operation_id belongs to (param -> key).
+_OP_KEY_OF: Dict[str, "Callable[[Dict[str, Any]], str]"] = {
+    "device.setup": lambda p: f"device:{p.get('name', '')}",
+    "run.start": lambda p: f"tab:{p.get('tab_id', '')}",
+    "connect.start": lambda p: "soc",  # noqa: ARG005 — uniform signature
+}
+
 _READER_THREAD: Optional[threading.Thread] = None
 _READER_STOP = threading.Event()
 
@@ -359,7 +376,14 @@ def send_gui_rpc(
     # its own guarded ops. A concurrent (human) change between two RPCs lands
     # after this refresh and so is correctly caught by the next guard.
     _refresh_versions()
-    return dict(resp.get("result", {}))
+    result = dict(resp.get("result", {}))
+    # Capture a start op's operation_id under its semantic key (latest wins), so
+    # an agent can later await it by name — then strip it from the result, since
+    # the raw id is mcp<->RPC bookkeeping that must not surface to the agent.
+    key_of = _OP_KEY_OF.get(method)
+    if key_of is not None and "operation_id" in result:
+        _OP_BY_KEY[key_of(params)] = int(result.pop("operation_id"))
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -641,6 +665,33 @@ def tool_gui_editor_unsubscribe(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return send_gui_rpc("editor.unsubscribe", {"editor_id": editor_id})
 
 
+def _await_operation_by_key(key: str, what: str, timeout: float) -> Dict[str, Any]:
+    """Block until the latest operation for ``key`` settles; semantic result.
+
+    Translates the agent's semantic name to the internal operation_id, awaits it
+    via the off-main operation.await RPC, and returns a plain-language status.
+    operation.await raises (PRECONDITION_FAILED) on failed/cancelled, surfaced to
+    the agent as an error; here we shape the success message.
+    """
+    operation_id = _OP_BY_KEY.get(key)
+    if operation_id is None:
+        return {
+            "status": "no_operation",
+            "message": f"No in-flight operation for {what}.",
+        }
+    res = send_gui_rpc(
+        "operation.await", {"operation_id": operation_id, "timeout": timeout}, timeout
+    )
+    return {"status": res.get("status", "finished"), "message": f"{what} completed."}
+
+
+def tool_gui_device_wait_setup(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Block until the named device's current setup completes (semantic)."""
+    name = str(arguments["name"])
+    timeout = float(arguments.get("timeout", 120.0))
+    return _await_operation_by_key(f"device:{name}", f"Device {name!r} setup", timeout)
+
+
 def tool_gui_events_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
     """Drain up to ``max_events`` queued event pushes, blocking briefly."""
     timeout_seconds = float(arguments.get("timeout_seconds", 5.0))
@@ -759,6 +810,10 @@ _NON_GENERATED_METHODS = frozenset(
         # mcp<->RPC bookkeeping only; never an agent-facing tool (version numbers
         # must not surface to the agent — used internally by _refresh_versions).
         "resources.versions",
+        # operation handle await: agent drives it via semantic wait tools (e.g.
+        # gui_device_wait_setup), which translate name -> operation_id; the raw
+        # by-id RPC is never an agent tool.
+        "operation.await",
     }
 )
 
@@ -996,6 +1051,25 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             "required": ["editor_id"],
         },
     },
+    "gui_device_wait_setup": {
+        "handler": tool_gui_device_wait_setup,
+        "description": (
+            "Block until the named device's current setup completes. Returns "
+            "status='finished' on success; raises on setup failure/cancellation; "
+            "status='no_operation' if no setup is in flight for that device."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Device name"},
+                "timeout": {
+                    "type": "number",
+                    "description": "Seconds to wait (default 120)",
+                },
+            },
+            "required": ["name"],
+        },
+    },
     "gui_events_poll": {
         "handler": tool_gui_events_poll,
         "description": (
@@ -1178,6 +1252,7 @@ _OVERRIDE_NAMES = frozenset(
         "gui_events_poll",
         "gui_editor_subscribe",
         "gui_editor_unsubscribe",
+        "gui_device_wait_setup",
     }
 )
 

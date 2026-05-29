@@ -27,7 +27,11 @@ from zcu_tools.gui.plot_routing import has_current_container
 from zcu_tools.gui.registry import Registry
 from zcu_tools.gui.runner import Runner
 from zcu_tools.gui.services.device import ConnectDeviceRequest
-from zcu_tools.gui.services.operation_gate import OperationConflictError, OperationKind
+from zcu_tools.gui.services.operation_gate import (
+    OperationConflictError,
+    OperationKind,
+    OperationOutcome,
+)
 from zcu_tools.gui.services.session_persistence import (
     SessionPersistenceError,
     SessionPersistenceService,
@@ -289,7 +293,7 @@ def test_start_run_while_device_setup_active_raises(cf):
     with pytest.raises(OperationConflictError, match="device_setup is active"):
         cf.ctrl.start_run(tab_id)
 
-    cf.ctrl._operation_gate.release(lease)
+    cf.ctrl._operation_gate.release(lease, OperationOutcome("finished"))
 
 
 def test_draft_context_rejects_real_run_and_save(cf):
@@ -319,7 +323,7 @@ def test_run_rejected_while_soc_connect_lease_active(cf):
     with pytest.raises(OperationConflictError, match="soc_connect is active"):
         cf.ctrl.start_run(tab_id)
 
-    cf.ctrl._operation_gate.release(lease)
+    cf.ctrl._operation_gate.release(lease, OperationOutcome("finished"))
 
 
 def test_device_connect_persists_only_after_terminal_success(cf):

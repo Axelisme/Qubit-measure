@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -22,6 +23,7 @@ from zcu_tools.gui.services.operation_gate import (
     OperationConflictError,
     OperationGate,
     OperationKind,
+    OperationOutcome,
 )
 
 
@@ -95,7 +97,7 @@ def test_device_mutation_is_globally_exclusive_and_blocks_same_device_read(qapp)
         svc.start_set_device_value(SetDeviceValueRequest(name="dev1", value=1.0))
     with pytest.raises(OperationConflictError, match="Cannot read"):
         svc.get_device_info("dev1")
-    gate.release(lease)
+    gate.release(lease, OperationOutcome("finished"))
 
 
 def test_device_connect_failure_is_reported_without_live_registration(qapp):
@@ -152,7 +154,7 @@ def test_wait_setup_done_wakes_from_worker_thread_without_deadlock(qapp):
     device.setup.side_effect = slow_setup
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=2.0)
 
-    svc.start_setup_device(
+    token = svc.start_setup_device(
         SetupDeviceRequest(name="dev1", info=FakeDeviceInfo(address="addr", value=2.0))
     )
 
@@ -160,11 +162,8 @@ def test_wait_setup_done_wakes_from_worker_thread_without_deadlock(qapp):
 
     def waiter() -> None:
         t0 = time.monotonic()
-        try:
-            svc.wait_setup_done("dev1", timeout=3.0)
-            result["error"] = None
-        except RuntimeError as exc:
-            result["error"] = str(exc)
+        outcome = svc._gate.await_outcome(token, timeout=3.0)
+        result["outcome"] = outcome
         result["dt"] = time.monotonic() - t0
 
     wt = threading.Thread(target=waiter)
@@ -178,7 +177,8 @@ def test_wait_setup_done_wakes_from_worker_thread_without_deadlock(qapp):
         time.sleep(0.01)
     wt.join(timeout=1.0)
 
-    assert result.get("error") is None
+    outcome: Any = result.get("outcome")
+    assert outcome is not None and outcome.status == "finished"
     dt = result.get("dt")
     assert isinstance(dt, float)
     assert dt < 2.0  # woke shortly after the 0.5s setup, not on timeout
@@ -197,18 +197,14 @@ def test_wait_setup_done_raises_on_setup_failure(qapp):
 
     device.setup.side_effect = failing_setup
 
-    svc.start_setup_device(
+    token = svc.start_setup_device(
         SetupDeviceRequest(name="dev1", info=FakeDeviceInfo(address="addr", value=2.0))
     )
 
     result: dict[str, object] = {}
 
     def waiter() -> None:
-        try:
-            svc.wait_setup_done("dev1", timeout=3.0)
-            result["error"] = None
-        except RuntimeError as exc:
-            result["error"] = str(exc)
+        result["outcome"] = svc._gate.await_outcome(token, timeout=3.0)
 
     wt = threading.Thread(target=waiter)
     wt.start()
@@ -218,8 +214,9 @@ def test_wait_setup_done_raises_on_setup_failure(qapp):
         time.sleep(0.01)
     wt.join(timeout=1.0)
 
-    assert result.get("error") is not None
-    assert "hardware boom" in str(result["error"])
+    outcome: Any = result.get("outcome")
+    assert outcome is not None and outcome.status == "failed"
+    assert "hardware boom" in str(outcome.error)
 
 
 def test_disconnect_close_failure_retains_connected_device_and_releases_gate(qapp):

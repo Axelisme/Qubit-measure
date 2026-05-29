@@ -34,6 +34,7 @@ from .operation_gate import (
     OperationGate,
     OperationKind,
     OperationLease,
+    OperationOutcome,
 )
 
 if TYPE_CHECKING:
@@ -271,14 +272,6 @@ class DeviceService(QObject):
         self._active_prior: DeviceSnapshot | None = None
         self._command_worker: _DeviceCommandWorker | None = None
         self._setup_worker: _DeviceSetupWorker | None = None
-        # Thread-safe channel for wait_setup_done (runs off the main thread via
-        # an off-main RPC handler). The main-thread setup terminal handlers
-        # write the per-name lease token + outcome; the off-main waiter reads
-        # them under the lock and then blocks on gate.await_release(token). This
-        # keeps the waiter off main-thread-owned state (_snapshots / Qt signals).
-        self._setup_lock = threading.Lock()
-        self._setup_tokens: dict[str, int] = {}
-        self._setup_errors: dict[str, str | None] = {}
 
     def start_connect_device(self, req: ConnectDeviceRequest) -> None:
         current = self._snapshots.get(req.name)
@@ -345,7 +338,7 @@ class DeviceService(QObject):
         worker.finished.connect(worker.deleteLater)
         self._start_command_worker(worker, req.name)
 
-    def start_setup_device(self, req: SetupDeviceRequest) -> None:
+    def start_setup_device(self, req: SetupDeviceRequest) -> int:
         from zcu_tools.device import GlobalDeviceManager
 
         current = self._require_connected_snapshot(req.name)
@@ -356,9 +349,7 @@ class DeviceService(QObject):
             replace(current, status=DeviceStatus.SETTING_UP, error=None, progress=()),
         )
         assert self._active_lease is not None  # set by _begin_operation
-        with self._setup_lock:
-            self._setup_tokens[req.name] = self._active_lease.token
-            self._setup_errors.pop(req.name, None)
+        token = self._active_lease.token
         worker = _DeviceSetupWorker(
             dev,
             req.name,
@@ -380,6 +371,7 @@ class DeviceService(QObject):
         except Exception:
             self._abort_unstarted_operation(req.name)
             raise
+        return token
 
     def cancel_device_operation(self, name: str) -> None:
         if self._active_name != name or self._setup_worker is None:
@@ -569,10 +561,12 @@ class DeviceService(QObject):
             self._active_name = None
             self._active_lease = None
             self._active_prior = None
-            self._gate.release(lease)
+            self._gate.release(
+                lease, OperationOutcome("failed", "operation failed to begin")
+            )
             raise
 
-    def _finish_operation(self, name: str) -> None:
+    def _finish_operation(self, name: str, outcome: OperationOutcome) -> None:
         if self._active_name != name or self._active_lease is None:
             raise RuntimeError(f"Device operation for {name!r} has no active lease")
         lease = self._active_lease
@@ -581,7 +575,7 @@ class DeviceService(QObject):
         self._active_prior = None
         self._command_worker = None
         self._setup_worker = None
-        self._gate.release(lease)
+        self._gate.release(lease, outcome)
 
     def _start_command_worker(self, worker: _DeviceCommandWorker, name: str) -> None:
         try:
@@ -596,7 +590,9 @@ class DeviceService(QObject):
             self._snapshots.pop(name, None)
         else:
             self._snapshots[name] = prior
-        self._finish_operation(name)
+        self._finish_operation(
+            name, OperationOutcome("failed", "operation failed to start")
+        )
         self._emit_device_changed(name)
 
     def _on_connect_succeeded(self, req: ConnectDeviceRequest, info: object) -> None:
@@ -607,7 +603,7 @@ class DeviceService(QObject):
             status=DeviceStatus.CONNECTED,
             info=cast(BaseDeviceInfo, info),
         )
-        self._finish_operation(req.name)
+        self._finish_operation(req.name, OperationOutcome("finished"))
         self._emit_device_changed(req.name)
         self.device_connected.emit(req)
 
@@ -623,7 +619,7 @@ class DeviceService(QObject):
             )
         else:
             del self._snapshots[req.name]
-        self._finish_operation(req.name)
+        self._finish_operation(req.name, OperationOutcome("finished"))
         self._emit_device_changed(req.name)
         self.device_disconnected.emit(req)
 
@@ -635,7 +631,7 @@ class DeviceService(QObject):
             info=cast(BaseDeviceInfo, info),
             error=None,
         )
-        self._finish_operation(name)
+        self._finish_operation(name, OperationOutcome("finished"))
         self._emit_device_changed(name)
         self.value_set.emit(name)
 
@@ -648,10 +644,9 @@ class DeviceService(QObject):
             progress=(),
             error=None,
         )
-        # Record outcome before _finish_operation releases the lease (which sets
-        # the token Event and may wake an off-main wait_setup_done waiter).
-        self._record_setup_outcome(name, None)
-        self._finish_operation(name)
+        # release() settles the operation handle (sets the token Event and stores
+        # the outcome) — may wake an off-main operation.await waiter.
+        self._finish_operation(name, OperationOutcome("finished"))
         self._clear_progress()
         self._emit_device_changed(name)
         self._bus.emit(
@@ -662,8 +657,7 @@ class DeviceService(QObject):
 
     def _on_setup_failed(self, name: str, error: str) -> None:
         self._restore_prior_snapshot(name, error)
-        self._record_setup_outcome(name, error)
-        self._finish_operation(name)
+        self._finish_operation(name, OperationOutcome("failed", error))
         self._clear_progress()
         self._emit_device_changed(name)
         self._bus.emit(
@@ -674,8 +668,9 @@ class DeviceService(QObject):
 
     def _on_setup_cancelled(self, name: str) -> None:
         self._restore_prior_snapshot(name, None)
-        self._record_setup_outcome(name, f"device {name!r} setup was cancelled")
-        self._finish_operation(name)
+        self._finish_operation(
+            name, OperationOutcome("cancelled", f"device {name!r} setup was cancelled")
+        )
         self._clear_progress()
         self._emit_device_changed(name)
         self._bus.emit(
@@ -695,7 +690,7 @@ class DeviceService(QObject):
             del self._snapshots[name]
         else:
             self._restore_prior_snapshot(name, message)
-        self._finish_operation(name)
+        self._finish_operation(name, OperationOutcome("failed", message))
         self._emit_device_changed(name)
         self.operation_failed.emit(name, message)
 
@@ -718,45 +713,6 @@ class DeviceService(QObject):
         # written" point; bump its version here, on the main thread.
         self._state.version.bump(f"device:{name}")
         self._bus.emit(GuiEvent.DEVICE_CHANGED, DeviceChangedPayload(name=name))
-
-    def _record_setup_outcome(self, name: str, error: str | None) -> None:
-        """Record a setup terminal outcome for an off-main wait_setup_done waiter.
-
-        ``error`` is the failure/cancellation message, or None on success. The
-        token Event is set by gate.release inside _finish_operation, so by the
-        time a waiter wakes the outcome is already stored here.
-        """
-        with self._setup_lock:
-            self._setup_errors[name] = error
-
-    def wait_setup_done(self, name: str, timeout: float = 120.0) -> None:
-        """Block until the named device's active setup completes.
-
-        Designed to run on the RPC IO worker thread (off-main handler) — it does
-        NOT touch the Qt main thread, the _snapshots dict, or any Qt signal.
-        Synchronisation goes through the operation gate's per-token Event and a
-        lock-guarded outcome field both written by the main-thread terminal
-        handlers. Raises RuntimeError on setup failure/cancellation or timeout.
-        Returns immediately if no setup is (or was recently) tracked for ``name``.
-        """
-        with self._setup_lock:
-            token = self._setup_tokens.get(name)
-            if token is None:
-                # No setup ever started, or it completed and was reaped — done.
-                if name in self._setup_errors:
-                    error = self._setup_errors[name]
-                    if error is not None:
-                        raise RuntimeError(f"device {name!r} setup failed: {error}")
-                return
-
-        if not self._gate.await_release(token, timeout):
-            raise RuntimeError(f"device {name!r} setup timed out after {timeout}s")
-
-        with self._setup_lock:
-            error = self._setup_errors.get(name)
-            self._setup_tokens.pop(name, None)
-        if error is not None:
-            raise RuntimeError(f"device {name!r} setup failed: {error}")
 
     def _clear_progress(self) -> None:
         self._progress.clear()

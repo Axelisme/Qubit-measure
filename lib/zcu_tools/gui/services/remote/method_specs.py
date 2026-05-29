@@ -88,6 +88,10 @@ def _expected_versions() -> ParamSpec:
     )
 
 
+def _int(name: str, desc: str = "") -> ParamSpec:
+    return ParamSpec(name, JsonType.INTEGER, required=True, description=desc)
+
+
 def _num(name: str, desc: str = "") -> ParamSpec:
     return ParamSpec(name, JsonType.NUMBER, required=True, description=desc)
 
@@ -314,11 +318,14 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "device.active_setup": MethodSpec(5.0, "Read active device setup progress"),
     "device.active_operation": MethodSpec(5.0, "Read active device operation"),
-    "device.wait_setup": MethodSpec(
+    # Async operation handle: block until an operation (device.setup / run.start
+    # / connect.start, identified by the operation_id they return) settles. mcp
+    # bookkeeping only — agents drive it via semantic wait tools, never raw.
+    "operation.await": MethodSpec(
         130.0,
-        "Block until device setup completes",
+        "Block until an async operation settles (by operation_id)",
         (
-            _str("name", "Device name"),
+            _int("operation_id", "Operation handle returned by the start op"),
             _num_default("timeout", 120.0, "Seconds to wait"),
         ),
         off_main_thread=True,
