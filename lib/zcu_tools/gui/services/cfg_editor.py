@@ -60,6 +60,7 @@ from zcu_tools.gui.cfg_schemas import (
 from zcu_tools.gui.live_model import ControllerProtocol, LiveModelEnv, SectionLiveField
 from zcu_tools.gui.specs import make_waveform_spec_by_style
 
+from .ports import ModuleLibraryWritePort
 from .remote.path_resolver import (
     list_settable_paths,
     list_subtree_paths,
@@ -82,18 +83,24 @@ _MAX_HEADLESS_EDITORS = 16
 
 
 class _EditorCtrl(ControllerProtocol, Protocol):
-    """Controller surface a CfgEditor session needs.
+    """Reactive-env surface a CfgEditor LiveModel needs.
 
-    Extends the LiveModel env protocol with the ModuleLibrary registration
-    entry points used at commit time (the same ones inspect_dialog calls).
+    This is the LiveModel reactive environment (md/ml/device/bus reads) shared by
+    every LiveField — see docs/adr/0007 (a legitimate narrow Port for "needs the
+    owner's reactive env"). ML *writes* at commit time go through the separate
+    ``ModuleLibraryWritePort``, not this protocol.
     """
 
-    def set_ml_module_from_raw(self, name: str, raw_dict: dict) -> None: ...
-    def set_ml_waveform_from_raw(self, name: str, raw_dict: dict) -> None: ...
 
-    # Bump the optimistic-concurrency version of an editor session's draft
-    # resource (``editor:<id>``). The Controller forwards to State.version; the
-    # session is the resource owner and calls this when its draft changes.
+class CfgEditorHost(_EditorCtrl, ModuleLibraryWritePort, Protocol):
+    """Composition-root surface for ``CfgEditorService`` — the three facets it
+    needs, all provided by the Controller: the reactive env (``_EditorCtrl``),
+    the ML read/write port (``ModuleLibraryWritePort``), and the editor-version
+    bump. The service itself decomposes this into the narrow dependencies; this
+    composed protocol exists only so ``build_app_services`` can type the single
+    object (the Controller) that happens to satisfy all three.
+    """
+
     def bump_editor_version(self, editor_id: str) -> None: ...
 
 
@@ -102,7 +109,21 @@ class CfgEditorError(RuntimeError):
 
 
 @dataclass
-class _EditorSession:
+class CfgEditorSession:
+    """Aggregate root: one cfg-editing draft and **all logic to operate it**.
+
+    Holds the ``SectionLiveField`` draft tree and owns the behaviour over it
+    (set_field / get / validity / commit). Outside code reaches the draft only
+    through this session (it is the gateway), and identifies it by ``editor_id``
+    (DDD: reference aggregates by id). This replaces the old anemic dataclass
+    whose behaviour lived entirely on the service (docs/adr/0008 §Aggregate Root).
+
+    Lifecycle ownership (headless vs delegated) is the *Repository's* concern
+    (``CfgEditorService``), not the aggregate's; the session only carries the
+    discriminators the Repository needs.
+    """
+
+    editor_id: str
     root: SectionLiveField
     kind: str  # "headless" | "delegated"
     # headless: the ml entry kind being built ("module"/"waveform"); commit uses it.
@@ -116,20 +137,72 @@ class _EditorSession:
     # so it can be disconnected when the session ends.
     change_cb: Optional[Callable[..., None]] = None
 
+    # -- behaviour (the aggregate operates its own draft) ------------------
+
+    def is_headless(self) -> bool:
+        return self.kind == "headless"
+
+    def current_paths(self) -> list[dict[str, object]]:
+        """Full settable-path list of the draft (the ``get`` projection)."""
+        return list_settable_paths(self.root)
+
+    def set_field(self, path: str, value: object) -> dict[str, object]:
+        """Mutate one field; return the changed sub-tree + draft validity."""
+        resolve_and_set(self.root, path, _decode_value(value))
+        return {
+            "paths": list_subtree_paths(self.root, path),
+            "valid": bool(self.root.is_valid()),
+        }
+
+    def lower(self, ml_port: ModuleLibraryWritePort) -> dict:
+        """Lower the draft to a concrete raw dict (EvalValue → number)."""
+        schema = CfgSchema(spec=self.root.spec, value=self.root.get_value())
+        return schema_to_dict(schema, ml_port.get_current_ml())
+
+    def commit(self, name: str, ml_port: ModuleLibraryWritePort) -> None:
+        """Lower + register this headless draft into the ModuleLibrary.
+
+        Registers via the write port; the Repository tears the session down only
+        after this returns, so a validation failure leaves the draft intact.
+        """
+        if not self.is_headless():
+            raise CfgEditorError(
+                f"{self.editor_id!r} is a delegated session; commit applies only "
+                "to headless ml-entry sessions"
+            )
+        raw = self.lower(ml_port)
+        if self.item_kind == "module":
+            ml_port.set_ml_module_from_raw(name, raw)
+        else:
+            ml_port.set_ml_waveform_from_raw(name, raw)
+
 
 class CfgEditorService:
-    """Owns headless LiveModel editing sessions keyed by a server-issued id.
+    """Repository for ``CfgEditorSession`` aggregates, keyed by a server id.
 
-    The controller passes itself as ``ctrl`` so sessions can read the live
-    MetaDict / ModuleLibrary and build a ``LiveModelEnv``. The service holds no
-    Qt objects; lifecycle is driven by the remote layer (per-connection) via
-    ``discard_for_client``.
+    Owns the session *lifecycle* (create / look up / reap) and the cross-session
+    concerns (owner→id map, headless LRU, per-session change stream, version
+    bump). Per-session editing behaviour lives on the aggregate
+    (``CfgEditorSession``); the Repository delegates to it. The service holds no
+    Qt objects.
+
+    Dependencies (docs/adr/0008): ``env_ctrl`` is the LiveModel reactive env
+    (narrow port); ``ml_port`` is the ModuleLibrary read/write port used at
+    commit and to seed ``from_name`` sessions (no longer the whole Controller);
+    ``version_bump`` bumps the ``editor:<id>`` resource version (a registry-level
+    concern since the id is Repository-assigned).
     """
 
-    def __init__(self, ctrl: "_EditorCtrl") -> None:
-        self._ctrl = ctrl
-        self._env = LiveModelEnv(ctrl=ctrl)
-        self._editors: dict[str, _EditorSession] = {}
+    def __init__(
+        self,
+        env_ctrl: "_EditorCtrl",
+        ml_port: ModuleLibraryWritePort,
+        version_bump: Callable[[str], None],
+    ) -> None:
+        self._env = LiveModelEnv(ctrl=env_ctrl)
+        self._ml = ml_port
+        self._version_bump = version_bump
+        self._editors: dict[str, CfgEditorSession] = {}
         self._owner_to_editor: dict[str, str] = {}
         self._seq = itertools.count()
         self._listener: Optional[ChangeListener] = None
@@ -160,16 +233,17 @@ class CfgEditorService:
         spec, value = self._initial_schema(item_kind, discriminator, from_name)
         root = SectionLiveField(spec, self._env, value)
         editor_id = self._new_id()
-        session = _EditorSession(
+        session = CfgEditorSession(
+            editor_id=editor_id,
             root=root,
             kind="headless",
             item_kind=item_kind,
             seq=next(self._seq),
         )
         self._editors[editor_id] = session
-        self._attach_change_stream(editor_id, session)
+        self._attach_change_stream(session)
         self._evict_excess_headless()
-        return editor_id, list_settable_paths(root)
+        return editor_id, session.current_paths()
 
     def register_delegated_session(self, owner_key: str, root: SectionLiveField) -> str:
         """Register a widget's *existing* live LiveModel as a shared session.
@@ -186,42 +260,28 @@ class CfgEditorService:
         if prev is not None:
             self.close(prev)
         editor_id = self._new_id()
-        session = _EditorSession(root=root, kind="delegated", owner_key=owner_key)
+        session = CfgEditorSession(
+            editor_id=editor_id, root=root, kind="delegated", owner_key=owner_key
+        )
         self._editors[editor_id] = session
         self._owner_to_editor[owner_key] = editor_id
-        self._attach_change_stream(editor_id, session)
+        self._attach_change_stream(session)
         return editor_id
 
     def editor_id_for_owner(self, owner_key: str) -> Optional[str]:
         return self._owner_to_editor.get(owner_key)
 
     def set_field(self, editor_id: str, path: str, value: object) -> dict[str, object]:
-        session = self._require(editor_id)
-        resolve_and_set(session.root, path, self._decode_value(value))
-        return {
-            "paths": list_subtree_paths(session.root, path),
-            "valid": bool(session.root.is_valid()),
-        }
+        return self._require(editor_id).set_field(path, value)
 
     def get(self, editor_id: str) -> list[dict[str, object]]:
-        session = self._require(editor_id)
-        return list_settable_paths(session.root)
+        return self._require(editor_id).current_paths()
 
     def commit(self, editor_id: str, name: str) -> None:
-        session = self._require(editor_id)
-        if session.kind != "headless":
-            raise CfgEditorError(
-                f"{editor_id!r} is a delegated session; commit applies only to "
-                "headless ml-entry sessions"
-            )
-        schema = CfgSchema(spec=session.root.spec, value=session.root.get_value())
-        raw = schema_to_dict(schema, self._ctrl.get_current_ml())
-        # Register first; only tear down the session once it lands, so a
-        # validation failure leaves the draft intact for the agent to fix.
-        if session.item_kind == "module":
-            self._ctrl.set_ml_module_from_raw(name, raw)
-        else:
-            self._ctrl.set_ml_waveform_from_raw(name, raw)
+        # The aggregate lowers + registers itself through the ML write port; the
+        # Repository only owns teardown (after a successful commit, so a
+        # validation failure leaves the draft intact for the agent to fix).
+        self._require(editor_id).commit(name, self._ml)
         self._remove(editor_id, teardown=True, reason="committed")
 
     def discard(self, editor_id: str) -> None:
@@ -231,7 +291,7 @@ class CfgEditorService:
         root alive); discarding one would tear down a live widget tree.
         """
         session = self._require(editor_id)
-        if session.kind != "headless":
+        if not session.is_headless():
             raise CfgEditorError(
                 f"{editor_id!r} is a delegated session; use close (it must not "
                 "tear down the widget's live model)"
@@ -260,7 +320,7 @@ class CfgEditorService:
         """
         for editor_id in editor_ids:
             session = self._editors.get(editor_id)
-            if session is not None and session.kind == "headless":
+            if session is not None and session.is_headless():
                 self._remove(editor_id, teardown=True, reason="disconnected")
 
     # ------------------------------------------------------------------
@@ -270,22 +330,23 @@ class CfgEditorService:
     def _new_id(self) -> str:
         return "editor-" + uuid.uuid4().hex[:8]
 
-    def _attach_change_stream(self, editor_id: str, session: _EditorSession) -> None:
+    def _attach_change_stream(self, session: CfgEditorSession) -> None:
         """Bind a root ``on_change`` callback that pushes ``editor_changed``.
 
         Fires on any descendant edit (root on_change bubbles). The payload
         carries the full current path list (root on_change does not say which
         path changed); subtree-only optimisation can come later.
         """
+        editor_id = session.editor_id
 
         def _on_change(*_: object) -> None:
             # The draft for this session was just written (main thread); bump its
             # version so editor.commit's guard can detect a concurrent edit.
-            self._ctrl.bump_editor_version(editor_id)
+            self._version_bump(editor_id)
             self._emit(
                 editor_id,
                 "editor_changed",
-                {"paths": list_settable_paths(session.root)},
+                {"paths": session.current_paths()},
             )
 
         session.change_cb = _on_change
@@ -324,7 +385,7 @@ class CfgEditorService:
         for eid, _ in headless[: len(headless) - _MAX_HEADLESS_EDITORS]:
             self._remove(eid, teardown=True, reason="evicted")
 
-    def _require(self, editor_id: str) -> _EditorSession:
+    def _require(self, editor_id: str) -> CfgEditorSession:
         session = self._editors.get(editor_id)
         if session is None:
             raise CfgEditorError(f"unknown editor session: {editor_id!r}")
@@ -337,7 +398,7 @@ class CfgEditorService:
         from_name: Optional[str],
     ):
         if from_name is not None:
-            ml = self._ctrl.get_current_ml()
+            ml = self._ml.get_current_ml()
             if item_kind == "module":
                 if from_name not in ml.modules:
                     raise CfgEditorError(f"unknown module: {from_name!r}")
@@ -365,17 +426,17 @@ class CfgEditorService:
                 ) from exc
         return spec, make_default_value(spec)
 
-    @staticmethod
-    def _decode_value(value: object) -> object:
-        """Turn a tagged eval value into an ``EvalValue``; pass others through.
 
-        The agent sends ``{"__kind": "eval", "expr": "..."}`` for an md-reference
-        expression (the same tag used by the cfg-form codec). Everything else is
-        a plain JSON scalar that ``resolve_and_set`` handles directly.
-        """
-        if isinstance(value, dict) and value.get("__kind") == "eval":
-            expr = value.get("expr")
-            if not isinstance(expr, str):
-                raise CfgEditorError("eval value requires a string 'expr'")
-            return EvalValue(expr=expr)
-        return value
+def _decode_value(value: object) -> object:
+    """Turn a tagged eval value into an ``EvalValue``; pass others through.
+
+    The agent sends ``{"__kind": "eval", "expr": "..."}`` for an md-reference
+    expression (the same tag used by the cfg-form codec). Everything else is a
+    plain JSON scalar that ``resolve_and_set`` handles directly.
+    """
+    if isinstance(value, dict) and value.get("__kind") == "eval":
+        expr = value.get("expr")
+        if not isinstance(expr, str):
+            raise CfgEditorError("eval value requires a string 'expr'")
+        return EvalValue(expr=expr)
+    return value

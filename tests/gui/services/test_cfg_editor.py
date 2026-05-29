@@ -52,11 +52,57 @@ def ctrl(ml, md):
 
 @pytest.fixture()
 def service(ctrl):
-    return CfgEditorService(ctrl)
+    # M2: the Repository takes the reactive-env ctrl, the ML write port, and a
+    # version-bump callback. The MagicMock ctrl satisfies all three facets.
+    return CfgEditorService(ctrl, ml_port=ctrl, version_bump=ctrl.bump_editor_version)
 
 
 def _paths(entries):
     return {e["path"]: e for e in entries}
+
+
+# ---------------------------------------------------------------------------
+# M2 — CfgEditorSession is a rich aggregate (behaviour on the entity itself,
+# not on the service). docs/adr/0008 §Aggregate Root.
+# ---------------------------------------------------------------------------
+
+
+def test_session_is_the_aggregate_with_behaviour(service, ml):
+    """The session the Repository hands out operates its own draft directly:
+    set_field / commit / is_headless live on the aggregate, reachable without
+    going back through the service."""
+    from zcu_tools.gui.services.cfg_editor import CfgEditorSession
+
+    editor_id, _ = service.open("module", discriminator="pulse")
+    session = service._require(editor_id)  # Repository looks up the aggregate
+    assert isinstance(session, CfgEditorSession)
+    assert session.is_headless() is True
+
+    # set_field is the aggregate's own behaviour, returns subtree + validity
+    out = session.set_field("freq", 5000.0)
+    assert out["paths"] and "valid" in out
+    assert _paths(session.current_paths())["freq"]["value"] == 5000.0
+
+    # commit is the aggregate's own behaviour: it lowers + registers via the
+    # ML write port (the MagicMock ctrl lands it into the real ml).
+    session.set_field("ch", 0)
+    session.commit("agg_pulse", ml_port=service._ml)
+    assert "agg_pulse" in ml.modules
+
+
+def test_delegated_session_rejects_commit_on_the_aggregate(service):
+    """commit-guard is enforced on the aggregate, not just the service facade."""
+    from zcu_tools.gui.adapter import make_default_value
+    from zcu_tools.gui.cfg_schemas import _MODULE_SPEC_FACTORIES
+    from zcu_tools.gui.live_model import SectionLiveField
+
+    spec = _MODULE_SPEC_FACTORIES["pulse"]()
+    root = SectionLiveField(spec, service._env, make_default_value(spec))
+    editor_id = service.register_delegated_session("owner-x", root)
+    session = service._require(editor_id)
+    assert session.is_headless() is False
+    with pytest.raises(CfgEditorError):
+        session.commit("nope", ml_port=service._ml)
 
 
 # ---------------------------------------------------------------------------

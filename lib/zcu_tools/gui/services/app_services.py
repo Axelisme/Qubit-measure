@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.io_manager import IOManager
     from zcu_tools.gui.registry import Registry
     from zcu_tools.gui.runner import AnalyzeRunner, Runner, SaveDataRunner
-    from zcu_tools.gui.services.cfg_editor import _EditorCtrl
+    from zcu_tools.gui.services.cfg_editor import CfgEditorHost
     from zcu_tools.gui.services.view_query import _ViewQueryTarget
     from zcu_tools.gui.state import State
 
@@ -69,7 +69,7 @@ def build_app_services(
     analyze_runner: "AnalyzeRunner",
     save_runner: "SaveDataRunner",
     view_provider: "Callable[[], _ViewQueryTarget]",
-    cfg_editor_ctrl: "_EditorCtrl",
+    cfg_editor_ctrl: "CfgEditorHost",
 ) -> AppServices:
     """Construct and wire every domain service into a frozen bundle.
 
@@ -100,5 +100,9 @@ def build_app_services(
         startup=StartupService(
             context, device, StartupPersistenceService(), state, bus
         ),
-        cfg_editor=CfgEditorService(cfg_editor_ctrl),
+        cfg_editor=CfgEditorService(
+            cfg_editor_ctrl,
+            ml_port=cfg_editor_ctrl,
+            version_bump=cfg_editor_ctrl.bump_editor_version,
+        ),
     )

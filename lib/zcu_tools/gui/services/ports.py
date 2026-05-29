@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Optional, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from zcu_tools.gui.adapter import CfgSchema, ExpContext
+    from zcu_tools.meta_tool import ModuleLibrary
 
     from .device import DeviceProtocol
     from .session_persistence import PersistedSession
@@ -111,3 +112,20 @@ class DriverFactoryPort(Protocol):
     """
 
     def __call__(self, type_name: str, address: str) -> "DeviceProtocol": ...
+
+
+@runtime_checkable
+class ModuleLibraryWritePort(Protocol):
+    """ModuleLibrary read + raw-entry registration as used by a CfgEditor commit.
+
+    A ``CfgEditorSession`` (aggregate root) lowers its draft against the current
+    ModuleLibrary and registers the concrete entry through this port — it no
+    longer borrows the whole Controller (the old leaky ``_EditorCtrl``). The
+    Controller (or any owner) implements it. Reading the current ml is needed
+    both to lower ``EvalValue`` to concrete numbers and to seed a session opened
+    ``from_name``.
+    """
+
+    def get_current_ml(self) -> "ModuleLibrary": ...
+    def set_ml_module_from_raw(self, name: str, raw_dict: dict) -> None: ...
+    def set_ml_waveform_from_raw(self, name: str, raw_dict: dict) -> None: ...
