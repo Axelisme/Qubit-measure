@@ -11,6 +11,7 @@ from zcu_tools.device.fake import FakeDevice
 from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.event_bus import EventBus
 from zcu_tools.gui.services.device import ConnectDeviceRequest, DeviceService
+from zcu_tools.gui.state import State
 
 
 @pytest.fixture(autouse=True)
@@ -26,6 +27,7 @@ def _make_svc(driver: object | None = None) -> DeviceService:
     fake = driver if driver is not None else FakeDevice()
     return DeviceService(
         EventBus(),
+        State(MagicMock()),
         driver_factory=lambda _type, _address: fake,  # type: ignore[arg-type]
     )
 

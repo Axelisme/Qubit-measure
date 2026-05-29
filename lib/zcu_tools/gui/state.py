@@ -45,6 +45,51 @@ class TabState(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     is_saving_data: bool = False
 
 
+class VersionTable:
+    """Monotonic per-resource version counters (optimistic-concurrency guard).
+
+    A passive container: each resource key maps to an integer that only ever
+    increases by one per mutation. Callers (the resource-owning service, on the
+    Qt main thread) ``bump`` a key when they actually write that resource's
+    state. The guard compares an op's declared ``expected_versions`` against the
+    current table atomically inside the main-thread dispatch sequence.
+
+    Resource keys are mid-grained: ``context``, ``soc``, ``device:<name>``,
+    ``tab:<id>:cfg`` / ``:result`` / ``:save_path``, ``tab:<id>`` (existence)
+    and ``editor:<id>``. A key absent from the table means version 0 (never
+    bumped, or its resource was dropped — both read as "gone" by the guard).
+    """
+
+    def __init__(self) -> None:
+        self._versions: dict[str, int] = {}
+
+    def bump(self, key: str) -> int:
+        new = self._versions.get(key, 0) + 1
+        self._versions[key] = new
+        logger.debug("version bump: %s -> %d", key, new)
+        return new
+
+    def get(self, key: str) -> int:
+        """Current version of ``key`` (0 if never bumped / dropped)."""
+        return self._versions.get(key, 0)
+
+    def snapshot(self) -> dict[str, int]:
+        """Full table copy (the ``resources.versions`` RPC payload)."""
+        return dict(self._versions)
+
+    def drop_prefix(self, prefix: str) -> None:
+        """Forget every key starting with ``prefix`` (e.g. a closed tab).
+
+        A dependency on a dropped key reads as version 0, which the guard
+        treats as stale (the resource the caller depended on is gone).
+        """
+        doomed = [k for k in self._versions if k.startswith(prefix)]
+        for k in doomed:
+            del self._versions[k]
+        if doomed:
+            logger.debug("version drop_prefix: %s -> dropped %s", prefix, doomed)
+
+
 @dataclass(frozen=True)
 class TabInteractionState:
     global_run_active: bool
@@ -67,9 +112,15 @@ class State:
         self.tabs: dict[str, TabState[Any, Any, Any, Any]] = {}
         self.active_tab_id: Optional[str] = None
         self.running_tab_id: Optional[str] = None
+        # Optimistic-concurrency version counters. Owned by State but bumped by
+        # whichever main-thread writer actually mutates a resource (State's own
+        # mutators below for context/tab/cfg/save_path; connection/device/run
+        # services for soc/device/result at their terminal slots).
+        self.version = VersionTable()
 
     def set_context(self, ctx: ExpContext) -> None:
         self.exp_context = ctx
+        self.version.bump("context")
 
     def add_tab(
         self,
@@ -84,12 +135,16 @@ class State:
             type(tab.adapter).__name__,
         )
         self.tabs[tab_id] = tab
+        self.version.bump(f"tab:{tab_id}")
 
     def remove_tab(self, tab_id: str) -> None:
         logger.debug("remove_tab: tab_id=%r", tab_id)
         if self.is_tab_busy(tab_id):
             raise RuntimeError(f"Cannot close busy tab {tab_id!r}")
         del self.tabs[tab_id]
+        # Forget every version entry for this tab; a stale dependency on a
+        # closed tab now reads as version 0 (gone) and the guard blocks.
+        self.version.drop_prefix(f"tab:{tab_id}")
         if self.active_tab_id == tab_id:
             self.active_tab_id = None
         if self.running_tab_id == tab_id:
@@ -115,6 +170,7 @@ class State:
         tab.analyze_result = None
         tab.figure = None
         tab.applied_writeback_keys.clear()
+        self.version.bump(f"tab:{tab_id}:result")
 
     def update_tab_analyze(
         self, tab_id: str, analyze_result: object, figure: Optional["Figure"]
@@ -132,6 +188,7 @@ class State:
     def update_tab_cfg_schema(self, tab_id: str, schema: CfgSchema) -> None:
         logger.debug("update_tab_cfg_schema: tab_id=%r", tab_id)
         self.tabs[tab_id].cfg_schema = schema
+        self.version.bump(f"tab:{tab_id}:cfg")
 
     def update_tab_analyze_params(self, tab_id: str, instance: object) -> None:
         logger.debug(
@@ -156,6 +213,7 @@ class State:
     ) -> None:
         logger.debug("update_tab_save_path_overrides: tab_id=%r", tab_id)
         self.tabs[tab_id].save_path_overrides = paths
+        self.version.bump(f"tab:{tab_id}:save_path")
 
     def clear_tab_save_path_overrides(
         self,
@@ -163,6 +221,7 @@ class State:
     ) -> None:
         logger.debug("clear_tab_save_path_overrides: tab_id=%r", tab_id)
         self.tabs[tab_id].save_path_overrides = None
+        self.version.bump(f"tab:{tab_id}:save_path")
 
     def get_effective_save_paths(self, tab_id: str) -> Optional[SavePaths]:
         return self.tabs[tab_id].save_path_overrides
@@ -184,6 +243,9 @@ class State:
             self.running_tab_id = tab_id
         elif self.running_tab_id == tab_id:
             self.running_tab_id = None
+        # Run-lock transition affects whether a run.start may proceed; the tab's
+        # own existence/run-state resource version moves with it.
+        self.version.bump(f"tab:{tab_id}")
 
     def set_tab_analyzing(self, tab_id: str, analyzing: bool) -> None:
         logger.debug("set_tab_analyzing: tab_id=%r analyzing=%s", tab_id, analyzing)

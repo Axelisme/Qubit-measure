@@ -31,11 +31,6 @@ class OperationLease:
     kind: OperationKind
     owner_id: str
     resource_id: str | None = None
-    # Who initiated the operation, as a neutral string the gate never
-    # interprets (like ``owner_id``). Carried so a terminal event emitted after
-    # the operation completes can be attributed to its initiator. Set at
-    # acquire time and never mutated.
-    origin: str = ""
 
 
 _DEVICE_MUTATIONS = frozenset(
@@ -68,7 +63,6 @@ class OperationGate:
         *,
         owner_id: str,
         resource_id: str | None = None,
-        origin: str = "",
     ) -> OperationLease:
         if not owner_id:
             raise ValueError("owner_id must not be empty")
@@ -77,7 +71,6 @@ class OperationGate:
             kind=kind,
             owner_id=owner_id,
             resource_id=resource_id,
-            origin=origin,
         )
         conflicting = next(
             (

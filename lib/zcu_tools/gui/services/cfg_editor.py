@@ -91,6 +91,11 @@ class _EditorCtrl(ControllerProtocol, Protocol):
     def set_ml_module_from_raw(self, name: str, raw_dict: dict) -> None: ...
     def set_ml_waveform_from_raw(self, name: str, raw_dict: dict) -> None: ...
 
+    # Bump the optimistic-concurrency version of an editor session's draft
+    # resource (``editor:<id>``). The Controller forwards to State.version; the
+    # session is the resource owner and calls this when its draft changes.
+    def bump_editor_version(self, editor_id: str) -> None: ...
+
 
 class CfgEditorError(RuntimeError):
     """A CfgEditor session operation failed (unknown id, bad kind, …)."""
@@ -274,6 +279,9 @@ class CfgEditorService:
         """
 
         def _on_change(*_: object) -> None:
+            # The draft for this session was just written (main thread); bump its
+            # version so editor.commit's guard can detect a concurrent edit.
+            self._ctrl.bump_editor_version(editor_id)
             self._emit(
                 editor_id,
                 "editor_changed",

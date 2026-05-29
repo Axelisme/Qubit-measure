@@ -41,10 +41,6 @@ class Response:
     ok: bool
     result: Optional[Mapping[str, object]] = None
     error: Optional[ErrorEnvelope] = None
-    # Sidecar GUI-change summary (the change buffer drained at reply time);
-    # carried at the envelope level so it never pollutes a tool's result schema
-    # and rides on both ok and error replies. Omitted from the wire when empty.
-    gui_changes: Optional[list[dict[str, object]]] = None
 
     def to_wire(self) -> dict[str, object]:
         if self.ok:
@@ -56,8 +52,6 @@ class Response:
         else:
             assert self.error is not None
             wire = {"id": self.id, "ok": False, "error": self.error.to_wire()}
-        if self.gui_changes:
-            wire["gui_changes"] = self.gui_changes
         return wire
 
 

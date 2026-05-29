@@ -6,10 +6,9 @@ All emits and subscribes happen on the main thread.  No Qt dependency.
 from __future__ import annotations
 
 import logging
-from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, Generator, Literal, overload
+from typing import TYPE_CHECKING, Any, Callable, Literal, overload
 
 if TYPE_CHECKING:
     from zcu_tools.gui.adapter import SocCfgHandle, SocHandle
@@ -184,30 +183,6 @@ _EventPayloadMap = {
 class EventBus:
     def __init__(self) -> None:
         self._subs: dict[GuiEvent, list[Callable[[Any], None]]] = {}
-        # Origin of the change currently being emitted — a neutral string the
-        # bus never interprets ("agent" for RPC-client-driven changes, "" for
-        # UI / system). A subscriber that cares (only the remote service's
-        # change-buffer) reads ``current_origin`` synchronously inside its
-        # callback, since emit runs the callbacks on the same call stack that
-        # set it. Set either by ``acting_as`` (a sync scope around an RPC
-        # handler) or per-emit via ``emit(..., origin=...)`` (async terminals
-        # that carry the originating operation's lease origin).
-        self._cur_origin: str = ""
-
-    @property
-    def current_origin(self) -> str:
-        """Origin of the change being emitted right now (synchronous read)."""
-        return self._cur_origin
-
-    @contextmanager
-    def acting_as(self, origin: str) -> "Generator[None, None, None]":
-        """Mark synchronous emits inside this scope as caused by ``origin``."""
-        prev = self._cur_origin
-        self._cur_origin = origin
-        try:
-            yield
-        finally:
-            self._cur_origin = prev
 
     # ------------------------------------------------------------------
     # subscribe overloads
@@ -406,8 +381,6 @@ class EventBus:
         self,
         event: "Literal[GuiEvent.MD_CHANGED]",
         payload: MdChangedPayload,
-        *,
-        origin: str = ...,
     ) -> None: ...
 
     @overload
@@ -415,8 +388,6 @@ class EventBus:
         self,
         event: "Literal[GuiEvent.CONTEXT_SWITCHED]",
         payload: ContextSwitchedPayload,
-        *,
-        origin: str = ...,
     ) -> None: ...
 
     @overload
@@ -424,8 +395,6 @@ class EventBus:
         self,
         event: "Literal[GuiEvent.ML_CHANGED]",
         payload: MlChangedPayload,
-        *,
-        origin: str = ...,
     ) -> None: ...
 
     @overload
@@ -433,8 +402,6 @@ class EventBus:
         self,
         event: "Literal[GuiEvent.SOC_CHANGED]",
         payload: SocChangedPayload,
-        *,
-        origin: str = ...,
     ) -> None: ...
 
     @overload
@@ -442,8 +409,6 @@ class EventBus:
         self,
         event: "Literal[GuiEvent.TAB_ADDED]",
         payload: TabAddedPayload,
-        *,
-        origin: str = ...,
     ) -> None: ...
 
     @overload
@@ -451,8 +416,6 @@ class EventBus:
         self,
         event: "Literal[GuiEvent.TAB_CLOSED]",
         payload: TabClosedPayload,
-        *,
-        origin: str = ...,
     ) -> None: ...
 
     @overload
@@ -460,8 +423,6 @@ class EventBus:
         self,
         event: "Literal[GuiEvent.TAB_CONTENT_CHANGED]",
         payload: TabContentChangedPayload,
-        *,
-        origin: str = ...,
     ) -> None: ...
 
     @overload
@@ -469,8 +430,6 @@ class EventBus:
         self,
         event: "Literal[GuiEvent.TAB_INTERACTION_CHANGED]",
         payload: TabInteractionChangedPayload,
-        *,
-        origin: str = ...,
     ) -> None: ...
 
     @overload
@@ -478,8 +437,6 @@ class EventBus:
         self,
         event: "Literal[GuiEvent.RUN_LOCK_CHANGED]",
         payload: RunLockChangedPayload,
-        *,
-        origin: str = ...,
     ) -> None: ...
 
     @overload
@@ -487,8 +444,6 @@ class EventBus:
         self,
         event: "Literal[GuiEvent.PREDICTOR_CHANGED]",
         payload: PredictorChangedPayload,
-        *,
-        origin: str = ...,
     ) -> None: ...
 
     @overload
@@ -496,8 +451,6 @@ class EventBus:
         self,
         event: "Literal[GuiEvent.DEVICE_CHANGED]",
         payload: DeviceChangedPayload,
-        *,
-        origin: str = ...,
     ) -> None: ...
 
     @overload
@@ -505,11 +458,9 @@ class EventBus:
         self,
         event: "Literal[GuiEvent.DEVICE_SETUP_CHANGED]",
         payload: DeviceSetupChangedPayload,
-        *,
-        origin: str = ...,
     ) -> None: ...
 
-    def emit(self, event: GuiEvent, payload: Payload, *, origin: str = "") -> None:
+    def emit(self, event: GuiEvent, payload: Payload) -> None:
         if not isinstance(event, GuiEvent):
             raise TypeError(f"event must be a GuiEvent, got {type(event)}")
         expected_payload = _EventPayloadMap[event]
@@ -518,25 +469,16 @@ class EventBus:
                 f"{event.value} expects {expected_payload.__name__}, "
                 f"got {type(payload).__name__}"
             )
-        # Override the current origin only when explicitly passed (async
-        # terminal emits carry their operation's lease origin). When omitted,
-        # the value set by an enclosing ``acting_as`` scope (or "") stands.
-        prev_origin = self._cur_origin
-        if origin:
-            self._cur_origin = origin
         exceptions: list[BaseException] = []
-        try:
-            for cb in list(self._subs.get(event, [])):
-                try:
-                    cb(payload)
-                except Exception as exc:
-                    exceptions.append(exc)
-                    logger.exception(
-                        "EventBus subscriber failed: event=%s callback=%r",
-                        event.value,
-                        cb,
-                    )
-        finally:
-            self._cur_origin = prev_origin
+        for cb in list(self._subs.get(event, [])):
+            try:
+                cb(payload)
+            except Exception as exc:
+                exceptions.append(exc)
+                logger.exception(
+                    "EventBus subscriber failed: event=%s callback=%r",
+                    event.value,
+                    cb,
+                )
         if exceptions:
             raise exceptions[0]

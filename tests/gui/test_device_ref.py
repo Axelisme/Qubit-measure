@@ -16,6 +16,7 @@ from zcu_tools.gui.services.device import (
     DeviceService,
     DisconnectDeviceRequest,
 )
+from zcu_tools.gui.state import State
 
 
 @pytest.fixture(autouse=True)
@@ -47,6 +48,7 @@ def _make_service(device: MagicMock) -> tuple[DeviceService, EventBus]:
     return (
         DeviceService(
             bus,
+            State(MagicMock()),
             driver_factory=lambda _type, _address: device,
         ),
         bus,

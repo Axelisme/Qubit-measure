@@ -15,6 +15,7 @@ from zcu_tools.gui.services.device import (
     SetupDeviceRequest,
     _DeviceSetupWorker,
 )
+from zcu_tools.gui.state import State
 
 
 @pytest.fixture(autouse=True)
@@ -31,6 +32,7 @@ def _make_svc(driver: MagicMock | None = None) -> tuple[DeviceService, MagicMock
     device.get_info.return_value = FakeDeviceInfo(address="none")
     svc = DeviceService(
         EventBus(),
+        State(MagicMock()),
         driver_factory=lambda _type, _address: device,
     )
     return svc, device

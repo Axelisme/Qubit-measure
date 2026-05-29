@@ -72,6 +72,22 @@ def _json(name: str, desc: str = "") -> ParamSpec:
     return ParamSpec(name, JsonType.JSON, required=True, description=desc)
 
 
+def _expected_versions() -> ParamSpec:
+    """Wire-only optimistic-concurrency guard param (mcp-filled, MCP-hidden).
+
+    The mcp layer attaches the resource->version map this op depends on; the
+    server compares it atomically. Hidden from the agent-facing MCP schema.
+    """
+    return ParamSpec(
+        "expected_versions",
+        JsonType.OBJECT,
+        required=False,
+        default={},
+        description="Resource versions the caller depends on (mcp bookkeeping)",
+        mcp_hidden=True,
+    )
+
+
 def _num(name: str, desc: str = "") -> ParamSpec:
     return ParamSpec(name, JsonType.NUMBER, required=True, description=desc)
 
@@ -141,7 +157,9 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         ),
     ),
     # Run
-    "run.start": MethodSpec(5.0, "Start a run (fire-and-forget)", (_str("tab_id"),)),
+    "run.start": MethodSpec(
+        5.0, "Start a run (fire-and-forget)", (_str("tab_id"), _expected_versions())
+    ),
     "run.cancel": MethodSpec(5.0, "Cancel current run"),
     "run.running_tab": MethodSpec(5.0, "Current running tab"),
     "run.progress": MethodSpec(
@@ -157,12 +175,21 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "save.data": MethodSpec(
         30.0,
         "Save data file",
-        (_str("tab_id"), _str_opt("data_path", "Override data path"), _comment()),
+        (
+            _str("tab_id"),
+            _str_opt("data_path", "Override data path"),
+            _comment(),
+            _expected_versions(),
+        ),
     ),
     "save.image": MethodSpec(
         30.0,
         "Save image file",
-        (_str("tab_id"), _str_opt("image_path", "Override image path")),
+        (
+            _str("tab_id"),
+            _str_opt("image_path", "Override image path"),
+            _expected_versions(),
+        ),
     ),
     "save.both": MethodSpec(
         30.0,
@@ -172,6 +199,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
             _str_opt("data_path", "Override data path"),
             _str_opt("image_path", "Override image path"),
             _comment(),
+            _expected_versions(),
         ),
     ),
     "save.set_paths": MethodSpec(
@@ -234,6 +262,10 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "state.has_context": MethodSpec(5.0, ""),
     "state.has_active_context": MethodSpec(5.0, ""),
     "state.has_soc": MethodSpec(5.0, ""),
+    # Resource version table (optimistic-concurrency guard baseline). Full
+    # snapshot the mcp layer reads to track last-seen versions; the version
+    # integers are mcp/RPC bookkeeping and are never surfaced to the agent.
+    "resources.versions": MethodSpec(5.0, "Snapshot of all resource versions"),
     # Session
     "session.persist": MethodSpec(10.0, "Persist tab session"),
     "session.restore": MethodSpec(10.0, "Restore tab session"),
@@ -432,7 +464,11 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "numbers) and register it into the ModuleLibrary under 'name'. On success "
         "the session is destroyed; on validation failure it is kept so you can fix "
         "and retry.",
-        (_str("editor_id"), _str("name", "ml entry name to register under")),
+        (
+            _str("editor_id"),
+            _str("name", "ml entry name to register under"),
+            _expected_versions(),
+        ),
     ),
     "editor.discard": MethodSpec(
         5.0,

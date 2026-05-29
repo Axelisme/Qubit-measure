@@ -44,6 +44,10 @@ class ParamSpec:
     required: bool = True
     default: object = None
     description: str = ""
+    # When True the param is validated and reaches the handler as usual, but is
+    # omitted from the MCP inputSchema — a wire-only param the mcp layer fills
+    # (e.g. ``expected_versions``), never surfaced to the agent.
+    mcp_hidden: bool = False
 
     def _coerce(self, present: bool, value: object) -> object:
         if not present or value is None:
@@ -140,9 +144,14 @@ def schema_property(spec: ParamSpec) -> dict[str, object]:
 
 
 def build_input_schema(specs: tuple[ParamSpec, ...]) -> dict[str, object]:
-    """Render a method's ParamSpec tuple as a JSON-schema object."""
-    properties = {spec.name: schema_property(spec) for spec in specs}
-    required = [spec.name for spec in specs if spec.required]
+    """Render a method's ParamSpec tuple as a JSON-schema object.
+
+    ``mcp_hidden`` params are wire-only (mcp-filled) and excluded from the
+    agent-facing schema.
+    """
+    visible = tuple(spec for spec in specs if not spec.mcp_hidden)
+    properties = {spec.name: schema_property(spec) for spec in visible}
+    required = [spec.name for spec in visible if spec.required]
     schema: dict[str, object] = {"type": "object", "properties": properties}
     if required:
         schema["required"] = required

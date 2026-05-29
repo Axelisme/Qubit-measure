@@ -112,6 +112,29 @@ _EVENT_QUEUE_MAX = 1024
 _EVENT_QUEUE: Deque[Dict[str, Any]] = deque(maxlen=_EVENT_QUEUE_MAX)
 _EVENT_COND = threading.Condition()
 
+# --- Optimistic-concurrency bookkeeping (policy lives here, mcp side) --------
+#
+# The agent never sees version numbers; they are bookkeeping between this mcp
+# layer and the RPC server. ``_LAST_SEEN`` tracks the versions we last read via
+# ``resources.versions``. Guarded ops (run/save/commit) attach the subset of
+# versions they depend on as ``expected_versions``; the server compares them
+# atomically and rejects with PRECONDITION_FAILED if any moved (a concurrent —
+# possibly human — edit). On rejection we re-read the table so the next attempt
+# carries fresh baselines.
+_LAST_SEEN: Dict[str, int] = {}
+
+# Dependency map (the single place that knows what each guarded op depends on).
+# Patterns use {tab_id}/{editor_id} placeholders and a literal ``device:*`` that
+# expands to every current device:* key. save.* does NOT depend on cfg — the
+# saved content comes from the run result's own cfg_snapshot.
+_GUARD_DEPS: Dict[str, tuple[str, ...]] = {
+    "run.start": ("tab:{tab_id}:cfg", "tab:{tab_id}", "soc", "context", "device:*"),
+    "save.data": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
+    "save.image": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
+    "save.both": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
+    "editor.commit": ("editor:{editor_id}", "context"),
+}
+
 _READER_THREAD: Optional[threading.Thread] = None
 _READER_STOP = threading.Event()
 
@@ -224,12 +247,12 @@ def _deliver_event(msg: Dict[str, Any]) -> None:
         _EVENT_COND.notify_all()
 
 
-def send_gui_rpc(
+def _send_gui_rpc_raw(
     method: str,
     params: Dict[str, Any],
-    timeout_seconds: float = 30.0,
+    timeout_seconds: float,
 ) -> Dict[str, Any]:
-    """Issue one RPC against the GUI; raises on error or timeout."""
+    """Issue one RPC and return its parsed reply envelope (no guard logic)."""
     if _GUI_SOCK is None:
         raise RuntimeError("GUI not connected. Call gui_connect first.")
     rid = _next_rid()
@@ -255,23 +278,88 @@ def send_gui_rpc(
             _RID_COND.wait(timeout=remaining)
     if "error" in holder and "message" not in holder:
         raise ConnectionError(holder["error"])
-    resp = holder["message"]
-    changes = resp.get("gui_changes")
+    return holder["message"]
+
+
+def _refresh_versions() -> None:
+    """Re-read the full resource version table into ``_LAST_SEEN``.
+
+    Pure read via ``resources.versions`` (the single read entry point). Called
+    on connect and after a stale rejection so the next guarded op carries fresh
+    baselines. Failures are swallowed — a missing table just means no guard.
+    """
+    try:
+        resp = _send_gui_rpc_raw("resources.versions", {}, 5.0)
+    except Exception:  # pragma: no cover — best-effort resync
+        return
+    if not resp.get("ok", False):
+        return
+    versions = resp.get("result", {}).get("versions")
+    if isinstance(versions, dict):
+        _LAST_SEEN.clear()
+        _LAST_SEEN.update(versions)
+
+
+def _build_expected_versions(method: str, params: Dict[str, Any]) -> Dict[str, int]:
+    """Resolve a guarded method's dependency patterns into expected versions.
+
+    Policy lives here: expand {tab_id}/{editor_id} placeholders and the literal
+    ``device:*`` (every current device:* key) against ``_LAST_SEEN``. Returns the
+    subset of versions the op depends on; the server compares only these.
+    """
+    deps = _GUARD_DEPS.get(method)
+    if not deps:
+        return {}
+    expected: Dict[str, int] = {}
+    for pattern in deps:
+        if pattern == "device:*":
+            for key in _LAST_SEEN:
+                if key.startswith("device:"):
+                    expected[key] = _LAST_SEEN[key]
+            continue
+        key = pattern.format(
+            tab_id=params.get("tab_id", ""),
+            editor_id=params.get("editor_id", ""),
+        )
+        expected[key] = _LAST_SEEN.get(key, 0)
+    return expected
+
+
+def send_gui_rpc(
+    method: str,
+    params: Dict[str, Any],
+    timeout_seconds: float = 30.0,
+) -> Dict[str, Any]:
+    """Issue one RPC against the GUI; raises on error or timeout.
+
+    For guarded methods (run/save/commit) attaches ``expected_versions`` from
+    the mcp-side bookkeeping so the server can reject stale operations. On a
+    stale rejection the version table is re-read so the agent's retry is fresh.
+    """
+    send_params = params
+    if method in _GUARD_DEPS:
+        send_params = dict(params)
+        send_params["expected_versions"] = _build_expected_versions(method, params)
+
+    resp = _send_gui_rpc_raw(method, send_params, timeout_seconds)
     if not resp.get("ok", False):
         err = resp.get("error", {})
+        if err.get("reason") == "stale_version":
+            # A dependency moved since we last read it; resync so the retry is
+            # against the current table, and surface a plain-language hint.
+            _refresh_versions()
+            raise RuntimeError(
+                "GUI Error (PRECONDITION_FAILED): a resource you depend on was "
+                "changed in the GUI since you last saw it; review then retry"
+            )
         msg = f"GUI Error ({err.get('code')}): {err.get('message')}"
-        # Surface the change summary on the error too — a stale-guard block
-        # rides here, and seeing it is what lets the immediate retry through.
-        if changes:
-            msg += f" | gui_changes (by others since you last saw): {changes}"
         raise RuntimeError(msg)
-    result = dict(resp.get("result", {}))
-    # Sidecar: GUI changes caused by others since the last reply. Surfaced under
-    # a reserved key so the agent sees it in every tool's output without it
-    # being part of the tool's semantic result.
-    if changes:
-        result["_gui_changes"] = changes
-    return result
+    # Every successful RPC is a round-trip in which the agent "observed" the GUI;
+    # refresh the baseline so its own reads/writes are not later seen as stale by
+    # its own guarded ops. A concurrent (human) change between two RPCs lands
+    # after this refresh and so is correctly caught by the next guard.
+    _refresh_versions()
+    return dict(resp.get("result", {}))
 
 
 # ---------------------------------------------------------------------------
@@ -553,14 +641,6 @@ def tool_gui_editor_unsubscribe(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return send_gui_rpc("editor.unsubscribe", {"editor_id": editor_id})
 
 
-def tool_gui_changes_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    del arguments
-    # Drains this connection's GUI-change buffer; the summary rides back in the
-    # reserved _gui_changes key (added by send_gui_rpc). Read-clears, so polling
-    # counts as being informed and releases the stale-operation guard.
-    return send_gui_rpc("changes.poll", {})
-
-
 def tool_gui_events_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
     """Drain up to ``max_events`` queued event pushes, blocking briefly."""
     timeout_seconds = float(arguments.get("timeout_seconds", 5.0))
@@ -676,6 +756,9 @@ _NON_GENERATED_METHODS = frozenset(
         "events.subscribe",
         "events.unsubscribe",
         "events.list",
+        # mcp<->RPC bookkeeping only; never an agent-facing tool (version numbers
+        # must not surface to the agent — used internally by _refresh_versions).
+        "resources.versions",
     }
 )
 
@@ -913,19 +996,6 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             "required": ["editor_id"],
         },
     },
-    "gui_changes_poll": {
-        "handler": tool_gui_changes_poll,
-        "description": (
-            "Drain and return the summary of GUI changes made by OTHERS (e.g. a "
-            "human at the GUI) since you were last informed — category + affected "
-            "object + count, in the _gui_changes key. Every gui_* call already "
-            "carries this sidecar; use this tool to check on demand without doing "
-            "anything else. NOTE: read-clears — polling counts as being informed, "
-            "so it releases the stale-operation guard on run/commit for those "
-            "objects. Returns empty when nothing changed."
-        ),
-        "inputSchema": {"type": "object", "properties": {}},
-    },
     "gui_events_poll": {
         "handler": tool_gui_events_poll,
         "description": (
@@ -1108,7 +1178,6 @@ _OVERRIDE_NAMES = frozenset(
         "gui_events_poll",
         "gui_editor_subscribe",
         "gui_editor_unsubscribe",
-        "gui_changes_poll",
     }
 )
 

@@ -300,6 +300,10 @@ class Controller:
     def has_soc(self) -> bool:
         return self._conn_svc.has_soc()
 
+    def resources_versions(self) -> dict[str, int]:
+        """Full resource-version snapshot (the resources.versions RPC payload)."""
+        return self._state.version.snapshot()
+
     def start_run(self, tab_id: str) -> None:
         # GuardService proves context readiness + committed-cfg validity + soc
         # capability, and carries the worker payload in the permit. Both clients
@@ -482,6 +486,10 @@ class Controller:
     def set_cfg_editor_change_listener(self, listener: Any) -> None:
         """Wire the per-session push listener (remote layer injects this)."""
         self._cfg_editor_svc.set_change_listener(listener)
+
+    def bump_editor_version(self, editor_id: str) -> None:
+        """Bump an editor session's draft version (editor.commit guard input)."""
+        self._state.version.bump(f"editor:{editor_id}")
 
     def cfg_editor_set_field(
         self, editor_id: str, path: str, value: object

@@ -69,7 +69,7 @@ def build_app_services(
 ) -> AppServices:
     """Construct and wire every domain service into a frozen bundle."""
     operation_gate = OperationGate()
-    device = DeviceService(bus, operation_gate)
+    device = DeviceService(bus, state, operation_gate)
     context = ContextService(state, io_manager, bus)
     tab = TabService(state, registry)
     writeback = WritebackService(state, bus)

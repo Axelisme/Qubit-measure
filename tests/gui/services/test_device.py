@@ -17,6 +17,7 @@ from zcu_tools.gui.services.device import (
     SetDeviceValueRequest,
     SetupDeviceRequest,
 )
+from zcu_tools.gui.state import State
 from zcu_tools.gui.services.operation_gate import (
     OperationConflictError,
     OperationGate,
@@ -41,6 +42,7 @@ def _make_svc(
     return (
         DeviceService(
             EventBus(),
+            State(MagicMock()),
             gate,
             driver_factory=lambda _type, _address: device,
         ),
@@ -247,6 +249,7 @@ def test_event_failure_before_worker_start_does_not_leak_device_lease(qapp):
     bus = EventBus()
     svc = DeviceService(
         bus,
+        State(MagicMock()),
         driver_factory=lambda _type, _address: MagicMock(),
     )
     bus.subscribe(

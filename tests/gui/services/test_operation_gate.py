@@ -66,23 +66,6 @@ def test_operation_gate_rejects_double_release() -> None:
 
 
 # ---------------------------------------------------------------------------
-# origin attribution (Phase 93)
-# ---------------------------------------------------------------------------
-
-
-def test_lease_carries_origin() -> None:
-    gate = OperationGate()
-    lease = gate.acquire(OperationKind.DEVICE_SETUP, owner_id="d", origin="agent")
-    assert lease.origin == "agent"
-
-
-def test_lease_origin_defaults_empty() -> None:
-    gate = OperationGate()
-    lease = gate.acquire(OperationKind.RUN, owner_id="tab")
-    assert lease.origin == ""
-
-
-# ---------------------------------------------------------------------------
 # await_release (Phase 93) — thread-safe wait for off-main blocking handlers
 # ---------------------------------------------------------------------------
 

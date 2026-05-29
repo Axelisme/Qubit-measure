@@ -38,6 +38,7 @@ from .operation_gate import (
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import EventBus
+    from zcu_tools.gui.state import State
 
 logger = logging.getLogger(__name__)
 
@@ -252,12 +253,14 @@ class DeviceService(QObject):
     def __init__(
         self,
         bus: "EventBus",
+        state: "State",
         gate: OperationGate | None = None,
         parent: Optional[QObject] = None,
         driver_factory: Optional[Callable[[str, str], DeviceProtocol]] = None,
     ) -> None:
         super().__init__(parent)
         self._bus = bus
+        self._state = state
         self._gate = gate or OperationGate()
         self._driver_factory = driver_factory or _default_driver_factory
         self._snapshots: dict[str, DeviceSnapshot] = {}
@@ -550,12 +553,7 @@ class DeviceService(QObject):
     def _begin_operation(
         self, kind: OperationKind, name: str, pending: DeviceSnapshot
     ) -> None:
-        # Carry the originating client (e.g. "agent") onto the lease so the
-        # terminal DEVICE_CHANGED — emitted later from the worker callback,
-        # outside the originating RPC's sync scope — can still be attributed.
-        lease = self._gate.acquire(
-            kind, owner_id=name, resource_id=name, origin=self._bus.current_origin
-        )
+        lease = self._gate.acquire(kind, owner_id=name, resource_id=name)
         prior = self._snapshots.get(name)
         self._active_lease = lease
         self._active_name = name
@@ -574,13 +572,7 @@ class DeviceService(QObject):
             self._gate.release(lease)
             raise
 
-    def _finish_operation(self, name: str) -> str:
-        """Release the active lease and return its origin.
-
-        The returned origin lets the caller emit the terminal DEVICE_CHANGED
-        attributed to whoever started the operation, even though the lease is
-        no longer active by the time the (post-release) emit runs.
-        """
+    def _finish_operation(self, name: str) -> None:
         if self._active_name != name or self._active_lease is None:
             raise RuntimeError(f"Device operation for {name!r} has no active lease")
         lease = self._active_lease
@@ -590,7 +582,6 @@ class DeviceService(QObject):
         self._command_worker = None
         self._setup_worker = None
         self._gate.release(lease)
-        return lease.origin
 
     def _start_command_worker(self, worker: _DeviceCommandWorker, name: str) -> None:
         try:
@@ -605,8 +596,8 @@ class DeviceService(QObject):
             self._snapshots.pop(name, None)
         else:
             self._snapshots[name] = prior
-        origin = self._finish_operation(name)
-        self._emit_device_changed(name, origin)
+        self._finish_operation(name)
+        self._emit_device_changed(name)
 
     def _on_connect_succeeded(self, req: ConnectDeviceRequest, info: object) -> None:
         self._snapshots[req.name] = DeviceSnapshot(
@@ -616,8 +607,8 @@ class DeviceService(QObject):
             status=DeviceStatus.CONNECTED,
             info=cast(BaseDeviceInfo, info),
         )
-        origin = self._finish_operation(req.name)
-        self._emit_device_changed(req.name, origin)
+        self._finish_operation(req.name)
+        self._emit_device_changed(req.name)
         self.device_connected.emit(req)
 
     def _on_disconnect_succeeded(self, req: DisconnectDeviceRequest) -> None:
@@ -632,8 +623,8 @@ class DeviceService(QObject):
             )
         else:
             del self._snapshots[req.name]
-        origin = self._finish_operation(req.name)
-        self._emit_device_changed(req.name, origin)
+        self._finish_operation(req.name)
+        self._emit_device_changed(req.name)
         self.device_disconnected.emit(req)
 
     def _on_value_set_succeeded(self, name: str, info: object) -> None:
@@ -644,8 +635,8 @@ class DeviceService(QObject):
             info=cast(BaseDeviceInfo, info),
             error=None,
         )
-        origin = self._finish_operation(name)
-        self._emit_device_changed(name, origin)
+        self._finish_operation(name)
+        self._emit_device_changed(name)
         self.value_set.emit(name)
 
     def _on_setup_finished(self, name: str, info: object) -> None:
@@ -660,39 +651,36 @@ class DeviceService(QObject):
         # Record outcome before _finish_operation releases the lease (which sets
         # the token Event and may wake an off-main wait_setup_done waiter).
         self._record_setup_outcome(name, None)
-        origin = self._finish_operation(name)
+        self._finish_operation(name)
         self._clear_progress()
-        self._emit_device_changed(name, origin)
+        self._emit_device_changed(name)
         self._bus.emit(
             GuiEvent.DEVICE_SETUP_CHANGED,
             DeviceSetupChangedPayload(active_setup=None),
-            origin=origin,
         )
         self.setup_finished.emit(name)
 
     def _on_setup_failed(self, name: str, error: str) -> None:
         self._restore_prior_snapshot(name, error)
         self._record_setup_outcome(name, error)
-        origin = self._finish_operation(name)
+        self._finish_operation(name)
         self._clear_progress()
-        self._emit_device_changed(name, origin)
+        self._emit_device_changed(name)
         self._bus.emit(
             GuiEvent.DEVICE_SETUP_CHANGED,
             DeviceSetupChangedPayload(active_setup=None),
-            origin=origin,
         )
         self.setup_failed.emit(name, error)
 
     def _on_setup_cancelled(self, name: str) -> None:
         self._restore_prior_snapshot(name, None)
         self._record_setup_outcome(name, f"device {name!r} setup was cancelled")
-        origin = self._finish_operation(name)
+        self._finish_operation(name)
         self._clear_progress()
-        self._emit_device_changed(name, origin)
+        self._emit_device_changed(name)
         self._bus.emit(
             GuiEvent.DEVICE_SETUP_CHANGED,
             DeviceSetupChangedPayload(active_setup=None),
-            origin=origin,
         )
         self.setup_cancelled.emit(name)
 
@@ -707,8 +695,8 @@ class DeviceService(QObject):
             del self._snapshots[name]
         else:
             self._restore_prior_snapshot(name, message)
-        origin = self._finish_operation(name)
-        self._emit_device_changed(name, origin)
+        self._finish_operation(name)
+        self._emit_device_changed(name)
         self.operation_failed.emit(name, message)
 
     def _restore_prior_snapshot(self, name: str, error: str | None) -> None:
@@ -723,10 +711,13 @@ class DeviceService(QObject):
             )
         self._snapshots[name] = replace(prior, error=error, progress=())
 
-    def _emit_device_changed(self, name: str, origin: str = "") -> None:
-        self._bus.emit(
-            GuiEvent.DEVICE_CHANGED, DeviceChangedPayload(name=name), origin=origin
-        )
+    def _emit_device_changed(self, name: str) -> None:
+        # Single chokepoint for every device state transition (begin / connect /
+        # disconnect / value-set / setup terminal / errors). Each caller has
+        # already written self._snapshots[name], so this is the "device resource
+        # written" point; bump its version here, on the main thread.
+        self._state.version.bump(f"device:{name}")
+        self._bus.emit(GuiEvent.DEVICE_CHANGED, DeviceChangedPayload(name=name))
 
     def _record_setup_outcome(self, name: str, error: str | None) -> None:
         """Record a setup terminal outcome for an off-main wait_setup_done waiter.

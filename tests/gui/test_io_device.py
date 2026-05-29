@@ -14,6 +14,7 @@ from zcu_tools.gui.services.device import (
     DisconnectDeviceRequest,
     SetDeviceValueRequest,
 )
+from zcu_tools.gui.state import State
 
 
 def _make_svc(driver: object | None = None) -> tuple[DeviceService, object]:
@@ -24,7 +25,8 @@ def _make_svc(driver: object | None = None) -> tuple[DeviceService, object]:
     def factory(type_name: str, address: str) -> object:
         return fake_device
 
-    return DeviceService(EventBus(), driver_factory=factory), fake_device  # type: ignore[arg-type]
+    svc = DeviceService(EventBus(), State(MagicMock()), driver_factory=factory)  # type: ignore[arg-type]
+    return svc, fake_device
 
 
 def _register(svc: DeviceService, name: str = "flux") -> None:

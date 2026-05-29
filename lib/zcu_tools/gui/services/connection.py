@@ -185,9 +185,7 @@ class ConnectionService(QObject):
         if not isinstance(req, (ConnectMockRequest, ConnectRemoteRequest)):
             raise TypeError(f"Unsupported connect request: {type(req).__name__}")
 
-        lease = self._gate.acquire(
-            OperationKind.SOC_CONNECT, owner_id="soc", origin=self._bus.current_origin
-        )
+        lease = self._gate.acquire(OperationKind.SOC_CONNECT, owner_id="soc")
         self._active_lease = lease
         self._pending_is_mock = isinstance(req, ConnectMockRequest)
 
@@ -245,12 +243,8 @@ class ConnectionService(QObject):
         self._finish_failure(error)
 
     def _finish_success(self, soc: SocHandle, soccfg: SocCfgHandle) -> None:
-        # Read the lease origin before release so the SOC_CHANGED emit (which
-        # happens inside _apply_connection, before _release_lease) is attributed
-        # to whoever started the connect.
-        origin = self._active_lease.origin if self._active_lease is not None else ""
         try:
-            self._apply_connection(soc, soccfg, origin)
+            self._apply_connection(soc, soccfg)
         finally:
             self._release_lease()
         self.connection_finished.emit()
@@ -266,15 +260,15 @@ class ConnectionService(QObject):
         self._active_lease = None
         self._gate.release(lease)
 
-    def _apply_connection(
-        self, soc: SocHandle, soccfg: SocCfgHandle, origin: str = ""
-    ) -> None:
+    def _apply_connection(self, soc: SocHandle, soccfg: SocCfgHandle) -> None:
         new_ctx = dataclasses.replace(self._state.exp_context, soc=soc, soccfg=soccfg)
         self._state.set_context(new_ctx)
+        # soc is its own resource (a run depends on it independently of context);
+        # bump it here, on the main thread, where the soc is written.
+        self._state.version.bump("soc")
         self._bus.emit(
             GuiEvent.SOC_CHANGED,
             SocChangedPayload(soc=soc, soccfg=soccfg, is_mock=self._pending_is_mock),
-            origin=origin,
         )
 
     # ------------------------------------------------------------------

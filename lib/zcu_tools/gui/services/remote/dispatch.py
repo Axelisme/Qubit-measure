@@ -499,6 +499,11 @@ def _h_state_has_soc(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
     return {"value": bool(ctrl.has_soc())}
 
 
+def _h_resources_versions(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    del params
+    return {"versions": ctrl.resources_versions()}
+
+
 def _h_session_persist(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     del params
     ctrl.persist_tabs_session()
@@ -1295,6 +1300,7 @@ _HANDLERS: dict[str, Handler] = {
     "state.has_context": _h_state_has_context,
     "state.has_active_context": _h_state_has_active_context,
     "state.has_soc": _h_state_has_soc,
+    "resources.versions": _h_resources_versions,
     "session.persist": _h_session_persist,
     "session.restore": _h_session_restore,
     "connect.start": _h_connect_start,
