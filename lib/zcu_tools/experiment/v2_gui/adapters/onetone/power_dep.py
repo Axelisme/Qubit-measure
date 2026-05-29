@@ -39,11 +39,8 @@ class OneTonePowerDepAdapter(
 ):
     exp_cls = PowerDepExp
 
-    def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
-        r_f = md_get_float(ctx, "r_f", 6000.0)
-        rf_w = md_get_float(ctx, "rf_w", 20.0)
-        half_span = 1.5 * rf_w if rf_w > 0 else 30.0
-        root_spec = CfgSectionSpec(
+    def cfg_spec(self) -> CfgSectionSpec:
+        return CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
                     label="Modules",
@@ -69,6 +66,11 @@ class OneTonePowerDepAdapter(
                 ),
             }
         )
+
+    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+        r_f = md_get_float(ctx, "r_f", 6000.0)
+        rf_w = md_get_float(ctx, "rf_w", 20.0)
+        half_span = 1.5 * rf_w if rf_w > 0 else 30.0
         root_val = CfgSectionValue(
             fields={
                 "modules": CfgSectionValue(
@@ -108,7 +110,7 @@ class OneTonePowerDepAdapter(
                 ),
             }
         )
-        return CfgSchema(spec=root_spec, value=root_val)
+        return root_val
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> PowerDepCfg:
         cfg_raw = dict(raw_cfg)

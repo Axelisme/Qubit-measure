@@ -95,8 +95,8 @@ class FakeAdapter(
     capabilities = AdapterCapabilities(requires_soc=False)
     exp_cls = FakeExp
 
-    def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
-        spec = CfgSectionSpec(
+    def cfg_spec(self) -> CfgSectionSpec:
+        return CfgSectionSpec(
             fields={
                 "reps": ScalarSpec(label="Reps", type=int),
                 "rounds": ScalarSpec(label="Rounds", type=int),
@@ -105,7 +105,10 @@ class FakeAdapter(
                 "noise_scale": ScalarSpec(label="Noise Scale", type=float, decimals=4),
             }
         )
-        value = CfgSectionValue(
+
+    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+        del ctx
+        return CfgSectionValue(
             fields={
                 "reps": DirectValue(100),
                 "rounds": DirectValue(10),
@@ -114,7 +117,6 @@ class FakeAdapter(
                 "noise_scale": DirectValue(0.1),
             }
         )
-        return CfgSchema(spec=spec, value=value)
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FakeExpCfg:
         return FakeExpCfg(

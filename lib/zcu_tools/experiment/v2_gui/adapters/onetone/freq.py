@@ -67,21 +67,8 @@ class OneToneFreqAdapter(
 ):
     exp_cls = FreqExp
 
-    def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
-        r_f = md_get_float(ctx, "r_f", 6000.0)
-        rf_w = md_get_float(ctx, "rf_w", 20.0)
-        half_span = 1.5 * rf_w if rf_w > 0 else 30.0
-        probe_len = md_get_float(ctx, "res_probe_len", 1.0)
-        ro_length: Union[float, EvalValue] = (
-            EvalValue(
-                expr="res_probe_len - 0.1",
-                resolved=probe_len - 0.1,
-                error=None,
-            )
-            if md_has_key(ctx, "res_probe_len")
-            else probe_len - 0.1
-        )
-        root_spec = CfgSectionSpec(
+    def cfg_spec(self) -> CfgSectionSpec:
+        return CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
                     label="Modules",
@@ -100,6 +87,21 @@ class OneToneFreqAdapter(
                     fields={"freq": SweepSpec(label="Freq (MHz)")},
                 ),
             }
+        )
+
+    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+        r_f = md_get_float(ctx, "r_f", 6000.0)
+        rf_w = md_get_float(ctx, "rf_w", 20.0)
+        half_span = 1.5 * rf_w if rf_w > 0 else 30.0
+        probe_len = md_get_float(ctx, "res_probe_len", 1.0)
+        ro_length: Union[float, EvalValue] = (
+            EvalValue(
+                expr="res_probe_len - 0.1",
+                resolved=probe_len - 0.1,
+                error=None,
+            )
+            if md_has_key(ctx, "res_probe_len")
+            else probe_len - 0.1
         )
         root_val = CfgSectionValue(
             fields={
@@ -140,7 +142,7 @@ class OneToneFreqAdapter(
                 ),
             }
         )
-        return CfgSchema(spec=root_spec, value=root_val)
+        return root_val
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FreqCfg:
         return req.ml.make_cfg(raw_cfg, FreqCfg)

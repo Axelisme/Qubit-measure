@@ -37,11 +37,8 @@ FluxDepRunResult: TypeAlias = FreqFluxResult
 class FluxDepAdapter(NoAnalysisAdapterMixin[FreqFluxCfg, FluxDepRunResult]):
     exp_cls = FreqFluxExp
 
-    def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
-        q_f = md_get_float(ctx, "q_f", 4000.0)
-        qf_w = md_get_float(ctx, "qf_w", 20.0)
-        half_span = qf_w if qf_w > 0 else 20.0
-        root_spec = CfgSectionSpec(
+    def cfg_spec(self) -> CfgSectionSpec:
+        return CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
                     label="Modules",
@@ -71,6 +68,11 @@ class FluxDepAdapter(NoAnalysisAdapterMixin[FreqFluxCfg, FluxDepRunResult]):
                 ),
             }
         )
+
+    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+        q_f = md_get_float(ctx, "q_f", 4000.0)
+        qf_w = md_get_float(ctx, "qf_w", 20.0)
+        half_span = qf_w if qf_w > 0 else 20.0
         _module_fields: dict[str, CfgNodeValue] = {
             "qub_pulse": make_pulse_ref_default(ctx),
             "readout": make_readout_default(ctx),
@@ -101,7 +103,7 @@ class FluxDepAdapter(NoAnalysisAdapterMixin[FreqFluxCfg, FluxDepRunResult]):
                 ),
             }
         )
-        return CfgSchema(spec=root_spec, value=root_val)
+        return root_val
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FreqFluxCfg:
         cfg_raw = dict(raw_cfg)

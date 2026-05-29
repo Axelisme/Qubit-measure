@@ -65,9 +65,8 @@ class AmpRabiAdapter(
 ):
     exp_cls = AmpRabiExp
 
-    def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
-        pi_amp = md_get_float(ctx, "pi_amp", 0.5)
-        root_spec = CfgSectionSpec(
+    def cfg_spec(self) -> CfgSectionSpec:
+        return CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
                     label="Modules",
@@ -88,6 +87,9 @@ class AmpRabiAdapter(
                 ),
             }
         )
+
+    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+        pi_amp = md_get_float(ctx, "pi_amp", 0.5)
         _module_fields: dict[str, CfgNodeValue] = {
             "qub_pulse": make_pulse_ref_default(ctx),
             "readout": make_readout_ref_default(ctx),
@@ -108,7 +110,7 @@ class AmpRabiAdapter(
                 ),
             }
         )
-        return CfgSchema(spec=root_spec, value=root_val)
+        return root_val
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> AmpRabiCfg:
         return req.ml.make_cfg(raw_cfg, AmpRabiCfg)

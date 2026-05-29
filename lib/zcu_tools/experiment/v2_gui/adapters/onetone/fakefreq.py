@@ -226,23 +226,8 @@ class FakeFreqAdapter(
     def __init__(self, fast_mode: bool = False) -> None:
         self._fast_mode = fast_mode
 
-    def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
-        r_f = md_get_float(ctx, "r_f", 6000.0)
-        rf_w_raw = ctx.md.get("rf_w")
-        rf_w: Optional[float] = (
-            float(rf_w_raw) if isinstance(rf_w_raw, (int, float)) else None
-        )
-
-        # Sweep range: ±5× linewidth around r_f, or ±200 MHz if rf_w unknown
-        half_span = (rf_w * 5.0) if rf_w is not None else 200.0
-        freq_start = r_f - half_span
-        freq_stop = r_f + half_span
-
-        # Rough Ql estimate from linewidth: Ql ≈ r_f / rf_w
-        ql_default = round(r_f / rf_w) if rf_w is not None and rf_w > 0 else 5000
-        qc_default = ql_default * 2
-
-        root_spec = CfgSectionSpec(
+    def cfg_spec(self) -> CfgSectionSpec:
+        return CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
                     label="Modules",
@@ -281,7 +266,23 @@ class FakeFreqAdapter(
             }
         )
 
-        root_val = CfgSectionValue(
+    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+        r_f = md_get_float(ctx, "r_f", 6000.0)
+        rf_w_raw = ctx.md.get("rf_w")
+        rf_w: Optional[float] = (
+            float(rf_w_raw) if isinstance(rf_w_raw, (int, float)) else None
+        )
+
+        # Sweep range: ±5× linewidth around r_f, or ±200 MHz if rf_w unknown
+        half_span = (rf_w * 5.0) if rf_w is not None else 200.0
+        freq_start = r_f - half_span
+        freq_stop = r_f + half_span
+
+        # Rough Ql estimate from linewidth: Ql ≈ r_f / rf_w
+        ql_default = round(r_f / rf_w) if rf_w is not None and rf_w > 0 else 5000
+        qc_default = ql_default * 2
+
+        return CfgSectionValue(
             fields={
                 "reps": DirectValue(100),
                 "rounds": DirectValue(100),
@@ -310,7 +311,6 @@ class FakeFreqAdapter(
                 ),
             }
         )
-        return CfgSchema(spec=root_spec, value=root_val)
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FakeFreqCfg:
         return req.ml.make_cfg(raw_cfg, FakeFreqCfg, fast_mode=self._fast_mode)

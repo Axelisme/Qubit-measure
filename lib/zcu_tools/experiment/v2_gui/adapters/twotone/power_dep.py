@@ -34,11 +34,8 @@ PowerDepRunResult: TypeAlias = PowerResult
 class PowerDepAdapter(NoAnalysisAdapterMixin[PowerCfg, PowerDepRunResult]):
     exp_cls = PowerExp
 
-    def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
-        q_f = md_get_float(ctx, "q_f", 4000.0)
-        qf_w = md_get_float(ctx, "qf_w", 20.0)
-        half_span = 1.5 * qf_w if qf_w > 0 else 30.0
-        root_spec = CfgSectionSpec(
+    def cfg_spec(self) -> CfgSectionSpec:
+        return CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
                     label="Modules",
@@ -62,6 +59,11 @@ class PowerDepAdapter(NoAnalysisAdapterMixin[PowerCfg, PowerDepRunResult]):
                 ),
             }
         )
+
+    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+        q_f = md_get_float(ctx, "q_f", 4000.0)
+        qf_w = md_get_float(ctx, "qf_w", 20.0)
+        half_span = 1.5 * qf_w if qf_w > 0 else 30.0
         _module_fields: dict[str, CfgNodeValue] = {
             "qub_pulse": make_pulse_ref_default(ctx),
             "readout": make_readout_default(ctx),
@@ -87,7 +89,7 @@ class PowerDepAdapter(NoAnalysisAdapterMixin[PowerCfg, PowerDepRunResult]):
                 ),
             }
         )
-        return CfgSchema(spec=root_spec, value=root_val)
+        return root_val
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> PowerCfg:
         return req.ml.make_cfg(raw_cfg, PowerCfg)

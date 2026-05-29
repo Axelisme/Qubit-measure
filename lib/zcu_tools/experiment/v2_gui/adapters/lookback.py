@@ -58,8 +58,8 @@ class LookbackAdapter(
     capabilities = AdapterCapabilities(requires_soc=False)
     exp_cls = LookbackExp
 
-    def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
-        root_spec = CfgSectionSpec(
+    def cfg_spec(self) -> CfgSectionSpec:
+        return CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
                     label="Modules",
@@ -76,6 +76,8 @@ class LookbackAdapter(
                 ),
             }
         )
+
+    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         root_val = CfgSectionValue(
             fields={
                 "modules": CfgSectionValue(
@@ -95,7 +97,7 @@ class LookbackAdapter(
                 "relax_delay": DirectValue(0.0),
             }
         )
-        return CfgSchema(spec=root_spec, value=root_val)
+        return root_val
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> LookbackCfg:
         return req.ml.make_cfg(raw_cfg, LookbackCfg)

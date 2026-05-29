@@ -12,6 +12,8 @@ from .types import (
     AnalyzeRequest,
     AnalyzeResultBase,
     CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
     ExpContext,
     RunRequest,
     SaveDataRequest,
@@ -41,8 +43,22 @@ class AbsExpAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzePara
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities()
 
     @abstractmethod
+    def cfg_spec(self) -> "CfgSectionSpec":
+        """Return the static cfg spec tree (no context required).
+
+        The spec is the structural contract (field names, types, choices) and
+        must not read any context. Default *values* live in make_default_value.
+        Keeping spec context-free lets agents query an adapter's shape without
+        building a tab/context.
+        """
+
+    @abstractmethod
+    def make_default_value(self, ctx: ExpContext) -> "CfgSectionValue":
+        """Build the default value tree, which may read ctx (md/ml/device)."""
+
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
-        """Build a default CfgSchema from ctx."""
+        """Compose the static spec with context-derived default values."""
+        return CfgSchema(spec=self.cfg_spec(), value=self.make_default_value(ctx))
 
     @abstractmethod
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T_Cfg:

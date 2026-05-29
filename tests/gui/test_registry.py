@@ -52,8 +52,11 @@ class _DummyAdapter(
 ):
     exp_cls = _DummyExp
 
-    def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:  # noqa: ARG002
-        return CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
+    def cfg_spec(self) -> CfgSectionSpec:
+        return CfgSectionSpec()
+
+    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:  # noqa: ARG002
+        return CfgSectionValue()
 
     def build_exp_cfg(self, raw_cfg, req):  # noqa: ARG002
         return _DummyCfg()

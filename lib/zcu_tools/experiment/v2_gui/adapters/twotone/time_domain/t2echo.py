@@ -68,15 +68,8 @@ class T2EchoAdapter(
 ):
     exp_cls = T2EchoExp
 
-    def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
-        t1 = md_get_float(ctx, "t1", 100.0)
-        t2e = md_get_float(ctx, "t2e", 20.0)
-        relax_delay: ScalarValue = (
-            EvalValue(expr="5 * t1", resolved=5.0 * t1, error=None)
-            if md_has_key(ctx, "t1")
-            else DirectValue(100.0)
-        )
-        root_spec = CfgSectionSpec(
+    def cfg_spec(self) -> CfgSectionSpec:
+        return CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
                     label="Modules",
@@ -97,6 +90,15 @@ class T2EchoAdapter(
                     fields={"length": SweepSpec(label="Total delay (us)")},
                 ),
             }
+        )
+
+    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+        t1 = md_get_float(ctx, "t1", 100.0)
+        t2e = md_get_float(ctx, "t2e", 20.0)
+        relax_delay: ScalarValue = (
+            EvalValue(expr="5 * t1", resolved=5.0 * t1, error=None)
+            if md_has_key(ctx, "t1")
+            else DirectValue(100.0)
         )
         _module_fields: dict[str, CfgNodeValue] = {
             "pi2_pulse": make_pulse_ref_default(
@@ -121,7 +123,7 @@ class T2EchoAdapter(
                 ),
             }
         )
-        return CfgSchema(spec=root_spec, value=root_val)
+        return root_val
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T2EchoCfg:
         return req.ml.make_cfg(raw_cfg, T2EchoCfg)
