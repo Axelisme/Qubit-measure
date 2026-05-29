@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
 
 from .analyze import AnalyzeService
+from .cfg_editor import CfgEditorService
 from .connection import ConnectionService
 from .context import ContextService
 from .device import DeviceService
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.io_manager import IOManager
     from zcu_tools.gui.registry import Registry
     from zcu_tools.gui.runner import AnalyzeRunner, Runner, SaveDataRunner
+    from zcu_tools.gui.services.cfg_editor import _EditorCtrl
     from zcu_tools.gui.services.view_query import _ViewQueryTarget
     from zcu_tools.gui.state import State
 
@@ -54,6 +56,7 @@ class AppServices:
     tab_view: TabViewService
     workspace: WorkspaceService
     startup: StartupService
+    cfg_editor: CfgEditorService
 
 
 def build_app_services(
@@ -66,8 +69,15 @@ def build_app_services(
     analyze_runner: "AnalyzeRunner",
     save_runner: "SaveDataRunner",
     view_provider: "Callable[[], _ViewQueryTarget]",
+    cfg_editor_ctrl: "_EditorCtrl",
 ) -> AppServices:
-    """Construct and wire every domain service into a frozen bundle."""
+    """Construct and wire every domain service into a frozen bundle.
+
+    ``cfg_editor_ctrl`` is the Controller itself (the CfgEditor session's
+    LiveModel env + ModuleLibrary registration surface). It is only stored, never
+    called during construction, so passing the still-initialising Controller is
+    safe and keeps the bundle complete (no service built outside this function).
+    """
     operation_gate = OperationGate()
     device = DeviceService(bus, state, operation_gate)
     context = ContextService(state, io_manager, bus)
@@ -90,4 +100,5 @@ def build_app_services(
         startup=StartupService(
             context, device, StartupPersistenceService(), state, bus
         ),
+        cfg_editor=CfgEditorService(cfg_editor_ctrl),
     )

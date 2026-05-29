@@ -92,6 +92,10 @@ class Controller:
 
         # Construct and wire every domain service into an immutable bundle, then
         # alias them onto self for the façade's call sites.
+        # ``cfg_editor_ctrl=self`` lets build_app_services build CfgEditorService
+        # in the same bundle: the session only stores the Controller (as its
+        # LiveModel env + ModuleLibrary registration surface) and never calls it
+        # during construction, so passing the still-initialising self is safe.
         services = build_app_services(
             state=state,
             bus=bus,
@@ -101,6 +105,7 @@ class Controller:
             analyze_runner=AnalyzeRunner(),
             save_runner=SaveDataRunner(),
             view_provider=self._require_view,
+            cfg_editor_ctrl=self,
         )
         self._services = services
         self._operation_gate = services.operation_gate
@@ -117,13 +122,7 @@ class Controller:
         self._tab_view_svc = services.tab_view
         self._workspace_svc = services.workspace
         self._startup_svc = services.startup
-
-        # CfgEditorService needs the Controller itself (as LiveModel env +
-        # ModuleLibrary registration surface), so it is built here rather than
-        # in build_app_services, which has no Controller reference yet.
-        from .services.cfg_editor import CfgEditorService
-
-        self._cfg_editor_svc = CfgEditorService(self)
+        self._cfg_editor_svc = services.cfg_editor
 
         self._run_svc.run_finished.connect(self._on_run_finished)
         self._run_svc.run_failed.connect(self._on_run_failed)

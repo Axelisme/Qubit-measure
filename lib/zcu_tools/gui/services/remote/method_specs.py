@@ -148,7 +148,8 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "tab.update_cfg": MethodSpec(
         10.0,
-        "Replace tab cfg raw",
+        "Replace tab cfg from a full tagged form (missing keys reset to spec "
+        "defaults, not preserved; use cfg.set_field for single-field edits)",
         (_str("tab_id"), _obj("raw", "Full tagged cfg form")),
     ),
     "cfg.set_field": MethodSpec(
