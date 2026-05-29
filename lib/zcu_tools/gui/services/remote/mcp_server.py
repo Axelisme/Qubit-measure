@@ -121,6 +121,10 @@ _GUI_PROC: Optional[subprocess.Popen] = None
 # PID file for cross-session GUI process tracking.
 _GUI_PID_FILE = Path(gettempdir()) / "zcu_tools_gui.pid"
 
+# DEBUG log for GUIs we launch (OS temp dir, not the repo). gui_launch points
+# run_gui.py here so an agent can read the server-side event flow for debugging.
+_GUI_LOG_FILE = Path(gettempdir()) / "zcu_tools_gui_debug.log"
+
 
 def _write_pid_file(pid: int) -> None:
     try:
@@ -252,10 +256,22 @@ def send_gui_rpc(
     if "error" in holder and "message" not in holder:
         raise ConnectionError(holder["error"])
     resp = holder["message"]
+    changes = resp.get("gui_changes")
     if not resp.get("ok", False):
         err = resp.get("error", {})
-        raise RuntimeError(f"GUI Error ({err.get('code')}): {err.get('message')}")
-    return resp.get("result", {})
+        msg = f"GUI Error ({err.get('code')}): {err.get('message')}"
+        # Surface the change summary on the error too — a stale-guard block
+        # rides here, and seeing it is what lets the immediate retry through.
+        if changes:
+            msg += f" | gui_changes (by others since you last saw): {changes}"
+        raise RuntimeError(msg)
+    result = dict(resp.get("result", {}))
+    # Sidecar: GUI changes caused by others since the last reply. Surfaced under
+    # a reserved key so the agent sees it in every tool's output without it
+    # being part of the tool's semantic result.
+    if changes:
+        result["_gui_changes"] = changes
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -331,7 +347,16 @@ def tool_gui_launch(arguments: Dict[str, Any]) -> str:
     if not run_gui.exists():
         raise FileNotFoundError(f"run_gui.py not found at {run_gui}")
 
-    cmd = [str(python), str(run_gui), "--control-port", str(port), "--no-log"]
+    # File logging at DEBUG into the OS temp dir (not --no-log) so the launched
+    # GUI's server-side event flow is readable for debugging.
+    cmd = [
+        str(python),
+        str(run_gui),
+        "--control-port",
+        str(port),
+        "--log-file",
+        str(_GUI_LOG_FILE),
+    ]
     if token:
         cmd += ["--control-token", token]
 
@@ -363,11 +388,15 @@ def tool_gui_launch(arguments: Dict[str, Any]) -> str:
             "call gui_connect manually when ready."
         )
 
+    log_note = f" DEBUG log: {_GUI_LOG_FILE}"
     if auto_connect:
         tool_gui_connect({"port": port, "token": token} if token else {"port": port})
-        return f"GUI launched (pid={pid}), listening on port {port}, and connected."
+        return (
+            f"GUI launched (pid={pid}), listening on port {port}, and connected."
+            + log_note
+        )
 
-    return f"GUI launched (pid={pid}) and listening on port {port}."
+    return f"GUI launched (pid={pid}) and listening on port {port}." + log_note
 
 
 def tool_gui_stop(arguments: Dict[str, Any]) -> str:
@@ -522,6 +551,14 @@ def tool_gui_editor_subscribe(arguments: Dict[str, Any]) -> Dict[str, Any]:
 def tool_gui_editor_unsubscribe(arguments: Dict[str, Any]) -> Dict[str, Any]:
     editor_id = str(arguments["editor_id"])
     return send_gui_rpc("editor.unsubscribe", {"editor_id": editor_id})
+
+
+def tool_gui_changes_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    del arguments
+    # Drains this connection's GUI-change buffer; the summary rides back in the
+    # reserved _gui_changes key (added by send_gui_rpc). Read-clears, so polling
+    # counts as being informed and releases the stale-operation guard.
+    return send_gui_rpc("changes.poll", {})
 
 
 def tool_gui_events_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -876,6 +913,19 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             "required": ["editor_id"],
         },
     },
+    "gui_changes_poll": {
+        "handler": tool_gui_changes_poll,
+        "description": (
+            "Drain and return the summary of GUI changes made by OTHERS (e.g. a "
+            "human at the GUI) since you were last informed — category + affected "
+            "object + count, in the _gui_changes key. Every gui_* call already "
+            "carries this sidecar; use this tool to check on demand without doing "
+            "anything else. NOTE: read-clears — polling counts as being informed, "
+            "so it releases the stale-operation guard on run/commit for those "
+            "objects. Returns empty when nothing changed."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
     "gui_events_poll": {
         "handler": tool_gui_events_poll,
         "description": (
@@ -1058,6 +1108,7 @@ _OVERRIDE_NAMES = frozenset(
         "gui_events_poll",
         "gui_editor_subscribe",
         "gui_editor_unsubscribe",
+        "gui_changes_poll",
     }
 )
 

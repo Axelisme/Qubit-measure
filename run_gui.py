@@ -22,8 +22,12 @@ LOG_FORMAT = "%(asctime)s.%(msecs)03d [%(levelname)-7s] %(name)s: %(message)s"
 LOG_DATE = "%H:%M:%S"
 
 
-def _setup_logging(to_file: bool = True) -> None:
-    """Configure root logger: DEBUG to file, WARNING to stderr."""
+def _setup_logging(to_file: bool = True, log_file: "Path | None" = None) -> None:
+    """Configure root logger: DEBUG to file, WARNING to stderr.
+
+    ``log_file`` overrides the default ``LOG_FILE`` location (e.g. an automated
+    launcher pointing it at the OS temp dir).
+    """
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
 
@@ -33,7 +37,8 @@ def _setup_logging(to_file: bool = True) -> None:
     root.addHandler(stderr_handler)
 
     if to_file:
-        file_handler = logging.FileHandler(LOG_FILE, mode="w", encoding="utf-8")
+        target = log_file or LOG_FILE
+        file_handler = logging.FileHandler(target, mode="w", encoding="utf-8")
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE))
         for name in ("zcu_tools.gui", "zcu_tools.experiment.v2_gui"):
@@ -41,7 +46,7 @@ def _setup_logging(to_file: bool = True) -> None:
             log.addHandler(file_handler)
             log.setLevel(logging.DEBUG)
 
-        print(f"[run_gui] Logging DEBUG output to: {LOG_FILE}", file=sys.stderr)
+        print(f"[run_gui] Logging DEBUG output to: {target}", file=sys.stderr)
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -53,6 +58,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--no-log",
         action="store_true",
         help="Disable file logging (stderr WARNING+ only)",
+    )
+    parser.add_argument(
+        "--log-file",
+        type=str,
+        default=None,
+        help="Override the DEBUG log file path (default: gui_debug.log beside run_gui.py).",
     )
     parser.add_argument(
         "--control-port",
@@ -79,7 +90,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = _parse_args(sys.argv[1:])
-    _setup_logging(to_file=not args.no_log)
+    _setup_logging(
+        to_file=not args.no_log,
+        log_file=Path(args.log_file) if args.log_file else None,
+    )
 
     from zcu_tools.gui.mpl_backend_setup import configure_gui_matplotlib_backend
 
