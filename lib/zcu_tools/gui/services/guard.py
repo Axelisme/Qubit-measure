@@ -149,7 +149,7 @@ class GuardService:
     def acquire_save_permit(self, tab_id: str) -> SavePermit:
         tab = self._require_tab(tab_id)
         self._require_readiness(ContextReadiness.ACTIVE, "save")
-        if tab.run_result is None:
+        if not tab.has_run_result():
             raise GuardError(
                 "No run result available to save.", reason_code="no_run_result"
             )
@@ -159,7 +159,7 @@ class GuardService:
     def acquire_analyze_permit(self, tab_id: str) -> AnalyzePermit:
         tab = self._require_tab(tab_id)
         self._require_context("analyze")
-        if tab.run_result is None:
+        if not tab.has_run_result():
             raise GuardError(
                 "No run result available to analyze.", reason_code="no_run_result"
             )
@@ -169,7 +169,7 @@ class GuardService:
     def acquire_writeback_permit(self, tab_id: str) -> WritebackPermit:
         tab = self._require_tab(tab_id)
         self._require_context("write back")
-        if tab.analyze_result is None:
+        if not tab.has_analyze_result():
             raise GuardError(
                 "No analyze result available for writeback.",
                 reason_code="no_analyze_result",

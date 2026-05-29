@@ -36,13 +36,17 @@ class WritebackService:
 
     def get_tab_writeback_items(self, tab_id: str) -> list[WritebackItem]:
         tab = self._state.get_tab(tab_id)
-        if tab.run_result is None or tab.analyze_result is None:
+        # Direct None-checks here (not the has_* predicates): the values are used
+        # immediately below, so the checker must narrow them to non-None.
+        run_result = tab.run_result
+        analyze_result = tab.analyze_result
+        if run_result is None or analyze_result is None:
             return []
         items = list(
             tab.adapter.get_writeback_items(
                 WritebackRequest(
-                    run_result=tab.run_result,
-                    analyze_result=tab.analyze_result,
+                    run_result=run_result,
+                    analyze_result=analyze_result,
                     ctx=self._state.exp_context,
                 )
             )

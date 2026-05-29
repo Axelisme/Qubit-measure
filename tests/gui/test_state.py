@@ -295,3 +295,49 @@ def test_get_device_unknown_returns_none():
     state = State(_make_ctx())
     assert state.get_device("nope") is None
     assert state.has_device("nope") is False
+
+
+# ----------------------------------------------------------------------
+# M3 — aggregates answer questions about themselves (rich, not anemic)
+# docs/adr/0008 §Aggregate Root
+# ----------------------------------------------------------------------
+
+
+def test_device_state_status_predicates():
+    mem = _dev(status=DeviceStatus.MEMORY_ONLY)
+    assert mem.is_memory_only() is True
+    assert mem.is_live() is False
+    assert mem.is_connected() is False
+
+    conn = _dev(status=DeviceStatus.CONNECTED)
+    assert conn.is_memory_only() is False
+    assert conn.is_live() is True
+    assert conn.is_connected() is True
+
+    # a transient live status is live but not idle-connected
+    setting = _dev(status=DeviceStatus.SETTING_UP)
+    assert setting.is_live() is True
+    assert setting.is_connected() is False
+    assert setting.is_memory_only() is False
+
+
+def test_tab_state_predicates():
+    from zcu_tools.gui.adapter import CfgSchema, CfgSectionSpec, CfgSectionValue
+    from zcu_tools.gui.state import TabState
+
+    tab = TabState(
+        adapter_name="fake",
+        adapter=_make_adapter(),
+        cfg_schema=CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue()),
+    )
+    assert tab.is_busy() is False
+    assert tab.has_run_result() is False
+    assert tab.has_analyze_result() is False
+    assert tab.has_figure() is False
+
+    tab.is_analyzing = True
+    assert tab.is_busy() is True
+    tab.is_analyzing = False
+    tab.run_result = object()
+    assert tab.is_busy() is False
+    assert tab.has_run_result() is True

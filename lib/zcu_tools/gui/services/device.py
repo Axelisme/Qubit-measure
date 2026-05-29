@@ -280,7 +280,7 @@ class DeviceService(QObject):
 
     def start_connect_device(self, req: ConnectDeviceRequest) -> None:
         current = self._state.get_device(req.name)
-        if current is not None and current.status is not DeviceStatus.MEMORY_ONLY:
+        if current is not None and current.is_live():
             raise RuntimeError(f"Device {req.name!r} is already connected or busy")
         initial = current or DeviceState(
             name=req.name,
@@ -303,7 +303,7 @@ class DeviceService(QObject):
 
     def start_reconnect_device(self, name: str) -> None:
         dev = self._require_device(name)
-        if dev.status is not DeviceStatus.MEMORY_ONLY:
+        if not dev.is_memory_only():
             raise RuntimeError(f"Device {name!r} is not a memory-only device")
         self.start_connect_device(
             ConnectDeviceRequest(
@@ -387,7 +387,7 @@ class DeviceService(QObject):
     def register_remembered_devices(self, entries: list[DeviceMemoryInfo]) -> None:
         for entry in entries:
             current = self._state.get_device(entry.name)
-            if current is not None and current.status is not DeviceStatus.MEMORY_ONLY:
+            if current is not None and current.is_live():
                 logger.warning("Ignoring remembered live device %r", entry.name)
                 continue
             self._state.put_device(
@@ -402,7 +402,7 @@ class DeviceService(QObject):
 
     def forget_device(self, name: str) -> None:
         dev = self._require_device(name)
-        if dev.status is not DeviceStatus.MEMORY_ONLY:
+        if not dev.is_memory_only():
             raise RuntimeError(f"Device {name!r} is not a memory-only device")
         self._state.remove_device(name)
         self._emit_device_changed(name)
@@ -473,11 +473,11 @@ class DeviceService(QObject):
 
     def is_memory_device(self, name: str) -> bool:
         dev = self._state.get_device(name)
-        return dev is not None and dev.status is DeviceStatus.MEMORY_ONLY
+        return dev is not None and dev.is_memory_only()
 
     def get_memory_device_address(self, name: str) -> Optional[str]:
         dev = self._state.get_device(name)
-        if dev is None or dev.status is not DeviceStatus.MEMORY_ONLY:
+        if dev is None or not dev.is_memory_only():
             return None
         return dev.address
 
@@ -494,7 +494,7 @@ class DeviceService(QObject):
 
         self._reject_mutating_read(name)
         dev = self._state.get_device(name)
-        if dev is None or dev.status is DeviceStatus.MEMORY_ONLY:
+        if dev is None or dev.is_memory_only():
             return None
         try:
             info = GlobalDeviceManager.get_info(name)
@@ -771,6 +771,6 @@ class DeviceService(QObject):
 
     def _require_connected_device(self, name: str) -> DeviceState:
         dev = self._require_device(name)
-        if dev.status is not DeviceStatus.CONNECTED:
+        if not dev.is_connected():
             raise RuntimeError(f"Device {name!r} is not connected")
         return dev

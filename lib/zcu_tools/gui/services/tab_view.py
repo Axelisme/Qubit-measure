@@ -49,16 +49,18 @@ class TabViewService:
     def get_snapshot(self, tab_id: str) -> TabViewSnapshot:
         tab = self._state.get_tab(tab_id)
         interaction = TabInteractionState(
+            # cross-cutting facts (need State / context) stay assembled here
             global_run_active=self._state.is_run_active() and not tab.is_running,
-            is_running=tab.is_running,
-            is_analyzing=tab.is_analyzing,
-            is_saving_data=tab.is_saving_data,
             has_context=self._context.has_context(),
             has_active_context=self._context.is_active_context(),
             has_soc=self._state.exp_context.soc is not None,
-            has_run_result=tab.run_result is not None,
-            has_analyze_result=tab.analyze_result is not None,
-            has_figure=tab.figure is not None,
+            # tab-intrinsic facts are the aggregate's own predicates
+            is_running=tab.is_running,
+            is_analyzing=tab.is_analyzing,
+            is_saving_data=tab.is_saving_data,
+            has_run_result=tab.has_run_result(),
+            has_analyze_result=tab.has_analyze_result(),
+            has_figure=tab.has_figure(),
         )
         return TabViewSnapshot(
             tab_id=tab_id,

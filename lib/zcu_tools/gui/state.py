@@ -74,6 +74,20 @@ class DeviceState:
     info: BaseDeviceInfo | None = None
     error: str | None = None
 
+    # -- status predicates (the entity answers questions about itself) -----
+
+    def is_memory_only(self) -> bool:
+        return self.status is DeviceStatus.MEMORY_ONLY
+
+    def is_connected(self) -> bool:
+        """Idle and live (a driver is registered, no operation in flight)."""
+        return self.status is DeviceStatus.CONNECTED
+
+    def is_live(self) -> bool:
+        """A driver is registered (connected or in a transient operation) — the
+        cross-object invariant's 'in GlobalDeviceManager' side."""
+        return self.status is not DeviceStatus.MEMORY_ONLY
+
 
 @dataclass
 class TabState(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
@@ -93,6 +107,21 @@ class TabState(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     is_running: bool = False
     is_analyzing: bool = False
     is_saving_data: bool = False
+
+    # -- predicates (the entity answers questions about itself) ------------
+
+    def is_busy(self) -> bool:
+        """Any per-tab operation in flight (run / analyze / save)."""
+        return self.is_running or self.is_analyzing or self.is_saving_data
+
+    def has_run_result(self) -> bool:
+        return self.run_result is not None
+
+    def has_analyze_result(self) -> bool:
+        return self.analyze_result is not None
+
+    def has_figure(self) -> bool:
+        return self.figure is not None
 
 
 class VersionTable:
@@ -389,5 +418,4 @@ class State:
         return self.tabs[tab_id].is_saving_data
 
     def is_tab_busy(self, tab_id: str) -> bool:
-        tab = self.tabs[tab_id]
-        return tab.is_running or tab.is_analyzing or tab.is_saving_data
+        return self.tabs[tab_id].is_busy()
