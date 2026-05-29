@@ -95,7 +95,7 @@ def build_app_services(
         analyze=AnalyzeService(state, analyze_runner, bus),
         save=SaveService(state, save_runner, bus),
         writeback=writeback,
-        tab_view=TabViewService(state, tab, writeback, context),
+        tab_view=TabViewService(state, writeback),
         workspace=WorkspaceService(state, tab, SessionPersistenceService(), bus),
         startup=StartupService(
             context, device, StartupPersistenceService(), state, bus

@@ -140,6 +140,22 @@ class ExpContext:
     predictor: Optional[FluxoniumPredictor] = None
     readiness: ContextReadiness = ContextReadiness.EMPTY
 
+    # -- readiness predicates (the context answers about itself) -----------
+
+    def has_context(self) -> bool:
+        """Any valid context exists (startup DRAFT or file-backed ACTIVE)."""
+        return self.readiness is not ContextReadiness.EMPTY
+
+    def is_draft(self) -> bool:
+        return self.readiness is ContextReadiness.DRAFT
+
+    def is_active(self) -> bool:
+        """File-backed context eligible for run and save."""
+        return self.readiness is ContextReadiness.ACTIVE
+
+    def has_soc(self) -> bool:
+        return self.soc is not None
+
 
 @dataclass(frozen=True)
 class RunRequest:

@@ -97,14 +97,14 @@ class ContextService:
 
     def has_context(self) -> bool:
         """True when any valid context exists (startup DRAFT or file-backed ACTIVE)."""
-        return self._state.exp_context.readiness is not ContextReadiness.EMPTY
+        return self._state.exp_context.has_context()
 
     def has_startup_context(self) -> bool:
-        return self._state.exp_context.readiness is ContextReadiness.DRAFT
+        return self._state.exp_context.is_draft()
 
     def is_active_context(self) -> bool:
         """True only for a file-backed context eligible for run and save."""
-        return self._state.exp_context.readiness is ContextReadiness.ACTIVE
+        return self._state.exp_context.is_active()
 
     def get_active_context_label(self) -> Optional[str]:
         return self._io.get_active_label()

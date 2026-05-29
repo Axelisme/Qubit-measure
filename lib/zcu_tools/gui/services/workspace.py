@@ -17,10 +17,9 @@ from .session_persistence import (
     PersistedTab,
     SessionPersistenceError,
 )
-from .tab import TabService
 
 if TYPE_CHECKING:
-    from .ports import SessionStorePort
+    from .ports import SessionStorePort, TabLifecyclePort
 
 
 @dataclass(frozen=True)
@@ -41,7 +40,7 @@ class WorkspaceService:
     def __init__(
         self,
         state: State,
-        tabs: TabService,
+        tabs: "TabLifecyclePort",
         persistence: "SessionStorePort",
         bus: EventBus,
     ) -> None:

@@ -8,8 +8,7 @@ from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 from zcu_tools.gui.event_bus import DeviceChangedPayload, EventBus, GuiEvent
 
-from .context import ContextService
-from .device import DeviceMemoryInfo, DeviceService
+from .ports import DeviceMemoryInfo
 from .startup_persistence import (
     DEFAULT_LEFT_PANEL_WIDTH,
     PersistedDeviceEntry,
@@ -20,7 +19,7 @@ from .startup_persistence import (
 if TYPE_CHECKING:
     from zcu_tools.gui.state import State
 
-    from .ports import StartupStorePort
+    from .ports import RememberedDevicePort, StartupContextPort, StartupStorePort
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +54,8 @@ class StartupService:
 
     def __init__(
         self,
-        context: ContextService,
-        devices: DeviceService,
+        context: "StartupContextPort",
+        devices: "RememberedDevicePort",
         persistence: "StartupStorePort",
         state: "State",
         bus: EventBus,

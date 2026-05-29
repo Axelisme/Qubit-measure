@@ -16,10 +16,11 @@ infrastructure capability it has no business using.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.adapter import CfgSchema, ExpContext
+    from zcu_tools.gui.adapter import CfgSchema, ExpContext, WritebackItem
     from zcu_tools.meta_tool import ModuleLibrary
 
     from .device import DeviceProtocol
@@ -129,3 +130,77 @@ class ModuleLibraryWritePort(Protocol):
     def get_current_ml(self) -> "ModuleLibrary": ...
     def set_ml_module_from_raw(self, name: str, raw_dict: dict) -> None: ...
     def set_ml_waveform_from_raw(self, name: str, raw_dict: dict) -> None: ...
+
+
+@runtime_checkable
+class WritebackQueryPort(Protocol):
+    """The writeback-items query as used by the tab read model.
+
+    ``TabViewService`` is a read-model assembler; it composes a tab's writeback
+    proposals into the snapshot but must not depend on the concrete
+    ``WritebackService`` (ADR-0008 violation 2 — no app-service→app-service
+    coupling). It depends on this narrow query port instead, which prevents a
+    back-edge from ever forming. ``WritebackService`` implements it.
+    """
+
+    def get_tab_writeback_items(self, tab_id: str) -> list["WritebackItem"]: ...
+
+
+@runtime_checkable
+class TabLifecyclePort(Protocol):
+    """Tab create/restore/close + cfg as commanded by ``WorkspaceService``.
+
+    ``WorkspaceService`` orchestrates the tab lifecycle (one-way command); it
+    depends on this port, not the concrete ``TabService`` (ADR-0008 violation 2).
+    """
+
+    def new_tab(self, adapter_name: str) -> str: ...
+    def restore_tab(self, adapter_name: str) -> str: ...
+    def close_tab(self, tab_id: str) -> None: ...
+    def get_tab_default_cfg(self, tab_id: str) -> "CfgSchema": ...
+    def update_tab_cfg(self, tab_id: str, schema: "CfgSchema") -> None: ...
+
+
+@runtime_checkable
+class StartupContextPort(Protocol):
+    """Context bootstrap commands as used by ``StartupService``.
+
+    ``StartupService`` orchestrates project startup (one-way command into the
+    context); it depends on this port, not the concrete ``ContextService``.
+    """
+
+    def set_startup_context(
+        self,
+        md: object,
+        ml: object,
+        chip_name: str,
+        qub_name: str,
+        res_name: str,
+        result_dir: str,
+        database_path: str,
+    ) -> None: ...
+    def setup_project(self, result_dir: str) -> None: ...
+
+
+@dataclass(frozen=True)
+class DeviceMemoryInfo:
+    """A remembered (memory-only) device's identity — the element type of
+    ``RememberedDevicePort.register_remembered_devices``. Lives in the contract
+    layer (ports) so both the device service and startup depend on it here, not
+    on each other's module.
+    """
+
+    type_name: str
+    name: str
+    address: str
+
+
+@runtime_checkable
+class RememberedDevicePort(Protocol):
+    """Remembered-device registration as used by ``StartupService.restore_devices``.
+
+    The one device command startup issues; depends on the port, not the concrete
+    ``DeviceService``.
+    """
+
+    def register_remembered_devices(self, entries: list[DeviceMemoryInfo]) -> None: ...

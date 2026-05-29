@@ -14,9 +14,7 @@ from zcu_tools.gui.adapter import (
 from zcu_tools.gui.state import State, TabInteractionState
 
 if TYPE_CHECKING:
-    from .context import ContextService
-    from .tab import TabService
-    from .writeback import WritebackService
+    from .ports import WritebackQueryPort
 
 
 @dataclass(frozen=True)
@@ -37,24 +35,24 @@ class TabViewService:
     def __init__(
         self,
         state: State,
-        tabs: "TabService",
-        writeback: "WritebackService",
-        context: "ContextService",
+        writeback: "WritebackQueryPort",
     ) -> None:
         self._state = state
-        self._tabs = tabs
+        # Read model depends only on State (aggregates) + a narrow writeback
+        # query port — no concrete sibling app-service (ADR-0008 violation 2).
         self._writeback = writeback
-        self._context = context
 
     def get_snapshot(self, tab_id: str) -> TabViewSnapshot:
         tab = self._state.get_tab(tab_id)
+        ctx = self._state.exp_context
         interaction = TabInteractionState(
-            # cross-cutting facts (need State / context) stay assembled here
+            # cross-cutting facts read directly off State's aggregates (no
+            # app-service dependency — ADR-0008 violation 2 / ADR-0007 Query).
             global_run_active=self._state.is_run_active() and not tab.is_running,
-            has_context=self._context.has_context(),
-            has_active_context=self._context.is_active_context(),
-            has_soc=self._state.exp_context.soc is not None,
-            # tab-intrinsic facts are the aggregate's own predicates
+            has_context=ctx.has_context(),
+            has_active_context=ctx.is_active(),
+            has_soc=ctx.has_soc(),
+            # tab-intrinsic facts are the tab aggregate's own predicates
             is_running=tab.is_running,
             is_analyzing=tab.is_analyzing,
             is_saving_data=tab.is_saving_data,
@@ -69,6 +67,6 @@ class TabViewService:
             capabilities=tab.adapter.capabilities,
             analyze_params=tab.analyze_param_instance,
             writeback_items=tuple(self._writeback.get_tab_writeback_items(tab_id)),
-            save_paths=self._tabs.get_tab_save_paths(tab_id),
+            save_paths=tab.effective_save_paths(ctx),
             figure=tab.figure,
         )

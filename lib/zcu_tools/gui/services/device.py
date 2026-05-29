@@ -37,6 +37,11 @@ from .operation_gate import (
     OperationOutcome,
 )
 
+# DeviceMemoryInfo lives in the contract layer (ports) — the element type of
+# RememberedDevicePort. Re-exported here for back-compat with imports of
+# ``from .device import DeviceMemoryInfo``.
+from .ports import DeviceMemoryInfo  # noqa: F401
+
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import EventBus
     from zcu_tools.gui.state import State
@@ -89,13 +94,6 @@ class SetupDeviceRequest:
 class SetDeviceValueRequest:
     name: str
     value: object
-
-
-@dataclass(frozen=True)
-class DeviceMemoryInfo:
-    type_name: str
-    name: str
-    address: str
 
 
 @dataclass(frozen=True)

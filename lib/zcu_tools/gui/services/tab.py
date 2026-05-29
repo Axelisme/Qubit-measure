@@ -98,12 +98,7 @@ class TabService:
 
     def get_tab_save_paths(self, tab_id: str) -> Optional[SavePaths]:
         tab = self._state.get_tab(tab_id)
-        if tab.save_path_overrides is not None:
-            return tab.save_path_overrides
-        ctx = self._state.exp_context
-        if not ctx.database_path or not ctx.result_dir or not ctx.active_label:
-            return None
-        return tab.adapter.make_save_paths(ctx)
+        return tab.effective_save_paths(self._state.exp_context)
 
     def update_tab_save_path_overrides(
         self, tab_id: str, data_path: str, image_path: str

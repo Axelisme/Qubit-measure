@@ -123,6 +123,16 @@ class TabState(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     def has_figure(self) -> bool:
         return self.figure is not None
 
+    def effective_save_paths(self, ctx: "ExpContext") -> Optional[SavePaths]:
+        """Resolve the tab's save paths: user override, else adapter suggestion
+        derived from ``ctx`` (None until the context can suggest a path). Pure —
+        a tab answering about its own save destination."""
+        if self.save_path_overrides is not None:
+            return self.save_path_overrides
+        if not ctx.database_path or not ctx.result_dir or not ctx.active_label:
+            return None
+        return self.adapter.make_save_paths(ctx)
+
 
 class VersionTable:
     """Monotonic per-resource version counters (optimistic-concurrency guard).
