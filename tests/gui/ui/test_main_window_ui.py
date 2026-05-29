@@ -339,6 +339,56 @@ def test_main_window_content_event_queries_single_tab_snapshot(qapp):
     ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
 
 
+def _editor_wiring_ctrl() -> MagicMock:
+    """Mock ctrl that also satisfies LiveModelEnv for a real populate()."""
+    ctrl = MagicMock()
+    ctrl.get_persisted_left_panel_width.return_value = 500
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.get_current_md.return_value = MagicMock()
+    ctrl.get_current_ml.return_value = MagicMock()
+    ctrl.list_device_names.return_value = []
+    ctrl.has_soc.return_value = False
+    ctrl.register_delegated_cfg_editor.return_value = "editor-tab1"
+    return ctrl
+
+
+def _pulse_schema():
+    from zcu_tools.gui.adapter import CfgSchema, make_default_value
+    from zcu_tools.gui.cfg_schemas import _MODULE_SPEC_FACTORIES
+
+    spec = _MODULE_SPEC_FACTORIES["pulse"]()
+    return CfgSchema(spec=spec, value=make_default_value(spec))
+
+
+def test_exp_tab_registers_cfg_editor_on_bind(qapp):
+    from zcu_tools.gui.ui.main_window import ExpTabWidget, MainWindow
+
+    ctrl = _editor_wiring_ctrl()
+    tab = ExpTabWidget("tab-1", ctrl)
+    tab.populate_cfg(_pulse_schema(), ctrl)
+    tab.bind_to_controller(MainWindow(ctrl))
+
+    # Registered the tab's *live* root (same instance the widget owns).
+    ctrl.register_delegated_cfg_editor.assert_called_once()
+    args = ctrl.register_delegated_cfg_editor.call_args.args
+    assert args[0] == "tab-1"
+    assert args[1] is tab.cfg_form.get_live_root()
+    assert tab._cfg_editor_id == "editor-tab1"
+
+
+def test_exp_tab_closes_cfg_editor_on_unbind(qapp):
+    from zcu_tools.gui.ui.main_window import ExpTabWidget, MainWindow
+
+    ctrl = _editor_wiring_ctrl()
+    tab = ExpTabWidget("tab-1", ctrl)
+    tab.populate_cfg(_pulse_schema(), ctrl)
+    tab.bind_to_controller(MainWindow(ctrl))
+    tab.unbind_from_controller()
+
+    ctrl.close_cfg_editor.assert_called_once_with("editor-tab1")
+    assert tab._cfg_editor_id is None
+
+
 def test_main_window_cancel_setup_before_closing(qapp, monkeypatch):
     from qtpy.QtGui import QCloseEvent
     from qtpy.QtWidgets import QMessageBox

@@ -108,6 +108,10 @@ def _tab_snapshot_wire(ctrl, tab_id: str) -> dict[str, object]:
     return {
         "tab_id": tab_id,
         "adapter_name": ctrl.get_tab_adapter_name(tab_id),
+        # Shared cfg-editor session id for this tab (None until the tab's form
+        # is populated). Address it with the editor.* methods to edit cfg with
+        # the GUI reflecting every change. (A tab uses its tab_id as owner key.)
+        "editor_id": ctrl.editor_id_for_owner(tab_id),
         "interaction": {
             "global_run_active": bool(interaction.global_run_active),
             "is_running": bool(interaction.is_running),

@@ -149,6 +149,9 @@ class ExpTabWidget(QWidget):
         self.tab_id = tab_id
         self._ctrl = ctrl
         self._writeback_count: int = 0
+        # editor_id of this tab's shared cfg-editor session (set on bind, when
+        # the cfg_form's live model exists). Exposed to agents via tab.snapshot.
+        self._cfg_editor_id: Optional[str] = None
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(4, 4, 4, 4)
@@ -527,6 +530,14 @@ class ExpTabWidget(QWidget):
 
         self.cfg_form.validity_changed.connect(validity_cb)
         self.cfg_form.schema_changed.connect(schema_cb)
+
+        # Register this tab's live cfg LiveModel as a shared editor session so an
+        # agent can drive it (and see it) via the same editor_id. populate_cfg
+        # has already built the model by the time bind runs.
+        root = self.cfg_form.get_live_root()
+        if root is not None:
+            # A tab uses its tab_id as the delegated session's owner key.
+            self._cfg_editor_id = self._ctrl.register_delegated_cfg_editor(tab_id, root)
         self.analyze_form.params_changed.connect(
             lambda instance: self._ctrl.update_tab_analyze_param_instance(
                 tab_id, instance
@@ -559,6 +570,11 @@ class ExpTabWidget(QWidget):
             self.cfg_form.validity_changed.disconnect(self._validity_cb)
         if hasattr(self, "_schema_cb"):
             self.cfg_form.schema_changed.disconnect(self._schema_cb)
+        # Drop the shared editor registration *before* clear() tears down the
+        # model (close does not tear down the root — the widget owns that).
+        if self._cfg_editor_id is not None:
+            self._ctrl.close_cfg_editor(self._cfg_editor_id)
+            self._cfg_editor_id = None
         self.cfg_form.clear()
 
 
