@@ -217,23 +217,13 @@ class StartupPersistenceService:
         )
         self.save(updated)
 
-    def add_device(self, entry: PersistedDeviceEntry) -> None:
-        existing = [d for d in self._current.devices if d.name != entry.name]
-        updated = PersistedStartup(
-            version=STARTUP_VERSION,
-            chip_name=self._current.chip_name,
-            qub_name=self._current.qub_name,
-            res_name=self._current.res_name,
-            result_dir=self._current.result_dir,
-            database_path=self._current.database_path,
-            ip=self._current.ip,
-            port=self._current.port,
-            devices=[*existing, entry],
-            left_panel_width=self._current.left_panel_width,
-        )
-        self.save(updated)
+    def replace_devices(self, entries: list[PersistedDeviceEntry]) -> None:
+        """Declaratively overwrite the remembered-device set (projection of State).
 
-    def remove_device(self, name: str) -> None:
+        The remembered set is derived from device State, not mutated
+        incrementally — callers pass the full set and this replaces it wholesale,
+        preserving every other persisted field.
+        """
         updated = PersistedStartup(
             version=STARTUP_VERSION,
             chip_name=self._current.chip_name,
@@ -243,7 +233,7 @@ class StartupPersistenceService:
             database_path=self._current.database_path,
             ip=self._current.ip,
             port=self._current.port,
-            devices=[d for d in self._current.devices if d.name != name],
+            devices=list(entries),
             left_panel_width=self._current.left_panel_width,
         )
         self.save(updated)

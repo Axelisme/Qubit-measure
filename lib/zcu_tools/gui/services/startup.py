@@ -1,17 +1,27 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
+from zcu_tools.gui.event_bus import DeviceChangedPayload, EventBus, GuiEvent
+
 from .context import ContextService
-from .device import ConnectDeviceRequest, DeviceMemoryInfo, DeviceService
+from .device import DeviceMemoryInfo, DeviceService
 from .startup_persistence import (
     DEFAULT_LEFT_PANEL_WIDTH,
     PersistedDeviceEntry,
     PersistedStartup,
+    StartupPersistenceError,
     StartupPersistenceService,
 )
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.state import State
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -47,10 +57,16 @@ class StartupService:
         context: ContextService,
         devices: DeviceService,
         persistence: StartupPersistenceService,
+        state: "State",
+        bus: EventBus,
     ) -> None:
         self._context = context
         self._devices = devices
         self._persistence = persistence
+        self._state = state
+        # Persistence is a projection of device State: whenever device state
+        # changes, re-derive and overwrite the remembered-device set on disk.
+        bus.subscribe(GuiEvent.DEVICE_CHANGED, self._on_device_changed)
 
     def restore_devices(self) -> None:
         data = self._persistence.load()
@@ -93,21 +109,29 @@ class StartupService:
     def remember_connection(self, req: StartupConnectionRequest) -> None:
         self._persistence.update_connection(ip=req.ip, port=req.port)
 
-    def remember_device(self, req: ConnectDeviceRequest) -> None:
-        if not req.remember:
-            raise ValueError("Cannot remember a device request with remember=False")
-        self._persistence.add_device(
-            PersistedDeviceEntry(
-                type_name=req.type_name,
-                name=req.name,
-                address=req.address,
-            )
-        )
+    def _on_device_changed(self, _payload: DeviceChangedPayload) -> None:
+        """Project the current remembered-device set from State onto disk.
 
-    def forget_device(self, name: str) -> None:
-        if not name:
-            raise ValueError("Device name must be non-empty")
-        self._persistence.remove_device(name)
+        Declarative: the remembered set is whatever State currently holds with
+        ``remember=True``; this overwrites the persisted list wholesale. A
+        diff-guard skips the (frequent, transient) DEVICE_CHANGED emissions that
+        do not alter the remembered set. Disk-write failures are logged and
+        swallowed — this runs off the original caller's path and cannot surface
+        an error to it.
+        """
+        entries = [
+            PersistedDeviceEntry(
+                type_name=dev.type_name, name=dev.name, address=dev.address
+            )
+            for dev in self._state.list_devices()
+            if dev.remember
+        ]
+        if entries == self._persistence.get_current().devices:
+            return
+        try:
+            self._persistence.replace_devices(entries)
+        except StartupPersistenceError:
+            logger.warning("Failed to persist remembered devices", exc_info=True)
 
     def get_left_panel_width(self) -> int:
         data = self._persistence.load()

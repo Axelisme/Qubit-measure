@@ -3,7 +3,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.services.device import ConnectDeviceRequest
+from zcu_tools.gui.event_bus import EventBus, GuiEvent
 from zcu_tools.gui.services.startup import (
     StartupConnectionRequest,
     StartupProjectRequest,
@@ -14,6 +14,7 @@ from zcu_tools.gui.services.startup_persistence import (
     PersistedDeviceEntry,
     PersistedStartup,
 )
+from zcu_tools.gui.state import DeviceState, DeviceStatus, State
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
@@ -21,7 +22,10 @@ def _make_service() -> tuple[StartupService, MagicMock, MagicMock, MagicMock]:
     context = MagicMock()
     devices = MagicMock()
     persistence = MagicMock()
-    return StartupService(context, devices, persistence), context, devices, persistence
+    state = State(MagicMock())
+    bus = EventBus()
+    svc = StartupService(context, devices, persistence, state, bus)
+    return svc, context, devices, persistence
 
 
 def test_apply_project_constructs_draft_dependencies_and_persists() -> None:
@@ -65,18 +69,77 @@ def test_restore_devices_registers_memory_only_entries() -> None:
     assert entries[0].address == "addr"
 
 
-def test_remember_device_rejects_non_persisted_command() -> None:
-    svc, _, _, _ = _make_service()
+def _dev(name: str, *, remember: bool) -> DeviceState:
+    return DeviceState(
+        name=name,
+        type_name="FakeDevice",
+        address=f"{name}-addr",
+        status=DeviceStatus.CONNECTED,
+        remember=remember,
+    )
 
-    with pytest.raises(ValueError, match="remember=False"):
-        svc.remember_device(
-            ConnectDeviceRequest(
-                type_name="FakeDevice",
-                name="flux",
-                address="addr",
-                remember=False,
-            )
-        )
+
+def _empty_persisted() -> PersistedStartup:
+    return PersistedStartup(
+        version=STARTUP_VERSION,
+        chip_name="",
+        qub_name="",
+        res_name="",
+        result_dir="",
+        database_path="",
+        ip="host",
+        port=8887,
+        devices=[],
+    )
+
+
+def test_device_changed_projects_remembered_set_onto_persistence() -> None:
+    context = MagicMock()
+    devices = MagicMock()
+    persistence = MagicMock()
+    persistence.get_current.return_value = _empty_persisted()
+    state = State(MagicMock())
+    bus = EventBus()
+    StartupService(context, devices, persistence, state, bus)
+
+    # Two remembered + one not-remembered → only the remembered ones persist.
+    state.put_device(_dev("flux", remember=True))
+    state.put_device(_dev("probe", remember=True))
+    state.put_device(_dev("scratch", remember=False))
+    from zcu_tools.gui.event_bus import DeviceChangedPayload
+
+    bus.emit(GuiEvent.DEVICE_CHANGED, DeviceChangedPayload(name="flux"))
+
+    (entries,) = persistence.replace_devices.call_args.args
+    assert sorted(e.name for e in entries) == ["flux", "probe"]
+
+
+def test_device_changed_diff_guard_skips_when_remembered_set_unchanged() -> None:
+    context = MagicMock()
+    devices = MagicMock()
+    persistence = MagicMock()
+    persistence.get_current.return_value = PersistedStartup(
+        version=STARTUP_VERSION,
+        chip_name="",
+        qub_name="",
+        res_name="",
+        result_dir="",
+        database_path="",
+        ip="host",
+        port=8887,
+        devices=[PersistedDeviceEntry("FakeDevice", "flux", "flux-addr")],
+    )
+    state = State(MagicMock())
+    bus = EventBus()
+    StartupService(context, devices, persistence, state, bus)
+    state.put_device(_dev("flux", remember=True))
+
+    from zcu_tools.gui.event_bus import DeviceChangedPayload
+
+    # The remembered set already matches what's persisted → no disk write.
+    bus.emit(GuiEvent.DEVICE_CHANGED, DeviceChangedPayload(name="flux"))
+
+    persistence.replace_devices.assert_not_called()
 
 
 def test_connection_request_validates_port() -> None:

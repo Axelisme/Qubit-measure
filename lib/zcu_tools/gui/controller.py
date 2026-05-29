@@ -214,19 +214,11 @@ class Controller:
         self._require_view().show_status_message(f"Device setup cancelled: {name}")
 
     def _on_device_connected(self, req: ConnectDeviceRequest) -> None:
-        if req.remember:
-            try:
-                self._startup_svc.remember_device(req)
-            except StartupPersistenceError as exc:
-                self._report_persistence_error("Startup settings save failed", exc)
+        # Persistence is a projection of device State, driven by StartupService's
+        # DEVICE_CHANGED subscription — this handler only presents UI feedback.
         self._require_view().show_status_message(f"Device connected: {req.name}")
 
     def _on_device_disconnected(self, req: DisconnectDeviceRequest) -> None:
-        if not req.remember:
-            try:
-                self._startup_svc.forget_device(req.name)
-            except StartupPersistenceError as exc:
-                self._report_persistence_error("Startup settings save failed", exc)
         self._require_view().show_status_message(f"Device disconnected: {req.name}")
 
     def _on_device_value_set(self, name: str) -> None:
@@ -553,11 +545,9 @@ class Controller:
         self._dev_svc.start_reconnect_device(name)
 
     def forget_device(self, name: str) -> None:
+        # Removing the device from State emits DEVICE_CHANGED, which re-projects
+        # the remembered-device set onto disk via StartupService.
         self._dev_svc.forget_device(name)
-        try:
-            self._startup_svc.forget_device(name)
-        except StartupPersistenceError as exc:
-            self._report_persistence_error("Startup settings save failed", exc)
 
     def is_memory_device(self, name: str) -> bool:
         return self._dev_svc.is_memory_device(name)

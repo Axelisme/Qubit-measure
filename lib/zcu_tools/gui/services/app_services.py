@@ -87,5 +87,7 @@ def build_app_services(
         writeback=writeback,
         tab_view=TabViewService(state, tab, writeback, context),
         workspace=WorkspaceService(state, tab, SessionPersistenceService(), bus),
-        startup=StartupService(context, device, StartupPersistenceService()),
+        startup=StartupService(
+            context, device, StartupPersistenceService(), state, bus
+        ),
     )

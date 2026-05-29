@@ -37,7 +37,7 @@ from zcu_tools.gui.services.session_persistence import (
     SessionPersistenceService,
 )
 from zcu_tools.gui.services.workspace import RestoreIssue, RestoreReport
-from zcu_tools.gui.state import State
+from zcu_tools.gui.state import DeviceStatus, State
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -326,7 +326,10 @@ def test_run_rejected_while_soc_connect_lease_active(cf):
     cf.ctrl._operation_gate.release(lease, OperationOutcome("finished"))
 
 
-def test_device_connect_persists_only_after_terminal_success(cf):
+def test_device_connect_handler_is_ui_only_no_persistence_coordination(cf):
+    """Persistence is now a State projection (StartupService subscribes to
+    DEVICE_CHANGED). The Controller's connect handler must not itself coordinate
+    persistence — it only presents UI feedback."""
     driver = MagicMock()
     driver.get_info.return_value = FakeDeviceInfo(address="addr")
     cf.ctrl._dev_svc._driver_factory = lambda _type, _address: driver
@@ -337,10 +340,14 @@ def test_device_connect_persists_only_after_terminal_success(cf):
     cf.ctrl.start_connect_device(
         ConnectDeviceRequest(type_name="FakeDevice", name="flux", address="addr")
     )
-    cf.ctrl._startup_svc.remember_device.assert_not_called()
     loop.exec()
 
-    cf.ctrl._startup_svc.remember_device.assert_called_once()
+    # Controller no longer reaches into StartupService for device persistence.
+    assert not cf.ctrl._startup_svc.method_calls
+    # On terminal success the device is committed to State as CONNECTED.
+    dev = cf.state.get_device("flux")
+    assert dev is not None and dev.status is DeviceStatus.CONNECTED
+    cf.view.show_status_message.assert_called()
     GlobalDeviceManager.drop_device("flux", ignore_error=True)
 
 

@@ -46,6 +46,37 @@ def test_startup_persistence_rejects_previous_cache_version(tmp_path: Path) -> N
         svc.load()
 
 
+def test_replace_devices_overwrites_set_and_preserves_other_fields(
+    tmp_path: Path,
+) -> None:
+    svc = StartupPersistenceService(cache_dir=tmp_path)
+    svc.save(_settings())
+
+    svc.replace_devices(
+        [
+            PersistedDeviceEntry(type_name="FakeDevice", name="probe", address="a1"),
+            PersistedDeviceEntry(type_name="YOKOGS200", name="bias", address="a2"),
+        ]
+    )
+
+    current = svc.get_current()
+    # Devices replaced wholesale (old "flux" gone)...
+    assert sorted(d.name for d in current.devices) == ["bias", "probe"]
+    # ...while every other persisted field is preserved.
+    assert current.chip_name == "chip"
+    assert current.result_dir == "/tmp/result"
+    assert svc.load() == current
+
+
+def test_replace_devices_with_empty_clears_the_set(tmp_path: Path) -> None:
+    svc = StartupPersistenceService(cache_dir=tmp_path)
+    svc.save(_settings())
+
+    svc.replace_devices([])
+
+    assert svc.get_current().devices == []
+
+
 def test_startup_persistence_does_not_update_memory_after_write_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
