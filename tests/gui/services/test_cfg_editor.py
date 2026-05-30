@@ -52,13 +52,14 @@ def ctrl(ml, md):
 
 @pytest.fixture()
 def service(ctrl):
-    # M2: the Repository takes the reactive-env ctrl, the ML write port, and the
-    # version bump/drop callbacks. The MagicMock ctrl satisfies all facets.
+    # The Repository takes the reactive-env ctrl, the ML write port, the
+    # version bump/drop callbacks, and the EventBus (for owned-model refresh).
     return CfgEditorService(
         ctrl,
         ml_port=ctrl,
         version_bump=ctrl.bump_editor_version,
         version_drop=ctrl.drop_editor_version,
+        bus=EventBus(),
     )
 
 
@@ -74,14 +75,14 @@ def _paths(entries):
 
 def test_session_is_the_aggregate_with_behaviour(service, ml):
     """The session the Repository hands out operates its own draft directly:
-    set_field / commit / is_headless live on the aggregate, reachable without
-    going back through the service."""
+    set_field / commit live on the aggregate, reachable without going back
+    through the service."""
     from zcu_tools.gui.services.cfg_editor import CfgEditorSession
 
     editor_id, _ = service.open("module", discriminator="pulse")
     session = service._require(editor_id)  # Repository looks up the aggregate
     assert isinstance(session, CfgEditorSession)
-    assert session.is_headless() is True
+    assert session.item_kind == "module"  # ml-entry session → committable
 
     # set_field is the aggregate's own behaviour, returns subtree + validity
     out = session.set_field("freq", 5000.0)
@@ -95,17 +96,18 @@ def test_session_is_the_aggregate_with_behaviour(service, ml):
     assert "agg_pulse" in ml.modules
 
 
-def test_delegated_session_rejects_commit_on_the_aggregate(service):
-    """commit-guard is enforced on the aggregate, not just the service facade."""
-    from zcu_tools.gui.adapter import make_default_value
+def test_seeded_session_rejects_commit_on_the_aggregate(service):
+    """commit-guard (item_kind is None) is enforced on the aggregate, not just
+    the service facade. A seeded session (tab cfg / writeback draft) is
+    teardown-only."""
+    from zcu_tools.gui.adapter import CfgSchema, make_default_value
     from zcu_tools.gui.cfg_schemas import _MODULE_SPEC_FACTORIES
-    from zcu_tools.gui.live_model import SectionLiveField
 
     spec = _MODULE_SPEC_FACTORIES["pulse"]()
-    root = SectionLiveField(spec, service._env, make_default_value(spec))
-    editor_id = service.register_delegated_session("owner-x", root)
+    seed = CfgSchema(spec=spec, value=make_default_value(spec))
+    editor_id, _ = service.open_seeded(seed, gc=False, owner_key="owner-x")
     session = service._require(editor_id)
-    assert session.is_headless() is False
+    assert session.item_kind is None
     with pytest.raises(CfgEditorError):
         session.commit("nope", ml_port=service._ml)
 
@@ -244,89 +246,74 @@ def test_commit_failure_keeps_session(service, ctrl):
 
 
 # ---------------------------------------------------------------------------
-# Delegated (tab) sessions
+# Seeded (UI-owned, gc=False) sessions — tab cfg / inspect / writeback
 # ---------------------------------------------------------------------------
 
 
-def _make_tab_root(ctrl):
-    """Build a standalone live LiveModel as a tab's CfgFormWidget would own."""
+def _make_tab_seed():
+    """Build a CfgSchema seed as a tab cfg / writeback draft would carry."""
+    from zcu_tools.gui.adapter import CfgSchema, make_default_value
     from zcu_tools.gui.cfg_schemas import _MODULE_SPEC_FACTORIES
-    from zcu_tools.gui.live_model import LiveModelEnv, SectionLiveField
 
     spec = _MODULE_SPEC_FACTORIES["pulse"]()
-    from zcu_tools.gui.adapter import make_default_value
-
-    return SectionLiveField(spec, LiveModelEnv(ctrl=ctrl), make_default_value(spec))
+    return CfgSchema(spec=spec, value=make_default_value(spec))
 
 
-def test_register_delegated_session_shares_root(service, ctrl):
-    root = _make_tab_root(ctrl)
-    editor_id = service.register_delegated_session("tab-1", root)
+def test_open_seeded_owns_model_and_is_addressable(service):
+    editor_id, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-1")
     assert editor_id.startswith("editor-")
     assert service.editor_id_for_owner("tab-1") == editor_id
 
-    # An edit via the session mutates the *same* root instance (WYSIWYG).
+    # The widget attaches via get_root; an agent edit mutates the same model.
+    root = service.get_root(editor_id)
     service.set_field(editor_id, "freq", 4321.0)
     val = root.fields["freq"].get_value()
     assert getattr(val, "value", None) == 4321.0
 
 
-def test_close_tab_session_keeps_root_alive(service, ctrl):
-    root = _make_tab_root(ctrl)
-    editor_id = service.register_delegated_session("tab-1", root)
-    service.close(editor_id)
-    # Registration gone …
+def test_teardown_seeded_session_drops_it(service):
+    editor_id, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-1")
+    service.teardown(editor_id)
     assert service.editor_id_for_owner("tab-1") is None
     with pytest.raises(CfgEditorError):
         service.get(editor_id)
-    # … but the widget's root was NOT torn down (still mutable).
-    root.fields["freq"].set_value(10.0)  # would raise if torn down badly
-    assert root.is_valid() in (True, False)
 
 
-def test_reregister_tab_closes_previous(service, ctrl):
-    root1 = _make_tab_root(ctrl)
-    id1 = service.register_delegated_session("tab-1", root1)
-    root2 = _make_tab_root(ctrl)
-    id2 = service.register_delegated_session("tab-1", root2)
+def test_reopen_same_owner_tears_down_previous(service):
+    id1, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-1")
+    id2, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-1")
     assert id1 != id2
     assert service.editor_id_for_owner("tab-1") == id2
     with pytest.raises(CfgEditorError):
         service.get(id1)
 
 
-def test_close_unknown_is_noop(service):
-    service.close("editor-never")  # no raise
+def test_teardown_unknown_is_noop(service):
+    service.teardown("editor-never")  # no raise
 
 
-def test_commit_rejects_tab_session(service, ctrl):
-    editor_id = service.register_delegated_session("tab-1", _make_tab_root(ctrl))
+def test_commit_rejects_seeded_session(service):
+    editor_id, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-1")
     with pytest.raises(CfgEditorError):
         service.commit(editor_id, "x")
 
 
-def test_discard_rejects_tab_session(service, ctrl):
-    editor_id = service.register_delegated_session("tab-1", _make_tab_root(ctrl))
+def test_discard_for_client_skips_gc_false_sessions(service):
+    tab_id, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-1")
+    gc_id, _ = service.open("module", discriminator="pulse")  # gc=True default
+    service.discard_for_client([tab_id, gc_id])
+    # gc=True reclaimed, gc=False (UI-owned) session untouched.
     with pytest.raises(CfgEditorError):
-        service.discard(editor_id)
-
-
-def test_discard_for_client_skips_tab_sessions(service, ctrl):
-    tab_id = service.register_delegated_session("tab-1", _make_tab_root(ctrl))
-    headless_id, _ = service.open("module", discriminator="pulse")
-    service.discard_for_client([tab_id, headless_id])
-    # headless reclaimed, tab session untouched.
-    with pytest.raises(CfgEditorError):
-        service.get(headless_id)
+        service.get(gc_id)
     assert service.editor_id_for_owner("tab-1") == tab_id
 
 
 # ---------------------------------------------------------------------------
-# Headless LRU orphan protection
+# gc LRU orphan protection
 # ---------------------------------------------------------------------------
 
 
-def test_headless_lru_evicts_oldest(service):
+def test_gc_lru_evicts_oldest(service):
     from zcu_tools.gui.services.cfg_editor import _MAX_HEADLESS_EDITORS
 
     ids = [
@@ -341,14 +328,14 @@ def test_headless_lru_evicts_oldest(service):
         assert service.get(alive) is not None
 
 
-def test_lru_does_not_count_tab_sessions(service, ctrl):
+def test_lru_does_not_count_gc_false_sessions(service):
     from zcu_tools.gui.services.cfg_editor import _MAX_HEADLESS_EDITORS
 
-    # Many tab sessions must not push headless out (different tab ids).
+    # Many gc=False sessions must not push gc=True ones out (different owners).
     for i in range(_MAX_HEADLESS_EDITORS + 5):
-        service.register_delegated_session(f"tab-{i}", _make_tab_root(ctrl))
-    headless_id, _ = service.open("module", discriminator="pulse")
-    assert service.get(headless_id) is not None
+        service.open_seeded(_make_tab_seed(), gc=False, owner_key=f"tab-{i}")
+    gc_id, _ = service.open("module", discriminator="pulse")
+    assert service.get(gc_id) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -356,13 +343,13 @@ def test_lru_does_not_count_tab_sessions(service, ctrl):
 # ---------------------------------------------------------------------------
 
 
-def test_change_stream_emits_editor_changed(service, ctrl):
+def test_change_stream_emits_editor_changed(service):
     events = []
     service.set_change_listener(
         lambda eid, ev, payload: events.append((eid, ev, payload))
     )
 
-    editor_id = service.register_delegated_session("tab-1", _make_tab_root(ctrl))
+    editor_id, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-1")
     service.set_field(editor_id, "freq", 5000.0)
 
     changed = [e for e in events if e[1] == "editor_changed" and e[0] == editor_id]
@@ -371,19 +358,19 @@ def test_change_stream_emits_editor_changed(service, ctrl):
     assert any("freq" in {p["path"] for p in e[2]["paths"]} for e in changed)
 
 
-def test_change_stream_emits_editor_closed_with_reason(service, ctrl):
+def test_change_stream_emits_editor_closed_with_reason(service):
     events = []
     service.set_change_listener(
         lambda eid, ev, payload: events.append((eid, ev, payload))
     )
 
-    # tab close → tab_closed
-    tab_id = service.register_delegated_session("tab-1", _make_tab_root(ctrl))
-    service.close(tab_id)
-    # headless discard → discarded
+    # seeded (UI-owned) teardown → tab_closed (default reason)
+    tab_id, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-1")
+    service.teardown(tab_id)
+    # ml-entry discard → discarded
     h1, _ = service.open("module", discriminator="pulse")
     service.discard(h1)
-    # headless commit → committed
+    # ml-entry commit → committed
     h2, _ = service.open("waveform", discriminator="const")
     service.commit(h2, "wf_x")
 
@@ -395,24 +382,25 @@ def test_change_stream_emits_editor_closed_with_reason(service, ctrl):
     assert (h2, "committed") in closed
 
 
-def test_change_stream_no_listener_is_safe(service, ctrl):
+def test_change_stream_no_listener_is_safe(service):
     # No listener set → operations must not raise.
-    editor_id = service.register_delegated_session("tab-1", _make_tab_root(ctrl))
+    editor_id, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-1")
     service.set_field(editor_id, "freq", 1.0)
-    service.close(editor_id)
+    service.teardown(editor_id)
 
 
-def test_closed_after_change_cb_disconnected(service, ctrl):
-    """After close, further edits to the (still-live) root emit nothing."""
+def test_closed_after_change_cb_disconnected(service):
+    """After teardown, the model's change hook is gone (no re-emit)."""
     events = []
     service.set_change_listener(
         lambda eid, ev, payload: events.append((eid, ev, payload))
     )
-    root = _make_tab_root(ctrl)
-    editor_id = service.register_delegated_session("tab-1", root)
-    service.close(editor_id)
+    editor_id, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-1")
+    root = service.get_root(editor_id)
+    service.teardown(editor_id)
     events.clear()
-    # widget still owns the root; an edit on it must not re-emit on a dead session.
+    # The service-owned root is torn down; the hook is disconnected so any
+    # residual edit emits nothing on a dead session.
     root.fields["freq"].set_value(99.0)
     assert events == []
 
@@ -421,50 +409,31 @@ def _hook_count(root):
     return len(root.on_change._cbs)
 
 
-def test_no_dangling_hook_after_every_removal_path(service, ctrl):
+def test_no_dangling_hook_after_every_removal_path(service):
     """Every removal path disconnects the change hook from its root.
 
-    Asserts the on_change callback count returns to baseline — the core
-    invariant guarding against dangling callbacks on a (possibly still-live)
-    root. Covers close / discard / commit / evict.
+    Covers teardown / discard / re-open. The session's root is service-owned;
+    after removal its on_change hook must be gone.
     """
-    # delegated: close
-    root = _make_tab_root(ctrl)
-    base = _hook_count(root)
-    eid = service.register_delegated_session("tab-x", root)
-    assert _hook_count(root) == base + 1
-    service.close(eid)
-    assert _hook_count(root) == base
+    # seeded: teardown
+    eid, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-x")
+    root = service.get_root(eid)
+    assert _hook_count(root) == 1
+    service.teardown(eid)
+    assert _hook_count(root) == 0
 
-    # headless: discard + commit each remove their own root's hook; we assert
-    # via the re-register path that no stale hook lingers on a reused owner.
-    r2 = _make_tab_root(ctrl)
-    base2 = _hook_count(r2)
-    service.register_delegated_session("tab-y", r2)
-    # Re-register same owner closes the previous → its hook is gone (the prev
-    # registration used the SAME root r2 here, so count must not accumulate).
-    service.register_delegated_session("tab-y", r2)
-    assert _hook_count(r2) == base2 + 1  # exactly one live hook, not two
-
-
-def test_reregister_disconnects_previous_root_hook(service, ctrl):
-    """Re-register with a *different* root leaves no hook on the old root."""
-    events = []
-    service.set_change_listener(
-        lambda eid, ev, payload: events.append((eid, ev, payload))
-    )
-    old = _make_tab_root(ctrl)
-    service.register_delegated_session("tab-1", old)
-    new = _make_tab_root(ctrl)
-    service.register_delegated_session("tab-1", new)  # closes the old reg
-    events.clear()
-    old.fields["freq"].set_value(7.0)  # old root edit → must be silent
-    assert events == []
+    # re-open same owner tears down the previous → its hook is gone.
+    id1, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-y")
+    r1 = service.get_root(id1)
+    id2, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-y")
+    assert _hook_count(r1) == 0  # previous root's hook gone
+    assert _hook_count(service.get_root(id2)) == 1  # new one live
 
 
 def _service_with_version_table(ctrl):
     """A CfgEditorService wired to a real VersionTable via bump/drop, so we can
     assert the editor:<id> resource version lifecycle (edit bumps, teardown drops)."""
+    from zcu_tools.gui.event_bus import EventBus
     from zcu_tools.gui.state import VersionTable
 
     table = VersionTable()
@@ -475,7 +444,9 @@ def _service_with_version_table(ctrl):
     def _drop(eid: str) -> None:
         table.drop_prefix(f"editor:{eid}")
 
-    svc = CfgEditorService(ctrl, ml_port=ctrl, version_bump=_bump, version_drop=_drop)
+    svc = CfgEditorService(
+        ctrl, ml_port=ctrl, version_bump=_bump, version_drop=_drop, bus=EventBus()
+    )
     return svc, table
 
 
@@ -498,11 +469,10 @@ def test_discard_drops_editor_version(ctrl):
     assert table.get(f"editor:{editor_id}") == 0
 
 
-def test_close_delegated_drops_editor_version(ctrl):
+def test_teardown_seeded_drops_editor_version(ctrl):
     svc, table = _service_with_version_table(ctrl)
-    root = _make_tab_root(ctrl)
-    editor_id = svc.register_delegated_session("tab-1", root)
-    root.fields["freq"].set_value(7.0)  # edit → bump
+    editor_id, _ = svc.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-1")
+    svc.set_field(editor_id, "freq", 7.0)  # edit → bump
     assert table.get(f"editor:{editor_id}") > 0
-    svc.close(editor_id)  # delegated teardown → drop (root stays alive)
+    svc.teardown(editor_id)  # UI-owned teardown → drop
     assert table.get(f"editor:{editor_id}") == 0

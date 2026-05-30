@@ -1,26 +1,23 @@
 """CfgEditorService — stateful LiveModel editing sessions shared by clients.
 
 A session owns one ``SectionLiveField`` (a cfg draft) keyed by a server-issued
-``editor_id``. It is the shared **draft SSOT** that multiple clients address:
-a tab's ``CfgFormWidget`` and an MCP agent both hold the same ``editor_id`` and
-operate the same session. See ``docs/adr/0003-shared-cfg-editor-session.md`` and
-the CfgEditor session glossary in ``gui/CONTEXT.md``.
+``editor_id``. The service owns *every* model; a ``CfgFormWidget`` is a pluggable
+viewer that ``attach``es to a model (renders + reflects it) and ``detach``es
+without tearing it down — so an agent edit and a user view converge on the same
+service-owned model (WYSIWYG), and a model can outlive any widget (the agent can
+edit before/without a widget being open). See ADR-0010 (supersedes ADR-0003's
+delegated model) and the CfgEditor session glossary in ``gui/CONTEXT.md``.
 
-Two session kinds differ only by *who owns the lifetime*:
+Lifetime is governed by ``gc`` (not two session kinds):
 
-- **headless** (``open``): the agent builds/edits a ModuleLibrary entry with no
-  widget attached. ``commit`` lowers + registers into ModuleLibrary, ``discard``
-  drops it; both tear down the session's LiveModel. Reclaimed on RPC disconnect
-  and bounded by an LRU cap (orphan protection).
-- **delegated** (``register_delegated_session``): a ``CfgFormWidget`` (tab,
-  inspect dialog or writeback) already owns a live LiveModel; the service
-  registers *that same instance* (no new tree — the shared instance is what
-  makes WYSIWYG work) and returns an ``editor_id``. The lifetime is the owner's:
-  ``close`` removes the registration but does **not** tear down the root (the
-  widget's ``cfg_form.clear()`` owns that). Not LRU-bounded, not reclaimed on
-  agent disconnect. Only a tab's editor_id is currently exposed to agents (via
-  ``tab.snapshot``); inspect/writeback sessions are registered for uniformity
-  (consistent change stream) but not yet addressable from the wire.
+- **gc=True** (``open`` default — the agent builds/edits a ModuleLibrary entry):
+  reclaimable on RPC disconnect and bounded by an LRU cap (orphan protection).
+  ``commit`` lowers + registers into ModuleLibrary, ``discard`` drops it.
+- **gc=False** (UI-owned: tab cfg / inspect / writeback): only the owner tears it
+  down via ``teardown(editor_id)`` (the owning widget ``detach``es first). Not
+  LRU-bounded, not reclaimed on agent disconnect. ``open_seeded`` builds one from
+  an existing ``CfgSchema`` (tab cfg / writeback draft — no ml ``item_kind``, so
+  it is teardown-only and rejects ``commit``).
 
 The incremental shape is *required*, not a convenience: ModuleRef/WaveformRef
 key switches rebuild the field sub-tree, so a client cannot send one complete
@@ -44,7 +41,7 @@ import itertools
 import logging
 import uuid
 from dataclasses import dataclass, field
-from typing import Callable, Optional, Protocol
+from typing import TYPE_CHECKING, Callable, Optional, Protocol
 
 from zcu_tools.gui.adapter import (
     CfgSchema,
@@ -66,6 +63,9 @@ from .remote.path_resolver import (
     list_subtree_paths,
     resolve_and_set,
 )
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -120,29 +120,31 @@ class CfgEditorSession:
     (DDD: reference aggregates by id). This replaces the old anemic dataclass
     whose behaviour lived entirely on the service (docs/adr/0008 §Aggregate Root).
 
-    Lifecycle ownership (headless vs delegated) is the *Repository's* concern
-    (``CfgEditorService``), not the aggregate's; the session only carries the
-    discriminators the Repository needs.
+    Lifecycle ownership is the *Repository's* concern (``CfgEditorService``), not
+    the aggregate's; the session only carries the discriminators the Repository
+    needs. Every session's ``root`` is service-owned (the widget attaches to it,
+    never owns it — ADR-0010); ``gc`` governs whether the Repository may reclaim
+    it automatically (LRU / disconnect) or only on the owner's explicit teardown.
     """
 
     editor_id: str
     root: SectionLiveField
-    kind: str  # "headless" | "delegated"
-    # headless: the ml entry kind being built ("module"/"waveform"); commit uses it.
+    # True: agent-opened, reclaimed by LRU / RPC-disconnect (orphan protection).
+    # False: UI-owned (tab / inspect / writeback) — only the owner tears it down.
+    gc: bool
+    # the ml entry kind being built ("module"/"waveform"); commit uses it. None
+    # for a seeded session (tab cfg / writeback draft) that is teardown-only.
     item_kind: Optional[str] = None
-    # delegated: the owner's key (so close() can drop the owner→editor mapping).
-    # A tab uses its tab_id; an inspect/writeback widget uses its own key.
+    # the owner's key (a tab uses its tab_id; an inspect/writeback widget uses its
+    # own key), so the owner can look its editor_id back up.
     owner_key: Optional[str] = None
-    # Monotonic open order; used for headless LRU eviction.
+    # Monotonic open order; used for gc-LRU eviction.
     seq: int = field(default=0)
     # on_change callback bound to root for the per-session change stream; held
     # so it can be disconnected when the session ends.
     change_cb: Optional[Callable[..., None]] = None
 
     # -- behaviour (the aggregate operates its own draft) ------------------
-
-    def is_headless(self) -> bool:
-        return self.kind == "headless"
 
     def current_paths(self) -> list[dict[str, object]]:
         """Full settable-path list of the draft (the ``get`` projection)."""
@@ -162,15 +164,18 @@ class CfgEditorSession:
         return schema_to_dict(schema, ml_port.get_current_ml())
 
     def commit(self, name: str, ml_port: ModuleLibraryWritePort) -> None:
-        """Lower + register this headless draft into the ModuleLibrary.
+        """Lower + register this ml-entry draft into the ModuleLibrary.
 
         Registers via the write port; the Repository tears the session down only
         after this returns, so a validation failure leaves the draft intact.
+        ``commit`` applies only to ml-entry sessions (those carrying an
+        ``item_kind``); a seeded session (tab cfg / writeback draft) is
+        teardown-only and rejects commit.
         """
-        if not self.is_headless():
+        if self.item_kind is None:
             raise CfgEditorError(
-                f"{self.editor_id!r} is a delegated session; commit applies only "
-                "to headless ml-entry sessions"
+                f"{self.editor_id!r} is a seeded session (no item_kind); commit "
+                "applies only to ml-entry sessions"
             )
         raw = self.lower(ml_port)
         if self.item_kind == "module":
@@ -183,10 +188,9 @@ class CfgEditorService:
     """Repository for ``CfgEditorSession`` aggregates, keyed by a server id.
 
     Owns the session *lifecycle* (create / look up / reap) and the cross-session
-    concerns (owner→id map, headless LRU, per-session change stream, version
-    bump). Per-session editing behaviour lives on the aggregate
-    (``CfgEditorSession``); the Repository delegates to it. The service holds no
-    Qt objects.
+    concerns (gc-LRU, per-session change stream, version bump, and the
+    md/ml-change refresh of every owned model). Per-session editing behaviour
+    lives on the aggregate (``CfgEditorSession``); the Repository delegates to it.
 
     Dependencies (docs/adr/0008): ``env_ctrl`` is the LiveModel reactive env
     (narrow port); ``ml_port`` is the ModuleLibrary read/write port used at
@@ -203,15 +207,27 @@ class CfgEditorService:
         ml_port: ModuleLibraryWritePort,
         version_bump: Callable[[str], None],
         version_drop: Callable[[str], None],
+        bus: "EventBus",
     ) -> None:
         self._env = LiveModelEnv(ctrl=env_ctrl)
         self._ml = ml_port
         self._version_bump = version_bump
         self._version_drop = version_drop
         self._editors: dict[str, CfgEditorSession] = {}
-        self._owner_to_editor: dict[str, str] = {}
         self._seq = itertools.count()
         self._listener: Optional[ChangeListener] = None
+        # ADR-0010/0007 Reaction: the service owns every cfg model, so it (not the
+        # widget) refreshes their EvalValue snapshots when md/ml/context/device
+        # change. Subscribe once; refresh_all fans out to every owned model.
+        from zcu_tools.gui.event_bus import GuiEvent
+
+        for event in (
+            GuiEvent.MD_CHANGED,
+            GuiEvent.ML_CHANGED,
+            GuiEvent.CONTEXT_SWITCHED,
+            GuiEvent.DEVICE_CHANGED,
+        ):
+            bus.subscribe(event, lambda _payload, ev=event: self.refresh_all(ev))
 
     def set_change_listener(self, listener: Optional[ChangeListener]) -> None:
         """Inject the per-session push listener (remote layer wires this).
@@ -231,51 +247,87 @@ class CfgEditorService:
         *,
         discriminator: Optional[str] = None,
         from_name: Optional[str] = None,
+        gc: bool = True,
+        owner_key: Optional[str] = None,
     ) -> tuple[str, list[dict[str, object]]]:
+        """Open an ml-entry editing session (module / waveform).
+
+        ``gc=True`` (the agent default) makes the session reclaimable by LRU and
+        on RPC-disconnect. ``gc=False`` ties teardown to an explicit owner call
+        (UI dialogs that build a real ml entry). ``item_kind`` is required and is
+        the commit discriminator.
+        """
         if item_kind not in _ITEM_KINDS:
             raise CfgEditorError(
                 f"item_kind must be one of {_ITEM_KINDS}, got {item_kind!r}"
             )
+        if owner_key is not None:
+            self._teardown_owner(owner_key)
         spec, value = self._initial_schema(item_kind, discriminator, from_name)
+        return self._make_session(
+            spec, value, item_kind=item_kind, gc=gc, owner_key=owner_key
+        )
+
+    def open_seeded(
+        self,
+        seed: CfgSchema,
+        *,
+        gc: bool = False,
+        owner_key: Optional[str] = None,
+    ) -> tuple[str, list[dict[str, object]]]:
+        """Open a session seeded from an existing ``CfgSchema`` (no item_kind).
+
+        Used by UI surfaces that own a cfg draft which is *not* an ml entry — a
+        tab's cfg (seed = ``State.cfg_schema``) and a writeback module/waveform
+        item (seed = its ``edit_schema``). Such a session is teardown-only
+        (``commit`` is rejected — there is no ml-entry to register). Defaults to
+        ``gc=False`` since these are always owner-driven.
+        """
+        if owner_key is not None:
+            self._teardown_owner(owner_key)
+        return self._make_session(
+            seed.spec, seed.value, item_kind=None, gc=gc, owner_key=owner_key
+        )
+
+    def _make_session(
+        self,
+        spec,
+        value,
+        *,
+        item_kind: Optional[str],
+        gc: bool,
+        owner_key: Optional[str],
+    ) -> tuple[str, list[dict[str, object]]]:
         root = SectionLiveField(spec, self._env, value)
         editor_id = self._new_id()
         session = CfgEditorSession(
             editor_id=editor_id,
             root=root,
-            kind="headless",
+            gc=gc,
             item_kind=item_kind,
+            owner_key=owner_key,
             seq=next(self._seq),
         )
         self._editors[editor_id] = session
         self._attach_change_stream(session)
-        self._evict_excess_headless()
+        if gc:
+            self._evict_excess_gc()
         return editor_id, session.current_paths()
 
-    def register_delegated_session(self, owner_key: str, root: SectionLiveField) -> str:
-        """Register a widget's *existing* live LiveModel as a shared session.
-
-        ``owner_key`` identifies the owner (a tab uses its tab_id; an inspect/
-        writeback widget uses its own key). The root is the widget's own
-        ``SectionLiveField`` — sharing the same instance is what makes a widget
-        edit and an agent edit converge (WYSIWYG). A re-register for the same
-        owner (e.g. inspect re-populates on type switch) closes the previous
-        registration first. Lifetime is owner-driven: ``close`` drops the
-        registration without tearing down the root.
-        """
-        prev = self._owner_to_editor.get(owner_key)
-        if prev is not None:
-            self.close(prev)
-        editor_id = self._new_id()
-        session = CfgEditorSession(
-            editor_id=editor_id, root=root, kind="delegated", owner_key=owner_key
-        )
-        self._editors[editor_id] = session
-        self._owner_to_editor[owner_key] = editor_id
-        self._attach_change_stream(session)
-        return editor_id
-
     def editor_id_for_owner(self, owner_key: str) -> Optional[str]:
-        return self._owner_to_editor.get(owner_key)
+        for editor_id, session in self._editors.items():
+            if session.owner_key == owner_key:
+                return editor_id
+        return None
+
+    def get_root(self, editor_id: str) -> SectionLiveField:
+        """Return the live ``SectionLiveField`` for ``editor_id``.
+
+        Exposed so the owning widget can ``attach`` to a service-owned model
+        (ADR-0010). The widget renders + reflects this model but never owns its
+        lifetime (the service does).
+        """
+        return self._require(editor_id).root
 
     def set_field(self, editor_id: str, path: str, value: object) -> dict[str, object]:
         return self._require(editor_id).set_field(path, value)
@@ -291,42 +343,43 @@ class CfgEditorService:
         self._remove(editor_id, teardown=True, reason="committed")
 
     def discard(self, editor_id: str) -> None:
-        """Drop a *headless* session (tearing down its LiveModel).
+        """Drop a session, tearing down its LiveModel.
 
-        Delegated sessions are closed via ``close`` (which keeps the widget's
-        root alive); discarding one would tear down a live widget tree.
+        The agent-facing discard of an ml-entry draft (discard = "throw the draft
+        away"). Unknown id raises (the agent referenced a gone session), unlike
+        the lenient ``teardown`` which is a no-op for owner-teardown races.
         """
-        session = self._require(editor_id)
-        if not session.is_headless():
-            raise CfgEditorError(
-                f"{editor_id!r} is a delegated session; use close (it must not "
-                "tear down the widget's live model)"
-            )
+        self._require(editor_id)
         self._remove(editor_id, teardown=True, reason="discarded")
 
-    def close(self, editor_id: str, *, reason: str = "tab_closed") -> None:
-        """Remove a session registration without tearing down its LiveModel.
+    def teardown(self, editor_id: str, *, reason: str = "tab_closed") -> None:
+        """Tear down a UI-owned (``gc=False``) session and its LiveModel.
 
-        Used for delegated sessions on owner teardown (tab close, dialog close):
-        the widget's ``cfg_form.clear()`` owns teardown of the root, so the
-        service must not double-tear-down. Unknown id is a no-op (close may race
-        a never-registered owner).
+        Called by the owner (tab close, dialog close, writeback reanalyze) — the
+        service owns every model now (ADR-0010), so it is also the one to tear it
+        down; the widget only ``detach``es first. Unknown id is a no-op (teardown
+        may race a never-opened owner).
         """
-        session = self._editors.get(editor_id)
-        if session is None:
+        if editor_id not in self._editors:
             return
-        self._remove(editor_id, teardown=False, reason=reason)
+        self._remove(editor_id, teardown=True, reason=reason)
+
+    def _teardown_owner(self, owner_key: str) -> None:
+        """Tear down the existing session for ``owner_key`` if any (re-open)."""
+        existing = self.editor_id_for_owner(owner_key)
+        if existing is not None:
+            self._remove(existing, teardown=True, reason="reopened")
 
     def discard_for_client(self, editor_ids: list[str]) -> None:
-        """Reclaim a batch of *headless* sessions (per-connection cleanup).
+        """Reclaim a batch of *gc* sessions (per-connection cleanup).
 
-        Delegated sessions are owner-driven and never reclaimed on RPC
-        disconnect, so they are skipped even if their id appears here. Unknown
-        ids are ignored.
+        UI-owned (``gc=False``) sessions are owner-driven and never reclaimed on
+        RPC disconnect, so they are skipped even if their id appears here.
+        Unknown ids are ignored.
         """
         for editor_id in editor_ids:
             session = self._editors.get(editor_id)
-            if session is not None and session.is_headless():
+            if session is not None and session.gc:
                 self._remove(editor_id, teardown=True, reason="disconnected")
 
     # ------------------------------------------------------------------
@@ -377,8 +430,6 @@ class CfgEditorService:
         if session.change_cb is not None:
             session.root.on_change.disconnect(session.change_cb)
             session.change_cb = None
-        if session.owner_key is not None:
-            self._owner_to_editor.pop(session.owner_key, None)
         if teardown:
             session.root.teardown()
         # Forget the session's resource version (symmetric to tab/device drop):
@@ -389,16 +440,31 @@ class CfgEditorService:
         # Notify subscribers the session is gone (after state is consistent).
         self._emit(editor_id, "editor_closed", {"reason": reason})
 
-    def _evict_excess_headless(self) -> None:
-        headless = [
-            (eid, s) for eid, s in self._editors.items() if s.kind == "headless"
-        ]
-        if len(headless) <= _MAX_HEADLESS_EDITORS:
+    def _evict_excess_gc(self) -> None:
+        gc_sessions = [(eid, s) for eid, s in self._editors.items() if s.gc]
+        if len(gc_sessions) <= _MAX_HEADLESS_EDITORS:
             return
         # Evict oldest-first until back under the cap.
-        headless.sort(key=lambda item: item[1].seq)
-        for eid, _ in headless[: len(headless) - _MAX_HEADLESS_EDITORS]:
+        gc_sessions.sort(key=lambda item: item[1].seq)
+        for eid, _ in gc_sessions[: len(gc_sessions) - _MAX_HEADLESS_EDITORS]:
             self._remove(eid, teardown=True, reason="evicted")
+
+    # ------------------------------------------------------------------
+    # External refresh (md/ml change → refresh every owned model's EvalValue)
+    # ------------------------------------------------------------------
+
+    def refresh_all(self, event: object) -> None:
+        """Refresh every owned model against an md/ml/context/device change.
+
+        ADR-0010 / ADR-0007 Reaction: the service owns the models, so refreshing
+        their ``EvalValue`` snapshots when md/ml change is the owner's job (it
+        moved here from the widget when ownership inverted). An attached widget
+        repaints for free via the model's bubbling ``on_change``.
+        """
+        # Snapshot values() — refresh_external may bubble on_change which our
+        # change stream observes, but it does not mutate the editors dict.
+        for session in list(self._editors.values()):
+            session.root.refresh_external(event)
 
     def _require(self, editor_id: str) -> CfgEditorSession:
         session = self._editors.get(editor_id)

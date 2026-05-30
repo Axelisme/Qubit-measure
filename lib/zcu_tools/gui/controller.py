@@ -465,18 +465,34 @@ class Controller:
         *,
         discriminator: Optional[str] = None,
         from_name: Optional[str] = None,
+        gc: bool = True,
+        owner_key: Optional[str] = None,
     ) -> tuple[str, list[dict[str, object]]]:
         return self._cfg_editor_svc.open(
-            item_kind, discriminator=discriminator, from_name=from_name
+            item_kind,
+            discriminator=discriminator,
+            from_name=from_name,
+            gc=gc,
+            owner_key=owner_key,
         )
 
-    def register_delegated_cfg_editor(self, owner_key: str, root: Any) -> str:
-        """Register a widget's live LiveModel as a shared cfg-editor session."""
-        return self._cfg_editor_svc.register_delegated_session(owner_key, root)
+    def open_seeded_cfg_editor(
+        self, seed: Any, *, gc: bool = False, owner_key: Optional[str] = None
+    ) -> tuple[str, list[dict[str, object]]]:
+        """Open a service-owned cfg model seeded from an existing CfgSchema.
 
-    def close_cfg_editor(self, editor_id: str) -> None:
-        """Close a session registration without tearing down its LiveModel."""
-        self._cfg_editor_svc.close(editor_id)
+        Used by UI surfaces (tab cfg / writeback item) that own a non-ml-entry
+        draft; the owning widget then ``attach``es to ``get_cfg_editor_root``.
+        """
+        return self._cfg_editor_svc.open_seeded(seed, gc=gc, owner_key=owner_key)
+
+    def get_cfg_editor_root(self, editor_id: str) -> Any:
+        """Return the service-owned LiveModel for a widget to ``attach`` to."""
+        return self._cfg_editor_svc.get_root(editor_id)
+
+    def teardown_cfg_editor(self, editor_id: str) -> None:
+        """Tear down a UI-owned (gc=False) cfg-editor session + its LiveModel."""
+        self._cfg_editor_svc.teardown(editor_id)
 
     def editor_id_for_owner(self, owner_key: str) -> Optional[str]:
         return self._cfg_editor_svc.editor_id_for_owner(owner_key)

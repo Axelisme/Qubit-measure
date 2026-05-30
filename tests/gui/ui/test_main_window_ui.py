@@ -348,7 +348,18 @@ def _editor_wiring_ctrl() -> MagicMock:
     ctrl.get_current_ml.return_value = MagicMock()
     ctrl.list_device_names.return_value = []
     ctrl.has_soc.return_value = False
-    ctrl.register_delegated_cfg_editor.return_value = "editor-tab1"
+
+    # populate_cfg now opens a service-owned (gc=False) seeded session and
+    # attaches the widget to the service-owned model (ADR-0010). Build a real
+    # SectionLiveField for get_cfg_editor_root so attach() works.
+    from zcu_tools.gui.adapter import make_default_value
+    from zcu_tools.gui.cfg_schemas import _MODULE_SPEC_FACTORIES
+    from zcu_tools.gui.live_model import LiveModelEnv, SectionLiveField
+
+    spec = _MODULE_SPEC_FACTORIES["pulse"]()
+    model = SectionLiveField(spec, LiveModelEnv(ctrl=ctrl), make_default_value(spec))
+    ctrl.open_seeded_cfg_editor.return_value = ("editor-tab1", [])
+    ctrl.get_cfg_editor_root.return_value = model
     return ctrl
 
 
@@ -360,7 +371,7 @@ def _pulse_schema():
     return CfgSchema(spec=spec, value=make_default_value(spec))
 
 
-def test_exp_tab_registers_cfg_editor_on_bind(qapp):
+def test_exp_tab_opens_cfg_editor_on_populate(qapp):
     from zcu_tools.gui.ui.main_window import ExpTabWidget, MainWindow
 
     ctrl = _editor_wiring_ctrl()
@@ -368,15 +379,17 @@ def test_exp_tab_registers_cfg_editor_on_bind(qapp):
     tab.populate_cfg(_pulse_schema(), ctrl)
     tab.bind_to_controller(MainWindow(ctrl))
 
-    # Registered the tab's *live* root (same instance the widget owns).
-    ctrl.register_delegated_cfg_editor.assert_called_once()
-    args = ctrl.register_delegated_cfg_editor.call_args.args
-    assert args[0] == "tab-1"
-    assert args[1] is tab.cfg_form.get_live_root()
+    # Opened a gc=False seeded session keyed by the tab id, and attached the
+    # widget to the service-owned model.
+    ctrl.open_seeded_cfg_editor.assert_called_once()
+    kwargs = ctrl.open_seeded_cfg_editor.call_args.kwargs
+    assert kwargs["owner_key"] == "tab-1"
+    assert kwargs["gc"] is False
     assert tab._cfg_editor_id == "editor-tab1"
+    assert tab.cfg_form.get_live_root() is ctrl.get_cfg_editor_root.return_value
 
 
-def test_exp_tab_closes_cfg_editor_on_unbind(qapp):
+def test_exp_tab_tears_down_cfg_editor_on_unbind(qapp):
     from zcu_tools.gui.ui.main_window import ExpTabWidget, MainWindow
 
     ctrl = _editor_wiring_ctrl()
@@ -385,7 +398,7 @@ def test_exp_tab_closes_cfg_editor_on_unbind(qapp):
     tab.bind_to_controller(MainWindow(ctrl))
     tab.unbind_from_controller()
 
-    ctrl.close_cfg_editor.assert_called_once_with("editor-tab1")
+    ctrl.teardown_cfg_editor.assert_called_once_with("editor-tab1")
     assert tab._cfg_editor_id is None
 
 

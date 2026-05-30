@@ -105,5 +105,6 @@ def build_app_services(
             ml_port=cfg_editor_ctrl,
             version_bump=cfg_editor_ctrl.bump_editor_version,
             version_drop=cfg_editor_ctrl.drop_editor_version,
+            bus=bus,
         ),
     )

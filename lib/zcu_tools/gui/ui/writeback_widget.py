@@ -201,19 +201,16 @@ class WritebackWidget(QWidget):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        # Local-draft CfgFormWidget / LiveModel. Edits stay in this dialog and
-        # only get stored on the WritebackItem at Save below — they never
-        # auto-commit to State.cfg_schema.
+        # The cfg model is owned by the CfgEditorService (ADR-0010): open a
+        # gc=False seeded session from the item's draft schema, attach the widget.
+        # Edits land on the service-owned model; Save snapshots it onto the item.
         form_widget = CfgFormWidget()
         schema = copy.deepcopy(item.edited_schema or item.edit_schema)
-        form_widget.populate(schema, self._ctrl)
-        # Register this local-draft model as a delegated cfg-editor session so
-        # all cfg editing surfaces go through one mechanism (uniform change
-        # stream). Owner key is unique per edit dialog; closed on finish below.
         editor_owner = f"writeback-{uuid.uuid4().hex[:8]}"
-        editor_root = form_widget.get_live_root()
-        if editor_root is not None:
-            self._ctrl.register_delegated_cfg_editor(editor_owner, editor_root)
+        editor_id, _ = self._ctrl.open_seeded_cfg_editor(
+            schema, gc=False, owner_key=editor_owner
+        )
+        form_widget.attach(self._ctrl.get_cfg_editor_root(editor_id))
         initial_valid = form_widget.is_valid()
         logger.debug(
             "_edit_cfg_item: key=%r initial_valid=%r schema_spec=%r",
@@ -233,9 +230,8 @@ class WritebackWidget(QWidget):
         layout.addLayout(btn_row)
 
         def _close_editor(*_: Any) -> None:
-            editor_id = self._ctrl.editor_id_for_owner(editor_owner)
-            if editor_id is not None:
-                self._ctrl.close_cfg_editor(editor_id)
+            form_widget.detach()
+            self._ctrl.teardown_cfg_editor(editor_id)
 
         form_widget.validity_changed.connect(save_btn.setEnabled)
         cancel_btn.clicked.connect(dialog.reject)
@@ -251,7 +247,6 @@ class WritebackWidget(QWidget):
         save_btn.clicked.connect(save)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.finished.connect(_close_editor)
-        dialog.finished.connect(lambda _: form_widget.clear())
         dialog.open()
 
 

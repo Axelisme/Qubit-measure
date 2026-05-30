@@ -167,8 +167,11 @@ def test_stop_unsubscribes_event_bus(qapp):  # noqa: ARG001
     assert subs.get(GuiEvent.RUN_LOCK_CHANGED), "service should have subscribed"
     f.stop()
     subs_after = f.bus._subs  # type: ignore[attr-defined]
+    # The RemoteEventService's subscriptions are gone after stop. RUN_LOCK_CHANGED
+    # is remote-event-specific, so it must be empty. (MD_CHANGED is *also* held
+    # permanently by CfgEditorService for owned-model refresh — ADR-0010 — so it
+    # is not a clean proxy for the remote view's teardown.)
     assert not subs_after.get(GuiEvent.RUN_LOCK_CHANGED)
-    assert not subs_after.get(GuiEvent.MD_CHANGED)
 
 
 # ---------------------------------------------------------------------------

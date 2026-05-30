@@ -22,7 +22,7 @@ from zcu_tools.gui.adapter import (
     WaveformRefValue,
     schema_to_dict,
 )
-from zcu_tools.gui.event_bus import EventBus, MdChangedPayload
+from zcu_tools.gui.event_bus import EventBus
 from zcu_tools.gui.live_model import SweepLiveField
 
 # ---------------------------------------------------------------------------
@@ -44,6 +44,20 @@ def _schema(spec_fields: dict, value_fields: dict) -> CfgSchema:
         spec=CfgSectionSpec(fields=spec_fields),
         value=CfgSectionValue(fields=value_fields),
     )
+
+
+def _attach(w, schema: CfgSchema, ctrl):
+    """Build a LiveModel from ``schema`` and attach the widget to it.
+
+    Mirrors the production flow where the CfgEditorService owns the model and the
+    widget ``attach``es (ADR-0010). The model is returned for tests that drive it
+    directly (e.g. external refresh, which the service performs in production).
+    """
+    from zcu_tools.gui.live_model import LiveModelEnv, SectionLiveField
+
+    model = SectionLiveField(schema.spec, LiveModelEnv(ctrl=ctrl), schema.value)
+    w.attach(model)
+    return model
 
 
 def _make_ctx():
@@ -262,14 +276,21 @@ def test_populate_scalar_fields_round_trip(qapp, ctrl):
         },
     )
     w = CfgFormWidget()
-    w.populate(schema, ctrl)
+    _attach(w, schema, ctrl)
     out = w.read_values()
 
     assert out.fields["reps"].value == 100  # type: ignore[union-attr]
     assert out.fields["freq"].value == pytest.approx(6.0)  # type: ignore[union-attr]
 
 
-def test_cfg_form_refreshes_eval_field_from_bus(qapp, ctrl):
+def test_cfg_form_reflects_model_external_refresh(qapp, ctrl):
+    """The widget repaints when the (service-owned) model refreshes an EvalValue.
+
+    Under ADR-0010 the service drives ``refresh_external`` on the model it owns;
+    the attached widget reflects it for free via the model's bubbling on_change.
+    Here we drive the model directly (the service-bus path is covered in
+    test_cfg_editor) and assert the widget's read-back + schema_changed fire.
+    """
     from zcu_tools.gui.event_bus import GuiEvent
     from zcu_tools.gui.ui.cfg_form import CfgFormWidget
     from zcu_tools.meta_tool import MetaDict
@@ -284,10 +305,10 @@ def test_cfg_form_refreshes_eval_field_from_bus(qapp, ctrl):
     w = CfgFormWidget()
     emitted = []
     w.schema_changed.connect(emitted.append)
-    w.populate(schema, ctrl)
+    model = _attach(w, schema, ctrl)
 
     md.r_f = 6100.0
-    ctrl.get_bus.return_value.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=md))
+    model.refresh_external(GuiEvent.MD_CHANGED)  # the service does this in prod
 
     val = w.read_values().fields["freq"]
     assert isinstance(val, EvalValue)
@@ -295,8 +316,9 @@ def test_cfg_form_refreshes_eval_field_from_bus(qapp, ctrl):
     assert emitted
 
 
-def test_cfg_form_unsubscribes_bus_on_repopulate(qapp, ctrl):
-    from zcu_tools.gui.event_bus import GuiEvent
+def test_cfg_form_does_not_subscribe_bus(qapp, ctrl):
+    """The widget no longer touches the EventBus (ADR-0010 moved refresh to the
+    service). attach/detach must not register any bus subscription."""
     from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 
     schema = _schema(
@@ -304,13 +326,11 @@ def test_cfg_form_unsubscribes_bus_on_repopulate(qapp, ctrl):
         {"freq": DirectValue(6000.0)},
     )
     w = CfgFormWidget()
-    w.populate(schema, ctrl)
-    w.populate(schema, ctrl)
+    _attach(w, schema, ctrl)
+    _attach(w, schema, ctrl)  # re-attach swaps models cleanly
 
     bus = ctrl.get_bus.return_value
-    assert len(bus._subs[GuiEvent.MD_CHANGED]) == 1
-    assert len(bus._subs[GuiEvent.CONTEXT_SWITCHED]) == 1
-    assert len(bus._subs[GuiEvent.ML_CHANGED]) == 1
+    assert bus._subs == {} or all(not subs for subs in bus._subs.values())
 
 
 def test_read_schema_returns_cfg_schema(qapp, ctrl):
@@ -321,7 +341,7 @@ def test_read_schema_returns_cfg_schema(qapp, ctrl):
         {"reps": DirectValue(10)},
     )
     w = CfgFormWidget()
-    w.populate(schema, ctrl)
+    _attach(w, schema, ctrl)
     out = w.read_schema()
     assert isinstance(out, CfgSchema)
     assert out.spec is schema.spec
@@ -336,7 +356,7 @@ def test_read_values_does_not_mutate_original(qapp, ctrl):
         {"reps": DirectValue(100)},
     )
     w = CfgFormWidget()
-    w.populate(schema, ctrl)
+    _attach(w, schema, ctrl)
 
     spin = w.findChild(QSpinBox)
     assert spin is not None
@@ -355,7 +375,7 @@ def test_populate_sweep_field_round_trip(qapp, ctrl):
         {"f": SweepValue(start=5.8, stop=6.2, expts=201)},
     )
     w = CfgFormWidget()
-    w.populate(schema, ctrl)
+    _attach(w, schema, ctrl)
     out = w.read_values()
 
     sv = out.fields["f"]
@@ -374,7 +394,7 @@ def test_populate_sweep_field_step_preserved(qapp, ctrl):
         {"f": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)},
     )
     w = CfgFormWidget()
-    w.populate(schema, ctrl)
+    _attach(w, schema, ctrl)
     out = w.read_values()
 
     sv = out.fields["f"]
@@ -391,7 +411,7 @@ def test_sweep_widget_step_change_recomputes_expts_and_stop(qapp, ctrl):
         {"f": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)},
     )
     w = CfgFormWidget()
-    w.populate(schema, ctrl)
+    _attach(w, schema, ctrl)
     sweep_widget = w.findChild(SweepWidget)
     assert sweep_widget is not None
 
@@ -413,7 +433,7 @@ def test_sweep_widget_non_step_change_recomputes_step(qapp, ctrl):
         {"f": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)},
     )
     w = CfgFormWidget()
-    w.populate(schema, ctrl)
+    _attach(w, schema, ctrl)
     sweep_widget = w.findChild(SweepWidget)
     assert sweep_widget is not None
 
@@ -434,7 +454,7 @@ def test_sweep_widget_start_supports_eval_mode(qapp, ctrl):
         {"f": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)},
     )
     w = CfgFormWidget()
-    w.populate(schema, ctrl)
+    _attach(w, schema, ctrl)
     sweep_widget = w.findChild(SweepWidget)
     assert sweep_widget is not None
 
@@ -460,7 +480,7 @@ def test_populate_nested_section_round_trip(qapp, ctrl):
         {"inner": CfgSectionValue(fields={"gain": DirectValue(0.05)})},
     )
     w = CfgFormWidget()
-    w.populate(schema, ctrl)
+    _attach(w, schema, ctrl)
     out = w.read_values()
 
     inner = out.fields["inner"]
@@ -492,7 +512,7 @@ def test_literal_rows_are_hidden_regardless_of_key(qapp, ctrl):
         },
     )
     w = CfgFormWidget()
-    w.populate(schema, ctrl)
+    _attach(w, schema, ctrl)
 
     labels = [label.text() for label in w.findChildren(QLabel)]
     assert "Type:" not in labels
@@ -523,7 +543,7 @@ def test_module_ref_toggle_sits_left_of_combo_and_controls_subsection(qapp, ctrl
         },
     )
     w = CfgFormWidget()
-    w.populate(schema, ctrl)
+    _attach(w, schema, ctrl)
     w.show()
 
     ref_widget = w.findChild(ModuleRefWidget)
@@ -571,7 +591,7 @@ def test_waveform_ref_toggle_sits_left_of_combo(qapp, ctrl):
         },
     )
     w = CfgFormWidget()
-    w.populate(schema, ctrl)
+    _attach(w, schema, ctrl)
 
     ref_widget = w.findChild(ModuleRefWidget)
     assert ref_widget is not None
@@ -608,7 +628,7 @@ def test_cfg_form_does_not_wrap_module_ref_row(qapp, ctrl):
     )
     w = CfgFormWidget()
     w.resize(520, 480)
-    w.populate(schema, ctrl)
+    _attach(w, schema, ctrl)
 
     section = w.findChild(SectionWidget)
     assert section is not None
@@ -640,7 +660,7 @@ def test_populate_module_ref_field_round_trip(qapp, ctrl):
         ),
     )
     w = CfgFormWidget()
-    w.populate(schema, ctrl)
+    _attach(w, schema, ctrl)
     out = w.read_values()
 
     mod = out.fields["mod"]
@@ -659,7 +679,7 @@ def test_populate_full_fake_freq_schema(qapp, ctrl):
     schema = FakeFreqAdapter().make_default_cfg(ctx)
 
     w = CfgFormWidget()
-    w.populate(schema, ctrl)
+    _attach(w, schema, ctrl)
     out = w.read_values()
 
     for key in ("reps", "rounds", "sweep", "model", "modules"):
@@ -737,7 +757,7 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     )
 
     w = CfgFormWidget()
-    w.populate(schema, ctrl)
+    _attach(w, schema, ctrl)
     w.show()
 
     ref_widget = w.findChild(ModuleRefWidget)
@@ -834,7 +854,7 @@ def test_optional_module_ref_renders_none_option(qapp, ctrl):
 
     schema = _make_optional_module_ref_schema(enabled=True)
     w = CfgFormWidget()
-    w.populate(schema, ctrl)
+    _attach(w, schema, ctrl)
 
     module_widgets = w.findChildren(ModuleRefWidget)
     assert len(module_widgets) >= 1
@@ -851,7 +871,7 @@ def test_optional_module_ref_select_none_disables_sub(qapp, ctrl):
 
     schema = _make_optional_module_ref_schema(enabled=True)
     w = CfgFormWidget()
-    w.populate(schema, ctrl)
+    _attach(w, schema, ctrl)
 
     module_widgets = w.findChildren(ModuleRefWidget)
     mw = module_widgets[0]
@@ -889,7 +909,7 @@ def test_module_ref_missing_library_hint_visible_and_clear_on_switch(qapp, ctrl)
     ctrl.get_current_ml.return_value = ModuleLibrary()
 
     w = CfgFormWidget()
-    w.populate(schema, ctrl)
+    _attach(w, schema, ctrl)
     w.show()
 
     ref_widget = w.findChild(ModuleRefWidget)

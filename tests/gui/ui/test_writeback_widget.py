@@ -90,9 +90,20 @@ def test_readout_writeback_drag_schema_is_initially_valid(qapp):
     items = adapter.get_writeback_items(
         WritebackRequest(run_result=result, analyze_result=analyze_result, ctx=ctx)
     )
-    readout_item = next(item for item in items if item.key == "readout_rf")
+    from zcu_tools.gui.adapter import ModuleWriteback
 
+    readout_item = next(
+        item
+        for item in items
+        if isinstance(item, ModuleWriteback) and item.key == "readout_rf"
+    )
+
+    from zcu_tools.gui.live_model import LiveModelEnv, SectionLiveField
+
+    schema_r = readout_item.edit_schema
+    assert schema_r is not None
+    model = SectionLiveField(schema_r.spec, LiveModelEnv(ctrl=ctrl), schema_r.value)
     form = CfgFormWidget()
-    form.populate(readout_item.edit_schema, ctrl)  # type: ignore[arg-type]
+    form.attach(model)
 
     assert form.is_valid() is True

@@ -134,8 +134,8 @@ class _MlConfigDialog(QDialog):
                 )
             self._type_combo.setCurrentIndex(index)
 
-        # Stable owner key for this dialog's delegated cfg-editor session, so
-        # re-populate (type switch) re-registers the same logical owner.
+        # Stable owner key for this dialog's cfg-editor session, so a type switch
+        # (re-open) tears down + replaces the same logical owner's model.
         self._cfg_editor_owner = f"inspect-{uuid.uuid4().hex[:8]}"
 
         self._name_edit.textChanged.connect(self._validate)
@@ -143,17 +143,18 @@ class _MlConfigDialog(QDialog):
         self._form_widget.validity_changed.connect(self._validate)
         cancel_btn.clicked.connect(self.reject)
         self._save_btn.clicked.connect(self._on_save)
-        # Drop the delegated session when the dialog closes (the form's own
-        # teardown happens via Qt destruction; close only unregisters).
+        # Detach + tear down the service-owned model when the dialog closes.
         self.finished.connect(self._close_cfg_editor)
 
         self._on_type_changed(self._type_combo.currentText())
         self._validate()
 
     def _close_cfg_editor(self, *_: Any) -> None:
+        # Detach the widget, then tear down the service-owned model (ADR-0010).
+        self._form_widget.detach()
         editor_id = self._ctrl.editor_id_for_owner(self._cfg_editor_owner)
         if editor_id is not None:
-            self._ctrl.close_cfg_editor(editor_id)
+            self._ctrl.teardown_cfg_editor(editor_id)
 
     @property
     def _discriminator_label(self) -> str:
@@ -194,12 +195,15 @@ class _MlConfigDialog(QDialog):
 
     def _on_type_changed(self, type_str: str) -> None:
         schema = self._schema_for_discriminator(type_str)
-        self._form_widget.populate(schema, self._ctrl)
-        # Re-register the freshly-built model under the same owner key (the
-        # previous registration, if any, is closed by register_delegated).
-        root = self._form_widget.get_live_root()
-        if root is not None:
-            self._ctrl.register_delegated_cfg_editor(self._cfg_editor_owner, root)
+        # The service owns the model (ADR-0010): open a gc=False seeded session
+        # under this dialog's owner key (re-opening tears down the previous one),
+        # then attach. _on_save reads read_schema() + writes ml directly, so no
+        # editor.commit is needed (hence open_seeded, not the ml-entry open).
+        self._form_widget.detach()
+        editor_id, _ = self._ctrl.open_seeded_cfg_editor(
+            schema, gc=False, owner_key=self._cfg_editor_owner
+        )
+        self._form_widget.attach(self._ctrl.get_cfg_editor_root(editor_id))
         self._validate()
 
     def _validate(self, *_: Any) -> None:
@@ -256,7 +260,10 @@ class _MlConfigDialog(QDialog):
         self.accept()
 
     def clear(self) -> None:
-        self._form_widget.clear()
+        # Teardown of the service-owned model happens in _close_cfg_editor (also
+        # wired to `finished`); detach is idempotent, so this just ensures the
+        # widget is unbound.
+        self._form_widget.detach()
 
 
 class InspectDialog(QDialog):

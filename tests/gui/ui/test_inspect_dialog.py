@@ -33,7 +33,37 @@ def _make_ctrl_with_ml(ml: ModuleLibrary) -> MagicMock:
     ctrl.get_current_ml.return_value = ml
     ctrl.get_current_md.return_value = None
     ctrl.get_bus.return_value = MagicMock()
+    _wire_cfg_editor(ctrl)
     return ctrl
+
+
+def _wire_cfg_editor(ctrl: MagicMock) -> None:
+    """Simulate the CfgEditorService open_seeded/get_root/teardown contract.
+
+    The dialog now opens a service-owned model from its seed schema and attaches
+    (ADR-0010). Build a real SectionLiveField per open so attach() works, keyed by
+    a fake editor_id, with owner→id discovery and teardown.
+    """
+    from zcu_tools.gui.live_model import LiveModelEnv, SectionLiveField
+
+    roots: dict[str, SectionLiveField] = {}
+    owner_to_id: dict[str, str] = {}
+    counter = {"n": 0}
+
+    def _open_seeded(seed, *, gc=False, owner_key=None):
+        if owner_key is not None and owner_key in owner_to_id:
+            roots.pop(owner_to_id.pop(owner_key), None)
+        counter["n"] += 1
+        eid = f"editor-{counter['n']}"
+        roots[eid] = SectionLiveField(seed.spec, LiveModelEnv(ctrl=ctrl), seed.value)
+        if owner_key is not None:
+            owner_to_id[owner_key] = eid
+        return eid, []
+
+    ctrl.open_seeded_cfg_editor.side_effect = _open_seeded
+    ctrl.get_cfg_editor_root.side_effect = lambda eid: roots[eid]
+    ctrl.editor_id_for_owner.side_effect = lambda owner: owner_to_id.get(owner)
+    ctrl.teardown_cfg_editor.side_effect = lambda eid: roots.pop(eid, None)
 
 
 def test_inspect_dialog_init_and_refresh(qapp):

@@ -371,7 +371,15 @@ class ExpTabWidget(QWidget):
     # ── cfg helpers ───────────────────────────────────────────────────────
 
     def populate_cfg(self, schema: "CfgSchema", ctrl: "Controller") -> None:
-        self.cfg_form.populate(schema, ctrl)
+        # The cfg LiveModel is owned by the CfgEditorService (ADR-0010): open a
+        # gc=False session seeded from the committed schema, then attach the
+        # widget to the service-owned model. tab_id is the owner key so the
+        # editor_id is discoverable (tab.snapshot) and the agent can drive it.
+        editor_id, _ = ctrl.open_seeded_cfg_editor(
+            schema, gc=False, owner_key=self.tab_id
+        )
+        self._cfg_editor_id = editor_id
+        self.cfg_form.attach(ctrl.get_cfg_editor_root(editor_id))
 
     def read_schema(self) -> "CfgSchema":
         return self.cfg_form.read_schema()
@@ -528,13 +536,9 @@ class ExpTabWidget(QWidget):
         self.cfg_form.validity_changed.connect(validity_cb)
         self.cfg_form.schema_changed.connect(schema_cb)
 
-        # Register this tab's live cfg LiveModel as a shared editor session so an
-        # agent can drive it (and see it) via the same editor_id. populate_cfg
-        # has already built the model by the time bind runs.
-        root = self.cfg_form.get_live_root()
-        if root is not None:
-            # A tab uses its tab_id as the delegated session's owner key.
-            self._cfg_editor_id = self._ctrl.register_delegated_cfg_editor(tab_id, root)
+        # The cfg editor session + widget attach were already set up in
+        # populate_cfg (the service owns the model — ADR-0010). The agent reaches
+        # it via the tab's editor_id (exposed on tab.snapshot).
         self.analyze_form.params_changed.connect(
             lambda instance: self._ctrl.update_tab_analyze_param_instance(
                 tab_id, instance
@@ -567,12 +571,12 @@ class ExpTabWidget(QWidget):
             self.cfg_form.validity_changed.disconnect(self._validity_cb)
         if hasattr(self, "_schema_cb"):
             self.cfg_form.schema_changed.disconnect(self._schema_cb)
-        # Drop the shared editor registration *before* clear() tears down the
-        # model (close does not tear down the root — the widget owns that).
+        # Detach the widget first (drop its signal bindings + widget tree), then
+        # tell the service to tear down the model it owns (ADR-0010).
+        self.cfg_form.detach()
         if self._cfg_editor_id is not None:
-            self._ctrl.close_cfg_editor(self._cfg_editor_id)
+            self._ctrl.teardown_cfg_editor(self._cfg_editor_id)
             self._cfg_editor_id = None
-        self.cfg_form.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -701,11 +705,10 @@ class MainWindow(QMainWindow):
 
     def _on_bus_context_switched(self, payload: ContextSwitchedPayload) -> None:
         del payload
+        # cfg EvalValue refresh is the CfgEditorService's job now (it owns the
+        # models — ADR-0010); here we only refresh the surrounding tab panels.
         self.refresh_context_panel()
         for tab_id in list(self._tab_widgets):
-            tab_w = self._tab_widgets.get(tab_id)
-            if tab_w is not None:
-                tab_w.cfg_form.refresh_external(GuiEvent.CONTEXT_SWITCHED)
             snapshot = self._ctrl.get_tab_snapshot(tab_id)
             self.refresh_tab_writeback(tab_id, snapshot)
             self.refresh_tab_save_paths(tab_id, snapshot)
@@ -713,10 +716,9 @@ class MainWindow(QMainWindow):
 
     def _on_bus_ml_changed(self, payload: MlChangedPayload) -> None:
         del payload
+        # cfg EvalValue refresh is the CfgEditorService's job now (ADR-0010);
+        # here we only refresh the surrounding tab panels.
         for tab_id in list(self._tab_widgets):
-            tab_w = self._tab_widgets.get(tab_id)
-            if tab_w is not None:
-                tab_w.cfg_form.refresh_external(GuiEvent.ML_CHANGED)
             snapshot = self._ctrl.get_tab_snapshot(tab_id)
             self.refresh_tab_writeback(tab_id, snapshot)
             self.refresh_tab_interaction(tab_id, snapshot)
