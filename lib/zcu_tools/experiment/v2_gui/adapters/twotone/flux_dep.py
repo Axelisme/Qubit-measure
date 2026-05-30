@@ -15,7 +15,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_readout_module_spec,
     make_reset_module_spec,
     make_reset_ref_default,
-    md_get_float,
+    proper_qub_freq_range,
 )
 from zcu_tools.gui.adapter import (
     AdapterCapabilities,
@@ -74,9 +74,6 @@ class FluxDepAdapter(BaseAdapter[FreqFluxCfg, FluxDepRunResult]):
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        q_f = md_get_float(ctx, "q_f", 4000.0)
-        qf_w = md_get_float(ctx, "qf_w", 20.0)
-        half_span = qf_w if qf_w > 0 else 20.0
         _module_fields: dict[str, CfgNodeValue] = {
             "qub_pulse": make_qub_probe_default(ctx),
             "readout": make_readout_default(ctx),
@@ -84,7 +81,7 @@ class FluxDepAdapter(BaseAdapter[FreqFluxCfg, FluxDepRunResult]):
         _reset = make_reset_ref_default(ctx, optional=True)
         if _reset is not None:
             _module_fields["reset"] = _reset
-        root_val = CfgSectionValue(
+        return CfgSectionValue(
             fields={
                 "modules": CfgSectionValue(fields=_module_fields),
                 "dev": CfgSectionValue(
@@ -98,16 +95,11 @@ class FluxDepAdapter(BaseAdapter[FreqFluxCfg, FluxDepRunResult]):
                 "sweep": CfgSectionValue(
                     fields={
                         "flux": SweepValue(start=3.57e-3, stop=3.61e-3, expts=101),
-                        "freq": SweepValue(
-                            start=q_f - half_span,
-                            stop=q_f + half_span,
-                            expts=101,
-                        ),
+                        "freq": proper_qub_freq_range(ctx, 101, span_factor=1.0),
                     }
                 ),
             }
         )
-        return root_val
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FreqFluxCfg:
         cfg_raw = dict(raw_cfg)

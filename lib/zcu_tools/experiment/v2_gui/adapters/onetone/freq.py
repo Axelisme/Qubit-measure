@@ -27,6 +27,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     md_get_float,
     md_has_key,
     md_writeback,
+    proper_res_freq_range,
 )
 from zcu_tools.gui.adapter import (
     AnalyzeRequest,
@@ -40,7 +41,6 @@ from zcu_tools.gui.adapter import (
     ParamMeta,
     ScalarSpec,
     SweepSpec,
-    SweepValue,
     WaveformWriteback,
     WritebackItem,
     WritebackRequest,
@@ -76,89 +76,53 @@ class OneToneFreqAdapter(
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:
-        # The readout pulse/ro frequency is driven by the sweep axis, not the
-        # user (notebook: ``freq: 0.0, # not used``). Lock both to 0.0 on the
-        # readout sub-tree as it is built — the lock is part of the spec contract.
-        readout = (
-            make_pulse_readout_module_spec()
-            .lock_literal("pulse_cfg.freq", 0.0)
-            .lock_literal("ro_cfg.ro_freq", 0.0)
-        )
         return CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
                     label="Modules",
                     fields={
                         "reset": make_reset_module_spec(optional=True),
-                        "readout": readout,
+                        "readout": make_pulse_readout_module_spec()
+                        .lock_literal("pulse_cfg.freq", 0.0)
+                        .lock_literal("ro_cfg.ro_freq", 0.0),
                     },
+                ),
+                "sweep": CfgSectionSpec(
+                    label="Sweep",
+                    fields={"freq": SweepSpec(label="Freq (MHz)")},
                 ),
                 "reps": ScalarSpec(label="Reps", type=int),
                 "rounds": ScalarSpec(label="Rounds", type=int),
                 "relax_delay": ScalarSpec(
                     label="Relax delay (us)", type=float, decimals=3
                 ),
-                "sweep": CfgSectionSpec(
-                    label="Sweep",
-                    fields={"freq": SweepSpec(label="Freq (MHz)")},
-                ),
             }
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        r_f = md_get_float(ctx, "r_f", 6000.0)
-        rf_w = md_get_float(ctx, "rf_w", 20.0)
-        half_span = 1.5 * rf_w if rf_w > 0 else 30.0
         probe_len = md_get_float(ctx, "res_probe_len", 1.0)
         ro_length: Union[float, EvalValue] = (
-            EvalValue(
-                expr="res_probe_len - 0.1",
-                resolved=probe_len - 0.1,
-                error=None,
-            )
+            EvalValue(expr="res_probe_len - 0.1", resolved=probe_len - 0.1)
             if md_has_key(ctx, "res_probe_len")
             else probe_len - 0.1
         )
-        root_val = CfgSectionValue(
+        return CfgSectionValue(
             fields={
                 "modules": CfgSectionValue(
                     fields={
-                        "readout": make_readout_default(
-                            ctx, gain=0.05, ro_length=ro_length
-                        ),
+                        "readout": make_readout_default(ctx)
+                        .with_field("pulse_cfg.gain", 0.05)
+                        .with_field("ro_cfg.ro_length", ro_length),
                     }
                 ),
+                "sweep": CfgSectionValue(
+                    fields={"freq": proper_res_freq_range(ctx, 301)},
+                ),
+                "relax_delay": DirectValue(1.0),
                 "reps": DirectValue(100),
                 "rounds": DirectValue(100),
-                "relax_delay": DirectValue(1.0),
-                "sweep": CfgSectionValue(
-                    fields={
-                        "freq": SweepValue(
-                            start=(
-                                EvalValue(
-                                    expr="r_f - 1.5 * rf_w",
-                                    resolved=r_f - half_span,
-                                    error=None,
-                                )
-                                if (md_has_key(ctx, "r_f") and md_has_key(ctx, "rf_w"))
-                                else (r_f - half_span)
-                            ),
-                            stop=(
-                                EvalValue(
-                                    expr="r_f + 1.5 * rf_w",
-                                    resolved=r_f + half_span,
-                                    error=None,
-                                )
-                                if (md_has_key(ctx, "r_f") and md_has_key(ctx, "rf_w"))
-                                else (r_f + half_span)
-                            ),
-                            expts=301,
-                        )
-                    }
-                ),
             }
         )
-        return root_val
 
     def get_analyze_params(
         self, result: OneToneFreqRunResult, ctx: ExpContext

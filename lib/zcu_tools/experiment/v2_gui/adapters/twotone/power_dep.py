@@ -13,7 +13,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_readout_module_spec,
     make_reset_module_spec,
     make_reset_ref_default,
-    md_get_float,
+    proper_qub_freq_range,
 )
 from zcu_tools.gui.adapter import (
     AdapterCapabilities,
@@ -65,9 +65,6 @@ class PowerDepAdapter(BaseAdapter[PowerCfg, PowerDepRunResult]):
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        q_f = md_get_float(ctx, "q_f", 4000.0)
-        qf_w = md_get_float(ctx, "qf_w", 20.0)
-        half_span = 1.5 * qf_w if qf_w > 0 else 30.0
         _module_fields: dict[str, CfgNodeValue] = {
             "qub_pulse": make_qub_probe_default(ctx),
             "readout": make_readout_default(ctx),
@@ -84,11 +81,7 @@ class PowerDepAdapter(BaseAdapter[PowerCfg, PowerDepRunResult]):
                 "sweep": CfgSectionValue(
                     fields={
                         "gain": SweepValue(start=0.001, stop=0.5, expts=101),
-                        "freq": SweepValue(
-                            start=q_f - half_span,
-                            stop=q_f + half_span,
-                            expts=201,
-                        ),
+                        "freq": proper_qub_freq_range(ctx, 201),
                     }
                 ),
             }

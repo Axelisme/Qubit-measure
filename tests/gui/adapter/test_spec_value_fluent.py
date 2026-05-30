@@ -88,7 +88,9 @@ def test_module_ref_spec_lock_literal_is_chain_start():
     no need to start from the root section). Returns a ModuleRefSpec for chaining."""
     inner = CfgSectionSpec(
         label="A",
-        fields={"pulse_cfg": CfgSectionSpec(fields={"freq": ScalarSpec("Freq", float)})},
+        fields={
+            "pulse_cfg": CfgSectionSpec(fields={"freq": ScalarSpec("Freq", float)})
+        },
     )
     ref = ModuleRefSpec(allowed=[inner])
     locked = ref.lock_literal("pulse_cfg.freq", 0.0)

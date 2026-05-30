@@ -14,8 +14,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_readout_module_spec,
     make_readout_default,
     make_reset_module_spec,
-    md_get_float,
-    md_has_key,
+    proper_res_freq_range,
 )
 from zcu_tools.gui.adapter import (
     AdapterCapabilities,
@@ -23,7 +22,6 @@ from zcu_tools.gui.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
-    EvalValue,
     ExpContext,
     RunRequest,
     ScalarSpec,
@@ -71,10 +69,7 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        r_f = md_get_float(ctx, "r_f", 6000.0)
-        rf_w = md_get_float(ctx, "rf_w", 20.0)
-        half_span = 1.5 * rf_w if rf_w > 0 else 30.0
-        root_val = CfgSectionValue(
+        return CfgSectionValue(
             fields={
                 "modules": CfgSectionValue(
                     fields={
@@ -88,32 +83,11 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
                 "sweep": CfgSectionValue(
                     fields={
                         "gain": SweepValue(start=0.001, stop=0.5, expts=101),
-                        "freq": SweepValue(
-                            start=(
-                                EvalValue(
-                                    expr="r_f - 1.5 * rf_w",
-                                    resolved=r_f - half_span,
-                                    error=None,
-                                )
-                                if (md_has_key(ctx, "r_f") and md_has_key(ctx, "rf_w"))
-                                else (r_f - half_span)
-                            ),
-                            stop=(
-                                EvalValue(
-                                    expr="r_f + 1.5 * rf_w",
-                                    resolved=r_f + half_span,
-                                    error=None,
-                                )
-                                if (md_has_key(ctx, "r_f") and md_has_key(ctx, "rf_w"))
-                                else (r_f + half_span)
-                            ),
-                            expts=201,
-                        ),
+                        "freq": proper_res_freq_range(ctx, 201),
                     }
                 ),
             }
         )
-        return root_val
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> PowerDepCfg:
         cfg_raw = dict(raw_cfg)

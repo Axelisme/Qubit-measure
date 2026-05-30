@@ -14,6 +14,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_reset_module_spec,
     md_get_float,
     md_has_key,
+    proper_res_freq_range,
 )
 from zcu_tools.gui.adapter import (
     AdapterCapabilities,
@@ -72,26 +73,19 @@ class OneToneFluxDepAdapter(BaseAdapter[FluxDepCfg, OneToneFluxDepRunResult]):
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        r_f = md_get_float(ctx, "r_f", 6000.0)
-        rf_w = md_get_float(ctx, "rf_w", 20.0)
-        half_span = rf_w if rf_w > 0 else 20.0
         probe_len = md_get_float(ctx, "res_probe_len", 1.0)
         ro_length: Union[float, ScalarValue] = (
-            EvalValue(
-                expr="res_probe_len - 0.1",
-                resolved=probe_len - 0.1,
-                error=None,
-            )
+            EvalValue(expr="res_probe_len - 0.1", resolved=probe_len - 0.1)
             if md_has_key(ctx, "res_probe_len")
             else probe_len - 0.1
         )
-        root_val = CfgSectionValue(
+        return CfgSectionValue(
             fields={
                 "modules": CfgSectionValue(
                     fields={
-                        "readout": make_readout_default(
-                            ctx, gain=0.005, ro_length=ro_length
-                        ),
+                        "readout": make_readout_default(ctx)
+                        .with_field("pulse_cfg.gain", 0.005)
+                        .with_field("ro_cfg.ro_length", ro_length),
                     }
                 ),
                 "dev": CfgSectionValue(
@@ -105,32 +99,11 @@ class OneToneFluxDepAdapter(BaseAdapter[FluxDepCfg, OneToneFluxDepRunResult]):
                 "sweep": CfgSectionValue(
                     fields={
                         "flux": SweepValue(start=3.57e-3, stop=3.61e-3, expts=101),
-                        "freq": SweepValue(
-                            start=(
-                                EvalValue(
-                                    expr="r_f - rf_w",
-                                    resolved=r_f - half_span,
-                                    error=None,
-                                )
-                                if (md_has_key(ctx, "r_f") and md_has_key(ctx, "rf_w"))
-                                else (r_f - half_span)
-                            ),
-                            stop=(
-                                EvalValue(
-                                    expr="r_f + rf_w",
-                                    resolved=r_f + half_span,
-                                    error=None,
-                                )
-                                if (md_has_key(ctx, "r_f") and md_has_key(ctx, "rf_w"))
-                                else (r_f + half_span)
-                            ),
-                            expts=101,
-                        ),
+                        "freq": proper_res_freq_range(ctx, 101, span_factor=1.0),
                     }
                 ),
             }
         )
-        return root_val
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FluxDepCfg:
         cfg_raw = dict(raw_cfg)

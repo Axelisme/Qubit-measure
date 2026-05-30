@@ -5,7 +5,9 @@ from .ctx_helpers import (
     md_scalar_float,
     md_scalar_int,
     md_writeback,
+    proper_qub_freq_range,
     proper_relax,
+    proper_res_freq_range,
 )
 from .defaults import (
     make_bath_reset_default,
@@ -53,6 +55,8 @@ __all__ = [
     "md_scalar_int",
     "md_writeback",
     "proper_relax",
+    "proper_res_freq_range",
+    "proper_qub_freq_range",
     # Module builders
     "build_readout_for_frequency",
     "build_waveform_for_length",

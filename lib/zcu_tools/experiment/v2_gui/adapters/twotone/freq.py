@@ -15,8 +15,8 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_readout_module_spec,
     make_reset_module_spec,
     make_reset_ref_default,
-    md_get_float,
     md_writeback,
+    proper_qub_freq_range,
 )
 from zcu_tools.gui.adapter import (
     AnalyzeRequest,
@@ -29,7 +29,6 @@ from zcu_tools.gui.adapter import (
     ParamMeta,
     ScalarSpec,
     SweepSpec,
-    SweepValue,
     WritebackItem,
     WritebackRequest,
 )
@@ -82,9 +81,6 @@ class FreqAdapter(
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        q_f = md_get_float(ctx, "q_f", 4000.0)
-        qf_w = md_get_float(ctx, "qf_w", 20.0)
-        half_span = 1.5 * qf_w if qf_w > 0 else 30.0
         _module_fields: dict[str, CfgNodeValue] = {
             "qub_pulse": make_qub_probe_default(ctx),
             "readout": make_readout_default(ctx),
@@ -92,24 +88,17 @@ class FreqAdapter(
         _reset = make_reset_ref_default(ctx, optional=True)
         if _reset is not None:
             _module_fields["reset"] = _reset
-        root_val = CfgSectionValue(
+        return CfgSectionValue(
             fields={
                 "modules": CfgSectionValue(fields=_module_fields),
                 "reps": DirectValue(100),
                 "rounds": DirectValue(100),
                 "relax_delay": DirectValue(1.0),
                 "sweep": CfgSectionValue(
-                    fields={
-                        "freq": SweepValue(
-                            start=q_f - half_span,
-                            stop=q_f + half_span,
-                            expts=301,
-                        )
-                    }
+                    fields={"freq": proper_qub_freq_range(ctx, 301)},
                 ),
             }
         )
-        return root_val
 
     def get_analyze_params(
         self, result: FreqRunResult, ctx: ExpContext
