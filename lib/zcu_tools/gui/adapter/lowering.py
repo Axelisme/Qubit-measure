@@ -27,15 +27,26 @@ if TYPE_CHECKING:
 
 
 def _resolve_eval(
-    value: EvalValue, md: "Optional[MetaDict]", *, path: str, label: str
-) -> float:
-    """Resolve an EvalValue to a number.
+    value: EvalValue,
+    md: "Optional[MetaDict]",
+    *,
+    path: str,
+    label: str,
+    type_: type = float,
+) -> Union[int, float]:
+    """Resolve an EvalValue to a number, coerced to ``type_``.
 
     Prefers the snapshot ``value.resolved``; when absent (adapters may build an
     EvalValue without one), evaluates ``value.expr`` against ``md`` — lowering is
     the single place that owns resolution. Fails only if there is no snapshot and
     no md to evaluate against, or the expression itself is invalid.
+
+    ``type_`` is the owning ScalarSpec's physical type; the result is coerced via
+    ``coerce_eval_result`` (int spec → int, float spec → float) so that e.g. an
+    ``EvalValue("ro_ch")`` for an int channel lowers to ``int`` rather than float.
     """
+    from zcu_tools.gui.expression import coerce_eval_result
+
     if value.resolved is not None:
         resolved = value.resolved
     elif md is not None:
@@ -56,7 +67,7 @@ def _resolve_eval(
         raise RuntimeError(
             f"Config field '{path}' ({label}) resolved to non-numeric value"
         )
-    return float(resolved)
+    return coerce_eval_result(resolved, type_)
 
 
 def _resolve_sweep_edge(
@@ -65,7 +76,8 @@ def _resolve_sweep_edge(
     if isinstance(value, (int, float)):
         return float(value)
     if isinstance(value, EvalValue):
-        return _resolve_eval(value, md, path=path, label=label)
+        # Sweep edges have no per-edge ScalarSpec; scan values are always float.
+        return float(_resolve_eval(value, md, path=path, label=label, type_=float))
     raise RuntimeError(f"Config field '{path}' ({label}) must be numeric")
 
 
@@ -108,7 +120,9 @@ def _section_to_dict_inner(
             else:
                 label = node_spec.label or key
                 full_path = ".".join([*path, key])
-                result[key] = _resolve_eval(node_val, md, path=full_path, label=label)
+                result[key] = _resolve_eval(
+                    node_val, md, path=full_path, label=label, type_=node_spec.type
+                )
 
         elif isinstance(node_spec, LiteralSpec):
             result[key] = node_spec.value

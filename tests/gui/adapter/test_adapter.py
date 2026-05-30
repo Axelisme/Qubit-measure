@@ -114,6 +114,31 @@ def test_scalar_eval_value_resolves_against_md_when_no_snapshot():
     assert schema_to_dict(s, _make_ml(), md)["freq"] == pytest.approx(5998.0)
 
 
+def test_scalar_eval_value_int_spec_coerces_to_int():
+    """An int-typed ScalarSpec resolves an EvalValue to int, not float."""
+    s = _schema(
+        {"ro_ch": ScalarSpec(label="RO ch", type=int)},
+        {"ro_ch": EvalValue(expr="ro_ch")},
+    )
+    md = MetaDict()
+    md.ro_ch = 2
+    out = schema_to_dict(s, _make_ml(), md)["ro_ch"]
+    assert out == 2
+    assert isinstance(out, int) and not isinstance(out, bool)
+
+
+def test_scalar_eval_value_int_spec_non_integer_raises():
+    """A non-integer eval result against an int spec fails fast."""
+    s = _schema(
+        {"ro_ch": ScalarSpec(label="RO ch", type=int)},
+        {"ro_ch": EvalValue(expr="r_f")},
+    )
+    md = MetaDict()
+    md.r_f = 6000.5
+    with pytest.raises(RuntimeError, match="not an integer"):
+        schema_to_dict(s, _make_ml(), md)
+
+
 def test_scalar_missing_in_value_skipped():
     """A key present in spec but absent in value raises."""
     s = _schema(
