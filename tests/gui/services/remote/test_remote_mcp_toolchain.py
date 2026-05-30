@@ -1,4 +1,4 @@
-"""Phase 82 — full MCP-facing remote toolchain coverage."""
+"""Full MCP-facing remote toolchain coverage (Phase 82)."""
 
 from __future__ import annotations
 

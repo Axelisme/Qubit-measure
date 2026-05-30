@@ -1,4 +1,4 @@
-"""Phase 80 — RemoteControlService transport / dispatch / query tests.
+"""RemoteControlService transport / dispatch / query tests (Phase 80).
 
 Each test spins up a real TCP socket on an ephemeral loopback port and drives
 a fixture Controller (already wired up with a fake adapter). The Qt event loop
