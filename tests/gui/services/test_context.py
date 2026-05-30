@@ -5,10 +5,13 @@ from __future__ import annotations
 import dataclasses
 from unittest.mock import MagicMock
 
+import pytest
+
 from zcu_tools.gui.adapter import ContextReadiness
 from zcu_tools.gui.event_bus import GuiEvent
 from zcu_tools.gui.services.context import ContextService
 from zcu_tools.gui.state import ExpContext, State
+from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
 def test_context_service_has_project():
@@ -197,3 +200,132 @@ def test_context_service_readiness_transitions_drive_has_context_queries():
     assert svc.has_context()
     assert not svc.has_startup_context()
     assert svc.is_active_context()
+
+
+# ---------------------------------------------------------------------------
+# Helper for md/ml mutation tests
+# ---------------------------------------------------------------------------
+
+
+def _make_active_state() -> tuple[State, ContextService]:
+    md = MetaDict()
+    ml = ModuleLibrary()
+    state = State(
+        ExpContext(
+            md=md,
+            ml=ml,
+            soc=None,
+            soccfg=None,
+            result_dir="",
+            readiness=ContextReadiness.ACTIVE,
+        )
+    )
+    bus = MagicMock()
+    svc = ContextService(state, MagicMock(), bus)
+    return state, svc
+
+
+# ---------------------------------------------------------------------------
+# del_md_attr
+# ---------------------------------------------------------------------------
+
+
+def test_del_md_attr_removes_attribute_and_bumps_context():
+    state, svc = _make_active_state()
+    state.exp_context.md.r_f = 6000.0
+    before = state.version.get("context")
+
+    svc.del_md_attr("r_f")
+
+    assert not hasattr(state.exp_context.md, "r_f")
+    assert state.version.get("context") == before + 1
+
+
+def test_del_md_attr_emits_md_changed():
+    state, svc = _make_active_state()
+    state.exp_context.md.r_f = 6000.0
+    bus: MagicMock = svc._bus  # type: ignore[assignment]
+
+    svc.del_md_attr("r_f")
+
+    bus.emit.assert_called()
+    event_calls = [c[0][0] for c in bus.emit.call_args_list]
+    assert GuiEvent.MD_CHANGED in event_calls
+
+
+# ---------------------------------------------------------------------------
+# del_ml_module
+# ---------------------------------------------------------------------------
+
+
+def test_del_ml_module_removes_module_and_bumps_context():
+    state, svc = _make_active_state()
+    ml = state.exp_context.ml
+    fake_module = MagicMock()
+    ml.register_module(qub=fake_module)
+    before = state.version.get("context")
+
+    svc.del_ml_module("qub")
+
+    assert "qub" not in ml.modules
+    assert state.version.get("context") == before + 1
+
+
+def test_del_ml_module_emits_ml_changed():
+    state, svc = _make_active_state()
+    ml = state.exp_context.ml
+    fake_module = MagicMock()
+    ml.register_module(qub=fake_module)
+    bus: MagicMock = svc._bus  # type: ignore[assignment]
+    bus.reset_mock()
+
+    svc.del_ml_module("qub")
+
+    event_calls = [c[0][0] for c in bus.emit.call_args_list]
+    assert GuiEvent.ML_CHANGED in event_calls
+
+
+# ---------------------------------------------------------------------------
+# del_ml_waveform
+# ---------------------------------------------------------------------------
+
+
+def test_del_ml_waveform_removes_waveform_and_bumps_context():
+    state, svc = _make_active_state()
+    ml = state.exp_context.ml
+    fake_wf = MagicMock()
+    ml.register_waveform(gauss=fake_wf)
+    before = state.version.get("context")
+
+    svc.del_ml_waveform("gauss")
+
+    assert "gauss" not in ml.waveforms
+    assert state.version.get("context") == before + 1
+
+
+# ---------------------------------------------------------------------------
+# set_ml_module_from_raw — validation error
+# ---------------------------------------------------------------------------
+
+
+def test_set_ml_module_from_raw_raises_on_invalid_raw():
+    from zcu_tools.gui.services.context import MlEntryValidationError
+
+    state, svc = _make_active_state()
+
+    with pytest.raises(MlEntryValidationError):
+        svc.set_ml_module_from_raw("qub", {"type": "nonexistent_module_type_xyz"})
+
+
+# ---------------------------------------------------------------------------
+# set_ml_waveform_from_raw — validation error
+# ---------------------------------------------------------------------------
+
+
+def test_set_ml_waveform_from_raw_raises_on_invalid_raw():
+    from zcu_tools.gui.services.context import MlEntryValidationError
+
+    state, svc = _make_active_state()
+
+    with pytest.raises(MlEntryValidationError):
+        svc.set_ml_waveform_from_raw("gauss", {"type": "nonexistent_waveform_xyz"})

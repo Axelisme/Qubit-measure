@@ -4,7 +4,22 @@ import json
 from pathlib import Path
 
 import pytest
-from zcu_tools.gui.adapter import SavePaths
+from zcu_tools.gui.adapter import (
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
+    DeviceRefSpec,
+    DirectValue,
+    EvalValue,
+    MultiSweepSpec,
+    MultiSweepValue,
+    SavePaths,
+    ScalarSpec,
+    SweepSpec,
+    SweepValue,
+    WaveformRefSpec,
+    WaveformRefValue,
+)
 from zcu_tools.gui.services.session_persistence import (
     SESSION_VERSION,
     PersistedSession,
@@ -109,16 +124,6 @@ def test_session_persistence_rejects_previous_cache_version(tmp_path: Path):
 
 
 def test_session_persistence_roundtrip_preserves_eval_values(tmp_path: Path):
-    from zcu_tools.gui.adapter import (
-        CfgSchema,
-        CfgSectionSpec,
-        CfgSectionValue,
-        EvalValue,
-        ScalarSpec,
-        SweepSpec,
-        SweepValue,
-    )
-
     svc = SessionPersistenceService(cache_dir=tmp_path)
     schema = CfgSchema(
         spec=CfgSectionSpec(
@@ -155,3 +160,206 @@ def test_session_persistence_roundtrip_preserves_eval_values(tmp_path: Path):
     assert isinstance(sweep.stop, EvalValue)
     assert sweep.start.expr == "r_f - rf_w"
     assert sweep.stop.expr == "r_f + rf_w"
+
+
+# ---------------------------------------------------------------------------
+# MultiSweepSpec roundtrip
+# ---------------------------------------------------------------------------
+
+
+def test_session_persistence_multisweep_roundtrip(tmp_path: Path):
+    svc = SessionPersistenceService(cache_dir=tmp_path)
+    schema = CfgSchema(
+        spec=CfgSectionSpec(
+            fields={
+                "sweep2d": MultiSweepSpec(
+                    axes={"x": SweepSpec(label="X"), "y": SweepSpec(label="Y")}
+                ),
+            }
+        ),
+        value=CfgSectionValue(
+            fields={
+                "sweep2d": MultiSweepValue(
+                    axes={
+                        "x": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1),
+                        "y": SweepValue(start=2.0, stop=3.0, expts=6, step=0.2),
+                    }
+                ),
+            }
+        ),
+    )
+
+    raw = svc.schema_to_raw(schema, ml=None)
+    restored = svc.raw_to_schema(
+        CfgSchema(spec=schema.spec, value=CfgSectionValue(fields={})),
+        raw,
+    )
+
+    ms = restored.value.fields["sweep2d"]
+    assert isinstance(ms, MultiSweepValue)
+    assert ms.axes["x"].start == 0.0
+    assert ms.axes["x"].stop == 1.0
+    assert ms.axes["y"].expts == 6
+
+
+# ---------------------------------------------------------------------------
+# WaveformRefSpec roundtrip
+# ---------------------------------------------------------------------------
+
+
+def test_session_persistence_waveform_ref_roundtrip(tmp_path: Path):
+    inner_spec = CfgSectionSpec(
+        fields={"width": ScalarSpec(label="Width", type=float)},
+        label="Gaussian",
+    )
+    svc = SessionPersistenceService(cache_dir=tmp_path)
+    schema = CfgSchema(
+        spec=CfgSectionSpec(
+            fields={
+                "wf": WaveformRefSpec(allowed=[inner_spec], label="Waveform"),
+            }
+        ),
+        value=CfgSectionValue(
+            fields={
+                "wf": WaveformRefValue(
+                    chosen_key="Gaussian",
+                    value=CfgSectionValue(
+                        fields={"width": DirectValue(value=50.0)}
+                    ),
+                ),
+            }
+        ),
+    )
+
+    raw = svc.schema_to_raw(schema, ml=None)
+    restored = svc.raw_to_schema(
+        CfgSchema(spec=schema.spec, value=CfgSectionValue(fields={})),
+        raw,
+    )
+
+    wf = restored.value.fields["wf"]
+    assert isinstance(wf, WaveformRefValue)
+    assert wf.chosen_key == "Gaussian"
+    assert wf.value.fields["width"] == DirectValue(value=50.0)
+
+
+# ---------------------------------------------------------------------------
+# Legacy payload rejection
+# ---------------------------------------------------------------------------
+
+
+def test_session_persistence_rejects_legacy_scalar_eval_expr(tmp_path: Path):
+    svc = SessionPersistenceService(cache_dir=tmp_path)
+    base = CfgSchema(
+        spec=CfgSectionSpec(fields={"freq": ScalarSpec(label="Freq", type=float)}),
+        value=CfgSectionValue(fields={}),
+    )
+
+    with pytest.raises(SessionPersistenceError, match="Legacy scalar"):
+        svc.raw_to_schema(base, {"freq": "=r_f + 10"})
+
+
+# ---------------------------------------------------------------------------
+# DeviceRefSpec errors
+# ---------------------------------------------------------------------------
+
+
+def test_session_persistence_device_ref_value_must_be_string(tmp_path: Path):
+    svc = SessionPersistenceService(cache_dir=tmp_path)
+    base = CfgSchema(
+        spec=CfgSectionSpec(fields={"dev": DeviceRefSpec(label="Device")}),
+        value=CfgSectionValue(fields={}),
+    )
+
+    with pytest.raises(SessionPersistenceError, match="Device reference value must be string"):
+        svc.raw_to_schema(
+            base,
+            {"dev": {"__kind": "direct", "value": 123, "is_unset": False}},
+        )
+
+
+def test_session_persistence_device_ref_must_use_direct_encoding(tmp_path: Path):
+    svc = SessionPersistenceService(cache_dir=tmp_path)
+    base = CfgSchema(
+        spec=CfgSectionSpec(fields={"dev": DeviceRefSpec(label="Device")}),
+        value=CfgSectionValue(fields={}),
+    )
+
+    with pytest.raises(SessionPersistenceError, match="Device reference must use direct"):
+        svc.raw_to_schema(
+            base,
+            {"dev": "lo_device"},
+        )
+
+
+# ---------------------------------------------------------------------------
+# active_tab_index validation
+# ---------------------------------------------------------------------------
+
+
+def test_session_persistence_rejects_non_integer_active_tab_index(tmp_path: Path):
+    svc = SessionPersistenceService(cache_dir=tmp_path)
+    svc.session_path.parent.mkdir(parents=True, exist_ok=True)
+    svc.session_path.write_text(
+        json.dumps(
+            {
+                "version": SESSION_VERSION,
+                "tabs": [],
+                "active_tab_index": "first",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SessionPersistenceError, match="active_tab_index must be an integer"):
+        svc.load_session()
+
+
+# ---------------------------------------------------------------------------
+# save_paths_override validation
+# ---------------------------------------------------------------------------
+
+
+def test_session_persistence_rejects_non_dict_save_paths_override(tmp_path: Path):
+    svc = SessionPersistenceService(cache_dir=tmp_path)
+    svc.session_path.parent.mkdir(parents=True, exist_ok=True)
+    svc.session_path.write_text(
+        json.dumps(
+            {
+                "version": SESSION_VERSION,
+                "tabs": [
+                    {
+                        "adapter_name": "fake",
+                        "cfg_raw": {},
+                        "save_paths_override": "not_a_dict",
+                    }
+                ],
+                "active_tab_index": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SessionPersistenceError, match="save_paths_override must be an object"):
+        svc.load_session()
+
+
+# ---------------------------------------------------------------------------
+# write_payload error handling
+# ---------------------------------------------------------------------------
+
+
+def test_session_persistence_write_error_raises_and_cleans_temp(tmp_path: Path):
+    svc = SessionPersistenceService(cache_dir=tmp_path)
+    session = PersistedSession(
+        version=SESSION_VERSION,
+        active_tab_index=None,
+        tabs=[],
+    )
+    # Make the cache directory read-only to force an OSError during temp file write
+    (tmp_path).chmod(0o444)
+    try:
+        with pytest.raises(SessionPersistenceError, match="Failed to save session"):
+            svc.save_session(session)
+    finally:
+        (tmp_path).chmod(0o755)

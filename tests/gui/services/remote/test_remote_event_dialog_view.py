@@ -22,8 +22,15 @@ import pytest
 from zcu_tools.gui.event_bus import (
     GuiEvent,
     MdChangedPayload,
+    PredictorChangedPayload,
     RunLockChangedPayload,
+    SocChangedPayload,
     TabAddedPayload,
+)
+from zcu_tools.gui.services.remote.events import (
+    _ser_predictor_changed,
+    _ser_run_lock_changed,
+    _ser_soc_changed,
 )
 
 from ._helpers import (
@@ -308,3 +315,83 @@ def test_unauthenticated_subscribe_rejected(qapp):  # noqa: ARG001
             sock.close()
     finally:
         f.stop()
+
+
+# ---------------------------------------------------------------------------
+# Serializer unit tests (pure functions — no TCP needed)
+# ---------------------------------------------------------------------------
+
+
+def test_ser_run_lock_changed_start_has_no_outcome():
+    payload = RunLockChangedPayload(
+        running_tab_id="tab1",
+        tab_id=None,
+        outcome=None,
+        error_message=None,
+    )
+    wire = _ser_run_lock_changed(payload)
+    assert wire is not None
+    assert wire["running_tab_id"] == "tab1"
+    assert "outcome" not in wire
+    assert "error_message" not in wire
+
+
+def test_ser_run_lock_changed_finished_includes_outcome():
+    payload = RunLockChangedPayload(
+        running_tab_id=None,
+        tab_id="tab1",
+        outcome="finished",
+        error_message=None,
+    )
+    wire = _ser_run_lock_changed(payload)
+    assert wire is not None
+    assert wire["outcome"] == "finished"
+    assert wire["tab_id"] == "tab1"
+    assert "error_message" not in wire
+    assert "requery" in wire
+
+
+def test_ser_run_lock_changed_failed_includes_error_message():
+    payload = RunLockChangedPayload(
+        running_tab_id=None,
+        tab_id="tab1",
+        outcome="failed",
+        error_message="timeout",
+    )
+    wire = _ser_run_lock_changed(payload)
+    assert wire is not None
+    assert wire["outcome"] == "failed"
+    assert wire["error_message"] == "timeout"
+
+
+def test_ser_run_lock_changed_cancelled():
+    payload = RunLockChangedPayload(
+        running_tab_id=None,
+        tab_id="tab1",
+        outcome="cancelled",
+        error_message=None,
+    )
+    wire = _ser_run_lock_changed(payload)
+    assert wire is not None
+    assert wire["outcome"] == "cancelled"
+    assert "error_message" not in wire
+
+
+def test_ser_predictor_changed_returns_empty_dict():
+    payload = PredictorChangedPayload()
+    wire = _ser_predictor_changed(payload)
+    assert wire == {}
+
+
+def test_ser_soc_changed_connected():
+    payload = SocChangedPayload(soc=MagicMock(), soccfg=MagicMock())
+    wire = _ser_soc_changed(payload)
+    assert wire is not None
+    assert wire["connected"] is True
+
+
+def test_ser_soc_changed_disconnected():
+    payload = SocChangedPayload(soc=None, soccfg=None)
+    wire = _ser_soc_changed(payload)
+    assert wire is not None
+    assert wire["connected"] is False

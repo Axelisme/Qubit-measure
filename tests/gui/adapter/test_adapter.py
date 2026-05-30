@@ -9,6 +9,7 @@ from zcu_tools.gui.adapter import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
+    DeviceRefSpec,
     DirectValue,
     EvalValue,
     MetaDictWriteback,
@@ -25,6 +26,13 @@ from zcu_tools.gui.adapter import (
     make_default_value,
     require_soc_handles,
     schema_to_dict,
+)
+from zcu_tools.gui.adapter.lowering import _find_allowed_spec
+from zcu_tools.gui.adapter.protocol import (
+    AbsExpAdapter,
+    NoAnalysisAdapterMixin,
+    NoAnalyzeParams,
+    NoAnalysisResult,
 )
 
 # ---------------------------------------------------------------------------
@@ -472,3 +480,213 @@ def test_non_optional_missing_raises():
 
     with pytest.raises(RuntimeError, match="reps.*missing"):
         schema_to_dict(s, _make_ml())
+
+
+# ---------------------------------------------------------------------------
+# DeviceRefSpec lowering
+# ---------------------------------------------------------------------------
+
+
+def test_device_ref_normal_path_produces_device_name():
+    spec = CfgSectionSpec(fields={"dev": DeviceRefSpec(label="Device")})
+    val = CfgSectionValue(fields={"dev": DirectValue("lo_device")})
+    s = CfgSchema(spec=spec, value=val)
+    result = schema_to_dict(s, _make_ml())
+    assert result["dev"] == "lo_device"
+
+
+def test_device_ref_is_unset_raises():
+    spec = CfgSectionSpec(fields={"dev": DeviceRefSpec(label="Device")})
+    val = CfgSectionValue(fields={"dev": DirectValue(value="", is_unset=True)})
+    s = CfgSchema(spec=spec, value=val)
+    with pytest.raises(RuntimeError, match="unset"):
+        schema_to_dict(s, _make_ml())
+
+
+def test_device_ref_empty_string_raises():
+    spec = CfgSectionSpec(fields={"dev": DeviceRefSpec(label="Device")})
+    val = CfgSectionValue(fields={"dev": DirectValue(value="")})
+    s = CfgSchema(spec=spec, value=val)
+    with pytest.raises(RuntimeError, match="unset"):
+        schema_to_dict(s, _make_ml())
+
+
+# ---------------------------------------------------------------------------
+# _find_allowed_spec — Custom key error paths
+# ---------------------------------------------------------------------------
+
+
+def test_find_allowed_spec_custom_key_missing_close_bracket_raises():
+    inner_spec = CfgSectionSpec(label="Pulse", fields={})
+    ref_spec = ModuleRefSpec(allowed=[inner_spec])
+    ref_val = ModuleRefValue(chosen_key="<Custom:Pulse", value=CfgSectionValue())
+
+    with pytest.raises(RuntimeError, match="Invalid custom reference key"):
+        _find_allowed_spec(ref_spec, ref_val, None)
+
+
+def test_find_allowed_spec_custom_key_unknown_label_raises():
+    inner_spec = CfgSectionSpec(label="Pulse", fields={})
+    ref_spec = ModuleRefSpec(allowed=[inner_spec])
+    ref_val = ModuleRefValue(chosen_key="<Custom:UnknownSpec>", value=CfgSectionValue())
+
+    with pytest.raises(RuntimeError, match="Unknown custom reference label"):
+        _find_allowed_spec(ref_spec, ref_val, None)
+
+
+# ---------------------------------------------------------------------------
+# _resolve_sweep_edge — error paths
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_sweep_edge_unresolved_eval_raises():
+    spec = CfgSectionSpec(fields={"sweep": SweepSpec()})
+    val = CfgSectionValue(
+        fields={
+            "sweep": SweepValue(
+                start=EvalValue(expr="r_f", resolved=None, error=None),
+                stop=1.0,
+                expts=11,
+            )
+        }
+    )
+    s = CfgSchema(spec=spec, value=val)
+    with pytest.raises(RuntimeError, match="unresolved"):
+        schema_to_dict(s, None)
+
+
+def test_resolve_sweep_edge_non_numeric_resolved_raises():
+    spec = CfgSectionSpec(fields={"sweep": SweepSpec()})
+    val = CfgSectionValue(
+        fields={
+            "sweep": SweepValue(
+                start=EvalValue(expr="r_f", resolved="not_a_number", error=None),
+                stop=1.0,
+                expts=11,
+            )
+        }
+    )
+    s = CfgSchema(spec=spec, value=val)
+    with pytest.raises(RuntimeError, match="non-numeric"):
+        schema_to_dict(s, None)
+
+
+# ---------------------------------------------------------------------------
+# AbsExpAdapter — make_default_save_paths error paths
+# ---------------------------------------------------------------------------
+
+
+def _make_concrete_adapter() -> AbsExpAdapter:
+    """Create a minimal concrete adapter for testing non-abstract methods."""
+
+    class _FakeAdapter(NoAnalysisAdapterMixin):
+        exp_cls = MagicMock()
+
+        def cfg_spec(self):
+            return CfgSectionSpec()
+
+        def make_default_value(self, ctx):
+            return CfgSectionValue()
+
+        def build_exp_cfg(self, raw_cfg, req):
+            return MagicMock()
+
+        def make_filename_stem(self, ctx):
+            return "fake_stem"
+
+    return _FakeAdapter()
+
+
+def _make_ctx(**kwargs):
+    from zcu_tools.gui.adapter import ContextReadiness, ExpContext
+    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+
+    defaults = dict(
+        md=MetaDict(),
+        ml=ModuleLibrary(),
+        soc=None,
+        soccfg=None,
+        result_dir="/res",
+        database_path="/db",
+        active_label="label",
+        readiness=ContextReadiness.ACTIVE,
+    )
+    defaults.update(kwargs)
+    return ExpContext(**defaults)  # type: ignore[arg-type]
+
+
+def test_make_default_save_paths_raises_without_database_path():
+    adapter = _make_concrete_adapter()
+    ctx = _make_ctx(database_path="")
+    with pytest.raises(RuntimeError, match="database_path is required"):
+        adapter.make_default_save_paths(ctx)
+
+
+def test_make_default_save_paths_raises_without_result_dir():
+    adapter = _make_concrete_adapter()
+    ctx = _make_ctx(result_dir="")
+    with pytest.raises(RuntimeError, match="result_dir is required"):
+        adapter.make_default_save_paths(ctx)
+
+
+def test_make_default_save_paths_raises_without_active_label():
+    adapter = _make_concrete_adapter()
+    ctx = _make_ctx(active_label="")
+    with pytest.raises(RuntimeError, match="active_label is required"):
+        adapter.make_default_save_paths(ctx)
+
+
+# ---------------------------------------------------------------------------
+# NoAnalysisAdapterMixin
+# ---------------------------------------------------------------------------
+
+
+def test_no_analysis_mixin_get_analyze_params_returns_instance():
+    adapter = _make_concrete_adapter()
+    result = adapter.get_analyze_params(MagicMock(), _make_ctx())
+    assert isinstance(result, NoAnalyzeParams)
+
+
+def test_no_analysis_mixin_analyze_returns_no_analysis_result():
+    from zcu_tools.gui.adapter import AnalyzeRequest
+
+    adapter = _make_concrete_adapter()
+    req = AnalyzeRequest(
+        run_result=MagicMock(),
+        analyze_params=NoAnalyzeParams(),
+        md=MagicMock(),
+        ml=MagicMock(),
+        predictor=None,
+    )
+    result = adapter.analyze(req)
+    assert isinstance(result, NoAnalysisResult)
+
+
+# ---------------------------------------------------------------------------
+# analyze_params_cls — fallback to NoAnalyzeParams when no annotation
+# ---------------------------------------------------------------------------
+
+
+def test_analyze_params_cls_fallback_when_no_annotation():
+
+    class _UnannotatedAdapter(NoAnalysisAdapterMixin):
+        exp_cls = MagicMock()
+
+        def cfg_spec(self):
+            return CfgSectionSpec()
+
+        def make_default_value(self, ctx):
+            return CfgSectionValue()
+
+        def build_exp_cfg(self, raw_cfg, req):
+            return MagicMock()
+
+        def make_filename_stem(self, ctx):
+            return "stem"
+
+        def get_analyze_params(self, result, ctx):
+            return NoAnalyzeParams()
+
+    # The overridden get_analyze_params has no type annotation → fallback
+    cls = _UnannotatedAdapter.analyze_params_cls()
+    assert cls is NoAnalyzeParams
