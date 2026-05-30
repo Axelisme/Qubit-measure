@@ -127,6 +127,32 @@ def proper_qub_freq_range(
     return _freq_range(ctx, "q_f", "qf_w", expts, span_factor, 4000.0, 20.0)
 
 
+def proper_flux_range(ctx: ExpContext, expts: int) -> SweepValue:
+    """Flux sweep range spanning one period around the calibrated flux points.
+
+    Extrapolates 10% past the two fitted positions (flx_half / flx_int):
+    ``start = 1.1*flx_int - 0.1*flx_half``, ``stop = 1.1*flx_half - 0.1*flx_int``.
+    When the md keys are absent, falls back to a fixed ``[-4e-3, 4e-3]`` scan.
+    """
+    if md_has_key(ctx, "flx_half") and md_has_key(ctx, "flx_int"):
+        flx_half = md_get_float(ctx, "flx_half", 0.0)
+        flx_int = md_get_float(ctx, "flx_int", 0.0)
+        start: Union[float, EvalValue] = EvalValue(
+            expr="1.1 * flx_int - 0.1 * flx_half",
+            resolved=1.1 * flx_int - 0.1 * flx_half,
+            error=None,
+        )
+        stop: Union[float, EvalValue] = EvalValue(
+            expr="1.1 * flx_half - 0.1 * flx_int",
+            resolved=1.1 * flx_half - 0.1 * flx_int,
+            error=None,
+        )
+    else:
+        start = -4e-3
+        stop = 4e-3
+    return SweepValue(start=start, stop=stop, expts=expts)
+
+
 def md_writeback(
     ctx: ExpContext,
     key: str,

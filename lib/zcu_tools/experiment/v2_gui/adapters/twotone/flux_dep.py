@@ -15,6 +15,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_readout_module_spec,
     make_reset_module_spec,
     make_reset_ref_default,
+    proper_flux_range,
     proper_qub_freq_range,
 )
 from zcu_tools.gui.adapter import (
@@ -28,7 +29,6 @@ from zcu_tools.gui.adapter import (
     RunRequest,
     ScalarSpec,
     SweepSpec,
-    SweepValue,
 )
 
 FluxDepRunResult: TypeAlias = FreqFluxResult
@@ -94,7 +94,7 @@ class FluxDepAdapter(BaseAdapter[FreqFluxCfg, FluxDepRunResult]):
                 "relax_delay": DirectValue(1.0),
                 "sweep": CfgSectionValue(
                     fields={
-                        "flux": SweepValue(start=3.57e-3, stop=3.61e-3, expts=101),
+                        "flux": proper_flux_range(ctx, 101),
                         "freq": proper_qub_freq_range(ctx, 101, span_factor=1.0),
                     }
                 ),

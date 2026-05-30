@@ -14,6 +14,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_reset_module_spec,
     md_get_float,
     md_has_key,
+    proper_flux_range,
     proper_res_freq_range,
 )
 from zcu_tools.gui.adapter import (
@@ -28,7 +29,6 @@ from zcu_tools.gui.adapter import (
     ScalarSpec,
     ScalarValue,
     SweepSpec,
-    SweepValue,
 )
 
 OneToneFluxDepRunResult: TypeAlias = FluxDepResult
@@ -98,7 +98,7 @@ class OneToneFluxDepAdapter(BaseAdapter[FluxDepCfg, OneToneFluxDepRunResult]):
                 "relax_delay": DirectValue(1.0),
                 "sweep": CfgSectionValue(
                     fields={
-                        "flux": SweepValue(start=3.57e-3, stop=3.61e-3, expts=101),
+                        "flux": proper_flux_range(ctx, 101),
                         "freq": proper_res_freq_range(ctx, 101, span_factor=1.0),
                     }
                 ),

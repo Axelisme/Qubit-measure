@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     md_writeback,
+    proper_flux_range,
     proper_qub_freq_range,
     proper_relax,
     proper_res_freq_range,
@@ -117,3 +118,23 @@ def test_qub_freq_range_uses_qubit_md_keys():
     assert sv.start.expr == "q_f - 2.0 * qf_w"
     assert sv.start.resolved == 4190.0
     assert sv.expts == 201
+
+
+# --- proper_flux_range ------------------------------------------------------
+
+
+def test_flux_range_extrapolates_past_calibrated_points():
+    ctx = _ctx_with_md({"flx_half": 1e-3, "flx_int": 3e-3})
+    sv = proper_flux_range(ctx, 101)
+    assert isinstance(sv.start, EvalValue)
+    assert isinstance(sv.stop, EvalValue)
+    assert sv.start.expr == "1.1 * flx_int - 0.1 * flx_half"
+    assert sv.start.resolved == 1.1 * 3e-3 - 0.1 * 1e-3
+    assert sv.stop.expr == "1.1 * flx_half - 0.1 * flx_int"
+    assert sv.expts == 101
+
+
+def test_flux_range_falls_back_when_md_absent():
+    sv = proper_flux_range(_ctx_with_md({}), 101)
+    assert sv.start == -4e-3
+    assert sv.stop == 4e-3
