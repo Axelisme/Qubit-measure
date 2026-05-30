@@ -12,11 +12,13 @@ from .ctx_helpers import (
 )
 from .defaults import (
     make_bath_reset_default,
+    make_direct_readout_default,
     make_none_reset_default,
     make_pi2_pulse_default,
     make_pi2_pulse_ref_default,
     make_pi_pulse_default,
     make_pi_pulse_ref_default,
+    make_pulse_readout_default,
     make_pulse_reset_default,
     make_qub_probe_default,
     make_qub_probe_ref_default,
@@ -75,6 +77,8 @@ __all__ = [
     "make_pi_pulse_ref_default",
     "make_pi2_pulse_default",
     "make_pi2_pulse_ref_default",
+    "make_pulse_readout_default",
+    "make_direct_readout_default",
     "make_readout_default",
     "make_readout_ref_default",
     "make_none_reset_default",

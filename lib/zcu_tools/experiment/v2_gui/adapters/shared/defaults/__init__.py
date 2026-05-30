@@ -17,7 +17,12 @@ from .pi2_pulse import make_pi2_pulse_default, make_pi2_pulse_ref_default
 from .pi_pulse import make_pi_pulse_default, make_pi_pulse_ref_default
 from .qub_probe import make_qub_probe_default, make_qub_probe_ref_default
 from .qub_waveform import make_qub_waveform_default, make_qub_waveform_ref_default
-from .readout import make_readout_default, make_readout_ref_default
+from .readout import (
+    make_direct_readout_default,
+    make_pulse_readout_default,
+    make_readout_default,
+    make_readout_ref_default,
+)
 from .res_probe import make_res_probe_default, make_res_probe_ref_default
 from .res_waveform import make_res_waveform_default, make_res_waveform_ref_default
 from .reset import (
@@ -49,6 +54,8 @@ __all__ = [
     "make_pi2_pulse_default",
     "make_pi2_pulse_ref_default",
     # readout
+    "make_pulse_readout_default",
+    "make_direct_readout_default",
     "make_readout_default",
     "make_readout_ref_default",
     # reset

@@ -6,8 +6,10 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 from zcu_tools.experiment.v2_gui.adapters.shared import (
+    make_direct_readout_default,
     make_pi2_pulse_ref_default,
     make_pi_pulse_ref_default,
+    make_pulse_readout_default,
     make_qub_probe_default,
     make_qub_waveform_default,
     make_readout_default,
@@ -17,7 +19,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_reset_default,
     make_reset_ref_default,
 )
-from zcu_tools.gui.adapter import ModuleRefValue, WaveformRefValue
+from zcu_tools.gui.adapter import EvalValue, ModuleRefValue, WaveformRefValue
 
 
 def _empty_ctx() -> MagicMock:
@@ -80,6 +82,49 @@ def test_readout_default_is_inline_pulse_readout_with_ro_cfg():
     assert isinstance(v, ModuleRefValue)
     assert v.chosen_key.startswith("<Custom:")
     assert "ro_cfg" in v.value.fields
+
+
+def test_make_readout_default_aliases_pulse_shape():
+    """The role blank is the pulse shape (Custom:Pulse Readout)."""
+    v = make_readout_default(_empty_ctx())
+    assert v.chosen_key == "<Custom:Pulse Readout>"
+    assert "pulse_cfg" in v.value.fields
+
+
+def test_make_pulse_readout_default_shape():
+    v = make_pulse_readout_default(_empty_ctx())
+    assert isinstance(v, ModuleRefValue)
+    assert v.chosen_key == "<Custom:Pulse Readout>"
+    assert "pulse_cfg" in v.value.fields
+    assert "ro_cfg" in v.value.fields
+
+
+def test_make_direct_readout_default_shape():
+    """Direct readout is a bare ro_cfg — no pulse_cfg."""
+    v = make_direct_readout_default(_empty_ctx())
+    assert isinstance(v, ModuleRefValue)
+    assert v.chosen_key == "<Custom:Direct Readout>"
+    assert "pulse_cfg" not in v.value.fields
+    assert "ro_freq" in v.value.fields
+
+
+def test_direct_readout_eval_fields_when_md_present():
+    """md keys present → ro_ch/ro_freq are EvalValue carrying the expression."""
+    ctx = MagicMock()
+    ctx.md.get.side_effect = lambda k, d=None: {"r_f": 6500.0, "ro_ch": 1}.get(k, d)
+    ctx.md.__contains__ = lambda self, k: k in {"r_f", "ro_ch"}
+    ml = MagicMock()
+    ml.modules = {}
+    ml.waveforms = {}
+    ctx.ml = ml
+
+    v = make_direct_readout_default(ctx)
+    ro_freq = cast(Any, v.value.fields["ro_freq"])
+    ro_ch = cast(Any, v.value.fields["ro_ch"])
+    assert isinstance(ro_freq, EvalValue) and ro_freq.expr == "r_f"
+    assert isinstance(ro_ch, EvalValue) and ro_ch.expr == "ro_ch"
+    # not pre-resolved — lowering owns resolution
+    assert ro_freq.resolved is None and ro_ch.resolved is None
 
 
 def test_readout_ref_falls_back_to_blank():
