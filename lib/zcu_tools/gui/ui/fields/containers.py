@@ -19,7 +19,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from ...adapter import LiteralSpec, ScalarSpec
+from ...adapter import LiteralSpec
 from ...live_model import (
     DeviceRefLiveField,
     ModuleRefLiveField,
@@ -132,10 +132,11 @@ class SectionWidget(BaseLiveWidget):
         field = cast(SectionLiveField, self._field)
         for key, child_field in field.fields.items():
             spec = child_field.spec
-            # Skip hidden scalar fields
-            if isinstance(spec, ScalarSpec) and spec.hidden:
-                continue
-            if isinstance(spec, LiteralSpec) and key in {"type", "style"}:
+            # LiteralSpec is a fixed value with no editing degree of freedom, so
+            # it has no widget — the GUI decides not to render it (the spec does
+            # not carry any "visible" flag). This covers discriminators
+            # (type/style) and adapter lock_literal'd fields uniformly.
+            if isinstance(spec, LiteralSpec):
                 continue
 
             widget_cls = get_widget_cls(child_field)

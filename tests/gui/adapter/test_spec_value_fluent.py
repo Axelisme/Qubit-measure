@@ -1,4 +1,4 @@
-"""Tests for spec fluent overrides (lock_literal/readonly) + value with_field."""
+"""Tests for spec fluent overrides (lock_literal) + value with_field."""
 
 from __future__ import annotations
 
@@ -73,10 +73,13 @@ def test_lock_literal_duck_type_skips_allowed_without_path():
 
 def test_lock_literal_chains():
     spec = _nested_spec()
-    locked = spec.lock_literal("modules.readout.pulse_cfg.freq", 0.0).readonly("reps")
+    # chaining works because each call returns a new CfgSectionSpec
+    locked = spec.lock_literal("modules.readout.pulse_cfg.freq", 0.0).lock_literal(
+        "reps", 1
+    )
     leaf = _readout_pulse_freq(locked)
     assert isinstance(leaf, LiteralSpec)
-    assert cast(Any, locked.fields["reps"]).editable is False
+    assert isinstance(locked.fields["reps"], LiteralSpec)
 
 
 def test_lock_literal_raises_when_no_allowed_matches():
@@ -89,22 +92,6 @@ def test_lock_literal_raises_on_unknown_top_segment():
     spec = _nested_spec()
     with pytest.raises(RuntimeError, match="not found"):
         spec.lock_literal("nope.freq", 0.0)
-
-
-# --- spec.readonly ----------------------------------------------------------
-
-
-def test_readonly_sets_editable_false():
-    spec = _nested_spec()
-    ro = spec.readonly("reps")
-    assert cast(Any, ro.fields["reps"]).editable is False
-    assert cast(Any, spec.fields["reps"]).editable is True  # original untouched
-
-
-def test_readonly_raises_on_non_scalar():
-    spec = _nested_spec()
-    with pytest.raises(RuntimeError, match="must be a ScalarSpec"):
-        spec.readonly("modules")  # CfgSectionSpec, not scalar
 
 
 # --- value.with_field -------------------------------------------------------

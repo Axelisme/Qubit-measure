@@ -470,13 +470,17 @@ def test_populate_nested_section_round_trip(qapp, ctrl):
     assert inner.fields["gain"].value == pytest.approx(0.05)  # type: ignore[union-attr]
 
 
-def test_literal_type_and_style_rows_are_hidden(qapp, ctrl):
+def test_literal_rows_are_hidden_regardless_of_key(qapp, ctrl):
+    """All LiteralSpec fields render no widget — discriminators (type/style) and
+    adapter lock_literal'd fields (e.g. a sweep-driven freq) alike."""
     from qtpy.QtWidgets import QLabel
     from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 
     schema = _schema(
         {
             "type": LiteralSpec("pulse", label="Type"),
+            # a non-type/style LiteralSpec: the lock_literal scenario
+            "freq": LiteralSpec(0.0, label="Freq"),
             "waveform": CfgSectionSpec(
                 label="Waveform",
                 fields={
@@ -495,6 +499,7 @@ def test_literal_type_and_style_rows_are_hidden(qapp, ctrl):
     labels = [label.text() for label in w.findChildren(QLabel)]
     assert "Type:" not in labels
     assert "Style:" not in labels
+    assert "Freq:" not in labels  # locked field hidden too
     assert "Sigma:" in labels
 
 

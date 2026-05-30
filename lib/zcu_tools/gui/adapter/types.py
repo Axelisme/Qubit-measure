@@ -268,7 +268,7 @@ def default_value_for_type(type_: type) -> object:
 # ---------------------------------------------------------------------------
 
 # A transform applied to the leaf spec node reached by a dotted path. Returns a
-# replacement node (e.g. a LiteralSpec for lock, a replace(...) for readonly).
+# replacement node (e.g. a LiteralSpec for lock_literal).
 _LeafTransform = Callable[["CfgNodeSpec"], "CfgNodeSpec"]
 
 
@@ -303,7 +303,6 @@ class ScalarSpec:
     editable: bool = True
     choices: Optional[list] = None
     decimals: Optional[int] = None
-    hidden: bool = False
     required: bool = False
 
 
@@ -394,18 +393,6 @@ class CfgSectionSpec:
         return self._with_override(
             _split_spec_path(path), lambda leaf: LiteralSpec(value=value)
         )
-
-    def readonly(self, path: str) -> "CfgSectionSpec":
-        """Mark the scalar leaf at ``path`` non-editable (shown but read-only)."""
-
-        def _make_readonly(leaf: "CfgNodeSpec") -> "CfgNodeSpec":
-            if not isinstance(leaf, ScalarSpec):
-                raise RuntimeError(
-                    f"readonly target must be a ScalarSpec, got {type(leaf).__name__}"
-                )
-            return replace(leaf, editable=False)
-
-        return self._with_override(_split_spec_path(path), _make_readonly)
 
     def _with_override(
         self, parts: list[str], fn: "_LeafTransform"
