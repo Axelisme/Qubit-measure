@@ -1,4 +1,4 @@
-"""Optimistic-concurrency version guard (Phase 94).
+"""Optimistic-concurrency version guard.
 
 A guarded op (run / save / editor.commit) carries an ``expected_versions`` map
 (filled by the mcp layer) of the resource versions it depends on. The server

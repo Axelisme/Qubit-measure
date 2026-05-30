@@ -35,6 +35,7 @@ from typing import Callable, Optional
 from qtpy.QtCore import QObject, Qt, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.event_bus import EventBus, GuiEvent, Payload
+
 from .dispatch import METHOD_REGISTRY
 from .errors import ErrorCode, ErrorEnvelope, RemoteError
 from .events import EVENT_SERIALIZERS, wire_event_name

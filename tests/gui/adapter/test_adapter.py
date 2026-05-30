@@ -1,4 +1,4 @@
-"""Unit tests for zcu_tools.gui.adapter (Phase 19 — Spec/Value split)."""
+"""Unit tests for zcu_tools.gui.adapter (Spec/Value split)."""
 
 from __future__ import annotations
 
@@ -415,7 +415,7 @@ def test_waveform_ref_spec_empty_allowed_raises():
 
 
 # ---------------------------------------------------------------------------
-# Phase 55 — optional ModuleRefSpec lowering
+# optional ModuleRefSpec lowering
 # ---------------------------------------------------------------------------
 
 

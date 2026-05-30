@@ -1,4 +1,4 @@
-"""Unit tests for zcu_tools.gui.registry (Phase 3)."""
+"""Unit tests for zcu_tools.gui.registry."""
 
 from __future__ import annotations
 

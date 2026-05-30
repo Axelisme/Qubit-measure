@@ -200,7 +200,7 @@ def test_sweep_live_field_updates_step_through_pure_model(env):
 
 
 # ---------------------------------------------------------------------------
-# Phase 55 — optional ModuleRefSpec
+# optional ModuleRefSpec
 # ---------------------------------------------------------------------------
 
 

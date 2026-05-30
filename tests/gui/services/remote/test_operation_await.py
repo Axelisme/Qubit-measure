@@ -1,4 +1,4 @@
-"""operation.await dispatch handler (Phase 95).
+"""operation.await dispatch handler.
 
 The handler is off_main_thread (blocks the IO worker). It calls
 ctrl.await_operation(operation_id, timeout) and shapes the OperationOutcome into

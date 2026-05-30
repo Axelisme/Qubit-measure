@@ -1,8 +1,8 @@
-"""Shared test helpers for RemoteControlService phase 80 / 81 suites.
+"""Shared test helpers for the RemoteControlService remote test suites.
 
-Single source of fixture + socket-pumping helpers so Phase 81 tests do not
-duplicate the boilerplate from Phase 80. Anything Phase 81-specific (e.g.
-event-push reception) lives next to the phase81 tests themselves.
+Single source of fixture + socket-pumping helpers so the remote test files do
+not duplicate the boilerplate. Anything suite-specific (e.g. event-push
+reception) lives next to the tests that need it.
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ def make_view() -> MagicMock:
     view.show_error_dialog = MagicMock()
     view.make_pbar_factory = MagicMock(return_value=None)
     view.make_live_container = MagicMock(return_value=None)
-    # Phase 81a-shaped View surface so Controller.open_dialog / take_screenshot
+    # shaped View surface so Controller.open_dialog / take_screenshot
     # / get_view_snapshot have somewhere to land in tests.
     view._open_dialogs = []
 

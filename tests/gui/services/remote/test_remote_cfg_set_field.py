@@ -1,4 +1,4 @@
-"""RemoteControlService cfg.set_field + context/device queries (Phase 81b).
+"""RemoteControlService cfg.set_field + context/device queries.
 
 ``cfg.set_field`` mutates the tab's *live* ``SectionLiveField`` (so the form
 stays WYSIWYG and auto-commits). In these tests the mock View returns a real

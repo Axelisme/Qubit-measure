@@ -1,4 +1,4 @@
-"""RemoteControlService event push + Dialog API + view query (Phase 81a).
+"""RemoteControlService event push + Dialog API + view query.
 
 Each test spins up a real TCP socket on an ephemeral loopback port via
 ``_helpers.Fixture`` and exercises:

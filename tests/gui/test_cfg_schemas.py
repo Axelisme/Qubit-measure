@@ -82,7 +82,7 @@ def test_waveform_cfg_to_value_invalid_type():
 
 
 # ---------------------------------------------------------------------------
-# Phase 54.1 — "pulse" module spec registration
+# "pulse" module spec registration
 # ---------------------------------------------------------------------------
 
 

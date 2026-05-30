@@ -1,4 +1,4 @@
-"""Phase 4 smoke test — full flow via FakeAdapter, no Qt, no hardware."""
+"""Smoke test — full flow via FakeAdapter, no Qt, no hardware."""
 
 from __future__ import annotations
 

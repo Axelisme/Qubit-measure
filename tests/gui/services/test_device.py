@@ -18,13 +18,13 @@ from zcu_tools.gui.services.device import (
     SetDeviceValueRequest,
     SetupDeviceRequest,
 )
-from zcu_tools.gui.state import State
 from zcu_tools.gui.services.operation_gate import (
     OperationConflictError,
     OperationGate,
     OperationKind,
     OperationOutcome,
 )
+from zcu_tools.gui.state import State
 
 
 @pytest.fixture(autouse=True)

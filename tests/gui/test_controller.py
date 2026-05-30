@@ -1,4 +1,4 @@
-"""Phase 7 tests — Controller skeleton (tab + run flow)."""
+"""Controller skeleton (tab + run flow)."""
 
 from __future__ import annotations
 
@@ -162,7 +162,7 @@ def test_start_run_sets_is_running(cf):
 
 
 def test_start_run_uses_committed_state_schema(cf):
-    """Phase 78-A: start_run reads cfg from State, not from a passed-in schema."""
+    """start_run reads cfg from State, not from a passed-in schema."""
     tab_id = cf.ctrl.new_tab("fake")
 
     # Mutate committed cfg in State after tab creation.
@@ -388,7 +388,7 @@ def test_run_completion_prepares_pure_tab_snapshot(cf):
 
 
 def test_update_tab_cfg_does_not_emit_interaction_changed(cf):
-    """Phase 78-C: cfg keystrokes must not trigger a full snapshot rebuild.
+    """cfg keystrokes must not trigger a full snapshot rebuild.
 
     update_tab_cfg writes to State but emits no TAB_INTERACTION_CHANGED;
     validity refreshes come from CfgFormWidget.validity_changed instead.

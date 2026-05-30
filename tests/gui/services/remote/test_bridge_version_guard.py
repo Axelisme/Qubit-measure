@@ -1,4 +1,4 @@
-"""mcp_server-side optimistic-concurrency bookkeeping (Phase 94).
+"""mcp_server-side optimistic-concurrency bookkeeping.
 
 Drives send_gui_rpc with the socket layer mocked: _send_line synchronously
 delivers a per-method crafted reply via _deliver_reply, so we assert the mcp

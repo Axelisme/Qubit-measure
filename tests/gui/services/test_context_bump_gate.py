@@ -99,7 +99,7 @@ def test_md_ml_writers_bump_context_version():
 
     assert not offenders, (
         "every function that writes MetaDict/ModuleLibrary content must "
-        'self.version.bump("context") (Phase 100 hidden-contract gate). '
+        'self.version.bump("context") (hidden-contract gate). '
         f"Missing the bump: {offenders}"
     )
 

@@ -26,7 +26,6 @@ from zcu_tools.gui.services.startup_persistence import (
 )
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
-
 # --- concrete services satisfy their ports (structural) -------------------
 
 

@@ -1,4 +1,4 @@
-"""Tests — CfgFormWidget populate / read_values round-trip (Phase 19)."""
+"""Tests — CfgFormWidget populate / read_values round-trip."""
 
 from __future__ import annotations
 
@@ -822,7 +822,7 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
 
 
 # ---------------------------------------------------------------------------
-# Phase 55 — optional ModuleRefSpec UI (None option in combo)
+# optional ModuleRefSpec UI (None option in combo)
 # ---------------------------------------------------------------------------
 
 

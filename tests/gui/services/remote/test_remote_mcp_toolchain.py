@@ -201,7 +201,7 @@ def test_context_ml_write_delete_delegates_raw_dict(fx):
         sock.close()
 
 
-def test_mcp_tool_schemas_include_required_phase82_tools():
+def test_mcp_tool_schemas_include_required_discovery_tools():
     expected = {
         "gui_adapter_list",
         "gui_connect_start",

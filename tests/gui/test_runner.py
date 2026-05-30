@@ -1,4 +1,4 @@
-"""Phase 6 tests — Runner / RunWorker (Qt, FakeAdapter)."""
+"""Runner / RunWorker (Qt, FakeAdapter)."""
 
 from __future__ import annotations
 

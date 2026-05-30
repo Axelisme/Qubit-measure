@@ -1,4 +1,4 @@
-"""mcp_server-side async-operation handle bookkeeping (Phase 95).
+"""mcp_server-side async-operation handle bookkeeping.
 
 Drives send_gui_rpc / the gui_device_wait_setup tool with the socket layer
 mocked, asserting the mcp policy: a start op's operation_id is captured under its
