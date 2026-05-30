@@ -7,42 +7,35 @@ from .ctx_helpers import (
     md_writeback,
     proper_relax,
 )
+from .defaults import (
+    make_bath_reset_default,
+    make_none_reset_default,
+    make_pi2_pulse_default,
+    make_pi2_pulse_ref_default,
+    make_pi_pulse_default,
+    make_pi_pulse_ref_default,
+    make_pulse_reset_default,
+    make_qub_probe_default,
+    make_qub_probe_ref_default,
+    make_qub_waveform_default,
+    make_qub_waveform_ref_default,
+    make_readout_default,
+    make_readout_ref_default,
+    make_res_probe_default,
+    make_res_probe_ref_default,
+    make_res_waveform_default,
+    make_res_waveform_ref_default,
+    make_reset_default,
+    make_reset_ref_default,
+    make_two_pulse_reset_default,
+)
 from .module_builders import build_readout_for_frequency, build_waveform_for_length
 from .module_defaults import NamedModuleValue, select_named_module_value
-from .module_ref_defaults import (
-    make_pulse_readout_ref_default,
-    make_pulse_ref_default,
-    make_readout_ref_default,
-    make_reset_ref_default,
-)
-from .role_defaults import (
-    default_pi,
-    default_pi2,
-    default_probe_readout,
-    default_qub_probe,
-    default_readout,
-    default_res_probe,
-    default_reset,
-    default_waveform,
-)
 from .module_templates import (
     make_flat_top_waveform_edit_template,
     make_pulse_readout_edit_template,
     make_readout_edit_template,
     update_readout_value_frequency,
-)
-from .module_value_defaults import (
-    make_bath_reset_default,
-    make_direct_readout_default,
-    make_none_reset_default,
-    make_pulse_default,
-    make_pulse_readout_default,
-    make_pulse_reset_default,
-    make_readout_default,
-    make_res_pulse_default,
-    make_reset_default,
-    make_two_pulse_reset_default,
-    make_waveform_default,
 )
 from .spec_helpers import (
     make_pulse_module_spec,
@@ -66,32 +59,27 @@ __all__ = [
     # Module defaults (low-level)
     "NamedModuleValue",
     "select_named_module_value",
-    # Module value defaults (first layer — sensible blanks)
-    "make_direct_readout_default",
-    "make_pulse_readout_default",
+    # Per-role default factories (defaults/ — each role has blank + ref)
+    "make_qub_probe_default",
+    "make_qub_probe_ref_default",
+    "make_res_probe_default",
+    "make_res_probe_ref_default",
+    "make_pi_pulse_default",
+    "make_pi_pulse_ref_default",
+    "make_pi2_pulse_default",
+    "make_pi2_pulse_ref_default",
     "make_readout_default",
-    "make_pulse_default",
-    "make_res_pulse_default",
-    "make_waveform_default",
+    "make_readout_ref_default",
     "make_none_reset_default",
     "make_pulse_reset_default",
     "make_two_pulse_reset_default",
     "make_bath_reset_default",
     "make_reset_default",
-    # Module ref defaults (second layer — lib lookup + fallback)
-    "make_pulse_readout_ref_default",
-    "make_readout_ref_default",
-    "make_pulse_ref_default",
     "make_reset_ref_default",
-    # Role defaults (notebook-aligned semantic wrappers)
-    "default_pi",
-    "default_pi2",
-    "default_qub_probe",
-    "default_res_probe",
-    "default_probe_readout",
-    "default_readout",
-    "default_waveform",
-    "default_reset",
+    "make_qub_waveform_default",
+    "make_qub_waveform_ref_default",
+    "make_res_waveform_default",
+    "make_res_waveform_ref_default",
     # Module templates
     "make_flat_top_waveform_edit_template",
     "make_pulse_readout_edit_template",

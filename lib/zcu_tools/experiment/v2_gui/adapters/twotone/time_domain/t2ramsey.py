@@ -13,12 +13,12 @@ from zcu_tools.experiment.v2.twotone.time_domain.t2ramsey import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    default_pi2,
-    default_reset,
+    make_pi2_pulse_ref_default,
     make_pulse_module_spec,
     make_readout_module_spec,
     make_readout_ref_default,
     make_reset_module_spec,
+    make_reset_ref_default,
     md_get_float,
     md_writeback,
     proper_relax,
@@ -94,10 +94,10 @@ class T2RamseyAdapter(
         t2r = md_get_float(ctx, "t2r", 20.0)
         relax_delay = proper_relax(ctx)
         _module_fields: dict[str, CfgNodeValue] = {
-            "pi2_pulse": default_pi2(ctx),
+            "pi2_pulse": make_pi2_pulse_ref_default(ctx),
             "readout": make_readout_ref_default(ctx),
         }
-        _reset = default_reset(ctx, optional=True)
+        _reset = make_reset_ref_default(ctx, optional=True)
         if _reset is not None:
             _module_fields["reset"] = _reset
         root_val = CfgSectionValue(

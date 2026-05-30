@@ -9,12 +9,12 @@ from typing_extensions import Annotated, Any, ClassVar, Sequence, TypeAlias
 from zcu_tools.experiment.v2.twotone.time_domain.t1 import T1Cfg, T1Exp, T1Result
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    default_pi,
-    default_reset,
+    make_pi_pulse_ref_default,
     make_pulse_module_spec,
     make_readout_module_spec,
     make_readout_ref_default,
     make_reset_module_spec,
+    make_reset_ref_default,
     md_get_float,
     md_writeback,
     proper_relax,
@@ -82,10 +82,10 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
         t1 = md_get_float(ctx, "t1", 100.0)
         relax_delay = proper_relax(ctx)
         _module_fields: dict[str, CfgNodeValue] = {
-            "pi_pulse": default_pi(ctx),
+            "pi_pulse": make_pi_pulse_ref_default(ctx),
             "readout": make_readout_ref_default(ctx),
         }
-        _reset = default_reset(ctx, optional=True)
+        _reset = make_reset_ref_default(ctx, optional=True)
         if _reset is not None:
             _module_fields["reset"] = _reset
         root_val = CfgSectionValue(

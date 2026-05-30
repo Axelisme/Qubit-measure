@@ -10,8 +10,8 @@ from zcu_tools.experiment.v2.lookback import LookbackCfg, LookbackExp, LookbackR
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_module_spec,
-    make_pulse_readout_default,
     make_pulse_readout_module_spec,
+    make_readout_default,
     make_reset_module_spec,
     md_writeback,
 )
@@ -84,7 +84,7 @@ class LookbackAdapter(
             fields={
                 "modules": CfgSectionValue(
                     fields={
-                        "readout": make_pulse_readout_default(
+                        "readout": make_readout_default(
                             ctx,
                             gain=1.0,
                             ro_length=1.4,

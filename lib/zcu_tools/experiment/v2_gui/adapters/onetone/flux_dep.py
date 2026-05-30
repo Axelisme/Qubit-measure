@@ -9,8 +9,8 @@ from zcu_tools.experiment.v2.onetone.flux_dep import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    make_pulse_readout_default,
     make_pulse_readout_module_spec,
+    make_readout_default,
     make_reset_module_spec,
     md_get_float,
     md_has_key,
@@ -89,7 +89,7 @@ class OneToneFluxDepAdapter(BaseAdapter[FluxDepCfg, OneToneFluxDepRunResult]):
             fields={
                 "modules": CfgSectionValue(
                     fields={
-                        "readout": make_pulse_readout_default(
+                        "readout": make_readout_default(
                             ctx, gain=0.005, ro_length=ro_length
                         ),
                     }

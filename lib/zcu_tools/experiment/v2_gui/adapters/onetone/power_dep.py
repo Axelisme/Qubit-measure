@@ -11,8 +11,8 @@ from zcu_tools.experiment.v2.onetone.power_dep import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    make_pulse_readout_default,
     make_pulse_readout_module_spec,
+    make_readout_default,
     make_reset_module_spec,
     md_get_float,
     md_has_key,
@@ -78,7 +78,7 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
             fields={
                 "modules": CfgSectionValue(
                     fields={
-                        "readout": make_pulse_readout_default(ctx),
+                        "readout": make_readout_default(ctx),
                     }
                 ),
                 "reps": DirectValue(100),

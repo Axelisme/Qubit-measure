@@ -7,12 +7,12 @@ from typing_extensions import Any, ClassVar, TypeAlias
 from zcu_tools.experiment.v2.twotone.power_dep import PowerCfg, PowerExp, PowerResult
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    default_qub_probe,
-    default_reset,
     make_pulse_module_spec,
+    make_qub_probe_default,
     make_readout_default,
     make_readout_module_spec,
     make_reset_module_spec,
+    make_reset_ref_default,
     md_get_float,
 )
 from zcu_tools.gui.adapter import (
@@ -69,10 +69,10 @@ class PowerDepAdapter(BaseAdapter[PowerCfg, PowerDepRunResult]):
         qf_w = md_get_float(ctx, "qf_w", 20.0)
         half_span = 1.5 * qf_w if qf_w > 0 else 30.0
         _module_fields: dict[str, CfgNodeValue] = {
-            "qub_pulse": default_qub_probe(ctx),
+            "qub_pulse": make_qub_probe_default(ctx),
             "readout": make_readout_default(ctx),
         }
-        _reset = default_reset(ctx, optional=True)
+        _reset = make_reset_ref_default(ctx, optional=True)
         if _reset is not None:
             _module_fields["reset"] = _reset
         root_val = CfgSectionValue(
