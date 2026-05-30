@@ -93,7 +93,6 @@ class LookbackAdapter(
                             make_trig_offset(
                                 ctx,
                                 trig_expr="timeFly - 0.1",
-                                trig_delta=-0.1,
                                 trig_fallback=0.4,
                             ),
                         ),

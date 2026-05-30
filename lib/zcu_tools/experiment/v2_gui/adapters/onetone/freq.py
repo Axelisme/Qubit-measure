@@ -102,7 +102,7 @@ class OneToneFreqAdapter(
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         probe_len = md_get_float(ctx, "res_probe_len", 1.0)
         ro_length: Union[float, EvalValue] = (
-            EvalValue(expr="res_probe_len - 0.1", resolved=probe_len - 0.1)
+            EvalValue(expr="res_probe_len - 0.1")
             if md_has_key(ctx, "res_probe_len")
             else probe_len - 0.1
         )

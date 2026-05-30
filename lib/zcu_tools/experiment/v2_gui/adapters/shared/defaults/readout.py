@@ -44,9 +44,7 @@ def make_readout_default(ctx: ExpContext) -> ModuleRefValue:
     r_f = md_scalar_float(ctx, "r_f", 6000.0)
     res_ch = md_scalar_int(ctx, "res_ch", 0)
     ro_ch = md_scalar_int(ctx, "ro_ch", 0)
-    trig_offset = make_trig_offset(
-        ctx, trig_expr="timeFly + 0.05", trig_delta=0.05, trig_fallback=0.55
-    )
+    trig_offset = make_trig_offset(ctx, trig_expr="timeFly + 0.05", trig_fallback=0.55)
 
     value = make_default_value(make_pulse_readout_spec())
 

@@ -23,22 +23,49 @@ from .types import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
-def _resolve_sweep_edge(value: object, *, path: str, label: str) -> float:
+def _resolve_eval(
+    value: EvalValue, md: "Optional[MetaDict]", *, path: str, label: str
+) -> float:
+    """Resolve an EvalValue to a number.
+
+    Prefers the snapshot ``value.resolved``; when absent (adapters may build an
+    EvalValue without one), evaluates ``value.expr`` against ``md`` — lowering is
+    the single place that owns resolution. Fails only if there is no snapshot and
+    no md to evaluate against, or the expression itself is invalid.
+    """
+    if value.resolved is not None:
+        resolved = value.resolved
+    elif md is not None:
+        from zcu_tools.gui.expression import evaluate_numeric_expr
+
+        try:
+            resolved = evaluate_numeric_expr(value.expr, md)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Config field '{path}' ({label}) expression {value.expr!r} "
+                f"failed to evaluate: {exc}"
+            ) from exc
+    else:
+        raise RuntimeError(
+            f"Config field '{path}' ({label}) expression {value.expr!r} is unresolved"
+        )
+    if not isinstance(resolved, (int, float)):
+        raise RuntimeError(
+            f"Config field '{path}' ({label}) resolved to non-numeric value"
+        )
+    return float(resolved)
+
+
+def _resolve_sweep_edge(
+    value: object, md: "Optional[MetaDict]", *, path: str, label: str
+) -> float:
     if isinstance(value, (int, float)):
         return float(value)
     if isinstance(value, EvalValue):
-        if value.resolved is None:
-            raise RuntimeError(
-                f"Config field '{path}' ({label}) expression {value.expr!r} is unresolved"
-            )
-        if not isinstance(value.resolved, (int, float)):
-            raise RuntimeError(
-                f"Config field '{path}' ({label}) resolved to non-numeric value"
-            )
-        return float(value.resolved)
+        return _resolve_eval(value, md, path=path, label=label)
     raise RuntimeError(f"Config field '{path}' ({label}) must be numeric")
 
 
@@ -47,6 +74,7 @@ def _section_to_dict_inner(
     value: CfgSectionValue,
     ml: "Optional[ModuleLibrary]",
     path: list[str],
+    md: "Optional[MetaDict]" = None,
 ) -> dict:
     result: dict[str, Any] = {}
     extra_keys = set(value.fields.keys()) - set(spec.fields.keys())
@@ -78,14 +106,9 @@ def _section_to_dict_inner(
                     raise RuntimeError(f"Config field '{full_path}' ({label}) is unset")
                 result[key] = node_val.value
             else:
-                if node_val.resolved is None:
-                    label = node_spec.label or key
-                    full_path = ".".join([*path, key])
-                    raise RuntimeError(
-                        f"Config field '{full_path}' ({label}) expression "
-                        f"{node_val.expr!r} is unresolved"
-                    )
-                result[key] = node_val.resolved
+                label = node_spec.label or key
+                full_path = ".".join([*path, key])
+                result[key] = _resolve_eval(node_val, md, path=full_path, label=label)
 
         elif isinstance(node_spec, LiteralSpec):
             result[key] = node_spec.value
@@ -96,11 +119,15 @@ def _section_to_dict_inner(
 
             start = _resolve_sweep_edge(
                 node_val.start,
+                md,
                 path=".".join([*path, key, "start"]),
                 label="Sweep start",
             )
             stop = _resolve_sweep_edge(
-                node_val.stop, path=".".join([*path, key, "stop"]), label="Sweep stop"
+                node_val.stop,
+                md,
+                path=".".join([*path, key, "stop"]),
+                label="Sweep stop",
             )
             result[key] = make_sweep(start, stop, expts=node_val.expts)
 
@@ -115,6 +142,7 @@ def _section_to_dict_inner(
                 node_val.value,
                 ml,
                 [*path, key],
+                md,
             )
 
         elif isinstance(node_spec, DeviceRefSpec):
@@ -131,7 +159,9 @@ def _section_to_dict_inner(
 
         elif isinstance(node_spec, CfgSectionSpec):
             assert isinstance(node_val, CfgSectionValue)
-            result[key] = _section_to_dict_inner(node_spec, node_val, ml, [*path, key])
+            result[key] = _section_to_dict_inner(
+                node_spec, node_val, ml, [*path, key], md
+            )
 
         else:
             raise TypeError(f"Unknown CfgNodeSpec type: {type(node_spec)}")
@@ -143,9 +173,10 @@ def _section_to_dict(
     spec: CfgSectionSpec,
     value: CfgSectionValue,
     ml: "Optional[ModuleLibrary]",
+    md: "Optional[MetaDict]" = None,
 ) -> dict:
     """Public entry point for lowering a section; path starts at root."""
-    return _section_to_dict_inner(spec, value, ml, [])
+    return _section_to_dict_inner(spec, value, ml, [], md)
 
 
 def _find_allowed_spec(
@@ -193,6 +224,14 @@ def _find_allowed_spec(
     )
 
 
-def schema_to_dict(schema: CfgSchema, ml: "Optional[ModuleLibrary]") -> dict:
-    """Lower a CfgSchema using the same section lowerer as CfgSchema.to_raw_dict()."""
-    return _section_to_dict_inner(schema.spec, schema.value, ml, [])
+def schema_to_dict(
+    schema: CfgSchema,
+    ml: "Optional[ModuleLibrary]",
+    md: "Optional[MetaDict]" = None,
+) -> dict:
+    """Lower a CfgSchema using the same section lowerer as CfgSchema.to_raw_dict().
+
+    ``md`` lets lowering resolve any EvalValue that was built without a snapshot
+    ``resolved``; omit it only when every EvalValue is already resolved.
+    """
+    return _section_to_dict_inner(schema.spec, schema.value, ml, [], md)

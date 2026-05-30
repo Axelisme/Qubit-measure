@@ -39,25 +39,23 @@ def md_has_key(ctx: ExpContext, key: str) -> bool:
     return value is not sentinel and value is not None
 
 
-def md_eval_float(ctx: ExpContext, key: str, default: float) -> EvalValue:
-    resolved = md_get_float(ctx, key, default)
-    return EvalValue(expr=key, resolved=resolved, error=None)
+def md_eval_float(key: str) -> EvalValue:
+    return EvalValue(expr=key)
 
 
-def md_eval_int(ctx: ExpContext, key: str, default: int) -> EvalValue:
-    resolved = md_get_int(ctx, key, default)
-    return EvalValue(expr=key, resolved=resolved, error=None)
+def md_eval_int(key: str) -> EvalValue:
+    return EvalValue(expr=key)
 
 
 def md_scalar_float(ctx: ExpContext, key: str, default: float) -> ScalarValue:
     if md_has_key(ctx, key):
-        return md_eval_float(ctx, key, default)
+        return md_eval_float(key)
     return DirectValue(default)
 
 
 def md_scalar_int(ctx: ExpContext, key: str, default: int) -> ScalarValue:
     if md_has_key(ctx, key):
-        return md_eval_int(ctx, key, default)
+        return md_eval_int(key)
     return DirectValue(default)
 
 
@@ -71,8 +69,7 @@ def proper_relax(
     expression; otherwise a plain DirectValue fallback.
     """
     if md_has_key(ctx, "t1"):
-        t1 = md_get_float(ctx, "t1", fallback / factor)
-        return EvalValue(expr=f"{factor} * t1", resolved=factor * t1, error=None)
+        return EvalValue(expr=f"{factor} * t1")
     return DirectValue(fallback)
 
 
@@ -101,14 +98,9 @@ def _freq_range(
 
     def _edge(sign: int) -> Union[float, EvalValue]:
         op = "-" if sign < 0 else "+"
-        resolved = center + sign * half_span
         if have_md:
-            return EvalValue(
-                expr=f"{center_key} {op} {width_term}",
-                resolved=resolved,
-                error=None,
-            )
-        return resolved
+            return EvalValue(expr=f"{center_key} {op} {width_term}")
+        return center + sign * half_span
 
     return SweepValue(start=_edge(-1), stop=_edge(+1), expts=expts)
 
@@ -135,18 +127,10 @@ def proper_flux_range(ctx: ExpContext, expts: int) -> SweepValue:
     When the md keys are absent, falls back to a fixed ``[-4e-3, 4e-3]`` scan.
     """
     if md_has_key(ctx, "flx_half") and md_has_key(ctx, "flx_int"):
-        flx_half = md_get_float(ctx, "flx_half", 0.0)
-        flx_int = md_get_float(ctx, "flx_int", 0.0)
         start: Union[float, EvalValue] = EvalValue(
-            expr="1.1 * flx_int - 0.1 * flx_half",
-            resolved=1.1 * flx_int - 0.1 * flx_half,
-            error=None,
+            expr="1.1 * flx_int - 0.1 * flx_half"
         )
-        stop: Union[float, EvalValue] = EvalValue(
-            expr="1.1 * flx_half - 0.1 * flx_int",
-            resolved=1.1 * flx_half - 0.1 * flx_int,
-            error=None,
-        )
+        stop: Union[float, EvalValue] = EvalValue(expr="1.1 * flx_half - 0.1 * flx_int")
     else:
         start = -4e-3
         stop = 4e-3

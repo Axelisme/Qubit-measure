@@ -550,4 +550,4 @@ class CfgSchema:
         """Lower the current schema into a raw experiment config dictionary."""
         from .lowering import _section_to_dict_inner
 
-        return _section_to_dict_inner(self.spec, self.value, req.ml, [])
+        return _section_to_dict_inner(self.spec, self.value, req.ml, [], req.md)

@@ -29,6 +29,7 @@ from zcu_tools.gui.adapter import (
 )
 from zcu_tools.gui.adapter.lowering import _find_allowed_spec
 from zcu_tools.gui.adapter.protocol import NoAnalyzeParams
+from zcu_tools.meta_tool import MetaDict
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -99,6 +100,18 @@ def test_scalar_eval_value_unresolved_raises():
     )
     with pytest.raises(RuntimeError, match="freq.*missing_name.*unresolved"):
         schema_to_dict(s, _make_ml())
+
+
+def test_scalar_eval_value_resolves_against_md_when_no_snapshot():
+    """An EvalValue built without a snapshot is resolved by lowering against md."""
+    s = _schema(
+        {"freq": ScalarSpec(label="Freq", type=float)},
+        {"freq": EvalValue(expr="r_f - rf_w")},
+    )
+    md = MetaDict()
+    md.r_f = 6000.0
+    md.rf_w = 2.0
+    assert schema_to_dict(s, _make_ml(), md)["freq"] == pytest.approx(5998.0)
 
 
 def test_scalar_missing_in_value_skipped():
@@ -190,6 +203,28 @@ def test_sweep_eval_unresolved_fails_fast():
     )
     with pytest.raises(RuntimeError, match="unresolved"):
         schema_to_dict(s, _make_ml())
+
+
+def test_sweep_eval_edges_resolve_against_md_when_no_snapshot():
+    """Sweep edges built without a snapshot are resolved by lowering against md."""
+    from zcu_tools.program.v2 import SweepCfg
+
+    s = _schema(
+        {"sweep": SweepSpec()},
+        {
+            "sweep": SweepValue(
+                start=EvalValue(expr="r_f - 10"),
+                stop=EvalValue(expr="r_f + 10"),
+                expts=11,
+            )
+        },
+    )
+    md = MetaDict()
+    md.r_f = 6000.0
+    sweep = schema_to_dict(s, _make_ml(), md)["sweep"]
+    assert isinstance(sweep, SweepCfg)
+    assert sweep.start == pytest.approx(5990.0)
+    assert sweep.stop == pytest.approx(6010.0)
 
 
 # ---------------------------------------------------------------------------

@@ -34,7 +34,8 @@ def test_proper_relax_uses_eval_when_t1_present():
     result = proper_relax(ctx)
     assert isinstance(result, EvalValue)
     assert result.expr == "5.0 * t1"
-    assert result.resolved == 250.0
+    # helpers no longer eagerly resolve; lowering owns resolution against md
+    assert result.resolved is None
 
 
 def test_proper_relax_custom_factor():
@@ -42,7 +43,7 @@ def test_proper_relax_custom_factor():
     result = proper_relax(ctx, factor=3.0)
     assert isinstance(result, EvalValue)
     assert result.expr == "3.0 * t1"
-    assert result.resolved == 30.0
+    assert result.resolved is None
 
 
 def test_proper_relax_falls_back_without_t1():
@@ -90,9 +91,9 @@ def test_res_freq_range_uses_eval_value_when_md_present():
     assert isinstance(sv.start, EvalValue)
     assert isinstance(sv.stop, EvalValue)
     assert sv.start.expr == "r_f - 1.5 * rf_w"
-    assert sv.start.resolved == 5485.0
+    assert sv.start.resolved is None
     assert sv.stop.expr == "r_f + 1.5 * rf_w"
-    assert sv.stop.resolved == 5515.0
+    assert sv.stop.resolved is None
     assert sv.expts == 301
 
 
@@ -108,7 +109,7 @@ def test_freq_range_span_factor_one_omits_coefficient():
     sv = proper_res_freq_range(ctx, 101, span_factor=1.0)
     assert isinstance(sv.start, EvalValue)
     assert sv.start.expr == "r_f - rf_w"  # not "r_f - 1.0 * rf_w"
-    assert sv.start.resolved == 5980.0
+    assert sv.start.resolved is None
 
 
 def test_qub_freq_range_uses_qubit_md_keys():
@@ -116,7 +117,7 @@ def test_qub_freq_range_uses_qubit_md_keys():
     sv = proper_qub_freq_range(ctx, 201, span_factor=2.0)
     assert isinstance(sv.start, EvalValue)
     assert sv.start.expr == "q_f - 2.0 * qf_w"
-    assert sv.start.resolved == 4190.0
+    assert sv.start.resolved is None
     assert sv.expts == 201
 
 
@@ -129,7 +130,7 @@ def test_flux_range_extrapolates_past_calibrated_points():
     assert isinstance(sv.start, EvalValue)
     assert isinstance(sv.stop, EvalValue)
     assert sv.start.expr == "1.1 * flx_int - 0.1 * flx_half"
-    assert sv.start.resolved == 1.1 * 3e-3 - 0.1 * 1e-3
+    assert sv.start.resolved is None
     assert sv.stop.expr == "1.1 * flx_half - 0.1 * flx_int"
     assert sv.expts == 101
 

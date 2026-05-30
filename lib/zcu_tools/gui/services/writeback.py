@@ -110,7 +110,11 @@ class WritebackService:
 
     def _resolve_module_item(self, item: ModuleWriteback) -> Any:
         if item.edited_schema is not None:
-            raw = schema_to_dict(item.edited_schema, self._state.exp_context.ml)
+            raw = schema_to_dict(
+                item.edited_schema,
+                self._state.exp_context.ml,
+                self._state.exp_context.md,
+            )
             return ModuleCfgFactory.from_raw(raw, ml=self._state.exp_context.ml)
         if item.proposed_module is not None:
             return item.proposed_module
@@ -118,7 +122,11 @@ class WritebackService:
 
     def _resolve_waveform_item(self, item: WaveformWriteback) -> Any:
         if item.edited_schema is not None:
-            raw = schema_to_dict(item.edited_schema, self._state.exp_context.ml)
+            raw = schema_to_dict(
+                item.edited_schema,
+                self._state.exp_context.ml,
+                self._state.exp_context.md,
+            )
             return WaveformCfgFactory.from_raw(raw, ml=self._state.exp_context.ml)
         if item.proposed_waveform is not None:
             return item.proposed_waveform

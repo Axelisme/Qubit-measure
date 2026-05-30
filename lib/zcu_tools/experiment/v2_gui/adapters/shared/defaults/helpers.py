@@ -20,7 +20,7 @@ from zcu_tools.gui.adapter import (
     make_default_value,
 )
 
-from ..ctx_helpers import md_get_float, md_has_key
+from ..ctx_helpers import md_has_key
 from ..module_defaults import NamedModuleValue, select_named_module_value
 
 if TYPE_CHECKING:
@@ -92,11 +92,13 @@ def make_trig_offset(
     ctx: ExpContext,
     *,
     trig_expr: str,
-    trig_delta: float,
     trig_fallback: float,
 ) -> ScalarValue:
-    """Build a trig_offset ScalarValue: EvalValue if timeFly exists, else DirectValue."""
+    """Build a trig_offset ScalarValue: EvalValue if timeFly exists, else DirectValue.
+
+    When ``timeFly`` is present the EvalValue carries only ``trig_expr``; lowering
+    resolves it against md at render time.
+    """
     if md_has_key(ctx, "timeFly"):
-        resolved = md_get_float(ctx, "timeFly", trig_fallback - trig_delta) + trig_delta
-        return EvalValue(expr=trig_expr, resolved=resolved, error=None)
+        return EvalValue(expr=trig_expr)
     return DirectValue(trig_fallback)
