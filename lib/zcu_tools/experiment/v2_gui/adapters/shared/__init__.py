@@ -18,9 +18,12 @@ from .module_ref_defaults import (
 from .role_defaults import (
     default_pi,
     default_pi2,
+    default_probe_readout,
     default_qub_probe,
+    default_readout,
     default_res_probe,
     default_reset,
+    default_waveform,
 )
 from .module_templates import (
     make_flat_top_waveform_edit_template,
@@ -36,8 +39,10 @@ from .module_value_defaults import (
     make_pulse_readout_default,
     make_pulse_reset_default,
     make_readout_default,
+    make_res_pulse_default,
     make_reset_default,
     make_two_pulse_reset_default,
+    make_waveform_default,
 )
 from .spec_helpers import (
     make_pulse_module_spec,
@@ -66,6 +71,8 @@ __all__ = [
     "make_pulse_readout_default",
     "make_readout_default",
     "make_pulse_default",
+    "make_res_pulse_default",
+    "make_waveform_default",
     "make_none_reset_default",
     "make_pulse_reset_default",
     "make_two_pulse_reset_default",
@@ -81,6 +88,9 @@ __all__ = [
     "default_pi2",
     "default_qub_probe",
     "default_res_probe",
+    "default_probe_readout",
+    "default_readout",
+    "default_waveform",
     "default_reset",
     # Module templates
     "make_flat_top_waveform_edit_template",

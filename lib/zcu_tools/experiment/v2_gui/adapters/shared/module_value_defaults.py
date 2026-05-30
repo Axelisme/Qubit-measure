@@ -25,6 +25,7 @@ from zcu_tools.gui.specs.readout import (
     make_direct_readout_spec,
     make_pulse_readout_spec,
 )
+from zcu_tools.gui.specs.waveform import make_cosine_waveform_spec
 from zcu_tools.gui.specs.reset import (
     make_bath_reset_spec,
     make_none_reset_spec,
@@ -200,6 +201,53 @@ def make_pulse_default(
     value = make_default_value(spec)
     _patch_pulse_fields(value, freq=q_f, ch=qub_ch, gain=gain, length=length)
     return ModuleRefValue("<Custom:Pulse>", value)
+
+
+def make_res_pulse_default(
+    ctx: ExpContext, *, gain: float = 0.05, length: float = 1.0
+) -> ModuleRefValue:
+    """A blank resonator-side pulse (res_ch / r_f), no ro_cfg.
+
+    Same shape as make_pulse_default but driven by the resonator's md keys
+    (notebook res-side probes like CKP res_pulse / AC-Stark stark_pulse1 use
+    ``ch=md.res_ch, freq=md.r_f``).
+    """
+    r_f = md_get_float(ctx, "r_f", 6000.0)
+    res_ch = md_get_int(ctx, "res_ch", 0)
+
+    spec = make_pulse_spec()
+    value = make_default_value(spec)
+    _patch_pulse_fields(value, freq=r_f, ch=res_ch, gain=gain, length=length)
+    return ModuleRefValue("<Custom:Pulse>", value)
+
+
+_DEFAULT_WAVEFORM_NAMES = ["qub_flat", "qub_cos", "qub_const"]
+
+
+def make_waveform_default(
+    ctx: ExpContext,
+    preferred_names: list[str] = _DEFAULT_WAVEFORM_NAMES,
+    *,
+    length: float = 0.1,
+) -> WaveformRefValue:
+    """A WaveformRefValue: reference a library waveform if present, else blank.
+
+    Searches ``ctx.ml.waveforms`` for the first ``preferred_names`` match (notebook
+    qub_flat / qub_cos); on a hit, references it; otherwise falls back to a blank
+    cosine waveform with the given length. Mirrors make_*_ref_default but for the
+    waveform sub-field of a pulse.
+    """
+    from zcu_tools.gui.cfg_schemas import waveform_cfg_to_value
+
+    waveforms = getattr(ctx.ml, "waveforms", {})
+    for name in preferred_names:
+        if name in waveforms:
+            _, wav_val = waveform_cfg_to_value(waveforms[name])
+            return WaveformRefValue(chosen_key=name, value=wav_val)
+
+    blank = make_default_value(make_cosine_waveform_spec())
+    blank.fields["length"] = DirectValue(length)
+    return WaveformRefValue(chosen_key="<Custom:Cosine>", value=blank)
 
 
 # ---------------------------------------------------------------------------

@@ -16,14 +16,19 @@ from typing import TYPE_CHECKING
 
 from typing_extensions import Literal, Optional, overload
 
-from zcu_tools.gui.adapter import ModuleRefValue
+from zcu_tools.gui.adapter import ModuleRefValue, WaveformRefValue
 
 from .module_ref_defaults import (
-    make_pulse_readout_ref_default,
     make_pulse_ref_default,
+    make_readout_ref_default,
     make_reset_ref_default,
 )
-from .module_value_defaults import make_pulse_default
+from .module_value_defaults import (
+    make_pulse_default,
+    make_pulse_readout_default,
+    make_res_pulse_default,
+    make_waveform_default,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.adapter import ExpContext
@@ -44,28 +49,49 @@ def default_pi2(ctx: ExpContext) -> ModuleRefValue:
 
 
 def default_qub_probe(ctx: ExpContext) -> ModuleRefValue:
-    """Qubit probe pulse: a fresh blank pulse (freq usually locked by the adapter
-    because a sweep axis drives it). Does not reuse a calibrated pi pulse."""
+    """Qubit probe pulse: a fresh blank qubit pulse (qub_ch / q_f). freq usually
+    locked by the adapter because a sweep axis drives it. Does not reuse a
+    calibrated pi pulse."""
     return make_pulse_default(ctx)
 
 
+def default_res_probe(ctx: ExpContext) -> ModuleRefValue:
+    """Resonator probe pulse: a fresh blank resonator-side pulse (res_ch / r_f),
+    **no ro_cfg** (e.g. CKP res_pulse, AC-Stark stark_pulse1)."""
+    return make_res_pulse_default(ctx)
+
+
+def default_probe_readout(ctx: ExpContext) -> ModuleRefValue:
+    """Inline blank readout (pulse + ro_cfg), not a library reference. Used by
+    spectroscopy where the readout is not yet calibrated."""
+    return make_pulse_readout_default(ctx)
+
+
 @overload
-def default_res_probe(
+def default_readout(
     ctx: ExpContext, *, optional: Literal[False] = ...
 ) -> ModuleRefValue: ...
 
 
 @overload
-def default_res_probe(
+def default_readout(
     ctx: ExpContext, *, optional: Literal[True]
 ) -> Optional[ModuleRefValue]: ...
 
 
-def default_res_probe(
+def default_readout(
     ctx: ExpContext, *, optional: bool = False
 ) -> Optional[ModuleRefValue]:
-    """Resonator probe readout: prefer library readout entries, else blank."""
-    return make_pulse_readout_ref_default(ctx, optional=optional)
+    """Calibrated readout: reference a library readout (readout_dpm / readout_rf),
+    else fall back to a blank pulse-readout. Used by post-calibration experiments
+    (t1 / t2 / rabi)."""
+    return make_readout_ref_default(ctx, optional=optional)
+
+
+def default_waveform(ctx: ExpContext) -> WaveformRefValue:
+    """Qubit-pulse waveform: reference a library waveform (qub_flat / qub_cos),
+    else a blank cosine. Goes into a pulse's ``waveform`` sub-field."""
+    return make_waveform_default(ctx)
 
 
 @overload
