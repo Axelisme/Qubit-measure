@@ -4,13 +4,14 @@ import time
 from dataclasses import dataclass
 
 from matplotlib.figure import Figure
-from typing_extensions import Annotated, Sequence, TypeAlias
+from typing_extensions import Annotated, Any, ClassVar, Sequence, TypeAlias
 
 from zcu_tools.experiment.v2.twotone.time_domain.t2ramsey import (
     T2RamseyCfg,
     T2RamseyExp,
     T2RamseyResult,
 )
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_module_spec,
     make_pulse_ref_default,
@@ -19,24 +20,19 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_reset_module_spec,
     make_reset_ref_default,
     md_get_float,
-    md_has_key,
+    md_writeback,
+    proper_relax,
 )
 from zcu_tools.gui.adapter import (
-    AbsExpAdapter,
     AnalyzeRequest,
     AnalyzeResultBase,
     CfgNodeValue,
-    CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
-    EvalValue,
     ExpContext,
-    MetaDictWriteback,
     ParamMeta,
-    RunRequest,
     ScalarSpec,
-    ScalarValue,
     SweepSpec,
     SweepValue,
     WritebackItem,
@@ -60,7 +56,7 @@ class T2RamseyAnalyzeResult(AnalyzeResultBase):
 
 
 class T2RamseyAdapter(
-    AbsExpAdapter[
+    BaseAdapter[
         T2RamseyCfg,
         T2RamseyRunResult,
         T2RamseyAnalyzeResult,
@@ -68,8 +64,10 @@ class T2RamseyAdapter(
     ]
 ):
     exp_cls = T2RamseyExp
+    ExpCfg_cls: ClassVar[Any] = T2RamseyCfg
 
-    def cfg_spec(self) -> CfgSectionSpec:
+    @classmethod
+    def cfg_spec(cls) -> CfgSectionSpec:
         return CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
@@ -93,13 +91,8 @@ class T2RamseyAdapter(
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        t1 = md_get_float(ctx, "t1", 100.0)
         t2r = md_get_float(ctx, "t2r", 20.0)
-        relax_delay: ScalarValue = (
-            EvalValue(expr="5 * t1", resolved=5.0 * t1, error=None)
-            if md_has_key(ctx, "t1")
-            else DirectValue(100.0)
-        )
+        relax_delay = proper_relax(ctx)
         _module_fields: dict[str, CfgNodeValue] = {
             "pi2_pulse": make_pulse_ref_default(
                 ctx, preferred_names=["pi2_amp", "pi2_len", "pi_amp", "pi_len"]
@@ -124,9 +117,6 @@ class T2RamseyAdapter(
         )
         return root_val
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T2RamseyCfg:
-        return req.ml.make_cfg(raw_cfg, T2RamseyCfg)
-
     def get_analyze_params(
         self, result: T2RamseyRunResult, ctx: ExpContext
     ) -> T2RamseyAnalyzeParams:
@@ -150,13 +140,7 @@ class T2RamseyAdapter(
         result = req.analyze_result
         ctx = req.ctx
         return [
-            MetaDictWriteback(
-                key="t2r",
-                description="T2 Ramsey time (us)",
-                current_value=ctx.md.get("t2r"),
-                md_key="t2r",
-                proposed_value=round(result.t2r, 4),
-            ),
+            md_writeback(ctx, "t2r", "T2 Ramsey time (us)", result.t2r),
         ]
 
     def make_filename_stem(self, ctx: ExpContext) -> str:

@@ -9,7 +9,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-
 from zcu_tools.gui.adapter import ContextReadiness
 from zcu_tools.gui.event_bus import EventBus, GuiEvent
 from zcu_tools.gui.services.analyze import AnalyzeService
@@ -86,7 +85,10 @@ def test_start_analyze_passes_figure_container(qapp):  # noqa: ARG001
     )
 
     _, kwargs = runner.start_analyze.call_args
-    assert kwargs.get("figure_container") is container or container in runner.start_analyze.call_args[0]
+    assert (
+        kwargs.get("figure_container") is container
+        or container in runner.start_analyze.call_args[0]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +102,9 @@ def test_start_analyze_rejects_busy_tab(qapp):  # noqa: ARG001
     svc, _ = _make_service(state, EventBus())
 
     with pytest.raises(RuntimeError, match="busy"):
-        svc.start_analyze(AnalyzePermit(tab_id="tab1"), analyze_params_instance=object())
+        svc.start_analyze(
+            AnalyzePermit(tab_id="tab1"), analyze_params_instance=object()
+        )
 
 
 # ---------------------------------------------------------------------------

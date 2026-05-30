@@ -5,7 +5,9 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.adapter import (
+    AdapterCapabilities,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -28,12 +30,7 @@ from zcu_tools.gui.adapter import (
     schema_to_dict,
 )
 from zcu_tools.gui.adapter.lowering import _find_allowed_spec
-from zcu_tools.gui.adapter.protocol import (
-    AbsExpAdapter,
-    NoAnalysisAdapterMixin,
-    NoAnalyzeParams,
-    NoAnalysisResult,
-)
+from zcu_tools.gui.adapter.protocol import NoAnalyzeParams
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -572,17 +569,19 @@ def test_resolve_sweep_edge_non_numeric_resolved_raises():
 
 
 # ---------------------------------------------------------------------------
-# AbsExpAdapter — make_default_save_paths error paths
+# BaseAdapter — make_default_save_paths error paths
 # ---------------------------------------------------------------------------
 
 
-def _make_concrete_adapter() -> AbsExpAdapter:
-    """Create a minimal concrete adapter for testing non-abstract methods."""
+def _make_concrete_adapter() -> BaseAdapter:
+    """Create a minimal concrete no-analysis adapter for shared-method tests."""
 
-    class _FakeAdapter(NoAnalysisAdapterMixin):
+    class _FakeAdapter(BaseAdapter):
+        capabilities = AdapterCapabilities(supports_analysis=False)
         exp_cls = MagicMock()
 
-        def cfg_spec(self):
+        @classmethod
+        def cfg_spec(cls):
             return CfgSectionSpec()
 
         def make_default_value(self, ctx):
@@ -637,17 +636,17 @@ def test_make_default_save_paths_raises_without_active_label():
 
 
 # ---------------------------------------------------------------------------
-# NoAnalysisAdapterMixin
+# BaseAdapter — no-analysis adapters raise (Fast Fail) on analysis methods
 # ---------------------------------------------------------------------------
 
 
-def test_no_analysis_mixin_get_analyze_params_returns_instance():
+def test_base_adapter_get_analyze_params_raises_by_default():
     adapter = _make_concrete_adapter()
-    result = adapter.get_analyze_params(MagicMock(), _make_ctx())
-    assert isinstance(result, NoAnalyzeParams)
+    with pytest.raises(NotImplementedError, match="get_analyze_params"):
+        adapter.get_analyze_params(MagicMock(), _make_ctx())
 
 
-def test_no_analysis_mixin_analyze_returns_no_analysis_result():
+def test_base_adapter_analyze_raises_by_default():
     from zcu_tools.gui.adapter import AnalyzeRequest
 
     adapter = _make_concrete_adapter()
@@ -658,8 +657,63 @@ def test_no_analysis_mixin_analyze_returns_no_analysis_result():
         ml=MagicMock(),
         predictor=None,
     )
-    result = adapter.analyze(req)
-    assert isinstance(result, NoAnalysisResult)
+    with pytest.raises(NotImplementedError, match="analyze"):
+        adapter.analyze(req)
+
+
+# ---------------------------------------------------------------------------
+# BaseAdapter — default build_exp_cfg via ExpCfg_cls
+# ---------------------------------------------------------------------------
+
+
+def test_base_adapter_build_exp_cfg_delegates_to_make_cfg():
+    """ExpCfg_cls set → default build_exp_cfg delegates to ml.make_cfg."""
+
+    class _Cfg:
+        pass
+
+    class _Adapter(BaseAdapter):
+        capabilities = AdapterCapabilities(supports_analysis=False)
+        exp_cls = MagicMock()
+        ExpCfg_cls = _Cfg
+
+        @classmethod
+        def cfg_spec(cls):
+            return CfgSectionSpec()
+
+        def make_default_value(self, ctx):
+            return CfgSectionValue()
+
+        def make_filename_stem(self, ctx):
+            return "stem"
+
+    req = MagicMock()
+    sentinel = object()
+    req.ml.make_cfg.return_value = sentinel
+    out = _Adapter().build_exp_cfg({"reps": 1}, req)
+    req.ml.make_cfg.assert_called_once_with({"reps": 1}, _Cfg)
+    assert out is sentinel
+
+
+def test_base_adapter_build_exp_cfg_raises_without_expcfg_cls():
+    """Neither ExpCfg_cls set nor build_exp_cfg overridden → Fast Fail."""
+
+    class _Adapter(BaseAdapter):
+        capabilities = AdapterCapabilities(supports_analysis=False)
+        exp_cls = MagicMock()
+
+        @classmethod
+        def cfg_spec(cls):
+            return CfgSectionSpec()
+
+        def make_default_value(self, ctx):
+            return CfgSectionValue()
+
+        def make_filename_stem(self, ctx):
+            return "stem"
+
+    with pytest.raises(NotImplementedError, match="ExpCfg_cls"):
+        _Adapter().build_exp_cfg({}, MagicMock())
 
 
 # ---------------------------------------------------------------------------
@@ -669,10 +723,12 @@ def test_no_analysis_mixin_analyze_returns_no_analysis_result():
 
 def test_analyze_params_cls_fallback_when_no_annotation():
 
-    class _UnannotatedAdapter(NoAnalysisAdapterMixin):
+    class _UnannotatedAdapter(BaseAdapter):
+        capabilities = AdapterCapabilities(supports_analysis=False)
         exp_cls = MagicMock()
 
-        def cfg_spec(self):
+        @classmethod
+        def cfg_spec(cls):
             return CfgSectionSpec()
 
         def make_default_value(self, ctx):

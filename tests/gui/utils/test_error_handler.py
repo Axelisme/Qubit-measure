@@ -42,6 +42,7 @@ def test_install_replaces_threading_excepthook(qapp):  # noqa: ARG001
     try:
         install_global_exception_hook()
         import _thread
+
         assert threading.excepthook is not _thread._excepthook  # type: ignore[attr-defined]
     finally:
         _restore_hooks()

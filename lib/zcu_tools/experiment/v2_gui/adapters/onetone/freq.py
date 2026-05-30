@@ -4,9 +4,18 @@ import time
 from dataclasses import dataclass
 
 from matplotlib.figure import Figure
-from typing_extensions import Annotated, Any, Literal, Sequence, TypeAlias, Union
+from typing_extensions import (
+    Annotated,
+    Any,
+    ClassVar,
+    Literal,
+    Sequence,
+    TypeAlias,
+    Union,
+)
 
 from zcu_tools.experiment.v2.onetone.freq import FreqCfg, FreqExp, FreqResult
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     build_readout_for_frequency,
     build_waveform_for_length,
@@ -17,21 +26,18 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_reset_module_spec,
     md_get_float,
     md_has_key,
+    md_writeback,
 )
 from zcu_tools.gui.adapter import (
-    AbsExpAdapter,
     AnalyzeRequest,
     AnalyzeResultBase,
-    CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
     EvalValue,
     ExpContext,
-    MetaDictWriteback,
     ModuleWriteback,
     ParamMeta,
-    RunRequest,
     ScalarSpec,
     SweepSpec,
     SweepValue,
@@ -58,7 +64,7 @@ class OneToneFreqAnalyzeResult(AnalyzeResultBase):
 
 
 class OneToneFreqAdapter(
-    AbsExpAdapter[
+    BaseAdapter[
         FreqCfg,
         OneToneFreqRunResult,
         OneToneFreqAnalyzeResult,
@@ -66,8 +72,10 @@ class OneToneFreqAdapter(
     ]
 ):
     exp_cls = FreqExp
+    ExpCfg_cls: ClassVar[Any] = FreqCfg
 
-    def cfg_spec(self) -> CfgSectionSpec:
+    @classmethod
+    def cfg_spec(cls) -> CfgSectionSpec:
         return CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
@@ -144,9 +152,6 @@ class OneToneFreqAdapter(
         )
         return root_val
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FreqCfg:
-        return req.ml.make_cfg(raw_cfg, FreqCfg)
-
     def get_analyze_params(
         self, result: OneToneFreqRunResult, ctx: ExpContext
     ) -> OneToneFreqAnalyzeParams:
@@ -182,20 +187,8 @@ class OneToneFreqAdapter(
         wav_len = md_get_float(ctx, "res_probe_len", 5.0)
 
         return [
-            MetaDictWriteback(
-                key="r_f",
-                description="Resonator frequency (MHz)",
-                current_value=getattr(ctx.md, "r_f", None),
-                md_key="r_f",
-                proposed_value=round(result.freq, 4),
-            ),
-            MetaDictWriteback(
-                key="rf_w",
-                description="Resonator linewidth FWHM (MHz)",
-                current_value=getattr(ctx.md, "rf_w", None),
-                md_key="rf_w",
-                proposed_value=round(result.fwhm, 4),
-            ),
+            md_writeback(ctx, "r_f", "Resonator frequency (MHz)", result.freq),
+            md_writeback(ctx, "rf_w", "Resonator linewidth FWHM (MHz)", result.fwhm),
             ModuleWriteback(
                 key="readout_rf",
                 description="readout_rf module config",

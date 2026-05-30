@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING, Any, Optional
 from typing_extensions import Generic, TypeVar
 
 from .adapter import (
-    AbsExpAdapter,
     AnalyzeResultWithFigure,
     CfgSchema,
+    ExpAdapterProtocol,
     ExpContext,
     SavePaths,
     T_AnalyzeParams,
@@ -92,7 +92,7 @@ class DeviceState:
 @dataclass
 class TabState(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     adapter_name: str
-    adapter: AbsExpAdapter[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]
+    adapter: ExpAdapterProtocol
     # Committed cfg SSOT for this tab. The tab's CfgFormWidget LiveModel is the
     # runtime draft; it auto-commits here through Controller.update_tab_cfg on
     # every change. Run / Save / Session persistence read this field, never

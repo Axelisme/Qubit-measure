@@ -4,13 +4,14 @@ import time
 from dataclasses import dataclass
 
 from matplotlib.figure import Figure
-from typing_extensions import Annotated, Literal, Sequence, TypeAlias
+from typing_extensions import Annotated, Any, ClassVar, Literal, Sequence, TypeAlias
 
 from zcu_tools.experiment.v2.twotone.time_domain.t2echo import (
     T2EchoCfg,
     T2EchoExp,
     T2EchoResult,
 )
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_module_spec,
     make_pulse_ref_default,
@@ -19,24 +20,19 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_reset_module_spec,
     make_reset_ref_default,
     md_get_float,
-    md_has_key,
+    md_writeback,
+    proper_relax,
 )
 from zcu_tools.gui.adapter import (
-    AbsExpAdapter,
     AnalyzeRequest,
     AnalyzeResultBase,
     CfgNodeValue,
-    CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
-    EvalValue,
     ExpContext,
-    MetaDictWriteback,
     ParamMeta,
-    RunRequest,
     ScalarSpec,
-    ScalarValue,
     SweepSpec,
     SweepValue,
     WritebackItem,
@@ -59,7 +55,7 @@ class T2EchoAnalyzeResult(AnalyzeResultBase):
 
 
 class T2EchoAdapter(
-    AbsExpAdapter[
+    BaseAdapter[
         T2EchoCfg,
         T2EchoRunResult,
         T2EchoAnalyzeResult,
@@ -67,8 +63,10 @@ class T2EchoAdapter(
     ]
 ):
     exp_cls = T2EchoExp
+    ExpCfg_cls: ClassVar[Any] = T2EchoCfg
 
-    def cfg_spec(self) -> CfgSectionSpec:
+    @classmethod
+    def cfg_spec(cls) -> CfgSectionSpec:
         return CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
@@ -93,13 +91,8 @@ class T2EchoAdapter(
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        t1 = md_get_float(ctx, "t1", 100.0)
         t2e = md_get_float(ctx, "t2e", 20.0)
-        relax_delay: ScalarValue = (
-            EvalValue(expr="5 * t1", resolved=5.0 * t1, error=None)
-            if md_has_key(ctx, "t1")
-            else DirectValue(100.0)
-        )
+        relax_delay = proper_relax(ctx)
         _module_fields: dict[str, CfgNodeValue] = {
             "pi2_pulse": make_pulse_ref_default(
                 ctx, preferred_names=["pi2_amp", "pi2_len", "pi_amp", "pi_len"]
@@ -125,9 +118,6 @@ class T2EchoAdapter(
         )
         return root_val
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T2EchoCfg:
-        return req.ml.make_cfg(raw_cfg, T2EchoCfg)
-
     def get_analyze_params(
         self, result: T2EchoRunResult, ctx: ExpContext
     ) -> T2EchoAnalyzeParams:
@@ -149,13 +139,7 @@ class T2EchoAdapter(
         result = req.analyze_result
         ctx = req.ctx
         return [
-            MetaDictWriteback(
-                key="t2e",
-                description="T2 Echo time (us)",
-                current_value=ctx.md.get("t2e"),
-                md_key="t2e",
-                proposed_value=round(result.t2e, 4),
-            ),
+            md_writeback(ctx, "t2e", "T2 Echo time (us)", result.t2e),
         ]
 
     def make_filename_stem(self, ctx: ExpContext) -> str:

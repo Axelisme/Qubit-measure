@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import time
 
-from typing_extensions import TypeAlias
+from typing_extensions import Any, ClassVar, TypeAlias
 
 from zcu_tools.experiment.v2.twotone.power_dep import PowerCfg, PowerExp, PowerResult
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_module_spec,
     make_pulse_ref_default,
@@ -15,14 +16,12 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     md_get_float,
 )
 from zcu_tools.gui.adapter import (
+    AdapterCapabilities,
     CfgNodeValue,
-    CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
     ExpContext,
-    NoAnalysisAdapterMixin,
-    RunRequest,
     ScalarSpec,
     SweepSpec,
     SweepValue,
@@ -31,10 +30,15 @@ from zcu_tools.gui.adapter import (
 PowerDepRunResult: TypeAlias = PowerResult
 
 
-class PowerDepAdapter(NoAnalysisAdapterMixin[PowerCfg, PowerDepRunResult]):
+class PowerDepAdapter(BaseAdapter[PowerCfg, PowerDepRunResult]):
     exp_cls = PowerExp
+    ExpCfg_cls: ClassVar[Any] = PowerCfg
+    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
+        requires_soc=True, supports_analysis=False
+    )
 
-    def cfg_spec(self) -> CfgSectionSpec:
+    @classmethod
+    def cfg_spec(cls) -> CfgSectionSpec:
         return CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
@@ -90,9 +94,6 @@ class PowerDepAdapter(NoAnalysisAdapterMixin[PowerCfg, PowerDepRunResult]):
             }
         )
         return root_val
-
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> PowerCfg:
-        return req.ml.make_cfg(raw_cfg, PowerCfg)
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_qubit_power_{time.strftime('%H%M')}"

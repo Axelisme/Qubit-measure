@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from .adapter import (
-    AbsExpAdapter,
     CfgNodeSpec,
     CfgNodeValue,
     CfgSchema,
@@ -9,6 +8,7 @@ from .adapter import (
     CfgSectionValue,
     DirectValue,
     EvalValue,
+    ExpAdapterProtocol,
     ExpContext,
     MetaDictWriteback,
     ModuleRefSpec,
@@ -36,7 +36,6 @@ from .state import State, TabState
 from .sweep_model import SweepEditor
 
 __all__ = [
-    "AbsExpAdapter",
     "CfgNodeSpec",
     "CfgNodeValue",
     "CfgSchema",
@@ -44,6 +43,7 @@ __all__ = [
     "CfgSectionValue",
     "DirectValue",
     "EvalValue",
+    "ExpAdapterProtocol",
     "ExpContext",
     "IOManager",
     "MetaDictWriteback",

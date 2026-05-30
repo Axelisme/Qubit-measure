@@ -4,13 +4,14 @@ import time
 from dataclasses import dataclass
 
 from matplotlib.figure import Figure
-from typing_extensions import Annotated, Sequence, TypeAlias
+from typing_extensions import Annotated, Any, ClassVar, Sequence, TypeAlias
 
 from zcu_tools.experiment.v2.twotone.rabi.len_rabi import (
     LenRabiCfg,
     LenRabiExp,
     LenRabiResult,
 )
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_module_spec,
     make_pulse_ref_default,
@@ -19,20 +20,17 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_reset_module_spec,
     make_reset_ref_default,
     md_get_float,
+    md_writeback,
 )
 from zcu_tools.gui.adapter import (
-    AbsExpAdapter,
     AnalyzeRequest,
     AnalyzeResultBase,
     CfgNodeValue,
-    CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
     ExpContext,
-    MetaDictWriteback,
     ParamMeta,
-    RunRequest,
     ScalarSpec,
     SweepSpec,
     SweepValue,
@@ -56,7 +54,7 @@ class LenRabiAnalyzeResult(AnalyzeResultBase):
 
 
 class LenRabiAdapter(
-    AbsExpAdapter[
+    BaseAdapter[
         LenRabiCfg,
         LenRabiRunResult,
         LenRabiAnalyzeResult,
@@ -64,8 +62,10 @@ class LenRabiAdapter(
     ]
 ):
     exp_cls = LenRabiExp
+    ExpCfg_cls: ClassVar[Any] = LenRabiCfg
 
-    def cfg_spec(self) -> CfgSectionSpec:
+    @classmethod
+    def cfg_spec(cls) -> CfgSectionSpec:
         return CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
@@ -112,9 +112,6 @@ class LenRabiAdapter(
         )
         return root_val
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> LenRabiCfg:
-        return req.ml.make_cfg(raw_cfg, LenRabiCfg)
-
     def get_analyze_params(
         self, result: LenRabiRunResult, ctx: ExpContext
     ) -> LenRabiAnalyzeParams:
@@ -136,20 +133,8 @@ class LenRabiAdapter(
         result = req.analyze_result
         ctx = req.ctx
         return [
-            MetaDictWriteback(
-                key="pi_len",
-                description="Pi pulse length (us)",
-                current_value=ctx.md.get("pi_len"),
-                md_key="pi_len",
-                proposed_value=round(result.pi_len, 5),
-            ),
-            MetaDictWriteback(
-                key="pi2_len",
-                description="Pi/2 pulse length (us)",
-                current_value=ctx.md.get("pi2_len"),
-                md_key="pi2_len",
-                proposed_value=round(result.pi2_len, 5),
-            ),
+            md_writeback(ctx, "pi_len", "Pi pulse length (us)", result.pi_len, 5),
+            md_writeback(ctx, "pi2_len", "Pi/2 pulse length (us)", result.pi2_len, 5),
         ]
 
     def make_filename_stem(self, ctx: ExpContext) -> str:

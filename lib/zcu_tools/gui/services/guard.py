@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.adapter import (
-    AbsExpAdapter,
     CfgSchema,
     ContextReadiness,
+    ExpAdapterProtocol,
     RunRequest,
     require_soc_handles,
 )
@@ -49,7 +49,7 @@ class RunPermit:
     tab_id: str
     request: RunRequest
     schema: CfgSchema
-    adapter: AbsExpAdapter[Any, Any, Any, Any]
+    adapter: ExpAdapterProtocol
 
 
 @dataclass(frozen=True)

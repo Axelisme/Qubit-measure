@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from typing_extensions import TypeAlias, Union
+from typing_extensions import ClassVar, TypeAlias, Union
 
 from zcu_tools.experiment.v2.onetone.flux_dep import (
     FluxDepCfg,
     FluxDepExp,
     FluxDepResult,
 )
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_readout_default,
     make_pulse_readout_module_spec,
@@ -15,14 +16,13 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     md_has_key,
 )
 from zcu_tools.gui.adapter import (
-    CfgSchema,
+    AdapterCapabilities,
     CfgSectionSpec,
     CfgSectionValue,
     DeviceRefSpec,
     DirectValue,
     EvalValue,
     ExpContext,
-    NoAnalysisAdapterMixin,
     RunRequest,
     ScalarSpec,
     ScalarValue,
@@ -33,12 +33,14 @@ from zcu_tools.gui.adapter import (
 OneToneFluxDepRunResult: TypeAlias = FluxDepResult
 
 
-class OneToneFluxDepAdapter(
-    NoAnalysisAdapterMixin[FluxDepCfg, OneToneFluxDepRunResult]
-):
+class OneToneFluxDepAdapter(BaseAdapter[FluxDepCfg, OneToneFluxDepRunResult]):
     exp_cls = FluxDepExp
+    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
+        requires_soc=True, supports_analysis=False
+    )
 
-    def cfg_spec(self) -> CfgSectionSpec:
+    @classmethod
+    def cfg_spec(cls) -> CfgSectionSpec:
         return CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(

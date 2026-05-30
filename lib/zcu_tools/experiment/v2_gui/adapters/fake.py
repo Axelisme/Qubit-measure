@@ -7,12 +7,12 @@ from dataclasses import dataclass
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
-from typing_extensions import Annotated, Optional, Sequence, TypeAlias, cast
+from typing_extensions import Annotated, ClassVar, Optional, Sequence, TypeAlias, cast
 
 from zcu_tools.experiment.base import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.adapter import (
-    AbsExpAdapter,
     AdapterCapabilities,
     AnalyzeRequest,
     AnalyzeResultBase,
@@ -88,14 +88,17 @@ def _require_float(raw_cfg: dict[str, object], key: str) -> float:
 
 
 class FakeAdapter(
-    AbsExpAdapter[FakeExpCfg, FakeRunResult, FakeAnalyzeResult, FakeAnalyzeParams]
+    BaseAdapter[FakeExpCfg, FakeRunResult, FakeAnalyzeResult, FakeAnalyzeParams]
 ):
     """Minimal stub adapter — drives the full GUI flow without hardware."""
 
-    capabilities = AdapterCapabilities(requires_soc=False)
+    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
+        requires_soc=False
+    )
     exp_cls = FakeExp
 
-    def cfg_spec(self) -> CfgSectionSpec:
+    @classmethod
+    def cfg_spec(cls) -> CfgSectionSpec:
         return CfgSectionSpec(
             fields={
                 "reps": ScalarSpec(label="Reps", type=int),

@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import time
 
-from typing_extensions import Optional, TypeAlias
+from typing_extensions import ClassVar, Optional, TypeAlias
 
 from zcu_tools.experiment.v2.onetone.power_dep import (
     PowerDepCfg,
     PowerDepExp,
     PowerDepResult,
 )
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_readout_default,
     make_pulse_readout_module_spec,
@@ -17,13 +18,13 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     md_has_key,
 )
 from zcu_tools.gui.adapter import (
+    AdapterCapabilities,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
     EvalValue,
     ExpContext,
-    NoAnalysisAdapterMixin,
     RunRequest,
     ScalarSpec,
     SweepSpec,
@@ -34,12 +35,14 @@ from zcu_tools.gui.adapter import (
 OneTonePowerDepRunResult: TypeAlias = PowerDepResult
 
 
-class OneTonePowerDepAdapter(
-    NoAnalysisAdapterMixin[PowerDepCfg, OneTonePowerDepRunResult]
-):
+class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult]):
     exp_cls = PowerDepExp
+    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
+        requires_soc=True, supports_analysis=False
+    )
 
-    def cfg_spec(self) -> CfgSectionSpec:
+    @classmethod
+    def cfg_spec(cls) -> CfgSectionSpec:
         return CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(

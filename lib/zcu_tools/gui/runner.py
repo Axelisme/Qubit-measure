@@ -10,9 +10,9 @@ from zcu_tools.experiment.v2.runner.base import ActiveTask
 from zcu_tools.progress_bar.interface import use_pbar_factory
 
 from .adapter import (
-    AbsExpAdapter,
     AnalyzeRequest,
     CfgSchema,
+    ExpAdapterProtocol,
     RunRequest,
     SaveDataRequest,
 )
@@ -21,7 +21,7 @@ from .plot_routing import routing_scope
 
 logger = logging.getLogger(__name__)
 
-AdapterHandle = AbsExpAdapter[Any, Any, Any, Any]
+AdapterHandle = ExpAdapterProtocol
 _NO_RESULT = object()
 
 

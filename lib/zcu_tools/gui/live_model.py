@@ -556,9 +556,11 @@ class ModuleRefLiveField(LiveField):
     ) -> None:
         super().__init__(spec, env)
 
+        init_overridden = False
         if isinstance(initial_val, (ModuleRefValue, WaveformRefValue)):
             self._chosen_key = initial_val.chosen_key
             init_sub: Optional[CfgSectionValue] = initial_val.value
+            init_overridden = initial_val.is_overridden
         else:
             # Default to first allowed
             self._chosen_key = (
@@ -567,6 +569,11 @@ class ModuleRefLiveField(LiveField):
             init_sub = None
 
         self._binding_state = _binding_state_for_key(self._chosen_key)
+        # Restore a persisted override: a library ref whose value was edited away
+        # from the snapshot reloads as MODIFIED, not LINKED. (<Custom:> refs stay
+        # CUSTOM; is_overridden is meaningless there.)
+        if init_overridden and self._binding_state is LibraryBindingState.LINKED:
+            self._binding_state = LibraryBindingState.MODIFIED
         self.sub_field: Optional[SectionLiveField] = None
         self._missing_library_ref: bool = False
         self.is_enabled: bool = not (spec.optional and initial_val is None)
@@ -697,7 +704,11 @@ class ModuleRefLiveField(LiveField):
             ModuleRefValue if isinstance(self.spec, ModuleRefSpec) else WaveformRefValue
         )
         sub_val = self.sub_field.get_value() if self.sub_field else CfgSectionValue()
-        return klass(chosen_key=self._chosen_key, value=sub_val)
+        return klass(
+            chosen_key=self._chosen_key,
+            value=sub_val,
+            is_overridden=self.is_modified(),
+        )
 
     def set_value(self, val: object) -> None:
         if not isinstance(val, (ModuleRefValue, WaveformRefValue)):
@@ -708,6 +719,8 @@ class ModuleRefLiveField(LiveField):
         if val.chosen_key != self._chosen_key or self.is_modified():
             self._chosen_key = val.chosen_key
             self._binding_state = _binding_state_for_key(val.chosen_key)
+            if val.is_overridden and self._binding_state is LibraryBindingState.LINKED:
+                self._binding_state = LibraryBindingState.MODIFIED
             self._rebuild_sub_field(hint=val.value)
         elif self.sub_field:
             self.sub_field.set_value(val.value)

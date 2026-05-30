@@ -281,6 +281,84 @@ def test_optional_module_ref_parent_skips_key_when_disabled(env):
     assert val.fields["reps"] == DirectValue(10)
 
 
+def test_module_ref_sub_edit_marks_overridden_in_get_value(env):
+    """Editing a sub-field of a LINKED library ref flips is_overridden in get_value."""
+    inner = CfgSectionSpec(
+        label="Pulse", fields={"ch": ScalarSpec(label="Ch", type=int)}
+    )
+    spec = CfgSectionSpec(fields={"module": ModuleRefSpec(allowed=[inner])})
+
+    # Restore as a MODIFIED library ref (override flag persisted True), then
+    # confirm get_value() reports the override — the round-trip the bug dropped.
+    initial = CfgSectionValue(
+        fields={
+            "module": ModuleRefValue(
+                chosen_key="lib_mod",
+                value=CfgSectionValue(fields={"ch": DirectValue(1)}),
+                is_overridden=True,
+            )
+        }
+    )
+    env.ctrl.get_current_ml.return_value = ModuleLibrary()
+    section = SectionLiveField(spec, env, initial_val=initial)
+    field = cast(ModuleRefLiveField, section.fields["module"])
+
+    out = field.get_value()
+    assert out.chosen_key == "lib_mod"
+    assert out.is_overridden is True
+
+
+def test_module_ref_restores_overridden_flag(env):
+    """A persisted is_overridden=True library ref reloads as MODIFIED."""
+    inner = CfgSectionSpec(
+        label="Pulse", fields={"ch": ScalarSpec(label="Ch", type=int)}
+    )
+    spec = CfgSectionSpec(fields={"module": ModuleRefSpec(allowed=[inner])})
+
+    # Restore a library ref marked overridden. Since the library key is absent
+    # here, the field keeps the key and marks the value missing — but the binding
+    # state must still be MODIFIED, and get_value() must round-trip the flag.
+    initial = CfgSectionValue(
+        fields={
+            "module": ModuleRefValue(
+                chosen_key="some_lib_module",
+                value=CfgSectionValue(fields={"ch": DirectValue(7)}),
+                is_overridden=True,
+            )
+        }
+    )
+    ml = ModuleLibrary()
+    env.ctrl.get_current_ml.return_value = ml
+
+    section = SectionLiveField(spec, env, initial_val=initial)
+    field = cast(ModuleRefLiveField, section.fields["module"])
+
+    assert field.is_modified() is True
+    assert field.get_value().is_overridden is True
+
+
+def test_module_ref_custom_key_is_never_overridden(env):
+    """A <Custom:> ref restored with is_overridden=True stays not-overridden."""
+    inner = CfgSectionSpec(
+        label="Pulse", fields={"ch": ScalarSpec(label="Ch", type=int)}
+    )
+    spec = CfgSectionSpec(fields={"module": ModuleRefSpec(allowed=[inner])})
+    initial = CfgSectionValue(
+        fields={
+            "module": ModuleRefValue(
+                chosen_key="<Custom:Pulse>",
+                value=CfgSectionValue(fields={"ch": DirectValue(3)}),
+                is_overridden=True,  # nonsensical for Custom; must be ignored
+            )
+        }
+    )
+    section = SectionLiveField(spec, env, initial_val=initial)
+    field = cast(ModuleRefLiveField, section.fields["module"])
+
+    assert field.is_modified() is False
+    assert field.get_value().is_overridden is False
+
+
 def test_waveform_ref_missing_library_key_waits_for_ml_update(env):
     wav_spec = CfgSectionSpec(
         label="Const",

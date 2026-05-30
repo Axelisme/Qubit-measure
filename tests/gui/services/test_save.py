@@ -4,7 +4,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-
 from zcu_tools.gui.event_bus import EventBus
 from zcu_tools.gui.services.guard import SavePermit
 from zcu_tools.gui.services.save import SaveBothOutcome, SaveService

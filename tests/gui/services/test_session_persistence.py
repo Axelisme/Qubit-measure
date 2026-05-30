@@ -223,9 +223,7 @@ def test_session_persistence_waveform_ref_roundtrip(tmp_path: Path):
             fields={
                 "wf": WaveformRefValue(
                     chosen_key="Gaussian",
-                    value=CfgSectionValue(
-                        fields={"width": DirectValue(value=50.0)}
-                    ),
+                    value=CfgSectionValue(fields={"width": DirectValue(value=50.0)}),
                 ),
             }
         ),
@@ -241,6 +239,41 @@ def test_session_persistence_waveform_ref_roundtrip(tmp_path: Path):
     assert isinstance(wf, WaveformRefValue)
     assert wf.chosen_key == "Gaussian"
     assert wf.value.fields["width"] == DirectValue(value=50.0)
+    # default (not overridden) round-trips as False
+    assert wf.is_overridden is False
+
+
+def test_session_persistence_waveform_ref_preserves_override(tmp_path: Path):
+    """is_overridden=True survives the encode/decode round-trip (regression)."""
+    inner_spec = CfgSectionSpec(
+        fields={"width": ScalarSpec(label="Width", type=float)},
+        label="Gaussian",
+    )
+    svc = SessionPersistenceService(cache_dir=tmp_path)
+    schema = CfgSchema(
+        spec=CfgSectionSpec(
+            fields={"wf": WaveformRefSpec(allowed=[inner_spec], label="Waveform")}
+        ),
+        value=CfgSectionValue(
+            fields={
+                "wf": WaveformRefValue(
+                    chosen_key="Gaussian",
+                    value=CfgSectionValue(fields={"width": DirectValue(value=50.0)}),
+                    is_overridden=True,
+                ),
+            }
+        ),
+    )
+
+    raw = svc.schema_to_raw(schema, ml=None)
+    restored = svc.raw_to_schema(
+        CfgSchema(spec=schema.spec, value=CfgSectionValue(fields={})),
+        raw,
+    )
+
+    wf = restored.value.fields["wf"]
+    assert isinstance(wf, WaveformRefValue)
+    assert wf.is_overridden is True
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +304,9 @@ def test_session_persistence_device_ref_value_must_be_string(tmp_path: Path):
         value=CfgSectionValue(fields={}),
     )
 
-    with pytest.raises(SessionPersistenceError, match="Device reference value must be string"):
+    with pytest.raises(
+        SessionPersistenceError, match="Device reference value must be string"
+    ):
         svc.raw_to_schema(
             base,
             {"dev": {"__kind": "direct", "value": 123, "is_unset": False}},
@@ -285,7 +320,9 @@ def test_session_persistence_device_ref_must_use_direct_encoding(tmp_path: Path)
         value=CfgSectionValue(fields={}),
     )
 
-    with pytest.raises(SessionPersistenceError, match="Device reference must use direct"):
+    with pytest.raises(
+        SessionPersistenceError, match="Device reference must use direct"
+    ):
         svc.raw_to_schema(
             base,
             {"dev": "lo_device"},
@@ -311,7 +348,9 @@ def test_session_persistence_rejects_non_integer_active_tab_index(tmp_path: Path
         encoding="utf-8",
     )
 
-    with pytest.raises(SessionPersistenceError, match="active_tab_index must be an integer"):
+    with pytest.raises(
+        SessionPersistenceError, match="active_tab_index must be an integer"
+    ):
         svc.load_session()
 
 
@@ -340,7 +379,9 @@ def test_session_persistence_rejects_non_dict_save_paths_override(tmp_path: Path
         encoding="utf-8",
     )
 
-    with pytest.raises(SessionPersistenceError, match="save_paths_override must be an object"):
+    with pytest.raises(
+        SessionPersistenceError, match="save_paths_override must be an object"
+    ):
         svc.load_session()
 
 

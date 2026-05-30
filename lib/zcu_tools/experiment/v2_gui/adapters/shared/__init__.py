@@ -4,6 +4,8 @@ from .ctx_helpers import (
     md_has_key,
     md_scalar_float,
     md_scalar_int,
+    md_writeback,
+    proper_relax,
 )
 from .module_builders import build_readout_for_frequency, build_waveform_for_length
 from .module_defaults import NamedModuleValue, select_named_module_value
@@ -44,6 +46,8 @@ __all__ = [
     "md_has_key",
     "md_scalar_float",
     "md_scalar_int",
+    "md_writeback",
+    "proper_relax",
     # Module builders
     "build_readout_for_frequency",
     "build_waveform_for_length",

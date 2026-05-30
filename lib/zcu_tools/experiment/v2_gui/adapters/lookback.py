@@ -4,28 +4,26 @@ import time
 from dataclasses import dataclass
 
 from matplotlib.figure import Figure
-from typing_extensions import Annotated, Sequence, TypeAlias
+from typing_extensions import Annotated, Any, ClassVar, Sequence, TypeAlias
 
 from zcu_tools.experiment.v2.lookback import LookbackCfg, LookbackExp, LookbackResult
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_module_spec,
     make_pulse_readout_default,
     make_pulse_readout_module_spec,
     make_reset_module_spec,
+    md_writeback,
 )
 from zcu_tools.gui.adapter import (
-    AbsExpAdapter,
     AdapterCapabilities,
     AnalyzeRequest,
     AnalyzeResultBase,
-    CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
     ExpContext,
-    MetaDictWriteback,
     ParamMeta,
-    RunRequest,
     ScalarSpec,
     WritebackItem,
     WritebackRequest,
@@ -48,17 +46,21 @@ class LookbackAnalyzeResult(AnalyzeResultBase):
 
 
 class LookbackAdapter(
-    AbsExpAdapter[
+    BaseAdapter[
         LookbackCfg,
         LookbackRunResult,
         LookbackAnalyzeResult,
         LookbackAnalyzeParams,
     ]
 ):
-    capabilities = AdapterCapabilities(requires_soc=False)
+    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
+        requires_soc=False
+    )
     exp_cls = LookbackExp
+    ExpCfg_cls: ClassVar[Any] = LookbackCfg
 
-    def cfg_spec(self) -> CfgSectionSpec:
+    @classmethod
+    def cfg_spec(cls) -> CfgSectionSpec:
         return CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
@@ -99,9 +101,6 @@ class LookbackAdapter(
         )
         return root_val
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> LookbackCfg:
-        return req.ml.make_cfg(raw_cfg, LookbackCfg)
-
     def get_analyze_params(
         self, result: LookbackRunResult, ctx: ExpContext
     ) -> LookbackAnalyzeParams:
@@ -124,12 +123,12 @@ class LookbackAdapter(
         self, req: WritebackRequest[LookbackRunResult, LookbackAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         return [
-            MetaDictWriteback(
-                key="timeFly",
-                description="Readout trigger offset prediction (us)",
-                current_value=getattr(req.ctx.md, "timeFly", None),
-                md_key="timeFly",
-                proposed_value=round(req.analyze_result.predict_offset, 6),
+            md_writeback(
+                req.ctx,
+                "timeFly",
+                "Readout trigger offset prediction (us)",
+                req.analyze_result.predict_offset,
+                ndigits=6,
             )
         ]
 

@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import ClassVar, Sequence
 
 import pytest
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.adapter import (
-    AbsExpAdapter,
+    AdapterCapabilities,
     AnalyzeRequest,
     CfgSchema,
     CfgSectionSpec,
@@ -33,10 +32,6 @@ class _DummyExp:
         del filepath, result, kwargs
 
 
-class _DummyCfg(ExpCfgModel):
-    pass
-
-
 @dataclass
 class _DummyAnalyzeResult:
     figure: None = None
@@ -50,22 +45,32 @@ class _DummyAnalyzeParams:
     threshold: float = 0.0
 
 
-class _DummyAdapter(
-    AbsExpAdapter[_DummyCfg, object, _DummyAnalyzeResult, _DummyAnalyzeParams]
-):
+class _DummyAdapter:
+    """Self-contained ExpAdapterProtocol implementer for the Registry test.
+
+    Defines every Protocol member directly (no BaseAdapter dependency), so the
+    registry test stays scoped to the gui-side structural contract.
+    """
+
+    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities()
     exp_cls = _DummyExp
 
-    def cfg_spec(self) -> CfgSectionSpec:
+    @classmethod
+    def cfg_spec(cls) -> CfgSectionSpec:
         return CfgSectionSpec()
 
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:  # noqa: ARG002
-        return CfgSectionValue()
+    def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:  # noqa: ARG002
+        return CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
 
-    def build_exp_cfg(self, raw_cfg, req):  # noqa: ARG002
-        return _DummyCfg()
+    @classmethod
+    def analyze_params_cls(cls) -> type:
+        return _DummyAnalyzeParams
 
     def get_analyze_params(self, result, ctx) -> _DummyAnalyzeParams:  # noqa: ARG002
         return _DummyAnalyzeParams()
+
+    def run(self, req: RunRequest, schema: CfgSchema):  # noqa: ARG002
+        return object()
 
     def analyze(self, req: AnalyzeRequest[object, _DummyAnalyzeParams]):  # noqa: ARG002
         return _DummyAnalyzeResult()
@@ -76,8 +81,8 @@ class _DummyAdapter(
     ) -> Sequence[MetaDictWriteback]:
         return []
 
-    def make_filename_stem(self, ctx) -> str:  # noqa: ARG002
-        return "dummy"
+    def make_save_paths(self, ctx: ExpContext):  # noqa: ARG002
+        raise NotImplementedError
 
     def save(self, req: SaveDataRequest[object]) -> None:  # noqa: ARG002
         pass

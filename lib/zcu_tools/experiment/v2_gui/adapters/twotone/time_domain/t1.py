@@ -4,9 +4,10 @@ import time
 from dataclasses import dataclass
 
 from matplotlib.figure import Figure
-from typing_extensions import Annotated, Sequence, TypeAlias
+from typing_extensions import Annotated, Any, ClassVar, Sequence, TypeAlias
 
 from zcu_tools.experiment.v2.twotone.time_domain.t1 import T1Cfg, T1Exp, T1Result
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_module_spec,
     make_pulse_ref_default,
@@ -15,23 +16,19 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_reset_module_spec,
     make_reset_ref_default,
     md_get_float,
+    md_writeback,
+    proper_relax,
 )
 from zcu_tools.gui.adapter import (
-    AbsExpAdapter,
     AnalyzeRequest,
     AnalyzeResultBase,
     CfgNodeValue,
-    CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
-    EvalValue,
     ExpContext,
-    MetaDictWriteback,
     ParamMeta,
-    RunRequest,
     ScalarSpec,
-    ScalarValue,
     SweepSpec,
     SweepValue,
     WritebackItem,
@@ -53,10 +50,12 @@ class T1AnalyzeResult(AnalyzeResultBase):
     figure: Figure
 
 
-class T1Adapter(AbsExpAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams]):
+class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams]):
     exp_cls = T1Exp
+    ExpCfg_cls: ClassVar[Any] = T1Cfg
 
-    def cfg_spec(self) -> CfgSectionSpec:
+    @classmethod
+    def cfg_spec(cls) -> CfgSectionSpec:
         return CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
@@ -80,14 +79,8 @@ class T1Adapter(AbsExpAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzePara
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        from zcu_tools.experiment.v2_gui.adapters.shared import md_has_key
-
         t1 = md_get_float(ctx, "t1", 100.0)
-        relax_delay: ScalarValue = (
-            EvalValue(expr="5 * t1", resolved=5.0 * t1, error=None)
-            if md_has_key(ctx, "t1")
-            else DirectValue(100.0)
-        )
+        relax_delay = proper_relax(ctx)
         _module_fields: dict[str, CfgNodeValue] = {
             "pi_pulse": make_pulse_ref_default(ctx),
             "readout": make_readout_ref_default(ctx),
@@ -110,9 +103,6 @@ class T1Adapter(AbsExpAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzePara
         )
         return root_val
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T1Cfg:
-        return req.ml.make_cfg(raw_cfg, T1Cfg)
-
     def get_analyze_params(
         self, result: T1RunResult, ctx: ExpContext
     ) -> T1AnalyzeParams:
@@ -134,13 +124,7 @@ class T1Adapter(AbsExpAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzePara
         result = req.analyze_result
         ctx = req.ctx
         return [
-            MetaDictWriteback(
-                key="t1",
-                description="T1 relaxation time (us)",
-                current_value=ctx.md.get("t1"),
-                md_key="t1",
-                proposed_value=round(result.t1, 4),
-            ),
+            md_writeback(ctx, "t1", "T1 relaxation time (us)", result.t1),
         ]
 
     def make_filename_stem(self, ctx: ExpContext) -> str:

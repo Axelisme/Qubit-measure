@@ -280,6 +280,7 @@ class SessionPersistenceService:
             return {
                 "__kind": "module_ref",
                 "chosen_key": value.chosen_key,
+                "is_overridden": value.is_overridden,
                 "value": self._section_value_to_raw(
                     self._select_allowed_spec_for_restore(spec, value.chosen_key),
                     value.value,
@@ -290,6 +291,7 @@ class SessionPersistenceService:
             return {
                 "__kind": "waveform_ref",
                 "chosen_key": value.chosen_key,
+                "is_overridden": value.is_overridden,
                 "value": self._section_value_to_raw(
                     self._select_allowed_spec_for_restore(spec, value.chosen_key),
                     value.value,
@@ -402,7 +404,11 @@ class SessionPersistenceService:
             chosen_key = raw["chosen_key"]
             value_spec = self._select_allowed_spec_for_restore(spec, chosen_key)
             nested = self._section_value_from_raw(value_spec, raw["value"])
-            return ModuleRefValue(chosen_key=chosen_key, value=nested)
+            return ModuleRefValue(
+                chosen_key=chosen_key,
+                value=nested,
+                is_overridden=bool(raw.get("is_overridden", False)),
+            )
         raise RuntimeError("Module reference must use module_ref payload encoding")
 
     def _waveform_ref_value_from_raw(
@@ -419,7 +425,11 @@ class SessionPersistenceService:
             chosen_key = raw["chosen_key"]
             value_spec = self._select_allowed_spec_for_restore(spec, chosen_key)
             nested = self._section_value_from_raw(value_spec, raw["value"])
-            return WaveformRefValue(chosen_key=chosen_key, value=nested)
+            return WaveformRefValue(
+                chosen_key=chosen_key,
+                value=nested,
+                is_overridden=bool(raw.get("is_overridden", False)),
+            )
         raise RuntimeError("Waveform reference must use waveform_ref payload encoding")
 
     def _select_allowed_spec_for_restore(

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from typing_extensions import TypeAlias
+from typing_extensions import ClassVar, TypeAlias
 
 from zcu_tools.experiment.v2.twotone.fluxdep import (
     FreqFluxCfg,
     FreqFluxExp,
     FreqFluxResult,
 )
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_module_spec,
     make_pulse_ref_default,
@@ -17,14 +18,13 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     md_get_float,
 )
 from zcu_tools.gui.adapter import (
+    AdapterCapabilities,
     CfgNodeValue,
-    CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     DeviceRefSpec,
     DirectValue,
     ExpContext,
-    NoAnalysisAdapterMixin,
     RunRequest,
     ScalarSpec,
     SweepSpec,
@@ -34,10 +34,14 @@ from zcu_tools.gui.adapter import (
 FluxDepRunResult: TypeAlias = FreqFluxResult
 
 
-class FluxDepAdapter(NoAnalysisAdapterMixin[FreqFluxCfg, FluxDepRunResult]):
+class FluxDepAdapter(BaseAdapter[FreqFluxCfg, FluxDepRunResult]):
     exp_cls = FreqFluxExp
+    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
+        requires_soc=True, supports_analysis=False
+    )
 
-    def cfg_spec(self) -> CfgSectionSpec:
+    @classmethod
+    def cfg_spec(cls) -> CfgSectionSpec:
         return CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(

@@ -7,7 +7,6 @@ that guard the raw RPC params dict before any controller is touched.
 from __future__ import annotations
 
 import pytest
-
 from zcu_tools.gui.services.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.services.remote.wire import (
     Response,
@@ -25,7 +24,6 @@ from zcu_tools.gui.services.remote.wire import (
     require_json_safe,
     require_object,
 )
-
 
 # ---------------------------------------------------------------------------
 # _require_str

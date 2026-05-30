@@ -10,6 +10,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.adapter import ExpContext
 from zcu_tools.gui.registry import Registry
@@ -33,6 +34,9 @@ def _ctx() -> ExpContext:
 @pytest.mark.parametrize("name", _registry().list_names())
 def test_make_default_cfg_equals_spec_plus_value(name: str):
     adapter = _registry().create(name)
+    # make_default_value is a BaseAdapter member, not part of the framework
+    # ExpAdapterProtocol; every registered adapter is a BaseAdapter subclass.
+    assert isinstance(adapter, BaseAdapter)
     ctx = _ctx()
     cfg = adapter.make_default_cfg(ctx)
     assert adapter.cfg_spec() == cfg.spec

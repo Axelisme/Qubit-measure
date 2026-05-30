@@ -18,6 +18,7 @@ from typing_extensions import (
     Annotated,
     Any,
     Callable,
+    ClassVar,
     Literal,
     Optional,
     Sequence,
@@ -36,6 +37,7 @@ from zcu_tools.experiment.v2.onetone.freq import (
     FreqSweepCfg,
 )
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     build_readout_for_frequency,
     build_waveform_for_length,
@@ -46,9 +48,9 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_readout_module_spec,
     make_reset_module_spec,
     md_get_float,
+    md_writeback,
 )
 from zcu_tools.gui.adapter import (
-    AbsExpAdapter,
     AdapterCapabilities,
     AnalyzeRequest,
     AnalyzeResultBase,
@@ -57,7 +59,6 @@ from zcu_tools.gui.adapter import (
     CfgSectionValue,
     DirectValue,
     ExpContext,
-    MetaDictWriteback,
     ModuleWriteback,
     ParamMeta,
     RunRequest,
@@ -211,7 +212,7 @@ class FakeFreqExp(AbsExperiment[FreqResult, FakeFreqCfg]):
 
 
 class FakeFreqAdapter(
-    AbsExpAdapter[
+    BaseAdapter[
         FakeFreqCfg,
         FakeFreqRunResult,
         FakeFreqAnalyzeResult,
@@ -220,13 +221,16 @@ class FakeFreqAdapter(
 ):
     """Simulated one-tone frequency sweep.  No hardware required."""
 
-    capabilities = AdapterCapabilities(requires_soc=False)
+    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
+        requires_soc=False
+    )
     exp_cls = FakeFreqExp
 
     def __init__(self, fast_mode: bool = False) -> None:
         self._fast_mode = fast_mode
 
-    def cfg_spec(self) -> CfgSectionSpec:
+    @classmethod
+    def cfg_spec(cls) -> CfgSectionSpec:
         return CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
@@ -362,7 +366,6 @@ class FakeFreqAdapter(
         ctx = req.ctx
         freq = analyze_result.freq
         fwhm = analyze_result.fwhm
-        md = ctx.md
 
         cfg = req.run_result.cfg_snapshot
         assert cfg is not None, "cfg_snapshot is required for writeback"
@@ -389,20 +392,8 @@ class FakeFreqAdapter(
         cur_val_ro = ctx.ml.waveforms.get("ro_waveform")
 
         return [
-            MetaDictWriteback(
-                key="r_f",
-                description="Resonator frequency (MHz)",
-                current_value=getattr(md, "r_f", None),
-                md_key="r_f",
-                proposed_value=round(freq, 4),
-            ),
-            MetaDictWriteback(
-                key="rf_w",
-                description="Resonator linewidth FWHM (MHz)",
-                current_value=getattr(md, "rf_w", None),
-                md_key="rf_w",
-                proposed_value=round(fwhm, 4),
-            ),
+            md_writeback(ctx, "r_f", "Resonator frequency (MHz)", freq),
+            md_writeback(ctx, "rf_w", "Resonator linewidth FWHM (MHz)", fwhm),
             ModuleWriteback(
                 key="readout_rf",
                 description="readout_rf module config",

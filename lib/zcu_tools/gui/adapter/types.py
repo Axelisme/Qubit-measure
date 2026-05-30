@@ -121,8 +121,24 @@ class AnalyzeResultWithFigure(Protocol):
     def to_summary_dict(self) -> dict[str, object]: ...
 
 
-T_AnalyzeResult = TypeVar("T_AnalyzeResult", bound=AnalyzeResultWithFigure)
-T_AnalyzeParams = TypeVar("T_AnalyzeParams")
+@dataclass
+class NoAnalyzeParams:
+    """Default analyze-params type for adapters without analysis."""
+
+
+@dataclass
+class NoAnalysisResult(AnalyzeResultBase):
+    """Default analyze-result type for adapters without analysis."""
+
+    figure: Optional["Figure"] = None
+
+
+# PEP 696 defaults: adapters without analysis omit the last two generic args
+# (BaseAdapter[Cfg, Result]) and these No* types fill in automatically.
+T_AnalyzeResult = TypeVar(
+    "T_AnalyzeResult", bound=AnalyzeResultWithFigure, default=NoAnalysisResult
+)
+T_AnalyzeParams = TypeVar("T_AnalyzeParams", default=NoAnalyzeParams)
 
 
 @dataclass(frozen=True)
@@ -376,12 +392,17 @@ class MultiSweepValue:
 class ModuleRefValue:
     chosen_key: str
     value: "CfgSectionValue"
+    # True when chosen_key names a library entry but the user has edited value
+    # away from the library snapshot (LibraryBindingState.MODIFIED). Persisted so
+    # the override survives reload; False for pure library refs and <Custom:> refs.
+    is_overridden: bool = False
 
 
 @dataclass
 class WaveformRefValue:
     chosen_key: str
     value: "CfgSectionValue"
+    is_overridden: bool = False
 
 
 @dataclass

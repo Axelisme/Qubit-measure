@@ -4,9 +4,10 @@ import time
 from dataclasses import dataclass
 
 from matplotlib.figure import Figure
-from typing_extensions import Annotated, Any, Literal, Sequence, TypeAlias
+from typing_extensions import Annotated, Any, ClassVar, Literal, Sequence, TypeAlias
 
 from zcu_tools.experiment.v2.twotone.freq import FreqCfg, FreqExp, FreqResult
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_module_spec,
     make_pulse_ref_default,
@@ -15,20 +16,17 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_reset_module_spec,
     make_reset_ref_default,
     md_get_float,
+    md_writeback,
 )
 from zcu_tools.gui.adapter import (
-    AbsExpAdapter,
     AnalyzeRequest,
     AnalyzeResultBase,
     CfgNodeValue,
-    CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
     ExpContext,
-    MetaDictWriteback,
     ParamMeta,
-    RunRequest,
     ScalarSpec,
     SweepSpec,
     SweepValue,
@@ -54,11 +52,13 @@ class FreqAnalyzeResult(AnalyzeResultBase):
 
 
 class FreqAdapter(
-    AbsExpAdapter[FreqCfg, FreqRunResult, FreqAnalyzeResult, FreqAnalyzeParams]
+    BaseAdapter[FreqCfg, FreqRunResult, FreqAnalyzeResult, FreqAnalyzeParams]
 ):
     exp_cls = FreqExp
+    ExpCfg_cls: ClassVar[Any] = FreqCfg
 
-    def cfg_spec(self) -> CfgSectionSpec:
+    @classmethod
+    def cfg_spec(cls) -> CfgSectionSpec:
         return CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
@@ -111,9 +111,6 @@ class FreqAdapter(
         )
         return root_val
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FreqCfg:
-        return req.ml.make_cfg(raw_cfg, FreqCfg)
-
     def get_analyze_params(
         self, result: FreqRunResult, ctx: ExpContext
     ) -> FreqAnalyzeParams:
@@ -136,20 +133,8 @@ class FreqAdapter(
         result = req.analyze_result
         ctx = req.ctx
         return [
-            MetaDictWriteback(
-                key="q_f",
-                description="Qubit frequency (MHz)",
-                current_value=ctx.md.get("q_f"),
-                md_key="q_f",
-                proposed_value=round(result.freq, 4),
-            ),
-            MetaDictWriteback(
-                key="qf_w",
-                description="Qubit linewidth FWHM (MHz)",
-                current_value=ctx.md.get("qf_w"),
-                md_key="qf_w",
-                proposed_value=round(result.fwhm, 4),
-            ),
+            md_writeback(ctx, "q_f", "Qubit frequency (MHz)", result.freq),
+            md_writeback(ctx, "qf_w", "Qubit linewidth FWHM (MHz)", result.fwhm),
         ]
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
