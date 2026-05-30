@@ -9,10 +9,7 @@ from zcu_tools.gui.adapter import (
     LiteralSpec,
     ModuleRefSpec,
     ModuleRefValue,
-    MultiSweepSpec,
-    MultiSweepValue,
     ScalarSpec,
-    ScalarValue,
     SweepSpec,
     SweepValue,
     WaveformRefSpec,
@@ -131,34 +128,6 @@ def test_sweep_type_mismatch_uses_default():
     sv = result.fields["s"]
     assert isinstance(sv, SweepValue)
     assert sv.start == 0.0
-
-
-# ---------------------------------------------------------------------------
-# MultiSweepSpec
-# ---------------------------------------------------------------------------
-
-
-def test_multisweep_per_axis_inheritance():
-    shared_ax = SweepSpec()
-    old_spec = _section({"ms": MultiSweepSpec(axes={"x": shared_ax, "y": shared_ax})})
-    new_spec = _section({"ms": MultiSweepSpec(axes={"x": shared_ax, "z": shared_ax})})
-    old_val = _val(
-        {
-            "ms": MultiSweepValue(
-                axes={
-                    "x": SweepValue(1.0, 2.0, 5),
-                    "y": SweepValue(0.0, 1.0, 3),
-                }
-            )
-        }
-    )
-
-    result = inherit_from(old_val, old_spec, new_spec)
-
-    msv = result.fields["ms"]
-    assert isinstance(msv, MultiSweepValue)
-    assert msv.axes["x"] == SweepValue(1.0, 2.0, 5)  # inherited
-    assert msv.axes["z"] == SweepValue(0.0, 1.0, 11)  # new axis → default
 
 
 # ---------------------------------------------------------------------------

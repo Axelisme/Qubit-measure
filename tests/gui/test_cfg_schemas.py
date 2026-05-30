@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import cast
 
 import pytest
-from zcu_tools.gui.adapter import CfgSectionValue, DirectValue, WaveformRefValue
+from zcu_tools.gui.adapter import DirectValue, WaveformRefValue
 from zcu_tools.gui.cfg_schemas import (
     module_cfg_to_value,
     waveform_cfg_to_value,
@@ -123,9 +123,8 @@ def test_module_cfg_to_value_pulse_missing_fields():
 
 
 def test_module_cfg_to_value_pulse_round_trip():
-    from unittest.mock import MagicMock
 
-    from zcu_tools.gui.adapter import CfgSchema, RunRequest, schema_to_dict
+    from zcu_tools.gui.adapter import CfgSchema, schema_to_dict
 
     cfg = {
         "type": "pulse",

@@ -29,7 +29,7 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Callable, Dict, Optional, Protocol, Union, cast
+from typing import TYPE_CHECKING, Callable, Optional, Protocol, Union, cast
 
 from .adapter import (
     CfgNodeSpec,
@@ -42,8 +42,6 @@ from .adapter import (
     LiteralSpec,
     ModuleRefSpec,
     ModuleRefValue,
-    MultiSweepSpec,
-    MultiSweepValue,
     ScalarSpec,
     ScalarValue,
     SweepSpec,
@@ -360,42 +358,6 @@ class SweepLiveField(LiveField):
 
     def _refresh_validity(self) -> None:
         self._set_valid(self.start_field.is_valid() and self.stop_field.is_valid())
-
-
-class MultiSweepLiveField(LiveField):
-    spec: MultiSweepSpec
-
-    def __init__(
-        self, spec: MultiSweepSpec, env: LiveModelEnv, initial_val: object = None
-    ) -> None:
-        super().__init__(spec, env)
-
-        self.fields: Dict[str, SweepLiveField] = {}
-
-        initial_axes = {}
-        if isinstance(initial_val, MultiSweepValue):
-            initial_axes = initial_val.axes
-
-        for axis, axis_spec in spec.axes.items():
-            sv = initial_axes.get(axis, SweepValue(0.0, 1.0, 11, 0.1))
-            field = SweepLiveField(axis_spec, env, initial_val=sv)
-            self.fields[axis] = field
-            field.on_change.connect(self._on_child_change)
-
-    def _on_child_change(self, *_: object) -> None:
-        self.on_change.emit(self.get_value())
-
-    def get_value(self) -> MultiSweepValue:
-        return MultiSweepValue(axes={k: f.get_value() for k, f in self.fields.items()})
-
-    def set_value(self, val: object) -> None:
-        if not isinstance(val, MultiSweepValue):
-            raise TypeError(
-                f"MultiSweepLiveField expects MultiSweepValue, got {type(val).__name__}"
-            )
-        for k, field in self.fields.items():
-            if k in val.axes:
-                field.set_value(val.axes[k])
 
 
 class SectionLiveField(LiveField):
@@ -760,8 +722,6 @@ def create_live_field(
         return LiteralLiveField(spec, env, initial_val)
     if isinstance(spec, SweepSpec):
         return SweepLiveField(spec, env, initial_val)
-    if isinstance(spec, MultiSweepSpec):
-        return MultiSweepLiveField(spec, env, initial_val)
     if isinstance(spec, (ModuleRefSpec, WaveformRefSpec)):
         return ModuleRefLiveField(spec, env, initial_val)
     if isinstance(spec, DeviceRefSpec):

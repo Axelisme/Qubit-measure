@@ -23,7 +23,6 @@ from ...adapter import LiteralSpec
 from ...live_model import (
     DeviceRefLiveField,
     ModuleRefLiveField,
-    MultiSweepLiveField,
     SectionLiveField,
     SweepLiveField,
 )
@@ -143,7 +142,7 @@ class SectionWidget(BaseLiveWidget):
             w = widget_cls(child_field)  # type: ignore
 
             label = spec.label or key
-            if isinstance(child_field, (SweepLiveField, MultiSweepLiveField)):
+            if isinstance(child_field, SweepLiveField):
                 # Sweep widgets get their own full-width row; label goes on the line above
                 self._container.form.addRow(ElidedLabel(f"{label}:"))
                 self._container.form.addRow(cast(QWidget, w))

@@ -21,8 +21,6 @@ from zcu_tools.gui.adapter import (
     LiteralSpec,
     ModuleRefSpec,
     ModuleRefValue,
-    MultiSweepSpec,
-    MultiSweepValue,
     SavePaths,
     ScalarSpec,
     SweepSpec,
@@ -258,13 +256,6 @@ class SessionPersistenceService:
                 "expts": value.expts,
                 "step": value.step,
             }
-        if isinstance(spec, MultiSweepSpec):
-            assert isinstance(value, MultiSweepValue)
-            return {
-                axis: self._node_value_to_raw(spec.axes[axis], sweep_val)
-                for axis, sweep_val in value.axes.items()
-                if axis in spec.axes
-            }
         if isinstance(spec, DeviceRefSpec):
             assert isinstance(value, DirectValue)
             return {
@@ -348,18 +339,6 @@ class SessionPersistenceService:
                 step = float(step_raw)
                 return SweepValue(start=start, stop=stop, expts=expts, step=step)
             raise RuntimeError("Sweep payload must be an object")
-        if isinstance(spec, MultiSweepSpec):
-            if not isinstance(raw, dict):
-                raise RuntimeError("MultiSweep payload must be an object")
-            axes: dict[str, SweepValue] = {}
-            for axis, axis_spec in spec.axes.items():
-                axis_raw = raw.get(axis)
-                if not isinstance(axis_raw, dict):
-                    continue
-                parsed = self._node_value_from_raw(axis_spec, axis_raw)
-                if isinstance(parsed, SweepValue):
-                    axes[axis] = parsed
-            return MultiSweepValue(axes=axes)
         if isinstance(spec, DeviceRefSpec):
             if isinstance(raw, dict) and raw.get("__kind") == "direct":
                 value = raw.get("value")

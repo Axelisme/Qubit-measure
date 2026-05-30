@@ -314,12 +314,6 @@ class SweepSpec:
 
 
 @dataclass(frozen=True)
-class MultiSweepSpec:
-    axes: dict[str, SweepSpec]
-    label: str = "Sweep"
-
-
-@dataclass(frozen=True)
 class ModuleRefSpec:
     allowed: list["CfgSectionSpec"]
     label: str = "Module"
@@ -428,7 +422,6 @@ CfgNodeSpec = Union[
     ScalarSpec,
     LiteralSpec,
     SweepSpec,
-    MultiSweepSpec,
     ModuleRefSpec,
     WaveformRefSpec,
     CfgSectionSpec,
@@ -467,11 +460,6 @@ class SweepValue:
     def __post_init__(self) -> None:
         if self.expts < 1:
             raise ValueError("SweepValue.expts must be >= 1")
-
-
-@dataclass
-class MultiSweepValue:
-    axes: dict[str, SweepValue]
 
 
 @dataclass
@@ -542,7 +530,6 @@ class CfgSectionValue:
 CfgNodeValue = Union[
     ScalarValue,
     SweepValue,
-    MultiSweepValue,
     ModuleRefValue,
     WaveformRefValue,
     CfgSectionValue,

@@ -9,8 +9,6 @@ Path grammar (segments split on ``.``):
 
   - Scalar leaf:        ``section.sub.field``           -> ``ScalarLiveField.set_value(value)``
   - Sweep sub-field:    ``...path.sweep.start|stop|expts|step``
-  - Multi-sweep axis:   ``...path.<axis>.start|stop|expts|step`` (axis is a key
-                         in a ``MultiSweepLiveField``)
   - ModuleRef key:      ``...path.ref``                  -> ``set_chosen_key(value)``
   - ModuleRef sub:      ``...path.value.<sub>...``       -> recurse into ``.sub_field``
   - DeviceRef:          ``...path.device``               -> ``set_chosen_name(value)``
@@ -31,7 +29,6 @@ from zcu_tools.gui.adapter import (
     EvalValue,
     LiteralSpec,
     ModuleRefSpec,
-    MultiSweepSpec,
     ScalarSpec,
     SweepSpec,
     WaveformRefSpec,
@@ -40,7 +37,6 @@ from zcu_tools.gui.live_model import (
     DeviceRefLiveField,
     LiteralLiveField,
     ModuleRefLiveField,
-    MultiSweepLiveField,
     ScalarLiveField,
     SectionLiveField,
     SweepLiveField,
@@ -92,21 +88,6 @@ def _set_recursive(
         _set_sweep_edge(field, head, rest, full_path, value)
         return
 
-    if isinstance(field, MultiSweepLiveField):
-        axis = field.fields.get(head)
-        if axis is None:
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS,
-                f"unknown sweep axis {head!r} in path {full_path!r}",
-            )
-        if not rest:
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS,
-                f"multi-sweep axis {head!r} needs a sub-field (start/stop/expts/step)",
-            )
-        _set_sweep_edge(axis, rest[0], rest[1:], full_path, value)
-        return
-
     if isinstance(field, ModuleRefLiveField):
         _set_moduleref(field, head, rest, full_path, value)
         return
@@ -140,7 +121,7 @@ def _set_leaf(field: "LiveField", full_path: str, value: object) -> None:
             f"path {full_path!r} targets a module ref; set "
             f"'{full_path}.ref' (key) or '{full_path}.value.<sub>' instead",
         )
-    if isinstance(field, (SweepLiveField, MultiSweepLiveField)):
+    if isinstance(field, SweepLiveField):
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
             f"path {full_path!r} targets a sweep; set "
@@ -303,11 +284,6 @@ def _list_field(path: str, field: "LiveField") -> list[dict[str, object]]:
         return [_scalar_entry(path, field)]
     if isinstance(field, SweepLiveField):
         return _sweep_entries(path, field)
-    if isinstance(field, MultiSweepLiveField):
-        out: list[dict[str, object]] = []
-        for axis, axis_field in field.fields.items():
-            out.extend(_sweep_entries(f"{path}.{axis}", axis_field))
-        return out
     if isinstance(field, DeviceRefLiveField):
         return [
             {
@@ -388,11 +364,6 @@ def _list_spec_field(path: str, node: "CfgNodeSpec") -> list[dict[str, object]]:
         return [entry]
     if isinstance(node, SweepSpec):
         return _sweep_spec_entries(path)
-    if isinstance(node, MultiSweepSpec):
-        out: list[dict[str, object]] = []
-        for axis in node.axes:
-            out.extend(_sweep_spec_entries(f"{path}.{axis}"))
-        return out
     if isinstance(node, DeviceRefSpec):
         return [{"path": f"{path}.device", "kind": "deviceref", "type": "string"}]
     if isinstance(node, (ModuleRefSpec, WaveformRefSpec)):

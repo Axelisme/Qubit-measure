@@ -13,7 +13,7 @@ from typing import (
 )
 
 import typing_extensions
-from typing_extensions import Annotated, Literal
+from typing_extensions import Annotated
 
 _LITERAL_ORIGINS = {typing.Literal, typing_extensions.Literal}
 

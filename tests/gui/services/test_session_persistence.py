@@ -11,8 +11,6 @@ from zcu_tools.gui.adapter import (
     DeviceRefSpec,
     DirectValue,
     EvalValue,
-    MultiSweepSpec,
-    MultiSweepValue,
     SavePaths,
     ScalarSpec,
     SweepSpec,
@@ -160,46 +158,6 @@ def test_session_persistence_roundtrip_preserves_eval_values(tmp_path: Path):
     assert isinstance(sweep.stop, EvalValue)
     assert sweep.start.expr == "r_f - rf_w"
     assert sweep.stop.expr == "r_f + rf_w"
-
-
-# ---------------------------------------------------------------------------
-# MultiSweepSpec roundtrip
-# ---------------------------------------------------------------------------
-
-
-def test_session_persistence_multisweep_roundtrip(tmp_path: Path):
-    svc = SessionPersistenceService(cache_dir=tmp_path)
-    schema = CfgSchema(
-        spec=CfgSectionSpec(
-            fields={
-                "sweep2d": MultiSweepSpec(
-                    axes={"x": SweepSpec(label="X"), "y": SweepSpec(label="Y")}
-                ),
-            }
-        ),
-        value=CfgSectionValue(
-            fields={
-                "sweep2d": MultiSweepValue(
-                    axes={
-                        "x": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1),
-                        "y": SweepValue(start=2.0, stop=3.0, expts=6, step=0.2),
-                    }
-                ),
-            }
-        ),
-    )
-
-    raw = svc.schema_to_raw(schema, ml=None)
-    restored = svc.raw_to_schema(
-        CfgSchema(spec=schema.spec, value=CfgSectionValue(fields={})),
-        raw,
-    )
-
-    ms = restored.value.fields["sweep2d"]
-    assert isinstance(ms, MultiSweepValue)
-    assert ms.axes["x"].start == 0.0
-    assert ms.axes["x"].stop == 1.0
-    assert ms.axes["y"].expts == 6
 
 
 # ---------------------------------------------------------------------------

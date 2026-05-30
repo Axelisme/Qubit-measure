@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict, Optional, cast
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QLineEdit,
     QMenu,
     QSpinBox,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -26,7 +25,6 @@ from ...adapter import DirectValue, EvalValue, default_value_for_type
 from ...live_model import (
     LiteralLiveField,
     LiveField,
-    MultiSweepLiveField,
     ScalarLiveField,
     SweepLiveField,
 )
@@ -465,33 +463,3 @@ class SweepWidget(BaseLiveWidget):
             self._step.setValue(val.step)
         finally:
             self._updating = False
-
-
-@register_widget(MultiSweepLiveField)
-class MultiSweepWidget(BaseLiveWidget):
-    """Container for multiple SweepWidgets."""
-
-    def __init__(self, field: MultiSweepLiveField, parent: Optional[QWidget] = None):
-        super().__init__(field, parent)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
-
-        self._widgets: Dict[str, SweepWidget] = {}
-
-        self._build_axes()
-
-    def teardown(self) -> None:
-        for w in self._widgets.values():
-            w.teardown()
-
-    def _build_axes(self) -> None:
-        layout = cast(QVBoxLayout, self.layout())
-        field = cast(MultiSweepLiveField, self._field)
-
-        for axis, axis_field in field.fields.items():
-            w = SweepWidget(axis_field)
-            layout.addWidget(QLabel(f"{axis}:"))
-            layout.addWidget(w)
-            self._widgets[axis] = w

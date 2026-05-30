@@ -29,7 +29,6 @@ from zcu_tools.gui.plot_host import (
     set_shutting_down,
 )
 from zcu_tools.gui.services.remote.dialogs import DialogName
-from zcu_tools.gui.state import TabInteractionState
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +41,6 @@ from qtpy.QtGui import (  # type: ignore[attr-defined]
     QPen,
 )
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-    QCheckBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -79,7 +77,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.controller import Controller
     from zcu_tools.gui.live_model import SectionLiveField
     from zcu_tools.gui.services import TabViewSnapshot
-    from zcu_tools.meta_tool import ModuleLibrary
 
 
 # ---------------------------------------------------------------------------

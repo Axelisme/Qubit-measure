@@ -25,8 +25,6 @@ from .types import (
     ModuleRefSpec,
     ModuleRefValue,
     ModuleWriteback,
-    MultiSweepSpec,
-    MultiSweepValue,
     NoAnalysisResult,
     NoAnalyzeParams,
     RunRequest,

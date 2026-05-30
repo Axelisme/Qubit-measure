@@ -15,8 +15,6 @@ from zcu_tools.gui.adapter import (
     LiteralSpec,
     ModuleRefSpec,
     ModuleRefValue,
-    MultiSweepSpec,
-    MultiSweepValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
@@ -618,35 +616,6 @@ def test_cfg_form_does_not_wrap_module_ref_row(qapp, ctrl):
         section._container.form.rowWrapPolicy()
         == QFormLayout.RowWrapPolicy.DontWrapRows
     )
-
-
-def test_populate_multi_sweep_round_trip(qapp, ctrl):
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
-
-    schema = _schema(
-        {
-            "ms": MultiSweepSpec(
-                axes={"x": SweepSpec(label="X"), "y": SweepSpec(label="Y")},
-                label="Multi",
-            )
-        },
-        {
-            "ms": MultiSweepValue(
-                axes={
-                    "x": SweepValue(start=0.0, stop=1.0, expts=5),
-                    "y": SweepValue(start=2.0, stop=3.0, expts=3),
-                }
-            )
-        },
-    )
-    w = CfgFormWidget()
-    w.populate(schema, ctrl)
-    out = w.read_values()
-
-    ms = out.fields["ms"]
-    assert isinstance(ms, MultiSweepValue)
-    assert ms.axes["x"].expts == 5
-    assert ms.axes["y"].start == pytest.approx(2.0)
 
 
 def test_populate_module_ref_field_round_trip(qapp, ctrl):

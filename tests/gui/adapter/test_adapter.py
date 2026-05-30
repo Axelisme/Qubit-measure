@@ -18,8 +18,6 @@ from zcu_tools.gui.adapter import (
     ModuleRefSpec,
     ModuleRefValue,
     ModuleWriteback,
-    MultiSweepSpec,
-    MultiSweepValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
@@ -192,39 +190,6 @@ def test_sweep_eval_unresolved_fails_fast():
     )
     with pytest.raises(RuntimeError, match="unresolved"):
         schema_to_dict(s, _make_ml())
-
-
-# ---------------------------------------------------------------------------
-# MultiSweepSpec / MultiSweepValue
-# ---------------------------------------------------------------------------
-
-
-def test_multi_sweep_produces_dict_of_sweeps():
-    from zcu_tools.program.v2 import SweepCfg
-
-    s = _schema(
-        {
-            "sweep": MultiSweepSpec(
-                axes={
-                    "freq": SweepSpec(label="Freq"),
-                    "gain": SweepSpec(label="Gain"),
-                }
-            )
-        },
-        {
-            "sweep": MultiSweepValue(
-                axes={
-                    "freq": SweepValue(5.0, 6.0, 5),
-                    "gain": SweepValue(0.0, 1.0, 3),
-                }
-            )
-        },
-    )
-    result = schema_to_dict(s, _make_ml())
-    assert set(result["sweep"].keys()) == {"freq", "gain"}
-    assert isinstance(result["sweep"]["freq"], SweepCfg)
-    assert result["sweep"]["freq"].expts == 5
-    assert result["sweep"]["gain"].expts == 3
 
 
 # ---------------------------------------------------------------------------

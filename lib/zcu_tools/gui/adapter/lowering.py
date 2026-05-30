@@ -15,8 +15,6 @@ from .types import (
     LiteralSpec,
     ModuleRefSpec,
     ModuleRefValue,
-    MultiSweepSpec,
-    MultiSweepValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
@@ -105,27 +103,6 @@ def _section_to_dict_inner(
                 node_val.stop, path=".".join([*path, key, "stop"]), label="Sweep stop"
             )
             result[key] = make_sweep(start, stop, expts=node_val.expts)
-
-        elif isinstance(node_spec, MultiSweepSpec):
-            assert isinstance(node_val, MultiSweepValue)
-            from zcu_tools.notebook.utils import make_sweep
-
-            result[key] = {
-                axis: make_sweep(
-                    _resolve_sweep_edge(
-                        sv.start,
-                        path=".".join([*path, key, axis, "start"]),
-                        label=f"{axis} start",
-                    ),
-                    _resolve_sweep_edge(
-                        sv.stop,
-                        path=".".join([*path, key, axis, "stop"]),
-                        label=f"{axis} stop",
-                    ),
-                    expts=sv.expts,
-                )
-                for axis, sv in node_val.axes.items()
-            }
 
         elif isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
             assert isinstance(node_val, (ModuleRefValue, WaveformRefValue))

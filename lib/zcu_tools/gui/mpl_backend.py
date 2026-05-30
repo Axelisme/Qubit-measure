@@ -24,7 +24,6 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
 
-from .mpl_backend_setup import BACKEND_NAME
 from .plot_host import (
     activate_figure,
     attach_figure_to_current_container,

@@ -34,7 +34,6 @@ from zcu_tools.gui.event_bus import (
 )
 from zcu_tools.gui.services.device import (
     ConnectDeviceRequest,
-    DeviceEntry,
     DeviceSetupSnapshot,
     DeviceStatus,
     DisconnectDeviceRequest,

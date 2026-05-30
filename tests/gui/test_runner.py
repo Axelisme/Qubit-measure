@@ -7,7 +7,7 @@ import time
 from typing import Any
 
 import pytest
-from qtpy.QtCore import QCoreApplication, QEventLoop, QTimer
+from qtpy.QtCore import QCoreApplication
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter, FakeAnalyzeParams
 from zcu_tools.gui.adapter import AnalyzeRequest, CfgSchema, ExpContext, RunRequest
 from zcu_tools.gui.runner import (
