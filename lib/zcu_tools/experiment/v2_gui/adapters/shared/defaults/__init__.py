@@ -13,6 +13,7 @@ from .helpers import (
     patch_ro_cfg_fields,
     select_named_module_value,
 )
+from .module_defaults import NamedModuleValue
 from .pi2_pulse import make_pi2_pulse_default, make_pi2_pulse_ref_default
 from .pi_pulse import make_pi_pulse_default, make_pi_pulse_ref_default
 from .qub_probe import make_qub_probe_default, make_qub_probe_ref_default
@@ -41,6 +42,7 @@ __all__ = [
     "patch_pulse_fields",
     "patch_ro_cfg_fields",
     "select_named_module_value",
+    "NamedModuleValue",
     # qub_probe
     "make_qub_probe_default",
     "make_qub_probe_ref_default",

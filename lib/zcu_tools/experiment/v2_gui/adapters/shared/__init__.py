@@ -40,7 +40,7 @@ from .module_builders import (
     build_waveform_for_length,
     schema_from_module,
 )
-from .module_defaults import NamedModuleValue, select_named_module_value
+from .defaults import NamedModuleValue, select_named_module_value
 from .spec_helpers import (
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
