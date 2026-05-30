@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import (
     TYPE_CHECKING,
@@ -267,6 +267,34 @@ def default_value_for_type(type_: type) -> object:
 # Spec tree — static, defined by Adapter, never mutated
 # ---------------------------------------------------------------------------
 
+# A transform applied to the leaf spec node reached by a dotted path. Returns a
+# replacement node (e.g. a LiteralSpec for lock, a replace(...) for readonly).
+_LeafTransform = Callable[["CfgNodeSpec"], "CfgNodeSpec"]
+
+
+def _split_spec_path(path: str) -> list[str]:
+    parts = [p for p in path.split(".") if p]
+    if not parts:
+        raise RuntimeError("Spec override path must not be empty")
+    return parts
+
+
+def _path_exists(spec: "CfgSectionSpec", parts: list[str]) -> bool:
+    """True if the dotted ``parts`` resolve to a leaf within ``spec`` (descending
+    CfgSectionSpec.fields and ModuleRefSpec.allowed). Used by the duck-type
+    descent to decide which allowed shapes contain a path."""
+    head, rest = parts[0], parts[1:]
+    child = spec.fields.get(head)
+    if child is None:
+        return False
+    if not rest:
+        return True
+    if isinstance(child, CfgSectionSpec):
+        return _path_exists(child, rest)
+    if isinstance(child, ModuleRefSpec):
+        return any(_path_exists(shape, rest) for shape in child.allowed)
+    return False
+
 
 @dataclass(frozen=True)
 class ScalarSpec:
@@ -310,6 +338,25 @@ class ModuleRefSpec:
         if not self.allowed:
             raise RuntimeError("ModuleRefSpec.allowed must be non-empty")
 
+    def _with_override(self, parts: list[str], fn: "_LeafTransform") -> "ModuleRefSpec":
+        # Duck-type descent: apply to every allowed shape that contains the path,
+        # skip those that don't. Fail only if no allowed shape matches (real typo).
+        new_allowed: list[CfgSectionSpec] = []
+        matched = False
+        for shape in self.allowed:
+            if _path_exists(shape, parts):
+                new_allowed.append(shape._with_override(parts, fn))
+                matched = True
+            else:
+                new_allowed.append(shape)
+        if not matched:
+            allowed_labels = ", ".join(s.label for s in self.allowed)
+            raise RuntimeError(
+                f"Spec override path {'.'.join(parts)!r} not found in any allowed "
+                f"shape of ModuleRefSpec (allowed: {allowed_labels})"
+            )
+        return replace(self, allowed=new_allowed)
+
 
 @dataclass(frozen=True)
 class WaveformRefSpec:
@@ -329,6 +376,57 @@ class CfgSectionSpec:
     inherit_hook: Optional[
         Callable[["CfgSectionValue", "CfgSectionSpec"], Optional["CfgSectionValue"]]
     ] = None
+
+    # -- fluent spec overrides (return a new frozen spec; never mutate) -------
+    #
+    # Used inside an adapter's ``cfg_spec()`` to lock/restrict a deep leaf of a
+    # spec tree returned by a shared helper. The result MUST be the value that
+    # ``cfg_spec()`` returns — locking is part of the spec contract, and
+    # ``cfg_spec`` is the sole owner of that contract. Locking the return value
+    # of ``cfg_spec()`` from outside leaks the contract to the call site.
+
+    def lock_literal(self, path: str, value: Any) -> "CfgSectionSpec":
+        """Replace the scalar leaf at ``path`` with a fixed ``LiteralSpec(value)``.
+
+        The locked field shows no widget and always lowers to ``value`` (notebook
+        ``freq: 0.0, # not used``). Returns a new frozen spec.
+        """
+        return self._with_override(
+            _split_spec_path(path), lambda leaf: LiteralSpec(value=value)
+        )
+
+    def readonly(self, path: str) -> "CfgSectionSpec":
+        """Mark the scalar leaf at ``path`` non-editable (shown but read-only)."""
+
+        def _make_readonly(leaf: "CfgNodeSpec") -> "CfgNodeSpec":
+            if not isinstance(leaf, ScalarSpec):
+                raise RuntimeError(
+                    f"readonly target must be a ScalarSpec, got {type(leaf).__name__}"
+                )
+            return replace(leaf, editable=False)
+
+        return self._with_override(_split_spec_path(path), _make_readonly)
+
+    def _with_override(
+        self, parts: list[str], fn: "_LeafTransform"
+    ) -> "CfgSectionSpec":
+        head, rest = parts[0], parts[1:]
+        if head not in self.fields:
+            raise RuntimeError(
+                f"Spec override path segment {head!r} not found "
+                f"(available: {', '.join(self.fields)})"
+            )
+        child = self.fields[head]
+        if not rest:
+            new_child: CfgNodeSpec = fn(child)
+        elif isinstance(child, (CfgSectionSpec, ModuleRefSpec)):
+            new_child = child._with_override(rest, fn)
+        else:
+            raise RuntimeError(
+                f"Spec override path cannot descend into {type(child).__name__} "
+                f"at segment {head!r}"
+            )
+        return replace(self, fields={**self.fields, head: new_child})
 
 
 @dataclass(frozen=True)
@@ -397,6 +495,17 @@ class ModuleRefValue:
     # the override survives reload; False for pure library refs and <Custom:> refs.
     is_overridden: bool = False
 
+    def with_field(self, path: str, value: Any) -> "ModuleRefValue":
+        """Set a scalar leaf inside this ref's value (in-place, returns self).
+
+        Adapter-side default override sugar (replaces long factory params). The
+        value tree is mutable by contract; this mutates and returns self for
+        chaining — deliberately asymmetric with spec-side fluent (which returns
+        new frozen specs). See CONTEXT.md "Value OO 覆寫".
+        """
+        self.value.with_field(path, value)
+        return self
+
 
 @dataclass
 class WaveformRefValue:
@@ -404,10 +513,42 @@ class WaveformRefValue:
     value: "CfgSectionValue"
     is_overridden: bool = False
 
+    def with_field(self, path: str, value: Any) -> "WaveformRefValue":
+        self.value.with_field(path, value)
+        return self
+
 
 @dataclass
 class CfgSectionValue:
     fields: dict[str, "CfgNodeValue"] = field(default_factory=dict)
+
+    def with_field(self, path: str, value: Any) -> "CfgSectionValue":
+        """Set the scalar leaf at dotted ``path`` (in-place, returns self).
+
+        ``value`` may be a raw scalar (wrapped in ``DirectValue``) or an already-
+        built ``DirectValue``/``EvalValue``. Descends ``CfgSectionValue.fields``
+        and ``ModuleRefValue``/``WaveformRefValue`` (into their ``.value``).
+        """
+        parts = [p for p in path.split(".") if p]
+        if not parts:
+            raise RuntimeError("Value override path must not be empty")
+        node: CfgSectionValue = self
+        for seg in parts[:-1]:
+            child = node.fields.get(seg)
+            if isinstance(child, (ModuleRefValue, WaveformRefValue)):
+                node = child.value
+            elif isinstance(child, CfgSectionValue):
+                node = child
+            else:
+                raise RuntimeError(
+                    f"Value override path cannot descend into {type(child).__name__} "
+                    f"at segment {seg!r}"
+                )
+        leaf_value: CfgNodeValue = (
+            value if isinstance(value, (DirectValue, EvalValue)) else DirectValue(value)
+        )
+        node.fields[parts[-1]] = leaf_value
+        return self
 
 
 CfgNodeValue = Union[

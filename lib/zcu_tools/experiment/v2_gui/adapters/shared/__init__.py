@@ -15,6 +15,13 @@ from .module_ref_defaults import (
     make_readout_ref_default,
     make_reset_ref_default,
 )
+from .role_defaults import (
+    default_pi,
+    default_pi2,
+    default_qub_probe,
+    default_res_probe,
+    default_reset,
+)
 from .module_templates import (
     make_flat_top_waveform_edit_template,
     make_pulse_readout_edit_template,
@@ -69,6 +76,12 @@ __all__ = [
     "make_readout_ref_default",
     "make_pulse_ref_default",
     "make_reset_ref_default",
+    # Role defaults (notebook-aligned semantic wrappers)
+    "default_pi",
+    "default_pi2",
+    "default_qub_probe",
+    "default_res_probe",
+    "default_reset",
     # Module templates
     "make_flat_top_waveform_edit_template",
     "make_pulse_readout_edit_template",
