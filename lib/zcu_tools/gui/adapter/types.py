@@ -3,15 +3,7 @@ from __future__ import annotations
 from abc import ABC
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Callable,
-    Mapping,
-    Optional,
-    Protocol,
-    Union,
-)
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Protocol, Union
 
 from typing_extensions import Generic, TypeAlias, TypeVar
 
@@ -336,6 +328,15 @@ class ModuleRefSpec:
     def __post_init__(self) -> None:
         if not self.allowed:
             raise RuntimeError("ModuleRefSpec.allowed must be non-empty")
+
+    def lock_literal(self, path: str, value: Any) -> "ModuleRefSpec":
+        """Lock a leaf of this ref's allowed shapes (path is relative to the
+        shape, e.g. ``pulse_cfg.freq``). Lets an adapter lock fields on the
+        sub-tree as it is built, instead of from the root section. Returns a new
+        frozen ModuleRefSpec; chains stay on this type."""
+        return self._with_override(
+            _split_spec_path(path), lambda leaf: LiteralSpec(value=value)
+        )
 
     def _with_override(self, parts: list[str], fn: "_LeafTransform") -> "ModuleRefSpec":
         # Duck-type descent: apply to every allowed shape that contains the path,

@@ -76,13 +76,21 @@ class OneToneFreqAdapter(
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:
-        spec = CfgSectionSpec(
+        # The readout pulse/ro frequency is driven by the sweep axis, not the
+        # user (notebook: ``freq: 0.0, # not used``). Lock both to 0.0 on the
+        # readout sub-tree as it is built — the lock is part of the spec contract.
+        readout = (
+            make_pulse_readout_module_spec()
+            .lock_literal("pulse_cfg.freq", 0.0)
+            .lock_literal("ro_cfg.ro_freq", 0.0)
+        )
+        return CfgSectionSpec(
             fields={
                 "modules": CfgSectionSpec(
                     label="Modules",
                     fields={
                         "reset": make_reset_module_spec(optional=True),
-                        "readout": make_pulse_readout_module_spec(),
+                        "readout": readout,
                     },
                 ),
                 "reps": ScalarSpec(label="Reps", type=int),
@@ -95,12 +103,6 @@ class OneToneFreqAdapter(
                     fields={"freq": SweepSpec(label="Freq (MHz)")},
                 ),
             }
-        )
-        # The readout pulse/ro frequency is driven by the sweep axis, not the
-        # user (notebook: ``freq: 0.0, # not used``). Lock both to 0.0 — the lock
-        # is part of the spec contract, hence returned from cfg_spec().
-        return spec.lock_literal("modules.readout.pulse_cfg.freq", 0.0).lock_literal(
-            "modules.readout.ro_cfg.ro_freq", 0.0
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:

@@ -82,6 +82,25 @@ def test_lock_literal_chains():
     assert isinstance(locked.fields["reps"], LiteralSpec)
 
 
+def test_module_ref_spec_lock_literal_is_chain_start():
+    """ModuleRefSpec.lock_literal locks a leaf relative to its allowed shapes,
+    so a sub-tree from a helper can be locked as it is built (path is shorter,
+    no need to start from the root section). Returns a ModuleRefSpec for chaining."""
+    inner = CfgSectionSpec(
+        label="A",
+        fields={"pulse_cfg": CfgSectionSpec(fields={"freq": ScalarSpec("Freq", float)})},
+    )
+    ref = ModuleRefSpec(allowed=[inner])
+    locked = ref.lock_literal("pulse_cfg.freq", 0.0)
+    assert isinstance(locked, ModuleRefSpec)
+    leaf = cast(Any, locked.allowed[0]).fields["pulse_cfg"].fields["freq"]
+    assert isinstance(leaf, LiteralSpec)
+    assert leaf.value == 0.0
+    # original untouched (frozen)
+    orig = cast(Any, ref.allowed[0]).fields["pulse_cfg"].fields["freq"]
+    assert isinstance(orig, ScalarSpec)
+
+
 def test_lock_literal_raises_when_no_allowed_matches():
     spec = _nested_spec()
     with pytest.raises(RuntimeError, match="not found in any allowed"):
