@@ -23,15 +23,16 @@ if TYPE_CHECKING:
 RES_PROBE_NAMES = ["res_probe"]
 
 
-def make_res_probe_default(
-    ctx: ExpContext, *, gain: float = 0.05, length: float = 1.0
-) -> ModuleRefValue:
-    """Blank resonator probe pulse (res_ch / r_f), no library lookup."""
+def make_res_probe_default(ctx: ExpContext) -> ModuleRefValue:
+    """Blank resonator probe pulse (res_ch / r_f), no library lookup.
+
+    Adapter-specific tuning is applied by the caller via ``.with_field(...)``.
+    """
     r_f = md_get_float(ctx, "r_f", 6000.0)
     res_ch = md_get_int(ctx, "res_ch", 0)
 
     value = make_default_value(make_pulse_spec())
-    patch_pulse_fields(value, freq=r_f, ch=res_ch, gain=gain, length=length)
+    patch_pulse_fields(value, freq=r_f, ch=res_ch, gain=0.05, length=1.0)
     return ModuleRefValue("<Custom:Pulse>", value)
 
 

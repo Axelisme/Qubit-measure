@@ -29,6 +29,7 @@ from .defaults import (
     make_res_waveform_ref_default,
     make_reset_default,
     make_reset_ref_default,
+    make_trig_offset,
     make_two_pulse_reset_default,
 )
 from .module_builders import build_readout_for_frequency, build_waveform_for_length
@@ -80,6 +81,7 @@ __all__ = [
     "make_bath_reset_default",
     "make_reset_default",
     "make_reset_ref_default",
+    "make_trig_offset",
     "make_qub_waveform_default",
     "make_qub_waveform_ref_default",
     "make_res_waveform_default",

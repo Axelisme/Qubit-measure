@@ -107,9 +107,9 @@ class OneToneFreqAdapter(
             else probe_len - 0.1
         )
         return CfgSectionValue(
-            fields={
+            {
                 "modules": CfgSectionValue(
-                    fields={
+                    {
                         "readout": make_readout_default(ctx)
                         .with_field("pulse_cfg.gain", 0.05)
                         .with_field("ro_cfg.ro_length", ro_length),

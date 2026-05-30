@@ -21,12 +21,13 @@ if TYPE_CHECKING:
 QUB_WAVEFORM_NAMES = ["qub_flat", "qub_cos"]
 
 
-def make_qub_waveform_default(
-    ctx: ExpContext, *, length: float = 0.1
-) -> WaveformRefValue:  # noqa: ARG001
-    """Blank qubit-pulse waveform (a plain cosine), no library lookup."""
+def make_qub_waveform_default(ctx: ExpContext) -> WaveformRefValue:  # noqa: ARG001
+    """Blank qubit-pulse waveform (a plain cosine), no library lookup.
+
+    The caller sets ``length`` via ``.with_field("length", ...)`` when needed.
+    """
     value = make_default_value(make_cosine_waveform_spec())
-    value.fields["length"] = DirectValue(length)
+    value.fields["length"] = DirectValue(0.1)
     return WaveformRefValue(chosen_key="<Custom:Cosine>", value=value)
 
 

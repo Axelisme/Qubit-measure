@@ -13,6 +13,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_readout_module_spec,
     make_readout_default,
     make_reset_module_spec,
+    make_trig_offset,
     md_writeback,
 )
 from zcu_tools.gui.adapter import (
@@ -84,13 +85,17 @@ class LookbackAdapter(
             fields={
                 "modules": CfgSectionValue(
                     fields={
-                        "readout": make_readout_default(
-                            ctx,
-                            gain=1.0,
-                            ro_length=1.4,
-                            trig_expr="timeFly - 0.1",
-                            trig_delta=-0.1,
-                            trig_fallback=0.4,
+                        "readout": make_readout_default(ctx)
+                        .with_field("pulse_cfg.gain", 1.0)
+                        .with_field("ro_cfg.ro_length", 1.4)
+                        .with_field(
+                            "ro_cfg.trig_offset",
+                            make_trig_offset(
+                                ctx,
+                                trig_expr="timeFly - 0.1",
+                                trig_delta=-0.1,
+                                trig_fallback=0.4,
+                            ),
                         ),
                     }
                 ),

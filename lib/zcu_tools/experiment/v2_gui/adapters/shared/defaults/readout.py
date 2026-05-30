@@ -7,14 +7,13 @@ calibrated library readouts (readout_dpm / readout_rf).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 from typing_extensions import Literal, Optional, overload
 
 from zcu_tools.gui.adapter import (
     CfgSectionValue,
     ModuleRefValue,
-    ScalarValue,
     WaveformRefValue,
 )
 from zcu_tools.gui.specs.readout import make_pulse_readout_spec
@@ -35,29 +34,25 @@ if TYPE_CHECKING:
 READOUT_NAMES = ["readout_dpm", "readout_rf", "readout", "res_readout"]
 
 
-def make_readout_default(
-    ctx: ExpContext,
-    *,
-    gain: float = 0.1,
-    ro_length: Union[float, ScalarValue] = 0.9,
-    trig_expr: str = "timeFly + 0.05",
-    trig_delta: float = 0.05,
-    trig_fallback: float = 0.55,
-) -> ModuleRefValue:
+def make_readout_default(ctx: ExpContext) -> ModuleRefValue:
     """Blank inline pulse-readout (pulse + ro_cfg). References a library
-    ``ro_waveform`` for the pulse waveform when present."""
+    ``ro_waveform`` for the pulse waveform when present.
+
+    Adapter-specific tuning (gain, ro_length, …) is applied by the caller via
+    ``.with_field(...)`` rather than factory parameters.
+    """
     r_f = md_scalar_float(ctx, "r_f", 6000.0)
     res_ch = md_scalar_int(ctx, "res_ch", 0)
     ro_ch = md_scalar_int(ctx, "ro_ch", 0)
     trig_offset = make_trig_offset(
-        ctx, trig_expr=trig_expr, trig_delta=trig_delta, trig_fallback=trig_fallback
+        ctx, trig_expr="timeFly + 0.05", trig_delta=0.05, trig_fallback=0.55
     )
 
     value = make_default_value(make_pulse_readout_spec())
 
     pulse_cfg = value.fields.get("pulse_cfg")
     if isinstance(pulse_cfg, CfgSectionValue):
-        patch_pulse_fields(pulse_cfg, freq=r_f, ch=res_ch, gain=gain, length=1.0)
+        patch_pulse_fields(pulse_cfg, freq=r_f, ch=res_ch, gain=0.1, length=1.0)
         waveform_ref = pulse_cfg.fields.get("waveform")
         if (
             isinstance(waveform_ref, WaveformRefValue)
@@ -73,11 +68,7 @@ def make_readout_default(
     ro_cfg = value.fields.get("ro_cfg")
     if isinstance(ro_cfg, CfgSectionValue):
         patch_ro_cfg_fields(
-            ro_cfg,
-            ro_freq=r_f,
-            ro_ch=ro_ch,
-            trig_offset=trig_offset,
-            ro_length=ro_length,
+            ro_cfg, ro_freq=r_f, ro_ch=ro_ch, trig_offset=trig_offset, ro_length=0.9
         )
 
     return ModuleRefValue("<Custom:Pulse Readout>", value)

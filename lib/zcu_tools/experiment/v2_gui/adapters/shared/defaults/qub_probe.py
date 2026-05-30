@@ -27,15 +27,17 @@ if TYPE_CHECKING:
 QUB_PROBE_NAMES = ["qub_probe"]
 
 
-def make_qub_probe_default(
-    ctx: ExpContext, *, gain: float = 0.05, length: float = 0.1
-) -> ModuleRefValue:
-    """Blank qubit probe pulse (qub_ch / q_f), no library lookup."""
+def make_qub_probe_default(ctx: ExpContext) -> ModuleRefValue:
+    """Blank qubit probe pulse (qub_ch / q_f), no library lookup.
+
+    Adapter-specific tuning (gain, length, …) is applied by the caller via
+    ``.with_field(...)``.
+    """
     q_f = md_get_float(ctx, "q_f", 4000.0)
     qub_ch = md_get_int(ctx, "qub_ch", 0)
 
     value = make_default_value(make_pulse_spec())
-    patch_pulse_fields(value, freq=q_f, ch=qub_ch, gain=gain, length=length)
+    patch_pulse_fields(value, freq=q_f, ch=qub_ch, gain=0.05, length=0.1)
     return ModuleRefValue("<Custom:Pulse>", value)
 
 

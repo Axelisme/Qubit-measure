@@ -22,12 +22,13 @@ if TYPE_CHECKING:
 RES_WAVEFORM_NAMES = ["res_flat", "res_const"]
 
 
-def make_res_waveform_default(
-    ctx: ExpContext, *, length: float = 1.0
-) -> WaveformRefValue:  # noqa: ARG001
-    """Blank resonator-pulse waveform (a plain const), no library lookup."""
+def make_res_waveform_default(ctx: ExpContext) -> WaveformRefValue:  # noqa: ARG001
+    """Blank resonator-pulse waveform (a plain const), no library lookup.
+
+    The caller sets ``length`` via ``.with_field("length", ...)`` when needed.
+    """
     value = make_default_value(make_const_waveform_spec())
-    value.fields["length"] = DirectValue(length)
+    value.fields["length"] = DirectValue(1.0)
     return WaveformRefValue(chosen_key="<Custom:Const>", value=value)
 
 
