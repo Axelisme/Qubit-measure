@@ -1,62 +1,17 @@
-"""Phase 5 tests — IOManager (real ExperimentManager) + DeviceManager (FakeDevice)."""
+"""IOManager tests (real ExperimentManager).
+
+GlobalDeviceManager registry CRUD coverage lives in
+``services/test_device_manager.py`` alongside the rest of the device-registry
+tests — this file is IOManager-only.
+"""
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QEventLoop
-from zcu_tools.device import FakeDevice, FakeDeviceInfo, GlobalDeviceManager
 from zcu_tools.gui.adapter import ExpContext
-from zcu_tools.gui.services.device import (
-    ConnectDeviceRequest,
-    DeviceService,
-    DisconnectDeviceRequest,
-    SetDeviceValueRequest,
-)
-from zcu_tools.gui.state import State
-
-
-def _make_svc(driver: object | None = None) -> tuple[DeviceService, object]:
-    from zcu_tools.gui.event_bus import EventBus
-
-    fake_device = driver if driver is not None else FakeDevice()
-
-    def factory(type_name: str, address: str) -> object:
-        return fake_device
-
-    svc = DeviceService(EventBus(), State(MagicMock()), driver_factory=factory)  # type: ignore[arg-type]
-    return svc, fake_device
-
-
-def _register(svc: DeviceService, name: str = "flux") -> None:
-    loop = QEventLoop()
-    svc.device_connected.connect(lambda _request: loop.quit())
-    svc.start_connect_device(
-        ConnectDeviceRequest(type_name="FakeDevice", name=name, address="")
-    )
-    loop.exec()
-
-
-def _disconnect(svc: DeviceService, name: str = "flux") -> None:
-    loop = QEventLoop()
-    svc.device_disconnected.connect(lambda _request: loop.quit())
-    svc.start_disconnect_device(DisconnectDeviceRequest(name=name))
-    loop.exec()
-
-
-def _set_value(svc: DeviceService, name: str, value: float) -> None:
-    loop = QEventLoop()
-    svc.value_set.connect(lambda _name: loop.quit())
-    svc.start_set_device_value(SetDeviceValueRequest(name=name, value=value))
-    loop.exec()
-
-
 from zcu_tools.gui.io_manager import IOManager
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 def _make_base_ctx(**overrides) -> ExpContext:
@@ -72,18 +27,8 @@ def _make_base_ctx(**overrides) -> ExpContext:
     return ExpContext(**defaults)  # type: ignore[arg-type]
 
 
-@pytest.fixture(autouse=True)
-def _clean_gdm():
-    """Ensure GlobalDeviceManager is empty before and after each test."""
-    for name in list(GlobalDeviceManager.get_all_devices()):
-        GlobalDeviceManager.drop_device(name)
-    yield
-    for name in list(GlobalDeviceManager.get_all_devices()):
-        GlobalDeviceManager.drop_device(name)
-
-
 # ---------------------------------------------------------------------------
-# IOManager — setup / list_contexts
+# setup / list_contexts
 # ---------------------------------------------------------------------------
 
 
@@ -110,7 +55,7 @@ def test_iomanager_setup_creates_exp_dir(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# IOManager — use_context
+# use_context
 # ---------------------------------------------------------------------------
 
 
@@ -156,7 +101,7 @@ def test_iomanager_use_context_updates_md_ml(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# IOManager — new_context
+# new_context
 # ---------------------------------------------------------------------------
 
 
@@ -196,53 +141,3 @@ def test_iomanager_new_context_clone_creates_separate_files(tmp_path):
     assert ctx1.md is not ctx2.md
     assert ctx1.ml is not ctx2.ml
     assert len(io.list_contexts()) == 2
-
-
-# ---------------------------------------------------------------------------
-# DeviceManager
-# ---------------------------------------------------------------------------
-
-
-def test_devicemanager_register_and_list(qapp):
-    dev = FakeDevice()
-    svc, _ = _make_svc(driver=dev)
-    _register(svc, "flux")
-    entries = svc.list_devices()
-    entry = next((e for e in entries if e.name == "flux"), None)
-    assert entry is not None
-    assert entry.type_name == "FakeDevice"
-    assert entry.is_connected is True
-
-
-def test_devicemanager_drop_device(qapp):
-    svc, _ = _make_svc()
-    _register(svc, "flux")
-    _disconnect(svc)
-    # drop moves device to memory-only; it still appears but disconnected
-    entries = svc.list_devices()
-    flux_entry = next((e for e in entries if e.name == "flux"), None)
-    assert flux_entry is not None
-    assert not flux_entry.is_connected
-
-
-def test_devicemanager_get_set_value(qapp):
-    dev = FakeDevice()
-    dev.set_value(3.14)
-    svc, _ = _make_svc(driver=dev)
-    _register(svc, "flux")
-
-    assert svc.get_device_value("flux") == pytest.approx(3.14)
-    _set_value(svc, "flux", 2.71)
-    assert svc.get_device_value("flux") == pytest.approx(2.71)
-
-
-def test_devicemanager_get_all_info(qapp):
-    dev = FakeDevice()
-    dev.set_value(1.0)
-    svc, _ = _make_svc(driver=dev)
-    _register(svc, "flux")
-    info = GlobalDeviceManager.get_all_info()
-    assert "flux" in info
-    flux_info = info["flux"]
-    assert isinstance(flux_info, FakeDeviceInfo)
-    assert flux_info.value == pytest.approx(1.0)
