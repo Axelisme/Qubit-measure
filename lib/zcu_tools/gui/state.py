@@ -153,6 +153,17 @@ class VersionTable:
         self._versions: dict[str, int] = {}
 
     def bump(self, key: str) -> int:
+        """Advance a resource's version (a semantic write happened).
+
+        PAIRING CONTRACT — every resource that gets bumped must be dropped by its
+        owner's teardown, or a stale dependency would spuriously match a retained
+        version (the editor bug in Phase 100). The bump↔drop map:
+            tab:<id>* / tab:<id>:cfg/:result/:analyze/:save_path  → State.remove_tab (drop_prefix tab:<id>)
+            device:<name>                                         → State.remove_device (drop_prefix device:<name>)
+            editor:<id>                                           → Controller.drop_editor_version (CfgEditorService._remove)
+            context / soc                                         → process-lifetime singletons, never dropped
+        Adding a new bumped key means adding its drop to the owner's teardown.
+        """
         new = self._versions.get(key, 0) + 1
         self._versions[key] = new
         logger.debug("version bump: %s -> %d", key, new)
@@ -220,6 +231,9 @@ class State:
         it explicitly. soc has its own ``soc`` version key; predictor is not a
         guarded resource. This keeps soc-connect / predictor-load from spuriously
         marking md/ml-dependent ops (run / editor.commit / writeback) stale.
+
+        The full set of "writes md/ml → bump context" paths is enumerated at the
+        canonical anchor on ``ContextService.set_md_attr``.
         """
         self.exp_context = ctx
 

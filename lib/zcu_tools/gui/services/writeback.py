@@ -94,7 +94,8 @@ class WritebackService:
             # ContextService), so it must bump the context resource version
             # itself — same semantics as ContextService's md/ml writers — so a
             # later context-dependent op (run / editor.commit / another
-            # writeback) detects this change.
+            # writeback) detects this change. This is path 2 of 3; the canonical
+            # anchor listing all three is on ContextService.set_md_attr.
             self._state.version.bump("context")
         if touched_md:
             self._bus.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=ctx.md))

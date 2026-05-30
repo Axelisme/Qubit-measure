@@ -53,6 +53,27 @@ logger = logging.getLogger(__name__)
 
 @runtime_checkable
 class DeviceProtocol(Protocol):
+    """Structural contract a hardware driver must satisfy to be a GUI device.
+
+    pyright only checks the *shape* (these methods exist with these signatures).
+    The semantic invariants an implementer must also honour — and which a bug
+    silently violates — are:
+
+    - ``setup`` is called on a **worker QThread** (``_DeviceSetupWorker``), never
+      the Qt main thread. It MUST poll ``stop_event`` during any long operation:
+      cancellation works by ``stop_event.set()``, and the worker reports
+      "cancelled" only if it returns with the event set. A ``setup`` that ignores
+      ``stop_event`` makes cancel a no-op (the worker blocks until natural
+      completion). ``progress`` may drive a pbar via the ambient pbar factory.
+    - ``get_info`` returns a fresh value snapshot. It is called both on the
+      worker (right after ``setup``) and on the main thread (idle live-read,
+      guarded by OperationGate against a concurrent mutation). It must not mutate
+      device state.
+    - ``close`` releases the underlying resource and SHOULD be idempotent: it is
+      called on disconnect, and on any rollback where a driver was constructed
+      but never became the live registry entry.
+    """
+
     def setup(
         self,
         cfg: Any,
@@ -66,6 +87,15 @@ class DeviceProtocol(Protocol):
 
 @runtime_checkable
 class ValueDeviceProtocol(DeviceProtocol, Protocol):
+    """A ``DeviceProtocol`` that also exposes a scalar value (e.g. a source).
+
+    ``get_value`` / ``set_value`` are called on the device-mutation worker path
+    and guarded by OperationGate (no concurrent mutation of the same device).
+    ``set_value`` returns the device's post-set value (the caller writes it back
+    into State as the new ``info`` snapshot). Same thread/idempotency notes as
+    ``DeviceProtocol`` apply.
+    """
+
     def get_value(self) -> object: ...
     def set_value(self, value: object) -> object: ...
 
@@ -577,6 +607,9 @@ class DeviceService(QObject):
     def _begin_operation(
         self, kind: OperationKind, name: str, pending: DeviceState
     ) -> None:
+        # Symmetric release: this lease + _active_name/_active_prior are cleared
+        # exactly-once on the terminal path via _finish_operation, called from
+        # every _on_*_finished/_failed/_cancelled and _on_operation_failed.
         lease = self._gate.acquire(kind, owner_id=name, resource_id=name)
         prior = self._state.get_device(name)
         self._active_lease = lease

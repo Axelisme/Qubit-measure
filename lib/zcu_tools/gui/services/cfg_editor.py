@@ -342,6 +342,10 @@ class CfgEditorService:
         Fires on any descendant edit (root on_change bubbles). The payload
         carries the full current path list (root on_change does not say which
         path changed); subtree-only optimisation can come later.
+
+        Symmetric teardown: the callback stored in ``session.change_cb`` is
+        disconnected in ``_remove`` (the single teardown sink) before the session
+        is dropped — never leave a dangling hook on a torn-down root.
         """
         editor_id = session.editor_id
 

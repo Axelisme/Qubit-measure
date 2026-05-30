@@ -1,3 +1,20 @@
+"""Plot routing — task-local destination for matplotlib output.
+
+One of three plotting-substrate modules (see also ``mpl_backend`` =
+interception, ``plot_host`` = Qt canvas lifecycle; the full picture is in
+AI_NOTE "Plotting Substrate").
+
+Behaviour guarantee this module provides:
+- The active ``FigureContainer`` is held in a ``ContextVar`` (task-local), NOT a
+  global. Each run/analyze worker sets its own routing scope at entry via
+  ``routing_scope(container)``; concurrent workers therefore never cross-route
+  their figures even though ``mpl_backend`` reads a single "current container".
+- ``ContextVar`` semantics mean a child context (a QThread that inherited the
+  parent snapshot) sees the value bound *at copy time*; a worker MUST enter its
+  own ``routing_scope`` rather than rely on inheritance. Outside any scope the
+  current container is ``None`` (backend falls back to a detached figure).
+"""
+
 from __future__ import annotations
 
 from contextlib import contextmanager

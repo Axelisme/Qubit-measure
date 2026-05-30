@@ -162,7 +162,9 @@ class ContextService:
             readiness=ContextReadiness.DRAFT,
         )
         self._state.set_context(new_ctx)
-        # md/ml content is fully swapped → bump the context resource version.
+        # md/ml content is fully swapped → bump context (path 3 of 3; see the
+        # canonical anchor on ContextService.set_md_attr). set_context itself does
+        # not bump, so context-switch callers bump here explicitly.
         self._state.version.bump("context")
         self._bus.emit(
             GuiEvent.CONTEXT_SWITCHED,
@@ -214,7 +216,14 @@ class ContextService:
         md = self._state.exp_context.md
         setattr(md, key, value)
         # Semantic context content change: bump so concurrency guards on
-        # ``context`` (run.start / editor.commit) detect this edit.
+        # ``context`` (run.start / editor.commit / writeback.apply) detect this edit.
+        #
+        # CANONICAL ANCHOR — "writing md/ml must bump context" has THREE physical
+        # paths; change one, check the other two:
+        #   1. ContextService.set_md_attr / del_md_attr / set_ml_* / del_ml_*  (here, field-level)
+        #   2. WritebackService.apply_tab_writeback_items  (writes ctx.md/ml directly, bumps itself)
+        #   3. context-switch: setup_project / use_context / new_context  (whole md/ml swap)
+        # All three bump "context"; only set_context() itself does NOT (pure swap).
         self._state.version.bump("context")
         self._bus.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=md))
 

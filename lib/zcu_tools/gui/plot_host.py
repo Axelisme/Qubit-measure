@@ -1,3 +1,21 @@
+"""Plot host — Qt canvas lifecycle + main-thread bridge for figures.
+
+One of three plotting-substrate modules (see also ``plot_routing`` = task-local
+routing, ``mpl_backend`` = interception; full picture in AI_NOTE "Plotting
+Substrate").
+
+Behaviour guarantees this module provides / requires:
+- **The bridge MUST be initialised first on the GUI (main) thread.** Qt canvas
+  objects take the thread affinity of wherever they are first created; if a
+  worker thread triggers the first bridge init, every later canvas attaches to
+  the wrong thread and repaints crash / hang. The app initialises the bridge at
+  startup on the main thread before any worker runs.
+- Canvas attach/detach is marshalled to the main thread; worker code only
+  *selects* a ``FigureContainer`` (via routing), it never touches Qt widgets.
+- ``plt.show()`` under this host only activates an already-created canvas; it
+  does NOT take over the QApplication event loop (that stays the main window's).
+"""
+
 from __future__ import annotations
 
 import logging

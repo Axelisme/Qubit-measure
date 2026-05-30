@@ -300,6 +300,12 @@ class Controller:
         # capability, and carries the worker payload in the permit. Both clients
         # acquire through the same path so guard logic cannot drift. Returns the
         # operation token (handle for operation.await).
+        #
+        # Terminal: this only launches the worker. The outcome lands on the Qt
+        # main thread in ``RunService._on_run_finished`` / ``_on_run_failed``,
+        # which bump ``tab:<id>:result`` (finished only), release the RUN lease
+        # exactly-once, and emit ``RUN_LOCK_CHANGED`` with the outcome
+        # (finished / failed / cancelled).
         permit = self._guard_svc.acquire_run_permit(tab_id)
         view = self._require_view()
         pbar_factory = view.make_pbar_factory(tab_id)
@@ -480,7 +486,12 @@ class Controller:
         self._cfg_editor_svc.set_change_listener(listener)
 
     def bump_editor_version(self, editor_id: str) -> None:
-        """Bump an editor session's draft version (editor.commit guard input)."""
+        """Bump an editor session's draft version (editor.commit guard input).
+
+        Symmetric teardown is ``drop_editor_version`` (called from
+        ``CfgEditorService._remove``): a session that ends must drop its key, or
+        a stale dependency would spuriously match a retained version.
+        """
         self._state.version.bump(f"editor:{editor_id}")
 
     def drop_editor_version(self, editor_id: str) -> None:
@@ -699,6 +710,9 @@ class Controller:
 
         Do not call from dialog / writeback local LiveModel paths — those keep
         their drafts off of ``State`` until their own Apply boundary.
+
+        Terminal: → ``TabService.update_tab_cfg`` → ``State.update_tab_cfg_schema``,
+        which bumps ``tab:<id>:cfg`` and emits no event.
         """
         self._tab_svc.update_tab_cfg(tab_id, schema)
 
@@ -752,6 +766,16 @@ class Controller:
         Delegates to ViewQueryService, which goes through the form's live tree
         so the change auto-commits to ``State.cfg_schema`` via the existing
         ``schema_changed`` path, keeping the visible widget in sync (WYSIWYG).
+
+        Semantics differ from ``update_tab_cfg``: this is the View-coupled,
+        single-field WYSIWYG edit (mutates the live form, fails fast if the form
+        is not populated); ``update_tab_cfg`` is a codec replace that does not
+        depend on the View.
+
+        Terminal: ViewQueryService → ``path_resolver.resolve_and_set`` mutates the
+        live LiveModel → ``on_change`` → ``update_tab_cfg`` → ``State.update_tab_cfg_schema``,
+        bumping ``tab:<id>:cfg``; no ``TAB_INTERACTION_CHANGED`` (keystroke must
+        not trigger a snapshot rebuild).
         """
         self._view_query_svc.set_field(tab_id, path, value)
 

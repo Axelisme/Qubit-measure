@@ -187,6 +187,9 @@ class ConnectionService(QObject):
         if not isinstance(req, (ConnectMockRequest, ConnectRemoteRequest)):
             raise TypeError(f"Unsupported connect request: {type(req).__name__}")
 
+        # Symmetric release: this lease is released exactly-once on the terminal
+        # path via _release_lease, called from _finish_success / _finish_failure
+        # (mock dispatches them synchronously, remote from the worker slot).
         lease = self._gate.acquire(OperationKind.SOC_CONNECT, owner_id="soc")
         self._active_lease = lease
         self._pending_is_mock = isinstance(req, ConnectMockRequest)

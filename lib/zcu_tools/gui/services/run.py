@@ -71,6 +71,10 @@ class RunService(QObject):
         self._active_pbar_factory = pbar_factory
         logger.info("start_run: tab_id=%r", tab_id)
 
+        # Symmetric release: this lease is released exactly-once on the terminal
+        # path — _on_run_finished / _on_run_failed → _release_lease (covers
+        # success / failure / cancel). A pre-worker failure releases in the
+        # except below.
         lease = self._gate.acquire(OperationKind.RUN, owner_id=tab_id)
         self._active_lease = lease
         try:
