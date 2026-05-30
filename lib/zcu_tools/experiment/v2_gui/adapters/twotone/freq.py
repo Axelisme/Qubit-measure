@@ -9,12 +9,12 @@ from typing_extensions import Annotated, Any, ClassVar, Literal, Sequence, TypeA
 from zcu_tools.experiment.v2.twotone.freq import FreqCfg, FreqExp, FreqResult
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
+    default_qub_probe,
+    default_reset,
     make_pulse_module_spec,
-    make_pulse_ref_default,
     make_readout_default,
     make_readout_module_spec,
     make_reset_module_spec,
-    make_reset_ref_default,
     md_get_float,
     md_writeback,
 )
@@ -86,10 +86,10 @@ class FreqAdapter(
         qf_w = md_get_float(ctx, "qf_w", 20.0)
         half_span = 1.5 * qf_w if qf_w > 0 else 30.0
         _module_fields: dict[str, CfgNodeValue] = {
-            "qub_pulse": make_pulse_ref_default(ctx),
+            "qub_pulse": default_qub_probe(ctx),
             "readout": make_readout_default(ctx),
         }
-        _reset = make_reset_ref_default(ctx, optional=True)
+        _reset = default_reset(ctx, optional=True)
         if _reset is not None:
             _module_fields["reset"] = _reset
         root_val = CfgSectionValue(

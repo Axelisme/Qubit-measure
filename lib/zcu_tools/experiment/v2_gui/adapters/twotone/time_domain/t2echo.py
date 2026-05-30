@@ -13,12 +13,13 @@ from zcu_tools.experiment.v2.twotone.time_domain.t2echo import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
+    default_pi,
+    default_pi2,
+    default_reset,
     make_pulse_module_spec,
-    make_pulse_ref_default,
     make_readout_module_spec,
     make_readout_ref_default,
     make_reset_module_spec,
-    make_reset_ref_default,
     md_get_float,
     md_writeback,
     proper_relax,
@@ -94,13 +95,11 @@ class T2EchoAdapter(
         t2e = md_get_float(ctx, "t2e", 20.0)
         relax_delay = proper_relax(ctx)
         _module_fields: dict[str, CfgNodeValue] = {
-            "pi2_pulse": make_pulse_ref_default(
-                ctx, preferred_names=["pi2_amp", "pi2_len", "pi_amp", "pi_len"]
-            ),
-            "pi_pulse": make_pulse_ref_default(ctx),
+            "pi2_pulse": default_pi2(ctx),
+            "pi_pulse": default_pi(ctx),
             "readout": make_readout_ref_default(ctx),
         }
-        _reset = make_reset_ref_default(ctx, optional=True)
+        _reset = default_reset(ctx, optional=True)
         if _reset is not None:
             _module_fields["reset"] = _reset
         root_val = CfgSectionValue(
