@@ -4,9 +4,8 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
-
 from zcu_tools.gui.event_bus import DeviceChangedPayload, EventBus, GuiEvent
+from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 from .ports import DeviceMemoryInfo
 from .startup_persistence import (
