@@ -8,10 +8,7 @@ def test_writeback_widget_edit_module_item(qapp):
     item = ModuleWriteback(
         key="mod_key",
         description="A module",
-        module_name="my_mod",
-        proposed_module=MagicMock(),
         edit_schema=MagicMock(),
-        current_value=MagicMock(),
     )
 
     ctrl = MagicMock()

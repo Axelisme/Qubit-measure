@@ -974,16 +974,13 @@ def _writeback_item_wire(item) -> dict[str, object]:
         "key": item.key,
         "description": item.description,
         "selected": bool(item.selected),
-        "current_value": _json_safe(item.current_value),
     }
     if isinstance(item, MetaDictWriteback):
         base["kind"] = "metadict"
-        base["md_key"] = item.md_key
         base["proposed_value"] = _json_safe(item.proposed_value)
     elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
         is_module = isinstance(item, ModuleWriteback)
         base["kind"] = "module" if is_module else "waveform"
-        base["name"] = item.module_name if is_module else item.waveform_name
         base["has_edit_schema"] = item.edit_schema is not None
         if item.edit_schema is not None:
             base["edit_schema_raw"] = _SCHEMA_CODEC.schema_to_raw(

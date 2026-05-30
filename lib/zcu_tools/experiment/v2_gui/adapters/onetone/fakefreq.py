@@ -46,7 +46,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_readout_module_spec,
     make_reset_module_spec,
     md_get_float,
-    md_writeback,
     schema_from_module,
 )
 from zcu_tools.gui.adapter import (
@@ -66,6 +65,7 @@ from zcu_tools.gui.adapter import (
     SweepSpec,
     SweepValue,
     WaveformWriteback,
+    MetaDictWriteback,
     WritebackItem,
     WritebackRequest,
 )
@@ -380,7 +380,6 @@ class FakeFreqAdapter(
             ro_ch=ro_ch,
             ml=ctx.ml,
         )
-        cur_val_rf = ctx.ml.modules.get("readout_rf")
 
         wav_len = getattr(ctx.md, "res_probe_len", 5.0)
         new_waveform = build_waveform_for_length(
@@ -388,25 +387,26 @@ class FakeFreqAdapter(
             length=float(wav_len),
             ml=ctx.ml,
         )
-        cur_val_ro = ctx.ml.waveforms.get("ro_waveform")
 
         return [
-            md_writeback(ctx, "r_f", "Resonator frequency (MHz)", freq),
-            md_writeback(ctx, "rf_w", "Resonator linewidth FWHM (MHz)", fwhm),
+            MetaDictWriteback(
+                key="r_f",
+                description="Resonator frequency (MHz)",
+                proposed_value=freq,
+            ),
+            MetaDictWriteback(
+                key="rf_w",
+                description="Resonator linewidth FWHM (MHz)",
+                proposed_value=fwhm,
+            ),
             ModuleWriteback(
                 key="readout_rf",
                 description="readout_rf module config",
-                current_value=cur_val_rf,
-                module_name="readout_rf",
-                proposed_module=new_readout,
                 edit_schema=schema_from_module(new_readout),
             ),
             WaveformWriteback(
                 key="ro_waveform",
                 description="ro_waveform length config",
-                current_value=cur_val_ro,
-                waveform_name="ro_waveform",
-                proposed_waveform=new_waveform,
                 edit_schema=schema_from_module(new_waveform),
             ),
         ]

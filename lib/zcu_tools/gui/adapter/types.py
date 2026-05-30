@@ -204,44 +204,29 @@ class WritebackRequest(Generic[T_Result, T_AnalyzeResult]):
 
 @dataclass
 class WritebackItem(ABC):
+    # ``key`` is both the stable item id (UI/wire/dedup) and the apply target
+    # name — the item subtype names the destination (md attr / ml module /
+    # ml waveform), so a separate target-name field would just duplicate key.
     key: str
     description: str
-    current_value: Any
     selected: bool = field(default=True, init=False)
 
 
 @dataclass
 class MetaDictWriteback(WritebackItem):
-    md_key: str
     proposed_value: Any
-
-    def __post_init__(self) -> None:
-        if not self.md_key:
-            raise RuntimeError("MetaDictWriteback.md_key must be non-empty")
 
 
 @dataclass
 class ModuleWriteback(WritebackItem):
-    module_name: str
-    proposed_module: Any
     edit_schema: Optional["CfgSchema"] = None
     edited_schema: Optional["CfgSchema"] = None
-
-    def __post_init__(self) -> None:
-        if not self.module_name:
-            raise RuntimeError("ModuleWriteback.module_name must be non-empty")
 
 
 @dataclass
 class WaveformWriteback(WritebackItem):
-    waveform_name: str
-    proposed_waveform: Any
     edit_schema: Optional["CfgSchema"] = None
     edited_schema: Optional["CfgSchema"] = None
-
-    def __post_init__(self) -> None:
-        if not self.waveform_name:
-            raise RuntimeError("WaveformWriteback.waveform_name must be non-empty")
 
 
 @dataclass

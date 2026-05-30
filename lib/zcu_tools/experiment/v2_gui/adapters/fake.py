@@ -168,8 +168,6 @@ class FakeAdapter(
             MetaDictWriteback(
                 key="fake_peak",
                 description="Fake peak value from FakeAdapter analysis",
-                current_value=0.0,
-                md_key="fake_peak",
                 proposed_value=req.analyze_result.peak,
             )
         ]

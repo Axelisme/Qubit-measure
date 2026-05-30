@@ -356,77 +356,29 @@ def test_make_default_value_module_ref():
 # ---------------------------------------------------------------------------
 
 
-def test_meta_dict_writeback_empty_md_key_raises():
-    with pytest.raises(RuntimeError, match="md_key"):
-        MetaDictWriteback(
-            key="k", description="d", current_value=None, md_key="", proposed_value=1
-        )
-
-
-def test_meta_dict_writeback_requires_md_key_and_proposed_value():
+def test_meta_dict_writeback_requires_proposed_value():
     with pytest.raises(TypeError):
-        MetaDictWriteback(key="k", description="d", current_value=None)  # type: ignore[call-arg]
+        MetaDictWriteback(key="k", description="d")  # type: ignore[call-arg]
 
 
 def test_meta_dict_writeback_valid():
-    item = MetaDictWriteback(
-        key="k", description="d", current_value=None, md_key="freq", proposed_value=1
-    )
-    assert item.md_key == "freq"
-
-
-def test_module_writeback_empty_module_name_raises():
-    with pytest.raises(RuntimeError, match="module_name"):
-        ModuleWriteback(
-            key="k",
-            description="d",
-            current_value=None,
-            module_name="",
-            proposed_module=None,
-        )
-
-
-def test_module_writeback_requires_module_name_and_proposal():
-    with pytest.raises(TypeError):
-        ModuleWriteback(key="k", description="d", current_value=None)  # type: ignore[call-arg]
+    item = MetaDictWriteback(key="freq", description="d", proposed_value=1)
+    assert item.key == "freq"
+    assert item.proposed_value == 1
 
 
 def test_module_writeback_valid():
-    item = ModuleWriteback(
-        key="k",
-        description="d",
-        current_value=None,
-        module_name="pulse_a",
-        proposed_module=None,
-    )
-    assert item.module_name == "pulse_a"
-
-
-def test_waveform_writeback_empty_waveform_name_raises():
-    with pytest.raises(RuntimeError, match="waveform_name"):
-        WaveformWriteback(
-            key="k",
-            description="d",
-            current_value=None,
-            waveform_name="",
-            proposed_waveform=None,
-        )
-
-
-def test_waveform_writeback_requires_waveform_name_and_proposal():
-    with pytest.raises(TypeError):
-        WaveformWriteback(key="k", description="d", current_value=None)  # type: ignore[call-arg]
+    # key is the apply target name; edit_schema defaults to None.
+    item = ModuleWriteback(key="pulse_a", description="d")
+    assert item.key == "pulse_a"
+    assert item.edit_schema is None
+    assert item.edited_schema is None
 
 
 def test_waveform_writeback_valid():
-    item = WaveformWriteback(
-        key="k",
-        description="d",
-        current_value=None,
-        waveform_name="gauss",
-        proposed_waveform=None,
-    )
-    assert item.waveform_name == "gauss"
+    item = WaveformWriteback(key="gauss", description="d")
+    assert item.key == "gauss"
+    assert item.edit_schema is None
 
 
 # ---------------------------------------------------------------------------

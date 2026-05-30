@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Union
 from zcu_tools.gui.adapter import (
     DirectValue,
     EvalValue,
-    MetaDictWriteback,
     ScalarValue,
     SweepValue,
 )
@@ -135,24 +134,3 @@ def proper_flux_range(ctx: ExpContext, expts: int) -> SweepValue:
         start = -4e-3
         stop = 4e-3
     return SweepValue(start=start, stop=stop, expts=expts)
-
-
-def md_writeback(
-    ctx: ExpContext,
-    key: str,
-    description: str,
-    value: float,
-    ndigits: int = 4,
-) -> MetaDictWriteback:
-    """Build a MetaDictWriteback for a single md scalar.
-
-    Collapses the recurring shape where ``key`` and ``md_key`` are the same and
-    ``current_value`` is just ``ctx.md.get(key)``; the proposed value is rounded.
-    """
-    return MetaDictWriteback(
-        key=key,
-        description=description,
-        current_value=ctx.md.get(key),
-        md_key=key,
-        proposed_value=round(value, ndigits),
-    )

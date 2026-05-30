@@ -14,7 +14,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_readout_default,
     make_reset_module_spec,
     make_trig_offset,
-    md_writeback,
 )
 from zcu_tools.gui.adapter import (
     AdapterCapabilities,
@@ -26,6 +25,7 @@ from zcu_tools.gui.adapter import (
     ExpContext,
     ParamMeta,
     ScalarSpec,
+    MetaDictWriteback,
     WritebackItem,
     WritebackRequest,
 )
@@ -127,12 +127,10 @@ class LookbackAdapter(
         self, req: WritebackRequest[LookbackRunResult, LookbackAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         return [
-            md_writeback(
-                req.ctx,
-                "timeFly",
-                "Readout trigger offset prediction (us)",
-                req.analyze_result.predict_offset,
-                ndigits=6,
+            MetaDictWriteback(
+                key="timeFly",
+                description="Readout trigger offset prediction (us)",
+                proposed_value=req.analyze_result.predict_offset,
             )
         ]
 

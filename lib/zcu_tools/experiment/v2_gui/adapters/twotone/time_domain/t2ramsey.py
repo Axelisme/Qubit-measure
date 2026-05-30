@@ -20,7 +20,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_reset_module_spec,
     make_reset_ref_default,
     md_get_float,
-    md_writeback,
     proper_relax,
 )
 from zcu_tools.gui.adapter import (
@@ -35,6 +34,7 @@ from zcu_tools.gui.adapter import (
     ScalarSpec,
     SweepSpec,
     SweepValue,
+    MetaDictWriteback,
     WritebackItem,
     WritebackRequest,
 )
@@ -136,9 +136,12 @@ class T2RamseyAdapter(
         self, req: WritebackRequest[T2RamseyRunResult, T2RamseyAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
-        ctx = req.ctx
         return [
-            md_writeback(ctx, "t2r", "T2 Ramsey time (us)", result.t2r),
+            MetaDictWriteback(
+                key="t2r",
+                description="T2 Ramsey time (us)",
+                proposed_value=result.t2r,
+            ),
         ]
 
     def make_filename_stem(self, ctx: ExpContext) -> str:

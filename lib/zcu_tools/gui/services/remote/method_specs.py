@@ -416,9 +416,9 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "writeback.preview": MethodSpec(
         5.0,
         "List the adapter's proposed writeback items after analyze. Each item: "
-        "key (stable id), kind (metadict|module|waveform), description, selected, "
-        "current_value; metadict adds md_key+proposed_value; module/waveform add "
-        "name + has_edit_schema + edit_schema_raw (tagged cfg, like tab.get_cfg).",
+        "key (stable id == apply target name), kind (metadict|module|waveform), "
+        "description, selected; metadict adds proposed_value; module/waveform add "
+        "has_edit_schema + edit_schema_raw (tagged cfg, like tab.get_cfg).",
         (_str("tab_id"),),
     ),
     "writeback.apply": MethodSpec(

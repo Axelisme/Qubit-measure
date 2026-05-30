@@ -25,7 +25,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     schema_from_module,
     md_get_float,
     md_has_key,
-    md_writeback,
     proper_res_freq_range,
 )
 from zcu_tools.gui.adapter import (
@@ -41,6 +40,7 @@ from zcu_tools.gui.adapter import (
     ScalarSpec,
     SweepSpec,
     WaveformWriteback,
+    MetaDictWriteback,
     WritebackItem,
     WritebackRequest,
 )
@@ -171,22 +171,24 @@ class OneToneFreqAdapter(
         )
 
         return [
-            md_writeback(ctx, "r_f", "Resonator frequency (MHz)", result.freq),
-            md_writeback(ctx, "rf_w", "Resonator linewidth FWHM (MHz)", result.fwhm),
+            MetaDictWriteback(
+                key="r_f",
+                description="Resonator frequency (MHz)",
+                proposed_value=result.freq,
+            ),
+            MetaDictWriteback(
+                key="rf_w",
+                description="Resonator linewidth FWHM (MHz)",
+                proposed_value=result.fwhm,
+            ),
             ModuleWriteback(
                 key="readout_rf",
                 description="readout_rf module config",
-                current_value=ctx.ml.modules.get("readout_rf"),
-                module_name="readout_rf",
-                proposed_module=proposed_readout,
                 edit_schema=schema_from_module(proposed_readout),
             ),
             WaveformWriteback(
                 key="ro_waveform",
                 description="ro_waveform length config",
-                current_value=ctx.ml.waveforms.get("ro_waveform"),
-                waveform_name="ro_waveform",
-                proposed_waveform=proposed_waveform,
                 edit_schema=schema_from_module(proposed_waveform),
             ),
         ]

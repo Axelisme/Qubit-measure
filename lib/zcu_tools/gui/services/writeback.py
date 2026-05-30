@@ -73,15 +73,15 @@ class WritebackService:
             if not item.selected:
                 continue
             if isinstance(item, MetaDictWriteback):
-                setattr(ctx.md, item.md_key, item.proposed_value)
+                setattr(ctx.md, item.key, item.proposed_value)
                 touched_md = True
             elif isinstance(item, ModuleWriteback):
                 module = self._resolve_module_item(item)
-                ctx.ml.register_module(**{item.module_name: module})
+                ctx.ml.register_module(**{item.key: module})
                 touched_ml = True
             elif isinstance(item, WaveformWriteback):
                 waveform = self._resolve_waveform_item(item)
-                ctx.ml.register_waveform(**{item.waveform_name: waveform})
+                ctx.ml.register_waveform(**{item.key: waveform})
                 touched_ml = True
             else:
                 raise RuntimeError(f"Unsupported writeback item type: {type(item)}")
@@ -109,25 +109,23 @@ class WritebackService:
         return applied_keys
 
     def _resolve_module_item(self, item: ModuleWriteback) -> Any:
-        if item.edited_schema is not None:
-            raw = schema_to_dict(
-                item.edited_schema,
-                self._state.exp_context.ml,
-                self._state.exp_context.md,
-            )
-            return ModuleCfgFactory.from_raw(raw, ml=self._state.exp_context.ml)
-        if item.proposed_module is not None:
-            return item.proposed_module
-        raise RuntimeError(f"Module writeback '{item.key}' has no proposal to apply")
+        schema = item.edited_schema or item.edit_schema
+        if schema is None:
+            raise RuntimeError(f"Module writeback '{item.key}' has no edit_schema")
+        raw = schema_to_dict(
+            schema,
+            self._state.exp_context.ml,
+            self._state.exp_context.md,
+        )
+        return ModuleCfgFactory.from_raw(raw, ml=self._state.exp_context.ml)
 
     def _resolve_waveform_item(self, item: WaveformWriteback) -> Any:
-        if item.edited_schema is not None:
-            raw = schema_to_dict(
-                item.edited_schema,
-                self._state.exp_context.ml,
-                self._state.exp_context.md,
-            )
-            return WaveformCfgFactory.from_raw(raw, ml=self._state.exp_context.ml)
-        if item.proposed_waveform is not None:
-            return item.proposed_waveform
-        raise RuntimeError(f"Waveform writeback '{item.key}' has no proposal to apply")
+        schema = item.edited_schema or item.edit_schema
+        if schema is None:
+            raise RuntimeError(f"Waveform writeback '{item.key}' has no edit_schema")
+        raw = schema_to_dict(
+            schema,
+            self._state.exp_context.ml,
+            self._state.exp_context.md,
+        )
+        return WaveformCfgFactory.from_raw(raw, ml=self._state.exp_context.ml)

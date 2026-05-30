@@ -20,7 +20,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_reset_module_spec,
     make_reset_ref_default,
     md_get_float,
-    md_writeback,
 )
 from zcu_tools.gui.adapter import (
     AnalyzeRequest,
@@ -34,6 +33,7 @@ from zcu_tools.gui.adapter import (
     ScalarSpec,
     SweepSpec,
     SweepValue,
+    MetaDictWriteback,
     WritebackItem,
     WritebackRequest,
 )
@@ -131,10 +131,17 @@ class LenRabiAdapter(
         self, req: WritebackRequest[LenRabiRunResult, LenRabiAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
-        ctx = req.ctx
         return [
-            md_writeback(ctx, "pi_len", "Pi pulse length (us)", result.pi_len, 5),
-            md_writeback(ctx, "pi2_len", "Pi/2 pulse length (us)", result.pi2_len, 5),
+            MetaDictWriteback(
+                key="pi_len",
+                description="Pi pulse length (us)",
+                proposed_value=result.pi_len,
+            ),
+            MetaDictWriteback(
+                key="pi2_len",
+                description="Pi/2 pulse length (us)",
+                proposed_value=result.pi2_len,
+            ),
         ]
 
     def make_filename_stem(self, ctx: ExpContext) -> str:

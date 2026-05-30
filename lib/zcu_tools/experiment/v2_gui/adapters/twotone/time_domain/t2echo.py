@@ -21,7 +21,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_reset_module_spec,
     make_reset_ref_default,
     md_get_float,
-    md_writeback,
     proper_relax,
 )
 from zcu_tools.gui.adapter import (
@@ -36,6 +35,7 @@ from zcu_tools.gui.adapter import (
     ScalarSpec,
     SweepSpec,
     SweepValue,
+    MetaDictWriteback,
     WritebackItem,
     WritebackRequest,
 )
@@ -136,9 +136,12 @@ class T2EchoAdapter(
         self, req: WritebackRequest[T2EchoRunResult, T2EchoAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
-        ctx = req.ctx
         return [
-            md_writeback(ctx, "t2e", "T2 Echo time (us)", result.t2e),
+            MetaDictWriteback(
+                key="t2e",
+                description="T2 Echo time (us)",
+                proposed_value=result.t2e,
+            ),
         ]
 
     def make_filename_stem(self, ctx: ExpContext) -> str:

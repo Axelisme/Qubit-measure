@@ -132,35 +132,19 @@ class WritebackWidget(QWidget):
 
     def _make_label_text(self, item: WritebackItem) -> str:
         if isinstance(item, MetaDictWriteback):
-            return (
-                f"{item.key}  ({item.current_value!r} -> {item.proposed_value!r})\n"
-                f"  {item.description}"
-            )
-        if isinstance(item, ModuleWriteback):
+            return f"{item.key} -> {item.proposed_value!r}\n  {item.description}"
+        if isinstance(item, (ModuleWriteback, WaveformWriteback)):
             status = (
                 "Config edited" if item.edited_schema is not None else "Config modified"
             )
-            name_part = (
-                f" -> {item.module_name}" if item.module_name != item.key else ""
-            )
-            return f"{item.key}{name_part}  ({status})\n  {item.description}"
-        if isinstance(item, WaveformWriteback):
-            status = (
-                "Config edited" if item.edited_schema is not None else "Config modified"
-            )
-            name_part = (
-                f" -> {item.waveform_name}" if item.waveform_name != item.key else ""
-            )
-            return f"{item.key}{name_part}  ({status})\n  {item.description}"
+            return f"{item.key}  ({status})\n  {item.description}"
         return f"{item.key}\n  {item.description}"
 
     def _edit_item(self, item: WritebackItem, cb: QCheckBox) -> None:
         if isinstance(item, MetaDictWriteback):
             self._edit_md_item(item, cb)
-        elif isinstance(item, ModuleWriteback):
-            self._edit_cfg_item(item, cb, item.module_name)
-        elif isinstance(item, WaveformWriteback):
-            self._edit_cfg_item(item, cb, item.waveform_name)
+        elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
+            self._edit_cfg_item(item, cb)
 
     def _edit_md_item(self, item: MetaDictWriteback, cb: QCheckBox) -> None:
         dialog = QDialog(self)
@@ -168,9 +152,9 @@ class WritebackWidget(QWidget):
         layout = QVBoxLayout(dialog)
 
         form = QFormLayout()
-        name_edit = QLineEdit(item.md_key)
         value_edit = QLineEdit(str(item.proposed_value))
-        form.addRow("Key:", name_edit)
+        # ``key`` is the stable identifier / apply target name and is not editable
+        # here — only the proposed value is edited in place.
         form.addRow("Value:", value_edit)
         layout.addLayout(form)
 
@@ -184,7 +168,6 @@ class WritebackWidget(QWidget):
 
         def save() -> None:
             try:
-                item.md_key = name_edit.text().strip() or item.md_key
                 item.proposed_value = _coerce_scalar_input(
                     value_edit.text(),
                     item.proposed_value,
@@ -202,7 +185,6 @@ class WritebackWidget(QWidget):
         self,
         item: ModuleWriteback | WaveformWriteback,
         cb: QCheckBox,
-        initial_name: str,
     ) -> None:
         if item.edit_schema is None:
             return
@@ -212,10 +194,6 @@ class WritebackWidget(QWidget):
         dialog.setMinimumSize(560, 500)
 
         layout = QVBoxLayout(dialog)
-        name_form = QFormLayout()
-        name_edit = QLineEdit(initial_name)
-        name_form.addRow("Name:", name_edit)
-        layout.addLayout(name_form)
 
         hint = QLabel("Edit the configuration below. Click Save to confirm.")
         hint.setWordWrap(True)
@@ -264,12 +242,7 @@ class WritebackWidget(QWidget):
 
         def save() -> None:
             try:
-                updated = form_widget.read_schema()
-                if isinstance(item, ModuleWriteback):
-                    item.module_name = name_edit.text().strip() or item.module_name
-                else:
-                    item.waveform_name = name_edit.text().strip() or item.waveform_name
-                item.edited_schema = updated
+                item.edited_schema = form_widget.read_schema()
                 cb.setText(self._make_label_text(item))
                 dialog.accept()
             except Exception as exc:

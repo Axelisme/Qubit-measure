@@ -20,7 +20,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_reset_module_spec,
     make_reset_ref_default,
     md_get_float,
-    md_writeback,
 )
 from zcu_tools.gui.adapter import (
     AnalyzeRequest,
@@ -34,6 +33,7 @@ from zcu_tools.gui.adapter import (
     ScalarSpec,
     SweepSpec,
     SweepValue,
+    MetaDictWriteback,
     WritebackItem,
     WritebackRequest,
 )
@@ -131,10 +131,17 @@ class AmpRabiAdapter(
         self, req: WritebackRequest[AmpRabiRunResult, AmpRabiAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
-        ctx = req.ctx
         return [
-            md_writeback(ctx, "pi_amp", "Pi pulse gain (a.u.)", result.pi_amp, 5),
-            md_writeback(ctx, "pi2_amp", "Pi/2 pulse gain (a.u.)", result.pi2_amp, 5),
+            MetaDictWriteback(
+                key="pi_amp",
+                description="Pi pulse gain (a.u.)",
+                proposed_value=result.pi_amp,
+            ),
+            MetaDictWriteback(
+                key="pi2_amp",
+                description="Pi/2 pulse gain (a.u.)",
+                proposed_value=result.pi2_amp,
+            ),
         ]
 
     def make_filename_stem(self, ctx: ExpContext) -> str:

@@ -15,7 +15,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_readout_module_spec,
     make_reset_module_spec,
     make_reset_ref_default,
-    md_writeback,
     proper_qub_freq_range,
 )
 from zcu_tools.gui.adapter import (
@@ -29,6 +28,7 @@ from zcu_tools.gui.adapter import (
     ParamMeta,
     ScalarSpec,
     SweepSpec,
+    MetaDictWriteback,
     WritebackItem,
     WritebackRequest,
 )
@@ -120,10 +120,17 @@ class FreqAdapter(
         self, req: WritebackRequest[FreqRunResult, FreqAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
-        ctx = req.ctx
         return [
-            md_writeback(ctx, "q_f", "Qubit frequency (MHz)", result.freq),
-            md_writeback(ctx, "qf_w", "Qubit linewidth FWHM (MHz)", result.fwhm),
+            MetaDictWriteback(
+                key="q_f",
+                description="Qubit frequency (MHz)",
+                proposed_value=result.freq,
+            ),
+            MetaDictWriteback(
+                key="qf_w",
+                description="Qubit linewidth FWHM (MHz)",
+                proposed_value=result.fwhm,
+            ),
         ]
 
     def make_filename_stem(self, ctx: ExpContext) -> str:

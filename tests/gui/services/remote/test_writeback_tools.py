@@ -35,16 +35,11 @@ def _items() -> list:
         MetaDictWriteback(
             key="r_f",
             description="Resonator freq",
-            current_value=6000.0,
-            md_key="r_f",
             proposed_value=6012.3,
         ),
         ModuleWriteback(
             key="readout_rf",
             description="readout module",
-            current_value=None,
-            module_name="readout_rf",
-            proposed_module=MagicMock(),
             edit_schema=_edit_schema(),
         ),
     ]
@@ -70,12 +65,15 @@ def test_preview_serializes_metadict_and_module():
 
     md = items["r_f"]
     assert md["kind"] == "metadict"
-    assert md["md_key"] == "r_f"
+    assert md["key"] == "r_f"
+    assert "current_value" not in md
+    assert "md_key" not in md
     assert md["proposed_value"] == 6012.3
 
     mod = items["readout_rf"]
     assert mod["kind"] == "module"
-    assert mod["name"] == "readout_rf"
+    assert mod["key"] == "readout_rf"
+    assert "name" not in mod
     assert mod["has_edit_schema"] is True
     # edit_schema serialized as tagged cfg (same format as tab.get_cfg)
     assert "freq" in mod["edit_schema_raw"]

@@ -16,7 +16,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_reset_module_spec,
     make_reset_ref_default,
     md_get_float,
-    md_writeback,
     proper_relax,
 )
 from zcu_tools.gui.adapter import (
@@ -31,6 +30,7 @@ from zcu_tools.gui.adapter import (
     ScalarSpec,
     SweepSpec,
     SweepValue,
+    MetaDictWriteback,
     WritebackItem,
     WritebackRequest,
 )
@@ -122,9 +122,12 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
         self, req: WritebackRequest[T1RunResult, T1AnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
-        ctx = req.ctx
         return [
-            md_writeback(ctx, "t1", "T1 relaxation time (us)", result.t1),
+            MetaDictWriteback(
+                key="t1",
+                description="T1 relaxation time (us)",
+                proposed_value=result.t1,
+            ),
         ]
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
