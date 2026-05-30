@@ -46,7 +46,7 @@ def _make_svc(
             EventBus(),
             State(MagicMock()),
             gate,
-            driver_factory=lambda _type, _address: device,
+            driver_factory=lambda _type, _address: device,  # type: ignore[arg-type]
         ),
         device,
     )
@@ -247,7 +247,7 @@ def test_event_failure_before_worker_start_does_not_leak_device_lease(qapp):
     svc = DeviceService(
         bus,
         State(MagicMock()),
-        driver_factory=lambda _type, _address: MagicMock(),
+        driver_factory=lambda _type, _address: MagicMock(),  # type: ignore[arg-type]
     )
     bus.subscribe(
         GuiEvent.DEVICE_CHANGED,

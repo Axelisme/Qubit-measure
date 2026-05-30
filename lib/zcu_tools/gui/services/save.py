@@ -140,7 +140,10 @@ class SaveService(QObject):
         )
 
     def _on_save_finished(self, tab_id: str) -> None:
-        path = self._active_paths.pop(tab_id)
+        # Default-pop for symmetry with _on_save_failed: the entry is normally
+        # present (set in start_save_* before the worker can fire), but a missing
+        # entry must degrade to "" rather than raise inside a terminal slot.
+        path = self._active_paths.pop(tab_id, "")
         logger.info("_on_save_finished: tab_id=%r path=%r", tab_id, path)
         self._mark_saving(tab_id, False)
         if tab_id in self._pending_image:

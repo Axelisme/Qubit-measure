@@ -52,9 +52,14 @@ def ctrl(ml, md):
 
 @pytest.fixture()
 def service(ctrl):
-    # M2: the Repository takes the reactive-env ctrl, the ML write port, and a
-    # version-bump callback. The MagicMock ctrl satisfies all three facets.
-    return CfgEditorService(ctrl, ml_port=ctrl, version_bump=ctrl.bump_editor_version)
+    # M2: the Repository takes the reactive-env ctrl, the ML write port, and the
+    # version bump/drop callbacks. The MagicMock ctrl satisfies all facets.
+    return CfgEditorService(
+        ctrl,
+        ml_port=ctrl,
+        version_bump=ctrl.bump_editor_version,
+        version_drop=ctrl.drop_editor_version,
+    )
 
 
 def _paths(entries):
@@ -455,3 +460,49 @@ def test_reregister_disconnects_previous_root_hook(service, ctrl):
     events.clear()
     old.fields["freq"].set_value(7.0)  # old root edit → must be silent
     assert events == []
+
+
+def _service_with_version_table(ctrl):
+    """A CfgEditorService wired to a real VersionTable via bump/drop, so we can
+    assert the editor:<id> resource version lifecycle (edit bumps, teardown drops)."""
+    from zcu_tools.gui.state import VersionTable
+
+    table = VersionTable()
+
+    def _bump(eid: str) -> None:
+        table.bump(f"editor:{eid}")
+
+    def _drop(eid: str) -> None:
+        table.drop_prefix(f"editor:{eid}")
+
+    svc = CfgEditorService(ctrl, ml_port=ctrl, version_bump=_bump, version_drop=_drop)
+    return svc, table
+
+
+def test_commit_drops_editor_version(ctrl):
+    svc, table = _service_with_version_table(ctrl)
+    editor_id, _ = svc.open("module", discriminator="pulse")
+    svc.set_field(editor_id, "freq", 5000.0)  # edit → bump
+    svc.set_field(editor_id, "ch", 0)
+    assert table.get(f"editor:{editor_id}") > 0
+    svc.commit(editor_id, "committed_pulse")  # teardown → drop
+    assert table.get(f"editor:{editor_id}") == 0
+
+
+def test_discard_drops_editor_version(ctrl):
+    svc, table = _service_with_version_table(ctrl)
+    editor_id, _ = svc.open("waveform", discriminator="gauss")
+    svc.set_field(editor_id, "length", 0.1)
+    assert table.get(f"editor:{editor_id}") > 0
+    svc.discard(editor_id)
+    assert table.get(f"editor:{editor_id}") == 0
+
+
+def test_close_delegated_drops_editor_version(ctrl):
+    svc, table = _service_with_version_table(ctrl)
+    root = _make_tab_root(ctrl)
+    editor_id = svc.register_delegated_session("tab-1", root)
+    root.fields["freq"].set_value(7.0)  # edit → bump
+    assert table.get(f"editor:{editor_id}") > 0
+    svc.close(editor_id)  # delegated teardown → drop (root stays alive)
+    assert table.get(f"editor:{editor_id}") == 0

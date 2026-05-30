@@ -11,7 +11,7 @@ from zcu_tools.gui.state import ExpContext, State
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
-def _make_svc() -> ContextService:
+def _make_svc_with_state() -> tuple[ContextService, State]:
     state = State(
         ExpContext(
             md=MetaDict(),
@@ -22,7 +22,11 @@ def _make_svc() -> ContextService:
             readiness=ContextReadiness.DRAFT,
         )
     )
-    return ContextService(state, IOManager(), EventBus())
+    return ContextService(state, IOManager(), EventBus()), state
+
+
+def _make_svc() -> ContextService:
+    return _make_svc_with_state()[0]
 
 
 def test_set_ml_module_from_raw_registers_module():
@@ -61,3 +65,26 @@ def test_set_ml_waveform_from_raw_invalid_wraps_as_validation_error():
     svc = _make_svc()
     with pytest.raises(MlEntryValidationError, match="Invalid waveform"):
         svc.set_ml_waveform_from_raw("bad", {"style": "no_such_style"})
+
+
+def test_md_write_bumps_context_version():
+    # Concurrency guards on ``context`` (run.start / editor.commit / writeback)
+    # must detect md edits: a semantic md write bumps the context version.
+    svc, state = _make_svc_with_state()
+    before = state.version.get("context")
+    svc.set_md_attr("r_f", 6000.0)
+    assert state.version.get("context") == before + 1
+    svc.del_md_attr("r_f")
+    assert state.version.get("context") == before + 2
+
+
+def test_ml_write_bumps_context_version():
+    svc, state = _make_svc_with_state()
+    before = state.version.get("context")
+    svc.set_ml_waveform_from_raw(
+        "drive_wav",
+        {"style": "gauss", "length": 0.1, "sigma": 0.02},
+    )
+    assert state.version.get("context") == before + 1
+    svc.del_ml_waveform("drive_wav")
+    assert state.version.get("context") == before + 2

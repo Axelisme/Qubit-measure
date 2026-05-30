@@ -89,6 +89,13 @@ class WritebackService:
 
         if touched_ml and ctx.ml.has_persistence:
             ctx.ml.dump()
+        if touched_md or touched_ml:
+            # Writeback writes md/ml directly (it does not go through
+            # ContextService), so it must bump the context resource version
+            # itself — same semantics as ContextService's md/ml writers — so a
+            # later context-dependent op (run / editor.commit / another
+            # writeback) detects this change.
+            self._state.version.bump("context")
         if touched_md:
             self._bus.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=ctx.md))
         if touched_ml:

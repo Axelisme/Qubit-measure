@@ -6,6 +6,8 @@ non-empty required strings, bool-rejecting integers/numbers, JSON-safe values.
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 from zcu_tools.gui.services.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.services.remote.param_spec import (
@@ -101,7 +103,9 @@ def test_build_input_schema_marks_required_and_types():
     )
     schema = build_input_schema(specs)
     assert schema["type"] == "object"
-    props = schema["properties"]
+    # build_input_schema is typed as dict[str, object]; narrow the nested shape
+    # for indexing (the runtime value is a JSON-schema dict-of-dicts).
+    props = cast("dict[str, dict]", schema["properties"])
     assert props["tab_id"] == {"type": "string"}
     assert props["flag"] == {"type": "boolean"}
     # JSON => a type-union covering any JSON value.
@@ -113,4 +117,4 @@ def test_build_input_schema_marks_required_and_types():
         "array",
         "null",
     ]
-    assert set(schema["required"]) == {"tab_id", "payload"}
+    assert set(cast("list", schema["required"])) == {"tab_id", "payload"}

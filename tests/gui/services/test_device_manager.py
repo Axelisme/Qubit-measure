@@ -33,7 +33,7 @@ def _make_svc(driver: MagicMock | None = None) -> tuple[DeviceService, MagicMock
     svc = DeviceService(
         EventBus(),
         State(MagicMock()),
-        driver_factory=lambda _type, _address: device,
+        driver_factory=lambda _type, _address: device,  # type: ignore[arg-type]
     )
     return svc, device
 

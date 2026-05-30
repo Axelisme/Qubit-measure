@@ -483,6 +483,12 @@ class Controller:
         """Bump an editor session's draft version (editor.commit guard input)."""
         self._state.version.bump(f"editor:{editor_id}")
 
+    def drop_editor_version(self, editor_id: str) -> None:
+        """Forget an editor session's version on teardown (symmetric to tab/
+        device drop). A stale dependency on a gone editor then reads version 0,
+        so the guard treats it as stale rather than spuriously matching."""
+        self._state.version.drop_prefix(f"editor:{editor_id}")
+
     def cfg_editor_set_field(
         self, editor_id: str, path: str, value: object
     ) -> dict[str, object]:
@@ -620,15 +626,24 @@ class Controller:
         on_finished: Callable[[], None],
         on_failed: Callable[[str], None],
     ) -> None:
-        """Bind one dialog observer without exposing the connection service."""
-        try:
-            self._conn_svc.connection_finished.disconnect(on_finished)
-        except (TypeError, RuntimeError):
-            pass
-        try:
-            self._conn_svc.connection_failed.disconnect(on_failed)
-        except (TypeError, RuntimeError):
-            pass
+        """Bind the single connection observer without exposing the service.
+
+        Single-observer model: only one observer (the currently-open SetupDialog)
+        should hear connection outcomes at a time. SetupDialog is re-created on
+        every open (``MainWindow._make_dialog`` → popped from the registry on
+        ``finished``), so a prior dialog's bound methods would otherwise stay
+        connected and leak. We therefore drop **all** existing slots on these
+        signals before connecting the new observer — a no-arg ``disconnect()``
+        removes every connection — guaranteeing exactly the latest observer.
+        """
+        for signal in (
+            self._conn_svc.connection_finished,
+            self._conn_svc.connection_failed,
+        ):
+            try:
+                signal.disconnect()
+            except (TypeError, RuntimeError):
+                pass  # no existing connections
         self._conn_svc.connection_finished.connect(on_finished)
         self._conn_svc.connection_failed.connect(on_failed)
 

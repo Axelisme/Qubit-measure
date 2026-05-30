@@ -99,7 +99,8 @@ def test_events_poll_refreshes_last_seen(wired, monkeypatch):
     # the version baseline must resync so a following guarded op isn't blocked by
     # the agent's own just-finished work. The async run bumped tab:t:result.
     monkeypatch.setattr(
-        mcp_server, "_EVENT_QUEUE",
+        mcp_server,
+        "_EVENT_QUEUE",
         mcp_server.deque([{"event": "run_lock_changed", "payload": {}}]),
         raising=False,
     )
@@ -115,9 +116,7 @@ def test_events_poll_empty_does_not_refresh(wired, monkeypatch):
     # No events -> no resync RPC (avoid a needless round-trip on every empty poll).
     monkeypatch.setattr(mcp_server, "_EVENT_QUEUE", mcp_server.deque(), raising=False)
     called: list[bool] = []
-    monkeypatch.setattr(
-        mcp_server, "_refresh_versions", lambda: called.append(True)
-    )
+    monkeypatch.setattr(mcp_server, "_refresh_versions", lambda: called.append(True))
 
     out = mcp_server.TOOLS["gui_events_poll"]["handler"]({"timeout_seconds": 0.05})
 

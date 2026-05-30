@@ -90,7 +90,7 @@ class TabService:
         instance = tab.adapter.get_analyze_params(
             tab.run_result, self._state.exp_context
         )
-        self._state.update_tab_analyze_params(tab_id, instance)
+        self._state.update_tab_analyze_param_instance(tab_id, instance)
         return instance
 
     def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:

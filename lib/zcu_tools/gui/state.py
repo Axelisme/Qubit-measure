@@ -211,8 +211,17 @@ class State:
         self.version = VersionTable()
 
     def set_context(self, ctx: ExpContext) -> None:
+        """Replace the whole ExpContext. Pure field swap — does NOT bump the
+        ``context`` resource version, because the same setter is used to swap
+        non-md/ml fields (soc/soccfg via connect, predictor via load/clear).
+
+        The ``context`` version represents md/ml *content*: only callers that
+        actually change md/ml (setup_project / use_context / new_context) bump
+        it explicitly. soc has its own ``soc`` version key; predictor is not a
+        guarded resource. This keeps soc-connect / predictor-load from spuriously
+        marking md/ml-dependent ops (run / editor.commit / writeback) stale.
+        """
         self.exp_context = ctx
-        self.version.bump("context")
 
     # ------------------------------------------------------------------
     # Device state (DeviceService writes these on the Qt main thread).
@@ -342,19 +351,14 @@ class State:
         tab.analyze_result = analyze_result
         tab.figure = figure
         tab.applied_writeback_keys.clear()
+        # Analyze result is a guarded resource (writeback depends on it), mirroring
+        # update_tab_result's tab:<id>:result bump.
+        self.version.bump(f"tab:{tab_id}:analyze")
 
     def update_tab_cfg_schema(self, tab_id: str, schema: CfgSchema) -> None:
         logger.debug("update_tab_cfg_schema: tab_id=%r", tab_id)
         self.tabs[tab_id].cfg_schema = schema
         self.version.bump(f"tab:{tab_id}:cfg")
-
-    def update_tab_analyze_params(self, tab_id: str, instance: object) -> None:
-        logger.debug(
-            "update_tab_analyze_params: tab_id=%r instance_type=%s",
-            tab_id,
-            type(instance).__name__,
-        )
-        self.tabs[tab_id].analyze_param_instance = instance
 
     def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:
         logger.debug(

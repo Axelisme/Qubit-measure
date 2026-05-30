@@ -266,7 +266,10 @@ class ConnectionService(QObject):
         new_ctx = dataclasses.replace(self._state.exp_context, soc=soc, soccfg=soccfg)
         self._state.set_context(new_ctx)
         # soc is its own resource (a run depends on it independently of context);
-        # bump it here, on the main thread, where the soc is written.
+        # bump it here, on the main thread, where the soc is written. Deliberately
+        # NOT bumping ``context``: set_context no longer does so, and a soc connect
+        # does not change md/ml — bumping context would spuriously mark md/ml-
+        # dependent ops (run / editor.commit / writeback) stale.
         self._state.version.bump("soc")
         self._bus.emit(
             GuiEvent.SOC_CHANGED,

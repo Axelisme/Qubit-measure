@@ -49,7 +49,7 @@ def _make_service(device: MagicMock) -> tuple[DeviceService, EventBus]:
         DeviceService(
             bus,
             State(MagicMock()),
-            driver_factory=lambda _type, _address: device,
+            driver_factory=lambda _type, _address: device,  # type: ignore[arg-type]
         ),
         bus,
     )

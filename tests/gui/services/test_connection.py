@@ -44,6 +44,35 @@ def test_start_connect_mock_emits_finished_and_updates_context(qapp):
     assert svc._state.exp_context.soccfg is not None
 
 
+def test_connect_bumps_soc_not_context_version(qapp):
+    svc = _make_svc()
+    ctx_before = svc._state.version.get("context")
+    soc_before = svc._state.version.get("soc")
+    loop = QEventLoop()
+    svc.connection_finished.connect(loop.quit)
+    svc.connection_failed.connect(lambda msg: loop.quit())
+
+    svc.start_connect(ConnectMockRequest())
+    loop.exec()
+
+    # soc is its own resource; a connect must not spuriously bump context
+    # (md/ml content did not change).
+    assert svc._state.version.get("soc") == soc_before + 1
+    assert svc._state.version.get("context") == ctx_before
+
+
+def test_predictor_load_clear_does_not_bump_context_version(qapp):
+    import dataclasses
+
+    svc = _make_svc()
+    ctx_before = svc._state.version.get("context")
+    fake = MagicMock()
+    svc._state.set_context(dataclasses.replace(svc._state.exp_context, predictor=fake))
+    svc.clear_predictor()
+    # predictor is not a guarded resource; swapping it must not bump context.
+    assert svc._state.version.get("context") == ctx_before
+
+
 def test_start_connect_rejects_concurrent_calls(qapp):
     gate = OperationGate()
     svc = _make_svc(gate)

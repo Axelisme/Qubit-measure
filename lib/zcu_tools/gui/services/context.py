@@ -162,6 +162,8 @@ class ContextService:
             readiness=ContextReadiness.DRAFT,
         )
         self._state.set_context(new_ctx)
+        # md/ml content is fully swapped → bump the context resource version.
+        self._state.version.bump("context")
         self._bus.emit(
             GuiEvent.CONTEXT_SWITCHED,
             ContextSwitchedPayload(md=new_ctx.md, ml=new_ctx.ml),
@@ -174,6 +176,7 @@ class ContextService:
             new_ctx, active_label=label, readiness=ContextReadiness.ACTIVE
         )
         self._state.set_context(new_ctx)
+        self._state.version.bump("context")
         self._bus.emit(
             GuiEvent.CONTEXT_SWITCHED,
             ContextSwitchedPayload(md=new_ctx.md, ml=new_ctx.ml),
@@ -199,6 +202,7 @@ class ContextService:
             new_ctx, active_label=label, readiness=ContextReadiness.ACTIVE
         )
         self._state.set_context(new_ctx)
+        self._state.version.bump("context")
         self._bus.emit(
             GuiEvent.CONTEXT_SWITCHED,
             ContextSwitchedPayload(md=new_ctx.md, ml=new_ctx.ml),
@@ -209,6 +213,9 @@ class ContextService:
             raise RuntimeError("No experiment context.")
         md = self._state.exp_context.md
         setattr(md, key, value)
+        # Semantic context content change: bump so concurrency guards on
+        # ``context`` (run.start / editor.commit) detect this edit.
+        self._state.version.bump("context")
         self._bus.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=md))
 
     def del_md_attr(self, key: str) -> None:
@@ -216,6 +223,7 @@ class ContextService:
             raise RuntimeError("No experiment context.")
         md = self._state.exp_context.md
         delattr(md, key)
+        self._state.version.bump("context")
         self._bus.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=md))
 
     def set_ml_module(self, name: str, module: Any) -> None:
@@ -223,6 +231,7 @@ class ContextService:
             raise RuntimeError("No experiment context.")
         ml = self._state.exp_context.ml
         ml.register_module(**{name: module})
+        self._state.version.bump("context")
         self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
 
     def set_ml_module_from_raw(self, name: str, raw_dict: dict) -> None:
@@ -242,6 +251,7 @@ class ContextService:
                 f"Invalid module configuration: {exc}"
             ) from exc
         ml.register_module(**{name: module})
+        self._state.version.bump("context")
         self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
 
     def del_ml_module(self, name: str) -> None:
@@ -249,6 +259,7 @@ class ContextService:
             raise RuntimeError("No experiment context.")
         ml = self._state.exp_context.ml
         ml.delete_module(name)
+        self._state.version.bump("context")
         self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
 
     def set_ml_waveform(self, name: str, waveform: Any) -> None:
@@ -256,6 +267,7 @@ class ContextService:
             raise RuntimeError("No experiment context.")
         ml = self._state.exp_context.ml
         ml.register_waveform(**{name: waveform})
+        self._state.version.bump("context")
         self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
 
     def set_ml_waveform_from_raw(self, name: str, raw_dict: dict) -> None:
@@ -275,6 +287,7 @@ class ContextService:
                 f"Invalid waveform configuration: {exc}"
             ) from exc
         ml.register_waveform(**{name: waveform})
+        self._state.version.bump("context")
         self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
 
     def coerce_md_value(self, key: str, text: str) -> Any:
@@ -300,4 +313,5 @@ class ContextService:
             raise RuntimeError("No experiment context.")
         ml = self._state.exp_context.ml
         ml.delete_waveform(name)
+        self._state.version.bump("context")
         self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))

@@ -126,12 +126,19 @@ _LAST_SEEN: Dict[str, int] = {}
 # Dependency map (the single place that knows what each guarded op depends on).
 # Patterns use {tab_id}/{editor_id} placeholders and a literal ``device:*`` that
 # expands to every current device:* key. save.* does NOT depend on cfg — the
-# saved content comes from the run result's own cfg_snapshot.
+# saved content comes from the run result's own cfg_snapshot. writeback.apply
+# depends on the run+analyze results it recomputes from, plus context (it writes
+# md/ml). Note: md/ml content edits bump the ``context`` version, so any op
+# depending on ``context`` (run.start / editor.commit / writeback.apply) detects
+# a concurrent md/ml change.
 _GUARD_DEPS: Dict[str, tuple[str, ...]] = {
     "run.start": ("tab:{tab_id}:cfg", "tab:{tab_id}", "soc", "context", "device:*"),
     "save.data": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
     "save.image": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
     "save.both": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
+    # writeback.apply recomputes items from run+analyze results and writes md/ml
+    # (context). A concurrent rerun/reanalyze or context edit must invalidate it.
+    "writeback.apply": ("tab:{tab_id}:result", "tab:{tab_id}:analyze", "context"),
     "editor.commit": ("editor:{editor_id}", "context"),
 }
 

@@ -79,6 +79,26 @@ def test_save_depends_on_result_and_save_path_not_cfg(wired):
     assert "tab:t:cfg" not in params["expected_versions"]
 
 
+def test_writeback_apply_depends_on_result_analyze_and_context(wired):
+    sent = wired["sent"]
+    mcp_server._LAST_SEEN.update(
+        {"tab:t:result": 7, "tab:t:analyze": 4, "context": 9, "tab:t:save_path": 2}
+    )
+    wired["writeback.apply"] = {"ok": True, "result": {}}
+    wired["resources.versions"] = _versions_reply(dict(mcp_server._LAST_SEEN))
+
+    mcp_server.send_gui_rpc("writeback.apply", {"tab_id": "t", "selections": []})
+
+    params = next(p for (m, p) in sent if m == "writeback.apply")
+    assert params["expected_versions"] == {
+        "tab:t:result": 7,
+        "tab:t:analyze": 4,
+        "context": 9,
+    }
+    # save_path is irrelevant to writeback.
+    assert "tab:t:save_path" not in params["expected_versions"]
+
+
 def test_unguarded_op_attaches_nothing(wired):
     sent = wired["sent"]
     wired["tab.snapshot"] = {"ok": True, "result": {"x": 1}}

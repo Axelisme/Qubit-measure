@@ -121,6 +121,7 @@ def test_context_service_use_context():
     # We must have a baseline result_dir in the startup context for use_context to inherit
     state.exp_context = dataclasses.replace(state.exp_context, result_dir="/base")
     old_ctx = state.exp_context
+    ctx_version_before = state.version.get("context")
 
     svc.use_context("flux_1.0_A")
 
@@ -132,6 +133,8 @@ def test_context_service_use_context():
     assert state.exp_context.readiness is ContextReadiness.ACTIVE
     assert svc.is_active_context()
     bus.emit.assert_called_once()
+    # Switching context fully swaps md/ml → context version must advance.
+    assert state.version.get("context") == ctx_version_before + 1
 
 
 def test_context_service_new_context():

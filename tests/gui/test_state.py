@@ -132,7 +132,7 @@ def test_update_tab_result_stores_result_and_clears_stale_analyze_data():
     state = State(_make_ctx())
     adapter = _make_adapter()
     _add_tab(state, "t1", adapter)
-    state.update_tab_analyze_params("t1", _AnalyzeParams(threshold=0.5))
+    state.update_tab_analyze_param_instance("t1", _AnalyzeParams(threshold=0.5))
     fig = Figure()
     state.update_tab_analyze("t1", object(), fig)
     state.update_tab_result("t1", object())
@@ -159,8 +159,20 @@ def test_update_tab_analyze_params_stores_instance():
     adapter = _make_adapter()
     _add_tab(state, "t1", adapter)
     params = _AnalyzeParams(threshold=0.2)
-    state.update_tab_analyze_params("t1", params)
+    state.update_tab_analyze_param_instance("t1", params)
     assert state.get_tab("t1").analyze_param_instance is params
+
+
+def test_update_tab_analyze_bumps_analyze_version():
+    state = State(_make_ctx())
+    adapter = _make_adapter()
+    _add_tab(state, "t1", adapter)
+    assert state.version.get("tab:t1:analyze") == 0
+    state.update_tab_analyze("t1", object(), None)
+    # Analyze result is a guarded resource (writeback depends on it).
+    assert state.version.get("tab:t1:analyze") == 1
+    state.update_tab_analyze("t1", object(), None)
+    assert state.version.get("tab:t1:analyze") == 2
 
 
 def test_update_tab_save_path_overrides_sets_both_paths():
@@ -182,6 +194,15 @@ def test_set_context_replaces_exp_context():
     assert state.exp_context is ctx1
     state.set_context(ctx2)
     assert state.exp_context is ctx2
+
+
+def test_set_context_does_not_bump_context_version():
+    # set_context is a pure field swap used for soc/predictor too; the context
+    # resource version (md/ml content) is bumped only by the md/ml writers.
+    state = State(_make_ctx())
+    before = state.version.get("context")
+    state.set_context(_make_ctx())
+    assert state.version.get("context") == before
 
 
 # ----------------------------------------------------------------------

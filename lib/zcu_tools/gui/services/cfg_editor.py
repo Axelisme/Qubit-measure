@@ -103,6 +103,8 @@ class CfgEditorHost(_EditorCtrl, ModuleLibraryWritePort, Protocol):
 
     def bump_editor_version(self, editor_id: str) -> None: ...
 
+    def drop_editor_version(self, editor_id: str) -> None: ...
+
 
 class CfgEditorError(RuntimeError):
     """A CfgEditor session operation failed (unknown id, bad kind, …)."""
@@ -189,8 +191,10 @@ class CfgEditorService:
     Dependencies (docs/adr/0008): ``env_ctrl`` is the LiveModel reactive env
     (narrow port); ``ml_port`` is the ModuleLibrary read/write port used at
     commit and to seed ``from_name`` sessions (no longer the whole Controller);
-    ``version_bump`` bumps the ``editor:<id>`` resource version (a registry-level
-    concern since the id is Repository-assigned).
+    ``version_bump`` / ``version_drop`` bump / forget the ``editor:<id>`` resource
+    version (a registry-level concern since the id is Repository-assigned): bump on
+    every edit (so commit's guard sees concurrent edits), drop on teardown (so a
+    stale dependency on a gone session reads version 0).
     """
 
     def __init__(
@@ -198,10 +202,12 @@ class CfgEditorService:
         env_ctrl: "_EditorCtrl",
         ml_port: ModuleLibraryWritePort,
         version_bump: Callable[[str], None],
+        version_drop: Callable[[str], None],
     ) -> None:
         self._env = LiveModelEnv(ctrl=env_ctrl)
         self._ml = ml_port
         self._version_bump = version_bump
+        self._version_drop = version_drop
         self._editors: dict[str, CfgEditorSession] = {}
         self._owner_to_editor: dict[str, str] = {}
         self._seq = itertools.count()
@@ -371,6 +377,11 @@ class CfgEditorService:
             self._owner_to_editor.pop(session.owner_key, None)
         if teardown:
             session.root.teardown()
+        # Forget the session's resource version (symmetric to tab/device drop):
+        # a later stale dependency on this gone editor reads version 0 and the
+        # guard treats it as stale, rather than spuriously matching a retained
+        # version. Done whether or not we tear the root down — the session is gone.
+        self._version_drop(editor_id)
         # Notify subscribers the session is gone (after state is consistent).
         self._emit(editor_id, "editor_closed", {"reason": reason})
 
