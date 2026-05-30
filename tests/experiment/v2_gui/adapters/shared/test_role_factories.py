@@ -182,6 +182,6 @@ def test_res_waveform_default_is_blank_const():
 
 
 def test_role_factory_composes_with_value_with_field():
-    v = cast(Any, make_qub_probe_default(_empty_ctx())).with_field("gain", 0.3)
+    v = make_qub_probe_default(_empty_ctx()).with_field("gain", 0.3)
     assert isinstance(v, ModuleRefValue)
     assert cast(Any, v.value.fields["gain"]).value == 0.3

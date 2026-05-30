@@ -5,7 +5,7 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Protocol, Union
 
-from typing_extensions import Generic, TypeAlias, TypeVar
+from typing_extensions import Generic, Self, TypeAlias, TypeVar
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -323,7 +323,7 @@ class ModuleRefSpec:
         if not self.allowed:
             raise RuntimeError("ModuleRefSpec.allowed must be non-empty")
 
-    def lock_literal(self, path: str, value: Any) -> "ModuleRefSpec":
+    def lock_literal(self, path: str, value: object) -> Self:
         """Lock a leaf of this ref's allowed shapes (path is relative to the
         shape, e.g. ``pulse_cfg.freq``). Lets an adapter lock fields on the
         sub-tree as it is built, instead of from the root section. Returns a new
@@ -332,7 +332,7 @@ class ModuleRefSpec:
             _split_spec_path(path), lambda leaf: LiteralSpec(value=value)
         )
 
-    def _with_override(self, parts: list[str], fn: "_LeafTransform") -> "ModuleRefSpec":
+    def _with_override(self, parts: list[str], fn: "_LeafTransform") -> Self:
         # Duck-type descent: apply to every allowed shape that contains the path,
         # skip those that don't. Fail only if no allowed shape matches (real typo).
         new_allowed: list[CfgSectionSpec] = []
@@ -379,7 +379,7 @@ class CfgSectionSpec:
     # ``cfg_spec`` is the sole owner of that contract. Locking the return value
     # of ``cfg_spec()`` from outside leaks the contract to the call site.
 
-    def lock_literal(self, path: str, value: Any) -> "CfgSectionSpec":
+    def lock_literal(self, path: str, value: object) -> Self:
         """Replace the scalar leaf at ``path`` with a fixed ``LiteralSpec(value)``.
 
         The locked field shows no widget and always lowers to ``value`` (notebook
@@ -389,9 +389,7 @@ class CfgSectionSpec:
             _split_spec_path(path), lambda leaf: LiteralSpec(value=value)
         )
 
-    def _with_override(
-        self, parts: list[str], fn: "_LeafTransform"
-    ) -> "CfgSectionSpec":
+    def _with_override(self, parts: list[str], fn: "_LeafTransform") -> Self:
         head, rest = parts[0], parts[1:]
         if head not in self.fields:
             raise RuntimeError(
@@ -449,6 +447,10 @@ class EvalValue:
 
 ScalarValue: TypeAlias = Union[DirectValue, EvalValue]
 
+# Accepted input for the value-tree fluent ``with_field``: a raw scalar (wrapped
+# in DirectValue) or an already-built scalar value.
+ScalarLeafInput: TypeAlias = Union[int, float, str, bool, DirectValue, EvalValue]
+
 
 @dataclass
 class SweepValue:
@@ -471,7 +473,7 @@ class ModuleRefValue:
     # the override survives reload; False for pure library refs and <Custom:> refs.
     is_overridden: bool = False
 
-    def with_field(self, path: str, value: Any) -> "ModuleRefValue":
+    def with_field(self, path: str, value: ScalarLeafInput) -> Self:
         """Set a scalar leaf inside this ref's value (in-place, returns self).
 
         Adapter-side default override sugar (replaces long factory params). The
@@ -489,7 +491,7 @@ class WaveformRefValue:
     value: "CfgSectionValue"
     is_overridden: bool = False
 
-    def with_field(self, path: str, value: Any) -> "WaveformRefValue":
+    def with_field(self, path: str, value: ScalarLeafInput) -> Self:
         self.value.with_field(path, value)
         return self
 
@@ -498,7 +500,7 @@ class WaveformRefValue:
 class CfgSectionValue:
     fields: dict[str, "CfgNodeValue"] = field(default_factory=dict)
 
-    def with_field(self, path: str, value: Any) -> "CfgSectionValue":
+    def with_field(self, path: str, value: ScalarLeafInput) -> Self:
         """Set the scalar leaf at dotted ``path`` (in-place, returns self).
 
         ``value`` may be a raw scalar (wrapped in ``DirectValue``) or an already-
