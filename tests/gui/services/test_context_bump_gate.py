@@ -1,6 +1,6 @@
 """Structural gate: writing md/ml must bump the ``context`` resource version.
 
-Phase 100's concurrency bug was a *hidden contract* — "every code path that
+A past concurrency bug was a *hidden contract* — "every code path that
 mutates MetaDict/ModuleLibrary content must ``version.bump("context")``" — that
 lived only in comments and was physically scattered across ContextService (8
 methods), the three context-switch methods, and WritebackService. A new md/ml
@@ -13,7 +13,7 @@ modules that write md/ml directly and asserts that any function whose body
 performs an md/ml write call also contains a ``version.bump("context")`` call.
 
 It checks *presence*, not correctness of the guard condition — exactly the
-altitude that catches the Phase 100 failure mode ("forgot to bump at all")
+altitude that catches that failure mode ("forgot to bump at all")
 without coupling to control flow. Reads (``getattr``) and pure field swaps
 (``dataclasses.replace`` in ``set_context``) contain no write marker and are
 not flagged.
