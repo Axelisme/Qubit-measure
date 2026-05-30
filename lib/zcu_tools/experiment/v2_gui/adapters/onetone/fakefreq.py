@@ -41,14 +41,13 @@ from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     build_readout_for_frequency,
     build_waveform_for_length,
-    make_flat_top_waveform_edit_template,
     make_pulse_module_spec,
     make_readout_default,
-    make_readout_edit_template,
     make_readout_module_spec,
     make_reset_module_spec,
     md_get_float,
     md_writeback,
+    schema_from_module,
 )
 from zcu_tools.gui.adapter import (
     AdapterCapabilities,
@@ -400,12 +399,7 @@ class FakeFreqAdapter(
                 current_value=cur_val_rf,
                 module_name="readout_rf",
                 proposed_module=new_readout,
-                edit_schema=make_readout_edit_template(
-                    readout,
-                    freq=freq,
-                    pulse_ch=pulse_ch,
-                    ro_ch=ro_ch,
-                ),
+                edit_schema=schema_from_module(new_readout),
             ),
             WaveformWriteback(
                 key="ro_waveform",
@@ -413,7 +407,7 @@ class FakeFreqAdapter(
                 current_value=cur_val_ro,
                 waveform_name="ro_waveform",
                 proposed_waveform=new_waveform,
-                edit_schema=make_flat_top_waveform_edit_template(length=float(wav_len)),
+                edit_schema=schema_from_module(new_waveform),
             ),
         ]
 

@@ -19,11 +19,10 @@ from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     build_readout_for_frequency,
     build_waveform_for_length,
-    make_flat_top_waveform_edit_template,
     make_pulse_readout_default,
     make_pulse_readout_module_spec,
-    make_readout_edit_template,
     make_reset_module_spec,
+    schema_from_module,
     md_get_float,
     md_has_key,
     md_writeback,
@@ -158,6 +157,19 @@ class OneToneFreqAdapter(
         ro_ch = ctx.md.get("ro_ch", 0)
         wav_len = md_get_float(ctx, "res_probe_len", 5.0)
 
+        proposed_readout = build_readout_for_frequency(
+            readout,
+            freq=result.freq,
+            pulse_ch=pulse_ch,
+            ro_ch=ro_ch,
+            ml=ctx.ml,
+        )
+        proposed_waveform = build_waveform_for_length(
+            readout,
+            length=wav_len,
+            ml=ctx.ml,
+        )
+
         return [
             md_writeback(ctx, "r_f", "Resonator frequency (MHz)", result.freq),
             md_writeback(ctx, "rf_w", "Resonator linewidth FWHM (MHz)", result.fwhm),
@@ -166,31 +178,16 @@ class OneToneFreqAdapter(
                 description="readout_rf module config",
                 current_value=ctx.ml.modules.get("readout_rf"),
                 module_name="readout_rf",
-                proposed_module=build_readout_for_frequency(
-                    readout,
-                    freq=result.freq,
-                    pulse_ch=pulse_ch,
-                    ro_ch=ro_ch,
-                    ml=ctx.ml,
-                ),
-                edit_schema=make_readout_edit_template(
-                    readout,
-                    freq=result.freq,
-                    pulse_ch=pulse_ch,
-                    ro_ch=ro_ch,
-                ),
+                proposed_module=proposed_readout,
+                edit_schema=schema_from_module(proposed_readout),
             ),
             WaveformWriteback(
                 key="ro_waveform",
                 description="ro_waveform length config",
                 current_value=ctx.ml.waveforms.get("ro_waveform"),
                 waveform_name="ro_waveform",
-                proposed_waveform=build_waveform_for_length(
-                    readout,
-                    length=wav_len,
-                    ml=ctx.ml,
-                ),
-                edit_schema=make_flat_top_waveform_edit_template(length=wav_len),
+                proposed_waveform=proposed_waveform,
+                edit_schema=schema_from_module(proposed_waveform),
             ),
         ]
 

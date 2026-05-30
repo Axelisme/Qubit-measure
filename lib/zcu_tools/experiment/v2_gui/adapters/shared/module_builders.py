@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, cast
+from typing import Any, Optional, cast
 
+from zcu_tools.gui.adapter import CfgSchema
+from zcu_tools.gui.cfg_schemas import module_cfg_to_value
 from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.program.v2 import (
     AbsModuleCfg,
@@ -12,6 +14,20 @@ from zcu_tools.program.v2 import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def schema_from_module(proposed: object | None) -> Optional[CfgSchema]:
+    """Edit CfgSchema from a proposed module/waveform cfg (module-agnostic).
+
+    Delegates to ``module_cfg_to_value``, which auto-routes waveform cfgs to
+    ``waveform_cfg_to_value``. Returns None when ``proposed`` is None (no edit
+    button shown). Unknown module types fast-fail (``module_cfg_to_value``
+    raises) — deliberate.
+    """
+    if proposed is None:
+        return None
+    spec, value = module_cfg_to_value(proposed)
+    return CfgSchema(spec=spec, value=value)
 
 
 def build_readout_for_frequency(

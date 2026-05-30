@@ -8,57 +8,67 @@ if TYPE_CHECKING:
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     build_readout_for_frequency,
     build_waveform_for_length,
-    make_pulse_readout_edit_template,
     make_readout_ref_default,
+    schema_from_module,
     select_named_module_value,
-    update_readout_value_frequency,
 )
 from zcu_tools.gui.adapter import (
+    CfgSchema,
     CfgSectionValue,
     DirectValue,
     ModuleRefValue,
-    ScalarValue,
 )
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import AbsReadoutCfg, ModuleCfgFactory, WaveformCfgFactory
 
 
-def test_update_readout_value_frequency_updates_all_supported_paths():
-    readout_value = CfgSectionValue(
-        fields={
-            "ro_freq": DirectValue(6000.0),
-            "pulse_cfg": CfgSectionValue(
-                fields={"freq": DirectValue(6000.0)},
-            ),
-            "ro_cfg": CfgSectionValue(
-                fields={"ro_freq": DirectValue(6000.0)},
-            ),
-        }
+def test_schema_from_module_returns_none_for_none():
+    assert schema_from_module(None) is None
+
+
+def test_schema_from_module_converts_proposed_readout_faithfully():
+    """edit_schema is the spec+value view of the proposed module (freq carried)."""
+    ml = ModuleLibrary()
+    readout = ModuleCfgFactory.from_raw(
+        {
+            "type": "readout/pulse",
+            "pulse_cfg": {
+                "waveform": {"style": "const", "length": 1.0},
+                "ch": 1,
+                "nqz": 2,
+                "freq": 6000.0,
+                "gain": 0.2,
+            },
+            "ro_cfg": {
+                "ro_ch": 2,
+                "ro_freq": 6000.0,
+                "ro_length": 1.0,
+                "trig_offset": 0.5,
+            },
+        },
+        ml=ml,
+    )
+    proposed = build_readout_for_frequency(
+        readout, freq=6150.0, pulse_ch=1, ro_ch=2, ml=ml
     )
 
-    updated = update_readout_value_frequency(readout_value, 6100.0)
+    schema = schema_from_module(proposed)
 
-    assert updated.fields["ro_freq"].value == 6100.0  # type: ignore[union-attr]
-    assert updated.fields["pulse_cfg"].fields["freq"].value == 6100.0  # type: ignore[union-attr]
-    assert updated.fields["ro_cfg"].fields["ro_freq"].value == 6100.0  # type: ignore[union-attr]
-
-
-def test_make_pulse_readout_edit_template_uses_requested_defaults():
-    schema = make_pulse_readout_edit_template(
-        pulse_ch=3,
-        pulse_freq=6200.0,
-        ro_ch=7,
-    )
-    value = schema.value
-    pulse_cfg = value.fields["pulse_cfg"]
-    ro_cfg = value.fields["ro_cfg"]
-
+    assert isinstance(schema, CfgSchema)
+    pulse_cfg = schema.value.fields["pulse_cfg"]
     assert isinstance(pulse_cfg, CfgSectionValue)
-    assert isinstance(ro_cfg, CfgSectionValue)
-    assert pulse_cfg.fields["freq"].value == 6200.0  # type: ignore[union-attr]
-    assert ro_cfg.fields["ro_freq"].value == 6200.0  # type: ignore[union-attr]
-    assert pulse_cfg.fields["ch"].value == 3  # type: ignore[union-attr]
-    assert ro_cfg.fields["ro_ch"].value == 7  # type: ignore[union-attr]
+    assert pulse_cfg.fields["freq"].value == 6150.0  # type: ignore[union-attr]
+
+
+def test_schema_from_module_converts_proposed_waveform_faithfully():
+    """A proposed waveform cfg auto-routes through the waveform converter."""
+    proposed = build_waveform_for_length(None, length=4.5, ml=ModuleLibrary())
+
+    schema = schema_from_module(proposed)
+
+    assert isinstance(schema, CfgSchema)
+    length = schema.value.fields["length"]
+    assert length.value == 4.5  # type: ignore[union-attr]
 
 
 def test_build_readout_for_frequency_updates_existing_module():

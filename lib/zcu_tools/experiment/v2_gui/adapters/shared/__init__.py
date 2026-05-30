@@ -35,14 +35,12 @@ from .defaults import (
     make_trig_offset,
     make_two_pulse_reset_default,
 )
-from .module_builders import build_readout_for_frequency, build_waveform_for_length
-from .module_defaults import NamedModuleValue, select_named_module_value
-from .module_templates import (
-    make_flat_top_waveform_edit_template,
-    make_pulse_readout_edit_template,
-    make_readout_edit_template,
-    update_readout_value_frequency,
+from .module_builders import (
+    build_readout_for_frequency,
+    build_waveform_for_length,
+    schema_from_module,
 )
+from .module_defaults import NamedModuleValue, select_named_module_value
 from .spec_helpers import (
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
@@ -65,6 +63,7 @@ __all__ = [
     # Module builders
     "build_readout_for_frequency",
     "build_waveform_for_length",
+    "schema_from_module",
     # Module defaults (low-level)
     "NamedModuleValue",
     "select_named_module_value",
@@ -92,11 +91,6 @@ __all__ = [
     "make_qub_waveform_ref_default",
     "make_res_waveform_default",
     "make_res_waveform_ref_default",
-    # Module templates
-    "make_flat_top_waveform_edit_template",
-    "make_pulse_readout_edit_template",
-    "make_readout_edit_template",
-    "update_readout_value_frequency",
     # Spec helpers
     "make_pulse_readout_module_spec",
     "make_pulse_module_spec",
