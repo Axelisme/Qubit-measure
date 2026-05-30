@@ -204,11 +204,16 @@ class WritebackRequest(Generic[T_Result, T_AnalyzeResult]):
 
 @dataclass
 class WritebackItem(ABC):
-    # ``key`` is both the stable item id (UI/wire/dedup) and the apply target
-    # name — the item subtype names the destination (md attr / ml module /
-    # ml waveform), so a separate target-name field would just duplicate key.
-    key: str
+    # ``target_name`` is the apply destination name (md attr / ml module / ml
+    # waveform — the item subtype names which namespace). It is mutable: agent/UI
+    # may retarget the writeback before applying.
+    target_name: str
     description: str
+    # ``session_id`` (``<kind>-<n>``, e.g. ``md-1``) is the stable identifier for
+    # UI/wire/dedup. Stamped once by WritebackService when items are computed at
+    # analyze time (never by the adapter), and decoupled from target_name so
+    # retargeting does not change the id.
+    session_id: str = field(default="", init=False)
     selected: bool = field(default=True, init=False)
 
 
@@ -221,12 +226,18 @@ class MetaDictWriteback(WritebackItem):
 class ModuleWriteback(WritebackItem):
     edit_schema: Optional["CfgSchema"] = None
     edited_schema: Optional["CfgSchema"] = None
+    # editor_id of the service-owned (gc=False) cfg model that holds this item's
+    # live draft (ADR-0010). Stamped by WritebackService at compute time; the
+    # agent edits via editor.set_field(editor_id, …), the user's Edit dialog
+    # attaches to the same model.
+    editor_id: Optional[str] = field(default=None, init=False)
 
 
 @dataclass
 class WaveformWriteback(WritebackItem):
     edit_schema: Optional["CfgSchema"] = None
     edited_schema: Optional["CfgSchema"] = None
+    editor_id: Optional[str] = field(default=None, init=False)
 
 
 @dataclass

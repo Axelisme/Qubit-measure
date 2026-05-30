@@ -1,9 +1,8 @@
-"""Unit tests for WritebackService.apply_tab_writeback_items.
+"""Unit tests for WritebackService — persistent draft (ADR-0010).
 
-Drives the service against a real State + ExpContext (real MetaDict) so we can
-assert the context resource version is bumped when writeback writes md — the
-writeback path writes md/ml directly (bypassing ContextService), so it must bump
-``context`` itself for concurrency guards to detect the change.
+Items are computed once into TabState.writeback_items; apply reads that draft
+as-is (no recompute) and writes md/ml directly, bumping ``context`` so
+concurrency guards detect the change.
 """
 
 from __future__ import annotations
@@ -43,10 +42,19 @@ def _make_state_with_tab(tab_id: str = "t1") -> State:
     return state
 
 
+def _svc(state: State, bus: EventBus | None = None) -> WritebackService:
+    """Build a WritebackService with a MagicMock CfgEditorService.
+
+    For module/waveform items that carry an editor_id, the apply path reads the
+    model via cfg_editor.get_root; tests that exercise that stub it. metadict
+    items need no editor.
+    """
+    return WritebackService(state, bus or EventBus(), MagicMock())
+
+
 @contextmanager
 def _patch_module_lower(result: object):
-    """Stub the module lowering path (schema_to_dict + ModuleCfgFactory.from_raw)
-    so an edit_schema resolves to ``result`` without a real spec/value tree."""
+    """Stub the module lowering path so an item resolves to ``result``."""
     with (
         patch("zcu_tools.gui.services.writeback.schema_to_dict", return_value={}),
         patch(
@@ -69,199 +77,228 @@ def _patch_waveform_lower(result: object):
         yield
 
 
+def _put_items(state: State, *items, tab_id: str = "t1") -> None:
+    """Place persistent items on the tab (as compute would)."""
+    state.get_tab(tab_id).writeback_items = list(items)
+
+
+# ---------------------------------------------------------------------------
+# apply (reads persistent draft, writes md/ml, bumps context)
+# ---------------------------------------------------------------------------
+
+
 def test_apply_md_writeback_bumps_context_version():
     state = _make_state_with_tab()
-    svc = WritebackService(state, EventBus())
+    svc = _svc(state)
     before = state.version.get("context")
 
     item = MetaDictWriteback(
-        key="r_f",
-        description="update r_f",
-        proposed_value=6100.0,
+        target_name="r_f", description="update r_f", proposed_value=6100.0
     )
-    applied = svc.apply_tab_writeback_items(WritebackPermit(tab_id="t1"), [item])
+    item.session_id = "md-1"
+    _put_items(state, item)
 
-    assert applied == [item.key]
+    applied = svc.apply_tab_writeback(WritebackPermit(tab_id="t1"))
+
+    assert applied == ["md-1"]
     assert state.exp_context.md.r_f == 6100.0
-    # Writeback wrote md → context version must advance so a later
-    # context-dependent op detects the change.
     assert state.version.get("context") == before + 1
 
 
 def test_apply_nothing_selected_does_not_bump_context():
     state = _make_state_with_tab()
-    svc = WritebackService(state, EventBus())
+    svc = _svc(state)
     before = state.version.get("context")
 
     item = MetaDictWriteback(
-        key="r_f",
-        description="update r_f",
-        proposed_value=6100.0,
+        target_name="r_f", description="update r_f", proposed_value=6100.0
     )
+    item.session_id = "md-1"
     item.selected = False
-    applied = svc.apply_tab_writeback_items(WritebackPermit(tab_id="t1"), [item])
+    _put_items(state, item)
+
+    applied = svc.apply_tab_writeback(WritebackPermit(tab_id="t1"))
 
     assert applied == []
-    # No md/ml touched → no spurious context bump.
     assert state.version.get("context") == before
 
 
-# ---------------------------------------------------------------------------
-# get_tab_writeback_items
-# ---------------------------------------------------------------------------
-
-
-def test_get_writeback_items_returns_empty_when_no_run_result():
+def test_apply_uses_target_name_as_destination():
+    """target_name (not session_id) is the md attr written."""
     state = _make_state_with_tab()
-    svc = WritebackService(state, EventBus())
+    svc = _svc(state)
 
-    items = svc.get_tab_writeback_items("t1")
-
-    assert items == []
-
-
-def test_get_writeback_items_returns_empty_when_no_analyze_result():
-    state = _make_state_with_tab()
-    state.update_tab_result("t1", object())
-    svc = WritebackService(state, EventBus())
-
-    items = svc.get_tab_writeback_items("t1")
-
-    assert items == []
-
-
-def test_get_writeback_items_calls_adapter_and_sets_selected():
-    state = _make_state_with_tab()
-    state.update_tab_result("t1", object())
-
-    fake_analyze_result = MagicMock()
-    fake_analyze_result.figure = None
-    state.update_tab_analyze("t1", fake_analyze_result, None)
-
-    adapter: MagicMock = state.get_tab("t1").adapter  # type: ignore[assignment]
     item = MetaDictWriteback(
-        key="r_f",
-        description="update r_f",
-        proposed_value=6100.0,
+        target_name="r_f_alt", description="d", proposed_value=42.0
     )
-    adapter.get_writeback_items.return_value = [item]
+    item.session_id = "md-1"
+    _put_items(state, item)
 
-    svc = WritebackService(state, EventBus())
-    items = svc.get_tab_writeback_items("t1")
-
-    assert len(items) == 1
-    assert items[0] is item
-    assert items[0].selected is True  # not yet applied
+    svc.apply_tab_writeback(WritebackPermit(tab_id="t1"))
+    assert state.exp_context.md.r_f_alt == 42.0
 
 
 # ---------------------------------------------------------------------------
-# apply_tab_writeback_items — ModuleWriteback (proposed_module path)
+# compute_items_for_tab + get (pure read)
 # ---------------------------------------------------------------------------
 
 
-def test_apply_module_writeback_proposed_module_registers_and_bumps():
+def test_get_writeback_items_is_a_pure_read():
     state = _make_state_with_tab()
-    svc = WritebackService(state, EventBus())
-    before = state.version.get("context")
-
-    fake_module = MagicMock()
-    item = ModuleWriteback(
-        key="qub",
-        description="update qub",
-        edit_schema=MagicMock(),
-    )
-    with _patch_module_lower(fake_module):
-        applied = svc.apply_tab_writeback_items(WritebackPermit(tab_id="t1"), [item])
-
-    assert applied == [item.key]
-    assert state.version.get("context") == before + 1
+    svc = _svc(state)
+    # empty by default
+    assert svc.get_tab_writeback_items("t1") == []
+    # returns exactly what is persisted
+    item = MetaDictWriteback(target_name="r_f", description="d", proposed_value=1.0)
+    item.session_id = "md-1"
+    _put_items(state, item)
+    assert svc.get_tab_writeback_items("t1") == [item]
 
 
-def test_apply_module_writeback_emits_ml_changed():
+def test_compute_stamps_per_kind_session_ids():
+    state = _make_state_with_tab()
+    state.update_tab_result("t1", object())
+    tab = state.get_tab("t1")
+    tab.analyze_result = MagicMock()
+
+    md1 = MetaDictWriteback(target_name="r_f", description="d", proposed_value=1.0)
+    wf1 = WaveformWriteback(target_name="wf_a", description="d")  # no edit_schema
+    ml1 = ModuleWriteback(target_name="mod_a", description="d")  # no edit_schema
+    wf2 = WaveformWriteback(target_name="wf_b", description="d")
+    adapter: MagicMock = tab.adapter  # type: ignore[assignment]
+    adapter.get_writeback_items.return_value = [md1, wf1, ml1, wf2]
+
+    svc = _svc(state)
+    items = svc.compute_items_for_tab("t1")
+
+    ids = [it.session_id for it in items]
+    assert ids == ["md-1", "wf-1", "ml-1", "wf-2"]
+    assert all(it.selected for it in items)
+
+
+# ---------------------------------------------------------------------------
+# apply module/waveform via edited schema (no editor model)
+# ---------------------------------------------------------------------------
+
+
+def test_apply_module_writeback_registers_and_emits():
     state = _make_state_with_tab()
     bus = EventBus()
     received: list = []
     bus.subscribe(GuiEvent.ML_CHANGED, lambda p: received.append(p))
-    svc = WritebackService(state, bus)
+    svc = _svc(state, bus)
+    before = state.version.get("context")
 
-    item = ModuleWriteback(
-        key="qub",
-        description="update qub",
-        edit_schema=MagicMock(),
-    )
-    with _patch_module_lower(MagicMock()):
-        svc.apply_tab_writeback_items(WritebackPermit(tab_id="t1"), [item])
+    item = ModuleWriteback(target_name="qub", description="d", edit_schema=MagicMock())
+    item.session_id = "ml-1"  # no editor_id → falls back to edit_schema
+    _put_items(state, item)
 
+    fake_module = MagicMock()
+    with _patch_module_lower(fake_module):
+        applied = svc.apply_tab_writeback(WritebackPermit(tab_id="t1"))
+
+    assert applied == ["ml-1"]
+    assert state.version.get("context") == before + 1
     assert len(received) == 1
 
 
-# ---------------------------------------------------------------------------
-# apply_tab_writeback_items — WaveformWriteback (edit_schema path)
-# ---------------------------------------------------------------------------
-
-
-def test_apply_waveform_writeback_edit_schema_registers_and_bumps():
+def test_apply_waveform_writeback_registers():
     state = _make_state_with_tab()
-    svc = WritebackService(state, EventBus())
-    before = state.version.get("context")
+    svc = _svc(state)
 
     item = WaveformWriteback(
-        key="gauss",
-        description="update gauss",
-        edit_schema=MagicMock(),
+        target_name="gauss", description="d", edit_schema=MagicMock()
     )
+    item.session_id = "wf-1"
+    _put_items(state, item)
+
     with _patch_waveform_lower(MagicMock()):
-        applied = svc.apply_tab_writeback_items(WritebackPermit(tab_id="t1"), [item])
-
-    assert applied == [item.key]
-    assert state.version.get("context") == before + 1
-
-
-# ---------------------------------------------------------------------------
-# touched_ml → dump() when has_persistence
-# ---------------------------------------------------------------------------
+        applied = svc.apply_tab_writeback(WritebackPermit(tab_id="t1"))
+    assert applied == ["wf-1"]
 
 
 def test_apply_ml_writeback_calls_dump_when_has_persistence():
     state = _make_state_with_tab()
-    # Replace ml with a MagicMock that reports has_persistence=True
     mock_ml = MagicMock()
     mock_ml.has_persistence = True
     from dataclasses import replace as dc_replace
 
-    new_ctx = dc_replace(state.exp_context, ml=mock_ml)
-    state.set_context(new_ctx)
-    svc = WritebackService(state, EventBus())
+    state.set_context(dc_replace(state.exp_context, ml=mock_ml))
+    svc = _svc(state)
 
-    item = ModuleWriteback(
-        key="qub",
-        description="update qub",
-        edit_schema=MagicMock(),
-    )
+    item = ModuleWriteback(target_name="qub", description="d", edit_schema=MagicMock())
+    item.session_id = "ml-1"
+    _put_items(state, item)
+
     with _patch_module_lower(MagicMock()):
-        svc.apply_tab_writeback_items(WritebackPermit(tab_id="t1"), [item])
-
+        svc.apply_tab_writeback(WritebackPermit(tab_id="t1"))
     mock_ml.dump.assert_called_once()
 
 
-# ---------------------------------------------------------------------------
-# _resolve_*_item — no edit_schema → RuntimeError
-# ---------------------------------------------------------------------------
-
-
-def test_resolve_module_item_no_edit_schema_raises():
+def test_apply_module_no_editable_schema_raises():
     state = _make_state_with_tab()
-    svc = WritebackService(state, EventBus())
+    svc = _svc(state)
 
-    item = ModuleWriteback(key="qub", description="update qub")
-    with pytest.raises(RuntimeError, match="no edit_schema"):
-        svc._resolve_module_item(item)
+    item = ModuleWriteback(target_name="qub", description="d")  # no schema, no editor
+    item.session_id = "ml-1"
+    _put_items(state, item)
+
+    with pytest.raises(RuntimeError, match="no editable schema"):
+        svc.apply_tab_writeback(WritebackPermit(tab_id="t1"))
 
 
-def test_resolve_waveform_item_no_edit_schema_raises():
+# ---------------------------------------------------------------------------
+# set_item_field (writeback.set)
+# ---------------------------------------------------------------------------
+
+
+def test_set_item_field_edits_persistent_item():
     state = _make_state_with_tab()
-    svc = WritebackService(state, EventBus())
+    svc = _svc(state)
+    item = MetaDictWriteback(target_name="r_f", description="d", proposed_value=1.0)
+    item.session_id = "md-1"
+    _put_items(state, item)
 
-    item = WaveformWriteback(key="gauss", description="update gauss")
-    with pytest.raises(RuntimeError, match="no edit_schema"):
-        svc._resolve_waveform_item(item)
+    svc.set_item_field(
+        "t1", "md-1", selected=False, target_name="r_f2", proposed_value=9.0
+    )
+    assert item.selected is False
+    assert item.target_name == "r_f2"
+    assert item.proposed_value == 9.0
+
+
+def test_set_item_field_proposed_value_on_module_rejected():
+    state = _make_state_with_tab()
+    svc = _svc(state)
+    item = ModuleWriteback(target_name="qub", description="d", edit_schema=MagicMock())
+    item.session_id = "ml-1"
+    _put_items(state, item)
+
+    with pytest.raises(RuntimeError, match="not a metadict"):
+        svc.set_item_field("t1", "ml-1", proposed_value=1.0)
+
+
+def test_set_item_field_unknown_id_raises():
+    state = _make_state_with_tab()
+    svc = _svc(state)
+    with pytest.raises(RuntimeError, match="unknown writeback session_id"):
+        svc.set_item_field("t1", "md-99", selected=True)
+
+
+# ---------------------------------------------------------------------------
+# teardown_tab_items (reanalyze / rerun)
+# ---------------------------------------------------------------------------
+
+
+def test_teardown_tab_items_tears_down_editor_models():
+    state = _make_state_with_tab()
+    cfg_editor = MagicMock()
+    svc = WritebackService(state, EventBus(), cfg_editor)
+
+    item = ModuleWriteback(target_name="qub", description="d", edit_schema=MagicMock())
+    item.session_id = "ml-1"
+    item.editor_id = "editor-7"
+    _put_items(state, item)
+
+    svc.teardown_tab_items("t1")
+    cfg_editor.teardown.assert_called_once_with("editor-7")

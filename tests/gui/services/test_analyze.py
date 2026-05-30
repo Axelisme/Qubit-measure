@@ -41,7 +41,9 @@ def _make_service(
     bus: EventBus,
 ) -> tuple[AnalyzeService, MagicMock]:
     runner = MagicMock()
-    svc = AnalyzeService(state, runner, bus)
+    writeback = MagicMock()
+    writeback.compute_items_for_tab.return_value = []
+    svc = AnalyzeService(state, runner, bus, writeback)
     return svc, runner
 
 

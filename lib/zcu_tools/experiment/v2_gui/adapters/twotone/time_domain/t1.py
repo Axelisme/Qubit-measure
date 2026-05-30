@@ -124,7 +124,7 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
         result = req.analyze_result
         return [
             MetaDictWriteback(
-                key="t1",
+                target_name="t1",
                 description="T1 relaxation time (us)",
                 proposed_value=result.t1,
             ),

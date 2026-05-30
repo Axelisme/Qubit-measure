@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import EventBus
+    from zcu_tools.gui.services.writeback import WritebackService
     from zcu_tools.gui.state import State
 
 
@@ -27,11 +28,13 @@ class AnalyzeService(QObject):
         state: "State",
         runner: AnalyzeRunner,
         bus: "EventBus",
+        writeback: "WritebackService",
     ) -> None:
         super().__init__()
         self._state = state
         self._runner = runner
         self._bus = bus
+        self._writeback = writeback
 
         self._runner.analyze_finished.connect(self._on_analyze_finished)
         self._runner.analyze_failed.connect(self._on_analyze_failed)
@@ -80,7 +83,17 @@ class AnalyzeService(QObject):
             tab_id,
             type(analyze_result).__name__,
         )
-        self._state.update_tab_analyze(tab_id, analyze_result, analyze_result.figure)
+        # Tear down the previous analyze's writeback editor models before the new
+        # draft replaces them (ADR-0010: per-item gc=False models are tied to a
+        # specific analyze result). Then set the result so compute can read it,
+        # compute the fresh persistent draft once, and store it.
+        self._writeback.teardown_tab_items(tab_id)
+        tab = self._state.get_tab(tab_id)
+        tab.analyze_result = analyze_result
+        items = self._writeback.compute_items_for_tab(tab_id)
+        self._state.update_tab_analyze(
+            tab_id, analyze_result, analyze_result.figure, writeback_items=items
+        )
         self._state.set_tab_analyzing(tab_id, False)
         self._bus.emit(
             GuiEvent.TAB_INTERACTION_CHANGED,

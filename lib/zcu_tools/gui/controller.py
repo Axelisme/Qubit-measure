@@ -343,11 +343,15 @@ class Controller:
         """
         return list(self._writeback_svc.get_tab_writeback_items(tab_id))
 
-    def apply_writeback_items(
-        self, tab_id: str, items: list[WritebackItem]
-    ) -> list[str]:
+    def apply_writeback(self, tab_id: str) -> list[str]:
+        """Apply the tab's persistent writeback draft as-is (no recompute)."""
         permit = self._guard_svc.acquire_writeback_permit(tab_id)
-        return self._writeback_svc.apply_tab_writeback_items(permit, items)
+        return self._writeback_svc.apply_tab_writeback(permit)
+
+    def set_writeback_item(self, tab_id: str, session_id: str, **changes: Any) -> None:
+        """Edit a persistent writeback item (selected / target_name / value)."""
+        self._guard_svc.acquire_writeback_permit(tab_id)
+        self._writeback_svc.set_item_field(tab_id, session_id, **changes)
 
     # ------------------------------------------------------------------
     # Save (TabService)

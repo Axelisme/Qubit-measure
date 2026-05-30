@@ -133,12 +133,12 @@ class LenRabiAdapter(
         result = req.analyze_result
         return [
             MetaDictWriteback(
-                key="pi_len",
+                target_name="pi_len",
                 description="Pi pulse length (us)",
                 proposed_value=result.pi_len,
             ),
             MetaDictWriteback(
-                key="pi2_len",
+                target_name="pi2_len",
                 description="Pi/2 pulse length (us)",
                 proposed_value=result.pi2_len,
             ),

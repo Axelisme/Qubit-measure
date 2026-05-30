@@ -6,10 +6,11 @@ from zcu_tools.gui.ui.writeback_widget import WritebackWidget
 
 def test_writeback_widget_edit_module_item(qapp):
     item = ModuleWriteback(
-        key="mod_key",
+        target_name="mod_key",
         description="A module",
         edit_schema=MagicMock(),
     )
+    item.session_id = "ml-1"
 
     ctrl = MagicMock()
     widget = WritebackWidget(ctrl)

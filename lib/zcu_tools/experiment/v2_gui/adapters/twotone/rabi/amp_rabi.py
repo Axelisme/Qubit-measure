@@ -133,12 +133,12 @@ class AmpRabiAdapter(
         result = req.analyze_result
         return [
             MetaDictWriteback(
-                key="pi_amp",
+                target_name="pi_amp",
                 description="Pi pulse gain (a.u.)",
                 proposed_value=result.pi_amp,
             ),
             MetaDictWriteback(
-                key="pi2_amp",
+                target_name="pi2_amp",
                 description="Pi/2 pulse gain (a.u.)",
                 proposed_value=result.pi2_amp,
             ),

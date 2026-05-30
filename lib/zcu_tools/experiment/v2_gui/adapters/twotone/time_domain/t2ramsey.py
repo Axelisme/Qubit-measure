@@ -138,7 +138,7 @@ class T2RamseyAdapter(
         result = req.analyze_result
         return [
             MetaDictWriteback(
-                key="t2r",
+                target_name="t2r",
                 description="T2 Ramsey time (us)",
                 proposed_value=result.t2r,
             ),

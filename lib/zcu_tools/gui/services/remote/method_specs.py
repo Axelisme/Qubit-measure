@@ -412,22 +412,37 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "tab.get_cfg_summary": MethodSpec(
         5.0, "Read tab cfg as clean scalar dict", (_str("tab_id"),)
     ),
-    # Writeback workflow
+    # Writeback workflow — a persistent draft computed once at analyze time.
     "writeback.preview": MethodSpec(
         5.0,
-        "List the adapter's proposed writeback items after analyze. Each item: "
-        "key (stable id == apply target name), kind (metadict|module|waveform), "
-        "description, selected; metadict adds proposed_value; module/waveform add "
-        "has_edit_schema + edit_schema_raw (tagged cfg, like tab.get_cfg).",
+        "List the tab's persistent writeback draft. Each item: id "
+        "(<kind>-<n>, kind∈md|ml|wf), target_name (apply destination, editable), "
+        "kind (metadict|module|waveform), description, selected; metadict adds "
+        "proposed_value; module/waveform add editor_id + has_edit_schema. Edit a "
+        "module/waveform's cfg via editor.* on its editor_id; the user's Edit "
+        "dialog renders the same model (WYSIWYG).",
         (_str("tab_id"),),
+    ),
+    "writeback.set": MethodSpec(
+        5.0,
+        "Edit a persistent writeback item by id: selected? / target_name? / "
+        "proposed_value? (metadict only). Module/waveform cfg edits go through "
+        "editor.set_field on the item's editor_id, not here.",
+        (
+            _str("tab_id"),
+            _str("id", "writeback item session id (<kind>-<n>)"),
+            ParamSpec("selected", JsonType.JSON, required=False),
+            _str_opt("target_name", "new apply destination name"),
+            ParamSpec("proposed_value", JsonType.JSON, required=False),
+            _expected_versions(),
+        ),
     ),
     "writeback.apply": MethodSpec(
         10.0,
-        "Apply writeback items. 'selections' is a list of "
-        "{key, selected?, proposed_value? (metadict), edited_raw? (module/"
-        "waveform, tagged cfg over edit_schema)}. Items recomputed server-side; "
-        "unlisted keys keep their default selected state. Returns applied_keys.",
-        (_str("tab_id"), _json("selections", "List of per-key adjustments")),
+        "Apply the tab's persistent writeback draft as-is (edit it first via "
+        "writeback.set / editor.*). Applies items currently selected. Returns "
+        "applied_ids.",
+        (_str("tab_id"), _expected_versions()),
     ),
     # CfgEditor sessions — headless, stateful ml-entry editing for the agent.
     "editor.open": MethodSpec(

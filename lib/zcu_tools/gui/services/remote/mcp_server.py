@@ -146,8 +146,10 @@ _GUARD_DEPS: Dict[str, tuple[str, ...]] = {
     "save.data": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
     "save.image": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
     "save.both": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
-    # writeback.apply recomputes items from run+analyze results and writes md/ml
-    # (context). A concurrent rerun/reanalyze or context edit must invalidate it.
+    # writeback.set / writeback.apply edit + apply the persistent draft (computed
+    # from run+analyze results, write md/ml). A concurrent rerun/reanalyze or
+    # context edit must invalidate them.
+    "writeback.set": ("tab:{tab_id}:result", "tab:{tab_id}:analyze", "context"),
     "writeback.apply": ("tab:{tab_id}:result", "tab:{tab_id}:analyze", "context"),
     "editor.commit": ("editor:{editor_id}", "context"),
 }

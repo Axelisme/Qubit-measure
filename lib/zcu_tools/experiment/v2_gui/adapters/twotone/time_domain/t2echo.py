@@ -138,7 +138,7 @@ class T2EchoAdapter(
         result = req.analyze_result
         return [
             MetaDictWriteback(
-                key="t2e",
+                target_name="t2e",
                 description="T2 Echo time (us)",
                 proposed_value=result.t2e,
             ),

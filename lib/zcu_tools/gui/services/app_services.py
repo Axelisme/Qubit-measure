@@ -82,7 +82,17 @@ def build_app_services(
     device = DeviceService(bus, state, operation_gate)
     context = ContextService(state, io_manager, bus)
     tab = TabService(state, registry)
-    writeback = WritebackService(state, bus)
+    # cfg_editor owns the per-tab and per-writeback-item cfg models; WritebackService
+    # builds/reads/tears those down, so it is built after cfg_editor (single-
+    # direction command edge — cfg_editor never calls writeback, ADR-0007).
+    cfg_editor = CfgEditorService(
+        cfg_editor_ctrl,
+        ml_port=cfg_editor_ctrl,
+        version_bump=cfg_editor_ctrl.bump_editor_version,
+        version_drop=cfg_editor_ctrl.drop_editor_version,
+        bus=bus,
+    )
+    writeback = WritebackService(state, bus, cfg_editor)
     return AppServices(
         operation_gate=operation_gate,
         guard=GuardService(state),
@@ -91,8 +101,8 @@ def build_app_services(
         connection=ConnectionService(state, bus, operation_gate),
         context=context,
         tab=tab,
-        run=RunService(state, runner, bus, operation_gate),
-        analyze=AnalyzeService(state, analyze_runner, bus),
+        run=RunService(state, runner, bus, operation_gate, writeback),
+        analyze=AnalyzeService(state, analyze_runner, bus, writeback),
         save=SaveService(state, save_runner, bus),
         writeback=writeback,
         tab_view=TabViewService(state, writeback),
@@ -100,11 +110,5 @@ def build_app_services(
         startup=StartupService(
             context, device, StartupPersistenceService(), state, bus
         ),
-        cfg_editor=CfgEditorService(
-            cfg_editor_ctrl,
-            ml_port=cfg_editor_ctrl,
-            version_bump=cfg_editor_ctrl.bump_editor_version,
-            version_drop=cfg_editor_ctrl.drop_editor_version,
-            bus=bus,
-        ),
+        cfg_editor=cfg_editor,
     )

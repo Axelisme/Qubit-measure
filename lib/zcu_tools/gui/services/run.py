@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import EventBus
     from zcu_tools.gui.runner import Runner
+    from zcu_tools.gui.services.writeback import WritebackService
     from zcu_tools.gui.state import State
 
 
@@ -39,12 +40,14 @@ class RunService(QObject):
         runner: "Runner",
         bus: "EventBus",
         gate: OperationGate,
+        writeback: "WritebackService",
     ) -> None:
         super().__init__()
         self._state = state
         self._runner = runner
         self._bus = bus
         self._gate = gate
+        self._writeback = writeback
         self._active_lease: Optional[OperationLease] = None
         self._active_pbar_factory: Optional[Any] = None
         # Tabs whose current run was explicitly cancelled, so the terminal
@@ -127,6 +130,9 @@ class RunService(QObject):
             "_on_run_finished: tab_id=%r result_type=%s", tab_id, type(result).__name__
         )
         self._clear_active_factory()
+        # New run invalidates the previous analyze's writeback draft: tear down
+        # its per-item editor models before update_tab_result clears the list.
+        self._writeback.teardown_tab_items(tab_id)
         self._state.update_tab_result(tab_id, result)
         self._state.set_tab_running(tab_id, False)
         was_cancelled = tab_id in self._cancel_requested_tabs

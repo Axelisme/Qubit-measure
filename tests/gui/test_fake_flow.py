@@ -66,7 +66,7 @@ def test_fake_adapter_full_flow():
         WritebackRequest(run_result=result, analyze_result=analyze_result, ctx=ctx)
     )
     assert len(items) == 1
-    assert items[0].key == "fake_peak"
+    assert items[0].target_name == "fake_peak"
     assert items[0].proposed_value == analyze_result.peak
 
 

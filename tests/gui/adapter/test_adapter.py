@@ -358,26 +358,30 @@ def test_make_default_value_module_ref():
 
 def test_meta_dict_writeback_requires_proposed_value():
     with pytest.raises(TypeError):
-        MetaDictWriteback(key="k", description="d")  # type: ignore[call-arg]
+        MetaDictWriteback(target_name="k", description="d")  # type: ignore[call-arg]
 
 
 def test_meta_dict_writeback_valid():
-    item = MetaDictWriteback(key="freq", description="d", proposed_value=1)
-    assert item.key == "freq"
+    item = MetaDictWriteback(target_name="freq", description="d", proposed_value=1)
+    assert item.target_name == "freq"
     assert item.proposed_value == 1
+    # session_id / editor_id are stamped by the service, not the adapter.
+    assert item.session_id == ""
 
 
 def test_module_writeback_valid():
-    # key is the apply target name; edit_schema defaults to None.
-    item = ModuleWriteback(key="pulse_a", description="d")
-    assert item.key == "pulse_a"
+    # target_name is the apply destination; edit_schema/editor_id default to None.
+    item = ModuleWriteback(target_name="pulse_a", description="d")
+    assert item.target_name == "pulse_a"
     assert item.edit_schema is None
     assert item.edited_schema is None
+    assert item.editor_id is None
+    assert item.session_id == ""
 
 
 def test_waveform_writeback_valid():
-    item = WaveformWriteback(key="gauss", description="d")
-    assert item.key == "gauss"
+    item = WaveformWriteback(target_name="gauss", description="d")
+    assert item.target_name == "gauss"
     assert item.edit_schema is None
 
 

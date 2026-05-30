@@ -551,7 +551,7 @@ class ExpTabWidget(QWidget):
             lambda: main_window._on_analyze_clicked(tab_id)
         )
         self.writeback_widget.apply_requested.connect(
-            lambda items: main_window._on_writeback_inline_apply(tab_id, items)
+            lambda: main_window._on_writeback_inline_apply(tab_id)
         )
         self.save_data_btn.clicked.connect(
             lambda: main_window._on_save_data_clicked(tab_id)
@@ -1045,20 +1045,16 @@ class MainWindow(QMainWindow):
             return
         self._ctrl.analyze(tab_id, tab_w.read_analyze_params())
 
-    def _on_writeback_inline_apply(
-        self, tab_id: str, items: list["WritebackItem"]
-    ) -> None:
+    def _on_writeback_inline_apply(self, tab_id: str) -> None:
         logger.info("_on_writeback_inline_apply: tab_id=%r", tab_id)
-        if not items:
-            return
         if not self._ctrl.has_tab(tab_id):
             logger.warning(
                 "_on_writeback_inline_apply: unknown tab_id=%r — ignoring", tab_id
             )
             return
-        applied_keys = self._ctrl.apply_writeback_items(tab_id, items)
-        if applied_keys:
-            self.show_status_message(f"Writeback applied: {', '.join(applied_keys)}")
+        applied_ids = self._ctrl.apply_writeback(tab_id)
+        if applied_ids:
+            self.show_status_message(f"Writeback applied: {', '.join(applied_ids)}")
 
     def _on_save_data_clicked(self, tab_id: str) -> None:
         logger.info("_on_save_data_clicked: tab_id=%r", tab_id)

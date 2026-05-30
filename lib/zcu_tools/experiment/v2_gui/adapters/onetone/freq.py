@@ -172,22 +172,22 @@ class OneToneFreqAdapter(
 
         return [
             MetaDictWriteback(
-                key="r_f",
+                target_name="r_f",
                 description="Resonator frequency (MHz)",
                 proposed_value=result.freq,
             ),
             MetaDictWriteback(
-                key="rf_w",
+                target_name="rf_w",
                 description="Resonator linewidth FWHM (MHz)",
                 proposed_value=result.fwhm,
             ),
             ModuleWriteback(
-                key="readout_rf",
+                target_name="readout_rf",
                 description="readout_rf module config",
                 edit_schema=schema_from_module(proposed_readout),
             ),
             WaveformWriteback(
-                key="ro_waveform",
+                target_name="ro_waveform",
                 description="ro_waveform length config",
                 edit_schema=schema_from_module(proposed_waveform),
             ),

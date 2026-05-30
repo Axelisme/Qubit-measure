@@ -128,7 +128,7 @@ class LookbackAdapter(
     ) -> Sequence[WritebackItem]:
         return [
             MetaDictWriteback(
-                key="timeFly",
+                target_name="timeFly",
                 description="Readout trigger offset prediction (us)",
                 proposed_value=req.analyze_result.predict_offset,
             )

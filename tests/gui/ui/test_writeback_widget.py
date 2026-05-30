@@ -51,16 +51,22 @@ def test_writeback_widget_lists_items_and_edit_buttons(qapp):
             predictor=ctx.predictor,
         )
     )
-    items = adapter.get_writeback_items(
-        WritebackRequest(run_result=result, analyze_result=analyze_result, ctx=ctx)
+    items = list(
+        adapter.get_writeback_items(
+            WritebackRequest(run_result=result, analyze_result=analyze_result, ctx=ctx)
+        )
     )
+    # The service stamps session_ids at compute time; do it here so the widget's
+    # per-id checkbox map is unambiguous.
+    for i, item in enumerate(items):
+        item.session_id = f"id-{i}"
 
     widget = WritebackWidget(MagicMock())
     widget.populate(items)
-    selected = widget.get_selected_items()
+    selected = [it for it in items if it.selected]
     edit_buttons = [w for w in widget.findChildren(QPushButton) if w.text() == "Edit"]
 
-    assert len(selected) == len(items)
+    assert len(selected) == len(items)  # all selected by default
     assert len(edit_buttons) >= 4
 
 
@@ -95,7 +101,7 @@ def test_readout_writeback_drag_schema_is_initially_valid(qapp):
     readout_item = next(
         item
         for item in items
-        if isinstance(item, ModuleWriteback) and item.key == "readout_rf"
+        if isinstance(item, ModuleWriteback) and item.target_name == "readout_rf"
     )
 
     from zcu_tools.gui.live_model import LiveModelEnv, SectionLiveField

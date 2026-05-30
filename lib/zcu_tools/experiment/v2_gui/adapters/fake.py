@@ -166,7 +166,7 @@ class FakeAdapter(
     ) -> Sequence[MetaDictWriteback]:
         return [
             MetaDictWriteback(
-                key="fake_peak",
+                target_name="fake_peak",
                 description="Fake peak value from FakeAdapter analysis",
                 proposed_value=req.analyze_result.peak,
             )

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import copy
 import logging
-import uuid
 from typing import TYPE_CHECKING, Any, Optional, Sequence
 
 from qtpy.QtCore import Qt, Signal  # type: ignore[attr-defined]
@@ -36,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 class WritebackWidget(QWidget):
-    apply_requested: Signal = Signal(list)  # list[WritebackItem]
+    apply_requested: Signal = Signal()  # apply the persistent draft as-is
 
     def __init__(
         self,
@@ -80,7 +78,10 @@ class WritebackWidget(QWidget):
                 if w is not None:
                     w.deleteLater()
 
-        self._items = copy.deepcopy(list(items))
+        # These are the *persistent* State items (ADR-0010) — do NOT copy. UI
+        # edits (checkbox, value, cfg via the editor model) land on the same
+        # objects the agent and apply read.
+        self._items = list(items)
         self._checks.clear()
 
         for item in self._items:
@@ -91,9 +92,9 @@ class WritebackWidget(QWidget):
             label = self._make_label_text(item)
             cb = QCheckBox(label)
             cb.setChecked(item.selected)
-            cb.stateChanged.connect(self._refresh_apply_enabled)
+            cb.stateChanged.connect(lambda _state, it=item: self._on_check_toggled(it))
             row_layout.addWidget(cb, 1)
-            self._checks[item.key] = cb
+            self._checks[item.session_id] = cb
 
             if self._is_editable(item):
                 edit_btn = QPushButton("Edit")
@@ -106,20 +107,16 @@ class WritebackWidget(QWidget):
 
         self._refresh_apply_enabled()
 
+    def _on_check_toggled(self, item: WritebackItem) -> None:
+        # The persistent item's selected flag follows the checkbox directly.
+        item.selected = self._checks[item.session_id].isChecked()
+        self._refresh_apply_enabled()
+
     def _refresh_apply_enabled(self, *_: int) -> None:
         self._apply_btn.setEnabled(any(cb.isChecked() for cb in self._checks.values()))
 
-    def get_selected_items(self) -> list[WritebackItem]:
-        selected: list[WritebackItem] = []
-        for item in self._items:
-            check = self._checks[item.key]
-            item.selected = check.isChecked()
-            if item.selected:
-                selected.append(item)
-        return selected
-
     def _on_apply_clicked(self) -> None:
-        self.apply_requested.emit(self.get_selected_items())
+        self.apply_requested.emit()
 
     def _is_editable(self, item: WritebackItem) -> bool:
         if isinstance(item, MetaDictWriteback):
@@ -132,13 +129,12 @@ class WritebackWidget(QWidget):
 
     def _make_label_text(self, item: WritebackItem) -> str:
         if isinstance(item, MetaDictWriteback):
-            return f"{item.key} -> {item.proposed_value!r}\n  {item.description}"
-        if isinstance(item, (ModuleWriteback, WaveformWriteback)):
-            status = (
-                "Config edited" if item.edited_schema is not None else "Config modified"
+            return (
+                f"{item.target_name} -> {item.proposed_value!r}\n  {item.description}"
             )
-            return f"{item.key}  ({status})\n  {item.description}"
-        return f"{item.key}\n  {item.description}"
+        if isinstance(item, (ModuleWriteback, WaveformWriteback)):
+            return f"{item.target_name}\n  {item.description}"
+        return f"{item.target_name}\n  {item.description}"
 
     def _edit_item(self, item: WritebackItem, cb: QCheckBox) -> None:
         if isinstance(item, MetaDictWriteback):
@@ -148,7 +144,7 @@ class WritebackWidget(QWidget):
 
     def _edit_md_item(self, item: MetaDictWriteback, cb: QCheckBox) -> None:
         dialog = QDialog(self)
-        dialog.setWindowTitle(f"Edit Value: {item.key}")
+        dialog.setWindowTitle(f"Edit Value: {item.target_name}")
         layout = QVBoxLayout(dialog)
 
         form = QFormLayout()
@@ -186,67 +182,42 @@ class WritebackWidget(QWidget):
         item: ModuleWriteback | WaveformWriteback,
         cb: QCheckBox,
     ) -> None:
-        if item.edit_schema is None:
+        # The item carries a persistent, service-owned cfg model (editor_id,
+        # ADR-0010). Attach the dialog widget to *that* model — the user's edits
+        # land on the same model the agent edits and apply reads. On close the
+        # widget detaches but the model persists (torn down only on reanalyze).
+        if item.editor_id is None:
             return
 
         dialog = QDialog(self)
-        dialog.setWindowTitle(f"Edit Config: {item.key}")
+        dialog.setWindowTitle(f"Edit Config: {item.target_name}")
         dialog.setMinimumSize(560, 500)
 
         layout = QVBoxLayout(dialog)
 
-        hint = QLabel("Edit the configuration below. Click Save to confirm.")
+        hint = QLabel("Edit the configuration below. Edits apply immediately.")
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        # The cfg model is owned by the CfgEditorService (ADR-0010): open a
-        # gc=False seeded session from the item's draft schema, attach the widget.
-        # Edits land on the service-owned model; Save snapshots it onto the item.
         form_widget = CfgFormWidget()
-        schema = copy.deepcopy(item.edited_schema or item.edit_schema)
-        editor_owner = f"writeback-{uuid.uuid4().hex[:8]}"
-        editor_id, _ = self._ctrl.open_seeded_cfg_editor(
-            schema, gc=False, owner_key=editor_owner
-        )
-        form_widget.attach(self._ctrl.get_cfg_editor_root(editor_id))
-        initial_valid = form_widget.is_valid()
-        logger.debug(
-            "_edit_cfg_item: key=%r initial_valid=%r schema_spec=%r",
-            item.key,
-            initial_valid,
-            type(schema.spec).__name__,
-        )
+        form_widget.attach(self._ctrl.get_cfg_editor_root(item.editor_id))
         scroll.setWidget(form_widget)
         layout.addWidget(scroll, stretch=1)
 
         btn_row = QHBoxLayout()
-        save_btn = QPushButton("Save")
-        save_btn.setEnabled(initial_valid)
-        cancel_btn = QPushButton("Cancel")
-        btn_row.addWidget(save_btn)
-        btn_row.addWidget(cancel_btn)
+        close_btn = QPushButton("Close")
+        btn_row.addWidget(close_btn)
         layout.addLayout(btn_row)
+        close_btn.clicked.connect(dialog.accept)
 
-        def _close_editor(*_: Any) -> None:
+        def _on_finished(*_: Any) -> None:
             form_widget.detach()
-            self._ctrl.teardown_cfg_editor(editor_id)
+            cb.setText(self._make_label_text(item))
 
-        form_widget.validity_changed.connect(save_btn.setEnabled)
-        cancel_btn.clicked.connect(dialog.reject)
-
-        def save() -> None:
-            try:
-                item.edited_schema = form_widget.read_schema()
-                cb.setText(self._make_label_text(item))
-                dialog.accept()
-            except Exception as exc:
-                QMessageBox.critical(dialog, "Validation Error", str(exc))
-
-        save_btn.clicked.connect(save)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dialog.finished.connect(_close_editor)
+        dialog.finished.connect(_on_finished)
         dialog.open()
 
 

@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
+    from zcu_tools.gui.adapter import WritebackItem
+
     # Imported only for typing: zcu_tools.device.base pulls in matplotlib.pyplot
     # at import time, which would break the GUI's "configure backend before
     # pyplot import" invariant if loaded eagerly here. ``from __future__ import
@@ -103,7 +105,12 @@ class TabState(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     figure: Optional["Figure"] = None
     analyze_param_instance: Optional[T_AnalyzeParams] = None
     save_path_overrides: Optional[SavePaths] = None
-    applied_writeback_keys: set[str] = field(default_factory=set)
+    # Persistent writeback draft (ADR-0010): computed once when analyze finishes,
+    # read/edited in place by UI + agent, applied as-is. Module/waveform items
+    # carry a gc=False CfgEditorService model (editor_id); cleared + torn down on
+    # rerun / reanalyze.
+    writeback_items: list["WritebackItem"] = field(default_factory=list)
+    applied_session_ids: set[str] = field(default_factory=set)
     is_running: bool = False
     is_analyzing: bool = False
     is_saving_data: bool = False
@@ -373,11 +380,18 @@ class State:
         # invalidate stale analyze results and figure from the previous run
         tab.analyze_result = None
         tab.figure = None
-        tab.applied_writeback_keys.clear()
+        # New run → the previous run's writeback draft is stale. Callers must
+        # teardown the per-item editor models (WritebackService) before this.
+        tab.writeback_items = []
+        tab.applied_session_ids.clear()
         self.version.bump(f"tab:{tab_id}:result")
 
     def update_tab_analyze(
-        self, tab_id: str, analyze_result: object, figure: Optional["Figure"]
+        self,
+        tab_id: str,
+        analyze_result: object,
+        figure: Optional["Figure"],
+        writeback_items: Optional[list["WritebackItem"]] = None,
     ) -> None:
         logger.debug(
             "update_tab_analyze: tab_id=%r figure=%s",
@@ -387,7 +401,11 @@ class State:
         tab = self.tabs[tab_id]
         tab.analyze_result = analyze_result
         tab.figure = figure
-        tab.applied_writeback_keys.clear()
+        # Fresh analyze → store the freshly computed persistent writeback draft
+        # (the sink computes it via WritebackService). Per-item models from a
+        # previous analyze must already have been torn down by the caller.
+        tab.writeback_items = list(writeback_items or [])
+        tab.applied_session_ids.clear()
         # Analyze result is a guarded resource (writeback depends on it), mirroring
         # update_tab_result's tab:<id>:result bump.
         self.version.bump(f"tab:{tab_id}:analyze")
