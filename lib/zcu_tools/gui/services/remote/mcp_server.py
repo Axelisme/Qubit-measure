@@ -132,7 +132,17 @@ _LAST_SEEN: Dict[str, int] = {}
 # depending on ``context`` (run.start / editor.commit / writeback.apply) detects
 # a concurrent md/ml change.
 _GUARD_DEPS: Dict[str, tuple[str, ...]] = {
-    "run.start": ("tab:{tab_id}:cfg", "tab:{tab_id}", "soc", "context", "device:*"),
+    # ``device:*`` guards mutations of *existing* devices; ``devices:__set__``
+    # guards *set membership* (a device added/removed since the agent last read
+    # versions) which the per-member glob cannot reveal.
+    "run.start": (
+        "tab:{tab_id}:cfg",
+        "tab:{tab_id}",
+        "soc",
+        "context",
+        "device:*",
+        "devices:__set__",
+    ),
     "save.data": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
     "save.image": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
     "save.both": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),

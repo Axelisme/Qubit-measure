@@ -134,6 +134,14 @@ class TabState(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
         return self.adapter.make_save_paths(ctx)
 
 
+# Set-cardinality version key for the whole device collection. Bumped only when
+# the device *set* gains or loses a member (not on status/info edits of an
+# existing member — those move that member's own ``device:<name>`` key). A
+# guarded op depending on the whole set (run.start) declares this key so a
+# concurrently-added device is detected, which a per-member glob cannot reveal.
+DEVICE_SET_VERSION_KEY = "devices:__set__"
+
+
 class VersionTable:
     """Monotonic per-resource version counters (optimistic-concurrency guard).
 
@@ -144,9 +152,10 @@ class VersionTable:
     current table atomically inside the main-thread dispatch sequence.
 
     Resource keys are mid-grained: ``context``, ``soc``, ``device:<name>``,
-    ``tab:<id>:cfg`` / ``:result`` / ``:save_path``, ``tab:<id>`` (existence)
-    and ``editor:<id>``. A key absent from the table means version 0 (never
-    bumped, or its resource was dropped — both read as "gone" by the guard).
+    ``devices:__set__`` (device-set cardinality), ``tab:<id>:cfg`` / ``:result``
+    / ``:save_path``, ``tab:<id>`` (existence) and ``editor:<id>``. A key absent
+    from the table means version 0 (never bumped, or its resource was dropped —
+    both read as "gone" by the guard).
     """
 
     def __init__(self) -> None:
@@ -160,6 +169,7 @@ class VersionTable:
         version (the editor bug in Phase 100). The bump↔drop map:
             tab:<id>* / tab:<id>:cfg/:result/:analyze/:save_path  → State.remove_tab (drop_prefix tab:<id>)
             device:<name>                                         → State.remove_device (drop_prefix device:<name>)
+            devices:__set__                                       → monotonic set-cardinality counter, never dropped
             editor:<id>                                           → Controller.drop_editor_version (CfgEditorService._remove)
             context / soc                                         → process-lifetime singletons, never dropped
         Adding a new bumped key means adding its drop to the owner's teardown.
@@ -246,8 +256,18 @@ class State:
     def put_device(self, dev: DeviceState) -> None:
         """Insert or replace a device entry (create / status transition)."""
         logger.debug("put_device: name=%r status=%s", dev.name, dev.status.value)
+        is_new = dev.name not in self.devices
         self.devices[dev.name] = dev
         self.version.bump(f"device:{dev.name}")
+        # Set-membership guard: a per-device version cannot reveal a *new* member
+        # to an opt-in concurrency check (the agent never declared a key for a
+        # device that did not exist when it read versions). The set-cardinality
+        # key advances whenever the device set grows or shrinks, so an op that
+        # depends on the whole set (run.start) detects a concurrently-added
+        # device. Status transitions reuse an existing entry → set unchanged →
+        # no bump here (the per-device key already moves).
+        if is_new:
+            self.version.bump(DEVICE_SET_VERSION_KEY)
 
     def set_device_status(
         self, name: str, status: DeviceStatus, *, error: Optional[str] = None
@@ -293,6 +313,9 @@ class State:
         del self.devices[name]
         # A stale dependency on a removed device now reads as version 0 (gone).
         self.version.drop_prefix(f"device:{name}")
+        # The device set shrank — advance the set-cardinality key (symmetric to
+        # the grow case in put_device) so a whole-set dependant detects it.
+        self.version.bump(DEVICE_SET_VERSION_KEY)
 
     def get_device(self, name: str) -> Optional[DeviceState]:
         return self.devices.get(name)

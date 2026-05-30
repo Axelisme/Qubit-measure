@@ -47,7 +47,14 @@ def test_guarded_op_attaches_expected_versions(wired):
     sent = wired["sent"]
     # Baseline the agent has observed.
     mcp_server._LAST_SEEN.update(
-        {"tab:t:cfg": 3, "tab:t": 1, "soc": 2, "context": 4, "device:yoko": 5}
+        {
+            "tab:t:cfg": 3,
+            "tab:t": 1,
+            "soc": 2,
+            "context": 4,
+            "device:yoko": 5,
+            "devices:__set__": 6,
+        }
     )
     wired["run.start"] = {"ok": True, "result": {}}
     wired["resources.versions"] = _versions_reply(dict(mcp_server._LAST_SEEN))
@@ -61,7 +68,25 @@ def test_guarded_op_attaches_expected_versions(wired):
         "soc": 2,
         "context": 4,
         "device:yoko": 5,
+        "devices:__set__": 6,
     }
+
+
+def test_run_start_declares_device_set_cardinality_key(wired):
+    """run.start must declare devices:__set__ so a concurrently-added device
+    (which device:* glob cannot reveal) is caught by the guard."""
+    sent = wired["sent"]
+    # Agent observed an empty device set (cardinality key unseen → 0).
+    mcp_server._LAST_SEEN.update({"tab:t:cfg": 1, "tab:t": 1, "soc": 1, "context": 1})
+    wired["run.start"] = {"ok": True, "result": {}}
+    wired["resources.versions"] = _versions_reply(dict(mcp_server._LAST_SEEN))
+
+    mcp_server.send_gui_rpc("run.start", {"tab_id": "t"})
+
+    expected = next(p for (m, p) in sent if m == "run.start")["expected_versions"]
+    # Declared at its last-seen baseline of 0; the server rejects if a device was
+    # added since (cardinality now ≥ 1).
+    assert expected["devices:__set__"] == 0
 
 
 def test_save_depends_on_result_and_save_path_not_cfg(wired):
