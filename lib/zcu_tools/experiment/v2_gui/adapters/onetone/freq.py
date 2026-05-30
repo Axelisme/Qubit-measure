@@ -20,8 +20,8 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     build_readout_for_frequency,
     build_waveform_for_length,
     make_flat_top_waveform_edit_template,
+    make_pulse_readout_default,
     make_pulse_readout_module_spec,
-    make_readout_default,
     make_readout_edit_template,
     make_reset_module_spec,
     md_get_float,
@@ -110,7 +110,7 @@ class OneToneFreqAdapter(
             {
                 "modules": CfgSectionValue(
                     {
-                        "readout": make_readout_default(ctx)
+                        "readout": make_pulse_readout_default(ctx)
                         .with_field("pulse_cfg.gain", 0.05)
                         .with_field("ro_cfg.ro_length", ro_length),
                     }

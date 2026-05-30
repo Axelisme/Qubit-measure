@@ -20,7 +20,7 @@ from zcu_tools.gui.specs.reset import (
 )
 from zcu_tools.program.v2.modules import AbsResetCfg
 
-from ..ctx_helpers import md_get_float, md_get_int, md_scalar_float
+from ..ctx_helpers import md_scalar_float, md_scalar_int
 from .helpers import make_default_value, patch_pulse_fields, select_named_module_value
 
 if TYPE_CHECKING:
@@ -36,8 +36,8 @@ def make_none_reset_default(ctx: ExpContext) -> ModuleRefValue:  # noqa: ARG001
 
 
 def make_pulse_reset_default(ctx: ExpContext) -> ModuleRefValue:
-    q_f = md_get_float(ctx, "q_f", 4000.0)
-    qub_ch = md_get_int(ctx, "qub_ch", 0)
+    q_f = md_scalar_float(ctx, "q_f", 4000.0)
+    qub_ch = md_scalar_int(ctx, "qub_ch", 0)
 
     value = make_default_value(make_pulse_reset_spec())
     pulse_cfg = value.fields.get("pulse_cfg")
@@ -47,8 +47,8 @@ def make_pulse_reset_default(ctx: ExpContext) -> ModuleRefValue:
 
 
 def make_two_pulse_reset_default(ctx: ExpContext) -> ModuleRefValue:
-    q_f = md_get_float(ctx, "q_f", 4000.0)
-    qub_ch = md_get_int(ctx, "qub_ch", 0)
+    q_f = md_scalar_float(ctx, "q_f", 4000.0)
+    qub_ch = md_scalar_int(ctx, "qub_ch", 0)
 
     value = make_default_value(make_two_pulse_reset_spec())
     for key in ("pulse1_cfg", "pulse2_cfg"):
@@ -60,9 +60,9 @@ def make_two_pulse_reset_default(ctx: ExpContext) -> ModuleRefValue:
 
 def make_bath_reset_default(ctx: ExpContext) -> ModuleRefValue:
     r_f = md_scalar_float(ctx, "r_f", 6000.0)
-    q_f = md_get_float(ctx, "q_f", 4000.0)
-    res_ch = md_get_int(ctx, "res_ch", 0)
-    qub_ch = md_get_int(ctx, "qub_ch", 0)
+    q_f = md_scalar_float(ctx, "q_f", 4000.0)
+    res_ch = md_scalar_int(ctx, "res_ch", 0)
+    qub_ch = md_scalar_int(ctx, "qub_ch", 0)
 
     value = make_default_value(make_bath_reset_spec())
     cav = value.fields.get("cavity_tone_cfg")

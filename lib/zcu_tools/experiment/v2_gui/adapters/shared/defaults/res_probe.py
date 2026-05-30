@@ -14,7 +14,7 @@ from zcu_tools.gui.adapter import ModuleRefValue
 from zcu_tools.gui.specs.pulse import make_pulse_spec
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 
-from ..ctx_helpers import md_get_float, md_get_int
+from ..ctx_helpers import md_scalar_float, md_scalar_int
 from .helpers import make_default_value, patch_pulse_fields, select_named_module_value
 
 if TYPE_CHECKING:
@@ -28,8 +28,8 @@ def make_res_probe_default(ctx: ExpContext) -> ModuleRefValue:
 
     Adapter-specific tuning is applied by the caller via ``.with_field(...)``.
     """
-    r_f = md_get_float(ctx, "r_f", 6000.0)
-    res_ch = md_get_int(ctx, "res_ch", 0)
+    r_f = md_scalar_float(ctx, "r_f", 6000.0)
+    res_ch = md_scalar_int(ctx, "res_ch", 0)
 
     value = make_default_value(make_pulse_spec())
     patch_pulse_fields(value, freq=r_f, ch=res_ch, gain=0.05, length=1.0)
