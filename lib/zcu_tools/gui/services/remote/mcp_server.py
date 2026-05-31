@@ -92,6 +92,11 @@ Detecting completion — prefer events over polling:
   - gui_run_progress gives in-flight bar snapshots (token/format/maximum/value/
     percent) but is a fallback; do not busy-poll gui_run_running_tab in a sleep
     loop.
+  - 'diagnostic' is an UNSOLICITED push (no subscription needed) carrying
+    {severity: 'error'|'info', title, message} — the same user-facing feedback
+    the GUI shows in a dialog/status bar. It arrives via gui_events_poll like
+    any event; watch for severity=='error' to learn about failures the GUI
+    surfaced (including ones not tied to a call you made).
 
 Preconditions are enforced server-side and identical to the GUI buttons:
   - Run/save require an active file-backed context; save/analyze require an

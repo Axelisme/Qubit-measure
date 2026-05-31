@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from .analyze import AnalyzeService
 from .cfg_editor import CfgEditorService
@@ -17,7 +17,6 @@ from .startup import StartupService
 from .startup_persistence import StartupPersistenceService
 from .tab import TabService
 from .tab_view import TabViewService
-from .view_query import ViewQueryService
 from .workspace import WorkspaceService
 from .writeback import WritebackService
 
@@ -27,7 +26,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.registry import Registry
     from zcu_tools.gui.runner import AnalyzeRunner, Runner, SaveDataRunner
     from zcu_tools.gui.services.cfg_editor import CfgEditorHost
-    from zcu_tools.gui.services.view_query import _ViewQueryTarget
     from zcu_tools.gui.state import State
 
 
@@ -44,7 +42,6 @@ class AppServices:
 
     operation_gate: OperationGate
     guard: GuardService
-    view_query: ViewQueryService
     device: DeviceService
     connection: ConnectionService
     context: ContextService
@@ -68,7 +65,6 @@ def build_app_services(
     runner: "Runner",
     analyze_runner: "AnalyzeRunner",
     save_runner: "SaveDataRunner",
-    view_provider: "Callable[[], _ViewQueryTarget]",
     cfg_editor_ctrl: "CfgEditorHost",
 ) -> AppServices:
     """Construct and wire every domain service into a frozen bundle.
@@ -97,7 +93,6 @@ def build_app_services(
     return AppServices(
         operation_gate=operation_gate,
         guard=GuardService(state),
-        view_query=ViewQueryService(view_provider),
         device=device,
         connection=ConnectionService(state, bus, operation_gate),
         context=context,

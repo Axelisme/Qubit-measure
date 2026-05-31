@@ -27,7 +27,6 @@ _APP_SERVICE_MODULES = {
     "startup",
     "tab",
     "tab_view",
-    "view_query",
     "workspace",
     "writeback",
 }

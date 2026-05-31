@@ -40,10 +40,14 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 #     — ADR-0011, the single ml/md write authority is ContextService.
 # v5: added device.setup_spec (discover the fields settable via device.setup's
 #     updates — name/type/choices/current/settable — from the live info model).
-# v6: removed cfg.set_field — a tab's cfg is edited through its CfgEditorService
-#     session (editor.set_field on the tab's editor_id), the same draft the form
-#     attaches to, so agent + user share one model (ADR-0013 F11). tab.list_paths
-#     now reads that session too (wire shape unchanged).
+# v6 (ADR-0013): (a) removed cfg.set_field — a tab's cfg is edited through its
+#     CfgEditorService session (editor.set_field on the tab's editor_id), the
+#     same draft the form attaches to, so agent + user share one model (F11);
+#     tab.list_paths now reads that session too (wire shape unchanged). (b) new
+#     unsolicited ``diagnostic`` event push ({severity: error|info, title,
+#     message}) — the Controller fans diagnostics to the adapter (a diagnostic
+#     View) out-of-band of the event subscription set; agents receive it via the
+#     normal events poll without subscribing.
 WIRE_VERSION = 6
 
 # ---------------------------------------------------------------------------

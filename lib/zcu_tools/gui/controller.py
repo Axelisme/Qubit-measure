@@ -123,7 +123,6 @@ class Controller:
         # adapter is a diagnostic-only View — it holds its own RenderView.
         self._diag_sinks: list[DiagnosticSink] = []
         self._render_host: Optional[RenderHost] = None
-        self._render_view: Optional[RenderView] = None
         if view is not None:
             self.add_view(view)
         self._bus = bus
@@ -146,13 +145,11 @@ class Controller:
             runner=runner,
             analyze_runner=AnalyzeRunner(),
             save_runner=SaveDataRunner(),
-            view_provider=self._require_render_view,
             cfg_editor_ctrl=self,
         )
         self._services = services
         self._operation_gate = services.operation_gate
         self._guard_svc = services.guard
-        self._view_query_svc = services.view_query
         self._dev_svc = services.device
         self._conn_svc = services.connection
         self._ctx_svc = services.context
@@ -188,7 +185,6 @@ class Controller:
         if view not in self._diag_sinks:
             self._diag_sinks.append(view)
         self._render_host = view
-        self._render_view = view
 
     def add_diagnostic_sink(self, sink: DiagnosticSink) -> None:
         """Attach a diagnostic-only View (e.g. the remote adapter): it receives
@@ -199,16 +195,6 @@ class Controller:
     def remove_diagnostic_sink(self, sink: DiagnosticSink) -> None:
         if sink in self._diag_sinks:
             self._diag_sinks.remove(sink)
-
-    def _require_render_host(self) -> RenderHost:
-        if self._render_host is None:
-            raise RuntimeError("Controller has no RenderHost view attached")
-        return self._render_host
-
-    def _require_render_view(self) -> RenderView:
-        if self._render_view is None:
-            raise RuntimeError("Controller has no RenderView view attached")
-        return self._render_view
 
     def _notify(self, severity: Severity, title: str, message: str) -> None:
         """Fan a diagnostic out to every attached View (ADR-0013). Never via
@@ -915,31 +901,6 @@ class Controller:
             GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
-
-    # ------------------------------------------------------------------
-    # Dialog / view-query facades (Phase 81a)
-    # ------------------------------------------------------------------
-
-    def open_dialog(self, name: DialogName) -> None:
-        self._require_render_view().open_dialog(name)
-
-    def close_dialog(self, name: DialogName) -> None:
-        self._require_render_view().close_dialog(name)
-
-    def list_open_dialogs(self) -> list[DialogName]:
-        return list(self._require_render_view().list_open_dialogs())
-
-    def get_view_snapshot(self) -> dict[str, object]:
-        return self._view_query_svc.snapshot()
-
-    def take_screenshot(self, tab_id: Optional[str] = None) -> bytes:
-        return self._view_query_svc.screenshot(tab_id)
-
-    def take_figure_screenshot(self, tab_id: str) -> bytes:
-        return self._view_query_svc.figure_screenshot(tab_id)
-
-    def take_dialog_screenshot(self, dialog_name: Any) -> bytes:
-        return self._view_query_svc.dialog_screenshot(dialog_name)
 
     def get_adapter_names(self) -> list[str]:
         return self._tab_svc.list_adapter_names()

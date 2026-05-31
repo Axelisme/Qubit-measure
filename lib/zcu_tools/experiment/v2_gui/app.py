@@ -76,7 +76,9 @@ def run_app(control_opts: Optional["ControlOptions"] = None) -> None:
     if control_opts is not None:
         from zcu_tools.gui.services.remote import RemoteControlAdapter
 
-        adapter = RemoteControlAdapter(controller=ctrl, opts=control_opts)
+        adapter = RemoteControlAdapter(
+            controller=ctrl, opts=control_opts, render_view=window
+        )
         adapter.start()
         # Stash on the window so MainWindow.closeEvent can stop it; keep a
         # strong ref so the GC does not retire the daemon thread early.

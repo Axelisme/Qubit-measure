@@ -47,7 +47,6 @@ from .startup_persistence import (
 )
 from .tab import TabService
 from .tab_view import TabViewService, TabViewSnapshot
-from .view_query import ViewQueryService
 from .workspace import RestoreIssue, RestoreReport, WorkspaceService
 from .writeback import WritebackService
 
@@ -94,7 +93,6 @@ __all__ = [
     "TabService",
     "TabViewService",
     "TabViewSnapshot",
-    "ViewQueryService",
     "RestoreIssue",
     "RestoreReport",
     "WorkspaceService",

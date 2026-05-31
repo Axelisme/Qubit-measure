@@ -102,6 +102,37 @@ def test_subscribe_then_run_lock_change_arrives(fx):
         sock.close()
 
 
+def test_diagnostic_pushed_without_subscription(fx):
+    """The adapter is a diagnostic sink (ADR-0013): a Controller diagnostic
+    reaches the client out-of-band of EventBus, with no subscription needed."""
+    sock = open_client(fx.service.port)
+    try:
+        # Round-trip first so the server has registered this client before the
+        # diagnostic fans out (no subscription needed for diagnostics).
+        call(sock, "events.list")
+        # Drive a Controller diagnostic on the main thread (fan-out is sync).
+        fx.ctrl._notify("error", "Run failed", "boom")
+        msg = recv_push(sock, "diagnostic")
+        assert msg["payload"]["severity"] == "error"
+        assert msg["payload"]["title"] == "Run failed"
+        assert msg["payload"]["message"] == "boom"
+    finally:
+        sock.close()
+
+
+def test_info_diagnostic_pushed(fx):
+    sock = open_client(fx.service.port)
+    try:
+        call(sock, "events.list")
+        fx.ctrl._info("Data saved to /tmp/x")
+        msg = recv_push(sock, "diagnostic")
+        assert msg["payload"]["severity"] == "info"
+        assert msg["payload"]["title"] == ""
+        assert msg["payload"]["message"] == "Data saved to /tmp/x"
+    finally:
+        sock.close()
+
+
 def test_unsubscribe_stops_push(fx):
     sock = open_client(fx.service.port)
     try:

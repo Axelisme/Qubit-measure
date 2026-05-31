@@ -107,7 +107,9 @@ class Fixture:
         )
         if opts is None:
             opts = ControlOptions(port=0)
-        self.service = RemoteControlAdapter(controller=self.ctrl, opts=opts)
+        self.service = RemoteControlAdapter(
+            controller=self.ctrl, opts=opts, render_view=self.view
+        )
 
     def start(self) -> int:
         return self.service.start()

@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     # Type-only: importing Controller at runtime would form a cycle
     # (controller.py imports remote.dialogs). String annotation keeps pyright
     # checking handler/ctrl method names while the runtime import never happens.
-    from zcu_tools.gui.controller import Controller
+    from zcu_tools.gui.controller import Controller, RenderView, Severity
 
 from .dispatch import METHOD_REGISTRY
 from .errors import ErrorCode, ErrorEnvelope, RemoteError
@@ -164,13 +164,18 @@ class RemoteControlAdapter:
         self,
         controller: "Controller",
         opts: ControlOptions,
+        render_view: Optional["RenderView"] = None,
     ) -> None:
         if opts.allow_external and not opts.token:
             raise RuntimeError(
                 "Remote control must specify a token when --control-allow-external is set"
             )
-        # Public: dispatch handlers reach the command face through ``adapter.ctrl``.
+        # Public: dispatch handlers reach the command face through ``adapter.ctrl``
+        # and the canvas-bearing View's pure-read surface through
+        # ``adapter.render_view`` (screenshot / snapshot / dialog). render_view is
+        # None in a headless process; render handlers fail-fast then.
         self.ctrl = controller
+        self.render_view = render_view
         self._opts = opts
         self._dispatcher = _MainThreadDispatcher()
         self._stopping = threading.Event()
@@ -219,6 +224,9 @@ class RemoteControlAdapter:
 
         self._subscribe_event_bus()
         self._wire_editor_change_listener()
+        # Become a diagnostic-only View (ADR-0013): receive ctrl error/info
+        # fan-out and push it to clients out-of-band of EventBus.
+        self.ctrl.add_diagnostic_sink(self)
 
         self._thread = threading.Thread(
             target=self._serve_forever, name="RemoteControlServer", daemon=True
@@ -242,9 +250,11 @@ class RemoteControlAdapter:
             return
         self._stopping.set()
 
-        # 1) Unsubscribe EventBus + editor change stream so no more enqueues.
+        # 1) Unsubscribe EventBus + editor change stream + diagnostic sink so no
+        #    more enqueues.
         self._unsubscribe_event_bus()
         self._unwire_editor_change_listener()
+        self.ctrl.remove_diagnostic_sink(self)
 
         # 2) Signal every writer to exit; join them.
         with self._clients_lock:
@@ -372,6 +382,35 @@ class RemoteControlAdapter:
         for state in clients:
             if wire_name not in state.subscribed:
                 continue
+            self._enqueue(state, line, is_push=True)
+
+    # ------------------------------------------------------------------
+    # Diagnostic channel (DiagnosticSink impl) — independent of EventBus
+    # ------------------------------------------------------------------
+
+    def notify_diagnostic(self, severity: "Severity", title: str, message: str) -> None:
+        """Push a Controller diagnostic to every client. Runs on the Qt main
+        thread (ctrl fans out there). Deliberately *not* gated by event
+        subscription and *not* routed through EventBus — diagnostics must reach
+        the agent regardless of what it subscribed to, and a channel that
+        reports a fault must not be the faulty channel (ADR-0013)."""
+        try:
+            line = encode_line(
+                {
+                    "event": "diagnostic",
+                    "payload": {
+                        "severity": severity,
+                        "title": title,
+                        "message": message,
+                    },
+                }
+            )
+        except Exception:  # pragma: no cover — payload is plain strings
+            logger.exception("failed to encode diagnostic %r/%r", severity, title)
+            return
+        with self._clients_lock:
+            clients = list(self._clients.values())
+        for state in clients:
             self._enqueue(state, line, is_push=True)
 
     # ------------------------------------------------------------------

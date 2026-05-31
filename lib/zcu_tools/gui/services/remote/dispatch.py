@@ -29,8 +29,10 @@ if TYPE_CHECKING:
     # Type-only: runtime import would cycle (controller.py imports
     # remote.dialogs). Handlers receive the RemoteControlAdapter (the driving
     # adapter that hosts them); they reach the command face via ``adapter.ctrl``
-    # and View surfaces via the adapter's own methods. String annotations let
-    # pyright check every ``adapter.ctrl.<method>`` / ``adapter.<method>`` call.
+    # and the canvas View's pure-read surface via ``adapter.render_view`` (see
+    # _render_view). String annotations let pyright check those call sites.
+    from zcu_tools.gui.controller import RenderView
+
     from .service import RemoteControlAdapter
 from zcu_tools.gui.services.context import MlEntryValidationError
 from zcu_tools.gui.services.device import SetupDeviceRequest
@@ -75,6 +77,18 @@ class BoundMethod:
     @property
     def off_main_thread(self) -> bool:
         return self.spec.off_main_thread
+
+
+def _render_view(adapter: "RemoteControlAdapter") -> "RenderView":
+    """The canvas-bearing View's pure-read surface (screenshot / snapshot /
+    dialog). None in a headless process — render queries fail-fast there."""
+    rv = adapter.render_view
+    if rv is None:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            "no render view attached (headless process)",
+        )
+    return rv
 
 
 # ---------------------------------------------------------------------------
@@ -960,7 +974,7 @@ def _h_dialog_open(
         name: DialogName = parse_dialog_name(name_raw)
     except ValueError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
-    adapter.ctrl.open_dialog(name)
+    _render_view(adapter).open_dialog(name)
     return {"opened": name.value}
 
 
@@ -974,7 +988,7 @@ def _h_dialog_close(
         name: DialogName = parse_dialog_name(name_raw)
     except ValueError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
-    adapter.ctrl.close_dialog(name)
+    _render_view(adapter).close_dialog(name)
     return {"closed": name.value}
 
 
@@ -982,7 +996,7 @@ def _h_dialog_list_open(
     adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    open_names = [n.value for n in adapter.ctrl.list_open_dialogs()]
+    open_names = [n.value for n in _render_view(adapter).list_open_dialogs()]
     return {"open": open_names}
 
 
@@ -990,7 +1004,7 @@ def _h_view_snapshot(
     adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    snap = adapter.ctrl.get_view_snapshot()
+    snap = _render_view(adapter).get_view_snapshot()
     if not isinstance(snap, dict):
         raise RemoteError(
             ErrorCode.INTERNAL,
@@ -1009,7 +1023,7 @@ def _h_dialog_screenshot(
     name_str = str(params["dialog_name"])
     try:
         dialog_name = parse_dialog_name(name_str)
-        png = adapter.ctrl.take_dialog_screenshot(dialog_name)
+        png = _render_view(adapter).take_dialog_screenshot(dialog_name)
     except (ValueError, RuntimeError) as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -1033,7 +1047,7 @@ def _h_view_screenshot(
     tab_id_raw = params.get("tab_id")
     tab_id: Optional[str] = str(tab_id_raw) if tab_id_raw is not None else None
     try:
-        png = adapter.ctrl.take_screenshot(tab_id)
+        png = _render_view(adapter).take_screenshot(tab_id)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -1386,7 +1400,7 @@ def _h_tab_figure_screenshot(
     out_path_raw = params.get("out_path")
     out_path: Optional[str] = str(out_path_raw) if out_path_raw is not None else None
     try:
-        png = adapter.ctrl.take_figure_screenshot(tab_id)
+        png = _render_view(adapter).take_figure_screenshot(tab_id)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
