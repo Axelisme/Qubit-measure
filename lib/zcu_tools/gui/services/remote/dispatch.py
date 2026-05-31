@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Callable, Mapping, Optional, cast
+from typing import TYPE_CHECKING, Callable, Mapping, Optional, cast
 
 from zcu_tools.gui.adapter import (
     CfgSchema,
@@ -22,6 +22,12 @@ from zcu_tools.gui.adapter import (
     ModuleWriteback,
     WaveformWriteback,
 )
+
+if TYPE_CHECKING:
+    # Type-only: runtime import would cycle (controller.py imports
+    # remote.dialogs). Handlers receive the concrete Controller façade; the
+    # string annotation lets pyright check every ``ctrl.<method>`` call site.
+    from zcu_tools.gui.controller import Controller
 from zcu_tools.gui.services.context import MlEntryValidationError
 from zcu_tools.gui.services.device import SetupDeviceRequest
 from zcu_tools.gui.services.session_persistence import SessionPersistenceService
@@ -37,7 +43,7 @@ from .wire import (
 
 logger = logging.getLogger(__name__)
 
-Handler = Callable[["object", Mapping[str, object]], Mapping[str, object]]
+Handler = Callable[["Controller", Mapping[str, object]], Mapping[str, object]]
 
 # Shared serializer instance: we only use its pure schema_to_raw / raw_to_schema
 # methods, never its persistence side effects.
@@ -72,7 +78,9 @@ class BoundMethod:
 # ---------------------------------------------------------------------------
 
 
-def _h_tab_new(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_tab_new(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     name = str(params["adapter_name"])
     if name not in ctrl.get_adapter_names():
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown adapter: {name!r}")
@@ -80,7 +88,9 @@ def _h_tab_new(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     return {"tab_id": tab_id}
 
 
-def _h_tab_close(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_tab_close(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
@@ -88,7 +98,9 @@ def _h_tab_close(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     return {}
 
 
-def _h_tab_set_active(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_tab_set_active(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
@@ -96,7 +108,9 @@ def _h_tab_set_active(ctrl, params: Mapping[str, object]) -> Mapping[str, object
     return {}
 
 
-def _h_tab_list(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_tab_list(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     del params
     tabs = [
         {"tab_id": tid, "adapter_name": ctrl.get_tab_adapter_name(tid)}
@@ -105,7 +119,7 @@ def _h_tab_list(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     return {"tabs": tabs}
 
 
-def _tab_snapshot_wire(ctrl, tab_id: str) -> dict[str, object]:
+def _tab_snapshot_wire(ctrl: "Controller", tab_id: str) -> dict[str, object]:
     snap = ctrl.get_tab_snapshot(tab_id)
     interaction = snap.interaction
     return {
@@ -131,7 +145,9 @@ def _tab_snapshot_wire(ctrl, tab_id: str) -> dict[str, object]:
     }
 
 
-def _h_tab_snapshot(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_tab_snapshot(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     tab_id_raw = params.get("tab_id")
     if tab_id_raw is None:
         # batch: return all tabs
@@ -148,7 +164,9 @@ def _save_paths_wire(paths) -> Optional[dict[str, str]]:
     return {"data_path": paths.data_path, "image_path": paths.image_path}
 
 
-def _h_tab_get_cfg(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_tab_get_cfg(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
@@ -157,7 +175,9 @@ def _h_tab_get_cfg(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     return {"raw": raw}
 
 
-def _h_tab_list_paths(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_tab_list_paths(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     from .path_resolver import list_settable_paths
 
     tab_id = str(params["tab_id"])
@@ -176,7 +196,9 @@ def _h_tab_list_paths(ctrl, params: Mapping[str, object]) -> Mapping[str, object
     return {"paths": list_settable_paths(root)}
 
 
-def _h_tab_update_cfg(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_tab_update_cfg(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
@@ -199,7 +221,9 @@ def _h_tab_update_cfg(ctrl, params: Mapping[str, object]) -> Mapping[str, object
     return {}
 
 
-def _h_cfg_set_field(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_cfg_set_field(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
@@ -226,7 +250,9 @@ def _h_cfg_set_field(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
 # ---------------------------------------------------------------------------
 
 
-def _h_run_start(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_run_start(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
@@ -241,18 +267,24 @@ def _h_run_start(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     return {"operation_id": operation_id}
 
 
-def _h_run_cancel(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_run_cancel(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     del params
     ctrl.cancel_run()
     return {}
 
 
-def _h_run_running_tab(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_run_running_tab(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     del params
     return {"tab_id": ctrl.get_running_tab_id()}
 
 
-def _h_save_data(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_save_data(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     data_path = params["data_path"]
     comment = str(params["comment"])
@@ -269,7 +301,9 @@ def _h_save_data(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     return {}
 
 
-def _h_save_image(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_save_image(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     image_path = params["image_path"]
     try:
@@ -283,7 +317,9 @@ def _h_save_image(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     return {}
 
 
-def _h_save_both(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_save_both(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     data_path = params["data_path"]
     image_path = params["image_path"]
@@ -304,7 +340,9 @@ def _h_save_both(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     return {}
 
 
-def _h_save_set_paths(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_save_set_paths(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
@@ -319,12 +357,16 @@ def _h_save_set_paths(ctrl, params: Mapping[str, object]) -> Mapping[str, object
 # ---------------------------------------------------------------------------
 
 
-def _h_context_use(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_context_use(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     ctrl.use_context(str(params["label"]))
     return {}
 
 
-def _h_context_new(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_context_new(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     value = params["value"]
     unit = str(params["unit"])
     clone = bool(params["clone_from_current"])
@@ -336,12 +378,16 @@ def _h_context_new(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     return {}
 
 
-def _h_context_labels(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_context_labels(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     del params
     return {"labels": list(ctrl.get_context_labels())}
 
 
-def _h_context_active(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_context_active(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     del params
     return {"label": ctrl.get_active_context_label()}
 
@@ -357,13 +403,17 @@ def _json_safe(value: object) -> object:
         return {"__repr__": repr(value)}
 
 
-def _h_context_get_md(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_context_get_md(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     del params
     md = ctrl.get_current_md()
     return {"keys": sorted(str(k) for k in md.keys())}
 
 
-def _h_context_get_md_attr(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_context_get_md_attr(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     key = str(params["key"])
     md = ctrl.get_current_md()
     sentinel = object()
@@ -373,7 +423,9 @@ def _h_context_get_md_attr(ctrl, params: Mapping[str, object]) -> Mapping[str, o
     return {"key": key, "value": _json_safe(value)}
 
 
-def _h_context_get_ml(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_context_get_ml(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     del params
     ml = ctrl.get_current_ml()
     return {
@@ -382,7 +434,9 @@ def _h_context_get_ml(ctrl, params: Mapping[str, object]) -> Mapping[str, object
     }
 
 
-def _h_ml_list_roles(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_ml_list_roles(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     """List the experiment-role templates available for create_from_role."""
     del params
     try:
@@ -392,7 +446,9 @@ def _h_ml_list_roles(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
     return {"roles": list(catalog.list_meta())}
 
 
-def _h_ml_create_from_role(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_ml_create_from_role(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     """Create a blank ml module/waveform from a named role and register it.
 
     One-shot: seeds md-linked defaults (lowered against the live md), writes ml.
@@ -416,7 +472,9 @@ def _h_ml_create_from_role(ctrl, params: Mapping[str, object]) -> Mapping[str, o
     return {}
 
 
-def _h_context_set_md_attr(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_context_set_md_attr(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     key = str(params["key"])
     value = params["value"]
     try:
@@ -430,7 +488,9 @@ def _h_context_set_md_attr(ctrl, params: Mapping[str, object]) -> Mapping[str, o
     return {}
 
 
-def _h_context_del_md_attr(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_context_del_md_attr(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     key = str(params["key"])
     try:
         ctrl.del_md_attr(key)
@@ -505,12 +565,16 @@ def _h_context_del_ml_waveform(
     return {}
 
 
-def _h_state_has_project(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_state_has_project(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     del params
     return {"value": bool(ctrl.has_project())}
 
 
-def _h_state_has_context(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_state_has_context(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     del params
     return {"value": bool(ctrl.has_context())}
 
@@ -522,23 +586,31 @@ def _h_state_has_active_context(
     return {"value": bool(ctrl.has_active_context())}
 
 
-def _h_state_has_soc(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_state_has_soc(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     del params
     return {"value": bool(ctrl.has_soc())}
 
 
-def _h_resources_versions(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_resources_versions(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     del params
     return {"versions": ctrl.resources_versions()}
 
 
-def _h_session_persist(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_session_persist(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     del params
     ctrl.persist_tabs_session()
     return {}
 
 
-def _h_session_restore(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_session_restore(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     del params
     ctrl.restore_tabs_from_session()
     return {}
@@ -549,13 +621,17 @@ def _h_session_restore(ctrl, params: Mapping[str, object]) -> Mapping[str, objec
 # ---------------------------------------------------------------------------
 
 
-def _h_connect_start(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_connect_start(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     req = coerce_connect_request(params)
     operation_id = ctrl.start_connect(req)
     return {"operation_id": operation_id}
 
 
-def _h_startup_apply(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_startup_apply(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     # Params are ParamSpec-validated; result_dir/database_path are optional and
     # default to "" (empty result_dir leaves the context in DRAFT — editable but
     # not runnable until a result_dir is set).
@@ -572,7 +648,9 @@ def _h_startup_apply(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
     return {"ok": bool(ok)}
 
 
-def _h_device_connect(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_device_connect(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     req = coerce_connect_device_request(params)
     try:
         operation_id = ctrl.start_connect_device(req)
@@ -585,7 +663,9 @@ def _h_device_connect(ctrl, params: Mapping[str, object]) -> Mapping[str, object
     return {"operation_id": operation_id}
 
 
-def _h_device_disconnect(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_device_disconnect(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     req = coerce_disconnect_device_request(params)
     try:
         operation_id = ctrl.start_disconnect_device(req)
@@ -598,7 +678,9 @@ def _h_device_disconnect(ctrl, params: Mapping[str, object]) -> Mapping[str, obj
     return {"operation_id": operation_id}
 
 
-def _h_device_reconnect(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_device_reconnect(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     name = str(params["name"])
     try:
         ctrl.start_reconnect_device(name)
@@ -611,7 +693,9 @@ def _h_device_reconnect(ctrl, params: Mapping[str, object]) -> Mapping[str, obje
     return {}
 
 
-def _h_device_forget(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_device_forget(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     name = str(params["name"])
     try:
         ctrl.forget_device(name)
@@ -624,7 +708,9 @@ def _h_device_forget(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
     return {}
 
 
-def _h_device_setup(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_device_setup(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     name = str(params["name"])
     updates = cast(dict, params["updates"])  # ParamSpec(_obj)-validated
     try:
@@ -691,7 +777,9 @@ def _field_type_and_choices(annotation: object) -> tuple[str, Optional[list]]:
     return _SCALAR.get(annotation, "str"), None  # type: ignore[arg-type]
 
 
-def _h_device_setup_spec(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_device_setup_spec(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     name = str(params["name"])
     try:
         info = ctrl.get_device_info(name)
@@ -736,12 +824,16 @@ def _h_device_cancel_operation(
     return {}
 
 
-def _h_adapter_list(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_adapter_list(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     del params
     return {"adapters": list(ctrl.get_adapter_names())}
 
 
-def _h_adapter_cfg_spec(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_adapter_cfg_spec(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     from .path_resolver import list_spec_paths
 
     name = str(params["adapter_name"])
@@ -751,14 +843,18 @@ def _h_adapter_cfg_spec(ctrl, params: Mapping[str, object]) -> Mapping[str, obje
     return {"paths": list_spec_paths(spec)}
 
 
-def _h_adapter_analyze_spec(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_adapter_analyze_spec(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     name = str(params["adapter_name"])
     if name not in ctrl.get_adapter_names():
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown adapter: {name!r}")
     return {"params": ctrl.get_adapter_analyze_params(name)}
 
 
-def _h_device_list(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_device_list(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     del params
     devices = [
         {
@@ -771,7 +867,9 @@ def _h_device_list(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     return {"devices": devices}
 
 
-def _h_device_snapshot(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_device_snapshot(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     name = str(params["name"])
     snap = ctrl.get_device_snapshot(name)
     if snap is None:
@@ -803,7 +901,9 @@ def _progress_wire(progress) -> list[dict[str, object]]:
     ]
 
 
-def _h_device_active_setup(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_device_active_setup(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     del params
     setup = ctrl.get_active_device_setup()
     if setup is None:
@@ -835,7 +935,9 @@ def _h_device_active_operation(
     }
 
 
-def _h_operation_await(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_operation_await(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     # off_main_thread handler: blocks the IO worker thread on the gate's
     # thread-safe registry (never touches main-thread-owned state). Returns the
     # terminal outcome; failed/cancelled become a PRECONDITION_FAILED so the
@@ -862,7 +964,9 @@ def _h_operation_await(ctrl, params: Mapping[str, object]) -> Mapping[str, objec
 # ---------------------------------------------------------------------------
 
 
-def _h_dialog_open(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_dialog_open(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     from .dialogs import DialogName, parse_dialog_name
 
     name_raw = str(params["name"])
@@ -874,7 +978,9 @@ def _h_dialog_open(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     return {"opened": name.value}
 
 
-def _h_dialog_close(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_dialog_close(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     from .dialogs import DialogName, parse_dialog_name
 
     name_raw = str(params["name"])
@@ -886,13 +992,17 @@ def _h_dialog_close(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     return {"closed": name.value}
 
 
-def _h_dialog_list_open(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_dialog_list_open(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     del params
     open_names = [n.value for n in ctrl.list_open_dialogs()]
     return {"open": open_names}
 
 
-def _h_view_snapshot(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_view_snapshot(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     del params
     snap = ctrl.get_view_snapshot()
     if not isinstance(snap, dict):
@@ -903,7 +1013,9 @@ def _h_view_snapshot(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
     return snap
 
 
-def _h_dialog_screenshot(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_dialog_screenshot(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     import base64
 
     from .dialogs import parse_dialog_name
@@ -927,7 +1039,9 @@ def _h_dialog_screenshot(ctrl, params: Mapping[str, object]) -> Mapping[str, obj
     return {"png_b64": payload, "bytes": len(png)}
 
 
-def _h_view_screenshot(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_view_screenshot(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     import base64
 
     tab_id_raw = params.get("tab_id")
@@ -988,7 +1102,9 @@ def _h_tab_get_analyze_params(
     return {"analyze_params": dataclasses.asdict(ap)}
 
 
-def _h_analyze_start(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_analyze_start(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     import dataclasses
 
     tab_id = str(params["tab_id"])
@@ -1035,7 +1151,9 @@ def _strip_cfg_tags(raw: object) -> object:
     return raw
 
 
-def _h_tab_get_cfg_summary(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_tab_get_cfg_summary(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
@@ -1069,7 +1187,9 @@ def _writeback_item_wire(item) -> dict[str, object]:
     return base
 
 
-def _h_writeback_preview(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_writeback_preview(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
@@ -1077,7 +1197,9 @@ def _h_writeback_preview(ctrl, params: Mapping[str, object]) -> Mapping[str, obj
     return {"items": [_writeback_item_wire(it) for it in items]}
 
 
-def _h_writeback_set(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_writeback_set(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     """Edit a persistent writeback item by id (selected / target_name /
     metadict proposed_value). Module/waveform cfg edits go through editor.* on
     the item's editor_id, not here."""
@@ -1109,7 +1231,9 @@ def _h_writeback_set(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
     return {}
 
 
-def _h_writeback_apply(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_writeback_apply(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     """Apply the tab's persistent writeback draft as-is (edit it first via
     writeback.set / editor.*)."""
     tab_id = str(params["tab_id"])
@@ -1131,7 +1255,9 @@ def _h_writeback_apply(ctrl, params: Mapping[str, object]) -> Mapping[str, objec
 # ---------------------------------------------------------------------------
 
 
-def _h_editor_open(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_editor_open(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     from zcu_tools.gui.services.cfg_editor import CfgEditorError
 
     item_kind = str(params["item_kind"])
@@ -1147,7 +1273,9 @@ def _h_editor_open(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     return {"editor_id": editor_id, "paths": paths}
 
 
-def _h_editor_set_field(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_editor_set_field(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     from zcu_tools.gui.services.cfg_editor import CfgEditorError
 
     editor_id = str(params["editor_id"])
@@ -1167,7 +1295,9 @@ def _h_editor_set_field(ctrl, params: Mapping[str, object]) -> Mapping[str, obje
         ) from exc
 
 
-def _h_editor_get(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_editor_get(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     from zcu_tools.gui.services.cfg_editor import CfgEditorError
 
     editor_id = str(params["editor_id"])
@@ -1177,7 +1307,9 @@ def _h_editor_get(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
 
 
-def _h_editor_commit(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_editor_commit(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     from zcu_tools.gui.services.cfg_editor import CfgEditorError
 
     editor_id = str(params["editor_id"])
@@ -1197,7 +1329,9 @@ def _h_editor_commit(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
     return {}
 
 
-def _h_editor_discard(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_editor_discard(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     from zcu_tools.gui.services.cfg_editor import CfgEditorError
 
     editor_id = str(params["editor_id"])
@@ -1213,7 +1347,9 @@ def _h_editor_discard(ctrl, params: Mapping[str, object]) -> Mapping[str, object
 # ---------------------------------------------------------------------------
 
 
-def _h_run_progress(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_run_progress(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     del params
     bars = ctrl.get_run_progress()
     if not bars:
@@ -1277,7 +1413,9 @@ def _h_tab_figure_screenshot(
 # ---------------------------------------------------------------------------
 
 
-def _h_predictor_load(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_predictor_load(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     from zcu_tools.gui.services.connection import (
         LoadPredictorRequest,
         PredictorLoadError,
@@ -1296,13 +1434,17 @@ def _h_predictor_load(ctrl, params: Mapping[str, object]) -> Mapping[str, object
     return {}
 
 
-def _h_predictor_clear(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_predictor_clear(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     del params
     ctrl.clear_predictor()
     return {}
 
 
-def _h_predictor_predict(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_predictor_predict(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     from zcu_tools.gui.services.connection import PredictFreqRequest, PredictorNotLoaded
 
     value = float(params["value"])  # type: ignore[arg-type]
@@ -1321,7 +1463,9 @@ def _h_predictor_predict(ctrl, params: Mapping[str, object]) -> Mapping[str, obj
     return {"freq_mhz": freq}
 
 
-def _h_predictor_info(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+def _h_predictor_info(
+    ctrl: "Controller", params: Mapping[str, object]
+) -> Mapping[str, object]:
     del params
     return {"info": ctrl.get_predictor_info()}
 

@@ -30,11 +30,17 @@ import selectors
 import socket
 import threading
 from dataclasses import dataclass
-from typing import Callable, Mapping, Optional
+from typing import TYPE_CHECKING, Callable, Mapping, Optional
 
 from qtpy.QtCore import QObject, Qt, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.event_bus import EventBus, GuiEvent, Payload
+
+if TYPE_CHECKING:
+    # Type-only: importing Controller at runtime would form a cycle
+    # (controller.py imports remote.dialogs). String annotation keeps pyright
+    # checking handler/ctrl method names while the runtime import never happens.
+    from zcu_tools.gui.controller import Controller
 
 from .dispatch import METHOD_REGISTRY
 from .errors import ErrorCode, ErrorEnvelope, RemoteError
@@ -147,7 +153,7 @@ class RemoteControlService:
 
     def __init__(
         self,
-        controller: object,
+        controller: "Controller",
         opts: ControlOptions,
     ) -> None:
         if opts.allow_external and not opts.token:
@@ -297,16 +303,7 @@ class RemoteControlService:
 
     def _subscribe_event_bus(self) -> None:
         """Subscribe one callback per serialised GuiEvent on the main thread."""
-        get_bus = getattr(self._ctrl, "get_bus", None)
-        if get_bus is None:
-            logger.warning("Controller has no get_bus(); event push disabled")
-            return
-        bus = get_bus()
-        if not isinstance(bus, EventBus):
-            logger.warning(
-                "Controller.get_bus() returned non-EventBus; event push disabled"
-            )
-            return
+        bus = self._ctrl.get_bus()
         self._bus = bus
         for event in EVENT_SERIALIZERS.keys():
             cb = self._make_bus_callback(event)
@@ -373,19 +370,10 @@ class RemoteControlService:
 
     def _wire_editor_change_listener(self) -> None:
         """Inject ``_on_editor_event`` into the CfgEditorService (via ctrl)."""
-        setter = getattr(self._ctrl, "set_cfg_editor_change_listener", None)
-        if setter is None:
-            logger.warning(
-                "Controller has no set_cfg_editor_change_listener(); "
-                "editor change push disabled"
-            )
-            return
-        setter(self._on_editor_event)
+        self._ctrl.set_cfg_editor_change_listener(self._on_editor_event)
 
     def _unwire_editor_change_listener(self) -> None:
-        setter = getattr(self._ctrl, "set_cfg_editor_change_listener", None)
-        if setter is not None:
-            setter(None)
+        self._ctrl.set_cfg_editor_change_listener(None)
 
     def _on_editor_event(self, editor_id: str, event_name: str, payload: dict) -> None:
         """Push a per-editor notification. Runs on the Qt main thread.
@@ -615,13 +603,10 @@ class RemoteControlService:
         state.editor_ids.clear()
         if not ids:
             return
-        discard = getattr(self._ctrl, "discard_cfg_editors", None)
-        if discard is None:
-            return
 
         def _run() -> None:
             try:
-                discard(ids)
+                self._ctrl.discard_cfg_editors(ids)
             except Exception:  # pragma: no cover — best-effort cleanup
                 logger.exception("failed to reclaim editor sessions %r", ids)
 
@@ -907,19 +892,10 @@ class RemoteControlService:
             )
 
     def _ctrl_resource_versions(self) -> dict[str, int]:
-        getter = getattr(self._ctrl, "resources_versions", None)
-        if getter is None:
-            return {}
-        return dict(getter())
+        return dict(self._ctrl.resources_versions())
 
     def _safe_editor_id_for_owner(self, owner_key: str) -> Optional[str]:
-        getter = getattr(self._ctrl, "editor_id_for_owner", None)
-        if getter is None:
-            return None
-        try:
-            return getter(owner_key)
-        except Exception:  # pragma: no cover — defensive
-            return None
+        return self._ctrl.editor_id_for_owner(owner_key)
 
     def _track_editor_lifecycle(
         self,
