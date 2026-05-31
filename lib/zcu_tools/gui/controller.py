@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Optional, Protocol
+from typing import Any, Callable, Literal, Optional, Protocol
 
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
@@ -53,25 +53,55 @@ from .services.remote.dialogs import DialogName
 from .state import State
 
 
-class ViewProtocol(Protocol):
-    """Minimal interface Controller uses to update the View."""
+# A View has two distinct down-channels from the Controller (ADR-0013):
+#   - diagnostics (error / info) — fanned out to *every* attached View;
+#   - render help (pbar / live container) — pulled from the *one* View that has
+#     a real canvas.
+# So the interface splits by channel, not lumped into a single "View".
+# Render/snapshot/dialog *queries* are pulled by the RemoteControlAdapter
+# through its own ``render_view`` (see RenderView), not by the Controller.
 
-    def show_status_message(self, message: str) -> None: ...
+Severity = Literal["error", "info"]
+
+
+class DiagnosticSink(Protocol):
+    """A View that can receive a Controller diagnostic (error / info).
+
+    Fanned out to every attached sink. Each View renders it its own way — the
+    Qt window pops a dialog (error) or status bar (info); the remote adapter
+    enqueues a diagnostic line. Diagnostics never go through EventBus (a channel
+    that reports a fault must not be the faulty channel — ADR-0013).
+    """
+
+    def notify_diagnostic(
+        self, severity: Severity, title: str, message: str
+    ) -> None: ...
+
+
+class RenderHost(Protocol):
+    """The single canvas-bearing View the Controller asks for run/analyze Qt
+    artefacts (progress bar factory, live figure container)."""
+
     def make_pbar_factory(self, tab_id: str) -> Optional[object]: ...
     def make_live_container(self, tab_id: str) -> Optional[FigureContainer]: ...
-    def show_error_dialog(self, title: str, message: str) -> None: ...
 
-    # Dialog API — shared between UI clicks and RemoteControlAdapter.
+
+class RenderView(Protocol):
+    """Pure-read View surface the RemoteControlAdapter pulls from (snapshot /
+    screenshot / dialog management). Held by the adapter, not the Controller."""
+
+    def get_view_snapshot(self) -> dict[str, object]: ...
+    def take_screenshot(self, tab_id: Optional[str] = None) -> bytes: ...
+    def take_figure_screenshot(self, tab_id: str) -> bytes: ...
+    def take_dialog_screenshot(self, dialog_name: Any) -> bytes: ...
     def open_dialog(self, name: DialogName) -> None: ...
     def close_dialog(self, name: DialogName) -> None: ...
     def list_open_dialogs(self) -> list[DialogName]: ...
     def register_dialog(self, name: DialogName, dialog: Any) -> None: ...
 
-    # Remote query helpers.
-    def get_view_snapshot(self) -> dict[str, object]: ...
-    def take_screenshot(self, tab_id: Optional[str] = None) -> bytes: ...
-    def take_figure_screenshot(self, tab_id: str) -> bytes: ...
-    def take_dialog_screenshot(self, dialog_name: Any) -> bytes: ...
+
+class ViewProtocol(DiagnosticSink, RenderHost, RenderView, Protocol):
+    """A full Qt View (``MainWindow``) implements all three channels."""
 
 
 class Controller:
@@ -88,7 +118,14 @@ class Controller:
         role_catalog: Optional["RoleCatalog"] = None,
     ) -> None:
         self._state = state
-        self._view = view
+        # Views attached as diagnostic sinks (fan-out target). A full Qt View is
+        # also the single RenderHost (run/analyze Qt artefacts). The remote
+        # adapter is a diagnostic-only View — it holds its own RenderView.
+        self._diag_sinks: list[DiagnosticSink] = []
+        self._render_host: Optional[RenderHost] = None
+        self._render_view: Optional[RenderView] = None
+        if view is not None:
+            self.add_view(view)
         self._bus = bus
         # Catalog of experiment-role templates (gui interface, populated by
         # experiment/v2_gui at startup). Optional so tests can construct a bare
@@ -109,7 +146,7 @@ class Controller:
             runner=runner,
             analyze_runner=AnalyzeRunner(),
             save_runner=SaveDataRunner(),
-            view_provider=self._require_view,
+            view_provider=self._require_render_view,
             cfg_editor_ctrl=self,
         )
         self._services = services
@@ -143,16 +180,48 @@ class Controller:
         self._dev_svc.device_disconnected.connect(self._on_device_disconnected)
         self._dev_svc.operation_failed.connect(self._on_device_operation_failed)
 
-    def set_view(self, view: ViewProtocol) -> None:
-        self._view = view
+    def add_view(self, view: ViewProtocol) -> None:
+        """Attach a full Qt View. It is a diagnostic sink (fan-out target) and
+        the single RenderHost / RenderView (run/analyze Qt artefacts + pure-read
+        render queries). Attaching a second replaces the render role (last
+        writer wins); diagnostic sinks accumulate."""
+        if view not in self._diag_sinks:
+            self._diag_sinks.append(view)
+        self._render_host = view
+        self._render_view = view
 
-    def _require_view(self) -> ViewProtocol:
-        if self._view is None:
-            raise RuntimeError("Controller view is not attached")
-        return self._view
+    def add_diagnostic_sink(self, sink: DiagnosticSink) -> None:
+        """Attach a diagnostic-only View (e.g. the remote adapter): it receives
+        error/info fan-out but is not a RenderHost."""
+        if sink not in self._diag_sinks:
+            self._diag_sinks.append(sink)
+
+    def remove_diagnostic_sink(self, sink: DiagnosticSink) -> None:
+        if sink in self._diag_sinks:
+            self._diag_sinks.remove(sink)
+
+    def _require_render_host(self) -> RenderHost:
+        if self._render_host is None:
+            raise RuntimeError("Controller has no RenderHost view attached")
+        return self._render_host
+
+    def _require_render_view(self) -> RenderView:
+        if self._render_view is None:
+            raise RuntimeError("Controller has no RenderView view attached")
+        return self._render_view
+
+    def _notify(self, severity: Severity, title: str, message: str) -> None:
+        """Fan a diagnostic out to every attached View (ADR-0013). Never via
+        EventBus — diagnostics must not depend on the channel they report on."""
+        for sink in list(self._diag_sinks):
+            sink.notify_diagnostic(severity, title, message)
+
+    def _info(self, message: str) -> None:
+        """Transient status diagnostic (no title) — Qt status bar / wire line."""
+        self._notify("info", "", message)
 
     def _report_persistence_error(self, title: str, error: Exception) -> None:
-        self._require_view().show_error_dialog(title, str(error))
+        self._notify("error", title, str(error))
 
     def _on_run_finished(self, tab_id: str, _result: object) -> None:
         # State is already updated in RunService/Runner
@@ -162,7 +231,7 @@ class Controller:
         )
 
     def _on_run_failed(self, _tab_id: str, error: Exception) -> None:
-        self._require_view().show_error_dialog("Run failed", str(error))
+        self._notify("error", "Run failed", str(error))
 
     def _on_analyze_finished(self, tab_id: str, _result: object) -> None:
         self._bus.emit(
@@ -170,62 +239,65 @@ class Controller:
         )
 
     def _on_analyze_failed(self, _tab_id: str, error: Exception) -> None:
-        self._require_view().show_error_dialog("Analyze failed", str(error))
+        self._notify("error", "Analyze failed", str(error))
 
     def _on_save_finished(self, tab_id: str, data_path: str) -> None:
         del tab_id
-        self._require_view().show_status_message(f"Data saved to {data_path}")
+        self._info(f"Data saved to {data_path}")
 
     def _on_save_failed(self, tab_id: str, data_path: str, error: Exception) -> None:
         del tab_id, data_path
-        self._require_view().show_error_dialog("Save data failed", str(error))
+        self._notify("error", "Save data failed", str(error))
 
     def _on_save_both_finished(self, tab_id: str, outcome: SaveBothOutcome) -> None:
         del tab_id
         if outcome.data_error is None and outcome.image_error is None:
-            self._require_view().show_status_message(
+            self._info(
                 f"Data saved to {outcome.data_path}; "
                 f"image saved to {outcome.image_path}"
             )
             return
         if outcome.data_error is None:
-            self._require_view().show_status_message(
+            self._info(
                 f"Data saved to {outcome.data_path}; image failed: {outcome.image_error}"
             )
             return
         if outcome.image_error is None:
-            self._require_view().show_status_message(
+            self._info(
                 f"Data failed: {outcome.data_error}; "
                 f"image saved to {outcome.image_path}"
             )
             return
-        self._require_view().show_error_dialog(
+        self._notify(
+            "error",
             "Save Both failed",
             f"Data failed: {outcome.data_error}\nImage failed: {outcome.image_error}",
         )
 
     def _on_device_setup_finished(self, name: str) -> None:
-        self._require_view().show_status_message(f"Device setup completed: {name}")
+        self._info(f"Device setup completed: {name}")
 
     def _on_device_setup_failed(self, name: str, error: str) -> None:
-        self._require_view().show_error_dialog(
+        self._notify(
+            "error",
             f"Device setup failed: {name}",
             error,
         )
 
     def _on_device_setup_cancelled(self, name: str) -> None:
-        self._require_view().show_status_message(f"Device setup cancelled: {name}")
+        self._info(f"Device setup cancelled: {name}")
 
     def _on_device_connected(self, req: ConnectDeviceRequest) -> None:
         # Persistence is a projection of device State, driven by StartupService's
         # DEVICE_CHANGED subscription — this handler only presents UI feedback.
-        self._require_view().show_status_message(f"Device connected: {req.name}")
+        self._info(f"Device connected: {req.name}")
 
     def _on_device_disconnected(self, req: DisconnectDeviceRequest) -> None:
-        self._require_view().show_status_message(f"Device disconnected: {req.name}")
+        self._info(f"Device disconnected: {req.name}")
 
     def _on_device_operation_failed(self, name: str, error: str) -> None:
-        self._require_view().show_error_dialog(
+        self._notify(
+            "error",
             f"Device operation failed: {name}",
             error,
         )
@@ -249,7 +321,8 @@ class Controller:
 
     def _present_restore_report(self, report: RestoreReport) -> None:
         if report.rejected_tabs:
-            self._require_view().show_error_dialog(
+            self._notify(
+                "error",
                 "Some session tabs were not restored",
                 "\n".join(
                     f"{issue.subject}: {issue.message}"
@@ -308,9 +381,11 @@ class Controller:
         # exactly-once, and emit ``RUN_LOCK_CHANGED`` with the outcome
         # (finished / failed / cancelled).
         permit = self._guard_svc.acquire_run_permit(tab_id)
-        view = self._require_view()
-        pbar_factory = view.make_pbar_factory(tab_id)
-        live_container = view.make_live_container(tab_id)
+        # Headless (no Qt RenderHost, e.g. a pure-agent process): RunService
+        # tolerates None pbar/container.
+        host = self._render_host
+        pbar_factory = host.make_pbar_factory(tab_id) if host is not None else None
+        live_container = host.make_live_container(tab_id) if host is not None else None
         return self._run_svc.start_run(permit, pbar_factory, live_container)
 
     def cancel_run(self) -> None:
@@ -328,7 +403,10 @@ class Controller:
 
     def analyze(self, tab_id: str, analyze_params_instance: object) -> None:
         permit = self._guard_svc.acquire_analyze_permit(tab_id)
-        figure_container = self._require_view().make_live_container(tab_id)
+        host = self._render_host
+        figure_container = (
+            host.make_live_container(tab_id) if host is not None else None
+        )
         self._analyze_svc.start_analyze(
             permit, analyze_params_instance, figure_container
         )
@@ -378,7 +456,7 @@ class Controller:
         permit = self._guard_svc.acquire_save_permit(tab_id)
         resolved = image_path or self._resolve_save_paths(tab_id).image_path
         self._save_svc.save_image_sync(permit, resolved)
-        self._require_view().show_status_message(f"Image saved to {resolved}")
+        self._info(f"Image saved to {resolved}")
 
     def save_both(
         self,
@@ -843,13 +921,13 @@ class Controller:
     # ------------------------------------------------------------------
 
     def open_dialog(self, name: DialogName) -> None:
-        self._require_view().open_dialog(name)
+        self._require_render_view().open_dialog(name)
 
     def close_dialog(self, name: DialogName) -> None:
-        self._require_view().close_dialog(name)
+        self._require_render_view().close_dialog(name)
 
     def list_open_dialogs(self) -> list[DialogName]:
-        return list(self._require_view().list_open_dialogs())
+        return list(self._require_render_view().list_open_dialogs())
 
     def get_view_snapshot(self) -> dict[str, object]:
         return self._view_query_svc.snapshot()

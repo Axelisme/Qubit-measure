@@ -61,8 +61,19 @@ def _make_ctx() -> ExpContext:
 def _make_view() -> MagicMock:
     view = MagicMock()
     view.show_status_message = MagicMock()
+    view.show_error_dialog = MagicMock()
     view.make_pbar_factory = MagicMock(return_value=None)
     view.make_live_container = MagicMock(return_value=None)
+
+    # The Controller fans diagnostics out via notify_diagnostic (ADR-0013);
+    # mirror MainWindow's dispatch so tests can assert on show_*.
+    def _notify(severity: str, title: str, message: str) -> None:
+        if severity == "error":
+            view.show_error_dialog(title or "Error", message)
+        else:
+            view.show_status_message(message)
+
+    view.notify_diagnostic = MagicMock(side_effect=_notify)
     return view
 
 

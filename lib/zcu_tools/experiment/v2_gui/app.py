@@ -135,5 +135,5 @@ def _build_window(
     )
 
     window = MainWindow(ctrl)
-    ctrl.set_view(window)
+    ctrl.add_view(window)
     return ctrl, window

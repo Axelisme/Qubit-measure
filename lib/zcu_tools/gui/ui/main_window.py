@@ -920,6 +920,14 @@ class MainWindow(QMainWindow):
         tab_w.reset_plot()  # clear prior liveplot before new run/analyze
         return tab_w._figure_container
 
+    def notify_diagnostic(self, severity: str, title: str, message: str) -> None:
+        """DiagnosticSink impl (ADR-0013): render a Controller diagnostic the Qt
+        way — error pops a modal dialog, info goes to the status bar."""
+        if severity == "error":
+            self.show_error_dialog(title or "Error", message)
+        else:
+            self.show_status_message(message)
+
     def show_status_message(self, message: str) -> None:
         logger.info("status: %s", message)
         self._status_bar.showMessage(message)
