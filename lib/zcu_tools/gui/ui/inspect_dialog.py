@@ -32,11 +32,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.adapter import CfgSchema, schema_to_dict
-from zcu_tools.gui.cfg_schemas import (
-    module_cfg_to_value,
-    waveform_cfg_to_value,
-)
+from zcu_tools.gui.adapter import CfgSchema
 from zcu_tools.gui.event_bus import GuiEvent, Payload
 from zcu_tools.gui.services.context import MdValueError, MlEntryValidationError
 from zcu_tools.gui.ui.cfg_form import CfgFormWidget
@@ -79,14 +75,23 @@ class _MlModifyDialog(QDialog):
         self._ctrl = ctrl
         self._item_kind = item_kind
         self._name = name
-        self._initial_cfg = cfg
         self.setWindowTitle(f"Modify {item_kind.capitalize()}")
         self.setMinimumSize(560, 500)
 
         layout = QVBoxLayout(self)
 
-        schema = self._schema_from_cfg()
-        discriminator = self._read_discriminator(schema)
+        # ADR-0011: modify an existing ml entry is the UI twin of the agent's
+        # open(from_name) → edit → commit flow. Open a committable session loaded
+        # from the live ml; Save commits via the single write authority. No
+        # UI-side schema build / lowering / raw write.
+        self._cfg_editor_owner = f"inspect-{uuid.uuid4().hex[:8]}"
+        editor_id, _ = self._ctrl.open_cfg_editor(
+            item_kind, from_name=name, gc=False, owner_key=self._cfg_editor_owner
+        )
+        root = self._ctrl.get_cfg_editor_root(editor_id)
+        discriminator = self._read_discriminator(
+            CfgSchema(spec=root.spec, value=root.get_value())
+        )
 
         form = QFormLayout()
         form.addRow("Name:", QLabel(name))
@@ -97,8 +102,8 @@ class _MlModifyDialog(QDialog):
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
-        # Local-draft CfgFormWidget / LiveModel. Edits stay in this dialog's
-        # draft and only enter the live ModuleLibrary on Save below.
+        # CfgFormWidget attaches to the service-owned LiveModel (ADR-0010); edits
+        # land in that draft and enter the live ModuleLibrary only on commit.
         self._form_widget = CfgFormWidget()
         self._scroll.setWidget(self._form_widget)
         layout.addWidget(self._scroll, stretch=1)
@@ -114,20 +119,13 @@ class _MlModifyDialog(QDialog):
         btn_row.addWidget(cancel_btn)
         layout.addLayout(btn_row)
 
-        # Stable owner key for this dialog's cfg-editor session.
-        self._cfg_editor_owner = f"inspect-{uuid.uuid4().hex[:8]}"
-
         self._form_widget.validity_changed.connect(self._validate)
         cancel_btn.clicked.connect(self.reject)
         self._save_btn.clicked.connect(self._on_save)
         # Detach + tear down the service-owned model when the dialog closes.
         self.finished.connect(self._close_cfg_editor)
 
-        # Seed the editable form from the existing cfg (fixed shape).
-        editor_id, _ = self._ctrl.open_seeded_cfg_editor(
-            schema, gc=False, owner_key=self._cfg_editor_owner
-        )
-        self._form_widget.attach(self._ctrl.get_cfg_editor_root(editor_id))
+        self._form_widget.attach(root)
         self._validate()
 
     def _close_cfg_editor(self, *_: Any) -> None:
@@ -140,13 +138,6 @@ class _MlModifyDialog(QDialog):
     @property
     def _discriminator_label(self) -> str:
         return "type" if self._item_kind == "module" else "style"
-
-    def _schema_from_cfg(self) -> CfgSchema:
-        if self._item_kind == "module":
-            spec, value = module_cfg_to_value(self._initial_cfg)
-        else:
-            spec, value = waveform_cfg_to_value(self._initial_cfg)
-        return CfgSchema(spec=spec, value=value)
 
     def _read_discriminator(self, schema: CfgSchema) -> str:
         value = schema.value.fields[self._discriminator_label]
@@ -166,15 +157,13 @@ class _MlModifyDialog(QDialog):
             self._save_btn.setEnabled(False)
 
     def _on_save(self) -> None:
-        schema = self._form_widget.read_schema()
-        ml = self._ctrl.get_current_ml()
-        raw_dict = schema_to_dict(schema, ml)
-
+        # ADR-0011: commit the service-owned session through the single write
+        # authority (lowering + register happen there). No UI-side lowering.
+        editor_id = self._ctrl.editor_id_for_owner(self._cfg_editor_owner)
+        if editor_id is None:
+            return
         try:
-            if self._item_kind == "module":
-                self._ctrl.set_ml_module_from_raw(self._name, raw_dict)
-            else:
-                self._ctrl.set_ml_waveform_from_raw(self._name, raw_dict)
+            self._ctrl.commit_cfg_editor(editor_id, self._name)
         except MlEntryValidationError as exc:
             QMessageBox.critical(self, "Validation Error", str(exc))
             return

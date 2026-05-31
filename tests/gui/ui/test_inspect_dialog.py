@@ -42,29 +42,56 @@ def _make_ctrl_with_ml(ml: ModuleLibrary) -> MagicMock:
 
 
 def _wire_cfg_editor(ctrl: MagicMock) -> None:
-    """Simulate the CfgEditorService open_seeded/get_root/teardown contract.
+    """Simulate the CfgEditorService open/open_seeded/commit/get_root contract.
 
-    The dialog now opens a service-owned model from its seed schema and attaches
-    (ADR-0010). Build a real SectionLiveField per open so attach() works, keyed by
-    a fake editor_id, with owner→id discovery and teardown.
+    The modify dialog opens a *committable* session from the live ml
+    (open_cfg_editor with from_name; ADR-0011) and commits via commit_cfg_editor;
+    seeded sessions still exist for tab/writeback. Build a real SectionLiveField
+    per open so attach() works, keyed by a fake editor_id, with owner→id discovery,
+    commit (records last commit), and teardown.
     """
+    from zcu_tools.gui.cfg_schemas import module_cfg_to_value, waveform_cfg_to_value
     from zcu_tools.gui.live_model import LiveModelEnv, SectionLiveField
 
+    ml = ctrl.get_current_ml.return_value
     roots: dict[str, SectionLiveField] = {}
     owner_to_id: dict[str, str] = {}
     counter = {"n": 0}
 
-    def _open_seeded(seed, *, gc=False, owner_key=None):
+    def _register(spec, value, owner_key) -> str:
         if owner_key is not None and owner_key in owner_to_id:
             roots.pop(owner_to_id.pop(owner_key), None)
         counter["n"] += 1
         eid = f"editor-{counter['n']}"
-        roots[eid] = SectionLiveField(seed.spec, LiveModelEnv(ctrl=ctrl), seed.value)
+        roots[eid] = SectionLiveField(spec, LiveModelEnv(ctrl=ctrl), value)
         if owner_key is not None:
             owner_to_id[owner_key] = eid
-        return eid, []
+        return eid
+
+    def _open_seeded(seed, *, gc=False, owner_key=None):
+        return _register(seed.spec, seed.value, owner_key), []
+
+    def _open(
+        item_kind, *, discriminator=None, from_name=None, gc=True, owner_key=None
+    ):
+        # Load the existing entry's shape from the live ml (from_name path).
+        store = ml.modules if item_kind == "module" else ml.waveforms
+        to_value = (
+            module_cfg_to_value if item_kind == "module" else waveform_cfg_to_value
+        )
+        spec, value = to_value(store[from_name])
+        return _register(spec, value, owner_key), []
+
+    def _commit(editor_id, name):
+        ctrl.committed = (name, roots[editor_id])  # record for assertions
+        roots.pop(editor_id, None)
+        for owner, eid in list(owner_to_id.items()):
+            if eid == editor_id:
+                owner_to_id.pop(owner)
 
     ctrl.open_seeded_cfg_editor.side_effect = _open_seeded
+    ctrl.open_cfg_editor.side_effect = _open
+    ctrl.commit_cfg_editor.side_effect = _commit
     ctrl.get_cfg_editor_root.side_effect = lambda eid: roots[eid]
     ctrl.editor_id_for_owner.side_effect = lambda owner: owner_to_id.get(owner)
     ctrl.teardown_cfg_editor.side_effect = lambda eid: roots.pop(eid, None)
@@ -213,9 +240,9 @@ def test_modify_dialog_module_fixed_shape_saves_same_name_and_type(qapp):
 
     dialog._save_btn.click()
 
-    name, raw = ctrl.set_ml_module_from_raw.call_args.args
+    # ADR-0011: save commits the session via the single write authority.
+    name, _root = ctrl.committed
     assert name == "readout_rf"
-    assert raw["type"] == "readout/direct"  # unchanged shape
     dialog.clear()
 
 
@@ -231,9 +258,8 @@ def test_modify_dialog_waveform_fixed_shape(qapp):
 
     dialog._save_btn.click()
 
-    name, raw = ctrl.set_ml_waveform_from_raw.call_args.args
+    name, _root = ctrl.committed
     assert name == "drive_wav"
-    assert raw["style"] == "const"  # unchanged shape
     dialog.clear()
 
 

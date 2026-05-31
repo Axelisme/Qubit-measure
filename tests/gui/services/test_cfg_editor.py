@@ -29,7 +29,12 @@ def md():
 
 @pytest.fixture()
 def ctrl(ml, md):
-    """MagicMock controller whose set_ml_*_from_raw lands into the real ml."""
+    """MagicMock controller whose set_ml_*_from_schema lands into the real ml.
+
+    Mirrors ContextService (ADR-0011 single write authority): the write port
+    lowers the CfgSchema against the live ml/md, then registers.
+    """
+    from zcu_tools.gui.adapter import schema_to_dict
     from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
 
     c = MagicMock()
@@ -39,24 +44,28 @@ def ctrl(ml, md):
     c.list_device_names.return_value = []
     c.has_soc.return_value = False
 
-    def _set_module(name, raw):
+    def _set_module(name, schema):
+        raw = schema_to_dict(schema, ml, md)
         ml.register_module(**{name: ModuleCfgFactory.from_raw(raw, ml=ml)})
 
-    def _set_waveform(name, raw):
+    def _set_waveform(name, schema):
+        raw = schema_to_dict(schema, ml, md)
         ml.register_waveform(**{name: WaveformCfgFactory.from_raw(raw, ml=ml)})
 
-    c.set_ml_module_from_raw.side_effect = _set_module
-    c.set_ml_waveform_from_raw.side_effect = _set_waveform
+    c.set_ml_module_from_schema.side_effect = _set_module
+    c.set_ml_waveform_from_schema.side_effect = _set_waveform
     return c
 
 
 @pytest.fixture()
 def service(ctrl):
-    # The Repository takes the reactive-env ctrl, the ML write port, the
-    # version bump/drop callbacks, and the EventBus (for owned-model refresh).
+    # The Repository takes the reactive-env ctrl, the context read + write ports
+    # (ADR-0011), the version bump/drop callbacks, and the EventBus (for
+    # owned-model refresh). The MagicMock ctrl satisfies all facets.
     return CfgEditorService(
         ctrl,
-        ml_port=ctrl,
+        read_port=ctrl,
+        write_port=ctrl,
         version_bump=ctrl.bump_editor_version,
         version_drop=ctrl.drop_editor_version,
         bus=EventBus(),
@@ -89,10 +98,15 @@ def test_session_is_the_aggregate_with_behaviour(service, ml):
     assert out["paths"] and "valid" in out
     assert _paths(session.current_paths())["freq"]["value"] == 5000.0
 
-    # commit is the aggregate's own behaviour: it lowers + registers via the
-    # ML write port (the MagicMock ctrl lands it into the real ml).
+    # commit_schema is the aggregate's own behaviour: it yields the un-lowered
+    # CfgSchema (ADR-0011 — lowering + register belong to the write authority).
     session.set_field("ch", 0)
-    session.commit("agg_pulse", ml_port=service._ml)
+    from zcu_tools.gui.adapter import CfgSchema
+
+    schema = session.commit_schema()
+    assert isinstance(schema, CfgSchema)
+    # The service-level commit routes that schema through the write port.
+    service.commit(editor_id, "agg_pulse")
     assert "agg_pulse" in ml.modules
 
 
@@ -109,7 +123,7 @@ def test_seeded_session_rejects_commit_on_the_aggregate(service):
     session = service._require(editor_id)
     assert session.item_kind is None
     with pytest.raises(CfgEditorError):
-        session.commit("nope", ml_port=service._ml)
+        session.commit_schema()
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +178,7 @@ def test_set_scalar_then_commit_lands_concrete(service, ctrl, ml):
     assert res["valid"] is True
     service.commit(editor_id, "agent_pulse")
 
-    ctrl.set_ml_module_from_raw.assert_called_once()
+    ctrl.set_ml_module_from_schema.assert_called_once()
     assert "agent_pulse" in ml.modules
     assert ml.modules["agent_pulse"].to_dict()["freq"] == 5000.0
 
@@ -238,7 +252,7 @@ def test_discard_for_client_batch_ignores_unknown(service):
 
 def test_commit_failure_keeps_session(service, ctrl):
     editor_id, _ = service.open("module", discriminator="pulse")
-    ctrl.set_ml_module_from_raw.side_effect = RuntimeError("boom")
+    ctrl.set_ml_module_from_schema.side_effect = RuntimeError("boom")
     with pytest.raises(RuntimeError):
         service.commit(editor_id, "bad")
     # session survives so the agent can fix and retry.
@@ -445,7 +459,12 @@ def _service_with_version_table(ctrl):
         table.drop_prefix(f"editor:{eid}")
 
     svc = CfgEditorService(
-        ctrl, ml_port=ctrl, version_bump=_bump, version_drop=_drop, bus=EventBus()
+        ctrl,
+        read_port=ctrl,
+        write_port=ctrl,
+        version_bump=_bump,
+        version_drop=_drop,
+        bus=EventBus(),
     )
     return svc, table
 

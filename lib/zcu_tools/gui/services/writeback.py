@@ -10,23 +10,20 @@ from zcu_tools.gui.adapter import (
     WaveformWriteback,
     WritebackItem,
     WritebackRequest,
-    schema_to_dict,
 )
 from zcu_tools.gui.event_bus import (
     GuiEvent,
-    MdChangedPayload,
-    MlChangedPayload,
     TabContentChangedPayload,
 )
 from zcu_tools.gui.services.guard import WritebackPermit
-from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
+from zcu_tools.gui.services.ports import ContextWrites
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.adapter import ExpContext
     from zcu_tools.gui.event_bus import EventBus
     from zcu_tools.gui.services.cfg_editor import CfgEditorService
+    from zcu_tools.gui.services.ports import ContextWritePort
     from zcu_tools.gui.state import State
 
 # kind prefix for the stable per-item session_id (``<kind>-<n>``).
@@ -52,11 +49,16 @@ class WritebackService:
     """
 
     def __init__(
-        self, state: "State", bus: "EventBus", cfg_editor: "CfgEditorService"
+        self,
+        state: "State",
+        bus: "EventBus",
+        cfg_editor: "CfgEditorService",
+        write_port: "ContextWritePort",
     ) -> None:
         self._state = state
         self._bus = bus
         self._cfg_editor = cfg_editor
+        self._write = write_port
 
     # ------------------------------------------------------------------
     # Compute once (analyze sink) + read
@@ -159,68 +161,42 @@ class WritebackService:
 
     def apply_tab_writeback(self, permit: WritebackPermit) -> list[str]:
         # Context + analyze-result preconditions are proven by the
-        # WritebackPermit.
+        # WritebackPermit. ADR-0011: writeback no longer writes ctx.md/ml itself —
+        # it collects the selected items into a ContextWrites batch and hands them
+        # to the single write authority (ContextService), which lowers + registers
+        # + bumps "context" once + emits at most one MD/ML_CHANGED. Writeback only
+        # owns the per-tab bookkeeping (applied ids + TAB_CONTENT_CHANGED).
         tab_id = permit.tab_id
         tab = self._state.get_tab(tab_id)
-        ctx = self._state.exp_context
         applied_ids: list[str] = []
-        touched_ml = False
-        touched_md = False
+        md: dict[str, Any] = {}
+        ml_modules: dict[str, CfgSchema] = {}
+        ml_waveforms: dict[str, CfgSchema] = {}
 
         for item in tab.writeback_items:
             if not item.selected:
                 continue
             if isinstance(item, MetaDictWriteback):
-                setattr(ctx.md, item.target_name, item.proposed_value)
-                touched_md = True
+                md[item.target_name] = item.proposed_value
             elif isinstance(item, ModuleWriteback):
-                module = self._resolve_module_item(item)
-                ctx.ml.register_module(**{item.target_name: module})
-                touched_ml = True
+                ml_modules[item.target_name] = self._item_schema(item)
             elif isinstance(item, WaveformWriteback):
-                waveform = self._resolve_waveform_item(item)
-                ctx.ml.register_waveform(**{item.target_name: waveform})
-                touched_ml = True
+                ml_waveforms[item.target_name] = self._item_schema(item)
             else:
                 raise RuntimeError(f"Unsupported writeback item type: {type(item)}")
             applied_ids.append(item.session_id)
 
-        if touched_ml and ctx.ml.has_persistence:
-            ctx.ml.dump()
-        if touched_md or touched_ml:
-            # Writeback writes md/ml directly (it does not go through
-            # ContextService), so it must bump the context resource version
-            # itself — same semantics as ContextService's md/ml writers — so a
-            # later context-dependent op (run / editor.commit / another
-            # writeback) detects this change. This is path 2 of 3; the canonical
-            # anchor listing all three is on ContextService.set_md_attr.
-            self._state.version.bump("context")
-        if touched_md:
-            self._bus.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=ctx.md))
-        if touched_ml:
-            self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ctx.ml))
-        if touched_md or touched_ml:
-            tab.applied_session_ids.update(applied_ids)
-            self._bus.emit(
-                GuiEvent.TAB_CONTENT_CHANGED, TabContentChangedPayload(tab_id=tab_id)
-            )
+        if not (md or ml_modules or ml_waveforms):
+            return applied_ids
+
+        self._write.apply_writes(
+            ContextWrites(md=md, ml_modules=ml_modules, ml_waveforms=ml_waveforms)
+        )
+        tab.applied_session_ids.update(applied_ids)
+        self._bus.emit(
+            GuiEvent.TAB_CONTENT_CHANGED, TabContentChangedPayload(tab_id=tab_id)
+        )
         return applied_ids
-
-    def _resolve_module_item(self, item: ModuleWriteback) -> Any:
-        raw = schema_to_dict(
-            self._item_schema(item),
-            self._state.exp_context.ml,
-            self._state.exp_context.md,
-        )
-        return ModuleCfgFactory.from_raw(raw, ml=self._state.exp_context.ml)
-
-    def _resolve_waveform_item(self, item: WaveformWriteback) -> Any:
-        raw = schema_to_dict(
-            self._item_schema(item),
-            self._state.exp_context.ml,
-            self._state.exp_context.md,
-        )
-        return WaveformCfgFactory.from_raw(raw, ml=self._state.exp_context.ml)
 
     def _item_schema(self, item: "ModuleWriteback | WaveformWriteback") -> CfgSchema:
         """The live draft to apply: snapshot the item's editor model if present.

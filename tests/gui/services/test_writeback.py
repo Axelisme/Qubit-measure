@@ -7,8 +7,7 @@ concurrency guards detect the change.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.adapter import (
@@ -17,7 +16,12 @@ from zcu_tools.gui.adapter import (
     ModuleWriteback,
     WaveformWriteback,
 )
-from zcu_tools.gui.event_bus import EventBus, GuiEvent
+from zcu_tools.gui.event_bus import (
+    EventBus,
+    GuiEvent,
+    MdChangedPayload,
+    MlChangedPayload,
+)
 from zcu_tools.gui.services.guard import WritebackPermit
 from zcu_tools.gui.services.writeback import WritebackService
 from zcu_tools.gui.state import ExpContext, State, TabState
@@ -42,39 +46,42 @@ def _make_state_with_tab(tab_id: str = "t1") -> State:
     return state
 
 
-def _svc(state: State, bus: EventBus | None = None) -> WritebackService:
-    """Build a WritebackService with a MagicMock CfgEditorService.
-
-    For module/waveform items that carry an editor_id, the apply path reads the
-    model via cfg_editor.get_root; tests that exercise that stub it. metadict
-    items need no editor.
+def _make_write_port(state: State, bus: EventBus):
+    """A ContextWritePort stand-in that reproduces ContextService.apply_writes'
+    observable effects (ADR-0011) without lowering the items' mock schemas: it
+    sets md attrs, registers ml entries (the schema is the registered object —
+    enough for "did it land" assertions), bumps "context" once, emits per kind,
+    and dumps ml when persistent.
     """
-    return WritebackService(state, bus or EventBus(), MagicMock())
+    port = MagicMock()
+
+    def _apply_writes(writes) -> None:
+        ctx = state.exp_context
+        for key, value in writes.md.items():
+            setattr(ctx.md, key, value)
+        for name, schema in writes.ml_modules.items():
+            ctx.ml.register_module(**{name: schema})
+        for name, schema in writes.ml_waveforms.items():
+            ctx.ml.register_waveform(**{name: schema})
+        touched_ml = bool(writes.ml_modules or writes.ml_waveforms)
+        if touched_ml and getattr(ctx.ml, "has_persistence", False):
+            ctx.ml.dump()
+        if writes.md or touched_ml:
+            state.version.bump("context")
+        if writes.md:
+            bus.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=ctx.md))
+        if touched_ml:
+            bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ctx.ml))
+
+    port.apply_writes.side_effect = _apply_writes
+    return port
 
 
-@contextmanager
-def _patch_module_lower(result: object):
-    """Stub the module lowering path so an item resolves to ``result``."""
-    with (
-        patch("zcu_tools.gui.services.writeback.schema_to_dict", return_value={}),
-        patch(
-            "zcu_tools.gui.services.writeback.ModuleCfgFactory.from_raw",
-            return_value=result,
-        ),
-    ):
-        yield
-
-
-@contextmanager
-def _patch_waveform_lower(result: object):
-    with (
-        patch("zcu_tools.gui.services.writeback.schema_to_dict", return_value={}),
-        patch(
-            "zcu_tools.gui.services.writeback.WaveformCfgFactory.from_raw",
-            return_value=result,
-        ),
-    ):
-        yield
+def _svc(state: State, bus: EventBus | None = None) -> WritebackService:
+    """Build a WritebackService with a MagicMock CfgEditorService + a write port
+    that reproduces ContextService's observable effects."""
+    bus = bus or EventBus()
+    return WritebackService(state, bus, MagicMock(), _make_write_port(state, bus))
 
 
 def _put_items(state: State, *items, tab_id: str = "t1") -> None:
@@ -193,9 +200,7 @@ def test_apply_module_writeback_registers_and_emits():
     item.session_id = "ml-1"  # no editor_id → falls back to edit_schema
     _put_items(state, item)
 
-    fake_module = MagicMock()
-    with _patch_module_lower(fake_module):
-        applied = svc.apply_tab_writeback(WritebackPermit(tab_id="t1"))
+    applied = svc.apply_tab_writeback(WritebackPermit(tab_id="t1"))
 
     assert applied == ["ml-1"]
     assert state.version.get("context") == before + 1
@@ -212,8 +217,7 @@ def test_apply_waveform_writeback_registers():
     item.session_id = "wf-1"
     _put_items(state, item)
 
-    with _patch_waveform_lower(MagicMock()):
-        applied = svc.apply_tab_writeback(WritebackPermit(tab_id="t1"))
+    applied = svc.apply_tab_writeback(WritebackPermit(tab_id="t1"))
     assert applied == ["wf-1"]
 
 
@@ -230,8 +234,7 @@ def test_apply_ml_writeback_calls_dump_when_has_persistence():
     item.session_id = "ml-1"
     _put_items(state, item)
 
-    with _patch_module_lower(MagicMock()):
-        svc.apply_tab_writeback(WritebackPermit(tab_id="t1"))
+    svc.apply_tab_writeback(WritebackPermit(tab_id="t1"))
     mock_ml.dump.assert_called_once()
 
 
@@ -293,7 +296,7 @@ def test_set_item_field_unknown_id_raises():
 def test_teardown_tab_items_tears_down_editor_models():
     state = _make_state_with_tab()
     cfg_editor = MagicMock()
-    svc = WritebackService(state, EventBus(), cfg_editor)
+    svc = WritebackService(state, EventBus(), cfg_editor, MagicMock())
 
     item = ModuleWriteback(target_name="qub", description="d", edit_schema=MagicMock())
     item.session_id = "ml-1"

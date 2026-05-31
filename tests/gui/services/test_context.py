@@ -354,31 +354,3 @@ def test_del_ml_waveform_removes_waveform_and_bumps_context():
 
     assert "gauss" not in ml.waveforms
     assert state.version.get("context") == before + 1
-
-
-# ---------------------------------------------------------------------------
-# set_ml_module_from_raw — validation error
-# ---------------------------------------------------------------------------
-
-
-def test_set_ml_module_from_raw_raises_on_invalid_raw():
-    from zcu_tools.gui.services.context import MlEntryValidationError
-
-    state, svc = _make_active_state()
-
-    with pytest.raises(MlEntryValidationError):
-        svc.set_ml_module_from_raw("qub", {"type": "nonexistent_module_type_xyz"})
-
-
-# ---------------------------------------------------------------------------
-# set_ml_waveform_from_raw — validation error
-# ---------------------------------------------------------------------------
-
-
-def test_set_ml_waveform_from_raw_raises_on_invalid_raw():
-    from zcu_tools.gui.services.context import MlEntryValidationError
-
-    state, svc = _make_active_state()
-
-    with pytest.raises(MlEntryValidationError):
-        svc.set_ml_waveform_from_raw("gauss", {"type": "nonexistent_waveform_xyz"})

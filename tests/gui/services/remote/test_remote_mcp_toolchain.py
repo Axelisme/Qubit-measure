@@ -177,25 +177,17 @@ def test_context_md_write_and_delete(fx):
         sock.close()
 
 
-def test_context_ml_write_delete_delegates_raw_dict(fx):
-    fx.ctrl.set_ml_module_from_raw = MagicMock()  # type: ignore[method-assign]
+def test_context_ml_delete_delegates(fx):
+    # ADR-0011: there is no raw-dict context.set_ml_* RPC anymore (ml entries are
+    # built/edited via the editor session). Delete still delegates to the ctrl.
     fx.ctrl.del_ml_module = MagicMock()  # type: ignore[method-assign]
-    fx.ctrl.set_ml_waveform_from_raw = MagicMock()  # type: ignore[method-assign]
     fx.ctrl.del_ml_waveform = MagicMock()  # type: ignore[method-assign]
     sock = open_client(fx.service.port)
     try:
-        assert call(sock, "context.set_ml_module", {"name": "m", "raw": {"a": 1}})["ok"]
-        fx.ctrl.set_ml_module_from_raw.assert_called_once_with("m", {"a": 1})
-
-        assert call(sock, "context.del_ml_module", {"name": "m"}, rid="2")["ok"]
+        assert call(sock, "context.del_ml_module", {"name": "m"})["ok"]
         fx.ctrl.del_ml_module.assert_called_once_with("m")
 
-        assert call(
-            sock, "context.set_ml_waveform", {"name": "w", "raw": {"b": 2}}, rid="3"
-        )["ok"]
-        fx.ctrl.set_ml_waveform_from_raw.assert_called_once_with("w", {"b": 2})
-
-        assert call(sock, "context.del_ml_waveform", {"name": "w"}, rid="4")["ok"]
+        assert call(sock, "context.del_ml_waveform", {"name": "w"}, rid="2")["ok"]
         fx.ctrl.del_ml_waveform.assert_called_once_with("w")
     finally:
         sock.close()

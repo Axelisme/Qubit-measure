@@ -47,7 +47,6 @@ from zcu_tools.gui.adapter import (
     CfgSchema,
     EvalValue,
     make_default_value,
-    schema_to_dict,
 )
 from zcu_tools.gui.cfg_schemas import (
     _MODULE_SPEC_FACTORIES,
@@ -57,7 +56,7 @@ from zcu_tools.gui.cfg_schemas import (
 from zcu_tools.gui.live_model import ControllerProtocol, LiveModelEnv, SectionLiveField
 from zcu_tools.gui.specs import make_waveform_spec_by_style
 
-from .ports import ModuleLibraryWritePort
+from .ports import ContextReadPort, ContextWritePort
 from .remote.path_resolver import (
     list_settable_paths,
     list_subtree_paths,
@@ -88,15 +87,16 @@ class _EditorCtrl(ControllerProtocol, Protocol):
     This is the LiveModel reactive environment (md/ml/device/bus reads) shared by
     every LiveField — see docs/adr/0007 (a legitimate narrow Port for "needs the
     owner's reactive env"). ML *writes* at commit time go through the separate
-    ``ModuleLibraryWritePort``, not this protocol.
+    ``ContextWritePort``, not this protocol.
     """
 
 
-class CfgEditorHost(_EditorCtrl, ModuleLibraryWritePort, Protocol):
-    """Composition-root surface for ``CfgEditorService`` — the three facets it
-    needs, all provided by the Controller: the reactive env (``_EditorCtrl``),
-    the ML read/write port (``ModuleLibraryWritePort``), and the editor-version
-    bump. The service itself decomposes this into the narrow dependencies; this
+class CfgEditorHost(_EditorCtrl, ContextReadPort, ContextWritePort, Protocol):
+    """Composition-root surface for ``CfgEditorService`` — the facets it needs,
+    all provided by the Controller: the reactive env (``_EditorCtrl``), the
+    context read port (``ContextReadPort``, to seed from_name) + context write
+    port (``ContextWritePort``, used at commit), and the editor-version bump. The
+    service itself decomposes this into the narrow dependencies; this
     composed protocol exists only so ``build_app_services`` can type the single
     object (the Controller) that happens to satisfy all three.
     """
@@ -158,41 +158,21 @@ class CfgEditorSession:
             "valid": bool(self.root.is_valid()),
         }
 
-    def lower(self, ml_port: ModuleLibraryWritePort) -> dict:
-        """Lower the draft to a concrete raw dict (EvalValue → number).
+    def commit_schema(self) -> "CfgSchema":
+        """Snapshot the draft as an **un-lowered** CfgSchema for the writer.
 
-        Passes the live md so lowering can cross-check each EvalValue's snapshot
-        (``resolved``, taken when the field was set) against a fresh evaluation
-        against the current md; a drift is logged (the snapshot still wins).
-        """
-        schema = CfgSchema(spec=self.root.spec, value=self.root.get_value())
-        return schema_to_dict(
-            schema, ml_port.get_current_ml(), ml_port.get_current_md()
-        )
-
-    def commit(self, name: str, ml_port: ModuleLibraryWritePort) -> None:
-        """Lower + register this ml-entry draft into the ModuleLibrary.
-
-        Registers via the write port; the Repository tears the session down only
-        after this returns, so a validation failure leaves the draft intact.
-        ``commit`` applies only to ml-entry sessions (those carrying an
-        ``item_kind``); a seeded session (tab cfg / writeback draft) is
-        teardown-only and rejects commit.
-
-        Semantics are **upsert** (create-or-modify): an existing ``name`` is
-        overwritten. The create-only, name-clash-rejecting entry point is
-        ``Controller.create_from_role`` (role templates), not this.
+        ADR-0011: the session's job ends at the CfgSchema snapshot; lowering
+        (EvalValue → concrete, against the live md) + register belong to
+        ContextService (the single write authority). ``commit`` applies only to
+        ml-entry sessions (those carrying an ``item_kind``); a seeded session
+        (tab cfg / writeback draft) is teardown-only and rejects commit.
         """
         if self.item_kind is None:
             raise CfgEditorError(
                 f"{self.editor_id!r} is a seeded session (no item_kind); commit "
                 "applies only to ml-entry sessions"
             )
-        raw = self.lower(ml_port)
-        if self.item_kind == "module":
-            ml_port.set_ml_module_from_raw(name, raw)
-        else:
-            ml_port.set_ml_waveform_from_raw(name, raw)
+        return CfgSchema(spec=self.root.spec, value=self.root.get_value())
 
 
 class CfgEditorService:
@@ -204,9 +184,10 @@ class CfgEditorService:
     lives on the aggregate (``CfgEditorSession``); the Repository delegates to it.
 
     Dependencies (docs/adr/0008): ``env_ctrl`` is the LiveModel reactive env
-    (narrow port); ``ml_port`` is the ModuleLibrary read/write port used at
-    commit and to seed ``from_name`` sessions (no longer the whole Controller);
-    ``version_bump`` / ``version_drop`` bump / forget the ``editor:<id>`` resource
+    (narrow port); ``read_port`` (ContextReadPort) reads the current ml to seed
+    ``from_name`` sessions; ``write_port`` (ContextWritePort) is the single ml/md
+    write authority used at commit (ADR-0011 — the session no longer lowers /
+    registers itself); ``version_bump`` / ``version_drop`` bump / forget the ``editor:<id>`` resource
     version (a registry-level concern since the id is Repository-assigned): bump on
     every edit (so commit's guard sees concurrent edits), drop on teardown (so a
     stale dependency on a gone session reads version 0).
@@ -215,13 +196,15 @@ class CfgEditorService:
     def __init__(
         self,
         env_ctrl: "_EditorCtrl",
-        ml_port: ModuleLibraryWritePort,
+        read_port: ContextReadPort,
+        write_port: ContextWritePort,
         version_bump: Callable[[str], None],
         version_drop: Callable[[str], None],
         bus: "EventBus",
     ) -> None:
         self._env = LiveModelEnv(ctrl=env_ctrl)
-        self._ml = ml_port
+        self._read = read_port
+        self._write = write_port
         self._version_bump = version_bump
         self._version_drop = version_drop
         self._editors: dict[str, CfgEditorSession] = {}
@@ -347,10 +330,16 @@ class CfgEditorService:
         return self._require(editor_id).current_paths()
 
     def commit(self, editor_id: str, name: str) -> None:
-        # The aggregate lowers + registers itself through the ML write port; the
-        # Repository only owns teardown (after a successful commit, so a
-        # validation failure leaves the draft intact for the agent to fix).
-        self._require(editor_id).commit(name, self._ml)
+        # ADR-0011: the aggregate yields its un-lowered CfgSchema; ContextService
+        # (the single write authority) lowers + registers. The Repository owns
+        # teardown only — after a successful write, so a validation failure
+        # (raised by the write port) leaves the draft intact for the agent to fix.
+        session = self._require(editor_id)
+        schema = session.commit_schema()
+        if session.item_kind == "module":
+            self._write.set_ml_module_from_schema(name, schema)
+        else:
+            self._write.set_ml_waveform_from_schema(name, schema)
         self._remove(editor_id, teardown=True, reason="committed")
 
     def discard(self, editor_id: str) -> None:
@@ -490,7 +479,7 @@ class CfgEditorService:
         from_name: Optional[str],
     ):
         if from_name is not None:
-            ml = self._ml.get_current_ml()
+            ml = self._read.get_current_ml()
             if item_kind == "module":
                 if from_name not in ml.modules:
                     raise CfgEditorError(f"unknown module: {from_name!r}")

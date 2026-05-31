@@ -16,11 +16,11 @@ from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.adapter import ExpContext
+    from zcu_tools.gui.adapter import CfgSchema, ExpContext
     from zcu_tools.gui.event_bus import EventBus
     from zcu_tools.gui.state import State
 
-    from .ports import ProjectIOPort
+    from .ports import ContextWrites, ProjectIOPort
 
 
 class MlEntryValidationError(RuntimeError):
@@ -223,12 +223,14 @@ class ContextService:
         # Semantic context content change: bump so concurrency guards on
         # ``context`` (run.start / editor.commit / writeback.apply) detect this edit.
         #
-        # CANONICAL ANCHOR — "writing md/ml must bump context" has THREE physical
-        # paths; change one, check the other two:
-        #   1. ContextService.set_md_attr / del_md_attr / set_ml_* / del_ml_*  (here, field-level)
-        #   2. WritebackService.apply_tab_writeback_items  (writes ctx.md/ml directly, bumps itself)
-        #   3. context-switch: setup_project / use_context / new_context  (whole md/ml swap)
-        # All three bump "context"; only set_context() itself does NOT (pure swap).
+        # CANONICAL ANCHOR — "writing md/ml must bump context" has TWO physical
+        # paths (ADR-0011 collapsed writeback's direct write into path 1):
+        #   1. ContextService writes: set_md_attr / del_md_attr / set_ml_*_from_schema /
+        #      del_ml_* (field-level, each bumps+emits) and apply_writes (batch:
+        #      one bump + one emit per kind). Writeback / editor commit / inspect /
+        #      create_from_role all route here — the single write authority.
+        #   2. context-switch: setup_project / use_context / new_context  (whole md/ml swap)
+        # Both bump "context"; only set_context() itself does NOT (pure swap).
         self._state.version.bump("context")
         self._bus.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=md))
 
@@ -240,67 +242,99 @@ class ContextService:
         self._state.version.bump("context")
         self._bus.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=md))
 
-    def set_ml_module(self, name: str, module: Any) -> None:
-        if not self.has_context():
-            raise RuntimeError("No experiment context.")
-        ml = self._state.exp_context.ml
-        ml.register_module(**{name: module})
-        self._state.version.bump("context")
-        self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
+    # ------------------------------------------------------------------
+    # ml/md content writes — the single write authority (ADR-0011).
+    #
+    # Sources holding an un-lowered CfgSchema (editor commit, writeback apply,
+    # inspect save, create_from_role) write through set_ml_*_from_schema /
+    # apply_writes; ContextService lowers (schema_to_dict with the live md, so
+    # callers can never forget md) + registers + bumps + emits. There is no
+    # public raw-dict entry — raw lives only as an internal lowering detail.
+    # ------------------------------------------------------------------
 
-    def set_ml_module_from_raw(self, name: str, raw_dict: dict) -> None:
-        """Deserialise raw dict into a Module cfg and register it under name.
-
-        Raises MlEntryValidationError on validation / construction failure.
-        """
+    def _lower_module(self, schema: "CfgSchema", ml: ModuleLibrary, md: MetaDict):
+        from zcu_tools.gui.adapter import schema_to_dict
         from zcu_tools.program.v2 import ModuleCfgFactory
 
-        if not self.has_context():
-            raise RuntimeError("No experiment context.")
-        ml = self._state.exp_context.ml
+        raw = schema_to_dict(schema, ml, md)
         try:
-            module = ModuleCfgFactory.from_raw(raw_dict, ml=ml)
+            return ModuleCfgFactory.from_raw(raw, ml=ml)
         except Exception as exc:
             raise MlEntryValidationError(
                 f"Invalid module configuration: {exc}"
             ) from exc
-        ml.register_module(**{name: module})
+
+    def _lower_waveform(self, schema: "CfgSchema", ml: ModuleLibrary, md: MetaDict):
+        from zcu_tools.gui.adapter import schema_to_dict
+        from zcu_tools.program.v2 import WaveformCfgFactory
+
+        raw = schema_to_dict(schema, ml, md)
+        try:
+            return WaveformCfgFactory.from_raw(raw, ml=ml)
+        except Exception as exc:
+            raise MlEntryValidationError(
+                f"Invalid waveform configuration: {exc}"
+            ) from exc
+
+    def set_ml_module_from_schema(self, name: str, schema: "CfgSchema") -> None:
+        """Lower (against live md) + register a Module cfg under name.
+
+        Raises MlEntryValidationError on validation / construction failure.
+        """
+        if not self.has_context():
+            raise RuntimeError("No experiment context.")
+        ctx = self._state.exp_context
+        module = self._lower_module(schema, ctx.ml, ctx.md)
+        ctx.ml.register_module(**{name: module})
         self._state.version.bump("context")
-        self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
+        self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ctx.ml))
+
+    def set_ml_waveform_from_schema(self, name: str, schema: "CfgSchema") -> None:
+        """Lower (against live md) + register a Waveform cfg under name.
+
+        Raises MlEntryValidationError on validation / construction failure.
+        """
+        if not self.has_context():
+            raise RuntimeError("No experiment context.")
+        ctx = self._state.exp_context
+        waveform = self._lower_waveform(schema, ctx.ml, ctx.md)
+        ctx.ml.register_waveform(**{name: waveform})
+        self._state.version.bump("context")
+        self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ctx.ml))
+
+    def apply_writes(self, writes: "ContextWrites") -> None:
+        """Apply a batch of md/ml content writes atomically (ADR-0011).
+
+        One ``version.bump("context")``; at most one MD_CHANGED + one ML_CHANGED
+        (the per-write methods would emit N times — a batch avoids N redundant
+        full-refreshes). All lowering happens here, never at the call site.
+        """
+        if not self.has_context():
+            raise RuntimeError("No experiment context.")
+        ctx = self._state.exp_context
+        for key, value in writes.md.items():
+            setattr(ctx.md, key, value)
+        for name, schema in writes.ml_modules.items():
+            ctx.ml.register_module(**{name: self._lower_module(schema, ctx.ml, ctx.md)})
+        for name, schema in writes.ml_waveforms.items():
+            ctx.ml.register_waveform(
+                **{name: self._lower_waveform(schema, ctx.ml, ctx.md)}
+            )
+        touched_ml = bool(writes.ml_modules or writes.ml_waveforms)
+        if touched_ml and ctx.ml.has_persistence:
+            ctx.ml.dump()
+        if writes.md or touched_ml:
+            self._state.version.bump("context")
+        if writes.md:
+            self._bus.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=ctx.md))
+        if writes.ml_modules or writes.ml_waveforms:
+            self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ctx.ml))
 
     def del_ml_module(self, name: str) -> None:
         if not self.has_context():
             raise RuntimeError("No experiment context.")
         ml = self._state.exp_context.ml
         ml.delete_module(name)
-        self._state.version.bump("context")
-        self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
-
-    def set_ml_waveform(self, name: str, waveform: Any) -> None:
-        if not self.has_context():
-            raise RuntimeError("No experiment context.")
-        ml = self._state.exp_context.ml
-        ml.register_waveform(**{name: waveform})
-        self._state.version.bump("context")
-        self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
-
-    def set_ml_waveform_from_raw(self, name: str, raw_dict: dict) -> None:
-        """Deserialise raw dict into a Waveform cfg and register it under name.
-
-        Raises MlEntryValidationError on validation / construction failure.
-        """
-        from zcu_tools.program.v2 import WaveformCfgFactory
-
-        if not self.has_context():
-            raise RuntimeError("No experiment context.")
-        ml = self._state.exp_context.ml
-        try:
-            waveform = WaveformCfgFactory.from_raw(raw_dict, ml=ml)
-        except Exception as exc:
-            raise MlEntryValidationError(
-                f"Invalid waveform configuration: {exc}"
-            ) from exc
-        ml.register_waveform(**{name: waveform})
         self._state.version.bump("context")
         self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
 

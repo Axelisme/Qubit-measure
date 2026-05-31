@@ -87,12 +87,13 @@ def build_app_services(
     # direction command edge — cfg_editor never calls writeback, ADR-0007).
     cfg_editor = CfgEditorService(
         cfg_editor_ctrl,
-        ml_port=cfg_editor_ctrl,
+        read_port=cfg_editor_ctrl,
+        write_port=cfg_editor_ctrl,
         version_bump=cfg_editor_ctrl.bump_editor_version,
         version_drop=cfg_editor_ctrl.drop_editor_version,
         bus=bus,
     )
-    writeback = WritebackService(state, bus, cfg_editor)
+    writeback = WritebackService(state, bus, cfg_editor, write_port=cfg_editor_ctrl)
     return AppServices(
         operation_gate=operation_gate,
         guard=GuardService(state),

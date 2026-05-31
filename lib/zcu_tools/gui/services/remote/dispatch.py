@@ -442,25 +442,6 @@ def _h_context_del_md_attr(ctrl, params: Mapping[str, object]) -> Mapping[str, o
     return {}
 
 
-def _h_context_set_ml_module(
-    ctrl, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    name = str(params["name"])
-    raw = params["raw"]
-    assert isinstance(raw, dict)
-    try:
-        ctrl.set_ml_module_from_raw(name, dict(raw))
-    except MlEntryValidationError as exc:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
-    return {}
-
-
 def _h_context_del_ml_module(
     ctrl, params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -499,25 +480,6 @@ def _h_context_rename_ml_waveform(
     new = str(params["new"])
     try:
         ctrl.rename_ml_waveform(old, new)
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
-    return {}
-
-
-def _h_context_set_ml_waveform(
-    ctrl, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    name = str(params["name"])
-    raw = params["raw"]
-    assert isinstance(raw, dict)
-    try:
-        ctrl.set_ml_waveform_from_raw(name, dict(raw))
-    except MlEntryValidationError as exc:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -1335,9 +1297,7 @@ _HANDLERS: dict[str, Handler] = {
     "context.get_ml": _h_context_get_ml,
     "context.set_md_attr": _h_context_set_md_attr,
     "context.del_md_attr": _h_context_del_md_attr,
-    "context.set_ml_module": _h_context_set_ml_module,
     "context.del_ml_module": _h_context_del_ml_module,
-    "context.set_ml_waveform": _h_context_set_ml_waveform,
     "context.del_ml_waveform": _h_context_del_ml_waveform,
     "context.rename_ml_module": _h_context_rename_ml_module,
     "context.rename_ml_waveform": _h_context_rename_ml_waveform,

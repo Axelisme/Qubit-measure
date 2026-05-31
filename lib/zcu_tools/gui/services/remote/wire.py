@@ -35,7 +35,10 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 # v3: removed device.set_value (set values via device.setup updates={"value":..});
 #     device.connect / device.disconnect now return operation_id (operation handle
 #     parity with device.setup); device.snapshot includes the device info payload.
-WIRE_VERSION = 3
+# v4: removed context.set_ml_module / context.set_ml_waveform (raw-dict RPC); ml
+#     entries are built/edited via the editor session (create_from_role + editor.*)
+#     — ADR-0011, the single ml/md write authority is ContextService.
+WIRE_VERSION = 4
 
 # ---------------------------------------------------------------------------
 # Wire envelopes

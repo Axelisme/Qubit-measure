@@ -48,6 +48,7 @@ from .services.device import (
     DeviceSetupSnapshot,
 )
 from .services.device_progress import DeviceSetupProgressModel
+from .services.ports import ContextWrites
 from .services.remote.dialogs import DialogName
 from .state import State
 
@@ -439,20 +440,17 @@ class Controller:
     def get_current_ml(self) -> ModuleLibrary:
         return self._ctx_svc.get_current_ml()
 
-    def set_ml_module(self, name: str, module: Any) -> None:
-        self._ctx_svc.set_ml_module(name, module)
-
-    def set_ml_module_from_raw(self, name: str, raw_dict: dict) -> None:
-        self._ctx_svc.set_ml_module_from_raw(name, raw_dict)
+    def set_ml_module_from_schema(self, name: str, schema: CfgSchema) -> None:
+        self._ctx_svc.set_ml_module_from_schema(name, schema)
 
     def del_ml_module(self, name: str) -> None:
         self._ctx_svc.del_ml_module(name)
 
-    def set_ml_waveform(self, name: str, waveform: Any) -> None:
-        self._ctx_svc.set_ml_waveform(name, waveform)
+    def set_ml_waveform_from_schema(self, name: str, schema: CfgSchema) -> None:
+        self._ctx_svc.set_ml_waveform_from_schema(name, schema)
 
-    def set_ml_waveform_from_raw(self, name: str, raw_dict: dict) -> None:
-        self._ctx_svc.set_ml_waveform_from_raw(name, raw_dict)
+    def apply_writes(self, writes: "ContextWrites") -> None:
+        self._ctx_svc.apply_writes(writes)
 
     def coerce_md_value(self, key: str, text: str) -> Any:
         return self._ctx_svc.coerce_md_value(key, text)
@@ -487,7 +485,7 @@ class Controller:
         against the live md turns those into the md's current concrete values
         (ModuleLibrary stores concrete numbers, never md references).
         """
-        from zcu_tools.gui.adapter import CfgSchema, schema_to_dict
+        from zcu_tools.gui.adapter import CfgSchema
         from zcu_tools.gui.cfg_schemas import _MODULE_SPEC_FACTORIES
         from zcu_tools.gui.specs import make_waveform_spec_by_style
 
@@ -511,12 +509,13 @@ class Controller:
             spec = _MODULE_SPEC_FACTORIES[discriminator]()
         else:
             spec = make_waveform_spec_by_style(discriminator)
-        raw = schema_to_dict(CfgSchema(spec=spec, value=value), ctx.ml, ctx.md)
-
+        # ADR-0011: hand the un-lowered CfgSchema to the single write authority;
+        # ContextService lowers (against live md) + registers. No UI-side lowering.
+        schema = CfgSchema(spec=spec, value=value)
         if item_kind == "module":
-            self.set_ml_module_from_raw(name, raw)
+            self.set_ml_module_from_schema(name, schema)
         else:
-            self.set_ml_waveform_from_raw(name, raw)
+            self.set_ml_waveform_from_schema(name, schema)
 
     @staticmethod
     def _discriminator_of(value: Any, item_kind: str) -> str:

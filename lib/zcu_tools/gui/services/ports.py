@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, Optional, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from zcu_tools.gui.adapter import CfgSchema, ExpContext, WritebackItem
-    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+    from zcu_tools.meta_tool import ModuleLibrary
 
     from .device import DeviceProtocol
     from .session_persistence import PersistedSession
@@ -116,21 +116,49 @@ class DriverFactoryPort(Protocol):
 
 
 @runtime_checkable
-class ModuleLibraryWritePort(Protocol):
-    """ModuleLibrary read + raw-entry registration as used by a CfgEditor commit.
+class ContextReadPort(Protocol):
+    """Read-only view of the active context's ModuleLibrary, as a CfgEditor needs.
 
-    A ``CfgEditorSession`` (aggregate root) lowers its draft against the current
-    ModuleLibrary and registers the concrete entry through this port — it no
-    longer borrows the whole Controller (the old leaky ``_EditorCtrl``). The
-    Controller (or any owner) implements it. Reading the current ml is needed
-    both to lower ``EvalValue`` to concrete numbers and to seed a session opened
-    ``from_name``.
+    A ``CfgEditorSession`` reads the current ml to seed a session opened
+    ``from_name`` (load an existing entry's shape). Reading only — all ml/md
+    *content writes* go through ``ContextWritePort`` (ADR-0011: ContextService is
+    the single write authority). Symmetric name with ``ContextWritePort``.
     """
 
     def get_current_ml(self) -> "ModuleLibrary": ...
-    def get_current_md(self) -> "MetaDict": ...
-    def set_ml_module_from_raw(self, name: str, raw_dict: dict) -> None: ...
-    def set_ml_waveform_from_raw(self, name: str, raw_dict: dict) -> None: ...
+
+
+@runtime_checkable
+class ContextWritePort(Protocol):
+    """The single authority for ml/md content writes (ADR-0011).
+
+    Sources holding an un-lowered ``CfgSchema`` (editor commit, writeback apply,
+    inspect save, create_from_role) write through this port; ContextService
+    lowers (``schema_to_dict`` with the live md, so callers can never forget md)
+    + registers + bumps the ``context`` version + emits ML/MD_CHANGED. The only
+    implementer is ContextService.
+
+    ``apply_writes`` is the batch entry: a single apply (writeback) of md attrs +
+    multiple ml entries lands as **one** version bump and **at most one**
+    ML_CHANGED + one MD_CHANGED (the per-write methods each bump/emit on their
+    own; batching avoids N redundant full-refreshes).
+    """
+
+    def set_ml_module_from_schema(self, name: str, schema: "CfgSchema") -> None: ...
+    def set_ml_waveform_from_schema(self, name: str, schema: "CfgSchema") -> None: ...
+    def set_md_attr(self, key: str, value: Any) -> None: ...
+    def apply_writes(self, writes: "ContextWrites") -> None: ...
+
+
+@dataclass(frozen=True)
+class ContextWrites:
+    """A batch of ml/md content writes applied atomically (one bump + one emit
+    per kind). ``md`` maps attr name → value; ``ml_modules`` / ``ml_waveforms``
+    map entry name → its un-lowered ``CfgSchema``. Insertion order preserved."""
+
+    md: "dict[str, Any]"
+    ml_modules: "dict[str, CfgSchema]"
+    ml_waveforms: "dict[str, CfgSchema]"
 
 
 @runtime_checkable

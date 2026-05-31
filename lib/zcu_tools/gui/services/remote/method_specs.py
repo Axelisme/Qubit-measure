@@ -246,18 +246,8 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "context.del_md_attr": MethodSpec(
         5.0, "Delete one MetaDict attribute", (_str("key", "MetaDict key"),)
     ),
-    "context.set_ml_module": MethodSpec(
-        10.0,
-        "Set one ModuleLibrary module from raw dict",
-        (_str("name", "Module name"), _obj("raw", "Module cfg dict")),
-    ),
     "context.del_ml_module": MethodSpec(
         5.0, "Delete one ModuleLibrary module", (_str("name", "Module name"),)
-    ),
-    "context.set_ml_waveform": MethodSpec(
-        10.0,
-        "Set one ModuleLibrary waveform from raw dict",
-        (_str("name", "Waveform name"), _obj("raw", "Waveform cfg dict")),
     ),
     "context.del_ml_waveform": MethodSpec(
         5.0, "Delete one ModuleLibrary waveform", (_str("name", "Waveform name"),)
