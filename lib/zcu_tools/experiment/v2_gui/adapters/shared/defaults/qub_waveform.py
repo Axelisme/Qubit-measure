@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from typing_extensions import Literal, Optional, overload
+from typing_extensions import Literal, Union, overload
 
-from zcu_tools.gui.adapter import DirectValue, WaveformRefValue
+from zcu_tools.gui.adapter import DirectValue, DisabledRefValue, WaveformRefValue
 from zcu_tools.gui.specs.waveform import make_cosine_waveform_spec
 
-from .helpers import make_default_value
+from .helpers import make_default_value, select_named_waveform_value
 
 if TYPE_CHECKING:
     from zcu_tools.gui.adapter import ExpContext
@@ -31,17 +31,6 @@ def make_qub_waveform_default(ctx: ExpContext) -> WaveformRefValue:  # noqa: ARG
     return WaveformRefValue(chosen_key="<Custom:Cosine>", value=value)
 
 
-def _select_waveform(ctx: ExpContext, preferred_names: list[str]):
-    from zcu_tools.gui.cfg_schemas import waveform_cfg_to_value
-
-    waveforms = getattr(ctx.ml, "waveforms", {})
-    for name in preferred_names:
-        if name in waveforms:
-            _, wav_val = waveform_cfg_to_value(waveforms[name])
-            return WaveformRefValue(chosen_key=name, value=wav_val)
-    return None
-
-
 @overload
 def make_qub_waveform_ref_default(
     ctx: ExpContext,
@@ -57,7 +46,7 @@ def make_qub_waveform_ref_default(
     preferred_names: list[str] = ...,
     *,
     optional: Literal[True],
-) -> Optional[WaveformRefValue]: ...
+) -> Union[WaveformRefValue, DisabledRefValue]: ...
 
 
 def make_qub_waveform_ref_default(
@@ -65,11 +54,11 @@ def make_qub_waveform_ref_default(
     preferred_names: list[str] = QUB_WAVEFORM_NAMES,
     *,
     optional: bool = False,
-) -> Optional[WaveformRefValue]:
+) -> Union[WaveformRefValue, DisabledRefValue]:
     """Reference a library qubit waveform (qub_flat / qub_cos), else blank cosine."""
-    selected = _select_waveform(ctx, preferred_names)
+    selected = select_named_waveform_value(ctx.ml, preferred_names)
     if selected is not None:
         return selected
     if optional:
-        return None
+        return DisabledRefValue()  # ADR-0012: present-but-disabled marker
     return make_qub_waveform_default(ctx)

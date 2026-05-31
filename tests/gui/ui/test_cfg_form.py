@@ -671,7 +671,7 @@ def test_populate_module_ref_field_round_trip(qapp, ctrl):
 
 def test_populate_full_fake_freq_schema(qapp, ctrl):
     """Smoke test: FakeFreqAdapter default schema populates and round-trips."""
-    from zcu_tools.experiment.v2_gui.adapters.onetone.fakefreq import FakeFreqAdapter
+    from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
     from zcu_tools.gui.adapter import ModuleRefSpec
     from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 

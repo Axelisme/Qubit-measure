@@ -8,13 +8,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from typing_extensions import Literal, Optional, overload
+from typing_extensions import Literal, Union, overload
 
-from zcu_tools.gui.adapter import DirectValue, WaveformRefValue
+from zcu_tools.gui.adapter import DirectValue, DisabledRefValue, WaveformRefValue
 from zcu_tools.gui.specs.waveform import make_const_waveform_spec
 
-from .helpers import make_default_value
-from .qub_waveform import _select_waveform
+from .helpers import make_default_value, select_named_waveform_value
 
 if TYPE_CHECKING:
     from zcu_tools.gui.adapter import ExpContext
@@ -47,7 +46,7 @@ def make_res_waveform_ref_default(
     preferred_names: list[str] = ...,
     *,
     optional: Literal[True],
-) -> Optional[WaveformRefValue]: ...
+) -> Union[WaveformRefValue, DisabledRefValue]: ...
 
 
 def make_res_waveform_ref_default(
@@ -55,11 +54,11 @@ def make_res_waveform_ref_default(
     preferred_names: list[str] = RES_WAVEFORM_NAMES,
     *,
     optional: bool = False,
-) -> Optional[WaveformRefValue]:
+) -> Union[WaveformRefValue, DisabledRefValue]:
     """Reference a library resonator waveform (res_flat / res_const), else blank."""
-    selected = _select_waveform(ctx, preferred_names)
+    selected = select_named_waveform_value(ctx.ml, preferred_names)
     if selected is not None:
         return selected
     if optional:
-        return None
+        return DisabledRefValue()  # ADR-0012: present-but-disabled marker
     return make_res_waveform_default(ctx)

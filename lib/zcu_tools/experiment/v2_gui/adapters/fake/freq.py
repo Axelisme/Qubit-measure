@@ -39,12 +39,12 @@ from zcu_tools.experiment.v2.onetone.freq import (
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
+    make_onetone_freq_writeback_items,
     make_pulse_module_spec,
     make_readout_default,
     make_readout_module_spec,
     make_reset_module_spec,
     md_get_float,
-    schema_from_module,
 )
 from zcu_tools.gui.adapter import (
     AdapterCapabilities,
@@ -55,15 +55,12 @@ from zcu_tools.gui.adapter import (
     CfgSectionValue,
     DirectValue,
     ExpContext,
-    MetaDictWriteback,
-    ModuleWriteback,
     ParamMeta,
     RunRequest,
     SaveDataRequest,
     ScalarSpec,
     SweepSpec,
     SweepValue,
-    WaveformWriteback,
     WritebackItem,
     WritebackRequest,
 )
@@ -359,47 +356,12 @@ class FakeFreqAdapter(
     def get_writeback_items(
         self, req: WritebackRequest[FakeFreqRunResult, FakeFreqAnalyzeResult]
     ) -> Sequence[WritebackItem]:
-        analyze_result = req.analyze_result
-        ctx = req.ctx
-        freq = analyze_result.freq
-        fwhm = analyze_result.fwhm
-
+        result = req.analyze_result
         cfg = req.run_result.cfg_snapshot
         assert cfg is not None, "cfg_snapshot is required for writeback"
-
-        readout = cfg.modules.readout
-        wav_len = getattr(ctx.md, "res_probe_len", 5.0)
-
-        # readout is statically a PulseReadoutCfg (the run snapshot is a FreqCfg);
-        # update freq + probe length directly via with_updates, no fallback.
-        new_readout = readout.with_updates(
-            pulse_cfg=readout.pulse_cfg.with_updates(freq=freq),
-            ro_cfg=readout.ro_cfg.with_updates(ro_freq=freq),
+        return make_onetone_freq_writeback_items(
+            cfg.modules.readout, result.freq, result.fwhm, req.ctx
         )
-        new_waveform = readout.pulse_cfg.waveform.with_updates(length=float(wav_len))
-
-        return [
-            MetaDictWriteback(
-                target_name="r_f",
-                description="Resonator frequency (MHz)",
-                proposed_value=freq,
-            ),
-            MetaDictWriteback(
-                target_name="rf_w",
-                description="Resonator linewidth FWHM (MHz)",
-                proposed_value=fwhm,
-            ),
-            ModuleWriteback(
-                target_name="readout_rf",
-                description="readout_rf module config",
-                edit_schema=schema_from_module(new_readout),
-            ),
-            WaveformWriteback(
-                target_name="ro_waveform",
-                description="ro_waveform length config",
-                edit_schema=schema_from_module(new_waveform),
-            ),
-        ]
 
     def save(self, req: SaveDataRequest[FakeFreqRunResult]) -> None:
         del req  # fake experiment — no HDF5 persistence

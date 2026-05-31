@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from zcu_tools.gui.registry import Registry
 
+from .adapters.fake.freq import FakeFreqAdapter
 from .adapters.lookback import LookbackAdapter
-from .adapters.onetone.fakefreq import FakeFreqAdapter
 from .adapters.onetone.flux_dep import OneToneFluxDepAdapter
 from .adapters.onetone.freq import OneToneFreqAdapter
 from .adapters.onetone.power_dep import OneTonePowerDepAdapter
@@ -18,7 +18,7 @@ from .adapters.twotone.time_domain.t2ramsey import T2RamseyAdapter
 
 ADAPTERS = {
     "lookback": LookbackAdapter,
-    "onetone/fake_freq": FakeFreqAdapter,
+    "fake/freq": FakeFreqAdapter,
     "onetone/freq": OneToneFreqAdapter,
     "onetone/power_dep": OneTonePowerDepAdapter,
     "onetone/flux_dep": OneToneFluxDepAdapter,

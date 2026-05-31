@@ -9,9 +9,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from typing_extensions import Literal, Optional, overload
+from typing_extensions import Literal, Union, overload
 
-from zcu_tools.gui.adapter import CfgSectionValue, ModuleRefValue
+from zcu_tools.gui.adapter import (
+    CfgSectionValue,
+    DisabledRefValue,
+    ModuleRefValue,
+)
 from zcu_tools.gui.specs.reset import (
     make_bath_reset_spec,
     make_none_reset_spec,
@@ -97,7 +101,7 @@ def make_reset_ref_default(
     preferred_names: list[str] = ...,
     *,
     optional: Literal[True],
-) -> Optional[ModuleRefValue]: ...
+) -> Union[ModuleRefValue, DisabledRefValue]: ...
 
 
 def make_reset_ref_default(
@@ -105,13 +109,19 @@ def make_reset_ref_default(
     preferred_names: list[str] = RESET_NAMES,
     *,
     optional: bool = False,
-) -> Optional[ModuleRefValue]:
-    """Reference a calibrated library reset, else fall back to a blank pulse reset."""
+) -> Union[ModuleRefValue, DisabledRefValue]:
+    """Reference a calibrated library reset, else fall back to a blank pulse reset.
+
+    ADR-0012: when ``optional`` and no library reset is found, return a
+    ``DisabledRefValue`` marker (the field is present but not enabled) rather
+    than None — so the adapter drops it straight into ``modules`` fields without
+    an ``if x is not None`` guard, symmetric with the optional spec.
+    """
     selected = select_named_module_value(
         ml=ctx.ml, module_type=AbsResetCfg, preferred_names=preferred_names
     )
     if selected is not None:
         return ModuleRefValue(chosen_key=selected.name, value=selected.value)
     if optional:
-        return None
+        return DisabledRefValue()
     return make_reset_default(ctx)

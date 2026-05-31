@@ -90,16 +90,16 @@ class AmpRabiAdapter(
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         sweep_stop = md_eval_scaled(ctx, "pi_amp", factor=2.0, fallback=0.5)
-        _module_fields: dict[str, CfgNodeValue] = {
-            "qub_pulse": make_qub_probe_default(ctx),
-            "readout": make_readout_ref_default(ctx),
-        }
-        _reset = make_reset_ref_default(ctx, optional=True)
-        if _reset is not None:
-            _module_fields["reset"] = _reset
         root_val = CfgSectionValue(
             fields={
-                "modules": CfgSectionValue(fields=_module_fields),
+                "modules": CfgSectionValue(
+                    fields={
+                        "qub_pulse": make_qub_probe_default(ctx),
+                        "readout": make_readout_ref_default(ctx),
+                        # optional → DisabledRefValue when no library reset (ADR-0012)
+                        "reset": make_reset_ref_default(ctx, optional=True),
+                    }
+                ),
                 "reps": DirectValue(100),
                 "rounds": DirectValue(100),
                 "relax_delay": DirectValue(10.5),

@@ -84,10 +84,9 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
         _module_fields: dict[str, CfgNodeValue] = {
             "pi_pulse": make_pi_pulse_ref_default(ctx),
             "readout": make_readout_ref_default(ctx),
+            # optional → DisabledRefValue when no library reset (ADR-0012)
+            "reset": make_reset_ref_default(ctx, optional=True),
         }
-        _reset = make_reset_ref_default(ctx, optional=True)
-        if _reset is not None:
-            _module_fields["reset"] = _reset
         root_val = CfgSectionValue(
             fields={
                 "modules": CfgSectionValue(fields=_module_fields),

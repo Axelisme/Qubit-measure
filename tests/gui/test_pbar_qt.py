@@ -147,7 +147,7 @@ def test_total_setter(qapp):
 def test_fake_freq_adapter_run_with_qt_pbar(qapp):
     """FakeFreqAdapter.run() completes; leave=True outer bar stays, reset_all clears."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-    from zcu_tools.experiment.v2_gui.adapters.onetone.fakefreq import FakeFreqAdapter
+    from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
     from zcu_tools.gui.adapter import ExpContext, RunRequest
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
     from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory

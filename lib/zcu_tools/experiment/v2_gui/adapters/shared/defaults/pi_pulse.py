@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from typing_extensions import Literal, Optional, overload
+from typing_extensions import Literal, Union, overload
 
-from zcu_tools.gui.adapter import ModuleRefValue
+from zcu_tools.gui.adapter import DisabledRefValue, ModuleRefValue
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 
 from .helpers import select_named_module_value
@@ -42,7 +42,7 @@ def make_pi_pulse_ref_default(
     preferred_names: list[str] = ...,
     *,
     optional: Literal[True],
-) -> Optional[ModuleRefValue]: ...
+) -> Union[ModuleRefValue, DisabledRefValue]: ...
 
 
 def make_pi_pulse_ref_default(
@@ -50,7 +50,7 @@ def make_pi_pulse_ref_default(
     preferred_names: list[str] = PI_PULSE_NAMES,
     *,
     optional: bool = False,
-) -> Optional[ModuleRefValue]:
+) -> Union[ModuleRefValue, DisabledRefValue]:
     """Reference a library π pulse (pi_amp → pi_len), else the blank one."""
     selected = select_named_module_value(
         ml=ctx.ml, module_type=PulseCfg, preferred_names=preferred_names
@@ -58,5 +58,5 @@ def make_pi_pulse_ref_default(
     if selected is not None:
         return ModuleRefValue(chosen_key=selected.name, value=selected.value)
     if optional:
-        return None
+        return DisabledRefValue()  # ADR-0012: present-but-disabled marker
     return make_pi_pulse_default(ctx)

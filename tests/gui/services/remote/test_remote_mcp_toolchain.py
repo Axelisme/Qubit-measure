@@ -379,7 +379,7 @@ def test_connect_start_mock_ok(fx):
 def test_adapter_cfg_spec_lists_paths_without_tab(fx):
     sock = open_client(fx.service.port)
     try:
-        resp = call(sock, "adapter.cfg_spec", {"adapter_name": "onetone/fake_freq"})
+        resp = call(sock, "adapter.cfg_spec", {"adapter_name": "fake/freq"})
         assert resp["ok"] is True
         paths = {p["path"] for p in resp["result"]["paths"]}
         assert "sweep.freq.expts" in paths
@@ -407,7 +407,7 @@ def test_adapter_cfg_spec_unknown_rejected(fx):
 def test_adapter_analyze_spec_reflects_params(fx):
     sock = open_client(fx.service.port)
     try:
-        resp = call(sock, "adapter.analyze_spec", {"adapter_name": "onetone/fake_freq"})
+        resp = call(sock, "adapter.analyze_spec", {"adapter_name": "fake/freq"})
         assert resp["ok"] is True
         params = {p["name"]: p for p in resp["result"]["params"]}
         assert params["model_type"]["choices"] == ["hm", "t", "auto"]

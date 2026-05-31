@@ -45,5 +45,5 @@ def test_make_default_cfg_equals_spec_plus_value(name: str):
 
 def test_cfg_spec_is_context_free():
     # cfg_spec() takes no ctx; calling it twice yields equal specs (pure).
-    adapter = _registry().create("onetone/fake_freq")
+    adapter = _registry().create("fake/freq")
     assert adapter.cfg_spec() == adapter.cfg_spec()

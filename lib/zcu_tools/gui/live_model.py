@@ -38,6 +38,7 @@ from .adapter import (
     CfgSectionValue,
     DeviceRefSpec,
     DirectValue,
+    DisabledRefValue,
     EvalValue,
     LiteralSpec,
     ModuleRefSpec,
@@ -380,10 +381,13 @@ class SectionLiveField(LiveField):
         provided_val = initial_val if initial_val is not None else default_val
 
         # Build child fields; fall back to spec default for keys missing from provided_val.
-        # Optional ModuleRef/WaveformRef missing from provided_val → pass None so the
-        # field initialises as disabled (is_enabled=False).
+        # An optional ModuleRef/WaveformRef that is missing, None, or carries the
+        # explicit DisabledRefValue marker (ADR-0012) → pass None so the field
+        # initialises as disabled (is_enabled=False).
         for key, node_spec in spec.fields.items():
             child_val = provided_val.fields.get(key)
+            if isinstance(child_val, DisabledRefValue):
+                child_val = None
             if child_val is None:
                 if (
                     isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec))
@@ -517,6 +521,12 @@ class ModuleRefLiveField(LiveField):
         initial_val: object = None,
     ) -> None:
         super().__init__(spec, env)
+
+        # An explicit DisabledRefValue marker (ADR-0012) means "this optional
+        # field is not enabled" — normalise to None so it shares the existing
+        # disabled path (chosen_key = first-allowed Custom, is_enabled=False).
+        if isinstance(initial_val, DisabledRefValue):
+            initial_val = None
 
         init_overridden = False
         if isinstance(initial_val, (ModuleRefValue, WaveformRefValue)):

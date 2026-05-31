@@ -19,7 +19,12 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_reset_default,
     make_reset_ref_default,
 )
-from zcu_tools.gui.adapter import EvalValue, ModuleRefValue, WaveformRefValue
+from zcu_tools.gui.adapter import (
+    DisabledRefValue,
+    EvalValue,
+    ModuleRefValue,
+    WaveformRefValue,
+)
 
 
 def _empty_ctx() -> MagicMock:
@@ -86,8 +91,10 @@ def test_pi2_pulse_ref_falls_back_to_blank():
     assert isinstance(make_pi2_pulse_ref_default(_empty_ctx()), ModuleRefValue)
 
 
-def test_pi_pulse_ref_optional_returns_none_when_lib_empty():
-    assert make_pi_pulse_ref_default(_empty_ctx(), optional=True) is None
+def test_pi_pulse_ref_optional_returns_disabled_when_lib_empty():
+    assert isinstance(
+        make_pi_pulse_ref_default(_empty_ctx(), optional=True), DisabledRefValue
+    )
 
 
 # --- readout (blank inline pulse+ro_cfg; ref to library) --------------------
@@ -147,8 +154,10 @@ def test_readout_ref_falls_back_to_blank():
     assert isinstance(make_readout_ref_default(_empty_ctx()), ModuleRefValue)
 
 
-def test_readout_ref_optional_returns_none_when_lib_empty():
-    assert make_readout_ref_default(_empty_ctx(), optional=True) is None
+def test_readout_ref_optional_returns_disabled_when_lib_empty():
+    assert isinstance(
+        make_readout_ref_default(_empty_ctx(), optional=True), DisabledRefValue
+    )
 
 
 # --- reset ------------------------------------------------------------------
@@ -159,8 +168,10 @@ def test_reset_default_returns_blank_pulse_reset():
     assert isinstance(v, ModuleRefValue)
 
 
-def test_reset_ref_optional_returns_none_when_lib_empty():
-    assert make_reset_ref_default(_empty_ctx(), optional=True) is None
+def test_reset_ref_optional_returns_disabled_when_lib_empty():
+    assert isinstance(
+        make_reset_ref_default(_empty_ctx(), optional=True), DisabledRefValue
+    )
 
 
 # --- waveforms --------------------------------------------------------------

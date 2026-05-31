@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from zcu_tools.experiment.v2_gui.adapters.onetone.fakefreq import FakeFreqAdapter
+from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
 from zcu_tools.gui.adapter import CfgSchema, RunRequest
 from zcu_tools.meta_tool import MetaDict
 

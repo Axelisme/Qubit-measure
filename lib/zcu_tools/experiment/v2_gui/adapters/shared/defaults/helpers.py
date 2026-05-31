@@ -21,7 +21,11 @@ from zcu_tools.gui.adapter import (
 )
 
 from ..ctx_helpers import md_has_key
-from .module_defaults import NamedModuleValue, select_named_module_value
+from .module_defaults import (
+    NamedModuleValue,
+    select_named_module_value,
+    select_named_waveform_value,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.adapter import ExpContext
@@ -29,6 +33,7 @@ if TYPE_CHECKING:
 __all__ = [
     "make_default_value",
     "select_named_module_value",
+    "select_named_waveform_value",
     "NamedModuleValue",
     "patch_pulse_fields",
     "patch_ro_cfg_fields",

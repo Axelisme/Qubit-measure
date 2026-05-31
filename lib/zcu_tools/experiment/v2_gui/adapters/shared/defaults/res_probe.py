@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from typing_extensions import Literal, Optional, overload
+from typing_extensions import Literal, Union, overload
 
-from zcu_tools.gui.adapter import ModuleRefValue
+from zcu_tools.gui.adapter import DisabledRefValue, ModuleRefValue
 from zcu_tools.gui.specs.pulse import make_pulse_spec
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 
@@ -51,7 +51,7 @@ def make_res_probe_ref_default(
     preferred_names: list[str] = ...,
     *,
     optional: Literal[True],
-) -> Optional[ModuleRefValue]: ...
+) -> Union[ModuleRefValue, DisabledRefValue]: ...
 
 
 def make_res_probe_ref_default(
@@ -59,7 +59,7 @@ def make_res_probe_ref_default(
     preferred_names: list[str] = RES_PROBE_NAMES,
     *,
     optional: bool = False,
-) -> Optional[ModuleRefValue]:
+) -> Union[ModuleRefValue, DisabledRefValue]:
     """Reference a library resonator probe pulse, else the blank one."""
     selected = select_named_module_value(
         ml=ctx.ml, module_type=PulseCfg, preferred_names=preferred_names
@@ -67,5 +67,5 @@ def make_res_probe_ref_default(
     if selected is not None:
         return ModuleRefValue(chosen_key=selected.name, value=selected.value)
     if optional:
-        return None
+        return DisabledRefValue()  # ADR-0012: present-but-disabled marker
     return make_res_probe_default(ctx)

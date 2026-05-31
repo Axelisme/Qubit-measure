@@ -13,10 +13,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from typing_extensions import Literal, Optional, overload
+from typing_extensions import Literal, Union, overload
 
 from zcu_tools.gui.adapter import (
     CfgSectionValue,
+    DisabledRefValue,
     ModuleRefValue,
     WaveformRefValue,
 )
@@ -115,7 +116,7 @@ def make_readout_ref_default(
     preferred_names: list[str] = ...,
     *,
     optional: Literal[True],
-) -> Optional[ModuleRefValue]: ...
+) -> Union[ModuleRefValue, DisabledRefValue]: ...
 
 
 def make_readout_ref_default(
@@ -123,7 +124,7 @@ def make_readout_ref_default(
     preferred_names: list[str] = READOUT_NAMES,
     *,
     optional: bool = False,
-) -> Optional[ModuleRefValue]:
+) -> Union[ModuleRefValue, DisabledRefValue]:
     """Reference a calibrated library readout (readout_dpm / readout_rf), else
     fall back to the blank inline pulse-readout."""
     selected = select_named_module_value(
@@ -132,5 +133,5 @@ def make_readout_ref_default(
     if selected is not None:
         return ModuleRefValue(chosen_key=selected.name, value=selected.value)
     if optional:
-        return None
+        return DisabledRefValue()  # ADR-0012: present-but-disabled marker
     return make_readout_default(ctx)

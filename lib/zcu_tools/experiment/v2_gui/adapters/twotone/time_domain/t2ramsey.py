@@ -96,10 +96,9 @@ class T2RamseyAdapter(
         _module_fields: dict[str, CfgNodeValue] = {
             "pi2_pulse": make_pi2_pulse_ref_default(ctx),
             "readout": make_readout_ref_default(ctx),
+            # optional → DisabledRefValue when no library reset (ADR-0012)
+            "reset": make_reset_ref_default(ctx, optional=True),
         }
-        _reset = make_reset_ref_default(ctx, optional=True)
-        if _reset is not None:
-            _module_fields["reset"] = _reset
         root_val = CfgSectionValue(
             fields={
                 "modules": CfgSectionValue(fields=_module_fields),

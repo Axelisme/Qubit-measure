@@ -11,6 +11,7 @@ from .types import (
     CfgSectionValue,
     DeviceRefSpec,
     DirectValue,
+    DisabledRefValue,
     EvalValue,
     LiteralSpec,
     ModuleRefSpec,
@@ -122,6 +123,10 @@ def _section_to_dict_inner(
         raise RuntimeError(f"Config section '{section}' has unknown fields: {extras}")
     for key, node_spec in spec.fields.items():
         node_val = value.fields.get(key)
+        # A DisabledRefValue marker (ADR-0012) lowers exactly like a missing key:
+        # the disabled optional field is omitted from the output.
+        if isinstance(node_val, DisabledRefValue):
+            node_val = None
         if node_val is None:
             if isinstance(node_spec, LiteralSpec):
                 result[key] = node_spec.value

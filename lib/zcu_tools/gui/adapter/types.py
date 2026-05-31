@@ -492,6 +492,21 @@ class WaveformRefValue:
         return self
 
 
+@dataclass(frozen=True)
+class DisabledRefValue:
+    """A first-class "this optional ModuleRef/WaveformRef field is not enabled"
+    value (ADR-0012).
+
+    Symmetric with the spec side: an optional field is *always* present in the
+    spec tree (``ModuleRefSpec(optional=True)``) and is *always* present in the
+    value tree — a disabled one carries this marker instead of forcing each
+    adapter to omit the key with an ``if x is not None`` guard. LiveModel maps it
+    to ``is_enabled=False`` (and lowering omits the key, exactly as a missing key
+    does). A pure marker: enabling reveals the spec's default shape, so it needs
+    no payload. Distinct from selecting a "None Reset" entry, which is a real
+    (enabled) reset choice, not an absent field."""
+
+
 @dataclass
 class CfgSectionValue:
     fields: dict[str, "CfgNodeValue"] = field(default_factory=dict)
@@ -530,6 +545,7 @@ CfgNodeValue = Union[
     SweepValue,
     ModuleRefValue,
     WaveformRefValue,
+    DisabledRefValue,
     CfgSectionValue,
 ]
 

@@ -17,13 +17,13 @@ from typing_extensions import (
 from zcu_tools.experiment.v2.onetone.freq import FreqCfg, FreqExp, FreqResult
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
+    make_onetone_freq_writeback_items,
     make_pulse_readout_default,
     make_pulse_readout_module_spec,
     make_reset_module_spec,
     md_get_float,
     md_has_key,
     proper_res_freq_range,
-    schema_from_module,
 )
 from zcu_tools.gui.adapter import (
     AnalyzeRequest,
@@ -33,12 +33,9 @@ from zcu_tools.gui.adapter import (
     DirectValue,
     EvalValue,
     ExpContext,
-    MetaDictWriteback,
-    ModuleWriteback,
     ParamMeta,
     ScalarSpec,
     SweepSpec,
-    WaveformWriteback,
     WritebackItem,
     WritebackRequest,
 )
@@ -148,43 +145,9 @@ class OneToneFreqAdapter(
         result = req.analyze_result
         cfg = req.run_result.cfg_snapshot
         assert cfg is not None, "cfg_snapshot is required for writeback"
-
-        ctx = req.ctx
-        readout = cfg.modules.readout
-        wav_len = md_get_float(ctx, "res_probe_len", 5.0)
-
-        # readout is statically a PulseReadoutCfg (FreqModuleCfg.readout); update
-        # freq on both the pulse and the readout, and the probe waveform length,
-        # directly via with_updates. No defensive fallback — a structural change
-        # should fast-fail here, not silently produce an unrelated cfg.
-        proposed_readout = readout.with_updates(
-            pulse_cfg=readout.pulse_cfg.with_updates(freq=result.freq),
-            ro_cfg=readout.ro_cfg.with_updates(ro_freq=result.freq),
+        return make_onetone_freq_writeback_items(
+            cfg.modules.readout, result.freq, result.fwhm, req.ctx
         )
-        proposed_waveform = readout.pulse_cfg.waveform.with_updates(length=wav_len)
-
-        return [
-            MetaDictWriteback(
-                target_name="r_f",
-                description="Resonator frequency (MHz)",
-                proposed_value=result.freq,
-            ),
-            MetaDictWriteback(
-                target_name="rf_w",
-                description="Resonator linewidth FWHM (MHz)",
-                proposed_value=result.fwhm,
-            ),
-            ModuleWriteback(
-                target_name="readout_rf",
-                description="readout_rf module config",
-                edit_schema=schema_from_module(proposed_readout),
-            ),
-            WaveformWriteback(
-                target_name="ro_waveform",
-                description="ro_waveform length config",
-                edit_schema=schema_from_module(proposed_waveform),
-            ),
-        ]
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.res_name}_freq_{time.strftime('%m%d')}"

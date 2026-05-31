@@ -3,7 +3,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from qtpy.QtWidgets import QPushButton
-from zcu_tools.experiment.v2_gui.adapters.onetone.fakefreq import (
+from zcu_tools.experiment.v2_gui.adapters.fake.freq import (
     FakeFreqAdapter,
     FakeFreqAnalyzeParams,
     FakeFreqRunResult,
