@@ -18,7 +18,6 @@ from zcu_tools.gui.services.connection import (
 from zcu_tools.gui.services.device import (
     ConnectDeviceRequest,
     DisconnectDeviceRequest,
-    SetDeviceValueRequest,
 )
 
 from .errors import ErrorCode, ErrorEnvelope, RemoteError
@@ -33,7 +32,10 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 # v2: added ml.list_roles / ml.create_from_role (role catalog) and
 #     context.rename_ml_module / context.rename_ml_waveform; editor.open dropped
 #     its discriminator param (from_name-only).
-WIRE_VERSION = 2
+# v3: removed device.set_value (set values via device.setup updates={"value":..});
+#     device.connect / device.disconnect now return operation_id (operation handle
+#     parity with device.setup); device.snapshot includes the device info payload.
+WIRE_VERSION = 3
 
 # ---------------------------------------------------------------------------
 # Wire envelopes
@@ -225,13 +227,4 @@ def coerce_disconnect_device_request(
     return DisconnectDeviceRequest(
         name=_require_str(params, "name"),
         remember=_optional_bool(params, "remember", True),
-    )
-
-
-def coerce_set_device_value_request(
-    params: Mapping[str, object],
-) -> SetDeviceValueRequest:
-    return SetDeviceValueRequest(
-        name=_require_str(params, "name"),
-        value=require_json_safe(params, "value"),
     )

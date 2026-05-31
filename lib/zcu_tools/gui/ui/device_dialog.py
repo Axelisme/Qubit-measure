@@ -517,7 +517,6 @@ class DeviceDialog(QDialog):
         elif snapshot.status in {
             DeviceStatus.CONNECTING,
             DeviceStatus.DISCONNECTING,
-            DeviceStatus.SETTING_VALUE,
         }:
             self._add_status.setStyleSheet("color: gray;")
             self._add_status.setText(

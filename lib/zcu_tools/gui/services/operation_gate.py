@@ -20,7 +20,6 @@ class OperationKind(Enum):
     DEVICE_CONNECT = "device_connect"
     DEVICE_DISCONNECT = "device_disconnect"
     DEVICE_SETUP = "device_setup"
-    DEVICE_SET_VALUE = "device_set_value"
 
 
 class OperationConflictError(RuntimeError):
@@ -57,7 +56,6 @@ _DEVICE_MUTATIONS = frozenset(
         OperationKind.DEVICE_CONNECT,
         OperationKind.DEVICE_DISCONNECT,
         OperationKind.DEVICE_SETUP,
-        OperationKind.DEVICE_SET_VALUE,
     }
 )
 

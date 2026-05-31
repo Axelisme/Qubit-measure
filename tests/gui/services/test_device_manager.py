@@ -18,7 +18,6 @@ from zcu_tools.gui.services.device import (
     ConnectDeviceRequest,
     DeviceService,
     DisconnectDeviceRequest,
-    SetDeviceValueRequest,
     SetupDeviceRequest,
     _DeviceSetupWorker,
 )
@@ -151,9 +150,18 @@ def _disconnect(svc: DeviceService, name: str = "flux") -> None:
 
 
 def _set_value(svc: DeviceService, name: str, value: float) -> None:
+    # Setting a value goes through setup (FakeDevice.setup ramps to info.value).
+    # Build the setup info from the device's current info with value updated, so
+    # the address matches (mirrors the device.setup RPC's with_updates path);
+    # a mismatched address makes BaseDevice.setup raise.
+    info = svc.get_device_info(name)
+    assert info is not None
     loop = QEventLoop()
-    svc.value_set.connect(lambda _name: loop.quit())
-    svc.start_set_device_value(SetDeviceValueRequest(name=name, value=value))
+    svc.setup_finished.connect(lambda _name: loop.quit())
+    svc.setup_failed.connect(lambda _name, _err: loop.quit())
+    svc.start_setup_device(
+        SetupDeviceRequest(name=name, info=info.with_updates(value=value))
+    )
     loop.exec()
 
 
@@ -179,7 +187,7 @@ def test_devicemanager_drop_device(qapp):
     assert not flux_entry.is_connected
 
 
-def test_devicemanager_get_set_value(qapp):
+def test_devicemanager_get_value_and_set_via_setup(qapp):
     dev = FakeDevice()
     dev.set_value(3.14)
     svc, _ = _make_real_svc(driver=dev)

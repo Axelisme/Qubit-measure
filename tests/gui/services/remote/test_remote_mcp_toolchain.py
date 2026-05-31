@@ -286,18 +286,37 @@ def test_mcp_wrappers_map_to_expected_rpc(monkeypatch):
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
 
     mcp_server.TOOLS["gui_context_use"]["handler"]({"label": "ctx1"})
-    mcp_server.TOOLS["gui_device_setup"]["handler"](
-        {"name": "bias", "updates": {"value": 1.0}}
-    )
+    mcp_server.TOOLS["gui_device_reconnect"]["handler"]({"name": "bias"})
     mcp_server.TOOLS["gui_save_image"]["handler"](
         {"tab_id": "tab1", "image_path": "/tmp/a.png"}
     )
 
     assert calls == [
         ("context.use", {"label": "ctx1"}),
-        ("device.setup", {"name": "bias", "updates": {"value": 1.0}}),
+        ("device.reconnect", {"name": "bias"}),
         ("save.image", {"tab_id": "tab1", "image_path": "/tmp/a.png"}),
     ]
+
+
+def test_device_setup_wrapper_issues_setup_then_short_wait(monkeypatch):
+    """gui_device_setup is not a 1:1 wrapper: it starts device.setup then waits
+    briefly (operation.await) and reports a snapshot/handle (short-wait degrade)."""
+    from zcu_tools.gui.services.remote import mcp_server
+
+    calls: list[tuple[str, dict]] = []
+
+    def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        del timeout_seconds
+        calls.append((method, params))
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    mcp_server.TOOLS["gui_device_setup"]["handler"](
+        {"name": "bias", "updates": {"value": 1.0}}
+    )
+
+    # First call is always the start RPC with the agent's params verbatim.
+    assert calls[0] == ("device.setup", {"name": "bias", "updates": {"value": 1.0}})
 
 
 # ---------------------------------------------------------------------------

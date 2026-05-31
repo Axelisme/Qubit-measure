@@ -85,21 +85,6 @@ class DeviceProtocol(Protocol):
     def close(self) -> None: ...
 
 
-@runtime_checkable
-class ValueDeviceProtocol(DeviceProtocol, Protocol):
-    """A ``DeviceProtocol`` that also exposes a scalar value (e.g. a source).
-
-    ``get_value`` / ``set_value`` are called on the device-mutation worker path
-    and guarded by OperationGate (no concurrent mutation of the same device).
-    ``set_value`` returns the device's post-set value (the caller writes it back
-    into State as the new ``info`` snapshot). Same thread/idempotency notes as
-    ``DeviceProtocol`` apply.
-    """
-
-    def get_value(self) -> object: ...
-    def set_value(self, value: object) -> object: ...
-
-
 @dataclass(frozen=True)
 class ConnectDeviceRequest:
     type_name: str
@@ -118,12 +103,6 @@ class DisconnectDeviceRequest:
 class SetupDeviceRequest:
     name: str
     info: BaseDeviceInfo
-
-
-@dataclass(frozen=True)
-class SetDeviceValueRequest:
-    name: str
-    value: object
 
 
 @dataclass(frozen=True)
@@ -274,7 +253,6 @@ class DeviceService(QObject):
 
     device_connected: Signal = Signal(object)
     device_disconnected: Signal = Signal(object)
-    value_set: Signal = Signal(str)
     operation_failed: Signal = Signal(str, str)
     setup_finished: Signal = Signal(str)
     setup_failed: Signal = Signal(str, str)
@@ -306,7 +284,7 @@ class DeviceService(QObject):
         self._command_worker: _DeviceCommandWorker | None = None
         self._setup_worker: _DeviceSetupWorker | None = None
 
-    def start_connect_device(self, req: ConnectDeviceRequest) -> None:
+    def start_connect_device(self, req: ConnectDeviceRequest) -> int:
         current = self._state.get_device(req.name)
         if current is not None and current.is_live():
             raise RuntimeError(f"Device {req.name!r} is already connected or busy")
@@ -322,12 +300,15 @@ class DeviceService(QObject):
             req.name,
             replace(initial, status=DeviceStatus.CONNECTING, error=None),
         )
+        assert self._active_lease is not None  # set by _begin_operation
+        token = self._active_lease.token
         worker = _DeviceCommandWorker(lambda: self._connect(req), parent=self)
         self._command_worker = worker
         worker.succeeded.connect(lambda info: self._on_connect_succeeded(req, info))
         worker.failed.connect(lambda error: self._on_operation_failed(req.name, error))
         worker.finished.connect(worker.deleteLater)
         self._start_command_worker(worker, req.name)
+        return token
 
     def start_reconnect_device(self, name: str) -> None:
         dev = self._require_device(name)
@@ -342,35 +323,22 @@ class DeviceService(QObject):
             )
         )
 
-    def start_disconnect_device(self, req: DisconnectDeviceRequest) -> None:
+    def start_disconnect_device(self, req: DisconnectDeviceRequest) -> int:
         current = self._require_connected_device(req.name)
         self._begin_operation(
             OperationKind.DEVICE_DISCONNECT,
             req.name,
             replace(current, status=DeviceStatus.DISCONNECTING, error=None),
         )
+        assert self._active_lease is not None  # set by _begin_operation
+        token = self._active_lease.token
         worker = _DeviceCommandWorker(lambda: self._disconnect(req.name), parent=self)
         self._command_worker = worker
         worker.succeeded.connect(lambda _: self._on_disconnect_succeeded(req))
         worker.failed.connect(lambda error: self._on_operation_failed(req.name, error))
         worker.finished.connect(worker.deleteLater)
         self._start_command_worker(worker, req.name)
-
-    def start_set_device_value(self, req: SetDeviceValueRequest) -> None:
-        current = self._require_connected_device(req.name)
-        self._begin_operation(
-            OperationKind.DEVICE_SET_VALUE,
-            req.name,
-            replace(current, status=DeviceStatus.SETTING_VALUE, error=None),
-        )
-        worker = _DeviceCommandWorker(lambda: self._set_value(req), parent=self)
-        self._command_worker = worker
-        worker.succeeded.connect(
-            lambda info: self._on_value_set_succeeded(req.name, info)
-        )
-        worker.failed.connect(lambda error: self._on_operation_failed(req.name, error))
-        worker.finished.connect(worker.deleteLater)
-        self._start_command_worker(worker, req.name)
+        return token
 
     def start_setup_device(self, req: SetupDeviceRequest) -> int:
         from zcu_tools.device import GlobalDeviceManager
@@ -486,7 +454,6 @@ class DeviceService(QObject):
                     DeviceStatus.CONNECTED,
                     DeviceStatus.DISCONNECTING,
                     DeviceStatus.SETTING_UP,
-                    DeviceStatus.SETTING_VALUE,
                 },
             )
             for snapshot in self.list_device_snapshots()
@@ -592,18 +559,6 @@ class DeviceService(QObject):
         GlobalDeviceManager.drop_device(name)
         return None
 
-    @staticmethod
-    def _set_value(req: SetDeviceValueRequest) -> BaseDeviceInfo:
-        from zcu_tools.device import GlobalDeviceManager
-
-        device = GlobalDeviceManager.get_device(req.name)
-        if not isinstance(device, ValueDeviceProtocol):
-            raise RuntimeError(
-                f"Device {req.name!r} ({type(device).__name__}) does not support set_value."
-            )
-        device.set_value(req.value)
-        return device.get_info()
-
     def _begin_operation(
         self, kind: OperationKind, name: str, pending: DeviceState
     ) -> None:
@@ -693,20 +648,6 @@ class DeviceService(QObject):
         self._finish_operation(req.name, OperationOutcome("finished"))
         self._emit_device_changed(req.name)
         self.device_disconnected.emit(req)
-
-    def _on_value_set_succeeded(self, name: str, info: object) -> None:
-        current = self._require_device(name)
-        self._state.put_device(
-            replace(
-                current,
-                status=DeviceStatus.CONNECTED,
-                info=cast(BaseDeviceInfo, info),
-                error=None,
-            )
-        )
-        self._finish_operation(name, OperationOutcome("finished"))
-        self._emit_device_changed(name)
-        self.value_set.emit(name)
 
     def _on_setup_finished(self, name: str, info: object) -> None:
         current = self._require_device(name)

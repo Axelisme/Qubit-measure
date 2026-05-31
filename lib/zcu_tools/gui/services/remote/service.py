@@ -792,7 +792,7 @@ class RemoteControlService:
         holder: dict[str, object] = {}
 
         if spec.off_main_thread:
-            # Blocking handler (e.g. device.wait_setup): run on THIS IO worker
+            # Blocking handler (operation.await): run on THIS IO worker
             # thread, never the main thread — marshalling it onto the main
             # thread would deadlock (it would occupy the event loop that must
             # dispatch the worker signal it awaits). It must only do thread-safe

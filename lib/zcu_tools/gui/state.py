@@ -49,7 +49,6 @@ class DeviceStatus(Enum):
     CONNECTED = "connected"
     DISCONNECTING = "disconnecting"
     SETTING_UP = "setting_up"
-    SETTING_VALUE = "setting_value"
 
 
 @dataclass(frozen=True)

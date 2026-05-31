@@ -19,7 +19,6 @@ from zcu_tools.gui.services.remote.wire import (
     coerce_connect_device_request,
     coerce_connect_request,
     coerce_disconnect_device_request,
-    coerce_set_device_value_request,
     parse_request,
     require_json_safe,
     require_object,
@@ -304,19 +303,3 @@ def test_coerce_disconnect_device_request_ok():
     req = coerce_disconnect_device_request({"name": "lo"})
     assert req.name == "lo"
     assert req.remember is True
-
-
-# ---------------------------------------------------------------------------
-# coerce_set_device_value_request
-# ---------------------------------------------------------------------------
-
-
-def test_coerce_set_device_value_request_ok():
-    req = coerce_set_device_value_request({"name": "lo", "value": 6000.0})
-    assert req.name == "lo"
-    assert req.value == 6000.0
-
-
-def test_coerce_set_device_value_request_non_serializable():
-    with pytest.raises(RemoteError):
-        coerce_set_device_value_request({"name": "lo", "value": object()})

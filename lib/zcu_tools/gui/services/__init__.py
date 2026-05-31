@@ -10,7 +10,6 @@ from .device import (
     DeviceSnapshot,
     DeviceStatus,
     DisconnectDeviceRequest,
-    SetDeviceValueRequest,
     SetupDeviceRequest,
 )
 from .guard import (
@@ -63,7 +62,6 @@ __all__ = [
     "DeviceSnapshot",
     "DeviceStatus",
     "DisconnectDeviceRequest",
-    "SetDeviceValueRequest",
     "SetupDeviceRequest",
     "OperationConflictError",
     "OperationGate",

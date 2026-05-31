@@ -1,9 +1,11 @@
 """mcp_server-side async-operation handle bookkeeping.
 
-Drives send_gui_rpc / the gui_device_wait_setup tool with the socket layer
+Drives send_gui_rpc / the gui_device_wait_operation tool with the socket layer
 mocked, asserting the mcp policy: a start op's operation_id is captured under its
 semantic key (latest wins), and the semantic wait tool translates name ->
-operation_id -> operation.await without the agent ever seeing the raw id.
+operation_id -> operation.await without the agent ever seeing the raw id. Also
+covers the connect/disconnect/setup short-wait degrade (finished -> snapshot,
+timeout -> pending handle).
 """
 
 from __future__ import annotations
@@ -60,25 +62,61 @@ def test_latest_setup_wins_for_same_device(wired):
     assert mcp_server._OP_BY_KEY["device:flux"] == 2
 
 
-def test_wait_setup_translates_name_to_operation_await(wired):
+def test_connect_captures_operation_id_under_device_key(wired):
+    wired["device.connect"] = {"ok": True, "result": {"operation_id": 9}}
+    wired["operation.await"] = {"ok": True, "result": {"status": "finished"}}
+    wired["device.snapshot"] = {
+        "ok": True,
+        "result": {"snapshot": {"name": "flux", "status": "connected"}},
+    }
+    wired["resources.versions"] = _versions({})
+
+    out = mcp_server.TOOLS["gui_device_connect"]["handler"](
+        {"type_name": "FakeDevice", "name": "flux", "address": "addr"}
+    )
+
+    # connect's operation_id is captured (so wait_operation can await by name) and
+    # the short wait landed -> finished + snapshot returned.
+    assert out["status"] == "finished"
+    assert out["snapshot"]["name"] == "flux"
+
+
+def test_connect_degrades_to_pending_on_short_wait_timeout(wired):
+    wired["device.connect"] = {"ok": True, "result": {"operation_id": 9}}
+    wired["operation.await"] = {
+        "ok": False,
+        "error": {"code": "timeout", "message": "did not complete within 1.0s"},
+    }
+    wired["resources.versions"] = _versions({})
+
+    out = mcp_server.TOOLS["gui_device_connect"]["handler"](
+        {"type_name": "FakeDevice", "name": "flux", "address": "addr"}
+    )
+
+    # Timeout is the expected degrade path -> pending handle, NOT an error.
+    assert out["status"] == "pending"
+    assert "flux" in out["message"]
+
+
+def test_wait_operation_translates_name_to_operation_await(wired):
     sent = wired["sent"]
     mcp_server._OP_BY_KEY["device:flux"] = 42
     wired["operation.await"] = {"ok": True, "result": {"status": "finished"}}
     wired["resources.versions"] = _versions({})
 
-    out = mcp_server.TOOLS["gui_device_wait_setup"]["handler"]({"name": "flux"})
+    out = mcp_server.TOOLS["gui_device_wait_operation"]["handler"]({"name": "flux"})
 
     await_params = next(p for (m, p) in sent if m == "operation.await")
     assert await_params["operation_id"] == 42  # name translated to id
     assert out["status"] == "finished"
 
 
-def test_wait_setup_no_operation_when_key_unknown(wired):
-    out = mcp_server.TOOLS["gui_device_wait_setup"]["handler"]({"name": "ghost"})
+def test_wait_operation_no_operation_when_key_unknown(wired):
+    out = mcp_server.TOOLS["gui_device_wait_operation"]["handler"]({"name": "ghost"})
     assert out["status"] == "no_operation"
 
 
-def test_wait_setup_propagates_failure(wired):
+def test_wait_operation_propagates_failure(wired):
     mcp_server._OP_BY_KEY["device:flux"] = 7
     wired["operation.await"] = {
         "ok": False,
@@ -91,7 +129,7 @@ def test_wait_setup_propagates_failure(wired):
     wired["resources.versions"] = _versions({})
 
     with pytest.raises(RuntimeError, match="hardware boom"):
-        mcp_server.TOOLS["gui_device_wait_setup"]["handler"]({"name": "flux"})
+        mcp_server.TOOLS["gui_device_wait_operation"]["handler"]({"name": "flux"})
 
 
 def test_events_poll_refreshes_last_seen(wired, monkeypatch):

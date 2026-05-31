@@ -15,7 +15,6 @@ from zcu_tools.gui.services.device import (
     DeviceService,
     DeviceStatus,
     DisconnectDeviceRequest,
-    SetDeviceValueRequest,
     SetupDeviceRequest,
 )
 from zcu_tools.gui.services.operation_gate import (
@@ -64,22 +63,38 @@ def _connect(svc: DeviceService, req: ConnectDeviceRequest) -> None:
     loop.exec()
 
 
-def test_device_connect_disconnect_and_set_value_update_snapshot(qapp):
+def test_device_connect_returns_operation_handle(qapp):
+    svc, _device = _make_svc()
+    loop = QEventLoop()
+    svc.device_connected.connect(lambda _request: loop.quit())
+    token = svc.start_connect_device(_req())
+    loop.exec()
+    # connect now returns an operation token (parity with setup) for awaiting.
+    assert isinstance(token, int)
+    assert svc.get_device_snapshot("dev1").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
+
+
+def test_device_setup_updates_value_and_disconnect_updates_snapshot(qapp):
     svc, device = _make_svc()
     _connect(svc, _req())
     assert svc.get_device_snapshot("dev1").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
 
+    # Setting an output value goes through setup (ramped/cancellable), not a
+    # separate set_value: the post-setup get_info reflects the new value.
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=1.0)
-    value_loop = QEventLoop()
-    svc.value_set.connect(lambda _name: value_loop.quit())
-    svc.start_set_device_value(SetDeviceValueRequest(name="dev1", value=1.0))
-    value_loop.exec()
-    device.set_value.assert_called_once_with(1.0)
+    setup_loop = QEventLoop()
+    svc.setup_finished.connect(lambda _name: setup_loop.quit())
+    svc.start_setup_device(
+        SetupDeviceRequest(name="dev1", info=FakeDeviceInfo(address="addr", value=1.0))
+    )
+    setup_loop.exec()
+    device.setup.assert_called_once()
     assert svc.get_device_snapshot("dev1").info.value == 1.0  # type: ignore[union-attr]
 
     drop_loop = QEventLoop()
     svc.device_disconnected.connect(lambda _request: drop_loop.quit())
-    svc.start_disconnect_device(DisconnectDeviceRequest(name="dev1"))
+    disc_token = svc.start_disconnect_device(DisconnectDeviceRequest(name="dev1"))
+    assert isinstance(disc_token, int)  # disconnect also returns a handle
     drop_loop.exec()
     device.close.assert_called_once_with()
     assert svc.get_device_snapshot("dev1").status is DeviceStatus.MEMORY_ONLY  # type: ignore[union-attr]
@@ -94,7 +109,11 @@ def test_device_mutation_is_globally_exclusive_and_blocks_same_device_read(qapp)
     )
 
     with pytest.raises(OperationConflictError, match="Cannot start"):
-        svc.start_set_device_value(SetDeviceValueRequest(name="dev1", value=1.0))
+        svc.start_setup_device(
+            SetupDeviceRequest(
+                name="dev1", info=FakeDeviceInfo(address="addr", value=1.0)
+            )
+        )
     with pytest.raises(OperationConflictError, match="Cannot read"):
         svc.get_device_info("dev1")
     gate.release(lease, OperationOutcome("finished"))

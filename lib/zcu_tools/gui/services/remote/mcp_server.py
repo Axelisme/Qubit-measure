@@ -95,6 +95,20 @@ Preconditions are enforced server-side and identical to the GUI buttons:
   - Run/save require an active file-backed context; save/analyze require an
     existing run result. Violations return precondition_failed with a message.
   - Editing cfg while a tab is running returns precondition_failed.
+
+Call contract — read before issuing defensive/duplicate calls:
+  - A failed call always raises an error; it never returns stale or partial
+    data. One call is therefore enough — never fire a backup copy of the same
+    tool in the same turn 'in case the first did not go through'.
+  - Query tools (gui_*_list / _get* / _snapshot / _check / _active* /
+    _progress, e.g. gui_tab_list, gui_tab_get_cfg, gui_state_check) are
+    read-only and side-effect-free. Safe to retry across turns, but duplicating
+    within a turn is pure waste — the result cannot change.
+  - Mutating tools DO have side effects and must be sent exactly once: gui_run_start
+    (fire-and-forget — a duplicate starts a SECOND run), gui_cfg_set_field,
+    gui_tab_new / gui_tab_close, gui_save_*, gui_device_connect / _disconnect / _setup,
+    gui_context_set_* / _del_* / _rename_*, gui_editor_commit. Issue once and
+    read the response rather than re-sending.
 """
 
 # ---------------------------------------------------------------------------
@@ -168,7 +182,11 @@ _GUARD_DEPS: Dict[str, tuple[str, ...]] = {
 _OP_BY_KEY: Dict[str, int] = {}
 
 # Which semantic key a start RPC's operation_id belongs to (param -> key).
+# Device connect/disconnect/setup all key on the device name: "latest wins" means
+# the most recent operation for that device is the one a wait tool awaits.
 _OP_KEY_OF: Dict[str, "Callable[[Dict[str, Any]], str]"] = {
+    "device.connect": lambda p: f"device:{p.get('name', '')}",
+    "device.disconnect": lambda p: f"device:{p.get('name', '')}",
     "device.setup": lambda p: f"device:{p.get('name', '')}",
     "run.start": lambda p: f"tab:{p.get('tab_id', '')}",
     "connect.start": lambda p: "soc",  # noqa: ARG005 — uniform signature
@@ -733,11 +751,70 @@ def _await_operation_by_key(key: str, what: str, timeout: float) -> Dict[str, An
     return {"status": res.get("status", "finished"), "message": f"{what} completed."}
 
 
-def tool_gui_device_wait_setup(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    """Block until the named device's current setup completes (semantic)."""
+def _is_timeout_error(exc: RuntimeError) -> bool:
+    """True when a send_gui_rpc RuntimeError carries the wire TIMEOUT code.
+
+    send_gui_rpc formats failures as ``GUI Error (<code>): ...`` where <code> is
+    the lowercase ErrorCode value (ErrorCode.TIMEOUT == 'timeout'). The literal is
+    matched here to keep the bridge free of the errors-module import.
+    """
+    return "(timeout)" in str(exc)
+
+
+def _start_device_op_with_short_wait(
+    name: str, what: str, wait_seconds: float
+) -> Dict[str, Any]:
+    """Wait briefly for a just-started device op, degrading to a handle on timeout.
+
+    The start RPC must already have run (its operation_id captured into _OP_BY_KEY
+    under ``device:<name>`` by send_gui_rpc). Awaits up to ``wait_seconds``:
+    - settles in time -> follow-up device.snapshot, return {status:'finished',
+      snapshot:{...}} so the caller sees the device's live params immediately;
+    - still running -> {status:'pending'} so the caller can gui_device_wait_operation
+      or watch 'device_changed'. operation.await still raises on failure/cancel.
+    """
+    key = f"device:{name}"
+    operation_id = _OP_BY_KEY.get(key)
+    if operation_id is None:
+        # No handle captured (e.g. op already settled synchronously) — just report
+        # the current snapshot.
+        return {"status": "finished", "snapshot": _device_snapshot(name)}
+    try:
+        send_gui_rpc(
+            "operation.await",
+            {"operation_id": operation_id, "timeout": wait_seconds},
+            wait_seconds + 5.0,
+        )
+    except RuntimeError as exc:
+        if _is_timeout_error(exc):
+            return {
+                "status": "pending",
+                "message": (
+                    f"{what} still in progress after {wait_seconds}s; await it with "
+                    f"gui_device_wait_operation(name={name!r}) or watch 'device_changed'."
+                ),
+            }
+        raise  # genuine failure/cancellation surfaces as an error
+    return {"status": "finished", "snapshot": _device_snapshot(name)}
+
+
+def _device_snapshot(name: str) -> Any:
+    """Fetch one device's snapshot (now including its live ``info`` params)."""
+    return send_gui_rpc("device.snapshot", {"name": name}).get("snapshot")
+
+
+def tool_gui_device_wait_operation(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Block until the named device's current operation completes (semantic).
+
+    Covers connect / disconnect / setup — whichever is the latest operation for
+    the device. Returns status='finished' on success; raises on failure/
+    cancellation; status='no_operation' if nothing is in flight for that device.
+    """
     name = str(arguments["name"])
     timeout = float(arguments.get("timeout", 120.0))
-    return _await_operation_by_key(f"device:{name}", f"Device {name!r} setup", timeout)
+    return _await_operation_by_key(
+        f"device:{name}", f"Device {name!r} operation", timeout
+    )
 
 
 def tool_gui_events_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -810,29 +887,42 @@ def tool_gui_dialog_screenshot(arguments: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def tool_gui_device_connect(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    name = str(arguments["name"])
     params: Dict[str, Any] = {
         "type_name": str(arguments["type_name"]),
-        "name": str(arguments["name"]),
+        "name": name,
         "address": str(arguments["address"]),
     }
     if "remember" in arguments:
         params["remember"] = bool(arguments["remember"])
-    return send_gui_rpc("device.connect", params)
+    wait_seconds = float(arguments.get("wait_seconds", 1.0))
+    send_gui_rpc("device.connect", params)  # operation_id captured into _OP_BY_KEY
+    return _start_device_op_with_short_wait(
+        name, f"Device {name!r} connect", wait_seconds
+    )
 
 
 def tool_gui_device_disconnect(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    params: Dict[str, Any] = {"name": str(arguments["name"])}
+    name = str(arguments["name"])
+    params: Dict[str, Any] = {"name": name}
     if "remember" in arguments:
         params["remember"] = bool(arguments["remember"])
-    return send_gui_rpc("device.disconnect", params)
+    wait_seconds = float(arguments.get("wait_seconds", 1.0))
+    send_gui_rpc("device.disconnect", params)
+    return _start_device_op_with_short_wait(
+        name, f"Device {name!r} disconnect", wait_seconds
+    )
 
 
-def tool_gui_device_set_value(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    if "value" not in arguments:
-        raise ValueError("missing 'value'")
-    return send_gui_rpc(
-        "device.set_value",
-        {"name": str(arguments["name"]), "value": arguments["value"]},
+def tool_gui_device_setup(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    name = str(arguments["name"])
+    updates = arguments.get("updates", {})
+    if not isinstance(updates, dict):
+        raise ValueError("'updates' must be an object")
+    wait_seconds = float(arguments.get("wait_seconds", 1.0))
+    send_gui_rpc("device.setup", {"name": name, "updates": dict(updates)})
+    return _start_device_op_with_short_wait(
+        name, f"Device {name!r} setup", wait_seconds
     )
 
 
@@ -846,10 +936,11 @@ def tool_gui_device_set_value(arguments: Dict[str, Any]) -> Dict[str, Any]:
 # stop/disconnect) have no RPC method and are hand-written too.
 _NON_GENERATED_METHODS = frozenset(
     {
-        # coerce_* → frozen request (multi-field)
+        # coerce_* → frozen request (multi-field) + mcp-side short-wait degrade
+        # (await the returned operation_id briefly, then return snapshot or handle).
         "device.connect",
         "device.disconnect",
-        "device.set_value",
+        "device.setup",
         # client-side file write of base64 PNG
         "view.screenshot",
         "dialog.screenshot",
@@ -866,7 +957,7 @@ _NON_GENERATED_METHODS = frozenset(
         # must not surface to the agent — used internally by _refresh_versions).
         "resources.versions",
         # operation handle await: agent drives it via semantic wait tools (e.g.
-        # gui_device_wait_setup), which translate name -> operation_id; the raw
+        # gui_device_wait_operation), which translate name -> operation_id; the raw
         # by-id RPC is never an agent tool.
         "operation.await",
     }
@@ -1106,12 +1197,14 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             "required": ["editor_id"],
         },
     },
-    "gui_device_wait_setup": {
-        "handler": tool_gui_device_wait_setup,
+    "gui_device_wait_operation": {
+        "handler": tool_gui_device_wait_operation,
         "description": (
-            "Block until the named device's current setup completes. Returns "
-            "status='finished' on success; raises on setup failure/cancellation; "
-            "status='no_operation' if no setup is in flight for that device."
+            "Block until the named device's current operation (connect / disconnect "
+            "/ setup — whichever was started last) completes. Returns "
+            "status='finished' on success; raises on failure/cancellation; "
+            "status='no_operation' if nothing is in flight for that device. Use "
+            "this after a gui_device_* tool returned status='pending'."
         ),
         "inputSchema": {
             "type": "object",
@@ -1196,12 +1289,13 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
     "gui_device_connect": {
         "handler": tool_gui_device_connect,
         "description": (
-            "Register and start connecting a hardware device (async). "
-            "Returns immediately; connection completes in the background. "
-            "Poll gui_device_active_operation or subscribe to 'device_changed' to detect completion. "
-            "type_name identifies the driver class (e.g. 'YOKOGS200', 'SGS100A'); "
-            "address is the VISA/GPIB/IP address. "
-            "Set remember=true to persist the device across sessions."
+            "Register and connect a hardware device. Waits up to wait_seconds "
+            "(default 1.0) for the connection: if it lands in time, returns "
+            "{status:'finished', snapshot:{...}} (snapshot includes the device's "
+            "live info params); otherwise {status:'pending'} — await it with "
+            "gui_device_wait_operation or watch 'device_changed'. type_name is the "
+            "driver class (e.g. 'YOKOGS200', 'SGS100A'); address is the VISA/GPIB/IP "
+            "address. Set remember=true to persist the device across sessions."
         ),
         "inputSchema": {
             "type": "object",
@@ -1219,6 +1313,10 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
                     "type": "boolean",
                     "description": "Persist device across sessions (default false)",
                 },
+                "wait_seconds": {
+                    "type": "number",
+                    "description": "Seconds to wait before degrading to a handle (default 1.0)",
+                },
             },
             "required": ["type_name", "name", "address"],
         },
@@ -1226,10 +1324,11 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
     "gui_device_disconnect": {
         "handler": tool_gui_device_disconnect,
         "description": (
-            "Start disconnecting a device (async). "
-            "Returns immediately; disconnection completes in the background. "
-            "Poll gui_device_active_operation or subscribe to 'device_changed' to detect completion. "
-            "Set remember=false to also remove it from persistent storage."
+            "Disconnect a device. Waits up to wait_seconds (default 1.0): returns "
+            "{status:'finished', snapshot:{...}} if it lands in time, else "
+            "{status:'pending'} (await with gui_device_wait_operation or watch "
+            "'device_changed'). Set remember=false to also remove it from "
+            "persistent storage."
         ),
         "inputSchema": {
             "type": "object",
@@ -1239,26 +1338,39 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
                     "type": "boolean",
                     "description": "Keep device in persistent storage (default true)",
                 },
+                "wait_seconds": {
+                    "type": "number",
+                    "description": "Seconds to wait before degrading to a handle (default 1.0)",
+                },
             },
             "required": ["name"],
         },
     },
-    "gui_device_set_value": {
-        "handler": tool_gui_device_set_value,
+    "gui_device_setup": {
+        "handler": tool_gui_device_setup,
         "description": (
-            "Set the output value on a connected value-type device (e.g. flux bias current in A). "
-            "The device must already be connected."
+            "Apply a device setup: patch the device's info fields via 'updates' "
+            "(e.g. {'value': 0.5} to ramp a source's output value — this is the way "
+            "to set an output value, ramped/cancellable, no separate set_value). "
+            "Waits up to wait_seconds (default 1.0): returns {status:'finished', "
+            "snapshot:{...}} if it lands in time, else {status:'pending'} (await "
+            "with gui_device_wait_operation, or read progress via "
+            "gui_device_active_setup). The device must already be connected."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "name": {"type": "string"},
-                "value": {
-                    "type": ["number", "string", "boolean", "object", "array", "null"],
-                    "description": "New output value (type depends on device, typically a float)",
+                "name": {"type": "string", "description": "Device name"},
+                "updates": {
+                    "type": "object",
+                    "description": "Device info field updates (e.g. {'value': 0.5})",
+                },
+                "wait_seconds": {
+                    "type": "number",
+                    "description": "Seconds to wait before degrading to a handle (default 1.0)",
                 },
             },
-            "required": ["name", "value"],
+            "required": ["name", "updates"],
         },
     },
     "gui_tab_figure_screenshot": {
@@ -1296,7 +1408,7 @@ _OVERRIDE_NAMES = frozenset(
         "gui_connect_mock",
         "gui_device_connect",
         "gui_device_disconnect",
-        "gui_device_set_value",
+        "gui_device_setup",
         "gui_view_screenshot",
         "gui_dialog_screenshot",
         "gui_tab_figure_screenshot",
@@ -1307,7 +1419,7 @@ _OVERRIDE_NAMES = frozenset(
         "gui_events_poll",
         "gui_editor_subscribe",
         "gui_editor_unsubscribe",
-        "gui_device_wait_setup",
+        "gui_device_wait_operation",
     }
 )
 

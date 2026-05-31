@@ -24,7 +24,7 @@ _FINISHED = OperationOutcome("finished")
         (OperationKind.SOC_CONNECT, OperationKind.SOC_CONNECT),
         (OperationKind.DEVICE_CONNECT, OperationKind.RUN),
         (OperationKind.DEVICE_CONNECT, OperationKind.DEVICE_DISCONNECT),
-        (OperationKind.DEVICE_SETUP, OperationKind.DEVICE_SET_VALUE),
+        (OperationKind.DEVICE_SETUP, OperationKind.DEVICE_CONNECT),
     ],
 )
 def test_operation_gate_rejects_conflicts(

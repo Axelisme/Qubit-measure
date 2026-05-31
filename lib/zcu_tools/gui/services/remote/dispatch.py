@@ -33,7 +33,6 @@ from .wire import (
     coerce_connect_device_request,
     coerce_connect_request,
     coerce_disconnect_device_request,
-    coerce_set_device_value_request,
 )
 
 logger = logging.getLogger(__name__)
@@ -613,27 +612,27 @@ def _h_startup_apply(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
 def _h_device_connect(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     req = coerce_connect_device_request(params)
     try:
-        ctrl.start_connect_device(req)
+        operation_id = ctrl.start_connect_device(req)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
             str(exc),
             reason=getattr(exc, "reason_code", ""),
         ) from exc
-    return {}
+    return {"operation_id": operation_id}
 
 
 def _h_device_disconnect(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     req = coerce_disconnect_device_request(params)
     try:
-        ctrl.start_disconnect_device(req)
+        operation_id = ctrl.start_disconnect_device(req)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
             str(exc),
             reason=getattr(exc, "reason_code", ""),
         ) from exc
-    return {}
+    return {"operation_id": operation_id}
 
 
 def _h_device_reconnect(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
@@ -653,19 +652,6 @@ def _h_device_forget(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
     name = str(params["name"])
     try:
         ctrl.forget_device(name)
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
-    return {}
-
-
-def _h_device_set_value(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
-    req = coerce_set_device_value_request(params)
-    try:
-        ctrl.start_set_device_value(req)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -764,7 +750,9 @@ def _h_device_snapshot(ctrl, params: Mapping[str, object]) -> Mapping[str, objec
     snap = ctrl.get_device_snapshot(name)
     if snap is None:
         return {"snapshot": None}
-    # BaseDeviceInfo is intentionally omitted (not JSON-friendly).
+    # ``info`` is a ``BaseDeviceInfo`` (a pydantic ``ConfigBase``); ``to_dict()``
+    # yields JSON-safe scalars (address/type/label + driver fields like the
+    # source ``value``), so the agent can read the device's live parameters.
     return {
         "snapshot": {
             "name": snap.name,
@@ -772,6 +760,7 @@ def _h_device_snapshot(ctrl, params: Mapping[str, object]) -> Mapping[str, objec
             "address": snap.address,
             "status": snap.status.value,
             "error": snap.error,
+            "info": snap.info.to_dict() if snap.info is not None else None,
         }
     }
 
@@ -824,7 +813,7 @@ def _h_operation_await(ctrl, params: Mapping[str, object]) -> Mapping[str, objec
     # off_main_thread handler: blocks the IO worker thread on the gate's
     # thread-safe registry (never touches main-thread-owned state). Returns the
     # terminal outcome; failed/cancelled become a PRECONDITION_FAILED so the
-    # caller's await raises (mirrors the old wait_setup "failed -> raise").
+    # caller's await raises; timeout becomes TIMEOUT.
     operation_id = int(params["operation_id"])  # type: ignore[arg-type]
     timeout = float(params["timeout"])  # type: ignore[arg-type]
     outcome = ctrl.await_operation(operation_id, timeout)
@@ -1367,7 +1356,6 @@ _HANDLERS: dict[str, Handler] = {
     "device.disconnect": _h_device_disconnect,
     "device.reconnect": _h_device_reconnect,
     "device.forget": _h_device_forget,
-    "device.set_value": _h_device_set_value,
     "device.setup": _h_device_setup,
     "device.cancel_operation": _h_device_cancel_operation,
     "device.active_setup": _h_device_active_setup,

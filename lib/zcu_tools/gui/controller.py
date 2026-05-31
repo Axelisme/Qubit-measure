@@ -31,7 +31,6 @@ from .services import (
     RestoreReport,
     SaveBothOutcome,
     SessionPersistenceError,
-    SetDeviceValueRequest,
     SetupDeviceRequest,
     StartupConnectionRequest,
     StartupPersistenceError,
@@ -142,7 +141,6 @@ class Controller:
         self._dev_svc.setup_cancelled.connect(self._on_device_setup_cancelled)
         self._dev_svc.device_connected.connect(self._on_device_connected)
         self._dev_svc.device_disconnected.connect(self._on_device_disconnected)
-        self._dev_svc.value_set.connect(self._on_device_value_set)
         self._dev_svc.operation_failed.connect(self._on_device_operation_failed)
 
     def set_view(self, view: ViewProtocol) -> None:
@@ -225,9 +223,6 @@ class Controller:
 
     def _on_device_disconnected(self, req: DisconnectDeviceRequest) -> None:
         self._require_view().show_status_message(f"Device disconnected: {req.name}")
-
-    def _on_device_value_set(self, name: str) -> None:
-        self._require_view().show_status_message(f"Device value set: {name}")
 
     def _on_device_operation_failed(self, name: str, error: str) -> None:
         self._require_view().show_error_dialog(
@@ -636,11 +631,11 @@ class Controller:
     # Device (DeviceService)
     # ------------------------------------------------------------------
 
-    def start_connect_device(self, req: ConnectDeviceRequest) -> None:
-        self._dev_svc.start_connect_device(req)
+    def start_connect_device(self, req: ConnectDeviceRequest) -> int:
+        return self._dev_svc.start_connect_device(req)
 
-    def start_disconnect_device(self, req: DisconnectDeviceRequest) -> None:
-        self._dev_svc.start_disconnect_device(req)
+    def start_disconnect_device(self, req: DisconnectDeviceRequest) -> int:
+        return self._dev_svc.start_disconnect_device(req)
 
     def list_devices(self) -> list[DeviceEntry]:
         return self._dev_svc.list_devices()
@@ -653,12 +648,6 @@ class Controller:
 
     def get_device_value_for_new_context(self, name: str) -> Optional[float]:
         return self._dev_svc.get_device_value_for_new_context(name)
-
-    def start_set_device_value(self, req: SetDeviceValueRequest) -> None:
-        self._dev_svc.start_set_device_value(req)
-
-    def get_device_value(self, name: str) -> object:
-        return self._dev_svc.get_device_value(name)
 
     def get_device_info(self, name: str) -> BaseDeviceInfo | None:
         return self._dev_svc.get_device_info(name)
