@@ -178,22 +178,20 @@ def _h_tab_get_cfg(
 def _h_tab_list_paths(
     ctrl: "Controller", params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from .path_resolver import list_settable_paths
-
     tab_id = str(params["tab_id"])
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    # Walk the same live LiveModel that cfg.set_field mutates, so every listed
-    # path is guaranteed settable. Requires the tab's form to be populated.
-    try:
-        root = ctrl.get_tab_live_model_root(tab_id)
-    except (KeyError, RuntimeError) as exc:
+    # A tab's cfg draft is a CfgEditorService session keyed by its tab_id (the
+    # same draft the open form attaches to). List its settable paths from that
+    # session — the one ``editor.set_field`` mutates — so listed paths are
+    # guaranteed settable and agent+user share one model (ADR-0013 F11).
+    editor_id = ctrl.editor_id_for_owner(tab_id)
+    if editor_id is None:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
-    return {"paths": list_settable_paths(root)}
+            f"tab {tab_id!r} cfg form has no live model yet",
+        )
+    return {"paths": ctrl.cfg_editor_get(editor_id)}
 
 
 def _h_tab_update_cfg(
@@ -218,30 +216,6 @@ def _h_tab_update_cfg(
             ErrorCode.INVALID_PARAMS, f"invalid cfg payload: {exc}"
         ) from exc
     ctrl.update_tab_cfg(tab_id, schema)
-    return {}
-
-
-def _h_cfg_set_field(
-    ctrl: "Controller", params: Mapping[str, object]
-) -> Mapping[str, object]:
-    tab_id = str(params["tab_id"])
-    if not ctrl.has_tab(tab_id):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    if ctrl.get_running_tab_id() == tab_id:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            f"tab {tab_id!r} is currently running; cancel the run before editing cfg",
-        )
-    path = str(params["path"])
-    value = params["value"]
-    try:
-        ctrl.set_tab_field(tab_id, path, value)
-    except (KeyError, RuntimeError) as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
     return {}
 
 
@@ -1281,6 +1255,15 @@ def _h_editor_set_field(
     editor_id = str(params["editor_id"])
     path = str(params["path"])
     value = params["value"]
+    # A tab cfg draft is a session owned by the tab_id; editing it while that
+    # tab runs is blocked — same guard the human gets via the disabled form
+    # (ADR-0013 F11). owner-less / ml-entry sessions are unaffected.
+    owner = ctrl.owner_of_editor(editor_id)
+    if owner is not None and ctrl.get_running_tab_id() == owner:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            f"tab {owner!r} is currently running; cancel the run before editing cfg",
+        )
     try:
         return ctrl.cfg_editor_set_field(editor_id, path, value)
     except CfgEditorError as exc:
@@ -1486,7 +1469,6 @@ _HANDLERS: dict[str, Handler] = {
     "tab.get_cfg": _h_tab_get_cfg,
     "tab.list_paths": _h_tab_list_paths,
     "tab.update_cfg": _h_tab_update_cfg,
-    "cfg.set_field": _h_cfg_set_field,
     "run.start": _h_run_start,
     "run.cancel": _h_run_cancel,
     "run.running_tab": _h_run_running_tab,

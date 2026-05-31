@@ -40,7 +40,11 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 #     — ADR-0011, the single ml/md write authority is ContextService.
 # v5: added device.setup_spec (discover the fields settable via device.setup's
 #     updates — name/type/choices/current/settable — from the live info model).
-WIRE_VERSION = 5
+# v6: removed cfg.set_field — a tab's cfg is edited through its CfgEditorService
+#     session (editor.set_field on the tab's editor_id), the same draft the form
+#     attaches to, so agent + user share one model (ADR-0013 F11). tab.list_paths
+#     now reads that session too (wire shape unchanged).
+WIRE_VERSION = 6
 
 # ---------------------------------------------------------------------------
 # Wire envelopes

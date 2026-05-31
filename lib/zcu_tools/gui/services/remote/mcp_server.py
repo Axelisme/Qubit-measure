@@ -70,11 +70,13 @@ Getting started:
 
 Typical experiment loop:
   - gui_adapter_list -> gui_tab_new(adapter_name) -> note the returned tab_id.
-  - Inspect/edit config: gui_tab_get_cfg, then gui_cfg_set_field(tab_id, path,
-    value) for single fields. Paths are dotted and must match gui_tab_get_cfg
-    keys exactly, e.g. 'reps', 'sweep.gain.expts', 'modules.qub_pulse.value.freq'.
-    Nested module fields need the 'modules.' prefix; an unknown path fails with
-    invalid_params rather than silently no-op'ing.
+  - Inspect/edit config: gui_tab_get_cfg, then edit single fields via the tab's
+    cfg-editor session — take editor_id from gui_tab_snapshot and call
+    gui_editor_set_field(editor_id, path, value). Paths are dotted and must match
+    gui_tab_list_paths, e.g. 'reps', 'sweep.gain.expts',
+    'modules.qub_pulse.value.freq'. Nested module fields need the 'modules.'
+    prefix; an unknown path fails with invalid_params rather than silently
+    no-op'ing. (This is the same draft the GUI form shows — edits are WYSIWYG.)
   - gui_run_start(tab_id) is fire-and-forget (returns immediately).
   - gui_analyze_start(tab_id) after a run; gui_save_data / gui_save_image /
     gui_save_both to persist.
@@ -105,7 +107,7 @@ Call contract — read before issuing defensive/duplicate calls:
     read-only and side-effect-free. Safe to retry across turns, but duplicating
     within a turn is pure waste — the result cannot change.
   - Mutating tools DO have side effects and must be sent exactly once: gui_run_start
-    (fire-and-forget — a duplicate starts a SECOND run), gui_cfg_set_field,
+    (fire-and-forget — a duplicate starts a SECOND run), gui_editor_set_field,
     gui_tab_new / gui_tab_close, gui_save_*, gui_device_connect / _disconnect / _setup,
     gui_context_set_* / _del_* / _rename_*, gui_editor_commit. Issue once and
     read the response rather than re-sending.
@@ -882,7 +884,7 @@ def tool_gui_dialog_screenshot(arguments: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Phase 81b tools — cfg.set_field / context queries / device queries
+# Phase 81b tools — context queries / device queries
 # ---------------------------------------------------------------------------
 
 

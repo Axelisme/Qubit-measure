@@ -287,14 +287,20 @@ def _add_fake_tab(fx, tab_id: str) -> None:
     )
 
 
-def test_cfg_set_field_blocked_while_running(fx):
+def test_editor_set_field_blocked_while_owning_tab_runs(fx):
+    """A tab cfg draft (editor session owned by tab_id) can't be edited while
+    that tab runs — same guard the human gets via the disabled form (F11)."""
     tab_id = "tab-run"
     _add_fake_tab(fx, tab_id)
+    cfg = fx.state.get_tab(tab_id).cfg_schema
+    editor_id, _ = fx.ctrl.open_seeded_cfg_editor(cfg, gc=False, owner_key=tab_id)
     sock = open_client(fx.service.port)
     try:
         with patch.object(fx.ctrl, "get_running_tab_id", return_value=tab_id):
             resp = call(
-                sock, "cfg.set_field", {"tab_id": tab_id, "path": "reps", "value": 10}
+                sock,
+                "editor.set_field",
+                {"editor_id": editor_id, "path": "reps", "value": 10},
             )
         assert resp["ok"] is False
         assert resp["error"]["code"] == "precondition_failed"

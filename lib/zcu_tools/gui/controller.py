@@ -72,7 +72,6 @@ class ViewProtocol(Protocol):
     def take_screenshot(self, tab_id: Optional[str] = None) -> bytes: ...
     def take_figure_screenshot(self, tab_id: str) -> bytes: ...
     def take_dialog_screenshot(self, dialog_name: Any) -> bytes: ...
-    def get_tab_live_model_root(self, tab_id: str) -> Any: ...
 
 
 class Controller:
@@ -614,6 +613,10 @@ class Controller:
     ) -> dict[str, object]:
         return self._cfg_editor_svc.set_field(editor_id, path, value)
 
+    def owner_of_editor(self, editor_id: str) -> Optional[str]:
+        """The owner_key a cfg-editor session is keyed to (tab_id for tab cfg)."""
+        return self._cfg_editor_svc.owner_of_editor(editor_id)
+
     def cfg_editor_get(self, editor_id: str) -> list[dict[str, object]]:
         return self._cfg_editor_svc.get(editor_id)
 
@@ -859,28 +862,6 @@ class Controller:
 
     def take_dialog_screenshot(self, dialog_name: Any) -> bytes:
         return self._view_query_svc.dialog_screenshot(dialog_name)
-
-    def get_tab_live_model_root(self, tab_id: str):
-        return self._view_query_svc.live_model_root(tab_id)
-
-    def set_tab_field(self, tab_id: str, path: str, value: object) -> None:
-        """Mutate a single cfg field on the tab's live LiveModel (Phase 81b).
-
-        Delegates to ViewQueryService, which goes through the form's live tree
-        so the change auto-commits to ``State.cfg_schema`` via the existing
-        ``schema_changed`` path, keeping the visible widget in sync (WYSIWYG).
-
-        Semantics differ from ``update_tab_cfg``: this is the View-coupled,
-        single-field WYSIWYG edit (mutates the live form, fails fast if the form
-        is not populated); ``update_tab_cfg`` is a codec replace that does not
-        depend on the View.
-
-        Terminal: ViewQueryService → ``path_resolver.resolve_and_set`` mutates the
-        live LiveModel → ``on_change`` → ``update_tab_cfg`` → ``State.update_tab_cfg_schema``,
-        bumping ``tab:<id>:cfg``; no ``TAB_INTERACTION_CHANGED`` (keystroke must
-        not trigger a snapshot rebuild).
-        """
-        self._view_query_svc.set_field(tab_id, path, value)
 
     def get_adapter_names(self) -> list[str]:
         return self._tab_svc.list_adapter_names()

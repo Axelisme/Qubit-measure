@@ -75,7 +75,6 @@ if TYPE_CHECKING:
 
     from zcu_tools.gui.adapter import CfgSchema, WritebackItem
     from zcu_tools.gui.controller import Controller
-    from zcu_tools.gui.live_model import SectionLiveField
     from zcu_tools.gui.services import TabViewSnapshot
 
 
@@ -1271,21 +1270,6 @@ class MainWindow(QMainWindow):
                 f"Qt failed to encode {dialog_name.value!r} dialog as PNG"
             )
         return bytes(buf.data().data())  # type: ignore[arg-type]
-
-    def get_tab_live_model_root(self, tab_id: str) -> "SectionLiveField":
-        """Return the tab's live ``SectionLiveField`` root.
-
-        Used by the remote ``cfg.set_field`` path resolver to mutate the
-        draft directly (Phase 81b). Raises ``KeyError`` if the tab does
-        not exist, ``RuntimeError`` if the form has not been populated yet.
-        """
-        tab_w = self._tab_widgets.get(tab_id)
-        if tab_w is None:
-            raise KeyError(tab_id)
-        root = tab_w.cfg_form.get_live_root()
-        if root is None:
-            raise RuntimeError(f"tab {tab_id!r} cfg form has no live model yet")
-        return root
 
     def closeEvent(self, a0: Optional[QCloseEvent]) -> None:
         active_setup = self._ctrl.get_active_device_setup()

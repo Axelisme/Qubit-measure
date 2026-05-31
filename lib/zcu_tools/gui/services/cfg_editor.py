@@ -314,6 +314,16 @@ class CfgEditorService:
                 return editor_id
         return None
 
+    def owner_of_editor(self, editor_id: str) -> Optional[str]:
+        """The owner_key a session is keyed to (tab_id for a tab cfg draft).
+
+        ``None`` for unknown sessions or owner-less (gc) sessions. Lets a caller
+        that knows run-state (the Controller façade) gate edits on the owning
+        tab without this service needing to know about runs.
+        """
+        session = self._editors.get(editor_id)
+        return session.owner_key if session is not None else None
+
     def get_root(self, editor_id: str) -> SectionLiveField:
         """Return the live ``SectionLiveField`` for ``editor_id``.
 

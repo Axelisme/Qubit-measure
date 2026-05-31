@@ -142,24 +142,16 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "tab.list_paths": MethodSpec(
         5.0,
         "List every settable cfg dotted path with its current value, type and "
-        "(when applicable) choices. Each path is guaranteed usable with "
-        "cfg.set_field. kind ∈ scalar / sweep_edge / moduleref_key / deviceref.",
+        "(when applicable) choices. Edit a path with editor.set_field on the "
+        "tab's editor_id (from tab.snapshot). kind ∈ scalar / sweep_edge / "
+        "moduleref_key / deviceref.",
         (_str("tab_id"),),
     ),
     "tab.update_cfg": MethodSpec(
         10.0,
         "Replace tab cfg from a full tagged form (missing keys reset to spec "
-        "defaults, not preserved; use cfg.set_field for single-field edits)",
+        "defaults, not preserved; use editor.set_field for single-field edits)",
         (_str("tab_id"), _obj("raw", "Full tagged cfg form")),
-    ),
-    "cfg.set_field": MethodSpec(
-        5.0,
-        "Set a single cfg field by dotted path",
-        (
-            _str("tab_id"),
-            _str("path", "Dotted field path"),
-            _json("value", "New field value"),
-        ),
     ),
     # Run
     "run.start": MethodSpec(

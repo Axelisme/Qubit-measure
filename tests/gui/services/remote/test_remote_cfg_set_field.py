@@ -1,51 +1,38 @@
-"""RemoteControlService cfg.set_field + context/device queries.
+"""RemoteControlService tab-cfg editing via the CfgEditorService session.
 
-``cfg.set_field`` mutates the tab's *live* ``SectionLiveField`` (so the form
-stays WYSIWYG and auto-commits). In these tests the mock View returns a real
-``SectionLiveField`` built from the FakeAdapter default cfg, and we assert the
-mutation lands on that live tree. Path-resolver edge cases (sweep edges,
-literal rejection, unknown paths) each get a focused case.
+A tab's cfg draft is a service-owned ``CfgEditorSession`` keyed by the tab_id
+(the same draft the open form attaches to). Agents edit it with
+``editor.set_field`` on the tab's ``editor_id`` (from ``tab.snapshot``) — the
+same path the GUI form uses, so user + agent share one model (ADR-0013 F11).
+
+Here the fixture opens a real seeded session owned by the tab on the real
+Controller, then drives edits through ``editor.set_field`` and discovery
+through ``tab.list_paths`` (which reads that same session). Path-resolver edge
+cases (sweep edges, literal rejection, unknown paths) each get a focused case.
 """
 
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.adapter import DirectValue, EvalValue
-from zcu_tools.gui.live_model import (
-    LiveModelEnv,
-    ScalarLiveField,
-    SectionLiveField,
-    SweepLiveField,
-)
 
 from ._helpers import Fixture, call, open_client
 
 # ---------------------------------------------------------------------------
-# Fixture: wire a real live model behind the mock View
+# Fixture: open a real seeded cfg-editor session owned by one tab
 # ---------------------------------------------------------------------------
 
 
 class _LiveFixture(Fixture):
-    """Fixture whose View serves a real SectionLiveField for one tab."""
+    """Fixture with a real CfgEditorService session owned by one tab."""
 
     def __init__(self) -> None:
         super().__init__()
-        # Build a live model from the FakeAdapter default cfg, using the real
-        # Controller as the LiveModelEnv controller (it implements the
-        # ControllerProtocol surface LiveFields need).
-        schema = self.ctrl.get_adapter_names()  # touch to ensure registry ready
-        del schema
         from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
-
-        cfg = FakeAdapter().make_default_cfg(self.state.exp_context)
-        env = LiveModelEnv(ctrl=self.ctrl)
-        self.root = SectionLiveField(cfg.spec, env, initial_val=cfg.value)
-        self.view.get_tab_live_model_root = lambda tab_id: self.root
-        # cfg.set_field also checks has_tab; register a dummy tab id.
-        self._tab_id = "tab-live"
-        # Inject a minimal TabState so has_tab(tab-live) is True.
         from zcu_tools.gui.state import TabState
 
+        cfg = FakeAdapter().make_default_cfg(self.state.exp_context)
+        self._tab_id = "tab-live"
+        # Inject a TabState so has_tab(tab-live) is True.
         self.state.add_tab(
             self._tab_id,
             TabState(
@@ -54,6 +41,22 @@ class _LiveFixture(Fixture):
                 cfg_schema=cfg,
             ),
         )
+        # Open the tab's cfg-editor session keyed by tab_id — exactly what
+        # MainWindow.populate_cfg does. editor_id_for_owner(tab_id) now resolves
+        # it, so tab.list_paths reads it and editor.set_field mutates it.
+        self.editor_id, _ = self.ctrl.open_seeded_cfg_editor(
+            cfg, gc=False, owner_key=self._tab_id
+        )
+
+    def get_value(self, path: str):
+        """Read the current value of a path off the live session draft."""
+        from zcu_tools.gui.services.remote.path_resolver import list_settable_paths
+
+        root = self.ctrl.get_cfg_editor_root(self.editor_id)
+        for entry in list_settable_paths(root):
+            if entry["path"] == path:
+                return entry["value"]
+        raise KeyError(path)
 
 
 @pytest.fixture()
@@ -64,8 +67,13 @@ def lf(qapp):  # noqa: ARG001
     f.stop()
 
 
-def _field(root: SectionLiveField, name: str):
-    return root.fields[name]
+def _set_field(sock, lf, path, value, rid="1"):
+    return call(
+        sock,
+        "editor.set_field",
+        {"editor_id": lf.editor_id, "path": path, "value": value},
+        rid=rid,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -73,41 +81,22 @@ def _field(root: SectionLiveField, name: str):
 # ---------------------------------------------------------------------------
 
 
-def test_set_field_scalar_updates_live_model(lf):
+def test_set_field_scalar_updates_session(lf):
     sock = open_client(lf.service.port)
     try:
-        resp = call(
-            sock,
-            "cfg.set_field",
-            {"tab_id": lf._tab_id, "path": "reps", "value": 42},
-        )
+        resp = _set_field(sock, lf, "reps", 42)
         assert resp["ok"] is True
-        reps = _field(lf.root, "reps")
-        assert isinstance(reps, ScalarLiveField)
-        val = reps.get_value()
-        assert isinstance(val, DirectValue)
-        assert val.value == 42
+        assert lf.get_value("reps") == 42
     finally:
         sock.close()
 
 
-def test_set_field_scalar_eval_expression(lf):
+def test_set_field_scalar_float(lf):
     sock = open_client(lf.service.port)
     try:
-        # ScalarLiveField.set_value accepts EvalValue; the resolver passes the
-        # raw value straight through, so a plain number is the common path.
-        # Here we confirm a float lands too.
-        resp = call(
-            sock,
-            "cfg.set_field",
-            {"tab_id": lf._tab_id, "path": "gain", "value": 0.25},
-        )
+        resp = _set_field(sock, lf, "gain", 0.25)
         assert resp["ok"] is True
-        gain = _field(lf.root, "gain")
-        assert isinstance(gain, ScalarLiveField)
-        val = gain.get_value()
-        assert isinstance(val, (DirectValue, EvalValue))
-        assert isinstance(val, DirectValue) and val.value == 0.25
+        assert lf.get_value("gain") == 0.25
     finally:
         sock.close()
 
@@ -120,15 +109,9 @@ def test_set_field_scalar_eval_expression(lf):
 def test_set_field_sweep_expts(lf):
     sock = open_client(lf.service.port)
     try:
-        resp = call(
-            sock,
-            "cfg.set_field",
-            {"tab_id": lf._tab_id, "path": "sweep.expts", "value": 5},
-        )
+        resp = _set_field(sock, lf, "sweep.expts", 5)
         assert resp["ok"] is True
-        sweep = _field(lf.root, "sweep")
-        assert isinstance(sweep, SweepLiveField)
-        assert sweep.get_value().expts == 5
+        assert lf.get_value("sweep.expts") == 5
     finally:
         sock.close()
 
@@ -136,23 +119,10 @@ def test_set_field_sweep_expts(lf):
 def test_set_field_sweep_start_stop(lf):
     sock = open_client(lf.service.port)
     try:
-        call(
-            sock,
-            "cfg.set_field",
-            {"tab_id": lf._tab_id, "path": "sweep.start", "value": 2.0},
-            rid="a",
-        )
-        call(
-            sock,
-            "cfg.set_field",
-            {"tab_id": lf._tab_id, "path": "sweep.stop", "value": 8.0},
-            rid="b",
-        )
-        sweep = _field(lf.root, "sweep")
-        assert isinstance(sweep, SweepLiveField)
-        sv = sweep.get_value()
-        assert sv.start == 2.0
-        assert sv.stop == 8.0
+        _set_field(sock, lf, "sweep.start", 2.0, rid="a")
+        _set_field(sock, lf, "sweep.stop", 8.0, rid="b")
+        assert lf.get_value("sweep.start") == 2.0
+        assert lf.get_value("sweep.stop") == 8.0
     finally:
         sock.close()
 
@@ -160,11 +130,7 @@ def test_set_field_sweep_start_stop(lf):
 def test_set_field_sweep_step(lf):
     sock = open_client(lf.service.port)
     try:
-        resp = call(
-            sock,
-            "cfg.set_field",
-            {"tab_id": lf._tab_id, "path": "sweep.step", "value": 0.5},
-        )
+        resp = _set_field(sock, lf, "sweep.step", 0.5)
         assert resp["ok"] is True
     finally:
         sock.close()
@@ -173,11 +139,7 @@ def test_set_field_sweep_step(lf):
 def test_set_field_sweep_expts_non_integer_rejected(lf):
     sock = open_client(lf.service.port)
     try:
-        resp = call(
-            sock,
-            "cfg.set_field",
-            {"tab_id": lf._tab_id, "path": "sweep.expts", "value": 3.5},
-        )
+        resp = _set_field(sock, lf, "sweep.expts", 3.5)
         assert resp["ok"] is False
         assert resp["error"]["code"] == "invalid_params"
     finally:
@@ -192,38 +154,20 @@ def test_set_field_sweep_expts_non_integer_rejected(lf):
 def test_set_field_unknown_path_rejected(lf):
     sock = open_client(lf.service.port)
     try:
-        resp = call(
-            sock,
-            "cfg.set_field",
-            {"tab_id": lf._tab_id, "path": "does_not_exist", "value": 1},
-        )
+        resp = _set_field(sock, lf, "does_not_exist", 1)
         assert resp["ok"] is False
         assert resp["error"]["code"] == "invalid_params"
     finally:
         sock.close()
 
 
-def test_set_field_unknown_tab_rejected(lf):
+def test_set_field_unknown_editor_rejected(lf):
     sock = open_client(lf.service.port)
     try:
         resp = call(
             sock,
-            "cfg.set_field",
-            {"tab_id": "ghost", "path": "reps", "value": 1},
-        )
-        assert resp["ok"] is False
-        assert resp["error"]["code"] == "invalid_params"
-    finally:
-        sock.close()
-
-
-def test_set_field_missing_value_rejected(lf):
-    sock = open_client(lf.service.port)
-    try:
-        resp = call(
-            sock,
-            "cfg.set_field",
-            {"tab_id": lf._tab_id, "path": "reps"},
+            "editor.set_field",
+            {"editor_id": "ghost", "path": "reps", "value": 1},
         )
         assert resp["ok"] is False
         assert resp["error"]["code"] == "invalid_params"
@@ -235,11 +179,7 @@ def test_set_field_section_target_rejected(lf):
     sock = open_client(lf.service.port)
     try:
         # 'sweep' alone targets a sweep container, not a leaf.
-        resp = call(
-            sock,
-            "cfg.set_field",
-            {"tab_id": lf._tab_id, "path": "sweep", "value": 1},
-        )
+        resp = _set_field(sock, lf, "sweep", 1)
         assert resp["ok"] is False
         assert resp["error"]["code"] == "invalid_params"
     finally:
@@ -317,7 +257,7 @@ def test_device_list_and_snapshot(lf):
 
 
 # ---------------------------------------------------------------------------
-# tab.list_paths
+# tab.list_paths — now reads the tab's cfg-editor session (ADR-0013 F11)
 # ---------------------------------------------------------------------------
 
 
@@ -355,11 +295,7 @@ def test_list_paths_round_trips_through_set_field(lf):
             if p["kind"] == "scalar" and p["type"] in ("int", "float")
         )
         new_value = 7 if scalar["type"] == "int" else 0.5
-        set_resp = call(
-            sock,
-            "cfg.set_field",
-            {"tab_id": lf._tab_id, "path": scalar["path"], "value": new_value},
-        )
+        set_resp = _set_field(sock, lf, scalar["path"], new_value)
         assert set_resp["ok"] is True, scalar["path"]
     finally:
         sock.close()
@@ -373,3 +309,27 @@ def test_list_paths_unknown_tab_rejected(lf):
         assert resp["error"]["code"] == "invalid_params"
     finally:
         sock.close()
+
+
+def test_list_paths_form_not_populated_rejected(qapp):  # noqa: ARG001
+    """A tab with no cfg-editor session yet → precondition_failed."""
+    from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
+    from zcu_tools.gui.state import TabState
+
+    f = Fixture()
+    f.start()
+    try:
+        cfg = FakeAdapter().make_default_cfg(f.state.exp_context)
+        f.state.add_tab(
+            "bare",
+            TabState(adapter_name="fake", adapter=FakeAdapter(), cfg_schema=cfg),
+        )
+        sock = open_client(f.service.port)
+        try:
+            resp = call(sock, "tab.list_paths", {"tab_id": "bare"})
+            assert resp["ok"] is False
+            assert resp["error"]["code"] == "precondition_failed"
+        finally:
+            sock.close()
+    finally:
+        f.stop()
