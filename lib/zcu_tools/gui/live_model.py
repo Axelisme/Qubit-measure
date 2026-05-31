@@ -677,10 +677,27 @@ class ModuleRefLiveField(LiveField):
             self._set_valid(valid)
 
     def _refresh_library_binding(self) -> None:
-        if self._binding_state is not LibraryBindingState.LINKED:
+        # A dangling library ref (LINKED *or* MODIFIED whose key vanished, e.g.
+        # the entry was deleted/renamed) must self-heal to inline Custom keeping
+        # the current value. A present MODIFIED ref is left alone (rebuilding
+        # would discard the user's edits); only LINKED-present refs re-sync from
+        # the library.
+        if self._chosen_key.startswith("<Custom:"):
             return
+        if self._library_key_present():
+            if self._binding_state is not LibraryBindingState.LINKED:
+                return
+        # LINKED-present → re-sync; LINKED/MODIFIED-absent → _rebuild_sub_field
+        # detects the missing key and heals to Custom (keeping current value).
         self._rebuild_sub_field()
         self.on_change.emit(self.get_value())
+
+    def _library_key_present(self) -> bool:
+        ml = self.env.ctrl.get_current_ml()
+        if ml is None:
+            return False
+        store = ml.modules if isinstance(self.spec, ModuleRefSpec) else ml.waveforms
+        return self._chosen_key in store
 
     def get_chosen_key(self) -> str:
         return self._chosen_key

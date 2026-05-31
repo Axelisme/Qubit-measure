@@ -293,10 +293,12 @@ def test_module_ref_sub_edit_marks_overridden_in_get_value(env, monkeypatch):
     # round-trip — this test is about the is_overridden flag, not conversion).
     import zcu_tools.gui.ui.fields.utils as _utils
 
+    _orig = _utils._spec_value_for_chosen
+
     def _fake_lookup(chosen_key, allowed, ml):
         if chosen_key == "lib_mod":
             return inner, CfgSectionValue(fields={"ch": DirectValue(0)})
-        return _utils._spec_value_for_chosen(chosen_key, allowed, ml)
+        return _orig(chosen_key, allowed, ml)
 
     monkeypatch.setattr(_utils, "_spec_value_for_chosen", _fake_lookup)
 
@@ -349,6 +351,66 @@ def test_module_ref_overridden_dangling_self_heals_to_custom(env):
     out = field.get_value()
     ch = out.value.fields["ch"]
     assert isinstance(ch, DirectValue) and ch.value == 7
+
+
+def test_modified_ref_self_heals_when_library_key_deleted_at_runtime(env, monkeypatch):
+    """A MODIFIED (edited) library ref whose key is deleted at runtime must also
+    self-heal to Custom on ML_CHANGED — _refresh_library_binding's old LINKED-only
+    guard skipped MODIFIED refs, leaving a dangling chosen_key that broke lowering."""
+    from zcu_tools.gui.event_bus import GuiEvent
+
+    inner = CfgSectionSpec(
+        label="Const",
+        fields={
+            "style": LiteralSpec("const"),
+            "length": ScalarSpec(label="Length", type=float),
+        },
+    )
+    spec = CfgSectionSpec(
+        fields={"wav": WaveformRefSpec(allowed=[inner], label="Waveform")}
+    )
+
+    present = {"yes": True}
+    import zcu_tools.gui.ui.fields.utils as _utils
+
+    _orig = _utils._spec_value_for_chosen
+
+    def _fake_lookup(chosen_key, allowed, ml):
+        if chosen_key == "lib_wav" and present["yes"]:
+            return inner, CfgSectionValue(
+                fields={"style": DirectValue("const"), "length": DirectValue(1.0)}
+            )
+        return _orig(chosen_key, allowed, ml)
+
+    monkeypatch.setattr(_utils, "_spec_value_for_chosen", _fake_lookup)
+    env.ctrl.get_current_ml.return_value = ModuleLibrary()
+
+    initial = CfgSectionValue(
+        fields={
+            "wav": WaveformRefValue(
+                chosen_key="lib_wav",
+                value=CfgSectionValue(
+                    fields={"style": DirectValue("const"), "length": DirectValue(99.9)}
+                ),
+                is_overridden=True,  # MODIFIED
+            )
+        }
+    )
+    section = SectionLiveField(spec, env, initial_val=initial)
+    field = cast(ModuleRefLiveField, section.fields["wav"])
+    assert field.get_chosen_key() == "lib_wav"
+    assert field.is_modified() is True
+
+    # Delete the library key, then notify: the MODIFIED ref must heal to Custom,
+    # keeping the user's edited length (99.9).
+    present["yes"] = False
+    field.refresh_external(GuiEvent.ML_CHANGED)
+
+    assert field.get_chosen_key() == "<Custom:Const>"
+    assert field.is_valid() is True
+    length = field.get_value().value.fields["length"]
+    assert isinstance(length, DirectValue)
+    assert length.value == 99.9
 
 
 def test_module_ref_custom_key_is_never_overridden(env):
