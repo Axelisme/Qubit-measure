@@ -537,12 +537,19 @@ class ModuleRefLiveField(LiveField):
         if init_overridden and self._binding_state is LibraryBindingState.LINKED:
             self._binding_state = LibraryBindingState.MODIFIED
         self.sub_field: Optional[SectionLiveField] = None
+        # True when a LINKED ref's chosen_key names a library entry that does not
+        # exist (deleted/renamed). Kept LINKED so re-adding the name re-links it;
+        # surfaced as invalid + a red "missing library reference" badge.
+        self._missing_library_ref: bool = False
         self.is_enabled: bool = not (spec.optional and initial_val is None)
         self.on_enabled_changed = CallbackList()
         self._rebuild_sub_field(hint=init_sub)
 
     def is_modified(self) -> bool:
         return self._binding_state is LibraryBindingState.MODIFIED
+
+    def has_missing_library_ref(self) -> bool:
+        return self._missing_library_ref
 
     def _rebuild_sub_field(self, hint: Optional[CfgSectionValue] = None) -> None:
         """Rebuild the sub-field for the current chosen_key.
@@ -560,38 +567,50 @@ class ModuleRefLiveField(LiveField):
         from .ui.fields.utils import _spec_value_for_chosen
 
         ml = self.env.ctrl.get_current_ml()
+        self._missing_library_ref = False
         try:
             chosen_spec, lib_val = _spec_value_for_chosen(
                 self._chosen_key, self.spec.allowed, ml
             )
         except RuntimeError as exc:
-            # The referenced library entry no longer exists (deleted or renamed,
-            # or a persisted session referencing an entry absent from the active
-            # ModuleLibrary). Self-heal: convert to an inline <Custom:…> binding
-            # of the same shape, KEEPING the last-known value — graceful
-            # degradation instead of an invalid empty shell. The user fixes/
-            # re-links later if desired.
+            # The referenced library entry no longer exists (deleted/renamed, or
+            # a persisted session referencing an absent entry). Two behaviours by
+            # binding state (deliberately asymmetric — see CONTEXT.md):
+            #   - MODIFIED (user edited the value away from the snapshot): heal to
+            #     an inline <Custom:…> KEEPING the edits (the override would
+            #     otherwise be lost; it has already left the library).
+            #   - LINKED (pure library ref, value = snapshot, no edits to lose):
+            #     keep chosen_key, mark missing+invalid (red badge). The user
+            #     sees the broken ref, and re-adding an entry of the same name
+            #     auto-relinks it to LINKED (the recoverable path).
             if "Unknown library reference" in str(
                 exc
             ) and not self._chosen_key.startswith("<Custom:"):
-                dropped_key = self._chosen_key
-                # Seed value: the prior sub_field value (runtime delete) or the
-                # provided hint (construction-time persisted load).
-                kept_val = old_val if old_val is not None else hint
-                label = self._custom_label_for_value(old_spec, kept_val)
-                logger.warning(
-                    "ML ref %r no longer exists; converting to inline "
-                    "<Custom:%s>, keeping last value",
-                    dropped_key,
-                    label,
-                )
-                self._chosen_key = f"<Custom:{label}>"
-                self._binding_state = LibraryBindingState.CUSTOM
-                chosen_spec, lib_val = _spec_value_for_chosen(
-                    self._chosen_key, self.spec.allowed, ml
-                )
-                if hint is None:
-                    hint = kept_val
+                if self._binding_state is LibraryBindingState.MODIFIED:
+                    kept_val = old_val if old_val is not None else hint
+                    label = self._custom_label_for_value(old_spec, kept_val)
+                    logger.warning(
+                        "ML ref %r (modified) no longer exists; converting to "
+                        "inline <Custom:%s>, keeping edits",
+                        self._chosen_key,
+                        label,
+                    )
+                    self._chosen_key = f"<Custom:{label}>"
+                    self._binding_state = LibraryBindingState.CUSTOM
+                    chosen_spec, lib_val = _spec_value_for_chosen(
+                        self._chosen_key, self.spec.allowed, ml
+                    )
+                    if hint is None:
+                        hint = kept_val
+                else:
+                    logger.warning(
+                        "ML ref %r no longer exists in the library "
+                        "(missing reference)",
+                        self._chosen_key,
+                    )
+                    self._missing_library_ref = True
+                    chosen_spec = None
+                    lib_val = None
             else:
                 raise
         if chosen_spec:
@@ -661,6 +680,13 @@ class ModuleRefLiveField(LiveField):
         if self.spec.optional and not self.is_enabled:
             self._set_valid(True)
             return
+        if self._missing_library_ref:
+            logger.debug(
+                "ModuleRefLiveField._refresh_validity: key=%r missing in library",
+                self._chosen_key,
+            )
+            self._set_valid(False)
+            return
         if self.sub_field is None:
             logger.debug(
                 "ModuleRefLiveField._refresh_validity: key=%r sub_field=None → valid=True",
@@ -677,18 +703,19 @@ class ModuleRefLiveField(LiveField):
             self._set_valid(valid)
 
     def _refresh_library_binding(self) -> None:
-        # A dangling library ref (LINKED *or* MODIFIED whose key vanished, e.g.
-        # the entry was deleted/renamed) must self-heal to inline Custom keeping
-        # the current value. A present MODIFIED ref is left alone (rebuilding
-        # would discard the user's edits); only LINKED-present refs re-sync from
-        # the library.
+        # Custom refs never track the library.
         if self._chosen_key.startswith("<Custom:"):
             return
-        if self._library_key_present():
-            if self._binding_state is not LibraryBindingState.LINKED:
-                return
-        # LINKED-present → re-sync; LINKED/MODIFIED-absent → _rebuild_sub_field
-        # detects the missing key and heals to Custom (keeping current value).
+        # A present MODIFIED ref is left alone (rebuilding would discard edits).
+        # Everything else rebuilds — _rebuild_sub_field then decides:
+        #   LINKED-present  → re-sync from the library snapshot
+        #   LINKED-absent   → mark missing + invalid (recoverable: re-adding the
+        #                     name re-links here on the next ML_CHANGED)
+        #   MODIFIED-absent → heal to inline Custom, keeping the edits
+        if self._library_key_present() and self._binding_state is not (
+            LibraryBindingState.LINKED
+        ):
+            return
         self._rebuild_sub_field()
         self.on_change.emit(self.get_value())
 

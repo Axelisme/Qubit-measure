@@ -888,9 +888,9 @@ def test_optional_module_ref_select_none_disables_sub(qapp, ctrl):
     assert not mw._sub_container.isEnabled()
 
 
-def test_module_ref_missing_library_self_heals_to_custom(qapp, ctrl):
-    """A ref to an absent library key self-heals to inline Custom (valid),
-    keeping the value — the missing-ref badge no longer exists."""
+def test_module_ref_missing_library_shows_red_badge_and_invalid(qapp, ctrl):
+    """A LINKED ref to an absent library key shows the red missing-ref badge and
+    is invalid (recoverable — re-adding the name re-links it)."""
     from zcu_tools.gui.adapter import LiteralSpec
     from zcu_tools.gui.live_model import ModuleRefLiveField
     from zcu_tools.gui.ui.cfg_form import CfgFormWidget
@@ -923,8 +923,8 @@ def test_module_ref_missing_library_self_heals_to_custom(qapp, ctrl):
 
     ref_widget = w.findChild(ModuleRefWidget)
     assert ref_widget is not None
-    # No missing-ref badge anymore; the ref healed to the Custom shape.
-    assert not hasattr(ref_widget, "_missing_ref_hint")
-    healed = cast(ModuleRefLiveField, ref_widget._field)
-    assert healed.get_chosen_key() == "<Custom:Pulse>"
-    assert healed.is_valid() is True
+    field = cast(ModuleRefLiveField, ref_widget._field)
+    assert field.has_missing_library_ref() is True
+    assert field.is_valid() is False
+    assert ref_widget._missing_ref_hint.isVisible() is True
+    assert "missing_pulse" in ref_widget._missing_ref_hint.text()

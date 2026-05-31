@@ -24,6 +24,7 @@ from zcu_tools.gui.adapter import (
 from zcu_tools.gui.event_bus import EventBus, GuiEvent
 from zcu_tools.gui.live_model import (
     CallbackList,
+    LibraryBindingState,
     LiveModelEnv,
     ModuleRefLiveField,
     ScalarLiveField,
@@ -435,9 +436,9 @@ def test_module_ref_custom_key_is_never_overridden(env):
     assert field.get_value().is_overridden is False
 
 
-def test_waveform_ref_missing_library_key_self_heals_to_custom(env):
-    """A persisted ref to an absent library key self-heals to inline Custom,
-    keeping the persisted value (valid), instead of staying missing+invalid."""
+def test_linked_ref_missing_key_is_invalid_and_relinks_on_readd(env, monkeypatch):
+    """A LINKED ref to an absent key stays LINKED + missing + invalid (red badge),
+    NOT Custom — so re-adding an entry of that name re-links it (recoverable)."""
     wav_spec = CfgSectionSpec(
         label="Const",
         fields={
@@ -448,6 +449,22 @@ def test_waveform_ref_missing_library_key_self_heals_to_custom(env):
     spec = CfgSectionSpec(
         fields={"waveform": WaveformRefSpec(allowed=[wav_spec], label="Waveform")}
     )
+
+    present = {"yes": False}
+    import zcu_tools.gui.ui.fields.utils as _utils
+
+    _orig = _utils._spec_value_for_chosen
+
+    def _fake_lookup(chosen_key, allowed, ml):
+        if chosen_key == "ro_waveform" and present["yes"]:
+            return wav_spec, CfgSectionValue(
+                fields={"style": DirectValue("const"), "length": DirectValue(1.0)}
+            )
+        return _orig(chosen_key, allowed, ml)
+
+    monkeypatch.setattr(_utils, "_spec_value_for_chosen", _fake_lookup)
+    env.ctrl.get_current_ml.return_value = ModuleLibrary()
+
     initial = CfgSectionValue(
         fields={
             "waveform": WaveformRefValue(
@@ -461,15 +478,18 @@ def test_waveform_ref_missing_library_key_self_heals_to_custom(env):
             )
         }
     )
-    ml = ModuleLibrary()
-    env.ctrl.get_current_ml.return_value = ml
-
     section = SectionLiveField(spec, env, initial_val=initial)
     field = cast(ModuleRefLiveField, section.fields["waveform"])
-    # Self-healed to Custom on construction, value preserved, valid.
-    assert field.get_chosen_key() == "<Custom:Const>"
-    assert field.sub_field is not None
+    # Absent key → LINKED + missing + invalid (NOT healed to Custom).
+    assert field.get_chosen_key() == "ro_waveform"
+    assert field._binding_state is LibraryBindingState.LINKED
+    assert field.has_missing_library_ref() is True
+    assert field.is_valid() is False
+
+    # Re-add an entry of that name → re-links to a valid LINKED ref.
+    present["yes"] = True
+    field.refresh_external(GuiEvent.ML_CHANGED)
+    assert field.get_chosen_key() == "ro_waveform"
+    assert field._binding_state is LibraryBindingState.LINKED
+    assert field.has_missing_library_ref() is False
     assert field.is_valid() is True
-    length = field.get_value().value.fields["length"]
-    assert isinstance(length, DirectValue)
-    assert length.value == 5.0

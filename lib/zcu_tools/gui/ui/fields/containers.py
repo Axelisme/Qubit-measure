@@ -195,7 +195,14 @@ class ModuleRefWidget(BaseLiveWidget):
         header.addWidget(self._combo, stretch=1)
         layout.addLayout(header)
 
+        self._missing_ref_hint = QLabel()
+        self._missing_ref_hint.setObjectName("missingRefHint")
+        self._missing_ref_hint.setStyleSheet("color: #b00020; font-size: 11px;")
+        self._missing_ref_hint.setVisible(False)
+        layout.addWidget(self._missing_ref_hint)
+
         layout.addWidget(self._sub_container)
+        self._refresh_missing_ref_hint()
         self._refresh_sub_widget()
 
         # Reactive sync
@@ -258,6 +265,9 @@ class ModuleRefWidget(BaseLiveWidget):
             self._combo.setCurrentIndex(0)  # None option
         else:
             idx = self._combo.findData(current)
+            if idx < 0 and field.has_missing_library_ref():
+                self._combo.addItem(f"Missing: {current}", current)
+                idx = self._combo.findData(current)
             if idx >= 0:
                 self._combo.setCurrentIndex(idx)
         self._combo.blockSignals(False)
@@ -294,7 +304,20 @@ class ModuleRefWidget(BaseLiveWidget):
 
     def _on_model_changed(self, *_: Any) -> None:
         self._refresh_combo_items()
+        self._refresh_missing_ref_hint()
         self._refresh_sub_widget()
+
+    def _refresh_missing_ref_hint(self) -> None:
+        field = cast(ModuleRefLiveField, self._field)
+        if field.has_missing_library_ref():
+            key = field.get_chosen_key()
+            self._missing_ref_hint.setText(
+                f"Missing library reference: {key}. "
+                "Switch key, or re-add an entry of that name to re-link."
+            )
+            self._missing_ref_hint.setVisible(True)
+            return
+        self._missing_ref_hint.setVisible(False)
 
     def _on_toggle_subsection(self, expanded: bool) -> None:
         self._sub_container.setVisible(expanded)
@@ -360,6 +383,7 @@ class ModuleRefWidget(BaseLiveWidget):
         style = "" if valid else "border: 1px solid red;"
         self._combo.setStyleSheet(style)
         self._expand_btn.setStyleSheet("" if valid else "color: red;")
+        self._refresh_missing_ref_hint()
 
 
 @register_widget(DeviceRefLiveField)
