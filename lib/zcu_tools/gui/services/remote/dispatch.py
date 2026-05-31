@@ -1091,13 +1091,12 @@ def _h_editor_open(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     from zcu_tools.gui.services.cfg_editor import CfgEditorError
 
     item_kind = str(params["item_kind"])
-    disc_raw = params.get("discriminator")
-    from_raw = params.get("from_name")
-    discriminator = str(disc_raw) if disc_raw is not None else None
-    from_name = str(from_raw) if from_raw is not None else None
+    from_name = str(params["from_name"])
+    # editor.open is modify-only: it edits an existing ml entry. Creating a blank
+    # entry goes through ml.create_from_role (role_id='<disc>:blank').
     try:
         editor_id, paths = ctrl.open_cfg_editor(
-            item_kind, discriminator=discriminator, from_name=from_name
+            item_kind, discriminator=None, from_name=from_name
         )
     except CfgEditorError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc

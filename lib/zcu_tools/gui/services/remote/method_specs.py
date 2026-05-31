@@ -469,18 +469,15 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     # CfgEditor sessions — headless, stateful ml-entry editing for the agent.
     "editor.open": MethodSpec(
         5.0,
-        "Open a stateful editing session for a ModuleLibrary module/waveform. "
-        "item_kind is 'module' or 'waveform'. Provide 'discriminator' (module "
-        "type e.g. 'pulse'/'readout/direct', or waveform style e.g. 'const'/"
-        "'gauss') for a blank entry, OR 'from_name' to load an existing ml entry "
-        "for editing. Returns {editor_id, paths} (paths = settable dotted paths "
+        "Open a stateful editing session over an EXISTING ModuleLibrary "
+        "module/waveform (by 'from_name'). To create a new blank/shaped entry, "
+        "use ml.create_from_role (e.g. role_id='pulse:blank' or a named role) "
+        "then editor.open(from_name=name) to edit it. item_kind is 'module' or "
+        "'waveform'. Returns {editor_id, paths} (paths = settable dotted paths "
         "with current values, same shape as tab.list_paths).",
         (
             _str("item_kind", "'module' or 'waveform'"),
-            _str_opt(
-                "discriminator", "Module type or waveform style for a blank entry"
-            ),
-            _str_opt("from_name", "Existing ml entry name to load for editing"),
+            _str("from_name", "Existing ml entry name to load for editing"),
         ),
     ),
     "editor.set_field": MethodSpec(

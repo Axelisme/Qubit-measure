@@ -6,7 +6,11 @@ from typing import Any
 from unittest.mock import MagicMock
 
 from zcu_tools.gui.ui import inspect_dialog
-from zcu_tools.gui.ui.inspect_dialog import InspectDialog, _MlConfigDialog
+from zcu_tools.gui.ui.inspect_dialog import (
+    InspectDialog,
+    _MlCreateDialog,
+    _MlModifyDialog,
+)
 from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
 
@@ -196,71 +200,40 @@ def test_inspect_dialog_ml_modify_enabled_only_for_children(qapp):
     assert dialog._modify_ml_btn.isEnabled()
 
 
-def test_ml_config_dialog_modify_module_keeps_name_and_changes_type(qapp):
+def test_modify_dialog_module_fixed_shape_saves_same_name_and_type(qapp):
     ml = _make_ml()
     ctrl = _make_ctrl_with_ml(ml)
-    dialog = _MlConfigDialog(
-        ctrl,
-        "module",
-        "modify",
-        name="readout_rf",
-        cfg=ml.modules["readout_rf"],
+    dialog = _MlModifyDialog(
+        ctrl, "module", name="readout_rf", cfg=ml.modules["readout_rf"]
     )
 
-    assert dialog._name_edit.isReadOnly()
-    dialog._name_edit.setText("ignored_name")
-    dialog._type_combo.setCurrentText("reset/none")
+    # No type combo: modify never changes shape (the type is read-only).
+    assert not hasattr(dialog, "_type_combo")
     assert dialog._save_btn.isEnabled()
 
     dialog._save_btn.click()
 
     name, raw = ctrl.set_ml_module_from_raw.call_args.args
     assert name == "readout_rf"
-    assert raw["type"] == "reset/none"
+    assert raw["type"] == "readout/direct"  # unchanged shape
     dialog.clear()
 
 
-def test_ml_config_dialog_modify_waveform_keeps_name_and_changes_style(qapp):
+def test_modify_dialog_waveform_fixed_shape(qapp):
     ml = _make_ml()
     ctrl = _make_ctrl_with_ml(ml)
-    dialog = _MlConfigDialog(
-        ctrl,
-        "waveform",
-        "modify",
-        name="drive_wav",
-        cfg=ml.waveforms["drive_wav"],
+    dialog = _MlModifyDialog(
+        ctrl, "waveform", name="drive_wav", cfg=ml.waveforms["drive_wav"]
     )
 
-    assert dialog._name_edit.isReadOnly()
-    dialog._name_edit.setText("ignored_name")
-    dialog._type_combo.setCurrentText("cosine")
+    assert not hasattr(dialog, "_type_combo")
     assert dialog._save_btn.isEnabled()
 
     dialog._save_btn.click()
 
     name, raw = ctrl.set_ml_waveform_from_raw.call_args.args
     assert name == "drive_wav"
-    assert raw["style"] == "cosine"
-    dialog.clear()
-
-
-def test_ml_config_dialog_style_change_rebuilds_schema_and_validity(qapp):
-    ml = _make_ml()
-    ctrl = _make_ctrl_with_ml(ml)
-    dialog = _MlConfigDialog(
-        ctrl,
-        "waveform",
-        "modify",
-        name="drive_wav",
-        cfg=ml.waveforms["drive_wav"],
-    )
-
-    assert dialog._save_btn.isEnabled()
-    dialog._type_combo.setCurrentText("arb")
-    assert not dialog._save_btn.isEnabled()
-
-    dialog._type_combo.setCurrentText("const")
-    assert dialog._save_btn.isEnabled()
+    assert raw["style"] == "const"  # unchanged shape
     dialog.clear()
 
 
@@ -292,7 +265,7 @@ def test_inspect_dialog_modify_clears_form_widget_after_exec(qapp, monkeypatch):
         def clear(self) -> None:
             clear_calls.append("clear")
 
-    monkeypatch.setattr(inspect_dialog, "_MlConfigDialog", FakeDialog)
+    monkeypatch.setattr(inspect_dialog, "_MlModifyDialog", FakeDialog)
     modules_item = dialog._ml_tree.topLevelItem(0)
     assert modules_item is not None
     dialog._ml_tree.setCurrentItem(modules_item.child(0))
@@ -311,17 +284,16 @@ def _catalog():
     return cat
 
 
-def test_template_dialog_populates_roles_and_creates(qapp):
-    from zcu_tools.gui.ui.inspect_dialog import _MlTemplateDialog
-
+def test_create_dialog_populates_roles_and_creates(qapp):
     ctrl = MagicMock()
     ctrl.get_role_catalog.return_value = _catalog()
 
-    dlg = _MlTemplateDialog(ctrl)
-    # Combo lists role labels (modules then waveforms), not type strings.
+    dlg = _MlCreateDialog(ctrl)
+    # Combo lists role labels (md-aware + blank), not raw type strings.
     labels = [dlg._role_combo.itemText(i) for i in range(dlg._role_combo.count())]
-    assert any("Resonator probe" in t for t in labels)
-    assert any("waveform" in t for t in labels)
+    assert any("Resonator probe" in t for t in labels)  # md-aware
+    assert any("Blank: reset/bath" in t for t in labels)  # blank role
+    assert any("Blank: drag" in t for t in labels)  # waveform-only blank shape
 
     # Pick the first role, give a name, create.
     dlg._role_combo.setCurrentIndex(0)
@@ -334,17 +306,25 @@ def test_template_dialog_populates_roles_and_creates(qapp):
     )
 
 
-def test_template_dialog_rejects_empty_name(qapp, monkeypatch):
+def test_create_dialog_rejects_empty_name(qapp, monkeypatch):
     from qtpy.QtWidgets import QMessageBox
-
-    from zcu_tools.gui.ui.inspect_dialog import _MlTemplateDialog
 
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
     ctrl = MagicMock()
     ctrl.get_role_catalog.return_value = _catalog()
 
-    dlg = _MlTemplateDialog(ctrl)
+    dlg = _MlCreateDialog(ctrl)
     dlg._name_edit.setText("   ")
     dlg._on_create()
 
     ctrl.create_from_role.assert_not_called()
+
+
+def test_inspect_ml_toolbar_has_single_create_button(qapp):
+    ctrl = _make_ctrl_with_ml(_make_ml())
+    dialog = InspectDialog(ctrl, MagicMock())
+    # The three old buttons (Add Module / Add Waveform / From template) collapse
+    # into one Create entry; no add-by-discriminator path remains.
+    assert hasattr(dialog, "_create_btn")
+    assert not hasattr(dialog, "_add_mod_btn")
+    assert not hasattr(dialog, "_add_wav_btn")

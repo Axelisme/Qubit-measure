@@ -87,6 +87,22 @@ def test_create_waveform_from_role(qapp):  # noqa: ARG001
     assert "ro_wav" in ctrl.get_current_ml().waveforms
 
 
+def test_create_from_blank_module_role(qapp):  # noqa: ARG001
+    """A ':blank' role creates a structural-zero entry of that exact shape."""
+    ctrl = _make_ctrl({"r_f": 6000.0})
+    ctrl.create_from_role("module", "reset/bath:blank", "rb")
+    raw = ctrl.get_current_ml().modules["rb"].to_dict()
+    assert raw["type"] == "reset/bath"
+
+
+def test_create_from_blank_waveform_role_uncovered_style(qapp):  # noqa: ARG001
+    """A waveform style with no md-aware role (drag) is reachable via :blank."""
+    ctrl = _make_ctrl({})
+    ctrl.create_from_role("waveform", "drag:blank", "dwav")
+    raw = ctrl.get_current_ml().waveforms["dwav"].to_dict()
+    assert raw["style"] == "drag"
+
+
 def test_item_kind_mismatch_raises(qapp):  # noqa: ARG001
     ctrl = _make_ctrl({})
     with pytest.raises(RuntimeError, match="not a waveform"):

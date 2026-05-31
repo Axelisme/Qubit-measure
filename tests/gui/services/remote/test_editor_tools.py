@@ -23,20 +23,21 @@ def test_open_returns_editor_id_and_paths():
     ctrl = MagicMock()
     ctrl.open_cfg_editor.return_value = ("editor-abc", [{"path": "freq"}])
     res = _dispatch(
-        ctrl, "editor.open", {"item_kind": "module", "discriminator": "pulse"}
+        ctrl, "editor.open", {"item_kind": "module", "from_name": "readout_rf"}
     )
     assert res["editor_id"] == "editor-abc"
     assert res["paths"] == [{"path": "freq"}]
+    # editor.open is modify-only: from_name forwarded, discriminator always None.
     ctrl.open_cfg_editor.assert_called_once_with(
-        "module", discriminator="pulse", from_name=None
+        "module", discriminator=None, from_name="readout_rf"
     )
 
 
 def test_open_translates_cfg_editor_error():
     ctrl = MagicMock()
-    ctrl.open_cfg_editor.side_effect = CfgEditorError("bad kind")
+    ctrl.open_cfg_editor.side_effect = CfgEditorError("unknown module")
     with pytest.raises(RemoteError) as ei:
-        _dispatch(ctrl, "editor.open", {"item_kind": "nope"})
+        _dispatch(ctrl, "editor.open", {"item_kind": "module", "from_name": "nope"})
     assert ei.value.code == ErrorCode.INVALID_PARAMS
 
 

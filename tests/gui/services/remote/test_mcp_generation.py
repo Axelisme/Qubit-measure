@@ -67,9 +67,12 @@ def test_cfg_editor_tools_generated():
     assert expected.issubset(set(m.TOOLS))
 
     open_tool = m.TOOLS["gui_editor_open"]
-    assert open_tool["inputSchema"]["required"] == ["item_kind"]
+    # editor.open is modify-only (from_name); the blank-by-discriminator surface
+    # was removed (create a blank via ml.create_from_role(role_id='<disc>:blank')).
+    assert set(open_tool["inputSchema"]["required"]) == {"item_kind", "from_name"}
     props = open_tool["inputSchema"]["properties"]
-    assert "discriminator" in props and "from_name" in props
+    assert "discriminator" not in props
+    assert "from_name" in props
 
     # 'value' is a JSON kind (scalar OR the tagged eval object) — its schema
     # must not pin a single type.

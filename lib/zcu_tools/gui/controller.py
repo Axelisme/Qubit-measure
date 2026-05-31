@@ -556,6 +556,11 @@ class Controller:
         gc: bool = True,
         owner_key: Optional[str] = None,
     ) -> tuple[str, list[dict[str, object]]]:
+        """Open a CfgEditor session. The ``editor.open`` RPC only uses
+        ``from_name`` (edit an existing entry); ``discriminator`` (blank seed)
+        remains an internal seam — creating a blank goes through
+        ``create_from_role`` (``<disc>:blank`` roles), not the RPC.
+        """
         return self._cfg_editor_svc.open(
             item_kind,
             discriminator=discriminator,

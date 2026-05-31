@@ -31,15 +31,13 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.adapter import CfgSchema, make_default_value, schema_to_dict
+from zcu_tools.gui.adapter import CfgSchema, schema_to_dict
 from zcu_tools.gui.cfg_schemas import (
-    _MODULE_SPEC_FACTORIES,
     module_cfg_to_value,
     waveform_cfg_to_value,
 )
 from zcu_tools.gui.event_bus import GuiEvent, Payload
 from zcu_tools.gui.services.context import MdValueError, MlEntryValidationError
-from zcu_tools.gui.specs.waveform import make_waveform_spec_by_style
 from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 
 if TYPE_CHECKING:
@@ -54,47 +52,46 @@ _MONO_FONT.setStyleHint(QFont.StyleHint.Monospace)
 _MAX_VALUE_LEN = 80
 
 
-_MlConfigMode = Literal["add", "modify"]
 _MlItemKind = Literal["module", "waveform"]
 
 
-class _MlConfigDialog(QDialog):
-    """Editor dialog for adding or modifying ModuleLibrary entries."""
+class _MlModifyDialog(QDialog):
+    """Edit an EXISTING ModuleLibrary entry (fixed shape).
+
+    Name and type/style are read-only — modify never changes shape (to change
+    shape, delete the entry and create a new one from a role). Creating new
+    entries goes through ``_MlCreateDialog`` / ``create_from_role``.
+    """
 
     def __init__(
         self,
         ctrl: "Controller",
         item_kind: _MlItemKind,
-        mode: _MlConfigMode,
-        name: Optional[str] = None,
-        cfg: Optional[Any] = None,
+        name: str,
+        cfg: Any,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
-        if mode == "modify" and (not name or cfg is None):
-            raise ValueError("Modify mode requires both name and cfg.")
+        if not name or cfg is None:
+            raise ValueError("Modify requires both name and cfg.")
 
         self._ctrl = ctrl
         self._item_kind = item_kind
-        self._mode = mode
-        self._fixed_name = name if mode == "modify" else None
+        self._name = name
         self._initial_cfg = cfg
-        self._initial_discriminator: Optional[str] = None
-        self.setWindowTitle(f"{mode.capitalize()} {item_kind.capitalize()}")
+        self.setWindowTitle(f"Modify {item_kind.capitalize()}")
         self.setMinimumSize(560, 500)
 
         layout = QVBoxLayout(self)
 
-        form = QFormLayout()
-        self._name_edit = QLineEdit()
-        self._type_combo = QComboBox()
-        if name is not None:
-            self._name_edit.setText(name)
-        if mode == "modify":
-            self._name_edit.setReadOnly(True)
+        schema = self._schema_from_cfg()
+        discriminator = self._read_discriminator(schema)
 
-        form.addRow("Name:", self._name_edit)
-        form.addRow("Type:" if item_kind == "module" else "Style:", self._type_combo)
+        form = QFormLayout()
+        form.addRow("Name:", QLabel(name))
+        form.addRow(
+            "Type:" if item_kind == "module" else "Style:", QLabel(discriminator)
+        )
         layout.addLayout(form)
 
         self._scroll = QScrollArea()
@@ -116,37 +113,20 @@ class _MlConfigDialog(QDialog):
         btn_row.addWidget(cancel_btn)
         layout.addLayout(btn_row)
 
-        if item_kind == "module":
-            self._type_combo.addItems(list(_MODULE_SPEC_FACTORIES.keys()))
-        else:
-            self._type_combo.addItems(
-                ["const", "cosine", "gauss", "drag", "flat_top", "arb"]
-            )
-
-        if mode == "modify":
-            schema = self._schema_from_cfg()
-            discriminator = self._read_discriminator(schema)
-            self._initial_discriminator = discriminator
-            index = self._type_combo.findText(discriminator)
-            if index < 0:
-                raise RuntimeError(
-                    f"Unsupported {self._discriminator_label} {discriminator!r}"
-                )
-            self._type_combo.setCurrentIndex(index)
-
-        # Stable owner key for this dialog's cfg-editor session, so a type switch
-        # (re-open) tears down + replaces the same logical owner's model.
+        # Stable owner key for this dialog's cfg-editor session.
         self._cfg_editor_owner = f"inspect-{uuid.uuid4().hex[:8]}"
 
-        self._name_edit.textChanged.connect(self._validate)
-        self._type_combo.currentTextChanged.connect(self._on_type_changed)
         self._form_widget.validity_changed.connect(self._validate)
         cancel_btn.clicked.connect(self.reject)
         self._save_btn.clicked.connect(self._on_save)
         # Detach + tear down the service-owned model when the dialog closes.
         self.finished.connect(self._close_cfg_editor)
 
-        self._on_type_changed(self._type_combo.currentText())
+        # Seed the editable form from the existing cfg (fixed shape).
+        editor_id, _ = self._ctrl.open_seeded_cfg_editor(
+            schema, gc=False, owner_key=self._cfg_editor_owner
+        )
+        self._form_widget.attach(self._ctrl.get_cfg_editor_root(editor_id))
         self._validate()
 
     def _close_cfg_editor(self, *_: Any) -> None:
@@ -161,8 +141,6 @@ class _MlConfigDialog(QDialog):
         return "type" if self._item_kind == "module" else "style"
 
     def _schema_from_cfg(self) -> CfgSchema:
-        if self._initial_cfg is None:
-            raise RuntimeError("No source config is available.")
         if self._item_kind == "module":
             spec, value = module_cfg_to_value(self._initial_cfg)
         else:
@@ -178,81 +156,24 @@ class _MlConfigDialog(QDialog):
             )
         return raw_value
 
-    def _schema_for_discriminator(self, discriminator: str) -> CfgSchema:
-        if (
-            self._mode == "modify"
-            and discriminator == self._initial_discriminator
-            and self._initial_cfg is not None
-        ):
-            return self._schema_from_cfg()
-
-        if self._item_kind == "module":
-            spec = _MODULE_SPEC_FACTORIES[discriminator]()
-        else:
-            spec = make_waveform_spec_by_style(discriminator)
-        value = make_default_value(spec)
-        return CfgSchema(spec=spec, value=value)
-
-    def _on_type_changed(self, type_str: str) -> None:
-        schema = self._schema_for_discriminator(type_str)
-        # The service owns the model (ADR-0010): open a gc=False seeded session
-        # under this dialog's owner key (re-opening tears down the previous one),
-        # then attach. _on_save reads read_schema() + writes ml directly, so no
-        # editor.commit is needed (hence open_seeded, not the ml-entry open).
-        self._form_widget.detach()
-        editor_id, _ = self._ctrl.open_seeded_cfg_editor(
-            schema, gc=False, owner_key=self._cfg_editor_owner
-        )
-        self._form_widget.attach(self._ctrl.get_cfg_editor_root(editor_id))
-        self._validate()
-
     def _validate(self, *_: Any) -> None:
-        name = self._fixed_name or self._name_edit.text().strip()
-        ml = self._ctrl.get_current_ml()
-        valid = True
-        warn_text = ""
-
-        if not name:
-            valid = False
+        if self._form_widget.is_valid():
+            self._warning_label.setText("")
+            self._save_btn.setEnabled(True)
         else:
-            if (
-                self._mode == "add"
-                and self._item_kind == "module"
-                and ml is not None
-                and name in ml.modules
-            ):
-                warn_text = "Name already exists in modules!"
-                valid = False
-            elif (
-                self._mode == "add"
-                and self._item_kind == "waveform"
-                and ml is not None
-                and name in ml.waveforms
-            ):
-                warn_text = "Name already exists in waveforms!"
-                valid = False
-
-        if valid and not self._form_widget.is_valid():
-            valid = False
-            warn_text = "Configuration is invalid."
-
-        self._warning_label.setText(warn_text)
-        self._save_btn.setEnabled(valid)
+            self._warning_label.setText("Configuration is invalid.")
+            self._save_btn.setEnabled(False)
 
     def _on_save(self) -> None:
-        name = self._fixed_name or self._name_edit.text().strip()
-        if not name:
-            return
-
         schema = self._form_widget.read_schema()
         ml = self._ctrl.get_current_ml()
         raw_dict = schema_to_dict(schema, ml)
 
         try:
             if self._item_kind == "module":
-                self._ctrl.set_ml_module_from_raw(name, raw_dict)
+                self._ctrl.set_ml_module_from_raw(self._name, raw_dict)
             else:
-                self._ctrl.set_ml_waveform_from_raw(name, raw_dict)
+                self._ctrl.set_ml_waveform_from_raw(self._name, raw_dict)
         except MlEntryValidationError as exc:
             QMessageBox.critical(self, "Validation Error", str(exc))
             return
@@ -266,23 +187,24 @@ class _MlConfigDialog(QDialog):
         self._form_widget.detach()
 
 
-class _MlTemplateDialog(QDialog):
-    """Create a blank ml module/waveform from a named experiment role.
+class _MlCreateDialog(QDialog):
+    """Create a new ml module/waveform from a role (the single create path).
 
-    One-shot: pick a role + a name → the role's eval-aware factory seeds md-linked
-    defaults that are registered directly into ml (no editable form here). To
-    change the entry afterwards, use the Modify path.
+    One-shot: pick a role + a name → the role's factory seeds the value
+    (md-linked defaults for named roles, structural zeros for ``:blank`` roles)
+    and registers it directly into ml (no editable form here). To change the
+    entry afterwards, use Modify.
     """
 
     def __init__(self, ctrl: "Controller", parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
-        self.setWindowTitle("Create from template")
+        self.setWindowTitle("Create ModuleLibrary entry")
 
         layout = QVBoxLayout(self)
         hint = QLabel(
-            "Pick a role and a name. The new entry is seeded with the role's "
-            "md-linked defaults. Edit it afterwards via Modify."
+            "Pick a role and a name. Named roles seed md-linked defaults; "
+            "'Blank: …' roles seed an empty shape. Edit afterwards via Modify."
         )
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -439,24 +361,18 @@ class InspectDialog(QDialog):
         left_layout.addWidget(self._ml_tree)
 
         btn_layout = QHBoxLayout()
-        self._add_mod_btn = QPushButton("Add Module...")
-        self._add_wav_btn = QPushButton("Add Waveform...")
-        self._template_btn = QPushButton("From template...")
+        self._create_btn = QPushButton("Create...")
         self._modify_ml_btn = QPushButton("Modify...")
         self._modify_ml_btn.setEnabled(False)
         self._del_ml_btn = QPushButton("Delete")
         self._del_ml_btn.setEnabled(False)
 
-        btn_layout.addWidget(self._add_mod_btn)
-        btn_layout.addWidget(self._add_wav_btn)
-        btn_layout.addWidget(self._template_btn)
+        btn_layout.addWidget(self._create_btn)
         btn_layout.addWidget(self._modify_ml_btn)
         btn_layout.addWidget(self._del_ml_btn)
         left_layout.addLayout(btn_layout)
 
-        self._add_mod_btn.clicked.connect(self._on_add_module_clicked)
-        self._add_wav_btn.clicked.connect(self._on_add_waveform_clicked)
-        self._template_btn.clicked.connect(self._on_create_from_template_clicked)
+        self._create_btn.clicked.connect(self._on_create_clicked)
         self._modify_ml_btn.clicked.connect(self._on_modify_ml_clicked)
         self._del_ml_btn.clicked.connect(self._on_delete_ml_clicked)
 
@@ -625,20 +541,8 @@ class InspectDialog(QDialog):
         text = yaml.dump(cfg.to_dict(), allow_unicode=True, sort_keys=False)
         self._ml_text.setPlainText(text)
 
-    def _on_add_module_clicked(self) -> None:
-        dlg = _MlConfigDialog(self._ctrl, "module", "add", parent=self)
-        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dlg.finished.connect(lambda _: dlg.clear())
-        dlg.open()
-
-    def _on_add_waveform_clicked(self) -> None:
-        dlg = _MlConfigDialog(self._ctrl, "waveform", "add", parent=self)
-        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dlg.finished.connect(lambda _: dlg.clear())
-        dlg.open()
-
-    def _on_create_from_template_clicked(self) -> None:
-        dlg = _MlTemplateDialog(self._ctrl, parent=self)
+    def _on_create_clicked(self) -> None:
+        dlg = _MlCreateDialog(self._ctrl, parent=self)
         dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dlg.open()
 
@@ -666,22 +570,12 @@ class InspectDialog(QDialog):
             return
 
         if group == "modules":
-            dlg = _MlConfigDialog(
-                self._ctrl,
-                "module",
-                "modify",
-                name=name,
-                cfg=ml.modules[name],
-                parent=self,
+            dlg = _MlModifyDialog(
+                self._ctrl, "module", name=name, cfg=ml.modules[name], parent=self
             )
         else:
-            dlg = _MlConfigDialog(
-                self._ctrl,
-                "waveform",
-                "modify",
-                name=name,
-                cfg=ml.waveforms[name],
-                parent=self,
+            dlg = _MlModifyDialog(
+                self._ctrl, "waveform", name=name, cfg=ml.waveforms[name], parent=self
             )
         dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dlg.finished.connect(lambda _: dlg.clear())
