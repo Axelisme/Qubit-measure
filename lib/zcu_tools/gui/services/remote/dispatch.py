@@ -392,9 +392,7 @@ def _h_ml_list_roles(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
     return {"roles": list(catalog.list_meta())}
 
 
-def _h_ml_create_from_role(
-    ctrl, params: Mapping[str, object]
-) -> Mapping[str, object]:
+def _h_ml_create_from_role(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     """Create a blank ml module/waveform from a named role and register it.
 
     One-shot: seeds md-linked defaults (lowered against the live md), writes ml.
@@ -471,6 +469,38 @@ def _h_context_del_ml_module(
     try:
         ctrl.del_ml_module(name)
     except (KeyError, RuntimeError) as exc:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
+    return {}
+
+
+def _h_context_rename_ml_module(
+    ctrl, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    old = str(params["old"])
+    new = str(params["new"])
+    try:
+        ctrl.rename_ml_module(old, new)
+    except RuntimeError as exc:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
+    return {}
+
+
+def _h_context_rename_ml_waveform(
+    ctrl, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    old = str(params["old"])
+    new = str(params["new"])
+    try:
+        ctrl.rename_ml_waveform(old, new)
+    except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
             str(exc),
@@ -1320,6 +1350,8 @@ _HANDLERS: dict[str, Handler] = {
     "context.del_ml_module": _h_context_del_ml_module,
     "context.set_ml_waveform": _h_context_set_ml_waveform,
     "context.del_ml_waveform": _h_context_del_ml_waveform,
+    "context.rename_ml_module": _h_context_rename_ml_module,
+    "context.rename_ml_waveform": _h_context_rename_ml_waveform,
     "ml.list_roles": _h_ml_list_roles,
     "ml.create_from_role": _h_ml_create_from_role,
     "state.has_project": _h_state_has_project,

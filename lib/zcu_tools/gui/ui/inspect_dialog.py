@@ -15,6 +15,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QDialog,
     QFormLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -364,16 +365,20 @@ class InspectDialog(QDialog):
         self._create_btn = QPushButton("Create...")
         self._modify_ml_btn = QPushButton("Modify...")
         self._modify_ml_btn.setEnabled(False)
+        self._rename_ml_btn = QPushButton("Rename...")
+        self._rename_ml_btn.setEnabled(False)
         self._del_ml_btn = QPushButton("Delete")
         self._del_ml_btn.setEnabled(False)
 
         btn_layout.addWidget(self._create_btn)
         btn_layout.addWidget(self._modify_ml_btn)
+        btn_layout.addWidget(self._rename_ml_btn)
         btn_layout.addWidget(self._del_ml_btn)
         left_layout.addLayout(btn_layout)
 
         self._create_btn.clicked.connect(self._on_create_clicked)
         self._modify_ml_btn.clicked.connect(self._on_modify_ml_clicked)
+        self._rename_ml_btn.clicked.connect(self._on_rename_ml_clicked)
         self._del_ml_btn.clicked.connect(self._on_delete_ml_clicked)
 
         splitter.addWidget(left_panel)
@@ -518,6 +523,7 @@ class InspectDialog(QDialog):
         self, current: Optional[QTreeWidgetItem], _previous: Any
     ) -> None:
         self._modify_ml_btn.setEnabled(False)
+        self._rename_ml_btn.setEnabled(False)
         self._del_ml_btn.setEnabled(False)
         if current is None:
             self._ml_text.setPlainText("")
@@ -528,6 +534,7 @@ class InspectDialog(QDialog):
             return
 
         self._modify_ml_btn.setEnabled(True)
+        self._rename_ml_btn.setEnabled(True)
         self._del_ml_btn.setEnabled(True)
 
         group, name = data
@@ -601,6 +608,25 @@ class InspectDialog(QDialog):
             self._ctrl.del_ml_module(name)
         else:
             self._ctrl.del_ml_waveform(name)
+
+    def _on_rename_ml_clicked(self) -> None:
+        data = self._current_ml_item_data()
+        if data is None:
+            return
+        group, name = data
+        new, ok = QInputDialog.getText(
+            self, "Rename", f"New name for {group[:-1]} '{name}':", text=name
+        )
+        new = new.strip()
+        if not ok or not new or new == name:
+            return
+        try:
+            if group == "modules":
+                self._ctrl.rename_ml_module(name, new)
+            else:
+                self._ctrl.rename_ml_waveform(name, new)
+        except Exception as exc:  # noqa: BLE001 — surface failure to the user
+            QMessageBox.critical(self, "Rename failed", str(exc))
 
     # ------------------------------------------------------------------
     # Public API

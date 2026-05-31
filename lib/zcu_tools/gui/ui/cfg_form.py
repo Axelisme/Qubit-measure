@@ -180,8 +180,6 @@ class CfgFormWidget(QWidget):
                 return None
             key = field.get_chosen_key()
             label = path or field.spec.label
-            if field.has_missing_library_ref():
-                return f"{label}: missing library reference '{key}'"
             if field.sub_field is not None:
                 nested = self._find_first_invalid(
                     field.sub_field, path=f"{label}.{key}"

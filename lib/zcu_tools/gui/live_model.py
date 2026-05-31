@@ -537,16 +537,12 @@ class ModuleRefLiveField(LiveField):
         if init_overridden and self._binding_state is LibraryBindingState.LINKED:
             self._binding_state = LibraryBindingState.MODIFIED
         self.sub_field: Optional[SectionLiveField] = None
-        self._missing_library_ref: bool = False
         self.is_enabled: bool = not (spec.optional and initial_val is None)
         self.on_enabled_changed = CallbackList()
         self._rebuild_sub_field(hint=init_sub)
 
     def is_modified(self) -> bool:
         return self._binding_state is LibraryBindingState.MODIFIED
-
-    def has_missing_library_ref(self) -> bool:
-        return self._missing_library_ref
 
     def _rebuild_sub_field(self, hint: Optional[CfgSectionValue] = None) -> None:
         """Rebuild the sub-field for the current chosen_key.
@@ -564,21 +560,38 @@ class ModuleRefLiveField(LiveField):
         from .ui.fields.utils import _spec_value_for_chosen
 
         ml = self.env.ctrl.get_current_ml()
-        self._missing_library_ref = False
         try:
             chosen_spec, lib_val = _spec_value_for_chosen(
                 self._chosen_key, self.spec.allowed, ml
             )
         except RuntimeError as exc:
-            # Persisted sessions may reference a library key that no longer exists
-            # in the active ModuleLibrary. Keep the key and mark the value missing,
-            # so users can switch key or refresh library context explicitly.
+            # The referenced library entry no longer exists (deleted or renamed,
+            # or a persisted session referencing an entry absent from the active
+            # ModuleLibrary). Self-heal: convert to an inline <Custom:…> binding
+            # of the same shape, KEEPING the last-known value — graceful
+            # degradation instead of an invalid empty shell. The user fixes/
+            # re-links later if desired.
             if "Unknown library reference" in str(
                 exc
             ) and not self._chosen_key.startswith("<Custom:"):
-                self._missing_library_ref = True
-                chosen_spec = None
-                lib_val = None
+                dropped_key = self._chosen_key
+                # Seed value: the prior sub_field value (runtime delete) or the
+                # provided hint (construction-time persisted load).
+                kept_val = old_val if old_val is not None else hint
+                label = self._custom_label_for_value(old_spec, kept_val)
+                logger.warning(
+                    "ML ref %r no longer exists; converting to inline "
+                    "<Custom:%s>, keeping last value",
+                    dropped_key,
+                    label,
+                )
+                self._chosen_key = f"<Custom:{label}>"
+                self._binding_state = LibraryBindingState.CUSTOM
+                chosen_spec, lib_val = _spec_value_for_chosen(
+                    self._chosen_key, self.spec.allowed, ml
+                )
+                if hint is None:
+                    hint = kept_val
             else:
                 raise
         if chosen_spec:
@@ -602,6 +615,31 @@ class ModuleRefLiveField(LiveField):
 
         self._refresh_validity()
 
+    def _custom_label_for_value(
+        self,
+        old_spec: Optional[CfgNodeSpec],
+        value: Optional[CfgSectionValue],
+    ) -> str:
+        """Pick the allowed <Custom:label> shape for a dangling ref's heal.
+
+        Prefer the prior sub_field's spec label (already an allowed label). Else
+        match the value's type/style discriminator against an allowed spec's
+        label by lowering each allowed shape. Fall back to the first allowed.
+        """
+        if isinstance(old_spec, CfgSectionSpec) and any(
+            s.label == old_spec.label for s in self.spec.allowed
+        ):
+            return old_spec.label
+        if isinstance(value, CfgSectionValue):
+            disc_field = value.fields.get("type") or value.fields.get("style")
+            disc = getattr(disc_field, "value", None)
+            if isinstance(disc, str):
+                for spec in self.spec.allowed:
+                    lit = spec.fields.get("type") or spec.fields.get("style")
+                    if getattr(lit, "value", None) == disc and spec.label:
+                        return spec.label
+        return self.spec.allowed[0].label if self.spec.allowed else "Custom"
+
     def _on_sub_change(self, *_: object) -> None:
         if self._binding_state is LibraryBindingState.LINKED:
             self._binding_state = LibraryBindingState.MODIFIED
@@ -622,13 +660,6 @@ class ModuleRefLiveField(LiveField):
     def _refresh_validity(self) -> None:
         if self.spec.optional and not self.is_enabled:
             self._set_valid(True)
-            return
-        if self._missing_library_ref:
-            logger.debug(
-                "ModuleRefLiveField._refresh_validity: key=%r missing in library",
-                self._chosen_key,
-            )
-            self._set_valid(False)
             return
         if self.sub_field is None:
             logger.debug(

@@ -465,6 +465,12 @@ class Controller:
     def del_ml_waveform(self, name: str) -> None:
         self._ctx_svc.del_ml_waveform(name)
 
+    def rename_ml_module(self, old: str, new: str) -> None:
+        self._ctx_svc.rename_ml_module(old, new)
+
+    def rename_ml_waveform(self, old: str, new: str) -> None:
+        self._ctx_svc.rename_ml_waveform(old, new)
+
     # ------------------------------------------------------------------
     # Role templates — one-shot "create blank ml entry from a named role"
     # (shared by inspect UI and ml.create_from_role RPC). Editing afterwards

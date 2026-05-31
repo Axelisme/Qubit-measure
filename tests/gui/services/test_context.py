@@ -285,6 +285,60 @@ def test_del_ml_module_emits_ml_changed():
 
 
 # ---------------------------------------------------------------------------
+# rename_ml_module / rename_ml_waveform
+# ---------------------------------------------------------------------------
+
+
+def test_rename_ml_module_moves_key_and_emits_once():
+    state, svc = _make_active_state()
+    ml = state.exp_context.ml
+    fake_module = MagicMock()
+    ml.register_module(qub=fake_module)
+    bus: MagicMock = svc._bus  # type: ignore[assignment]
+    bus.reset_mock()
+    before = state.version.get("context")
+
+    svc.rename_ml_module("qub", "qub2")
+
+    assert "qub" not in ml.modules
+    assert "qub2" in ml.modules
+    assert state.version.get("context") == before + 1
+    event_calls = [c[0][0] for c in bus.emit.call_args_list]
+    assert event_calls.count(GuiEvent.ML_CHANGED) == 1
+
+
+def test_rename_ml_module_clash_fails():
+    state, svc = _make_active_state()
+    ml = state.exp_context.ml
+    ml.register_module(a=MagicMock(), b=MagicMock())
+    with pytest.raises(RuntimeError, match="already exists"):
+        svc.rename_ml_module("a", "b")
+    assert "a" in ml.modules  # untouched
+
+
+def test_rename_ml_module_missing_fails():
+    state, svc = _make_active_state()
+    with pytest.raises(RuntimeError, match="No module named"):
+        svc.rename_ml_module("nope", "x")
+
+
+def test_rename_ml_module_empty_name_fails():
+    state, svc = _make_active_state()
+    state.exp_context.ml.register_module(qub=MagicMock())
+    with pytest.raises(RuntimeError, match="must not be empty"):
+        svc.rename_ml_module("qub", "")
+
+
+def test_rename_ml_waveform_moves_key():
+    state, svc = _make_active_state()
+    ml = state.exp_context.ml
+    ml.register_waveform(gauss=MagicMock())
+    svc.rename_ml_waveform("gauss", "gauss2")
+    assert "gauss" not in ml.waveforms
+    assert "gauss2" in ml.waveforms
+
+
+# ---------------------------------------------------------------------------
 # del_ml_waveform
 # ---------------------------------------------------------------------------
 

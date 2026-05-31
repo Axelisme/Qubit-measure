@@ -262,6 +262,17 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "context.del_ml_waveform": MethodSpec(
         5.0, "Delete one ModuleLibrary waveform", (_str("name", "Waveform name"),)
     ),
+    "context.rename_ml_module": MethodSpec(
+        5.0,
+        "Rename a ModuleLibrary module old→new (clash fails fast). cfg refs to "
+        "'old' degrade to inline Custom (value kept); to re-link, edit them.",
+        (_str("old", "Current module name"), _str("new", "New module name")),
+    ),
+    "context.rename_ml_waveform": MethodSpec(
+        5.0,
+        "Rename a ModuleLibrary waveform old→new (clash fails fast).",
+        (_str("old", "Current waveform name"), _str("new", "New waveform name")),
+    ),
     "ml.list_roles": MethodSpec(
         5.0,
         "List experiment-role templates for ml.create_from_role. Returns "

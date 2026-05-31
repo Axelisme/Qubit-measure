@@ -30,7 +30,10 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 # built against; ``gui_launch``/``gui_connect`` surface both so a stale process
 # (one that did not reload the latest code) is immediately visible instead of
 # being inferred from start times. Bump deliberately on every wire change.
-WIRE_VERSION = 1
+# v2: added ml.list_roles / ml.create_from_role (role catalog) and
+#     context.rename_ml_module / context.rename_ml_waveform; editor.open dropped
+#     its discriminator param (from_name-only).
+WIRE_VERSION = 2
 
 # ---------------------------------------------------------------------------
 # Wire envelopes

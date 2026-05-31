@@ -329,3 +329,40 @@ class ContextService:
         ml.delete_waveform(name)
         self._state.version.bump("context")
         self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
+
+    def rename_ml_module(self, old: str, new: str) -> None:
+        """Rename an ml module by re-registering under ``new`` and deleting ``old``.
+
+        References (cfg ``chosen_key == old``) are NOT migrated — they degrade
+        to inline Custom via the ModuleRefLiveField self-heal on the single
+        ML_CHANGED below (the value is preserved). New-name clash fails fast.
+        """
+        if not self.has_context():
+            raise RuntimeError("No experiment context.")
+        if not new:
+            raise RuntimeError("New name must not be empty.")
+        ml = self._state.exp_context.ml
+        if old not in ml.modules:
+            raise RuntimeError(f"No module named {old!r}.")
+        if new in ml.modules:
+            raise RuntimeError(f"A module named {new!r} already exists.")
+        ml.register_module(**{new: ml.modules[old]})
+        ml.delete_module(old)
+        self._state.version.bump("context")
+        self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))
+
+    def rename_ml_waveform(self, old: str, new: str) -> None:
+        """Rename an ml waveform (see :meth:`rename_ml_module`)."""
+        if not self.has_context():
+            raise RuntimeError("No experiment context.")
+        if not new:
+            raise RuntimeError("New name must not be empty.")
+        ml = self._state.exp_context.ml
+        if old not in ml.waveforms:
+            raise RuntimeError(f"No waveform named {old!r}.")
+        if new in ml.waveforms:
+            raise RuntimeError(f"A waveform named {new!r} already exists.")
+        ml.register_waveform(**{new: ml.waveforms[old]})
+        ml.delete_waveform(old)
+        self._state.version.bump("context")
+        self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ml))

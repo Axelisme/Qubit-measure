@@ -328,3 +328,33 @@ def test_inspect_ml_toolbar_has_single_create_button(qapp):
     assert hasattr(dialog, "_create_btn")
     assert not hasattr(dialog, "_add_mod_btn")
     assert not hasattr(dialog, "_add_wav_btn")
+
+
+def test_inspect_rename_button_calls_controller(qapp, monkeypatch):
+    from qtpy.QtWidgets import QInputDialog
+
+    ctrl = _make_ctrl_with_ml(_make_ml())
+    dialog = InspectDialog(ctrl, MagicMock())
+
+    modules_item = dialog._ml_tree.topLevelItem(0)
+    assert modules_item is not None
+    dialog._ml_tree.setCurrentItem(modules_item.child(0))
+    assert dialog._rename_ml_btn.isEnabled()
+
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("readout_v2", True))
+    dialog._rename_ml_btn.click()
+    ctrl.rename_ml_module.assert_called_once_with("readout_rf", "readout_v2")
+
+
+def test_inspect_rename_cancelled_does_nothing(qapp, monkeypatch):
+    from qtpy.QtWidgets import QInputDialog
+
+    ctrl = _make_ctrl_with_ml(_make_ml())
+    dialog = InspectDialog(ctrl, MagicMock())
+    modules_item = dialog._ml_tree.topLevelItem(0)
+    assert modules_item is not None
+    dialog._ml_tree.setCurrentItem(modules_item.child(0))
+
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("", False))
+    dialog._rename_ml_btn.click()
+    ctrl.rename_ml_module.assert_not_called()

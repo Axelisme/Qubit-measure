@@ -11,6 +11,7 @@ from zcu_tools.gui.adapter import (
     CfgSectionValue,
     DirectValue,
     EvalValue,
+    LiteralSpec,
     ModuleRefSpec,
     ModuleRefValue,
     ScalarSpec,
@@ -30,7 +31,6 @@ from zcu_tools.gui.live_model import (
     SweepLiveField,
 )
 from zcu_tools.meta_tool import ModuleLibrary
-from zcu_tools.program.v2 import WaveformCfgFactory
 
 
 @pytest.fixture()
@@ -281,15 +281,25 @@ def test_optional_module_ref_parent_skips_key_when_disabled(env):
     assert val.fields["reps"] == DirectValue(10)
 
 
-def test_module_ref_sub_edit_marks_overridden_in_get_value(env):
+def test_module_ref_sub_edit_marks_overridden_in_get_value(env, monkeypatch):
     """Editing a sub-field of a LINKED library ref flips is_overridden in get_value."""
     inner = CfgSectionSpec(
         label="Pulse", fields={"ch": ScalarSpec(label="Ch", type=int)}
     )
     spec = CfgSectionSpec(fields={"module": ModuleRefSpec(allowed=[inner])})
 
-    # Restore as a MODIFIED library ref (override flag persisted True), then
-    # confirm get_value() reports the override — the round-trip the bug dropped.
+    # The library HAS lib_mod (so the ref is a genuine modified library ref, not
+    # dangling). Stub the lookup to return the synthetic spec (avoids a real cfg
+    # round-trip — this test is about the is_overridden flag, not conversion).
+    import zcu_tools.gui.ui.fields.utils as _utils
+
+    def _fake_lookup(chosen_key, allowed, ml):
+        if chosen_key == "lib_mod":
+            return inner, CfgSectionValue(fields={"ch": DirectValue(0)})
+        return _utils._spec_value_for_chosen(chosen_key, allowed, ml)
+
+    monkeypatch.setattr(_utils, "_spec_value_for_chosen", _fake_lookup)
+
     initial = CfgSectionValue(
         fields={
             "module": ModuleRefValue(
@@ -308,33 +318,37 @@ def test_module_ref_sub_edit_marks_overridden_in_get_value(env):
     assert out.is_overridden is True
 
 
-def test_module_ref_restores_overridden_flag(env):
-    """A persisted is_overridden=True library ref reloads as MODIFIED."""
+def test_module_ref_overridden_dangling_self_heals_to_custom(env):
+    """A persisted MODIFIED library ref whose key is now absent self-heals to
+    inline Custom (the value is already the user's inline copy); the override
+    flag is meaningless once Custom, and the field stays valid."""
     inner = CfgSectionSpec(
-        label="Pulse", fields={"ch": ScalarSpec(label="Ch", type=int)}
+        label="Pulse",
+        fields={"type": LiteralSpec("pulse"), "ch": ScalarSpec(label="Ch", type=int)},
     )
     spec = CfgSectionSpec(fields={"module": ModuleRefSpec(allowed=[inner])})
 
-    # Restore a library ref marked overridden. Since the library key is absent
-    # here, the field keeps the key and marks the value missing — but the binding
-    # state must still be MODIFIED, and get_value() must round-trip the flag.
     initial = CfgSectionValue(
         fields={
             "module": ModuleRefValue(
                 chosen_key="some_lib_module",
-                value=CfgSectionValue(fields={"ch": DirectValue(7)}),
+                value=CfgSectionValue(
+                    fields={"type": DirectValue("pulse"), "ch": DirectValue(7)}
+                ),
                 is_overridden=True,
             )
         }
     )
-    ml = ModuleLibrary()
-    env.ctrl.get_current_ml.return_value = ml
+    env.ctrl.get_current_ml.return_value = ModuleLibrary()
 
     section = SectionLiveField(spec, env, initial_val=initial)
     field = cast(ModuleRefLiveField, section.fields["module"])
 
-    assert field.is_modified() is True
-    assert field.get_value().is_overridden is True
+    assert field.get_chosen_key() == "<Custom:Pulse>"
+    assert field.is_valid() is True
+    out = field.get_value()
+    ch = out.value.fields["ch"]
+    assert isinstance(ch, DirectValue) and ch.value == 7
 
 
 def test_module_ref_custom_key_is_never_overridden(env):
@@ -359,11 +373,13 @@ def test_module_ref_custom_key_is_never_overridden(env):
     assert field.get_value().is_overridden is False
 
 
-def test_waveform_ref_missing_library_key_waits_for_ml_update(env):
+def test_waveform_ref_missing_library_key_self_heals_to_custom(env):
+    """A persisted ref to an absent library key self-heals to inline Custom,
+    keeping the persisted value (valid), instead of staying missing+invalid."""
     wav_spec = CfgSectionSpec(
         label="Const",
         fields={
-            "style": ScalarSpec(label="Style", type=str),
+            "style": LiteralSpec("const"),
             "length": ScalarSpec(label="Length", type=float),
         },
     )
@@ -374,7 +390,12 @@ def test_waveform_ref_missing_library_key_waits_for_ml_update(env):
         fields={
             "waveform": WaveformRefValue(
                 chosen_key="ro_waveform",
-                value=CfgSectionValue(fields={"length": DirectValue(5.0)}),
+                value=CfgSectionValue(
+                    fields={
+                        "style": DirectValue("const"),
+                        "length": DirectValue(5.0),
+                    }
+                ),
             )
         }
     )
@@ -383,16 +404,10 @@ def test_waveform_ref_missing_library_key_waits_for_ml_update(env):
 
     section = SectionLiveField(spec, env, initial_val=initial)
     field = cast(ModuleRefLiveField, section.fields["waveform"])
-    assert field.get_chosen_key() == "ro_waveform"
-    assert field.sub_field is None
-    assert field.is_valid() is False
-
-    ml.register_waveform(
-        ro_waveform=WaveformCfgFactory.from_raw(
-            {"style": "const", "length": 1.0}, ml=ml
-        )
-    )
-    field.refresh_external(GuiEvent.ML_CHANGED)
-
+    # Self-healed to Custom on construction, value preserved, valid.
+    assert field.get_chosen_key() == "<Custom:Const>"
     assert field.sub_field is not None
     assert field.is_valid() is True
+    length = field.get_value().value.fields["length"]
+    assert isinstance(length, DirectValue)
+    assert length.value == 5.0

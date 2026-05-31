@@ -888,21 +888,30 @@ def test_optional_module_ref_select_none_disables_sub(qapp, ctrl):
     assert not mw._sub_container.isEnabled()
 
 
-def test_module_ref_missing_library_hint_visible_and_clear_on_switch(qapp, ctrl):
+def test_module_ref_missing_library_self_heals_to_custom(qapp, ctrl):
+    """A ref to an absent library key self-heals to inline Custom (valid),
+    keeping the value — the missing-ref badge no longer exists."""
+    from zcu_tools.gui.adapter import LiteralSpec
+    from zcu_tools.gui.live_model import ModuleRefLiveField
     from zcu_tools.gui.ui.cfg_form import CfgFormWidget
     from zcu_tools.gui.ui.fields.containers import ModuleRefWidget
     from zcu_tools.meta_tool import ModuleLibrary
 
     pulse_spec = CfgSectionSpec(
         label="Pulse",
-        fields={"gain": ScalarSpec(label="Gain", type=float)},
+        fields={
+            "type": LiteralSpec("pulse"),
+            "gain": ScalarSpec(label="Gain", type=float),
+        },
     )
     schema = _schema(
         {"pulse": ModuleRefSpec(label="Pulse", allowed=[pulse_spec])},
         {
             "pulse": ModuleRefValue(
                 chosen_key="missing_pulse",
-                value=CfgSectionValue(fields={"gain": DirectValue(0.2)}),
+                value=CfgSectionValue(
+                    fields={"type": DirectValue("pulse"), "gain": DirectValue(0.2)}
+                ),
             )
         },
     )
@@ -914,11 +923,8 @@ def test_module_ref_missing_library_hint_visible_and_clear_on_switch(qapp, ctrl)
 
     ref_widget = w.findChild(ModuleRefWidget)
     assert ref_widget is not None
-    assert ref_widget._combo.currentText() == "Missing: missing_pulse"
-    assert ref_widget._missing_ref_hint.isVisible() is True
-    assert "missing_pulse" in ref_widget._missing_ref_hint.text()
-
-    custom_idx = ref_widget._combo.findData("<Custom:Pulse>")
-    assert custom_idx >= 0
-    ref_widget._combo.setCurrentIndex(custom_idx)
-    assert ref_widget._missing_ref_hint.isVisible() is False
+    # No missing-ref badge anymore; the ref healed to the Custom shape.
+    assert not hasattr(ref_widget, "_missing_ref_hint")
+    healed = cast(ModuleRefLiveField, ref_widget._field)
+    assert healed.get_chosen_key() == "<Custom:Pulse>"
+    assert healed.is_valid() is True
