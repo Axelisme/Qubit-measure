@@ -75,3 +75,11 @@ def test_cfg_editor_tools_generated():
     # must not pin a single type.
     value_schema = m.TOOLS["gui_editor_set_field"]["inputSchema"]["properties"]["value"]
     assert "type" not in value_schema or isinstance(value_schema.get("type"), list)
+
+
+def test_writeback_set_selected_is_boolean_schema():
+    """``selected`` must render as a boolean schema so the client sends a real
+    boolean. A JSON-any schema lets the client send the string "false", which
+    ``bool("false")`` wrongly reads as True (selection never clears)."""
+    props = m.TOOLS["gui_writeback_set"]["inputSchema"]["properties"]
+    assert props["selected"]["type"] == "boolean"

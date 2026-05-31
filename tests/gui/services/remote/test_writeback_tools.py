@@ -92,6 +92,47 @@ def test_set_target_name_override():
     assert kwargs["target_name"] == "readout_v2"
 
 
+def test_set_deselect_flows_through():
+    """``selected=False`` is a legit falsy value — it must reach the service.
+
+    The ``params.get('selected') is not None`` guard must distinguish a real
+    ``False`` from an omitted/null optional.
+    """
+    ctrl = _ctrl()
+    _dispatch(
+        ctrl,
+        "writeback.set",
+        {"tab_id": "t", "id": "md-2", "selected": False},
+    )
+    _, kwargs = ctrl.set_writeback_item.call_args
+    assert kwargs == {"selected": False}
+
+
+def test_set_ignores_null_optionals():
+    """The wire collapses 'omitted optional' to an explicit null-valued key.
+
+    A retarget-only call on a module item must not forward ``selected`` or
+    ``proposed_value`` just because they arrive as null — otherwise it flips the
+    selection off and trips the metadict-only guard on a module item.
+    """
+    ctrl = _ctrl()
+    _dispatch(
+        ctrl,
+        "writeback.set",
+        {
+            "tab_id": "t",
+            "id": "ml-1",
+            "selected": None,
+            "target_name": "readout_v2",
+            "proposed_value": None,
+        },
+    )
+    _, kwargs = ctrl.set_writeback_item.call_args
+    assert kwargs == {"target_name": "readout_v2"}
+    assert "selected" not in kwargs
+    assert "proposed_value" not in kwargs
+
+
 def test_set_empty_target_name_rejected():
     ctrl = _ctrl()
     with pytest.raises(RemoteError) as exc:

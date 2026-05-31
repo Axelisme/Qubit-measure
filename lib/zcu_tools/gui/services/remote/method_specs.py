@@ -431,7 +431,10 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         (
             _str("tab_id"),
             _str("id", "writeback item session id (<kind>-<n>)"),
-            ParamSpec("selected", JsonType.JSON, required=False),
+            # Boolean (not JSON): a JSON schema of {type: boolean} makes the
+            # client send a real boolean. Declared as JSON, the client may send
+            # the string "false", which ``bool("false")`` wrongly reads as True.
+            ParamSpec("selected", JsonType.BOOLEAN, required=False),
             _str_opt("target_name", "new apply destination name"),
             ParamSpec("proposed_value", JsonType.JSON, required=False),
             _expected_versions(),

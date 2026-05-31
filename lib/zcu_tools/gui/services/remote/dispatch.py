@@ -1005,17 +1005,22 @@ def _h_writeback_set(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
     if not ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     session_id = str(params["id"])
+    # The wire collapses "omitted optional" and "explicit JSON null" to the same
+    # thing (a null-valued key), so a null here means "not provided" — never a
+    # value to write. ``selected``/``target_name`` can never legitimately be null.
+    # ``proposed_value`` is only forwarded when present *and* non-null; a metadict
+    # item that genuinely needs a null value is out of scope for this surface.
     changes: dict[str, object] = {}
-    if "selected" in params:
+    if params.get("selected") is not None:
         changes["selected"] = bool(params["selected"])
-    if "target_name" in params:
+    if params.get("target_name") is not None:
         name = params["target_name"]
         if not isinstance(name, str) or not name:
             raise RemoteError(
                 ErrorCode.INVALID_PARAMS, "target_name must be a non-empty string"
             )
         changes["target_name"] = name
-    if "proposed_value" in params:
+    if params.get("proposed_value") is not None:
         changes["proposed_value"] = params["proposed_value"]
     try:
         ctrl.set_writeback_item(tab_id, session_id, **changes)
