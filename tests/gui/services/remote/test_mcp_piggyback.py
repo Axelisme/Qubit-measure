@@ -65,20 +65,22 @@ def _note_with(wire_ver, gui_ver) -> str:
         return mcp_server._wire_version_note()
 
 
-def test_note_both_match():
-    note = _note_with(mcp_server.MCP_WIRE_VERSION, mcp_server.MCP_GUI_VERSION)
-    assert "mcp==gui" in note
+def test_note_wire_match_shows_all_three_versions():
+    note = _note_with(mcp_server.MCP_WIRE_VERSION, 7)
     assert "MISMATCH" not in note
-    assert "STALE" not in note
+    assert f"wire v{mcp_server.MCP_WIRE_VERSION}" in note
+    # gui/mcp code revisions are reported, not compared.
+    assert "gui code v7" in note
+    assert f"mcp code v{mcp_server.MCP_VERSION}" in note
 
 
 def test_note_wire_mismatch_is_hard():
-    note = _note_with(mcp_server.MCP_WIRE_VERSION + 99, mcp_server.MCP_GUI_VERSION)
+    note = _note_with(mcp_server.MCP_WIRE_VERSION + 99, 1)
     assert "WIRE VERSION MISMATCH" in note
 
 
-def test_note_gui_stale_when_wire_ok():
-    # Contract matches but the GUI code revision differs → soft stale note.
-    note = _note_with(mcp_server.MCP_WIRE_VERSION, mcp_server.MCP_GUI_VERSION + 99)
-    assert "WIRE VERSION MISMATCH" not in note
-    assert "GUI CODE STALE" in note
+def test_note_differing_gui_version_is_not_a_mismatch():
+    # A different GUI code revision must NOT trigger a mismatch — it's reported.
+    note = _note_with(mcp_server.MCP_WIRE_VERSION, 999)
+    assert "MISMATCH" not in note
+    assert "gui code v999" in note

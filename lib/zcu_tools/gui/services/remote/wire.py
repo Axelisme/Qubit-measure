@@ -22,21 +22,21 @@ from zcu_tools.gui.services.device import (
 
 from .errors import ErrorCode, ErrorEnvelope, RemoteError
 
-# Two independent hand-maintained versions, reported together by the no-auth
-# ``wire.version`` handshake and compared by the MCP server (which pins the
-# values it was built against):
+# Two independent hand-maintained versions reported by the no-auth
+# ``wire.version`` handshake (which also surfaces the MCP server's own
+# MCP_VERSION). Only WIRE_VERSION is *compared*; the code revisions are
+# *reported* so an agent can eyeball whether a reload took effect:
 #
 #   WIRE_VERSION — the mcp<->RPC *interface contract* (RPC method set, their
-#     params, event/serialization shape). A mismatch means the two sides speak
-#     different protocols → incompatible, surfaced as a hard MISMATCH. Bump ONLY
+#     params, event/serialization shape). The MCP server pins it; a mismatch
+#     means the two sides speak different protocols → hard MISMATCH. Bump ONLY
 #     on a contract change.
-#   GUI_VERSION  — this GUI code's *revision*. A mismatch means one process is
-#     running stale code (did not reload after a change) even though the
-#     contract is unchanged → surfaced as a softer "stale" note. Bump on any
-#     meaningful GUI change you want stale-process detection to flag — including
-#     pure-internal logic changes that DON'T touch the wire (the whole point of
-#     splitting: an internal change bumps GUI_VERSION, not WIRE_VERSION, so mcp
-#     does not falsely report a contract change).
+#   GUI_VERSION  — this GUI code's *revision*. Reported, never compared (the
+#     MCP server does not pin it — a GUI revision is the GUI process's own
+#     property). Bump on any meaningful GUI change you want to be able to spot a
+#     reload of, INCLUDING pure-internal logic changes that DON'T touch the wire
+#     (the whole point of the split: an internal change bumps GUI_VERSION, not
+#     WIRE_VERSION, so the contract version stays put).
 #
 # (Replaces the old single-version scheme that conflated "is the contract
 # compatible" with "is this process running the latest code".)
