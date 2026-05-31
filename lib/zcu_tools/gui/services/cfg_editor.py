@@ -159,9 +159,16 @@ class CfgEditorSession:
         }
 
     def lower(self, ml_port: ModuleLibraryWritePort) -> dict:
-        """Lower the draft to a concrete raw dict (EvalValue → number)."""
+        """Lower the draft to a concrete raw dict (EvalValue → number).
+
+        Passes the live md so lowering can cross-check each EvalValue's snapshot
+        (``resolved``, taken when the field was set) against a fresh evaluation
+        against the current md; a drift is logged (the snapshot still wins).
+        """
         schema = CfgSchema(spec=self.root.spec, value=self.root.get_value())
-        return schema_to_dict(schema, ml_port.get_current_ml())
+        return schema_to_dict(
+            schema, ml_port.get_current_ml(), ml_port.get_current_md()
+        )
 
     def commit(self, name: str, ml_port: ModuleLibraryWritePort) -> None:
         """Lower + register this ml-entry draft into the ModuleLibrary.
@@ -171,6 +178,10 @@ class CfgEditorSession:
         ``commit`` applies only to ml-entry sessions (those carrying an
         ``item_kind``); a seeded session (tab cfg / writeback draft) is
         teardown-only and rejects commit.
+
+        Semantics are **upsert** (create-or-modify): an existing ``name`` is
+        overwritten. The create-only, name-clash-rejecting entry point is
+        ``Controller.create_from_role`` (role templates), not this.
         """
         if self.item_kind is None:
             raise CfgEditorError(

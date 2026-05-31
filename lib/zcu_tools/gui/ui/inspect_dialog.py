@@ -266,6 +266,64 @@ class _MlConfigDialog(QDialog):
         self._form_widget.detach()
 
 
+class _MlTemplateDialog(QDialog):
+    """Create a blank ml module/waveform from a named experiment role.
+
+    One-shot: pick a role + a name → the role's eval-aware factory seeds md-linked
+    defaults that are registered directly into ml (no editable form here). To
+    change the entry afterwards, use the Modify path.
+    """
+
+    def __init__(self, ctrl: "Controller", parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._ctrl = ctrl
+        self.setWindowTitle("Create from template")
+
+        layout = QVBoxLayout(self)
+        hint = QLabel(
+            "Pick a role and a name. The new entry is seeded with the role's "
+            "md-linked defaults. Edit it afterwards via Modify."
+        )
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        form = QFormLayout()
+        self._role_combo = QComboBox()
+        catalog = self._ctrl.get_role_catalog()
+        # Modules then waveforms, each labelled; role entry stashed on the item.
+        for kind in ("module", "waveform"):
+            for entry in catalog.entries_for(kind):  # type: ignore[arg-type]
+                self._role_combo.addItem(f"{entry.label}  ({kind})", userData=entry)
+        form.addRow("Role:", self._role_combo)
+        self._name_edit = QLineEdit()
+        form.addRow("Name:", self._name_edit)
+        layout.addLayout(form)
+
+        btn_row = QHBoxLayout()
+        create_btn = QPushButton("Create")
+        cancel_btn = QPushButton("Cancel")
+        btn_row.addWidget(create_btn)
+        btn_row.addWidget(cancel_btn)
+        layout.addLayout(btn_row)
+        create_btn.clicked.connect(self._on_create)
+        cancel_btn.clicked.connect(self.reject)
+
+    def _on_create(self) -> None:
+        entry = self._role_combo.currentData()
+        if entry is None:
+            return
+        name = self._name_edit.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Invalid name", "Entry name must not be empty.")
+            return
+        try:
+            self._ctrl.create_from_role(entry.item_kind, entry.role_id, name)
+        except Exception as exc:  # noqa: BLE001 — surface any failure to the user
+            QMessageBox.critical(self, "Create failed", str(exc))
+            return
+        self.accept()
+
+
 class InspectDialog(QDialog):
     """Non-modal dialog showing MetaDict and ModuleLibrary contents."""
 
@@ -383,6 +441,7 @@ class InspectDialog(QDialog):
         btn_layout = QHBoxLayout()
         self._add_mod_btn = QPushButton("Add Module...")
         self._add_wav_btn = QPushButton("Add Waveform...")
+        self._template_btn = QPushButton("From template...")
         self._modify_ml_btn = QPushButton("Modify...")
         self._modify_ml_btn.setEnabled(False)
         self._del_ml_btn = QPushButton("Delete")
@@ -390,12 +449,14 @@ class InspectDialog(QDialog):
 
         btn_layout.addWidget(self._add_mod_btn)
         btn_layout.addWidget(self._add_wav_btn)
+        btn_layout.addWidget(self._template_btn)
         btn_layout.addWidget(self._modify_ml_btn)
         btn_layout.addWidget(self._del_ml_btn)
         left_layout.addLayout(btn_layout)
 
         self._add_mod_btn.clicked.connect(self._on_add_module_clicked)
         self._add_wav_btn.clicked.connect(self._on_add_waveform_clicked)
+        self._template_btn.clicked.connect(self._on_create_from_template_clicked)
         self._modify_ml_btn.clicked.connect(self._on_modify_ml_clicked)
         self._del_ml_btn.clicked.connect(self._on_delete_ml_clicked)
 
@@ -574,6 +635,11 @@ class InspectDialog(QDialog):
         dlg = _MlConfigDialog(self._ctrl, "waveform", "add", parent=self)
         dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dlg.finished.connect(lambda _: dlg.clear())
+        dlg.open()
+
+    def _on_create_from_template_clicked(self) -> None:
+        dlg = _MlTemplateDialog(self._ctrl, parent=self)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dlg.open()
 
     def _current_ml_item_data(self) -> Optional[tuple[str, str]]:

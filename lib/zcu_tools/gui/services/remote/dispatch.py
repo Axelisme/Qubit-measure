@@ -382,6 +382,42 @@ def _h_context_get_ml(ctrl, params: Mapping[str, object]) -> Mapping[str, object
     }
 
 
+def _h_ml_list_roles(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    """List the experiment-role templates available for create_from_role."""
+    del params
+    try:
+        catalog = ctrl.get_role_catalog()
+    except RuntimeError as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    return {"roles": list(catalog.list_meta())}
+
+
+def _h_ml_create_from_role(
+    ctrl, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Create a blank ml module/waveform from a named role and register it.
+
+    One-shot: seeds md-linked defaults (lowered against the live md), writes ml.
+    Edit afterwards via editor.open(from_name=...).
+    """
+    item_kind = str(params["item_kind"])
+    role_id = str(params["role_id"])
+    name = str(params["name"])
+    try:
+        ctrl.create_from_role(item_kind, role_id, name)
+    except KeyError as exc:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    except MlEntryValidationError as exc:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    except RuntimeError as exc:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
+    return {}
+
+
 def _h_context_set_md_attr(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     key = str(params["key"])
     value = params["value"]
@@ -1285,6 +1321,8 @@ _HANDLERS: dict[str, Handler] = {
     "context.del_ml_module": _h_context_del_ml_module,
     "context.set_ml_waveform": _h_context_set_ml_waveform,
     "context.del_ml_waveform": _h_context_del_ml_waveform,
+    "ml.list_roles": _h_ml_list_roles,
+    "ml.create_from_role": _h_ml_create_from_role,
     "state.has_project": _h_state_has_project,
     "state.has_context": _h_state_has_context,
     "state.has_active_context": _h_state_has_active_context,

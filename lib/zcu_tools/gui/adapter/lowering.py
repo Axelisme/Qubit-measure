@@ -49,6 +49,32 @@ def _resolve_eval(
 
     if value.resolved is not None:
         resolved = value.resolved
+        # The snapshot wins, but if md is available cross-check it against a
+        # fresh evaluation: a mismatch means the snapshot is stale (md changed
+        # after the field was set). Log it — never silently lower a stale value
+        # without trace — but keep the snapshot to preserve existing semantics.
+        if md is not None:
+            from zcu_tools.gui.expression import evaluate_numeric_expr
+
+            try:
+                fresh = evaluate_numeric_expr(value.expr, md)
+            except Exception:
+                fresh = None
+            # Compare coerced-to-spec-type so an int/float representation
+            # difference (5 vs 5.0) is not flagged as a drift.
+            if fresh is not None and isinstance(fresh, (int, float)):
+                if coerce_eval_result(fresh, type_) != coerce_eval_result(
+                    resolved, type_
+                ):
+                    logger.warning(
+                        "Config field '%s' (%s): EvalValue %r snapshot %r differs "
+                        "from current md evaluation %r; using snapshot",
+                        path,
+                        label,
+                        value.expr,
+                        resolved,
+                        fresh,
+                    )
     elif md is not None:
         from zcu_tools.gui.expression import evaluate_numeric_expr
 

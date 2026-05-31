@@ -300,3 +300,51 @@ def test_inspect_dialog_modify_clears_form_widget_after_exec(qapp, monkeypatch):
     dialog._modify_ml_btn.click()
 
     assert clear_calls == ["clear"]
+
+
+def _catalog():
+    from zcu_tools.experiment.v2_gui.role_catalog_registry import register_all_roles
+    from zcu_tools.gui.role_catalog import RoleCatalog
+
+    cat = RoleCatalog()
+    register_all_roles(cat)
+    return cat
+
+
+def test_template_dialog_populates_roles_and_creates(qapp):
+    from zcu_tools.gui.ui.inspect_dialog import _MlTemplateDialog
+
+    ctrl = MagicMock()
+    ctrl.get_role_catalog.return_value = _catalog()
+
+    dlg = _MlTemplateDialog(ctrl)
+    # Combo lists role labels (modules then waveforms), not type strings.
+    labels = [dlg._role_combo.itemText(i) for i in range(dlg._role_combo.count())]
+    assert any("Resonator probe" in t for t in labels)
+    assert any("waveform" in t for t in labels)
+
+    # Pick the first role, give a name, create.
+    dlg._role_combo.setCurrentIndex(0)
+    dlg._name_edit.setText("my_entry")
+    dlg._on_create()
+
+    entry = dlg._role_combo.itemData(0)
+    ctrl.create_from_role.assert_called_once_with(
+        entry.item_kind, entry.role_id, "my_entry"
+    )
+
+
+def test_template_dialog_rejects_empty_name(qapp, monkeypatch):
+    from qtpy.QtWidgets import QMessageBox
+
+    from zcu_tools.gui.ui.inspect_dialog import _MlTemplateDialog
+
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
+    ctrl = MagicMock()
+    ctrl.get_role_catalog.return_value = _catalog()
+
+    dlg = _MlTemplateDialog(ctrl)
+    dlg._name_edit.setText("   ")
+    dlg._on_create()
+
+    ctrl.create_from_role.assert_not_called()

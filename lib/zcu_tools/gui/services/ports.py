@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, Optional, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from zcu_tools.gui.adapter import CfgSchema, ExpContext, WritebackItem
-    from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
     from .device import DeviceProtocol
     from .session_persistence import PersistedSession
@@ -128,6 +128,7 @@ class ModuleLibraryWritePort(Protocol):
     """
 
     def get_current_ml(self) -> "ModuleLibrary": ...
+    def get_current_md(self) -> "MetaDict": ...
     def set_ml_module_from_raw(self, name: str, raw_dict: dict) -> None: ...
     def set_ml_waveform_from_raw(self, name: str, raw_dict: dict) -> None: ...
 

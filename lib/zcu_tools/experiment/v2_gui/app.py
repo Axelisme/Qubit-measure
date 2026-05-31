@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.controller import Controller
     from zcu_tools.gui.io_manager import IOManager
     from zcu_tools.gui.registry import Registry
+    from zcu_tools.gui.role_catalog import RoleCatalog
     from zcu_tools.gui.runner import Runner
     from zcu_tools.gui.services.remote import ControlOptions
     from zcu_tools.gui.state import State
@@ -47,10 +48,12 @@ def run_app(control_opts: Optional["ControlOptions"] = None) -> None:
 
     from zcu_tools.gui.io_manager import IOManager
     from zcu_tools.gui.registry import Registry
+    from zcu_tools.gui.role_catalog import RoleCatalog
     from zcu_tools.gui.runner import Runner
     from zcu_tools.gui.state import State
 
     from .registry import register_all
+    from .role_catalog_registry import register_all_roles
 
     app = QApplication.instance() or QApplication(sys.argv)
 
@@ -58,11 +61,14 @@ def run_app(control_opts: Optional["ControlOptions"] = None) -> None:
     registry = Registry()
     register_all(registry)
 
+    role_catalog = RoleCatalog()
+    register_all_roles(role_catalog)
+
     state = State(_make_empty_ctx())
     runner = Runner()
     io_manager = IOManager()
 
-    ctrl, window = _build_window(state, runner, registry, io_manager)
+    ctrl, window = _build_window(state, runner, registry, role_catalog, io_manager)
     ctrl.restore_tabs_from_session()
     ctrl.restore_startup_settings()
     window.show()
@@ -107,6 +113,7 @@ def _build_window(
     state: "State",
     runner: "Runner",
     registry: "Registry",
+    role_catalog: "RoleCatalog",
     io_manager: "IOManager",
 ) -> tuple["Controller", "MainWindow"]:
     """Create Controller + MainWindow in the correct order."""
@@ -121,6 +128,7 @@ def _build_window(
         state=state,
         runner=runner,
         registry=registry,
+        role_catalog=role_catalog,
         io_manager=io_manager,
         view=None,
         bus=bus,

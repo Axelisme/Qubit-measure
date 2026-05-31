@@ -16,6 +16,7 @@ from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.adapter import ExpContext
     from zcu_tools.gui.event_bus import EventBus
     from zcu_tools.gui.state import State
 
@@ -117,6 +118,10 @@ class ContextService:
 
     def get_current_ml(self) -> ModuleLibrary:
         return self._state.exp_context.ml
+
+    def get_exp_context(self) -> "ExpContext":
+        """The live ExpContext (md + ml + …) — used to seed role templates."""
+        return self._state.exp_context
 
     def get_flux_dir(self) -> Optional[str]:
         import os

@@ -262,6 +262,25 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "context.del_ml_waveform": MethodSpec(
         5.0, "Delete one ModuleLibrary waveform", (_str("name", "Waveform name"),)
     ),
+    "ml.list_roles": MethodSpec(
+        5.0,
+        "List experiment-role templates for ml.create_from_role. Returns "
+        "{roles: [{role_id, label, item_kind}]}. Each role seeds a blank module/"
+        "waveform with md-linked defaults (e.g. 'res_probe', 'bath_reset').",
+    ),
+    "ml.create_from_role": MethodSpec(
+        10.0,
+        "Create a blank ModuleLibrary module/waveform from a named role "
+        "(ml.list_roles) and register it under 'name'. One-shot: seeds the role's "
+        "md-linked defaults (lowered to the md's current values) — it does NOT "
+        "open an editing session. To then change the entry use "
+        "editor.open(from_name=name).",
+        (
+            _str("item_kind", "'module' or 'waveform'"),
+            _str("role_id", "role id from ml.list_roles"),
+            _str("name", "new ml entry name"),
+        ),
+    ),
     # State (fan-out at MCP; individual booleans here)
     "state.has_project": MethodSpec(5.0, ""),
     "state.has_context": MethodSpec(5.0, ""),

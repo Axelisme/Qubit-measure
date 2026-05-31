@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
-from .adapter import CfgSchema, SavePaths, SocCfgHandle, WritebackItem
+from .adapter import CfgSchema, ExpContext, SavePaths, SocCfgHandle, WritebackItem
 from .event_bus import (
     EventBus,
     GuiEvent,
@@ -20,6 +20,7 @@ from .event_bus import (
 from .io_manager import IOManager
 from .plot_host import FigureContainer
 from .registry import Registry
+from .role_catalog import RoleCatalog
 from .runner import AnalyzeRunner, Runner, SaveDataRunner
 from .services import (
     DEFAULT_LEFT_PANEL_WIDTH,
@@ -85,10 +86,15 @@ class Controller:
         io_manager: IOManager,
         view: Optional[ViewProtocol],
         bus: EventBus,
+        role_catalog: Optional["RoleCatalog"] = None,
     ) -> None:
         self._state = state
         self._view = view
         self._bus = bus
+        # Catalog of experiment-role templates (gui interface, populated by
+        # experiment/v2_gui at startup). Optional so tests can construct a bare
+        # Controller; create_from_role fails fast when absent.
+        self._role_catalog = role_catalog
 
         # Construct and wire every domain service into an immutable bundle, then
         # alias them onto self for the façade's call sites.
@@ -458,6 +464,84 @@ class Controller:
 
     def del_ml_waveform(self, name: str) -> None:
         self._ctx_svc.del_ml_waveform(name)
+
+    # ------------------------------------------------------------------
+    # Role templates — one-shot "create blank ml entry from a named role"
+    # (shared by inspect UI and ml.create_from_role RPC). Editing afterwards
+    # goes through the normal modify path (inspect / editor.open(from_name)).
+    # ------------------------------------------------------------------
+
+    def get_role_catalog(self) -> RoleCatalog:
+        if self._role_catalog is None:
+            raise RuntimeError("No role catalog is wired up.")
+        return self._role_catalog
+
+    def get_exp_context(self) -> "ExpContext":
+        return self._ctx_svc.get_exp_context()
+
+    def create_from_role(self, item_kind: str, role_id: str, name: str) -> None:
+        """Seed a blank ml module/waveform from a named role and register it.
+
+        The role's eval-aware factory produces md-linked defaults; lowering
+        against the live md turns those into the md's current concrete values
+        (ModuleLibrary stores concrete numbers, never md references).
+        """
+        from zcu_tools.gui.adapter import CfgSchema, schema_to_dict
+        from zcu_tools.gui.cfg_schemas import _MODULE_SPEC_FACTORIES
+        from zcu_tools.gui.specs import make_waveform_spec_by_style
+
+        if not name:
+            raise RuntimeError("Entry name must not be empty.")
+        entry = self.get_role_catalog().get(role_id)
+        if entry.item_kind != item_kind:
+            raise RuntimeError(
+                f"Role {role_id!r} is a {entry.item_kind}, not a {item_kind}."
+            )
+        # create = new entry; a name clash is an error (the user/agent meant to
+        # add, not silently overwrite an existing entry — register_module would
+        # overwrite). Editing an existing entry goes through the modify path.
+        self._require_new_ml_name(item_kind, name)
+
+        ctx = self.get_exp_context()
+        ref = entry.make_value(ctx)
+        value = ref.value
+        discriminator = self._discriminator_of(value, item_kind)
+        if item_kind == "module":
+            spec = _MODULE_SPEC_FACTORIES[discriminator]()
+        else:
+            spec = make_waveform_spec_by_style(discriminator)
+        raw = schema_to_dict(CfgSchema(spec=spec, value=value), ctx.ml, ctx.md)
+
+        if item_kind == "module":
+            self.set_ml_module_from_raw(name, raw)
+        else:
+            self.set_ml_waveform_from_raw(name, raw)
+
+    @staticmethod
+    def _discriminator_of(value: Any, item_kind: str) -> str:
+        """Read the type/style discriminator off a role factory's value."""
+        key = "type" if item_kind == "module" else "style"
+        field = value.fields.get(key)
+        disc = getattr(field, "value", None)
+        if not isinstance(disc, str):
+            raise RuntimeError(
+                f"Role value has no usable {key!r} discriminator (got {disc!r})."
+            )
+        return disc
+
+    def has_ml_entry(self, item_kind: str, name: str) -> bool:
+        """Whether an ml module/waveform of this name already exists."""
+        ml = self.get_current_ml()
+        store = ml.modules if item_kind == "module" else ml.waveforms
+        return name in store
+
+    def _require_new_ml_name(self, item_kind: str, name: str) -> None:
+        """Fail fast if a create would overwrite an existing ml entry."""
+        if self.has_ml_entry(item_kind, name):
+            raise RuntimeError(
+                f"A {item_kind} named {name!r} already exists; "
+                "use Modify to change it, or pick a different name."
+            )
 
     # ------------------------------------------------------------------
     # CfgEditor sessions (CfgEditorService) — headless ml editing for RPC

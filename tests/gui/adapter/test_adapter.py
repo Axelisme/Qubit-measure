@@ -114,6 +114,36 @@ def test_scalar_eval_value_resolves_against_md_when_no_snapshot():
     assert schema_to_dict(s, _make_ml(), md)["freq"] == pytest.approx(5998.0)
 
 
+def test_scalar_eval_snapshot_drift_warns_but_keeps_snapshot(caplog):
+    """When md is supplied and the snapshot disagrees with a fresh evaluation,
+    lowering keeps the snapshot but logs a drift warning (commit cross-check)."""
+    s = _schema(
+        {"freq": ScalarSpec(label="Freq", type=float)},
+        {"freq": EvalValue(expr="r_f - rf_w", resolved=5998.0)},
+    )
+    md = MetaDict()
+    md.r_f = 7000.0  # md changed after the snapshot was taken
+    md.rf_w = 2.0
+    with caplog.at_level("WARNING"):
+        out = schema_to_dict(s, _make_ml(), md)
+    # snapshot still wins
+    assert out["freq"] == pytest.approx(5998.0)
+    assert any("differs from current md evaluation" in r.message for r in caplog.records)
+
+
+def test_scalar_eval_snapshot_consistent_no_warn(caplog):
+    s = _schema(
+        {"freq": ScalarSpec(label="Freq", type=float)},
+        {"freq": EvalValue(expr="r_f - rf_w", resolved=5998.0)},
+    )
+    md = MetaDict()
+    md.r_f = 6000.0
+    md.rf_w = 2.0  # fresh eval == snapshot
+    with caplog.at_level("WARNING"):
+        schema_to_dict(s, _make_ml(), md)
+    assert not any("differs" in r.message for r in caplog.records)
+
+
 def test_scalar_eval_value_int_spec_coerces_to_int():
     """An int-typed ScalarSpec resolves an EvalValue to int, not float."""
     s = _schema(
