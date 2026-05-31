@@ -25,10 +25,10 @@ from zcu_tools.gui.adapter import (
     CfgSectionValue,
     DirectValue,
     ExpContext,
+    MetaDictWriteback,
     ParamMeta,
     ScalarSpec,
     SweepSpec,
-    MetaDictWriteback,
     WritebackItem,
     WritebackRequest,
 )

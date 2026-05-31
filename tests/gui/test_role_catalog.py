@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from zcu_tools.gui.role_catalog import RoleCatalog, RoleEntry
 
 

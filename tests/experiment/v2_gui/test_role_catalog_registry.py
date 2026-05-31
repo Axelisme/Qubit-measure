@@ -5,7 +5,6 @@ create_from_role)."""
 from __future__ import annotations
 
 import pytest
-
 from zcu_tools.experiment.v2_gui.role_catalog_registry import (
     ALL_ROLE_ENTRIES,
     register_all_roles,

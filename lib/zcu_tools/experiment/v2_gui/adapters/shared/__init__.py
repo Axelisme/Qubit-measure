@@ -11,6 +11,7 @@ from .ctx_helpers import (
     proper_res_freq_range,
 )
 from .defaults import (
+    NamedModuleValue,
     make_bath_reset_default,
     make_direct_readout_default,
     make_none_reset_default,
@@ -34,8 +35,8 @@ from .defaults import (
     make_reset_ref_default,
     make_trig_offset,
     make_two_pulse_reset_default,
+    select_named_module_value,
 )
-from .defaults import NamedModuleValue, select_named_module_value
 from .spec_helpers import (
     make_pulse_module_spec,
     make_pulse_readout_module_spec,

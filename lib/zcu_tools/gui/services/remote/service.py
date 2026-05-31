@@ -644,9 +644,7 @@ class RemoteControlService:
             # the server's wire-protocol version before authenticating, so a
             # stale GUI process is detectable on connect.
             if req.method == "wire.version":
-                self._reply_ok(
-                    state, rid=req.id, result={"wire_version": WIRE_VERSION}
-                )
+                self._reply_ok(state, rid=req.id, result={"wire_version": WIRE_VERSION})
                 return
             if req.method == "auth":
                 self._handle_auth(state, req.id, req.params)

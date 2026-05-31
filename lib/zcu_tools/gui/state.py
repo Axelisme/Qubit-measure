@@ -22,14 +22,13 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
-    from zcu_tools.gui.adapter import WritebackItem
-
     # Imported only for typing: zcu_tools.device.base pulls in matplotlib.pyplot
     # at import time, which would break the GUI's "configure backend before
     # pyplot import" invariant if loaded eagerly here. ``from __future__ import
     # annotations`` keeps all annotations as strings, so a TYPE_CHECKING import
     # is sufficient.
     from zcu_tools.device.base import BaseDeviceInfo
+    from zcu_tools.gui.adapter import WritebackItem
 
 T_Result = TypeVar("T_Result")
 T_AnalyzeResult = TypeVar("T_AnalyzeResult", bound=AnalyzeResultWithFigure)

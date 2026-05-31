@@ -128,7 +128,9 @@ def test_scalar_eval_snapshot_drift_warns_but_keeps_snapshot(caplog):
         out = schema_to_dict(s, _make_ml(), md)
     # snapshot still wins
     assert out["freq"] == pytest.approx(5998.0)
-    assert any("differs from current md evaluation" in r.message for r in caplog.records)
+    assert any(
+        "differs from current md evaluation" in r.message for r in caplog.records
+    )
 
 
 def test_scalar_eval_snapshot_consistent_no_warn(caplog):

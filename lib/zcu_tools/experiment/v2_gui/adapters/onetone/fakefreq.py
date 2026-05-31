@@ -55,6 +55,7 @@ from zcu_tools.gui.adapter import (
     CfgSectionValue,
     DirectValue,
     ExpContext,
+    MetaDictWriteback,
     ModuleWriteback,
     ParamMeta,
     RunRequest,
@@ -63,7 +64,6 @@ from zcu_tools.gui.adapter import (
     SweepSpec,
     SweepValue,
     WaveformWriteback,
-    MetaDictWriteback,
     WritebackItem,
     WritebackRequest,
 )

@@ -7,9 +7,9 @@ factory → lowering → ml-register chain is exercised end to end.
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import MagicMock
 
+import pytest
 from zcu_tools.experiment.v2_gui.role_catalog_registry import register_all_roles
 from zcu_tools.gui.adapter import ContextReadiness, ExpContext
 from zcu_tools.gui.controller import Controller

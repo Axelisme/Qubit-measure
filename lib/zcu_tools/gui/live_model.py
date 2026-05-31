@@ -604,8 +604,7 @@ class ModuleRefLiveField(LiveField):
                         hint = kept_val
                 else:
                     logger.warning(
-                        "ML ref %r no longer exists in the library "
-                        "(missing reference)",
+                        "ML ref %r no longer exists in the library (missing reference)",
                         self._chosen_key,
                     )
                     self._missing_library_ref = True

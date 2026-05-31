@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from zcu_tools.gui.adapter import ExpContext
 
+from typing_extensions import cast
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_readout_ref_default,
     schema_from_module,
@@ -23,7 +24,6 @@ from zcu_tools.program.v2 import (
     PulseReadoutCfg,
     WaveformCfgFactory,
 )
-from typing_extensions import cast
 
 
 def test_schema_from_module_returns_none_for_none():

@@ -1,7 +1,6 @@
 from unittest.mock import MagicMock, patch
 
 from qtpy.QtWidgets import QCheckBox, QDialog, QLineEdit, QPushButton
-
 from zcu_tools.gui.adapter import MetaDictWriteback, ModuleWriteback
 from zcu_tools.gui.ui.writeback_widget import WritebackWidget
 

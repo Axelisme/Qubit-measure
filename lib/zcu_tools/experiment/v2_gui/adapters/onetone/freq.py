@@ -20,10 +20,10 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_readout_default,
     make_pulse_readout_module_spec,
     make_reset_module_spec,
-    schema_from_module,
     md_get_float,
     md_has_key,
     proper_res_freq_range,
+    schema_from_module,
 )
 from zcu_tools.gui.adapter import (
     AnalyzeRequest,
@@ -33,12 +33,12 @@ from zcu_tools.gui.adapter import (
     DirectValue,
     EvalValue,
     ExpContext,
+    MetaDictWriteback,
     ModuleWriteback,
     ParamMeta,
     ScalarSpec,
     SweepSpec,
     WaveformWriteback,
-    MetaDictWriteback,
     WritebackItem,
     WritebackRequest,
 )
