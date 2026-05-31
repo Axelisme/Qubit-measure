@@ -148,9 +148,11 @@ class WritebackWidget(QWidget):
         layout = QVBoxLayout(dialog)
 
         form = QFormLayout()
+        # target_name is the apply destination, decoupled from the stable
+        # session_id (ADR-0010) — editable here so the user can retarget.
+        name_edit = QLineEdit(item.target_name)
+        form.addRow("Apply as:", name_edit)
         value_edit = QLineEdit(str(item.proposed_value))
-        # ``key`` is the stable identifier / apply target name and is not editable
-        # here — only the proposed value is edited in place.
         form.addRow("Value:", value_edit)
         layout.addLayout(form)
 
@@ -164,10 +166,12 @@ class WritebackWidget(QWidget):
 
         def save() -> None:
             try:
+                new_name = _require_target_name(name_edit.text())
                 item.proposed_value = _coerce_scalar_input(
                     value_edit.text(),
                     item.proposed_value,
                 )
+                item.target_name = new_name
                 cb.setText(self._make_label_text(item))
                 dialog.accept()
             except Exception as exc:
@@ -199,6 +203,24 @@ class WritebackWidget(QWidget):
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
+        # target_name is the apply destination, decoupled from the stable
+        # session_id (ADR-0010) — editable so the user can retarget. Like the cfg
+        # edits below, a valid change applies immediately; a blank field is left
+        # on the previous name (revert on focus-out).
+        name_row = QFormLayout()
+        name_edit = QLineEdit(item.target_name)
+        name_row.addRow("Apply as:", name_edit)
+        layout.addLayout(name_row)
+
+        def _commit_name() -> None:
+            text = name_edit.text().strip()
+            if not text:
+                name_edit.setText(item.target_name)  # revert, no blank target
+                return
+            item.target_name = text
+
+        name_edit.editingFinished.connect(_commit_name)
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         form_widget = CfgFormWidget()
@@ -213,12 +235,21 @@ class WritebackWidget(QWidget):
         close_btn.clicked.connect(dialog.accept)
 
         def _on_finished(*_: Any) -> None:
+            _commit_name()
             form_widget.detach()
             cb.setText(self._make_label_text(item))
 
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.finished.connect(_on_finished)
         dialog.open()
+
+
+def _require_target_name(text: str) -> str:
+    """Validate an apply-destination name (mirrors the writeback.set guard)."""
+    name = text.strip()
+    if not name:
+        raise RuntimeError("Apply-as name must not be empty")
+    return name
 
 
 def _coerce_scalar_input(text: str, original: Any) -> Any:
