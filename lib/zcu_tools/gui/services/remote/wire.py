@@ -23,6 +23,15 @@ from zcu_tools.gui.services.device import (
 
 from .errors import ErrorCode, ErrorEnvelope, RemoteError
 
+# Hand-maintained wire-protocol version. Bump this whenever the RPC method set,
+# their params, or the event/serialization contract changes, so a live process
+# advertises which contract it speaks. The GUI server reports it via the
+# (no-auth) ``wire.version`` method, and the MCP server pins the version it was
+# built against; ``gui_launch``/``gui_connect`` surface both so a stale process
+# (one that did not reload the latest code) is immediately visible instead of
+# being inferred from start times. Bump deliberately on every wire change.
+WIRE_VERSION = 1
+
 # ---------------------------------------------------------------------------
 # Wire envelopes
 # ---------------------------------------------------------------------------

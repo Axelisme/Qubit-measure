@@ -41,7 +41,7 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 from .events import EVENT_SERIALIZERS, wire_event_name
 from .framing import LINE_TERMINATOR, MAX_LINE_BYTES, decode_line, encode_line
 from .param_spec import validate_params
-from .wire import Response, _require_str, parse_request
+from .wire import WIRE_VERSION, Response, _require_str, parse_request
 
 logger = logging.getLogger(__name__)
 
@@ -640,6 +640,14 @@ class RemoteControlService:
             raw = decode_line(line)
             req = parse_request(raw)
             rid = req.id
+            # wire.version is a no-auth handshake probe: it lets a caller read
+            # the server's wire-protocol version before authenticating, so a
+            # stale GUI process is detectable on connect.
+            if req.method == "wire.version":
+                self._reply_ok(
+                    state, rid=req.id, result={"wire_version": WIRE_VERSION}
+                )
+                return
             if req.method == "auth":
                 self._handle_auth(state, req.id, req.params)
                 return

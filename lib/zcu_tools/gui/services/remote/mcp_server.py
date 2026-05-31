@@ -51,6 +51,9 @@ from zcu_tools.gui.services.remote.param_spec import (  # noqa: E402
     JsonType,
     build_input_schema,
 )
+from zcu_tools.gui.services.remote.wire import (  # noqa: E402
+    WIRE_VERSION as MCP_WIRE_VERSION,
+)
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -317,6 +320,28 @@ def _send_gui_rpc_raw(
     return holder["message"]
 
 
+def _wire_version_note() -> str:
+    """Compare the GUI's wire version against the version this MCP server was
+    built with, returning a human-readable note for connect/launch replies.
+
+    ``wire.version`` is a no-auth probe, so this works right after connect. A
+    mismatch means one of the two processes is running stale code (did not
+    reload after a wire change) — surfaced explicitly instead of inferred from
+    process start times.
+    """
+    try:
+        resp = _send_gui_rpc_raw("wire.version", {}, 5.0)
+        gui_ver = resp.get("result", {}).get("wire_version")
+    except Exception as exc:  # noqa: BLE001 — probe is best-effort
+        return f" wire: mcp=v{MCP_WIRE_VERSION}, gui=unknown ({exc})"
+    if gui_ver == MCP_WIRE_VERSION:
+        return f" wire v{MCP_WIRE_VERSION} (mcp==gui)."
+    return (
+        f" WIRE VERSION MISMATCH: mcp=v{MCP_WIRE_VERSION}, gui=v{gui_ver} — "
+        "one process is running stale code; restart it."
+    )
+
+
 def _refresh_versions() -> None:
     """Re-read the full resource version table into ``_LAST_SEEN``.
 
@@ -433,8 +458,11 @@ def tool_gui_connect(arguments: Dict[str, Any]) -> str:
 
     if token:
         send_gui_rpc("auth", {"token": token})
-        return f"Connected to GUI on 127.0.0.1:{port} with token authentication."
-    return f"Connected to GUI on 127.0.0.1:{port}."
+        return (
+            f"Connected to GUI on 127.0.0.1:{port} with token authentication."
+            + _wire_version_note()
+        )
+    return f"Connected to GUI on 127.0.0.1:{port}." + _wire_version_note()
 
 
 def tool_gui_disconnect(arguments: Dict[str, Any]) -> str:
@@ -524,6 +552,7 @@ def tool_gui_launch(arguments: Dict[str, Any]) -> str:
         tool_gui_connect({"port": port, "token": token} if token else {"port": port})
         return (
             f"GUI launched (pid={pid}), listening on port {port}, and connected."
+            + _wire_version_note()
             + log_note
         )
 

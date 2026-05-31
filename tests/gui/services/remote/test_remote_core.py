@@ -26,6 +26,7 @@ from zcu_tools.gui.io_manager import IOManager
 from zcu_tools.gui.registry import Registry
 from zcu_tools.gui.runner import Runner
 from zcu_tools.gui.services.remote import ControlOptions, RemoteControlService
+from zcu_tools.gui.services.remote.wire import WIRE_VERSION
 from zcu_tools.gui.state import State
 
 # ---------------------------------------------------------------------------
@@ -256,6 +257,39 @@ def test_invalid_typed_request_rejected(fx):
         assert resp["error"]["code"] == "invalid_params"
     finally:
         sock.close()
+
+
+def test_wire_version_reported(fx):
+    sock = _open_client(fx.service.port)
+    try:
+        _send(sock, {"id": "1", "method": "wire.version", "params": {}})
+        resp = _recv_response(sock)
+        assert resp["ok"] is True
+        assert resp["result"]["wire_version"] == WIRE_VERSION
+    finally:
+        sock.close()
+
+
+def test_wire_version_is_no_auth(qapp):  # noqa: ARG001
+    # wire.version is a handshake probe: it must answer before auth even on a
+    # token-gated service, so a caller can detect a stale process on connect.
+    f = _Fixture(ControlOptions(port=0, token="s3cr3t"))
+    f.start()
+    try:
+        sock = _open_client(f.service.port)
+        try:
+            _send(sock, {"id": "1", "method": "wire.version", "params": {}})
+            resp = _recv_response(sock)
+            assert resp["ok"] is True
+            assert resp["result"]["wire_version"] == WIRE_VERSION
+
+            # A normal method is still gated.
+            _send(sock, {"id": "2", "method": "state.has_context", "params": {}})
+            assert _recv_response(sock)["error"]["code"] == "unauthorized"
+        finally:
+            sock.close()
+    finally:
+        f.stop()
 
 
 def test_token_gated_when_set(qapp):  # noqa: ARG001
