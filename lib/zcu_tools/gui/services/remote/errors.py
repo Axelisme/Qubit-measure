@@ -1,4 +1,4 @@
-"""Typed error envelope for RemoteControlService.
+"""Typed error envelope for RemoteControlAdapter.
 
 Wire format:
 

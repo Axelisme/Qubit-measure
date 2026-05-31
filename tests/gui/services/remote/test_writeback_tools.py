@@ -36,8 +36,7 @@ def _ctrl() -> MagicMock:
     return ctrl
 
 
-def _dispatch(ctrl, method, params):
-    return METHOD_REGISTRY[method].handler(ctrl, params)
+from ._helpers import dispatch_handler as _dispatch  # noqa: E402
 
 
 def test_preview_serializes_metadict_and_module():

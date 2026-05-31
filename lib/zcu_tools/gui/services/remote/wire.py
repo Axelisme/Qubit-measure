@@ -1,4 +1,4 @@
-"""Wire types for RemoteControlService.
+"""Wire types for RemoteControlAdapter.
 
 Frozen dataclasses for request / response envelopes plus strict JSON ↔ dataclass
 coercion helpers. All raw-dict validation happens here; no ``Any`` from the wire

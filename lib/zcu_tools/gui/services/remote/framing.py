@@ -1,4 +1,4 @@
-"""NDJSON framing for RemoteControlService.
+"""NDJSON framing for RemoteControlAdapter.
 
 One JSON object per line each way. Line length capped to defend against runaway
 clients. Parsing rejects non-object roots, control characters, and oversized

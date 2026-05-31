@@ -1,8 +1,8 @@
 #!/usr/bin/env python
-"""MCP server bridge for ``RemoteControlService``.
+"""MCP server bridge for ``RemoteControlAdapter``.
 
 Communicates with an MCP host (Gemini / Claude / VS Code) via stdio JSON-RPC
-2.0, and forwards calls to the live GUI's ``RemoteControlService`` over a
+2.0, and forwards calls to the live GUI's ``RemoteControlAdapter`` over a
 single persistent TCP socket. Event push from the GUI is received by a
 dedicated reader thread, parked in an internal queue and exposed to the LLM
 via the ``gui_events_poll`` polling tool.

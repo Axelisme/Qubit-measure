@@ -12,7 +12,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.services.remote import ControlOptions, RemoteControlService
+from zcu_tools.gui.services.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.services.remote.errors import ErrorCode, RemoteError
 
 
@@ -26,7 +26,7 @@ def _service(versions=None):
     ctrl = MagicMock()
     ctrl.get_bus.return_value = None
     ctrl.resources_versions.return_value = dict(versions or {})
-    return RemoteControlService(controller=ctrl, opts=ControlOptions(port=0))
+    return RemoteControlAdapter(controller=ctrl, opts=ControlOptions(port=0))
 
 
 # ---------------------------------------------------------------------------

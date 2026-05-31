@@ -1,11 +1,13 @@
-"""Method dispatcher for RemoteControlService.
+"""Method dispatcher for RemoteControlAdapter.
 
-Every handler is a pure synchronous function ``(controller, params) -> dict``
-that runs on the Qt main thread. The service layer is responsible for
-marshalling — handlers must not touch threading or Qt directly.
+Every handler is a pure synchronous function ``(adapter, params) -> dict`` that
+runs on the Qt main thread. The adapter layer is responsible for marshalling —
+handlers must not touch threading or Qt directly.
 
 Adding a method:
-  1. Implement ``def _h_<dotted_name>(ctrl, params): ...`` (returns wire dict).
+  1. Implement ``def _h_<dotted_name>(adapter, params): ...`` (returns wire
+     dict). Reach the façade via ``adapter.ctrl.<m>``; View surfaces (render /
+     snapshot) via the adapter's own methods.
   2. Register it in ``METHOD_REGISTRY`` below.
   3. Document the wire shape in ``AI_NOTE.md``.
 """
@@ -25,9 +27,11 @@ from zcu_tools.gui.adapter import (
 
 if TYPE_CHECKING:
     # Type-only: runtime import would cycle (controller.py imports
-    # remote.dialogs). Handlers receive the concrete Controller façade; the
-    # string annotation lets pyright check every ``ctrl.<method>`` call site.
-    from zcu_tools.gui.controller import Controller
+    # remote.dialogs). Handlers receive the RemoteControlAdapter (the driving
+    # adapter that hosts them); they reach the command face via ``adapter.ctrl``
+    # and View surfaces via the adapter's own methods. String annotations let
+    # pyright check every ``adapter.ctrl.<method>`` / ``adapter.<method>`` call.
+    from .service import RemoteControlAdapter
 from zcu_tools.gui.services.context import MlEntryValidationError
 from zcu_tools.gui.services.device import SetupDeviceRequest
 from zcu_tools.gui.services.session_persistence import SessionPersistenceService
@@ -43,7 +47,7 @@ from .wire import (
 
 logger = logging.getLogger(__name__)
 
-Handler = Callable[["Controller", Mapping[str, object]], Mapping[str, object]]
+Handler = Callable[["RemoteControlAdapter", Mapping[str, object]], Mapping[str, object]]
 
 # Shared serializer instance: we only use its pure schema_to_raw / raw_to_schema
 # methods, never its persistence side effects.
@@ -79,56 +83,58 @@ class BoundMethod:
 
 
 def _h_tab_new(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["adapter_name"])
-    if name not in ctrl.get_adapter_names():
+    if name not in adapter.ctrl.get_adapter_names():
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown adapter: {name!r}")
-    tab_id = ctrl.new_tab(name)
+    tab_id = adapter.ctrl.new_tab(name)
     return {"tab_id": tab_id}
 
 
 def _h_tab_close(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
-    if not ctrl.has_tab(tab_id):
+    if not adapter.ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    ctrl.close_tab(tab_id)
+    adapter.ctrl.close_tab(tab_id)
     return {}
 
 
 def _h_tab_set_active(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
-    if not ctrl.has_tab(tab_id):
+    if not adapter.ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    ctrl.set_active_tab(tab_id)
+    adapter.ctrl.set_active_tab(tab_id)
     return {}
 
 
 def _h_tab_list(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
     tabs = [
-        {"tab_id": tid, "adapter_name": ctrl.get_tab_adapter_name(tid)}
-        for tid in ctrl.list_tab_ids()
+        {"tab_id": tid, "adapter_name": adapter.ctrl.get_tab_adapter_name(tid)}
+        for tid in adapter.ctrl.list_tab_ids()
     ]
     return {"tabs": tabs}
 
 
-def _tab_snapshot_wire(ctrl: "Controller", tab_id: str) -> dict[str, object]:
-    snap = ctrl.get_tab_snapshot(tab_id)
+def _tab_snapshot_wire(
+    adapter: "RemoteControlAdapter", tab_id: str
+) -> dict[str, object]:
+    snap = adapter.ctrl.get_tab_snapshot(tab_id)
     interaction = snap.interaction
     return {
         "tab_id": tab_id,
-        "adapter_name": ctrl.get_tab_adapter_name(tab_id),
+        "adapter_name": adapter.ctrl.get_tab_adapter_name(tab_id),
         # Shared cfg-editor session id for this tab (None until the tab's form
         # is populated). Address it with the editor.* methods to edit cfg with
         # the GUI reflecting every change. (A tab uses its tab_id as owner key.)
-        "editor_id": ctrl.editor_id_for_owner(tab_id),
+        "editor_id": adapter.ctrl.editor_id_for_owner(tab_id),
         "interaction": {
             "global_run_active": bool(interaction.global_run_active),
             "is_running": bool(interaction.is_running),
@@ -146,16 +152,20 @@ def _tab_snapshot_wire(ctrl: "Controller", tab_id: str) -> dict[str, object]:
 
 
 def _h_tab_snapshot(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id_raw = params.get("tab_id")
     if tab_id_raw is None:
         # batch: return all tabs
-        return {"tabs": [_tab_snapshot_wire(ctrl, tid) for tid in ctrl.list_tab_ids()]}
+        return {
+            "tabs": [
+                _tab_snapshot_wire(adapter, tid) for tid in adapter.ctrl.list_tab_ids()
+            ]
+        }
     tab_id = str(tab_id_raw)
-    if not ctrl.has_tab(tab_id):
+    if not adapter.ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    return _tab_snapshot_wire(ctrl, tab_id)
+    return _tab_snapshot_wire(adapter, tab_id)
 
 
 def _save_paths_wire(paths) -> Optional[dict[str, str]]:
@@ -165,42 +175,42 @@ def _save_paths_wire(paths) -> Optional[dict[str, str]]:
 
 
 def _h_tab_get_cfg(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
-    if not ctrl.has_tab(tab_id):
+    if not adapter.ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    schema = ctrl.get_tab_cfg_schema(tab_id)
+    schema = adapter.ctrl.get_tab_cfg_schema(tab_id)
     raw = _SCHEMA_CODEC.schema_to_raw(schema, ml=None)
     return {"raw": raw}
 
 
 def _h_tab_list_paths(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
-    if not ctrl.has_tab(tab_id):
+    if not adapter.ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     # A tab's cfg draft is a CfgEditorService session keyed by its tab_id (the
     # same draft the open form attaches to). List its settable paths from that
     # session — the one ``editor.set_field`` mutates — so listed paths are
     # guaranteed settable and agent+user share one model (ADR-0013 F11).
-    editor_id = ctrl.editor_id_for_owner(tab_id)
+    editor_id = adapter.ctrl.editor_id_for_owner(tab_id)
     if editor_id is None:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
             f"tab {tab_id!r} cfg form has no live model yet",
         )
-    return {"paths": ctrl.cfg_editor_get(editor_id)}
+    return {"paths": adapter.ctrl.cfg_editor_get(editor_id)}
 
 
 def _h_tab_update_cfg(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
-    if not ctrl.has_tab(tab_id):
+    if not adapter.ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    if ctrl.get_running_tab_id() == tab_id:
+    if adapter.ctrl.get_running_tab_id() == tab_id:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
             f"tab {tab_id!r} is currently running; cancel the run before editing cfg",
@@ -208,14 +218,14 @@ def _h_tab_update_cfg(
     # ParamSpec(_obj) already validated this is a dict at the wire boundary; cast
     # to narrow for the type checker without a redundant runtime re-check.
     raw = cast(dict, params["raw"])
-    base = ctrl.get_tab_cfg_schema(tab_id)
+    base = adapter.ctrl.get_tab_cfg_schema(tab_id)
     try:
         schema: CfgSchema = _SCHEMA_CODEC.raw_to_schema(base, dict(raw))
     except Exception as exc:
         raise RemoteError(
             ErrorCode.INVALID_PARAMS, f"invalid cfg payload: {exc}"
         ) from exc
-    ctrl.update_tab_cfg(tab_id, schema)
+    adapter.ctrl.update_tab_cfg(tab_id, schema)
     return {}
 
 
@@ -225,13 +235,13 @@ def _h_tab_update_cfg(
 
 
 def _h_run_start(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
-    if not ctrl.has_tab(tab_id):
+    if not adapter.ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     try:
-        operation_id = ctrl.start_run(tab_id)
+        operation_id = adapter.ctrl.start_run(tab_id)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -242,28 +252,28 @@ def _h_run_start(
 
 
 def _h_run_cancel(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    ctrl.cancel_run()
+    adapter.ctrl.cancel_run()
     return {}
 
 
 def _h_run_running_tab(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    return {"tab_id": ctrl.get_running_tab_id()}
+    return {"tab_id": adapter.ctrl.get_running_tab_id()}
 
 
 def _h_save_data(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     data_path = params["data_path"]
     comment = str(params["comment"])
     try:
-        ctrl.save_data(
+        adapter.ctrl.save_data(
             tab_id, str(data_path) if data_path is not None else None, comment=comment
         )
     except RuntimeError as exc:
@@ -276,12 +286,14 @@ def _h_save_data(
 
 
 def _h_save_image(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     image_path = params["image_path"]
     try:
-        ctrl.save_image(tab_id, str(image_path) if image_path is not None else None)
+        adapter.ctrl.save_image(
+            tab_id, str(image_path) if image_path is not None else None
+        )
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -292,14 +304,14 @@ def _h_save_image(
 
 
 def _h_save_both(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     data_path = params["data_path"]
     image_path = params["image_path"]
     comment = str(params["comment"])
     try:
-        ctrl.save_both(
+        adapter.ctrl.save_both(
             tab_id,
             str(data_path) if data_path is not None else None,
             str(image_path) if image_path is not None else None,
@@ -315,14 +327,14 @@ def _h_save_both(
 
 
 def _h_save_set_paths(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
-    if not ctrl.has_tab(tab_id):
+    if not adapter.ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     data_path = str(params["data_path"])
     image_path = str(params["image_path"])
-    ctrl.update_tab_save_paths(tab_id, data_path, image_path)
+    adapter.ctrl.update_tab_save_paths(tab_id, data_path, image_path)
     return {}
 
 
@@ -332,19 +344,19 @@ def _h_save_set_paths(
 
 
 def _h_context_use(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    ctrl.use_context(str(params["label"]))
+    adapter.ctrl.use_context(str(params["label"]))
     return {}
 
 
 def _h_context_new(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     value = params["value"]
     unit = str(params["unit"])
     clone = bool(params["clone_from_current"])
-    ctrl.new_context(
+    adapter.ctrl.new_context(
         value=float(value) if value is not None else None,  # type: ignore[arg-type]
         unit=unit,
         clone_from_current=clone,
@@ -353,17 +365,17 @@ def _h_context_new(
 
 
 def _h_context_labels(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    return {"labels": list(ctrl.get_context_labels())}
+    return {"labels": list(adapter.ctrl.get_context_labels())}
 
 
 def _h_context_active(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    return {"label": ctrl.get_active_context_label()}
+    return {"label": adapter.ctrl.get_active_context_label()}
 
 
 def _json_safe(value: object) -> object:
@@ -378,18 +390,18 @@ def _json_safe(value: object) -> object:
 
 
 def _h_context_get_md(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    md = ctrl.get_current_md()
+    md = adapter.ctrl.get_current_md()
     return {"keys": sorted(str(k) for k in md.keys())}
 
 
 def _h_context_get_md_attr(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     key = str(params["key"])
-    md = ctrl.get_current_md()
+    md = adapter.ctrl.get_current_md()
     sentinel = object()
     value = md.get(key, sentinel)
     if value is sentinel:
@@ -398,10 +410,10 @@ def _h_context_get_md_attr(
 
 
 def _h_context_get_ml(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    ml = ctrl.get_current_ml()
+    ml = adapter.ctrl.get_current_ml()
     return {
         "modules": sorted(ml.modules.keys()),
         "waveforms": sorted(ml.waveforms.keys()),
@@ -409,19 +421,19 @@ def _h_context_get_ml(
 
 
 def _h_ml_list_roles(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     """List the experiment-role templates available for create_from_role."""
     del params
     try:
-        catalog = ctrl.get_role_catalog()
+        catalog = adapter.ctrl.get_role_catalog()
     except RuntimeError as exc:
         raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
     return {"roles": list(catalog.list_meta())}
 
 
 def _h_ml_create_from_role(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     """Create a blank ml module/waveform from a named role and register it.
 
@@ -432,7 +444,7 @@ def _h_ml_create_from_role(
     role_id = str(params["role_id"])
     name = str(params["name"])
     try:
-        ctrl.create_from_role(item_kind, role_id, name)
+        adapter.ctrl.create_from_role(item_kind, role_id, name)
     except KeyError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     except MlEntryValidationError as exc:
@@ -447,12 +459,12 @@ def _h_ml_create_from_role(
 
 
 def _h_context_set_md_attr(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     key = str(params["key"])
     value = params["value"]
     try:
-        ctrl.set_md_attr(key, value)
+        adapter.ctrl.set_md_attr(key, value)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -463,11 +475,11 @@ def _h_context_set_md_attr(
 
 
 def _h_context_del_md_attr(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     key = str(params["key"])
     try:
-        ctrl.del_md_attr(key)
+        adapter.ctrl.del_md_attr(key)
     except (AttributeError, RuntimeError) as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -478,11 +490,11 @@ def _h_context_del_md_attr(
 
 
 def _h_context_del_ml_module(
-    ctrl, params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
     try:
-        ctrl.del_ml_module(name)
+        adapter.ctrl.del_ml_module(name)
     except (KeyError, RuntimeError) as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -493,12 +505,12 @@ def _h_context_del_ml_module(
 
 
 def _h_context_rename_ml_module(
-    ctrl, params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     old = str(params["old"])
     new = str(params["new"])
     try:
-        ctrl.rename_ml_module(old, new)
+        adapter.ctrl.rename_ml_module(old, new)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -509,12 +521,12 @@ def _h_context_rename_ml_module(
 
 
 def _h_context_rename_ml_waveform(
-    ctrl, params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     old = str(params["old"])
     new = str(params["new"])
     try:
-        ctrl.rename_ml_waveform(old, new)
+        adapter.ctrl.rename_ml_waveform(old, new)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -525,11 +537,11 @@ def _h_context_rename_ml_waveform(
 
 
 def _h_context_del_ml_waveform(
-    ctrl, params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
     try:
-        ctrl.del_ml_waveform(name)
+        adapter.ctrl.del_ml_waveform(name)
     except (KeyError, RuntimeError) as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -540,53 +552,53 @@ def _h_context_del_ml_waveform(
 
 
 def _h_state_has_project(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    return {"value": bool(ctrl.has_project())}
+    return {"value": bool(adapter.ctrl.has_project())}
 
 
 def _h_state_has_context(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    return {"value": bool(ctrl.has_context())}
+    return {"value": bool(adapter.ctrl.has_context())}
 
 
 def _h_state_has_active_context(
-    ctrl, params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    return {"value": bool(ctrl.has_active_context())}
+    return {"value": bool(adapter.ctrl.has_active_context())}
 
 
 def _h_state_has_soc(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    return {"value": bool(ctrl.has_soc())}
+    return {"value": bool(adapter.ctrl.has_soc())}
 
 
 def _h_resources_versions(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    return {"versions": ctrl.resources_versions()}
+    return {"versions": adapter.ctrl.resources_versions()}
 
 
 def _h_session_persist(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    ctrl.persist_tabs_session()
+    adapter.ctrl.persist_tabs_session()
     return {}
 
 
 def _h_session_restore(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    ctrl.restore_tabs_from_session()
+    adapter.ctrl.restore_tabs_from_session()
     return {}
 
 
@@ -596,15 +608,15 @@ def _h_session_restore(
 
 
 def _h_connect_start(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     req = coerce_connect_request(params)
-    operation_id = ctrl.start_connect(req)
+    operation_id = adapter.ctrl.start_connect(req)
     return {"operation_id": operation_id}
 
 
 def _h_startup_apply(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     # Params are ParamSpec-validated; result_dir/database_path are optional and
     # default to "" (empty result_dir leaves the context in DRAFT — editable but
@@ -618,16 +630,16 @@ def _h_startup_apply(
         result_dir=str(params["result_dir"] or ""),
         database_path=str(params["database_path"] or ""),
     )
-    ok = ctrl.apply_startup_project(req)
+    ok = adapter.ctrl.apply_startup_project(req)
     return {"ok": bool(ok)}
 
 
 def _h_device_connect(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     req = coerce_connect_device_request(params)
     try:
-        operation_id = ctrl.start_connect_device(req)
+        operation_id = adapter.ctrl.start_connect_device(req)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -638,11 +650,11 @@ def _h_device_connect(
 
 
 def _h_device_disconnect(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     req = coerce_disconnect_device_request(params)
     try:
-        operation_id = ctrl.start_disconnect_device(req)
+        operation_id = adapter.ctrl.start_disconnect_device(req)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -653,11 +665,11 @@ def _h_device_disconnect(
 
 
 def _h_device_reconnect(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
     try:
-        ctrl.start_reconnect_device(name)
+        adapter.ctrl.start_reconnect_device(name)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -668,11 +680,11 @@ def _h_device_reconnect(
 
 
 def _h_device_forget(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
     try:
-        ctrl.forget_device(name)
+        adapter.ctrl.forget_device(name)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -683,12 +695,12 @@ def _h_device_forget(
 
 
 def _h_device_setup(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
     updates = cast(dict, params["updates"])  # ParamSpec(_obj)-validated
     try:
-        info = ctrl.get_device_info(name)
+        info = adapter.ctrl.get_device_info(name)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -705,7 +717,7 @@ def _h_device_setup(
     except ValueError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     try:
-        operation_id = ctrl.start_setup_device(
+        operation_id = adapter.ctrl.start_setup_device(
             SetupDeviceRequest(name=name, info=updated)
         )
     except RuntimeError as exc:
@@ -752,11 +764,11 @@ def _field_type_and_choices(annotation: object) -> tuple[str, Optional[list]]:
 
 
 def _h_device_setup_spec(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
     try:
-        info = ctrl.get_device_info(name)
+        info = adapter.ctrl.get_device_info(name)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -784,11 +796,11 @@ def _h_device_setup_spec(
 
 
 def _h_device_cancel_operation(
-    ctrl, params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
     try:
-        ctrl.cancel_device_operation(name)
+        adapter.ctrl.cancel_device_operation(name)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -799,35 +811,35 @@ def _h_device_cancel_operation(
 
 
 def _h_adapter_list(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    return {"adapters": list(ctrl.get_adapter_names())}
+    return {"adapters": list(adapter.ctrl.get_adapter_names())}
 
 
 def _h_adapter_cfg_spec(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from .path_resolver import list_spec_paths
 
     name = str(params["adapter_name"])
-    if name not in ctrl.get_adapter_names():
+    if name not in adapter.ctrl.get_adapter_names():
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown adapter: {name!r}")
-    spec = ctrl.get_adapter_cfg_spec(name)
+    spec = adapter.ctrl.get_adapter_cfg_spec(name)
     return {"paths": list_spec_paths(spec)}
 
 
 def _h_adapter_analyze_spec(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["adapter_name"])
-    if name not in ctrl.get_adapter_names():
+    if name not in adapter.ctrl.get_adapter_names():
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown adapter: {name!r}")
-    return {"params": ctrl.get_adapter_analyze_params(name)}
+    return {"params": adapter.ctrl.get_adapter_analyze_params(name)}
 
 
 def _h_device_list(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
     devices = [
@@ -836,16 +848,16 @@ def _h_device_list(
             "type_name": e.type_name,
             "is_connected": bool(e.is_connected),
         }
-        for e in ctrl.list_devices()
+        for e in adapter.ctrl.list_devices()
     ]
     return {"devices": devices}
 
 
 def _h_device_snapshot(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
-    snap = ctrl.get_device_snapshot(name)
+    snap = adapter.ctrl.get_device_snapshot(name)
     if snap is None:
         return {"snapshot": None}
     # ``info`` is a ``BaseDeviceInfo`` (a pydantic ``ConfigBase``); ``to_dict()``
@@ -876,10 +888,10 @@ def _progress_wire(progress) -> list[dict[str, object]]:
 
 
 def _h_device_active_setup(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    setup = ctrl.get_active_device_setup()
+    setup = adapter.ctrl.get_active_device_setup()
     if setup is None:
         return {"active_setup": None}
     return {
@@ -891,10 +903,10 @@ def _h_device_active_setup(
 
 
 def _h_device_active_operation(
-    ctrl, params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    snap = ctrl.get_active_device_operation()
+    snap = adapter.ctrl.get_active_device_operation()
     if snap is None:
         return {"active_operation": None}
     return {
@@ -910,7 +922,7 @@ def _h_device_active_operation(
 
 
 def _h_operation_await(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     # off_main_thread handler: blocks the IO worker thread on the gate's
     # thread-safe registry (never touches main-thread-owned state). Returns the
@@ -918,7 +930,7 @@ def _h_operation_await(
     # caller's await raises; timeout becomes TIMEOUT.
     operation_id = int(params["operation_id"])  # type: ignore[arg-type]
     timeout = float(params["timeout"])  # type: ignore[arg-type]
-    outcome = ctrl.await_operation(operation_id, timeout)
+    outcome = adapter.ctrl.await_operation(operation_id, timeout)
     if outcome is None:
         raise RemoteError(
             ErrorCode.TIMEOUT,
@@ -939,7 +951,7 @@ def _h_operation_await(
 
 
 def _h_dialog_open(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from .dialogs import DialogName, parse_dialog_name
 
@@ -948,12 +960,12 @@ def _h_dialog_open(
         name: DialogName = parse_dialog_name(name_raw)
     except ValueError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
-    ctrl.open_dialog(name)
+    adapter.ctrl.open_dialog(name)
     return {"opened": name.value}
 
 
 def _h_dialog_close(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from .dialogs import DialogName, parse_dialog_name
 
@@ -962,23 +974,23 @@ def _h_dialog_close(
         name: DialogName = parse_dialog_name(name_raw)
     except ValueError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
-    ctrl.close_dialog(name)
+    adapter.ctrl.close_dialog(name)
     return {"closed": name.value}
 
 
 def _h_dialog_list_open(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    open_names = [n.value for n in ctrl.list_open_dialogs()]
+    open_names = [n.value for n in adapter.ctrl.list_open_dialogs()]
     return {"open": open_names}
 
 
 def _h_view_snapshot(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    snap = ctrl.get_view_snapshot()
+    snap = adapter.ctrl.get_view_snapshot()
     if not isinstance(snap, dict):
         raise RemoteError(
             ErrorCode.INTERNAL,
@@ -988,7 +1000,7 @@ def _h_view_snapshot(
 
 
 def _h_dialog_screenshot(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     import base64
 
@@ -997,7 +1009,7 @@ def _h_dialog_screenshot(
     name_str = str(params["dialog_name"])
     try:
         dialog_name = parse_dialog_name(name_str)
-        png = ctrl.take_dialog_screenshot(dialog_name)
+        png = adapter.ctrl.take_dialog_screenshot(dialog_name)
     except (ValueError, RuntimeError) as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -1014,14 +1026,14 @@ def _h_dialog_screenshot(
 
 
 def _h_view_screenshot(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     import base64
 
     tab_id_raw = params.get("tab_id")
     tab_id: Optional[str] = str(tab_id_raw) if tab_id_raw is not None else None
     try:
-        png = ctrl.take_screenshot(tab_id)
+        png = adapter.ctrl.take_screenshot(tab_id)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -1043,31 +1055,32 @@ def _h_view_screenshot(
 
 
 def _h_tab_get_analyze_result(
-    ctrl, params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
-    if not ctrl.has_tab(tab_id):
+    if not adapter.ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    result = ctrl.get_tab_analyze_result(tab_id)
+    result = adapter.ctrl.get_tab_analyze_result(tab_id)
     if result is None:
         return {"summary": None}
-    if not hasattr(result, "to_summary_dict"):
+    to_summary = getattr(result, "to_summary_dict", None)
+    if not callable(to_summary):
         raise RemoteError(
             ErrorCode.INTERNAL,
             "analyze result does not implement to_summary_dict()",
         )
-    return {"summary": result.to_summary_dict()}
+    return {"summary": to_summary()}
 
 
 def _h_tab_get_analyze_params(
-    ctrl, params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     import dataclasses
 
     tab_id = str(params["tab_id"])
-    if not ctrl.has_tab(tab_id):
+    if not adapter.ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    snap = ctrl.get_tab_snapshot(tab_id)
+    snap = adapter.ctrl.get_tab_snapshot(tab_id)
     if snap.analyze_params is None:
         return {"analyze_params": None}
     ap = snap.analyze_params
@@ -1077,14 +1090,14 @@ def _h_tab_get_analyze_params(
 
 
 def _h_analyze_start(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     import dataclasses
 
     tab_id = str(params["tab_id"])
-    if not ctrl.has_tab(tab_id):
+    if not adapter.ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    snap = ctrl.get_tab_snapshot(tab_id)
+    snap = adapter.ctrl.get_tab_snapshot(tab_id)
     if snap.analyze_params is None:
         raise RemoteError(ErrorCode.PRECONDITION_FAILED, "no analyze params available")
     raw_updates = cast(dict, params["updates"])  # ParamSpec(_obj)-validated
@@ -1098,7 +1111,7 @@ def _h_analyze_start(
     except (TypeError, ValueError) as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     try:
-        ctrl.analyze(tab_id, updated)
+        adapter.ctrl.analyze(tab_id, updated)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -1126,12 +1139,12 @@ def _strip_cfg_tags(raw: object) -> object:
 
 
 def _h_tab_get_cfg_summary(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
-    if not ctrl.has_tab(tab_id):
+    if not adapter.ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    schema = ctrl.get_tab_cfg_schema(tab_id)
+    schema = adapter.ctrl.get_tab_cfg_schema(tab_id)
     raw = _SCHEMA_CODEC.schema_to_raw(schema, ml=None)
     return {"summary": _strip_cfg_tags(raw)}
 
@@ -1162,23 +1175,23 @@ def _writeback_item_wire(item) -> dict[str, object]:
 
 
 def _h_writeback_preview(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
-    if not ctrl.has_tab(tab_id):
+    if not adapter.ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    items = ctrl.get_tab_writeback_items(tab_id)
+    items = adapter.ctrl.get_tab_writeback_items(tab_id)
     return {"items": [_writeback_item_wire(it) for it in items]}
 
 
 def _h_writeback_set(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     """Edit a persistent writeback item by id (selected / target_name /
     metadict proposed_value). Module/waveform cfg edits go through editor.* on
     the item's editor_id, not here."""
     tab_id = str(params["tab_id"])
-    if not ctrl.has_tab(tab_id):
+    if not adapter.ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     session_id = str(params["id"])
     # The wire collapses "omitted optional" and "explicit JSON null" to the same
@@ -1199,22 +1212,22 @@ def _h_writeback_set(
     if params.get("proposed_value") is not None:
         changes["proposed_value"] = params["proposed_value"]
     try:
-        ctrl.set_writeback_item(tab_id, session_id, **changes)
+        adapter.ctrl.set_writeback_item(tab_id, session_id, **changes)
     except RuntimeError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     return {}
 
 
 def _h_writeback_apply(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     """Apply the tab's persistent writeback draft as-is (edit it first via
     writeback.set / editor.*)."""
     tab_id = str(params["tab_id"])
-    if not ctrl.has_tab(tab_id):
+    if not adapter.ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     try:
-        applied = ctrl.apply_writeback(tab_id)
+        applied = adapter.ctrl.apply_writeback(tab_id)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -1230,7 +1243,7 @@ def _h_writeback_apply(
 
 
 def _h_editor_open(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from zcu_tools.gui.services.cfg_editor import CfgEditorError
 
@@ -1239,7 +1252,7 @@ def _h_editor_open(
     # editor.open is modify-only: it edits an existing ml entry. Creating a blank
     # entry goes through ml.create_from_role (role_id='<disc>:blank').
     try:
-        editor_id, paths = ctrl.open_cfg_editor(
+        editor_id, paths = adapter.ctrl.open_cfg_editor(
             item_kind, discriminator=None, from_name=from_name
         )
     except CfgEditorError as exc:
@@ -1248,7 +1261,7 @@ def _h_editor_open(
 
 
 def _h_editor_set_field(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from zcu_tools.gui.services.cfg_editor import CfgEditorError
 
@@ -1258,14 +1271,14 @@ def _h_editor_set_field(
     # A tab cfg draft is a session owned by the tab_id; editing it while that
     # tab runs is blocked — same guard the human gets via the disabled form
     # (ADR-0013 F11). owner-less / ml-entry sessions are unaffected.
-    owner = ctrl.owner_of_editor(editor_id)
-    if owner is not None and ctrl.get_running_tab_id() == owner:
+    owner = adapter.ctrl.owner_of_editor(editor_id)
+    if owner is not None and adapter.ctrl.get_running_tab_id() == owner:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
             f"tab {owner!r} is currently running; cancel the run before editing cfg",
         )
     try:
-        return ctrl.cfg_editor_set_field(editor_id, path, value)
+        return adapter.ctrl.cfg_editor_set_field(editor_id, path, value)
     except CfgEditorError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     except RemoteError:
@@ -1279,26 +1292,26 @@ def _h_editor_set_field(
 
 
 def _h_editor_get(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from zcu_tools.gui.services.cfg_editor import CfgEditorError
 
     editor_id = str(params["editor_id"])
     try:
-        return {"paths": ctrl.cfg_editor_get(editor_id)}
+        return {"paths": adapter.ctrl.cfg_editor_get(editor_id)}
     except CfgEditorError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
 
 
 def _h_editor_commit(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from zcu_tools.gui.services.cfg_editor import CfgEditorError
 
     editor_id = str(params["editor_id"])
     name = str(params["name"])
     try:
-        ctrl.commit_cfg_editor(editor_id, name)
+        adapter.ctrl.commit_cfg_editor(editor_id, name)
     except CfgEditorError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     except MlEntryValidationError as exc:
@@ -1313,13 +1326,13 @@ def _h_editor_commit(
 
 
 def _h_editor_discard(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from zcu_tools.gui.services.cfg_editor import CfgEditorError
 
     editor_id = str(params["editor_id"])
     try:
-        ctrl.discard_cfg_editor(editor_id)
+        adapter.ctrl.discard_cfg_editor(editor_id)
     except CfgEditorError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     return {}
@@ -1331,10 +1344,10 @@ def _h_editor_discard(
 
 
 def _h_run_progress(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    bars = ctrl.get_run_progress()
+    bars = adapter.ctrl.get_run_progress()
     if not bars:
         return {"active": False, "bars": []}
     # bars are ProgressEntrySnapshot(token, format, maximum, value). `format` is
@@ -1364,7 +1377,7 @@ def _h_run_progress(
 
 
 def _h_tab_figure_screenshot(
-    ctrl, params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     import base64
     from pathlib import Path
@@ -1373,7 +1386,7 @@ def _h_tab_figure_screenshot(
     out_path_raw = params.get("out_path")
     out_path: Optional[str] = str(out_path_raw) if out_path_raw is not None else None
     try:
-        png = ctrl.take_figure_screenshot(tab_id)
+        png = adapter.ctrl.take_figure_screenshot(tab_id)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -1397,7 +1410,7 @@ def _h_tab_figure_screenshot(
 
 
 def _h_predictor_load(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from zcu_tools.gui.services.connection import (
         LoadPredictorRequest,
@@ -1407,7 +1420,9 @@ def _h_predictor_load(
     path = str(params["path"])
     flux_bias = float(params["flux_bias"])  # type: ignore[arg-type]
     try:
-        ctrl.load_predictor(LoadPredictorRequest(path=path, flux_bias=flux_bias))
+        adapter.ctrl.load_predictor(
+            LoadPredictorRequest(path=path, flux_bias=flux_bias)
+        )
     except PredictorLoadError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -1418,15 +1433,15 @@ def _h_predictor_load(
 
 
 def _h_predictor_clear(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    ctrl.clear_predictor()
+    adapter.ctrl.clear_predictor()
     return {}
 
 
 def _h_predictor_predict(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from zcu_tools.gui.services.connection import PredictFreqRequest, PredictorNotLoaded
 
@@ -1434,7 +1449,7 @@ def _h_predictor_predict(
     from_lvl = int(params["from_lvl"])  # type: ignore[arg-type]
     to_lvl = int(params["to_lvl"])  # type: ignore[arg-type]
     try:
-        freq = ctrl.predict_freq(
+        freq = adapter.ctrl.predict_freq(
             PredictFreqRequest(value=value, transition=(from_lvl, to_lvl))
         )
     except PredictorNotLoaded as exc:
@@ -1447,10 +1462,10 @@ def _h_predictor_predict(
 
 
 def _h_predictor_info(
-    ctrl: "Controller", params: Mapping[str, object]
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    return {"info": ctrl.get_predictor_info()}
+    return {"info": adapter.ctrl.get_predictor_info()}
 
 
 # ---------------------------------------------------------------------------

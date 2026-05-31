@@ -1,4 +1,4 @@
-"""Per-connection lifecycle of CfgEditor sessions in RemoteControlService.
+"""Per-connection lifecycle of CfgEditor sessions in RemoteControlAdapter.
 
 editor.open binds the returned id to the connection's _ClientState; commit /
 discard forget it; a dropped connection reclaims any leftover sessions via
@@ -11,7 +11,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.services.remote import ControlOptions, RemoteControlService
+from zcu_tools.gui.services.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.services.remote.service import _ClientState
 
 
@@ -23,7 +23,7 @@ def _qt(qapp):  # noqa: ARG001 — _MainThreadDispatcher is a QObject; needs an 
 def _service():
     ctrl = MagicMock()
     ctrl.get_bus.return_value = None  # disables event-bus subscription wiring
-    svc = RemoteControlService(controller=ctrl, opts=ControlOptions(port=0))
+    svc = RemoteControlAdapter(controller=ctrl, opts=ControlOptions(port=0))
     return svc, ctrl
 
 

@@ -61,10 +61,17 @@ def _make_controller(readiness: ContextReadiness) -> Controller:
 
 def _dispatch(ctrl: Controller, method: str, params: dict) -> object:
     """Mirror the service path: validate params against the method's ParamSpec
-    before invoking the handler."""
+    before invoking the handler. Handlers receive the adapter (ADR-0013), so
+    wrap ctrl in a minimal adapter stub."""
+    from types import SimpleNamespace
+    from typing import cast
+
+    from zcu_tools.gui.services.remote.service import RemoteControlAdapter
+
     spec = METHOD_REGISTRY[method]
     handler_params = validate_params(spec.params, params) if spec.params else params
-    return spec.handler(ctrl, handler_params)
+    adapter = cast(RemoteControlAdapter, SimpleNamespace(ctrl=ctrl))
+    return spec.handler(adapter, handler_params)
 
 
 def test_run_start_draft_context_symmetry(qapp):  # noqa: ARG001

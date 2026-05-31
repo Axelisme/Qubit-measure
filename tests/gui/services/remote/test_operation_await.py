@@ -14,7 +14,12 @@ from zcu_tools.gui.services.operation_gate import OperationOutcome
 from zcu_tools.gui.services.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.services.remote.errors import ErrorCode, RemoteError
 
-_HANDLER = METHOD_REGISTRY["operation.await"].handler
+from ._helpers import dispatch_handler
+
+
+def _HANDLER(ctrl, params):
+    # Handlers receive the adapter (ADR-0013); wrap ctrl in an adapter stub.
+    return dispatch_handler(ctrl, "operation.await", params)
 
 
 def _ctrl(outcome) -> MagicMock:

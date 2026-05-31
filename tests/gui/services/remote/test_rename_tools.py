@@ -9,8 +9,7 @@ from zcu_tools.gui.services.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.services.remote.errors import ErrorCode, RemoteError
 
 
-def _dispatch(ctrl, method, params):
-    return METHOD_REGISTRY[method].handler(ctrl, params)
+from ._helpers import dispatch_handler as _dispatch  # noqa: E402
 
 
 def test_rename_module_drives_controller():

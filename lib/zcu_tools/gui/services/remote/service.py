@@ -1,4 +1,4 @@
-"""RemoteControlService — local socket interface for automation agents.
+"""RemoteControlAdapter — local socket interface for automation agents.
 
 Bind defaults to 127.0.0.1. NDJSON request/response (plus optional event push)
 over plain TCP.
@@ -143,12 +143,21 @@ class _ClientState:
 # ---------------------------------------------------------------------------
 
 
-class RemoteControlService:
-    """Run an NDJSON dispatcher on a local TCP port.
+class RemoteControlAdapter:
+    """Driving adapter: an NDJSON RPC face onto the Controller, peer to the Qt
+    ``MainWindow`` (ADR-0008 / ADR-0013).
 
-    Construct after ``Controller`` / ``MainWindow`` exist; the service holds a
-    weak relationship to the Controller and pulls EventBus from it via
-    ``controller.get_bus()``. Inert until ``start()``.
+    It is a *View* — the second user-facing client (user = an automation agent /
+    another server). It holds the concrete ``Controller`` (command face) and
+    pulls EventBus from it via ``controller.get_bus()``. Dispatch handlers
+    receive *this adapter* (not the bare ctrl), so they reach commands through
+    ``adapter.ctrl.<façade>`` and View-side surfaces (render/snapshot) through
+    the adapter's own methods. Construct after ``Controller`` / ``MainWindow``
+    exist; inert until ``start()``.
+
+    Handlers that merely forward to the façade call ``adapter.ctrl.<m>``
+    directly (no wrapper). Wrap a call as an adapter method only when the RPC
+    side needs its own logic (e.g. render queries that use ``render_view``).
     """
 
     def __init__(
@@ -160,7 +169,8 @@ class RemoteControlService:
             raise RuntimeError(
                 "Remote control must specify a token when --control-allow-external is set"
             )
-        self._ctrl = controller
+        # Public: dispatch handlers reach the command face through ``adapter.ctrl``.
+        self.ctrl = controller
         self._opts = opts
         self._dispatcher = _MainThreadDispatcher()
         self._stopping = threading.Event()
@@ -187,7 +197,7 @@ class RemoteControlService:
         Returns the actual bound port.
         """
         if self._thread is not None:
-            raise RuntimeError("RemoteControlService.start() called twice")
+            raise RuntimeError("RemoteControlAdapter.start() called twice")
         host = self._opts.host()
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
@@ -195,7 +205,7 @@ class RemoteControlService:
         except OSError as exc:
             sock.close()
             raise RuntimeError(
-                f"RemoteControlService bind {host}:{self._opts.port} failed: {exc}"
+                f"RemoteControlAdapter bind {host}:{self._opts.port} failed: {exc}"
             ) from exc
         sock.listen(8)
         sock.setblocking(False)
@@ -215,7 +225,7 @@ class RemoteControlService:
         )
         self._thread.start()
         logger.info(
-            "RemoteControlService listening on %s:%d (token=%s)",
+            "RemoteControlAdapter listening on %s:%d (token=%s)",
             host,
             port,
             "yes" if self._opts.token else "no",
@@ -288,13 +298,13 @@ class RemoteControlService:
         self._wake_r = None
         self._wake_w = None
         self._thread = None
-        logger.info("RemoteControlService stopped")
+        logger.info("RemoteControlAdapter stopped")
 
     @property
     def port(self) -> int:
         port = self._actual_port
         if port is None:
-            raise RuntimeError("RemoteControlService.start() was not called")
+            raise RuntimeError("RemoteControlAdapter.start() was not called")
         return port
 
     # ------------------------------------------------------------------
@@ -303,7 +313,7 @@ class RemoteControlService:
 
     def _subscribe_event_bus(self) -> None:
         """Subscribe one callback per serialised GuiEvent on the main thread."""
-        bus = self._ctrl.get_bus()
+        bus = self.ctrl.get_bus()
         self._bus = bus
         for event in EVENT_SERIALIZERS.keys():
             cb = self._make_bus_callback(event)
@@ -370,10 +380,10 @@ class RemoteControlService:
 
     def _wire_editor_change_listener(self) -> None:
         """Inject ``_on_editor_event`` into the CfgEditorService (via ctrl)."""
-        self._ctrl.set_cfg_editor_change_listener(self._on_editor_event)
+        self.ctrl.set_cfg_editor_change_listener(self._on_editor_event)
 
     def _unwire_editor_change_listener(self) -> None:
-        self._ctrl.set_cfg_editor_change_listener(None)
+        self.ctrl.set_cfg_editor_change_listener(None)
 
     def _on_editor_event(self, editor_id: str, event_name: str, payload: dict) -> None:
         """Push a per-editor notification. Runs on the Qt main thread.
@@ -606,7 +616,7 @@ class RemoteControlService:
 
         def _run() -> None:
             try:
-                self._ctrl.discard_cfg_editors(ids)
+                self.ctrl.discard_cfg_editors(ids)
             except Exception:  # pragma: no cover — best-effort cleanup
                 logger.exception("failed to reclaim editor sessions %r", ids)
 
@@ -784,7 +794,7 @@ class RemoteControlService:
             # waiting and must not touch the change buffer / stale guard /
             # origin scope, so none of those are set here.
             try:
-                holder["result"] = spec.handler(self._ctrl, params)
+                holder["result"] = spec.handler(self, params)
             except RemoteError as exc:
                 holder["remote_error"] = exc
             except Exception as exc:  # noqa: BLE001 — Controller error envelope
@@ -799,7 +809,7 @@ class RemoteControlService:
                 # atomic against any other GUI write.
                 try:
                     self._guard_versions(params)
-                    holder["result"] = spec.handler(self._ctrl, params)
+                    holder["result"] = spec.handler(self, params)
                 except RemoteError as exc:
                     holder["remote_error"] = exc
                 except Exception as exc:  # noqa: BLE001 — Controller error envelope
@@ -892,10 +902,10 @@ class RemoteControlService:
             )
 
     def _ctrl_resource_versions(self) -> dict[str, int]:
-        return dict(self._ctrl.resources_versions())
+        return dict(self.ctrl.resources_versions())
 
     def _safe_editor_id_for_owner(self, owner_key: str) -> Optional[str]:
-        return self._ctrl.editor_id_for_owner(owner_key)
+        return self.ctrl.editor_id_for_owner(owner_key)
 
     def _track_editor_lifecycle(
         self,
@@ -953,4 +963,4 @@ class RemoteControlService:
 
 
 # Re-export base64 helpers used by view.screenshot.
-__all__ = ["ControlOptions", "RemoteControlService", "base64"]
+__all__ = ["ControlOptions", "RemoteControlAdapter", "base64"]

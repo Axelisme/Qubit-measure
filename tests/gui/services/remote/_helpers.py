@@ -1,4 +1,4 @@
-"""Shared test helpers for the RemoteControlService remote test suites.
+"""Shared test helpers for the RemoteControlAdapter remote test suites.
 
 Single source of fixture + socket-pumping helpers so the remote test files do
 not duplicate the boilerplate. Anything suite-specific (e.g. event-push
@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import socket
 import time
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Mapping, Optional
 from unittest.mock import MagicMock
 
 from qtpy.QtCore import QCoreApplication
@@ -22,7 +22,7 @@ from zcu_tools.gui.event_bus import EventBus
 from zcu_tools.gui.io_manager import IOManager
 from zcu_tools.gui.registry import Registry
 from zcu_tools.gui.runner import Runner
-from zcu_tools.gui.services.remote import ControlOptions, RemoteControlService
+from zcu_tools.gui.services.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.services.remote.dialogs import DialogName
 from zcu_tools.gui.state import State
 
@@ -107,13 +107,30 @@ class Fixture:
         )
         if opts is None:
             opts = ControlOptions(port=0)
-        self.service = RemoteControlService(controller=self.ctrl, opts=opts)
+        self.service = RemoteControlAdapter(controller=self.ctrl, opts=opts)
 
     def start(self) -> int:
         return self.service.start()
 
     def stop(self) -> None:
         self.service.stop()
+
+
+def dispatch_handler(ctrl: Any, method: str, params: dict) -> Mapping[str, object]:
+    """Invoke a dispatch handler directly with a ctrl mock/real Controller.
+
+    Handlers now receive the ``RemoteControlAdapter`` (not the bare ctrl) and
+    reach the façade via ``adapter.ctrl`` (ADR-0013). This wraps ``ctrl`` in a
+    minimal adapter stub so unit tests can drive a single handler without a live
+    socket. Cast keeps the typed ``Handler`` signature satisfied.
+    """
+    from types import SimpleNamespace
+    from typing import cast
+
+    from zcu_tools.gui.services.remote.dispatch import METHOD_REGISTRY
+
+    adapter = cast(RemoteControlAdapter, SimpleNamespace(ctrl=ctrl))
+    return METHOD_REGISTRY[method].handler(adapter, params)
 
 
 def send(sock: socket.socket, obj: dict) -> None:

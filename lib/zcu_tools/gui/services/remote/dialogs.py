@@ -1,4 +1,4 @@
-"""Dialog naming + factory contract for RemoteControlService.
+"""Dialog naming + factory contract for RemoteControlAdapter.
 
 ``DialogName`` is the wire enum a remote caller uses with
 ``dialog.open`` / ``dialog.close`` / ``dialog.list_open``. ``MainWindow``

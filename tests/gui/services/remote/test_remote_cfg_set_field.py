@@ -1,4 +1,4 @@
-"""RemoteControlService tab-cfg editing via the CfgEditorService session.
+"""RemoteControlAdapter tab-cfg editing via the CfgEditorService session.
 
 A tab's cfg draft is a service-owned ``CfgEditorSession`` keyed by the tab_id
 (the same draft the open form attaches to). Agents edit it with

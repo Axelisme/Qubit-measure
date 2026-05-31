@@ -35,8 +35,8 @@ def _make_empty_ctx() -> "ExpContext":
 def run_app(control_opts: Optional["ControlOptions"] = None) -> None:
     """Build and launch the GUI. Blocks until the window is closed.
 
-    ``control_opts`` (if provided) starts a ``RemoteControlService`` after the
-    window is constructed; the service is stopped from ``MainWindow.closeEvent``.
+    ``control_opts`` (if provided) starts a ``RemoteControlAdapter`` after the
+    window is constructed; the adapter is stopped from ``MainWindow.closeEvent``.
     """
     from zcu_tools.gui.utils.error_handler import install_global_exception_hook
 
@@ -74,13 +74,13 @@ def run_app(control_opts: Optional["ControlOptions"] = None) -> None:
     window.show()
 
     if control_opts is not None:
-        from zcu_tools.gui.services.remote import RemoteControlService
+        from zcu_tools.gui.services.remote import RemoteControlAdapter
 
-        service = RemoteControlService(controller=ctrl, opts=control_opts)
-        service.start()
+        adapter = RemoteControlAdapter(controller=ctrl, opts=control_opts)
+        adapter.start()
         # Stash on the window so MainWindow.closeEvent can stop it; keep a
         # strong ref so the GC does not retire the daemon thread early.
-        window.remote_control_service = service  # type: ignore[attr-defined]
+        window.remote_control_service = adapter  # type: ignore[attr-defined]
 
     # Show startup dialog to let user set chip/qub names and derive paths.
     # Non-blocking: user can close it and still use the app (with empty context).
@@ -93,7 +93,7 @@ def _show_startup_dialog(ctrl: "Controller", parent: "MainWindow") -> None:
     """Show the bootstrap startup dialog non-modally.
 
     Non-modal is required so the Qt event loop keeps pumping while the
-    dialog is visible — this is what lets ``RemoteControlService`` accept
+    dialog is visible — this is what lets ``RemoteControlAdapter`` accept
     further RPCs (e.g. ``dialog.close STARTUP``) while a remote agent is
     driving onboarding. The dialog registers in ``window._open_dialogs``
     so it shows up in ``dialog.list_open`` queries.

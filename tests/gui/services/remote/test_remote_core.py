@@ -1,4 +1,4 @@
-"""RemoteControlService transport / dispatch / query tests.
+"""RemoteControlAdapter transport / dispatch / query tests.
 
 Each test spins up a real TCP socket on an ephemeral loopback port and drives
 a fixture Controller (already wired up with a fake adapter). The Qt event loop
@@ -25,7 +25,7 @@ from zcu_tools.gui.event_bus import EventBus
 from zcu_tools.gui.io_manager import IOManager
 from zcu_tools.gui.registry import Registry
 from zcu_tools.gui.runner import Runner
-from zcu_tools.gui.services.remote import ControlOptions, RemoteControlService
+from zcu_tools.gui.services.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.services.remote.wire import WIRE_VERSION
 from zcu_tools.gui.state import State
 
@@ -80,7 +80,7 @@ class _Fixture:
         )
         if opts is None:
             opts = ControlOptions(port=0)
-        self.service = RemoteControlService(controller=self.ctrl, opts=opts)
+        self.service = RemoteControlAdapter(controller=self.ctrl, opts=opts)
 
     def start(self) -> int:
         return self.service.start()
@@ -148,7 +148,7 @@ def test_service_binds_loopback_only(fx):
 
 def test_external_requires_token(qapp):  # noqa: ARG001
     with pytest.raises(RuntimeError, match="token"):
-        RemoteControlService(
+        RemoteControlAdapter(
             controller=MagicMock(),
             opts=ControlOptions(port=0, allow_external=True),
         )
