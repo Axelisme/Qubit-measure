@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.adapter import ModuleRefSpec
+from typing import Optional
+
+from zcu_tools.gui.adapter import CfgSchema, ModuleRefSpec
+from zcu_tools.gui.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.specs.pulse import make_pulse_spec
 from zcu_tools.gui.specs.readout import (
     make_direct_readout_spec,
@@ -59,3 +62,17 @@ def make_reset_module_spec(
         label=label,
         optional=optional,
     )
+
+
+def schema_from_module(proposed: object | None) -> Optional[CfgSchema]:
+    """Edit CfgSchema from a proposed module/waveform cfg (module-agnostic).
+
+    Delegates to ``module_cfg_to_value``, which auto-routes waveform cfgs to
+    ``waveform_cfg_to_value``. Returns None when ``proposed`` is None (no edit
+    button shown). Unknown module types fast-fail (``module_cfg_to_value``
+    raises) — deliberate.
+    """
+    if proposed is None:
+        return None
+    spec, value = module_cfg_to_value(proposed)
+    return CfgSchema(spec=spec, value=value)

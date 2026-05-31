@@ -34,17 +34,13 @@ from .defaults import (
     make_trig_offset,
     make_two_pulse_reset_default,
 )
-from .module_builders import (
-    build_readout_for_frequency,
-    build_waveform_for_length,
-    schema_from_module,
-)
 from .defaults import NamedModuleValue, select_named_module_value
 from .spec_helpers import (
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
     make_readout_module_spec,
     make_reset_module_spec,
+    schema_from_module,
 )
 
 __all__ = [
@@ -58,10 +54,6 @@ __all__ = [
     "proper_res_freq_range",
     "proper_qub_freq_range",
     "proper_flux_range",
-    # Module builders
-    "build_readout_for_frequency",
-    "build_waveform_for_length",
-    "schema_from_module",
     # Module defaults (low-level)
     "NamedModuleValue",
     "select_named_module_value",
@@ -94,4 +86,5 @@ __all__ = [
     "make_pulse_module_spec",
     "make_readout_module_spec",
     "make_reset_module_spec",
+    "schema_from_module",
 ]

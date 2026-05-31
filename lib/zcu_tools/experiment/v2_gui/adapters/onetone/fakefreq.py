@@ -39,8 +39,6 @@ from zcu_tools.experiment.v2.onetone.freq import (
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    build_readout_for_frequency,
-    build_waveform_for_length,
     make_pulse_module_spec,
     make_readout_default,
     make_readout_module_spec,
@@ -370,23 +368,15 @@ class FakeFreqAdapter(
         assert cfg is not None, "cfg_snapshot is required for writeback"
 
         readout = cfg.modules.readout
-        pulse_ch = getattr(ctx.md, "res_ch", 0)
-        ro_ch = getattr(ctx.md, "ro_ch", 0)
-
-        new_readout = build_readout_for_frequency(
-            readout,
-            freq=freq,
-            pulse_ch=pulse_ch,
-            ro_ch=ro_ch,
-            ml=ctx.ml,
-        )
-
         wav_len = getattr(ctx.md, "res_probe_len", 5.0)
-        new_waveform = build_waveform_for_length(
-            readout,
-            length=float(wav_len),
-            ml=ctx.ml,
+
+        # readout is statically a PulseReadoutCfg (the run snapshot is a FreqCfg);
+        # update freq + probe length directly via with_updates, no fallback.
+        new_readout = readout.with_updates(
+            pulse_cfg=readout.pulse_cfg.with_updates(freq=freq),
+            ro_cfg=readout.ro_cfg.with_updates(ro_freq=freq),
         )
+        new_waveform = readout.pulse_cfg.waveform.with_updates(length=float(wav_len))
 
         return [
             MetaDictWriteback(

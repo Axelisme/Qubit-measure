@@ -17,8 +17,6 @@ from typing_extensions import (
 from zcu_tools.experiment.v2.onetone.freq import FreqCfg, FreqExp, FreqResult
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    build_readout_for_frequency,
-    build_waveform_for_length,
     make_pulse_readout_default,
     make_pulse_readout_module_spec,
     make_reset_module_spec,
@@ -153,22 +151,17 @@ class OneToneFreqAdapter(
 
         ctx = req.ctx
         readout = cfg.modules.readout
-        pulse_ch = ctx.md.get("res_ch", 0)
-        ro_ch = ctx.md.get("ro_ch", 0)
         wav_len = md_get_float(ctx, "res_probe_len", 5.0)
 
-        proposed_readout = build_readout_for_frequency(
-            readout,
-            freq=result.freq,
-            pulse_ch=pulse_ch,
-            ro_ch=ro_ch,
-            ml=ctx.ml,
+        # readout is statically a PulseReadoutCfg (FreqModuleCfg.readout); update
+        # freq on both the pulse and the readout, and the probe waveform length,
+        # directly via with_updates. No defensive fallback — a structural change
+        # should fast-fail here, not silently produce an unrelated cfg.
+        proposed_readout = readout.with_updates(
+            pulse_cfg=readout.pulse_cfg.with_updates(freq=result.freq),
+            ro_cfg=readout.ro_cfg.with_updates(ro_freq=result.freq),
         )
-        proposed_waveform = build_waveform_for_length(
-            readout,
-            length=wav_len,
-            ml=ctx.ml,
-        )
+        proposed_waveform = readout.pulse_cfg.waveform.with_updates(length=wav_len)
 
         return [
             MetaDictWriteback(

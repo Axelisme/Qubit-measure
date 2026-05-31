@@ -6,8 +6,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.adapter import ExpContext
 
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    build_readout_for_frequency,
-    build_waveform_for_length,
     make_readout_ref_default,
     schema_from_module,
     select_named_module_value,
@@ -19,37 +17,54 @@ from zcu_tools.gui.adapter import (
     ModuleRefValue,
 )
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
-from zcu_tools.program.v2 import AbsReadoutCfg, ModuleCfgFactory, WaveformCfgFactory
+from zcu_tools.program.v2 import (
+    AbsReadoutCfg,
+    ModuleCfgFactory,
+    PulseReadoutCfg,
+    WaveformCfgFactory,
+)
+from typing_extensions import cast
 
 
 def test_schema_from_module_returns_none_for_none():
     assert schema_from_module(None) is None
 
 
-def test_schema_from_module_converts_proposed_readout_faithfully():
-    """edit_schema is the spec+value view of the proposed module (freq carried)."""
-    ml = ModuleLibrary()
-    readout = ModuleCfgFactory.from_raw(
-        {
-            "type": "readout/pulse",
-            "pulse_cfg": {
-                "waveform": {"style": "const", "length": 1.0},
-                "ch": 1,
-                "nqz": 2,
-                "freq": 6000.0,
-                "gain": 0.2,
+def _pulse_readout(ml: ModuleLibrary, *, freq: float = 6000.0) -> PulseReadoutCfg:
+    return cast(
+        PulseReadoutCfg,
+        ModuleCfgFactory.from_raw(
+            {
+                "type": "readout/pulse",
+                "pulse_cfg": {
+                    "waveform": {"style": "const", "length": 1.0},
+                    "ch": 1,
+                    "nqz": 2,
+                    "freq": freq,
+                    "gain": 0.2,
+                },
+                "ro_cfg": {
+                    "ro_ch": 2,
+                    "ro_freq": freq,
+                    "ro_length": 1.0,
+                    "trig_offset": 0.5,
+                },
             },
-            "ro_cfg": {
-                "ro_ch": 2,
-                "ro_freq": 6000.0,
-                "ro_length": 1.0,
-                "trig_offset": 0.5,
-            },
-        },
-        ml=ml,
+            ml=ml,
+        ),
     )
-    proposed = build_readout_for_frequency(
-        readout, freq=6150.0, pulse_ch=1, ro_ch=2, ml=ml
+
+
+def test_schema_from_module_converts_proposed_readout_faithfully():
+    """edit_schema is the spec+value view of the proposed module (freq carried).
+
+    The proposed module is built the way adapters now build it: a direct
+    with_updates on the strongly-typed PulseReadoutCfg.
+    """
+    readout = _pulse_readout(ModuleLibrary())
+    proposed = readout.with_updates(
+        pulse_cfg=readout.pulse_cfg.with_updates(freq=6150.0),
+        ro_cfg=readout.ro_cfg.with_updates(ro_freq=6150.0),
     )
 
     schema = schema_from_module(proposed)
@@ -62,91 +77,14 @@ def test_schema_from_module_converts_proposed_readout_faithfully():
 
 def test_schema_from_module_converts_proposed_waveform_faithfully():
     """A proposed waveform cfg auto-routes through the waveform converter."""
-    proposed = build_waveform_for_length(None, length=4.5, ml=ModuleLibrary())
+    readout = _pulse_readout(ModuleLibrary())
+    proposed = readout.pulse_cfg.waveform.with_updates(length=4.5)
 
     schema = schema_from_module(proposed)
 
     assert isinstance(schema, CfgSchema)
     length = schema.value.fields["length"]
     assert length.value == 4.5  # type: ignore[union-attr]
-
-
-def test_build_readout_for_frequency_updates_existing_module():
-    ml = ModuleLibrary()
-    readout = ModuleCfgFactory.from_raw(
-        {
-            "type": "readout/pulse",
-            "pulse_cfg": {
-                "waveform": {"style": "const", "length": 1.0},
-                "ch": 1,
-                "nqz": 2,
-                "freq": 6000.0,
-                "gain": 0.2,
-            },
-            "ro_cfg": {
-                "ro_ch": 2,
-                "ro_freq": 6000.0,
-                "ro_length": 1.0,
-                "trig_offset": 0.5,
-            },
-        },
-        ml=ml,
-    )
-
-    updated = build_readout_for_frequency(
-        readout,
-        freq=6150.0,
-        pulse_ch=1,
-        ro_ch=2,
-        ml=ml,
-    )
-
-    assert updated is not None
-    assert getattr(getattr(updated, "pulse_cfg"), "freq") == 6150.0
-    assert getattr(getattr(updated, "ro_cfg"), "ro_freq") == 6150.0
-
-
-def test_build_waveform_for_length_falls_back_to_flat_top():
-    waveform = build_waveform_for_length(
-        None,
-        length=4.5,
-        ml=ModuleLibrary(),
-    )
-
-    assert waveform is not None
-    assert getattr(waveform, "length") == 4.5
-
-
-def test_build_waveform_for_length_updates_existing_waveform():
-    ml = ModuleLibrary()
-    readout = ModuleCfgFactory.from_raw(
-        {
-            "type": "readout/pulse",
-            "pulse_cfg": {
-                "waveform": {
-                    "style": "flat_top",
-                    "length": 1.5,
-                    "raise_waveform": {"style": "cosine", "length": 0.1},
-                },
-                "ch": 1,
-                "nqz": 2,
-                "freq": 6000.0,
-                "gain": 0.2,
-            },
-            "ro_cfg": {
-                "ro_ch": 2,
-                "ro_freq": 6000.0,
-                "ro_length": 1.0,
-                "trig_offset": 0.5,
-            },
-        },
-        ml=ml,
-    )
-
-    updated = build_waveform_for_length(readout, length=3.25, ml=ml)
-
-    assert updated is not None
-    assert getattr(updated, "length") == 3.25
 
 
 def test_select_named_module_value_prefers_requested_name():
