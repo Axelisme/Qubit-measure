@@ -657,6 +657,70 @@ def _h_device_setup(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     return {"operation_id": operation_id}
 
 
+# device.setup field-schema discovery: BaseDeviceInfo is a pydantic model whose
+# model_fields carry the settable fields' types + Literal choices. Protected
+# fields (type/address; cf. BaseDeviceInfo.with_updates) are reported
+# settable=false. Pure read of pydantic metadata (same scope as snapshot's
+# info.to_dict()); no device-side change.
+_DEVICE_SETUP_PROTECTED = frozenset({"type", "address"})
+
+
+def _field_type_and_choices(annotation: object) -> tuple[str, Optional[list]]:
+    """Wire (type, choices) for a BaseDeviceInfo field annotation.
+
+    Literal[...] (from typing or typing_extensions — get_origin returns the
+    respective Literal object) → ('enum', [members]). Optional[X] unwraps to X.
+    Otherwise map the scalar python type to a JSON type name.
+    """
+    import typing
+
+    import typing_extensions
+
+    origin = typing.get_origin(annotation)
+    args = typing.get_args(annotation)
+    # Literal: origin is typing.Literal or typing_extensions.Literal (the model
+    # fields use typing_extensions; its origin object has no __name__).
+    if origin is typing.Literal or origin is typing_extensions.Literal:
+        return "enum", list(args)
+    # Optional[X] / Union[X, None] → unwrap to the non-None member.
+    if origin is typing.Union:
+        non_none = [a for a in args if a is not type(None)]
+        if len(non_none) == 1:
+            return _field_type_and_choices(non_none[0])
+    _SCALAR = {float: "float", int: "int", str: "str", bool: "bool"}
+    return _SCALAR.get(annotation, "str"), None  # type: ignore[arg-type]
+
+
+def _h_device_setup_spec(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
+    name = str(params["name"])
+    try:
+        info = ctrl.get_device_info(name)
+    except RuntimeError as exc:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason=getattr(exc, "reason_code", ""),
+        ) from exc
+    if info is None:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            f"Device {name!r} has no live info (connect it first)",
+        )
+    fields: list[dict[str, object]] = []
+    for fname, finfo in type(info).model_fields.items():
+        ftype, choices = _field_type_and_choices(finfo.annotation)
+        entry: dict[str, object] = {
+            "name": fname,
+            "type": ftype,
+            "current": getattr(info, fname, None),
+            "settable": fname not in _DEVICE_SETUP_PROTECTED,
+        }
+        if choices is not None:
+            entry["choices"] = choices
+        fields.append(entry)
+    return {"fields": fields}
+
+
 def _h_device_cancel_operation(
     ctrl, params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -1316,6 +1380,7 @@ _HANDLERS: dict[str, Handler] = {
     "device.reconnect": _h_device_reconnect,
     "device.forget": _h_device_forget,
     "device.setup": _h_device_setup,
+    "device.setup_spec": _h_device_setup_spec,
     "device.cancel_operation": _h_device_cancel_operation,
     "device.active_setup": _h_device_active_setup,
     "device.active_operation": _h_device_active_operation,

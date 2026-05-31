@@ -333,6 +333,14 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "Setup device",
         (_str("name", "Device name"), _obj("updates", "Field updates")),
     ),
+    "device.setup_spec": MethodSpec(
+        5.0,
+        "List the fields settable via device.setup's 'updates' for a connected "
+        "device: each field's name, type, choices (for enum/Literal fields like "
+        "output/mode), current value, and whether it is settable (the protected "
+        "type/address are reported settable=false). The device must be connected.",
+        (_str("name", "Device name"),),
+    ),
     "device.cancel_operation": MethodSpec(
         5.0, "Cancel active device setup", (_str("name", "Device name"),)
     ),

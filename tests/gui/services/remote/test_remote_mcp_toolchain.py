@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from zcu_tools.device.fake import FakeDeviceInfo
+from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.event_bus import DeviceSetupChangedPayload, GuiEvent
 from zcu_tools.gui.services.device import DeviceSetupSnapshot, SetupDeviceRequest
 from zcu_tools.gui.services.device_progress import ProgressEntrySnapshot
@@ -148,6 +149,55 @@ def test_device_setup_rejects_protected_info_update(fx):
         resp = call(sock, "device.setup", {"name": "bias", "updates": {"type": "x"}})
         assert resp["ok"] is False
         assert resp["error"]["code"] == "invalid_params"
+    finally:
+        sock.close()
+
+
+def test_device_setup_spec_lists_settable_fields_with_current(fx):
+    fx.ctrl.get_device_info = MagicMock(  # type: ignore[method-assign]
+        return_value=FakeDeviceInfo(address="none", value=2.5)
+    )
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "device.setup_spec", {"name": "bias"})
+        assert resp["ok"] is True
+        fields = {f["name"]: f for f in resp["result"]["fields"]}
+        # protected fields reported but settable=false
+        assert fields["address"]["settable"] is False
+        assert fields["type"]["settable"] is False
+        # driver fields are settable, typed, carry the current value
+        assert fields["value"]["settable"] is True
+        assert fields["value"]["type"] == "float"
+        assert fields["value"]["current"] == 2.5
+        assert fields["rampstep"]["settable"] is True
+    finally:
+        sock.close()
+
+
+def test_device_setup_spec_exposes_literal_choices(fx):
+    # A driver with Literal enum fields (YOKO output/mode) → choices surfaced.
+    fx.ctrl.get_device_info = MagicMock(  # type: ignore[method-assign]
+        return_value=YOKOGS200Info(address="x", type="YOKOGS200")
+    )
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "device.setup_spec", {"name": "flux"})
+        assert resp["ok"] is True
+        fields = {f["name"]: f for f in resp["result"]["fields"]}
+        assert fields["output"]["type"] == "enum"
+        assert fields["output"]["choices"] == ["on", "off"]
+        assert fields["mode"]["choices"] == ["voltage", "current"]
+    finally:
+        sock.close()
+
+
+def test_device_setup_spec_requires_live_info(fx):
+    fx.ctrl.get_device_info = MagicMock(return_value=None)  # type: ignore[method-assign]
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "device.setup_spec", {"name": "ghost"})
+        assert resp["ok"] is False
+        assert resp["error"]["code"] == "precondition_failed"
     finally:
         sock.close()
 

@@ -38,7 +38,9 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 # v4: removed context.set_ml_module / context.set_ml_waveform (raw-dict RPC); ml
 #     entries are built/edited via the editor session (create_from_role + editor.*)
 #     — ADR-0011, the single ml/md write authority is ContextService.
-WIRE_VERSION = 4
+# v5: added device.setup_spec (discover the fields settable via device.setup's
+#     updates — name/type/choices/current/settable — from the live info model).
+WIRE_VERSION = 5
 
 # ---------------------------------------------------------------------------
 # Wire envelopes
