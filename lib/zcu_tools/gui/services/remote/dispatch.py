@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Callable, Mapping, Optional
+from typing import Callable, Mapping, Optional, cast
 
 from zcu_tools.gui.adapter import (
     CfgSchema,
@@ -185,8 +185,9 @@ def _h_tab_update_cfg(ctrl, params: Mapping[str, object]) -> Mapping[str, object
             ErrorCode.PRECONDITION_FAILED,
             f"tab {tab_id!r} is currently running; cancel the run before editing cfg",
         )
-    raw = params["raw"]
-    assert isinstance(raw, dict)
+    # ParamSpec(_obj) already validated this is a dict at the wire boundary; cast
+    # to narrow for the type checker without a redundant runtime re-check.
+    raw = cast(dict, params["raw"])
     base = ctrl.get_tab_cfg_schema(tab_id)
     try:
         schema: CfgSchema = _SCHEMA_CODEC.raw_to_schema(base, dict(raw))
@@ -625,8 +626,7 @@ def _h_device_forget(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
 
 def _h_device_setup(ctrl, params: Mapping[str, object]) -> Mapping[str, object]:
     name = str(params["name"])
-    updates = params["updates"]
-    assert isinstance(updates, dict)
+    updates = cast(dict, params["updates"])  # ParamSpec(_obj)-validated
     try:
         info = ctrl.get_device_info(name)
     except RuntimeError as exc:
@@ -933,8 +933,7 @@ def _h_analyze_start(ctrl, params: Mapping[str, object]) -> Mapping[str, object]
     snap = ctrl.get_tab_snapshot(tab_id)
     if snap.analyze_params is None:
         raise RemoteError(ErrorCode.PRECONDITION_FAILED, "no analyze params available")
-    raw_updates = params["updates"]
-    assert isinstance(raw_updates, dict)
+    raw_updates = cast(dict, params["updates"])  # ParamSpec(_obj)-validated
     ap = snap.analyze_params
     if not dataclasses.is_dataclass(ap) or isinstance(ap, type):
         raise RemoteError(

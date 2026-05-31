@@ -30,7 +30,7 @@ import selectors
 import socket
 import threading
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Callable, Mapping, Optional
 
 from qtpy.QtCore import QObject, Qt, Signal  # type: ignore[attr-defined]
 
@@ -848,12 +848,15 @@ class RemoteControlService:
                 message=str(err),
             )
             return
+        # Every handler returns a wire dict (Mapping[str, object]); guard the
+        # handler-return invariant (this is the result, not a ParamSpec-validated
+        # input, so the check is not redundant with wire validation).
         result = holder["result"]
-        assert isinstance(result, dict) or hasattr(result, "items")
+        assert isinstance(result, dict), f"handler {method!r} returned non-dict result"
         self._track_editor_lifecycle(state, method, params, result)
-        self._reply_ok(state, rid=rid, result=result)  # type: ignore[arg-type]
+        self._reply_ok(state, rid=rid, result=result)
 
-    def _guard_versions(self, params) -> None:
+    def _guard_versions(self, params: Mapping[str, object]) -> None:
         """Atomically reject an op whose declared resource versions are stale.
 
         Optimistic concurrency, If-Match style: the mcp layer (which owns the
@@ -872,7 +875,7 @@ class RemoteControlService:
         sequence, so the compare-and-act is atomic against any other GUI write
         (real-user actions also marshal onto the main thread) — no TOCTOU.
         """
-        expected = params.get("expected_versions") if hasattr(params, "get") else None
+        expected = params.get("expected_versions")
         if not expected:
             return
         if not isinstance(expected, dict):
@@ -919,7 +922,11 @@ class RemoteControlService:
             return None
 
     def _track_editor_lifecycle(
-        self, state: _ClientState, method: str, params, result
+        self,
+        state: _ClientState,
+        method: str,
+        params: Mapping[str, object],
+        result: object,
     ) -> None:
         """Record/forget CfgEditor session ids per connection.
 
@@ -933,7 +940,7 @@ class RemoteControlService:
             if isinstance(editor_id, str):
                 state.editor_ids.add(editor_id)
         elif method in ("editor.commit", "editor.discard"):
-            editor_id = params.get("editor_id") if hasattr(params, "get") else None
+            editor_id = params.get("editor_id")
             if isinstance(editor_id, str):
                 state.editor_ids.discard(editor_id)
 

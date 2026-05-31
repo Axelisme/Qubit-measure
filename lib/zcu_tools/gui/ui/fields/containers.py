@@ -249,6 +249,14 @@ class ModuleRefWidget(BaseLiveWidget):
                 try:
                     entry_spec, _ = resolve_fn(cfg)
                 except Exception:
+                    # A malformed library entry is skipped from this dropdown
+                    # (it can't be offered as a choice) but must not silently
+                    # vanish — log it so a broken/corrupt entry is discoverable.
+                    logger.warning(
+                        "ModuleRef combo: skipping unresolvable library entry %r",
+                        name,
+                        exc_info=True,
+                    )
                     continue
                 if entry_spec.label in allowed_labels:
                     compatible.append(name)
