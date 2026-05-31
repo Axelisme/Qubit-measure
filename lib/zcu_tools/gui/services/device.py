@@ -502,10 +502,6 @@ class DeviceService(QObject):
             self._emit_device_changed(name)
         return info
 
-    def get_device_value(self, name: str) -> object:
-        info = self.get_device_info(name)
-        return None if info is None else getattr(info, "value", None)
-
     def get_device_value_for_new_context(self, name: str) -> Optional[float]:
         info = self.get_device_info(name)
         if info is None:

@@ -193,9 +193,11 @@ def test_devicemanager_get_value_and_set_via_setup(qapp):
     svc, _ = _make_real_svc(driver=dev)
     _register(svc, "flux")
 
-    assert svc.get_device_value("flux") == pytest.approx(3.14)
+    # The live value is read via get_device_value_for_new_context (the sole
+    # prod reader; the bare get_device_value was an orphan and was removed).
+    assert svc.get_device_value_for_new_context("flux") == pytest.approx(3.14)
     _set_value(svc, "flux", 2.71)
-    assert svc.get_device_value("flux") == pytest.approx(2.71)
+    assert svc.get_device_value_for_new_context("flux") == pytest.approx(2.71)
 
 
 def test_devicemanager_get_all_info(qapp):
