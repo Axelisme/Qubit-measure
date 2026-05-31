@@ -131,10 +131,22 @@ _RID_COND = threading.Condition()
 _RID_COUNTER = 0
 _PENDING: Dict[str, Dict[str, Any]] = {}
 
-# Event push queue (FIFO, drop-oldest when full).
+# Event push queue (FIFO, drop-oldest when full). Diagnostics are split into
+# their own queue (ADR-0013): the GUI sends them on the same socket as events,
+# but they are user-facing error/info feedback delivered unconditionally (no
+# subscription), so this side keeps them separate from the subscribed-event
+# stream — both surface to the agent (poll + piggyback), tagged distinctly.
 _EVENT_QUEUE_MAX = 1024
 _EVENT_QUEUE: Deque[Dict[str, Any]] = deque(maxlen=_EVENT_QUEUE_MAX)
+_DIAGNOSTIC_QUEUE: Deque[Dict[str, Any]] = deque(maxlen=_EVENT_QUEUE_MAX)
 _EVENT_COND = threading.Condition()
+
+# Events the experiment workflow assumes the agent always wants to hear about
+# (run finished/failed, device setup lifecycle, SoC connect/drop). The agent
+# can subscribe to more; these are auto-subscribed right after connect because
+# "what an agent must not miss" is experiment policy, owned by this mcp layer —
+# not a wire mechanism the GUI server should bake in.
+_DEFAULT_SUBSCRIBE = ("run_lock_changed", "device_setup_changed", "soc_changed")
 
 # --- Optimistic-concurrency bookkeeping (policy lives here, mcp side) --------
 #
@@ -307,8 +319,23 @@ def _deliver_reply(msg: Dict[str, Any]) -> None:
 
 def _deliver_event(msg: Dict[str, Any]) -> None:
     with _EVENT_COND:
-        _EVENT_QUEUE.append(msg)
+        if msg.get("event") == "diagnostic":
+            _DIAGNOSTIC_QUEUE.append(msg)
+        else:
+            _EVENT_QUEUE.append(msg)
         _EVENT_COND.notify_all()
+
+
+def _drain_pending() -> Dict[str, list]:
+    """Take everything buffered since the last drain — for piggyback on any tool
+    result. Returns separate ``events`` / ``diagnostics`` lists (possibly empty).
+    The agent gets background notifications without a dedicated poll call."""
+    with _EVENT_COND:
+        events = [m for m in _EVENT_QUEUE]
+        diagnostics = [m for m in _DIAGNOSTIC_QUEUE]
+        _EVENT_QUEUE.clear()
+        _DIAGNOSTIC_QUEUE.clear()
+    return {"events": events, "diagnostics": diagnostics}
 
 
 def _send_gui_rpc_raw(
@@ -483,11 +510,23 @@ def tool_gui_connect(arguments: Dict[str, Any]) -> str:
 
     if token:
         send_gui_rpc("auth", {"token": token})
+        _auto_subscribe_defaults()
         return (
             f"Connected to GUI on 127.0.0.1:{port} with token authentication."
             + _wire_version_note()
         )
+    _auto_subscribe_defaults()
     return f"Connected to GUI on 127.0.0.1:{port}." + _wire_version_note()
+
+
+def _auto_subscribe_defaults() -> None:
+    """After connect, subscribe the events an experiment agent should never miss
+    (run/device/SoC lifecycle). Experiment policy lives here, not in the GUI
+    server. Best-effort: a subscribe failure must not fail the connect."""
+    try:
+        send_gui_rpc("events.subscribe", {"events": list(_DEFAULT_SUBSCRIBE)})
+    except Exception:
+        pass
 
 
 def tool_gui_disconnect(arguments: Dict[str, Any]) -> str:
@@ -511,6 +550,7 @@ def tool_gui_disconnect(arguments: Dict[str, Any]) -> str:
     _READER_THREAD = None
     with _EVENT_COND:
         _EVENT_QUEUE.clear()
+        _DIAGNOSTIC_QUEUE.clear()
     return "Disconnected from GUI."
 
 
@@ -825,18 +865,23 @@ def tool_gui_device_wait_operation(arguments: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def tool_gui_events_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    """Drain up to ``max_events`` queued event pushes, blocking briefly."""
+    """Drain up to ``max_events`` queued event pushes, blocking briefly. Also
+    returns any buffered diagnostics so an idle agent that only polls still sees
+    GUI error/info feedback."""
     timeout_seconds = float(arguments.get("timeout_seconds", 5.0))
     max_events = int(arguments.get("max_events", 16))
     if max_events < 1:
         max_events = 1
     out: List[Dict[str, Any]] = []
+    diagnostics: List[Dict[str, Any]] = []
     deadline = time.monotonic() + timeout_seconds
     with _EVENT_COND:
         while len(out) < max_events:
+            while _DIAGNOSTIC_QUEUE:
+                diagnostics.append(_DIAGNOSTIC_QUEUE.popleft())
             while _EVENT_QUEUE and len(out) < max_events:
                 out.append(_EVENT_QUEUE.popleft())
-            if out:
+            if out or diagnostics:
                 break
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -849,7 +894,7 @@ def tool_gui_events_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
     # following guarded op isn't blocked by the agent's own just-finished work.
     if out:
         _refresh_versions()
-    return {"events": out}
+    return {"events": out, "diagnostics": diagnostics}
 
 
 def tool_gui_view_screenshot(arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -1540,10 +1585,26 @@ def main() -> None:
                         text = (
                             res if isinstance(res, str) else json.dumps(res, indent=2)
                         )
+                        content = [{"type": "text", "text": text}]
+                        # Piggyback (ADR-0013): drain background notifications
+                        # buffered since the last tool call onto this result, so
+                        # the agent learns about run/device/SoC changes + GUI
+                        # diagnostics without a dedicated poll. The poll tool owns
+                        # the event drain itself — don't double-drain there.
+                        if name != "gui_events_poll":
+                            pending = _drain_pending()
+                            if pending["events"] or pending["diagnostics"]:
+                                content.append(
+                                    {
+                                        "type": "text",
+                                        "text": "notifications since last call:\n"
+                                        + json.dumps(pending, indent=2),
+                                    }
+                                )
                         resp = {
                             "jsonrpc": "2.0",
                             "id": rid,
-                            "result": {"content": [{"type": "text", "text": text}]},
+                            "result": {"content": content},
                         }
                     except Exception as e:
                         resp = {
