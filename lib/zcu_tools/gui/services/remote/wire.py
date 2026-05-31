@@ -22,13 +22,24 @@ from zcu_tools.gui.services.device import (
 
 from .errors import ErrorCode, ErrorEnvelope, RemoteError
 
-# Hand-maintained wire-protocol version. Bump this whenever the RPC method set,
-# their params, or the event/serialization contract changes, so a live process
-# advertises which contract it speaks. The GUI server reports it via the
-# (no-auth) ``wire.version`` method, and the MCP server pins the version it was
-# built against; ``gui_launch``/``gui_connect`` surface both so a stale process
-# (one that did not reload the latest code) is immediately visible instead of
-# being inferred from start times. Bump deliberately on every wire change.
+# Two independent hand-maintained versions, reported together by the no-auth
+# ``wire.version`` handshake and compared by the MCP server (which pins the
+# values it was built against):
+#
+#   WIRE_VERSION — the mcp<->RPC *interface contract* (RPC method set, their
+#     params, event/serialization shape). A mismatch means the two sides speak
+#     different protocols → incompatible, surfaced as a hard MISMATCH. Bump ONLY
+#     on a contract change.
+#   GUI_VERSION  — this GUI code's *revision*. A mismatch means one process is
+#     running stale code (did not reload after a change) even though the
+#     contract is unchanged → surfaced as a softer "stale" note. Bump on any
+#     meaningful GUI change you want stale-process detection to flag — including
+#     pure-internal logic changes that DON'T touch the wire (the whole point of
+#     splitting: an internal change bumps GUI_VERSION, not WIRE_VERSION, so mcp
+#     does not falsely report a contract change).
+#
+# (Replaces the old single-version scheme that conflated "is the contract
+# compatible" with "is this process running the latest code".)
 # v2: added ml.list_roles / ml.create_from_role (role catalog) and
 #     context.rename_ml_module / context.rename_ml_waveform; editor.open dropped
 #     its discriminator param (from_name-only).
@@ -49,6 +60,10 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 #     View) out-of-band of the event subscription set; agents receive it via the
 #     normal events poll without subscribing.
 WIRE_VERSION = 6
+
+# GUI code revision (see header). Bump on any meaningful GUI change you want a
+# stale-process check to flag; independent of WIRE_VERSION.
+GUI_VERSION = 1
 
 # ---------------------------------------------------------------------------
 # Wire envelopes

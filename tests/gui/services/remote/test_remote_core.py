@@ -26,7 +26,7 @@ from zcu_tools.gui.io_manager import IOManager
 from zcu_tools.gui.registry import Registry
 from zcu_tools.gui.runner import Runner
 from zcu_tools.gui.services.remote import ControlOptions, RemoteControlAdapter
-from zcu_tools.gui.services.remote.wire import WIRE_VERSION
+from zcu_tools.gui.services.remote.wire import GUI_VERSION, WIRE_VERSION
 from zcu_tools.gui.state import State
 
 # ---------------------------------------------------------------------------
@@ -266,6 +266,8 @@ def test_wire_version_reported(fx):
         resp = _recv_response(sock)
         assert resp["ok"] is True
         assert resp["result"]["wire_version"] == WIRE_VERSION
+        # The handshake also reports the (independent) GUI code revision.
+        assert resp["result"]["gui_version"] == GUI_VERSION
     finally:
         sock.close()
 

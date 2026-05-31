@@ -52,6 +52,7 @@ from zcu_tools.gui.services.remote.param_spec import (  # noqa: E402
     build_input_schema,
 )
 from zcu_tools.gui.services.remote.wire import (  # noqa: E402
+    GUI_VERSION as MCP_GUI_VERSION,
     WIRE_VERSION as MCP_WIRE_VERSION,
 )
 
@@ -373,25 +374,36 @@ def _send_gui_rpc_raw(
 
 
 def _wire_version_note() -> str:
-    """Compare the GUI's wire version against the version this MCP server was
-    built with, returning a human-readable note for connect/launch replies.
+    """Compare the GUI's wire-contract version + GUI code revision against the
+    values this MCP server was built with, for connect/launch replies.
 
-    ``wire.version`` is a no-auth probe, so this works right after connect. A
-    mismatch means one of the two processes is running stale code (did not
-    reload after a wire change) — surfaced explicitly instead of inferred from
-    process start times.
+    ``wire.version`` is a no-auth probe, so this works right after connect.
+    Two independent checks (ADR-0013 follow-up):
+      - wire mismatch  → the two sides speak different protocols → hard MISMATCH;
+      - wire match but gui mismatch → contract is fine but one process runs stale
+        code → softer "stale" note (a pure-internal change bumps GUI_VERSION
+        only, so this fires without a false contract-mismatch).
     """
     try:
         resp = _send_gui_rpc_raw("wire.version", {}, 5.0)
-        gui_ver = resp.get("result", {}).get("wire_version")
+        result = resp.get("result", {})
+        wire_ver = result.get("wire_version")
+        # gui_version may be absent if talking to a pre-split GUI build.
+        gui_ver = result.get("gui_version")
     except Exception as exc:  # noqa: BLE001 — probe is best-effort
         return f" wire: mcp=v{MCP_WIRE_VERSION}, gui=unknown ({exc})"
-    if gui_ver == MCP_WIRE_VERSION:
-        return f" wire v{MCP_WIRE_VERSION} (mcp==gui)."
-    return (
-        f" WIRE VERSION MISMATCH: mcp=v{MCP_WIRE_VERSION}, gui=v{gui_ver} — "
-        "one process is running stale code; restart it."
-    )
+    if wire_ver != MCP_WIRE_VERSION:
+        return (
+            f" WIRE VERSION MISMATCH: mcp=v{MCP_WIRE_VERSION}, gui=v{wire_ver} — "
+            "the two processes speak different protocols; restart the stale one."
+        )
+    if gui_ver != MCP_GUI_VERSION:
+        return (
+            f" wire v{MCP_WIRE_VERSION} (mcp==gui), but GUI CODE STALE: "
+            f"gui_version mcp=v{MCP_GUI_VERSION}, gui=v{gui_ver} — the GUI "
+            "process did not reload the latest code; restart it."
+        )
+    return f" wire v{MCP_WIRE_VERSION} / gui v{MCP_GUI_VERSION} (mcp==gui)."
 
 
 def _refresh_versions() -> None:

@@ -47,7 +47,7 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 from .events import EVENT_SERIALIZERS, wire_event_name
 from .framing import LINE_TERMINATOR, MAX_LINE_BYTES, decode_line, encode_line
 from .param_spec import validate_params
-from .wire import WIRE_VERSION, Response, _require_str, parse_request
+from .wire import GUI_VERSION, WIRE_VERSION, Response, _require_str, parse_request
 
 logger = logging.getLogger(__name__)
 
@@ -675,10 +675,15 @@ class RemoteControlAdapter:
             req = parse_request(raw)
             rid = req.id
             # wire.version is a no-auth handshake probe: it lets a caller read
-            # the server's wire-protocol version before authenticating, so a
-            # stale GUI process is detectable on connect.
+            # the server's wire-contract version + GUI code revision before
+            # authenticating, so an incompatible contract or a stale GUI process
+            # is detectable on connect.
             if req.method == "wire.version":
-                self._reply_ok(state, rid=req.id, result={"wire_version": WIRE_VERSION})
+                self._reply_ok(
+                    state,
+                    rid=req.id,
+                    result={"wire_version": WIRE_VERSION, "gui_version": GUI_VERSION},
+                )
                 return
             if req.method == "auth":
                 self._handle_auth(state, req.id, req.params)
