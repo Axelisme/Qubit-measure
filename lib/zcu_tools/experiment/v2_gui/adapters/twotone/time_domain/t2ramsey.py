@@ -19,7 +19,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_readout_ref_default,
     make_reset_module_spec,
     make_reset_ref_default,
-    md_get_float,
+    md_eval_scaled,
     proper_relax,
 )
 from zcu_tools.gui.adapter import (
@@ -91,7 +91,7 @@ class T2RamseyAdapter(
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        t2r = md_get_float(ctx, "t2r", 20.0)
+        sweep_stop = md_eval_scaled(ctx, "t2r", factor=4.0, fallback=20.0)
         relax_delay = proper_relax(ctx)
         _module_fields: dict[str, CfgNodeValue] = {
             "pi2_pulse": make_pi2_pulse_ref_default(ctx),
@@ -108,7 +108,7 @@ class T2RamseyAdapter(
                 "relax_delay": relax_delay,
                 "sweep": CfgSectionValue(
                     fields={
-                        "length": SweepValue(start=0.0, stop=t2r * 4, expts=101),
+                        "length": SweepValue(start=0.0, stop=sweep_stop, expts=101),
                     }
                 ),
             }

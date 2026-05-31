@@ -58,6 +58,22 @@ def md_scalar_int(ctx: ExpContext, key: str, default: int) -> ScalarValue:
     return DirectValue(default)
 
 
+def md_eval_scaled(
+    ctx: ExpContext, key: str, factor: float, fallback: float
+) -> Union[float, EvalValue]:
+    """A ``factor * <key>`` sweep edge that stays md-linked.
+
+    When md has ``key`` the edge is an ``EvalValue(f"{factor} * {key}")`` so the
+    GUI keeps the live expression (re-derives if md changes); otherwise a plain
+    ``factor * fallback`` float. Use for ``SweepValue.start``/``stop`` edges
+    derived from an md quantity (e.g. ``stop = 5 * md.t1``). Returns the edge
+    value, not a whole SweepValue.
+    """
+    if md_has_key(ctx, key):
+        return EvalValue(expr=f"{factor} * {key}")
+    return factor * fallback
+
+
 def proper_relax(
     ctx: ExpContext, factor: float = 5.0, fallback: float = 100.0
 ) -> ScalarValue:

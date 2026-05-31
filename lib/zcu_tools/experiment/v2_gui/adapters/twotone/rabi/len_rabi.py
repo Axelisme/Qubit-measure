@@ -19,7 +19,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_readout_ref_default,
     make_reset_module_spec,
     make_reset_ref_default,
-    md_get_float,
+    md_eval_scaled,
 )
 from zcu_tools.gui.adapter import (
     AnalyzeRequest,
@@ -89,7 +89,7 @@ class LenRabiAdapter(
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        pi_len = md_get_float(ctx, "pi_len", 0.1)
+        sweep_stop = md_eval_scaled(ctx, "pi_len", factor=4.0, fallback=0.1)
         _module_fields: dict[str, CfgNodeValue] = {
             "qub_pulse": make_qub_probe_default(ctx),
             "readout": make_readout_ref_default(ctx),
@@ -105,7 +105,7 @@ class LenRabiAdapter(
                 "relax_delay": DirectValue(10.5),
                 "sweep": CfgSectionValue(
                     fields={
-                        "length": SweepValue(start=0.03, stop=pi_len * 4, expts=101),
+                        "length": SweepValue(start=0.03, stop=sweep_stop, expts=101),
                     }
                 ),
             }

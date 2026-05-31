@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from zcu_tools.experiment.v2_gui.adapters.shared import (
+    md_eval_scaled,
     proper_flux_range,
     proper_qub_freq_range,
     proper_relax,
@@ -56,6 +57,27 @@ def test_proper_relax_custom_fallback():
     result = proper_relax(ctx, fallback=42.0)
     assert isinstance(result, DirectValue)
     assert result.value == 42.0
+
+
+# --- md_eval_scaled (sweep-edge factor * key) -------------------------------
+
+
+def test_md_eval_scaled_uses_eval_when_md_present():
+    ctx = _ctx_with_md({"t1": 50.0})
+    edge = md_eval_scaled(ctx, "t1", factor=5.0, fallback=100.0)
+    assert isinstance(edge, EvalValue)
+    assert edge.expr == "5.0 * t1"
+    # lowering owns resolution against md
+    assert edge.resolved is None
+
+
+def test_md_eval_scaled_falls_back_to_scaled_float_without_md():
+    ctx = _ctx_with_md({})
+    edge = md_eval_scaled(ctx, "pi_amp", factor=2.0, fallback=0.5)
+    # the fallback is a plain float (a sweep edge, not a scalar field value),
+    # already multiplied by the factor.
+    assert edge == 1.0
+    assert not isinstance(edge, EvalValue)
 
 
 # --- proper_*_freq_range ----------------------------------------------------

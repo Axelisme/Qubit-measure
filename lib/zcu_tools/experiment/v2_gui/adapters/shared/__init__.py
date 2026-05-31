@@ -1,4 +1,5 @@
 from .ctx_helpers import (
+    md_eval_scaled,
     md_get_float,
     md_get_int,
     md_has_key,
@@ -50,6 +51,7 @@ __all__ = [
     "md_has_key",
     "md_scalar_float",
     "md_scalar_int",
+    "md_eval_scaled",
     "proper_relax",
     "proper_res_freq_range",
     "proper_qub_freq_range",

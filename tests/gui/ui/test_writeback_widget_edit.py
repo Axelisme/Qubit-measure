@@ -6,11 +6,21 @@ from zcu_tools.gui.adapter import MetaDictWriteback, ModuleWriteback
 from zcu_tools.gui.ui.writeback_widget import WritebackWidget
 
 
-def _find_open_dialog() -> QDialog:
+def _find_open_dialog(title_prefix: str) -> QDialog:
     from qtpy.QtWidgets import QApplication
 
-    dialogs = [w for w in QApplication.topLevelWidgets() if isinstance(w, QDialog)]
-    assert dialogs, "edit dialog was not opened"
+    # Match by title prefix: WA_DeleteOnClose defers destruction to the event
+    # loop (which does not spin between tests), so a closed dialog from a prior
+    # test can still linger in topLevelWidgets — picking the last one blindly
+    # grabs the wrong dialog.
+    dialogs = [
+        w
+        for w in QApplication.topLevelWidgets()
+        if isinstance(w, QDialog)
+        and w.isVisible()
+        and w.windowTitle().startswith(title_prefix)
+    ]
+    assert dialogs, f"no open dialog titled {title_prefix!r}"
     return dialogs[-1]
 
 
@@ -26,7 +36,7 @@ def test_edit_md_item_can_change_target_name(qapp):
 
     cb = QCheckBox()
     widget._edit_md_item(item, cb)
-    dialog = _find_open_dialog()
+    dialog = _find_open_dialog("Edit Value:")
     try:
         line_edits = dialog.findChildren(QLineEdit)
         # First field is "Apply as" (target_name), second is "Value".
@@ -59,7 +69,7 @@ def test_edit_md_item_rejects_blank_target_name(qapp):
 
     cb = QCheckBox()
     widget._edit_md_item(item, cb)
-    dialog = _find_open_dialog()
+    dialog = _find_open_dialog("Edit Value:")
     try:
         name_edit = dialog.findChildren(QLineEdit)[0]
         name_edit.setText("   ")
@@ -93,7 +103,7 @@ def test_edit_cfg_item_can_change_target_name(qapp):
 
     cb = QCheckBox()
     widget._edit_cfg_item(item, cb)
-    dialog = _find_open_dialog()
+    dialog = _find_open_dialog("Edit Config:")
     try:
         name_edit = dialog.findChildren(QLineEdit)[0]
         assert name_edit.text() == "readout_rf"
