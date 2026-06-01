@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -86,17 +87,25 @@ class StartupService:
         return self._persistence.load()
 
     def apply_project(self, req: StartupProjectRequest) -> None:
+        # Scope result_dir / database_path under chip_name/qub_name so that data
+        # and images land in the same per-qubit tree the notebook flow uses
+        # (single_qubit.md: result_dir = result/chip/qub, database_path =
+        # create_datafolder(.., name=chip/qub)) rather than the bare roots the
+        # user types. Persistence below stores the raw user roots (not the
+        # scoped paths) so a restore re-derives the scope once, never twice.
+        scoped_result_dir = self._scope_to_qubit(req.result_dir, req)
+        scoped_database_path = self._scope_to_qubit(req.database_path, req)
         self._context.set_startup_context(
             MetaDict(),
             ModuleLibrary(),
             req.chip_name,
             req.qub_name,
             req.res_name,
-            req.result_dir,
-            req.database_path,
+            scoped_result_dir,
+            scoped_database_path,
         )
-        if req.result_dir:
-            self._context.setup_project(req.result_dir)
+        if scoped_result_dir:
+            self._context.setup_project(scoped_result_dir)
         self._persistence.update_project(
             chip_name=req.chip_name,
             qub_name=req.qub_name,
@@ -104,6 +113,13 @@ class StartupService:
             result_dir=req.result_dir,
             database_path=req.database_path,
         )
+
+    @staticmethod
+    def _scope_to_qubit(root: str, req: StartupProjectRequest) -> str:
+        """Append chip_name/qub_name to a root path (empty root stays empty)."""
+        if not root:
+            return root
+        return os.path.join(root, req.chip_name, req.qub_name)
 
     def remember_connection(self, req: StartupConnectionRequest) -> None:
         self._persistence.update_connection(ip=req.ip, port=req.port)

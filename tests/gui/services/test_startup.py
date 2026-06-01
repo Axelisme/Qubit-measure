@@ -28,17 +28,27 @@ def _make_service() -> tuple[StartupService, MagicMock, MagicMock, MagicMock]:
     return svc, context, devices, persistence
 
 
-def test_apply_project_constructs_draft_dependencies_and_persists() -> None:
+def test_apply_project_scopes_paths_under_chip_qubit_and_persists_raw() -> None:
     svc, context, _, persistence = _make_service()
     req = StartupProjectRequest("chip", "qubit", "res", "/tmp/result", "/tmp/db")
 
     svc.apply_project(req)
 
+    # context + io get the chip/qubit-scoped paths (so data/images land in the
+    # per-qubit tree, matching the notebook flow).
     args = context.set_startup_context.call_args.args
     assert isinstance(args[0], MetaDict)
     assert isinstance(args[1], ModuleLibrary)
-    assert args[2:] == ("chip", "qubit", "res", "/tmp/result", "/tmp/db")
-    context.setup_project.assert_called_once_with("/tmp/result")
+    assert args[2:] == (
+        "chip",
+        "qubit",
+        "res",
+        "/tmp/result/chip/qubit",
+        "/tmp/db/chip/qubit",
+    )
+    context.setup_project.assert_called_once_with("/tmp/result/chip/qubit")
+    # persistence stores the RAW user roots, not the scoped paths — so a restore
+    # re-derives the scope exactly once, never doubling it.
     persistence.update_project.assert_called_once_with(
         chip_name="chip",
         qub_name="qubit",
@@ -46,6 +56,18 @@ def test_apply_project_constructs_draft_dependencies_and_persists() -> None:
         result_dir="/tmp/result",
         database_path="/tmp/db",
     )
+
+
+def test_apply_project_empty_roots_stay_empty() -> None:
+    """An empty result_dir/database_path (DRAFT context) is not scoped."""
+    svc, context, _, _ = _make_service()
+    req = StartupProjectRequest("chip", "qubit", "res", "", "")
+
+    svc.apply_project(req)
+
+    args = context.set_startup_context.call_args.args
+    assert args[5:] == ("", "")
+    context.setup_project.assert_not_called()
 
 
 def test_restore_devices_registers_memory_only_entries() -> None:

@@ -181,8 +181,11 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         stem = self.make_filename_stem(ctx)
         data_dir = get_datafolder_path(ctx.database_path)
         image_dir = os.path.join(ctx.result_dir, "exps", ctx.active_label, "image")
+        # Data filename carries the flux label (single_qubit.md:
+        # '{stem}@{em.label}') so the same experiment at different flux points
+        # stays distinct within a day's data folder.
         return SavePaths(
-            data_path=os.path.join(data_dir, stem),
+            data_path=os.path.join(data_dir, f"{stem}@{ctx.active_label}"),
             image_path=os.path.join(image_dir, f"{stem}.png"),
         )
 
