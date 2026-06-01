@@ -122,6 +122,11 @@ def main() -> int:
         assert all(flags.values()), f"not ready: {flags}"
         log(f"ready: {flags}")
 
+        # 3b. SoC hardware summary (soc.info) — the agent's window into the board.
+        info = rpc.call("soc.info")
+        assert "QICK" in info["description"] and info["cfg"]["gens"], info
+        log(f"soc: mock={info['is_mock']}, gens={len(info['cfg']['gens'])}")
+
         # 4. New tab on the mock-friendly fake/freq adapter.
         tab_id = rpc.call("tab.new", {"adapter_name": "fake/freq"})["tab_id"]
         log(f"tab: {tab_id}")

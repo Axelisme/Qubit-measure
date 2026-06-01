@@ -26,6 +26,7 @@ class SocCfgProtocol(Protocol):
     """Minimal QICK config surface used by adapters and setup UI."""
 
     def description(self) -> str: ...
+    def dump_cfg(self) -> str: ...  # QICK config as a JSON string
     def cycles2us(
         self, cycles: Any, /, gen_ch: Any = None, ro_ch: Any = None
     ) -> Any: ...

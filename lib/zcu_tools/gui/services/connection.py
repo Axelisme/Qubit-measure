@@ -160,6 +160,14 @@ class ConnectionService(QObject):
     def get_soccfg(self) -> Optional[SocCfgHandle]:
         return self._state.exp_context.soccfg
 
+    def is_mock_soc(self) -> bool:
+        """Whether the current connection is the offline mock board.
+
+        Reflects the last connect request's kind; only meaningful while a SoC is
+        connected (a successful connect keeps soc set, so pair with has_soc).
+        """
+        return self._pending_is_mock
+
     def is_connect_active(self) -> bool:
         return self._active_lease is not None
 

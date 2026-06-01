@@ -369,6 +369,21 @@ class Controller:
     def has_soc(self) -> bool:
         return self._conn_svc.has_soc()
 
+    def get_soc_info(self) -> dict[str, object]:
+        """Hardware summary of the connected SoC (QICK soccfg): human-readable
+        description + structured cfg (DAC/ADC channels, sample rates, freq
+        ranges). Raises if no SoC is connected (→ precondition_failed)."""
+        import json
+
+        soccfg = self._conn_svc.get_soccfg()
+        if soccfg is None:
+            raise RuntimeError("No SoC connected")
+        return {
+            "description": soccfg.description(),
+            "cfg": json.loads(soccfg.dump_cfg()),
+            "is_mock": self._conn_svc.is_mock_soc(),
+        }
+
     def resources_versions(self) -> dict[str, int]:
         """Full resource-version snapshot (the resources.versions RPC payload)."""
         return self._state.version.snapshot()

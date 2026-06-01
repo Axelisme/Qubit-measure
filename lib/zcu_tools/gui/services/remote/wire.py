@@ -75,7 +75,9 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 #      (same shape as run.progress); device.active_setup now only {device_name}
 #      and device.active_operation drops progress (live progress via
 #      device.setup_progress).
-WIRE_VERSION = 10
+# v11: added soc.info — read the connected SoC's QICK soccfg (human-readable
+#      description + structured cfg: DAC/ADC channels, sample rates, freq ranges).
+WIRE_VERSION = 11
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -93,7 +95,9 @@ WIRE_VERSION = 10
 #     dict[operation_id, container]) behind a ProgressTransport port whose Qt
 #     marshal (QtProgressTransport) is a driven adapter; run/device no longer
 #     rebuild a ProgressModel; Views attach by owner_id. Wire shape unchanged.
-GUI_VERSION = 7
+# v8: soc.info RPC (WIRE 11) — expose the connected SoC's soccfg to the agent;
+#     mcp folds the description into connect replies.
+GUI_VERSION = 8
 
 # ---------------------------------------------------------------------------
 # Wire envelopes

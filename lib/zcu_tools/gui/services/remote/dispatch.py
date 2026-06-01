@@ -593,6 +593,16 @@ def _h_state_has_soc(
     return {"value": bool(adapter.ctrl.has_soc())}
 
 
+def _h_soc_info(
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
+) -> Mapping[str, object]:
+    del params
+    try:
+        return adapter.ctrl.get_soc_info()
+    except RuntimeError as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+
+
 def _h_resources_versions(
     adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -1518,6 +1528,7 @@ _HANDLERS: dict[str, Handler] = {
     "state.has_context": _h_state_has_context,
     "state.has_active_context": _h_state_has_active_context,
     "state.has_soc": _h_state_has_soc,
+    "soc.info": _h_soc_info,
     "resources.versions": _h_resources_versions,
     "session.persist": _h_session_persist,
     "session.restore": _h_session_restore,

@@ -64,7 +64,7 @@ from zcu_tools.gui.services.remote.wire import (  # noqa: E402
 # v4: gui_run_start / gui_connect_start now short-wait degrade like device ops
 #     (a fast run/connect returns its product, slow degrades to a handle); new
 #     gui_run_wait / gui_connect_wait semantic waits.
-MCP_VERSION = 4
+MCP_VERSION = 5
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -748,7 +748,11 @@ def tool_gui_connect_mock(arguments: Dict[str, Any]) -> str:
         active_res = send_gui_rpc("context.active", {})
         active_label = active_res.get("label", "new")
 
-    return f"Mock SOC connected and startup applied. Active context set to: {active_label!r}"
+    soc_desc = send_gui_rpc("soc.info", {}).get("description", "")
+    return (
+        f"Mock SOC connected and startup applied. Active context set to: "
+        f"{active_label!r}\n\n{soc_desc}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -938,19 +942,30 @@ def tool_gui_connect_start(arguments: Dict[str, Any]) -> Dict[str, Any]:
         params["port"] = int(arguments["port"])
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
     send_gui_rpc("connect.start", params)
+    # On a settled connect, fold in the SoC hardware summary so the agent sees
+    # the board (channels / sample rates / freq ranges) in the same reply,
+    # without a separate gui_soc_info round-trip.
     return _start_op_with_short_wait(
         "soc",
         "SoC connect",
         wait_seconds,
-        lambda: {"view": send_gui_rpc("view.snapshot", {})},
+        lambda: {
+            "view": send_gui_rpc("view.snapshot", {}),
+            "soc": send_gui_rpc("soc.info", {}),
+        },
         "await it with gui_connect_wait() or watch 'soc_changed'.",
     )
 
 
 def tool_gui_connect_wait(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    """Block until the SoC connect completes (semantic wait). Raises on failure."""
+    """Block until the SoC connect completes (semantic wait). Raises on failure.
+
+    On success also returns the SoC hardware summary (same as gui_soc_info)."""
     timeout = float(arguments.get("timeout", 120.0))
-    return _await_operation_by_key("soc", "SoC connect", timeout)
+    result = _await_operation_by_key("soc", "SoC connect", timeout)
+    if result.get("status") == "finished":
+        result["soc"] = send_gui_rpc("soc.info", {})
+    return result
 
 
 def tool_gui_events_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:

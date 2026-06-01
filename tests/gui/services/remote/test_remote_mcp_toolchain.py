@@ -248,6 +248,53 @@ def test_device_setup_spec_requires_live_info(fx):
         sock.close()
 
 
+# ---------------------------------------------------------------------------
+# soc.info — read the connected SoC's hardware summary (wire v11)
+# ---------------------------------------------------------------------------
+
+
+def _install_real_mock_soccfg(fx) -> None:
+    """Swap the fixture's MagicMock soccfg for a real QICK mock soccfg so
+    description()/dump_cfg() return real content."""
+    import dataclasses
+
+    from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
+    ctx = fx.state.exp_context
+    fx.state.exp_context = dataclasses.replace(ctx, soccfg=make_mock_soccfg())
+
+
+def test_soc_info_returns_description_and_cfg(fx):
+    _install_real_mock_soccfg(fx)
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "soc.info")
+        assert resp["ok"] is True
+        result = resp["result"]
+        assert "QICK" in result["description"]
+        assert "signal generator" in result["description"]
+        # structured cfg carries the DAC generators with their sample rate
+        gens = result["cfg"]["gens"]
+        assert gens and "fs" in gens[0]
+        assert isinstance(result["is_mock"], bool)
+    finally:
+        sock.close()
+
+
+def test_soc_info_requires_connected_soc(fx):
+    import dataclasses
+
+    ctx = fx.state.exp_context
+    fx.state.exp_context = dataclasses.replace(ctx, soc=None, soccfg=None)
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "soc.info")
+        assert resp["ok"] is False
+        assert resp["error"]["code"] == "precondition_failed"
+    finally:
+        sock.close()
+
+
 def test_device_mutation_error_path_is_precondition_failed(fx):
     sock = open_client(fx.service.port)
     try:

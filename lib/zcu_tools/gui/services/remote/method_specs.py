@@ -280,6 +280,13 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "state.has_context": MethodSpec(5.0, ""),
     "state.has_active_context": MethodSpec(5.0, ""),
     "state.has_soc": MethodSpec(5.0, ""),
+    "soc.info": MethodSpec(
+        5.0,
+        "Read the connected SoC's hardware summary (QICK soccfg): a "
+        "human-readable 'description' (DAC/ADC channels, sample rates, freq "
+        "ranges, tiles) plus a structured 'cfg' and 'is_mock'. Requires a "
+        "connected SoC.",
+    ),
     # Resource version table (optimistic-concurrency guard baseline). Full
     # snapshot the mcp layer reads to track last-seen versions; the version
     # integers are mcp/RPC bookkeeping and are never surfaced to the agent.

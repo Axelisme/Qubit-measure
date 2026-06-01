@@ -30,10 +30,15 @@ user first**, and you **must respect device safety limits**.
   can **physically destroy the instrument**. `gui_device_setup(name,
   updates={"value": ...})` and any flux-sweep edge must stay in range. When in
   doubt, ask — do not guess a flux value.
-- **Ask the user for these before planning a measurement** (they are not
-  discoverable from software):
+- **Read the board first with `gui_soc_info`** (after connect). It returns the
+  QICK soccfg: a human-readable `description` plus structured `cfg` — DAC/ADC
+  **channel count, sample rates (`fs`), DDS frequency ranges, tile layout**.
+  `gui_connect_mock` / `gui_connect_start` also fold this description into their
+  reply. This is the hardware you *can* see in software.
+- **Ask the user for what soccfg does NOT tell you** (the wiring/physics):
   - Which DAC/ADC **channels** are wired to the readout transmission line, and
-    which to the qubit drive line.
+    which to the qubit drive line (soccfg lists the channels and their rates,
+    but not what each is cabled to).
   - Qubit type: **Transmon or Fluxonium** (changes the expected spectrum and the
     flux model).
   - Estimated **readout-resonator frequency range**.
@@ -69,6 +74,7 @@ gui_launch                       # spawns the GUI, connects; banner shows the
                                  # handshake: "wire vN (mcp==gui); gui code vX, mcp code vY"
 gui_connect_mock                 # one-shot: mock SoC + project + active context
 gui_state_check                  # all four flags must be true before running
+gui_soc_info                     # the board: channels, sample rates, freq ranges
 ```
 
 Then the experiment loop (per tab):
