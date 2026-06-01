@@ -209,7 +209,7 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
                     PulseReadout("readout", modules.readout),
                 ],
             )
-            prog.acquire(soc, progress=True)
+            prog.acquire(soc, progress=True, stop_checkers=[ctx.is_stop])
 
             acc_buf = prog.get_raw()
             assert acc_buf is not None

@@ -75,7 +75,12 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
         assert isinstance(Ts, np.ndarray)
 
         def measure_fn(ctx: TaskState, update_hook: Optional[Callable]):
-            return prog.acquire_decimated(soc, progress=False, round_hook=update_hook)
+            return prog.acquire_decimated(
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+            )
 
         with LivePlot1D("Time (us)", "Amplitude") as viewer:
             signals = run_task(
