@@ -79,7 +79,11 @@ from zcu_tools.gui.services.remote.wire import (  # noqa: E402
 # v4: gui_run_start / gui_connect_start now short-wait degrade like device ops
 #     (a fast run/connect returns its product, slow degrades to a handle); new
 #     gui_run_wait / gui_connect_wait semantic waits.
-MCP_VERSION = 6
+# v7: batch convenience tools gui_editor_set_fields / gui_context_set_md_attrs —
+#     bridge-side fan-out over the existing editor.set_field / context.set_md_attr
+#     RPCs (fail-fast, set_fields returns the whole draft cfg). No wire change, so
+#     WIRE_VERSION stays put.
+MCP_VERSION = 7
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -870,6 +874,79 @@ def tool_gui_editor_unsubscribe(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return send_gui_rpc("editor.unsubscribe", {"editor_id": editor_id})
 
 
+def _coerce_pairs(
+    value: object, *, field: str, keys: "tuple[str, str]"
+) -> List[Dict[str, Any]]:
+    """Validate a batch list of {k0, k1} dicts, fail-fast on shape errors.
+
+    Validation happens up front (before any RPC) so a malformed item never lets
+    a partial batch fire — keeping the failure boundary at 'nothing applied'
+    rather than 'some applied'.
+    """
+    k0, k1 = keys
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{field!r} must be a non-empty list")
+    out: List[Dict[str, Any]] = []
+    for i, item in enumerate(value):
+        if not isinstance(item, dict) or k0 not in item or k1 not in item:
+            raise ValueError(f"{field}[{i}] must be an object with {k0!r} and {k1!r}")
+        out.append(item)
+    return out
+
+
+def tool_gui_editor_set_fields(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Apply several editor.set_field edits to ONE editor, fail-fast in order.
+
+    Convenience fan-out (a for-loop over the single-field RPC) — there is no
+    atomicity: edits before the failing one stay applied and are NOT rolled
+    back. On the first error this raises, reporting how many succeeded and which
+    path failed so the agent can reconcile. On success the WHOLE resulting draft
+    cfg is returned (via editor.get) rather than per-edit deltas, so the agent
+    sees the full final state in one shot.
+    """
+    editor_id = str(arguments["editor_id"])
+    edits = _coerce_pairs(arguments.get("edits"), field="edits", keys=("path", "value"))
+    for i, edit in enumerate(edits):
+        try:
+            send_gui_rpc(
+                "editor.set_field",
+                {
+                    "editor_id": editor_id,
+                    "path": str(edit["path"]),
+                    "value": edit["value"],
+                },
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"batch set_field failed at edits[{i}] (path={edit['path']!r}); "
+                f"{i} edit(s) already applied and NOT rolled back: {exc}"
+            ) from exc
+    cfg = send_gui_rpc("editor.get", {"editor_id": editor_id})
+    return {"applied": len(edits), "cfg": cfg}
+
+
+def tool_gui_context_set_md_attrs(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Set several MetaDict attributes, fail-fast in order.
+
+    Convenience fan-out over context.set_md_attr (no atomicity: attrs before the
+    failing one stay set, NOT rolled back). On the first error this raises with
+    the failing key and the count already applied.
+    """
+    attrs = _coerce_pairs(arguments.get("attrs"), field="attrs", keys=("key", "value"))
+    for i, attr in enumerate(attrs):
+        try:
+            send_gui_rpc(
+                "context.set_md_attr",
+                {"key": str(attr["key"]), "value": attr["value"]},
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"batch set_md_attr failed at attrs[{i}] (key={attr['key']!r}); "
+                f"{i} attr(s) already set and NOT rolled back: {exc}"
+            ) from exc
+    return {"applied": len(attrs)}
+
+
 def _await_operation_by_key(key: str, what: str, timeout: float) -> Dict[str, Any]:
     """Block until the latest operation for ``key`` settles; semantic result.
 
@@ -1436,6 +1513,76 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             "required": ["editor_id"],
         },
     },
+    "gui_editor_set_fields": {
+        "handler": tool_gui_editor_set_fields,
+        "description": (
+            "Batch-apply several field edits to ONE cfg-editor session in order. "
+            "Convenience fan-out over gui_editor_set_field — NOT atomic: it stops "
+            "at the first failure (fail-fast) and edits applied before it are NOT "
+            "rolled back; the error names the failing path and how many already "
+            "applied. On success returns {applied, cfg} where 'cfg' is the WHOLE "
+            "resulting draft (settable paths + current values, same as "
+            "gui_editor_get) so you see the final state without per-edit deltas. "
+            "Each edit's 'path' is dotted (see gui_tab_list_paths) and 'value' is "
+            "a JSON scalar or an md-ref {__kind:eval, expr}, exactly as "
+            "gui_editor_set_field."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "editor_id": {
+                    "type": "string",
+                    "description": "Editor session id (from gui_tab_snapshot or gui_editor_open)",
+                },
+                "edits": {
+                    "type": "array",
+                    "description": "Edits applied in order; each {path, value}",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Dotted field path",
+                            },
+                            "value": {
+                                "description": "JSON scalar or {__kind:eval, expr}"
+                            },
+                        },
+                        "required": ["path", "value"],
+                    },
+                },
+            },
+            "required": ["editor_id", "edits"],
+        },
+    },
+    "gui_context_set_md_attrs": {
+        "handler": tool_gui_context_set_md_attrs,
+        "description": (
+            "Batch-set several MetaDict attributes in order. Convenience fan-out "
+            "over gui_context_set_md_attr — NOT atomic: stops at the first failure "
+            "(fail-fast), attrs set before it are NOT rolled back, and the error "
+            "names the failing key plus how many already applied. Returns "
+            "{applied} on success."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "attrs": {
+                    "type": "array",
+                    "description": "Attributes set in order; each {key, value}",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "key": {"type": "string", "description": "MetaDict key"},
+                            "value": {"description": "JSON-safe value"},
+                        },
+                        "required": ["key", "value"],
+                    },
+                },
+            },
+            "required": ["attrs"],
+        },
+    },
     "gui_device_wait_operation": {
         "handler": tool_gui_device_wait_operation,
         "description": (
@@ -1737,6 +1884,8 @@ _OVERRIDE_NAMES = frozenset(
         "gui_events_poll",
         "gui_editor_subscribe",
         "gui_editor_unsubscribe",
+        "gui_editor_set_fields",
+        "gui_context_set_md_attrs",
         "gui_device_wait_operation",
         "gui_run_start",
         "gui_run_wait",

@@ -461,6 +461,122 @@ def test_device_setup_wrapper_issues_setup_then_short_wait(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Batch convenience tools (fan-out over single-field RPCs, fail-fast)
+# ---------------------------------------------------------------------------
+
+
+def test_set_fields_fans_out_in_order_then_returns_full_cfg(monkeypatch):
+    from zcu_tools.gui.services.remote import mcp_server
+
+    calls: list[tuple[str, dict]] = []
+
+    def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        del timeout_seconds
+        calls.append((method, params))
+        if method == "editor.get":
+            return {"paths": [{"path": "reps", "value": 100}], "valid": True}
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    out = mcp_server.TOOLS["gui_editor_set_fields"]["handler"](
+        {
+            "editor_id": "ed1",
+            "edits": [
+                {"path": "reps", "value": 100},
+                {"path": "sweep.gain.expts", "value": 5},
+            ],
+        }
+    )
+
+    # Each edit becomes one set_field in order; cfg is fetched once at the end.
+    assert calls == [
+        ("editor.set_field", {"editor_id": "ed1", "path": "reps", "value": 100}),
+        (
+            "editor.set_field",
+            {"editor_id": "ed1", "path": "sweep.gain.expts", "value": 5},
+        ),
+        ("editor.get", {"editor_id": "ed1"}),
+    ]
+    assert out["applied"] == 2
+    assert out["cfg"]["valid"] is True
+
+
+def test_set_fields_fail_fast_stops_and_reports_progress(monkeypatch):
+    from zcu_tools.gui.services.remote import mcp_server
+
+    calls: list[str] = []
+
+    def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        del timeout_seconds
+        calls.append(params.get("path", method))
+        if params.get("path") == "bad":
+            raise RuntimeError("GUI Error (INVALID_PARAMS): unknown path 'bad'")
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    with pytest.raises(RuntimeError) as ei:
+        mcp_server.TOOLS["gui_editor_set_fields"]["handler"](
+            {
+                "editor_id": "ed1",
+                "edits": [
+                    {"path": "ok", "value": 1},
+                    {"path": "bad", "value": 2},
+                    {"path": "never", "value": 3},
+                ],
+            }
+        )
+
+    # Stops at the failing edit; the third never fires; no editor.get on failure.
+    assert calls == ["ok", "bad"]
+    msg = str(ei.value)
+    assert "edits[1]" in msg and "'bad'" in msg and "1 edit(s) already applied" in msg
+
+
+def test_set_md_attrs_fans_out_in_order(monkeypatch):
+    from zcu_tools.gui.services.remote import mcp_server
+
+    calls: list[tuple[str, dict]] = []
+
+    def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        del timeout_seconds
+        calls.append((method, params))
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    out = mcp_server.TOOLS["gui_context_set_md_attrs"]["handler"](
+        {"attrs": [{"key": "r_f", "value": 5000.0}, {"key": "q_f", "value": 200.0}]}
+    )
+
+    assert calls == [
+        ("context.set_md_attr", {"key": "r_f", "value": 5000.0}),
+        ("context.set_md_attr", {"key": "q_f", "value": 200.0}),
+    ]
+    assert out["applied"] == 2
+
+
+def test_batch_tools_reject_malformed_items_before_any_rpc(monkeypatch):
+    from zcu_tools.gui.services.remote import mcp_server
+
+    calls: list[str] = []
+
+    def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        del params, timeout_seconds
+        calls.append(method)
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+
+    # Missing 'value' in an edit / empty list — validated up front, no RPC fires.
+    with pytest.raises(ValueError):
+        mcp_server.TOOLS["gui_editor_set_fields"]["handler"](
+            {"editor_id": "ed1", "edits": [{"path": "reps"}]}
+        )
+    with pytest.raises(ValueError):
+        mcp_server.TOOLS["gui_context_set_md_attrs"]["handler"]({"attrs": []})
+    assert calls == []
+
+
+# ---------------------------------------------------------------------------
 # Split startup + connect tools (generated from ParamSpec)
 # ---------------------------------------------------------------------------
 
