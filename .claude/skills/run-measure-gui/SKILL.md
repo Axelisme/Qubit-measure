@@ -1,7 +1,13 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
+skill_version: 1
 ---
+
+> **Copy-sync check.** This skill is hand-copied into `.claude/skills/`,
+> `.codex/skills/`, and `.agent/skills/` (one per agent). `skill_version` must be
+> identical across all three; a mismatch means a copy is stale. Bump it in every
+> copy whenever the skill content changes.
 
 # run-measure-gui
 
