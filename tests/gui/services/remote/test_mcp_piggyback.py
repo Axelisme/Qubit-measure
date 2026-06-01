@@ -86,3 +86,51 @@ def test_note_differing_gui_version_is_not_a_mismatch():
     note = _note_with(mcp_server.MCP_WIRE_VERSION, 999)
     assert "MISMATCH" not in note
     assert "gui code v999" in note
+
+
+# ---------------------------------------------------------------------------
+# Short-wait degrade (shared by device / run / connect)
+# ---------------------------------------------------------------------------
+
+
+def test_short_wait_settles_returns_product():
+    # operation.await returns in time -> {status:finished, **product()}.
+    mcp_server._OP_BY_KEY["tab:t1"] = 42
+    with patch.object(mcp_server, "_send_gui_rpc_raw", return_value={"result": {}}):
+        with patch.object(
+            mcp_server, "send_gui_rpc", return_value={"status": "finished"}
+        ):
+            out = mcp_server._start_op_with_short_wait(
+                "tab:t1",
+                "Run on 't1'",
+                1.0,
+                lambda: {"tab": {"has_run_result": True}},
+                "hint",
+            )
+    assert out["status"] == "finished"
+    assert out["tab"] == {"has_run_result": True}
+    mcp_server._OP_BY_KEY.pop("tab:t1", None)
+
+
+def test_short_wait_timeout_degrades_to_pending():
+    mcp_server._OP_BY_KEY["tab:t2"] = 43
+
+    def _raise_timeout(*a, **k):
+        raise RuntimeError("GUI Error (timeout): still running")
+
+    with patch.object(mcp_server, "send_gui_rpc", side_effect=_raise_timeout):
+        out = mcp_server._start_op_with_short_wait(
+            "tab:t2",
+            "Run on 't2'",
+            1.0,
+            lambda: {"tab": {}},
+            "await with gui_run_wait.",
+        )
+    assert out["status"] == "pending"
+    assert "await with gui_run_wait." in out["message"]
+    mcp_server._OP_BY_KEY.pop("tab:t2", None)
+
+
+def test_run_and_connect_are_override_tools_with_waits():
+    for t in ("gui_run_start", "gui_run_wait", "gui_connect_start", "gui_connect_wait"):
+        assert t in mcp_server.TOOLS

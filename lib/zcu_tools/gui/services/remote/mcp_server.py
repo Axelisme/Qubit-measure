@@ -61,7 +61,10 @@ from zcu_tools.gui.services.remote.wire import (  # noqa: E402
 # v2: piggyback/diagnostic-split + default-subscribe now includes run_started /
 #     run_finished (was run_lock_changed).
 # v3: default-subscribe device_setup_started/finished (was device_setup_changed).
-MCP_VERSION = 3
+# v4: gui_run_start / gui_connect_start now short-wait degrade like device ops
+#     (a fast run/connect returns its product, slow degrades to a handle); new
+#     gui_run_wait / gui_connect_wait semantic waits.
+MCP_VERSION = 4
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -85,7 +88,10 @@ Typical experiment loop:
     'modules.qub_pulse.value.freq'. Nested module fields need the 'modules.'
     prefix; an unknown path fails with invalid_params rather than silently
     no-op'ing. (This is the same draft the GUI form shows — edits are WYSIWYG.)
-  - gui_run_start(tab_id) is fire-and-forget (returns immediately).
+  - gui_run_start(tab_id) waits briefly (wait_seconds, default 1.0): a fast run
+    returns {status:'finished', tab:{...}}; a slow one returns {status:'pending'}
+    — then gui_run_wait(tab_id) or watch run_finished. (gui_device_* and
+    gui_connect_start degrade the same way.)
   - gui_analyze_start(tab_id) after a run; gui_save_data / gui_save_image /
     gui_save_both to persist.
 
@@ -830,24 +836,29 @@ def _is_timeout_error(exc: RuntimeError) -> bool:
     return "(timeout)" in str(exc)
 
 
-def _start_device_op_with_short_wait(
-    name: str, what: str, wait_seconds: float
+def _start_op_with_short_wait(
+    key: str,
+    what: str,
+    wait_seconds: float,
+    product: "Callable[[], Dict[str, Any]]",
+    pending_hint: str,
 ) -> Dict[str, Any]:
-    """Wait briefly for a just-started device op, degrading to a handle on timeout.
+    """Wait briefly for a just-started async op, degrading to a handle on timeout.
 
     The start RPC must already have run (its operation_id captured into _OP_BY_KEY
-    under ``device:<name>`` by send_gui_rpc). Awaits up to ``wait_seconds``:
-    - settles in time -> follow-up device.snapshot, return {status:'finished',
-      snapshot:{...}} so the caller sees the device's live params immediately;
-    - still running -> {status:'pending'} so the caller can gui_device_wait_operation
-      or watch 'device_changed'. operation.await still raises on failure/cancel.
+    under ``key`` by send_gui_rpc). Awaits up to ``wait_seconds``:
+    - settles in time -> ``{status:'finished', **product()}`` so the caller sees
+      the op's resulting state immediately (device snapshot / tab snapshot / soc);
+    - still running -> ``{status:'pending', message:<hint>}`` so the caller can
+      use the matching wait tool. operation.await still raises on failure/cancel.
+
+    Shared by device connect/disconnect/setup, run.start, and connect.start —
+    every op that has both a fast and a slow mode gets the same degrade.
     """
-    key = f"device:{name}"
     operation_id = _OP_BY_KEY.get(key)
     if operation_id is None:
-        # No handle captured (e.g. op already settled synchronously) — just report
-        # the current snapshot.
-        return {"status": "finished", "snapshot": _device_snapshot(name)}
+        # No handle captured (op already settled synchronously) — report product.
+        return {"status": "finished", **product()}
     try:
         send_gui_rpc(
             "operation.await",
@@ -858,13 +869,10 @@ def _start_device_op_with_short_wait(
         if _is_timeout_error(exc):
             return {
                 "status": "pending",
-                "message": (
-                    f"{what} still in progress after {wait_seconds}s; await it with "
-                    f"gui_device_wait_operation(name={name!r}) or watch 'device_changed'."
-                ),
+                "message": f"{what} still in progress after {wait_seconds}s; {pending_hint}",
             }
         raise  # genuine failure/cancellation surfaces as an error
-    return {"status": "finished", "snapshot": _device_snapshot(name)}
+    return {"status": "finished", **product()}
 
 
 def _device_snapshot(name: str) -> Any:
@@ -884,6 +892,65 @@ def tool_gui_device_wait_operation(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return _await_operation_by_key(
         f"device:{name}", f"Device {name!r} operation", timeout
     )
+
+
+def tool_gui_run_start(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Start a run, waiting briefly for a fast (small reps/rounds) run to finish.
+
+    A run has both modes — a tiny sweep finishes in well under a second, a big
+    one takes minutes — so it degrades like device ops: settles in time ->
+    {status:'finished', tab:<tab.snapshot>} (has_run_result reflects the result);
+    still running -> {status:'pending'} (await with gui_run_wait or watch
+    run_finished). send_gui_rpc attaches the version guard + captures the
+    operation_id under tab:<tab_id>.
+    """
+    tab_id = str(arguments["tab_id"])
+    wait_seconds = float(arguments.get("wait_seconds", 1.0))
+    send_gui_rpc("run.start", {"tab_id": tab_id})
+    return _start_op_with_short_wait(
+        f"tab:{tab_id}",
+        f"Run on tab {tab_id!r}",
+        wait_seconds,
+        lambda: {"tab": send_gui_rpc("tab.snapshot", {"tab_id": tab_id})},
+        f"await it with gui_run_wait(tab_id={tab_id!r}) or watch 'run_finished'.",
+    )
+
+
+def tool_gui_run_wait(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Block until the run on ``tab_id`` completes (semantic wait, mirrors
+    gui_device_wait_operation). Raises on failure/cancellation."""
+    tab_id = str(arguments["tab_id"])
+    timeout = float(arguments.get("timeout", 600.0))
+    return _await_operation_by_key(f"tab:{tab_id}", f"Run on tab {tab_id!r}", timeout)
+
+
+def tool_gui_connect_start(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Connect the SoC, waiting briefly for the (usually fast) connect to land.
+
+    Degrades like device ops: settles -> {status:'finished', view:<view.snapshot>};
+    still running -> {status:'pending'} (await with gui_connect_wait). kind='mock'
+    or kind='remote' with ip+port.
+    """
+    params: Dict[str, Any] = {"kind": str(arguments["kind"])}
+    if "ip" in arguments:
+        params["ip"] = str(arguments["ip"])
+    if "port" in arguments:
+        params["port"] = int(arguments["port"])
+    wait_seconds = float(arguments.get("wait_seconds", 1.0))
+    send_gui_rpc("connect.start", params)
+    return _start_op_with_short_wait(
+        "soc",
+        "SoC connect",
+        wait_seconds,
+        lambda: {"view": send_gui_rpc("view.snapshot", {})},
+        "await it with gui_connect_wait() or watch 'soc_changed'.",
+    )
+
+
+def tool_gui_connect_wait(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Block until the SoC connect completes (semantic wait). Raises on failure."""
+    timeout = float(arguments.get("timeout", 120.0))
+    return _await_operation_by_key("soc", "SoC connect", timeout)
 
 
 def tool_gui_events_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -971,8 +1038,12 @@ def tool_gui_device_connect(arguments: Dict[str, Any]) -> Dict[str, Any]:
         params["remember"] = bool(arguments["remember"])
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
     send_gui_rpc("device.connect", params)  # operation_id captured into _OP_BY_KEY
-    return _start_device_op_with_short_wait(
-        name, f"Device {name!r} connect", wait_seconds
+    return _start_op_with_short_wait(
+        f"device:{name}",
+        f"Device {name!r} connect",
+        wait_seconds,
+        lambda: {"snapshot": _device_snapshot(name)},
+        f"await it with gui_device_wait_operation(name={name!r}) or watch 'device_changed'.",
     )
 
 
@@ -983,8 +1054,12 @@ def tool_gui_device_disconnect(arguments: Dict[str, Any]) -> Dict[str, Any]:
         params["remember"] = bool(arguments["remember"])
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
     send_gui_rpc("device.disconnect", params)
-    return _start_device_op_with_short_wait(
-        name, f"Device {name!r} disconnect", wait_seconds
+    return _start_op_with_short_wait(
+        f"device:{name}",
+        f"Device {name!r} disconnect",
+        wait_seconds,
+        lambda: {"snapshot": _device_snapshot(name)},
+        f"await it with gui_device_wait_operation(name={name!r}) or watch 'device_changed'.",
     )
 
 
@@ -995,8 +1070,12 @@ def tool_gui_device_setup(arguments: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("'updates' must be an object")
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
     send_gui_rpc("device.setup", {"name": name, "updates": dict(updates)})
-    return _start_device_op_with_short_wait(
-        name, f"Device {name!r} setup", wait_seconds
+    return _start_op_with_short_wait(
+        f"device:{name}",
+        f"Device {name!r} setup",
+        wait_seconds,
+        lambda: {"snapshot": _device_snapshot(name)},
+        f"await it with gui_device_wait_operation(name={name!r}) or watch 'device_setup_finished'.",
     )
 
 
@@ -1034,6 +1113,11 @@ _NON_GENERATED_METHODS = frozenset(
         # gui_device_wait_operation), which translate name -> operation_id; the raw
         # by-id RPC is never an agent tool.
         "operation.await",
+        # hand-written short-wait degrade (like device ops): a fast run / connect
+        # returns its product, a slow one degrades to a handle (gui_run_wait /
+        # gui_connect_wait).
+        "run.start",
+        "connect.start",
     }
 )
 
@@ -1292,6 +1376,85 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             "required": ["name"],
         },
     },
+    "gui_run_start": {
+        "handler": tool_gui_run_start,
+        "description": (
+            "Start a run. Waits up to wait_seconds (default 1.0): a fast run "
+            "(small reps/rounds) finishes in time -> {status:'finished', tab:{...}} "
+            "(tab snapshot, has_run_result set); a slow run -> {status:'pending'} "
+            "(await with gui_run_wait or watch 'run_finished'). Track in-flight "
+            "progress with gui_run_progress."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tab_id": {"type": "string"},
+                "wait_seconds": {
+                    "type": "number",
+                    "description": "Seconds to wait before degrading to a handle (default 1.0)",
+                },
+            },
+            "required": ["tab_id"],
+        },
+    },
+    "gui_run_wait": {
+        "handler": tool_gui_run_wait,
+        "description": (
+            "Block until the run on tab_id completes. status='finished' on "
+            "success; raises on failure/cancellation; status='no_operation' if "
+            "no run is in flight. Use after gui_run_start returned status='pending'."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tab_id": {"type": "string"},
+                "timeout": {
+                    "type": "number",
+                    "description": "Seconds to wait (default 600)",
+                },
+            },
+            "required": ["tab_id"],
+        },
+    },
+    "gui_connect_start": {
+        "handler": tool_gui_connect_start,
+        "description": (
+            "Connect the SoC. kind='mock' (offline) or kind='remote' with ip+port. "
+            "Waits up to wait_seconds (default 1.0): connects in time -> "
+            "{status:'finished', view:{...}}; else {status:'pending'} (await with "
+            "gui_connect_wait or watch 'soc_changed')."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string", "description": "'mock' or 'remote'"},
+                "ip": {"type": "string", "description": "Board IP (remote)"},
+                "port": {"type": "integer", "description": "Board port (remote)"},
+                "wait_seconds": {
+                    "type": "number",
+                    "description": "Seconds to wait before degrading to a handle (default 1.0)",
+                },
+            },
+            "required": ["kind"],
+        },
+    },
+    "gui_connect_wait": {
+        "handler": tool_gui_connect_wait,
+        "description": (
+            "Block until the SoC connect completes. status='finished' on success; "
+            "raises on failure; status='no_operation' if none in flight. Use after "
+            "gui_connect_start returned status='pending'."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "timeout": {
+                    "type": "number",
+                    "description": "Seconds to wait (default 120)",
+                },
+            },
+        },
+    },
     "gui_events_poll": {
         "handler": tool_gui_events_poll,
         "description": (
@@ -1494,6 +1657,10 @@ _OVERRIDE_NAMES = frozenset(
         "gui_editor_subscribe",
         "gui_editor_unsubscribe",
         "gui_device_wait_operation",
+        "gui_run_start",
+        "gui_run_wait",
+        "gui_connect_start",
+        "gui_connect_wait",
     }
 )
 
