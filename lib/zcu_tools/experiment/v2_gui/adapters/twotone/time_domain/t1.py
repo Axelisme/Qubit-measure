@@ -19,6 +19,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     proper_relax,
 )
 from zcu_tools.gui.adapter import (
+    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     CfgNodeValue,
@@ -53,6 +54,45 @@ class T1AnalyzeResult(AnalyzeResultBase):
 class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams]):
     exp_cls = T1Exp
     ExpCfg_cls: ClassVar[Any] = T1Cfg
+
+    @classmethod
+    def guide(cls) -> AdapterGuide:
+        return AdapterGuide(
+            behavior=(
+                "T1 energy relaxation: applies a pi pulse to excite the qubit, "
+                "then sweeps a wait delay before readout and fits the exponential "
+                "decay to extract T1. Runs on real hardware. Run after a pi pulse "
+                "has been calibrated (amplitude/length Rabi)."
+            ),
+            expects_md=(
+                "Reads from the MetaDict (all optional, seeding defaults): 't1' — "
+                "prior T1 estimate (us); the delay sweep spans up to 5*t1 and "
+                "relax_delay defaults to 5*t1 (both fallback ~100 us). The pi "
+                "pulse pulls 'q_f' (~2000–6000 MHz) and 'qub_ch'. Readout pulls "
+                "'r_f' (~4000–8000 MHz), 'res_ch' / 'ro_ch', and 'timeFly' for the "
+                "readout trigger offset (~0–1 us)."
+            ),
+            expects_ml=(
+                "Needs a qubit pi-pulse module — references a calibrated library "
+                "pi pulse ('pi_amp' / 'pi_len') when present, else a blank inline "
+                "pulse — and a readout module (calibrated 'readout_dpm' / "
+                "'readout_rf' / 'readout' / 'res_readout', else a blank "
+                "pulse-readout referencing 'ro_waveform' when present). Optional "
+                "reset references a library reset ('reset_bath' / 'reset_10' / "
+                "'reset_120') when present, else stays disabled."
+            ),
+            typical_writeback=(
+                "Proposes the fitted T1 relaxation time into MetaDict 't1' (us). "
+                "No ModuleLibrary writeback."
+            ),
+            recommended=(
+                "Analysis defaults to a single-exponential fit; enable "
+                "dual-exponential only when the decay clearly shows two timescales "
+                "(a fast component on top of the slow relaxation). A delay sweep "
+                "reaching ~5*T1 lets the decay flatten so the fit is "
+                "well-constrained; with no prior 't1' it spans 0–100 us."
+            ),
+        )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

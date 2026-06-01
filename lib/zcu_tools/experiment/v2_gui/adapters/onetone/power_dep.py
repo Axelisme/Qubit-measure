@@ -18,6 +18,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 )
 from zcu_tools.gui.adapter import (
     AdapterCapabilities,
+    AdapterGuide,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -38,6 +39,45 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         requires_soc=True, supports_analysis=False
     )
+
+    @classmethod
+    def guide(cls) -> AdapterGuide:
+        return AdapterGuide(
+            behavior=(
+                "One-tone resonator power dependence: a 2D sweep of readout power "
+                "(gain) versus readout frequency, mapping how the resonator "
+                "response shifts with drive strength. Used to find the punch-out / "
+                "high-power transition and to pick a good low-power readout gain. "
+                "Runs on real hardware; requires a SoC connection."
+            ),
+            expects_md=(
+                "Reads from the MetaDict (all optional): 'r_f' — resonator "
+                "frequency, centring the frequency sweep and setting the readout / "
+                "ADC frequency (~4000–8000 MHz); 'rf_w' — linewidth, setting the "
+                "span as r_f ± 1.5*rf_w (~5–50 MHz; falls back to ±30 MHz when "
+                "absent); 'res_ch' / 'ro_ch' — drive / ADC channels; 'timeFly' — "
+                "cable time-of-flight for the trigger offset."
+            ),
+            expects_ml=(
+                "Needs a pulse-readout module, and references a ModuleLibrary "
+                "waveform named 'ro_waveform' when present (optional). Optionally "
+                "composes a 'reset' module before the readout."
+            ),
+            typical_writeback=(
+                "No writeback — this adapter has no analysis step (the underlying "
+                "experiment raises NotImplementedError). It produces a 2D map for "
+                "visual inspection only; read off the punch-out power and "
+                "low-power frequency by eye and update parameters in another step."
+            ),
+            recommended=(
+                "No analysis. Typical sweep: gain ~0.001 to 0.5 over ~101 points "
+                "(low to high power), frequency r_f ± a couple of linewidths over "
+                "~201 points. 'earlystop_snr' is a GUI-only control (0 disables): "
+                "set it positive to stop a column early once a signal-to-noise "
+                "target is reached, speeding up the scan. Narrow the gain range "
+                "once you've located the transition."
+            ),
+        )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

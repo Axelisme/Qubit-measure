@@ -19,6 +19,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 )
 from zcu_tools.gui.adapter import (
     AdapterCapabilities,
+    AdapterGuide,
     CfgSectionSpec,
     CfgSectionValue,
     DeviceRefSpec,
@@ -39,6 +40,50 @@ class OneToneFluxDepAdapter(BaseAdapter[FluxDepCfg, OneToneFluxDepRunResult]):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         requires_soc=True, supports_analysis=False
     )
+
+    @classmethod
+    def guide(cls) -> AdapterGuide:
+        return AdapterGuide(
+            behavior=(
+                "One-tone resonator flux dependence: a 2D sweep of an external "
+                "flux-bias device value versus readout frequency, tracing how the "
+                "resonator frequency moves with flux. The basis for locating a "
+                "Fluxonium's flux sweet spots (half-flux and integer-flux points). "
+                "Runs on real hardware; requires a SoC connection and a configured "
+                "flux-bias device."
+            ),
+            expects_md=(
+                "Reads from the MetaDict (all optional): 'r_f' — resonator "
+                "frequency, centring the frequency sweep (~4000–8000 MHz); 'rf_w' "
+                "— linewidth, span r_f ± rf_w (~5–50 MHz; falls back to ±30 MHz); "
+                "'res_probe_len' — readout probe length, from which ro_length is "
+                "derived as 'res_probe_len - 0.1' us (~0.5–5 us); 'res_ch' / "
+                "'ro_ch' — drive / ADC channels; 'timeFly' — trigger-offset cable "
+                "delay; 'flx_half' / 'flx_int' — previously calibrated half-flux / "
+                "integer-flux device values that set the flux sweep to span ~one "
+                "period (device-specific units; absent → fixed [-4e-3, 4e-3])."
+            ),
+            expects_ml=(
+                "Needs a pulse-readout module, and references a ModuleLibrary "
+                "waveform named 'ro_waveform' when present (optional). Optionally "
+                "composes a 'reset' module before the readout."
+            ),
+            typical_writeback=(
+                "No writeback — no automated analysis. The underlying experiment "
+                "opens an interactive line-picker for the user to mark the flux "
+                "points by hand; the chosen points are recorded manually "
+                "elsewhere, not through this adapter."
+            ),
+            recommended=(
+                "No automated analysis. Also set the 'flux_dev' field — the "
+                "flux-bias device reference (default 'flux_yoko') — and confirm it "
+                "points at a connected device. Typical sweep: flux ~101 points "
+                "across one period (driven by flx_half/flx_int when calibrated), "
+                "frequency r_f ± one linewidth over ~101 points, at a low readout "
+                "gain (~0.005) to stay below punch-out so the dip tracks cleanly. "
+                "Survey wide, then narrow around a sweet spot."
+            ),
+        )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

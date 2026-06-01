@@ -727,15 +727,27 @@ def test_adapter_guide_unknown_rejected(fx):
         sock.close()
 
 
-def test_adapter_guide_empty_when_not_written(fx):
-    # onetone/power_dep does not override guide(), so it inherits BaseAdapter's
-    # honest default — behavior says "not written yet", other fields empty.
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "adapter.guide", {"adapter_name": "onetone/power_dep"})
-        assert resp["ok"] is True
-        guide = resp["result"]["guide"]
-        assert guide["behavior"] == "(no guide written yet)"
-        assert guide["expects_md"] == ""
-    finally:
-        sock.close()
+def test_base_adapter_guide_default_is_honest():
+    # Every registered adapter now overrides guide(), so the honest default is
+    # tested directly on BaseAdapter: an adapter with no guide says so plainly
+    # rather than faking content.
+    from zcu_tools.experiment.v2_gui.adapters.fake.stub import FakeAdapter
+
+    guide = FakeAdapter.guide()
+    assert guide.behavior == "(no guide written yet)"
+    assert guide.expects_md == ""
+    assert guide.recommended == ""
+
+
+def test_every_registered_adapter_has_a_written_guide():
+    # A new adapter that forgets to override guide() falls back to the honest
+    # "(no guide written yet)" default — this test flags that so the gap is
+    # caught at review time rather than shipping a blank Guide tab to users.
+    from zcu_tools.experiment.v2_gui.registry import ADAPTERS
+
+    missing = [
+        name
+        for name, cls in ADAPTERS.items()
+        if cls.guide().behavior == "(no guide written yet)"
+    ]
+    assert not missing, f"adapters without a written guide: {missing}"

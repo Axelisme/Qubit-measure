@@ -18,6 +18,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     proper_qub_freq_range,
 )
 from zcu_tools.gui.adapter import (
+    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     CfgNodeValue,
@@ -55,6 +56,46 @@ class FreqAdapter(
 ):
     exp_cls = FreqExp
     ExpCfg_cls: ClassVar[Any] = FreqCfg
+
+    @classmethod
+    def guide(cls) -> AdapterGuide:
+        return AdapterGuide(
+            behavior=(
+                "Two-tone qubit spectroscopy: drives a qubit probe tone while "
+                "reading out the resonator, sweeps the drive frequency, and fits "
+                "the qubit response (Lorentzian or sinc) to extract the qubit "
+                "transition frequency and its linewidth. Runs on real hardware. "
+                "Typically run once the resonator is calibrated and you have a "
+                "rough idea of where the qubit sits."
+            ),
+            expects_md=(
+                "Reads from the MetaDict (all optional): 'q_f' — qubit frequency, "
+                "the sweep centre (~2000–6000 MHz); 'qf_w' — qubit linewidth, "
+                "setting the half-span as 1.5*qf_w (~1–50 MHz); 'qub_ch' — "
+                "qubit-drive channel; 'r_f' — resonator frequency for the readout "
+                "tone (~4000–8000 MHz); 'res_ch' / 'ro_ch' — readout drive / ADC "
+                "channels; 'timeFly' — readout trigger-offset cable delay (~0–1 "
+                "us). Absent 'q_f'/'qf_w' → a fixed ±30 MHz span around 4000 MHz."
+            ),
+            expects_ml=(
+                "Needs a qubit-probe pulse module and a pulse-readout module; "
+                "references a ModuleLibrary waveform named 'ro_waveform' for the "
+                "readout shape when present. Optionally references a calibrated "
+                "reset module (disabled when none exists)."
+            ),
+            typical_writeback=(
+                "Proposes the fitted qubit frequency into MetaDict 'q_f' and the "
+                "fitted linewidth (FWHM) into 'qf_w'. No ModuleLibrary writeback."
+            ),
+            recommended=(
+                "Analysis defaults to the Lorentzian fit ('lor') with plot-fit on; "
+                "switch to 'sinc' for power-broadened or saturated lines. A sweep "
+                "of ~301 points spanning a couple of linewidths around the "
+                "expected qubit frequency captures the peak cleanly; widen the "
+                "span and lower the drive gain if the qubit has drifted or the "
+                "line is washed out."
+            ),
+        )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

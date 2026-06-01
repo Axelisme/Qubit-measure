@@ -20,6 +20,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 )
 from zcu_tools.gui.adapter import (
     AdapterCapabilities,
+    AdapterGuide,
     CfgNodeValue,
     CfgSectionSpec,
     CfgSectionValue,
@@ -39,6 +40,51 @@ class FluxDepAdapter(BaseAdapter[FreqFluxCfg, FluxDepRunResult]):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         requires_soc=True, supports_analysis=False
     )
+
+    @classmethod
+    def guide(cls) -> AdapterGuide:
+        return AdapterGuide(
+            behavior=(
+                "Two-tone qubit flux dependence: a 2D scan stepping an external "
+                "flux device (outer) against the qubit-drive frequency (inner), "
+                "reading out the resonator at each point, to map the qubit "
+                "spectrum versus flux (the Fluxonium flux-dispersion arcs). Runs "
+                "on real hardware and needs a connected flux device. No automated "
+                "fit in the GUI — points are extracted interactively."
+            ),
+            expects_md=(
+                "Reads from the MetaDict (all optional): 'q_f' — qubit frequency, "
+                "centring the inner sweep (~2000–6000 MHz); 'qf_w' — qubit "
+                "linewidth, half-span ±qf_w (~1–50 MHz); 'qub_ch' — qubit-drive "
+                "channel; 'r_f' — resonator frequency for the readout tone "
+                "(~4000–8000 MHz); 'res_ch' / 'ro_ch' — readout drive / ADC "
+                "channels; 'timeFly' — readout trigger offset (~0–1 us); "
+                "'flx_half' / 'flx_int' — calibrated half-flux / integer-flux "
+                "device values that set the flux bounds (device-specific units; "
+                "absent → fixed [-4e-3, 4e-3])."
+            ),
+            expects_ml=(
+                "Needs a qubit-probe pulse module and a pulse-readout module; "
+                "references a ModuleLibrary waveform named 'ro_waveform' when "
+                "present. Optionally references a calibrated reset module. Also "
+                "needs a flux device reference 'flux_dev' (a connected device, "
+                "default 'flux_yoko') — a device, not a library entry."
+            ),
+            typical_writeback=(
+                "No GUI analysis and no automatic writeback. The underlying "
+                "experiment offers interactive tools (used in notebooks) to pick "
+                "the flux arcs and the 'flx_half'/'flx_int' points by hand; those "
+                "are not wired through this adapter."
+            ),
+            recommended=(
+                "No fit options. Default sweep: flux ~101 points across roughly "
+                "one period (bracketed by 'flx_int'/'flx_half' when calibrated), "
+                "frequency ~101 points spanning ±qf_w around 'q_f'. For a first "
+                "survey use a wide flux range and a broad frequency window at "
+                "moderate drive gain to capture the full arc, then narrow both. "
+                "Confirm 'flux_dev' points at a connected device before running."
+            ),
+        )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

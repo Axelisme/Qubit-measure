@@ -22,6 +22,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     md_eval_scaled,
 )
 from zcu_tools.gui.adapter import (
+    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     CfgNodeValue,
@@ -63,6 +64,46 @@ class AmpRabiAdapter(
 ):
     exp_cls = AmpRabiExp
     ExpCfg_cls: ClassVar[Any] = AmpRabiCfg
+
+    @classmethod
+    def guide(cls) -> AdapterGuide:
+        return AdapterGuide(
+            behavior=(
+                "Amplitude Rabi: drives the qubit at its known frequency and "
+                "sweeps the drive-pulse gain, fitting the resulting Rabi "
+                "oscillation to find the pi and pi/2 pulse amplitudes. Runs on "
+                "real hardware. Run once you know the qubit frequency, to "
+                "calibrate a pi pulse by amplitude (the pulse length stays fixed)."
+            ),
+            expects_md=(
+                "Reads from the MetaDict (all optional, seeding defaults): 'q_f' — "
+                "qubit frequency feeding the drive pulse (~2000–6000 MHz); "
+                "'qub_ch' — qubit-drive channel; 'pi_amp' — prior pi-pulse gain, "
+                "the gain sweep spans up to 2*pi_amp (fallback ~0.5). Readout "
+                "defaults pull 'r_f' (~4000–8000 MHz), 'res_ch' / 'ro_ch', and "
+                "'timeFly' for the readout trigger offset (~0–1 us)."
+            ),
+            expects_ml=(
+                "Needs a qubit drive-pulse module (defaults to a blank inline "
+                "pulse) and a readout module — references a calibrated library "
+                "readout ('readout_dpm' / 'readout_rf' / 'readout' / "
+                "'res_readout') when present, else a blank pulse-readout that "
+                "references the 'ro_waveform' waveform when one exists. Optional "
+                "reset references a library reset ('reset_bath' / 'reset_10' / "
+                "'reset_120') when present, else stays disabled."
+            ),
+            typical_writeback=(
+                "Proposes the fitted pi-pulse gain into MetaDict 'pi_amp' and the "
+                "pi/2-pulse gain into 'pi2_amp'. No ModuleLibrary writeback."
+            ),
+            recommended=(
+                "Analysis takes a 'Skip points' count (default 0) to drop leading "
+                "low-gain sweep points before the cosine fit; raise it only if the "
+                "first few points are distorted. A gain sweep spanning roughly two "
+                "pi amplitudes captures at least a full oscillation; widen it if "
+                "no full period is visible."
+            ),
+        )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:

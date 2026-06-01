@@ -17,6 +17,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 )
 from zcu_tools.gui.adapter import (
     AdapterCapabilities,
+    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     CfgSectionSpec,
@@ -60,6 +61,47 @@ class LookbackAdapter(
     )
     exp_cls = LookbackExp
     ExpCfg_cls: ClassVar[Any] = LookbackCfg
+
+    @classmethod
+    def guide(cls) -> AdapterGuide:
+        return AdapterGuide(
+            behavior=(
+                "Readout time-of-flight (lookback) measurement: fires the readout "
+                "pulse and captures the decimated ADC trace versus time, so you "
+                "can see when the readout signal actually arrives at the digitizer. "
+                "Runs on real hardware (reps is locked to 1 — decimated "
+                "acquisition has no multi-rep averaging). Run this first when "
+                "bringing up a new readout chain or after changing cabling, to "
+                "calibrate the trigger offset."
+            ),
+            expects_md=(
+                "Reads from the MetaDict (all optional): 'r_f' — resonator "
+                "frequency, used for both the readout pulse and the ADC "
+                "down-conversion (~4000–8000 MHz); 'res_ch' / 'ro_ch' — readout "
+                "drive / ADC channel indices; 'timeFly' — a previously measured "
+                "cable time-of-flight; when present the trigger offset is taken as "
+                "'timeFly - 0.1' us, otherwise it falls back to ~0.4 us."
+            ),
+            expects_ml=(
+                "Needs a pulse-readout module, and references a ModuleLibrary "
+                "waveform named 'ro_waveform' for the readout pulse shape when one "
+                "exists (optional). Optionally composes 'reset' / 'init_pulse' "
+                "modules ahead of the readout."
+            ),
+            typical_writeback=(
+                "Proposes the detected signal-arrival time back into MetaDict "
+                "'timeFly' (us) — the seed for the trigger offset of every "
+                "subsequent readout-based experiment. No ModuleLibrary writeback."
+            ),
+            recommended=(
+                "Analysis defaults: threshold 'ratio'=0.1 (the offset is the "
+                "latest time before the peak where the magnitude is still below "
+                "10% of maximum), 'smooth' sigma=1.0, plot-fit on. Use a wide "
+                "readout window so the full pulse arrival is captured; raise "
+                "'smooth' if the trace is noisy and the offset jitters, lower "
+                "'ratio' if it triggers too early on baseline ripple."
+            ),
+        )
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:
