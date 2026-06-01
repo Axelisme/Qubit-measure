@@ -2,8 +2,12 @@
   "mcpServers": {
     "measure-gui": {
       "type": "stdio",
-      "command": ".venv/bin/python",
+      "command": "uv",
       "args": [
+        "run",
+        "--extra",
+        "gui",
+        "python",
         "lib/zcu_tools/gui/services/remote/mcp_server.py"
       ],
       "env": {}

@@ -20,6 +20,7 @@ Threading:
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import signal
@@ -43,6 +44,20 @@ from typing import Any, Callable, Deque, Dict, List, Optional
 _LIB_DIR = Path(__file__).resolve().parents[4]
 if str(_LIB_DIR) not in sys.path:
     sys.path.insert(0, str(_LIB_DIR))
+
+# Fast-fail preflight: importing ``zcu_tools.gui`` below eagerly loads Qt. If the
+# 'gui' extra was not installed (e.g. a fresh checkout on another machine), the
+# import chain would otherwise die with a bare ``ModuleNotFoundError`` deep
+# inside the package. Surface an actionable instruction on stderr instead
+# (stdout is the JSON-RPC channel and must stay clean).
+for _gui_dep in ("qtpy", "PyQt6"):
+    if importlib.util.find_spec(_gui_dep) is None:
+        sys.stderr.write(
+            "measure-gui MCP server requires the 'gui' extra (qtpy + PyQt6); "
+            f"'{_gui_dep}' is missing. Rebuild the environment with:\n"
+            "    uv sync --extra gui\n"
+        )
+        raise SystemExit(1)
 
 from zcu_tools.gui.services.remote.method_specs import (  # noqa: E402
     METHOD_SPECS,
