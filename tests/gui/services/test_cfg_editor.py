@@ -275,7 +275,9 @@ def _make_tab_seed():
 
 def test_open_seeded_owns_model_and_is_addressable(service):
     editor_id, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-1")
-    assert editor_id.startswith("editor-")
+    # Owner-keyed sessions derive a readable id from the owner (vs the opaque
+    # 'editor-<hash>' of owner-less ml-entry sessions).
+    assert editor_id == "tab-1-ed"
     assert service.editor_id_for_owner("tab-1") == editor_id
 
     # The widget attaches via get_root; an agent edit mutates the same model.
@@ -295,11 +297,14 @@ def test_teardown_seeded_session_drops_it(service):
 
 def test_reopen_same_owner_tears_down_previous(service):
     id1, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-1")
+    root1 = service.get_root(id1)
     id2, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-1")
-    assert id1 != id2
+    # Owner-keyed id is deterministic, so re-open reuses it — but the previous
+    # session was torn down and replaced (a new draft tree), which is correct:
+    # it is still that owner's editor, now pointing at the fresh draft.
+    assert id2 == id1
     assert service.editor_id_for_owner("tab-1") == id2
-    with pytest.raises(CfgEditorError):
-        service.get(id1)
+    assert service.get_root(id2) is not root1
 
 
 def test_teardown_unknown_is_noop(service):

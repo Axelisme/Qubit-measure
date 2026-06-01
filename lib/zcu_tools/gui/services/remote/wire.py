@@ -63,7 +63,9 @@ WIRE_VERSION = 6
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
-GUI_VERSION = 1
+# v2: tab_id is now '<adapter-slug>-<hash>' and an owner-keyed editor_id is
+#     '<owner>-ed' (readability; ids stay opaque string keys — no wire change).
+GUI_VERSION = 2
 
 # ---------------------------------------------------------------------------
 # Wire envelopes

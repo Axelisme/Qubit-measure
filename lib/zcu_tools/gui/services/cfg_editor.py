@@ -293,7 +293,7 @@ class CfgEditorService:
         owner_key: Optional[str],
     ) -> tuple[str, list[dict[str, object]]]:
         root = SectionLiveField(spec, self._env, value)
-        editor_id = self._new_id()
+        editor_id = self._new_id(owner_key)
         session = CfgEditorSession(
             editor_id=editor_id,
             root=root,
@@ -396,7 +396,13 @@ class CfgEditorService:
     # Internals
     # ------------------------------------------------------------------
 
-    def _new_id(self) -> str:
+    def _new_id(self, owner_key: Optional[str]) -> str:
+        # Owner-keyed sessions (a tab cfg draft / writeback item) read as
+        # '<owner>-ed' so the agent sees which tab/item an editor_id belongs to
+        # without a lookup; the owner_key is already unique. Owner-less sessions
+        # (agent-opened ml-entry edits) keep an opaque short id.
+        if owner_key:
+            return f"{owner_key}-ed"
         return "editor-" + uuid.uuid4().hex[:8]
 
     def _attach_change_stream(self, session: CfgEditorSession) -> None:

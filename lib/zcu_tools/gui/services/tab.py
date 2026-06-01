@@ -13,6 +13,19 @@ if TYPE_CHECKING:
     from zcu_tools.gui.state import State
 from zcu_tools.gui.state import TabState
 
+# Characters allowed verbatim in a tab-id slug; everything else (notably the
+# adapter '/') collapses to '-'. The slug is cosmetic — the 8-hex suffix carries
+# uniqueness — so a human/agent reads 'twotone-freq-1a2b3c4d' instead of a bare
+# UUID while the id stays an opaque string key.
+_SLUG_OK = set("abcdefghijklmnopqrstuvwxyz0123456789")
+
+
+def _slug(name: str) -> str:
+    out = "".join(c if c in _SLUG_OK else "-" for c in name.lower())
+    # Collapse runs of '-' and trim, so 'twotone/rabi/amp_rabi' -> 'twotone-rabi-amp-rabi'.
+    parts = [p for p in out.split("-") if p]
+    return "-".join(parts) or "tab"
+
 
 class TabService:
     """Encapsulates tab lifecycle, and per-tab operations like analyze/writeback/save."""
@@ -27,7 +40,7 @@ class TabService:
 
     def new_tab(self, adapter_name: str) -> str:
         adapter = self._registry.create(adapter_name)
-        tab_id = str(uuid.uuid4())
+        tab_id = f"{_slug(adapter_name)}-{uuid.uuid4().hex[:8]}"
         logger.info("new_tab: adapter=%r tab_id=%r", adapter_name, tab_id)
         self._state.add_tab(
             tab_id,
