@@ -10,7 +10,8 @@ wheels/
 .github
 .coverage
 .cursor
-.claude
+.claude/*
+!.claude/skills/
 .codex
 .agents
 
