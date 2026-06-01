@@ -24,10 +24,10 @@ from zcu_tools.gui.event_bus import (
 )
 from zcu_tools.gui.state import DeviceState, DeviceStatus
 
-from .device_progress import (
-    DeviceSetupProgressFactory,
-    DeviceSetupProgressModel,
+from zcu_tools.gui.pbar_host import (
     ProgressEntrySnapshot,
+    ProgressFactory,
+    ProgressModel,
 )
 from .operation_gate import (
     OperationConflictError,
@@ -111,7 +111,7 @@ class DeviceSnapshot:
 
     Assembled by ``DeviceService._project`` from the State-owned ``DeviceState``
     (name/type/address/status/info/error) plus the live setup ``progress``
-    (owned by ``DeviceSetupProgressModel``, spliced only for the active setup).
+    (owned by ``ProgressModel``, spliced only for the active setup).
     It is never stored — State is the device-state SSOT.
     """
 
@@ -274,7 +274,7 @@ class DeviceService(QObject):
         # Device state lives in State (the SSOT). This service holds only the
         # live driver (in GlobalDeviceManager), the worker threads, the setup
         # progress model and the in-flight operation transient below.
-        self._progress = DeviceSetupProgressModel(parent=self)
+        self._progress = ProgressModel(parent=self)
         self.progress_model = self._progress  # public read-only alias for UI attachment
         self._active_lease: OperationLease | None = None
         self._active_name: str | None = None
@@ -356,7 +356,7 @@ class DeviceService(QObject):
             driver,
             req.name,
             req.info,
-            DeviceSetupProgressFactory(self._progress),
+            ProgressFactory(self._progress),
             parent=self,
         )
         self._setup_worker = worker

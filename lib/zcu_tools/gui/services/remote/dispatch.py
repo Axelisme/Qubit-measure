@@ -1364,23 +1364,24 @@ def _h_run_progress(
     bars = adapter.ctrl.get_run_progress()
     if not bars:
         return {"active": False, "bars": []}
-    # bars are ProgressEntrySnapshot(token, format, maximum, value). `format` is
-    # the human-readable bar string (e.g. "Rounds 23/100 [0:25<1:15]"); maximum
-    # is the Qt-scaled total (0 when unknown), value the current scaled position.
-    # `percent` is the convenience 0-100 derivation (None when total unknown).
+    # bars are live (token, ProgressBarModel) pairs (the SSOT). Derived fields
+    # are computed live at this read: 'format' is the human-readable string
+    # (e.g. "Rounds 23/100 [0:25<1:15]"), 'maximum'/'value' the Qt-scaled
+    # total/position (maximum 0 when unknown), 'percent' the 0-100 convenience
+    # (None when unknown). Also surface raw 'n'/'total' for precise reads.
     return {
         "active": True,
         "bars": [
             {
-                "token": s.token,
-                "format": s.format,
-                "maximum": s.maximum,
-                "value": s.value,
-                "percent": (
-                    None if s.maximum == 0 else round(s.value / s.maximum * 100, 1)
-                ),
+                "token": token,
+                "format": m.format(),
+                "maximum": m.qt_maximum(),
+                "value": m.qt_value(),
+                "percent": m.percent(),
+                "n": m.n,
+                "total": m.total,
             }
-            for s in bars
+            for token, m in bars
         ],
     }
 

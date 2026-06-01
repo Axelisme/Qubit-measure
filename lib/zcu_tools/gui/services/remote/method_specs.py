@@ -163,9 +163,10 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0,
         "Read current run progress bars. Returns active=false, bars=[] when idle. "
         "When active=true, each bar has: token (stable id), format (human-readable "
-        "string e.g. 'Rounds 23/100 [0:25<1:15]'), maximum (total steps; 0 if "
-        "unknown), value (current step), percent (0-100 convenience, null when "
-        "total unknown). Prefer the auto-subscribed 'run_finished' event (via "
+        "string e.g. 'Rounds 23/100 [0:25<1:15]'), maximum (Qt-scaled total; 0 if "
+        "unknown), value (Qt-scaled position), percent (0-100 convenience, null "
+        "when total unknown), and raw n/total (precise counts; total null when "
+        "unknown). Prefer the auto-subscribed 'run_finished' event (via "
         "gui_events_poll) to detect completion rather than polling this.",
     ),
     # Save

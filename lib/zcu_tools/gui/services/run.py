@@ -104,12 +104,14 @@ class RunService(QObject):
         return lease.token
 
     def get_run_progress(self) -> Tuple[Any, ...]:
-        from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
+        from zcu_tools.gui.pbar_host import ProgressFactory
 
         factory = self._active_pbar_factory
-        if not isinstance(factory, QtProgressBarFactory):
+        if not isinstance(factory, ProgressFactory):
             return ()
-        return factory.get_all_snapshots()
+        # Live ProgressBarModel objects (the SSOT); the caller reads their
+        # methods (format/percent/...) at serialization time.
+        return factory.live_models()
 
     def cancel_run(self) -> None:
         logger.info("cancel_run")

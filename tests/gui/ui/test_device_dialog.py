@@ -15,7 +15,7 @@ from zcu_tools.gui.services.device import (
     DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
-from zcu_tools.gui.services.device_progress import ProgressEntrySnapshot
+from zcu_tools.gui.pbar_host import ProgressEntrySnapshot
 from zcu_tools.gui.ui.device_dialog import DeviceDialog, _FakeDevicePanel
 
 

@@ -66,7 +66,10 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 #     (modules.qub_pulse.value.waveform.value.length -> ...qub_pulse.waveform.length;
 #     a stale 'value' path is rejected); editor.set_field result adds
 #     'removed'/'added' (paths a ref switch dropped/created).
-WIRE_VERSION = 8
+# v9: run.progress bars add raw 'n'/'total' (alongside scaled maximum/value) —
+#     progress derivation moved to the main-thread ProgressBarModel (SSOT), so
+#     format/percent/timing are computed live at read.
+WIRE_VERSION = 9
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -76,7 +79,10 @@ WIRE_VERSION = 8
 #     — WIRE_VERSION 7; bumped here too since it's a GUI code change).
 # v4: cfg path grammar drops 'value' wrapper + set_field returns removed/added
 #     (WIRE_VERSION 8).
-GUI_VERSION = 4
+# v5: progress refactor — device_progress.py -> pbar_host.py (beside plot_host),
+#     mutable ProgressBarModel SSOT (worker forwards raw + throttles, main thread
+#     computes format/timing live), run.progress adds raw n/total (WIRE 9).
+GUI_VERSION = 5
 
 # ---------------------------------------------------------------------------
 # Wire envelopes

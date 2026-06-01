@@ -1,4 +1,4 @@
-"""Tests for QtProgressBar / QtProgressBarFactory and FakeFreqAdapter pbar integration."""
+"""Tests for the pbar_host ProgressFactory/ProgressBar + FakeFreqAdapter pbar integration."""
 
 from __future__ import annotations
 
@@ -18,18 +18,27 @@ def _make_stack(qapp):  # noqa: ARG001
     return ProgressStack()
 
 
+def _make_factory(stack):
+    """Build a ProgressFactory wired to a model attached to ``stack`` (the
+    pbar_host SSOT factory; replaces the old QtProgressBarFactory(stack))."""
+    from zcu_tools.gui.pbar_host import ProgressFactory, ProgressModel
+
+    model = ProgressModel()
+    model.attach_stack(stack)
+    return ProgressFactory(model)
+
+
 # ---------------------------------------------------------------------------
-# QtProgressBarFactory — main-thread smoke test
+# ProgressFactory — main-thread smoke test
 # ---------------------------------------------------------------------------
 
 
 def test_factory_push_and_pop_leave_false(qapp):
     """leave=False: close() pops the bar immediately."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-    from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
 
     stack = _make_stack(qapp)
-    factory = QtProgressBarFactory(stack)
+    factory = _make_factory(stack)
 
     pbar = factory(desc="test", total=10, leave=False)
     QApplication.processEvents()
@@ -47,11 +56,10 @@ def test_factory_push_and_pop_leave_false(qapp):
 def test_reset_all_keeps_removed_bar_as_hidden_child(qapp):
     """Clearing a visible bar must not turn it into a top-level window."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-    from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
 
     stack = _make_stack(qapp)
     stack.show()
-    factory = QtProgressBarFactory(stack)
+    factory = _make_factory(stack)
     factory(desc="test", total=10, leave=True)
     QApplication.processEvents()
     bar = stack._active[0]
@@ -68,10 +76,9 @@ def test_reset_all_keeps_removed_bar_as_hidden_child(qapp):
 def test_factory_push_and_pop_leave_true(qapp):
     """leave=True: close() leaves bar visible; reset_all() clears it."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-    from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
 
     stack = _make_stack(qapp)
-    factory = QtProgressBarFactory(stack)
+    factory = _make_factory(stack)
 
     pbar = factory(desc="test", total=10, leave=True)
     QApplication.processEvents()
@@ -88,10 +95,9 @@ def test_factory_push_and_pop_leave_true(qapp):
 def test_factory_two_layers(qapp):
     """Two nested pbars (leave=False): inner pops on close, outer stays until reset."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-    from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
 
     stack = _make_stack(qapp)
-    factory = QtProgressBarFactory(stack)
+    factory = _make_factory(stack)
 
     outer = factory(desc="outer", total=5, leave=True)
     QApplication.processEvents()
@@ -114,10 +120,11 @@ def test_factory_two_layers(qapp):
 def test_total_setter(qapp):
     """Integer totals use raw value as max; float totals use _FLOAT_SCALE for proportional fill."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-    from zcu_tools.progress_bar.backend.qt import _FLOAT_SCALE, QtProgressBarFactory
 
     stack = _make_stack(qapp)
-    factory = QtProgressBarFactory(stack)
+    factory = _make_factory(stack)
+
+    from zcu_tools.gui.pbar_host import _FLOAT_SCALE
 
     # integer total → max == raw value
     pbar = factory(desc="t", total=5, leave=False)
@@ -140,7 +147,7 @@ def test_total_setter(qapp):
 
 
 # ---------------------------------------------------------------------------
-# FakeFreqAdapter pbar integration — use_pbar_factory with QtProgressBarFactory
+# FakeFreqAdapter pbar integration — use_pbar_factory with ProgressFactory
 # ---------------------------------------------------------------------------
 
 
@@ -150,11 +157,10 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
     from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
     from zcu_tools.gui.adapter import ExpContext, RunRequest
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
-    from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
     from zcu_tools.progress_bar.interface import use_pbar_factory
 
     stack = _make_stack(qapp)
-    factory = QtProgressBarFactory(stack)
+    factory = _make_factory(stack)
 
     ctx = ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
     adapter = FakeFreqAdapter(fast_mode=True)
@@ -191,10 +197,9 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
 def test_disabled_pbar_does_not_push_to_stack(qapp):
     """factory(disable=True) must not add any bar to stack._active."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-    from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
 
     stack = _make_stack(qapp)
-    factory = QtProgressBarFactory(stack)
+    factory = _make_factory(stack)
 
     factory(desc="hidden", total=10, leave=False, disable=True)
     QApplication.processEvents()
@@ -203,10 +208,9 @@ def test_disabled_pbar_does_not_push_to_stack(qapp):
 
 def test_disabled_pbar_methods_are_noop_no_exception(qapp):
     """All mutating methods on a disabled pbar must not raise and must not touch the stack."""
-    from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
 
     stack = _make_stack(qapp)
-    factory = QtProgressBarFactory(stack)
+    factory = _make_factory(stack)
 
     pbar = factory(desc="hidden", total=10, leave=False, disable=True)
     pbar.update(3)
@@ -221,10 +225,9 @@ def test_disabled_pbar_methods_are_noop_no_exception(qapp):
 
 def test_disabled_pbar_internal_state_updates(qapp):
     """Mutating methods on a disabled pbar still update internal state (no Qt signals)."""
-    from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
 
     stack = _make_stack(qapp)
-    factory = QtProgressBarFactory(stack)
+    factory = _make_factory(stack)
 
     pbar = factory(desc="hidden", total=10, disable=True)
     pbar.update(3)
@@ -243,10 +246,9 @@ def test_disabled_pbar_internal_state_updates(qapp):
 def test_disabled_pbar_close_does_not_pop_stack(qapp):
     """close() on a disabled pbar (leave=False) must not affect the stack."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-    from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
 
     stack = _make_stack(qapp)
-    factory = QtProgressBarFactory(stack)
+    factory = _make_factory(stack)
 
     pbar = factory(desc="hidden", total=5, leave=False, disable=True)
     pbar.close()
@@ -257,10 +259,9 @@ def test_disabled_pbar_close_does_not_pop_stack(qapp):
 def test_explicit_disable_false_behaves_normally(qapp):
     """Explicitly passing disable=False must behave identically to the default."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-    from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
 
     stack = _make_stack(qapp)
-    factory = QtProgressBarFactory(stack)
+    factory = _make_factory(stack)
 
     pbar = factory(desc="normal", total=5, leave=False, disable=False)
     QApplication.processEvents()
@@ -277,10 +278,9 @@ def test_explicit_disable_false_behaves_normally(qapp):
 def test_disabled_and_enabled_pbars_coexist(qapp):
     """A disabled pbar alongside an enabled one must not interfere with the stack."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-    from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
 
     stack = _make_stack(qapp)
-    factory = QtProgressBarFactory(stack)
+    factory = _make_factory(stack)
 
     enabled = factory(desc="active", total=10, leave=True, disable=False)
     QApplication.processEvents()

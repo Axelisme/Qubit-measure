@@ -165,7 +165,7 @@ class ExpTabWidget(QWidget):
         self.progress_stack = ProgressStack()
         root_layout.addWidget(self.progress_stack, stretch=0)
 
-        from zcu_tools.gui.services.device_progress import ProgressModel
+        from zcu_tools.gui.pbar_host import ProgressModel
 
         self.progress_model = ProgressModel(parent=self)
         self.progress_model.attach_stack(self.progress_stack)
@@ -914,12 +914,12 @@ class MainWindow(QMainWindow):
             self._predictor_label.setStyleSheet("color: green;")
 
     def make_pbar_factory(self, tab_id: str) -> Any:
-        from zcu_tools.progress_bar.backend.qt import QtProgressBarFactory
+        from zcu_tools.gui.pbar_host import ProgressFactory
 
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return None
-        return QtProgressBarFactory(tab_w.progress_model)
+        return ProgressFactory(tab_w.progress_model)
 
     def make_live_container(self, tab_id: str) -> Any:
         tab_w = self._tab_widgets.get(tab_id)

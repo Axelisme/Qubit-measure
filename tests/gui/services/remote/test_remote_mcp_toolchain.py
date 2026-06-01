@@ -9,7 +9,7 @@ from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.event_bus import DeviceSetupChangedPayload, GuiEvent
 from zcu_tools.gui.services.device import DeviceSetupSnapshot, SetupDeviceRequest
-from zcu_tools.gui.services.device_progress import ProgressEntrySnapshot
+from zcu_tools.gui.pbar_host import ProgressEntrySnapshot
 from zcu_tools.gui.services.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.services.remote.mcp_server import TOOLS
 
@@ -76,42 +76,44 @@ def test_run_progress_idle_returns_empty(fx):
         sock.close()
 
 
-def test_run_progress_serializes_scalar_bars(fx):
-    bars = (
-        ProgressEntrySnapshot(token=1, format="Rounds 23/100", maximum=100, value=23),
-        ProgressEntrySnapshot(token=2, format="Reps 5/500", maximum=500, value=5),
+def test_run_progress_serializes_live_bars(fx):
+    # get_run_progress returns live (token, ProgressBarModel) pairs; the wire
+    # layer reads the model's methods (computed at serialization time).
+    import time
+
+    from zcu_tools.gui.pbar_host import ProgressBarModel
+
+    t = time.monotonic()
+    m1 = ProgressBarModel(label="Rounds", total=100, start_time=t)
+    m1.set_n(23)
+    m2 = ProgressBarModel(label="Reps", total=500, start_time=t)
+    m2.set_n(5)
+    fx.ctrl.get_run_progress = MagicMock(  # type: ignore[method-assign]
+        return_value=((1, m1), (2, m2))
     )
-    fx.ctrl.get_run_progress = MagicMock(return_value=bars)  # type: ignore[method-assign]
     sock = open_client(fx.service.port)
     try:
         resp = call(sock, "run.progress")
         assert resp["ok"] is True
-        assert resp["result"] == {
-            "active": True,
-            "bars": [
-                {
-                    "token": 1,
-                    "format": "Rounds 23/100",
-                    "maximum": 100,
-                    "value": 23,
-                    "percent": 23.0,
-                },
-                {
-                    "token": 2,
-                    "format": "Reps 5/500",
-                    "maximum": 500,
-                    "value": 5,
-                    "percent": 1.0,
-                },
-            ],
-        }
+        assert resp["result"]["active"] is True
+        bars = {b["token"]: b for b in resp["result"]["bars"]}
+        assert bars[1]["maximum"] == 100
+        assert bars[1]["value"] == 23
+        assert bars[1]["percent"] == 23.0
+        assert bars[1]["n"] == 23 and bars[1]["total"] == 100
+        assert "Rounds" in bars[1]["format"]
+        assert bars[2]["percent"] == 1.0
     finally:
         sock.close()
 
 
 def test_run_progress_unknown_total_has_null_percent(fx):
-    bars = (ProgressEntrySnapshot(token=1, format="working", maximum=0, value=0),)
-    fx.ctrl.get_run_progress = MagicMock(return_value=bars)  # type: ignore[method-assign]
+    import time
+
+    from zcu_tools.gui.pbar_host import ProgressBarModel
+
+    m = ProgressBarModel(label="working", total=None, start_time=time.monotonic())
+    fx.ctrl.get_run_progress = MagicMock(return_value=((1, m),))  # type: ignore[method-assign]
     sock = open_client(fx.service.port)
     try:
         resp = call(sock, "run.progress")

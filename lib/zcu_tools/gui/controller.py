@@ -47,7 +47,7 @@ from .services.device import (
     DeviceEntry,
     DeviceSetupSnapshot,
 )
-from .services.device_progress import DeviceSetupProgressModel
+from .pbar_host import ProgressModel
 from .services.ports import ContextWrites
 from .services.remote.dialogs import DialogName
 from .state import State
@@ -748,7 +748,7 @@ class Controller:
     def get_active_device_operation(self) -> DeviceSnapshot | None:
         return self._dev_svc.get_active_device_operation()
 
-    def get_device_progress_model(self) -> "DeviceSetupProgressModel":
+    def get_device_progress_model(self) -> "ProgressModel":
         return self._dev_svc.progress_model
 
     def await_operation(self, operation_id: int, timeout: float):
