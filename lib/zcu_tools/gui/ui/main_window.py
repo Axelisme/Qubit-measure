@@ -165,10 +165,12 @@ class ExpTabWidget(QWidget):
         self.progress_stack = ProgressStack()
         root_layout.addWidget(self.progress_stack, stretch=0)
 
-        from zcu_tools.gui.pbar_host import ProgressModel
-
-        self.progress_model = ProgressModel(parent=self)
-        self.progress_model.attach_stack(self.progress_stack)
+        # Subscribe once by our own tab_id (the run operation's owner); the
+        # listener re-reads the live bars on every change and follows the tab
+        # across successive runs. Disposed in teardown.
+        self._progress_unsub = self._ctrl.attach_progress(
+            self.tab_id, self._on_progress_changed
+        )
 
         # splitter holds two panes: left (tab panel) | right (plot)
         splitter = QSplitter(Qt.Horizontal)  # type: ignore[attr-defined]
@@ -566,11 +568,18 @@ class ExpTabWidget(QWidget):
         self._validity_cb = validity_cb
         self._schema_cb = schema_cb
 
+    def _on_progress_changed(self) -> None:
+        # Main-thread callback from ProgressService; re-render the live bars of
+        # this tab's current run (empty when no run is live).
+        models = tuple(m for _, m in self._ctrl.progress_bars(self.tab_id))
+        self.progress_stack.render_models(models)
+
     def unbind_from_controller(self) -> None:
         if hasattr(self, "_validity_cb"):
             self.cfg_form.validity_changed.disconnect(self._validity_cb)
         if hasattr(self, "_schema_cb"):
             self.cfg_form.schema_changed.disconnect(self._schema_cb)
+        self._progress_unsub()
         # Detach the widget first (drop its signal bindings + widget tree), then
         # tell the service to tear down the model it owns (ADR-0010).
         self.cfg_form.detach()
@@ -864,9 +873,9 @@ class MainWindow(QMainWindow):
         for tab_id, tab_w in self._tab_widgets.items():
             if self._ctrl.has_tab(tab_id):
                 self._set_tab_running(tab_w, self._ctrl.get_tab_snapshot(tab_id))
-        if running_tab_id is None:
-            for tab_w in self._tab_widgets.values():
-                tab_w.progress_model.clear()
+        # Progress no longer cleared here — ProgressService.discard_operation on
+        # the run's terminal path drops the container and notifies the tab's
+        # listener, which re-renders to empty.
 
     def refresh_tab_interaction(
         self, tab_id: str, snapshot: Optional["TabViewSnapshot"] = None
@@ -918,14 +927,6 @@ class MainWindow(QMainWindow):
             flux_bias = info["flux_bias"]
             self._predictor_label.setText(f"loaded (flux_bias={flux_bias:.4g})")
             self._predictor_label.setStyleSheet("color: green;")
-
-    def make_pbar_factory(self, tab_id: str) -> Any:
-        from zcu_tools.gui.pbar_host import ProgressFactory
-
-        tab_w = self._tab_widgets.get(tab_id)
-        if tab_w is None:
-            return None
-        return ProgressFactory(tab_w.progress_model)
 
     def make_live_container(self, tab_id: str) -> Any:
         tab_w = self._tab_widgets.get(tab_id)

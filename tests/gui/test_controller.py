@@ -63,7 +63,6 @@ def _make_view() -> MagicMock:
     view = MagicMock()
     view.show_status_message = MagicMock()
     view.show_error_dialog = MagicMock()
-    view.make_pbar_factory = MagicMock(return_value=None)
     view.make_live_container = MagicMock(return_value=None)
 
     # The Controller fans diagnostics out via notify_diagnostic (ADR-0013);

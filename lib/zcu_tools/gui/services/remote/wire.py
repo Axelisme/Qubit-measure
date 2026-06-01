@@ -89,7 +89,11 @@ WIRE_VERSION = 10
 #     mutable ProgressBarModel SSOT (worker forwards raw + throttles, main thread
 #     computes format/timing live), run.progress adds raw n/total (WIRE 9).
 # v6: device setup ↔ run alignment (WIRE 10) — split setup event, device.setup_progress.
-GUI_VERSION = 6
+# v7: progress big refactor — Qt-free ProgressService + ProgressContainer (owns
+#     dict[operation_id, container]) behind a ProgressTransport port whose Qt
+#     marshal (QtProgressTransport) is a driven adapter; run/device no longer
+#     rebuild a ProgressModel; Views attach by owner_id. Wire shape unchanged.
+GUI_VERSION = 7
 
 # ---------------------------------------------------------------------------
 # Wire envelopes

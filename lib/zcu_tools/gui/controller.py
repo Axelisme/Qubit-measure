@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Literal, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Literal, Optional, Protocol
 
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
@@ -47,10 +47,13 @@ from .services.device import (
     DeviceEntry,
     DeviceSetupSnapshot,
 )
-from .pbar_host import ProgressModel
 from .services.ports import ContextWrites
 from .services.remote.dialogs import DialogName
 from .state import State
+
+if TYPE_CHECKING:
+    from .pbar_host import ProgressBarModel
+    from .services.ports import ProgressTransport
 
 
 # A View has two distinct down-channels from the Controller (ADR-0013):
@@ -80,9 +83,9 @@ class DiagnosticSink(Protocol):
 
 class RenderHost(Protocol):
     """The single canvas-bearing View the Controller asks for run/analyze Qt
-    artefacts (progress bar factory, live figure container)."""
+    artefacts (the live figure container). Progress bars no longer come from the
+    View — they are minted by ProgressService, bound to the operation."""
 
-    def make_pbar_factory(self, tab_id: str) -> Optional[object]: ...
     def make_live_container(self, tab_id: str) -> Optional[FigureContainer]: ...
 
 
@@ -116,6 +119,7 @@ class Controller:
         view: Optional[ViewProtocol],
         bus: EventBus,
         role_catalog: Optional["RoleCatalog"] = None,
+        progress_transport: Optional["ProgressTransport"] = None,
     ) -> None:
         self._state = state
         # Views attached as diagnostic sinks (fan-out target). A full Qt View is
@@ -137,6 +141,18 @@ class Controller:
         # in the same bundle: the session only stores the Controller (as its
         # LiveModel env + ModuleLibrary registration surface) and never calls it
         # during construction, so passing the still-initialising self is safe.
+        # The progress transport is the Qt marshal (a driven adapter). Default to
+        # the Qt one so GUI/agent processes (which run a Qt event loop) work
+        # without the entry point wiring it; tests inject a synchronous fake.
+        transport: "ProgressTransport"
+        if progress_transport is not None:
+            transport = progress_transport
+        else:
+            from zcu_tools.gui.adapters.qt_progress_transport import (
+                QtProgressTransport,
+            )
+
+            transport = QtProgressTransport()
         services = build_app_services(
             state=state,
             bus=bus,
@@ -146,9 +162,11 @@ class Controller:
             analyze_runner=AnalyzeRunner(),
             save_runner=SaveDataRunner(),
             cfg_editor_ctrl=self,
+            progress_transport=transport,
         )
         self._services = services
         self._operation_gate = services.operation_gate
+        self._progress_svc = services.progress
         self._guard_svc = services.guard
         self._dev_svc = services.device
         self._conn_svc = services.connection
@@ -368,11 +386,11 @@ class Controller:
         # (finished / failed / cancelled).
         permit = self._guard_svc.acquire_run_permit(tab_id)
         # Headless (no Qt RenderHost, e.g. a pure-agent process): RunService
-        # tolerates None pbar/container.
+        # tolerates a None live container. The progress factory is minted by
+        # RunService from ProgressService (bound to the operation), not the View.
         host = self._render_host
-        pbar_factory = host.make_pbar_factory(tab_id) if host is not None else None
         live_container = host.make_live_container(tab_id) if host is not None else None
-        return self._run_svc.start_run(permit, pbar_factory, live_container)
+        return self._run_svc.start_run(permit, live_container)
 
     def cancel_run(self) -> None:
         self._run_svc.cancel_run()
@@ -751,8 +769,21 @@ class Controller:
     def get_active_device_operation(self) -> DeviceSnapshot | None:
         return self._dev_svc.get_active_device_operation()
 
-    def get_device_progress_model(self) -> "ProgressModel":
-        return self._dev_svc.progress_model
+    def attach_progress(
+        self, owner_id: str, listener: Callable[[], None]
+    ) -> Callable[[], None]:
+        """A View subscribes (by its own tab_id / device_name) to progress
+        changes for that owner; returns a disposer. The listener fires whenever
+        the owner's live operation's bars change (and across operation rotation),
+        and re-reads via ``progress_bars``."""
+        return self._progress_svc.attach_by_owner(owner_id, listener)
+
+    def progress_bars(
+        self, owner_id: str
+    ) -> tuple[tuple[int, "ProgressBarModel"], ...]:
+        """Live (handle_id, ProgressBarModel) pairs for the owner's current
+        operation (empty if none live)."""
+        return self._progress_svc.bars_for_owner(owner_id)
 
     def await_operation(self, operation_id: int, timeout: float):
         """Block until an async operation settles; return its OperationOutcome.

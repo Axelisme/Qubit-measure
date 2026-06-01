@@ -10,6 +10,7 @@ from .context import ContextService
 from .device import DeviceService
 from .guard import GuardService
 from .operation_gate import OperationGate
+from .progress import ProgressService
 from .run import RunService
 from .save import SaveService
 from .session_persistence import SessionPersistenceService
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.registry import Registry
     from zcu_tools.gui.runner import AnalyzeRunner, Runner, SaveDataRunner
     from zcu_tools.gui.services.cfg_editor import CfgEditorHost
+    from zcu_tools.gui.services.ports import ProgressTransport
     from zcu_tools.gui.state import State
 
 
@@ -41,6 +43,7 @@ class AppServices:
     """
 
     operation_gate: OperationGate
+    progress: ProgressService
     guard: GuardService
     device: DeviceService
     connection: ConnectionService
@@ -66,6 +69,7 @@ def build_app_services(
     analyze_runner: "AnalyzeRunner",
     save_runner: "SaveDataRunner",
     cfg_editor_ctrl: "CfgEditorHost",
+    progress_transport: "ProgressTransport",
 ) -> AppServices:
     """Construct and wire every domain service into a frozen bundle.
 
@@ -75,7 +79,8 @@ def build_app_services(
     safe and keeps the bundle complete (no service built outside this function).
     """
     operation_gate = OperationGate()
-    device = DeviceService(bus, state, operation_gate)
+    progress = ProgressService(progress_transport)
+    device = DeviceService(bus, state, operation_gate, progress=progress)
     context = ContextService(state, io_manager, bus)
     tab = TabService(state, registry)
     # cfg_editor owns the per-tab and per-writeback-item cfg models; WritebackService
@@ -92,12 +97,13 @@ def build_app_services(
     writeback = WritebackService(state, bus, cfg_editor, write_port=cfg_editor_ctrl)
     return AppServices(
         operation_gate=operation_gate,
+        progress=progress,
         guard=GuardService(state),
         device=device,
         connection=ConnectionService(state, bus, operation_gate),
         context=context,
         tab=tab,
-        run=RunService(state, runner, bus, operation_gate, writeback),
+        run=RunService(state, runner, bus, operation_gate, writeback, progress),
         analyze=AnalyzeService(state, analyze_runner, bus, writeback),
         save=SaveService(state, save_runner, bus),
         writeback=writeback,

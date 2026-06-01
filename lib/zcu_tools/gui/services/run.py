@@ -24,7 +24,9 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import EventBus
+    from zcu_tools.gui.pbar_host import ProgressBarModel
     from zcu_tools.gui.runner import Runner
+    from zcu_tools.gui.services.progress import ProgressService
     from zcu_tools.gui.services.writeback import WritebackService
     from zcu_tools.gui.state import State
 
@@ -42,6 +44,7 @@ class RunService(QObject):
         bus: "EventBus",
         gate: OperationGate,
         writeback: "WritebackService",
+        progress: "ProgressService",
     ) -> None:
         super().__init__()
         self._state = state
@@ -49,8 +52,8 @@ class RunService(QObject):
         self._bus = bus
         self._gate = gate
         self._writeback = writeback
+        self._progress = progress
         self._active_lease: Optional[OperationLease] = None
-        self._active_pbar_factory: Optional[Any] = None
         # Tabs whose current run was explicitly cancelled, so the terminal
         # handler can report outcome='cancelled' instead of finished/failed.
         self._cancel_requested_tabs: set[str] = set()
@@ -61,7 +64,6 @@ class RunService(QObject):
     def start_run(
         self,
         permit: RunPermit,
-        pbar_factory: Optional[Any] = None,
         live_container: Optional[FigureContainer] = None,
     ) -> int:
         # Static preconditions (context readiness, committed-cfg validity, soc
@@ -72,7 +74,6 @@ class RunService(QObject):
         if self._state.is_tab_busy(tab_id):
             raise RuntimeError(f"Tab {tab_id!r} is busy")
 
-        self._active_pbar_factory = pbar_factory
         logger.info("start_run: tab_id=%r", tab_id)
 
         # Symmetric release: this lease is released exactly-once on the terminal
@@ -81,6 +82,9 @@ class RunService(QObject):
         # except below.
         lease = self._gate.acquire(OperationKind.RUN, owner_id=tab_id)
         self._active_lease = lease
+        # Progress factory is bound to this operation (owner = tab_id) only after
+        # the lease is minted; the worker gets it via the pbar ContextVar.
+        pbar_factory = self._progress.make_factory(lease.token, owner_id=tab_id)
         try:
             self._runner.start_run(
                 tab_id,
@@ -92,7 +96,8 @@ class RunService(QObject):
             )
         except Exception:
             self._active_lease = None
-            # The run never started; settle the handle as failed.
+            # The run never started; settle the handle as failed and drop progress.
+            self._progress.discard_operation(lease.token)
             self._gate.release(lease, OperationOutcome("failed", "run failed to start"))
             raise
         self._state.set_tab_running(tab_id, True)
@@ -103,15 +108,14 @@ class RunService(QObject):
         self._bus.emit(GuiEvent.RUN_STARTED, RunStartedPayload(tab_id=tab_id))
         return lease.token
 
-    def get_run_progress(self) -> Tuple[Any, ...]:
-        from zcu_tools.gui.pbar_host import ProgressFactory
-
-        factory = self._active_pbar_factory
-        if not isinstance(factory, ProgressFactory):
+    def get_run_progress(self) -> Tuple[Tuple[int, "ProgressBarModel"], ...]:
+        # Live (handle_id, ProgressBarModel) pairs for the running tab; the caller
+        # reads their methods (format/percent/...) at serialization time. Owner is
+        # the running tab_id, so progress follows the tab across runs.
+        running = self._state.running_tab_id
+        if running is None:
             return ()
-        # Live ProgressBarModel objects (the SSOT); the caller reads their
-        # methods (format/percent/...) at serialization time.
-        return factory.live_models()
+        return self._progress.bars_for_owner(running)
 
     def cancel_run(self) -> None:
         logger.info("cancel_run")
@@ -122,14 +126,10 @@ class RunService(QObject):
             self._cancel_requested_tabs.add(running)
         self._runner.cancel()
 
-    def _clear_active_factory(self) -> None:
-        self._active_pbar_factory = None
-
     def _on_run_finished(self, tab_id: str, result: Any) -> None:
         logger.info(
             "_on_run_finished: tab_id=%r result_type=%s", tab_id, type(result).__name__
         )
-        self._clear_active_factory()
         # New run invalidates the previous analyze's writeback draft: tear down
         # its per-item editor models before update_tab_result clears the list.
         self._writeback.teardown_tab_items(tab_id)
@@ -155,7 +155,6 @@ class RunService(QObject):
 
     def _on_run_failed(self, tab_id: str, error: Exception) -> None:
         logger.warning("_on_run_failed: tab_id=%r error=%r", tab_id, error)
-        self._clear_active_factory()
         self._state.set_tab_running(tab_id, False)
         was_cancelled = tab_id in self._cancel_requested_tabs
         self._release_lease(
@@ -184,4 +183,7 @@ class RunService(QObject):
         if lease is None:
             raise RuntimeError("Run completed without an active operation lease")
         self._active_lease = None
+        # Destroy the operation's progress container (leave=True bars never emit
+        # CLOSE, so the terminal path must clear them).
+        self._progress.discard_operation(lease.token)
         self._gate.release(lease, outcome)

@@ -72,9 +72,9 @@ class ProgressStack(QWidget):
         self._active.clear()
 
     def render_models(self, models: tuple["ProgressBarModel", ...]) -> None:
-        """Replace visible bars with the service-owned live bar models (driven by
-        the attached ProgressModel's ``changed`` signal). Derived values are read
-        live off each model (the SSOT) — the widget computes nothing itself.
+        """Replace visible bars with the service-owned live bar models (the View
+        calls this from its ProgressService progress listener). Derived values
+        are read live off each model (the SSOT) — the widget computes nothing.
         """
         self.reset_all()
         for model in models[: self.MAX_LAYERS]:

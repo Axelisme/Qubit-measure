@@ -51,7 +51,6 @@ def _make_ctx() -> ExpContext:
 def _make_view() -> MagicMock:
     view = MagicMock()
     view.show_status_message = MagicMock()
-    view.make_pbar_factory = MagicMock(return_value=None)
     view.make_live_container = MagicMock(return_value=None)
     return view
 

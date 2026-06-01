@@ -25,11 +25,6 @@ from zcu_tools.gui.event_bus import (
 )
 from zcu_tools.gui.state import DeviceState, DeviceStatus
 
-from zcu_tools.gui.pbar_host import (
-    ProgressBarModel,
-    ProgressFactory,
-    ProgressModel,
-)
 from .operation_gate import (
     OperationConflictError,
     OperationGate,
@@ -45,9 +40,11 @@ from .ports import DeviceMemoryInfo  # noqa: F401
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import EventBus
+    from zcu_tools.gui.pbar_host import ProgressBarModel
     from zcu_tools.gui.state import State
 
     from .ports import DriverFactoryPort
+    from .progress import ProgressService
 
 logger = logging.getLogger(__name__)
 
@@ -111,8 +108,8 @@ class DeviceSnapshot:
     """Read-time projection of a device for View / remote readers.
 
     Assembled by ``DeviceService._project`` from the State-owned ``DeviceState``
-    (name/type/address/status/info/error) plus the live setup ``progress``
-    (owned by ``ProgressModel``, spliced only for the active setup).
+    (name/type/address/status/info/error). Live setup progress is not spliced
+    here — it is polled separately via ``setup_progress`` (ProgressService).
     It is never stored — State is the device-state SSOT.
     """
 
@@ -266,17 +263,26 @@ class DeviceService(QObject):
         gate: OperationGate | None = None,
         parent: Optional[QObject] = None,
         driver_factory: Optional["DriverFactoryPort"] = None,
+        progress: "ProgressService | None" = None,
     ) -> None:
         super().__init__(parent)
         self._bus = bus
         self._state = state
         self._gate = gate or OperationGate()
         self._driver_factory = driver_factory or _default_driver_factory
+        if progress is None:
+            from zcu_tools.gui.adapters.qt_progress_transport import (
+                QtProgressTransport,
+            )
+
+            from .progress import ProgressService
+
+            progress = ProgressService(QtProgressTransport(parent=self))
+        self._progress: "ProgressService" = progress
         # Device state lives in State (the SSOT). This service holds only the
-        # live driver (in GlobalDeviceManager), the worker threads, the setup
-        # progress model and the in-flight operation transient below.
-        self._progress = ProgressModel(parent=self)
-        self.progress_model = self._progress  # public read-only alias for UI attachment
+        # live driver (in GlobalDeviceManager), the worker threads, and the
+        # in-flight operation transient below. Setup progress lives in the
+        # shared ProgressService, keyed by this operation's token (owner = name).
         self._active_lease: OperationLease | None = None
         self._active_name: str | None = None
         # Rollback buffer for the in-flight transition (worker-bound, not
@@ -357,7 +363,7 @@ class DeviceService(QObject):
             driver,
             req.name,
             req.info,
-            ProgressFactory(self._progress),
+            self._progress.make_factory(token, owner_id=req.name),
             parent=self,
         )
         self._setup_worker = worker
@@ -420,9 +426,11 @@ class DeviceService(QObject):
         )
 
     def setup_progress(self) -> tuple[tuple[int, "ProgressBarModel"], ...]:
-        """Live (token, ProgressBarModel) pairs of the active setup — the
+        """Live (handle_id, ProgressBarModel) pairs of the active setup — the
         device analogue of RunService.get_run_progress (read at query time)."""
-        return self._progress.model_items()
+        if self._active_name is None:
+            return ()
+        return self._progress.bars_for_owner(self._active_name)
 
     def list_device_snapshots(self) -> tuple[DeviceSnapshot, ...]:
         return tuple(self._project(dev) for dev in self._state.list_devices())
@@ -590,6 +598,10 @@ class DeviceService(QObject):
         self._active_prior = None
         self._command_worker = None
         self._setup_worker = None
+        # Destroy this operation's progress container (a no-op for connect/
+        # disconnect, which never minted one; setup's leave=True bars never emit
+        # CLOSE, so the terminal path must clear them).
+        self._progress.discard_operation(lease.token)
         self._gate.release(lease, outcome)
 
     def _start_command_worker(self, worker: _DeviceCommandWorker, name: str) -> None:
@@ -657,7 +669,6 @@ class DeviceService(QObject):
         # release() settles the operation handle (sets the token Event and stores
         # the outcome) — may wake an off-main operation.await waiter.
         self._finish_operation(name, OperationOutcome("finished"))
-        self._clear_progress()
         self._emit_device_changed(name)
         self._bus.emit(
             GuiEvent.DEVICE_SETUP_FINISHED,
@@ -668,7 +679,6 @@ class DeviceService(QObject):
     def _on_setup_failed(self, name: str, error: str) -> None:
         self._restore_prior_device(name, error)
         self._finish_operation(name, OperationOutcome("failed", error))
-        self._clear_progress()
         self._emit_device_changed(name)
         self._bus.emit(
             GuiEvent.DEVICE_SETUP_FINISHED,
@@ -683,7 +693,6 @@ class DeviceService(QObject):
         self._finish_operation(
             name, OperationOutcome("cancelled", f"device {name!r} setup was cancelled")
         )
-        self._clear_progress()
         self._emit_device_changed(name)
         self._bus.emit(
             GuiEvent.DEVICE_SETUP_FINISHED,
@@ -722,9 +731,6 @@ class DeviceService(QObject):
         # State mutator (which bumps device:<name> on the main thread). This is
         # the notification half only — no state write, no version bump here.
         self._bus.emit(GuiEvent.DEVICE_CHANGED, DeviceChangedPayload(name=name))
-
-    def _clear_progress(self) -> None:
-        self._progress.clear()
 
     def _reject_mutating_read(self, name: str) -> None:
         if self._gate.is_device_mutating(name):

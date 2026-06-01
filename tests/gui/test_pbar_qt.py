@@ -18,14 +18,22 @@ def _make_stack(qapp):  # noqa: ARG001
     return ProgressStack()
 
 
-def _make_factory(stack):
-    """Build a ProgressFactory wired to a model attached to ``stack`` (the
-    pbar_host SSOT factory; replaces the old QtProgressBarFactory(stack))."""
-    from zcu_tools.gui.pbar_host import ProgressFactory, ProgressModel
+def _make_factory(stack, *, operation_id: int = 1, owner_id: str = "owner"):
+    """Build a worker progress factory whose live bars render into ``stack``.
 
-    model = ProgressModel()
-    model.attach_stack(stack)
-    return ProgressFactory(model)
+    Wires the real Qt marshal (QtProgressTransport) → ProgressService → an
+    owner-attached listener that re-renders the stack on every change, mirroring
+    how a real View attaches. Returns the worker-side factory.
+    """
+    from zcu_tools.gui.adapters.qt_progress_transport import QtProgressTransport
+    from zcu_tools.gui.services.progress import ProgressService
+
+    svc = ProgressService(QtProgressTransport())
+    svc.attach_by_owner(
+        owner_id,
+        lambda: stack.render_models(tuple(m for _, m in svc.bars_for_owner(owner_id))),
+    )
+    return svc.make_factory(operation_id, owner_id=owner_id)
 
 
 # ---------------------------------------------------------------------------

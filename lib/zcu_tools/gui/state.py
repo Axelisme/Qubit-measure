@@ -62,8 +62,8 @@ class DeviceState:
     projection — it is no longer a transient connect-request attribute.
 
     There is deliberately no ``progress`` field: setup progress is live
-    (``ProgressModel`` in DeviceService) and is spliced in only at the
-    ``DeviceSnapshot`` projection boundary.
+    telemetry owned by ``ProgressService`` (keyed by the operation token) and is
+    polled separately via ``device.setup_progress`` — never spliced into state.
     """
 
     name: str

@@ -1,18 +1,15 @@
-"""Progress-bar host: main-thread bridge for worker-thread progress bars.
+"""Progress-bar host: the worker-side bar and the main-thread bar model.
 
-Sibling of ``plot_host.py`` — both are main-thread hosts that receive
-cross-thread signals from worker QThreads and own a class of GUI resource (here,
-progress bars; there, matplotlib figures). Nothing here is device-specific; it
-backs both run progress and device-setup progress.
+Both classes here are **Qt-free**. The cross-thread marshal lives in a
+``ProgressTransport`` (a port; the Qt implementation is a driven adapter), and
+the container/ownership logic lives in ``services/progress.py``. This file holds
+only the two ends of a single bar:
 
-Roles:
   - ``ProgressBar`` (worker side): a ``BaseProgressBar`` the experiment code
     drives via the ``make_pbar`` factory. It is **pure transport + throttle** —
-    it forwards raw (token, label, total, n) over Qt signals and computes
-    nothing (no format, no timing).
-  - ``ProgressModel`` (main thread): receives those signals on the main thread
-    and owns ``dict[token, ProgressBarModel]``. Optionally drives a
-    ``ProgressStack`` widget via ``attach_stack``.
+    it forwards raw (operation_id, handle_id, label, total, n) as
+    ``ProgressEvent``s and computes nothing (no format, no timing). It never sees
+    a container; the consumer routes by the ids it carries.
   - ``ProgressBarModel`` (main thread, the SSOT): one mutable object per live
     bar holding raw state (label / total / n / start_time). Derived values
     (format string, percent, elapsed/remaining) are **methods computed live on
@@ -22,20 +19,19 @@ Roles:
 
 from __future__ import annotations
 
-import itertools
 import time
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Optional
 
-from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
-
+from zcu_tools.gui.services.ports import (
+    ProgressEvent,
+    ProgressEventKind,
+    ProgressTransport,
+)
 from zcu_tools.progress_bar.base import BaseProgressBar, ProgressTotal, ProgressValue
-
-if TYPE_CHECKING:
-    from zcu_tools.gui.ui.progress_stack import ProgressStack
 
 # Float totals are rendered on an integer Qt bar by scaling to this resolution.
 _FLOAT_SCALE = 10000
-_PUBLISH_INTERVAL = 0.033  # ~30 fps cap for cross-thread Qt signal updates
+_PUBLISH_INTERVAL = 0.033  # ~30 fps cap for cross-thread progress updates
 
 
 def _fmt_seconds(secs: float) -> str:
@@ -48,7 +44,7 @@ class ProgressBarModel:
 
     Holds raw state; format / percent / timing are computed live on each query
     (so elapsed/remaining reflect wall-clock at read time, not a frozen string).
-    ``start_time`` is stamped by the main thread when the bar is first pushed.
+    ``start_time`` is stamped by the main thread when the bar is first created.
     """
 
     def __init__(self, label: str, total: ProgressTotal, start_time: float) -> None:
@@ -108,97 +104,27 @@ class ProgressBarModel:
         return f"{prefix}{time_part}"
 
 
-class ProgressModel(QObject):
-    """Thread-safe Qt bridge: worker threads emit signals; the main thread owns
-    a ``ProgressBarModel`` per token and updates it.
-
-    Optionally connected to a ProgressStack widget via ``attach_stack()`` — when
-    attached, the stack re-renders on every ``changed`` emit.
-    """
-
-    changed: Signal = Signal()
-    # token, label, total  (push = create the bar; main thread stamps start_time)
-    _push_requested: Signal = Signal(int, str, object)
-    # token, label, n      (update = advance an existing bar)
-    _update_requested: Signal = Signal(int, str, object)
-    _pop_requested: Signal = Signal(int)
-
-    def __init__(self, parent: Optional[QObject] = None) -> None:
-        super().__init__(parent)
-        self._entries: dict[int, ProgressBarModel] = {}
-        self._push_requested.connect(self._on_push)
-        self._update_requested.connect(self._on_update)
-        self._pop_requested.connect(self._on_pop)
-        self._stack: Optional[ProgressStack] = None
-
-    def attach_stack(self, stack: ProgressStack) -> None:
-        """Connect this model to a ProgressStack widget (main thread only)."""
-        if self._stack is stack:
-            return
-        if self._stack is not None:
-            self.changed.disconnect(self._render_stack)
-        self._stack = stack
-        self.changed.connect(self._render_stack)
-
-    def detach_stack(self) -> None:
-        """Disconnect the attached ProgressStack (main thread only)."""
-        if self._stack is not None:
-            self.changed.disconnect(self._render_stack)
-            self._stack = None
-
-    def _render_stack(self) -> None:
-        if self._stack is not None:
-            self._stack.render_models(self.models())
-
-    def models(self) -> tuple[ProgressBarModel, ...]:
-        """Live bar models (main-thread read). Readers call their methods."""
-        return tuple(self._entries.values())
-
-    def model_items(self) -> tuple[tuple[int, ProgressBarModel], ...]:
-        """Live (token, model) pairs — for readers that need the token (e.g. the
-        wire projection keys each bar by token)."""
-        return tuple(self._entries.items())
-
-    def clear(self) -> None:
-        if self._entries:
-            self._entries.clear()
-            self.changed.emit()
-
-    def _on_push(self, token: int, label: str, total: ProgressTotal) -> None:
-        # The main thread stamps start_time the moment the bar is created, so
-        # elapsed reflects the bar's real lifetime regardless of update timing.
-        self._entries[token] = ProgressBarModel(label, total, time.monotonic())
-        self.changed.emit()
-
-    def _on_update(self, token: int, label: str, n: ProgressValue) -> None:
-        entry = self._entries.get(token)
-        if entry is None:
-            # Update before push (e.g. a throttled-away initial): create it now.
-            entry = ProgressBarModel(label, None, time.monotonic())
-            self._entries[token] = entry
-        entry.set_label(label)
-        entry.set_n(n)
-        self.changed.emit()
-
-    def _on_pop(self, token: int) -> None:
-        if self._entries.pop(token, None) is not None:
-            self.changed.emit()
-
-
 class ProgressBar(BaseProgressBar):
-    """Worker-side bar: pure raw-forward + throttle, no format/timing here."""
+    """Worker-side bar: pure raw-forward + throttle, no format/timing here.
+
+    Bound to a fixed ``(operation_id, handle_id)`` at construction; every event
+    it emits carries those ids, so the consumer always routes it to the same
+    container/bar.
+    """
 
     def __init__(
         self,
-        model: ProgressModel,
-        token: int,
+        transport: ProgressTransport,
+        operation_id: int,
+        handle_id: int,
         label: str = "",
         total: ProgressTotal = None,
         leave: bool = True,
         disabled: bool = False,
     ) -> None:
-        self._model = model
-        self._token = token
+        self._transport = transport
+        self._operation_id = operation_id
+        self._handle_id = handle_id
         self._label = label
         self._total = total
         self._leave = leave
@@ -206,15 +132,26 @@ class ProgressBar(BaseProgressBar):
         self._n: ProgressValue = 0
         self._last_publish: float = 0.0
         if not disabled:
-            # Push creates the bar (and stamps start_time) on the main thread.
-            self._model._push_requested.emit(self._token, self._label, self._total)
+            self._emit(ProgressEventKind.CREATE)
+
+    def _emit(self, kind: ProgressEventKind) -> None:
+        self._transport.emit(
+            ProgressEvent(
+                operation_id=self._operation_id,
+                handle_id=self._handle_id,
+                kind=kind,
+                label=self._label,
+                total=self._total,
+                n=self._n,
+            )
+        )
 
     def _publish(self, *, force: bool = False) -> None:
         now = time.monotonic()
         if not force and now - self._last_publish < _PUBLISH_INTERVAL:
             return
         self._last_publish = now
-        self._model._update_requested.emit(self._token, self._label, self._n)
+        self._emit(ProgressEventKind.UPDATE)
 
     def set_description(self, description: str) -> None:
         self._label = description
@@ -229,8 +166,8 @@ class ProgressBar(BaseProgressBar):
     def reset(self) -> None:
         self._n = 0
         if not self._disabled:
-            # Re-push so the main thread re-stamps start_time.
-            self._model._push_requested.emit(self._token, self._label, self._total)
+            # Re-create so the main thread re-stamps start_time.
+            self._emit(ProgressEventKind.CREATE)
 
     def refresh(self) -> None:
         if not self._disabled:
@@ -238,7 +175,7 @@ class ProgressBar(BaseProgressBar):
 
     def close(self) -> None:
         if not self._disabled and not self._leave:
-            self._model._pop_requested.emit(self._token)
+            self._emit(ProgressEventKind.CLOSE)
 
     @property
     def total(self) -> ProgressTotal:
@@ -248,8 +185,8 @@ class ProgressBar(BaseProgressBar):
     def total(self, value: ProgressTotal) -> None:
         self._total = value
         if not self._disabled:
-            # total change must re-create the bar entry (push carries total).
-            self._model._push_requested.emit(self._token, self._label, self._total)
+            # total change re-creates the bar entry (CREATE carries total).
+            self._emit(ProgressEventKind.CREATE)
 
     @property
     def n(self) -> ProgressValue:
@@ -258,27 +195,3 @@ class ProgressBar(BaseProgressBar):
     @property
     def desc(self) -> str:
         return self._label
-
-
-class ProgressFactory:
-    def __init__(self, model: ProgressModel) -> None:
-        self._model = model
-        self._tokens = itertools.count()
-
-    def live_models(self) -> tuple[tuple[int, ProgressBarModel], ...]:
-        """Live (token, model) pairs of this factory's model (the SSOT)."""
-        return self._model.model_items()
-
-    def __call__(self, *args: Any, **kwargs: Any) -> ProgressBar:
-        label = kwargs.pop("desc", "") or (args[1] if len(args) > 1 else "")
-        total = kwargs.pop("total", None) or (args[2] if len(args) > 2 else None)
-        leave = kwargs.pop("leave", True)
-        disabled = bool(kwargs.pop("disable", False))
-        return ProgressBar(
-            self._model,
-            next(self._tokens),
-            label=str(label) if label else "",
-            total=total,
-            leave=leave,
-            disabled=disabled,
-        )

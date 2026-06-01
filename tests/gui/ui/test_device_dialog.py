@@ -28,6 +28,7 @@ def _make_ctrl() -> MagicMock:
     ctrl = MagicMock()
     ctrl.get_bus.return_value = EventBus()
     ctrl.get_active_device_setup.return_value = None
+    ctrl.progress_bars.return_value = ()
     ctrl.list_devices.return_value = []
     ctrl.is_memory_device.return_value = False
     ctrl.get_memory_device_address.return_value = None
@@ -204,8 +205,10 @@ def test_device_dialog_restores_background_setup_and_stops_it(qapp):
     assert dialog._apply_btn.text() == "Stop"
     assert dialog._list.isEnabled() is False
     assert dialog._refresh_btn.isEnabled() is False
-    # (Live progress bars are driven by the attached ProgressModel, covered in
-    # test_pbar_host; here we only assert the panel's running state.)
+    # The dialog attached to progress by the active setup's device_name (owner),
+    # so live bars render even though it opened mid-setup.
+    ctrl.attach_progress.assert_called_once()
+    assert ctrl.attach_progress.call_args.args[0] == "fd"
 
     dialog._apply_btn.click()
     ctrl.cancel_device_operation.assert_called_once_with("fd")

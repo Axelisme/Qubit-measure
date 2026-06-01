@@ -53,12 +53,17 @@ def _make_permit(state: State, tab_id: str, adapter: MagicMock) -> RunPermit:
 
 
 def _make_run_service(state: State) -> tuple[RunService, OperationGate, MagicMock]:
+    from zcu_tools.gui.services.progress import ProgressService
+
+    from ._progress_fakes import DirectProgressTransport
+
     runner = MagicMock()
     bus = EventBus()
     bus.emit = MagicMock()  # type: ignore[method-assign]
     gate = OperationGate()
     writeback = MagicMock()  # teardown_tab_items is a no-op in these tests
-    svc = RunService(state, runner, bus, gate, writeback)
+    progress = ProgressService(DirectProgressTransport())
+    svc = RunService(state, runner, bus, gate, writeback, progress)
     return svc, gate, runner
 
 

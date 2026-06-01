@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
@@ -331,10 +331,13 @@ class DeviceDialog(QDialog):
         bus.subscribe(GuiEvent.DEVICE_SETUP_STARTED, self._on_setup_started)
         bus.subscribe(GuiEvent.DEVICE_SETUP_FINISHED, self._on_setup_finished)
         self._bus_subs_active = True
+        # Progress subscription for the currently-active setup's device (managed
+        # in _render_setup as the active setup comes and goes). None when no
+        # setup is active or the dialog has detached.
+        self._progress_unsub: Optional[Callable[[], None]] = None
+        self._progress_owner: Optional[str] = None
         self.finished.connect(self._cleanup_bus_subscriptions)
         self.destroyed.connect(self._cleanup_bus_subscriptions)
-
-        self._ctrl.get_device_progress_model().attach_stack(self._progress)
 
         self._refresh_list()
         self._render_setup(self._ctrl.get_active_device_setup())
@@ -351,7 +354,7 @@ class DeviceDialog(QDialog):
         self._ctrl.get_bus().unsubscribe(
             GuiEvent.DEVICE_CHANGED, self._on_device_changed
         )
-        self._ctrl.get_device_progress_model().detach_stack()
+        self._detach_progress()
         self._bus_subs_active = False
 
     def _refresh_list(self, select_name: Optional[str] = None) -> None:
@@ -543,14 +546,37 @@ class DeviceDialog(QDialog):
                 if item.data(Qt.ItemDataRole.UserRole) == setup.device_name:  # type: ignore[attr-defined]
                     self._list.setCurrentRow(row)
                     break
-            # The attached ProgressModel renders the live bars itself (render_models
-            # on every changed emit); we only toggle panel visibility here.
+            # Subscribe (by device_name = the setup operation's owner) so the
+            # live bars render even if this dialog opened mid-setup; closing the
+            # dialog only detaches — the container lives on in ProgressService.
+            self._attach_progress(setup.device_name)
             self._progress.show()
             self._set_setup_running(True)
             return
+        self._detach_progress()
         self._progress.hide()
         self._set_setup_running(False)
         self._on_selection_changed(self._list.currentRow())
+
+    def _attach_progress(self, device_name: str) -> None:
+        self._detach_progress()
+        self._progress_owner = device_name
+        self._progress_unsub = self._ctrl.attach_progress(
+            device_name, self._on_progress_changed
+        )
+        self._on_progress_changed()  # render whatever is already live
+
+    def _detach_progress(self) -> None:
+        if self._progress_unsub is not None:
+            self._progress_unsub()
+            self._progress_unsub = None
+            self._progress_owner = None
+
+    def _on_progress_changed(self) -> None:
+        if self._progress_owner is None:
+            return
+        models = tuple(m for _, m in self._ctrl.progress_bars(self._progress_owner))
+        self._progress.render_models(models)
 
     def _set_setup_running(self, running: bool) -> None:
         has_selection = self._list.currentItem() is not None
