@@ -38,3 +38,16 @@ def test_tab_save_path_query_is_pure_and_does_not_create_directories(
     assert state.get_effective_save_paths(tab_id) is None
     assert not (tmp_path / "database").exists()
     assert not (tmp_path / "result").exists()
+
+
+def test_save_data_path_joins_database_path_directly_without_appending_date(
+    tmp_path: Path,
+) -> None:
+    """make_default_save_paths trusts ctx.database_path as the dated data folder
+    (derive_project_paths owns the date) — it must NOT re-append YYYY/MM/Data_MMDD.
+    Here the injected database_path has no date, so none appears in data_path."""
+    ctx = _make_context(tmp_path)
+    paths = FakeAdapter().make_default_save_paths(ctx)
+
+    data_dir = str(Path(paths.data_path).parent)
+    assert data_dir == str(tmp_path / "database")  # exactly ctx.database_path

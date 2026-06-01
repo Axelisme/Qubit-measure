@@ -25,15 +25,26 @@ logger = logging.getLogger(__name__)
 
 
 def derive_project_paths(chip_name: str, qub_name: str, root: str) -> tuple[str, str]:
-    """Single source of truth for the default per-qubit result / database roots.
+    """Single source of truth for the default per-qubit result / database paths.
 
-    Returns ``(result_dir, database_path)`` scoped under ``chip_name/qub_name``
-    (mirroring single_qubit.md: ``result/chip/qub`` + ``Database/chip/qub``).
-    Both the setup dialog and the mock-startup helper derive paths through here
-    so the chip/qub segment is joined in exactly ONE place — ``apply_project``
-    must not re-scope. ``root`` is the base dir (e.g. cwd or the repo root)."""
+    Returns ``(result_dir, database_path)`` mirroring single_qubit.md, where
+    ``database_path`` is the *dated* data folder
+    ``Database/chip/qub/YYYY/MM/Data_MMDD`` — the notebook's ``create_datafolder``
+    return value, with the date in the path itself. Save-path builders therefore
+    join filenames directly under ``ctx.database_path`` and must NOT re-append the
+    date (see BaseAdapter.make_default_save_paths). The date is *today's* at the
+    moment this is called, so restore paths (which re-derive) always land in the
+    current day's folder rather than a stale persisted one.
+
+    Both the setup dialog and the mock/RPC startup helpers derive through here so
+    the chip/qub (and date) segments are joined in exactly ONE place —
+    ``apply_project`` must not re-scope. ``root`` is the base dir (e.g. cwd)."""
+    from zcu_tools.utils.datasaver import get_datafolder_path
+
     result_dir = os.path.join(root, "result", chip_name, qub_name)
-    database_path = os.path.join(root, "Database", chip_name, qub_name)
+    database_path = get_datafolder_path(
+        os.path.join(root, "Database"), os.path.join(chip_name, qub_name)
+    )
     return result_dir, database_path
 
 

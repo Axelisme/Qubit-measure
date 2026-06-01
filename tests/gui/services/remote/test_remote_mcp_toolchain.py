@@ -607,7 +607,13 @@ def test_startup_apply_optional_dirs_default_to_scoped_roots(fx):
         assert req.chip_name == "C"
         cwd = os.getcwd()
         assert req.result_dir == os.path.join(cwd, "result", "C", "Q")
-        assert req.database_path == os.path.join(cwd, "Database", "C", "Q")
+        # database_path carries today's dated data folder (derive owns the date).
+        from datetime import datetime
+
+        yy, mm, dd = datetime.today().strftime("%Y-%m-%d").split("-")
+        assert req.database_path == os.path.join(
+            cwd, "Database", "C", "Q", yy, mm, f"Data_{mm}{dd}"
+        )
     finally:
         sock.close()
 

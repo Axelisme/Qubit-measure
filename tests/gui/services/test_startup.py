@@ -70,11 +70,17 @@ def test_apply_project_empty_result_dir_skips_setup_project() -> None:
 
 
 def test_derive_project_paths_scopes_under_chip_qubit() -> None:
+    from datetime import datetime
+
     from zcu_tools.gui.services.startup import derive_project_paths
 
     result_dir, database_path = derive_project_paths("Q5_2D", "Q1", "/root")
     assert result_dir == "/root/result/Q5_2D/Q1"
-    assert database_path == "/root/Database/Q5_2D/Q1"
+    # database_path carries today's dated data folder (the notebook's
+    # create_datafolder return value); the date lives here, not in save-path code.
+    today = datetime.today()
+    yy, mm, dd = today.strftime("%Y-%m-%d").split("-")
+    assert database_path == f"/root/Database/Q5_2D/Q1/{yy}/{mm}/Data_{mm}{dd}"
 
 
 def test_restore_devices_registers_memory_only_entries() -> None:

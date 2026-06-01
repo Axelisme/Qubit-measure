@@ -273,6 +273,8 @@ class SetupDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _prefill_from_persistence(self) -> None:
+        from zcu_tools.gui.services.startup import derive_project_paths
+
         data = self._ctrl.get_persisted_startup()
         if data is None:
             return
@@ -282,11 +284,20 @@ class SetupDialog(QDialog):
             self._qub_edit.setText(data.qub_name)
         if data.res_name:
             self._res_edit.setText(data.res_name)
-        # Overwrite auto-computed paths with persisted ones (if non-empty)
-        if data.result_dir:
-            self._result_dir_edit.setText(data.result_dir)
-        if data.database_path:
-            self._db_path_edit.setText(data.database_path)
+        # Re-derive from chip/qub so the dated database_path lands in *today's*
+        # folder (the persisted one may carry a stale date from a prior session);
+        # fall back to the persisted paths only when chip/qub are absent.
+        if data.chip_name and data.qub_name:
+            result_dir, database_path = derive_project_paths(
+                data.chip_name, data.qub_name, os.getcwd()
+            )
+            self._result_dir_edit.setText(result_dir)
+            self._db_path_edit.setText(database_path)
+        else:
+            if data.result_dir:
+                self._result_dir_edit.setText(data.result_dir)
+            if data.database_path:
+                self._db_path_edit.setText(data.database_path)
         if data.ip:
             self._ip_edit.setText(data.ip)
         if data.port:

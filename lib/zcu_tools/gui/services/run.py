@@ -6,8 +6,6 @@ from typing import TYPE_CHECKING, Any, Optional, Tuple
 
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
-from zcu_tools.gui.runner import NO_RESULT
-
 from zcu_tools.gui.event_bus import (
     GuiEvent,
     RunFinishedPayload,
@@ -15,6 +13,7 @@ from zcu_tools.gui.event_bus import (
     TabInteractionChangedPayload,
 )
 from zcu_tools.gui.plot_host import FigureContainer
+from zcu_tools.gui.runner import NO_RESULT
 from zcu_tools.gui.services.guard import RunPermit
 from zcu_tools.gui.services.operation_gate import (
     OperationGate,

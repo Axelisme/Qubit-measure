@@ -169,8 +169,6 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
 
     def make_default_save_paths(self, ctx: ExpContext) -> SavePaths:
         """Default save path policy shared by most adapters."""
-        from zcu_tools.utils.datasaver import get_datafolder_path
-
         if not ctx.database_path:
             raise RuntimeError("ExpContext.database_path is required for save paths")
         if not ctx.result_dir:
@@ -179,7 +177,10 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
             raise RuntimeError("ExpContext.active_label is required for save paths")
 
         stem = self.make_filename_stem(ctx)
-        data_dir = get_datafolder_path(ctx.database_path)
+        # ctx.database_path is already the dated data folder
+        # (Database/chip/qub/YYYY/MM/Data_MMDD; derive_project_paths owns the date),
+        # so join the filename directly — do NOT re-append the date here.
+        data_dir = ctx.database_path
         image_dir = os.path.join(ctx.result_dir, "exps", ctx.active_label, "image")
         # Data filename carries the flux label (single_qubit.md:
         # '{stem}@{em.label}') so the same experiment at different flux points
