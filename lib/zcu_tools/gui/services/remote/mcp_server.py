@@ -64,7 +64,7 @@ from zcu_tools.gui.services.remote.wire import (  # noqa: E402
 # v4: gui_run_start / gui_connect_start now short-wait degrade like device ops
 #     (a fast run/connect returns its product, slow degrades to a handle); new
 #     gui_run_wait / gui_connect_wait semantic waits.
-MCP_VERSION = 5
+MCP_VERSION = 6
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -517,9 +517,12 @@ def send_gui_rpc(
 
 def tool_gui_connect(arguments: Dict[str, Any]) -> str:
     global _GUI_SOCK, _READER_THREAD
-    port = arguments.get("port")
-    if port is None or not isinstance(port, int):
-        raise ValueError("Missing or invalid 'port' argument (must be integer)")
+    # Default port 8765, symmetric with gui_launch — but opposite expectation:
+    # connect attaches to a GUI that is ALREADY running there (launch starts a
+    # new one on a free port). So a missing GUI is the error case here.
+    port = arguments.get("port", 8765)
+    if not isinstance(port, int):
+        raise ValueError("Invalid 'port' argument (must be integer)")
     token = arguments.get("token")
 
     # Tear down any existing connection / reader before replacing it.
@@ -527,7 +530,15 @@ def tool_gui_connect(arguments: Dict[str, Any]) -> str:
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(5.0)
-    sock.connect(("127.0.0.1", port))
+    try:
+        sock.connect(("127.0.0.1", port))
+    except OSError as exc:
+        sock.close()
+        raise RuntimeError(
+            f"No GUI is listening on 127.0.0.1:{port} ({exc}). gui_connect "
+            f"attaches to an already-running GUI; start one first with "
+            f"gui_launch, or pass the port of a running GUI."
+        ) from exc
     sock.settimeout(1.0)  # short blocking timeout for reader loop responsiveness
     _GUI_SOCK = sock
     _READER_STOP.clear()
@@ -582,6 +593,15 @@ def tool_gui_disconnect(arguments: Dict[str, Any]) -> str:
     return "Disconnected from GUI."
 
 
+def _port_is_open(port: int) -> bool:
+    """True if something is already accepting TCP connections on the port."""
+    try:
+        socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+        return True
+    except OSError:
+        return False
+
+
 def tool_gui_launch(arguments: Dict[str, Any]) -> str:
     global _GUI_PROC
     if _GUI_PROC is not None and _GUI_PROC.poll() is None:
@@ -599,8 +619,22 @@ def tool_gui_launch(arguments: Dict[str, Any]) -> str:
     if not run_gui.exists():
         raise FileNotFoundError(f"run_gui.py not found at {run_gui}")
 
-    # File logging at DEBUG into the OS temp dir (not --no-log) so the launched
-    # GUI's server-side event flow is readable for debugging.
+    # Pre-flight: if the port is ALREADY accepting connections, someone else
+    # (a stale GUI from a previous session that wasn't stopped, or a foreign
+    # process) owns it. Spawning now would crash with 'Address already in use'
+    # and we'd silently connect to the OTHER process instead — reporting a fresh
+    # pid while talking to old code. Fail fast with an actionable message.
+    if _port_is_open(port):
+        raise RuntimeError(
+            f"Port {port} is already in use — a previous GUI is likely still "
+            f"running (its socket is open). This MCP server does not manage it, "
+            f"so launching here would either fail or connect to that stale "
+            f"process (old code, despite a fresh pid). Stop the old GUI first "
+            f"(gui_stop, or kill the run_gui.py holding port {port}), or launch "
+            f"on a different port."
+        )
+
+    # stderr to a file so a startup crash (e.g. bind failure) is reportable.
     cmd = [
         str(python),
         str(run_gui),
@@ -616,22 +650,33 @@ def tool_gui_launch(arguments: Dict[str, Any]) -> str:
         cmd,
         cwd=str(repo_root),
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
         start_new_session=True,
     )
     _write_pid_file(_GUI_PROC.pid)
 
-    # Wait until the port is listening (up to 15 s).
+    # Wait until the port is listening (up to 15 s). Each iteration first checks
+    # the child is still alive: if it died (e.g. the port got taken between the
+    # pre-flight check and bind), report the crash instead of connecting to
+    # whatever now answers on the port.
     deadline = time.monotonic() + 15.0
     ready = False
     while time.monotonic() < deadline:
-        try:
-            s = socket.create_connection(("127.0.0.1", port), timeout=0.5)
-            s.close()
+        rc = _GUI_PROC.poll()
+        if rc is not None:
+            stderr = b""
+            if _GUI_PROC.stderr is not None:
+                stderr = _GUI_PROC.stderr.read() or b""
+            tail = stderr.decode("utf-8", "replace").strip().splitlines()[-5:]
+            _GUI_PROC = None
+            raise RuntimeError(
+                f"GUI process exited during startup (returncode={rc}) before "
+                f"port {port} was ready. Last stderr:\n" + "\n".join(tail)
+            )
+        if _port_is_open(port):
             ready = True
             break
-        except OSError:
-            time.sleep(0.3)
+        time.sleep(0.3)
 
     pid = _GUI_PROC.pid
     if not ready:
@@ -1203,22 +1248,25 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
     "gui_connect": {
         "handler": tool_gui_connect,
         "description": (
-            "Connect the MCP bridge to an already-running GUI's TCP control port. "
-            "Skip this if you used gui_launch with auto_connect=true (default)."
+            "Connect the MCP bridge to an ALREADY-RUNNING GUI's TCP control port "
+            "(default 8765). Errors if no GUI is listening there — use gui_launch "
+            "to start one. Skip this if you used gui_launch with auto_connect=true "
+            "(default)."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "port": {
                     "type": "integer",
-                    "description": "TCP port of the GUI control service",
+                    "description": (
+                        "TCP port of a running GUI control service (default 8765)"
+                    ),
                 },
                 "token": {
                     "type": "string",
                     "description": "Optional authentication token",
                 },
             },
-            "required": ["port"],
         },
     },
     "gui_disconnect": {
@@ -1232,10 +1280,13 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
     "gui_launch": {
         "handler": tool_gui_launch,
         "description": (
-            "Launch the qubit-measure GUI as a subprocess, wait until its TCP "
-            "control port is ready, and optionally connect immediately. "
-            "Use this as the first step to start a session. "
-            "By default auto_connect=true so gui_connect is called automatically."
+            "Launch the qubit-measure GUI as a NEW subprocess on a free TCP "
+            "control port (default 8765), wait until it is ready, and optionally "
+            "connect. Use this as the first step to start a session. Errors if "
+            "the port is already in use (a stale GUI still running) — stop it "
+            "first (gui_stop) or pass a different port; this avoids silently "
+            "attaching to old code. By default auto_connect=true so gui_connect "
+            "is called automatically."
         ),
         "inputSchema": {
             "type": "object",

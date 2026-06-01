@@ -190,9 +190,20 @@ hardware) — the smoke harness uses it.
   measure-gui` **then** `gui_launch` — the MCP server is a separate process and
   caches the old code until reconnected. `wire` mismatch = hard error; `gui
   code` / `mcp code` are reported, you eyeball them to confirm the reload.
-- **Reconnect leaves the old GUI on the port.** Port release has a TIME_WAIT
-  delay; if `gui_launch` reports `Address already in use`, the previous GUI
-  subprocess hasn't exited yet — wait or kill it.
+- **`/mcp reconnect` does NOT stop the running GUI — it keeps its port.** A
+  reconnect drops the bridge's socket but leaves the old `run_gui.py` listening
+  on 8765. So always `gui_stop` (or kill it) before relaunching. `gui_launch`
+  now fails fast if the port is occupied ("Port 8765 is already in use …")
+  rather than silently attaching to the stale process — but if you ignore that
+  error you stay on old code. **The handshake alone won't save you:** a stale
+  process reports whatever version it was built at, so if it happens to match,
+  `gui code vN` looks fine while you're on old behaviour. Confirm a relaunch by
+  an *observable effect of your change*, not just the version banner.
+- **`gui_launch` vs `gui_connect` (both default port 8765, opposite
+  expectations).** launch starts a NEW GUI and needs the port FREE; connect
+  attaches to an EXISTING GUI and needs the port LISTENING (errors "No GUI is
+  listening on 127.0.0.1:8765" otherwise). Use launch to start, connect only to
+  re-attach to one already up.
 - **Analyze and run are separate operations; both make the tab busy.** Saving
   or editing while a tab is running/analyzing returns
   `precondition_failed: ... is busy`. Wait for the operation to settle
@@ -224,10 +235,11 @@ hardware) — the smoke harness uses it.
 
 | Symptom | Fix |
 |---|---|
-| `gui_launch` → `Address already in use` | Old GUI still on the port after a reconnect; wait for TIME_WAIT or kill the stale `run_gui.py`. |
+| `gui_launch` → `Port 8765 is already in use` | A previous GUI is still running on the port; `gui_stop` it (or kill the stale `run_gui.py`), then relaunch — or launch on another port. |
+| `gui_connect` → `No GUI is listening on 127.0.0.1:8765` | Nothing running there; `gui_launch` first (connect only re-attaches to a running GUI). |
 | `precondition_failed: ... is busy` on save/edit | The tab is still running/analyzing; wait for the operation to finish first. |
 | `precondition_failed` on run/save with no busy tab | Missing active file-backed context or no run result yet — `gui_state_check`, then `gui_connect_mock` (or set up a context). |
 | `invalid_params` on `gui_editor_set_field` | Path wrong (often a stray `value` segment); re-check `gui_tab_list_paths`. |
 | `Could not locate a VISA implementation` | Real device driver with no VISA backend; use `FakeDevice` or install `pyvisa-py`. |
 | GUI never renders / launch times out | No X display; set `DISPLAY` or run under `xvfb-run -a`. |
-| Stale GUI behaviour after a code change | `/mcp reconnect measure-gui` then `gui_launch`; confirm `gui code vX` bumped in the banner. |
+| Stale GUI behaviour after a code change | `gui_stop`, `/mcp reconnect measure-gui`, then `gui_launch`; confirm the change via an observable effect (the version banner can match a stale process). |
