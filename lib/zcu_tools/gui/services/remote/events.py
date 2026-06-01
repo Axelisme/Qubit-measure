@@ -29,7 +29,8 @@ from zcu_tools.gui.event_bus import (
     MlChangedPayload,
     Payload,
     PredictorChangedPayload,
-    RunLockChangedPayload,
+    RunFinishedPayload,
+    RunStartedPayload,
     SocChangedPayload,
     TabAddedPayload,
     TabClosedPayload,
@@ -67,18 +68,22 @@ def _ser_tab_interaction_changed(payload: Payload) -> WirePayload:
     return {"tab_id": payload.tab_id, "requery": ["tab.snapshot"]}
 
 
-def _ser_run_lock_changed(payload: Payload) -> WirePayload:
-    assert isinstance(payload, RunLockChangedPayload)
-    out: dict[str, object] = {"running_tab_id": payload.running_tab_id}
-    # Terminal emits carry an outcome (finished/failed/cancelled); the run-start
-    # emit leaves it None. Surface the outcome so a single event stream lets the
-    # agent distinguish success / failure / cancellation.
-    if payload.outcome is not None:
-        out["tab_id"] = payload.tab_id
-        out["outcome"] = payload.outcome
-        if payload.error_message is not None:
-            out["error_message"] = payload.error_message
-        out["requery"] = ["tab.snapshot"]
+def _ser_run_started(payload: Payload) -> WirePayload:
+    assert isinstance(payload, RunStartedPayload)
+    return {"tab_id": payload.tab_id}
+
+
+def _ser_run_finished(payload: Payload) -> WirePayload:
+    assert isinstance(payload, RunFinishedPayload)
+    # outcome ∈ finished/failed/cancelled lets the agent tell success from
+    # failure from cancellation; error_message only on failure.
+    out: dict[str, object] = {
+        "tab_id": payload.tab_id,
+        "outcome": payload.outcome,
+        "requery": ["tab.snapshot"],
+    }
+    if payload.error_message is not None:
+        out["error_message"] = payload.error_message
     return out
 
 
@@ -135,7 +140,8 @@ EVENT_SERIALIZERS: dict[GuiEvent, Serializer] = {
     GuiEvent.TAB_CLOSED: _ser_tab_closed,
     GuiEvent.TAB_CONTENT_CHANGED: _ser_tab_content_changed,
     GuiEvent.TAB_INTERACTION_CHANGED: _ser_tab_interaction_changed,
-    GuiEvent.RUN_LOCK_CHANGED: _ser_run_lock_changed,
+    GuiEvent.RUN_STARTED: _ser_run_started,
+    GuiEvent.RUN_FINISHED: _ser_run_finished,
     GuiEvent.PREDICTOR_CHANGED: _ser_predictor_changed,
     GuiEvent.DEVICE_CHANGED: _ser_device_changed,
     GuiEvent.DEVICE_SETUP_CHANGED: _ser_device_setup_changed,

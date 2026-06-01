@@ -15,7 +15,6 @@ Each test spins up a real TCP socket on an ephemeral loopback port via
 from __future__ import annotations
 
 import base64
-import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -23,13 +22,15 @@ from zcu_tools.gui.event_bus import (
     GuiEvent,
     MdChangedPayload,
     PredictorChangedPayload,
-    RunLockChangedPayload,
+    RunFinishedPayload,
+    RunStartedPayload,
     SocChangedPayload,
     TabAddedPayload,
 )
 from zcu_tools.gui.services.remote.events import (
     _ser_predictor_changed,
-    _ser_run_lock_changed,
+    _ser_run_finished,
+    _ser_run_started,
     _ser_soc_changed,
 )
 
@@ -67,7 +68,7 @@ def test_events_list_includes_all_serialized(fx):
         names = set(resp["result"]["events"])
         # Sanity-check a representative subset; full list is documented in
         # events.py.
-        for ev in ("tab_added", "run_lock_changed", "context_switched"):
+        for ev in ("tab_added", "run_started", "run_finished", "context_switched"):
             assert ev in names
         assert resp["result"]["subscribed"] == []
     finally:
@@ -88,16 +89,14 @@ def test_subscribe_unknown_event_rejected(fx):
         sock.close()
 
 
-def test_subscribe_then_run_lock_change_arrives(fx):
+def test_subscribe_then_run_started_arrives(fx):
     sock = open_client(fx.service.port)
     try:
-        call(sock, "events.subscribe", {"events": ["run_lock_changed"]})
+        call(sock, "events.subscribe", {"events": ["run_started"]})
         # Emit synthetically from the main thread (EventBus.emit is sync).
-        fx.bus.emit(
-            GuiEvent.RUN_LOCK_CHANGED, RunLockChangedPayload(running_tab_id="tab-x")
-        )
-        msg = recv_push(sock, "run_lock_changed")
-        assert msg["payload"]["running_tab_id"] == "tab-x"
+        fx.bus.emit(GuiEvent.RUN_STARTED, RunStartedPayload(tab_id="tab-x"))
+        msg = recv_push(sock, "run_started")
+        assert msg["payload"]["tab_id"] == "tab-x"
     finally:
         sock.close()
 
@@ -195,14 +194,14 @@ def test_stop_unsubscribes_event_bus(qapp):  # noqa: ARG001
     f.start()
     # Confirm at least one subscription is installed.
     subs = f.bus._subs  # type: ignore[attr-defined]
-    assert subs.get(GuiEvent.RUN_LOCK_CHANGED), "service should have subscribed"
+    assert subs.get(GuiEvent.RUN_FINISHED), "service should have subscribed"
     f.stop()
     subs_after = f.bus._subs  # type: ignore[attr-defined]
-    # The RemoteEventService's subscriptions are gone after stop. RUN_LOCK_CHANGED
+    # The RemoteEventService's subscriptions are gone after stop. RUN_FINISHED
     # is remote-event-specific, so it must be empty. (MD_CHANGED is *also* held
     # permanently by CfgEditorService for owned-model refresh — ADR-0010 — so it
     # is not a clean proxy for the remote view's teardown.)
-    assert not subs_after.get(GuiEvent.RUN_LOCK_CHANGED)
+    assert not subs_after.get(GuiEvent.RUN_FINISHED)
 
 
 # ---------------------------------------------------------------------------
@@ -299,27 +298,18 @@ def test_view_screenshot_precondition_failed_for_unknown_tab(fx):
 # ---------------------------------------------------------------------------
 
 
-def test_run_lifecycle_pushes_run_lock_changes(fx):
+def test_run_lifecycle_pushes_run_started_then_finished(fx):
     sock = open_client(fx.service.port)
     try:
-        call(sock, "events.subscribe", {"events": ["run_lock_changed"]})
+        call(sock, "events.subscribe", {"events": ["run_started", "run_finished"]})
         tab_id = call(sock, "tab.new", {"adapter_name": "fake"})["result"]["tab_id"]
         call(sock, "run.start", {"tab_id": tab_id})
-        # Two pushes expected: start (running_tab_id=tab_id, no outcome),
-        # end (running_tab_id=None, outcome='finished').
-        first = recv_push(sock, "run_lock_changed")
-        assert first["payload"]["running_tab_id"] == tab_id
-        assert "outcome" not in first["payload"]
-        deadline = time.monotonic() + 5.0
-        end_msg = None
-        while time.monotonic() < deadline:
-            msg = recv_push(sock, "run_lock_changed", timeout_s=2.0)
-            if msg["payload"]["running_tab_id"] is None:
-                end_msg = msg
-                break
-        assert end_msg is not None, "expected a release push (running_tab_id=null)"
-        assert end_msg["payload"]["outcome"] == "finished"
-        assert end_msg["payload"]["tab_id"] == tab_id
+        # One run_started, then one run_finished with outcome='finished'.
+        started = recv_push(sock, "run_started")
+        assert started["payload"]["tab_id"] == tab_id
+        finished = recv_push(sock, "run_finished", timeout_s=5.0)
+        assert finished["payload"]["tab_id"] == tab_id
+        assert finished["payload"]["outcome"] == "finished"
     finally:
         sock.close()
 
@@ -356,28 +346,17 @@ def test_unauthenticated_subscribe_rejected(qapp):  # noqa: ARG001
 # ---------------------------------------------------------------------------
 
 
-def test_ser_run_lock_changed_start_has_no_outcome():
-    payload = RunLockChangedPayload(
-        running_tab_id="tab1",
-        tab_id=None,
-        outcome=None,
-        error_message=None,
-    )
-    wire = _ser_run_lock_changed(payload)
+def test_ser_run_started():
+    wire = _ser_run_started(RunStartedPayload(tab_id="tab1"))
     assert wire is not None
-    assert wire["running_tab_id"] == "tab1"
+    assert wire["tab_id"] == "tab1"
     assert "outcome" not in wire
-    assert "error_message" not in wire
 
 
-def test_ser_run_lock_changed_finished_includes_outcome():
-    payload = RunLockChangedPayload(
-        running_tab_id=None,
-        tab_id="tab1",
-        outcome="finished",
-        error_message=None,
+def test_ser_run_finished_includes_outcome():
+    wire = _ser_run_finished(
+        RunFinishedPayload(tab_id="tab1", outcome="finished", error_message=None)
     )
-    wire = _ser_run_lock_changed(payload)
     assert wire is not None
     assert wire["outcome"] == "finished"
     assert wire["tab_id"] == "tab1"
@@ -385,27 +364,19 @@ def test_ser_run_lock_changed_finished_includes_outcome():
     assert "requery" in wire
 
 
-def test_ser_run_lock_changed_failed_includes_error_message():
-    payload = RunLockChangedPayload(
-        running_tab_id=None,
-        tab_id="tab1",
-        outcome="failed",
-        error_message="timeout",
+def test_ser_run_finished_failed_includes_error_message():
+    wire = _ser_run_finished(
+        RunFinishedPayload(tab_id="tab1", outcome="failed", error_message="timeout")
     )
-    wire = _ser_run_lock_changed(payload)
     assert wire is not None
     assert wire["outcome"] == "failed"
     assert wire["error_message"] == "timeout"
 
 
-def test_ser_run_lock_changed_cancelled():
-    payload = RunLockChangedPayload(
-        running_tab_id=None,
-        tab_id="tab1",
-        outcome="cancelled",
-        error_message=None,
+def test_ser_run_finished_cancelled():
+    wire = _ser_run_finished(
+        RunFinishedPayload(tab_id="tab1", outcome="cancelled", error_message=None)
     )
-    wire = _ser_run_lock_changed(payload)
     assert wire is not None
     assert wire["outcome"] == "cancelled"
     assert "error_message" not in wire

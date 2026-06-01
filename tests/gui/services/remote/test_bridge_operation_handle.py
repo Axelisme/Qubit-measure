@@ -139,7 +139,7 @@ def test_events_poll_refreshes_last_seen(wired, monkeypatch):
     monkeypatch.setattr(
         mcp_server,
         "_EVENT_QUEUE",
-        mcp_server.deque([{"event": "run_lock_changed", "payload": {}}]),
+        mcp_server.deque([{"event": "run_finished", "payload": {}}]),
         raising=False,
     )
     wired["resources.versions"] = _versions({"tab:t:result": 9})

@@ -59,13 +59,18 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 #     message}) — the Controller fans diagnostics to the adapter (a diagnostic
 #     View) out-of-band of the event subscription set; agents receive it via the
 #     normal events poll without subscribing.
-WIRE_VERSION = 6
+# v7: run_lock_changed split into run_started{tab_id} + run_finished{tab_id,
+#     outcome, error_message} — one event name per real transition instead of a
+#     single event whose meaning depended on which fields were present.
+WIRE_VERSION = 7
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
 # v2: tab_id is now '<adapter-slug>-<hash>' and an owner-keyed editor_id is
 #     '<owner>-ed' (readability; ids stay opaque string keys — no wire change).
-GUI_VERSION = 2
+# v3: run_lock_changed split into run_started / run_finished (also a wire change
+#     — WIRE_VERSION 7; bumped here too since it's a GUI code change).
+GUI_VERSION = 3
 
 # ---------------------------------------------------------------------------
 # Wire envelopes

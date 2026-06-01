@@ -165,8 +165,8 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "When active=true, each bar has: token (stable id), format (human-readable "
         "string e.g. 'Rounds 23/100 [0:25<1:15]'), maximum (total steps; 0 if "
         "unknown), value (current step), percent (0-100 convenience, null when "
-        "total unknown). Prefer subscribing to 'run_lock_changed' via "
-        "gui_events_subscribe to detect completion rather than polling this.",
+        "total unknown). Prefer the auto-subscribed 'run_finished' event (via "
+        "gui_events_poll) to detect completion rather than polling this.",
     ),
     # Save
     "save.data": MethodSpec(

@@ -7,7 +7,8 @@ from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.event_bus import (
     GuiEvent,
-    RunLockChangedPayload,
+    RunFinishedPayload,
+    RunStartedPayload,
     TabInteractionChangedPayload,
 )
 from zcu_tools.gui.plot_host import FigureContainer
@@ -99,10 +100,7 @@ class RunService(QObject):
             GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
-        self._bus.emit(
-            GuiEvent.RUN_LOCK_CHANGED,
-            RunLockChangedPayload(running_tab_id=tab_id, tab_id=tab_id, outcome=None),
-        )
+        self._bus.emit(GuiEvent.RUN_STARTED, RunStartedPayload(tab_id=tab_id))
         return lease.token
 
     def get_run_progress(self) -> Tuple[Any, ...]:
@@ -145,9 +143,8 @@ class RunService(QObject):
         )
         self._cancel_requested_tabs.discard(tab_id)
         self._bus.emit(
-            GuiEvent.RUN_LOCK_CHANGED,
-            RunLockChangedPayload(
-                running_tab_id=None,
+            GuiEvent.RUN_FINISHED,
+            RunFinishedPayload(
                 tab_id=tab_id,
                 outcome="cancelled" if was_cancelled else "finished",
             ),
@@ -171,9 +168,8 @@ class RunService(QObject):
         )
         self._cancel_requested_tabs.discard(tab_id)
         self._bus.emit(
-            GuiEvent.RUN_LOCK_CHANGED,
-            RunLockChangedPayload(
-                running_tab_id=None,
+            GuiEvent.RUN_FINISHED,
+            RunFinishedPayload(
                 tab_id=tab_id,
                 outcome="cancelled" if was_cancelled else "failed",
                 error_message=None if was_cancelled else str(error),

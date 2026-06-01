@@ -20,13 +20,13 @@ def _clear() -> None:
 
 def test_reader_routes_diagnostic_to_its_own_queue():
     _clear()
-    mcp_server._deliver_event({"event": "run_lock_changed", "payload": {}})
+    mcp_server._deliver_event({"event": "run_finished", "payload": {}})
     mcp_server._deliver_event(
         {"event": "diagnostic", "payload": {"severity": "error", "title": "x"}}
     )
     assert len(mcp_server._EVENT_QUEUE) == 1
     assert len(mcp_server._DIAGNOSTIC_QUEUE) == 1
-    assert mcp_server._EVENT_QUEUE[0]["event"] == "run_lock_changed"
+    assert mcp_server._EVENT_QUEUE[0]["event"] == "run_finished"
     assert mcp_server._DIAGNOSTIC_QUEUE[0]["event"] == "diagnostic"
     _clear()
 
@@ -48,7 +48,8 @@ def test_drain_pending_takes_both_and_empties():
 
 def test_default_subscribe_set_is_experiment_lifecycle():
     assert set(mcp_server._DEFAULT_SUBSCRIBE) == {
-        "run_lock_changed",
+        "run_started",
+        "run_finished",
         "device_setup_changed",
         "soc_changed",
     }

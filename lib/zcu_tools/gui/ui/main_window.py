@@ -15,7 +15,8 @@ from zcu_tools.gui.event_bus import (
     GuiEvent,
     MlChangedPayload,
     PredictorChangedPayload,
-    RunLockChangedPayload,
+    RunFinishedPayload,
+    RunStartedPayload,
     SocChangedPayload,
     TabAddedPayload,
     TabClosedPayload,
@@ -658,7 +659,8 @@ class MainWindow(QMainWindow):
         bus.subscribe(
             GuiEvent.TAB_INTERACTION_CHANGED, self._on_bus_tab_interaction_changed
         )
-        bus.subscribe(GuiEvent.RUN_LOCK_CHANGED, self._on_bus_run_lock_changed)
+        bus.subscribe(GuiEvent.RUN_STARTED, self._on_bus_run_started)
+        bus.subscribe(GuiEvent.RUN_FINISHED, self._on_bus_run_finished)
         bus.subscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_context_switched)
         bus.subscribe(GuiEvent.ML_CHANGED, self._on_bus_ml_changed)
         bus.subscribe(GuiEvent.TAB_ADDED, self._on_bus_tab_added)
@@ -676,7 +678,8 @@ class MainWindow(QMainWindow):
         bus.unsubscribe(
             GuiEvent.TAB_INTERACTION_CHANGED, self._on_bus_tab_interaction_changed
         )
-        bus.unsubscribe(GuiEvent.RUN_LOCK_CHANGED, self._on_bus_run_lock_changed)
+        bus.unsubscribe(GuiEvent.RUN_STARTED, self._on_bus_run_started)
+        bus.unsubscribe(GuiEvent.RUN_FINISHED, self._on_bus_run_finished)
         bus.unsubscribe(GuiEvent.CONTEXT_SWITCHED, self._on_bus_context_switched)
         bus.unsubscribe(GuiEvent.ML_CHANGED, self._on_bus_ml_changed)
         bus.unsubscribe(GuiEvent.TAB_ADDED, self._on_bus_tab_added)
@@ -695,8 +698,13 @@ class MainWindow(QMainWindow):
         self.refresh_tab_writeback(payload.tab_id, snapshot)
         self.refresh_tab_interaction(payload.tab_id, snapshot)
 
-    def _on_bus_run_lock_changed(self, payload: RunLockChangedPayload) -> None:
-        self.refresh_run_lock(payload.running_tab_id)
+    def _on_bus_run_started(self, payload: RunStartedPayload) -> None:
+        # Run lock now held by this tab.
+        self.refresh_run_lock(payload.tab_id)
+
+    def _on_bus_run_finished(self, payload: RunFinishedPayload) -> None:
+        # Run lock released.
+        self.refresh_run_lock(None)
 
     def _on_bus_device_setup_changed(self, payload: DeviceSetupChangedPayload) -> None:
         if self._shutdown_waiting_for_device_setup and payload.active_setup is None:

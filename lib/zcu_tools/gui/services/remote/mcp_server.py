@@ -87,12 +87,12 @@ Typical experiment loop:
     gui_save_both to persist.
 
 Detecting completion — prefer events over polling:
-  - gui_events_subscribe(['run_lock_changed','tab_content_changed']) then
-    gui_events_poll (blocks up to timeout_seconds) to receive pushes.
-  - run_lock_changed fires twice per run: at start (running_tab_id set,
-    no outcome) and at end (running_tab_id=null, outcome='finished'|'failed'|
-    'cancelled', plus error_message when failed). Read `outcome` to tell
-    success from failure from cancellation.
+  - run_started{tab_id} and run_finished{tab_id, outcome, error_message} are
+    auto-subscribed on connect; gui_events_poll (blocks up to timeout_seconds)
+    receives pushes. (gui_events_subscribe to add more, e.g.
+    'tab_content_changed'.)
+  - run_finished.outcome ∈ 'finished'|'failed'|'cancelled' (error_message set
+    on failure) tells success from failure from cancellation.
   - tab_content_changed fires when a run/analyze result becomes available.
   - gui_run_progress gives in-flight bar snapshots (token/format/maximum/value/
     percent) but is a fallback; do not busy-poll gui_run_running_tab in a sleep
@@ -151,7 +151,12 @@ _EVENT_COND = threading.Condition()
 # can subscribe to more; these are auto-subscribed right after connect because
 # "what an agent must not miss" is experiment policy, owned by this mcp layer —
 # not a wire mechanism the GUI server should bake in.
-_DEFAULT_SUBSCRIBE = ("run_lock_changed", "device_setup_changed", "soc_changed")
+_DEFAULT_SUBSCRIBE = (
+    "run_started",
+    "run_finished",
+    "device_setup_changed",
+    "soc_changed",
+)
 
 # --- Optimistic-concurrency bookkeeping (policy lives here, mcp side) --------
 #
@@ -1208,7 +1213,7 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
                 "events": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Event names to subscribe to, e.g. ['run_lock_changed', 'tab_content_changed']",
+                    "description": "Event names to subscribe to, e.g. ['run_finished', 'tab_content_changed']",
                 }
             },
             "required": ["events"],

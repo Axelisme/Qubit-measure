@@ -97,16 +97,14 @@ def test_start_run_releases_lease_when_worker_start_raises():
     assert not state.is_tab_running(tab_id)
 
 
-def _last_run_lock_payload(bus_emit: MagicMock):
-    from zcu_tools.gui.event_bus import GuiEvent, RunLockChangedPayload
+def _last_run_finished_payload(bus_emit: MagicMock):
+    from zcu_tools.gui.event_bus import GuiEvent, RunFinishedPayload
 
     for call in reversed(bus_emit.call_args_list):
         event, payload = call.args
-        if event is GuiEvent.RUN_LOCK_CHANGED and isinstance(
-            payload, RunLockChangedPayload
-        ):
+        if event is GuiEvent.RUN_FINISHED and isinstance(payload, RunFinishedPayload):
             return payload
-    raise AssertionError("no RUN_LOCK_CHANGED emitted")
+    raise AssertionError("no RUN_FINISHED emitted")
 
 
 def test_run_finished_emits_outcome_finished():
@@ -116,8 +114,7 @@ def test_run_finished_emits_outcome_finished():
 
     svc._on_run_finished(tab_id, object())
 
-    payload = _last_run_lock_payload(svc._bus.emit)  # type: ignore[attr-defined]
-    assert payload.running_tab_id is None
+    payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.tab_id == tab_id
     assert payload.outcome == "finished"
 
@@ -129,7 +126,7 @@ def test_run_failed_emits_outcome_failed_with_message():
 
     svc._on_run_failed(tab_id, RuntimeError("boom"))
 
-    payload = _last_run_lock_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "failed"
     assert payload.error_message == "boom"
 
@@ -143,7 +140,7 @@ def test_cancelled_run_reports_cancelled_via_finished_path():
     svc.cancel_run()  # records tab via state.running_tab_id
     svc._on_run_finished(tab_id, object())
 
-    payload = _last_run_lock_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "cancelled"
 
 
@@ -156,6 +153,6 @@ def test_cancelled_run_reports_cancelled_via_failed_path():
     svc.cancel_run()
     svc._on_run_failed(tab_id, RuntimeError("interrupted"))
 
-    payload = _last_run_lock_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "cancelled"
     assert payload.error_message is None
