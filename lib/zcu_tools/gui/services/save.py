@@ -9,6 +9,7 @@ from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.adapter import SaveDataRequest
 from zcu_tools.gui.event_bus import GuiEvent, TabInteractionChangedPayload
+from zcu_tools.gui.figure_export import save_figure_to_path
 from zcu_tools.gui.runner import SaveDataRunner
 from zcu_tools.gui.services.guard import SavePermit
 
@@ -79,7 +80,7 @@ class SaveService(QObject):
                 "start_save_both: savefig tab_id=%r image_path=%r", tab_id, image_path
             )
             self._ensure_parent_directory(image_path)
-            tab.figure.savefig(image_path)
+            save_figure_to_path(tab.figure, image_path)
         except Exception as exc:
             image_error = str(exc)
             logger.warning(
@@ -103,7 +104,7 @@ class SaveService(QObject):
             raise RuntimeError("No figure available to save")
         logger.info("save_image_sync: tab_id=%r path=%r", tab_id, image_path)
         self._ensure_parent_directory(image_path)
-        tab.figure.savefig(image_path)
+        save_figure_to_path(tab.figure, image_path)
 
     @staticmethod
     def _ensure_parent_directory(path: str) -> None:

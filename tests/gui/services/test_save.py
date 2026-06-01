@@ -5,9 +5,25 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.event_bus import EventBus
+from zcu_tools.gui.figure_export import SAVE_DPI, SAVE_FIGSIZE
 from zcu_tools.gui.services.guard import SavePermit
 from zcu_tools.gui.services.save import SaveBothOutcome, SaveService
 from zcu_tools.gui.state import State, TabState
+
+
+def _make_figure() -> MagicMock:
+    """Mock figure whose get_size_inches returns a real tuple, so the fixed-size
+    export helper (set/savefig/restore) can run against it."""
+    figure = MagicMock()
+    figure.get_size_inches.return_value = (6.0, 4.0)
+    return figure
+
+
+def _assert_saved_fixed_size(figure: MagicMock, image_path: str) -> None:
+    """save_figure_to_path pins the fixed export size, savefig(path, dpi), restores."""
+    figure.savefig.assert_called_once_with(image_path, dpi=SAVE_DPI)
+    figure.set_size_inches.assert_any_call(*SAVE_FIGSIZE)
+    figure.set_size_inches.assert_called_with(6.0, 4.0)  # restored last
 
 
 def _make_service() -> tuple[SaveService, State, MagicMock]:
@@ -41,14 +57,14 @@ def test_save_image_creates_parent_at_command_boundary(
     tmp_path: Path,  # noqa: ARG001
 ) -> None:
     svc, state, _ = _make_service()
-    figure = MagicMock()
+    figure = _make_figure()
     state.get_tab("tab").figure = figure
     image_path = tmp_path / "images" / "plot.png"
 
     svc.save_image_sync(SavePermit(tab_id="tab"), str(image_path))
 
     assert image_path.parent.is_dir()
-    figure.savefig.assert_called_once_with(str(image_path))
+    _assert_saved_fixed_size(figure, str(image_path))
 
 
 # ---------------------------------------------------------------------------
@@ -61,14 +77,14 @@ def test_start_save_both_saves_image_and_starts_data_runner(
     tmp_path: Path,
 ) -> None:
     svc, state, runner = _make_service()
-    figure = MagicMock()
+    figure = _make_figure()
     state.get_tab("tab").figure = figure
     data_path = tmp_path / "data" / "meas"
     image_path = tmp_path / "img" / "plot.png"
 
     svc.start_save_both(SavePermit(tab_id="tab"), str(data_path), str(image_path))
 
-    figure.savefig.assert_called_once_with(str(image_path))
+    _assert_saved_fixed_size(figure, str(image_path))
     runner.start_save.assert_called_once()
 
 
@@ -77,7 +93,7 @@ def test_start_save_both_captures_image_error_and_continues_data(
     tmp_path: Path,
 ) -> None:
     svc, state, runner = _make_service()
-    figure = MagicMock()
+    figure = _make_figure()
     figure.savefig.side_effect = OSError("disk full")
     state.get_tab("tab").figure = figure
     data_path = tmp_path / "data" / "meas"
@@ -125,7 +141,7 @@ def test_on_save_finished_with_pending_image_emits_save_both_finished(
     tmp_path: Path,
 ) -> None:
     svc, state, runner = _make_service()
-    figure = MagicMock()
+    figure = _make_figure()
     state.get_tab("tab").figure = figure
     data_path = tmp_path / "data" / "meas"
     image_path = tmp_path / "img" / "plot.png"
@@ -146,7 +162,7 @@ def test_on_save_finished_with_pending_image_error_propagates(
     tmp_path: Path,
 ) -> None:
     svc, state, runner = _make_service()
-    figure = MagicMock()
+    figure = _make_figure()
     figure.savefig.side_effect = OSError("disk full")
     state.get_tab("tab").figure = figure
     data_path = tmp_path / "data" / "meas"
@@ -189,7 +205,7 @@ def test_on_save_failed_with_pending_image_emits_save_both_finished(
     tmp_path: Path,
 ) -> None:
     svc, state, runner = _make_service()
-    figure = MagicMock()
+    figure = _make_figure()
     state.get_tab("tab").figure = figure
     data_path = tmp_path / "data" / "meas"
     image_path = tmp_path / "img" / "plot.png"

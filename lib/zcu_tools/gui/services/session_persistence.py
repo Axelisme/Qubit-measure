@@ -17,6 +17,7 @@ from zcu_tools.gui.adapter import (
     CfgSectionValue,
     DeviceRefSpec,
     DirectValue,
+    DisabledRefValue,
     EvalValue,
     LiteralSpec,
     ModuleRefSpec,
@@ -267,6 +268,11 @@ class SessionPersistenceService:
             assert isinstance(value, CfgSectionValue)
             return self._section_value_to_raw(spec, value)
         if isinstance(spec, ModuleRefSpec):
+            # An optional ModuleRef that is disabled carries a DisabledRefValue
+            # marker (ADR-0012), not a ModuleRefValue — persist it as such so the
+            # disabled state survives reload.
+            if isinstance(value, DisabledRefValue):
+                return {"__kind": "disabled"}
             assert isinstance(value, ModuleRefValue)
             return {
                 "__kind": "module_ref",
@@ -278,6 +284,8 @@ class SessionPersistenceService:
                 ),
             }
         if isinstance(spec, WaveformRefSpec):
+            if isinstance(value, DisabledRefValue):
+                return {"__kind": "disabled"}
             assert isinstance(value, WaveformRefValue)
             return {
                 "__kind": "waveform_ref",
@@ -373,7 +381,9 @@ class SessionPersistenceService:
         self,
         spec: ModuleRefSpec,
         raw: object,
-    ) -> ModuleRefValue:
+    ) -> Union[ModuleRefValue, DisabledRefValue]:
+        if isinstance(raw, dict) and raw.get("__kind") == "disabled":
+            return DisabledRefValue()
         if (
             isinstance(raw, dict)
             and raw.get("__kind") == "module_ref"
@@ -394,7 +404,9 @@ class SessionPersistenceService:
         self,
         spec: WaveformRefSpec,
         raw: object,
-    ) -> WaveformRefValue:
+    ) -> Union[WaveformRefValue, DisabledRefValue]:
+        if isinstance(raw, dict) and raw.get("__kind") == "disabled":
+            return DisabledRefValue()
         if (
             isinstance(raw, dict)
             and raw.get("__kind") == "waveform_ref"

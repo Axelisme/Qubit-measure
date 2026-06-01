@@ -1304,8 +1304,15 @@ class MainWindow(QMainWindow):
         return bytes(ba.data())  # type: ignore[arg-type]
 
     def take_figure_screenshot(self, tab_id: str) -> bytes:
-        """Grab only the figure/plot area of a tab and return raw PNG bytes."""
-        from qtpy.QtCore import QBuffer, QIODevice  # type: ignore[attr-defined]
+        """Render a tab's figure to PNG bytes at the fixed export size.
+
+        Renders the live figure via savefig (not ``canvas.grab()``) so the
+        screenshot has the same window-independent geometry as a saved image,
+        rather than tracking the current widget pixel size.
+        """
+        from matplotlib.figure import Figure
+
+        from zcu_tools.gui.figure_export import render_figure_png
 
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
@@ -1313,12 +1320,10 @@ class MainWindow(QMainWindow):
         canvas = tab_w._plot_stack.currentWidget()
         if canvas is None or canvas is tab_w._plot_placeholder:
             raise RuntimeError(f"tab {tab_id!r} has no figure yet")
-        pixmap = canvas.grab()
-        buf = QBuffer()
-        buf.open(QIODevice.OpenModeFlag.WriteOnly)
-        if not pixmap.save(buf, "PNG"):
-            raise RuntimeError("Qt failed to encode the figure pixmap as PNG")
-        return bytes(buf.data().data())  # type: ignore[arg-type]
+        figure = getattr(canvas, "figure", None)
+        if not isinstance(figure, Figure):
+            raise RuntimeError(f"tab {tab_id!r} canvas has no matplotlib figure")
+        return render_figure_png(figure)
 
     def take_dialog_screenshot(self, dialog_name: "DialogName") -> bytes:
         """Grab a currently-open dialog and return raw PNG bytes."""

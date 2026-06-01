@@ -10,7 +10,9 @@ from zcu_tools.gui.adapter import (
     CfgSectionValue,
     DeviceRefSpec,
     DirectValue,
+    DisabledRefValue,
     EvalValue,
+    ModuleRefSpec,
     SavePaths,
     ScalarSpec,
     SweepSpec,
@@ -199,6 +201,61 @@ def test_session_persistence_waveform_ref_roundtrip(tmp_path: Path):
     assert wf.value.fields["width"] == DirectValue(value=50.0)
     # default (not overridden) round-trips as False
     assert wf.is_overridden is False
+
+
+def test_session_persistence_disabled_module_ref_roundtrip(tmp_path: Path):
+    """A disabled optional ModuleRef (DisabledRefValue, ADR-0012) survives the
+    round-trip — previously this asserted ModuleRefValue and crashed on close
+    (e.g. ro_optimize tabs whose optional reset defaults to disabled)."""
+    inner_spec = CfgSectionSpec(
+        fields={"gain": ScalarSpec(label="Gain", type=float)},
+        label="Pulse",
+    )
+    svc = SessionPersistenceService(cache_dir=tmp_path)
+    schema = CfgSchema(
+        spec=CfgSectionSpec(
+            fields={
+                "reset": ModuleRefSpec(
+                    allowed=[inner_spec], label="Reset", optional=True
+                ),
+            }
+        ),
+        value=CfgSectionValue(fields={"reset": DisabledRefValue()}),
+    )
+
+    raw = svc.schema_to_raw(schema, ml=None)
+    assert raw["reset"] == {"__kind": "disabled"}
+    restored = svc.raw_to_schema(
+        CfgSchema(spec=schema.spec, value=CfgSectionValue(fields={})),
+        raw,
+    )
+    assert isinstance(restored.value.fields["reset"], DisabledRefValue)
+
+
+def test_session_persistence_disabled_waveform_ref_roundtrip(tmp_path: Path):
+    inner_spec = CfgSectionSpec(
+        fields={"width": ScalarSpec(label="Width", type=float)},
+        label="Gaussian",
+    )
+    svc = SessionPersistenceService(cache_dir=tmp_path)
+    schema = CfgSchema(
+        spec=CfgSectionSpec(
+            fields={
+                "wf": WaveformRefSpec(
+                    allowed=[inner_spec], label="Waveform", optional=True
+                ),
+            }
+        ),
+        value=CfgSectionValue(fields={"wf": DisabledRefValue()}),
+    )
+
+    raw = svc.schema_to_raw(schema, ml=None)
+    assert raw["wf"] == {"__kind": "disabled"}
+    restored = svc.raw_to_schema(
+        CfgSchema(spec=schema.spec, value=CfgSectionValue(fields={})),
+        raw,
+    )
+    assert isinstance(restored.value.fields["wf"], DisabledRefValue)
 
 
 def test_session_persistence_waveform_ref_preserves_override(tmp_path: Path):

@@ -68,7 +68,12 @@ class ReadoutOptimizer:
             initial_point_generator="lhs",
             base_estimator="ET",
             acq_func="EI",
-            n_jobs=-1,
+            # n_jobs=1, not -1: the ExtraTrees model is small, so spreading each
+            # ask() across all cores is *slower* (~4x: parallelization overhead
+            # dwarfs the work) AND saturates every core, starving the GUI render
+            # thread → the window goes laggy during an auto-optimize run. Single
+            # core is faster per iter and leaves CPU for the UI.
+            n_jobs=1,
             acq_optimizer="auto",
         )
         self.last_param = None
