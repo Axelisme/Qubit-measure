@@ -23,6 +23,7 @@ from zcu_tools.gui.adapter import (
     CfgSectionValue,
     DirectValue,
     ExpContext,
+    LiteralSpec,
     MetaDictWriteback,
     ParamMeta,
     ScalarSpec,
@@ -72,7 +73,11 @@ class LookbackAdapter(
                         "reset": make_reset_module_spec(optional=True),
                     },
                 ),
-                "reps": ScalarSpec(label="Reps", type=int),
+                # reps is locked to 1: decimated acquisition has no multi-rep
+                # averaging, so LookbackExp.run() forces reps=1 anyway. Locking it
+                # here means the GUI never offers a value that gets silently
+                # overridden.
+                "reps": LiteralSpec(value=1, label="Reps"),
                 "rounds": ScalarSpec(label="Rounds", type=int),
                 "relax_delay": ScalarSpec(
                     label="Relax delay (us)", type=float, decimals=3
@@ -98,7 +103,7 @@ class LookbackAdapter(
                         ),
                     }
                 ),
-                "reps": DirectValue(1),
+                # reps omitted: locked to 1 by the LiteralSpec in cfg_spec().
                 "rounds": DirectValue(500),
                 "relax_delay": DirectValue(0.0),
             }
