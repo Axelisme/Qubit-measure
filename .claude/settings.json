@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__measure-gui"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "measure-gui"
+  ]
+}

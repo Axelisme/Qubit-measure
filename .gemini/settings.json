@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "measure-gui": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--extra",
+        "gui",
+        "python",
+        "lib/zcu_tools/gui/services/remote/mcp_server.py"
+      ],
+      "env": {}
+    }
+  }
+}

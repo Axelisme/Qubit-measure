@@ -12,7 +12,7 @@ wheels/
 .cursor
 .claude/*
 !.claude/skills/
-.codex
+!.claude/settings.json
 .agents
 
 Database/
@@ -48,6 +48,8 @@ qiskit-metal/
 *.log
 *.json
 !.mcp.json
+!.claude/settings.json
+!.gemini/settings.json
 *.npz
 
 # Jupytext generated files

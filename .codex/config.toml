@@ -1,0 +1,11 @@
+# Codex project-level config. Mirrors the root .mcp.json (Claude Code) so the
+# measure-gui MCP server is available in Codex too. stdio is inferred from the
+# presence of `command` — no transport/type field is needed. `uv run` is invoked
+# from the project root (the trusted-project cwd), matching .mcp.json which sets
+# no cwd; keep this in sync with .mcp.json when the launch command changes.
+[mcp_servers.measure-gui]
+command = "uv"
+args = ["run", "--extra", "gui", "python", "lib/zcu_tools/gui/services/remote/mcp_server.py"]
+# Auto-approve every measure-gui tool call (no per-call confirmation), the Codex
+# analogue of the "mcp__measure-gui" allow rule in .claude/settings.local.json.
+default_tools_approval_mode = "auto"
