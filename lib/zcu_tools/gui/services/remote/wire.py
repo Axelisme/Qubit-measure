@@ -62,7 +62,11 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 # v7: run_lock_changed split into run_started{tab_id} + run_finished{tab_id,
 #     outcome, error_message} — one event name per real transition instead of a
 #     single event whose meaning depended on which fields were present.
-WIRE_VERSION = 7
+# v8: cfg path grammar drops the ModuleRef 'value' wrapper segment
+#     (modules.qub_pulse.value.waveform.value.length -> ...qub_pulse.waveform.length;
+#     a stale 'value' path is rejected); editor.set_field result adds
+#     'removed'/'added' (paths a ref switch dropped/created).
+WIRE_VERSION = 8
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -70,7 +74,9 @@ WIRE_VERSION = 7
 #     '<owner>-ed' (readability; ids stay opaque string keys — no wire change).
 # v3: run_lock_changed split into run_started / run_finished (also a wire change
 #     — WIRE_VERSION 7; bumped here too since it's a GUI code change).
-GUI_VERSION = 3
+# v4: cfg path grammar drops 'value' wrapper + set_field returns removed/added
+#     (WIRE_VERSION 8).
+GUI_VERSION = 4
 
 # ---------------------------------------------------------------------------
 # Wire envelopes

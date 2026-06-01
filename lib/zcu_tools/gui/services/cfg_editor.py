@@ -151,10 +151,21 @@ class CfgEditorSession:
         return list_settable_paths(self.root)
 
     def set_field(self, path: str, value: object) -> dict[str, object]:
-        """Mutate one field; return the changed sub-tree + draft validity."""
+        """Mutate one field; return the changed sub-tree, the set of paths a ref
+        switch added/removed, and draft validity.
+
+        A ModuleRef key switch rebuilds its sub-tree, so the settable-path set
+        changes. ``removed`` / ``added`` (diffed over the whole draft) tell the
+        agent exactly which paths disappeared and appeared, so it does not have
+        to re-list the whole tab to discover them.
+        """
+        before = {str(e["path"]) for e in list_settable_paths(self.root)}
         resolve_and_set(self.root, path, _decode_value(value))
+        after = {str(e["path"]) for e in list_settable_paths(self.root)}
         return {
             "paths": list_subtree_paths(self.root, path),
+            "removed": sorted(before - after),
+            "added": sorted(after - before),
             "valid": bool(self.root.is_valid()),
         }
 

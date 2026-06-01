@@ -10,9 +10,12 @@ Path grammar (segments split on ``.``):
   - Scalar leaf:        ``section.sub.field``           -> ``ScalarLiveField.set_value(value)``
   - Sweep sub-field:    ``...path.sweep.start|stop|expts|step``
   - ModuleRef key:      ``...path.ref``                  -> ``set_chosen_key(value)``
-  - ModuleRef sub:      ``...path.value.<sub>...``       -> recurse into ``.sub_field``
+  - ModuleRef sub:      ``...path.<sub>...``             -> recurse into ``.sub_field``
   - DeviceRef:          ``...path.device``               -> ``set_chosen_name(value)``
   - Literal:            rejected (immutable)
+
+ModuleRef sub-fields descend directly (no ``value`` wrapper segment); a path
+that still carries a ``value`` segment is rejected with a migration message.
 
 Unknown paths, type mismatches, and immutable targets raise
 ``RemoteError(INVALID_PARAMS, ...)`` with a discriminating message.
@@ -119,7 +122,7 @@ def _set_leaf(field: "LiveField", full_path: str, value: object) -> None:
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
             f"path {full_path!r} targets a module ref; set "
-            f"'{full_path}.ref' (key) or '{full_path}.value.<sub>' instead",
+            f"'{full_path}.ref' (key) or '{full_path}.<sub>' instead",
         )
     if isinstance(field, SweepLiveField):
         raise RemoteError(
@@ -203,24 +206,23 @@ def _set_moduleref(
         ref.set_chosen_key(value)
         return
     if head == "value":
-        sub = ref.sub_field
-        if sub is None:
-            raise RemoteError(
-                ErrorCode.PRECONDITION_FAILED,
-                f"module ref at {full_path!r} has no editable sub-fields for "
-                "the current key",
-            )
-        if not rest:
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS,
-                f"path {full_path!r} must name a sub-field after 'value'",
-            )
-        _set_recursive(sub, rest, full_path, value)
-        return
-    raise RemoteError(
-        ErrorCode.INVALID_PARAMS,
-        f"module ref segment must be 'ref' or 'value', got {head!r} in {full_path!r}",
-    )
+        # The old grammar wrapped ref sub-fields under a 'value' segment; it is
+        # gone (paths now descend straight into the sub-field). Fail fast so a
+        # stale path is obvious rather than silently mis-resolving.
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"path {full_path!r} uses the removed 'value' segment; drop it "
+            f"(e.g. '<ref>.{'.'.join(rest)}' instead of '<ref>.value.{'.'.join(rest)}')",
+        )
+    # Anything other than 'ref' is a sub-field of the currently-bound section.
+    sub = ref.sub_field
+    if sub is None:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            f"module ref at {full_path!r} has no editable sub-fields for "
+            "the current key",
+        )
+    _set_recursive(sub, [head, *rest], full_path, value)
 
 
 # ---------------------------------------------------------------------------
@@ -306,7 +308,7 @@ def _list_field(path: str, field: "LiveField") -> list[dict[str, object]]:
         sub = field.sub_field
         if sub is not None:
             for key, child in sub.fields.items():
-                out.extend(_list_field(f"{path}.value.{key}", child))
+                out.extend(_list_field(f"{path}.{key}", child))
         return out
     if isinstance(field, SectionLiveField):
         out = []
@@ -376,11 +378,12 @@ def _list_spec_field(path: str, node: "CfgNodeSpec") -> list[dict[str, object]]:
                 "choices": [s.label for s in node.allowed],
             }
         ]
+        # Static shape lists *every* allowed option's sub-fields keyed by the
+        # option label (the live chosen one is set without the label — these are
+        # introspection paths, not direct round-trip paths). No 'value' wrapper.
         for section in node.allowed:
             for key, child in section.fields.items():
-                out.extend(
-                    _list_spec_field(f"{path}.value.{section.label}.{key}", child)
-                )
+                out.extend(_list_spec_field(f"{path}.{section.label}.{key}", child))
         return out
     if isinstance(node, CfgSectionSpec):
         out = []
@@ -413,7 +416,7 @@ def _navigate(root: SectionLiveField, segments: list[str]) -> tuple["LiveField",
     ``set_field``. For a ModuleRef, a trailing ``ref`` (the key) resolves back to
     the ref *field itself* (base path without ``.ref``), because switching the
     key rebuilds the whole ref sub-tree — that is what callers want re-listed.
-    A ``value`` segment descends into the bound sub-section.
+    Other segments descend into the bound sub-section directly (no ``value``).
     """
     field: "LiveField" = root
     consumed: list[str] = []
@@ -437,21 +440,17 @@ def _navigate(root: SectionLiveField, segments: list[str]) -> tuple["LiveField",
                 # sub-tree is re-listed at the ref's own base path.
                 i += 1
                 continue
-            if head == "value":
-                sub = field.sub_field
-                if sub is None:
-                    raise RemoteError(
-                        ErrorCode.PRECONDITION_FAILED,
-                        f"module ref at {'.'.join(consumed)!r} has no sub-fields",
-                    )
-                field = sub
-                consumed.append("value")
-                i += 1
-                continue
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS,
-                f"module ref segment must be 'ref' or 'value', got {head!r}",
-            )
+            # Any other segment is a sub-field of the bound section (no 'value'
+            # wrapper). Descend into sub_field but keep the SAME base path, so
+            # re-listed leaves match the wire path the agent uses.
+            sub = field.sub_field
+            if sub is None:
+                raise RemoteError(
+                    ErrorCode.PRECONDITION_FAILED,
+                    f"module ref at {'.'.join(consumed)!r} has no sub-fields",
+                )
+            field = sub
+            continue
         # Sweep / multi-sweep edges are leaves — stop here; the caller lists
         # the sweep node itself.
         break

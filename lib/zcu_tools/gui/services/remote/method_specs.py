@@ -484,12 +484,13 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "editor.set_field": MethodSpec(
         5.0,
         "Set one field in an editing session. 'path' is a dotted path from "
-        "editor.open/get; 'value' is a JSON scalar, or an md-reference expression "
-        'as {"__kind":"eval","expr":"r_f - 0.1"} (resolved against MetaDict '
-        "at commit). Returns {paths, valid}: 'paths' is the sub-tree rooted at the "
-        "changed path (a ModuleRef key switch via '<path>.ref' rebuilds and returns "
-        "the newly-available sub-fields); 'valid' is whether the whole draft is "
-        "currently valid.",
+        "editor.open/get (ModuleRef sub-fields descend directly, no 'value' "
+        "segment); 'value' is a JSON scalar, or an md-reference expression as "
+        '{"__kind":"eval","expr":"r_f - 0.1"} (resolved against MetaDict at '
+        "commit). Returns {paths, removed, added, valid}: 'paths' is the sub-tree "
+        "rooted at the changed path; 'removed'/'added' list settable paths that a "
+        "ModuleRef key switch ('<path>.ref') dropped/created, so you need not "
+        "re-list the tab; 'valid' is whether the whole draft is currently valid.",
         (
             _str("editor_id"),
             _str("path", "Dotted field path"),

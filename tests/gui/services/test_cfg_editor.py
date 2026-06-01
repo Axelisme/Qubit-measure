@@ -203,20 +203,24 @@ def test_eval_value_requires_string_expr(service):
 # ---------------------------------------------------------------------------
 
 
-def test_ref_switch_returns_new_subtree(service):
+def test_ref_switch_returns_new_subtree_and_diff(service):
     # A pulse module references a waveform; switching the waveform style
     # rebuilds which sub-fields exist (Const has length only; Gauss adds sigma).
+    # ModuleRef sub-fields descend directly — no 'value' wrapper segment.
     editor_id, paths = service.open("module", discriminator="pulse")
     keys = _paths(paths)
     assert "waveform.ref" in keys
-    assert "waveform.value.sigma" not in keys  # const has no sigma
+    assert "waveform.sigma" not in keys  # const has no sigma
 
-    # Switch the waveform ref key; set_field returns the rebuilt sub-tree.
+    # Switch the waveform ref key; set_field returns the rebuilt sub-tree plus a
+    # removed/added diff of settable paths.
     res = service.set_field(editor_id, "waveform.ref", "<Custom:Gauss>")
     sub_keys = _paths(res["paths"])
-    # The returned sub-tree is rooted at the changed path and now exposes the
-    # gauss-only field that did not exist before the switch.
-    assert "waveform.value.sigma" in sub_keys
+    # The returned sub-tree now exposes the gauss-only field (no 'value' wrapper).
+    assert "waveform.sigma" in sub_keys
+    # The diff names the appeared path explicitly so the agent need not re-list.
+    assert "waveform.sigma" in res["added"]
+    assert "waveform.sigma" not in res["removed"]
 
 
 # ---------------------------------------------------------------------------
