@@ -69,7 +69,13 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 # v9: run.progress bars add raw 'n'/'total' (alongside scaled maximum/value) —
 #     progress derivation moved to the main-thread ProgressBarModel (SSOT), so
 #     format/percent/timing are computed live at read.
-WIRE_VERSION = 9
+# v10: device setup ↔ run alignment. device_setup_changed split into
+#      device_setup_started{name} + device_setup_finished{name, outcome,
+#      error_message} (mirrors run_started/run_finished); new device.setup_progress
+#      (same shape as run.progress); device.active_setup now only {device_name}
+#      and device.active_operation drops progress (live progress via
+#      device.setup_progress).
+WIRE_VERSION = 10
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -82,7 +88,8 @@ WIRE_VERSION = 9
 # v5: progress refactor — device_progress.py -> pbar_host.py (beside plot_host),
 #     mutable ProgressBarModel SSOT (worker forwards raw + throttles, main thread
 #     computes format/timing live), run.progress adds raw n/total (WIRE 9).
-GUI_VERSION = 5
+# v6: device setup ↔ run alignment (WIRE 10) — split setup event, device.setup_progress.
+GUI_VERSION = 6
 
 # ---------------------------------------------------------------------------
 # Wire envelopes

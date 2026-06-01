@@ -410,9 +410,7 @@ def test_main_window_cancel_setup_before_closing(qapp, monkeypatch):
 
     ctrl = MagicMock()
     ctrl.get_bus.return_value = EventBus()
-    ctrl.get_active_device_setup.return_value = DeviceSetupSnapshot(
-        device_name="flux", progress=()
-    )
+    ctrl.get_active_device_setup.return_value = DeviceSetupSnapshot(device_name="flux")
     monkeypatch.setattr(
         QMessageBox,
         "question",

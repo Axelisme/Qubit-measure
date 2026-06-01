@@ -50,7 +50,8 @@ def test_default_subscribe_set_is_experiment_lifecycle():
     assert set(mcp_server._DEFAULT_SUBSCRIBE) == {
         "run_started",
         "run_finished",
-        "device_setup_changed",
+        "device_setup_started",
+        "device_setup_finished",
         "soc_changed",
     }
 

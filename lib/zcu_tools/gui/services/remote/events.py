@@ -23,7 +23,8 @@ from typing import Callable, Mapping, Optional
 from zcu_tools.gui.event_bus import (
     ContextSwitchedPayload,
     DeviceChangedPayload,
-    DeviceSetupChangedPayload,
+    DeviceSetupFinishedPayload,
+    DeviceSetupStartedPayload,
     GuiEvent,
     MdChangedPayload,
     MlChangedPayload,
@@ -99,11 +100,18 @@ def _ser_device_changed(payload: Payload) -> WirePayload:
     return {"name": payload.name, "requery": ["device.list"]}
 
 
-def _ser_device_setup_changed(payload: Payload) -> WirePayload:
-    assert isinstance(payload, DeviceSetupChangedPayload)
-    # DeviceSetupSnapshot holds live Qt-thread state; never push.
-    del payload
-    return {"requery": ["device.active_setup"]}
+def _ser_device_setup_started(payload: Payload) -> WirePayload:
+    assert isinstance(payload, DeviceSetupStartedPayload)
+    # Live progress is polled via device.setup_progress, not pushed.
+    return {"name": payload.name}
+
+
+def _ser_device_setup_finished(payload: Payload) -> WirePayload:
+    assert isinstance(payload, DeviceSetupFinishedPayload)
+    out: dict[str, object] = {"name": payload.name, "outcome": payload.outcome}
+    if payload.error_message is not None:
+        out["error_message"] = payload.error_message
+    return out
 
 
 def _ser_context_switched(payload: Payload) -> WirePayload:
@@ -144,7 +152,8 @@ EVENT_SERIALIZERS: dict[GuiEvent, Serializer] = {
     GuiEvent.RUN_FINISHED: _ser_run_finished,
     GuiEvent.PREDICTOR_CHANGED: _ser_predictor_changed,
     GuiEvent.DEVICE_CHANGED: _ser_device_changed,
-    GuiEvent.DEVICE_SETUP_CHANGED: _ser_device_setup_changed,
+    GuiEvent.DEVICE_SETUP_STARTED: _ser_device_setup_started,
+    GuiEvent.DEVICE_SETUP_FINISHED: _ser_device_setup_finished,
     GuiEvent.CONTEXT_SWITCHED: _ser_context_switched,
     GuiEvent.MD_CHANGED: _ser_md_changed,
     GuiEvent.ML_CHANGED: _ser_ml_changed,

@@ -7,9 +7,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
-from zcu_tools.gui.event_bus import DeviceSetupChangedPayload, GuiEvent
+from zcu_tools.gui.event_bus import (
+    DeviceSetupFinishedPayload,
+    DeviceSetupStartedPayload,
+    GuiEvent,
+)
 from zcu_tools.gui.services.device import DeviceSetupSnapshot, SetupDeviceRequest
-from zcu_tools.gui.pbar_host import ProgressEntrySnapshot
 from zcu_tools.gui.services.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.services.remote.mcp_server import TOOLS
 
@@ -30,37 +33,78 @@ def test_event_requery_hints_point_to_registered_methods():
     assert "context.get_ml" in METHOD_REGISTRY
 
 
-def test_device_setup_changed_push_requeries_active_setup(fx):
+def test_device_setup_started_and_finished_push(fx):
     sock = open_client(fx.service.port)
     try:
-        call(sock, "events.subscribe", {"events": ["device_setup_changed"]})
-        fx.bus.emit(
-            GuiEvent.DEVICE_SETUP_CHANGED,
-            DeviceSetupChangedPayload(active_setup=None),
+        call(
+            sock,
+            "events.subscribe",
+            {"events": ["device_setup_started", "device_setup_finished"]},
         )
-        msg = recv_push(sock, "device_setup_changed")
-        assert msg["payload"] == {"requery": ["device.active_setup"]}
+        fx.bus.emit(
+            GuiEvent.DEVICE_SETUP_STARTED, DeviceSetupStartedPayload(name="bias")
+        )
+        started = recv_push(sock, "device_setup_started")
+        assert started["payload"] == {"name": "bias"}
+
+        fx.bus.emit(
+            GuiEvent.DEVICE_SETUP_FINISHED,
+            DeviceSetupFinishedPayload(name="bias", outcome="finished"),
+        )
+        finished = recv_push(sock, "device_setup_finished")
+        assert finished["payload"]["name"] == "bias"
+        assert finished["payload"]["outcome"] == "finished"
     finally:
         sock.close()
 
 
-def test_device_active_setup_serializes_scalar_progress(fx):
-    progress = (
-        ProgressEntrySnapshot(token=1, format="Ramp %v/%m", maximum=10, value=3),
-    )
+def test_device_active_setup_names_the_device(fx):
+    # active_setup now only names which device is setting up; live progress is
+    # via device.setup_progress (ADR-0013 device↔run alignment).
     fx.ctrl.get_active_device_setup = MagicMock(  # type: ignore[method-assign]
-        return_value=DeviceSetupSnapshot(device_name="bias", progress=progress)
+        return_value=DeviceSetupSnapshot(device_name="bias")
     )
     sock = open_client(fx.service.port)
     try:
         resp = call(sock, "device.active_setup")
         assert resp["ok"] is True
-        assert resp["result"]["active_setup"] == {
-            "device_name": "bias",
-            "progress": [
-                {"token": 1, "format": "Ramp %v/%m", "maximum": 10, "value": 3}
-            ],
-        }
+        assert resp["result"]["active_setup"] == {"device_name": "bias"}
+    finally:
+        sock.close()
+
+
+def test_device_setup_progress_serializes_live_bars(fx):
+    # Same shape as run.progress: live (token, ProgressBarModel) pairs.
+    import time
+
+    from zcu_tools.gui.pbar_host import ProgressBarModel
+
+    m = ProgressBarModel(label="Ramp", total=10, start_time=time.monotonic())
+    m.set_n(3)
+    fx.ctrl.get_device_setup_progress = MagicMock(  # type: ignore[method-assign]
+        return_value=((1, m),)
+    )
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "device.setup_progress")
+        assert resp["ok"] is True
+        assert resp["result"]["active"] is True
+        bar = resp["result"]["bars"][0]
+        assert bar["token"] == 1
+        assert bar["maximum"] == 10 and bar["value"] == 3
+        assert bar["n"] == 3 and bar["total"] == 10
+        assert "Ramp" in bar["format"]
+    finally:
+        sock.close()
+
+
+def test_device_setup_progress_idle_returns_empty(fx):
+    fx.ctrl.get_device_setup_progress = MagicMock(return_value=())  # type: ignore[method-assign]
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "device.setup_progress")
+        assert resp["ok"] is True
+        assert resp["result"] == {"active": False, "bars": []}
     finally:
         sock.close()
 

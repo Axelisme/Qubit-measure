@@ -19,13 +19,14 @@ from qtpy.QtCore import QObject, QThread, Signal  # type: ignore[attr-defined]
 from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.gui.event_bus import (
     DeviceChangedPayload,
-    DeviceSetupChangedPayload,
+    DeviceSetupFinishedPayload,
+    DeviceSetupStartedPayload,
     GuiEvent,
 )
 from zcu_tools.gui.state import DeviceState, DeviceStatus
 
 from zcu_tools.gui.pbar_host import (
-    ProgressEntrySnapshot,
+    ProgressBarModel,
     ProgressFactory,
     ProgressModel,
 )
@@ -120,7 +121,6 @@ class DeviceSnapshot:
     address: str
     status: DeviceStatus
     info: BaseDeviceInfo | None = None
-    progress: tuple[ProgressEntrySnapshot, ...] = ()
     error: str | None = None
 
 
@@ -133,8 +133,9 @@ class DeviceEntry:
 
 @dataclass(frozen=True)
 class DeviceSetupSnapshot:
+    # Live progress is polled via device.setup_progress (ADR-0013 device↔run
+    # alignment), not carried here — this names *which* device is setting up.
     device_name: str
-    progress: tuple[ProgressEntrySnapshot, ...]
 
 
 class DeviceRegistrationError(RuntimeError):
@@ -367,8 +368,8 @@ class DeviceService(QObject):
         try:
             worker.start()
             self._bus.emit(
-                GuiEvent.DEVICE_SETUP_CHANGED,
-                DeviceSetupChangedPayload(active_setup=self.get_active_setup()),
+                GuiEvent.DEVICE_SETUP_STARTED,
+                DeviceSetupStartedPayload(name=req.name),
             )
         except Exception:
             self._abort_unstarted_operation(req.name)
@@ -404,23 +405,24 @@ class DeviceService(QObject):
         self._emit_device_changed(name)
 
     def _project(self, dev: DeviceState) -> DeviceSnapshot:
-        """Assemble the read-time projection of a device-state entry.
+        """Assemble the read-time projection of a device-state entry from State.
 
-        Splices live setup ``progress`` only for the device that is the active
-        setup; every other field comes straight from State.
+        Live setup progress is no longer spliced here — it is polled separately
+        via setup_progress (ADR-0013 device↔run alignment).
         """
-        progress: tuple[ProgressEntrySnapshot, ...] = ()
-        if dev.status is DeviceStatus.SETTING_UP and dev.name == self._active_name:
-            progress = self._progress.snapshot()
         return DeviceSnapshot(
             name=dev.name,
             type_name=dev.type_name,
             address=dev.address,
             status=dev.status,
             info=dev.info,
-            progress=progress,
             error=dev.error,
         )
+
+    def setup_progress(self) -> tuple[tuple[int, "ProgressBarModel"], ...]:
+        """Live (token, ProgressBarModel) pairs of the active setup — the
+        device analogue of RunService.get_run_progress (read at query time)."""
+        return self._progress.model_items()
 
     def list_device_snapshots(self) -> tuple[DeviceSnapshot, ...]:
         return tuple(self._project(dev) for dev in self._state.list_devices())
@@ -439,10 +441,7 @@ class DeviceService(QObject):
         snapshot = self.get_active_device_operation()
         if snapshot is None or snapshot.status is not DeviceStatus.SETTING_UP:
             return None
-        return DeviceSetupSnapshot(
-            device_name=snapshot.name,
-            progress=snapshot.progress,
-        )
+        return DeviceSetupSnapshot(device_name=snapshot.name)
 
     def list_devices(self) -> list[DeviceEntry]:
         return [
@@ -661,8 +660,8 @@ class DeviceService(QObject):
         self._clear_progress()
         self._emit_device_changed(name)
         self._bus.emit(
-            GuiEvent.DEVICE_SETUP_CHANGED,
-            DeviceSetupChangedPayload(active_setup=None),
+            GuiEvent.DEVICE_SETUP_FINISHED,
+            DeviceSetupFinishedPayload(name=name, outcome="finished"),
         )
         self.setup_finished.emit(name)
 
@@ -672,8 +671,10 @@ class DeviceService(QObject):
         self._clear_progress()
         self._emit_device_changed(name)
         self._bus.emit(
-            GuiEvent.DEVICE_SETUP_CHANGED,
-            DeviceSetupChangedPayload(active_setup=None),
+            GuiEvent.DEVICE_SETUP_FINISHED,
+            DeviceSetupFinishedPayload(
+                name=name, outcome="failed", error_message=error
+            ),
         )
         self.setup_failed.emit(name, error)
 
@@ -685,8 +686,8 @@ class DeviceService(QObject):
         self._clear_progress()
         self._emit_device_changed(name)
         self._bus.emit(
-            GuiEvent.DEVICE_SETUP_CHANGED,
-            DeviceSetupChangedPayload(active_setup=None),
+            GuiEvent.DEVICE_SETUP_FINISHED,
+            DeviceSetupFinishedPayload(name=name, outcome="cancelled"),
         )
         self.setup_cancelled.emit(name)
 

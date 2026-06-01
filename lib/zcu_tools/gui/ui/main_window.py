@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from zcu_tools.gui.adapter import CfgSchema
 from zcu_tools.gui.event_bus import (
     ContextSwitchedPayload,
-    DeviceSetupChangedPayload,
+    DeviceSetupFinishedPayload,
     GuiEvent,
     MlChangedPayload,
     PredictorChangedPayload,
@@ -668,7 +668,9 @@ class MainWindow(QMainWindow):
         bus.subscribe(GuiEvent.TAB_CONTENT_CHANGED, self._on_bus_tab_content_changed)
         bus.subscribe(GuiEvent.PREDICTOR_CHANGED, self._on_bus_predictor_changed)
         bus.subscribe(GuiEvent.SOC_CHANGED, self._on_bus_soc_changed)
-        bus.subscribe(GuiEvent.DEVICE_SETUP_CHANGED, self._on_bus_device_setup_changed)
+        bus.subscribe(
+            GuiEvent.DEVICE_SETUP_FINISHED, self._on_bus_device_setup_finished
+        )
 
         # Cleanup on destroy
         self.destroyed.connect(self._cleanup_bus_subscriptions)
@@ -688,7 +690,7 @@ class MainWindow(QMainWindow):
         bus.unsubscribe(GuiEvent.PREDICTOR_CHANGED, self._on_bus_predictor_changed)
         bus.unsubscribe(GuiEvent.SOC_CHANGED, self._on_bus_soc_changed)
         bus.unsubscribe(
-            GuiEvent.DEVICE_SETUP_CHANGED, self._on_bus_device_setup_changed
+            GuiEvent.DEVICE_SETUP_FINISHED, self._on_bus_device_setup_finished
         )
 
     def _on_bus_tab_interaction_changed(
@@ -706,8 +708,12 @@ class MainWindow(QMainWindow):
         # Run lock released.
         self.refresh_run_lock(None)
 
-    def _on_bus_device_setup_changed(self, payload: DeviceSetupChangedPayload) -> None:
-        if self._shutdown_waiting_for_device_setup and payload.active_setup is None:
+    def _on_bus_device_setup_finished(
+        self, payload: DeviceSetupFinishedPayload
+    ) -> None:
+        del payload
+        # The setup we were holding shutdown for has reached a terminal state.
+        if self._shutdown_waiting_for_device_setup:
             QTimer.singleShot(0, self.close)
 
     def _on_bus_context_switched(self, payload: ContextSwitchedPayload) -> None:

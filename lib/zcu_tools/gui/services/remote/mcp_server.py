@@ -60,7 +60,8 @@ from zcu_tools.gui.services.remote.wire import (  # noqa: E402
 # on a meaningful mcp_server change you want to be able to spot a reload of.
 # v2: piggyback/diagnostic-split + default-subscribe now includes run_started /
 #     run_finished (was run_lock_changed).
-MCP_VERSION = 2
+# v3: default-subscribe device_setup_started/finished (was device_setup_changed).
+MCP_VERSION = 3
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -156,7 +157,8 @@ _EVENT_COND = threading.Condition()
 _DEFAULT_SUBSCRIBE = (
     "run_started",
     "run_finished",
-    "device_setup_changed",
+    "device_setup_started",
+    "device_setup_finished",
     "soc_changed",
 )
 

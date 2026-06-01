@@ -11,7 +11,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.pbar_host import ProgressBarModel, ProgressEntrySnapshot
+    from zcu_tools.gui.pbar_host import ProgressBarModel
 
 
 class ProgressStack(QWidget):
@@ -72,22 +72,12 @@ class ProgressStack(QWidget):
         self._active.clear()
 
     def render_models(self, models: tuple["ProgressBarModel", ...]) -> None:
-        """Replace visible bars with the service-owned live bar models (the
-        attach_stack live path). Derived values are read live off each model
-        (the SSOT) — the widget computes nothing itself.
+        """Replace visible bars with the service-owned live bar models (driven by
+        the attached ProgressModel's ``changed`` signal). Derived values are read
+        live off each model (the SSOT) — the widget computes nothing itself.
         """
         self.reset_all()
         for model in models[: self.MAX_LAYERS]:
             bar = self.push(total=model.qt_maximum())
             bar.setFormat(model.format())
             bar.setValue(model.qt_value())
-
-    def render_snapshot(self, entries: tuple["ProgressEntrySnapshot", ...]) -> None:
-        """Replace visible bars from a frozen projection (the device-setup
-        DEVICE_SETUP_CHANGED path, which carries a point-in-time snapshot rather
-        than the live model)."""
-        self.reset_all()
-        for entry in entries[: self.MAX_LAYERS]:
-            bar = self.push(total=entry.maximum)
-            bar.setFormat(entry.format)
-            bar.setValue(entry.value)

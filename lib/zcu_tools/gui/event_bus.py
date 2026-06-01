@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any, Callable, Literal, overload
 
 if TYPE_CHECKING:
     from zcu_tools.gui.adapter import SocCfgHandle, SocHandle
-    from zcu_tools.gui.services.device import DeviceSetupSnapshot
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 logger = logging.getLogger(__name__)
@@ -125,10 +124,22 @@ class DeviceChangedPayload(Payload):
 
 
 @dataclass(frozen=True)
-class DeviceSetupChangedPayload(Payload):
-    """Payload for DEVICE_SETUP_CHANGED: active setup progress/lifecycle changed."""
+class DeviceSetupStartedPayload(Payload):
+    """Payload for DEVICE_SETUP_STARTED: a setup began on device ``name`` (its
+    progress is now pollable via device.setup_progress)."""
 
-    active_setup: "DeviceSetupSnapshot | None"
+    name: str
+
+
+@dataclass(frozen=True)
+class DeviceSetupFinishedPayload(Payload):
+    """Payload for DEVICE_SETUP_FINISHED: the setup on device ``name`` reached a
+    terminal state. ``outcome`` ∈ finished/failed/cancelled; ``error_message``
+    set only on failure. (Mirrors RUN_STARTED / RUN_FINISHED.)"""
+
+    name: str
+    outcome: str  # 'finished' | 'failed' | 'cancelled'
+    error_message: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +171,10 @@ class GuiEvent(str, Enum):
 
     # Device layer
     DEVICE_CHANGED = "device_changed"  # device registered or dropped
-    DEVICE_SETUP_CHANGED = "device_setup_changed"  # active setup/progress changed
+    DEVICE_SETUP_STARTED = "device_setup_started"  # payload: DeviceSetupStartedPayload
+    DEVICE_SETUP_FINISHED = (
+        "device_setup_finished"  # payload: DeviceSetupFinishedPayload
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +195,8 @@ _EventPayloadMap = {
     GuiEvent.RUN_FINISHED: RunFinishedPayload,
     GuiEvent.PREDICTOR_CHANGED: PredictorChangedPayload,
     GuiEvent.DEVICE_CHANGED: DeviceChangedPayload,
-    GuiEvent.DEVICE_SETUP_CHANGED: DeviceSetupChangedPayload,
+    GuiEvent.DEVICE_SETUP_STARTED: DeviceSetupStartedPayload,
+    GuiEvent.DEVICE_SETUP_FINISHED: DeviceSetupFinishedPayload,
 }
 
 
@@ -280,8 +295,15 @@ class EventBus:
     @overload
     def subscribe(
         self,
-        event: "Literal[GuiEvent.DEVICE_SETUP_CHANGED]",
-        cb: Callable[[DeviceSetupChangedPayload], None],
+        event: "Literal[GuiEvent.DEVICE_SETUP_STARTED]",
+        cb: Callable[[DeviceSetupStartedPayload], None],
+    ) -> None: ...
+
+    @overload
+    def subscribe(
+        self,
+        event: "Literal[GuiEvent.DEVICE_SETUP_FINISHED]",
+        cb: Callable[[DeviceSetupFinishedPayload], None],
     ) -> None: ...
 
     def subscribe(self, event: GuiEvent, cb: Callable[[Any], None]) -> None:
@@ -380,8 +402,15 @@ class EventBus:
     @overload
     def unsubscribe(
         self,
-        event: "Literal[GuiEvent.DEVICE_SETUP_CHANGED]",
-        cb: Callable[[DeviceSetupChangedPayload], None],
+        event: "Literal[GuiEvent.DEVICE_SETUP_STARTED]",
+        cb: Callable[[DeviceSetupStartedPayload], None],
+    ) -> None: ...
+
+    @overload
+    def unsubscribe(
+        self,
+        event: "Literal[GuiEvent.DEVICE_SETUP_FINISHED]",
+        cb: Callable[[DeviceSetupFinishedPayload], None],
     ) -> None: ...
 
     def unsubscribe(self, event: GuiEvent, cb: Callable[[Any], None]) -> None:
@@ -482,8 +511,15 @@ class EventBus:
     @overload
     def emit(
         self,
-        event: "Literal[GuiEvent.DEVICE_SETUP_CHANGED]",
-        payload: DeviceSetupChangedPayload,
+        event: "Literal[GuiEvent.DEVICE_SETUP_STARTED]",
+        payload: DeviceSetupStartedPayload,
+    ) -> None: ...
+
+    @overload
+    def emit(
+        self,
+        event: "Literal[GuiEvent.DEVICE_SETUP_FINISHED]",
+        payload: DeviceSetupFinishedPayload,
     ) -> None: ...
 
     def emit(self, event: GuiEvent, payload: Payload) -> None:

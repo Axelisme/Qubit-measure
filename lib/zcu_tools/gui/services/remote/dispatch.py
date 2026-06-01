@@ -889,16 +889,26 @@ def _h_device_snapshot(
     }
 
 
-def _progress_wire(progress) -> list[dict[str, object]]:
-    return [
-        {
-            "token": entry.token,
-            "format": entry.format,
-            "maximum": entry.maximum,
-            "value": entry.value,
-        }
-        for entry in progress
-    ]
+def _progress_bars_wire(bars) -> Mapping[str, object]:
+    """Shared run/device progress projection from live (token, ProgressBarModel)
+    pairs — derived fields computed live at this read (the SSOT is the model)."""
+    if not bars:
+        return {"active": False, "bars": []}
+    return {
+        "active": True,
+        "bars": [
+            {
+                "token": token,
+                "format": m.format(),
+                "maximum": m.qt_maximum(),
+                "value": m.qt_value(),
+                "percent": m.percent(),
+                "n": m.n,
+                "total": m.total,
+            }
+            for token, m in bars
+        ],
+    }
 
 
 def _h_device_active_setup(
@@ -908,12 +918,15 @@ def _h_device_active_setup(
     setup = adapter.ctrl.get_active_device_setup()
     if setup is None:
         return {"active_setup": None}
-    return {
-        "active_setup": {
-            "device_name": setup.device_name,
-            "progress": _progress_wire(setup.progress),
-        }
-    }
+    # Names which device is setting up; live progress is via device.setup_progress.
+    return {"active_setup": {"device_name": setup.device_name}}
+
+
+def _h_device_setup_progress(
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
+) -> Mapping[str, object]:
+    del params
+    return _progress_bars_wire(adapter.ctrl.get_device_setup_progress())
 
 
 def _h_device_active_operation(
@@ -930,7 +943,6 @@ def _h_device_active_operation(
             "address": snap.address,
             "status": snap.status.value,
             "error": snap.error,
-            "progress": _progress_wire(snap.progress),
         }
     }
 
@@ -1361,29 +1373,9 @@ def _h_run_progress(
     adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    bars = adapter.ctrl.get_run_progress()
-    if not bars:
-        return {"active": False, "bars": []}
-    # bars are live (token, ProgressBarModel) pairs (the SSOT). Derived fields
-    # are computed live at this read: 'format' is the human-readable string
-    # (e.g. "Rounds 23/100 [0:25<1:15]"), 'maximum'/'value' the Qt-scaled
-    # total/position (maximum 0 when unknown), 'percent' the 0-100 convenience
-    # (None when unknown). Also surface raw 'n'/'total' for precise reads.
-    return {
-        "active": True,
-        "bars": [
-            {
-                "token": token,
-                "format": m.format(),
-                "maximum": m.qt_maximum(),
-                "value": m.qt_value(),
-                "percent": m.percent(),
-                "n": m.n,
-                "total": m.total,
-            }
-            for token, m in bars
-        ],
-    }
+    # Live (token, ProgressBarModel) pairs (the SSOT); _progress_bars_wire reads
+    # their methods at this point. Shared with device.setup_progress.
+    return _progress_bars_wire(adapter.ctrl.get_run_progress())
 
 
 # ---------------------------------------------------------------------------
@@ -1539,6 +1531,7 @@ _HANDLERS: dict[str, Handler] = {
     "device.setup_spec": _h_device_setup_spec,
     "device.cancel_operation": _h_device_cancel_operation,
     "device.active_setup": _h_device_active_setup,
+    "device.setup_progress": _h_device_setup_progress,
     "device.active_operation": _h_device_active_operation,
     "operation.await": _h_operation_await,
     "device.list": _h_device_list,

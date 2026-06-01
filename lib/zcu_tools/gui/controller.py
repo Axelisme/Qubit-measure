@@ -724,6 +724,9 @@ class Controller:
     def get_active_device_setup(self) -> Optional[DeviceSetupSnapshot]:
         return self._dev_svc.get_active_setup()
 
+    def get_device_setup_progress(self) -> tuple:
+        return self._dev_svc.setup_progress()
+
     def cancel_device_operation(self, name: str) -> None:
         self._dev_svc.cancel_device_operation(name)
 

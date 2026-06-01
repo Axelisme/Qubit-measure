@@ -13,7 +13,12 @@ from unittest.mock import MagicMock
 import pytest
 from qtpy.QtCore import QEventLoop
 from zcu_tools.device import FakeDevice, FakeDeviceInfo, GlobalDeviceManager
-from zcu_tools.gui.event_bus import DeviceSetupChangedPayload, EventBus, GuiEvent
+from zcu_tools.gui.event_bus import (
+    DeviceSetupFinishedPayload,
+    DeviceSetupStartedPayload,
+    EventBus,
+    GuiEvent,
+)
 from zcu_tools.gui.services.device import (
     ConnectDeviceRequest,
     DeviceService,
@@ -100,11 +105,13 @@ def test_device_setup_worker_cancel(qapp):
     assert cancelled == ["test_dev"]
 
 
-def test_device_service_emits_active_and_terminal_setup_snapshots(qapp):
+def test_device_service_emits_started_and_finished_events(qapp):
     svc, _device = _make_svc()
     _connect(svc)
-    events: list[DeviceSetupChangedPayload] = []
-    svc._bus.subscribe(GuiEvent.DEVICE_SETUP_CHANGED, events.append)
+    started: list[DeviceSetupStartedPayload] = []
+    finished: list[DeviceSetupFinishedPayload] = []
+    svc._bus.subscribe(GuiEvent.DEVICE_SETUP_STARTED, started.append)
+    svc._bus.subscribe(GuiEvent.DEVICE_SETUP_FINISHED, finished.append)
     loop = QEventLoop()
     svc.setup_finished.connect(lambda _name: loop.quit())
 
@@ -113,9 +120,9 @@ def test_device_service_emits_active_and_terminal_setup_snapshots(qapp):
     )
     loop.exec()
 
-    assert events[0].active_setup is not None
-    assert events[0].active_setup.device_name == "test_dev"
-    assert events[-1].active_setup is None
+    assert [p.name for p in started] == ["test_dev"]
+    assert finished[-1].name == "test_dev"
+    assert finished[-1].outcome == "finished"
 
 
 # ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.event_bus import DeviceSetupChangedPayload, EventBus, GuiEvent
+from zcu_tools.gui.event_bus import DeviceSetupFinishedPayload, EventBus, GuiEvent
 from zcu_tools.gui.services.device import (
     ConnectDeviceRequest,
     DeviceEntry,
@@ -15,7 +15,6 @@ from zcu_tools.gui.services.device import (
     DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
-from zcu_tools.gui.pbar_host import ProgressEntrySnapshot
 from zcu_tools.gui.ui.device_dialog import DeviceDialog, _FakeDevicePanel
 
 
@@ -195,15 +194,7 @@ def test_device_dialog_restores_background_setup_and_stops_it(qapp):
     ctrl.get_device_snapshot.return_value = _connected_snapshot(
         "fd", FakeDeviceInfo(address="none")
     )
-    snapshot = DeviceSetupSnapshot(
-        device_name="fd",
-        progress=(
-            ProgressEntrySnapshot(
-                token=1, format="Ramp value [0:01]", maximum=10000, value=5000
-            ),
-        ),
-    )
-    ctrl.get_active_device_setup.return_value = snapshot
+    ctrl.get_active_device_setup.return_value = DeviceSetupSnapshot(device_name="fd")
 
     dialog = DeviceDialog(ctrl)
 
@@ -213,13 +204,18 @@ def test_device_dialog_restores_background_setup_and_stops_it(qapp):
     assert dialog._apply_btn.text() == "Stop"
     assert dialog._list.isEnabled() is False
     assert dialog._refresh_btn.isEnabled() is False
-    assert dialog._progress._active[0].value() == 5000
+    # (Live progress bars are driven by the attached ProgressModel, covered in
+    # test_pbar_host; here we only assert the panel's running state.)
 
     dialog._apply_btn.click()
     ctrl.cancel_device_operation.assert_called_once_with("fd")
 
+    # Setup reaching a terminal state → panel returns to idle. After finish,
+    # get_active_device_setup reports no active setup.
+    ctrl.get_active_device_setup.return_value = None
     ctrl.get_bus.return_value.emit(
-        GuiEvent.DEVICE_SETUP_CHANGED, DeviceSetupChangedPayload(active_setup=None)
+        GuiEvent.DEVICE_SETUP_FINISHED,
+        DeviceSetupFinishedPayload(name="fd", outcome="cancelled"),
     )
     assert dialog._apply_btn.text() == "Apply Changes"
     assert dialog._list.isEnabled() is True
@@ -234,12 +230,10 @@ def test_device_dialog_close_keeps_setup_running_and_unsubscribes(qapp):
     ctrl.get_device_snapshot.return_value = _connected_snapshot(
         "fd", FakeDeviceInfo(address="none")
     )
-    ctrl.get_active_device_setup.return_value = DeviceSetupSnapshot(
-        device_name="fd", progress=()
-    )
+    ctrl.get_active_device_setup.return_value = DeviceSetupSnapshot(device_name="fd")
     dialog = DeviceDialog(ctrl)
 
     dialog.accept()
 
     ctrl.cancel_device_operation.assert_not_called()
-    assert ctrl.get_bus.return_value._subs[GuiEvent.DEVICE_SETUP_CHANGED] == []
+    assert ctrl.get_bus.return_value._subs[GuiEvent.DEVICE_SETUP_FINISHED] == []

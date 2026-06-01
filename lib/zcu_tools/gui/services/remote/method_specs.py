@@ -337,7 +337,15 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "device.cancel_operation": MethodSpec(
         5.0, "Cancel active device setup", (_str("name", "Device name"),)
     ),
-    "device.active_setup": MethodSpec(5.0, "Read active device setup progress"),
+    "device.active_setup": MethodSpec(
+        5.0, "Which device (if any) is currently setting up: {device_name} or null"
+    ),
+    "device.setup_progress": MethodSpec(
+        5.0,
+        "Read the active device setup's progress bars — same shape as run.progress "
+        "(active, bars[token/format/maximum/value/percent/n/total]). Prefer the "
+        "auto-subscribed device_setup_finished event to detect completion.",
+    ),
     "device.active_operation": MethodSpec(5.0, "Read active device operation"),
     # Async operation handle: block until an operation (device.connect /
     # device.disconnect / device.setup / run.start / connect.start, identified by

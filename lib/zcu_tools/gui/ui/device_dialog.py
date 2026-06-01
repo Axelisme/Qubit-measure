@@ -29,7 +29,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 
 from zcu_tools.gui.event_bus import (
     DeviceChangedPayload,
-    DeviceSetupChangedPayload,
+    DeviceSetupFinishedPayload,
+    DeviceSetupStartedPayload,
     GuiEvent,
 )
 from zcu_tools.gui.services.device import (
@@ -327,7 +328,8 @@ class DeviceDialog(QDialog):
 
         bus = self._ctrl.get_bus()
         bus.subscribe(GuiEvent.DEVICE_CHANGED, self._on_device_changed)
-        bus.subscribe(GuiEvent.DEVICE_SETUP_CHANGED, self._on_setup_changed)
+        bus.subscribe(GuiEvent.DEVICE_SETUP_STARTED, self._on_setup_started)
+        bus.subscribe(GuiEvent.DEVICE_SETUP_FINISHED, self._on_setup_finished)
         self._bus_subs_active = True
         self.finished.connect(self._cleanup_bus_subscriptions)
         self.destroyed.connect(self._cleanup_bus_subscriptions)
@@ -341,7 +343,10 @@ class DeviceDialog(QDialog):
         if not self._bus_subs_active:
             return
         self._ctrl.get_bus().unsubscribe(
-            GuiEvent.DEVICE_SETUP_CHANGED, self._on_setup_changed
+            GuiEvent.DEVICE_SETUP_STARTED, self._on_setup_started
+        )
+        self._ctrl.get_bus().unsubscribe(
+            GuiEvent.DEVICE_SETUP_FINISHED, self._on_setup_finished
         )
         self._ctrl.get_bus().unsubscribe(
             GuiEvent.DEVICE_CHANGED, self._on_device_changed
@@ -523,8 +528,12 @@ class DeviceDialog(QDialog):
                 f"{snapshot.status.value.replace('_', ' ').title()}: {name}..."
             )
 
-    def _on_setup_changed(self, payload: DeviceSetupChangedPayload) -> None:
-        self._render_setup(payload.active_setup)
+    def _on_setup_started(self, payload: DeviceSetupStartedPayload) -> None:
+        self._render_setup(self._ctrl.get_active_device_setup())
+
+    def _on_setup_finished(self, payload: DeviceSetupFinishedPayload) -> None:
+        # Terminal — re-read active setup (now None) to hide the panel.
+        self._render_setup(self._ctrl.get_active_device_setup())
 
     def _render_setup(self, setup: Optional[DeviceSetupSnapshot]) -> None:
         self._active_setup = setup
@@ -534,7 +543,8 @@ class DeviceDialog(QDialog):
                 if item.data(Qt.ItemDataRole.UserRole) == setup.device_name:  # type: ignore[attr-defined]
                     self._list.setCurrentRow(row)
                     break
-            self._progress.render_snapshot(setup.progress)
+            # The attached ProgressModel renders the live bars itself (render_models
+            # on every changed emit); we only toggle panel visibility here.
             self._progress.show()
             self._set_setup_running(True)
             return

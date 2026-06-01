@@ -14,16 +14,15 @@ def test_progress_model_retains_progress_without_widget(qapp):
     pbar.refresh()  # force flush past throttle
     QCoreApplication.processEvents()
 
-    # snapshot() freezes the live models into immutable projections.
-    snapshot = model.snapshot()
-    assert len(snapshot) == 1
-    assert snapshot[0].maximum == 10000  # float total scaled to _FLOAT_SCALE
-    assert snapshot[0].value == 5000  # 1.0 / 2.0 → 50%
-    assert "Ramp value" in snapshot[0].format
+    # The model retains a live ProgressBarModel even with no widget attached.
+    (live,) = model.models()
+    assert live.qt_maximum() == 10000  # float total scaled to _FLOAT_SCALE
+    assert live.qt_value() == 5000  # 1.0 / 2.0 → 50%
+    assert "Ramp value" in live.format()
 
     pbar.close()
     QCoreApplication.processEvents()
-    assert model.snapshot() == ()
+    assert model.models() == ()
 
 
 def test_live_model_computes_format_and_percent_on_query(qapp):

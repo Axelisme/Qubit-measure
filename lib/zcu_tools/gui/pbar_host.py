@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import itertools
 import time
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional
 
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
@@ -42,22 +41,6 @@ _PUBLISH_INTERVAL = 0.033  # ~30 fps cap for cross-thread Qt signal updates
 def _fmt_seconds(secs: float) -> str:
     minutes, seconds = divmod(int(max(0.0, secs)), 60)
     return f"{minutes}:{seconds:02d}"
-
-
-@dataclass(frozen=True)
-class ProgressEntrySnapshot:
-    """Immutable point-in-time projection of a ``ProgressBarModel``.
-
-    The live model is the SSOT; this is a frozen copy taken at capture time, for
-    places that need an immutable snapshot embedded elsewhere — notably the
-    frozen ``DeviceSetupSnapshot`` that is stored in State and serialized to the
-    wire. Run progress and the widget read the live model directly, not this.
-    """
-
-    token: int
-    format: str
-    maximum: int
-    value: int
 
 
 class ProgressBarModel:
@@ -124,15 +107,6 @@ class ProgressBarModel:
             return f"{prefix}%v/%m {time_part}"
         return f"{prefix}{time_part}"
 
-    def project(self, token: int) -> "ProgressEntrySnapshot":
-        """Freeze the current derived state into an immutable snapshot."""
-        return ProgressEntrySnapshot(
-            token=token,
-            format=self.format(),
-            maximum=self.qt_maximum(),
-            value=self.qt_value(),
-        )
-
 
 class ProgressModel(QObject):
     """Thread-safe Qt bridge: worker threads emit signals; the main thread owns
@@ -184,11 +158,6 @@ class ProgressModel(QObject):
         """Live (token, model) pairs — for readers that need the token (e.g. the
         wire projection keys each bar by token)."""
         return tuple(self._entries.items())
-
-    def snapshot(self) -> tuple[ProgressEntrySnapshot, ...]:
-        """Freeze every live bar into immutable projections (for embedding in a
-        frozen DeviceSetupSnapshot / wire payload)."""
-        return tuple(m.project(tok) for tok, m in self._entries.items())
 
     def clear(self) -> None:
         if self._entries:
