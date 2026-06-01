@@ -18,6 +18,10 @@ def make_plot_frame(
     return fig, axs
 
 
+def instant_plot(fig: Figure) -> None:
+    fig.show(warn=False)
+
+
 def refresh_figure(fig: Figure) -> None:
     fig.canvas.draw_idle()
     if plt.isinteractive():

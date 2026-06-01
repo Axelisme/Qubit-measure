@@ -22,6 +22,7 @@ from .readout import (
     make_direct_readout_default,
     make_pulse_readout_default,
     make_readout_default,
+    make_readout_dpm_default,
     make_readout_ref_default,
 )
 from .res_probe import make_res_probe_default, make_res_probe_ref_default
@@ -59,6 +60,7 @@ __all__ = [
     "make_pulse_readout_default",
     "make_direct_readout_default",
     "make_readout_default",
+    "make_readout_dpm_default",
     "make_readout_ref_default",
     # reset
     "make_none_reset_default",

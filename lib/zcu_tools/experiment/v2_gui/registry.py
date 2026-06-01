@@ -12,6 +12,13 @@ from .adapters.twotone.freq import FreqAdapter
 from .adapters.twotone.power_dep import PowerDepAdapter
 from .adapters.twotone.rabi.amp_rabi import AmpRabiAdapter
 from .adapters.twotone.rabi.len_rabi import LenRabiAdapter
+from .adapters.twotone.ro_optimize import (
+    RoOptAutoAdapter,
+    RoOptFreqAdapter,
+    RoOptFreqGainAdapter,
+    RoOptLengthAdapter,
+    RoOptPowerAdapter,
+)
 from .adapters.twotone.time_domain.t1 import T1Adapter
 from .adapters.twotone.time_domain.t2echo import T2EchoAdapter
 from .adapters.twotone.time_domain.t2ramsey import T2RamseyAdapter
@@ -27,6 +34,11 @@ ADAPTERS = {
     "twotone/flux_dep": FluxDepAdapter,
     "twotone/rabi/amp_rabi": AmpRabiAdapter,
     "twotone/rabi/len_rabi": LenRabiAdapter,
+    "twotone/ro_optimize/freq": RoOptFreqAdapter,
+    "twotone/ro_optimize/power": RoOptPowerAdapter,
+    "twotone/ro_optimize/length": RoOptLengthAdapter,
+    "twotone/ro_optimize/freq_gain": RoOptFreqGainAdapter,
+    "twotone/ro_optimize/auto": RoOptAutoAdapter,
     "twotone/t1": T1Adapter,
     "twotone/t2ramsey": T2RamseyAdapter,
     "twotone/t2echo": T2EchoAdapter,

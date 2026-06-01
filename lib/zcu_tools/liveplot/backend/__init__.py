@@ -36,6 +36,14 @@ def make_plot_frame(
     )
 
 
+def instant_plot(fig: Figure) -> None:
+    """Show a self-built figure immediately, dispatched by active backend:
+    Jupyter ``display``, attach into the active GUI container (Qt), or
+    ``fig.show`` (fallback). Use for figures built outside ``make_plot_frame``
+    (e.g. custom gridspec layouts) so they render in whichever frontend is live."""
+    auto_select_backend().instant_plot(fig)
+
+
 def refresh_figure(fig: Figure) -> None:
     auto_select_backend().refresh_figure(fig)
 
@@ -58,6 +66,7 @@ __all__ = [
     "qt",
     # functions
     "make_plot_frame",
+    "instant_plot",
     "refresh_figure",
     "close_figure",
     "set_figure_container",

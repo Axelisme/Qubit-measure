@@ -27,7 +27,7 @@ from zcu_tools.gui.specs.readout import (
 )
 from zcu_tools.program.v2.modules import PulseReadoutCfg
 
-from ..ctx_helpers import md_scalar_float, md_scalar_int
+from ..ctx_helpers import md_get_float, md_scalar_float, md_scalar_int
 from .helpers import (
     make_default_value,
     make_trig_offset,
@@ -99,6 +99,54 @@ def make_direct_readout_default(ctx: ExpContext) -> ModuleRefValue:
 def make_readout_default(ctx: ExpContext) -> ModuleRefValue:
     """The readout role's blank — a pulse readout."""
     return make_pulse_readout_default(ctx)
+
+
+def make_readout_dpm_default(ctx: ExpContext) -> ModuleRefValue:
+    """Optimized pulse-readout (``readout_dpm``): a pulse readout seeded from the
+    readout-optimization results in the MetaDict — 'best_ro_freq' / 'best_ro_gain'
+    / 'best_ro_length' (the outputs of the ro_optimize experiments). The pulse
+    window is best_ro_length + 0.1 us, the acquisition window is best_ro_length;
+    references a library ``ro_waveform`` for the pulse waveform when present.
+    Mirrors the notebook's readout_dpm assembly. Falls back to r_f / 0.1 / 1.0 us
+    when the best_ro_* values are absent."""
+    r_f = md_get_float(ctx, "r_f", 6000.0)
+    best_freq = md_scalar_float(ctx, "best_ro_freq", r_f)
+    best_gain = md_get_float(ctx, "best_ro_gain", 0.1)
+    best_len = md_get_float(ctx, "best_ro_length", 1.0)
+    res_ch = md_scalar_int(ctx, "res_ch", 0)
+    ro_ch = md_scalar_int(ctx, "ro_ch", 0)
+    trig_offset = make_trig_offset(ctx, trig_expr="timeFly + 0.05", trig_fallback=0.55)
+
+    value = make_default_value(make_pulse_readout_spec())
+
+    pulse_cfg = value.fields.get("pulse_cfg")
+    if isinstance(pulse_cfg, CfgSectionValue):
+        patch_pulse_fields(
+            pulse_cfg, freq=best_freq, ch=res_ch, gain=best_gain, length=best_len + 0.1
+        )
+        waveform_ref = pulse_cfg.fields.get("waveform")
+        if (
+            isinstance(waveform_ref, WaveformRefValue)
+            and "ro_waveform" in ctx.ml.waveforms
+        ):
+            from zcu_tools.gui.cfg_schemas import waveform_cfg_to_value
+
+            _, wav_val = waveform_cfg_to_value(ctx.ml.waveforms["ro_waveform"])
+            pulse_cfg.fields["waveform"] = WaveformRefValue(
+                chosen_key="ro_waveform", value=wav_val
+            )
+
+    ro_cfg = value.fields.get("ro_cfg")
+    if isinstance(ro_cfg, CfgSectionValue):
+        patch_ro_cfg_fields(
+            ro_cfg,
+            ro_freq=best_freq,
+            ro_ch=ro_ch,
+            trig_offset=trig_offset,
+            ro_length=best_len,
+        )
+
+    return ModuleRefValue("<Custom:Pulse Readout>", value)
 
 
 @overload

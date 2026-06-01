@@ -1,0 +1,173 @@
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass
+
+from matplotlib.figure import Figure
+from typing_extensions import Annotated, Any, ClassVar, Sequence, TypeAlias
+
+from zcu_tools.experiment.v2.twotone.ro_optimize.freq import (
+    FreqCfg,
+    FreqExp,
+    FreqResult,
+)
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
+from zcu_tools.experiment.v2_gui.adapters.shared import (
+    make_pulse_module_spec,
+    make_pulse_readout_module_spec,
+    make_qub_probe_default,
+    make_readout_default,
+    make_reset_module_spec,
+    make_reset_ref_default,
+    proper_res_freq_range,
+)
+from zcu_tools.gui.adapter import (
+    AdapterGuide,
+    AnalyzeRequest,
+    AnalyzeResultBase,
+    CfgSectionSpec,
+    CfgSectionValue,
+    DirectValue,
+    ExpContext,
+    MetaDictWriteback,
+    ParamMeta,
+    ScalarSpec,
+    SweepSpec,
+    WritebackItem,
+    WritebackRequest,
+)
+
+RoOptFreqRunResult: TypeAlias = FreqResult
+
+
+@dataclass
+class RoOptFreqAnalyzeParams:
+    smooth: Annotated[float, ParamMeta(label="Smooth sigma", decimals=2)]
+
+
+@dataclass
+class RoOptFreqAnalyzeResult(AnalyzeResultBase):
+    best_freq: float
+    figure: Figure
+
+
+class RoOptFreqAdapter(
+    BaseAdapter[
+        FreqCfg,
+        RoOptFreqRunResult,
+        RoOptFreqAnalyzeResult,
+        RoOptFreqAnalyzeParams,
+    ]
+):
+    exp_cls = FreqExp
+    ExpCfg_cls: ClassVar[Any] = FreqCfg
+
+    @classmethod
+    def guide(cls) -> AdapterGuide:
+        return AdapterGuide(
+            behavior=(
+                "Readout frequency optimization: with the qubit prepared in g and "
+                "e (a pi pulse toggles it), sweeps the readout frequency and "
+                "measures the g/e signal-to-noise ratio (SNR), so you can pick the "
+                "readout frequency that best distinguishes the two states. Runs on "
+                "real hardware. One step of readout tuning; usually run after the "
+                "qubit and a pi pulse are calibrated."
+            ),
+            expects_md=(
+                "Reads from the MetaDict (all optional): 'r_f' — resonator "
+                "frequency, the sweep centre (~4000–8000 MHz); 'rf_w' — linewidth, "
+                "setting the span as r_f ± 1.5*rf_w (~5–50 MHz; falls back to ±30 "
+                "MHz when absent); 'res_ch' / 'ro_ch' — drive / ADC channels; "
+                "'timeFly' — cable time-of-flight for the trigger offset; 'q_f' / "
+                "'qub_ch' — qubit frequency / drive channel for the g↔e pi pulse."
+            ),
+            expects_ml=(
+                "Needs a qubit-probe pulse module (typically a calibrated pi "
+                "pulse, e.g. 'pi_amp') and a pulse-readout module (e.g. "
+                "'readout_rf'); references a ModuleLibrary waveform named "
+                "'ro_waveform' when present. Optionally references a reset module."
+            ),
+            typical_writeback=(
+                "Proposes the SNR-maximizing readout frequency into MetaDict "
+                "'best_ro_freq' (MHz). No ModuleLibrary writeback — combine "
+                "'best_ro_freq' / 'best_ro_gain' / 'best_ro_length' into a "
+                "'readout_dpm' module afterwards (the 'readout_dpm' role)."
+            ),
+            recommended=(
+                "Analysis smooths the SNR curve before picking the peak; a "
+                "'smooth' sigma around 2 tames noise without washing out the "
+                "feature — raise it if the optimum jitters, lower it for a sharp "
+                "peak. A sweep of a couple of linewidths around 'r_f' usually "
+                "brackets the best frequency."
+            ),
+        )
+
+    @classmethod
+    def cfg_spec(cls) -> CfgSectionSpec:
+        return CfgSectionSpec(
+            fields={
+                "modules": CfgSectionSpec(
+                    label="Modules",
+                    fields={
+                        "reset": make_reset_module_spec(optional=True),
+                        "qub_pulse": make_pulse_module_spec(),
+                        "readout": make_pulse_readout_module_spec(),
+                    },
+                ),
+                "reps": ScalarSpec(label="Reps", type=int),
+                "rounds": ScalarSpec(label="Rounds", type=int),
+                "relax_delay": ScalarSpec(
+                    label="Relax delay (us)", type=float, decimals=3
+                ),
+                "sweep": CfgSectionSpec(
+                    label="Sweep",
+                    fields={"freq": SweepSpec(label="Readout freq (MHz)")},
+                ),
+            }
+        )
+
+    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+        return CfgSectionValue(
+            fields={
+                "modules": CfgSectionValue(
+                    fields={
+                        "qub_pulse": make_qub_probe_default(ctx),
+                        "readout": make_readout_default(ctx),
+                        "reset": make_reset_ref_default(ctx, optional=True),
+                    }
+                ),
+                "reps": DirectValue(1000),
+                "rounds": DirectValue(100),
+                "relax_delay": DirectValue(1.0),
+                "sweep": CfgSectionValue(
+                    fields={"freq": proper_res_freq_range(ctx, 301)},
+                ),
+            }
+        )
+
+    def get_analyze_params(
+        self, result: RoOptFreqRunResult, ctx: ExpContext
+    ) -> RoOptFreqAnalyzeParams:
+        return RoOptFreqAnalyzeParams(smooth=2.0)
+
+    def analyze(
+        self, req: AnalyzeRequest[RoOptFreqRunResult, RoOptFreqAnalyzeParams]
+    ) -> RoOptFreqAnalyzeResult:
+        params = req.analyze_params
+        best_freq, fig = FreqExp().analyze(req.run_result, smooth=params.smooth)
+        return RoOptFreqAnalyzeResult(best_freq=best_freq, figure=fig)
+
+    def get_writeback_items(
+        self, req: WritebackRequest[RoOptFreqRunResult, RoOptFreqAnalyzeResult]
+    ) -> Sequence[WritebackItem]:
+        result = req.analyze_result
+        return [
+            MetaDictWriteback(
+                target_name="best_ro_freq",
+                description="Optimal readout frequency (MHz)",
+                proposed_value=result.best_freq,
+            ),
+        ]
+
+    def make_filename_stem(self, ctx: ExpContext) -> str:
+        return f"{ctx.qub_name}_ro_opt_freq_{time.strftime('%m%d')}"

@@ -20,8 +20,8 @@ from zcu_tools.experiment.v2.runner import (
 )
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
-from zcu_tools.liveplot import LivePlotScatter, MultiLivePlot
-from zcu_tools.liveplot.backend.jupyter import instant_plot
+from zcu_tools.liveplot import LivePlotScatter, MultiLivePlot, instant_plot
+from zcu_tools.liveplot.backend import close_figure
 from zcu_tools.program.v2 import (
     Branch,
     ModularProgramV2,
@@ -230,7 +230,7 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
             results = run_task(
                 task=Task(
                     measure_fn=measure_fn,
-                    raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
+                    raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=1),
                     dtype=np.float64,
                     pbar_n=cfg.rounds,
                 ).scan(
@@ -242,7 +242,7 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
                 on_update=plot_fn,
             )
             signals = np.asarray(results)
-        plt.close(fig)
+        close_figure(fig)
 
         # record the last result
         self.last_result = AutoOptResult(params, signals, cfg_snapshot=cfg)

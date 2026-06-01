@@ -42,6 +42,7 @@ from .adapters.shared import (
     make_pulse_reset_default,
     make_qub_probe_default,
     make_qub_waveform_default,
+    make_readout_dpm_default,
     make_res_probe_default,
     make_res_waveform_default,
     make_two_pulse_reset_default,
@@ -99,6 +100,9 @@ def _blank_entries() -> list[RoleEntry]:
 ROLE_ENTRIES: list[RoleEntry] = [
     RoleEntry("res_probe", "Resonator probe", "module", make_res_probe_default),
     RoleEntry("pulse_readout", "Pulse readout", "module", make_pulse_readout_default),
+    RoleEntry(
+        "readout_dpm", "Optimized readout (DPM)", "module", make_readout_dpm_default
+    ),
     RoleEntry(
         "direct_readout", "Direct readout", "module", make_direct_readout_default
     ),

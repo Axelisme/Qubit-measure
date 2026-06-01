@@ -19,6 +19,14 @@ def set_figure_container(fig: Figure, container: FigureContainer) -> None:
     attach_existing_figure_to_container(fig, container)
 
 
+def instant_plot(fig: Figure) -> None:  # noqa: ARG001
+    """No-op under the GUI backend: a pyplot-created figure (``plt.figure`` /
+    ``plt.subplots``) is already attached to the active FigureContainer by the
+    custom matplotlib backend (``gui.mpl_backend.GuiFigureManager``) at creation
+    time. Jupyter needs an explicit ``display`` to render right now; the GUI does
+    not, so this dispatch target intentionally does nothing."""
+
+
 def make_plot_frame(
     n_row: int,
     n_col: int,
