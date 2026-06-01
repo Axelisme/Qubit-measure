@@ -128,8 +128,12 @@ def main() -> int:
         editor_id = rpc.call("tab.snapshot", {"tab_id": tab_id})["editor_id"]
 
         # 5. Edit a couple of fields through the cfg-editor session.
-        rpc.call("editor.set_field", {"editor_id": editor_id, "path": "rounds", "value": 30})
-        rpc.call("editor.set_field", {"editor_id": editor_id, "path": "reps", "value": 50})
+        rpc.call(
+            "editor.set_field", {"editor_id": editor_id, "path": "rounds", "value": 30}
+        )
+        rpc.call(
+            "editor.set_field", {"editor_id": editor_id, "path": "reps", "value": 50}
+        )
         log("edited reps/rounds")
 
         # 6. Start the run, then read live progress at least once.

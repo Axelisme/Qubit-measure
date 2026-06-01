@@ -8,7 +8,6 @@ import pytest
 from zcu_tools.gui.services.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.services.remote.errors import ErrorCode, RemoteError
 
-
 from ._helpers import dispatch_handler as _dispatch  # noqa: E402
 
 

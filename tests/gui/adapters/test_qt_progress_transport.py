@@ -12,7 +12,6 @@ def test_emit_from_worker_thread_delivers_on_main_thread(qapp):
 
     from qtpy.QtCore import QThread  # type: ignore[attr-defined]
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-
     from zcu_tools.gui.adapters.qt_progress_transport import QtProgressTransport
     from zcu_tools.gui.services.ports import ProgressEvent, ProgressEventKind
 
