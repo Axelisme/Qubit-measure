@@ -80,7 +80,9 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 # v12: added adapter.guide — read an adapter's human-facing orientation guide
 #      (behavior / expects_md / expects_ml / typical_writeback / recommended)
 #      before running it. New method = contract change.
-WIRE_VERSION = 12
+# v13: added app.shutdown — gracefully close the GUI via its normal window-close
+#      path (no OS kill); new method = contract change.
+WIRE_VERSION = 13
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -102,7 +104,10 @@ WIRE_VERSION = 12
 #     mcp folds the description into connect replies.
 # v9: adapter.guide RPC (WIRE 12) — adapters carry a static AdapterGuide; GUI adds
 #     a read-only "Guide" tab beside Config/Analysis.
-GUI_VERSION = 9
+# v10: app.shutdown RPC (WIRE 13) — MainWindow.request_shutdown drives the normal
+#     close path (persist/teardown) without the device-setup modal; close logic
+#     factored into _perform_close shared with closeEvent.
+GUI_VERSION = 10
 
 # ---------------------------------------------------------------------------
 # Wire envelopes

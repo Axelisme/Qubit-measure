@@ -1049,6 +1049,19 @@ def _h_dialog_list_open(
     return {"open": open_names}
 
 
+def _h_app_shutdown(
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
+) -> Mapping[str, object]:
+    # Graceful close: trigger the window's normal close path (persist session,
+    # tear down remote, cleanup) on the main thread. request_shutdown defers the
+    # actual close to the next event-loop turn so this reply is sent before the
+    # remote service tears down. No kill / OS signal — that path is the agent's
+    # cross-platform-safe way to stop the GUI.
+    del params
+    _render_view(adapter).request_shutdown()
+    return {"shutting_down": True}
+
+
 def _h_view_snapshot(
     adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -1580,6 +1593,7 @@ _HANDLERS: dict[str, Handler] = {
     "adapter.guide": _h_adapter_guide,
     "dialog.open": _h_dialog_open,
     "dialog.close": _h_dialog_close,
+    "app.shutdown": _h_app_shutdown,
     "dialog.list_open": _h_dialog_list_open,
     "dialog.screenshot": _h_dialog_screenshot,
     "view.snapshot": _h_view_snapshot,

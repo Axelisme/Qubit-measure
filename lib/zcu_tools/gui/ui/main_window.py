@@ -1341,6 +1341,43 @@ class MainWindow(QMainWindow):
             )
         return bytes(buf.data().data())  # type: ignore[arg-type]
 
+    def request_shutdown(self) -> None:
+        """Programmatic close (the app.shutdown RPC). Runs on the Qt main thread
+        via the remote dispatch marshal. Does the same work as a user's
+        window-close — persist session, tear down remote, quit — but without the
+        interactive device-setup prompt (no user to answer it): a running setup
+        is cancelled and the close proceeds once it stops.
+
+        Deferred to the next event-loop turn so the triggering RPC's reply is
+        written back before the remote service tears down (else the agent's
+        app.shutdown would race the socket teardown). It drives _perform_close
+        directly rather than self.close(), so it never enters closeEvent's modal
+        branch."""
+        from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
+
+        active_setup = self._ctrl.get_active_device_setup()
+        if active_setup is not None:
+            self._shutdown_waiting_for_device_setup = True
+            self._ctrl.cancel_device_operation(active_setup.device_name)
+            return  # _on_bus_device_setup_finished resumes the close
+        QTimer.singleShot(0, self._perform_close)
+
+    def _perform_close(self, a0: Optional[QCloseEvent] = None) -> None:
+        """The actual teardown: persist session, stop remote, accept the close.
+        Shared by closeEvent (a user window-close) and request_shutdown (RPC)."""
+        self._ctrl.persist_tabs_session()
+        set_shutting_down(True)
+        # Tear down remote control before the Qt main loop exits so any in-flight
+        # RPC sees a clean shutdown (timeout / EPIPE) rather than a dead Controller.
+        remote = getattr(self, "remote_control_service", None)
+        if remote is not None:
+            remote.stop()
+            self.remote_control_service = None
+        if a0 is not None:
+            super().closeEvent(a0)
+        else:
+            self.close()
+
     def closeEvent(self, a0: Optional[QCloseEvent]) -> None:
         active_setup = self._ctrl.get_active_device_setup()
         if active_setup is not None:
@@ -1365,12 +1402,4 @@ class MainWindow(QMainWindow):
             self._ctrl.cancel_device_operation(active_setup.device_name)
             a0.ignore()
             return
-        self._ctrl.persist_tabs_session()
-        set_shutting_down(True)
-        # Tear down remote control before the Qt main loop exits so any in-flight
-        # RPC sees a clean shutdown (timeout / EPIPE) rather than a dead Controller.
-        remote = getattr(self, "remote_control_service", None)
-        if remote is not None:
-            remote.stop()
-            self.remote_control_service = None
-        super().closeEvent(a0)
+        self._perform_close(a0)

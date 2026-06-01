@@ -229,6 +229,19 @@ def test_dialog_open_close_via_remote(fx):
         sock.close()
 
 
+def test_app_shutdown_triggers_request_shutdown(fx):
+    """app.shutdown drives the View's request_shutdown (the graceful window-close
+    path) rather than any OS kill."""
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "app.shutdown", {})
+        assert resp["ok"] is True
+        assert resp["result"]["shutting_down"] is True
+        assert fx.view.request_shutdown.called
+    finally:
+        sock.close()
+
+
 def test_dialog_open_unknown_name_rejected(fx):
     sock = open_client(fx.service.port)
     try:

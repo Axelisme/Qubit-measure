@@ -412,6 +412,13 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0, "Close a named dialog", (_str("name", "Dialog name"),)
     ),
     "dialog.list_open": MethodSpec(5.0, "List open dialogs"),
+    "app.shutdown": MethodSpec(
+        5.0,
+        "Gracefully close the GUI: runs the normal window-close path (persist "
+        "session, disconnect devices, cleanup) — the same as a user closing the "
+        "window. Returns immediately; the close happens just after. No OS kill. "
+        "Prefer this over gui_stop's force path to stop a GUI cleanly.",
+    ),
     "dialog.screenshot": MethodSpec(
         10.0,
         "Capture a named dialog as base64 PNG",

@@ -33,7 +33,7 @@ import traceback
 from collections import deque
 from pathlib import Path
 from tempfile import gettempdir
-from typing import Any, Callable, Deque, Dict, List, Optional
+from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
 
 # This bridge is launched standalone (``python .../mcp_server.py``), so the repo
 # ``lib`` dir is not on sys.path by default. Add it so the wire-contract modules
@@ -93,7 +93,12 @@ from zcu_tools.gui.services.remote.wire import (  # noqa: E402
 #      per-qubit roots (<cwd>/result|Database/<chip>/<qub>) so the project is
 #      runnable, instead of leaving a DRAFT context. Handler-side default only;
 #      wire contract unchanged.
-MCP_VERSION = 10
+# v11: gui_launch uses sys.executable (cross-platform, was hardcoded
+#      .venv/bin/python) + Windows process-group flag; gui_stop closes via the
+#      app.shutdown RPC (graceful, no OS kill) and only force-kills when
+#      timeout_kill=true (replaces the old 'force' SIGKILL param). gui_app_shutdown
+#      tool rides WIRE 13.
+MCP_VERSION = 11
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -280,6 +285,39 @@ _GUI_PID_FILE = Path(gettempdir()) / "zcu_tools_gui.pid"
 # DEBUG log for GUIs we launch (OS temp dir, not the repo). gui_launch points
 # run_gui.py here so an agent can read the server-side event flow for debugging.
 _GUI_LOG_FILE = Path(gettempdir()) / "zcu_tools_gui_debug.log"
+
+
+def _pid_alive(pid: int) -> bool:
+    """Cross-platform 'is this pid still running?'.
+
+    POSIX: ``os.kill(pid, 0)`` raises ProcessLookupError when gone. Windows has
+    no signal 0, so probe via the process handle (OpenProcess + exit code)."""
+    if os.name == "nt":
+        import ctypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        handle = ctypes.windll.kernel32.OpenProcess(  # type: ignore[attr-defined]
+            PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+        )
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if not ctypes.windll.kernel32.GetExitCodeProcess(  # type: ignore[attr-defined]
+                handle, ctypes.byref(code)
+            ):
+                return False
+            return code.value == STILL_ACTIVE
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # exists but not signalable (e.g. permissions)
 
 
 def _write_pid_file(pid: int) -> None:
@@ -650,7 +688,12 @@ def tool_gui_launch(arguments: Dict[str, Any]) -> str:
     repo_root = Path(__file__).parents[
         5
     ]  # lib/zcu_tools/gui/services/remote -> repo root
-    python = repo_root / ".venv" / "bin" / "python"
+    # Use this MCP server's own interpreter to spawn the GUI: it is the venv
+    # Python (with the 'gui' extra) that 'uv run' launched the bridge under, so
+    # the GUI child has the same dependencies. This is also cross-platform —
+    # avoids the hardcoded '.venv/bin/python' that does not exist on Windows
+    # (which uses '.venv\Scripts\python.exe').
+    python = sys.executable
     run_gui = repo_root / "run_gui.py"
 
     if not run_gui.exists():
@@ -683,13 +726,25 @@ def tool_gui_launch(arguments: Dict[str, Any]) -> str:
     if token:
         cmd += ["--control-token", token]
 
-    _GUI_PROC = subprocess.Popen(
-        cmd,
-        cwd=str(repo_root),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        start_new_session=True,
-    )
+    # Detach the GUI into its own process group/session so a signal to the MCP
+    # bridge does not propagate to it. start_new_session is POSIX-only; Windows
+    # uses CREATE_NEW_PROCESS_GROUP.
+    if os.name == "nt":
+        _GUI_PROC = subprocess.Popen(
+            cmd,
+            cwd=str(repo_root),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,  # type: ignore[attr-defined]
+        )
+    else:
+        _GUI_PROC = subprocess.Popen(
+            cmd,
+            cwd=str(repo_root),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
     _write_pid_file(_GUI_PROC.pid)
 
     # Wait until the port is listening (up to 15 s). Each iteration first checks
@@ -734,51 +789,86 @@ def tool_gui_launch(arguments: Dict[str, Any]) -> str:
     return f"GUI launched (pid={pid}) and listening on port {port}." + log_note
 
 
+def _pid_for_stop() -> Tuple[Optional[int], Optional[subprocess.Popen]]:
+    """The GUI pid (+ Popen if this process owns it) to stop, or (None, None)."""
+    proc = _GUI_PROC
+    if proc is not None and proc.poll() is None:
+        return proc.pid, proc
+    # Fallback: recover pid from file (handles cross-session restarts).
+    return _read_pid_file(), None
+
+
+def _await_exit(pid: int, proc: Optional[subprocess.Popen], timeout: float) -> bool:
+    """Block up to ``timeout`` for the GUI to exit; True if it did."""
+    if proc is not None:
+        try:
+            proc.wait(timeout=timeout)
+            return True
+        except subprocess.TimeoutExpired:
+            return False
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not _pid_alive(pid):
+            return True
+        time.sleep(0.2)
+    return False
+
+
 def tool_gui_stop(arguments: Dict[str, Any]) -> str:
     global _GUI_PROC
+    pid, proc = _pid_for_stop()
+    if pid is None:
+        _GUI_PROC = None
+        tool_gui_disconnect({})
+        return "No GUI process managed by this MCP server."
+
+    timeout = float(arguments.get("timeout", 10.0))
+    timeout_kill = bool(arguments.get("timeout_kill", False))
+
+    # Graceful close over the existing RPC channel — runs the GUI's normal
+    # window-close path (persist session, disconnect devices, cleanup) on its
+    # main thread, with no OS signal. This is cross-platform (no SIGKILL /
+    # process-group handling). Send BEFORE disconnecting the socket the RPC
+    # travels on.
+    try:
+        send_gui_rpc("app.shutdown", {})
+    except Exception as exc:
+        # stderr is safe (stdout is the JSON-RPC channel); proceed to await/kill.
+        sys.stderr.write(f"gui_stop: app.shutdown RPC failed: {exc!r}\n")
+
+    exited = _await_exit(pid, proc, timeout)
     tool_gui_disconnect({})
 
-    proc = _GUI_PROC
-    pid: Optional[int] = None
-
-    if proc is not None and proc.poll() is None:
-        pid = proc.pid
-    else:
-        # Fallback: recover pid from file (handles cross-session restarts).
-        pid = _read_pid_file()
-        if pid is None:
-            _GUI_PROC = None
-            return "No GUI process managed by this MCP server."
-        proc = None  # no Popen object available
-
-    force = bool(arguments.get("force", False))
-    sig = (
-        signal.SIGKILL
-        if force
-        else (signal.SIGTERM if hasattr(signal, "SIGTERM") else signal.SIGINT)
-    )
-    try:
-        os.kill(pid, sig)
-        if proc is not None:
-            try:
-                proc.wait(timeout=8.0)
-            except subprocess.TimeoutExpired:
+    if not exited and timeout_kill:
+        # Opt-in fallback: the GUI did not close gracefully in time. terminate()
+        # / kill() are cross-platform (POSIX SIGTERM/SIGKILL, Windows
+        # TerminateProcess). pid-only path uses os.kill (SIGTERM both platforms;
+        # SIGKILL POSIX-only).
+        try:
+            if proc is not None:
                 proc.kill()
-                proc.wait()
-        else:
-            deadline = time.monotonic() + 8.0
-            while time.monotonic() < deadline:
-                try:
-                    os.kill(pid, 0)
-                    time.sleep(0.3)
-                except ProcessLookupError:
-                    break
-    except ProcessLookupError:
-        pass
+                proc.wait(timeout=5.0)
+            else:
+                sig = signal.SIGKILL if hasattr(signal, "SIGKILL") else signal.SIGTERM
+                os.kill(pid, sig)
+        except (ProcessLookupError, OSError, subprocess.TimeoutExpired):
+            pass
+        _GUI_PROC = None
+        _clear_pid_file()
+        return f"GUI process (pid={pid}) force-killed after graceful close timed out."
+
+    if not exited:
+        # Left running on purpose (no timeout_kill). Do not clear our handle —
+        # a later gui_stop can retry.
+        return (
+            f"app.shutdown sent but GUI (pid={pid}) has not exited within "
+            f"{timeout:.0f}s. It may be finishing cleanup, or stuck. Re-run "
+            f"gui_stop, or pass timeout_kill=true to force-kill on timeout."
+        )
 
     _GUI_PROC = None
     _clear_pid_file()
-    return f"GUI process (pid={pid}) stopped."
+    return f"GUI process (pid={pid}) closed gracefully."
 
 
 # ---------------------------------------------------------------------------
@@ -1364,16 +1454,27 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
     "gui_stop": {
         "handler": tool_gui_stop,
         "description": (
-            "Stop the GUI subprocess that was started by gui_launch, "
-            "and disconnect the MCP socket."
+            "Stop the GUI started by gui_launch, then disconnect the MCP socket. "
+            "Closes gracefully via the app.shutdown RPC (the GUI's normal "
+            "window-close: persist session, disconnect devices, cleanup) — no OS "
+            "kill, cross-platform. Waits up to 'timeout' s for it to exit. If it "
+            "does not and timeout_kill=false (default), reports it still running "
+            "(re-run to retry); timeout_kill=true force-kills on timeout."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "force": {
+                "timeout": {
+                    "type": "number",
+                    "description": "Seconds to wait for graceful exit (default 10)",
+                },
+                "timeout_kill": {
                     "type": "boolean",
-                    "description": "Send SIGKILL instead of SIGTERM (default false)",
-                }
+                    "description": (
+                        "Force-kill the process if it has not exited within "
+                        "'timeout' (default false — leave it running and report)"
+                    ),
+                },
             },
         },
     },
@@ -1863,7 +1964,9 @@ TOOLS: Dict[str, Dict[str, Any]] = _assemble_tools()
 def _cleanup_on_exit() -> None:
     """Stop the GUI process when the MCP host disconnects (stdin EOF)."""
     try:
-        tool_gui_stop({"force": False})
+        # Best-effort graceful close on host disconnect; force-kill on timeout so
+        # we don't leak a GUI process when the bridge goes away.
+        tool_gui_stop({"timeout_kill": True})
     except Exception:
         pass
 
