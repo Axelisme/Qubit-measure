@@ -309,14 +309,22 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "startup.apply": MethodSpec(
         30.0,
         "Set the project: chip / qubit / resonator names, plus optional "
-        "result_dir and database_path. Omit result_dir to leave the context in "
-        "DRAFT (editable but not runnable); set it to enable runs/saves.",
+        "result_dir and database_path. Omit them to use the default per-qubit "
+        "roots (<cwd>/result/<chip>/<qub> and <cwd>/Database/<chip>/<qub>, the "
+        "same the setup dialog pre-fills) — the project is runnable either way. "
+        "Pass explicit paths to override.",
         (
             _str("chip_name"),
             _str("qub_name"),
             _str("res_name"),
-            _str_opt("result_dir", "Result directory; omit → DRAFT context"),
-            _str_opt("database_path", "Database path; optional"),
+            _str_opt(
+                "result_dir",
+                "Result directory; omit → default <cwd>/result/<chip>/<qub>",
+            ),
+            _str_opt(
+                "database_path",
+                "Database path; omit → default <cwd>/Database/<chip>/<qub>",
+            ),
         ),
     ),
     # Device

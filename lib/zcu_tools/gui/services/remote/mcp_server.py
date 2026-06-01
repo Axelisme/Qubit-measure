@@ -85,7 +85,15 @@ from zcu_tools.gui.services.remote.wire import (  # noqa: E402
 #     WIRE_VERSION stays put.
 # v8: adapter.guide generated tool (gui_adapter_guide) rides the WIRE 12 bump —
 #     read an adapter's orientation guide before running it.
-MCP_VERSION = 8
+# v9: removed gui_connect_mock — agent now walks the same startup path as a GUI
+#     user (gui_connect_start kind=mock + gui_startup_apply + gui_context_use),
+#     eliminating the mock-only shortcut that diverged (caused a save-path bug).
+#     Pure mcp-side tool removal; no wire change (WIRE stays 12).
+# v10: startup.apply omitting result_dir/database_path now fills the default
+#      per-qubit roots (<cwd>/result|Database/<chip>/<qub>) so the project is
+#      runnable, instead of leaving a DRAFT context. Handler-side default only;
+#      wire contract unchanged.
+MCP_VERSION = 10
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -94,10 +102,18 @@ MCP_VERSION = 8
 _SERVER_INSTRUCTIONS = """\
 Drive a live qubit-measure GUI over a TCP control socket.
 
-Getting started:
-  1. gui_launch (auto-connects). For offline/testing use gui_connect_mock to
-     start a mock SoC + default project + active context in one call.
-  2. gui_state_check — all four flags (has_project / has_context /
+Getting started (same path a GUI user takes — no mock shortcut):
+  1. gui_launch (auto-connects).
+  2. gui_connect_start(kind='mock') for offline/testing (or kind='remote',
+     ip, port for hardware) — the same connect the user picks via the setup
+     dialog's "Use MockSoc" checkbox. It short-wait degrades; gui_connect_wait
+     if it returns pending.
+  3. gui_startup_apply(chip_name, qub_name, res_name[, result_dir,
+     database_path]) — applies the project; omitting result_dir/database_path
+     scopes them under chip/qub per the notebook layout.
+  4. gui_context_use(label) to activate an existing context, or
+     gui_context_new(value, unit) to create one.
+  5. gui_state_check — all four flags (has_project / has_context /
      has_active_context / has_soc) should be true before running experiments.
 
 Typical experiment loop:
@@ -765,62 +781,6 @@ def tool_gui_stop(arguments: Dict[str, Any]) -> str:
     return f"GUI process (pid={pid}) stopped."
 
 
-def tool_gui_connect_mock(arguments: Dict[str, Any]) -> str:
-    # Convenience wrapper around connect.start + startup.apply + context setup.
-    # chip/qub/res and the directories are optional; sensible defaults are used
-    # when omitted.
-    repo_root = Path.cwd()
-    chip = str(arguments.get("chip_name") or "Q1_Chip")
-    qub = str(arguments.get("qub_name") or "Q1")
-    res = str(arguments.get("res_name") or "R1")
-    result_dir = str(arguments.get("result_dir") or (repo_root / "result"))
-    db_path = str(arguments.get("database_path") or (repo_root / "Database"))
-
-    # 1. connect.start
-    send_gui_rpc("connect.start", {"kind": "mock"})
-
-    # 2. Apply startup project parameters.
-    send_gui_rpc(
-        "startup.apply",
-        {
-            "chip_name": chip,
-            "qub_name": qub,
-            "res_name": res,
-            "result_dir": result_dir,
-            "database_path": db_path,
-        },
-    )
-
-    # 3. Wait for has_soc to become true
-    connected = False
-    for _ in range(50):
-        time.sleep(0.1)
-        check = send_gui_rpc("state.has_soc", {})
-        if check.get("value", False):
-            connected = True
-            break
-
-    if not connected:
-        raise RuntimeError("Mock SOC failed to connect within timeout.")
-
-    # 4. Check context labels and use first one, or create new
-    labels_res = send_gui_rpc("context.labels", {})
-    labels = labels_res.get("labels", [])
-    if labels:
-        send_gui_rpc("context.use", {"label": labels[0]})
-        active_label = labels[0]
-    else:
-        send_gui_rpc("context.new", {"value": 1.0, "unit": "A"})
-        active_res = send_gui_rpc("context.active", {})
-        active_label = active_res.get("label", "new")
-
-    soc_desc = send_gui_rpc("soc.info", {}).get("description", "")
-    return (
-        f"Mock SOC connected and startup applied. Active context set to: "
-        f"{active_label!r}\n\n{soc_desc}"
-    )
-
-
 # ---------------------------------------------------------------------------
 # Workflow tools (thin pass-through wrappers)
 # ---------------------------------------------------------------------------
@@ -1417,28 +1377,6 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
-    "gui_connect_mock": {
-        "handler": tool_gui_connect_mock,
-        "description": (
-            "One-shot setup for testing/offline use: starts a Mock FPGA SoC "
-            "(connect.start kind=mock), applies project startup parameters, waits "
-            "for the SoC to be ready, then activates the first existing context "
-            "(or creates one at 1.0 A). chip_name/qub_name/res_name/result_dir/"
-            "database_path are optional (defaults Q1_Chip/Q1/R1 + ./result + "
-            "./Database). For finer control call gui_connect_start + "
-            "gui_startup_apply directly. Requires gui_connect first."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "chip_name": {"type": "string"},
-                "qub_name": {"type": "string"},
-                "res_name": {"type": "string"},
-                "result_dir": {"type": "string"},
-                "database_path": {"type": "string"},
-            },
-        },
-    },
     "gui_state_check": {
         "handler": tool_gui_state_check,
         "description": (
@@ -1872,7 +1810,6 @@ _OVERRIDE_NAMES = frozenset(
         "gui_disconnect",
         "gui_launch",
         "gui_stop",
-        "gui_connect_mock",
         "gui_device_connect",
         "gui_device_disconnect",
         "gui_device_setup",

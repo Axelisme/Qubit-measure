@@ -33,7 +33,7 @@ user first**, and you **must respect device safety limits**.
 - **Read the board first with `gui_soc_info`** (after connect). It returns the
   QICK soccfg: a human-readable `description` plus structured `cfg` — DAC/ADC
   **channel count, sample rates (`fs`), DDS frequency ranges, tile layout**.
-  `gui_connect_mock` / `gui_connect_start` also fold this description into their
+  `gui_connect_start` / `gui_connect_wait` also fold this description into their
   reply. This is the hardware you *can* see in software.
 - **Ask the user for what soccfg does NOT tell you** (the wiring/physics):
   - Which DAC/ADC **channels** are wired to the readout transmission line, and
@@ -70,11 +70,15 @@ This is the path you use when asked to "drive measure-gui". The MCP server
 auto-launches the GUI; you call tools.
 
 ```
-gui_launch                       # spawns the GUI, connects; banner shows the
-                                 # handshake: "wire vN (mcp==gui); gui code vX, mcp code vY"
-gui_connect_mock                 # one-shot: mock SoC + project + active context
-gui_state_check                  # all four flags must be true before running
-gui_soc_info                     # the board: channels, sample rates, freq ranges
+gui_launch                                      # spawns the GUI, connects; banner shows the
+                                                # handshake: "wire vN (mcp==gui); gui code vX, mcp code vY"
+# Same startup path a GUI user takes (no mock shortcut):
+gui_connect_start(kind="mock")                  # mock SoC (or kind="remote", ip, port for hardware)
+gui_startup_apply(chip_name="Q1_Chip",          # apply the project; omit result_dir/database_path
+                  qub_name="Q1", res_name="R1")  # to scope them under chip/qub (notebook layout)
+gui_context_new(value=1.0, unit="A")            # create a context (or gui_context_use(label) for an existing one)
+gui_state_check                                 # all four flags must be true before running
+gui_soc_info                                    # the board: channels, sample rates, freq ranges
 ```
 
 Then the experiment loop (per tab):
@@ -238,7 +242,7 @@ hardware) — the smoke harness uses it.
 | `gui_launch` → `Port 8765 is already in use` | A previous GUI is still running on the port; `gui_stop` it (or kill the stale `run_gui.py`), then relaunch — or launch on another port. |
 | `gui_connect` → `No GUI is listening on 127.0.0.1:8765` | Nothing running there; `gui_launch` first (connect only re-attaches to a running GUI). |
 | `precondition_failed: ... is busy` on save/edit | The tab is still running/analyzing; wait for the operation to finish first. |
-| `precondition_failed` on run/save with no busy tab | Missing active file-backed context or no run result yet — `gui_state_check`, then `gui_connect_mock` (or set up a context). |
+| `precondition_failed` on run/save with no busy tab | Missing active file-backed context or no run result yet — `gui_state_check`, then `gui_startup_apply` + `gui_context_new`/`gui_context_use` if a context is missing. |
 | `invalid_params` on `gui_editor_set_field` | Path wrong (often a stray `value` segment); re-check `gui_tab_list_paths`. |
 | `Could not locate a VISA implementation` | Real device driver with no VISA backend; use `FakeDevice` or install `pyvisa-py`. |
 | GUI never renders / launch times out | No X display; set `DISPLAY` or run under `xvfb-run -a`. |

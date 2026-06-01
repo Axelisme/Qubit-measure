@@ -642,17 +642,35 @@ def _h_connect_start(
 def _h_startup_apply(
     adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    # Params are ParamSpec-validated; result_dir/database_path are optional and
-    # default to "" (empty result_dir leaves the context in DRAFT — editable but
-    # not runnable until a result_dir is set).
-    from zcu_tools.gui.services.startup import StartupProjectRequest
+    # result_dir / database_path are optional. When omitted, the RPC fills the
+    # default per-qubit roots via derive_project_paths(chip, qub, cwd) — the same
+    # paths the setup dialog pre-fills when a user types the chip/qub names — so
+    # an agent gets a runnable project without having to know the chip/qub path
+    # layout. (The setup dialog keeps its own empty-result_dir = DRAFT path for
+    # interactive use; this agent-facing entry intentionally defaults to runnable
+    # rather than DRAFT.)
+    import os
+
+    from zcu_tools.gui.services.startup import (
+        StartupProjectRequest,
+        derive_project_paths,
+    )
+
+    chip = str(params["chip_name"])
+    qub = str(params["qub_name"])
+    result_dir = str(params["result_dir"] or "")
+    database_path = str(params["database_path"] or "")
+    if not result_dir or not database_path:
+        default_result, default_db = derive_project_paths(chip, qub, os.getcwd())
+        result_dir = result_dir or default_result
+        database_path = database_path or default_db
 
     req = StartupProjectRequest(
-        chip_name=str(params["chip_name"]),
-        qub_name=str(params["qub_name"]),
+        chip_name=chip,
+        qub_name=qub,
         res_name=str(params["res_name"]),
-        result_dir=str(params["result_dir"] or ""),
-        database_path=str(params["database_path"] or ""),
+        result_dir=result_dir,
+        database_path=database_path,
     )
     ok = adapter.ctrl.apply_startup_project(req)
     return {"ok": bool(ok)}

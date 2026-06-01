@@ -293,12 +293,14 @@ class SetupDialog(QDialog):
             self._port_spin.setValue(data.port)
 
     def _on_names_changed(self) -> None:
+        from zcu_tools.gui.services.startup import derive_project_paths
+
         chip = self._chip_edit.text().strip()
         qub = self._qub_edit.text().strip()
         if chip and qub:
-            cwd = os.getcwd()
-            self._result_dir_edit.setText(os.path.join(cwd, "result", chip, qub))
-            self._db_path_edit.setText(os.path.join(cwd, "Database", chip, qub))
+            result_dir, database_path = derive_project_paths(chip, qub, os.getcwd())
+            self._result_dir_edit.setText(result_dir)
+            self._db_path_edit.setText(database_path)
 
     def _on_browse_dir(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "Select result directory")

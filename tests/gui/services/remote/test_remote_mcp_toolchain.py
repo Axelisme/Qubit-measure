@@ -581,7 +581,13 @@ def test_batch_tools_reject_malformed_items_before_any_rpc(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_startup_apply_optional_dirs_default_to_empty(fx):
+def test_startup_apply_optional_dirs_default_to_scoped_roots(fx):
+    """Omitting result_dir/database_path fills the default per-qubit roots
+    (<cwd>/result/<chip>/<qub>) via the RPC — so an agent gets a runnable
+    project without knowing the path layout (the setup dialog pre-fills the
+    same; this agent entry defaults to runnable, not DRAFT)."""
+    import os
+
     captured = {}
 
     def _apply(req):
@@ -599,8 +605,9 @@ def test_startup_apply_optional_dirs_default_to_empty(fx):
         assert resp["ok"] is True
         req = captured["req"]
         assert req.chip_name == "C"
-        assert req.result_dir == ""  # omitted -> empty (DRAFT context)
-        assert req.database_path == ""
+        cwd = os.getcwd()
+        assert req.result_dir == os.path.join(cwd, "result", "C", "Q")
+        assert req.database_path == os.path.join(cwd, "Database", "C", "Q")
     finally:
         sock.close()
 

@@ -24,6 +24,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def derive_project_paths(chip_name: str, qub_name: str, root: str) -> tuple[str, str]:
+    """Single source of truth for the default per-qubit result / database roots.
+
+    Returns ``(result_dir, database_path)`` scoped under ``chip_name/qub_name``
+    (mirroring single_qubit.md: ``result/chip/qub`` + ``Database/chip/qub``).
+    Both the setup dialog and the mock-startup helper derive paths through here
+    so the chip/qub segment is joined in exactly ONE place — ``apply_project``
+    must not re-scope. ``root`` is the base dir (e.g. cwd or the repo root)."""
+    result_dir = os.path.join(root, "result", chip_name, qub_name)
+    database_path = os.path.join(root, "Database", chip_name, qub_name)
+    return result_dir, database_path
+
+
 @dataclass(frozen=True)
 class StartupProjectRequest:
     chip_name: str
@@ -87,25 +100,21 @@ class StartupService:
         return self._persistence.load()
 
     def apply_project(self, req: StartupProjectRequest) -> None:
-        # Scope result_dir / database_path under chip_name/qub_name so that data
-        # and images land in the same per-qubit tree the notebook flow uses
-        # (single_qubit.md: result_dir = result/chip/qub, database_path =
-        # create_datafolder(.., name=chip/qub)) rather than the bare roots the
-        # user types. Persistence below stores the raw user roots (not the
-        # scoped paths) so a restore re-derives the scope once, never twice.
-        scoped_result_dir = self._scope_to_qubit(req.result_dir, req)
-        scoped_database_path = self._scope_to_qubit(req.database_path, req)
+        # result_dir / database_path arrive already scoped under chip/qub by the
+        # caller (UI derives them via derive_project_paths; mock uses the same
+        # helper). apply_project does NOT re-scope — that would double the
+        # chip/qub segment.
         self._context.set_startup_context(
             MetaDict(),
             ModuleLibrary(),
             req.chip_name,
             req.qub_name,
             req.res_name,
-            scoped_result_dir,
-            scoped_database_path,
+            req.result_dir,
+            req.database_path,
         )
-        if scoped_result_dir:
-            self._context.setup_project(scoped_result_dir)
+        if req.result_dir:
+            self._context.setup_project(req.result_dir)
         self._persistence.update_project(
             chip_name=req.chip_name,
             qub_name=req.qub_name,
@@ -113,13 +122,6 @@ class StartupService:
             result_dir=req.result_dir,
             database_path=req.database_path,
         )
-
-    @staticmethod
-    def _scope_to_qubit(root: str, req: StartupProjectRequest) -> str:
-        """Append chip_name/qub_name to a root path (empty root stays empty)."""
-        if not root:
-            return root
-        return os.path.join(root, req.chip_name, req.qub_name)
 
     def remember_connection(self, req: StartupConnectionRequest) -> None:
         self._persistence.update_connection(ip=req.ip, port=req.port)

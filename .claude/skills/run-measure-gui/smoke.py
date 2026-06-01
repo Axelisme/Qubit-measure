@@ -92,7 +92,8 @@ def main() -> int:
             raise RuntimeError("control port never came up")
         rpc = Rpc(sock)
 
-        # 2. Mock SoC + project + context (mirrors gui_connect_mock).
+        # 2. Mock SoC + project + context — the same RPC path a GUI user takes
+        #    (connect.start + startup.apply + context), no mock-only shortcut.
         rpc.call("connect.start", {"kind": "mock"})
         rpc.call(
             "startup.apply",

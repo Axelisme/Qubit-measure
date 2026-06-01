@@ -28,14 +28,17 @@ def _make_service() -> tuple[StartupService, MagicMock, MagicMock, MagicMock]:
     return svc, context, devices, persistence
 
 
-def test_apply_project_scopes_paths_under_chip_qubit_and_persists_raw() -> None:
+def test_apply_project_passes_paths_through_without_rescoping() -> None:
+    """apply_project does NOT scope under chip/qub — the caller (derive_project_
+    paths) already did. It must pass result_dir/database_path through verbatim,
+    else the chip/qub segment would be doubled."""
     svc, context, _, persistence = _make_service()
-    req = StartupProjectRequest("chip", "qubit", "res", "/tmp/result", "/tmp/db")
+    req = StartupProjectRequest(
+        "chip", "qubit", "res", "/tmp/result/chip/qubit", "/tmp/db/chip/qubit"
+    )
 
     svc.apply_project(req)
 
-    # context + io get the chip/qubit-scoped paths (so data/images land in the
-    # per-qubit tree, matching the notebook flow).
     args = context.set_startup_context.call_args.args
     assert isinstance(args[0], MetaDict)
     assert isinstance(args[1], ModuleLibrary)
@@ -47,27 +50,31 @@ def test_apply_project_scopes_paths_under_chip_qubit_and_persists_raw() -> None:
         "/tmp/db/chip/qubit",
     )
     context.setup_project.assert_called_once_with("/tmp/result/chip/qubit")
-    # persistence stores the RAW user roots, not the scoped paths — so a restore
-    # re-derives the scope exactly once, never doubling it.
     persistence.update_project.assert_called_once_with(
         chip_name="chip",
         qub_name="qubit",
         res_name="res",
-        result_dir="/tmp/result",
-        database_path="/tmp/db",
+        result_dir="/tmp/result/chip/qubit",
+        database_path="/tmp/db/chip/qubit",
     )
 
 
-def test_apply_project_empty_roots_stay_empty() -> None:
-    """An empty result_dir/database_path (DRAFT context) is not scoped."""
+def test_apply_project_empty_result_dir_skips_setup_project() -> None:
+    """An empty result_dir (DRAFT context) does not trigger setup_project."""
     svc, context, _, _ = _make_service()
     req = StartupProjectRequest("chip", "qubit", "res", "", "")
 
     svc.apply_project(req)
 
-    args = context.set_startup_context.call_args.args
-    assert args[5:] == ("", "")
     context.setup_project.assert_not_called()
+
+
+def test_derive_project_paths_scopes_under_chip_qubit() -> None:
+    from zcu_tools.gui.services.startup import derive_project_paths
+
+    result_dir, database_path = derive_project_paths("Q5_2D", "Q1", "/root")
+    assert result_dir == "/root/result/Q5_2D/Q1"
+    assert database_path == "/root/Database/Q5_2D/Q1"
 
 
 def test_restore_devices_registers_memory_only_entries() -> None:
