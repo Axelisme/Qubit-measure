@@ -47,6 +47,7 @@ qiskit-metal/
 *.csv
 *.log
 *.json
+!.mcp.json
 *.npz
 
 # Jupytext generated files
