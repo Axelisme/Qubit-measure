@@ -58,7 +58,9 @@ from zcu_tools.gui.services.remote.wire import (  # noqa: E402
 # This MCP server's own code revision — reported (not compared) in the version
 # note so an agent can confirm a reconnect picked up its bridge-side edits. Bump
 # on a meaningful mcp_server change you want to be able to spot a reload of.
-MCP_VERSION = 1
+# v2: piggyback/diagnostic-split + default-subscribe now includes run_started /
+#     run_finished (was run_lock_changed).
+MCP_VERSION = 2
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
