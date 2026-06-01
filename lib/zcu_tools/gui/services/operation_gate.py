@@ -94,6 +94,9 @@ class _OperationExclusion:
     def has_active(self, kind: OperationKind) -> bool:
         return any(lease.kind is kind for lease in self._active.values())
 
+    def active_count(self) -> int:
+        return len(self._active)
+
     def is_device_mutating(self, name: str) -> bool:
         return any(
             lease.kind in _DEVICE_MUTATIONS and lease.resource_id == name
@@ -278,6 +281,11 @@ class OperationGate:
 
     def has_active(self, kind: OperationKind) -> bool:
         return self._exclusion.has_active(kind)
+
+    def active_count(self) -> int:
+        """How many operations are live (any kind) — used by shutdown to decide
+        whether closing will interrupt work."""
+        return self._exclusion.active_count()
 
     def is_device_mutating(self, name: str) -> bool:
         return self._exclusion.is_device_mutating(name)

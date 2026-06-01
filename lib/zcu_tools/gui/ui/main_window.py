@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any, Optional
 from zcu_tools.gui.adapter import CfgSchema
 from zcu_tools.gui.event_bus import (
     ContextSwitchedPayload,
-    DeviceSetupFinishedPayload,
     GuiEvent,
     MlChangedPayload,
     PredictorChangedPayload,
@@ -646,7 +645,10 @@ class MainWindow(QMainWindow):
         # tracked through this dict (the legacy ``_inspect_dialog`` attribute
         # is gone — there is now exactly one entry point).
         self._open_dialogs: dict[DialogName, "QDialog"] = {}
-        self._shutdown_waiting_for_device_setup = False
+        # True once _perform_close has begun the actual teardown, so the second
+        # closeEvent (triggered by _perform_close's self.close()) passes straight
+        # through instead of re-entering the cancel-and-wait coordination.
+        self._closing = False
 
         self.setWindowTitle("ZCU Qubit Measure — v2 GUI")
         self.resize(1280, 750)
@@ -719,9 +721,6 @@ class MainWindow(QMainWindow):
         bus.subscribe(GuiEvent.TAB_CONTENT_CHANGED, self._on_bus_tab_content_changed)
         bus.subscribe(GuiEvent.PREDICTOR_CHANGED, self._on_bus_predictor_changed)
         bus.subscribe(GuiEvent.SOC_CHANGED, self._on_bus_soc_changed)
-        bus.subscribe(
-            GuiEvent.DEVICE_SETUP_FINISHED, self._on_bus_device_setup_finished
-        )
 
         # Cleanup on destroy
         self.destroyed.connect(self._cleanup_bus_subscriptions)
@@ -740,9 +739,6 @@ class MainWindow(QMainWindow):
         bus.unsubscribe(GuiEvent.TAB_CONTENT_CHANGED, self._on_bus_tab_content_changed)
         bus.unsubscribe(GuiEvent.PREDICTOR_CHANGED, self._on_bus_predictor_changed)
         bus.unsubscribe(GuiEvent.SOC_CHANGED, self._on_bus_soc_changed)
-        bus.unsubscribe(
-            GuiEvent.DEVICE_SETUP_FINISHED, self._on_bus_device_setup_finished
-        )
 
     def _on_bus_tab_interaction_changed(
         self, payload: TabInteractionChangedPayload
@@ -758,14 +754,6 @@ class MainWindow(QMainWindow):
     def _on_bus_run_finished(self, payload: RunFinishedPayload) -> None:
         # Run lock released.
         self.refresh_run_lock(None)
-
-    def _on_bus_device_setup_finished(
-        self, payload: DeviceSetupFinishedPayload
-    ) -> None:
-        del payload
-        # The setup we were holding shutdown for has reached a terminal state.
-        if self._shutdown_waiting_for_device_setup:
-            QTimer.singleShot(0, self.close)
 
     def _on_bus_context_switched(self, payload: ContextSwitchedPayload) -> None:
         del payload
@@ -1344,27 +1332,23 @@ class MainWindow(QMainWindow):
     def request_shutdown(self) -> None:
         """Programmatic close (the app.shutdown RPC). Runs on the Qt main thread
         via the remote dispatch marshal. Does the same work as a user's
-        window-close — persist session, tear down remote, quit — but without the
-        interactive device-setup prompt (no user to answer it): a running setup
-        is cancelled and the close proceeds once it stops.
+        window-close — cancel every live operation, wait for them to stop,
+        persist session, tear down remote, quit — but without the interactive
+        confirmation (no user to answer it).
 
-        Deferred to the next event-loop turn so the triggering RPC's reply is
-        written back before the remote service tears down (else the agent's
-        app.shutdown would race the socket teardown). It drives _perform_close
-        directly rather than self.close(), so it never enters closeEvent's modal
-        branch."""
+        The cancel-and-wait is deferred to the next event-loop turn so the
+        triggering RPC's reply is written back before the remote service tears
+        down (else the agent's app.shutdown would race the socket teardown)."""
         from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
 
-        active_setup = self._ctrl.get_active_device_setup()
-        if active_setup is not None:
-            self._shutdown_waiting_for_device_setup = True
-            self._ctrl.cancel_device_operation(active_setup.device_name)
-            return  # _on_bus_device_setup_finished resumes the close
-        QTimer.singleShot(0, self._perform_close)
+        QTimer.singleShot(0, lambda: self._ctrl.begin_shutdown(self._perform_close))
 
     def _perform_close(self, a0: Optional[QCloseEvent] = None) -> None:
         """The actual teardown: persist session, stop remote, accept the close.
-        Shared by closeEvent (a user window-close) and request_shutdown (RPC)."""
+        Runs once every cancelled operation has settled (or timed out), driven by
+        the Controller's shutdown coordinator. Shared by closeEvent (user) and
+        request_shutdown (RPC)."""
+        self._closing = True
         self._ctrl.persist_tabs_session()
         set_shutting_down(True)
         # Tear down remote control before the Qt main loop exits so any in-flight
@@ -1379,27 +1363,33 @@ class MainWindow(QMainWindow):
             self.close()
 
     def closeEvent(self, a0: Optional[QCloseEvent]) -> None:
-        active_setup = self._ctrl.get_active_device_setup()
-        if active_setup is not None:
+        # Second pass: _perform_close → self.close() re-enters here once teardown
+        # has begun; accept it straight through.
+        if self._closing:
+            if a0 is not None:
+                super().closeEvent(a0)
+            return
+        # A user window-close cancels every live operation, then closes once they
+        # stop (or a timeout forces it). Confirm first if work is in progress —
+        # closing will interrupt it. The wait is asynchronous, so ignore this
+        # event now; the coordinator drives _perform_close when ready.
+        active = self._ctrl.active_operation_count()
+        if active > 0:
             if a0 is None:
-                return
-            if self._shutdown_waiting_for_device_setup:
-                a0.ignore()
                 return
             from qtpy.QtWidgets import QMessageBox
 
             answer = QMessageBox.question(
                 self,
-                "Device setup is running",
-                "Cancel the active device setup and close after it stops?",
+                "Operations in progress",
+                f"Cancel {active} operation(s) in progress and close once they stop?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
             if answer != QMessageBox.StandardButton.Yes:
                 a0.ignore()
                 return
-            self._shutdown_waiting_for_device_setup = True
-            self._ctrl.cancel_device_operation(active_setup.device_name)
             a0.ignore()
-            return
-        self._perform_close(a0)
+        elif a0 is not None:
+            a0.ignore()
+        self._ctrl.begin_shutdown(self._perform_close)

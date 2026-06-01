@@ -52,6 +52,7 @@ from .services.remote.dialogs import DialogName
 from .state import State
 
 if TYPE_CHECKING:
+    from .adapters.qt_shutdown_driver import QtShutdownDriver
     from .pbar_host import ProgressBarModel
     from .services.ports import ProgressTransport
 
@@ -181,6 +182,10 @@ class Controller:
         self._workspace_svc = services.workspace
         self._startup_svc = services.startup
         self._cfg_editor_svc = services.cfg_editor
+        # Lazily built on first begin_shutdown so the Controller stays importable
+        # without a Qt event loop (tests construct a bare Controller). The driver
+        # is a Qt adapter owning the QTimer that pumps the Qt-free coordinator.
+        self._shutdown_driver: Optional["QtShutdownDriver"] = None
 
         self._run_svc.run_finished.connect(self._on_run_finished)
         self._run_svc.run_failed.connect(self._on_run_failed)
@@ -410,6 +415,30 @@ class Controller:
 
     def cancel_run(self) -> None:
         self._run_svc.cancel_run()
+
+    # ------------------------------------------------------------------
+    # Shutdown coordination (cancel-all + wait, ADR-0014)
+    # ------------------------------------------------------------------
+
+    def active_operation_count(self) -> int:
+        """How many operations (run / device / connect) are live right now.
+
+        The View reads this before closing to decide whether to confirm with the
+        user (a non-zero count means closing will cancel work in progress)."""
+        return self._operation_gate.active_count()
+
+    def begin_shutdown(self, on_closed: Callable[[], None]) -> None:
+        """Cancel every live operation, wait (with a timeout) for them to stop,
+        then run ``on_closed`` — the View's actual teardown.
+
+        Qt-free façade: the QTimer-driven coordinator lives in a driving adapter
+        (ADR-0008), built lazily here so the Controller stays importable without
+        a Qt loop. ``on_closed`` always runs on the main thread."""
+        if self._shutdown_driver is None:
+            from .adapters.qt_shutdown_driver import QtShutdownDriver
+
+            self._shutdown_driver = QtShutdownDriver(self._operation_gate)
+        self._shutdown_driver.begin(on_closed)
 
     def get_run_progress(self) -> tuple:
         return self._run_svc.get_run_progress()

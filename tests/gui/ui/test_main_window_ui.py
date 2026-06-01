@@ -402,15 +402,19 @@ def test_exp_tab_tears_down_cfg_editor_on_unbind(qapp):
     assert tab._cfg_editor_id is None
 
 
-def test_main_window_cancel_setup_before_closing(qapp, monkeypatch):
+def test_main_window_confirms_and_begins_shutdown_when_operations_active(
+    qapp, monkeypatch
+):
+    """User close with work in progress: confirm, then begin_shutdown (which
+    cancels-all and waits). The event is ignored now; the coordinator drives the
+    real close later."""
     from qtpy.QtGui import QCloseEvent
     from qtpy.QtWidgets import QMessageBox
-    from zcu_tools.gui.services.device import DeviceSetupSnapshot
     from zcu_tools.gui.ui.main_window import MainWindow
 
     ctrl = MagicMock()
     ctrl.get_bus.return_value = EventBus()
-    ctrl.get_active_device_setup.return_value = DeviceSetupSnapshot(device_name="flux")
+    ctrl.active_operation_count.return_value = 2
     monkeypatch.setattr(
         QMessageBox,
         "question",
@@ -421,18 +425,44 @@ def test_main_window_cancel_setup_before_closing(qapp, monkeypatch):
 
     window.closeEvent(event)
 
+    assert event.isAccepted() is False  # async wait — not closed yet
+    ctrl.begin_shutdown.assert_called_once_with(window._perform_close)
+
+
+def test_main_window_declining_confirmation_keeps_window_open(qapp, monkeypatch):
+    from qtpy.QtGui import QCloseEvent
+    from qtpy.QtWidgets import QMessageBox
+    from zcu_tools.gui.ui.main_window import MainWindow
+
+    ctrl = MagicMock()
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.active_operation_count.return_value = 1
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.No,
+    )
+    window = MainWindow(ctrl)
+    event = QCloseEvent()
+
+    window.closeEvent(event)
+
     assert event.isAccepted() is False
-    assert window._shutdown_waiting_for_device_setup is True
-    ctrl.cancel_device_operation.assert_called_once_with("flux")
+    ctrl.begin_shutdown.assert_not_called()
 
 
 def test_main_window_persists_session_on_close_when_idle(qapp):
+    """Idle close: no confirmation; begin_shutdown settles immediately and runs
+    _perform_close, which persists the session."""
     from qtpy.QtGui import QCloseEvent
     from zcu_tools.gui.ui.main_window import MainWindow
 
     ctrl = MagicMock()
     ctrl.get_bus.return_value = EventBus()
-    ctrl.get_active_device_setup.return_value = None
+    ctrl.active_operation_count.return_value = 0
+    # The real coordinator runs on_closed once nothing is pending; here drive it
+    # synchronously so the test exercises _perform_close.
+    ctrl.begin_shutdown.side_effect = lambda on_closed: on_closed()
     window = MainWindow(ctrl)
     event = QCloseEvent()
 
