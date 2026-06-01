@@ -70,6 +70,25 @@ class AdapterCapabilities:
     supports_analysis: bool = True
 
 
+@dataclass(frozen=True)
+class AdapterGuide:
+    """Human-facing orientation for an adapter — read *before* running it.
+
+    Prose, not a contract: it helps an agent/user grasp the experiment's
+    behaviour and the adapter's built-in recommendations at a glance, but how
+    they actually use it is their call. Written in present tense at the
+    intent level (e.g. "assumes the resonator frequency is already calibrated"),
+    NOT as a literal md-key list or concrete numbers — those would rot against
+    the imperative ``md_get_*`` reads / default values they describe.
+    """
+
+    behavior: str  # what this experiment measures and roughly how it runs
+    expects_md: str  # what it assumes is already in the MetaDict (intent level)
+    expects_ml: str  # what it assumes is in the ModuleLibrary
+    typical_writeback: str  # what a completed run tends to propose writing back
+    recommended: str  # recommended analysis settings + typical usage (when/why)
+
+
 class ContextReadiness(Enum):
     """Lifecycle readiness for operations that need a persisted context."""
 

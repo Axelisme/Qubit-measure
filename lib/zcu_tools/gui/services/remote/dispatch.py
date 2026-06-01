@@ -862,6 +862,15 @@ def _h_adapter_analyze_spec(
     return {"params": adapter.ctrl.get_adapter_analyze_params(name)}
 
 
+def _h_adapter_guide(
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
+) -> Mapping[str, object]:
+    name = str(params["adapter_name"])
+    if name not in adapter.ctrl.get_adapter_names():
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown adapter: {name!r}")
+    return {"guide": adapter.ctrl.get_adapter_guide(name)}
+
+
 def _h_device_list(
     adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -1550,6 +1559,7 @@ _HANDLERS: dict[str, Handler] = {
     "adapter.list": _h_adapter_list,
     "adapter.cfg_spec": _h_adapter_cfg_spec,
     "adapter.analyze_spec": _h_adapter_analyze_spec,
+    "adapter.guide": _h_adapter_guide,
     "dialog.open": _h_dialog_open,
     "dialog.close": _h_dialog_close,
     "dialog.list_open": _h_dialog_list_open,

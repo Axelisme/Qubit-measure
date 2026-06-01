@@ -961,3 +961,7 @@ class Controller:
     def get_adapter_analyze_params(self, adapter_name: str) -> list[dict]:
         """Static analyze-params field spec of an adapter ([] if unsupported)."""
         return self._tab_svc.adapter_analyze_params(adapter_name)
+
+    def get_adapter_guide(self, adapter_name: str) -> dict:
+        """Static human-facing orientation guide of an adapter (no tab needed)."""
+        return self._tab_svc.adapter_guide(adapter_name)

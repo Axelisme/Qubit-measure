@@ -7,6 +7,7 @@ from typing_extensions import Any, ClassVar, Generic, Sequence
 
 from zcu_tools.gui.adapter import (
     AdapterCapabilities,
+    AdapterGuide,
     AnalyzeRequest,
     CfgSchema,
     CfgSectionSpec,
@@ -64,6 +65,21 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         The spec is the structural contract (field names, types, choices) and
         must not read any context. Default *values* live in make_default_value.
         """
+
+    @classmethod
+    def guide(cls) -> AdapterGuide:
+        """Static human-facing orientation guide. Override per adapter.
+
+        Honest default: an adapter that has not written one says so plainly
+        (Fast-Fail spirit — surface the gap, do not fake content).
+        """
+        return AdapterGuide(
+            behavior="(no guide written yet)",
+            expects_md="",
+            expects_ml="",
+            typical_writeback="",
+            recommended="",
+        )
 
     @abstractmethod
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:

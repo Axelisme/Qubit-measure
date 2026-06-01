@@ -386,6 +386,16 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "Returns empty params when the adapter has no analysis.",
         (_str("adapter_name", "Adapter to introspect"),),
     ),
+    "adapter.guide": MethodSpec(
+        5.0,
+        "Read an adapter's human-facing orientation guide BEFORE running it: "
+        "prose (not a contract) on {behavior, expects_md, expects_ml, "
+        "typical_writeback, recommended} — what the experiment measures, what it "
+        "assumes is already in the MetaDict/ModuleLibrary, what a run tends to "
+        "write back, and recommended analysis settings. How you actually use it "
+        "is your call. Empty fields mean the adapter has no guide written yet.",
+        (_str("adapter_name", "Adapter to introspect"),),
+    ),
     # Dialog / view
     "dialog.open": MethodSpec(
         10.0, "Open a named dialog", (_str("name", "Dialog name"),)

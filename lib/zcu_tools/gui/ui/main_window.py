@@ -270,6 +270,21 @@ class ExpTabWidget(QWidget):
         analysis_scroll.setWidget(analysis_inner)
         self._left_tabs.addTab(analysis_scroll, "Analysis")
 
+        # ── Tab 2: Guide ─────────────────────────────────────────────────
+        # Read-only orientation for this adapter (behavior / expects / writeback
+        # / recommended). Static content — filled once at tab creation from the
+        # adapter's AdapterGuide; no subscription/refresh needed.
+        guide_scroll = QScrollArea()
+        guide_scroll.setWidgetResizable(True)
+        guide_label = QLabel()
+        guide_label.setWordWrap(True)
+        guide_label.setTextFormat(Qt.RichText)  # type: ignore[attr-defined]
+        guide_label.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
+        guide_label.setContentsMargins(8, 8, 8, 8)
+        guide_label.setText(self._render_guide_html())
+        guide_scroll.setWidget(guide_label)
+        self._left_tabs.addTab(guide_scroll, "Guide")
+
         splitter.addWidget(self._left_tabs)
 
         # ── Right pane: Plot ─────────────────────────────────────────────
@@ -299,6 +314,33 @@ class ExpTabWidget(QWidget):
         super().resizeEvent(a0)
         self._fix_splitter_on_resize()
         self._schedule_handle_layout()
+
+    def _render_guide_html(self) -> str:
+        """Render this adapter's static AdapterGuide as read-only rich text.
+
+        Pulled once at construction from the adapter (no tab/context needed).
+        Empty sections are dropped; a guide with no content at all falls back to
+        an honest 'not written yet' line.
+        """
+        import html
+
+        adapter_name = self._ctrl.get_tab_adapter_name(self.tab_id)
+        guide = self._ctrl.get_adapter_guide(adapter_name)
+        sections = [
+            ("Behavior", guide.get("behavior", "")),
+            ("Expects (MetaDict)", guide.get("expects_md", "")),
+            ("Expects (ModuleLibrary)", guide.get("expects_ml", "")),
+            ("Typical writeback", guide.get("typical_writeback", "")),
+            ("Recommended", guide.get("recommended", "")),
+        ]
+        parts = [
+            f"<p><b>{title}</b><br>{html.escape(body)}</p>"
+            for title, body in sections
+            if body
+        ]
+        if not parts:
+            return "<p><i>No guide written for this adapter yet.</i></p>"
+        return "".join(parts)
 
     def _fix_splitter_on_resize(self) -> None:
         if self._left_panel_collapsed:

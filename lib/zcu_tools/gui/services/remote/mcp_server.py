@@ -83,7 +83,9 @@ from zcu_tools.gui.services.remote.wire import (  # noqa: E402
 #     bridge-side fan-out over the existing editor.set_field / context.set_md_attr
 #     RPCs (fail-fast, set_fields returns the whole draft cfg). No wire change, so
 #     WIRE_VERSION stays put.
-MCP_VERSION = 7
+# v8: adapter.guide generated tool (gui_adapter_guide) rides the WIRE 12 bump —
+#     read an adapter's orientation guide before running it.
+MCP_VERSION = 8
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)

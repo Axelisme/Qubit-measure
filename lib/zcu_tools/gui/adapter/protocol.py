@@ -4,6 +4,7 @@ from typing_extensions import Any, ClassVar, Protocol, Sequence, runtime_checkab
 
 from .types import (
     AdapterCapabilities,
+    AdapterGuide,
     AnalyzeRequest,
     CfgSchema,
     CfgSectionSpec,
@@ -50,6 +51,11 @@ class ExpAdapterProtocol(Protocol):
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:
         """Return the static cfg spec tree (no context, no instance state)."""
+        ...
+
+    @classmethod
+    def guide(cls) -> AdapterGuide:
+        """Return the static human-facing orientation guide (no instance state)."""
         ...
 
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:

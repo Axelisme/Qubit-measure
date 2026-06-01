@@ -77,7 +77,10 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 #      device.setup_progress).
 # v11: added soc.info — read the connected SoC's QICK soccfg (human-readable
 #      description + structured cfg: DAC/ADC channels, sample rates, freq ranges).
-WIRE_VERSION = 11
+# v12: added adapter.guide — read an adapter's human-facing orientation guide
+#      (behavior / expects_md / expects_ml / typical_writeback / recommended)
+#      before running it. New method = contract change.
+WIRE_VERSION = 12
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -97,7 +100,9 @@ WIRE_VERSION = 11
 #     rebuild a ProgressModel; Views attach by owner_id. Wire shape unchanged.
 # v8: soc.info RPC (WIRE 11) — expose the connected SoC's soccfg to the agent;
 #     mcp folds the description into connect replies.
-GUI_VERSION = 8
+# v9: adapter.guide RPC (WIRE 12) — adapters carry a static AdapterGuide; GUI adds
+#     a read-only "Guide" tab beside Config/Analysis.
+GUI_VERSION = 9
 
 # ---------------------------------------------------------------------------
 # Wire envelopes

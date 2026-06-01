@@ -72,6 +72,12 @@ class TabService:
             return []
         return describe_analyze_params(adapter.analyze_params_cls())
 
+    def adapter_guide(self, adapter_name: str) -> dict:
+        """Static human-facing orientation guide of an adapter (five fields)."""
+        import dataclasses
+
+        return dataclasses.asdict(self._registry.create(adapter_name).guide())
+
     def close_tab(self, tab_id: str) -> None:
         logger.info("close_tab: tab_id=%r", tab_id)
         self._state.remove_tab(tab_id)

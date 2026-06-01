@@ -690,3 +690,52 @@ def test_adapter_analyze_spec_empty_for_no_analysis(fx):
         assert resp["result"]["params"] == []
     finally:
         sock.close()
+
+
+def test_adapter_guide_returns_five_fields(fx):
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "adapter.guide", {"adapter_name": "fake/freq"})
+        assert resp["ok"] is True
+        guide = resp["result"]["guide"]
+        assert set(guide) == {
+            "behavior",
+            "expects_md",
+            "expects_ml",
+            "typical_writeback",
+            "recommended",
+        }
+        # fake/freq overrides the guide — every field is non-empty prose.
+        assert all(isinstance(v, str) and v for v in guide.values())
+        assert "simulated" in guide["behavior"].lower()
+        # expects_md names the concrete md keys it reads (orientation, not a
+        # contract — but the guide is supposed to surface real key names).
+        assert "r_f" in guide["expects_md"]
+        assert "res_ch" in guide["expects_md"]
+        assert "ro_waveform" in guide["expects_ml"]
+    finally:
+        sock.close()
+
+
+def test_adapter_guide_unknown_rejected(fx):
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "adapter.guide", {"adapter_name": "nope/nope"})
+        assert resp["ok"] is False
+        assert resp["error"]["code"] == "invalid_params"
+    finally:
+        sock.close()
+
+
+def test_adapter_guide_empty_when_not_written(fx):
+    # onetone/power_dep does not override guide(), so it inherits BaseAdapter's
+    # honest default — behavior says "not written yet", other fields empty.
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "adapter.guide", {"adapter_name": "onetone/power_dep"})
+        assert resp["ok"] is True
+        guide = resp["result"]["guide"]
+        assert guide["behavior"] == "(no guide written yet)"
+        assert guide["expects_md"] == ""
+    finally:
+        sock.close()
