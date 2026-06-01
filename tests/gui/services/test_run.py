@@ -136,28 +136,44 @@ def test_run_failed_emits_outcome_failed_with_message():
     assert payload.error_message == "boom"
 
 
-def test_cancelled_run_reports_cancelled_via_finished_path():
-    # Worker may return a partial result after a cancel; outcome must be cancelled.
+def test_cancel_run_sets_operation_stop_event():
+    # cancel_run is async-notification: it sets the operation's stop_event via
+    # the gate. The worker then self-judges and drives _on_run_cancelled.
     state, tab_id, adapter = _make_state()
-    svc, _gate, _runner = _make_run_service(state)
-    svc.start_run(_make_permit(state, tab_id, adapter))
+    svc, gate, _runner = _make_run_service(state)
+    token = svc.start_run(_make_permit(state, tab_id, adapter))
 
-    svc.cancel_run()  # records tab via state.running_tab_id
-    svc._on_run_finished(tab_id, object())
-
-    payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
-    assert payload.outcome == "cancelled"
-
-
-def test_cancelled_run_reports_cancelled_via_failed_path():
-    # Worker may raise after a cancel; outcome must still be cancelled (no error).
-    state, tab_id, adapter = _make_state()
-    svc, _gate, _runner = _make_run_service(state)
-    svc.start_run(_make_permit(state, tab_id, adapter))
-
+    assert gate.poll(token) is None  # still pending before cancel
     svc.cancel_run()
-    svc._on_run_failed(tab_id, RuntimeError("interrupted"))
+    # The stop_event is set, but the operation only settles when the worker
+    # self-judges and the terminal handler releases the lease.
+    assert gate.has_active(OperationKind.RUN)
+
+
+def test_run_cancelled_with_partial_result_reports_cancelled_and_keeps_result():
+    state, tab_id, adapter = _make_state()
+    svc, _gate, _runner = _make_run_service(state)
+    svc.start_run(_make_permit(state, tab_id, adapter))
+
+    partial = object()
+    svc._on_run_cancelled(tab_id, partial)
 
     payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "cancelled"
-    assert payload.error_message is None
+    assert state.get_tab(tab_id).run_result is partial
+    assert not state.is_tab_running(tab_id)
+
+
+def test_run_cancelled_without_result_reports_cancelled_and_keeps_no_result():
+    from zcu_tools.gui.runner import NO_RESULT
+
+    state, tab_id, adapter = _make_state()
+    svc, _gate, _runner = _make_run_service(state)
+    svc.start_run(_make_permit(state, tab_id, adapter))
+
+    svc._on_run_cancelled(tab_id, NO_RESULT)
+
+    payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    assert payload.outcome == "cancelled"
+    assert state.get_tab(tab_id).run_result is None
+    assert not state.is_tab_running(tab_id)

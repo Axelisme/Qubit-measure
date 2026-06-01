@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import TYPE_CHECKING, Any, Optional, Tuple
 
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
+
+from zcu_tools.gui.runner import NO_RESULT
 
 from zcu_tools.gui.event_bus import (
     GuiEvent,
@@ -54,12 +57,10 @@ class RunService(QObject):
         self._writeback = writeback
         self._progress = progress
         self._active_lease: Optional[OperationLease] = None
-        # Tabs whose current run was explicitly cancelled, so the terminal
-        # handler can report outcome='cancelled' instead of finished/failed.
-        self._cancel_requested_tabs: set[str] = set()
 
         self._runner.run_finished.connect(self._on_run_finished)
         self._runner.run_failed.connect(self._on_run_failed)
+        self._runner.run_cancelled.connect(self._on_run_cancelled)
 
     def start_run(
         self,
@@ -77,10 +78,14 @@ class RunService(QObject):
         logger.info("start_run: tab_id=%r", tab_id)
 
         # Symmetric release: this lease is released exactly-once on the terminal
-        # path — _on_run_finished / _on_run_failed → _release_lease (covers
-        # success / failure / cancel). A pre-worker failure releases in the
-        # except below.
-        lease = self._gate.acquire(OperationKind.RUN, owner_id=tab_id)
+        # path — _on_run_finished / _on_run_failed / _on_run_cancelled →
+        # _release_lease. A pre-worker failure releases in the except below.
+        # The stop_event is created here (single owner) and passed to both the
+        # gate (which sets it on cancel) and the worker (which polls/self-judges).
+        stop_event = threading.Event()
+        lease = self._gate.acquire(
+            OperationKind.RUN, owner_id=tab_id, stop_event=stop_event
+        )
         self._active_lease = lease
         # Progress factory is bound to this operation (owner = tab_id) only after
         # the lease is minted; the worker gets it via the pbar ContextVar.
@@ -91,6 +96,7 @@ class RunService(QObject):
                 permit.adapter,
                 permit.request,
                 permit.schema,
+                stop_event,
                 pbar_factory=pbar_factory,
                 figure_container=live_container,
             )
@@ -119,12 +125,12 @@ class RunService(QObject):
 
     def cancel_run(self) -> None:
         logger.info("cancel_run")
-        # Record the running tab so the terminal handler reports 'cancelled'
-        # regardless of whether the worker returns a partial result or raises.
-        running = self._state.running_tab_id
-        if running is not None:
-            self._cancel_requested_tabs.add(running)
-        self._runner.cancel()
+        # Async notification: set the operation's stop_event via the gate and
+        # return. The worker self-judges 'cancelled' (stop_event set) and emits
+        # run_cancelled — no external "who I cancelled" bookkeeping needed.
+        lease = self._active_lease
+        if lease is not None:
+            self._gate.cancel(lease.token)
 
     def _on_run_finished(self, tab_id: str, result: Any) -> None:
         logger.info(
@@ -135,45 +141,53 @@ class RunService(QObject):
         self._writeback.teardown_tab_items(tab_id)
         self._state.update_tab_result(tab_id, result)
         self._state.set_tab_running(tab_id, False)
-        was_cancelled = tab_id in self._cancel_requested_tabs
-        self._release_lease(
-            OperationOutcome("cancelled" if was_cancelled else "finished")
-        )
+        self._release_lease(OperationOutcome("finished"))
         self._bus.emit(
             GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
-        self._cancel_requested_tabs.discard(tab_id)
         self._bus.emit(
             GuiEvent.RUN_FINISHED,
-            RunFinishedPayload(
-                tab_id=tab_id,
-                outcome="cancelled" if was_cancelled else "finished",
-            ),
+            RunFinishedPayload(tab_id=tab_id, outcome="finished"),
         )
         self.run_finished.emit(tab_id, result)
+
+    def _on_run_cancelled(self, tab_id: str, result: Any) -> None:
+        logger.info("_on_run_cancelled: tab_id=%r", tab_id)
+        # A cancelled run may still carry a partial result (the worker returned
+        # before the stop_event tripped a hard interrupt); keep it if present.
+        if result is not NO_RESULT:
+            self._writeback.teardown_tab_items(tab_id)
+            self._state.update_tab_result(tab_id, result)
+        self._state.set_tab_running(tab_id, False)
+        self._release_lease(OperationOutcome("cancelled"))
+        self._bus.emit(
+            GuiEvent.TAB_INTERACTION_CHANGED,
+            TabInteractionChangedPayload(tab_id=tab_id),
+        )
+        self._bus.emit(
+            GuiEvent.RUN_FINISHED,
+            RunFinishedPayload(tab_id=tab_id, outcome="cancelled"),
+        )
+        # A cancelled run is reported to View listeners via run_finished only if
+        # it produced a usable result; otherwise it leaves no result to consume.
+        if result is not NO_RESULT:
+            self.run_finished.emit(tab_id, result)
 
     def _on_run_failed(self, tab_id: str, error: Exception) -> None:
         logger.warning("_on_run_failed: tab_id=%r error=%r", tab_id, error)
         self._state.set_tab_running(tab_id, False)
-        was_cancelled = tab_id in self._cancel_requested_tabs
-        self._release_lease(
-            OperationOutcome(
-                "cancelled" if was_cancelled else "failed",
-                None if was_cancelled else str(error),
-            )
-        )
+        self._release_lease(OperationOutcome("failed", str(error)))
         self._bus.emit(
             GuiEvent.TAB_INTERACTION_CHANGED,
             TabInteractionChangedPayload(tab_id=tab_id),
         )
-        self._cancel_requested_tabs.discard(tab_id)
         self._bus.emit(
             GuiEvent.RUN_FINISHED,
             RunFinishedPayload(
                 tab_id=tab_id,
-                outcome="cancelled" if was_cancelled else "failed",
-                error_message=None if was_cancelled else str(error),
+                outcome="failed",
+                error_message=str(error),
             ),
         )
         self.run_failed.emit(tab_id, error)

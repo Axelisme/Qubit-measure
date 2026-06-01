@@ -22,18 +22,20 @@ from .plot_routing import routing_scope
 logger = logging.getLogger(__name__)
 
 AdapterHandle = ExpAdapterProtocol
-_NO_RESULT = object()
+NO_RESULT = object()
 
 
 class RunWorker(QThread):
     run_finished: Signal = Signal(object)
     run_failed: Signal = Signal(object)
+    run_cancelled: Signal = Signal(object)  # partial result, or NO_RESULT
 
     def __init__(
         self,
         adapter: AdapterHandle,
         req: RunRequest,
         schema: CfgSchema,
+        stop_event: threading.Event,
         pbar_factory: Optional[Callable[..., Any]] = None,
         figure_container: Optional[FigureContainer] = None,
         parent: Optional[QObject] = None,
@@ -44,8 +46,10 @@ class RunWorker(QThread):
         self._schema = schema
         self._pbar_factory = pbar_factory
         self._figure_container = figure_container
-        self._stop_event = threading.Event()
-        self._result: object = _NO_RESULT
+        # The cancellation flag is owned by RunService and passed in, so the same
+        # handle is registered with the OperationGate (which sets it on cancel).
+        self._stop_event = stop_event
+        self._result: object = NO_RESULT
         self._error: Optional[Exception] = None
         self.finished.connect(self._emit_outcome)
 
@@ -67,16 +71,18 @@ class RunWorker(QThread):
             self._error = exc
 
     def _emit_outcome(self) -> None:
-        if self._error is not None:
+        # Self-judge cancellation first: a cancelled run either raises (the task
+        # interrupted itself on the stop_event) or returns a partial result —
+        # both read as 'cancelled' once the stop_event is set, so the worker
+        # reports it directly instead of the service tracking "who I cancelled".
+        if self._stop_event.is_set():
+            self.run_cancelled.emit(self._result)
+        elif self._error is not None:
             self.run_failed.emit(self._error)
-        elif self._result is not _NO_RESULT:
+        elif self._result is not NO_RESULT:
             self.run_finished.emit(self._result)
         else:
             raise RuntimeError("RunWorker stopped without an outcome")
-
-    def cancel(self) -> None:
-        logger.debug("RunWorker.cancel: setting stop event")
-        self._stop_event.set()
 
 
 class AnalyzeWorker(QThread):
@@ -94,7 +100,7 @@ class AnalyzeWorker(QThread):
         self._adapter = adapter
         self._req = req
         self._figure_container = figure_container
-        self._result: object = _NO_RESULT
+        self._result: object = NO_RESULT
         self._error: Optional[Exception] = None
         self.finished.connect(self._emit_outcome)
 
@@ -116,7 +122,7 @@ class AnalyzeWorker(QThread):
     def _emit_outcome(self) -> None:
         if self._error is not None:
             self.analyze_failed.emit(self._error)
-        elif self._result is not _NO_RESULT:
+        elif self._result is not NO_RESULT:
             self.analyze_finished.emit(self._result)
         else:
             raise RuntimeError("AnalyzeWorker stopped without an outcome")
@@ -162,10 +168,17 @@ class SaveDataWorker(QThread):
 
 
 class Runner(QObject):
-    """Manages a single RunWorker; forwards its signals with the tab_id attached."""
+    """Manages a single RunWorker; forwards its signals with the tab_id attached.
+
+    Cancellation flows through the stop_event the RunService owns and passes to
+    ``start_run`` (and to the OperationGate); the Runner never sets it. The
+    worker self-judges cancelled (stop_event set) and emits ``run_cancelled``
+    with whatever partial result it has, which the Runner forwards.
+    """
 
     run_finished: Signal = Signal(str, object)
     run_failed: Signal = Signal(str, object)
+    run_cancelled: Signal = Signal(str, object)
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -182,6 +195,7 @@ class Runner(QObject):
         adapter: AdapterHandle,
         req: RunRequest,
         schema: CfgSchema,
+        stop_event: threading.Event,
         pbar_factory: Optional[Callable[..., Any]] = None,
         figure_container: Optional[FigureContainer] = None,
     ) -> None:
@@ -197,6 +211,7 @@ class Runner(QObject):
             adapter,
             req,
             schema,
+            stop_event,
             pbar_factory,
             figure_container,
             parent=self,
@@ -204,31 +219,32 @@ class Runner(QObject):
         worker.finished.connect(worker.deleteLater)
         worker.run_finished.connect(self._on_worker_finished)
         worker.run_failed.connect(self._on_worker_failed)
+        worker.run_cancelled.connect(self._on_worker_cancelled)
         self._worker = worker
         worker.start()
 
-    def cancel(self) -> None:
-        if self._worker is not None:
-            logger.debug("Runner.cancel: requesting stop")
-            self._worker.cancel()
-
     def _on_worker_finished(self, result: Any) -> None:
-        if self._active_tab_id is None:
-            raise RuntimeError("RunWorker finished without an active tab id")
-        tab_id = self._active_tab_id
+        tab_id = self._take_active_tab_id("finished")
         logger.debug("Runner._on_worker_finished: tab_id=%r", tab_id)
-        self._worker = None
-        self._active_tab_id = None
         self.run_finished.emit(tab_id, result)
 
     def _on_worker_failed(self, exc: Exception) -> None:
-        if self._active_tab_id is None:
-            raise RuntimeError("RunWorker failed without an active tab id")
-        tab_id = self._active_tab_id
+        tab_id = self._take_active_tab_id("failed")
         logger.warning("Runner._on_worker_failed: tab_id=%r exc=%r", tab_id, exc)
+        self.run_failed.emit(tab_id, exc)
+
+    def _on_worker_cancelled(self, result: Any) -> None:
+        tab_id = self._take_active_tab_id("cancelled")
+        logger.debug("Runner._on_worker_cancelled: tab_id=%r", tab_id)
+        self.run_cancelled.emit(tab_id, result)
+
+    def _take_active_tab_id(self, terminal: str) -> str:
+        if self._active_tab_id is None:
+            raise RuntimeError(f"RunWorker {terminal} without an active tab id")
+        tab_id = self._active_tab_id
         self._worker = None
         self._active_tab_id = None
-        self.run_failed.emit(tab_id, exc)
+        return tab_id
 
 
 class AnalyzeRunner(QObject):

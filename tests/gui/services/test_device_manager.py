@@ -8,6 +8,7 @@ GlobalDeviceManager registry).
 
 from __future__ import annotations
 
+import threading
 from unittest.mock import MagicMock
 
 import pytest
@@ -61,7 +62,9 @@ def _connect(svc: DeviceService) -> None:
 def test_device_setup_worker_success(qapp):
     dev = MagicMock()
     dev.get_info.return_value = FakeDeviceInfo(address="none")
-    worker = _DeviceSetupWorker(dev, "test_dev", FakeDeviceInfo(address="none"), None)
+    worker = _DeviceSetupWorker(
+        dev, "test_dev", FakeDeviceInfo(address="none"), None, threading.Event()
+    )
     loop = QEventLoop()
     completed: list[bool] = []
     worker.setup_finished.connect(
@@ -78,7 +81,9 @@ def test_device_setup_worker_success(qapp):
 def test_device_setup_worker_failure(qapp):
     dev = MagicMock()
     dev.setup.side_effect = RuntimeError("setup failed")
-    worker = _DeviceSetupWorker(dev, "test_dev", FakeDeviceInfo(address="none"), None)
+    worker = _DeviceSetupWorker(
+        dev, "test_dev", FakeDeviceInfo(address="none"), None, threading.Event()
+    )
     loop = QEventLoop()
     errors: list[str] = []
     worker.failed.connect(lambda _name, error: errors.append(error) or loop.quit())
@@ -90,16 +95,21 @@ def test_device_setup_worker_failure(qapp):
 
 
 def test_device_setup_worker_cancel(qapp):
+    """Setting the stop_event the worker was handed makes it self-judge
+    'cancelled' (the worker has no cancel() — the owner sets the flag)."""
     dev = MagicMock()
     dev.get_info.return_value = FakeDeviceInfo(address="none")
     dev.setup.side_effect = lambda _info, stop_event: stop_event.wait(0.1)
-    worker = _DeviceSetupWorker(dev, "test_dev", FakeDeviceInfo(address="none"), None)
+    stop_event = threading.Event()
+    worker = _DeviceSetupWorker(
+        dev, "test_dev", FakeDeviceInfo(address="none"), None, stop_event
+    )
     loop = QEventLoop()
     cancelled: list[str] = []
     worker.cancelled.connect(lambda name: cancelled.append(name) or loop.quit())
 
     worker.start()
-    worker.cancel()
+    stop_event.set()
     loop.exec()
 
     assert cancelled == ["test_dev"]

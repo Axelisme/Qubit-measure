@@ -82,7 +82,7 @@ def test_runworker_emits_run_finished(qapp):
 
     results = []
     running_at_notification = []
-    worker = RunWorker(adapter, _make_run_req(), schema)
+    worker = RunWorker(adapter, _make_run_req(), schema, threading.Event())
     worker.run_finished.connect(
         lambda r: (
             results.append(r),
@@ -99,17 +99,19 @@ def test_runworker_emits_run_finished(qapp):
     assert running_at_notification == [False]
 
 
-def test_runworker_cancel_before_start_still_finishes(qapp):
-    """cancel() before start should cause adapter to finish early (FakeAdapter ignores stop)."""
+def test_runworker_stop_event_set_before_start_emits_cancelled(qapp):
+    """A pre-set stop_event makes the worker self-judge 'cancelled' (carries the
+    partial result FakeAdapter still returns, since it ignores the stop flag)."""
     adapter = FakeAdapter()
     schema = _simple_schema()
 
-    finished = []
-    worker = RunWorker(adapter, _make_run_req(), schema)
-    worker.run_finished.connect(lambda r: finished.append(r))
-    worker.cancel()  # set stop flag before start
+    cancelled = []
+    stop_event = threading.Event()
+    worker = RunWorker(adapter, _make_run_req(), schema, stop_event)
+    worker.run_cancelled.connect(lambda r: cancelled.append(r))
+    stop_event.set()  # set stop flag before start
     worker.start()
-    assert _wait_for(lambda: len(finished) > 0), "run_finished not emitted after cancel"
+    assert _wait_for(lambda: len(cancelled) > 0), "run_cancelled not emitted"
 
 
 def test_runworker_emits_run_failed_on_exception(qapp):
@@ -119,7 +121,7 @@ def test_runworker_emits_run_failed_on_exception(qapp):
     adapter.run.side_effect = RuntimeError("boom")
 
     errors: list[Exception] = []
-    worker = RunWorker(adapter, _make_run_req(), _simple_schema())
+    worker = RunWorker(adapter, _make_run_req(), _simple_schema(), threading.Event())
     worker.run_failed.connect(lambda e: errors.append(e))
     worker.start()
     assert _wait_for(lambda: len(errors) > 0), "run_failed not emitted in time"
@@ -138,7 +140,9 @@ def test_runner_start_run_emits_run_finished(qapp):
     finished = []
     runner.run_finished.connect(lambda tid, r: finished.append((tid, r)))
 
-    runner.start_run("tab1", adapter, _make_run_req(), _simple_schema())
+    runner.start_run(
+        "tab1", adapter, _make_run_req(), _simple_schema(), threading.Event()
+    )
     assert _wait_for(lambda: len(finished) > 0), "runner run_finished not emitted"
     assert finished[0][0] == "tab1"
 
@@ -150,7 +154,9 @@ def test_runner_run_finished_clears_is_running(qapp):
     done = []
     runner.run_finished.connect(lambda *_: done.append(True))
 
-    runner.start_run("tab1", adapter, _make_run_req(), _simple_schema())
+    runner.start_run(
+        "tab1", adapter, _make_run_req(), _simple_schema(), threading.Event()
+    )
     assert runner.is_running or _wait_for(lambda: len(done) > 0)
     _wait_for(lambda: len(done) > 0)
     assert not runner.is_running
@@ -166,19 +172,26 @@ def test_runner_duplicate_start_raises(qapp):
     slow_adapter.run.side_effect = lambda *a, **kw: event.wait()
 
     runner = Runner()
-    runner.start_run("tab1", slow_adapter, _make_run_req(), _simple_schema())
+    stop_event = threading.Event()
+    runner.start_run(
+        "tab1", slow_adapter, _make_run_req(), _simple_schema(), stop_event
+    )
 
     assert runner.is_running
     with pytest.raises(RuntimeError, match="already active"):
-        runner.start_run("tab2", FakeAdapter(), _make_run_req(), _simple_schema())
+        runner.start_run(
+            "tab2", FakeAdapter(), _make_run_req(), _simple_schema(), threading.Event()
+        )
 
     # cleanup — unblock the slow worker
     event.set()
-    runner.cancel()
     _wait_for(lambda: not runner.is_running, timeout_ms=2000)
 
 
 def test_runner_cancel_stops_active_run(qapp):
+    """Setting the stop_event the Runner was handed cancels the active run; the
+    worker self-judges and emits run_cancelled (Runner has no cancel() — the
+    caller, here the test, owns the stop_event and sets it)."""
     from unittest.mock import MagicMock
 
     slow_adapter = MagicMock(spec=FakeAdapter)
@@ -195,13 +208,16 @@ def test_runner_cancel_stops_active_run(qapp):
 
     slow_adapter.run.side_effect = slow_run
 
-    finished = []
+    cancelled = []
     runner = Runner()
-    runner.run_finished.connect(lambda *_: finished.append(True))
+    runner.run_cancelled.connect(lambda *_: cancelled.append(True))
 
-    runner.start_run("tab1", slow_adapter, _make_run_req(), _simple_schema())
-    runner.cancel()
-    assert _wait_for(lambda: len(finished) > 0, timeout_ms=3000)
+    stop_event = threading.Event()
+    runner.start_run(
+        "tab1", slow_adapter, _make_run_req(), _simple_schema(), stop_event
+    )
+    stop_event.set()  # cancel: the gate would do this via cancel()
+    assert _wait_for(lambda: len(cancelled) > 0, timeout_ms=3000)
     assert stop_seen and stop_seen[0]  # stop flag was set when run() saw it
 
 

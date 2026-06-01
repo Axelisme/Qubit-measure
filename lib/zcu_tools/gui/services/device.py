@@ -205,6 +205,7 @@ class _DeviceSetupWorker(QThread):
         name: str,
         info: BaseDeviceInfo,
         pbar_factory: Optional[Callable[..., Any]],
+        stop_event: threading.Event,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -212,14 +213,13 @@ class _DeviceSetupWorker(QThread):
         self._name = name
         self._info = info
         self._pbar_factory = pbar_factory
-        self._stop_event = threading.Event()
+        # The cancellation flag is owned by DeviceService and passed in, so the
+        # same handle is registered with the OperationGate (set on cancel).
+        self._stop_event = stop_event
         self._completed = False
         self._result: BaseDeviceInfo | None = None
         self._error: Optional[str] = None
         self.finished.connect(self._emit_outcome)
-
-    def cancel(self) -> None:
-        self._stop_event.set()
 
     def run(self) -> None:
         from zcu_tools.progress_bar import use_pbar_factory
@@ -352,10 +352,14 @@ class DeviceService(QObject):
 
         current = self._require_connected_device(req.name)
         driver = cast(DeviceProtocol, GlobalDeviceManager.get_device(req.name))
+        # Single owner of the cancellation flag: passed to both the gate (set on
+        # cancel) and the worker (polls it / self-judges 'cancelled').
+        stop_event = threading.Event()
         self._begin_operation(
             OperationKind.DEVICE_SETUP,
             req.name,
             replace(current, status=DeviceStatus.SETTING_UP, error=None),
+            stop_event=stop_event,
         )
         assert self._active_lease is not None  # set by _begin_operation
         token = self._active_lease.token
@@ -364,6 +368,7 @@ class DeviceService(QObject):
             req.name,
             req.info,
             self._progress.make_factory(token, owner_id=req.name),
+            stop_event,
             parent=self,
         )
         self._setup_worker = worker
@@ -383,9 +388,16 @@ class DeviceService(QObject):
         return token
 
     def cancel_device_operation(self, name: str) -> None:
-        if self._active_name != name or self._setup_worker is None:
+        if (
+            self._active_name != name
+            or self._setup_worker is None
+            or self._active_lease is None
+        ):
             raise RuntimeError(f"No cancellable device setup is active for {name!r}")
-        self._setup_worker.cancel()
+        # Async notification via the gate: set the operation's stop_event and
+        # return. The worker self-judges 'cancelled' and emits its cancelled
+        # signal — no direct worker.cancel() coupling.
+        self._gate.cancel(self._active_lease.token)
 
     def register_remembered_devices(self, entries: list[DeviceMemoryInfo]) -> None:
         for entry in entries:
@@ -563,12 +575,20 @@ class DeviceService(QObject):
         return None
 
     def _begin_operation(
-        self, kind: OperationKind, name: str, pending: DeviceState
+        self,
+        kind: OperationKind,
+        name: str,
+        pending: DeviceState,
+        stop_event: Optional[threading.Event] = None,
     ) -> None:
         # Symmetric release: this lease + _active_name/_active_prior are cleared
         # exactly-once on the terminal path via _finish_operation, called from
         # every _on_*_finished/_failed/_cancelled and _on_operation_failed.
-        lease = self._gate.acquire(kind, owner_id=name, resource_id=name)
+        # stop_event is set only for cancellable operations (setup); connect /
+        # disconnect have no cancellation point, so cancel is a no-op for them.
+        lease = self._gate.acquire(
+            kind, owner_id=name, resource_id=name, stop_event=stop_event
+        )
         prior = self._state.get_device(name)
         self._active_lease = lease
         self._active_name = name
