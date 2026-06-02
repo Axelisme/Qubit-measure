@@ -132,34 +132,20 @@ def test_wait_operation_propagates_failure(wired):
         mcp_server.TOOLS["gui_device_wait_operation"]["handler"]({"name": "flux"})
 
 
-def test_events_poll_refreshes_last_seen(wired, monkeypatch):
-    # Receiving an event = the agent observed a (possibly async-terminal) change;
-    # the version baseline must resync so a following guarded op isn't blocked by
-    # the agent's own just-finished work. The async run bumped tab:t:result.
-    monkeypatch.setattr(
-        mcp_server,
-        "_EVENT_QUEUE",
-        mcp_server.deque([{"event": "run_finished", "payload": {}}]),
-        raising=False,
-    )
+def test_await_operation_refreshes_last_seen_via_rpc(wired):
+    # Phase 120c-2: no event poll. The version baseline resync now rides every
+    # send_gui_rpc round-trip — so a wait/poll (which calls operation.await)
+    # resyncs the baseline, covering the async-terminal bump that an event poll
+    # used to. The async run bumped tab:t:result; awaiting it picks that up.
+    mcp_server._OP_BY_KEY["tab:t"] = 5
+    wired["operation.await"] = {"ok": True, "result": {"status": "finished"}}
     wired["resources.versions"] = _versions({"tab:t:result": 9})
 
-    out = mcp_server.TOOLS["gui_events_poll"]["handler"]({"timeout_seconds": 0.1})
+    out = mcp_server.TOOLS["gui_run_wait"]["handler"]({"tab_id": "t", "timeout": 0.1})
 
-    assert out["events"]  # delivered the queued event
+    assert out["status"] == "finished"
     assert mcp_server._LAST_SEEN.get("tab:t:result") == 9  # baseline resynced
-
-
-def test_events_poll_empty_does_not_refresh(wired, monkeypatch):
-    # No events -> no resync RPC (avoid a needless round-trip on every empty poll).
-    monkeypatch.setattr(mcp_server, "_EVENT_QUEUE", mcp_server.deque(), raising=False)
-    called: list[bool] = []
-    monkeypatch.setattr(mcp_server, "_refresh_versions", lambda: called.append(True))
-
-    out = mcp_server.TOOLS["gui_events_poll"]["handler"]({"timeout_seconds": 0.05})
-
-    assert out["events"] == []
-    assert called == []  # no refresh on an empty poll
+    mcp_server._OP_BY_KEY.pop("tab:t", None)
 
 
 def test_run_start_captures_operation_id_under_tab_key(wired):

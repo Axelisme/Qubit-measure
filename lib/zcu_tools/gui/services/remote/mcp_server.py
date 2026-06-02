@@ -5,7 +5,8 @@ Communicates with an MCP host (Gemini / Claude / VS Code) via stdio JSON-RPC
 2.0, and forwards calls to the live GUI's ``RemoteControlAdapter`` over a
 single persistent TCP socket. Event push from the GUI is received by a
 dedicated reader thread, parked in an internal queue and exposed to the LLM
-via the ``gui_events_poll`` polling tool.
+piggybacked on tool replies (diagnostics) — the agent is not exposed to
+resource-change events; it waits/polls operation handles instead.
 
 Threading:
   - Main (stdio) thread: reads MCP request lines, dispatches into tool
@@ -121,7 +122,14 @@ from zcu_tools.gui.services.remote.wire import (  # noqa: E402
 #      running / failed / no_operation, keyed on the semantic name (tab_id /
 #      device name / soc), no operation_id exposed (ADR-0005 kept). Lets an agent
 #      check a slow op without blocking, replacing the run_finished event watch.
-MCP_VERSION = 15
+# v16: agent not exposed to events (Phase 120c-2). The GUI still emits its full
+#      EventBus stream on the wire (RPC-side registration unchanged), but the
+#      bridge drops every non-diagnostic event in _deliver_event and removes the
+#      agent tools gui_events_subscribe/poll/list/unsubscribe +
+#      gui_editor_subscribe/unsubscribe. Only diagnostics (GUI error/info push)
+#      still piggyback tool replies. Resource-change awareness = the version
+#      guard; async completion = gui_*_poll / gui_*_wait. No wire change.
+MCP_VERSION = 16
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -155,28 +163,30 @@ Typical experiment loop:
     no-op'ing. (This is the same draft the GUI form shows — edits are WYSIWYG.)
   - gui_run_start(tab_id) waits briefly (wait_seconds, default 1.0): a fast run
     returns {status:'finished', tab:{...}}; a slow one returns {status:'pending'}
-    — then gui_run_wait(tab_id) or watch run_finished. (gui_device_* and
+    — then gui_run_wait(tab_id) or gui_run_poll(tab_id). (gui_device_* and
     gui_connect_start degrade the same way.)
   - gui_analyze(tab_id) after a run — synchronous: on return the analysis is
     done (read gui_tab_get_analyze_result, no wait step). Then gui_save_data /
     gui_save_image / gui_save_both to persist.
 
-Detecting completion — prefer events over polling:
-  - run_started{tab_id} and run_finished{tab_id, outcome, error_message} are
-    auto-subscribed on connect; gui_events_poll (blocks up to timeout_seconds)
-    receives pushes. (gui_events_subscribe to add more, e.g.
-    'tab_content_changed'.)
-  - run_finished.outcome ∈ 'finished'|'failed'|'cancelled' (error_message set
-    on failure) tells success from failure from cancellation.
-  - tab_content_changed fires when a run/analyze result becomes available.
+Detecting completion — no events; wait or poll a handle:
+  - A slow gui_run_start returns {status:'pending'}; then either gui_run_wait
+    (blocks until done, raises on failure/cancellation) or gui_run_poll (returns
+    immediately: 'finished'|'running'|'failed'|'no_operation'). A finished run/
+    poll with a figure folds in figure_path. Same shape for devices
+    (gui_device_wait_operation / gui_device_poll) and connect
+    (gui_connect_wait / gui_connect_poll). gui_analyze is synchronous to you
+    (it awaits internally) and returns figure_path.
   - gui_run_progress gives in-flight bar snapshots (token/format/maximum/value/
     percent) but is a fallback; do not busy-poll gui_run_running_tab in a sleep
-    loop.
-  - 'diagnostic' is an UNSOLICITED push (no subscription needed) carrying
-    {severity: 'error'|'info', title, message} — the same user-facing feedback
-    the GUI shows in a dialog/status bar. It arrives via gui_events_poll like
-    any event; watch for severity=='error' to learn about failures the GUI
-    surfaced (including ones not tied to a call you made).
+    loop — use gui_run_poll.
+  - GUI diagnostics still reach you UNSOLICITED: every tool reply piggybacks any
+    {severity:'error'|'info', title, message} the GUI surfaced since your last
+    call (e.g. "Data saved to …", a run-failure reason) under "notifications
+    since last call". Watch severity=='error' for failures the GUI raised,
+    including ones not tied to the call you just made. (Resource-change events
+    are NOT exposed — stale detection is the version guard's job; it rejects a
+    run/save/commit whose dependencies a GUI user changed under you.)
 
 Preconditions are enforced server-side and identical to the GUI buttons:
   - Run/save require an active file-backed context; save/analyze require an
@@ -211,28 +221,15 @@ _RID_COND = threading.Condition()
 _RID_COUNTER = 0
 _PENDING: Dict[str, Dict[str, Any]] = {}
 
-# Event push queue (FIFO, drop-oldest when full). Diagnostics are split into
-# their own queue (ADR-0013): the GUI sends them on the same socket as events,
-# but they are user-facing error/info feedback delivered unconditionally (no
-# subscription), so this side keeps them separate from the subscribed-event
-# stream — both surface to the agent (poll + piggyback), tagged distinctly.
-_EVENT_QUEUE_MAX = 1024
-_EVENT_QUEUE: Deque[Dict[str, Any]] = deque(maxlen=_EVENT_QUEUE_MAX)
-_DIAGNOSTIC_QUEUE: Deque[Dict[str, Any]] = deque(maxlen=_EVENT_QUEUE_MAX)
-_EVENT_COND = threading.Condition()
-
-# Events the experiment workflow assumes the agent always wants to hear about
-# (run finished/failed, device setup lifecycle, SoC connect/drop). The agent
-# can subscribe to more; these are auto-subscribed right after connect because
-# "what an agent must not miss" is experiment policy, owned by this mcp layer —
-# not a wire mechanism the GUI server should bake in.
-_DEFAULT_SUBSCRIBE = (
-    "run_started",
-    "run_finished",
-    "device_setup_started",
-    "device_setup_finished",
-    "soc_changed",
-)
+# Diagnostic push queue (FIFO, drop-oldest when full). The GUI still emits its
+# full EventBus stream + diagnostics on the wire, but the agent is exposed only
+# to diagnostics — user-facing error/info feedback ("Data saved to …", a run
+# failure reason) that no version-guard or poll could surface. Resource-change
+# events are dropped in _deliver_event (Phase 120c-2). Diagnostics piggyback on
+# the next tool reply; _DIAGNOSTIC_COND guards the queue (notified on append).
+_DIAGNOSTIC_QUEUE_MAX = 1024
+_DIAGNOSTIC_QUEUE: Deque[Dict[str, Any]] = deque(maxlen=_DIAGNOSTIC_QUEUE_MAX)
+_DIAGNOSTIC_COND = threading.Condition()
 
 # --- Optimistic-concurrency bookkeeping (policy lives here, mcp side) --------
 #
@@ -438,24 +435,27 @@ def _deliver_reply(msg: Dict[str, Any]) -> None:
 
 
 def _deliver_event(msg: Dict[str, Any]) -> None:
-    with _EVENT_COND:
-        if msg.get("event") == "diagnostic":
-            _DIAGNOSTIC_QUEUE.append(msg)
-        else:
-            _EVENT_QUEUE.append(msg)
-        _EVENT_COND.notify_all()
+    # The GUI still emits its full EventBus stream over the wire (RPC-side
+    # registration unchanged), but the agent is NOT exposed to resource-change
+    # events: stale detection is the version-guard's job, and async completion is
+    # polled via gui_run_poll / gui_*_poll. Only diagnostics (the GUI's own
+    # error/info push — "Data saved to …", run-failure reason) reach the agent,
+    # piggybacked on the next tool reply. Everything else is dropped here.
+    if msg.get("event") != "diagnostic":
+        return
+    with _DIAGNOSTIC_COND:
+        _DIAGNOSTIC_QUEUE.append(msg)
+        _DIAGNOSTIC_COND.notify_all()
 
 
 def _drain_pending() -> Dict[str, list]:
-    """Take everything buffered since the last drain — for piggyback on any tool
-    result. Returns separate ``events`` / ``diagnostics`` lists (possibly empty).
-    The agent gets background notifications without a dedicated poll call."""
-    with _EVENT_COND:
-        events = [m for m in _EVENT_QUEUE]
+    """Take the diagnostics buffered since the last drain — for piggyback on any
+    tool result. The agent gets GUI error/info feedback without a dedicated poll
+    call (resource-change events are not exposed; see _deliver_event)."""
+    with _DIAGNOSTIC_COND:
         diagnostics = [m for m in _DIAGNOSTIC_QUEUE]
-        _EVENT_QUEUE.clear()
         _DIAGNOSTIC_QUEUE.clear()
-    return {"events": events, "diagnostics": diagnostics}
+    return {"diagnostics": diagnostics}
 
 
 def _send_gui_rpc_raw(
@@ -649,23 +649,11 @@ def tool_gui_connect(arguments: Dict[str, Any]) -> str:
 
     if token:
         send_gui_rpc("auth", {"token": token})
-        _auto_subscribe_defaults()
         return (
             f"Connected to GUI on 127.0.0.1:{port} with token authentication."
             + _wire_version_note()
         )
-    _auto_subscribe_defaults()
     return f"Connected to GUI on 127.0.0.1:{port}." + _wire_version_note()
-
-
-def _auto_subscribe_defaults() -> None:
-    """After connect, subscribe the events an experiment agent should never miss
-    (run/device/SoC lifecycle). Experiment policy lives here, not in the GUI
-    server. Best-effort: a subscribe failure must not fail the connect."""
-    try:
-        send_gui_rpc("events.subscribe", {"events": list(_DEFAULT_SUBSCRIBE)})
-    except Exception:
-        pass
 
 
 def tool_gui_disconnect(arguments: Dict[str, Any]) -> str:
@@ -687,8 +675,7 @@ def tool_gui_disconnect(arguments: Dict[str, Any]) -> str:
     if t is not None and t.is_alive():
         t.join(timeout=2.0)
     _READER_THREAD = None
-    with _EVENT_COND:
-        _EVENT_QUEUE.clear()
+    with _DIAGNOSTIC_COND:
         _DIAGNOSTIC_QUEUE.clear()
     return "Disconnected from GUI."
 
@@ -916,39 +903,8 @@ def tool_gui_state_check(arguments: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Phase 81a tools — events / dialog / view
+# Batch / dialog / view tools
 # ---------------------------------------------------------------------------
-
-
-def _coerce_str_list(value: object, *, field: str) -> List[str]:
-    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
-        raise ValueError(f"{field!r} must be a list of strings")
-    return list(value)
-
-
-def tool_gui_events_subscribe(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    events = _coerce_str_list(arguments.get("events", []), field="events")
-    return send_gui_rpc("events.subscribe", {"events": events})
-
-
-def tool_gui_events_unsubscribe(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    events = _coerce_str_list(arguments.get("events", []), field="events")
-    return send_gui_rpc("events.unsubscribe", {"events": events})
-
-
-def tool_gui_events_list(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    del arguments
-    return send_gui_rpc("events.list", {})
-
-
-def tool_gui_editor_subscribe(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    editor_id = str(arguments["editor_id"])
-    return send_gui_rpc("editor.subscribe", {"editor_id": editor_id})
-
-
-def tool_gui_editor_unsubscribe(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    editor_id = str(arguments["editor_id"])
-    return send_gui_rpc("editor.unsubscribe", {"editor_id": editor_id})
 
 
 def _coerce_pairs(
@@ -1193,8 +1149,8 @@ def tool_gui_run_start(arguments: Dict[str, Any]) -> Dict[str, Any]:
     A run has both modes — a tiny sweep finishes in well under a second, a big
     one takes minutes — so it degrades like device ops: settles in time ->
     {status:'finished', tab:<tab.snapshot>} (has_run_result reflects the result);
-    still running -> {status:'pending'} (await with gui_run_wait or watch
-    run_finished). send_gui_rpc attaches the version guard + captures the
+    still running -> {status:'pending'} (await with gui_run_wait or poll with
+    gui_run_poll). send_gui_rpc attaches the version guard + captures the
     operation_id under tab:<tab_id>.
     """
     tab_id = str(arguments["tab_id"])
@@ -1280,7 +1236,7 @@ def tool_gui_connect_start(arguments: Dict[str, Any]) -> Dict[str, Any]:
             "view": send_gui_rpc("view.snapshot", {}),
             "soc": send_gui_rpc("soc.info", {}),
         },
-        "await it with gui_connect_wait() or watch 'soc_changed'.",
+        "await it with gui_connect_wait() or poll gui_connect_poll().",
     )
 
 
@@ -1293,39 +1249,6 @@ def tool_gui_connect_wait(arguments: Dict[str, Any]) -> Dict[str, Any]:
     if result.get("status") == "finished":
         result["soc"] = send_gui_rpc("soc.info", {})
     return result
-
-
-def tool_gui_events_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    """Drain up to ``max_events`` queued event pushes, blocking briefly. Also
-    returns any buffered diagnostics so an idle agent that only polls still sees
-    GUI error/info feedback."""
-    timeout_seconds = float(arguments.get("timeout_seconds", 5.0))
-    max_events = int(arguments.get("max_events", 16))
-    if max_events < 1:
-        max_events = 1
-    out: List[Dict[str, Any]] = []
-    diagnostics: List[Dict[str, Any]] = []
-    deadline = time.monotonic() + timeout_seconds
-    with _EVENT_COND:
-        while len(out) < max_events:
-            while _DIAGNOSTIC_QUEUE:
-                diagnostics.append(_DIAGNOSTIC_QUEUE.popleft())
-            while _EVENT_QUEUE and len(out) < max_events:
-                out.append(_EVENT_QUEUE.popleft())
-            if out or diagnostics:
-                break
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            _EVENT_COND.wait(timeout=remaining)
-    # Receiving an event is the point at which the agent "observed" a GUI change
-    # (including async terminals like run/device/connect completion, whose version
-    # bumps happen outside any RPC the bridge issues). Resync the baseline now —
-    # done outside the _EVENT_COND lock since it makes a synchronous RPC — so a
-    # following guarded op isn't blocked by the agent's own just-finished work.
-    if out:
-        _refresh_versions()
-    return {"events": out, "diagnostics": diagnostics}
 
 
 def tool_gui_view_screenshot(arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -1385,7 +1308,7 @@ def tool_gui_device_connect(arguments: Dict[str, Any]) -> Dict[str, Any]:
         f"Device {name!r} connect",
         wait_seconds,
         lambda: {"snapshot": _device_snapshot(name)},
-        f"await it with gui_device_wait_operation(name={name!r}) or watch 'device_changed'.",
+        f"await it with gui_device_wait_operation(name={name!r}) or gui_device_poll(name={name!r}).",
     )
 
 
@@ -1401,7 +1324,7 @@ def tool_gui_device_disconnect(arguments: Dict[str, Any]) -> Dict[str, Any]:
         f"Device {name!r} disconnect",
         wait_seconds,
         lambda: {"snapshot": _device_snapshot(name)},
-        f"await it with gui_device_wait_operation(name={name!r}) or watch 'device_changed'.",
+        f"await it with gui_device_wait_operation(name={name!r}) or gui_device_poll(name={name!r}).",
     )
 
 
@@ -1445,9 +1368,6 @@ _NON_GENERATED_METHODS = frozenset(
         "state.has_context",
         "state.has_active_context",
         "state.has_soc",
-        "events.subscribe",
-        "events.unsubscribe",
-        "events.list",
         # mcp<->RPC bookkeeping only; never an agent-facing tool (version numbers
         # must not surface to the agent — used internally by _refresh_versions).
         "resources.versions",
@@ -1628,73 +1548,6 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },
-    "gui_events_subscribe": {
-        "handler": tool_gui_events_subscribe,
-        "description": (
-            "Subscribe to one or more GUI event push streams. "
-            "Subscribed events are delivered to gui_events_poll. "
-            "Use gui_events_list to see available event names."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "events": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Event names to subscribe to, e.g. ['run_finished', 'tab_content_changed']",
-                }
-            },
-            "required": ["events"],
-        },
-    },
-    "gui_events_unsubscribe": {
-        "handler": tool_gui_events_unsubscribe,
-        "description": "Unsubscribe from one or more GUI event push streams.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"events": {"type": "array", "items": {"type": "string"}}},
-            "required": ["events"],
-        },
-    },
-    "gui_events_list": {
-        "handler": tool_gui_events_list,
-        "description": (
-            "List all supported event names and which ones are currently subscribed. "
-            "Call this before gui_events_subscribe to discover available events."
-        ),
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    "gui_editor_subscribe": {
-        "handler": tool_gui_editor_subscribe,
-        "description": (
-            "Subscribe to a cfg-editor session's change stream. After this, "
-            "editor_changed (any field edit, by you OR a GUI user) and "
-            "editor_closed (session ended: committed/discarded/tab_closed/"
-            "evicted/disconnected) pushes for this editor_id are delivered to "
-            "gui_events_poll. Get a tab's editor_id from gui_tab_snapshot. "
-            "Essential when editing a tab cfg an interactive user may also touch: "
-            "it lets you notice your value being overwritten."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "editor_id": {
-                    "type": "string",
-                    "description": "Editor session id (from gui_tab_snapshot or gui_editor_open)",
-                }
-            },
-            "required": ["editor_id"],
-        },
-    },
-    "gui_editor_unsubscribe": {
-        "handler": tool_gui_editor_unsubscribe,
-        "description": "Stop receiving a cfg-editor session's change/close pushes.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"editor_id": {"type": "string"}},
-            "required": ["editor_id"],
-        },
-    },
     "gui_editor_set_fields": {
         "handler": tool_gui_editor_set_fields,
         "description": (
@@ -1806,7 +1659,7 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             "Start a run. Waits up to wait_seconds (default 1.0): a fast run "
             "(small reps/rounds) finishes in time -> {status:'finished', tab:{...}} "
             "(tab snapshot, has_run_result set); a slow run -> {status:'pending'} "
-            "(await with gui_run_wait or watch 'run_finished'). Track in-flight "
+            "(await with gui_run_wait or gui_run_poll). Track in-flight "
             "progress with gui_run_progress."
         ),
         "inputSchema": {
@@ -1882,7 +1735,7 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             "Connect the SoC. kind='mock' (offline) or kind='remote' with ip+port. "
             "Waits up to wait_seconds (default 1.0): connects in time -> "
             "{status:'finished', view:{...}}; else {status:'pending'} (await with "
-            "gui_connect_wait or watch 'soc_changed')."
+            "gui_connect_wait or gui_connect_poll)."
         ),
         "inputSchema": {
             "type": "object",
@@ -1923,28 +1776,6 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             "hardware summary (same as gui_soc_info). Returns immediately."
         ),
         "inputSchema": {"type": "object", "properties": {}},
-    },
-    "gui_events_poll": {
-        "handler": tool_gui_events_poll,
-        "description": (
-            "Drain up to max_events queued event pushes from subscribed streams. "
-            "Blocks for up to timeout_seconds (default 5.0) if the queue is empty. "
-            "Returns immediately if events are available. "
-            "Must call gui_events_subscribe first."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "timeout_seconds": {
-                    "type": "number",
-                    "description": "Max wait time in seconds (default 5.0)",
-                },
-                "max_events": {
-                    "type": "integer",
-                    "description": "Max events to return in one call (default 16)",
-                },
-            },
-        },
     },
     "gui_view_screenshot": {
         "handler": tool_gui_view_screenshot,
@@ -1999,7 +1830,7 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             "(default 1.0) for the connection: if it lands in time, returns "
             "{status:'finished', snapshot:{...}} (snapshot includes the device's "
             "live info params); otherwise {status:'pending'} — await it with "
-            "gui_device_wait_operation or watch 'device_changed'. type_name is the "
+            "gui_device_wait_operation or gui_device_poll. type_name is the "
             "driver class (e.g. 'YOKOGS200', 'SGS100A'); address is the VISA/GPIB/IP "
             "address. Set remember=true to persist the device across sessions."
         ),
@@ -2118,12 +1949,6 @@ _OVERRIDE_NAMES = frozenset(
         "gui_dialog_screenshot",
         "gui_tab_figure_screenshot",
         "gui_state_check",
-        "gui_events_subscribe",
-        "gui_events_unsubscribe",
-        "gui_events_list",
-        "gui_events_poll",
-        "gui_editor_subscribe",
-        "gui_editor_unsubscribe",
         "gui_editor_set_fields",
         "gui_context_set_md_attrs",
         "gui_device_wait_operation",
@@ -2251,21 +2076,21 @@ def main() -> None:
                             res if isinstance(res, str) else json.dumps(res, indent=2)
                         )
                         content = [{"type": "text", "text": text}]
-                        # Piggyback (ADR-0013): drain background notifications
-                        # buffered since the last tool call onto this result, so
-                        # the agent learns about run/device/SoC changes + GUI
-                        # diagnostics without a dedicated poll. The poll tool owns
-                        # the event drain itself — don't double-drain there.
-                        if name != "gui_events_poll":
-                            pending = _drain_pending()
-                            if pending["events"] or pending["diagnostics"]:
-                                content.append(
-                                    {
-                                        "type": "text",
-                                        "text": "notifications since last call:\n"
-                                        + json.dumps(pending, indent=2),
-                                    }
-                                )
+                        # Piggyback (ADR-0013): drain GUI diagnostics buffered
+                        # since the last tool call onto this result, so the agent
+                        # gets the GUI's error/info feedback ("Data saved to …",
+                        # a run-failure reason) without a dedicated poll. Only
+                        # diagnostics ride here now — resource-change events are
+                        # not exposed to the agent (Phase 120c-2).
+                        pending = _drain_pending()
+                        if pending["diagnostics"]:
+                            content.append(
+                                {
+                                    "type": "text",
+                                    "text": "notifications since last call:\n"
+                                    + json.dumps(pending, indent=2),
+                                }
+                            )
                         resp = {
                             "jsonrpc": "2.0",
                             "id": rid,

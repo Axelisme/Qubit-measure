@@ -1,8 +1,9 @@
-"""mcp-side event/diagnostic split + piggyback drain (ADR-0013 C2a).
+"""mcp-side diagnostic-only piggyback (Phase 120c-2).
 
-These exercise the bridge's pure queue logic without a live socket: the reader
-routes diagnostics into their own queue, and _drain_pending takes both buffers
-so any tool result can piggyback background notifications.
+The GUI still emits its full EventBus stream on the wire, but the bridge exposes
+ONLY diagnostics to the agent: resource-change events are dropped in
+_deliver_event, and _drain_pending returns diagnostics that piggyback any tool
+reply. These exercise that pure queue logic without a live socket.
 """
 
 from __future__ import annotations
@@ -13,47 +14,37 @@ from zcu_tools.gui.services.remote import mcp_server
 
 
 def _clear() -> None:
-    with mcp_server._EVENT_COND:
-        mcp_server._EVENT_QUEUE.clear()
+    with mcp_server._DIAGNOSTIC_COND:
         mcp_server._DIAGNOSTIC_QUEUE.clear()
 
 
-def test_reader_routes_diagnostic_to_its_own_queue():
+def test_deliver_drops_events_keeps_diagnostics():
     _clear()
+    # A resource-change event is dropped (agent not exposed to it).
     mcp_server._deliver_event({"event": "run_finished", "payload": {}})
+    # A diagnostic is queued for piggyback.
     mcp_server._deliver_event(
         {"event": "diagnostic", "payload": {"severity": "error", "title": "x"}}
     )
-    assert len(mcp_server._EVENT_QUEUE) == 1
     assert len(mcp_server._DIAGNOSTIC_QUEUE) == 1
-    assert mcp_server._EVENT_QUEUE[0]["event"] == "run_finished"
     assert mcp_server._DIAGNOSTIC_QUEUE[0]["event"] == "diagnostic"
     _clear()
 
 
-def test_drain_pending_takes_both_and_empties():
+def test_drain_pending_takes_diagnostics_and_empties():
     _clear()
     mcp_server._deliver_event({"event": "tab_added", "payload": {"tab_id": "a"}})
     mcp_server._deliver_event(
         {"event": "diagnostic", "payload": {"severity": "info", "message": "saved"}}
     )
     drained = mcp_server._drain_pending()
-    assert [e["event"] for e in drained["events"]] == ["tab_added"]
+    # Only diagnostics surface; the event was dropped on delivery.
+    assert "events" not in drained
     assert [d["payload"]["severity"] for d in drained["diagnostics"]] == ["info"]
-    # Second drain is empty (single buffer, one drain each).
+    # Second drain is empty (one buffer, drained once).
     again = mcp_server._drain_pending()
-    assert again == {"events": [], "diagnostics": []}
+    assert again == {"diagnostics": []}
     _clear()
-
-
-def test_default_subscribe_set_is_experiment_lifecycle():
-    assert set(mcp_server._DEFAULT_SUBSCRIBE) == {
-        "run_started",
-        "run_finished",
-        "device_setup_started",
-        "device_setup_finished",
-        "soc_changed",
-    }
 
 
 # ---------------------------------------------------------------------------
