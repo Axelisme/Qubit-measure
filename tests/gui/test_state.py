@@ -12,9 +12,9 @@ from zcu_tools.gui.adapter import CfgSchema, CfgSectionSpec, CfgSectionValue, Sa
 from zcu_tools.gui.state import (
     DeviceState,
     DeviceStatus,
+    Session,
     State,
     TabInteractionState,
-    Session,
 )
 
 

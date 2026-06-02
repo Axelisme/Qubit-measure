@@ -11,13 +11,13 @@ from zcu_tools.gui.event_bus import (
 )
 from zcu_tools.gui.state import State
 
+from .ports import TabSnapshot
 from .session_persistence import (
     SESSION_VERSION,
     PersistedSession,
     PersistedTab,
     SessionPersistenceError,
 )
-from .ports import TabSnapshot
 
 if TYPE_CHECKING:
     from .ports import SessionStorePort, TabLifecyclePort

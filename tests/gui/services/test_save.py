@@ -8,7 +8,7 @@ from zcu_tools.gui.event_bus import EventBus
 from zcu_tools.gui.figure_export import SAVE_DPI, SAVE_FIGSIZE
 from zcu_tools.gui.services.guard import SavePermit
 from zcu_tools.gui.services.save import SaveBothOutcome, SaveService
-from zcu_tools.gui.state import State, Session
+from zcu_tools.gui.state import Session, State
 
 
 def _make_figure() -> MagicMock:

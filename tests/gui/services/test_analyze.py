@@ -13,7 +13,7 @@ from zcu_tools.gui.adapter import ContextReadiness
 from zcu_tools.gui.event_bus import EventBus, GuiEvent
 from zcu_tools.gui.services.analyze import AnalyzeService
 from zcu_tools.gui.services.guard import AnalyzePermit
-from zcu_tools.gui.state import ExpContext, State, Session
+from zcu_tools.gui.state import ExpContext, Session, State
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
