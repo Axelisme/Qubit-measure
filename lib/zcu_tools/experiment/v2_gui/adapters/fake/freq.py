@@ -75,6 +75,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.utils.fitting.resonance.hanger import HangerModel
+from zcu_tools.utils.fitting.resonance.transmission import TransmissionModel
 
 # ---------------------------------------------------------------------------
 # FakeFreqCfg — same structure as FreqCfg but with HangerModel params
@@ -85,7 +86,19 @@ class FakeFreqSweepCfg(ProgramV2Cfg):  # type: ignore[misc]
     freq: SweepCfg
 
 
-class FakeFreqModelCfg(ProgramV2Cfg):  # type: ignore[misc]
+# ---------------------------------------------------------------------------
+# Simulation params — the ground-truth resonance the fake places, supplied at
+# adapter construction (NOT in the cfg). Keeping them out of the cfg is the
+# point: the sweep is set independently (from r_f/rf_w), so the analysis must
+# genuinely *find* the dip rather than read an aligned cfg field. One frozen
+# dataclass per resonator model, mirroring each model's calc_signals inputs.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class HangerSimParams:
+    """Ground-truth params for a HangerModel lineshape (hanger / notch)."""
+
     freq: float = 6000.0
     Ql: float = 5000.0
     Qc_abs: float = 6000.0
@@ -93,6 +106,20 @@ class FakeFreqModelCfg(ProgramV2Cfg):  # type: ignore[misc]
     a0_abs: float = 1.0
     edelay: float = 0.05
     noise_scale: float = 0.05
+
+
+@dataclass(frozen=True)
+class TransmissionSimParams:
+    """Ground-truth params for a TransmissionModel lineshape (no Qc / phi)."""
+
+    freq: float = 6000.0
+    Ql: float = 5000.0
+    a0_abs: float = 1.0
+    edelay: float = 0.05
+    noise_scale: float = 0.05
+
+
+Param: TypeAlias = "HangerSimParams | TransmissionSimParams"
 
 
 class FakeFreqModuleCfg(ConfigBase):
@@ -103,7 +130,6 @@ class FakeFreqModuleCfg(ConfigBase):
 
 class FakeFreqCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: FakeFreqSweepCfg
-    model: FakeFreqModelCfg = FakeFreqModelCfg()
     modules: FakeFreqModuleCfg
     fast_mode: bool = False  # skip per-point sleep; set True in tests
 
@@ -136,19 +162,35 @@ class FakeFreqAnalyzeParams:
 
 
 class FakeFreqExp(AbsExperiment[FreqResult, FakeFreqCfg]):
-    """Simulated FreqExp: same run/analyze/save interface, no hardware required."""
+    """Simulated FreqExp: same run/analyze/save interface, no hardware required.
+
+    The ground-truth resonance (``model_type`` + ``params``) is supplied at
+    construction, NOT carried in the cfg — so the cfg's sweep is set
+    independently and the analysis must genuinely find the dip.
+    """
+
+    def __init__(self, model_type: Literal["t", "hm"], params: Param) -> None:
+        self._model_type = model_type
+        self._params = params
+
+    def _clean_signals(self, freqs: NDArray[np.float64]) -> NDArray[np.complex128]:
+        p = self._params
+        a0 = complex(p.a0_abs)
+        if self._model_type == "hm":
+            assert isinstance(p, HangerSimParams)
+            Qc = complex(p.Qc_abs * np.exp(-1j * p.phi))
+            return HangerModel.calc_signals(
+                freqs, p.freq, p.Ql, cast(float, Qc), p.phi, a0, p.edelay
+            )
+        assert isinstance(p, TransmissionSimParams)
+        return TransmissionModel.calc_signals(freqs, p.freq, p.Ql, a0, p.edelay)
 
     def run(self, cfg: FakeFreqCfg) -> FreqResult:
         sweep = cfg.sweep.freq
         freqs = np.linspace(sweep.start, sweep.stop, sweep.expts)
 
-        m = cfg.model
-        a0 = complex(m.a0_abs)
-        Qc = complex(m.Qc_abs * np.exp(-1j * m.phi))
-        clean = HangerModel.calc_signals(
-            freqs, m.freq, m.Ql, cast(float, Qc), m.phi, a0, m.edelay
-        )
-        sigma = m.noise_scale / np.sqrt(cfg.reps * cfg.rounds)
+        clean = self._clean_signals(freqs)
+        sigma = self._params.noise_scale / np.sqrt(cfg.reps * cfg.rounds)
         rng = np.random.default_rng()
 
         def measure_fn(
@@ -185,13 +227,15 @@ class FakeFreqExp(AbsExperiment[FreqResult, FakeFreqCfg]):
 
         return FreqResult(freqs=freqs, signals=signals)
 
+    @staticmethod
     def analyze(
-        self,
         result: Optional[FreqResult] = None,
         *,
         model_type: Literal["hm", "t", "auto"] = "auto",
         fit_bg_slope: bool = False,
     ) -> tuple[float, float, dict[str, Any], Figure]:
+        # Analysis is blind by construction — it only sees the result, never the
+        # ground-truth sim params; no instance state needed.
         assert result is not None
         return FreqExp().analyze(
             result, model_type=model_type, fit_bg_slope=fit_bg_slope
@@ -256,7 +300,26 @@ class FakeFreqAdapter(
             ),
         )
 
-    def __init__(self, fast_mode: bool = False) -> None:
+    def __init__(
+        self,
+        model_type: Literal["t", "hm"] = "hm",
+        params: Optional[Param] = None,
+        fast_mode: bool = False,
+    ) -> None:
+        if params is None:
+            params = (
+                HangerSimParams() if model_type == "hm" else TransmissionSimParams()
+            )
+        # Fast-Fail: the concrete params type must match model_type (strong types,
+        # least surprise) — a hanger run with transmission params is a bug.
+        expected = HangerSimParams if model_type == "hm" else TransmissionSimParams
+        if not isinstance(params, expected):
+            raise TypeError(
+                f"model_type={model_type!r} expects {expected.__name__}, "
+                f"got {type(params).__name__}"
+            )
+        self._model_type: Literal["t", "hm"] = model_type
+        self._params: Param = params
         self._fast_mode = fast_mode
 
     @classmethod
@@ -277,26 +340,9 @@ class FakeFreqAdapter(
                     label="Sweep",
                     fields={"freq": SweepSpec(label="Freq (MHz)")},
                 ),
-                "model": CfgSectionSpec(
-                    label="Model",
-                    fields={
-                        "freq": ScalarSpec(
-                            label="Resonator freq (MHz)", type=float, decimals=2
-                        ),
-                        "Ql": ScalarSpec(label="Ql (loaded Q)", type=int),
-                        "Qc_abs": ScalarSpec(label="|Qc| (coupling Q)", type=int),
-                        "phi": ScalarSpec(label="phi (rad)", type=float, decimals=4),
-                        "a0_abs": ScalarSpec(
-                            label="|a0| (bg amplitude)", type=float, decimals=4
-                        ),
-                        "edelay": ScalarSpec(
-                            label="edelay (us)", type=float, decimals=3
-                        ),
-                        "noise_scale": ScalarSpec(
-                            label="Noise scale", type=float, decimals=4
-                        ),
-                    },
-                ),
+                # No 'model' block: the simulated resonance is fixed at adapter
+                # construction (model_type + params), hidden from the cfg, so the
+                # sweep below scans blind and the analysis must find the dip.
             }
         )
 
@@ -307,14 +353,13 @@ class FakeFreqAdapter(
             float(rf_w_raw) if isinstance(rf_w_raw, (int, float)) else None
         )
 
-        # Sweep range: ±5× linewidth around r_f, or ±200 MHz if rf_w unknown
+        # Sweep range: ±5× linewidth around r_f, or ±200 MHz if rf_w unknown.
+        # This is set from r_f independently of the simulated resonance freq
+        # (held in __init__); the two only coincide by default, so a test that
+        # constructs a different params.freq forces a genuine blind sweep.
         half_span = (rf_w * 5.0) if rf_w is not None else 200.0
         freq_start = r_f - half_span
         freq_stop = r_f + half_span
-
-        # Rough Ql estimate from linewidth: Ql ≈ r_f / rf_w
-        ql_default = round(r_f / rf_w) if rf_w is not None and rf_w > 0 else 5000
-        qc_default = ql_default * 2
 
         return CfgSectionValue(
             fields={
@@ -323,17 +368,6 @@ class FakeFreqAdapter(
                 "sweep": CfgSectionValue(
                     fields={
                         "freq": SweepValue(start=freq_start, stop=freq_stop, expts=201)
-                    }
-                ),
-                "model": CfgSectionValue(
-                    fields={
-                        "freq": DirectValue(r_f),
-                        "Ql": DirectValue(ql_default),
-                        "Qc_abs": DirectValue(qc_default),
-                        "phi": DirectValue(0.0),
-                        "a0_abs": DirectValue(1.0),
-                        "edelay": DirectValue(0.05),
-                        "noise_scale": DirectValue(0.05),
                     }
                 ),
                 "modules": CfgSectionValue(
@@ -354,7 +388,7 @@ class FakeFreqAdapter(
 
         raw_cfg = schema.to_raw_dict(req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
-        result = FakeFreqExp().run(cfg)
+        result = FakeFreqExp(self._model_type, self._params).run(cfg)
         freq_cfg = FreqCfg(
             reps=cfg.reps,
             rounds=cfg.rounds,
@@ -377,7 +411,7 @@ class FakeFreqAdapter(
         req: AnalyzeRequest[FakeFreqRunResult, FakeFreqAnalyzeParams],
     ) -> FakeFreqAnalyzeResult:
         analyze_params = req.analyze_params
-        freq, fwhm, fit_params, figure = FakeFreqExp().analyze(
+        freq, fwhm, fit_params, figure = FakeFreqExp.analyze(
             req.run_result,
             model_type=analyze_params.model_type,
             fit_bg_slope=analyze_params.fit_bg_slope,
