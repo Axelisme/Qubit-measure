@@ -11,7 +11,6 @@ from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_readout_module_spec,
     make_readout_default,
-    make_reset_module_spec,
     md_get_float,
     md_has_key,
     proper_flux_range,
@@ -65,8 +64,7 @@ class OneToneFluxDepAdapter(BaseAdapter[FluxDepCfg, OneToneFluxDepRunResult]):
             ),
             expects_ml=(
                 "Needs a pulse-readout module, and references a ModuleLibrary "
-                "waveform named 'ro_waveform' when present (optional). Optionally "
-                "composes a 'reset' module before the readout."
+                "waveform named 'ro_waveform' when present (optional)."
             ),
             typical_writeback=(
                 "No writeback — no automated analysis. The underlying experiment "
@@ -92,7 +90,8 @@ class OneToneFluxDepAdapter(BaseAdapter[FluxDepCfg, OneToneFluxDepRunResult]):
                 "modules": CfgSectionSpec(
                     label="Modules",
                     fields={
-                        "reset": make_reset_module_spec(optional=True),
+                        # No reset module — one-tone runs without a qubit reset
+                        # (the ExpCfg defaults reset=None).
                         "readout": make_pulse_readout_module_spec(),
                     },
                 ),

@@ -13,7 +13,6 @@ from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_readout_module_spec,
     make_readout_default,
-    make_reset_module_spec,
     proper_res_freq_range,
 )
 from zcu_tools.gui.adapter import (
@@ -60,8 +59,7 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
             ),
             expects_ml=(
                 "Needs a pulse-readout module, and references a ModuleLibrary "
-                "waveform named 'ro_waveform' when present (optional). Optionally "
-                "composes a 'reset' module before the readout."
+                "waveform named 'ro_waveform' when present (optional)."
             ),
             typical_writeback=(
                 "No writeback — this adapter has no analysis step (the underlying "
@@ -86,7 +84,8 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
                 "modules": CfgSectionSpec(
                     label="Modules",
                     fields={
-                        "reset": make_reset_module_spec(optional=True),
+                        # No reset module — one-tone runs without a qubit reset
+                        # (the ExpCfg defaults reset=None).
                         "readout": make_pulse_readout_module_spec(),
                     },
                 ),

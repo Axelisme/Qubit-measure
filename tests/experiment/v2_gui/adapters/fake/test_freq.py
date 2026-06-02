@@ -60,7 +60,8 @@ def test_fakefreq_build_exp_cfg_basic():
 
     assert isinstance(raw["sweep"]["freq"], SweepCfg)
 
-    # optional modules absent (disabled)
+    # one-tone modules: readout only. No init_pulse (no qubit-drive pulse) and
+    # no reset (one-tone runs without a qubit reset).
     assert "init_pulse" not in raw["modules"]
     assert "reset" not in raw["modules"]
 
@@ -71,8 +72,8 @@ def test_fakefreq_build_exp_cfg_basic():
     assert call_kwargs.kwargs.get("fast_mode") is True
 
 
-def test_fakefreq_build_exp_cfg_without_optional_modules():
-    """When optional modules are disabled, lowering omits their keys."""
+def test_fakefreq_modules_are_readout_only():
+    """The one-tone modules expose readout only — no init_pulse, no reset."""
     ml = _make_ml()
     ctx = _make_ctx(ml)
     req = _make_req(ml)
@@ -80,13 +81,12 @@ def test_fakefreq_build_exp_cfg_without_optional_modules():
     schema = FakeFreqAdapter(fast_mode=True).make_default_cfg(ctx)
     raw = _lower(schema, req)
 
-    assert "init_pulse" not in raw.get("modules", {})
-    assert "reset" not in raw.get("modules", {})
+    assert set(raw["modules"]) == {"readout"}
 
 
 def test_fakefreq_make_default_cfg_spec_structure():
     """Spec structure matches FakeFreqCfg nesting."""
-    from zcu_tools.gui.adapter import CfgSectionSpec, ModuleRefSpec, SweepSpec
+    from zcu_tools.gui.adapter import CfgSectionSpec, SweepSpec
 
     ctx = _make_ctx()
     schema = FakeFreqAdapter().make_default_cfg(ctx)
@@ -101,12 +101,11 @@ def test_fakefreq_make_default_cfg_spec_structure():
     # No 'model' block: simulated resonance is an __init__ arg, not a cfg field.
     assert "model" not in spec.fields
 
+    # Modules mirror the real one-tone ExpCfg: readout only (no init_pulse, no
+    # reset).
     modules_spec = spec.fields["modules"]
     assert isinstance(modules_spec, CfgSectionSpec)
-    assert isinstance(modules_spec.fields["init_pulse"], ModuleRefSpec)
-    assert modules_spec.fields["init_pulse"].optional is True
-    assert isinstance(modules_spec.fields["reset"], ModuleRefSpec)
-    assert modules_spec.fields["reset"].optional is True
+    assert set(modules_spec.fields) == {"readout"}
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +124,8 @@ def _real_ctx():
 
 
 def _run_and_fit(adapter: FakeFreqAdapter):
-    from zcu_tools.gui.adapter import AnalyzeRequest, RunRequest as RR
+    from zcu_tools.gui.adapter import AnalyzeRequest
+    from zcu_tools.gui.adapter import RunRequest as RR
 
     ctx = _real_ctx()
     schema = adapter.make_default_cfg(ctx)
@@ -173,7 +173,6 @@ def test_transmission_blind_sweep_finds_hidden_resonance():
 def test_model_type_params_mismatch_is_fast_fail():
     """A hanger run with transmission params is a bug — reject at construction."""
     import pytest
-
     from zcu_tools.experiment.v2_gui.adapters.fake.freq import TransmissionSimParams
 
     with pytest.raises(TypeError, match="HangerSimParams"):

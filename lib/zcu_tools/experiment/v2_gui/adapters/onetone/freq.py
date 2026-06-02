@@ -20,7 +20,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_onetone_freq_writeback_items,
     make_pulse_readout_default,
     make_pulse_readout_module_spec,
-    make_reset_module_spec,
     md_get_float,
     md_has_key,
     proper_res_freq_range,
@@ -110,7 +109,8 @@ class OneToneFreqAdapter(
                 "modules": CfgSectionSpec(
                     label="Modules",
                     fields={
-                        "reset": make_reset_module_spec(optional=True),
+                        # No reset module — one-tone spectroscopy runs without a
+                        # qubit reset (the ExpCfg defaults reset=None).
                         "readout": make_pulse_readout_module_spec()
                         .lock_literal("pulse_cfg.freq", 0.0)
                         .lock_literal("ro_cfg.ro_freq", 0.0),

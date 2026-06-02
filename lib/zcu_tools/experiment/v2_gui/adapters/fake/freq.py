@@ -40,10 +40,8 @@ from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_onetone_freq_writeback_items,
-    make_pulse_module_spec,
     make_readout_default,
     make_readout_module_spec,
-    make_reset_module_spec,
     md_get_float,
 )
 from zcu_tools.gui.adapter import (
@@ -69,9 +67,7 @@ from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     AbsReadoutCfg,
     ProgramV2Cfg,
-    PulseCfg,
     PulseReadoutCfg,
-    ResetCfg,
 )
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.utils.fitting.resonance.hanger import HangerModel
@@ -123,9 +119,9 @@ Param: TypeAlias = "HangerSimParams | TransmissionSimParams"
 
 
 class FakeFreqModuleCfg(ConfigBase):
+    # Mirrors the real onetone ExpCfg modules: readout only. No init_pulse (no
+    # qubit-drive pulse) and no reset (one-tone runs without a qubit reset).
     readout: AbsReadoutCfg
-    init_pulse: Optional[PulseCfg] = None
-    reset: Optional[ResetCfg] = None
 
 
 class FakeFreqCfg(ProgramV2Cfg, ExpCfgModel):
@@ -331,8 +327,6 @@ class FakeFreqAdapter(
                     label="Modules",
                     fields={
                         "readout": make_readout_module_spec(),
-                        "init_pulse": make_pulse_module_spec(optional=True),
-                        "reset": make_reset_module_spec(optional=True),
                     },
                 ),
                 "reps": ScalarSpec(label="Reps", type=int),
@@ -374,8 +368,6 @@ class FakeFreqAdapter(
                 "modules": CfgSectionValue(
                     fields={
                         "readout": make_readout_default(ctx),
-                        # init_pulse and reset are optional ModuleRefs; omitting their
-                        # keys here means they start as disabled (None) in the UI.
                     }
                 ),
             }
@@ -396,7 +388,6 @@ class FakeFreqAdapter(
             relax_delay=cfg.relax_delay,
             modules=FreqModuleCfg(
                 readout=cast(PulseReadoutCfg, cfg.modules.readout),
-                reset=cfg.modules.reset,
             ),
             sweep=FreqSweepCfg(freq=cfg.sweep.freq),
         )
