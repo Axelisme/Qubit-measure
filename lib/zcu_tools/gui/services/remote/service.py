@@ -748,7 +748,12 @@ class RemoteControlAdapter:
             self._dispatch_on_main(state, req.id, req.method, spec, handler_params)
         except RemoteError as exc:
             self._reply_error(
-                state, rid=rid, code=exc.code, message=exc.message, reason=exc.reason
+                state,
+                rid=rid,
+                code=exc.code,
+                message=exc.message,
+                reason=exc.reason,
+                data=exc.data,
             )
 
     def _handle_auth(
@@ -937,7 +942,8 @@ class RemoteControlAdapter:
             # The caller (mcp) resyncs by re-reading resources.versions on this
             # error — pure read-via-snapshot, so the error carries no version
             # numbers itself (they stay RPC<->mcp bookkeeping, never on the
-            # agent-facing message).
+            # agent-facing message). It DOES carry the resource *identities* that
+            # moved (data.stale), so mcp can name them in agent language.
             logger.debug(
                 "version guard BLOCK: expected=%s mismatched(current)=%s",
                 expected,
@@ -948,6 +954,7 @@ class RemoteControlAdapter:
                 "a resource you depend on was changed in the GUI since you last "
                 "saw it; review then retry",
                 reason="stale_version",
+                data={"stale": sorted(mismatched.keys())},
             )
 
     def _ctrl_resource_versions(self) -> dict[str, int]:
@@ -1000,8 +1007,9 @@ class RemoteControlAdapter:
         code: ErrorCode,
         message: str,
         reason: str = "",
+        data: "Optional[dict]" = None,
     ) -> None:
-        env = ErrorEnvelope(code=code.value, message=message, reason=reason)
+        env = ErrorEnvelope(code=code.value, message=message, reason=reason, data=data)
         resp = Response(id=rid, ok=False, error=env)
         try:
             line = encode_line(resp.to_wire())

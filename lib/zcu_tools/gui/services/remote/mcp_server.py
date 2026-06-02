@@ -129,7 +129,12 @@ from zcu_tools.gui.services.remote.wire import (  # noqa: E402
 #      gui_editor_subscribe/unsubscribe. Only diagnostics (GUI error/info push)
 #      still piggyback tool replies. Resource-change awareness = the version
 #      guard; async completion = gui_*_poll / gui_*_wait. No wire change.
-MCP_VERSION = 16
+# v17: stale-guard error names changed resources (WIRE 16, Phase 120c-3). The
+#      version-guard PRECONDITION_FAILED carries data.stale (resource keys);
+#      _describe_stale_keys translates them into agent language and folds them
+#      into the error message ("… changed (the active context, this tab's cfg) …")
+#      so the agent knows what to re-read. Version numbers stay mcp bookkeeping.
+MCP_VERSION = 17
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -566,6 +571,43 @@ def _build_expected_versions(method: str, params: Dict[str, Any]) -> Dict[str, i
     return expected
 
 
+def _describe_stale_keys(keys: "list") -> "list[str]":
+    """Translate stale resource keys into agent language (no version numbers).
+
+    The server names which resource identities moved (e.g. 'tab:<uuid>:cfg',
+    'context', 'device:flux'); the agent should not see the raw keyspace, so map
+    them to phrases it can act on. Unknown shapes pass through verbatim (forward-
+    compatible) rather than being dropped.
+    """
+    out: list[str] = []
+    for raw in keys:
+        key = str(raw)
+        if key == "context":
+            out.append("the active context (md/ml)")
+        elif key == "soc":
+            out.append("the SoC connection")
+        elif key == "devices:__set__":
+            out.append("the set of devices (one added/removed)")
+        elif key.startswith("device:"):
+            out.append(f"device {key[len('device:') :]!r}")
+        elif key.startswith("editor:"):
+            out.append("the cfg-editor draft")
+        elif key.startswith("tab:"):
+            # tab:<uuid>[:facet] — surface the facet, not the opaque uuid.
+            facet = key.split(":", 2)[2] if key.count(":") >= 2 else ""
+            label = {
+                "cfg": "this tab's cfg",
+                "result": "this tab's run result",
+                "analyze": "this tab's analysis",
+                "save_path": "this tab's save path",
+            }.get(facet, "this tab")
+            if label not in out:
+                out.append(label)
+        else:
+            out.append(key)
+    return out
+
+
 def send_gui_rpc(
     method: str,
     params: Dict[str, Any],
@@ -587,11 +629,16 @@ def send_gui_rpc(
         err = resp.get("error", {})
         if err.get("reason") == "stale_version":
             # A dependency moved since we last read it; resync so the retry is
-            # against the current table, and surface a plain-language hint.
+            # against the current table, and name (in agent language) which
+            # resources changed so the agent knows what to re-read.
             _refresh_versions()
+            data = err.get("data") or {}
+            stale = _describe_stale_keys(data.get("stale", []))
+            detail = f" ({', '.join(stale)})" if stale else ""
             raise RuntimeError(
                 "GUI Error (PRECONDITION_FAILED): a resource you depend on was "
-                "changed in the GUI since you last saw it; review then retry"
+                f"changed in the GUI since you last saw it{detail}; review then "
+                "retry"
             )
         msg = f"GUI Error ({err.get('code')}): {err.get('message')}"
         raise RuntimeError(msg)

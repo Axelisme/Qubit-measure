@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Optional
 
 
 class ErrorCode(str, Enum):
@@ -32,13 +33,27 @@ class RemoteError(Exception):
     the closed ``code`` enum (e.g. ``code=precondition_failed`` +
     ``reason="no_run_result"``), so agents can branch on it without parsing the
     human ``message`` or widening the closed code set.
+
+    ``data`` is an optional structured payload for the few errors that carry
+    machine-readable detail beyond a tag — e.g. a stale-version guard naming the
+    resource keys that moved (``data={"stale": ["tab:X:cfg", "context"]}``), so
+    the mcp layer can translate them into agent language. It must stay free of
+    RPC<->mcp bookkeeping the agent should not see (no version numbers).
     """
 
-    def __init__(self, code: ErrorCode, message: str, *, reason: str = "") -> None:
+    def __init__(
+        self,
+        code: ErrorCode,
+        message: str,
+        *,
+        reason: str = "",
+        data: "Optional[dict]" = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.reason = reason
+        self.data = data
 
 
 @dataclass(frozen=True)
@@ -46,13 +61,21 @@ class ErrorEnvelope:
     code: str
     message: str
     reason: str = ""
+    data: "Optional[dict]" = None
 
     @classmethod
     def from_remote_error(cls, exc: RemoteError) -> "ErrorEnvelope":
-        return cls(code=exc.code.value, message=exc.message, reason=exc.reason)
+        return cls(
+            code=exc.code.value,
+            message=exc.message,
+            reason=exc.reason,
+            data=exc.data,
+        )
 
-    def to_wire(self) -> dict[str, str]:
-        wire = {"code": self.code, "message": self.message}
+    def to_wire(self) -> dict:
+        wire: dict = {"code": self.code, "message": self.message}
         if self.reason:
             wire["reason"] = self.reason
+        if self.data:
+            wire["data"] = self.data
         return wire

@@ -914,3 +914,48 @@ def test_run_poll_no_operation_when_untracked(monkeypatch):
     monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {})
     out = mcp_server.TOOLS["gui_run_poll"]["handler"]({"tab_id": "t1"})
     assert out["status"] == "no_operation"
+
+
+# ---------------------------------------------------------------------------
+# Phase 120c-3 — guard stale error names which resources moved, in agent
+# language (no version numbers, no raw keyspace).
+# ---------------------------------------------------------------------------
+
+
+def test_describe_stale_keys_translates_to_agent_language():
+    from zcu_tools.gui.services.remote import mcp_server
+
+    out = mcp_server._describe_stale_keys(
+        ["context", "soc", "tab:abc123:cfg", "device:flux", "devices:__set__"]
+    )
+    assert "the active context (md/ml)" in out
+    assert "the SoC connection" in out
+    assert "this tab's cfg" in out
+    assert "device 'flux'" in out
+    assert "the set of devices (one added/removed)" in out
+    # No raw key (uuid / keyspace) leaks through for known shapes.
+    assert not any("abc123" in s for s in out)
+
+
+def test_stale_error_message_names_changed_resources(monkeypatch):
+    from zcu_tools.gui.services.remote import mcp_server
+
+    def fake_raw(method, params, timeout_seconds=30.0):
+        del method, params, timeout_seconds
+        return {
+            "ok": False,
+            "error": {
+                "code": "precondition_failed",
+                "message": "stale",
+                "reason": "stale_version",
+                "data": {"stale": ["context", "tab:t:cfg"]},
+            },
+        }
+
+    monkeypatch.setattr(mcp_server, "_send_gui_rpc_raw", fake_raw)
+    monkeypatch.setattr(mcp_server, "_refresh_versions", lambda: None)
+    with pytest.raises(RuntimeError) as ei:
+        mcp_server.send_gui_rpc("run.start", {"tab_id": "t"})
+    msg = str(ei.value)
+    assert "the active context (md/ml)" in msg
+    assert "this tab's cfg" in msg

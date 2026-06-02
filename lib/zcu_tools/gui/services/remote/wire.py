@@ -82,7 +82,7 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 #      before running it. New method = contract change.
 # v13: added app.shutdown — gracefully close the GUI via its normal window-close
 #      path (no OS kill); new method = contract change.
-WIRE_VERSION = 15
+WIRE_VERSION = 16
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -117,7 +117,11 @@ WIRE_VERSION = 15
 #     OperationKind.ANALYZE lease (never conflicts; handle-only) and analyze.start
 #     returns {operation_id}. The mcp gui_analyze tool awaits it, so analyze is
 #     synchronous to the agent and its figure is ready when the reply lands.
-GUI_VERSION = 12
+# v13: stale-version guard error carries data.stale (WIRE 16, Phase 120c-3) — the
+#     error envelope gains an optional ``data`` field; the version guard names the
+#     resource identities that moved (no version numbers) so mcp translates them
+#     into agent language ("the active context", "this tab's cfg", "device 'flux'").
+GUI_VERSION = 13
 
 # ---------------------------------------------------------------------------
 # Wire envelopes

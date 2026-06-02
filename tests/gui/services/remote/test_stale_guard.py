@@ -58,6 +58,19 @@ def test_stale_dependency_blocks():
         svc._guard_versions({"expected_versions": {"tab:t:cfg": 3}})  # saw 3
     assert ei.value.code == ErrorCode.PRECONDITION_FAILED
     assert ei.value.reason == "stale_version"
+    # The error names the resource identities that moved (no version numbers),
+    # so mcp can translate them into agent language (Phase 120c-3).
+    assert ei.value.data == {"stale": ["tab:t:cfg"]}
+
+
+def test_stale_data_lists_only_mismatched_keys():
+    svc = _service({"tab:t:cfg": 4, "soc": 1, "context": 2})
+    with pytest.raises(RemoteError) as ei:
+        svc._guard_versions(
+            {"expected_versions": {"tab:t:cfg": 3, "soc": 1, "context": 9}}
+        )
+    # Only the moved keys (cfg, context) appear — soc matched, so it is omitted.
+    assert ei.value.data == {"stale": ["context", "tab:t:cfg"]}
 
 
 def test_one_mismatch_among_matches_blocks():
