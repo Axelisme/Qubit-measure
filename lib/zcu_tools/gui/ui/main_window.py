@@ -665,11 +665,6 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._ctrl = controller
         self._tab_widgets: dict[str, ExpTabWidget] = {}
-        # Tabs whose next content-change should auto-switch to the Analysis tab —
-        # set only when a run *finished* normally (RUN_FINISHED outcome=finished),
-        # NOT when it was stopped/cancelled (a partial result must not yank the
-        # user to Analysis). Consumed by the following TAB_CONTENT_CHANGED.
-        self._auto_switch_on_result: set[str] = set()
         # ``DialogName -> live QDialog`` registry. ``InspectDialog`` is also
         # tracked through this dict (the legacy ``_inspect_dialog`` attribute
         # is gone — there is now exactly one entry point).
@@ -783,14 +778,20 @@ class MainWindow(QMainWindow):
     def _on_bus_run_finished(self, payload: RunFinishedPayload) -> None:
         # Run lock released.
         self.refresh_run_lock(None)
-        # Arm the auto-switch to Analysis only for a normal finish. A stopped
-        # run (outcome=cancelled) may still leave a partial result, but the user
-        # interrupted it on purpose — don't yank them to the Analysis tab. This
-        # RUN_FINISHED fires before the TAB_CONTENT_CHANGED that consumes it.
-        if payload.outcome == "finished":
-            self._auto_switch_on_result.add(payload.tab_id)
-        else:
-            self._auto_switch_on_result.discard(payload.tab_id)
+        # Auto-switch to the Analysis tab only on a normal finish — RUN_FINISHED
+        # carries the outcome directly, so the decision lives here. A stopped run
+        # (outcome=cancelled) may leave a partial result, but the user interrupted
+        # it on purpose; don't yank them to Analysis. RunService writes the result
+        # to State before emitting RUN_FINISHED, so has_run_result is already set.
+        if payload.outcome != "finished":
+            return
+        tab_w = self._tab_widgets.get(payload.tab_id)
+        if tab_w is None:
+            return
+        snapshot = self._ctrl.get_tab_snapshot(payload.tab_id)
+        assert snapshot.interaction is not None  # render snapshot fills live fields
+        if snapshot.interaction.has_run_result:
+            tab_w._left_tabs.setCurrentIndex(1)
 
     def _on_bus_context_switched(self, payload: ContextSwitchedPayload) -> None:
         del payload
@@ -835,7 +836,6 @@ class MainWindow(QMainWindow):
     def _on_bus_tab_closed(self, payload: TabClosedPayload) -> None:
         tab_id = payload.tab_id
         logger.info("_on_bus_tab_closed: tab_id=%r", tab_id)
-        self._auto_switch_on_result.discard(tab_id)
         tab_w = self._tab_widgets.pop(tab_id, None)
         if tab_w is not None:
             tab_w.detach()
@@ -856,13 +856,8 @@ class MainWindow(QMainWindow):
         self.refresh_tab_writeback(tab_id, snapshot)
         self.refresh_tab_save_paths(tab_id, snapshot)
         self.refresh_tab_figure(tab_id, snapshot)
-        assert snapshot.interaction is not None  # render snapshot fills live fields
-        # auto-switch to Analysis tab only after a normally-finished run (armed by
-        # _on_bus_run_finished); a stopped run's partial result must not switch.
-        if tab_id in self._auto_switch_on_result:
-            self._auto_switch_on_result.discard(tab_id)
-            if snapshot.interaction.has_run_result:
-                tab_w._left_tabs.setCurrentIndex(1)
+        # The auto-switch to Analysis lives in _on_bus_run_finished (it needs the
+        # run outcome); content refresh here is outcome-agnostic.
         self.refresh_tab_interaction(tab_id, snapshot)
 
     def _on_bus_predictor_changed(self, payload: PredictorChangedPayload) -> None:

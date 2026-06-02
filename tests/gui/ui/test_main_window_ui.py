@@ -341,16 +341,15 @@ def test_main_window_content_event_queries_single_tab_snapshot(qapp):
     ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
 
 
-def _run_finished_then_content(window, bus, tab_id: str, outcome: str) -> None:
-    """Replay the real terminal sequence: RUN_FINISHED (carries the outcome)
-    then the TAB_CONTENT_CHANGED that the Controller emits for the result."""
-    from zcu_tools.gui.event_bus import RunFinishedPayload, TabContentChangedPayload
+def _emit_run_finished(bus, tab_id: str, outcome: str) -> None:
+    from zcu_tools.gui.event_bus import RunFinishedPayload
 
     bus.emit(GuiEvent.RUN_FINISHED, RunFinishedPayload(tab_id=tab_id, outcome=outcome))
-    bus.emit(GuiEvent.TAB_CONTENT_CHANGED, TabContentChangedPayload(tab_id=tab_id))
 
 
 def test_finished_run_auto_switches_to_analysis_tab(qapp):
+    """RUN_FINISHED with outcome=finished switches the tab to Analysis — the
+    decision reads the outcome straight off the RUN_FINISHED payload."""
     from zcu_tools.gui.ui.main_window import MainWindow
 
     ctrl = MagicMock()
@@ -362,7 +361,7 @@ def test_finished_run_auto_switches_to_analysis_tab(qapp):
     tab = MagicMock()
     window._tab_widgets["tab-1"] = tab
 
-    _run_finished_then_content(window, bus, "tab-1", outcome="finished")
+    _emit_run_finished(bus, "tab-1", outcome="finished")
 
     tab._left_tabs.setCurrentIndex.assert_called_once_with(1)
 
@@ -381,7 +380,7 @@ def test_stopped_run_does_not_auto_switch_to_analysis_tab(qapp):
     tab = MagicMock()
     window._tab_widgets["tab-1"] = tab
 
-    _run_finished_then_content(window, bus, "tab-1", outcome="cancelled")
+    _emit_run_finished(bus, "tab-1", outcome="cancelled")
 
     tab._left_tabs.setCurrentIndex.assert_not_called()
 
