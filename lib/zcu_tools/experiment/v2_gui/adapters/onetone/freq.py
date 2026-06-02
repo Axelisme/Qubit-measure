@@ -177,11 +177,7 @@ class OneToneFreqAdapter(
         self, req: WritebackRequest[OneToneFreqRunResult, OneToneFreqAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
-        cfg = req.run_result.cfg_snapshot
-        assert cfg is not None, "cfg_snapshot is required for writeback"
-        return make_onetone_freq_writeback_items(
-            cfg.modules.readout, result.freq, result.fwhm, req.ctx
-        )
+        return make_onetone_freq_writeback_items(result.freq, result.fwhm)
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.res_name}_freq_{time.strftime('%m%d')}"

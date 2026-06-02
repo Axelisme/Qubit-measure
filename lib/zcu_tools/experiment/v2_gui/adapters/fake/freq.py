@@ -427,11 +427,7 @@ class FakeFreqAdapter(
         self, req: WritebackRequest[FakeFreqRunResult, FakeFreqAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
-        cfg = req.run_result.cfg_snapshot
-        assert cfg is not None, "cfg_snapshot is required for writeback"
-        return make_onetone_freq_writeback_items(
-            cfg.modules.readout, result.freq, result.fwhm, req.ctx
-        )
+        return make_onetone_freq_writeback_items(result.freq, result.fwhm)
 
     def save(self, req: SaveDataRequest[FakeFreqRunResult]) -> None:
         del req  # fake experiment — no HDF5 persistence

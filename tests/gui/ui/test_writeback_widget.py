@@ -14,8 +14,6 @@ from zcu_tools.gui.adapter import (
     RunRequest,
     WritebackRequest,
 )
-from zcu_tools.gui.event_bus import EventBus
-from zcu_tools.gui.ui.cfg_form import CfgFormWidget
 from zcu_tools.gui.ui.writeback_widget import WritebackWidget
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
@@ -66,50 +64,8 @@ def test_writeback_widget_lists_items_and_edit_buttons(qapp):
     selected = [it for it in items if it.selected]
     edit_buttons = [w for w in widget.findChildren(QPushButton) if w.text() == "Edit"]
 
+    # The one-tone freq fit proposes only r_f / rf_w (two MetaDict items, both
+    # editable) — no readout module / waveform writeback.
     assert len(selected) == len(items)  # all selected by default
-    assert len(edit_buttons) >= 4
-
-
-def test_readout_writeback_drag_schema_is_initially_valid(qapp):
-    ctx = _make_ctx()
-    ctrl = MagicMock()
-    ctrl.get_bus.return_value = EventBus()
-    ctrl.get_current_md.return_value = ctx.md
-    ctrl.get_current_ml.return_value = ctx.ml
-    ctrl.is_running.return_value = False
-    ctrl.has_soc.return_value = False
-
-    adapter = FakeFreqAdapter(fast_mode=True)
-    schema = adapter.make_default_cfg(ctx)
-    result = adapter.run(
-        RunRequest(md=ctx.md, ml=ctx.ml, soc=ctx.soc, soccfg=ctx.soccfg), schema
-    )
-    analyze_result = adapter.analyze(
-        AnalyzeRequest(
-            run_result=result,
-            analyze_params=_default_analyze_params(adapter, result, ctx),
-            md=ctx.md,
-            ml=ctx.ml,
-            predictor=ctx.predictor,
-        )
-    )
-    items = adapter.get_writeback_items(
-        WritebackRequest(run_result=result, analyze_result=analyze_result, ctx=ctx)
-    )
-    from zcu_tools.gui.adapter import ModuleWriteback
-
-    readout_item = next(
-        item
-        for item in items
-        if isinstance(item, ModuleWriteback) and item.target_name == "readout_rf"
-    )
-
-    from zcu_tools.gui.live_model import LiveModelEnv, SectionLiveField
-
-    schema_r = readout_item.edit_schema
-    assert schema_r is not None
-    model = SectionLiveField(schema_r.spec, LiveModelEnv(ctrl=ctrl), schema_r.value)
-    form = CfgFormWidget()
-    form.attach(model)
-
-    assert form.is_valid() is True
+    assert {it.target_name for it in items} == {"r_f", "rf_w"}
+    assert len(edit_buttons) == 2
