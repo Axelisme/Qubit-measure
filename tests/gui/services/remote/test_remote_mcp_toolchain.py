@@ -785,3 +785,51 @@ def test_every_registered_adapter_has_a_written_guide():
         if cls.guide().behavior == "(no guide written yet)"
     ]
     assert not missing, f"adapters without a written guide: {missing}"
+
+
+# ---------------------------------------------------------------------------
+# Phase 120c-⑧ — run/analyze replies fold in figure_path (no extra screenshot
+# call), saved to the cross-platform temp dir, base64-free.
+# ---------------------------------------------------------------------------
+
+
+def test_analyze_reply_includes_figure_path_when_figure_exists(monkeypatch):
+    from zcu_tools.gui.services.remote import mcp_server
+
+    calls: list[tuple[str, dict]] = []
+
+    def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        del timeout_seconds
+        calls.append((method, params))
+        if method == "tab.snapshot":
+            return {"interaction": {"has_figure": True}}
+        if method == "tab.figure_screenshot":
+            return {"saved_to": params["out_path"]}
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    out = mcp_server.TOOLS["gui_analyze"]["handler"]({"tab_id": "fake-freq-1"})
+
+    assert out["status"] == "finished"
+    # figure_path points at a temp PNG keyed by tab_id (cross-platform tempdir).
+    assert out["figure_path"].endswith("zcu_tools_figure_fake-freq-1.png")
+    # analyze.start was issued, and the figure was rendered to that exact path.
+    assert ("analyze.start", {"tab_id": "fake-freq-1"}) in calls
+    shot = next(c for c in calls if c[0] == "tab.figure_screenshot")
+    assert shot[1]["out_path"] == out["figure_path"]
+
+
+def test_analyze_reply_omits_figure_path_when_no_figure(monkeypatch):
+    from zcu_tools.gui.services.remote import mcp_server
+
+    def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
+        del timeout_seconds, params
+        if method == "tab.snapshot":
+            return {"interaction": {"has_figure": False}}
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    out = mcp_server.TOOLS["gui_analyze"]["handler"]({"tab_id": "t1"})
+
+    assert out["status"] == "finished"
+    assert "figure_path" not in out

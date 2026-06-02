@@ -105,7 +105,13 @@ from zcu_tools.gui.services.remote.wire import (  # noqa: E402
 #      gui_analyze (was gui_analyze_start, v? sync) unchanged here. cfg_spec is
 #      ref-only. Token-noise + WYSIWYG read split: edit returns success, read via
 #      list_paths.
-MCP_VERSION = 12
+# v13: run/analyze replies fold in figure_path (Phase 120c-⑧). On a finished
+#      run / completed analyze that produced a figure, the reply carries
+#      figure_path — a PNG rendered to the cross-platform temp dir (gettempdir,
+#      keyed by tab_id), NOT base64 — so the agent opens the file instead of a
+#      separate gui_tab_figure_screenshot call. gui_analyze becomes a hand-written
+#      override (was a generated forwarder) to attach it.
+MCP_VERSION = 13
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -1083,6 +1089,39 @@ def _device_snapshot(name: str) -> Any:
     return send_gui_rpc("device.snapshot", {"name": name}).get("snapshot")
 
 
+def _figure_path_if_any(tab_id: str) -> "Optional[str]":
+    """If the tab has a figure, render it to a temp PNG and return its path.
+
+    Saves to the cross-platform temp dir (tempfile.gettempdir(), keyed by
+    tab_id) and returns the path — NOT base64, so a run/analyze reply stays
+    small. The agent opens the file (e.g. via Read) to see the plot, without a
+    separate gui_tab_figure_screenshot call. Returns None when the tab has no
+    figure yet (a data-only run), so the caller simply omits figure_path.
+    """
+    try:
+        snap = send_gui_rpc("tab.snapshot", {"tab_id": tab_id})
+    except RuntimeError:
+        return None
+    interaction = snap.get("interaction", {}) if isinstance(snap, dict) else {}
+    if not interaction.get("has_figure"):
+        return None
+    out_path = str(Path(gettempdir()) / f"zcu_tools_figure_{tab_id}.png")
+    try:
+        send_gui_rpc("tab.figure_screenshot", {"tab_id": tab_id, "out_path": out_path})
+    except RuntimeError:
+        return None  # figure raced away / render failed — just omit it
+    return out_path
+
+
+def _with_figure(tab_id: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    """Attach figure_path to a finished run/analyze reply when a figure exists."""
+    if result.get("status") == "finished":
+        path = _figure_path_if_any(tab_id)
+        if path is not None:
+            result["figure_path"] = path
+    return result
+
+
 def tool_gui_device_wait_operation(arguments: Dict[str, Any]) -> Dict[str, Any]:
     """Block until the named device's current operation completes (semantic).
 
@@ -1110,21 +1149,43 @@ def tool_gui_run_start(arguments: Dict[str, Any]) -> Dict[str, Any]:
     tab_id = str(arguments["tab_id"])
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
     send_gui_rpc("run.start", {"tab_id": tab_id})
-    return _start_op_with_short_wait(
+    result = _start_op_with_short_wait(
         f"tab:{tab_id}",
         f"Run on tab {tab_id!r}",
         wait_seconds,
         lambda: {"tab": send_gui_rpc("tab.snapshot", {"tab_id": tab_id})},
-        f"await it with gui_run_wait(tab_id={tab_id!r}) or watch 'run_finished'.",
+        f"await it with gui_run_wait(tab_id={tab_id!r}).",
     )
+    # On a finished run that produced a figure, fold in figure_path so the agent
+    # need not call gui_tab_figure_screenshot separately.
+    return _with_figure(tab_id, result)
 
 
 def tool_gui_run_wait(arguments: Dict[str, Any]) -> Dict[str, Any]:
     """Block until the run on ``tab_id`` completes (semantic wait, mirrors
-    gui_device_wait_operation). Raises on failure/cancellation."""
+    gui_device_wait_operation). Raises on failure/cancellation. On a finished
+    run that produced a figure, the reply includes figure_path (a temp PNG)."""
     tab_id = str(arguments["tab_id"])
     timeout = float(arguments.get("timeout", 600.0))
-    return _await_operation_by_key(f"tab:{tab_id}", f"Run on tab {tab_id!r}", timeout)
+    result = _await_operation_by_key(f"tab:{tab_id}", f"Run on tab {tab_id!r}", timeout)
+    return _with_figure(tab_id, result)
+
+
+def tool_gui_analyze(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Analyze the tab's run result — SYNCHRONOUS: returns when done.
+
+    Overrides the generated forwarder to fold in figure_path: analysis almost
+    always produces a figure, so on return the reply carries figure_path (a temp
+    PNG) and the agent need not call gui_tab_figure_screenshot. Read the scalar
+    fit summary with gui_tab_get_analyze_result.
+    """
+    tab_id = str(arguments["tab_id"])
+    params: Dict[str, Any] = {"tab_id": tab_id}
+    if "updates" in arguments and arguments["updates"] is not None:
+        params["updates"] = arguments["updates"]
+    send_gui_rpc("analyze.start", params)
+    # analyze.start is synchronous — on return the result + figure are ready.
+    return _with_figure(tab_id, {"status": "finished"})
 
 
 def tool_gui_connect_start(arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -1332,6 +1393,9 @@ _NON_GENERATED_METHODS = frozenset(
         # gui_connect_wait).
         "run.start",
         "connect.start",
+        # hand-written to fold figure_path into the synchronous reply (analysis
+        # almost always produces a figure; agent skips gui_tab_figure_screenshot).
+        "analyze.start",
     }
 )
 
@@ -1696,6 +1760,28 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             "required": ["tab_id"],
         },
     },
+    "gui_analyze": {
+        "handler": tool_gui_analyze,
+        "description": (
+            "Analyze the tab's run result — SYNCHRONOUS: on return the analysis "
+            "is complete. Read the scalar fit summary with "
+            "gui_tab_get_analyze_result. The reply includes figure_path (a temp "
+            "PNG of the fitted plot) when a figure was produced — open it (Read) "
+            "instead of calling gui_tab_figure_screenshot. 'updates' optionally "
+            "overrides analyze params (see gui_adapter_analyze_spec)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tab_id": {"type": "string"},
+                "updates": {
+                    "type": "object",
+                    "description": "Analyze param updates",
+                },
+            },
+            "required": ["tab_id"],
+        },
+    },
     "gui_connect_start": {
         "handler": tool_gui_connect_start,
         "description": (
@@ -1940,6 +2026,7 @@ _OVERRIDE_NAMES = frozenset(
         "gui_device_wait_operation",
         "gui_run_start",
         "gui_run_wait",
+        "gui_analyze",
         "gui_connect_start",
         "gui_connect_wait",
     }
