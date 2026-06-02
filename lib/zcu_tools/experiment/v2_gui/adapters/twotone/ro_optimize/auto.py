@@ -178,7 +178,7 @@ class RoOptAutoAdapter(
 
     def run(self, req: RunRequest, schema: CfgSchema) -> RoOptAutoRunResult:
         soc, soccfg = require_soc_handles(req)
-        raw_cfg = schema.to_raw_dict(req)
+        raw_cfg = schema.to_raw_dict(req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
         num_points = self._num_points(raw_cfg)
         return AutoOptExp().run(soc, soccfg, cfg, num_points=num_points)

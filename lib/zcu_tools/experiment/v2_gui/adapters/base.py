@@ -154,7 +154,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         return hints.get("return", NoAnalyzeParams)
 
     def run(self, req: RunRequest, schema: CfgSchema) -> T_Result:
-        raw_cfg = schema.to_raw_dict(req)
+        raw_cfg = schema.to_raw_dict(req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
         if self.capabilities.requires_soc:
             soc, soccfg = require_soc_handles(req)

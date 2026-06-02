@@ -34,7 +34,6 @@ def ctrl(ml, md):
     Mirrors ContextService (ADR-0011 single write authority): the write port
     lowers the CfgSchema against the live ml/md, then registers.
     """
-    from zcu_tools.gui.adapter import schema_to_dict
     from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
 
     c = MagicMock()
@@ -45,11 +44,11 @@ def ctrl(ml, md):
     c.has_soc.return_value = False
 
     def _set_module(name, schema):
-        raw = schema_to_dict(schema, ml, md)
+        raw = schema.to_raw_dict(md, ml)
         ml.register_module(**{name: ModuleCfgFactory.from_raw(raw, ml=ml)})
 
     def _set_waveform(name, schema):
-        raw = schema_to_dict(schema, ml, md)
+        raw = schema.to_raw_dict(md, ml)
         ml.register_waveform(**{name: WaveformCfgFactory.from_raw(raw, ml=ml)})
 
     c.set_ml_module_from_schema.side_effect = _set_module

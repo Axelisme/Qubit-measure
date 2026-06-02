@@ -12,7 +12,6 @@ from zcu_tools.gui.adapter import (
     DirectValue,
     RunRequest,
     WritebackRequest,
-    schema_to_dict,
 )
 from zcu_tools.gui.registry import Registry
 
@@ -36,7 +35,7 @@ def test_fake_adapter_full_flow():
     assert schema is not None
 
     # 2. schema_to_dict
-    cfg_dict = schema_to_dict(schema, ctx.ml)
+    cfg_dict = schema.to_raw_dict(None, ctx.ml)
     assert "reps" in cfg_dict
     assert cfg_dict["reps"] == 100
     assert "sweep" in cfg_dict

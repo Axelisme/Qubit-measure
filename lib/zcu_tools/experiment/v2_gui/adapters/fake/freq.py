@@ -352,7 +352,7 @@ class FakeFreqAdapter(
     def run(self, req: RunRequest, schema: CfgSchema) -> FakeFreqRunResult:
         import dataclasses
 
-        raw_cfg = schema.to_raw_dict(req)
+        raw_cfg = schema.to_raw_dict(req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = FakeFreqExp().run(cfg)
         freq_cfg = FreqCfg(

@@ -17,7 +17,6 @@ from zcu_tools.experiment.v2_gui.adapters.twotone.ro_optimize import (
     RoOptPowerAdapter,
 )
 from zcu_tools.gui.adapter import CfgSchema, RunRequest
-from zcu_tools.gui.adapter.lowering import schema_to_dict
 from zcu_tools.meta_tool import MetaDict
 from zcu_tools.program.v2 import SweepCfg
 
@@ -43,7 +42,7 @@ def _make_req(ml: MagicMock | None = None) -> RunRequest:
 
 
 def _lower(schema: CfgSchema, req: RunRequest) -> dict[str, object]:
-    return schema_to_dict(schema, req.ml)
+    return schema.to_raw_dict(None, req.ml)
 
 
 @pytest.mark.parametrize(

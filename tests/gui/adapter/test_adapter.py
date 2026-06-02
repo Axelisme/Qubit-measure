@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -25,7 +26,6 @@ from zcu_tools.gui.adapter import (
     WaveformWriteback,
     make_default_value,
     require_soc_handles,
-    schema_to_dict,
 )
 from zcu_tools.gui.adapter.lowering import _find_allowed_spec
 from zcu_tools.gui.adapter.protocol import NoAnalyzeParams
@@ -66,7 +66,7 @@ def test_scalar_int():
         {"reps": ScalarSpec(label="Reps", type=int)},
         {"reps": DirectValue(100)},
     )
-    assert schema_to_dict(s, _make_ml()) == {"reps": 100}
+    assert s.to_raw_dict(None, _make_ml()) == {"reps": 100}
 
 
 def test_scalar_str():
@@ -74,7 +74,7 @@ def test_scalar_str():
         {"name": ScalarSpec(label="Name", type=str)},
         {"name": DirectValue("hello")},
     )
-    assert schema_to_dict(s, _make_ml())["name"] == "hello"
+    assert s.to_raw_dict(None, _make_ml())["name"] == "hello"
 
 
 def test_scalar_editable_false_still_included():
@@ -82,7 +82,7 @@ def test_scalar_editable_false_still_included():
         {"freq": ScalarSpec(label="Freq", type=float, editable=False)},
         {"freq": DirectValue(6.0)},
     )
-    assert schema_to_dict(s, _make_ml())["freq"] == pytest.approx(6.0)
+    assert s.to_raw_dict(None, _make_ml())["freq"] == pytest.approx(6.0)
 
 
 def test_scalar_eval_value_uses_resolved_snapshot():
@@ -90,7 +90,7 @@ def test_scalar_eval_value_uses_resolved_snapshot():
         {"freq": ScalarSpec(label="Freq", type=float)},
         {"freq": EvalValue(expr="r_f - rf_w", resolved=5998.0)},
     )
-    assert schema_to_dict(s, _make_ml())["freq"] == pytest.approx(5998.0)
+    assert s.to_raw_dict(None, _make_ml())["freq"] == pytest.approx(5998.0)
 
 
 def test_scalar_eval_value_unresolved_raises():
@@ -99,7 +99,7 @@ def test_scalar_eval_value_unresolved_raises():
         {"freq": EvalValue(expr="missing_name", resolved=None)},
     )
     with pytest.raises(RuntimeError, match="freq.*missing_name.*unresolved"):
-        schema_to_dict(s, _make_ml())
+        s.to_raw_dict(None, _make_ml())
 
 
 def test_scalar_eval_value_resolves_against_md_when_no_snapshot():
@@ -111,7 +111,7 @@ def test_scalar_eval_value_resolves_against_md_when_no_snapshot():
     md = MetaDict()
     md.r_f = 6000.0
     md.rf_w = 2.0
-    assert schema_to_dict(s, _make_ml(), md)["freq"] == pytest.approx(5998.0)
+    assert s.to_raw_dict(md, _make_ml())["freq"] == pytest.approx(5998.0)
 
 
 def test_scalar_eval_snapshot_drift_warns_but_keeps_snapshot(caplog):
@@ -125,7 +125,7 @@ def test_scalar_eval_snapshot_drift_warns_but_keeps_snapshot(caplog):
     md.r_f = 7000.0  # md changed after the snapshot was taken
     md.rf_w = 2.0
     with caplog.at_level("WARNING"):
-        out = schema_to_dict(s, _make_ml(), md)
+        out = s.to_raw_dict(md, _make_ml())
     # snapshot still wins
     assert out["freq"] == pytest.approx(5998.0)
     assert any(
@@ -142,7 +142,7 @@ def test_scalar_eval_snapshot_consistent_no_warn(caplog):
     md.r_f = 6000.0
     md.rf_w = 2.0  # fresh eval == snapshot
     with caplog.at_level("WARNING"):
-        schema_to_dict(s, _make_ml(), md)
+        s.to_raw_dict(md, _make_ml())
     assert not any("differs" in r.message for r in caplog.records)
 
 
@@ -154,7 +154,7 @@ def test_scalar_eval_value_int_spec_coerces_to_int():
     )
     md = MetaDict()
     md.ro_ch = 2
-    out = schema_to_dict(s, _make_ml(), md)["ro_ch"]
+    out = s.to_raw_dict(md, _make_ml())["ro_ch"]
     assert out == 2
     assert isinstance(out, int) and not isinstance(out, bool)
 
@@ -168,7 +168,7 @@ def test_scalar_eval_value_int_spec_non_integer_raises():
     md = MetaDict()
     md.r_f = 6000.5
     with pytest.raises(RuntimeError, match="not an integer"):
-        schema_to_dict(s, _make_ml(), md)
+        s.to_raw_dict(md, _make_ml())
 
 
 def test_scalar_missing_in_value_skipped():
@@ -181,7 +181,7 @@ def test_scalar_missing_in_value_skipped():
         {"reps": DirectValue(5)},
     )
     with pytest.raises(RuntimeError, match="x"):
-        schema_to_dict(s, _make_ml())
+        s.to_raw_dict(None, _make_ml())
 
 
 def test_extra_value_fields_raise():
@@ -190,7 +190,7 @@ def test_extra_value_fields_raise():
         {"reps": DirectValue(5), "extra": DirectValue(1)},
     )
     with pytest.raises(RuntimeError, match="extra"):
-        schema_to_dict(s, _make_ml())
+        s.to_raw_dict(None, _make_ml())
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +205,7 @@ def test_sweep_produces_sweep_cfg():
         {"sweep": SweepSpec(label="Freq")},
         {"sweep": SweepValue(start=1.0, stop=2.0, expts=11)},
     )
-    result = schema_to_dict(s, _make_ml())
+    result = s.to_raw_dict(None, _make_ml())
     sweep = result["sweep"]
     assert isinstance(sweep, SweepCfg)
     assert sweep.start == pytest.approx(1.0)
@@ -220,7 +220,7 @@ def test_sweep_step_mode():
         {"sweep": SweepSpec()},
         {"sweep": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)},
     )
-    result = schema_to_dict(s, _make_ml())
+    result = s.to_raw_dict(None, _make_ml())
     sweep = result["sweep"]
     assert isinstance(sweep, SweepCfg)
     assert sweep.expts == 11
@@ -240,7 +240,7 @@ def test_sweep_eval_edges_use_resolved_value():
             )
         },
     )
-    result = schema_to_dict(s, _make_ml())
+    result = s.to_raw_dict(None, _make_ml())
     sweep = result["sweep"]
     assert isinstance(sweep, SweepCfg)
     assert sweep.start == pytest.approx(5990.0)
@@ -259,7 +259,7 @@ def test_sweep_eval_unresolved_fails_fast():
         },
     )
     with pytest.raises(RuntimeError, match="unresolved"):
-        schema_to_dict(s, _make_ml())
+        s.to_raw_dict(None, _make_ml())
 
 
 def test_sweep_eval_edges_resolve_against_md_when_no_snapshot():
@@ -278,7 +278,7 @@ def test_sweep_eval_edges_resolve_against_md_when_no_snapshot():
     )
     md = MetaDict()
     md.r_f = 6000.0
-    sweep = schema_to_dict(s, _make_ml(), md)["sweep"]
+    sweep = s.to_raw_dict(md, _make_ml())["sweep"]
     assert isinstance(sweep, SweepCfg)
     assert sweep.start == pytest.approx(5990.0)
     assert sweep.stop == pytest.approx(6010.0)
@@ -307,7 +307,7 @@ def test_module_ref_named_key_without_library_entry_raises():
         },
     )
     with pytest.raises(RuntimeError, match="Unknown module reference"):
-        schema_to_dict(s, ml)
+        s.to_raw_dict(None, ml)
 
 
 def test_module_ref_custom_key_resolves_by_label():
@@ -324,7 +324,7 @@ def test_module_ref_custom_key_resolves_by_label():
             )
         },
     )
-    result = schema_to_dict(s, _make_ml())
+    result = s.to_raw_dict(None, _make_ml())
     assert result["ro"] == {"gain": pytest.approx(0.5)}
 
 
@@ -338,7 +338,7 @@ def test_nested_section_is_recursed():
         {"inner": CfgSectionSpec(fields={"x": ScalarSpec(label="X", type=int)})},
         {"inner": CfgSectionValue(fields={"x": DirectValue(42)})},
     )
-    assert schema_to_dict(s, _make_ml()) == {"inner": {"x": 42}}
+    assert s.to_raw_dict(None, _make_ml()) == {"inner": {"x": 42}}
 
 
 # ---------------------------------------------------------------------------
@@ -455,7 +455,7 @@ def test_optional_module_ref_omitted_when_disabled():
     # value omits "module" key → disabled optional
     outer_val = CfgSectionValue(fields={"reps": DirectValue(100)})
     s = CfgSchema(spec=outer_spec, value=outer_val)
-    result = schema_to_dict(s, _make_ml())
+    result = s.to_raw_dict(None, _make_ml())
 
     assert "module" not in result
     assert result["reps"] == 100
@@ -477,10 +477,10 @@ def test_optional_module_ref_included_when_enabled():
         }
     )
     s = CfgSchema(spec=outer_spec, value=outer_val)
-    result = schema_to_dict(s, _make_ml())
+    result = s.to_raw_dict(None, _make_ml())
 
     assert result["reps"] == 100
-    assert result["module"]["ch"] == 3
+    assert cast(dict, result["module"])["ch"] == 3
 
 
 def test_non_optional_missing_raises():
@@ -489,7 +489,7 @@ def test_non_optional_missing_raises():
     s = CfgSchema(spec=outer_spec, value=outer_val)
 
     with pytest.raises(RuntimeError, match="reps.*missing"):
-        schema_to_dict(s, _make_ml())
+        s.to_raw_dict(None, _make_ml())
 
 
 # ---------------------------------------------------------------------------
@@ -501,7 +501,7 @@ def test_device_ref_normal_path_produces_device_name():
     spec = CfgSectionSpec(fields={"dev": DeviceRefSpec(label="Device")})
     val = CfgSectionValue(fields={"dev": DirectValue("lo_device")})
     s = CfgSchema(spec=spec, value=val)
-    result = schema_to_dict(s, _make_ml())
+    result = s.to_raw_dict(None, _make_ml())
     assert result["dev"] == "lo_device"
 
 
@@ -510,7 +510,7 @@ def test_device_ref_is_unset_raises():
     val = CfgSectionValue(fields={"dev": DirectValue(value="", is_unset=True)})
     s = CfgSchema(spec=spec, value=val)
     with pytest.raises(RuntimeError, match="unset"):
-        schema_to_dict(s, _make_ml())
+        s.to_raw_dict(None, _make_ml())
 
 
 def test_device_ref_empty_string_raises():
@@ -518,7 +518,7 @@ def test_device_ref_empty_string_raises():
     val = CfgSectionValue(fields={"dev": DirectValue(value="")})
     s = CfgSchema(spec=spec, value=val)
     with pytest.raises(RuntimeError, match="unset"):
-        schema_to_dict(s, _make_ml())
+        s.to_raw_dict(None, _make_ml())
 
 
 # ---------------------------------------------------------------------------
@@ -562,7 +562,7 @@ def test_resolve_sweep_edge_unresolved_eval_raises():
     )
     s = CfgSchema(spec=spec, value=val)
     with pytest.raises(RuntimeError, match="unresolved"):
-        schema_to_dict(s, None)
+        s.to_raw_dict(None, None)
 
 
 def test_resolve_sweep_edge_non_numeric_resolved_raises():
@@ -578,7 +578,7 @@ def test_resolve_sweep_edge_non_numeric_resolved_raises():
     )
     s = CfgSchema(spec=spec, value=val)
     with pytest.raises(RuntimeError, match="non-numeric"):
-        schema_to_dict(s, None)
+        s.to_raw_dict(None, None)
 
 
 # ---------------------------------------------------------------------------

@@ -33,9 +33,8 @@ def _make_req(ml=None):
 
 
 def _lower(schema: CfgSchema, req: RunRequest) -> dict:
-    from zcu_tools.gui.adapter.lowering import schema_to_dict
 
-    return schema_to_dict(schema, req.ml)
+    return schema.to_raw_dict(None, req.ml)
 
 
 def test_fakefreq_build_exp_cfg_basic():

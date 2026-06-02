@@ -144,7 +144,7 @@ class ContextWritePort(Protocol):
 
     Sources holding an un-lowered ``CfgSchema`` (editor commit, writeback apply,
     inspect save, create_from_role) write through this port; ContextService
-    lowers (``schema_to_dict`` with the live md, so callers can never forget md)
+    lowers (``schema.to_raw_dict`` with the live md, so callers can never forget md)
     + registers + bumps the ``context`` version + emits ML/MD_CHANGED. The only
     implementer is ContextService.
 

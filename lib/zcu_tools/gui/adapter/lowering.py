@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any, Optional, Union
 logger = logging.getLogger(__name__)
 
 from .types import (
-    CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     DeviceRefSpec,
@@ -214,16 +213,6 @@ def _section_to_dict_inner(
     return result
 
 
-def _section_to_dict(
-    spec: CfgSectionSpec,
-    value: CfgSectionValue,
-    ml: "Optional[ModuleLibrary]",
-    md: "Optional[MetaDict]" = None,
-) -> dict:
-    """Public entry point for lowering a section; path starts at root."""
-    return _section_to_dict_inner(spec, value, ml, [], md)
-
-
 def _find_allowed_spec(
     ref_spec: Union[ModuleRefSpec, WaveformRefSpec],
     ref_val: Union[ModuleRefValue, WaveformRefValue],
@@ -267,16 +256,3 @@ def _find_allowed_spec(
         f"Library reference {chosen!r} resolved to unsupported spec "
         f"{chosen_spec.label!r}; allowed labels: {allowed}"
     )
-
-
-def schema_to_dict(
-    schema: CfgSchema,
-    ml: "Optional[ModuleLibrary]",
-    md: "Optional[MetaDict]" = None,
-) -> dict:
-    """Lower a CfgSchema using the same section lowerer as CfgSchema.to_raw_dict().
-
-    ``md`` lets lowering resolve any EvalValue that was built without a snapshot
-    ``resolved``; omit it only when every EvalValue is already resolved.
-    """
-    return _section_to_dict_inner(schema.spec, schema.value, ml, [], md)

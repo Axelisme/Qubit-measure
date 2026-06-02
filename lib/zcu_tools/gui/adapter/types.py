@@ -580,8 +580,16 @@ class CfgSchema:
     spec: CfgSectionSpec
     value: CfgSectionValue
 
-    def to_raw_dict(self, req: RunRequest) -> dict[str, object]:
-        """Lower the current schema into a raw experiment config dictionary."""
+    def to_raw_dict(
+        self, md: "Optional[MetaDict]", ml: "Optional[ModuleLibrary]"
+    ) -> dict[str, object]:
+        """Lower the current schema into a raw experiment config dictionary.
+
+        ``md`` lets lowering resolve any ``EvalValue`` built without a snapshot
+        ``resolved``; omit it (pass ``None``) only when every EvalValue is
+        already resolved. This is the single lowering entry point — the former
+        free function ``schema_to_dict`` was folded into it.
+        """
         from .lowering import _section_to_dict_inner
 
-        return _section_to_dict_inner(self.spec, self.value, req.ml, [], req.md)
+        return _section_to_dict_inner(self.spec, self.value, ml, [], md)

@@ -134,8 +134,9 @@ Typical experiment loop:
     returns {status:'finished', tab:{...}}; a slow one returns {status:'pending'}
     — then gui_run_wait(tab_id) or watch run_finished. (gui_device_* and
     gui_connect_start degrade the same way.)
-  - gui_analyze_start(tab_id) after a run; gui_save_data / gui_save_image /
-    gui_save_both to persist.
+  - gui_analyze(tab_id) after a run — synchronous: on return the analysis is
+    done (read gui_tab_get_analyze_result, no wait step). Then gui_save_data /
+    gui_save_image / gui_save_both to persist.
 
 Detecting completion — prefer events over polling:
   - run_started{tab_id} and run_finished{tab_id, outcome, error_message} are
@@ -2068,17 +2069,26 @@ def main() -> None:
                             "result": {"content": content},
                         }
                     except Exception as e:
+                        # GUI-side business errors (send_gui_rpc raises
+                        # RuntimeError with an already-clear "GUI Error (code):
+                        # message") carry no useful Python stack for the agent —
+                        # the traceback is always the same forwarder→send_gui_rpc
+                        # frames, pure noise. Strip it for those; keep the full
+                        # traceback only for unexpected bridge-side failures,
+                        # where the stack is the actual debugging signal.
+                        if isinstance(e, RuntimeError):
+                            text = f"Error executing tool {name!r}: {e}"
+                        else:
+                            text = (
+                                f"Error executing tool {name!r}: {e}\n"
+                                f"{traceback.format_exc()}"
+                            )
                         resp = {
                             "jsonrpc": "2.0",
                             "id": rid,
                             "result": {
                                 "isError": True,
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": f"Error executing tool {name!r}: {e}\n{traceback.format_exc()}",
-                                    }
-                                ],
+                                "content": [{"type": "text", "text": text}],
                             },
                         }
                 sys.stdout.write(json.dumps(resp) + "\n")

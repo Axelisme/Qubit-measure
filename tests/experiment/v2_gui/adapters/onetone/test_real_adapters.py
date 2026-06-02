@@ -18,7 +18,6 @@ from zcu_tools.experiment.v2_gui.adapters.onetone.power_dep import (
     OneTonePowerDepRunResult,
 )
 from zcu_tools.gui.adapter import AnalyzeRequest, CfgSchema, RunRequest
-from zcu_tools.gui.adapter.lowering import schema_to_dict
 from zcu_tools.meta_tool import MetaDict
 from zcu_tools.program.v2 import ModuleCfgFactory, SweepCfg
 
@@ -49,7 +48,7 @@ def _make_req(ml: MagicMock | None = None, *, with_soc: bool = False) -> RunRequ
 
 
 def _lower(schema: CfgSchema, req: RunRequest) -> dict[str, object]:
-    return schema_to_dict(schema, req.ml)
+    return schema.to_raw_dict(None, req.ml)
 
 
 def test_onetone_freq_build_exp_cfg_delegates_to_ml_make_cfg() -> None:

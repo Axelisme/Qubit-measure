@@ -124,7 +124,7 @@ def test_module_cfg_to_value_pulse_missing_fields():
 
 def test_module_cfg_to_value_pulse_round_trip():
 
-    from zcu_tools.gui.adapter import CfgSchema, schema_to_dict
+    from zcu_tools.gui.adapter import CfgSchema
 
     cfg = {
         "type": "pulse",
@@ -139,9 +139,9 @@ def test_module_cfg_to_value_pulse_round_trip():
     }
     spec, val = module_cfg_to_value(cfg)
     schema = CfgSchema(spec=spec, value=val)
-    out = schema_to_dict(schema, ml=None)
+    out = schema.to_raw_dict(md=None, ml=None)
 
     assert out["freq"] == 5000.0
     assert out["gain"] == 0.5
     assert out["type"] == "pulse"
-    assert out["waveform"]["style"] == "const"
+    assert cast(dict, out["waveform"])["style"] == "const"

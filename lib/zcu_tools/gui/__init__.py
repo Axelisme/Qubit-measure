@@ -26,7 +26,6 @@ from .adapter import (
     WritebackItem,
     make_default_value,
     reconstruct_params,
-    schema_to_dict,
 )
 from .io_manager import IOManager
 from .registry import Registry
@@ -64,5 +63,4 @@ __all__ = [
     "WritebackItem",
     "make_default_value",
     "reconstruct_params",
-    "schema_to_dict",
 ]

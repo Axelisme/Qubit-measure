@@ -12,7 +12,6 @@ from zcu_tools.gui.adapter import (
     ScalarSpec,
     inherit_from,
     make_default_value,
-    schema_to_dict,
 )
 
 
@@ -27,14 +26,14 @@ def _val(fields: dict) -> CfgSectionValue:
 def test_channel_direct_scalar_to_dict() -> None:
     spec = _section({"ch": ScalarSpec(label="Gen ch", type=int)})
     val = _val({"ch": DirectValue(3)})
-    result = schema_to_dict(CfgSchema(spec=spec, value=val), ml=None)
+    result = CfgSchema(spec=spec, value=val).to_raw_dict(None, None)
     assert result["ch"] == 3
 
 
 def test_channel_eval_scalar_to_dict_uses_resolved_snapshot() -> None:
     spec = _section({"ch": ScalarSpec(label="Gen ch", type=int)})
     val = _val({"ch": EvalValue(expr="res_ch", resolved=5)})
-    result = schema_to_dict(CfgSchema(spec=spec, value=val), ml=None)
+    result = CfgSchema(spec=spec, value=val).to_raw_dict(None, None)
     assert result["ch"] == 5
 
 
@@ -42,7 +41,7 @@ def test_channel_eval_scalar_unresolved_raises() -> None:
     spec = _section({"ch": ScalarSpec(label="Gen ch", type=int)})
     val = _val({"ch": EvalValue(expr="unknown_key", resolved=None)})
     with pytest.raises(RuntimeError, match="unknown_key"):
-        schema_to_dict(CfgSchema(spec=spec, value=val), ml=None)
+        CfgSchema(spec=spec, value=val).to_raw_dict(None, None)
 
 
 def test_channel_scalar_default_value() -> None:

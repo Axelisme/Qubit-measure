@@ -27,7 +27,7 @@ for exactly this reason.
 
 ``EvalValue`` fields (md-reference expressions, e.g. ``r_f - 0.1``) are carried
 on the wire as the cfg-form tagged form ``{"__kind": "eval", "expr": ...}`` and
-resolved against the live MetaDict at ``commit`` time (``schema_to_dict`` lowers
+resolved against the live MetaDict at ``commit`` time (``schema.to_raw_dict`` lowers
 ``EvalValue`` to its concrete ``resolved`` number), because ModuleLibrary stores
 concrete numbers, never md references.
 

@@ -467,8 +467,16 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "analyze.start": MethodSpec(
         30.0,
-        "Start analyze (fire-and-forget)",
+        "Analyze the tab's run result — SYNCHRONOUS: on return the analysis is "
+        "complete, so read it directly with gui_tab_get_analyze_result (and the "
+        "figure is ready for gui_tab_figure_screenshot). Unlike run/connect/"
+        "device this does NOT degrade to a pending handle and there is no "
+        "separate wait/await step. 'updates' optionally overrides analyze "
+        "params (see gui_adapter_analyze_spec). Makes the tab busy while it "
+        "runs; a concurrent save/edit returns precondition_failed until it "
+        "settles.",
         (_str("tab_id"), _obj_default("updates", "Analyze param updates")),
+        tool_name="gui_analyze",
     ),
     "tab.get_cfg_summary": MethodSpec(
         5.0, "Read tab cfg as clean scalar dict", (_str("tab_id"),)

@@ -129,7 +129,7 @@ class GuardService:
 
         # Lowering verifies committed cfg validity (fail-fast before any worker).
         try:
-            tab.cfg_schema.to_raw_dict(req)
+            tab.cfg_schema.to_raw_dict(ctx.md, ctx.ml)
         except Exception as exc:
             raise GuardError(
                 f"Config invalid: {exc}", reason_code="invalid_cfg"

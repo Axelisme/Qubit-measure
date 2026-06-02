@@ -247,16 +247,15 @@ class ContextService:
     #
     # Sources holding an un-lowered CfgSchema (editor commit, writeback apply,
     # inspect save, create_from_role) write through set_ml_*_from_schema /
-    # apply_writes; ContextService lowers (schema_to_dict with the live md, so
-    # callers can never forget md) + registers + bumps + emits. There is no
+    # apply_writes; ContextService lowers (schema.to_raw_dict with the live md,
+    # so callers can never forget md) + registers + bumps + emits. There is no
     # public raw-dict entry — raw lives only as an internal lowering detail.
     # ------------------------------------------------------------------
 
     def _lower_module(self, schema: "CfgSchema", ml: ModuleLibrary, md: MetaDict):
-        from zcu_tools.gui.adapter import schema_to_dict
         from zcu_tools.program.v2 import ModuleCfgFactory
 
-        raw = schema_to_dict(schema, ml, md)
+        raw = schema.to_raw_dict(md, ml)
         try:
             return ModuleCfgFactory.from_raw(raw, ml=ml)
         except Exception as exc:
@@ -265,10 +264,9 @@ class ContextService:
             ) from exc
 
     def _lower_waveform(self, schema: "CfgSchema", ml: ModuleLibrary, md: MetaDict):
-        from zcu_tools.gui.adapter import schema_to_dict
         from zcu_tools.program.v2 import WaveformCfgFactory
 
-        raw = schema_to_dict(schema, ml, md)
+        raw = schema.to_raw_dict(md, ml)
         try:
             return WaveformCfgFactory.from_raw(raw, ml=ml)
         except Exception as exc:

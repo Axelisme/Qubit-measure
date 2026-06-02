@@ -131,7 +131,7 @@ class FakeAdapter(
         )
 
     def run(self, req: RunRequest, schema: CfgSchema) -> FakeRunResult:
-        raw_cfg = schema.to_raw_dict(req)
+        raw_cfg = schema.to_raw_dict(req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
         return FakeExp().run(cfg)
 
