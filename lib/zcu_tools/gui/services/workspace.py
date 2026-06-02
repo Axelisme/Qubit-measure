@@ -17,6 +17,7 @@ from .session_persistence import (
     PersistedTab,
     SessionPersistenceError,
 )
+from .ports import TabSnapshot
 
 if TYPE_CHECKING:
     from .ports import SessionStorePort, TabLifecyclePort
@@ -103,8 +104,12 @@ class WorkspaceService:
         restored_by_index: dict[int, str] = {}
         rejected: list[RestoreIssue] = []
         for index, persisted_tab in enumerate(session.tabs):
+            # Bridge the on-disk raw form (PersistedTab) into a live TabSnapshot:
+            # WorkspaceService holds both the adapter default (as decode base) and
+            # the codec, so the raw→live conversion lives here (TabService stays
+            # codec-free, SessionPersistenceService stays adapter-free).
             try:
-                tab_id = self._tabs.restore_tab(persisted_tab.adapter_name)
+                base_schema = self._tabs.make_default_cfg(persisted_tab.adapter_name)
             except KeyError as exc:
                 rejected.append(
                     RestoreIssue(
@@ -115,11 +120,9 @@ class WorkspaceService:
                 continue
             try:
                 restored_schema = self._persistence.raw_to_schema(
-                    self._tabs.get_tab_default_cfg(tab_id),
-                    persisted_tab.cfg_raw,
+                    base_schema, persisted_tab.cfg_raw
                 )
             except SessionPersistenceError as exc:
-                self._tabs.close_tab(tab_id)
                 rejected.append(
                     RestoreIssue(
                         persisted_tab.adapter_name,
@@ -127,12 +130,12 @@ class WorkspaceService:
                     )
                 )
                 continue
-            self._tabs.update_tab_cfg(tab_id, restored_schema)
-            if persisted_tab.save_paths_override is not None:
-                self._state.update_tab_save_path_overrides(
-                    tab_id,
-                    persisted_tab.save_paths_override,
-                )
+            snapshot = TabSnapshot(
+                adapter_name=persisted_tab.adapter_name,
+                cfg_schema=restored_schema,
+                save_paths_override=persisted_tab.save_paths_override,
+            )
+            tab_id = self._tabs.new_tab(persisted_tab.adapter_name, from_dict=snapshot)
             restored_by_index[index] = tab_id
             self._bus.emit(
                 GuiEvent.TAB_ADDED,

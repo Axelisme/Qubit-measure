@@ -30,12 +30,59 @@ from typing import (
 from zcu_tools.progress_bar.base import ProgressTotal, ProgressValue
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.adapter import CfgSchema, ExpContext, WritebackItem
+    from matplotlib.figure import Figure
+
+    from zcu_tools.gui.adapter import (
+        AdapterCapabilities,
+        CfgSchema,
+        ExpContext,
+        SavePaths,
+        WritebackItem,
+    )
+    from zcu_tools.gui.state import TabInteractionState
     from zcu_tools.meta_tool import ModuleLibrary
 
     from .device import DeviceProtocol
     from .session_persistence import PersistedSession
     from .startup_persistence import PersistedDeviceEntry, PersistedStartup
+
+
+@dataclass(frozen=True)
+class TabSnapshot:
+    """Immutable full-state snapshot of one tab (contract-layer DTO).
+
+    A single type for two consumers (formerly ``TabViewSnapshot`` + the on-disk
+    ``PersistedTab``):
+
+    - **render** (``TabService.get_snapshot``): every field populated, handed to
+      the View to draw one tab.
+    - **restore** (``TabService.new_tab(from_dict=...)``): only the serializable
+      head fields carry meaning; the live fields below are ``None`` / empty.
+
+    ``cfg_schema`` is always the *live* ``CfgSchema`` (resolved EvalValue), which
+    the render path uses directly. The disk codec (``SessionPersistenceService``)
+    converts ``cfg_schema`` ↔ raw at the file boundary, so the persisted form
+    never leaks into the snapshot. Lives in ``ports`` (the contract layer) so an
+    application service can pass it around without importing a sibling
+    application-service module (ADR-0008).
+    """
+
+    adapter_name: str
+    cfg_schema: "CfgSchema"
+    # The user's explicit override only (None = follow the adapter suggestion).
+    # This is the serializable save-path state — persist/restore round-trip it so
+    # a reload never pins an adapter-derived path.
+    save_paths_override: Optional["SavePaths"]
+    # Live render-only fields; None / empty on the persist + restore paths.
+    tab_id: Optional[str] = None
+    interaction: Optional["TabInteractionState"] = None
+    capabilities: Optional["AdapterCapabilities"] = None
+    analyze_params: object | None = None
+    writeback_items: "tuple[WritebackItem, ...]" = ()
+    figure: Optional["Figure"] = None
+    # Render-computed effective paths (override, else adapter suggestion from
+    # ctx). The View shows this; it is *not* persisted (derivable on restore).
+    save_paths: Optional["SavePaths"] = None
 
 
 @runtime_checkable
@@ -193,11 +240,11 @@ class TabLifecyclePort(Protocol):
     depends on this port, not the concrete ``TabService`` (ADR-0008 violation 2).
     """
 
-    def new_tab(self, adapter_name: str) -> str: ...
-    def restore_tab(self, adapter_name: str) -> str: ...
+    def new_tab(
+        self, adapter_name: str, from_dict: Optional["TabSnapshot"] = None
+    ) -> str: ...
     def close_tab(self, tab_id: str) -> None: ...
-    def get_tab_default_cfg(self, tab_id: str) -> "CfgSchema": ...
-    def update_tab_cfg(self, tab_id: str, schema: "CfgSchema") -> None: ...
+    def make_default_cfg(self, adapter_name: str) -> "CfgSchema": ...
 
 
 @runtime_checkable

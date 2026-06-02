@@ -50,8 +50,7 @@ def test_restore_invalid_configuration_returns_typed_issue() -> None:
         tabs=[PersistedTab(adapter_name="fake", cfg_raw={}, save_paths_override=None)],
         active_tab_index=0,
     )
-    tabs.restore_tab.return_value = "tab-1"
-    tabs.get_tab_default_cfg.return_value = MagicMock()
+    tabs.make_default_cfg.return_value = MagicMock()
     persistence.raw_to_schema.side_effect = SessionPersistenceError("bad cfg")
 
     report = svc.restore_session()
@@ -59,5 +58,8 @@ def test_restore_invalid_configuration_returns_typed_issue() -> None:
     assert report.restored_tabs == 0
     assert report.rejected_tabs[0].subject == "fake"
     assert "invalid saved configuration" in report.rejected_tabs[0].message
-    tabs.close_tab.assert_called_once_with("tab-1")
+    # New flow decodes raw→live *before* creating the tab, so a bad cfg never
+    # creates a tab to close.
+    tabs.new_tab.assert_not_called()
+    tabs.close_tab.assert_not_called()
     assert state.active_tab_id is None

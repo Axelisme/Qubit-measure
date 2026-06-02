@@ -2,19 +2,12 @@ from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
-from matplotlib.figure import Figure
+from zcu_tools.gui.adapter import CfgSchema, CfgSectionSpec, SavePaths
+from zcu_tools.gui.state import TabInteractionState, TabState
 
-from zcu_tools.gui.adapter import (
-    AdapterCapabilities,
-    CfgSchema,
-    CfgSectionSpec,
-    SavePaths,
-    WritebackItem,
-)
-from zcu_tools.gui.state import TabInteractionState
+from .ports import TabSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -23,43 +16,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.state import State
 
     from .ports import WritebackQueryPort
-from zcu_tools.gui.state import TabState
-
-
-@dataclass(frozen=True)
-class TabSnapshot:
-    """Immutable full-state snapshot of one tab.
-
-    Single type for two consumers (formerly ``TabViewSnapshot`` + ``PersistedTab``):
-
-    - **render** (``TabService.get_snapshot``): every field populated, handed to
-      the View to draw one tab.
-    - **restore** (``TabService.new_tab(from_dict=...)``) and **persist**
-      (``PersistedSession.tabs``): only the serializable head three fields carry
-      meaning; the live fields below are ``None`` / empty.
-
-    ``cfg_schema`` is always the *live* ``CfgSchema`` (resolved EvalValue), which
-    the render path uses directly. The disk codec
-    (``SessionPersistenceService``) converts ``cfg_schema`` ↔ ``cfg_raw`` at the
-    file boundary, so the persisted form never leaks into the tab snapshot.
-    """
-
-    adapter_name: str
-    cfg_schema: CfgSchema
-    # The user's explicit override only (None = follow the adapter suggestion).
-    # This is the serializable save-path state — persist/restore round-trip it so
-    # a reload never pins an adapter-derived path.
-    save_paths_override: Optional[SavePaths]
-    # Live render-only fields; None / empty on the persist + restore paths.
-    tab_id: Optional[str] = None
-    interaction: Optional[TabInteractionState] = None
-    capabilities: Optional[AdapterCapabilities] = None
-    analyze_params: object | None = None
-    writeback_items: tuple[WritebackItem, ...] = ()
-    figure: Optional[Figure] = None
-    # Render-computed effective paths (override, else adapter suggestion from
-    # ctx). The View shows this; it is *not* persisted (derivable on restore).
-    save_paths: Optional[SavePaths] = None
 
 
 # Characters allowed verbatim in a tab-id slug; everything else (notably the
@@ -125,23 +81,50 @@ class TabService:
             save_paths=tab.effective_save_paths(ctx),
         )
 
-    def new_tab(self, adapter_name: str) -> str:
+    def new_tab(
+        self, adapter_name: str, from_dict: Optional["TabSnapshot"] = None
+    ) -> str:
+        """Single tab-creation entry.
+
+        ``from_dict is None`` → a fresh tab with the adapter's default cfg.
+        ``from_dict`` given (restore) → rebuild the tab in one step from the
+        snapshot's live ``cfg_schema`` + ``save_paths_override`` — no
+        build-default-then-overwrite. The caller (WorkspaceService) has already
+        turned the on-disk raw cfg into a live ``cfg_schema`` (it holds both the
+        adapter default as base and the codec), so this method never touches the
+        persistence codec.
+        """
         adapter = self._registry.create(adapter_name)
         tab_id = f"{_slug(adapter_name)}-{uuid.uuid4().hex[:8]}"
-        logger.info("new_tab: adapter=%r tab_id=%r", adapter_name, tab_id)
+        logger.info(
+            "new_tab: adapter=%r tab_id=%r restore=%s",
+            adapter_name,
+            tab_id,
+            from_dict is not None,
+        )
+        if from_dict is None:
+            cfg_schema = adapter.make_default_cfg(self._state.exp_context)
+            save_path_overrides = None
+        else:
+            cfg_schema = from_dict.cfg_schema
+            save_path_overrides = from_dict.save_paths_override
         self._state.add_tab(
             tab_id,
             TabState(
                 adapter_name=adapter_name,
                 adapter=adapter,
-                cfg_schema=adapter.make_default_cfg(self._state.exp_context),
+                cfg_schema=cfg_schema,
+                save_path_overrides=save_path_overrides,
             ),
         )
         return tab_id
 
-    def restore_tab(self, adapter_name: str) -> str:
-        """Create a tab for restore flow using the same lifecycle as new_tab."""
-        return self.new_tab(adapter_name)
+    def make_default_cfg(self, adapter_name: str) -> CfgSchema:
+        """The adapter's default cfg under the current context — the base schema
+        WorkspaceService needs to decode a persisted raw cfg into a live one."""
+        return self._registry.create(adapter_name).make_default_cfg(
+            self._state.exp_context
+        )
 
     def list_adapter_names(self) -> list[str]:
         return self._registry.list_names()
@@ -168,9 +151,6 @@ class TabService:
     def close_tab(self, tab_id: str) -> None:
         logger.info("close_tab: tab_id=%r", tab_id)
         self._state.remove_tab(tab_id)
-
-    def get_tab_default_cfg(self, tab_id: str) -> CfgSchema:
-        return self._state.get_tab(tab_id).cfg_schema
 
     def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None:
         """Commit boundary: store the latest draft as the committed cfg.
