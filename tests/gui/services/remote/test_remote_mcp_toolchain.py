@@ -845,3 +845,72 @@ def test_analyze_reply_omits_figure_path_when_no_figure(monkeypatch):
 
     assert out["status"] == "finished"
     assert "figure_path" not in out
+
+
+# ---------------------------------------------------------------------------
+# Phase 120c-1 — non-blocking per-domain poll (replaces watching events).
+# gui_run_poll maps a zero-timeout await onto finished/running/failed/
+# no_operation, keyed on the semantic name (tab_id), no operation_id exposed.
+# ---------------------------------------------------------------------------
+
+
+def test_run_poll_running_when_op_in_flight(monkeypatch):
+    from zcu_tools.gui.services.remote import mcp_server
+
+    monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"tab:t1": 7})
+
+    def fake_send(method, params, timeout_seconds=30.0):
+        del timeout_seconds
+        if method == "operation.await":
+            # zero-timeout await of an unfinished op -> wire TIMEOUT
+            raise RuntimeError("GUI Error (timeout): not done")
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    out = mcp_server.TOOLS["gui_run_poll"]["handler"]({"tab_id": "t1"})
+    assert out["status"] == "running"
+
+
+def test_run_poll_finished_attaches_figure(monkeypatch):
+    from zcu_tools.gui.services.remote import mcp_server
+
+    monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"tab:t1": 7})
+
+    def fake_send(method, params, timeout_seconds=30.0):
+        del timeout_seconds
+        if method == "operation.await":
+            return {"status": "finished"}
+        if method == "tab.snapshot":
+            return {"interaction": {"has_figure": True}}
+        if method == "tab.figure_screenshot":
+            return {"saved_to": params["out_path"]}
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    out = mcp_server.TOOLS["gui_run_poll"]["handler"]({"tab_id": "t1"})
+    assert out["status"] == "finished"
+    assert out["figure_path"].endswith("zcu_tools_figure_t1.png")
+
+
+def test_run_poll_failed_does_not_raise(monkeypatch):
+    from zcu_tools.gui.services.remote import mcp_server
+
+    monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"tab:t1": 7})
+
+    def fake_send(method, params, timeout_seconds=30.0):
+        del timeout_seconds, params
+        if method == "operation.await":
+            raise RuntimeError("GUI Error (precondition_failed): run blew up")
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    out = mcp_server.TOOLS["gui_run_poll"]["handler"]({"tab_id": "t1"})
+    assert out["status"] == "failed"
+
+
+def test_run_poll_no_operation_when_untracked(monkeypatch):
+    from zcu_tools.gui.services.remote import mcp_server
+
+    monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {})
+    out = mcp_server.TOOLS["gui_run_poll"]["handler"]({"tab_id": "t1"})
+    assert out["status"] == "no_operation"

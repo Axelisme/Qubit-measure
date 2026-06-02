@@ -116,7 +116,12 @@ from zcu_tools.gui.services.remote.wire import (  # noqa: E402
 #      operation_id, captured under analyze:<tab_id>) then awaits via
 #      _await_operation_by_key, so it stays synchronous to the agent AND the
 #      figure is rendered (has_figure true) by the time figure_path is attached.
-MCP_VERSION = 14
+# v15: non-blocking per-domain poll (Phase 120c-1) — gui_run_poll / gui_device_poll
+#      / gui_connect_poll map a zero-timeout operation.await onto finished /
+#      running / failed / no_operation, keyed on the semantic name (tab_id /
+#      device name / soc), no operation_id exposed (ADR-0005 kept). Lets an agent
+#      check a slow op without blocking, replacing the run_finished event watch.
+MCP_VERSION = 15
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -1041,6 +1046,29 @@ def _await_operation_by_key(key: str, what: str, timeout: float) -> Dict[str, An
     return {"status": res.get("status", "finished"), "message": f"{what} completed."}
 
 
+def _poll_operation_by_key(key: str, what: str) -> Dict[str, Any]:
+    """Non-blocking status of the latest operation for ``key`` (no event needed).
+
+    Maps a zero-timeout await onto a plain status: 'finished' (settled OK),
+    'running' (still in flight), 'failed'/'cancelled' (terminal error — does NOT
+    raise here, unlike the blocking wait; poll reports it as a status), or
+    'no_operation' (nothing tracked / already reaped). Lets an agent that
+    started a slow op go do other work and check back without blocking.
+    """
+    operation_id = _OP_BY_KEY.get(key)
+    if operation_id is None:
+        return {"status": "no_operation", "message": f"No operation for {what}."}
+    try:
+        send_gui_rpc("operation.await", {"operation_id": operation_id, "timeout": 0.0})
+    except RuntimeError as exc:
+        if _is_timeout_error(exc):
+            return {"status": "running", "message": f"{what} still in progress."}
+        # failed / cancelled — report as status rather than raising (poll is a
+        # query, not an await). The wire error message carries the reason.
+        return {"status": "failed", "message": f"{what}: {exc}"}
+    return {"status": "finished", "message": f"{what} completed."}
+
+
 def _is_timeout_error(exc: RuntimeError) -> bool:
     """True when a send_gui_rpc RuntimeError carries the wire TIMEOUT code.
 
@@ -1142,6 +1170,23 @@ def tool_gui_device_wait_operation(arguments: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
+def tool_gui_device_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Non-blocking status of the named device's latest operation (connect /
+    disconnect / setup): finished / running / failed / no_operation."""
+    name = str(arguments["name"])
+    return _poll_operation_by_key(f"device:{name}", f"Device {name!r} operation")
+
+
+def tool_gui_connect_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Non-blocking status of the SoC connect: finished / running / failed /
+    no_operation. On finished, also returns the SoC hardware summary."""
+    del arguments
+    result = _poll_operation_by_key("soc", "SoC connect")
+    if result.get("status") == "finished":
+        result["soc"] = send_gui_rpc("soc.info", {})
+    return result
+
+
 def tool_gui_run_start(arguments: Dict[str, Any]) -> Dict[str, Any]:
     """Start a run, waiting briefly for a fast (small reps/rounds) run to finish.
 
@@ -1174,6 +1219,16 @@ def tool_gui_run_wait(arguments: Dict[str, Any]) -> Dict[str, Any]:
     tab_id = str(arguments["tab_id"])
     timeout = float(arguments.get("timeout", 600.0))
     result = _await_operation_by_key(f"tab:{tab_id}", f"Run on tab {tab_id!r}", timeout)
+    return _with_figure(tab_id, result)
+
+
+def tool_gui_run_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Non-blocking status of the run on ``tab_id``: finished / running / failed
+    / no_operation. Lets the agent start a slow run, do other work, then check
+    back without blocking (replaces watching the run_finished event). On a
+    finished run with a figure, the reply includes figure_path."""
+    tab_id = str(arguments["tab_id"])
+    result = _poll_operation_by_key(f"tab:{tab_id}", f"Run on tab {tab_id!r}")
     return _with_figure(tab_id, result)
 
 
@@ -1732,6 +1787,19 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             "required": ["name"],
         },
     },
+    "gui_device_poll": {
+        "handler": tool_gui_device_poll,
+        "description": (
+            "Non-blocking status of the named device's latest operation (connect "
+            "/ disconnect / setup): 'finished' / 'running' / 'failed' / "
+            "'no_operation'. Returns immediately (cf. gui_device_wait_operation)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "Device name"}},
+            "required": ["name"],
+        },
+    },
     "gui_run_start": {
         "handler": tool_gui_run_start,
         "description": (
@@ -1769,6 +1837,20 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
                     "description": "Seconds to wait (default 600)",
                 },
             },
+            "required": ["tab_id"],
+        },
+    },
+    "gui_run_poll": {
+        "handler": tool_gui_run_poll,
+        "description": (
+            "Non-blocking status of the run on tab_id: 'finished' / 'running' / "
+            "'failed' / 'no_operation'. Unlike gui_run_wait this returns "
+            "immediately — start a slow run, do other work, then poll back. On a "
+            "finished run with a figure the reply includes figure_path."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"tab_id": {"type": "string"}},
             "required": ["tab_id"],
         },
     },
@@ -1832,6 +1914,15 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
                 },
             },
         },
+    },
+    "gui_connect_poll": {
+        "handler": tool_gui_connect_poll,
+        "description": (
+            "Non-blocking status of the SoC connect: 'finished' / 'running' / "
+            "'failed' / 'no_operation'. On finished, also returns the SoC "
+            "hardware summary (same as gui_soc_info). Returns immediately."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
     },
     "gui_events_poll": {
         "handler": tool_gui_events_poll,
@@ -2038,9 +2129,12 @@ _OVERRIDE_NAMES = frozenset(
         "gui_device_wait_operation",
         "gui_run_start",
         "gui_run_wait",
+        "gui_run_poll",
         "gui_analyze",
         "gui_connect_start",
         "gui_connect_wait",
+        "gui_connect_poll",
+        "gui_device_poll",
     }
 )
 
