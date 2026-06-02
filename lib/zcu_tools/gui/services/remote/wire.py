@@ -87,7 +87,12 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 # v18: save.both → save.result (rename) + leaner replies (context.new returns the
 #      new label, save.* returns {ok}, connect folds only the soc description not
 #      the structured cfg, run-finished tab is {tab_id, interaction} only).
-WIRE_VERSION = 18
+# v19: context.new params (value, unit, clone_from_current) → (bind_device,
+#      clone_from). The flux value/unit are no longer agent-supplied; bind_device
+#      names a connected flux device whose current value/unit (whitelist:
+#      FakeDevice->none, YOKOGS200->A) name the context; clone_from is an existing
+#      context label to clone. Aligns the agent path with the GUI setup dialog.
+WIRE_VERSION = 19
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -126,7 +131,11 @@ WIRE_VERSION = 18
 #     error envelope gains an optional ``data`` field; the version guard names the
 #     resource identities that moved (no version numbers) so mcp translates them
 #     into agent language ("the active context", "this tab's cfg", "device 'flux'").
-GUI_VERSION = 15
+# v16: context creation binds to a flux device (WIRE 19, Phase 128) —
+#     Controller.new_context(bind_device, clone_from) resolves unit/value from
+#     the device (read-only, strict whitelist) instead of taking raw value/unit;
+#     the setup dialog's "New context" button drives the same path.
+GUI_VERSION = 16
 
 # ---------------------------------------------------------------------------
 # Wire envelopes
@@ -204,30 +213,6 @@ def _require_int(params: Mapping[str, object], key: str) -> int:
     return val
 
 
-def _require_bool(params: Mapping[str, object], key: str) -> bool:
-    val = params.get(key)
-    if val is None:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"missing '{key}'")
-    if not isinstance(val, bool):
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            f"'{key}' must be a boolean, got {type(val).__name__}",
-        )
-    return val
-
-
-def _optional_str(params: Mapping[str, object], key: str) -> Optional[str]:
-    val = params.get(key)
-    if val is None:
-        return None
-    if not isinstance(val, str):
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            f"'{key}' must be a string if present, got {type(val).__name__}",
-        )
-    return val
-
-
 def _optional_bool(params: Mapping[str, object], key: str, default: bool) -> bool:
     val = params.get(key)
     if val is None:
@@ -238,22 +223,6 @@ def _optional_bool(params: Mapping[str, object], key: str, default: bool) -> boo
             f"'{key}' must be a boolean if present, got {type(val).__name__}",
         )
     return val
-
-
-def _optional_float(params: Mapping[str, object], key: str) -> Optional[float]:
-    val = params.get(key)
-    if val is None:
-        return None
-    if isinstance(val, bool):
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS, f"'{key}' must be a number if present"
-        )
-    if not isinstance(val, (int, float)):
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            f"'{key}' must be a number if present, got {type(val).__name__}",
-        )
-    return float(val)
 
 
 def require_object(params: Mapping[str, object], key: str) -> Mapping[str, object]:

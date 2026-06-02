@@ -373,13 +373,11 @@ def _h_context_use(
 def _h_context_new(
     adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    value = params["value"]
-    unit = str(params["unit"])
-    clone = bool(params["clone_from_current"])
+    bind_device = params["bind_device"]
+    clone_from = params["clone_from"]
     adapter.ctrl.new_context(
-        value=float(value) if value is not None else None,  # type: ignore[arg-type]
-        unit=unit,
-        clone_from_current=clone,
+        bind_device=str(bind_device) if bind_device is not None else None,
+        clone_from=str(clone_from) if clone_from is not None else None,
     )
     # new_context makes the new context active — return its label so the agent
     # knows what was created without a follow-up gui_context_active.

@@ -96,10 +96,6 @@ def _num(name: str, desc: str = "") -> ParamSpec:
     return ParamSpec(name, JsonType.NUMBER, required=True, description=desc)
 
 
-def _num_opt(name: str, desc: str = "") -> ParamSpec:
-    return ParamSpec(name, JsonType.NUMBER, required=False, description=desc)
-
-
 def _num_default(name: str, default: float, desc: str = "") -> ParamSpec:
     return ParamSpec(
         name, JsonType.NUMBER, required=False, default=default, description=desc
@@ -220,15 +216,13 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         10.0,
         "Create new context",
         (
-            _num_opt("value", "Flux value"),
-            _str_default("unit", "A", "Flux unit"),
-            ParamSpec(
-                "clone_from_current",
-                JsonType.BOOLEAN,
-                required=False,
-                default=False,
-                description="Clone current context",
+            _str_opt(
+                "bind_device",
+                "Connected flux device to bind: its current value/unit name the "
+                "context (whitelist: FakeDevice->none, YOKOGS200->A). Omit for an "
+                "unbound context (unit=none, no value).",
             ),
+            _str_opt("clone_from", "Label of an existing context to clone ml/md from"),
         ),
     ),
     "context.labels": MethodSpec(5.0, "List context labels"),

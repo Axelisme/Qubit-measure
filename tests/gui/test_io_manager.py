@@ -137,7 +137,9 @@ def test_iomanager_new_context_clone_creates_separate_files(tmp_path):
     io.setup(str(tmp_path))
     ctx0 = _make_base_ctx()
     ctx1 = io.new_context(ctx0)
-    ctx2 = io.new_context(ctx1, clone_from_current=True)
+    src_label = io.get_active_label()
+    assert src_label is not None
+    ctx2 = io.new_context(ctx1, clone_from=src_label)
     assert ctx1.md is not ctx2.md
     assert ctx1.ml is not ctx2.ml
     assert len(io.list_contexts()) == 2

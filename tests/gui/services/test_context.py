@@ -160,10 +160,10 @@ def test_context_service_new_context():
 
     svc = ContextService(state, io_mock, bus)
 
-    svc.new_context(value=1.5, unit="V", clone_from_current=True)
+    svc.new_context(value=1.5, unit="V", clone_from="src_label")
 
     io_mock.new_context.assert_called_with(
-        base_ctx, value=1.5, unit="V", clone_from_current=True
+        base_ctx, value=1.5, unit="V", clone_from="src_label"
     )
     bus.emit.assert_called_once()
     assert bus.emit.call_args[0][0] == GuiEvent.CONTEXT_SWITCHED

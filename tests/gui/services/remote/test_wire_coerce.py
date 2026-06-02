@@ -11,9 +11,6 @@ from zcu_tools.gui.services.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.services.remote.wire import (
     Response,
     _optional_bool,
-    _optional_float,
-    _optional_str,
-    _require_bool,
     _require_int,
     _require_str,
     coerce_connect_device_request,
@@ -75,44 +72,6 @@ def test_require_int_rejects_none():
 
 
 # ---------------------------------------------------------------------------
-# _require_bool
-# ---------------------------------------------------------------------------
-
-
-def test_require_bool_ok():
-    assert _require_bool({"k": True}, "k") is True
-    assert _require_bool({"k": False}, "k") is False
-
-
-def test_require_bool_rejects_str():
-    with pytest.raises(RemoteError):
-        _require_bool({"k": "true"}, "k")
-
-
-def test_require_bool_rejects_none():
-    with pytest.raises(RemoteError):
-        _require_bool({}, "k")
-
-
-# ---------------------------------------------------------------------------
-# _optional_str
-# ---------------------------------------------------------------------------
-
-
-def test_optional_str_none():
-    assert _optional_str({}, "k") is None
-
-
-def test_optional_str_ok():
-    assert _optional_str({"k": "val"}, "k") == "val"
-
-
-def test_optional_str_not_string():
-    with pytest.raises(RemoteError):
-        _optional_str({"k": 1}, "k")
-
-
-# ---------------------------------------------------------------------------
 # _optional_bool
 # ---------------------------------------------------------------------------
 
@@ -129,35 +88,6 @@ def test_optional_bool_ok():
 def test_optional_bool_not_bool():
     with pytest.raises(RemoteError):
         _optional_bool({"k": "yes"}, "k", True)
-
-
-# ---------------------------------------------------------------------------
-# _optional_float
-# ---------------------------------------------------------------------------
-
-
-def test_optional_float_none():
-    assert _optional_float({}, "k") is None
-
-
-def test_optional_float_from_int():
-    result = _optional_float({"k": 5}, "k")
-    assert result == 5.0
-    assert isinstance(result, float)
-
-
-def test_optional_float_ok():
-    assert _optional_float({"k": 3.14}, "k") == pytest.approx(3.14)
-
-
-def test_optional_float_rejects_bool():
-    with pytest.raises(RemoteError):
-        _optional_float({"k": True}, "k")
-
-
-def test_optional_float_rejects_string():
-    with pytest.raises(RemoteError):
-        _optional_float({"k": "1.5"}, "k")
 
 
 # ---------------------------------------------------------------------------

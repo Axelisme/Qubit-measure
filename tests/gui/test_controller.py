@@ -418,6 +418,52 @@ def test_get_adapter_names_includes_fake(cf):
     assert "fake" in cf.ctrl.get_adapter_names()
 
 
+def test_new_context_with_bind_device_resolves_unit_and_value(cf):
+    # bind_device -> Controller reads unit (strict whitelist) + current value
+    # from the device, then hands them to ContextService. The agent never
+    # supplies a raw value/unit.
+    cf.ctrl._dev_svc.get_device_unit_strict = MagicMock(return_value="A")
+    cf.ctrl._dev_svc.get_device_value_for_new_context = MagicMock(return_value=0.005)
+    cf.ctrl._ctx_svc.new_context = MagicMock()
+
+    cf.ctrl.new_context(bind_device="flux", clone_from="src")
+
+    cf.ctrl._dev_svc.get_device_unit_strict.assert_called_once_with("flux")
+    cf.ctrl._dev_svc.get_device_value_for_new_context.assert_called_once_with("flux")
+    cf.ctrl._ctx_svc.new_context.assert_called_once_with(
+        value=0.005, unit="A", clone_from="src"
+    )
+
+
+def test_new_context_without_bind_device_is_unbound(cf):
+    # No device -> unit "none", no value, no device read.
+    cf.ctrl._dev_svc.get_device_unit_strict = MagicMock()
+    cf.ctrl._dev_svc.get_device_value_for_new_context = MagicMock()
+    cf.ctrl._ctx_svc.new_context = MagicMock()
+
+    cf.ctrl.new_context()
+
+    cf.ctrl._dev_svc.get_device_unit_strict.assert_not_called()
+    cf.ctrl._dev_svc.get_device_value_for_new_context.assert_not_called()
+    cf.ctrl._ctx_svc.new_context.assert_called_once_with(
+        value=None, unit="none", clone_from=None
+    )
+
+
+def test_new_context_unknown_bind_device_raises_before_creating(cf):
+    # Strict whitelist failure must propagate (Fast-Fail) and never reach
+    # ContextService.
+    cf.ctrl._dev_svc.get_device_unit_strict = MagicMock(
+        side_effect=RuntimeError("no such device")
+    )
+    cf.ctrl._ctx_svc.new_context = MagicMock()
+
+    with pytest.raises(RuntimeError):
+        cf.ctrl.new_context(bind_device="ghost")
+
+    cf.ctrl._ctx_svc.new_context.assert_not_called()
+
+
 def test_persist_then_restore_app_state(tmp_path):
     """Full round-trip through the PersistenceCaretaker single-file memento:
     capture (flush) on one Controller, restore on a fresh one sharing the dir."""

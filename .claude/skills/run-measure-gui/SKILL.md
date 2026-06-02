@@ -86,7 +86,10 @@ gui_launch                                      # spawns the GUI, connects; bann
 gui_connect_start(kind="mock")                  # mock SoC (or kind="remote", ip, port for hardware)
 gui_startup_apply(chip_name="Q1_Chip",          # apply the project; omit result_dir/database_path
                   qub_name="Q1", res_name="R1")  # to scope them under chip/qub (notebook layout)
-gui_context_new(value=1.0, unit="A")            # create a context (or gui_context_use(label) for an existing one)
+gui_context_new(bind_device="flux")             # create a context bound to a flux device (reads its
+                                                # current value/unit; FakeDevice->none, YOKOGS200->A).
+                                                # Omit bind_device for an unbound context; clone_from=<label>
+                                                # clones an existing one. Or gui_context_use(label) for an existing one.
 gui_state_check                                 # all four flags must be true before running
 gui_soc_info                                    # the board: channels, sample rates, freq ranges
 ```
@@ -249,7 +252,7 @@ fields. Sweeping a device across an experiment is done in the adapter cfg's
 **Stash reusable constants in the context (md/ml), then reference them by name
 in cfg.** Channel numbers, `res_probe_len`, probe-pulse lengths etc. go into the
 MetaDict (`gui_context_set_md_attr`); named waveforms/modules go into the
-ModuleLibrary (`gui_context_new`/role tools). A cfg field can then reference
+ModuleLibrary (`gui_ml_create_from_role`/role tools). A cfg field can then reference
 `md.<attr>` (e.g. a pulse `freq: r_f`) or a module/waveform by its library key,
 instead of hard-coding — the notebook does exactly this (`md.res_ch`,
 `ro_waveform`, `readout_rf`, `pi_amp`).

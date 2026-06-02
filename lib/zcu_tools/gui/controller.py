@@ -581,11 +581,26 @@ class Controller:
 
     def new_context(
         self,
-        value: Optional[float] = None,
-        unit: str = "A",
-        clone_from_current: bool = False,
+        bind_device: Optional[str] = None,
+        clone_from: Optional[str] = None,
     ) -> None:
-        self._ctx_svc.new_context(value, unit, clone_from_current)
+        """Create a new flux context, optionally bound to a flux device.
+
+        ``bind_device`` (a connected device name) decides the flux unit/value:
+        the unit comes from the device-type whitelist (Fast-Fail if the device
+        is unknown or its type is not whitelisted) and the value is *read* from
+        the device's current state (never set). ``bind_device=None`` makes an
+        unbound context (unit="none", no value). ``clone_from`` is the label of
+        an existing context to clone its ml/md from. The new context's label is
+        derived automatically by ``ExperimentManager`` — the agent cannot name
+        it directly.
+        """
+        if bind_device is not None:
+            unit = self._dev_svc.get_device_unit_strict(bind_device)
+            value = self._dev_svc.get_device_value_for_new_context(bind_device)
+        else:
+            unit, value = "none", None
+        self._ctx_svc.new_context(value=value, unit=unit, clone_from=clone_from)
 
     def get_active_context_label(self) -> Optional[str]:
         return self._ctx_svc.get_active_context_label()

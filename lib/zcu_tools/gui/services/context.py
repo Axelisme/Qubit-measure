@@ -192,17 +192,17 @@ class ContextService:
     def new_context(
         self,
         value: Optional[float] = None,
-        unit: str = "A",
-        clone_from_current: bool = False,
+        unit: str = "none",
+        clone_from: Optional[str] = None,
     ) -> None:
         logger.info(
-            "new_context: value=%r unit=%r clone=%r", value, unit, clone_from_current
+            "new_context: value=%r unit=%r clone_from=%r", value, unit, clone_from
         )
         new_ctx = self._io.new_context(
             self._state.exp_context,
             value=value,
             unit=unit,
-            clone_from_current=clone_from_current,
+            clone_from=clone_from,
         )
         label = self._io.get_active_label() or ""
         new_ctx = dataclasses.replace(

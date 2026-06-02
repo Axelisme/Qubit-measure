@@ -503,6 +503,27 @@ class DeviceService(QObject):
             return "V" if getattr(dev.info, "mode", None) == "voltage" else "A"
         return _DEVICE_DEFAULT_UNITS.get(dev.type_name, "none")
 
+    def get_device_unit_strict(self, name: str) -> str:
+        """Resolve the flux unit for binding a context to ``name``, Fast-Fail.
+
+        Unlike the lenient :meth:`get_device_unit` (used for UI labels, which
+        tolerates unknown devices by returning "none"), this is the binding
+        path: the device must exist and its type must be on the unit whitelist
+        (``_DEVICE_DEFAULT_UNITS``). Anything else raises — a context's flux
+        value/unit must come from a *known* flux device, not an arbitrary one.
+        """
+        dev = self._state.get_device(name)
+        if dev is None:
+            raise DeviceRegistrationError(f"No such device: {name!r}")
+        if dev.type_name not in _DEVICE_DEFAULT_UNITS:
+            raise DeviceRegistrationError(
+                f"Device {name!r} of type {dev.type_name!r} cannot bind a "
+                f"flux context (supported: {sorted(_DEVICE_DEFAULT_UNITS)})"
+            )
+        if dev.type_name == "YOKOGS200" and dev.info is not None:
+            return "V" if getattr(dev.info, "mode", None) == "voltage" else "A"
+        return _DEVICE_DEFAULT_UNITS[dev.type_name]
+
     def get_device_info(self, name: str) -> BaseDeviceInfo | None:
         from zcu_tools.device.manager import GlobalDeviceManager
 

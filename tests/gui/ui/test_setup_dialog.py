@@ -84,16 +84,33 @@ def test_setup_dialog_switch_context(qapp):
     ctrl.use_context.assert_called_with("ctx2")
 
 
-def test_setup_dialog_new_context(qapp):
-    ctrl = _make_ctrl()
+def test_setup_dialog_new_context_clone_from_dropdown(qapp):
+    # No bound device (empty device combo) -> bind_device=None; the clone
+    # dropdown is populated from the active project's context labels and the
+    # picked label flows through as clone_from.
+    ctrl = _make_ctrl(
+        get_context_labels=["ctx_a", "ctx_b"],
+        get_active_context_label="ctx_a",
+    )
     dialog = SetupDialog(ctrl)
 
-    dialog._clone_check.setChecked(True)
+    # index 0 == "(none)"; pick "ctx_b".
+    idx = dialog._clone_combo.findData("ctx_b")
+    assert idx > 0
+    dialog._clone_combo.setCurrentIndex(idx)
     dialog._on_new_ctx_clicked()
 
-    ctrl.new_context.assert_called_with(
-        value=None, unit="none", clone_from_current=True
-    )
+    ctrl.new_context.assert_called_with(bind_device=None, clone_from="ctx_b")
+
+
+def test_setup_dialog_new_context_clone_none_default(qapp):
+    # Default clone selection "(none)" -> clone_from=None.
+    ctrl = _make_ctrl(get_context_labels=["ctx_a"])
+    dialog = SetupDialog(ctrl)
+
+    dialog._on_new_ctx_clicked()
+
+    ctrl.new_context.assert_called_with(bind_device=None, clone_from=None)
 
 
 def test_setup_dialog_connect_mock_dispatches_request(qapp):

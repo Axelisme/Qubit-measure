@@ -22,6 +22,7 @@ from zcu_tools.gui.event_bus import (
 )
 from zcu_tools.gui.services.device import (
     ConnectDeviceRequest,
+    DeviceRegistrationError,
     DeviceService,
     DisconnectDeviceRequest,
     SetupDeviceRequest,
@@ -215,6 +216,21 @@ def test_devicemanager_get_value_and_set_via_setup(qapp):
     assert svc.get_device_value_for_new_context("flux") == pytest.approx(3.14)
     _set_value(svc, "flux", 2.71)
     assert svc.get_device_value_for_new_context("flux") == pytest.approx(2.71)
+
+
+def test_get_device_unit_strict_whitelisted_device(qapp):
+    # FakeDevice is on the bind whitelist -> unit "none" (no raise).
+    dev = FakeDevice()
+    svc, _ = _make_real_svc(driver=dev)
+    _register(svc, "flux")
+    assert svc.get_device_unit_strict("flux") == "none"
+
+
+def test_get_device_unit_strict_unknown_device_raises(qapp):
+    # No device by that name -> Fast-Fail (binding must reference a known device).
+    svc, _ = _make_real_svc()
+    with pytest.raises(DeviceRegistrationError):
+        svc.get_device_unit_strict("does_not_exist")
 
 
 def test_devicemanager_get_all_info(qapp):

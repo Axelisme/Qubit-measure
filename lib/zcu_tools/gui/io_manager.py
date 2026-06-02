@@ -41,14 +41,18 @@ class IOManager:
         self,
         base_ctx: ExpContext,
         value: Optional[float] = None,
-        unit: str = "A",
-        clone_from_current: bool = False,
+        unit: str = "none",
+        clone_from: Optional[str] = None,
     ) -> ExpContext:
-        """Create a new context; return updated ExpContext to Controller."""
+        """Create a new context; return updated ExpContext to Controller.
+
+        ``clone_from`` is the label of an existing context to clone (its ml/md
+        are read from ``exp_dir/<label>``); ``None`` starts empty. ``em.new_flux``
+        already accepts a label string as ``clone_from``.
+        """
         if self._em is None:
             raise RuntimeError("IOManager not set up. Call setup() first.")
-        clone_src = (base_ctx.ml, base_ctx.md) if clone_from_current else None
-        ml, md = self._em.new_flux(value=value, clone_from=clone_src, unit=unit)  # type: ignore[arg-type]
+        ml, md = self._em.new_flux(value=value, clone_from=clone_from, unit=unit)  # type: ignore[arg-type]
         # Flush files so list_contexts() and use_context() can find them immediately.
         md.dump()
         ml.dump()

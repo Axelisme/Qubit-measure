@@ -41,7 +41,7 @@ class _FakeProjectIO:
         self._label = label
         return base_ctx
 
-    def new_context(self, base_ctx, value=None, unit="A", clone_from_current=False):
+    def new_context(self, base_ctx, value=None, unit="none", clone_from=None):
         return base_ctx
 
 

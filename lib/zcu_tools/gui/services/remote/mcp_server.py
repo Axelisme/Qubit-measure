@@ -159,7 +159,11 @@ Getting started (same path a GUI user takes — no mock shortcut):
      database_path]) — applies the project; omitting result_dir/database_path
      scopes them under chip/qub per the notebook layout.
   4. gui_context_use(label) to activate an existing context, or
-     gui_context_new(value, unit) to create one.
+     gui_context_new([bind_device][, clone_from]) to create one. The flux
+     value/unit are NOT supplied directly: bind_device names a connected flux
+     device (FakeDevice->unit none, YOKOGS200->unit A) and its *current* value
+     is read (never set) to name the context; omit it for an unbound context.
+     clone_from is the label of an existing context to clone ml/md from.
   5. gui_state_check — all four flags (has_project / has_context /
      has_active_context / has_soc) should be true before running experiments.
 

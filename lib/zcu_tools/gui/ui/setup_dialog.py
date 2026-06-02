@@ -155,8 +155,9 @@ class SetupDialog(QDialog):
         self._unit_label = QLabel("—")
         new_form.addRow("Unit:", self._unit_label)
 
-        self._clone_check = QCheckBox("Clone from current context")
-        new_form.addRow("", self._clone_check)
+        self._clone_combo = QComboBox()
+        self._clone_combo.setMinimumWidth(160)
+        new_form.addRow("Clone from:", self._clone_combo)
 
         self._new_ctx_btn = QPushButton("Create new context")
         self._new_ctx_btn.clicked.connect(self._on_new_ctx_clicked)
@@ -388,22 +389,19 @@ class SetupDialog(QDialog):
         logger.info("SetupDialog: switched to context=%r", label)
 
     def _on_new_ctx_clicked(self) -> None:
-        clone = self._clone_check.isChecked()
         device_name: Optional[str] = self._device_combo.currentData()
-        unit = self._unit_label.text() if device_name else "none"
-        value: Optional[float] = None
-        if device_name:
-            value = self._ctrl.get_device_value_for_new_context(device_name)
-        self._ctrl.new_context(value=value, unit=unit, clone_from_current=clone)
+        # Clone source picked from the dropdown ("(none)" -> None). The
+        # Controller resolves unit/value from bind_device internally.
+        clone_from: Optional[str] = self._clone_combo.currentData()
+        self._ctrl.new_context(bind_device=device_name, clone_from=clone_from)
         self._refresh_context_list()
-        val_str = f"{value} {unit}" if value is not None else "NoValue"
-        self._set_project_status(f"Created new context ({val_str})")
+        self._set_project_status(
+            f"Created new context (device={device_name or 'none'})"
+        )
         logger.info(
-            "SetupDialog: new_context value=%r unit=%r clone=%r device=%r",
-            value,
-            unit,
-            clone,
+            "SetupDialog: new_context bind_device=%r clone_from=%r",
             device_name,
+            clone_from,
         )
 
     def _refresh_context_list(self) -> None:
@@ -426,6 +424,20 @@ class SetupDialog(QDialog):
             self._ctx_list.setCurrentRow(active_idx)
         elif self._ctx_list.count() > 0:
             self._ctx_list.setCurrentRow(0)
+        self._refresh_clone_combo(labels)
+
+    def _refresh_clone_combo(self, labels: list[str]) -> None:
+        # Clone source = any existing context under the active project; default
+        # "(none)" -> clone_from=None. Same label set as the context list above.
+        prev: Optional[str] = self._clone_combo.currentData()
+        self._clone_combo.blockSignals(True)
+        self._clone_combo.clear()
+        self._clone_combo.addItem("(none)", userData=None)
+        for label in labels:
+            self._clone_combo.addItem(label, userData=label)
+        self._clone_combo.blockSignals(False)
+        idx = self._clone_combo.findData(prev) if prev is not None else 0
+        self._clone_combo.setCurrentIndex(max(idx, 0))
 
     def _set_project_status(self, msg: str, error: bool = False) -> None:
         self._project_status.setText(msg)

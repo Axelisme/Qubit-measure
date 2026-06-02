@@ -136,8 +136,8 @@ class ProjectIOPort(Protocol):
         self,
         base_ctx: "ExpContext",
         value: Optional[float] = None,
-        unit: str = "A",
-        clone_from_current: bool = False,
+        unit: str = "none",
+        clone_from: Optional[str] = None,
     ) -> "ExpContext": ...
 
 
