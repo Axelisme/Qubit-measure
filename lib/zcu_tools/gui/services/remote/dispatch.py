@@ -321,7 +321,7 @@ def _h_save_image(
     return {}
 
 
-def _h_save_both(
+def _h_save_result(
     adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
@@ -329,7 +329,7 @@ def _h_save_both(
     image_path = params["image_path"]
     comment = str(params["comment"])
     try:
-        adapter.ctrl.save_both(
+        adapter.ctrl.save_result(
             tab_id,
             str(data_path) if data_path is not None else None,
             str(image_path) if image_path is not None else None,
@@ -341,7 +341,9 @@ def _h_save_both(
             str(exc),
             reason=getattr(exc, "reason_code", ""),
         ) from exc
-    return {}
+    # Dispatched; paths were caller-supplied (already known). The save runs
+    # async — its diagnostic rides along in the next reply's notifications.
+    return {"ok": True}
 
 
 def _h_save_set_paths(
@@ -379,7 +381,9 @@ def _h_context_new(
         unit=unit,
         clone_from_current=clone,
     )
-    return {}
+    # new_context makes the new context active — return its label so the agent
+    # knows what was created without a follow-up gui_context_active.
+    return {"label": adapter.ctrl.get_active_context_label()}
 
 
 def _h_context_labels(
@@ -1552,7 +1556,7 @@ _HANDLERS: dict[str, Handler] = {
     "run.progress": _h_run_progress,
     "save.data": _h_save_data,
     "save.image": _h_save_image,
-    "save.both": _h_save_both,
+    "save.result": _h_save_result,
     "save.set_paths": _h_save_set_paths,
     "context.use": _h_context_use,
     "context.new": _h_context_new,

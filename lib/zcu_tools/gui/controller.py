@@ -31,7 +31,7 @@ from .services import (
     PersistenceCaretaker,
     PersistenceError,
     RestoreReport,
-    SaveBothOutcome,
+    SaveResultOutcome,
     SetupDeviceRequest,
     StartupConnectionRequest,
     StartupProjectRequest,
@@ -199,7 +199,7 @@ class Controller:
         self._analyze_svc.analyze_failed.connect(self._on_analyze_failed)
         self._save_svc.save_finished.connect(self._on_save_finished)
         self._save_svc.save_failed.connect(self._on_save_failed)
-        self._save_svc.save_both_finished.connect(self._on_save_both_finished)
+        self._save_svc.save_result_finished.connect(self._on_save_result_finished)
         self._dev_svc.setup_finished.connect(self._on_device_setup_finished)
         self._dev_svc.setup_failed.connect(self._on_device_setup_failed)
         self._dev_svc.setup_cancelled.connect(self._on_device_setup_cancelled)
@@ -265,7 +265,7 @@ class Controller:
         del tab_id, data_path
         self._notify("error", "Save data failed", str(error))
 
-    def _on_save_both_finished(self, tab_id: str, outcome: SaveBothOutcome) -> None:
+    def _on_save_result_finished(self, tab_id: str, outcome: SaveResultOutcome) -> None:
         del tab_id
         if outcome.data_error is None and outcome.image_error is None:
             self._info(
@@ -286,7 +286,7 @@ class Controller:
             return
         self._notify(
             "error",
-            "Save Both failed",
+            "Save Result failed",
             f"Data failed: {outcome.data_error}\nImage failed: {outcome.image_error}",
         )
 
@@ -551,7 +551,7 @@ class Controller:
         self._save_svc.save_image_sync(permit, resolved)
         self._info(f"Image saved to {resolved}")
 
-    def save_both(
+    def save_result(
         self,
         tab_id: str,
         data_path: Optional[str] = None,
@@ -562,7 +562,7 @@ class Controller:
         paths = self._resolve_save_paths(tab_id)
         resolved_data = data_path or paths.data_path
         resolved_image = image_path or paths.image_path
-        self._save_svc.start_save_both(
+        self._save_svc.start_save_result(
             permit, resolved_data, resolved_image, comment=comment
         )
 

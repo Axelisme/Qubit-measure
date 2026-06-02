@@ -257,10 +257,10 @@ class ExpTabWidget(QWidget):
         btn_row = QHBoxLayout()
         self.save_data_btn = QPushButton("Save Data")
         self.save_image_btn = QPushButton("Save Image")
-        self.save_both_btn = QPushButton("Save Both")
+        self.save_result_btn = QPushButton("Save Result")
         btn_row.addWidget(self.save_data_btn)
         btn_row.addWidget(self.save_image_btn)
-        btn_row.addWidget(self.save_both_btn)
+        btn_row.addWidget(self.save_result_btn)
         save_layout.addRow("", btn_row)
 
         analysis_layout.addWidget(save_section)
@@ -574,7 +574,7 @@ class ExpTabWidget(QWidget):
         self.save_image_btn.setEnabled(
             idle and state.has_active_context and state.has_figure
         )
-        self.save_both_btn.setEnabled(
+        self.save_result_btn.setEnabled(
             idle and state.has_active_context and state.has_figure
         )
         self.writeback_widget.setEnabled(
@@ -623,8 +623,8 @@ class ExpTabWidget(QWidget):
         self.save_image_btn.clicked.connect(
             lambda: main_window._on_save_image_clicked(tab_id)
         )
-        self.save_both_btn.clicked.connect(
-            lambda: main_window._on_save_both_clicked(tab_id)
+        self.save_result_btn.clicked.connect(
+            lambda: main_window._on_save_result_clicked(tab_id)
         )
 
         self._validity_cb = validity_cb
@@ -1166,14 +1166,16 @@ class MainWindow(QMainWindow):
         path = tab_w.get_image_path()
         self._ctrl.save_image(tab_id, path)
 
-    def _on_save_both_clicked(self, tab_id: str) -> None:
-        logger.info("_on_save_both_clicked: tab_id=%r", tab_id)
-        tab_w = self._resolve_tab_widget(tab_id, "_on_save_both_clicked")
+    def _on_save_result_clicked(self, tab_id: str) -> None:
+        logger.info("_on_save_result_clicked: tab_id=%r", tab_id)
+        tab_w = self._resolve_tab_widget(tab_id, "_on_save_result_clicked")
         if tab_w is None:
             return
         data_path = tab_w.get_data_path()
         image_path = tab_w.get_image_path()
-        self._ctrl.save_both(tab_id, data_path, image_path, comment=tab_w.get_comment())
+        self._ctrl.save_result(
+            tab_id, data_path, image_path, comment=tab_w.get_comment()
+        )
 
     def _on_setup_clicked(self) -> None:
         self.open_dialog(DialogName.SETUP)

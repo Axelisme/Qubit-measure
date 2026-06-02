@@ -140,7 +140,7 @@ from zcu_tools.gui.services.remote.wire import (  # noqa: E402
 #      {status:'finished'|'timed_out'|'no_operation', waited_seconds}. Both
 #      timeout flavors (bridge socket TimeoutError, GUI-side "(timeout)") map to
 #      timed_out; a genuine failed/cancelled still raises. No wire change.
-MCP_VERSION = 19
+MCP_VERSION = 20
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -178,7 +178,7 @@ Typical experiment loop:
     gui_connect_start degrade the same way.)
   - gui_analyze(tab_id) after a run — synchronous: on return the analysis is
     done (read gui_tab_get_analyze_result, no wait step). Then gui_save_data /
-    gui_save_image / gui_save_both to persist.
+    gui_save_image / gui_save_result to persist.
 
 Detecting completion — no events; wait or poll a handle:
   - A slow gui_run_start returns {status:'pending'}; then either gui_run_wait
@@ -275,7 +275,7 @@ _GUARD_DEPS: Dict[str, tuple[str, ...]] = {
     ),
     "save.data": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
     "save.image": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
-    "save.both": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
+    "save.result": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
     # writeback.set / writeback.apply edit + apply the persistent draft (computed
     # from run+analyze results, write md/ml). A concurrent rerun/reanalyze or
     # context edit must invalidate them.
@@ -1186,6 +1186,17 @@ def _figure_path_if_any(tab_id: str) -> "Optional[str]":
     return out_path
 
 
+def _run_tab_summary(tab_id: str) -> Dict[str, Any]:
+    """A run-finished tab summary: only {tab_id, interaction}. The full
+    tab.snapshot also carries adapter_name / editor_id / save_paths, none of
+    which change across a run — re-sending them every run is wasted tokens
+    (the agent already has them from gui_tab_snapshot). figure_path is folded
+    separately by _with_figure."""
+    snap = send_gui_rpc("tab.snapshot", {"tab_id": tab_id})
+    interaction = snap.get("interaction", {}) if isinstance(snap, dict) else {}
+    return {"tab_id": tab_id, "interaction": interaction}
+
+
 def _with_figure(tab_id: str, result: Dict[str, Any]) -> Dict[str, Any]:
     """Attach figure_path to a finished run/analyze reply when a figure exists."""
     if result.get("status") == "finished":
@@ -1222,7 +1233,7 @@ def tool_gui_connect_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
     del arguments
     result = _poll_operation_by_key("soc", "SoC connect")
     if result.get("status") == "finished":
-        result["soc"] = send_gui_rpc("soc.info", {})
+        result["soc"] = _connect_soc_summary()
     return result
 
 
@@ -1243,7 +1254,7 @@ def tool_gui_run_start(arguments: Dict[str, Any]) -> Dict[str, Any]:
         f"tab:{tab_id}",
         f"Run on tab {tab_id!r}",
         wait_seconds,
-        lambda: {"tab": send_gui_rpc("tab.snapshot", {"tab_id": tab_id})},
+        lambda: {"tab": _run_tab_summary(tab_id)},
         f"await it with gui_run_wait(tab_id={tab_id!r}).",
     )
     # On a finished run that produced a figure, fold in figure_path so the agent
@@ -1294,12 +1305,26 @@ def tool_gui_analyze(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return _with_figure(tab_id, result)
 
 
+def _connect_soc_summary() -> Dict[str, Any]:
+    """The SoC summary folded into a settled connect reply: only the human-
+    readable ``description`` (print(soccfg)) + ``is_mock``. The structured ``cfg``
+    (DAC/ADC channels, sample rates, freq ranges — ~2 KB) is NOT folded here; it
+    duplicates the description and is rarely needed at connect time. Fetch it on
+    demand with gui_soc_info."""
+    info = send_gui_rpc("soc.info", {})
+    return {
+        "description": info.get("description"),
+        "is_mock": info.get("is_mock"),
+    }
+
+
 def tool_gui_connect_start(arguments: Dict[str, Any]) -> Dict[str, Any]:
     """Connect the SoC, waiting briefly for the (usually fast) connect to land.
 
     Degrades like device ops: settles -> {status:'finished', view:<view.snapshot>};
     still running -> {status:'pending'} (await with gui_connect_wait). kind='mock'
-    or kind='remote' with ip+port.
+    or kind='remote' with ip+port. The settled reply folds in only the SoC
+    *description* + is_mock; call gui_soc_info for the structured cfg.
     """
     params: Dict[str, Any] = {"kind": str(arguments["kind"])}
     if "ip" in arguments:
@@ -1317,7 +1342,7 @@ def tool_gui_connect_start(arguments: Dict[str, Any]) -> Dict[str, Any]:
         wait_seconds,
         lambda: {
             "view": send_gui_rpc("view.snapshot", {}),
-            "soc": send_gui_rpc("soc.info", {}),
+            "soc": _connect_soc_summary(),
         },
         "await it with gui_connect_wait() or poll gui_connect_poll().",
     )
@@ -1330,7 +1355,7 @@ def tool_gui_connect_wait(arguments: Dict[str, Any]) -> Dict[str, Any]:
     timeout = float(arguments.get("timeout", 120.0))
     result = _await_operation_by_key("soc", "SoC connect", timeout)
     if result.get("status") == "finished":
-        result["soc"] = send_gui_rpc("soc.info", {})
+        result["soc"] = _connect_soc_summary()
     return result
 
 

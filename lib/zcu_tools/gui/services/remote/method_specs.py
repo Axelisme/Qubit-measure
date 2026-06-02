@@ -196,9 +196,9 @@ METHOD_SPECS: dict[str, MethodSpec] = {
             _expected_versions(),
         ),
     ),
-    "save.both": MethodSpec(
+    "save.result": MethodSpec(
         30.0,
-        "Save data and image",
+        "Save the result's data and image",
         (
             _str("tab_id"),
             _str_opt("data_path", "Override data path"),

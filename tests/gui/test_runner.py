@@ -310,11 +310,11 @@ def test_save_data_runner_emits_finished(qapp):
     assert finished[0] == "tab1"
 
 
-def test_save_data_runner_does_not_have_save_both(qapp):
-    """SaveDataRunner no longer has start_save_both; save_both is handled by SaveService."""
+def test_save_data_runner_does_not_have_save_result(qapp):
+    """SaveDataRunner has no start_save_result; save_result is handled by SaveService."""
     runner = SaveDataRunner()
-    assert not hasattr(runner, "start_save_both")
-    assert not hasattr(runner, "save_both_finished")
+    assert not hasattr(runner, "start_save_result")
+    assert not hasattr(runner, "save_result_finished")
 
 
 # ---------------------------------------------------------------------------

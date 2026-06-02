@@ -84,7 +84,10 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 #      path (no OS kill); new method = contract change.
 # v17: removed session.persist / session.restore — persistence is now lifecycle-
 #      driven (flush at close, restore at startup); agent no longer triggers it.
-WIRE_VERSION = 17
+# v18: save.both → save.result (rename) + leaner replies (context.new returns the
+#      new label, save.* returns {ok}, connect folds only the soc description not
+#      the structured cfg, run-finished tab is {tab_id, interaction} only).
+WIRE_VERSION = 18
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -123,7 +126,7 @@ WIRE_VERSION = 17
 #     error envelope gains an optional ``data`` field; the version guard names the
 #     resource identities that moved (no version numbers) so mcp translates them
 #     into agent language ("the active context", "this tab's cfg", "device 'flux'").
-GUI_VERSION = 14
+GUI_VERSION = 15
 
 # ---------------------------------------------------------------------------
 # Wire envelopes

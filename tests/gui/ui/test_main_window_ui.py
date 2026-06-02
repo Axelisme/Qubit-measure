@@ -194,7 +194,7 @@ def test_exp_tab_disables_save_buttons_while_saving_data(qapp):
     )
 
     assert tab.save_data_btn.isEnabled() is False
-    assert tab.save_both_btn.isEnabled() is False
+    assert tab.save_result_btn.isEnabled() is False
     assert tab.run_btn.text() == "Run"
     assert tab.run_btn.toolTip() == "Tab is busy"
 
@@ -278,7 +278,7 @@ def test_exp_tab_draft_context_allows_analysis_but_disables_run_and_save(qapp):
     assert tab.writeback_widget.isEnabled() is True
     assert tab.save_data_btn.isEnabled() is False
     assert tab.save_image_btn.isEnabled() is False
-    assert tab.save_both_btn.isEnabled() is False
+    assert tab.save_result_btn.isEnabled() is False
 
 
 def test_main_window_run_lock_disables_only_new_tab_and_run(qapp):

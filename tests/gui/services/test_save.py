@@ -7,7 +7,7 @@ import pytest
 from zcu_tools.gui.event_bus import EventBus
 from zcu_tools.gui.figure_export import SAVE_DPI, SAVE_FIGSIZE
 from zcu_tools.gui.services.guard import SavePermit
-from zcu_tools.gui.services.save import SaveBothOutcome, SaveService
+from zcu_tools.gui.services.save import SaveResultOutcome, SaveService
 from zcu_tools.gui.state import Session, State
 
 
@@ -68,11 +68,11 @@ def test_save_image_creates_parent_at_command_boundary(
 
 
 # ---------------------------------------------------------------------------
-# start_save_both
+# start_save_result
 # ---------------------------------------------------------------------------
 
 
-def test_start_save_both_saves_image_and_starts_data_runner(
+def test_start_save_result_saves_image_and_starts_data_runner(
     qapp,
     tmp_path: Path,
 ) -> None:
@@ -82,13 +82,13 @@ def test_start_save_both_saves_image_and_starts_data_runner(
     data_path = tmp_path / "data" / "meas"
     image_path = tmp_path / "img" / "plot.png"
 
-    svc.start_save_both(SavePermit(tab_id="tab"), str(data_path), str(image_path))
+    svc.start_save_result(SavePermit(tab_id="tab"), str(data_path), str(image_path))
 
     _assert_saved_fixed_size(figure, str(image_path))
     runner.start_save.assert_called_once()
 
 
-def test_start_save_both_captures_image_error_and_continues_data(
+def test_start_save_result_captures_image_error_and_continues_data(
     qapp,
     tmp_path: Path,
 ) -> None:
@@ -100,15 +100,15 @@ def test_start_save_both_captures_image_error_and_continues_data(
     image_path = tmp_path / "img" / "plot.png"
 
     # Should not raise — image error is captured, data save continues
-    svc.start_save_both(SavePermit(tab_id="tab"), str(data_path), str(image_path))
+    svc.start_save_result(SavePermit(tab_id="tab"), str(data_path), str(image_path))
 
     runner.start_save.assert_called_once()
 
 
-def test_start_save_both_raises_if_no_figure(qapp) -> None:  # noqa: ARG001
+def test_start_save_result_raises_if_no_figure(qapp) -> None:  # noqa: ARG001
     svc, _, _ = _make_service()
     with pytest.raises(RuntimeError, match="No figure"):
-        svc.start_save_both(SavePermit(tab_id="tab"), "/data", "/img")
+        svc.start_save_result(SavePermit(tab_id="tab"), "/data", "/img")
 
 
 # ---------------------------------------------------------------------------
@@ -132,11 +132,11 @@ def test_on_save_finished_emits_save_finished(qapp) -> None:  # noqa: ARG001
 
 
 # ---------------------------------------------------------------------------
-# _on_save_finished with pending_image (save_both flow)
+# _on_save_finished with pending_image (save_result flow)
 # ---------------------------------------------------------------------------
 
 
-def test_on_save_finished_with_pending_image_emits_save_both_finished(
+def test_on_save_finished_with_pending_image_emits_save_result_finished(
     qapp,
     tmp_path: Path,
 ) -> None:
@@ -146,10 +146,10 @@ def test_on_save_finished_with_pending_image_emits_save_both_finished(
     data_path = tmp_path / "data" / "meas"
     image_path = tmp_path / "img" / "plot.png"
 
-    outcomes: list[SaveBothOutcome] = []
-    svc.save_both_finished.connect(lambda tid, o: outcomes.append(o))
+    outcomes: list[SaveResultOutcome] = []
+    svc.save_result_finished.connect(lambda tid, o: outcomes.append(o))
 
-    svc.start_save_both(SavePermit(tab_id="tab"), str(data_path), str(image_path))
+    svc.start_save_result(SavePermit(tab_id="tab"), str(data_path), str(image_path))
     svc._on_save_finished("tab")
 
     assert len(outcomes) == 1
@@ -168,10 +168,10 @@ def test_on_save_finished_with_pending_image_error_propagates(
     data_path = tmp_path / "data" / "meas"
     image_path = tmp_path / "img" / "plot.png"
 
-    outcomes: list[SaveBothOutcome] = []
-    svc.save_both_finished.connect(lambda tid, o: outcomes.append(o))
+    outcomes: list[SaveResultOutcome] = []
+    svc.save_result_finished.connect(lambda tid, o: outcomes.append(o))
 
-    svc.start_save_both(SavePermit(tab_id="tab"), str(data_path), str(image_path))
+    svc.start_save_result(SavePermit(tab_id="tab"), str(data_path), str(image_path))
     svc._on_save_finished("tab")
 
     assert len(outcomes) == 1
@@ -200,7 +200,7 @@ def test_on_save_failed_emits_save_failed(qapp) -> None:  # noqa: ARG001
     assert failed[0][1] is error
 
 
-def test_on_save_failed_with_pending_image_emits_save_both_finished(
+def test_on_save_failed_with_pending_image_emits_save_result_finished(
     qapp,
     tmp_path: Path,
 ) -> None:
@@ -210,10 +210,10 @@ def test_on_save_failed_with_pending_image_emits_save_both_finished(
     data_path = tmp_path / "data" / "meas"
     image_path = tmp_path / "img" / "plot.png"
 
-    outcomes: list[SaveBothOutcome] = []
-    svc.save_both_finished.connect(lambda tid, o: outcomes.append(o))
+    outcomes: list[SaveResultOutcome] = []
+    svc.save_result_finished.connect(lambda tid, o: outcomes.append(o))
 
-    svc.start_save_both(SavePermit(tab_id="tab"), str(data_path), str(image_path))
+    svc.start_save_result(SavePermit(tab_id="tab"), str(data_path), str(image_path))
     error = OSError("data write failed")
     svc._on_save_failed("tab", error)
 

@@ -321,7 +321,7 @@ def test_draft_context_rejects_real_run_and_save(cf):
     with pytest.raises(RuntimeError, match="active file-backed context"):
         cf.ctrl.save_image(tab_id, "/tmp/image.png")
     with pytest.raises(RuntimeError, match="active file-backed context"):
-        cf.ctrl.save_both(tab_id, "/tmp/data.h5", "/tmp/image.png")
+        cf.ctrl.save_result(tab_id, "/tmp/data.h5", "/tmp/image.png")
 
 
 def test_run_rejected_while_soc_connect_lease_active(cf):

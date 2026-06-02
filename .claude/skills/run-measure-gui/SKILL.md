@@ -28,6 +28,10 @@ Paths below are relative to the repo root (`<repo>` = the directory with
 
 ## Before touching real hardware — READ THIS
 
+> **Mock SoC / `FakeDevice` flow? Skip this section.** It is safe and offline —
+> none of the hardware-safety rules below apply. They kick in only when a real
+> `YOKOGS200` / `SGS100A` is involved.
+
 You drive **software only**. You cannot see the cabling, the sample, or the
 fridge. So on a real (non-mock) session you **must get hardware facts from the
 user first**, and you **must respect device safety limits**.
@@ -93,21 +97,28 @@ Then the experiment loop (per tab):
 gui_adapter_list                                  # available experiments
 gui_tab_new(adapter_name="fake/freq") -> tab_id   # readable id, e.g. fake-freq-1a2b3c4d
 gui_tab_snapshot(tab_id) -> editor_id             # the cfg-editing session handle
-gui_tab_list_paths(tab_id)                        # dotted cfg paths + current values + choices
+gui_tab_list_paths(tab_id)                        # dotted cfg paths (compact: path+kind+choices)
+gui_tab_get_cfg_summary(tab_id)                   # when you only want current values (clean scalar dict)
 gui_editor_set_field(editor_id, "rounds", 30)     # WYSIWYG edit of the form's draft
-gui_run_start(tab_id)                             # waits ~1s; finished -> {tab}, slow -> {status:pending}
-gui_run_progress                                  # live bars while running (fallback to events)
-gui_run_wait(tab_id)                              # block until done (after pending)
-gui_analyze_start(tab_id)                         # fit; then read gui_tab_get_analyze_result
-gui_save_data(tab_id) / gui_save_image / gui_save_both
+gui_run_start(tab_id)                             # waits ~1s; finished -> {status:finished,...}, slow -> {status:pending}
+gui_run_wait(tab_id)                              # block until done (only after pending)
+gui_analyze(tab_id)                               # SYNCHRONOUS fit; reply folds in figure_path (Read it)
+gui_save_data(tab_id) / gui_save_image / gui_save_result
 gui_view_screenshot(tab_id)                       # base64 PNG of the window/tab
 ```
 
-Detecting completion — **prefer events over polling**: `run_started` /
-`run_finished{outcome}` and `device_setup_started/finished` are auto-subscribed;
-`gui_events_poll` drains them. A `diagnostic{severity}` push carries the same
-error/info the GUI would show in a dialog. `gui_run_progress` is a fallback —
-don't busy-poll `gui_run_running_tab` in a sleep loop.
+Detecting completion — a small decision table (there are no agent-facing events;
+don't look for `gui_events_*`, they don't exist):
+
+| situation | what to do |
+|---|---|
+| fast run / any analyze | **synchronous** — the call returns when done (`gui_analyze` always; `gui_run_start` when it finishes within `wait_seconds`, default 1.0) |
+| `gui_run_start` returned `{status:pending}` | `gui_run_wait(tab_id)` (blocks) or `gui_run_poll(tab_id)` (non-blocking) |
+| want live progress bars | `gui_run_progress(tab_id)` |
+
+A `diagnostic{severity}` push (errors / info the GUI would show in a dialog) rides
+along in the *next* tool reply's notifications — you get it without asking. Don't
+busy-poll `gui_run_running_tab` in a sleep loop.
 
 The full, authoritative tool reference is the **MCP server instructions block**
 (shown by the client when the server connects, defined in

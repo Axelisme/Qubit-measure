@@ -21,8 +21,8 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class SaveBothOutcome:
-    """Combined result envelope for a save_both operation."""
+class SaveResultOutcome:
+    """Combined result envelope for a save_result (data + image) operation."""
 
     data_path: str
     image_path: str
@@ -33,7 +33,7 @@ class SaveBothOutcome:
 class SaveService(QObject):
     save_finished: Signal = Signal(str, str)
     save_failed: Signal = Signal(str, str, object)
-    save_both_finished: Signal = Signal(str, object)
+    save_result_finished: Signal = Signal(str, object)
 
     def __init__(
         self,
@@ -64,7 +64,7 @@ class SaveService(QObject):
         self._active_paths[tab_id] = data_path
         self._mark_saving(tab_id, True)
 
-    def start_save_both(
+    def start_save_result(
         self, permit: SavePermit, data_path: str, image_path: str, comment: str = ""
     ) -> None:
         """Sync-save image on the main thread, then async-save data on a worker thread."""
@@ -77,19 +77,19 @@ class SaveService(QObject):
         image_error: Optional[str] = None
         try:
             logger.info(
-                "start_save_both: savefig tab_id=%r image_path=%r", tab_id, image_path
+                "start_save_result: savefig tab_id=%r image_path=%r", tab_id, image_path
             )
             self._ensure_parent_directory(image_path)
             save_figure_to_path(tab.figure, image_path)
         except Exception as exc:
             image_error = str(exc)
             logger.warning(
-                "start_save_both: image failed tab_id=%r exc=%r", tab_id, exc
+                "start_save_result: image failed tab_id=%r exc=%r", tab_id, exc
             )
 
         req = self._make_save_data_request(tab_id, data_path, comment=comment)
         logger.info(
-            "start_save_both: start_save tab_id=%r data_path=%r", tab_id, data_path
+            "start_save_result: start_save tab_id=%r data_path=%r", tab_id, data_path
         )
         self._ensure_parent_directory(data_path)
         self._runner.start_save(tab_id, tab.adapter, req)
@@ -150,13 +150,13 @@ class SaveService(QObject):
         if tab_id in self._pending_image:
             image_path, image_error = self._pending_image.pop(tab_id)
             logger.info(
-                "_on_save_finished: save_both_finished tab_id=%r image_error=%r",
+                "_on_save_finished: save_result_finished tab_id=%r image_error=%r",
                 tab_id,
                 image_error,
             )
-            self.save_both_finished.emit(
+            self.save_result_finished.emit(
                 tab_id,
-                SaveBothOutcome(
+                SaveResultOutcome(
                     data_path=path,
                     image_path=image_path,
                     data_error=None,
@@ -175,14 +175,14 @@ class SaveService(QObject):
         if tab_id in self._pending_image:
             image_path, image_error = self._pending_image.pop(tab_id)
             logger.warning(
-                "_on_save_failed: save_both_finished tab_id=%r data_error=%r image_error=%r",
+                "_on_save_failed: save_result_finished tab_id=%r data_error=%r image_error=%r",
                 tab_id,
                 error,
                 image_error,
             )
-            self.save_both_finished.emit(
+            self.save_result_finished.emit(
                 tab_id,
-                SaveBothOutcome(
+                SaveResultOutcome(
                     data_path=path,
                     image_path=image_path,
                     data_error=str(error),
