@@ -149,7 +149,11 @@ from zcu_tools.gui.services.remote.wire import (  # noqa: E402
 #      folded in) — gui_run_progress / gui_device_setup_progress tools are gone.
 #      gui_*_poll reports user cancel as status:'cancelled' (was 'failed'), read
 #      structurally from the wire reason via GuiRpcError.
-MCP_VERSION = 22
+# MCP 23: tool errors append the machine-readable reason tag (Phase 130) — a
+#      precondition failure (no_run_result / no_project / …) now ends with
+#      "reason: <tag>" so the agent can branch without parsing the prose. No wire
+#      change (reason already on the wire envelope; only surfaced at mcp now).
+MCP_VERSION = 23
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -2278,6 +2282,14 @@ def main() -> None:
                         # where the stack is the actual debugging signal.
                         if isinstance(e, RuntimeError):
                             text = f"Error executing tool {name!r}: {e}"
+                            # Surface the machine-readable reason tag (e.g.
+                            # no_run_result / no_project) when the wire carried
+                            # one, so the agent can branch on it without parsing
+                            # the message prose. GuiRpcError.reason is set from
+                            # the wire error envelope (Phase 129).
+                            reason = getattr(e, "reason", None)
+                            if reason:
+                                text += f"\nreason: {reason}"
                         else:
                             text = (
                                 f"Error executing tool {name!r}: {e}\n"

@@ -170,6 +170,51 @@ def test_transmission_blind_sweep_finds_hidden_resonance():
     assert abs(analyze_result.freq - 6088.0) < 5.0
 
 
+def _run_for_save(adapter: FakeFreqAdapter):
+    from zcu_tools.gui.adapter import RunRequest as RR
+
+    ctx = _real_ctx()
+    schema = adapter.make_default_cfg(ctx)
+    return adapter.run(RR(md=ctx.md, ml=ctx.ml, soc=None, soccfg=None), schema)
+
+
+def _save_request(result, data_path: str):
+    from zcu_tools.gui.adapter import SaveDataRequest
+
+    return SaveDataRequest(
+        run_result=result,
+        data_path=data_path,
+        md=MetaDict(readonly=True),
+        ml=MagicMock(),  # fake save() does not touch ml
+        chip_name="chip",
+        qub_name="q",
+        res_name="r",
+        active_label="0.0",
+        comment="",
+    )
+
+
+def test_save_persist_true_writes_hdf5(tmp_path):
+    # persist_data=True (the registry default) → save writes a real HDF5 so
+    # "data saved to <path>" is truthful and the file exists (Phase 130 #1).
+    import glob
+
+    adapter = FakeFreqAdapter(fast_mode=True, persist_data=True)
+    result = _run_for_save(adapter)
+    data_path = str(tmp_path / "fake_save")
+    adapter.save(_save_request(result, data_path))
+    # save_data appends an extension / safe-name; assert a file actually landed.
+    assert glob.glob(str(tmp_path / "fake_save*")), "no data file written"
+
+
+def test_save_persist_false_is_noop(tmp_path):
+    adapter = FakeFreqAdapter(fast_mode=True, persist_data=False)
+    result = _run_for_save(adapter)
+    data_path = str(tmp_path / "fake_save")
+    adapter.save(_save_request(result, data_path))
+    assert not list(tmp_path.iterdir()), "no-op save must not write anything"
+
+
 def test_model_type_params_mismatch_is_fast_fail():
     """A hanger run with transmission params is a bug — reject at construction."""
     import pytest

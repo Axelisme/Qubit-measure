@@ -14,29 +14,50 @@ class SweepEditor:
         if bounds is None:
             return value
         start, stop = bounds
+        # auto_norm=False: this IS the canonicalisation authority — step is
+        # already derived here, don't let SweepValue re-derive it.
         return SweepValue(
             start=value.start,
             stop=value.stop,
             expts=value.expts,
             step=SweepEditor._step_from_expts(start, stop, value.expts),
+            auto_norm=False,
         )
 
     @staticmethod
     def update_start(value: SweepValue, start: float | EvalValue) -> SweepValue:
         return SweepEditor.canonicalize(
-            SweepValue(start=start, stop=value.stop, expts=value.expts, step=value.step)
+            SweepValue(
+                start=start,
+                stop=value.stop,
+                expts=value.expts,
+                step=value.step,
+                auto_norm=False,
+            )
         )
 
     @staticmethod
     def update_stop(value: SweepValue, stop: float | EvalValue) -> SweepValue:
         return SweepEditor.canonicalize(
-            SweepValue(start=value.start, stop=stop, expts=value.expts, step=value.step)
+            SweepValue(
+                start=value.start,
+                stop=stop,
+                expts=value.expts,
+                step=value.step,
+                auto_norm=False,
+            )
         )
 
     @staticmethod
     def update_expts(value: SweepValue, expts: int) -> SweepValue:
         return SweepEditor.canonicalize(
-            SweepValue(start=value.start, stop=value.stop, expts=expts, step=value.step)
+            SweepValue(
+                start=value.start,
+                stop=value.stop,
+                expts=expts,
+                step=value.step,
+                auto_norm=False,
+            )
         )
 
     @staticmethod
@@ -48,8 +69,16 @@ class SweepEditor:
             return value
         start, stop = bounds
         expts = 1 if step == 0.0 else max(1, round((stop - start) / step + 1))
+        # step is the user's input → expts is reverse-derived; auto_norm=False so
+        # the supplied step is preserved (not overwritten by the forward rule).
         return SweepEditor.canonicalize(
-            SweepValue(start=value.start, stop=value.stop, expts=expts, step=step)
+            SweepValue(
+                start=value.start,
+                stop=value.stop,
+                expts=expts,
+                step=step,
+                auto_norm=False,
+            )
         )
 
     @staticmethod

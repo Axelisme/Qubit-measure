@@ -302,6 +302,7 @@ class FakeFreqAdapter(
         model_type: Literal["t", "hm"] = "hm",
         params: Optional[Param] = None,
         fast_mode: bool = False,
+        persist_data: bool = True,
     ) -> None:
         if params is None:
             params = (
@@ -318,6 +319,11 @@ class FakeFreqAdapter(
         self._model_type: Literal["t", "hm"] = model_type
         self._params: Param = params
         self._fast_mode = fast_mode
+        # When True (default), save() writes a real (simulated-data) HDF5 to the
+        # requested path — fake/freq is for rehearsing the full flow offline, so a
+        # save should produce a file and "data saved to <path>" stays honest. Pass
+        # False for a pure no-op (no file). See save().
+        self._persist_data = persist_data
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:
@@ -422,7 +428,21 @@ class FakeFreqAdapter(
         return make_onetone_freq_writeback_items(result.freq, result.fwhm)
 
     def save(self, req: SaveDataRequest[FakeFreqRunResult]) -> None:
-        del req  # fake experiment — no HDF5 persistence
+        # Pure-mock default: no HDF5 (no real instrument data). When the adapter
+        # was built with persist_data=True, write the simulated sweep so the
+        # "data saved to <path>" report is truthful and the file exists.
+        if not self._persist_data:
+            return
+        from zcu_tools.utils.datasaver import save_data
+
+        result = req.run_result
+        save_data(
+            filepath=req.data_path,
+            x_info={"name": "Frequency", "unit": "Hz", "values": result.freqs * 1e6},
+            z_info={"name": "Signal", "unit": "a.u.", "values": result.signals},
+            comment=req.comment or "fake/freq simulated data",
+            tag="fake/freq",
+        )
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.res_name}_freq_{time.strftime('%m%d')}"

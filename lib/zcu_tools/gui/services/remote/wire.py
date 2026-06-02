@@ -147,7 +147,11 @@ WIRE_VERSION = 20
 #     in RunService.start_run) so a run-in-flight tab honestly has no result;
 #     progress query unified to operation.progress(operation_id), removing
 #     get_run_progress / DeviceService.setup_progress (WIRE 20, Phase 129).
-GUI_VERSION = 18
+# v19: FakeFreqAdapter persists real (simulated) HDF5 on save by default
+#     (persist_data=True) so "data saved" is truthful; SweepValue auto-derives
+#     step from start/stop/expts at construction (auto_norm, SweepEditor opts
+#     out) so default cfg step is consistent across views (Phase 130, WIRE 20).
+GUI_VERSION = 19
 
 # ---------------------------------------------------------------------------
 # Wire envelopes

@@ -198,6 +198,35 @@ def test_extra_value_fields_raise():
 # ---------------------------------------------------------------------------
 
 
+def test_sweepvalue_auto_norm_derives_step_from_expts():
+    # A plain SweepValue(start, stop, expts=N) self-derives step (it is a view of
+    # expts, not an independent input) so any direct construction — the adapter
+    # defaults, session codec, inheritance — is self-consistent. Phase 130.
+    v = SweepValue(start=0.0, stop=600.0, expts=301)
+    assert v.step == pytest.approx(2.0)  # (600-0)/(301-1), not the 0.1 default
+
+
+def test_sweepvalue_auto_norm_false_preserves_step():
+    # SweepEditor (the canonicalisation authority) passes auto_norm=False so its
+    # already-computed step is not re-derived.
+    v = SweepValue(start=0.0, stop=600.0, expts=301, step=0.1, auto_norm=False)
+    assert v.step == pytest.approx(0.1)
+
+
+def test_sweepvalue_auto_norm_expts_one_gives_zero_step():
+    v = SweepValue(start=0.0, stop=1.0, expts=1)
+    assert v.step == pytest.approx(0.0)
+
+
+def test_sweepvalue_auto_norm_skips_evalvalue_bounds():
+    # EvalValue bounds are left to SweepEditor (resolved-edge handling); auto_norm
+    # never touches an EvalValue's resolved, so the supplied step stays.
+    from zcu_tools.gui.adapter import EvalValue
+
+    v = SweepValue(start=EvalValue("r_f - 0.1"), stop=600.0, expts=11, step=0.5)
+    assert v.step == pytest.approx(0.5)
+
+
 def test_sweep_produces_sweep_cfg():
     from zcu_tools.program.v2 import SweepCfg
 

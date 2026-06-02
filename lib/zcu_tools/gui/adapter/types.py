@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC
-from dataclasses import dataclass, field, replace
+from dataclasses import InitVar, dataclass, field, replace
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Protocol, Union
 
@@ -474,10 +474,30 @@ class SweepValue:
     stop: Union[float, EvalValue]
     expts: int
     step: float = 0.1
+    # ``auto_norm`` (init-only) derives ``step`` from start/stop/expts at
+    # construction so that any direct ``SweepValue(start, stop, expts=N)`` (the
+    # 16 adapter defaults, session codec, inheritance) is self-consistent — step
+    # is a derived view of expts, not an independent input. ``SweepEditor`` (the
+    # canonicalisation authority, which also runs the reverse step→expts rule)
+    # passes ``auto_norm=False`` so its already-computed value is not re-derived.
+    # Only plain numeric bounds are normalised; EvalValue bounds are left to
+    # ``SweepEditor`` (which owns the resolved-edge handling) — auto_norm never
+    # touches an EvalValue's ``resolved`` (it may be unresolved or non-numeric).
+    auto_norm: InitVar[bool] = True
 
-    def __post_init__(self) -> None:
+    def __post_init__(self, auto_norm: bool) -> None:
         if self.expts < 1:
             raise ValueError("SweepValue.expts must be >= 1")
+        if (
+            auto_norm
+            and isinstance(self.start, (int, float))
+            and isinstance(self.stop, (int, float))
+        ):
+            self.step = (
+                0.0
+                if self.expts == 1
+                else (float(self.stop) - float(self.start)) / (self.expts - 1)
+            )
 
 
 @dataclass
