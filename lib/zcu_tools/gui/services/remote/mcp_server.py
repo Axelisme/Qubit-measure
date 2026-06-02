@@ -134,7 +134,13 @@ from zcu_tools.gui.services.remote.wire import (  # noqa: E402
 #      _describe_stale_keys translates them into agent language and folds them
 #      into the error message ("… changed (the active context, this tab's cfg) …")
 #      so the agent knows what to re-read. Version numbers stay mcp bookkeeping.
-MCP_VERSION = 17
+# v18: wait returns structured timeout (Phase 120c-4). gui_run_wait /
+#      gui_device_wait_operation / gui_connect_wait no longer raise on timeout (a
+#      bounded wait elapsing is expected, not a crash) — they return
+#      {status:'finished'|'timed_out'|'no_operation', waited_seconds}. Both
+#      timeout flavors (bridge socket TimeoutError, GUI-side "(timeout)") map to
+#      timed_out; a genuine failed/cancelled still raises. No wire change.
+MCP_VERSION = 18
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -1030,12 +1036,14 @@ def tool_gui_context_set_md_attrs(arguments: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _await_operation_by_key(key: str, what: str, timeout: float) -> Dict[str, Any]:
-    """Block until the latest operation for ``key`` settles; semantic result.
+    """Block until the latest operation for ``key`` settles, or ``timeout`` s
+    elapse; semantic result.
 
-    Translates the agent's semantic name to the internal operation_id, awaits it
-    via the off-main operation.await RPC, and returns a plain-language status.
-    operation.await raises (PRECONDITION_FAILED) on failed/cancelled, surfaced to
-    the agent as an error; here we shape the success message.
+    Returns ``{status, waited_seconds[, message]}``: 'finished' (settled OK),
+    'timed_out' (still running after the bounded wait — NOT a crash, no raise),
+    or 'no_operation' (nothing tracked). ``waited_seconds`` is how long the wait
+    actually blocked. A genuine failed/cancelled outcome still raises (the agent
+    must see it as an error), distinct from a timeout.
     """
     operation_id = _OP_BY_KEY.get(key)
     if operation_id is None:
@@ -1043,10 +1051,38 @@ def _await_operation_by_key(key: str, what: str, timeout: float) -> Dict[str, An
             "status": "no_operation",
             "message": f"No in-flight operation for {what}.",
         }
-    res = send_gui_rpc(
-        "operation.await", {"operation_id": operation_id, "timeout": timeout}, timeout
-    )
-    return {"status": res.get("status", "finished"), "message": f"{what} completed."}
+    start = time.monotonic()
+    try:
+        # Allow the bridge RPC a little slack beyond the op timeout so the
+        # GUI-side timeout (a clean 'still running' signal) is what fires first,
+        # not the socket round-trip ceiling.
+        res = send_gui_rpc(
+            "operation.await",
+            {"operation_id": operation_id, "timeout": timeout},
+            timeout + 5.0,
+        )
+    except TimeoutError:
+        # Bridge socket round-trip ceiling hit — the op is still running. This is
+        # an expected outcome of a bounded wait, not a crash: report it (no raise,
+        # no traceback) with how long we actually waited so the agent can decide.
+        return {
+            "status": "timed_out",
+            "waited_seconds": round(time.monotonic() - start, 3),
+            "message": f"{what} still in progress after {timeout}s.",
+        }
+    except RuntimeError as exc:
+        if _is_timeout_error(exc):
+            return {
+                "status": "timed_out",
+                "waited_seconds": round(time.monotonic() - start, 3),
+                "message": f"{what} still in progress after {timeout}s.",
+            }
+        raise  # genuine failure/cancellation — surfaces to the agent as an error
+    return {
+        "status": res.get("status", "finished"),
+        "waited_seconds": round(time.monotonic() - start, 3),
+        "message": f"{what} completed.",
+    }
 
 
 def _poll_operation_by_key(key: str, what: str) -> Dict[str, Any]:
@@ -1670,10 +1706,11 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
         "handler": tool_gui_device_wait_operation,
         "description": (
             "Block until the named device's current operation (connect / disconnect "
-            "/ setup — whichever was started last) completes. Returns "
-            "status='finished' on success; raises on failure/cancellation; "
-            "status='no_operation' if nothing is in flight for that device. Use "
-            "this after a gui_device_* tool returned status='pending'."
+            "/ setup — whichever was started last) completes or 'timeout' s elapse. "
+            "Returns {status, waited_seconds}: 'finished' / 'timed_out' (still "
+            "running — re-wait or gui_device_poll) / 'no_operation'. Raises only on "
+            "a genuine failure/cancellation. Use after a gui_device_* tool returned "
+            "status='pending'."
         ),
         "inputSchema": {
             "type": "object",
@@ -1724,9 +1761,12 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
     "gui_run_wait": {
         "handler": tool_gui_run_wait,
         "description": (
-            "Block until the run on tab_id completes. status='finished' on "
-            "success; raises on failure/cancellation; status='no_operation' if "
-            "no run is in flight. Use after gui_run_start returned status='pending'."
+            "Block until the run on tab_id completes or 'timeout' s elapse. "
+            "Returns {status, waited_seconds}: status='finished' (done; figure_path "
+            "folded in if any), 'timed_out' (still running after the wait — not an "
+            "error, re-wait or gui_run_poll), or 'no_operation' (none in flight). "
+            "Raises only on a genuine run failure/cancellation. Use after "
+            "gui_run_start returned status='pending'."
         ),
         "inputSchema": {
             "type": "object",
@@ -1801,8 +1841,10 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
     "gui_connect_wait": {
         "handler": tool_gui_connect_wait,
         "description": (
-            "Block until the SoC connect completes. status='finished' on success; "
-            "raises on failure; status='no_operation' if none in flight. Use after "
+            "Block until the SoC connect completes or 'timeout' s elapse. Returns "
+            "{status, waited_seconds}: 'finished' (also returns the SoC summary) / "
+            "'timed_out' (still connecting — re-wait or gui_connect_poll) / "
+            "'no_operation'. Raises only on a genuine connect failure. Use after "
             "gui_connect_start returned status='pending'."
         ),
         "inputSchema": {

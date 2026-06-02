@@ -144,7 +144,55 @@ def test_await_operation_refreshes_last_seen_via_rpc(wired):
     out = mcp_server.TOOLS["gui_run_wait"]["handler"]({"tab_id": "t", "timeout": 0.1})
 
     assert out["status"] == "finished"
+    assert "waited_seconds" in out  # how long the wait blocked (Phase 120c-4)
     assert mcp_server._LAST_SEEN.get("tab:t:result") == 9  # baseline resynced
+    mcp_server._OP_BY_KEY.pop("tab:t", None)
+
+
+def test_wait_timeout_returns_timed_out_not_raises(monkeypatch):
+    # Phase 120c-4: a bounded wait that elapses is an expected outcome, not a
+    # crash — gui_run_wait returns {status:'timed_out', waited_seconds} instead
+    # of raising. Covers both timeout flavors (bridge socket TimeoutError and the
+    # GUI-side "(timeout)" RuntimeError).
+    mcp_server._OP_BY_KEY["tab:t"] = 5
+
+    def bridge_timeout(method, params, timeout_seconds=30.0):
+        del params, timeout_seconds
+        if method == "operation.await":
+            raise TimeoutError("GUI RPC 'operation.await' did not complete")
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", bridge_timeout)
+    out = mcp_server.TOOLS["gui_run_wait"]["handler"]({"tab_id": "t", "timeout": 0.05})
+    assert out["status"] == "timed_out"
+    assert isinstance(out["waited_seconds"], float)
+
+    def gui_timeout(method, params, timeout_seconds=30.0):
+        del params, timeout_seconds
+        if method == "operation.await":
+            raise RuntimeError("GUI Error (timeout): not done")
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", gui_timeout)
+    out2 = mcp_server.TOOLS["gui_run_wait"]["handler"]({"tab_id": "t", "timeout": 0.05})
+    assert out2["status"] == "timed_out"
+    mcp_server._OP_BY_KEY.pop("tab:t", None)
+
+
+def test_wait_genuine_failure_still_raises(monkeypatch):
+    # A failed/cancelled outcome is NOT a timeout — it must still raise so the
+    # agent sees it as an error (distinct from timed_out).
+    mcp_server._OP_BY_KEY["tab:t"] = 5
+
+    def fail(method, params, timeout_seconds=30.0):
+        del params, timeout_seconds
+        if method == "operation.await":
+            raise RuntimeError("GUI Error (precondition_failed): run blew up")
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fail)
+    with pytest.raises(RuntimeError):
+        mcp_server.TOOLS["gui_run_wait"]["handler"]({"tab_id": "t", "timeout": 0.05})
     mcp_server._OP_BY_KEY.pop("tab:t", None)
 
 
