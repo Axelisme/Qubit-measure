@@ -660,7 +660,9 @@ def test_adapter_cfg_spec_lists_paths_without_tab(fx):
         assert resp["ok"] is True
         paths = {p["path"] for p in resp["result"]["paths"]}
         assert "sweep.freq.expts" in paths
-        assert "model.freq" in paths
+        assert "reps" in paths
+        # The simulated resonance moved to the adapter __init__ — not a cfg path.
+        assert "model.freq" not in paths
         # a sweep edge carries integer/number type
         expts = next(
             p for p in resp["result"]["paths"] if p["path"] == "sweep.freq.expts"

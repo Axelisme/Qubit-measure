@@ -51,17 +51,14 @@ def test_fakefreq_build_exp_cfg_basic():
     assert "reps" in raw
     assert "rounds" in raw
     assert "sweep" in raw
-    assert "model" in raw
     assert "modules" in raw
+    # The simulated resonance is held in the adapter (__init__), not the cfg.
+    assert "model" not in raw
 
     # sweep has freq SweepCfg
     from zcu_tools.program.v2 import SweepCfg
 
     assert isinstance(raw["sweep"]["freq"], SweepCfg)
-
-    # model has all expected keys
-    for key in ("freq", "Ql", "Qc_abs", "phi", "a0_abs", "edelay", "noise_scale"):
-        assert key in raw["model"], f"missing model key: {key}"
 
     # optional modules absent (disabled)
     assert "init_pulse" not in raw["modules"]
@@ -101,11 +98,8 @@ def test_fakefreq_make_default_cfg_spec_structure():
     assert "freq" in sweep_spec.fields
     assert isinstance(sweep_spec.fields["freq"], SweepSpec)
 
-    assert "model" in spec.fields
-    model_spec = spec.fields["model"]
-    assert isinstance(model_spec, CfgSectionSpec)
-    for key in ("freq", "Ql", "Qc_abs"):
-        assert key in model_spec.fields
+    # No 'model' block: simulated resonance is an __init__ arg, not a cfg field.
+    assert "model" not in spec.fields
 
     modules_spec = spec.fields["modules"]
     assert isinstance(modules_spec, CfgSectionSpec)
@@ -113,3 +107,74 @@ def test_fakefreq_make_default_cfg_spec_structure():
     assert modules_spec.fields["init_pulse"].optional is True
     assert isinstance(modules_spec.fields["reset"], ModuleRefSpec)
     assert modules_spec.fields["reset"].optional is True
+
+
+# ---------------------------------------------------------------------------
+# Blind-sweep tests — the resonance lives in __init__, the sweep is set
+# independently (centred on r_f), so the analysis must genuinely *find* the dip
+# rather than read an aligned cfg field.
+# ---------------------------------------------------------------------------
+
+
+def _real_ctx():
+    """A real ExpContext so run/analyze actually compute (not MagicMock)."""
+    from zcu_tools.gui.adapter import ExpContext
+    from zcu_tools.meta_tool import ModuleLibrary
+
+    return ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+
+
+def _run_and_fit(adapter: FakeFreqAdapter):
+    from zcu_tools.gui.adapter import AnalyzeRequest, RunRequest as RR
+
+    ctx = _real_ctx()
+    schema = adapter.make_default_cfg(ctx)
+    result = adapter.run(RR(md=ctx.md, ml=ctx.ml, soc=None, soccfg=None), schema)
+    return adapter.analyze(
+        AnalyzeRequest(
+            run_result=result,
+            analyze_params=adapter.get_analyze_params(result, ctx),
+            md=ctx.md,
+            ml=ctx.ml,
+            predictor=ctx.predictor,
+        )
+    )
+
+
+def test_hanger_blind_sweep_finds_hidden_resonance():
+    """sweep centres on r_f=6000 (cfg default); the true dip is 6080, supplied
+    only via __init__ — the fit must locate it without the cfg telling it. Ql is
+    lowered so the dip is several sweep-steps wide (the default sweep is ~2 MHz/
+    point over [5800, 6200]); a sub-resolution dip is a separate concern."""
+    from zcu_tools.experiment.v2_gui.adapters.fake.freq import HangerSimParams
+
+    adapter = FakeFreqAdapter(
+        params=HangerSimParams(freq=6080.0, Ql=500.0, Qc_abs=600.0),
+        fast_mode=True,
+    )
+    analyze_result = _run_and_fit(adapter)
+
+    assert abs(analyze_result.freq - 6080.0) < 5.0
+
+
+def test_transmission_blind_sweep_finds_hidden_resonance():
+    from zcu_tools.experiment.v2_gui.adapters.fake.freq import TransmissionSimParams
+
+    adapter = FakeFreqAdapter(
+        model_type="t",
+        params=TransmissionSimParams(freq=6088.0, Ql=500.0),
+        fast_mode=True,
+    )
+    analyze_result = _run_and_fit(adapter)
+
+    assert abs(analyze_result.freq - 6088.0) < 5.0
+
+
+def test_model_type_params_mismatch_is_fast_fail():
+    """A hanger run with transmission params is a bug — reject at construction."""
+    import pytest
+
+    from zcu_tools.experiment.v2_gui.adapters.fake.freq import TransmissionSimParams
+
+    with pytest.raises(TypeError, match="HangerSimParams"):
+        FakeFreqAdapter(model_type="hm", params=TransmissionSimParams())

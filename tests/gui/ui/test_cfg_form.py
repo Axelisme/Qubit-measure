@@ -681,16 +681,13 @@ def test_populate_full_fake_freq_schema(qapp, ctrl):
     _attach(w, schema, ctrl)
     out = w.read_values()
 
-    for key in ("reps", "rounds", "sweep", "model", "modules"):
+    for key in ("reps", "rounds", "sweep", "modules"):
         assert key in out.fields, f"missing key: {key}"
+    # The simulated resonance moved to the adapter __init__ — no 'model' in cfg.
+    assert "model" not in out.fields
 
     assert isinstance(out.fields["sweep"], CfgSectionValue)
     assert isinstance(out.fields["sweep"].fields["freq"], SweepValue)
-    assert isinstance(out.fields["model"], CfgSectionValue)
-    for model_key in ("freq", "Ql", "Qc_abs", "phi", "a0_abs", "edelay", "noise_scale"):
-        assert model_key in out.fields["model"].fields, (
-            f"missing model key: {model_key}"
-        )
     # modules is a CfgSectionValue with readout as ModuleRefValue
     modules_val = out.fields["modules"]
     assert isinstance(modules_val, CfgSectionValue)
