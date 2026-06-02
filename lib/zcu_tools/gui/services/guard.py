@@ -91,7 +91,7 @@ class GuardService:
         self._state = state
 
     def _require_tab(self, tab_id: str) -> Any:
-        if tab_id not in self._state.tabs:
+        if not self._state.has_tab(tab_id):
             raise GuardError(f"Unknown tab: {tab_id!r}", reason_code="unknown_tab")
         return self._state.get_tab(tab_id)
 

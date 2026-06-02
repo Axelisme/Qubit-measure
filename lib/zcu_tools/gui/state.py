@@ -362,6 +362,14 @@ class State:
     def get_tab(self, tab_id: str) -> Session:
         return self.tabs[tab_id]
 
+    def has_tab(self, tab_id: str) -> bool:
+        """Existence query — callers ask the aggregate, not the raw dict."""
+        return tab_id in self.tabs
+
+    def list_tab_ids(self) -> list[str]:
+        """Tab ids in insertion order — callers ask the aggregate, not the dict."""
+        return list(self.tabs.keys())
+
     def set_active_tab(self, tab_id: str) -> None:
         if tab_id not in self.tabs:
             raise KeyError(f"tab_id {tab_id!r} not found")

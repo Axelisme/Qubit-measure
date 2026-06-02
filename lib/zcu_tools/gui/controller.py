@@ -937,10 +937,10 @@ class Controller:
     # ------------------------------------------------------------------
 
     def has_tab(self, tab_id: str) -> bool:
-        return tab_id in self._state.tabs
+        return self._state.has_tab(tab_id)
 
     def list_tab_ids(self) -> list[str]:
-        return list(self._state.tabs.keys())
+        return self._state.list_tab_ids()
 
     def get_tab_adapter_name(self, tab_id: str) -> str:
         return self._state.get_tab(tab_id).adapter_name
