@@ -369,14 +369,14 @@ def test_mcp_tool_schemas_include_required_discovery_tools():
 
 
 def _add_fake_tab(fx, tab_id: str) -> None:
-    """Register a minimal TabState so has_tab(tab_id) is True."""
+    """Register a minimal Session so has_tab(tab_id) is True."""
     from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
-    from zcu_tools.gui.state import TabState
+    from zcu_tools.gui.state import Session
 
     adapter = FakeAdapter()
     cfg = adapter.make_default_cfg(fx.state.exp_context)
     fx.state.add_tab(
-        tab_id, TabState(adapter_name="fake", adapter=adapter, cfg_schema=cfg)
+        tab_id, Session(adapter_name="fake", adapter=adapter, cfg_schema=cfg)
     )
 
 

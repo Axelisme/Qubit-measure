@@ -5,7 +5,7 @@ import uuid
 from typing import TYPE_CHECKING, Optional
 
 from zcu_tools.gui.adapter import CfgSchema, CfgSectionSpec, SavePaths
-from zcu_tools.gui.state import TabInteractionState, TabState
+from zcu_tools.gui.state import Session, TabInteractionState
 
 from .ports import TabSnapshot
 
@@ -110,7 +110,7 @@ class TabService:
             save_path_overrides = from_dict.save_paths_override
         self._state.add_tab(
             tab_id,
-            TabState(
+            Session(
                 adapter_name=adapter_name,
                 adapter=adapter,
                 cfg_schema=cfg_schema,

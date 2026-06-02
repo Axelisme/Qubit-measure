@@ -90,7 +90,7 @@ class DeviceState:
 
 
 @dataclass
-class TabState(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
+class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     adapter_name: str
     adapter: ExpAdapterProtocol
     # Committed cfg SSOT for this tab. The tab's CfgFormWidget LiveModel is the
@@ -224,7 +224,7 @@ class State:
 
     def __init__(self, ctx: ExpContext) -> None:
         self.exp_context: ExpContext = ctx
-        self.tabs: dict[str, TabState[Any, Any, Any, Any]] = {}
+        self.tabs: dict[str, Session[Any, Any, Any, Any]] = {}
         self.active_tab_id: Optional[str] = None
         self.running_tab_id: Optional[str] = None
         # Device state SSOT. DeviceService writes here (on the Qt main thread,
@@ -334,7 +334,7 @@ class State:
     def add_tab(
         self,
         tab_id: str,
-        tab: TabState[Any, Any, Any, Any],
+        tab: Session[Any, Any, Any, Any],
     ) -> None:
         if tab_id in self.tabs:
             raise ValueError(f"tab_id {tab_id!r} already exists")
@@ -359,7 +359,7 @@ class State:
         if self.running_tab_id == tab_id:
             self.running_tab_id = None
 
-    def get_tab(self, tab_id: str) -> TabState:
+    def get_tab(self, tab_id: str) -> Session:
         return self.tabs[tab_id]
 
     def set_active_tab(self, tab_id: str) -> None:

@@ -13,7 +13,7 @@ from zcu_tools.gui.adapter import ContextReadiness
 from zcu_tools.gui.event_bus import EventBus, GuiEvent
 from zcu_tools.gui.services.analyze import AnalyzeService
 from zcu_tools.gui.services.guard import AnalyzePermit
-from zcu_tools.gui.state import ExpContext, State, TabState
+from zcu_tools.gui.state import ExpContext, State, Session
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
@@ -29,7 +29,7 @@ def _make_state(tab_id: str = "tab1") -> State:
     state = State(ctx)
     state.add_tab(
         tab_id,
-        TabState(adapter_name="fake", adapter=MagicMock(), cfg_schema=MagicMock()),
+        Session(adapter_name="fake", adapter=MagicMock(), cfg_schema=MagicMock()),
     )
     # Provide a fake run_result so the tab is not empty
     state.update_tab_result(tab_id, object())

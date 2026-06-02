@@ -14,7 +14,7 @@ from zcu_tools.gui.services.guard import (
     SavePermit,
     WritebackPermit,
 )
-from zcu_tools.gui.state import ExpContext, State, TabState
+from zcu_tools.gui.state import ExpContext, State, Session
 
 
 def _make_state(
@@ -41,7 +41,7 @@ def _make_state(
     else:
         schema.to_raw_dict.return_value = {"ok": True}
 
-    tab = TabState(adapter_name="any", adapter=adapter, cfg_schema=schema)
+    tab = Session(adapter_name="any", adapter=adapter, cfg_schema=schema)
     tab.run_result = run_result
     tab.analyze_result = analyze_result
     state.add_tab(tab_id, tab)

@@ -41,7 +41,7 @@ class WritebackService:
     """Owns the persistent writeback draft for each tab (ADR-0010).
 
     Writeback items are computed **once** when analyze finishes (``compute_items``)
-    and stored on ``TabState.writeback_items``. Each module/waveform item gets a
+    and stored on ``Session.writeback_items``. Each module/waveform item gets a
     gc=False CfgEditorService model (seeded from its ``edit_schema``); the agent
     edits it via ``editor.set_field`` and the user's Edit dialog attaches to the
     same model (WYSIWYG). ``get_tab_writeback_items`` is a pure read of that
@@ -70,7 +70,7 @@ class WritebackService:
         Calls the adapter, stamps a stable per-kind ``session_id``, and for each
         module/waveform item opens a gc=False CfgEditorService model seeded from
         its ``edit_schema`` (storing the ``editor_id``). The returned list is
-        stored on ``TabState.writeback_items`` by the analyze sink.
+        stored on ``Session.writeback_items`` by the analyze sink.
         """
         tab = self._state.get_tab(tab_id)
         run_result = tab.run_result

@@ -28,14 +28,14 @@ class _LiveFixture(Fixture):
     def __init__(self) -> None:
         super().__init__()
         from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
-        from zcu_tools.gui.state import TabState
+        from zcu_tools.gui.state import Session
 
         cfg = FakeAdapter().make_default_cfg(self.state.exp_context)
         self._tab_id = "tab-live"
-        # Inject a TabState so has_tab(tab-live) is True.
+        # Inject a Session so has_tab(tab-live) is True.
         self.state.add_tab(
             self._tab_id,
-            TabState(
+            Session(
                 adapter_name="fake",
                 adapter=FakeAdapter(),
                 cfg_schema=cfg,
@@ -372,7 +372,7 @@ def test_list_paths_unknown_tab_rejected(lf):
 def test_list_paths_form_not_populated_rejected(qapp):  # noqa: ARG001
     """A tab with no cfg-editor session yet → precondition_failed."""
     from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
-    from zcu_tools.gui.state import TabState
+    from zcu_tools.gui.state import Session
 
     f = Fixture()
     f.start()
@@ -380,7 +380,7 @@ def test_list_paths_form_not_populated_rejected(qapp):  # noqa: ARG001
         cfg = FakeAdapter().make_default_cfg(f.state.exp_context)
         f.state.add_tab(
             "bare",
-            TabState(adapter_name="fake", adapter=FakeAdapter(), cfg_schema=cfg),
+            Session(adapter_name="fake", adapter=FakeAdapter(), cfg_schema=cfg),
         )
         sock = open_client(f.service.port)
         try:

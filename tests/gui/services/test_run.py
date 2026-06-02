@@ -21,7 +21,7 @@ from zcu_tools.gui.event_bus import EventBus
 from zcu_tools.gui.services.guard import RunPermit
 from zcu_tools.gui.services.operation_gate import OperationGate, OperationKind
 from zcu_tools.gui.services.run import RunService
-from zcu_tools.gui.state import ExpContext, State, TabState
+from zcu_tools.gui.state import ExpContext, State, Session
 
 
 def _empty_schema() -> CfgSchema:
@@ -37,7 +37,7 @@ def _make_state() -> tuple[State, str, MagicMock]:
     adapter.capabilities = AdapterCapabilities(requires_soc=True)
     state.add_tab(
         tab_id,
-        TabState(adapter_name="any", adapter=adapter, cfg_schema=_empty_schema()),
+        Session(adapter_name="any", adapter=adapter, cfg_schema=_empty_schema()),
     )
     return state, tab_id, adapter
 

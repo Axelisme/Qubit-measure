@@ -8,7 +8,7 @@ from zcu_tools.gui.event_bus import EventBus
 from zcu_tools.gui.figure_export import SAVE_DPI, SAVE_FIGSIZE
 from zcu_tools.gui.services.guard import SavePermit
 from zcu_tools.gui.services.save import SaveBothOutcome, SaveService
-from zcu_tools.gui.state import State, TabState
+from zcu_tools.gui.state import State, Session
 
 
 def _make_figure() -> MagicMock:
@@ -31,7 +31,7 @@ def _make_service() -> tuple[SaveService, State, MagicMock]:
     adapter = MagicMock()
     state.add_tab(
         "tab",
-        TabState(adapter_name="fake", adapter=adapter, cfg_schema=MagicMock()),
+        Session(adapter_name="fake", adapter=adapter, cfg_schema=MagicMock()),
     )
     state.update_tab_result("tab", object())
     runner = MagicMock()

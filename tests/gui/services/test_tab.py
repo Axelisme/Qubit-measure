@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 from zcu_tools.gui.adapter import ContextReadiness, ExpContext, SavePaths
 from zcu_tools.gui.services.tab import TabService
-from zcu_tools.gui.state import State, TabState
+from zcu_tools.gui.state import State, Session
 
 
 def test_tab_snapshot_is_single_pure_render_model() -> None:
@@ -20,7 +20,7 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
     analyze_params = object()
     state.add_tab(
         "tab",
-        TabState(
+        Session(
             adapter_name="fake",
             adapter=MagicMock(),
             cfg_schema=MagicMock(),

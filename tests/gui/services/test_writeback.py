@@ -1,6 +1,6 @@
 """Unit tests for WritebackService — persistent draft (ADR-0010).
 
-Items are computed once into TabState.writeback_items; apply reads that draft
+Items are computed once into Session.writeback_items; apply reads that draft
 as-is (no recompute) and writes md/ml directly, bumping ``context`` so
 concurrency guards detect the change.
 """
@@ -24,7 +24,7 @@ from zcu_tools.gui.event_bus import (
 )
 from zcu_tools.gui.services.guard import WritebackPermit
 from zcu_tools.gui.services.writeback import WritebackService
-from zcu_tools.gui.state import ExpContext, State, TabState
+from zcu_tools.gui.state import ExpContext, State, Session
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
@@ -41,7 +41,7 @@ def _make_state_with_tab(tab_id: str = "t1") -> State:
     )
     state.add_tab(
         tab_id,
-        TabState(adapter_name="fake", adapter=MagicMock(), cfg_schema=MagicMock()),
+        Session(adapter_name="fake", adapter=MagicMock(), cfg_schema=MagicMock()),
     )
     return state
 

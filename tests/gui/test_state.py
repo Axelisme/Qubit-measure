@@ -14,7 +14,7 @@ from zcu_tools.gui.state import (
     DeviceStatus,
     State,
     TabInteractionState,
-    TabState,
+    Session,
 )
 
 
@@ -30,7 +30,7 @@ def _add_tab(state: State, tab_id: str, adapter: MagicMock) -> object:
     cfg_schema = CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
     state.add_tab(
         tab_id,
-        TabState(adapter_name="fake", adapter=adapter, cfg_schema=cfg_schema),
+        Session(adapter_name="fake", adapter=adapter, cfg_schema=cfg_schema),
     )
     return cfg_schema
 
@@ -64,7 +64,7 @@ def test_add_tab_then_get_tab_returns_correct_tabstate():
     adapter = _make_adapter()
     cfg_schema = _add_tab(state, "t1", adapter)
     tab = state.get_tab("t1")
-    assert isinstance(tab, TabState)
+    assert isinstance(tab, Session)
     assert tab.adapter_name == "fake"
     assert tab.adapter is adapter
     assert tab.cfg_schema is cfg_schema
@@ -344,9 +344,9 @@ def test_device_state_status_predicates():
 
 def test_tab_state_predicates():
     from zcu_tools.gui.adapter import CfgSchema, CfgSectionSpec, CfgSectionValue
-    from zcu_tools.gui.state import TabState
+    from zcu_tools.gui.state import Session
 
-    tab = TabState(
+    tab = Session(
         adapter_name="fake",
         adapter=_make_adapter(),
         cfg_schema=CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue()),

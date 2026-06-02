@@ -29,7 +29,7 @@ from .adapter import (
 )
 from .io_manager import IOManager
 from .registry import Registry
-from .state import State, TabState
+from .state import Session, State
 from .sweep_model import SweepEditor
 
 __all__ = [
@@ -56,7 +56,7 @@ __all__ = [
     "SweepSpec",
     "SweepEditor",
     "SweepValue",
-    "TabState",
+    "Session",
     "WaveformRefSpec",
     "WaveformRefValue",
     "WaveformWriteback",
