@@ -9,3 +9,99 @@ args = ["run", "--extra", "gui", "python", "lib/zcu_tools/gui/services/remote/mc
 # Auto-approve every measure-gui tool call (no per-call confirmation), the Codex
 # analogue of the "mcp__measure-gui" allow rule in .claude/settings.local.json.
 default_tools_approval_mode = "auto"
+
+[mcp_servers.measure-gui.tools.gui_launch]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_adapter_list]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_connect_start]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_startup_apply]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_context_new]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_state_check]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_tab_snapshot]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_tab_list_paths]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_context_get_md]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_adapter_analyze_spec]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_adapter_guide]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_context_set_md_attrs]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_events_subscribe]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_events_list]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_editor_set_fields]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_tab_get_cfg]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_context_set_md_attr]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_run_start]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_run_progress]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_run_wait]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_save_data]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_save_set_paths]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_analyze]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_tab_get_analyze_result]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_save_both]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_tab_get_analyze_params]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_tab_new]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_writeback_preview]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_writeback_apply]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_editor_set_field]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_writeback_set]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_context_get_md_attr]
+approval_mode = "approve"

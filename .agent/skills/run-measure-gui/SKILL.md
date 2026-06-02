@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 1
+skill_version: 3
 ---
 
 > **Copy-sync check.** This skill is hand-copied into `.claude/skills/`,
@@ -175,6 +175,59 @@ Steps 7–12 (Rabi/T2/recalibrate/Rabi/T1) are the per-point qubit
 characterization. Reset characterization (single/dual/bath, in the notebook) is
 a separate sub-procedure layered on top once a π pulse exists.
 
+**Readout bring-up rules that generalize beyond one notebook run:**
+
+- **Do not start `onetone/freq` on real hardware until `lookback` has set a
+  believable `timeFly`.** A guessed trigger offset can shift the readout window
+  off the arriving signal and distort every downstream resonator fit.
+- **Run `lookback` off-resonance when calibrating `timeFly` for an `hm`
+  resonator.** On resonance the resonator can absorb the probe and hide the
+  clean square-step edge you actually need for timing.
+- **Tune `lookback` to the rising edge, not the saturated plateau.** Leave
+  enough pre-trigger baseline to see the step start cleanly, keep the pulse /
+  readout window short enough that the plot focuses on the edge, and only then
+  trust the predicted offset.
+- **If `lookback` is using a trigger expression derived from an old `timeFly`,
+  break that feedback loop before re-measuring.** Use a direct fallback
+  `trig_offset` (or remove the old md value) when you need an unbiased timing
+  re-calibration.
+- **Probe gain is part of the timing calibration.** If the user tells you the
+  line only works at a stronger gain, re-run `lookback` at that gain before
+  trusting the earlier `timeFly`.
+- **Do not confuse GUI pulse gain with external device power/current values.**
+  The readout-pulse `gain` fields in these adapters are normalized waveform
+  amplitudes, typically safe in the range `-1` to `+1`, and do **not** mean the
+  same thing as a source's physical output setting.
+- **For power-insensitive readout experiments such as `lookback` and
+  `onetone/freq`, `gain=1.0` is often the right default on a weak line.** If the
+  user tells you the line is not power-sensitive for the task at hand, prefer
+  the stronger readout drive so the signal-to-noise ratio is good enough to
+  judge timing and resonator features cleanly.
+- **After every important `run`, inspect the analysis figure before trusting the
+  scalar summary.** A plausible-looking number can still come from a visibly bad
+  fit.
+- **Before choosing a `lookback` frequency, ask whether the readout resonator is
+  hanger-like (`hm`) or transmission-like (`t`).** For a hanger, the resonant
+  point absorbs and `lookback` should be done off-resonance; for a transmission
+  resonator the resonant point transmits more strongly and `lookback` should be
+  done on-resonance.
+- **When the user does not specify the resonator family, ask instead of
+  guessing.** A common lab convention is that multi-qubit chip-integrated
+  readout resonators are hanger-type, while single-qubit sample-box readout
+  modes are often transmission-type, but this is only a heuristic.
+- **For narrow windows and overlapping peaks, treat `fit_bg_slope` as a
+  potential overfit knob.** If the background line is doing obvious work the
+  physics should be doing, re-run with `fit_bg_slope=false` and compare the
+  figure, not just the summary.
+- **Do not force single-peak `hm` fits onto obviously overlapped or truncated
+  features.** In those cases it is better to save the trace, report a manually
+  verified dip frequency, and leave linewidth / derived module writeback unset
+  than to write back bad fit parameters.
+- **When characterizing multiple resonators, rename writeback targets per peak
+  before applying them.** Avoid clobbering shared keys like `r_f`, `rf_w`,
+  `readout_rf`, or `ro_waveform` unless the user explicitly wants the latest
+  result to become the canonical default.
+
 Flux/RF sources (YOKOGS200, SGS100A) are driven as **devices**:
 `gui_device_connect(type_name, name, address)` → `gui_device_setup(name,
 updates={"value": ...})` ramps an output (cancellable, with progress via
@@ -220,6 +273,13 @@ hardware) — the smoke harness uses it.
   (`tab.snapshot.interaction.is_analyzing` / `is_running` false, or the
   `run_finished` event) before the next mutating call. (The smoke harness hits
   this — it waits on `is_analyzing` before `save.data`.)
+- **`run` success is not `analyze` success.** A completed acquisition can still
+  produce a bad or misleading fit. On real data, open the figure and verify the
+  model visually before you trust `gui_tab_get_analyze_result`, especially for
+  lookback timing, narrow resonator windows, and overlapping dips.
+- **Minimum writeback bar: inspect the analysis figure first.** Do not write fit
+  results into the context or module library unless the plotted fit matches the
+  feature you intended to measure.
 - **cfg paths have no `value` segment.** Module sub-fields are
   `modules.qub_pulse.freq`, not `...qub_pulse.value.freq`; an unknown path
   fails `invalid_params` rather than silently no-op'ing. Always confirm against
@@ -234,6 +294,9 @@ hardware) — the smoke harness uses it.
   flows.
 - **`run.start` is fire-and-forget.** A duplicate call starts a *second* run.
   Issue mutating tools exactly once and read the reply.
+- **If a writeback item is only partially trustworthy, apply only the safe
+  subset.** Frequency-only writeback is often safer than writing a dubious
+  linewidth or derived readout module after a marginal fit.
 - **Mirror/image peaks in spectra (ZCU DAC artifact).** The Xilinx ZCU board's
   DAC has a finite sampling rate and side-band leakage, so a real transition can
   show up *mirrored* around `sample_f/2` in a twotone spectrum. A peak at the
