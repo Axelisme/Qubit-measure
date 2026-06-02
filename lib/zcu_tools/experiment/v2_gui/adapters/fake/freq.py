@@ -288,8 +288,9 @@ class FakeFreqAdapter(
             ),
             typical_writeback=(
                 "Proposes the fitted resonator frequency and linewidth back into "
-                "MetaDict 'r_f' / 'rf_w', and an updated 'readout_rf' module + "
-                "'ro_waveform' waveform into the ModuleLibrary."
+                "MetaDict 'r_f' / 'rf_w'. The readout module / waveform are left "
+                "to the user — a frequency fit alone does not justify rewriting "
+                "the whole readout config."
             ),
             recommended=(
                 "Analysis defaults to the hanger-model fit ('hm'). Switch to the "
