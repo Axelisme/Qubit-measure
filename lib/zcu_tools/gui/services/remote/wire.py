@@ -82,7 +82,7 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 #      before running it. New method = contract change.
 # v13: added app.shutdown — gracefully close the GUI via its normal window-close
 #      path (no OS kill); new method = contract change.
-WIRE_VERSION = 14
+WIRE_VERSION = 15
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -112,7 +112,12 @@ WIRE_VERSION = 14
 #     cfg content (no lowering/eval side effect), set_field returns
 #     {valid, removed, added}; adapter.cfg_spec lists ModuleRef '.ref' + choices
 #     only (no variant inner-field descent); list_subtree_paths removed.
-GUI_VERSION = 11
+# v12: analyze takes an operation lease (WIRE 15, Phase 120c). analyze is an
+#     async worker, not synchronous as v11 assumed — it now acquires an
+#     OperationKind.ANALYZE lease (never conflicts; handle-only) and analyze.start
+#     returns {operation_id}. The mcp gui_analyze tool awaits it, so analyze is
+#     synchronous to the agent and its figure is ready when the reply lands.
+GUI_VERSION = 12
 
 # ---------------------------------------------------------------------------
 # Wire envelopes

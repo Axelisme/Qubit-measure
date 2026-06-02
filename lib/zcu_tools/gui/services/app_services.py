@@ -104,7 +104,7 @@ def build_app_services(
         context=context,
         tab=tab,
         run=RunService(state, runner, bus, operation_gate, writeback, progress),
-        analyze=AnalyzeService(state, analyze_runner, bus, writeback),
+        analyze=AnalyzeService(state, analyze_runner, bus, writeback, operation_gate),
         save=SaveService(state, save_runner, bus),
         writeback=writeback,
         tab_view=TabViewService(state, writeback),

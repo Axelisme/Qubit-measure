@@ -807,7 +807,14 @@ def test_analyze_reply_includes_figure_path_when_figure_exists(monkeypatch):
             return {"saved_to": params["out_path"]}
         return {}
 
+    # analyze is async — gui_analyze starts it then awaits. Stub the await as a
+    # completed operation so the synchronous-to-agent contract holds in the unit.
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    monkeypatch.setattr(
+        mcp_server,
+        "_await_operation_by_key",
+        lambda key, what, timeout: {"status": "finished"},
+    )
     out = mcp_server.TOOLS["gui_analyze"]["handler"]({"tab_id": "fake-freq-1"})
 
     assert out["status"] == "finished"
@@ -829,6 +836,11 @@ def test_analyze_reply_omits_figure_path_when_no_figure(monkeypatch):
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    monkeypatch.setattr(
+        mcp_server,
+        "_await_operation_by_key",
+        lambda key, what, timeout: {"status": "finished"},
+    )
     out = mcp_server.TOOLS["gui_analyze"]["handler"]({"tab_id": "t1"})
 
     assert out["status"] == "finished"

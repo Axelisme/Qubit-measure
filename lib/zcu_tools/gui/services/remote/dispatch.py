@@ -1192,14 +1192,14 @@ def _h_analyze_start(
     except (TypeError, ValueError) as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     try:
-        adapter.ctrl.analyze(tab_id, updated)
+        operation_id = adapter.ctrl.analyze(tab_id, updated)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
             str(exc),
             reason=getattr(exc, "reason_code", ""),
         ) from exc
-    return {}
+    return {"operation_id": operation_id}
 
 
 def _strip_cfg_tags(raw: object) -> object:

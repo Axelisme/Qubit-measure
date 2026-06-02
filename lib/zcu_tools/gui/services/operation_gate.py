@@ -20,6 +20,11 @@ class OperationKind(Enum):
     DEVICE_CONNECT = "device_connect"
     DEVICE_DISCONNECT = "device_disconnect"
     DEVICE_SETUP = "device_setup"
+    # Analyze is pure-CPU (no hardware), so it never conflicts with any other
+    # operation — _conflicts() falls through to False for it. It takes a lease
+    # only for the async handle (operation_id + await), not for exclusion;
+    # same-tab concurrency is guarded separately by is_tab_busy.
+    ANALYZE = "analyze"
 
 
 class OperationConflictError(RuntimeError):

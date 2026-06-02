@@ -40,10 +40,13 @@ def _make_service(
     state: State,
     bus: EventBus,
 ) -> tuple[AnalyzeService, MagicMock]:
+    from zcu_tools.gui.services.operation_gate import OperationGate
+
     runner = MagicMock()
     writeback = MagicMock()
     writeback.compute_items_for_tab.return_value = []
-    svc = AnalyzeService(state, runner, bus, writeback)
+    # Real (Qt-free) gate so analyze takes a genuine async-handle lease.
+    svc = AnalyzeService(state, runner, bus, writeback, OperationGate())
     return svc, runner
 
 

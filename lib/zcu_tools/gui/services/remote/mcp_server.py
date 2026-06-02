@@ -111,7 +111,12 @@ from zcu_tools.gui.services.remote.wire import (  # noqa: E402
 #      keyed by tab_id), NOT base64 — so the agent opens the file instead of a
 #      separate gui_tab_figure_screenshot call. gui_analyze becomes a hand-written
 #      override (was a generated forwarder) to attach it.
-MCP_VERSION = 13
+# v14: gui_analyze awaits the analyze operation (WIRE 15, Phase 120c). analyze is
+#      an async worker; gui_analyze starts it (analyze.start now returns an
+#      operation_id, captured under analyze:<tab_id>) then awaits via
+#      _await_operation_by_key, so it stays synchronous to the agent AND the
+#      figure is rendered (has_figure true) by the time figure_path is attached.
+MCP_VERSION = 14
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -285,6 +290,7 @@ _OP_KEY_OF: Dict[str, "Callable[[Dict[str, Any]], str]"] = {
     "device.setup": lambda p: f"device:{p.get('name', '')}",
     "run.start": lambda p: f"tab:{p.get('tab_id', '')}",
     "connect.start": lambda p: "soc",  # noqa: ARG005 — uniform signature
+    "analyze.start": lambda p: f"analyze:{p.get('tab_id', '')}",
 }
 
 _READER_THREAD: Optional[threading.Thread] = None
@@ -1172,20 +1178,26 @@ def tool_gui_run_wait(arguments: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def tool_gui_analyze(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    """Analyze the tab's run result — SYNCHRONOUS: returns when done.
+    """Analyze the tab's run result — synchronous to the agent.
 
-    Overrides the generated forwarder to fold in figure_path: analysis almost
-    always produces a figure, so on return the reply carries figure_path (a temp
-    PNG) and the agent need not call gui_tab_figure_screenshot. Read the scalar
-    fit summary with gui_tab_get_analyze_result.
+    Analyze runs on a worker thread, but this tool awaits its completion before
+    returning, so to the agent it is one synchronous call: on return the result
+    and figure are ready. Folds in figure_path (a temp PNG) so the agent need
+    not call gui_tab_figure_screenshot. Read the scalar fit summary with
+    gui_tab_get_analyze_result. 'updates' optionally overrides analyze params.
     """
     tab_id = str(arguments["tab_id"])
     params: Dict[str, Any] = {"tab_id": tab_id}
     if "updates" in arguments and arguments["updates"] is not None:
         params["updates"] = arguments["updates"]
+    # Start (captures operation_id under analyze:<tab_id>, strips it from reply)
+    # then block until the worker settles — figure is in State by then, so the
+    # subsequent figure render sees has_figure=true.
     send_gui_rpc("analyze.start", params)
-    # analyze.start is synchronous — on return the result + figure are ready.
-    return _with_figure(tab_id, {"status": "finished"})
+    result = _await_operation_by_key(
+        f"analyze:{tab_id}", f"Analyze on tab {tab_id!r}", 600.0
+    )
+    return _with_figure(tab_id, result)
 
 
 def tool_gui_connect_start(arguments: Dict[str, Any]) -> Dict[str, Any]:

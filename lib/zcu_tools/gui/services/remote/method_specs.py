@@ -477,14 +477,13 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "analyze.start": MethodSpec(
         30.0,
-        "Analyze the tab's run result — SYNCHRONOUS: on return the analysis is "
-        "complete, so read it directly with gui_tab_get_analyze_result (and the "
-        "figure is ready for gui_tab_figure_screenshot). Unlike run/connect/"
-        "device this does NOT degrade to a pending handle and there is no "
-        "separate wait/await step. 'updates' optionally overrides analyze "
-        "params (see gui_adapter_analyze_spec). Makes the tab busy while it "
-        "runs; a concurrent save/edit returns precondition_failed until it "
-        "settles.",
+        "Start analyzing the tab's run result. Analyze runs on a worker thread "
+        "and returns an operation_id (like run/connect/device); the mcp "
+        "gui_analyze tool awaits it so the agent sees one synchronous call. "
+        "'updates' optionally overrides analyze params (see "
+        "gui_adapter_analyze_spec). Makes the tab busy while it runs; a "
+        "concurrent save/edit returns precondition_failed until it settles. "
+        "Read the fit summary with gui_tab_get_analyze_result.",
         (_str("tab_id"), _obj_default("updates", "Analyze param updates")),
         tool_name="gui_analyze",
     ),

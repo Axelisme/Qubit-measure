@@ -450,13 +450,14 @@ class Controller:
     # Analyze flow (TabService)
     # ------------------------------------------------------------------
 
-    def analyze(self, tab_id: str, analyze_params_instance: object) -> None:
+    def analyze(self, tab_id: str, analyze_params_instance: object) -> int:
+        """Start analyze (async worker); returns the operation token to await."""
         permit = self._guard_svc.acquire_analyze_permit(tab_id)
         host = self._render_host
         figure_container = (
             host.make_live_container(tab_id) if host is not None else None
         )
-        self._analyze_svc.start_analyze(
+        return self._analyze_svc.start_analyze(
             permit, analyze_params_instance, figure_container
         )
 
