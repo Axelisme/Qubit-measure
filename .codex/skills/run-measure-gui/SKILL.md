@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 6
+skill_version: 7
 ---
 
 # run-measure-gui
@@ -278,13 +278,17 @@ hardware) — the smoke harness uses it.
   listening on 127.0.0.1:8765" otherwise). Use launch to start, connect only to
   re-attach to one already up.
 - **A run starts by clearing its tab's prior run/analyze/writeback result.** So
-  while a run is in flight — and after it fails or is cancelled — the tab has no
-  result: `gui_analyze` / `gui_save_*` fail-fast with `no_run_result` (the true
-  reason: this run hasn't produced one yet), not a "busy" message. `gui_editor_set_field`
+  while a run is in flight — and after it fails — the tab has no result:
+  `gui_analyze` / `gui_save_*` fail-fast with `no_run_result` (the true reason:
+  this run hasn't produced one yet), not a "busy" message. `gui_editor_set_field`
   while running is the one that returns `precondition_failed: ... is currently running`.
   Wait for the run to settle (`tab.snapshot.interaction.is_running` false, or
-  `gui_run_wait` / `gui_run_poll`) before analyzing/saving. (The smoke harness
-  waits on `is_analyzing` before `save.data`.)
+  `gui_run_wait` / `gui_run_poll`) before analyzing/saving. **Cancelled runs are
+  the exception:** if the worker produced a partial result before observing the
+  stop signal, the tab intentionally keeps that partial result (`has_run_result`
+  true) and analysis/save may proceed; if no partial result exists, analyze/save
+  still fail with `no_run_result`. (The smoke harness waits on `is_analyzing`
+  before `save.data`.)
 - **`run` success is not `analyze` success.** A completed acquisition can still
   produce a bad or misleading fit. On real data, open the figure and verify the
   model visually before you trust `gui_tab_get_analyze_result`, especially for
@@ -327,7 +331,7 @@ hardware) — the smoke harness uses it.
 | `gui_launch` → `Port 8765 is already in use` | A previous GUI is still running on the port; `gui_stop` it (or kill the stale `run_gui.py`), then relaunch — or launch on another port. |
 | `gui_connect` → `No GUI is listening on 127.0.0.1:8765` | Nothing running there; `gui_launch` first (connect only re-attaches to a running GUI). |
 | `precondition_failed: ... is currently running` on `gui_editor_set_field` | The tab is running; wait for it to finish (run clears prior results, so editing mid-run is blocked). |
-| `no_run_result` on `gui_analyze` / `gui_save_*` | No result for *this* run yet — the run is still in flight, or failed/cancelled (a run clears the previous result on start). Wait for it to finish, or re-run. |
+| `no_run_result` on `gui_analyze` / `gui_save_*` | No result for *this* run yet — the run is still in flight, failed, or was cancelled before producing a partial result (a run clears the previous result on start). Wait for it to finish, or re-run. |
 | `precondition_failed: no_project` on `gui_context_new` | No project applied; `gui_startup_apply` first. |
 | `precondition_failed` on run/save with no busy tab | Missing active file-backed context — `gui_state_check`, then `gui_startup_apply` + `gui_context_new`/`gui_context_use` if a context is missing. |
 | `invalid_params` on `gui_editor_set_field` | Path wrong (often a stray `value` segment); re-check `gui_tab_list_paths`. |

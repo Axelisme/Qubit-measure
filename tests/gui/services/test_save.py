@@ -52,6 +52,24 @@ def test_start_save_data_creates_parent_at_command_boundary(
     runner.start_save.assert_called_once()
 
 
+def test_start_save_data_resolves_path_to_actual_hdf5(
+    qapp,
+    tmp_path: Path,  # noqa: ARG001
+) -> None:
+    # The path handed to the saver (and reported to the agent) is normalised up
+    # front to what actually lands on disk: .hdf5 extension + uniqueness suffix —
+    # not the caller's raw stem (Phase 130 follow-up: display matches reality).
+    svc, _, runner = _make_service()
+    data_path = tmp_path / "data" / "meas"  # no extension
+
+    svc.start_save_data(SavePermit(tab_id="tab"), str(data_path))
+
+    req = runner.start_save.call_args.args[2]
+    assert req.data_path.endswith("meas_1.hdf5")
+    # the reported path (consumed by _on_save_finished → diagnostic) matches
+    assert svc._active_paths["tab"] == req.data_path
+
+
 def test_save_image_creates_parent_at_command_boundary(
     qapp,
     tmp_path: Path,  # noqa: ARG001

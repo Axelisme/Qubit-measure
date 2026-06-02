@@ -461,8 +461,11 @@ class ExpTabWidget(QWidget):
         self.writeback_section.setVisible(len(items) > 0)
 
     def _on_browse_data_path(self) -> None:
+        # The data saver forces the .hdf5 extension (save_local_data /
+        # safe_labber_filepath), so show that here — a .h5 filter would mislead:
+        # the file actually lands as .hdf5.
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save data file", "", "HDF5 files (*.h5);;All files (*)"
+            self, "Save data file", "", "HDF5 files (*.hdf5);;All files (*)"
         )
         if path:
             self._data_path_edit.setText(path)

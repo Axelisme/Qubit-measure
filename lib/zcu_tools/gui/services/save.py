@@ -11,6 +11,7 @@ from zcu_tools.gui.adapter import SaveDataRequest
 from zcu_tools.gui.event_bus import GuiEvent, TabInteractionChangedPayload
 from zcu_tools.gui.figure_export import save_figure_to_path
 from zcu_tools.gui.runner import SaveDataRunner
+from zcu_tools.utils.datasaver import safe_labber_filepath
 from zcu_tools.gui.services.guard import SavePermit
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,9 @@ class SaveService(QObject):
         self, permit: SavePermit, data_path: str, comment: str = ""
     ) -> None:
         tab_id = permit.tab_id
+        # Resolve to the path the saver will actually write (.hdf5 + uniqueness
+        # suffix) so the report matches the file — see start_save_result.
+        data_path = safe_labber_filepath(data_path)
         req = self._make_save_data_request(tab_id, data_path, comment=comment)
         tab = self._state.get_tab(tab_id)
         logger.info("start_save_data: tab_id=%r path=%r", tab_id, data_path)
@@ -72,6 +76,16 @@ class SaveService(QObject):
         tab = self._state.get_tab(tab_id)
         if tab.figure is None:
             raise RuntimeError("No figure available to save")
+
+        # Normalise the data path to what the saver will ACTUALLY write, up front.
+        # The low-level saver (utils.datasaver.save_local_data) quietly forces the
+        # .hdf5 extension and always appends a uniqueness suffix (foo -> foo_1.hdf5,
+        # via safe_labber_filepath). If we reported the caller's raw path the agent
+        # would be told "saved to foo" / "foo.h5" while the file is foo_1.hdf5 —
+        # the same display-vs-reality lie as the fake-save no-op. Resolve it here
+        # (the file does not exist yet, so the suffix the saver picks is the one we
+        # compute) and pass the resolved path both downstream and to the report.
+        data_path = safe_labber_filepath(data_path)
 
         # savefig runs on the main thread — no cross-thread canvas repaint.
         image_error: Optional[str] = None
