@@ -406,8 +406,10 @@ def test_main_window_confirms_and_begins_shutdown_when_operations_active(
     qapp, monkeypatch
 ):
     """User close with work in progress: confirm, then begin_shutdown (which
-    cancels-all and waits). The event is ignored now; the coordinator drives the
-    real close later."""
+    cancels-all and waits). The event is ignored now; begin_shutdown is deferred
+    to the next event-loop turn and the coordinator drives the real close
+    later."""
+    from qtpy.QtCore import QCoreApplication
     from qtpy.QtGui import QCloseEvent
     from qtpy.QtWidgets import QMessageBox
     from zcu_tools.gui.ui.main_window import MainWindow
@@ -426,6 +428,7 @@ def test_main_window_confirms_and_begins_shutdown_when_operations_active(
     window.closeEvent(event)
 
     assert event.isAccepted() is False  # async wait — not closed yet
+    QCoreApplication.processEvents()  # drain the deferred singleShot(0)
     ctrl.begin_shutdown.assert_called_once_with(window._perform_close)
 
 
@@ -452,8 +455,11 @@ def test_main_window_declining_confirmation_keeps_window_open(qapp, monkeypatch)
 
 
 def test_main_window_persists_session_on_close_when_idle(qapp):
-    """Idle close: no confirmation; begin_shutdown settles immediately and runs
-    _perform_close, which persists the session."""
+    """Idle close: no confirmation; closeEvent ignores the event and *defers*
+    begin_shutdown to the next event-loop turn (so it never re-enters
+    self.close() within the closeEvent stack — the single-click bug). After the
+    deferred turn fires, begin_shutdown runs _perform_close → persist."""
+    from qtpy.QtCore import QCoreApplication
     from qtpy.QtGui import QCloseEvent
     from zcu_tools.gui.ui.main_window import MainWindow
 
@@ -461,13 +467,21 @@ def test_main_window_persists_session_on_close_when_idle(qapp):
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 0
     # The real coordinator runs on_closed once nothing is pending; here drive it
-    # synchronously so the test exercises _perform_close.
+    # synchronously so the deferred turn exercises _perform_close.
     ctrl.begin_shutdown.side_effect = lambda on_closed: on_closed()
     window = MainWindow(ctrl)
     event = QCloseEvent()
 
     window.closeEvent(event)
 
+    # Deferred: closeEvent must NOT have begun shutdown synchronously.
+    assert event.isAccepted() is False
+    ctrl.begin_shutdown.assert_not_called()
+
+    # Drain the singleShot(0) — the deferred turn runs begin_shutdown.
+    QCoreApplication.processEvents()
+
+    ctrl.begin_shutdown.assert_called_once_with(window._perform_close)
     ctrl.persist_tabs_session.assert_called_once_with()
 
 

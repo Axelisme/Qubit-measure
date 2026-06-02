@@ -1392,4 +1392,13 @@ class MainWindow(QMainWindow):
             a0.ignore()
         elif a0 is not None:
             a0.ignore()
-        self._ctrl.begin_shutdown(self._perform_close)
+        # Defer begin_shutdown to the next event-loop turn (mirrors
+        # request_shutdown). When idle, the shutdown coordinator settles
+        # synchronously and calls _perform_close → self.close(), which would
+        # otherwise re-enter this closeEvent within its own stack — Qt does not
+        # honour a self.close() issued from inside a closeEvent handler, so the
+        # first click would appear to do nothing. The singleShot breaks out of
+        # this stack first.
+        from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
+
+        QTimer.singleShot(0, lambda: self._ctrl.begin_shutdown(self._perform_close))
