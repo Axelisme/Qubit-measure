@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from .service import RemoteControlAdapter
 from zcu_tools.gui.services.context import MlEntryValidationError
 from zcu_tools.gui.services.device import SetupDeviceRequest
-from zcu_tools.gui.services.session_persistence import SessionPersistenceService
+from zcu_tools.gui.services.session_codec import raw_to_schema, schema_to_raw
 
 from .errors import ErrorCode, RemoteError
 from .method_specs import METHOD_SPECS, MethodSpec
@@ -50,10 +50,6 @@ from .wire import (
 logger = logging.getLogger(__name__)
 
 Handler = Callable[["RemoteControlAdapter", Mapping[str, object]], Mapping[str, object]]
-
-# Shared serializer instance: we only use its pure schema_to_raw / raw_to_schema
-# methods, never its persistence side effects.
-_SCHEMA_CODEC = SessionPersistenceService()
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +194,7 @@ def _h_tab_get_cfg(
     if not adapter.ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     schema = adapter.ctrl.get_tab_cfg_schema(tab_id)
-    raw = _SCHEMA_CODEC.schema_to_raw(schema, ml=None)
+    raw = schema_to_raw(schema)
     return {"raw": raw}
 
 
@@ -242,7 +238,7 @@ def _h_tab_update_cfg(
     raw = cast(dict, params["raw"])
     base = adapter.ctrl.get_tab_cfg_schema(tab_id)
     try:
-        schema: CfgSchema = _SCHEMA_CODEC.raw_to_schema(base, dict(raw))
+        schema: CfgSchema = raw_to_schema(base, dict(raw))
     except Exception as exc:
         raise RemoteError(
             ErrorCode.INVALID_PARAMS, f"invalid cfg payload: {exc}"
@@ -616,22 +612,6 @@ def _h_resources_versions(
 ) -> Mapping[str, object]:
     del params
     return {"versions": adapter.ctrl.resources_versions()}
-
-
-def _h_session_persist(
-    adapter: "RemoteControlAdapter", params: Mapping[str, object]
-) -> Mapping[str, object]:
-    del params
-    adapter.ctrl.persist_tabs_session()
-    return {}
-
-
-def _h_session_restore(
-    adapter: "RemoteControlAdapter", params: Mapping[str, object]
-) -> Mapping[str, object]:
-    del params
-    adapter.ctrl.restore_tabs_from_session()
-    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -1229,7 +1209,7 @@ def _h_tab_get_cfg_summary(
     if not adapter.ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     schema = adapter.ctrl.get_tab_cfg_schema(tab_id)
-    raw = _SCHEMA_CODEC.schema_to_raw(schema, ml=None)
+    raw = schema_to_raw(schema)
     return {"summary": _strip_cfg_tags(raw)}
 
 
@@ -1595,8 +1575,6 @@ _HANDLERS: dict[str, Handler] = {
     "state.has_soc": _h_state_has_soc,
     "soc.info": _h_soc_info,
     "resources.versions": _h_resources_versions,
-    "session.persist": _h_session_persist,
-    "session.restore": _h_session_restore,
     "connect.start": _h_connect_start,
     "startup.apply": _h_startup_apply,
     "device.connect": _h_device_connect,

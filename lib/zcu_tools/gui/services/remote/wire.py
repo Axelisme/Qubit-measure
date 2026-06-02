@@ -82,7 +82,9 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 #      before running it. New method = contract change.
 # v13: added app.shutdown — gracefully close the GUI via its normal window-close
 #      path (no OS kill); new method = contract change.
-WIRE_VERSION = 16
+# v17: removed session.persist / session.restore — persistence is now lifecycle-
+#      driven (flush at close, restore at startup); agent no longer triggers it.
+WIRE_VERSION = 17
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -121,7 +123,7 @@ WIRE_VERSION = 16
 #     error envelope gains an optional ``data`` field; the version guard names the
 #     resource identities that moved (no version numbers) so mcp translates them
 #     into agent language ("the active context", "this tab's cfg", "device 'flux'").
-GUI_VERSION = 13
+GUI_VERSION = 14
 
 # ---------------------------------------------------------------------------
 # Wire envelopes

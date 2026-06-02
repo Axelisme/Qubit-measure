@@ -69,8 +69,15 @@ def run_app(control_opts: Optional["ControlOptions"] = None) -> None:
     io_manager = IOManager()
 
     ctrl, window = _build_window(state, runner, registry, role_catalog, io_manager)
-    ctrl.restore_tabs_from_session()
-    ctrl.restore_startup_settings()
+
+    # App-level PersistenceCaretaker (Memento Caretaker): owns the single
+    # gui_state_v1.json file. The Controller is the Originator; restore at
+    # startup, flush at close (MainWindow._perform_close → ctrl.persist_all).
+    from zcu_tools.gui.services import PersistenceCaretaker
+
+    caretaker = PersistenceCaretaker(ctrl)
+    ctrl.attach_caretaker(caretaker)
+    ctrl.restore_all()
     window.show()
 
     if control_opts is not None:

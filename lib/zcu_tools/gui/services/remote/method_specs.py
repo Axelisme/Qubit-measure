@@ -298,9 +298,6 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     # snapshot the mcp layer reads to track last-seen versions; the version
     # integers are mcp/RPC bookkeeping and are never surfaced to the agent.
     "resources.versions": MethodSpec(5.0, "Snapshot of all resource versions"),
-    # Session
-    "session.persist": MethodSpec(10.0, "Persist tab session"),
-    "session.restore": MethodSpec(10.0, "Restore tab session"),
     # Connection / startup
     "connect.start": MethodSpec(
         30.0,

@@ -27,26 +27,23 @@ from .operation_gate import (
     OperationLease,
     OperationOutcome,
 )
+from .caretaker import PersistenceCaretaker, RestoreOutcome
+from .persistence_types import (
+    APP_STATE_VERSION,
+    DEFAULT_LEFT_PANEL_WIDTH,
+    AppPersistedState,
+    PersistedDeviceEntry,
+    PersistedSession,
+    PersistedStartup,
+    PersistedTab,
+    PersistenceError,
+)
+from .ports import RestoreIssue, RestoreReport
 from .run import RunService
 from .save import SaveBothOutcome, SaveService
-from .session_persistence import (
-    SESSION_VERSION,
-    PersistedSession,
-    PersistedTab,
-    SessionPersistenceError,
-    SessionPersistenceService,
-)
 from .startup import StartupConnectionRequest, StartupProjectRequest, StartupService
-from .startup_persistence import (
-    DEFAULT_LEFT_PANEL_WIDTH,
-    STARTUP_VERSION,
-    PersistedDeviceEntry,
-    PersistedStartup,
-    StartupPersistenceError,
-    StartupPersistenceService,
-)
 from .tab import TabService, TabSnapshot
-from .workspace import RestoreIssue, RestoreReport, WorkspaceService
+from .workspace import WorkspaceService
 from .writeback import WritebackService
 
 __all__ = [
@@ -75,17 +72,16 @@ __all__ = [
     "RunService",
     "SaveBothOutcome",
     "SaveService",
+    "PersistenceCaretaker",
+    "RestoreOutcome",
+    "AppPersistedState",
     "PersistedSession",
     "PersistedTab",
-    "SESSION_VERSION",
-    "SessionPersistenceError",
-    "SessionPersistenceService",
     "PersistedDeviceEntry",
     "PersistedStartup",
+    "PersistenceError",
+    "APP_STATE_VERSION",
     "DEFAULT_LEFT_PANEL_WIDTH",
-    "STARTUP_VERSION",
-    "StartupPersistenceError",
-    "StartupPersistenceService",
     "StartupConnectionRequest",
     "StartupProjectRequest",
     "StartupService",

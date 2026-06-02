@@ -532,7 +532,7 @@ def test_main_window_persists_session_on_close_when_idle(qapp):
     QCoreApplication.processEvents()
 
     ctrl.begin_shutdown.assert_called_once_with(window._perform_close)
-    ctrl.persist_tabs_session.assert_called_once_with()
+    ctrl.persist_all.assert_called_once_with()
 
 
 def test_new_tab_menu_supports_nested_paths(qapp, monkeypatch):

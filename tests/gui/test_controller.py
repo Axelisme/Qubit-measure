@@ -33,11 +33,8 @@ from zcu_tools.gui.services.operation_gate import (
     OperationKind,
     OperationOutcome,
 )
-from zcu_tools.gui.services.session_persistence import (
-    SessionPersistenceError,
-    SessionPersistenceService,
-)
-from zcu_tools.gui.services.workspace import RestoreIssue, RestoreReport
+from zcu_tools.gui.services import PersistenceCaretaker, StartupProjectRequest
+from zcu_tools.gui.services.ports import RestoreIssue, RestoreReport
 from zcu_tools.gui.state import DeviceStatus, State
 
 # ---------------------------------------------------------------------------
@@ -80,7 +77,7 @@ def _make_view() -> MagicMock:
 class ControllerFixture:
     """Holds all objects to prevent premature GC during tests."""
 
-    def __init__(self) -> None:
+    def __init__(self, cache_dir=None) -> None:
         self.state = State(_make_ctx())
         self.runner = Runner()
         self.registry = Registry()
@@ -102,11 +99,14 @@ class ControllerFixture:
             view=self.view,
             bus=self.bus,
         )
+        self.caretaker = PersistenceCaretaker(self.ctrl, cache_dir=cache_dir)
+        self.ctrl.attach_caretaker(self.caretaker)
 
 
 @pytest.fixture()
-def cf(qapp) -> ControllerFixture:  # noqa: ARG001
-    return ControllerFixture()
+def cf(qapp, tmp_path) -> ControllerFixture:  # noqa: ARG001
+    # Scope persistence to a temp dir so tests never read/write the real cache.
+    return ControllerFixture(cache_dir=tmp_path)
 
 
 def _default_fake_schema(ctx: ExpContext) -> CfgSchema:
@@ -418,21 +418,19 @@ def test_get_adapter_names_includes_fake(cf):
     assert "fake" in cf.ctrl.get_adapter_names()
 
 
-def test_persist_then_restore_tabs_session(cf, tmp_path):
+def test_persist_then_restore_app_state(tmp_path):
+    """Full round-trip through the PersistenceCaretaker single-file memento:
+    capture (flush) on one Controller, restore on a fresh one sharing the dir."""
+    cf = ControllerFixture(cache_dir=tmp_path)
     tab_id = cf.ctrl.new_tab("fake")
     schema = _default_fake_schema(cf.state.exp_context)
     cf.ctrl.update_tab_cfg(tab_id, schema)
     cf.ctrl.update_tab_save_paths(tab_id, "/tmp/a.h5", "/tmp/b.png")
+    cf.ctrl.apply_startup_project(StartupProjectRequest("chip", "qub", "res", "", ""))
+    cf.ctrl.persist_all()
 
-    session_svc = SessionPersistenceService(cache_dir=tmp_path)
-    cf.ctrl._workspace_svc._persistence = session_svc
-    cf.ctrl.persist_tabs_session()
-
-    cf_restored = ControllerFixture()
-    cf_restored.ctrl._workspace_svc._persistence = SessionPersistenceService(
-        cache_dir=tmp_path
-    )
-    cf_restored.ctrl.restore_tabs_from_session()
+    cf_restored = ControllerFixture(cache_dir=tmp_path)
+    cf_restored.ctrl.restore_all()
 
     assert len(cf_restored.state.tabs) == 1
     restored_tab = next(iter(cf_restored.state.tabs.values()))
@@ -443,28 +441,28 @@ def test_persist_then_restore_tabs_session(cf, tmp_path):
     assert save_paths is not None
     assert save_paths.data_path == "/tmp/a.h5"
     assert save_paths.image_path == "/tmp/b.png"
+    # startup prefs round-tripped (prefill values; project not auto-applied).
+    assert cf_restored.ctrl.get_persisted_startup().chip_name == "chip"
 
 
-def test_restore_session_failure_is_visible_to_user(cf):
-    cf.ctrl._workspace_svc = MagicMock()
-    cf.ctrl._workspace_svc.restore_session.side_effect = SessionPersistenceError(
-        "unsupported cache"
-    )
+def test_restore_corrupt_file_is_visible_to_user(cf, tmp_path):
+    """A corrupt / wrong-version state file → defaults + a user-visible error."""
+    cf.caretaker._path.parent.mkdir(parents=True, exist_ok=True)
+    cf.caretaker._path.write_text("{ not valid json", encoding="utf-8")
 
-    cf.ctrl.restore_tabs_from_session()
+    cf.ctrl.restore_all()
 
-    cf.view.show_error_dialog.assert_called_with(
-        "Session restore failed", "unsupported cache"
-    )
+    title, _ = cf.view.show_error_dialog.call_args.args
+    assert title == "Settings restore failed"
 
 
 def test_restore_invalid_tab_is_rejected_and_reported(cf):
     cf.ctrl._workspace_svc = MagicMock()
-    cf.ctrl._workspace_svc.restore_session.return_value = RestoreReport(
+    cf.ctrl._workspace_svc.apply_session.return_value = RestoreReport(
         restored_tabs=0,
         rejected_tabs=(RestoreIssue("fake", "invalid saved configuration (bad cfg)"),),
     )
-    cf.ctrl.restore_tabs_from_session()
+    cf.ctrl.restore_all()
 
     title, message = cf.view.show_error_dialog.call_args.args
     assert title == "Some session tabs were not restored"

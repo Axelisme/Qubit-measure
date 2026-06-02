@@ -140,7 +140,7 @@ from zcu_tools.gui.services.remote.wire import (  # noqa: E402
 #      {status:'finished'|'timed_out'|'no_operation', waited_seconds}. Both
 #      timeout flavors (bridge socket TimeoutError, GUI-side "(timeout)") map to
 #      timed_out; a genuine failed/cancelled still raises. No wire change.
-MCP_VERSION = 18
+MCP_VERSION = 19
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)

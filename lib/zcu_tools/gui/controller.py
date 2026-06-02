@@ -23,17 +23,17 @@ from .registry import Registry
 from .role_catalog import RoleCatalog
 from .runner import AnalyzeRunner, Runner, SaveDataRunner
 from .services import (
-    DEFAULT_LEFT_PANEL_WIDTH,
     ConnectDeviceRequest,
+    AppPersistedState,
     DeviceSnapshot,
     DisconnectDeviceRequest,
     PersistedStartup,
+    PersistenceCaretaker,
+    PersistenceError,
     RestoreReport,
     SaveBothOutcome,
-    SessionPersistenceError,
     SetupDeviceRequest,
     StartupConnectionRequest,
-    StartupPersistenceError,
     StartupProjectRequest,
     TabSnapshot,
     build_app_services,
@@ -88,6 +88,10 @@ class RenderHost(Protocol):
     View — they are minted by ProgressService, bound to the operation."""
 
     def make_live_container(self, tab_id: str) -> Optional[FigureContainer]: ...
+
+    # The View's current left-panel width — the only persistence value sourced
+    # from the View (the splitter widget); captured at flush time.
+    def current_left_panel_width(self) -> int: ...
 
 
 class RenderView(Protocol):
@@ -181,6 +185,9 @@ class Controller:
         self._workspace_svc = services.workspace
         self._startup_svc = services.startup
         self._cfg_editor_svc = services.cfg_editor
+        # App-level PersistenceCaretaker, injected by run_app via attach_caretaker
+        # (None in bare-Controller tests that don't exercise persistence).
+        self._caretaker: Optional[PersistenceCaretaker] = None
         # Lazily built on first begin_shutdown so the Controller stays importable
         # without a Qt event loop (tests construct a bare Controller). The driver
         # is a Qt adapter owning the QTimer that pumps the Qt-free coordinator.
@@ -314,19 +321,56 @@ class Controller:
     def get_bus(self) -> EventBus:
         return self._bus
 
-    def restore_tabs_from_session(self) -> None:
-        try:
-            report = self._workspace_svc.restore_session()
-        except SessionPersistenceError as exc:
-            self._report_persistence_error("Session restore failed", exc)
-            return
-        self._present_restore_report(report)
+    def attach_caretaker(self, caretaker: PersistenceCaretaker) -> None:
+        """Wire the app-level PersistenceCaretaker (built by run_app). The
+        Controller is the Memento Originator; the Caretaker owns disk I/O."""
+        self._caretaker = caretaker
 
-    def persist_tabs_session(self) -> None:
+    # -- Memento Originator (PersistOriginatorPort) --------------------------
+
+    def capture_persisted_state(self) -> AppPersistedState:
+        """Snapshot the whole app state into a memento (no disk). Composes the
+        startup prefs + device projection + view's left-panel width and the live
+        tabs into one immutable ``AppPersistedState``."""
+        startup = self._startup_svc.capture_startup(
+            left_panel_width=self._capture_left_panel_width()
+        )
+        session = self._workspace_svc.capture_session()
+        return AppPersistedState(startup=startup, session=session)
+
+    def restore_persisted_state(self, state: AppPersistedState) -> RestoreReport:
+        """Dispatch a memento back to the sub-owners: seed startup prefs +
+        register remembered devices, then rebuild tabs. Returns the session's
+        per-tab restore report (presented to the user by ``restore_all``)."""
+        self._startup_svc.restore_startup(state.startup)
+        report = self._workspace_svc.apply_session(state.session)
+        self._present_restore_report(report)
+        return report
+
+    # -- lifecycle façade (run_app startup / MainWindow close) ---------------
+
+    def restore_all(self) -> None:
+        assert self._caretaker is not None, "caretaker not attached"
+        outcome = self._caretaker.restore_all()
+        if outcome.load_error is not None:
+            self._report_persistence_error(
+                "Settings restore failed", outcome.load_error
+            )
+
+    def persist_all(self) -> None:
+        assert self._caretaker is not None, "caretaker not attached"
         try:
-            self._workspace_svc.persist_session()
-        except SessionPersistenceError as exc:
-            self._report_persistence_error("Session save failed", exc)
+            self._caretaker.flush()
+        except PersistenceError as exc:
+            self._report_persistence_error("Settings save failed", exc)
+
+    def _capture_left_panel_width(self) -> int:
+        from .services.persistence_types import DEFAULT_LEFT_PANEL_WIDTH
+
+        host = self._render_host
+        if host is None:
+            return DEFAULT_LEFT_PANEL_WIDTH
+        return host.current_left_panel_width()
 
     def _present_restore_report(self, report: RestoreReport) -> None:
         if report.rejected_tabs:
@@ -527,11 +571,9 @@ class Controller:
     # ------------------------------------------------------------------
 
     def apply_startup_project(self, req: StartupProjectRequest) -> bool:
-        try:
-            self._startup_svc.apply_project(req)
-        except StartupPersistenceError as exc:
-            self._report_persistence_error("Startup settings save failed", exc)
-            return False
+        # Applies the project to the active context AND records it as the
+        # remembered prefs (in State); persisted to disk only at close.
+        self._startup_svc.apply_project(req)
         return True
 
     def use_context(self, label: str) -> None:
@@ -847,37 +889,14 @@ class Controller:
     # Startup application workflow (StartupService)
     # ------------------------------------------------------------------
 
-    def restore_startup_settings(self) -> None:
-        try:
-            self._startup_svc.restore_devices()
-        except StartupPersistenceError as exc:
-            self._report_persistence_error("Startup settings restore failed", exc)
-
-    def get_persisted_startup(self) -> Optional[PersistedStartup]:
-        try:
-            return self._startup_svc.get_persisted()
-        except StartupPersistenceError as exc:
-            self._report_persistence_error("Startup settings restore failed", exc)
-            return None
+    def get_persisted_startup(self) -> PersistedStartup:
+        """The remembered startup prefs (for the setup dialog's prefill). Reads
+        State.startup_prefs — no disk I/O (the Caretaker loads at startup)."""
+        return self._startup_svc.get_persisted()
 
     def remember_startup_connection(self, req: StartupConnectionRequest) -> None:
-        try:
-            self._startup_svc.remember_connection(req)
-        except StartupPersistenceError as exc:
-            self._report_persistence_error("Startup settings save failed", exc)
-
-    def get_persisted_left_panel_width(self) -> int:
-        try:
-            return self._startup_svc.get_left_panel_width()
-        except StartupPersistenceError as exc:
-            self._report_persistence_error("Startup settings restore failed", exc)
-            return DEFAULT_LEFT_PANEL_WIDTH
-
-    def save_left_panel_width(self, width: int) -> None:
-        try:
-            self._startup_svc.save_left_panel_width(width)
-        except StartupPersistenceError as exc:
-            self._report_persistence_error("Startup settings save failed", exc)
+        # Updates the in-State prefs only; persisted at close by the Caretaker.
+        self._startup_svc.remember_connection(req)
 
     # ------------------------------------------------------------------
     # Connection / Predictor (ConnectionService)

@@ -177,7 +177,7 @@ class ExpTabWidget(QWidget):
         content_row.addWidget(splitter, stretch=1)
 
         self._splitter = splitter
-        self._splitter_left_saved = ctrl.get_persisted_left_panel_width()
+        self._splitter_left_saved = ctrl.get_persisted_startup().left_panel_width
         self._left_panel_collapsed = False
         self._splitter.splitterMoved.connect(self._on_splitter_moved)
 
@@ -404,8 +404,9 @@ class ExpTabWidget(QWidget):
         if not self._left_panel_collapsed:
             sizes = self._splitter.sizes()
             if sizes[0] > 0:
+                # In-memory only — persisted to disk at close (the caretaker
+                # captures the active tab's width via current_left_panel_width).
                 self._splitter_left_saved = sizes[0]
-                self._ctrl.save_left_panel_width(sizes[0])
         self._schedule_handle_layout()
 
     def _schedule_handle_layout(self) -> None:
@@ -993,6 +994,17 @@ class MainWindow(QMainWindow):
         tab_w.reset_plot()  # clear prior liveplot before new run/analyze
         return tab_w._figure_container
 
+    def current_left_panel_width(self) -> int:
+        """RenderHost impl: the active tab's left-panel width (the single
+        persistence value sourced from the View). Falls back to the default when
+        no tab is open."""
+        from zcu_tools.gui.state import DEFAULT_LEFT_PANEL_WIDTH
+
+        current = self._tabs.currentWidget()
+        if isinstance(current, ExpTabWidget):
+            return current._splitter_left_saved
+        return DEFAULT_LEFT_PANEL_WIDTH
+
     def notify_diagnostic(self, severity: str, title: str, message: str) -> None:
         """DiagnosticSink impl (ADR-0013): render a Controller diagnostic the Qt
         way — error pops a modal dialog, info goes to the status bar."""
@@ -1379,7 +1391,7 @@ class MainWindow(QMainWindow):
         the Controller's shutdown coordinator. Shared by closeEvent (user) and
         request_shutdown (RPC)."""
         self._closing = True
-        self._ctrl.persist_tabs_session()
+        self._ctrl.persist_all()
         set_shutting_down(True)
         # Tear down remote control before the Qt main loop exits so any in-flight
         # RPC sees a clean shutdown (timeout / EPIPE) rather than a dead Controller.

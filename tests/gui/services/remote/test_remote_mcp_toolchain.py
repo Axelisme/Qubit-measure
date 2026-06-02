@@ -346,8 +346,6 @@ def test_mcp_tool_schemas_include_required_discovery_tools():
         "gui_context_new",
         "gui_save_data",
         "gui_save_image",
-        "gui_session_persist",
-        "gui_session_restore",
         "gui_device_connect",
         "gui_device_disconnect",
         "gui_device_setup",

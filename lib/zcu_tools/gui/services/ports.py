@@ -43,8 +43,7 @@ if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
 
     from .device import DeviceProtocol
-    from .session_persistence import PersistedSession
-    from .startup_persistence import PersistedDeviceEntry, PersistedStartup
+    from .persistence_types import AppPersistedState
 
 
 @dataclass(frozen=True)
@@ -85,46 +84,37 @@ class TabSnapshot:
     save_paths: Optional["SavePaths"] = None
 
 
-@runtime_checkable
-class StartupStorePort(Protocol):
-    """Startup-preference persistence as used by ``StartupService``.
+@dataclass(frozen=True)
+class RestoreIssue:
+    """One rejected tab during session restore (adapter missing / cfg invalid)."""
 
-    Implemented by ``StartupPersistenceService``. Covers the remembered
-    project/connection/device/left-panel settings store.
-    """
+    subject: str
+    message: str
 
-    def load(self) -> Optional["PersistedStartup"]: ...
-    def get_current(self) -> "PersistedStartup": ...
-    def update_project(
-        self,
-        *,
-        chip_name: str,
-        qub_name: str,
-        res_name: str,
-        result_dir: str,
-        database_path: str,
-    ) -> None: ...
-    def update_connection(self, *, ip: str, port: int) -> None: ...
-    def replace_devices(self, entries: list["PersistedDeviceEntry"]) -> None: ...
-    def update_left_panel_width(self, width: int) -> None: ...
+
+@dataclass(frozen=True)
+class RestoreReport:
+    """Outcome of applying a persisted session: how many tabs restored, and the
+    per-tab rejections to surface to the user."""
+
+    restored_tabs: int
+    rejected_tabs: tuple[RestoreIssue, ...]
 
 
 @runtime_checkable
-class SessionStorePort(Protocol):
-    """Tab-session persistence + cfg codec as used by ``WorkspaceService``.
+class PersistOriginatorPort(Protocol):
+    """The Memento Originator surface the ``PersistenceCaretaker`` depends on.
 
-    Implemented by ``SessionPersistenceService``. The codec methods
-    (``schema_to_raw`` / ``raw_to_schema``) are pure transforms bundled on the
-    same concrete service; the port surfaces them alongside the session I/O
-    because ``WorkspaceService`` needs both to round-trip a session.
+    The Caretaker (a Driven Adapter doing only disk I/O) never touches State,
+    services, or cfg — it only asks the originator (the Controller) for one
+    immutable snapshot to write, and hands one back to restore. Two narrow
+    methods keep the Caretaker decoupled from the whole Controller interface.
     """
 
-    def save_session(self, session: "PersistedSession") -> None: ...
-    def load_session(self) -> Optional["PersistedSession"]: ...
-    def schema_to_raw(self, schema: "CfgSchema", *, ml: Any) -> dict[str, object]: ...
-    def raw_to_schema(
-        self, base_schema: "CfgSchema", raw_cfg: dict[str, object]
-    ) -> "CfgSchema": ...
+    def capture_persisted_state(self) -> "AppPersistedState": ...
+    def restore_persisted_state(
+        self, state: "AppPersistedState"
+    ) -> "RestoreReport": ...
 
 
 @runtime_checkable

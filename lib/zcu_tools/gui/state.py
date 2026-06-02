@@ -219,6 +219,33 @@ class TabInteractionState:
     has_figure: bool
 
 
+DEFAULT_LEFT_PANEL_WIDTH = 500
+
+
+@dataclass
+class StartupPrefs:
+    """Remembered startup preferences — the *prefill* values, distinct from the
+    active ``ExpContext``.
+
+    These are what the setup dialog prefills and what persistence projects to
+    disk; they are NOT the live connection/active-project state. Because the
+    instrument never auto-connects on launch, there is no need to distinguish
+    "currently connected to" from "remembered" — apply/connect just update these
+    prefill values at write-time, and restore writes them back without applying
+    a context. Mutable (State holds live mutable objects); a value-only block, so
+    not versioned (no guarded op depends on it).
+    """
+
+    chip_name: str = ""
+    qub_name: str = ""
+    res_name: str = ""
+    result_dir: str = ""
+    database_path: str = ""
+    ip: str = "192.168.10.1"
+    port: int = 8887
+    left_panel_width: int = DEFAULT_LEFT_PANEL_WIDTH
+
+
 class State:
     """Passive GUI state container shared by Controller and domain services."""
 
@@ -227,6 +254,9 @@ class State:
         self.tabs: dict[str, Session[Any, Any, Any, Any]] = {}
         self.active_tab_id: Optional[str] = None
         self.running_tab_id: Optional[str] = None
+        # Remembered startup prefs (prefill values), distinct from exp_context.
+        # StartupService writes at apply/connect; PersistenceCaretaker projects.
+        self.startup_prefs: StartupPrefs = StartupPrefs()
         # Device state SSOT. DeviceService writes here (on the Qt main thread,
         # at its terminal slots) and holds only the live driver / worker / progress.
         self.devices: dict[str, DeviceState] = {}

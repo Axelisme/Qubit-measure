@@ -13,9 +13,7 @@ from .operation_gate import OperationGate
 from .progress import ProgressService
 from .run import RunService
 from .save import SaveService
-from .session_persistence import SessionPersistenceService
 from .startup import StartupService
-from .startup_persistence import StartupPersistenceService
 from .tab import TabService
 from .workspace import WorkspaceService
 from .writeback import WritebackService
@@ -107,9 +105,7 @@ def build_app_services(
         analyze=AnalyzeService(state, analyze_runner, bus, writeback, operation_gate),
         save=SaveService(state, save_runner, bus),
         writeback=writeback,
-        workspace=WorkspaceService(state, tab, SessionPersistenceService(), bus),
-        startup=StartupService(
-            context, device, StartupPersistenceService(), state, bus
-        ),
+        workspace=WorkspaceService(state, tab, bus),
+        startup=StartupService(context, device, state),
         cfg_editor=cfg_editor,
     )

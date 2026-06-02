@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.event_bus import (
@@ -11,43 +10,30 @@ from zcu_tools.gui.event_bus import (
 )
 from zcu_tools.gui.state import State
 
-from .ports import TabSnapshot
-from .session_persistence import (
-    SESSION_VERSION,
-    PersistedSession,
-    PersistedTab,
-    SessionPersistenceError,
-)
+from .persistence_types import PersistedSession, PersistedTab
+from .ports import RestoreIssue, RestoreReport, TabSnapshot
+from .session_codec import SessionCodecError, raw_to_schema, schema_to_raw
 
 if TYPE_CHECKING:
-    from .ports import SessionStorePort, TabLifecyclePort
-
-
-@dataclass(frozen=True)
-class RestoreIssue:
-    subject: str
-    message: str
-
-
-@dataclass(frozen=True)
-class RestoreReport:
-    restored_tabs: int
-    rejected_tabs: tuple[RestoreIssue, ...]
+    from .ports import TabLifecyclePort
 
 
 class WorkspaceService:
-    """Own tab lifecycle and tab-session application workflow."""
+    """Own tab lifecycle and tab-session capture/apply workflow.
+
+    The cfg raw↔live codec (``session_codec``) is this service's internal
+    implementation of capturing/applying a session; the PersistenceCaretaker
+    only ever sees the resulting ``PersistedSession`` memento (opaque cfg_raw).
+    """
 
     def __init__(
         self,
         state: State,
         tabs: "TabLifecyclePort",
-        persistence: "SessionStorePort",
         bus: EventBus,
     ) -> None:
         self._state = state
         self._tabs = tabs
-        self._persistence = persistence
         self._bus = bus
 
     def new_tab(self, adapter_name: str) -> str:
@@ -68,7 +54,9 @@ class WorkspaceService:
     def set_active_tab(self, tab_id: str) -> None:
         self._state.set_active_tab(tab_id)
 
-    def persist_session(self) -> None:
+    def capture_session(self) -> PersistedSession:
+        """Snapshot the live tabs into a serializable session memento (no disk).
+        Lowers each tab's live cfg to raw via the internal codec."""
         tabs = list(self._state.tabs.items())
         tab_ids = [tab_id for tab_id, _ in tabs]
         active_tab_index = (
@@ -76,38 +64,23 @@ class WorkspaceService:
             if self._state.active_tab_id in tab_ids
             else None
         )
-        payload_tabs = [
+        payload_tabs = tuple(
             PersistedTab(
                 adapter_name=tab.adapter_name,
-                cfg_raw=self._persistence.schema_to_raw(
-                    tab.cfg_schema, ml=self._state.exp_context.ml
-                ),
+                cfg_raw=schema_to_raw(tab.cfg_schema),
                 save_paths_override=tab.save_path_overrides,
             )
             for _, tab in tabs
-        ]
-        self._persistence.save_session(
-            PersistedSession(
-                version=SESSION_VERSION,
-                tabs=payload_tabs,
-                active_tab_index=active_tab_index,
-            )
         )
+        return PersistedSession(tabs=payload_tabs, active_tab_index=active_tab_index)
 
-    def restore_session(self) -> RestoreReport:
-        session = self._persistence.load_session()
-        if session is None:
-            return RestoreReport(restored_tabs=0, rejected_tabs=())
-        return self._restore_loaded_session(session)
-
-    def _restore_loaded_session(self, session: PersistedSession) -> RestoreReport:
+    def apply_session(self, session: PersistedSession) -> RestoreReport:
+        """Rebuild tabs from a session memento. Per-tab failures (adapter
+        missing / cfg invalid) are collected into the report; good tabs still
+        restore. Bridges the raw cfg back to live via the internal codec."""
         restored_by_index: dict[int, str] = {}
         rejected: list[RestoreIssue] = []
         for index, persisted_tab in enumerate(session.tabs):
-            # Bridge the on-disk raw form (PersistedTab) into a live TabSnapshot:
-            # WorkspaceService holds both the adapter default (as decode base) and
-            # the codec, so the raw→live conversion lives here (TabService stays
-            # codec-free, SessionPersistenceService stays adapter-free).
             try:
                 base_schema = self._tabs.make_default_cfg(persisted_tab.adapter_name)
             except KeyError as exc:
@@ -119,10 +92,8 @@ class WorkspaceService:
                 )
                 continue
             try:
-                restored_schema = self._persistence.raw_to_schema(
-                    base_schema, persisted_tab.cfg_raw
-                )
-            except SessionPersistenceError as exc:
+                restored_schema = raw_to_schema(base_schema, persisted_tab.cfg_raw)
+            except SessionCodecError as exc:
                 rejected.append(
                     RestoreIssue(
                         persisted_tab.adapter_name,

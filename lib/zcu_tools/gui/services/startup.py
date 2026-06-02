@@ -5,21 +5,16 @@ import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.event_bus import DeviceChangedPayload, EventBus, GuiEvent
+from zcu_tools.gui.state import StartupPrefs
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
+from .persistence_types import PersistedDeviceEntry, PersistedStartup
 from .ports import DeviceMemoryInfo
-from .startup_persistence import (
-    DEFAULT_LEFT_PANEL_WIDTH,
-    PersistedDeviceEntry,
-    PersistedStartup,
-    StartupPersistenceError,
-)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.state import State
 
-    from .ports import RememberedDevicePort, StartupContextPort, StartupStorePort
+    from .ports import RememberedDevicePort, StartupContextPort
 
 logger = logging.getLogger(__name__)
 
@@ -74,41 +69,28 @@ class StartupConnectionRequest:
 
 
 class StartupService:
-    """Own startup context construction and preference transactions."""
+    """Own startup context construction + startup-prefs capture/restore.
+
+    Stateless app service: the remembered prefs live in ``State.startup_prefs``,
+    not here. Apply/connect update those prefs at write-time; capture projects
+    them (+ device set from State) into a memento; restore writes them back and
+    registers remembered devices. No disk I/O (the PersistenceCaretaker owns it),
+    no DEVICE_CHANGED subscription (capture re-projects devices at flush time).
+    """
 
     def __init__(
         self,
         context: "StartupContextPort",
         devices: "RememberedDevicePort",
-        persistence: "StartupStorePort",
         state: "State",
-        bus: EventBus,
     ) -> None:
         self._context = context
         self._devices = devices
-        self._persistence = persistence
         self._state = state
-        # Persistence is a projection of device State: whenever device state
-        # changes, re-derive and overwrite the remembered-device set on disk.
-        bus.subscribe(GuiEvent.DEVICE_CHANGED, self._on_device_changed)
 
-    def restore_devices(self) -> None:
-        data = self._persistence.load()
-        if data is None:
-            return
-        self._devices.register_remembered_devices(
-            [
-                DeviceMemoryInfo(
-                    type_name=entry.type_name,
-                    name=entry.name,
-                    address=entry.address,
-                )
-                for entry in data.devices
-            ]
-        )
-
-    def get_persisted(self) -> PersistedStartup | None:
-        return self._persistence.load()
+    def get_persisted(self) -> PersistedStartup:
+        """The current remembered prefs (for the setup dialog's prefill)."""
+        return self._project_prefs_to_startup()
 
     def apply_project(self, req: StartupProjectRequest) -> None:
         # result_dir / database_path arrive already scoped under chip/qub by the
@@ -126,44 +108,77 @@ class StartupService:
         )
         if req.result_dir:
             self._context.setup_project(req.result_dir)
-        self._persistence.update_project(
-            chip_name=req.chip_name,
-            qub_name=req.qub_name,
-            res_name=req.res_name,
-            result_dir=req.result_dir,
-            database_path=req.database_path,
-        )
+        # Remember the just-applied project as the prefill values (write-time).
+        prefs = self._state.startup_prefs
+        prefs.chip_name = req.chip_name
+        prefs.qub_name = req.qub_name
+        prefs.res_name = req.res_name
+        prefs.result_dir = req.result_dir
+        prefs.database_path = req.database_path
 
     def remember_connection(self, req: StartupConnectionRequest) -> None:
-        self._persistence.update_connection(ip=req.ip, port=req.port)
+        prefs = self._state.startup_prefs
+        prefs.ip = req.ip
+        prefs.port = req.port
 
-    def _on_device_changed(self, _payload: DeviceChangedPayload) -> None:
-        """Project the current remembered-device set from State onto disk.
-
-        Declarative: the remembered set is whatever State currently holds with
-        ``remember=True``; this overwrites the persisted list wholesale. A
-        diff-guard skips the (frequent, transient) DEVICE_CHANGED emissions that
-        do not alter the remembered set. Disk-write failures are logged and
-        swallowed — this runs off the original caller's path and cannot surface
-        an error to it.
-        """
-        entries = [
+    def capture_startup(self, *, left_panel_width: int) -> PersistedStartup:
+        """Project the remembered prefs (+ current remember-device set from
+        State) into a memento. The device set is re-derived here (deferred to
+        flush time — replaces the old DEVICE_CHANGED eager projection)."""
+        devices = tuple(
             PersistedDeviceEntry(
                 type_name=dev.type_name, name=dev.name, address=dev.address
             )
             for dev in self._state.list_devices()
             if dev.remember
-        ]
-        if entries == self._persistence.get_current().devices:
-            return
-        try:
-            self._persistence.replace_devices(entries)
-        except StartupPersistenceError:
-            logger.warning("Failed to persist remembered devices", exc_info=True)
+        )
+        prefs = self._state.startup_prefs
+        return PersistedStartup(
+            chip_name=prefs.chip_name,
+            qub_name=prefs.qub_name,
+            res_name=prefs.res_name,
+            result_dir=prefs.result_dir,
+            database_path=prefs.database_path,
+            ip=prefs.ip,
+            port=prefs.port,
+            devices=devices,
+            left_panel_width=left_panel_width,
+        )
 
-    def get_left_panel_width(self) -> int:
-        data = self._persistence.load()
-        return DEFAULT_LEFT_PANEL_WIDTH if data is None else data.left_panel_width
+    def restore_startup(self, data: PersistedStartup) -> None:
+        """Seed the remembered prefs from the memento + register remembered
+        devices. Project is NOT auto-applied to the active context (the user
+        applies it via the setup dialog) — the instrument never auto-connects."""
+        self._state.startup_prefs = StartupPrefs(
+            chip_name=data.chip_name,
+            qub_name=data.qub_name,
+            res_name=data.res_name,
+            result_dir=data.result_dir,
+            database_path=data.database_path,
+            ip=data.ip,
+            port=data.port,
+            left_panel_width=data.left_panel_width,
+        )
+        self._devices.register_remembered_devices(
+            [
+                DeviceMemoryInfo(
+                    type_name=entry.type_name,
+                    name=entry.name,
+                    address=entry.address,
+                )
+                for entry in data.devices
+            ]
+        )
 
-    def save_left_panel_width(self, width: int) -> None:
-        self._persistence.update_left_panel_width(width)
+    def _project_prefs_to_startup(self) -> PersistedStartup:
+        prefs = self._state.startup_prefs
+        return PersistedStartup(
+            chip_name=prefs.chip_name,
+            qub_name=prefs.qub_name,
+            res_name=prefs.res_name,
+            result_dir=prefs.result_dir,
+            database_path=prefs.database_path,
+            ip=prefs.ip,
+            port=prefs.port,
+            left_panel_width=prefs.left_panel_width,
+        )
