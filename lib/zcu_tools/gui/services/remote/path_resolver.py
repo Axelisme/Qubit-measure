@@ -203,7 +203,21 @@ def _set_moduleref(
                 ErrorCode.INVALID_PARAMS,
                 f"module ref key at {full_path!r} expects a string",
             )
-        ref.set_chosen_key(value)
+        # list_paths advertises a ModuleRef's options as bare variant labels in
+        # 'choices' (e.g. "Pulse Readout"), but a chosen_key for a built-in
+        # variant is the tagged form "<Custom:Pulse Readout>". An agent naturally
+        # echoes the bare label back; normalize it so set_chosen_key stores a
+        # valid key. A bare label is treated as LINKED (library entry name)
+        # otherwise, which silently rebuilds an empty sub-field and later fails
+        # lowering with "Unknown module reference". Only a value that exactly
+        # matches an allowed variant label is wrapped; anything else (already
+        # tagged, or a real library entry name) passes through unchanged.
+        key = value
+        if not (key.startswith("<Custom:") and key.endswith(">")):
+            allowed_labels = {s.label for s in ref.spec.allowed}
+            if key in allowed_labels:
+                key = f"<Custom:{key}>"
+        ref.set_chosen_key(key)
         return
     if head == "value":
         # The old grammar wrapped ref sub-fields under a 'value' segment; it is

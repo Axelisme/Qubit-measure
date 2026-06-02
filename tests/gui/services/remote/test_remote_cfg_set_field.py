@@ -391,3 +391,63 @@ def test_list_paths_form_not_populated_rejected(qapp):  # noqa: ARG001
             sock.close()
     finally:
         f.stop()
+
+
+# ---------------------------------------------------------------------------
+# ModuleRef key normalization — a bare variant label (as list_paths advertises
+# in 'choices') is accepted and stored as the tagged <Custom:label> chosen_key,
+# not mistaken for a (non-existent) library entry name. Regression: a bare label
+# used to be stored verbatim → empty sub-field → lowering "Unknown module
+# reference". Pure resolve_and_set unit (no socket): fake/freq has a readout
+# ModuleRef with variant labels "Direct Readout" / "Pulse Readout".
+# ---------------------------------------------------------------------------
+
+
+def _fakefreq_root():
+    from unittest.mock import MagicMock
+
+    from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
+    from zcu_tools.gui.adapter import ExpContext
+    from zcu_tools.gui.live_model import LiveModelEnv, SectionLiveField
+    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+
+    ctx = ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+    cfg = FakeFreqAdapter().make_default_cfg(ctx)
+    ctrl = MagicMock()
+    ctrl.get_current_ml.return_value = ctx.ml
+    ctrl.get_current_md.return_value = ctx.md
+    env = LiveModelEnv(ctrl=ctrl)
+    return SectionLiveField(cfg.spec, env, initial_val=cfg.value)
+
+
+def test_moduleref_bare_label_normalized_to_custom_tag(qapp):  # noqa: ARG001
+    from zcu_tools.gui.services.remote.path_resolver import (
+        list_settable_paths_full,
+        resolve_and_set,
+    )
+
+    root = _fakefreq_root()
+    # Bare label, exactly as tab.list_paths advertises in 'choices'.
+    resolve_and_set(root, "modules.readout.ref", "Direct Readout")
+
+    entry = next(
+        e for e in list_settable_paths_full(root) if e["path"] == "modules.readout.ref"
+    )
+    # Stored as the tagged key, not the bare label.
+    assert entry["value"] == "<Custom:Direct Readout>"
+
+
+def test_moduleref_tagged_key_passes_through(qapp):  # noqa: ARG001
+    from zcu_tools.gui.services.remote.path_resolver import (
+        list_settable_paths_full,
+        resolve_and_set,
+    )
+
+    root = _fakefreq_root()
+    # An already-tagged key is stored verbatim (no double-wrapping).
+    resolve_and_set(root, "modules.readout.ref", "<Custom:Direct Readout>")
+
+    entry = next(
+        e for e in list_settable_paths_full(root) if e["path"] == "modules.readout.ref"
+    )
+    assert entry["value"] == "<Custom:Direct Readout>"

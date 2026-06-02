@@ -205,6 +205,11 @@ class RemoteControlAdapter:
             raise RuntimeError("RemoteControlAdapter.start() called twice")
         host = self._opts.host()
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # Allow rebinding while a previous bind lingers in TIME-WAIT, so a
+        # gui_stop -> gui_launch cycle does not fail with EADDRINUSE for ~60s
+        # (standard server-socket convention; bind is still exclusive of a live
+        # listener, so a stale *running* process is still correctly rejected).
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind((host, self._opts.port))
         except OSError as exc:
