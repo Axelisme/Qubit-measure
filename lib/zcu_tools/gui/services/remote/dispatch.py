@@ -215,7 +215,12 @@ def _h_tab_list_paths(
             ErrorCode.PRECONDITION_FAILED,
             f"tab {tab_id!r} cfg form has no live model yet",
         )
-    return {"paths": adapter.ctrl.cfg_editor_get(editor_id)}
+    under, verbosity = _path_view_args(params)
+    return {
+        "paths": adapter.ctrl.cfg_editor_get(
+            editor_id, under=under, verbosity=verbosity
+        )
+    }
 
 
 def _h_tab_update_cfg(
@@ -1367,14 +1372,31 @@ def _h_editor_set_field(
         ) from exc
 
 
+def _path_view_args(params: Mapping[str, object]) -> "tuple[str | None, str]":
+    """Extract optional ``under`` (sub-tree root) + ``verbosity`` from params.
+
+    ``verbosity`` defaults to ``full`` at the wire layer (mechanism fidelity);
+    the agent-facing compact default is applied by the mcp tool.
+    """
+    raw_under = params.get("under")
+    under = str(raw_under) if raw_under else None
+    verbosity = str(params.get("verbosity") or "full")
+    return under, verbosity
+
+
 def _h_editor_get(
     adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from zcu_tools.gui.services.cfg_editor import CfgEditorError
 
     editor_id = str(params["editor_id"])
+    under, verbosity = _path_view_args(params)
     try:
-        return {"paths": adapter.ctrl.cfg_editor_get(editor_id)}
+        return {
+            "paths": adapter.ctrl.cfg_editor_get(
+                editor_id, under=under, verbosity=verbosity
+            )
+        }
     except CfgEditorError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
 

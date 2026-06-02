@@ -141,11 +141,18 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "tab.get_cfg": MethodSpec(5.0, "Read tab cfg raw", (_str("tab_id"),)),
     "tab.list_paths": MethodSpec(
         5.0,
-        "List every settable cfg dotted path with its current value, type and "
-        "(when applicable) choices. Edit a path with editor.set_field on the "
-        "tab's editor_id (from tab.snapshot). kind ∈ scalar / sweep_edge / "
-        "moduleref_key / deviceref.",
-        (_str("tab_id"),),
+        "List the settable cfg dotted paths. Edit a path with editor.set_field "
+        "on the tab's editor_id (from tab.snapshot). kind ∈ scalar / sweep_edge "
+        "/ moduleref_key / deviceref. 'under' restricts to the sub-tree at that "
+        "dotted path (e.g. 'modules.readout'); omit for the whole cfg. "
+        "'verbosity' shapes each entry: 'compact' (default) = {path, kind, "
+        "choices?}; 'full' adds current value + type; 'paths' = a bare list of "
+        "path strings (smallest).",
+        (
+            _str("tab_id"),
+            _str_opt("under", "Restrict to the sub-tree at this dotted path"),
+            _str_default("verbosity", "compact", "compact (default) / full / paths"),
+        ),
     ),
     "tab.update_cfg": MethodSpec(
         10.0,
@@ -383,9 +390,12 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "adapter.cfg_spec": MethodSpec(
         5.0,
         "List an adapter's static cfg paths (path/kind/type/choices/label) "
-        "without building a tab. ModuleRef/WaveformRef expose every allowed "
-        "option's sub-fields under value.<label>. Use tab.list_paths for a "
-        "live tab's current values.",
+        "without building a tab — the shape skeleton. ModuleRef/WaveformRef "
+        "nodes list ONLY their '.ref' selector + allowed choices, NOT any "
+        "variant's inner fields (which variant is the live default is a "
+        "context-dependent value-layer decision a static spec can't know). To "
+        "read a chosen variant's fields, build a tab and use tab.list_paths "
+        "(live, with under/verbosity).",
         (_str("adapter_name", "Adapter to introspect"),),
     ),
     "adapter.analyze_spec": MethodSpec(
@@ -536,10 +546,12 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "editor.open/get (ModuleRef sub-fields descend directly, no 'value' "
         "segment); 'value' is a JSON scalar, or an md-reference expression as "
         '{"__kind":"eval","expr":"r_f - 0.1"} (resolved against MetaDict at '
-        "commit). Returns {paths, removed, added, valid}: 'paths' is the sub-tree "
-        "rooted at the changed path; 'removed'/'added' list settable paths that a "
-        "ModuleRef key switch ('<path>.ref') dropped/created, so you need not "
-        "re-list the tab; 'valid' is whether the whole draft is currently valid.",
+        "commit). Returns {valid, removed, added} — does NOT echo cfg content "
+        "(that would force a lowering pass that eagerly evaluates EvalValue). "
+        "'valid' is whether the whole draft is currently valid; 'removed'/'added' "
+        "list settable paths a ModuleRef key switch ('<path>.ref') dropped/"
+        "created so you need not re-list after a variant switch. To read cfg use "
+        "tab.list_paths / editor.get (which have under/verbosity).",
         (
             _str("editor_id"),
             _str("path", "Dotted field path"),
@@ -548,8 +560,15 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "editor.get": MethodSpec(
         5.0,
-        "List all settable paths + current values of an editing session.",
-        (_str("editor_id"),),
+        "List the settable paths of an editing session. 'under' restricts to the "
+        "sub-tree at that dotted path; omit for the whole draft. 'verbosity': "
+        "'compact' (default) = {path, kind, choices?}; 'full' adds value + type; "
+        "'paths' = a bare list of path strings.",
+        (
+            _str("editor_id"),
+            _str_opt("under", "Restrict to the sub-tree at this dotted path"),
+            _str_default("verbosity", "compact", "compact (default) / full / paths"),
+        ),
     ),
     "editor.commit": MethodSpec(
         10.0,

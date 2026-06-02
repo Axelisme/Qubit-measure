@@ -98,7 +98,14 @@ from zcu_tools.gui.services.remote.wire import (  # noqa: E402
 #      app.shutdown RPC (graceful, no OS kill) and only force-kills when
 #      timeout_kill=true (replaces the old 'force' SIGKILL param). gui_app_shutdown
 #      tool rides WIRE 13.
-MCP_VERSION = 11
+# v12: cfg introspection slimming (WIRE 14, Phase 120b). gui_tab_list_paths /
+#      gui_editor_get gain under (sub-tree scope) + verbosity (compact default =
+#      {path,kind,choices?}; full adds value/type; paths = bare list[str]).
+#      gui_editor_set_fields returns {applied, valid} (no longer the whole cfg);
+#      gui_analyze (was gui_analyze_start, v? sync) unchanged here. cfg_spec is
+#      ref-only. Token-noise + WYSIWYG read split: edit returns success, read via
+#      list_paths.
+MCP_VERSION = 12
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -953,15 +960,17 @@ def tool_gui_editor_set_fields(arguments: Dict[str, Any]) -> Dict[str, Any]:
     Convenience fan-out (a for-loop over the single-field RPC) — there is no
     atomicity: edits before the failing one stay applied and are NOT rolled
     back. On the first error this raises, reporting how many succeeded and which
-    path failed so the agent can reconcile. On success the WHOLE resulting draft
-    cfg is returned (via editor.get) rather than per-edit deltas, so the agent
-    sees the full final state in one shot.
+    path failed so the agent can reconcile. On success returns
+    ``{applied, valid}`` — the count applied and whether the resulting draft is
+    valid. It does NOT echo cfg content (that would force a lowering pass which
+    eagerly evaluates EvalValue); read the cfg with gui_tab_list_paths if needed.
     """
     editor_id = str(arguments["editor_id"])
     edits = _coerce_pairs(arguments.get("edits"), field="edits", keys=("path", "value"))
+    valid = True
     for i, edit in enumerate(edits):
         try:
-            send_gui_rpc(
+            res = send_gui_rpc(
                 "editor.set_field",
                 {
                     "editor_id": editor_id,
@@ -974,8 +983,8 @@ def tool_gui_editor_set_fields(arguments: Dict[str, Any]) -> Dict[str, Any]:
                 f"batch set_field failed at edits[{i}] (path={edit['path']!r}); "
                 f"{i} edit(s) already applied and NOT rolled back: {exc}"
             ) from exc
-    cfg = send_gui_rpc("editor.get", {"editor_id": editor_id})
-    return {"applied": len(edits), "cfg": cfg}
+        valid = bool(res.get("valid", True))
+    return {"applied": len(edits), "valid": valid}
 
 
 def tool_gui_context_set_md_attrs(arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -1562,12 +1571,13 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             "Convenience fan-out over gui_editor_set_field — NOT atomic: it stops "
             "at the first failure (fail-fast) and edits applied before it are NOT "
             "rolled back; the error names the failing path and how many already "
-            "applied. On success returns {applied, cfg} where 'cfg' is the WHOLE "
-            "resulting draft (settable paths + current values, same as "
-            "gui_editor_get) so you see the final state without per-edit deltas. "
-            "Each edit's 'path' is dotted (see gui_tab_list_paths) and 'value' is "
-            "a JSON scalar or an md-ref {__kind:eval, expr}, exactly as "
-            "gui_editor_set_field."
+            "applied. On success returns {applied, valid} — the count applied "
+            "and whether the resulting draft is valid. It does NOT echo cfg "
+            "content (reading it would force a lowering pass that eagerly "
+            "evaluates EvalValue); read the cfg with gui_tab_list_paths if "
+            "needed. Each edit's 'path' is dotted (see gui_tab_list_paths) and "
+            "'value' is a JSON scalar or an md-ref {__kind:eval, expr}, exactly "
+            "as gui_editor_set_field."
         ),
         "inputSchema": {
             "type": "object",

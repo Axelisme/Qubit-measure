@@ -92,9 +92,12 @@ def test_session_is_the_aggregate_with_behaviour(service, ml):
     assert isinstance(session, CfgEditorSession)
     assert session.item_kind == "module"  # ml-entry session → committable
 
-    # set_field is the aggregate's own behaviour, returns subtree + validity
+    # set_field is the aggregate's own behaviour: returns validity + ref-switch
+    # diff, NOT cfg content (no lowering/eval side effect). The new value is read
+    # back via current_paths.
     out = session.set_field("freq", 5000.0)
-    assert out["paths"] and "valid" in out
+    assert "valid" in out and "removed" in out and "added" in out
+    assert "paths" not in out
     assert _paths(session.current_paths())["freq"]["value"] == 5000.0
 
     # commit_schema is the aggregate's own behaviour: it yields the un-lowered
@@ -211,15 +214,15 @@ def test_ref_switch_returns_new_subtree_and_diff(service):
     assert "waveform.ref" in keys
     assert "waveform.sigma" not in keys  # const has no sigma
 
-    # Switch the waveform ref key; set_field returns the rebuilt sub-tree plus a
-    # removed/added diff of settable paths.
+    # Switch the waveform ref key; set_field returns only a removed/added diff of
+    # settable paths (no cfg content — no lowering/eval side effect).
     res = service.set_field(editor_id, "waveform.ref", "<Custom:Gauss>")
-    sub_keys = _paths(res["paths"])
-    # The returned sub-tree now exposes the gauss-only field (no 'value' wrapper).
-    assert "waveform.sigma" in sub_keys
+    assert "paths" not in res
     # The diff names the appeared path explicitly so the agent need not re-list.
     assert "waveform.sigma" in res["added"]
     assert "waveform.sigma" not in res["removed"]
+    # And the rebuilt structure is observable via the session's path view.
+    assert "waveform.sigma" in _paths(service.get(editor_id, verbosity="full"))
 
 
 # ---------------------------------------------------------------------------

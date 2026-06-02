@@ -82,7 +82,7 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 #      before running it. New method = contract change.
 # v13: added app.shutdown — gracefully close the GUI via its normal window-close
 #      path (no OS kill); new method = contract change.
-WIRE_VERSION = 13
+WIRE_VERSION = 14
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -107,7 +107,12 @@ WIRE_VERSION = 13
 # v10: app.shutdown RPC (WIRE 13) — MainWindow.request_shutdown drives the normal
 #     close path (persist/teardown) without the device-setup modal; close logic
 #     factored into _perform_close shared with closeEvent.
-GUI_VERSION = 10
+# v11: cfg introspection slimming (WIRE 14, Phase 120b) — list_paths gains
+#     under/verbosity (compact default at mcp); set_field/set_fields stop echoing
+#     cfg content (no lowering/eval side effect), set_field returns
+#     {valid, removed, added}; adapter.cfg_spec lists ModuleRef '.ref' + choices
+#     only (no variant inner-field descent); list_subtree_paths removed.
+GUI_VERSION = 11
 
 # ---------------------------------------------------------------------------
 # Wire envelopes

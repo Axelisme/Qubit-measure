@@ -59,7 +59,7 @@ from zcu_tools.gui.specs import make_waveform_spec_by_style
 from .ports import ContextReadPort, ContextWritePort
 from .remote.path_resolver import (
     list_settable_paths,
-    list_subtree_paths,
+    list_settable_paths_full,
     resolve_and_set,
 )
 
@@ -148,25 +148,38 @@ class CfgEditorSession:
 
     def current_paths(self) -> list[dict[str, object]]:
         """Full settable-path list of the draft (the ``get`` projection)."""
-        return list_settable_paths(self.root)
+        return list_settable_paths_full(self.root)
+
+    def paths_view(
+        self, under: "str | None" = None, verbosity: str = "full"
+    ) -> "list[dict[str, object]] | list[str]":
+        """Settable-path list scoped by ``under`` and shaped by ``verbosity``.
+
+        Mechanism layer: defaults to full fidelity over the whole draft. The
+        agent-facing compact default is the mcp layer's policy, not this
+        aggregate's.
+        """
+        return list_settable_paths(self.root, under=under, verbosity=verbosity)
 
     def set_field(self, path: str, value: object) -> dict[str, object]:
-        """Mutate one field; return the changed sub-tree, the set of paths a ref
-        switch added/removed, and draft validity.
+        """Mutate one field; return draft validity + which paths a ref switch
+        added/removed.
 
-        A ModuleRef key switch rebuilds its sub-tree, so the settable-path set
-        changes. ``removed`` / ``added`` (diffed over the whole draft) tell the
-        agent exactly which paths disappeared and appeared, so it does not have
-        to re-list the whole tab to discover them.
+        Does NOT echo cfg content back — reading it would force a lowering pass
+        that eagerly evaluates EvalValue (e.g. ``r_f - 0.1`` → a concrete
+        number), an unwanted side effect for a plain edit. To see the cfg, call
+        ``list_paths`` (which has under/verbosity). A ModuleRef key switch
+        rebuilds its sub-tree, so ``removed`` / ``added`` (diffed over the whole
+        draft) tell the agent exactly which paths disappeared / appeared, so it
+        need not re-list the whole tab after a variant switch.
         """
-        before = {str(e["path"]) for e in list_settable_paths(self.root)}
+        before = {str(e["path"]) for e in list_settable_paths_full(self.root)}
         resolve_and_set(self.root, path, _decode_value(value))
-        after = {str(e["path"]) for e in list_settable_paths(self.root)}
+        after = {str(e["path"]) for e in list_settable_paths_full(self.root)}
         return {
-            "paths": list_subtree_paths(self.root, path),
+            "valid": bool(self.root.is_valid()),
             "removed": sorted(before - after),
             "added": sorted(after - before),
-            "valid": bool(self.root.is_valid()),
         }
 
     def commit_schema(self) -> "CfgSchema":
@@ -347,8 +360,13 @@ class CfgEditorService:
     def set_field(self, editor_id: str, path: str, value: object) -> dict[str, object]:
         return self._require(editor_id).set_field(path, value)
 
-    def get(self, editor_id: str) -> list[dict[str, object]]:
-        return self._require(editor_id).current_paths()
+    def get(
+        self,
+        editor_id: str,
+        under: "str | None" = None,
+        verbosity: str = "full",
+    ) -> "list[dict[str, object]] | list[str]":
+        return self._require(editor_id).paths_view(under=under, verbosity=verbosity)
 
     def commit(self, editor_id: str, name: str) -> None:
         # ADR-0011: the aggregate yields its un-lowered CfgSchema; ContextService

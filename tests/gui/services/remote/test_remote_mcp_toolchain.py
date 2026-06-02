@@ -465,7 +465,7 @@ def test_device_setup_wrapper_issues_setup_then_short_wait(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_set_fields_fans_out_in_order_then_returns_full_cfg(monkeypatch):
+def test_set_fields_fans_out_in_order_and_returns_valid(monkeypatch):
     from zcu_tools.gui.services.remote import mcp_server
 
     calls: list[tuple[str, dict]] = []
@@ -473,9 +473,7 @@ def test_set_fields_fans_out_in_order_then_returns_full_cfg(monkeypatch):
     def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
         del timeout_seconds
         calls.append((method, params))
-        if method == "editor.get":
-            return {"paths": [{"path": "reps", "value": 100}], "valid": True}
-        return {}
+        return {"valid": True, "removed": [], "added": []}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
     out = mcp_server.TOOLS["gui_editor_set_fields"]["handler"](
@@ -488,17 +486,18 @@ def test_set_fields_fans_out_in_order_then_returns_full_cfg(monkeypatch):
         }
     )
 
-    # Each edit becomes one set_field in order; cfg is fetched once at the end.
+    # Each edit becomes one set_field in order; NO trailing editor.get (set does
+    # not echo cfg content — that would force a lowering/eval pass).
     assert calls == [
         ("editor.set_field", {"editor_id": "ed1", "path": "reps", "value": 100}),
         (
             "editor.set_field",
             {"editor_id": "ed1", "path": "sweep.gain.expts", "value": 5},
         ),
-        ("editor.get", {"editor_id": "ed1"}),
     ]
     assert out["applied"] == 2
-    assert out["cfg"]["valid"] is True
+    assert out["valid"] is True
+    assert "cfg" not in out
 
 
 def test_set_fields_fail_fast_stops_and_reports_progress(monkeypatch):
@@ -668,6 +667,28 @@ def test_adapter_cfg_spec_lists_paths_without_tab(fx):
         )
         assert expts["kind"] == "sweep_edge"
         assert expts["type"] == "integer"
+    finally:
+        sock.close()
+
+
+def test_adapter_cfg_spec_lists_ref_only_not_variant_inner_fields(fx):
+    """cfg_spec emits each ModuleRef's '.ref' selector + allowed choices, and
+    does NOT descend into any variant's inner fields (no Cartesian-product
+    blowup, no guessing the live default variant)."""
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(sock, "adapter.cfg_spec", {"adapter_name": "fake/freq"})
+        by_path = {p["path"]: p for p in resp["result"]["paths"]}
+        # The ref selector is present, carrying its allowed variant labels.
+        assert "modules.readout.ref" in by_path
+        ref = by_path["modules.readout.ref"]
+        assert ref["kind"] == "moduleref_key"
+        assert "Pulse Readout" in ref["choices"]
+        assert "Direct Readout" in ref["choices"]
+        # No variant inner fields leak through — neither label-keyed nor
+        # chosen-style. The only modules.readout.* path is the ref itself.
+        readout_paths = [p for p in by_path if p.startswith("modules.readout.")]
+        assert readout_paths == ["modules.readout.ref"]
     finally:
         sock.close()
 

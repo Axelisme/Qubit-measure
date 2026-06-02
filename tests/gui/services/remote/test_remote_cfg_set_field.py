@@ -50,10 +50,12 @@ class _LiveFixture(Fixture):
 
     def get_value(self, path: str):
         """Read the current value of a path off the live session draft."""
-        from zcu_tools.gui.services.remote.path_resolver import list_settable_paths
+        from zcu_tools.gui.services.remote.path_resolver import (
+            list_settable_paths_full,
+        )
 
         root = self.ctrl.get_cfg_editor_root(self.editor_id)
-        for entry in list_settable_paths(root):
+        for entry in list_settable_paths_full(root):
             if entry["path"] == path:
                 return entry["value"]
         raise KeyError(path)
@@ -264,23 +266,79 @@ def test_device_list_and_snapshot(lf):
 def test_list_paths_enumerates_settable_leaves(lf):
     sock = open_client(lf.service.port)
     try:
+        # Default verbosity is 'compact': keeps path/kind/choices, drops
+        # value/type.
         resp = call(sock, "tab.list_paths", {"tab_id": lf._tab_id})
         assert resp["ok"] is True
         paths = resp["result"]["paths"]
         by_path = {p["path"]: p for p in paths}
 
-        # Scalar leaf present with value + type.
         assert "reps" in by_path
         assert by_path["reps"]["kind"] == "scalar"
-        assert by_path["reps"]["type"] in ("int", "float")
+        assert "value" not in by_path["reps"]
+        assert "type" not in by_path["reps"]
 
-        # A sweep edge is exposed as <path>.expts (integer) etc.
+        # A sweep edge is exposed as <path>.expts etc.
         sweep_edges = [p for p in paths if p["kind"] == "sweep_edge"]
         assert sweep_edges, "expected at least one sweep edge"
         assert any(p["path"].endswith(".expts") for p in sweep_edges)
-
-        # Every listed path is non-empty and dotted-or-plain.
         assert all(p["path"] for p in paths)
+    finally:
+        sock.close()
+
+
+def test_list_paths_verbosity_full_adds_value_and_type(lf):
+    sock = open_client(lf.service.port)
+    try:
+        resp = call(sock, "tab.list_paths", {"tab_id": lf._tab_id, "verbosity": "full"})
+        by_path = {p["path"]: p for p in resp["result"]["paths"]}
+        assert by_path["reps"]["type"] in ("int", "float")
+        assert "value" in by_path["reps"]
+    finally:
+        sock.close()
+
+
+def test_list_paths_verbosity_paths_is_bare_string_list(lf):
+    sock = open_client(lf.service.port)
+    try:
+        resp = call(
+            sock, "tab.list_paths", {"tab_id": lf._tab_id, "verbosity": "paths"}
+        )
+        paths = resp["result"]["paths"]
+        assert all(isinstance(p, str) for p in paths)
+        assert "reps" in paths
+    finally:
+        sock.close()
+
+
+def test_list_paths_under_restricts_to_subtree(lf):
+    sock = open_client(lf.service.port)
+    try:
+        full = call(
+            sock, "tab.list_paths", {"tab_id": lf._tab_id, "verbosity": "paths"}
+        )["result"]["paths"]
+        # Pick a dotted prefix that has children (e.g. a sweep or module path).
+        prefixes = {p.split(".")[0] for p in full if "." in p}
+        assert prefixes, "expected at least one nested path"
+        root = sorted(prefixes)[0]
+        scoped = call(
+            sock,
+            "tab.list_paths",
+            {"tab_id": lf._tab_id, "under": root, "verbosity": "paths"},
+        )["result"]["paths"]
+        assert scoped, f"expected paths under {root!r}"
+        assert all(p == root or p.startswith(root + ".") for p in scoped)
+        assert len(scoped) < len(full)
+    finally:
+        sock.close()
+
+
+def test_list_paths_bad_verbosity_rejected(lf):
+    sock = open_client(lf.service.port)
+    try:
+        resp = call(sock, "tab.list_paths", {"tab_id": lf._tab_id, "verbosity": "nope"})
+        assert resp["ok"] is False
+        assert resp["error"]["code"] == "invalid_params"
     finally:
         sock.close()
 
@@ -288,7 +346,7 @@ def test_list_paths_enumerates_settable_leaves(lf):
 def test_list_paths_round_trips_through_set_field(lf):
     sock = open_client(lf.service.port)
     try:
-        resp = call(sock, "tab.list_paths", {"tab_id": lf._tab_id})
+        resp = call(sock, "tab.list_paths", {"tab_id": lf._tab_id, "verbosity": "full"})
         scalar = next(
             p
             for p in resp["result"]["paths"]

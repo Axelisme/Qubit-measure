@@ -23,7 +23,7 @@ Unknown paths, type mismatches, and immutable targets raise
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from zcu_tools.gui.adapter import (
     CfgSectionSpec,
@@ -318,14 +318,68 @@ def _list_field(path: str, field: "LiveField") -> list[dict[str, object]]:
     return []
 
 
-def list_settable_paths(root: SectionLiveField) -> list[dict[str, object]]:
-    """Enumerate every dotted path that ``resolve_and_set`` can mutate.
+# Fields dropped at each verbosity level (lower = less token noise). 'full'
+# keeps everything; 'compact' drops the current value + python type (re-readable
+# elsewhere) but KEEPS kind + choices (Fast-Fail semantics: agent needs the enum
+# choices to validate before commit, and 'kind' to know a ref-switch point);
+# 'paths' is a bare list[str].
+_VERBOSITY_DROP = {"compact": ("value", "type")}
 
-    Each entry is ``{path, kind, value, type[, choices]}``. The path grammar is
-    identical to resolve_and_set's, so every listed path round-trips through
-    ``cfg.set_field``. Literal (immutable) leaves are omitted.
+
+def _project(
+    entries: list[dict[str, object]], verbosity: str
+) -> "list[dict[str, object]] | list[str]":
+    """Project full path entries down to the requested verbosity."""
+    if verbosity == "full":
+        return entries
+    if verbosity == "paths":
+        return [str(e["path"]) for e in entries]
+    if verbosity == "compact":
+        drop = _VERBOSITY_DROP["compact"]
+        return [{k: v for k, v in e.items() if k not in drop} for e in entries]
+    raise RemoteError(
+        ErrorCode.INVALID_PARAMS,
+        f"unknown verbosity {verbosity!r}; expected one of full/compact/paths",
+    )
+
+
+def list_settable_paths(
+    root: SectionLiveField,
+    under: "str | None" = None,
+    verbosity: str = "full",
+) -> "list[dict[str, object]] | list[str]":
+    """Enumerate the dotted paths that ``resolve_and_set`` can mutate.
+
+    The path grammar is identical to resolve_and_set's, so every listed path
+    round-trips through ``cfg.set_field``. Literal (immutable) leaves are
+    omitted.
+
+    ``under`` restricts the listing to the sub-tree rooted at that dotted path
+    (same navigation as a ModuleRef key switch's re-list); omit it for the whole
+    draft. ``verbosity`` controls the per-entry shape: ``full`` (default, the
+    mechanism layer's full fidelity) = ``{path, kind, value, type[, choices]}``;
+    ``compact`` drops ``value``/``type`` but keeps ``kind``/``choices``;
+    ``paths`` = bare ``list[str]``. The agent-facing default (compact) is chosen
+    by the mcp/RPC layer, not here.
     """
-    return _list_field("", root)
+    if under:
+        field, base_path = _navigate(root, under.split("."))
+        entries = _list_field(base_path, field)
+    else:
+        entries = _list_field("", root)
+    return _project(entries, verbosity)
+
+
+def list_settable_paths_full(
+    root: SectionLiveField, under: "str | None" = None
+) -> list[dict[str, object]]:
+    """``list_settable_paths`` at full verbosity, typed as the dict-entry list.
+
+    Internal callers (diffing, sub-tree re-list) need the dict form and a
+    non-union return type; this thin wrapper gives them that without casts.
+    """
+    result = list_settable_paths(root, under=under, verbosity="full")
+    return cast("list[dict[str, object]]", result)
 
 
 # ---------------------------------------------------------------------------
@@ -349,8 +403,14 @@ def _list_spec_field(path: str, node: "CfgNodeSpec") -> list[dict[str, object]]:
 
     The static analogue of ``_list_field``: it walks the spec tree instead of a
     live LiveModel, so an adapter's shape can be listed without a tab/context.
-    ModuleRef/WaveformRef expose *every* allowed option's sub-fields under
-    ``value.<label>`` (the live version only shows the chosen one).
+
+    ModuleRef/WaveformRef nodes do NOT descend into any variant's sub-fields —
+    they emit only the ``.ref`` selector plus its allowed ``choices``. Which
+    variant is the live default is a value-layer decision (the adapter's
+    ``make_default_value(ctx)``, context-dependent) that a static, context-free
+    spec walk cannot know; and a variant's fields only become concrete once a
+    tab is built. So the agent reads the shape skeleton + ref options here, then
+    picks a ref and reads that variant's live fields via ``tab.list_paths``.
     """
     if isinstance(node, LiteralSpec):
         return []  # immutable
@@ -370,7 +430,7 @@ def _list_spec_field(path: str, node: "CfgNodeSpec") -> list[dict[str, object]]:
         return [{"path": f"{path}.device", "kind": "deviceref", "type": "string"}]
     if isinstance(node, (ModuleRefSpec, WaveformRefSpec)):
         kind = "moduleref_key" if isinstance(node, ModuleRefSpec) else "waveformref_key"
-        out = [
+        return [
             {
                 "path": f"{path}.ref",
                 "kind": kind,
@@ -378,17 +438,11 @@ def _list_spec_field(path: str, node: "CfgNodeSpec") -> list[dict[str, object]]:
                 "choices": [s.label for s in node.allowed],
             }
         ]
-        # Static shape lists *every* allowed option's sub-fields keyed by the
-        # option label (the live chosen one is set without the label — these are
-        # introspection paths, not direct round-trip paths). No 'value' wrapper.
-        for section in node.allowed:
-            for key, child in section.fields.items():
-                out.extend(_list_spec_field(f"{path}.{section.label}.{key}", child))
-        return out
     if isinstance(node, CfgSectionSpec):
         out = []
         for key, child in node.fields.items():
-            out.extend(_list_spec_field(f"{path}.{key}" if path else key, child))
+            seg = f"{path}.{key}" if path else key
+            out.extend(_list_spec_field(seg, child))
         return out
     return []
 
@@ -397,14 +451,17 @@ def list_spec_paths(spec: CfgSectionSpec) -> list[dict[str, object]]:
     """Enumerate an adapter's settable cfg paths from its static spec tree.
 
     Like ``list_settable_paths`` but over a pure ``CfgSectionSpec`` (no values,
-    no live model), so it works without building a tab. Use for adapter
-    introspection; use ``list_settable_paths`` for a live tab's current values.
+    no live model), so it works without building a tab. ModuleRef/WaveformRef
+    nodes list only their ``.ref`` selector + allowed choices, not any variant's
+    inner fields (see ``_list_spec_field``). Use for adapter introspection; use
+    ``list_settable_paths`` on a live tab to read a chosen variant's fields.
     """
     return _list_spec_field("", spec)
 
 
 # ---------------------------------------------------------------------------
-# Sub-tree discovery — list the leaves beneath the field a path points at
+# Path navigation — walk a dotted path to the field it addresses (used by the
+# ``under`` sub-tree scoping in list_settable_paths).
 # ---------------------------------------------------------------------------
 
 
@@ -455,17 +512,3 @@ def _navigate(root: SectionLiveField, segments: list[str]) -> tuple["LiveField",
         # the sweep node itself.
         break
     return field, ".".join(consumed)
-
-
-def list_subtree_paths(root: SectionLiveField, path: str) -> list[dict[str, object]]:
-    """Return the settable leaves beneath the field addressed by ``path``.
-
-    After a ``resolve_and_set`` mutation (especially a ModuleRef key switch that
-    rebuilds the sub-tree), this re-lists only what changed. A scalar path
-    returns its own single entry; a ref/section path returns the freshly-bound
-    sub-tree. Paths are rooted so they round-trip through ``set_field``.
-    """
-    if not path:
-        return list_settable_paths(root)
-    field, base_path = _navigate(root, path.split("."))
-    return _list_field(base_path, field)
