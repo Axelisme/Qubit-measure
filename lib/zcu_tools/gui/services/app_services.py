@@ -17,7 +17,6 @@ from .session_persistence import SessionPersistenceService
 from .startup import StartupService
 from .startup_persistence import StartupPersistenceService
 from .tab import TabService
-from .tab_view import TabViewService
 from .workspace import WorkspaceService
 from .writeback import WritebackService
 
@@ -53,7 +52,6 @@ class AppServices:
     analyze: AnalyzeService
     save: SaveService
     writeback: WritebackService
-    tab_view: TabViewService
     workspace: WorkspaceService
     startup: StartupService
     cfg_editor: CfgEditorService
@@ -82,7 +80,6 @@ def build_app_services(
     progress = ProgressService(progress_transport)
     device = DeviceService(bus, state, operation_gate, progress=progress)
     context = ContextService(state, io_manager, bus)
-    tab = TabService(state, registry)
     # cfg_editor owns the per-tab and per-writeback-item cfg models; WritebackService
     # builds/reads/tears those down, so it is built after cfg_editor (single-
     # direction command edge — cfg_editor never calls writeback, ADR-0007).
@@ -95,6 +92,9 @@ def build_app_services(
         bus=bus,
     )
     writeback = WritebackService(state, bus, cfg_editor, write_port=cfg_editor_ctrl)
+    # TabService composes the tab render model and needs the writeback query port
+    # (built above) — built after writeback (read-model dependency, ADR-0008).
+    tab = TabService(state, registry, writeback)
     return AppServices(
         operation_gate=operation_gate,
         progress=progress,
@@ -107,7 +107,6 @@ def build_app_services(
         analyze=AnalyzeService(state, analyze_runner, bus, writeback, operation_gate),
         save=SaveService(state, save_runner, bus),
         writeback=writeback,
-        tab_view=TabViewService(state, writeback),
         workspace=WorkspaceService(state, tab, SessionPersistenceService(), bus),
         startup=StartupService(
             context, device, StartupPersistenceService(), state, bus

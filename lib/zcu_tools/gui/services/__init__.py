@@ -45,8 +45,7 @@ from .startup_persistence import (
     StartupPersistenceError,
     StartupPersistenceService,
 )
-from .tab import TabService
-from .tab_view import TabViewService, TabViewSnapshot
+from .tab import TabService, TabSnapshot
 from .workspace import RestoreIssue, RestoreReport, WorkspaceService
 from .writeback import WritebackService
 
@@ -91,8 +90,7 @@ __all__ = [
     "StartupProjectRequest",
     "StartupService",
     "TabService",
-    "TabViewService",
-    "TabViewSnapshot",
+    "TabSnapshot",
     "RestoreIssue",
     "RestoreReport",
     "WorkspaceService",

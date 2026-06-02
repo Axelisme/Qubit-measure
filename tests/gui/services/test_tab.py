@@ -3,11 +3,11 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from zcu_tools.gui.adapter import ContextReadiness, ExpContext, SavePaths
-from zcu_tools.gui.services.tab_view import TabViewService
+from zcu_tools.gui.services.tab import TabService
 from zcu_tools.gui.state import State, TabState
 
 
-def test_tab_view_snapshot_is_single_pure_render_model() -> None:
+def test_tab_snapshot_is_single_pure_render_model() -> None:
     state = State(
         ExpContext(
             md=MagicMock(),
@@ -34,13 +34,15 @@ def test_tab_view_snapshot_is_single_pure_render_model() -> None:
     )
     writeback = MagicMock()
     writeback.get_tab_writeback_items.return_value = []
-    # M4: TabViewService depends only on State + a writeback query port; readiness
-    # / save paths come off State's aggregates, not sibling app-services.
-    service = TabViewService(state, writeback)
+    # TabService's render model depends only on State + a writeback query port;
+    # readiness / save paths come off State's aggregates, not sibling
+    # app-services. The registry is unused by get_snapshot.
+    service = TabService(state, MagicMock(), writeback)
 
     snapshot = service.get_snapshot("tab")
 
     assert snapshot.tab_id == "tab"
+    assert snapshot.interaction is not None  # render path fills every live field
     assert snapshot.interaction.has_run_result is True
     assert snapshot.interaction.has_active_context is True  # ctx.readiness=ACTIVE
     assert snapshot.analyze_params is analyze_params

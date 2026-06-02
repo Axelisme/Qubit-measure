@@ -2,16 +2,65 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
-from zcu_tools.gui.adapter import CfgSchema, CfgSectionSpec, SavePaths
+from matplotlib.figure import Figure
+
+from zcu_tools.gui.adapter import (
+    AdapterCapabilities,
+    CfgSchema,
+    CfgSectionSpec,
+    SavePaths,
+    WritebackItem,
+)
+from zcu_tools.gui.state import TabInteractionState
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.registry import Registry
     from zcu_tools.gui.state import State
+
+    from .ports import WritebackQueryPort
 from zcu_tools.gui.state import TabState
+
+
+@dataclass(frozen=True)
+class TabSnapshot:
+    """Immutable full-state snapshot of one tab.
+
+    Single type for two consumers (formerly ``TabViewSnapshot`` + ``PersistedTab``):
+
+    - **render** (``TabService.get_snapshot``): every field populated, handed to
+      the View to draw one tab.
+    - **restore** (``TabService.new_tab(from_dict=...)``) and **persist**
+      (``PersistedSession.tabs``): only the serializable head three fields carry
+      meaning; the live fields below are ``None`` / empty.
+
+    ``cfg_schema`` is always the *live* ``CfgSchema`` (resolved EvalValue), which
+    the render path uses directly. The disk codec
+    (``SessionPersistenceService``) converts ``cfg_schema`` ↔ ``cfg_raw`` at the
+    file boundary, so the persisted form never leaks into the tab snapshot.
+    """
+
+    adapter_name: str
+    cfg_schema: CfgSchema
+    # The user's explicit override only (None = follow the adapter suggestion).
+    # This is the serializable save-path state — persist/restore round-trip it so
+    # a reload never pins an adapter-derived path.
+    save_paths_override: Optional[SavePaths]
+    # Live render-only fields; None / empty on the persist + restore paths.
+    tab_id: Optional[str] = None
+    interaction: Optional[TabInteractionState] = None
+    capabilities: Optional[AdapterCapabilities] = None
+    analyze_params: object | None = None
+    writeback_items: tuple[WritebackItem, ...] = ()
+    figure: Optional[Figure] = None
+    # Render-computed effective paths (override, else adapter suggestion from
+    # ctx). The View shows this; it is *not* persisted (derivable on restore).
+    save_paths: Optional[SavePaths] = None
+
 
 # Characters allowed verbatim in a tab-id slug; everything else (notably the
 # adapter '/') collapses to '-'. The slug is cosmetic — the 8-hex suffix carries
@@ -34,9 +83,47 @@ class TabService:
         self,
         state: "State",
         registry: "Registry",
+        writeback: "WritebackQueryPort",
     ) -> None:
         self._state = state
         self._registry = registry
+        # Read model composes writeback proposals via a narrow query port — no
+        # concrete sibling app-service dependency (ADR-0008 violation 2).
+        self._writeback = writeback
+
+    def get_snapshot(self, tab_id: str) -> "TabSnapshot":
+        """Build the immutable full render model for one tab (all live fields
+        populated). The persist/restore form of ``TabSnapshot`` is produced
+        elsewhere (codec / restore) with the live fields left empty."""
+        tab = self._state.get_tab(tab_id)
+        ctx = self._state.exp_context
+        interaction = TabInteractionState(
+            # cross-cutting facts read directly off State's aggregates (no
+            # app-service dependency — ADR-0008 violation 2 / ADR-0007 Query).
+            global_run_active=self._state.is_run_active() and not tab.is_running,
+            has_context=ctx.has_context(),
+            has_active_context=ctx.is_active(),
+            has_soc=ctx.has_soc(),
+            # tab-intrinsic facts are the tab aggregate's own predicates
+            is_running=tab.is_running,
+            is_analyzing=tab.is_analyzing,
+            is_saving_data=tab.is_saving_data,
+            has_run_result=tab.has_run_result(),
+            has_analyze_result=tab.has_analyze_result(),
+            has_figure=tab.has_figure(),
+        )
+        return TabSnapshot(
+            adapter_name=tab.adapter_name,
+            cfg_schema=tab.cfg_schema,
+            save_paths_override=tab.save_path_overrides,
+            tab_id=tab_id,
+            interaction=interaction,
+            capabilities=tab.adapter.capabilities,
+            analyze_params=tab.analyze_param_instance,
+            writeback_items=tuple(self._writeback.get_tab_writeback_items(tab_id)),
+            figure=tab.figure,
+            save_paths=tab.effective_save_paths(ctx),
+        )
 
     def new_tab(self, adapter_name: str) -> str:
         adapter = self._registry.create(adapter_name)

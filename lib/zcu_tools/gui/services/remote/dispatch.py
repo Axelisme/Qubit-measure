@@ -142,6 +142,9 @@ def _tab_snapshot_wire(
 ) -> dict[str, object]:
     snap = adapter.ctrl.get_tab_snapshot(tab_id)
     interaction = snap.interaction
+    # Render snapshot always fills the live fields (persist/restore form is the
+    # only one that leaves them None, and it never hits the wire).
+    assert interaction is not None
     return {
         "tab_id": tab_id,
         "adapter_name": adapter.ctrl.get_tab_adapter_name(tab_id),

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 from qtpy.QtCore import Qt
 from zcu_tools.gui.adapter import AdapterCapabilities
 from zcu_tools.gui.event_bus import EventBus, GuiEvent, SocChangedPayload
-from zcu_tools.gui.services import TabViewSnapshot
+from zcu_tools.gui.services import TabSnapshot
 from zcu_tools.gui.state import TabInteractionState
 
 
@@ -30,8 +30,9 @@ def _snapshot(
     has_run_result: bool = True,
     has_analyze_result: bool = True,
     has_figure: bool = True,
-) -> TabViewSnapshot:
-    return TabViewSnapshot(
+) -> TabSnapshot:
+    return TabSnapshot(
+        adapter_name="fake",
         tab_id=tab_id,
         interaction=TabInteractionState(
             global_run_active=global_run_active,
@@ -46,6 +47,7 @@ def _snapshot(
             has_figure=has_figure,
         ),
         cfg_schema=MagicMock(),
+        save_paths_override=None,
         capabilities=AdapterCapabilities(),
         analyze_params=MagicMock(),
         writeback_items=(),

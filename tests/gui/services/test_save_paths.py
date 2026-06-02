@@ -29,7 +29,7 @@ def test_tab_save_path_query_is_pure_and_does_not_create_directories(
     state = State(_make_context(tmp_path))
     registry = Registry()
     registry.register("fake", FakeAdapter)
-    svc = TabService(state, registry)
+    svc = TabService(state, registry, MagicMock())
     tab_id = svc.new_tab("fake")
 
     paths = svc.get_tab_save_paths(tab_id)

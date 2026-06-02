@@ -175,8 +175,8 @@ class ContextWrites:
 class WritebackQueryPort(Protocol):
     """The writeback-items query as used by the tab read model.
 
-    ``TabViewService`` is a read-model assembler; it composes a tab's writeback
-    proposals into the snapshot but must not depend on the concrete
+    ``TabService.get_snapshot`` is a read-model assembler; it composes a tab's
+    writeback proposals into the snapshot but must not depend on the concrete
     ``WritebackService`` (ADR-0008 violation 2 — no app-service→app-service
     coupling). It depends on this narrow query port instead, which prevents a
     back-edge from ever forming. ``WritebackService`` implements it.

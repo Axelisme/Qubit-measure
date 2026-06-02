@@ -35,7 +35,7 @@ from .services import (
     StartupConnectionRequest,
     StartupPersistenceError,
     StartupProjectRequest,
-    TabViewSnapshot,
+    TabSnapshot,
     build_app_services,
 )
 from .services.connection import (
@@ -178,7 +178,6 @@ class Controller:
         self._analyze_svc = services.analyze
         self._save_svc = services.save
         self._writeback_svc = services.writeback
-        self._tab_view_svc = services.tab_view
         self._workspace_svc = services.workspace
         self._startup_svc = services.startup
         self._cfg_editor_svc = services.cfg_editor
@@ -952,8 +951,8 @@ class Controller:
     def get_tab_result(self, tab_id: str) -> Optional[object]:
         return self._tab_svc.get_tab_result(tab_id)
 
-    def get_tab_snapshot(self, tab_id: str) -> TabViewSnapshot:
-        return self._tab_view_svc.get_snapshot(tab_id)
+    def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
+        return self._tab_svc.get_snapshot(tab_id)
 
     def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None:
         """Auto-commit boundary for tab CfgFormWidget.

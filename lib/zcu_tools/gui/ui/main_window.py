@@ -75,7 +75,7 @@ if TYPE_CHECKING:
 
     from zcu_tools.gui.adapter import CfgSchema, WritebackItem
     from zcu_tools.gui.controller import Controller
-    from zcu_tools.gui.services import TabViewSnapshot
+    from zcu_tools.gui.services import TabSnapshot
 
 
 # ---------------------------------------------------------------------------
@@ -496,7 +496,11 @@ class ExpTabWidget(QWidget):
     def _on_cfg_validity_changed(self, valid: bool) -> None:
         del valid
 
-    def update_interaction_state(self, snapshot: TabViewSnapshot) -> None:
+    def update_interaction_state(self, snapshot: TabSnapshot) -> None:
+        # A render snapshot (get_tab_snapshot) always fills the live fields; only
+        # the persist/restore form leaves them None, and that never reaches here.
+        assert snapshot.interaction is not None
+        assert snapshot.capabilities is not None
         state = snapshot.interaction
         capabilities = snapshot.capabilities
         local_busy = state.is_running or state.is_analyzing or state.is_saving_data
@@ -828,6 +832,7 @@ class MainWindow(QMainWindow):
         self.refresh_tab_writeback(tab_id, snapshot)
         self.refresh_tab_save_paths(tab_id, snapshot)
         self.refresh_tab_figure(tab_id, snapshot)
+        assert snapshot.interaction is not None  # render snapshot fills live fields
         # auto-switch to Analysis tab when a new run result first arrives
         if snapshot.interaction.has_run_result:
             tab_w._left_tabs.setCurrentIndex(1)
@@ -848,17 +853,18 @@ class MainWindow(QMainWindow):
     def _set_tab_running(
         self,
         tab_w: "ExpTabWidget",
-        snapshot: "TabViewSnapshot",
+        snapshot: "TabSnapshot",
     ) -> None:
         tab_w.update_interaction_state(snapshot)
 
     def refresh_tab_analyze_form(
-        self, tab_id: str, snapshot: Optional["TabViewSnapshot"] = None
+        self, tab_id: str, snapshot: Optional["TabSnapshot"] = None
     ) -> None:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
+        assert current.interaction is not None  # render snapshot fills live fields
         if not current.interaction.has_run_result:
             return
         if current.analyze_params is None:
@@ -867,7 +873,7 @@ class MainWindow(QMainWindow):
         tab_w.analyze_form.populate_values(current.analyze_params)
 
     def refresh_tab_writeback(
-        self, tab_id: str, snapshot: Optional["TabViewSnapshot"] = None
+        self, tab_id: str, snapshot: Optional["TabSnapshot"] = None
     ) -> None:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
@@ -876,7 +882,7 @@ class MainWindow(QMainWindow):
         tab_w.update_writeback_items(list(current.writeback_items))
 
     def refresh_tab_save_paths(
-        self, tab_id: str, snapshot: Optional["TabViewSnapshot"] = None
+        self, tab_id: str, snapshot: Optional["TabSnapshot"] = None
     ) -> None:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
@@ -887,7 +893,7 @@ class MainWindow(QMainWindow):
             tab_w.set_save_paths(save_paths.data_path, save_paths.image_path)
 
     def refresh_tab_figure(
-        self, tab_id: str, snapshot: Optional["TabViewSnapshot"] = None
+        self, tab_id: str, snapshot: Optional["TabSnapshot"] = None
     ) -> None:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
@@ -908,7 +914,7 @@ class MainWindow(QMainWindow):
         # listener, which re-renders to empty.
 
     def refresh_tab_interaction(
-        self, tab_id: str, snapshot: Optional["TabViewSnapshot"] = None
+        self, tab_id: str, snapshot: Optional["TabSnapshot"] = None
     ) -> None:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None or not self._ctrl.has_tab(tab_id):
@@ -1074,7 +1080,9 @@ class MainWindow(QMainWindow):
         tab_w = self._resolve_tab_widget(tab_id, "_on_run_stop_clicked")
         if tab_w is None:
             return
-        if self._ctrl.get_tab_snapshot(tab_id).interaction.is_running:
+        interaction = self._ctrl.get_tab_snapshot(tab_id).interaction
+        assert interaction is not None  # render snapshot fills live fields
+        if interaction.is_running:
             logger.info("_on_run_stop_clicked: stop requested tab_id=%r", tab_id)
             self._ctrl.cancel_run()
             return

@@ -26,7 +26,6 @@ _APP_SERVICE_MODULES = {
     "save",
     "startup",
     "tab",
-    "tab_view",
     "workspace",
     "writeback",
 }
