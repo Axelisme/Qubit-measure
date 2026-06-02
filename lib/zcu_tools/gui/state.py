@@ -406,6 +406,27 @@ class State:
         logger.debug("set_active_tab: tab_id=%r", tab_id)
         self.active_tab_id = tab_id
 
+    def clear_tab_results(self, tab_id: str) -> None:
+        """Drop this tab's run/analyze/figure/writeback results back to empty.
+
+        Called at the *start* of a run so that while the run is in flight (and
+        after a failed/cancelled run) the tab honestly has no result — analyze /
+        save then fail-fast with ``no_run_result`` (the true reason) instead of
+        being blocked behind a stale previous result. The per-item writeback
+        editor models must already be torn down by the caller (WritebackService),
+        mirroring ``update_tab_result``.
+        """
+        logger.debug("clear_tab_results: tab_id=%r", tab_id)
+        tab = self.tabs[tab_id]
+        tab.run_result = None
+        tab.analyze_result = None
+        tab.figure = None
+        tab.analyze_param_instance = None
+        tab.writeback_items = []
+        tab.applied_session_ids.clear()
+        self.version.bump(f"tab:{tab_id}:result")
+        self.version.bump(f"tab:{tab_id}:analyze")
+
     def update_tab_result(self, tab_id: str, result: object) -> None:
         logger.debug(
             "update_tab_result: tab_id=%r result_type=%s", tab_id, type(result).__name__

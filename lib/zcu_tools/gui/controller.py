@@ -483,8 +483,11 @@ class Controller:
             self._shutdown_driver = QtShutdownDriver(self._operation_gate)
         self._shutdown_driver.begin(on_closed)
 
-    def get_run_progress(self) -> tuple:
-        return self._run_svc.get_run_progress()
+    def get_operation_progress(self, operation_id: int) -> tuple:
+        """Live progress bars for one operation by id (run / device setup alike).
+        The wire's operation.progress handler reads this; the mcp poll folds it
+        into its reply."""
+        return self._progress_svc.bars_for_operation(operation_id)
 
     def get_tab_analyze_result(self, tab_id: str) -> object | None:
         return self._tab_svc.get_tab_analyze_result(tab_id)
@@ -848,9 +851,6 @@ class Controller:
 
     def get_active_device_setup(self) -> Optional[DeviceSetupSnapshot]:
         return self._dev_svc.get_active_setup()
-
-    def get_device_setup_progress(self) -> tuple:
-        return self._dev_svc.setup_progress()
 
     def cancel_device_operation(self, name: str) -> None:
         self._dev_svc.cancel_device_operation(name)

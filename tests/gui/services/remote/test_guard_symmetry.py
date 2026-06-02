@@ -111,11 +111,13 @@ def test_analyze_without_run_result_symmetry(qapp):  # noqa: ARG001
     with pytest.raises(GuardError, match="No run result"):
         ctrl.analyze(tab_id, object())
 
-    snap = ctrl.get_tab_snapshot(tab_id)
-    # analyze.start needs prepared analyze params; without a run result the
-    # snapshot has none, so the handler short-circuits before guard. Assert the
-    # UI-path guard directly covers the no-result case (the authoritative guard).
-    assert snap.analyze_params is None
+    # The wire path (analyze.start) checks run-result presence first too, so the
+    # agent gets the true reason 'no_run_result' rather than the downstream
+    # 'no analyze params available' (params only exist once a run produced one).
+    with pytest.raises(RemoteError) as excinfo:
+        _dispatch(ctrl, "analyze.start", {"tab_id": tab_id, "updates": {}})
+    assert excinfo.value.code is ErrorCode.PRECONDITION_FAILED
+    assert excinfo.value.reason == "no_run_result"
 
 
 def test_save_no_run_result_carries_reason(qapp):  # noqa: ARG001

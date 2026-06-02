@@ -162,16 +162,6 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "run.cancel": MethodSpec(5.0, "Cancel current run"),
     "run.running_tab": MethodSpec(5.0, "Current running tab"),
-    "run.progress": MethodSpec(
-        5.0,
-        "Read current run progress bars. Returns active=false, bars=[] when idle. "
-        "When active=true, each bar has: token (stable id), format (human-readable "
-        "string e.g. 'Rounds 23/100 [0:25<1:15]'), maximum (Qt-scaled total; 0 if "
-        "unknown), value (Qt-scaled position), percent (0-100 convenience, null "
-        "when total unknown), and raw n/total (precise counts; total null when "
-        "unknown). Prefer the auto-subscribed 'run_finished' event (via "
-        "gui_events_poll) to detect completion rather than polling this.",
-    ),
     # Save
     "save.data": MethodSpec(
         30.0,
@@ -353,12 +343,6 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "device.active_setup": MethodSpec(
         5.0, "Which device (if any) is currently setting up: {device_name} or null"
     ),
-    "device.setup_progress": MethodSpec(
-        5.0,
-        "Read the active device setup's progress bars — same shape as run.progress "
-        "(active, bars[token/format/maximum/value/percent/n/total]). Prefer the "
-        "auto-subscribed device_setup_finished event to detect completion.",
-    ),
     "device.active_operation": MethodSpec(5.0, "Read active device operation"),
     # Async operation handle: block until an operation (device.connect /
     # device.disconnect / device.setup / run.start / connect.start, identified by
@@ -372,6 +356,15 @@ METHOD_SPECS: dict[str, MethodSpec] = {
             _num_default("timeout", 120.0, "Seconds to wait"),
         ),
         off_main_thread=True,
+    ),
+    "operation.progress": MethodSpec(
+        5.0,
+        "Read one operation's live progress bars by operation_id (run or device "
+        "setup alike). active=false/bars=[] when idle; each bar has token, format "
+        "(human-readable e.g. 'Rounds 23/100 [0:25<1:15]'), maximum/value "
+        "(Qt-scaled), percent (0-100, null when total unknown), raw n/total. "
+        "Internal: agents read progress folded into the gui_*_poll reply.",
+        (_int("operation_id", "Operation handle returned by the start op"),),
     ),
     "device.list": MethodSpec(5.0, "List registered devices"),
     "device.snapshot": MethodSpec(

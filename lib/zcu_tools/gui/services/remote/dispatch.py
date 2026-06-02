@@ -274,7 +274,7 @@ def _h_run_cancel(
 ) -> Mapping[str, object]:
     del params
     adapter.ctrl.cancel_run()
-    return {}
+    return {"ok": True}
 
 
 def _h_run_running_tab(
@@ -373,6 +373,16 @@ def _h_context_use(
 def _h_context_new(
     adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
+    # A context lives under a project's experiment dir; without a project the
+    # IOManager has no dir to create it in. Translate that precondition into
+    # agent language here rather than leaking the internal "IOManager not set
+    # up" RuntimeError as a controller_error.
+    if not adapter.ctrl.has_project():
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            "No project applied yet; apply a project first (gui_startup_apply).",
+            reason="no_project",
+        )
     bind_device = params["bind_device"]
     clone_from = params["clone_from"]
     adapter.ctrl.new_context(
@@ -945,15 +955,9 @@ def _h_device_active_setup(
     setup = adapter.ctrl.get_active_device_setup()
     if setup is None:
         return {"active_setup": None}
-    # Names which device is setting up; live progress is via device.setup_progress.
+    # Names which device is setting up; live progress is via operation.progress
+    # (by the setup's operation_id, folded into the device poll reply).
     return {"active_setup": {"device_name": setup.device_name}}
-
-
-def _h_device_setup_progress(
-    adapter: "RemoteControlAdapter", params: Mapping[str, object]
-) -> Mapping[str, object]:
-    del params
-    return _progress_bars_wire(adapter.ctrl.get_device_setup_progress())
 
 
 def _h_device_active_operation(
@@ -1164,6 +1168,18 @@ def _h_analyze_start(
     if not adapter.ctrl.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     snap = adapter.ctrl.get_tab_snapshot(tab_id)
+    # Order the checks by the true cause: analyze params only exist once a run
+    # produced a result (they are built from it). A run-in-flight / failed /
+    # cancelled tab has no result, so report that — not the downstream "no
+    # analyze params", which reads as a config gap rather than "nothing to
+    # analyze yet".
+    interaction = snap.interaction
+    if interaction is not None and not interaction.has_run_result:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            "No run result available to analyze.",
+            reason="no_run_result",
+        )
     if snap.analyze_params is None:
         raise RemoteError(ErrorCode.PRECONDITION_FAILED, "no analyze params available")
     raw_updates = cast(dict, params["updates"])  # ParamSpec(_obj)-validated
@@ -1426,13 +1442,14 @@ def _h_editor_discard(
 # ---------------------------------------------------------------------------
 
 
-def _h_run_progress(
+def _h_operation_progress(
     adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    del params
-    # Live (token, ProgressBarModel) pairs (the SSOT); _progress_bars_wire reads
-    # their methods at this point. Shared with device.setup_progress.
-    return _progress_bars_wire(adapter.ctrl.get_run_progress())
+    # Live (token, ProgressBarModel) pairs for one operation (run or device
+    # setup alike, keyed by operation_id — the SSOT); _progress_bars_wire reads
+    # their methods at this point. The mcp poll folds this into its reply.
+    operation_id = int(params["operation_id"])  # type: ignore[arg-type]
+    return _progress_bars_wire(adapter.ctrl.get_operation_progress(operation_id))
 
 
 # ---------------------------------------------------------------------------
@@ -1551,7 +1568,6 @@ _HANDLERS: dict[str, Handler] = {
     "run.start": _h_run_start,
     "run.cancel": _h_run_cancel,
     "run.running_tab": _h_run_running_tab,
-    "run.progress": _h_run_progress,
     "save.data": _h_save_data,
     "save.image": _h_save_image,
     "save.result": _h_save_result,
@@ -1587,9 +1603,9 @@ _HANDLERS: dict[str, Handler] = {
     "device.setup_spec": _h_device_setup_spec,
     "device.cancel_operation": _h_device_cancel_operation,
     "device.active_setup": _h_device_active_setup,
-    "device.setup_progress": _h_device_setup_progress,
     "device.active_operation": _h_device_active_operation,
     "operation.await": _h_operation_await,
+    "operation.progress": _h_operation_progress,
     "device.list": _h_device_list,
     "device.snapshot": _h_device_snapshot,
     "adapter.list": _h_adapter_list,

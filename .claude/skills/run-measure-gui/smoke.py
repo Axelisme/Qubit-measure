@@ -8,7 +8,7 @@ so it verifies the whole experiment loop without needing an MCP client.
 
 What it proves (mock SoC, no hardware):
   connect.start(mock) -> startup.apply -> context -> tab.new(fake/freq)
-  -> editor.set_field(reps/rounds) -> run.start -> run.progress (live)
+  -> editor.set_field(reps/rounds) -> run.start -> operation.progress (live)
   -> wait for run_finished event -> analyze.start -> save.data
   -> tab.close -> clean shutdown.
 
@@ -142,11 +142,13 @@ def main() -> int:
         )
         log("edited reps/rounds")
 
-        # 6. Start the run, then read live progress at least once.
-        rpc.call("run.start", {"tab_id": tab_id})
+        # 6. Start the run, then read live progress at least once (progress is
+        # queried by the run's operation_id — the unified operation.progress).
+        op = rpc.call("run.start", {"tab_id": tab_id})
+        operation_id = op.get("operation_id")
         saw_progress = False
         for _ in range(60):
-            prog = rpc.call("run.progress")
+            prog = rpc.call("operation.progress", {"operation_id": operation_id})
             if prog.get("active") and prog.get("bars"):
                 bar = prog["bars"][0]
                 log(f"progress: {bar['format']} ({bar['percent']}%)")

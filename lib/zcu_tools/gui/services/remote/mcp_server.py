@@ -144,7 +144,12 @@ from zcu_tools.gui.services.remote.wire import (  # noqa: E402
 #      restoring the persisted session at startup); tab.get_cfg_summary
 #      description now warns its key shape (the '.value.' nesting) is read-only
 #      and differs from the editable list_paths shape. No wire change.
-MCP_VERSION = 21
+# MCP 22: poll replies fold in progress + distinguish cancel (WIRE 20, Phase 129).
+#      A 'running' gui_*_poll reply now carries the live bars (operation.progress
+#      folded in) — gui_run_progress / gui_device_setup_progress tools are gone.
+#      gui_*_poll reports user cancel as status:'cancelled' (was 'failed'), read
+#      structurally from the wire reason via GuiRpcError.
+MCP_VERSION = 22
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -191,14 +196,15 @@ Typical experiment loop:
 Detecting completion — no events; wait or poll a handle:
   - A slow gui_run_start returns {status:'pending'}; then either gui_run_wait
     (blocks until done, raises on failure/cancellation) or gui_run_poll (returns
-    immediately: 'finished'|'running'|'failed'|'no_operation'). A finished run/
+    immediately: 'finished'|'running'|'cancelled'|'failed'|'no_operation').
+    'cancelled' is a user/agent cancel, distinct from 'failed'. A finished run/
     poll with a figure folds in figure_path. Same shape for devices
     (gui_device_wait_operation / gui_device_poll) and connect
     (gui_connect_wait / gui_connect_poll). gui_analyze is synchronous to you
     (it awaits internally) and returns figure_path.
-  - gui_run_progress gives in-flight bar snapshots (token/format/maximum/value/
-    percent) but is a fallback; do not busy-poll gui_run_running_tab in a sleep
-    loop — use gui_run_poll.
+  - While 'running', the poll reply carries the live progress bars (active,
+    bars[token/format/maximum/value/percent/n/total]) — no separate progress
+    tool. Don't busy-poll gui_run_running_tab in a sleep loop; use gui_run_poll.
   - GUI diagnostics still reach you UNSOLICITED: every tool reply piggybacks any
     {severity:'error'|'info', title, message} the GUI surfaced since your last
     call (e.g. "Data saved to …", a run-failure reason) under "notifications
@@ -622,6 +628,20 @@ def _describe_stale_keys(keys: "list") -> "list[str]":
     return out
 
 
+class GuiRpcError(RuntimeError):
+    """A wire-level GUI error, carrying the structured ``reason`` / ``code``
+    tags alongside the human message. Subclasses RuntimeError so existing
+    ``except RuntimeError`` sites keep working; callers that care (e.g. poll
+    distinguishing cancelled vs failed) read ``.reason`` instead of the text."""
+
+    def __init__(
+        self, message: str, *, reason: Optional[str] = None, code: Optional[str] = None
+    ) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.code = code
+
+
 def send_gui_rpc(
     method: str,
     params: Dict[str, Any],
@@ -655,7 +675,7 @@ def send_gui_rpc(
                 "retry"
             )
         msg = f"GUI Error ({err.get('code')}): {err.get('message')}"
-        raise RuntimeError(msg)
+        raise GuiRpcError(msg, reason=err.get("reason"), code=err.get("code"))
     # Every successful RPC is a round-trip in which the agent "observed" the GUI;
     # refresh the baseline so its own reads/writes are not later seen as stale by
     # its own guarded ops. A concurrent (human) change between two RPCs lands
@@ -1112,9 +1132,24 @@ def _poll_operation_by_key(key: str, what: str) -> Dict[str, Any]:
         send_gui_rpc("operation.await", {"operation_id": operation_id, "timeout": 0.0})
     except RuntimeError as exc:
         if _is_timeout_error(exc):
-            return {"status": "running", "message": f"{what} still in progress."}
-        # failed / cancelled — report as status rather than raising (poll is a
-        # query, not an await). The wire error message carries the reason.
+            # Still running — fold the live progress bars into the poll reply so
+            # the agent watches progress without a separate tool call.
+            progress = send_gui_rpc(
+                "operation.progress", {"operation_id": operation_id}
+            )
+            return {
+                "status": "running",
+                "message": f"{what} still in progress.",
+                **progress,
+            }
+        # terminal error — report as status rather than raising (poll is a query,
+        # not an await). A user-initiated cancel is a distinct, non-failure
+        # outcome: surface it as 'cancelled' so the agent need not parse the
+        # message to tell "it crashed" from "I cancelled it" (the wire carries
+        # reason='cancelled', read structurally via GuiRpcError.reason).
+        reason = getattr(exc, "reason", None)
+        if reason == "cancelled":
+            return {"status": "cancelled", "message": f"{what} was cancelled."}
         return {"status": "failed", "message": f"{what}: {exc}"}
     return {"status": "finished", "message": f"{what} completed."}
 
@@ -1494,6 +1529,9 @@ _NON_GENERATED_METHODS = frozenset(
         # gui_device_wait_operation), which translate name -> operation_id; the raw
         # by-id RPC is never an agent tool.
         "operation.await",
+        # operation progress by id: internal — the poll tools fold its bars into
+        # their reply, so the agent never calls it directly.
+        "operation.progress",
         # hand-written short-wait degrade (like device ops): a fast run / connect
         # returns its product, a slow one degrades to a handle (gui_run_wait /
         # gui_connect_wait).
@@ -1769,8 +1807,10 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
         "handler": tool_gui_device_poll,
         "description": (
             "Non-blocking status of the named device's latest operation (connect "
-            "/ disconnect / setup): 'finished' / 'running' / 'failed' / "
-            "'no_operation'. Returns immediately (cf. gui_device_wait_operation)."
+            "/ disconnect / setup): 'finished' / 'running' / 'cancelled' / "
+            "'failed' / 'no_operation'. Returns immediately (cf. "
+            "gui_device_wait_operation). While 'running' the reply carries the "
+            "live progress bars (active, bars) — e.g. a setup ramp."
         ),
         "inputSchema": {
             "type": "object",
@@ -1784,8 +1824,8 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             "Start a run. Waits up to wait_seconds (default 1.0): a fast run "
             "(small reps/rounds) finishes in time -> {status:'finished', tab:{...}} "
             "(tab snapshot, has_run_result set); a slow run -> {status:'pending'} "
-            "(await with gui_run_wait or gui_run_poll). Track in-flight "
-            "progress with gui_run_progress."
+            "(await with gui_run_wait or gui_run_poll — a 'running' poll reply "
+            "carries the live progress bars)."
         ),
         "inputSchema": {
             "type": "object",
@@ -1825,9 +1865,11 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
         "handler": tool_gui_run_poll,
         "description": (
             "Non-blocking status of the run on tab_id: 'finished' / 'running' / "
-            "'failed' / 'no_operation'. Unlike gui_run_wait this returns "
-            "immediately — start a slow run, do other work, then poll back. On a "
-            "finished run with a figure the reply includes figure_path."
+            "'cancelled' / 'failed' / 'no_operation' ('cancelled' = a user/agent "
+            "cancel, distinct from 'failed'). Unlike gui_run_wait this returns "
+            "immediately — start a slow run, do other work, then poll back. While "
+            "'running' the reply carries the live progress bars (active, bars); "
+            "on a finished run with a figure it includes figure_path."
         ),
         "inputSchema": {
             "type": "object",
@@ -1902,8 +1944,8 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
         "handler": tool_gui_connect_poll,
         "description": (
             "Non-blocking status of the SoC connect: 'finished' / 'running' / "
-            "'failed' / 'no_operation'. On finished, also returns the SoC "
-            "hardware summary (same as gui_soc_info). Returns immediately."
+            "'cancelled' / 'failed' / 'no_operation'. On finished, also returns "
+            "the SoC hardware summary (same as gui_soc_info). Returns immediately."
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },

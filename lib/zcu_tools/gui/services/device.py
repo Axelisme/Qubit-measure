@@ -40,7 +40,6 @@ from .ports import DeviceMemoryInfo  # noqa: F401
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import EventBus
-    from zcu_tools.gui.pbar_host import ProgressBarModel
     from zcu_tools.gui.state import State
 
     from .ports import DriverFactoryPort
@@ -436,13 +435,6 @@ class DeviceService(QObject):
             info=dev.info,
             error=dev.error,
         )
-
-    def setup_progress(self) -> tuple[tuple[int, "ProgressBarModel"], ...]:
-        """Live (handle_id, ProgressBarModel) pairs of the active setup — the
-        device analogue of RunService.get_run_progress (read at query time)."""
-        if self._active_name is None:
-            return ()
-        return self._progress.bars_for_owner(self._active_name)
 
     def list_device_snapshots(self) -> tuple[DeviceSnapshot, ...]:
         return tuple(self._project(dev) for dev in self._state.list_devices())

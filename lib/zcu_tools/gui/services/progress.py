@@ -137,6 +137,16 @@ class ProgressService:
         container = self._containers.get(op)
         return container.bars() if container is not None else ()
 
+    def bars_for_operation(
+        self, operation_id: int
+    ) -> tuple[tuple[int, ProgressBarModel], ...]:
+        """Bars for one operation directly by its id (the agent's poll path).
+
+        Containers are keyed by operation_id, so this is the direct lookup —
+        no owner→live-op indirection. Unknown / already-discarded op → empty."""
+        container = self._containers.get(operation_id)
+        return container.bars() if container is not None else ()
+
     # -- UI attach (View attaches once by its own owner_id; follows op rotation)
     def attach_by_owner(self, owner_id: str, listener: Listener) -> Disposer:
         self._listeners.setdefault(owner_id, []).append(listener)

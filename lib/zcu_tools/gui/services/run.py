@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import TYPE_CHECKING, Any, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Optional
 
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
@@ -26,7 +26,6 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import EventBus
-    from zcu_tools.gui.pbar_host import ProgressBarModel
     from zcu_tools.gui.runner import Runner
     from zcu_tools.gui.services.progress import ProgressService
     from zcu_tools.gui.services.writeback import WritebackService
@@ -76,6 +75,15 @@ class RunService(QObject):
 
         logger.info("start_run: tab_id=%r", tab_id)
 
+        # Starting a run invalidates the previous run/analyze/writeback result:
+        # drop them now so the tab honestly has "no result this run" while it is
+        # in flight (and if it fails/cancels). analyze/save then fail-fast with
+        # the true no_run_result reason instead of reporting a misleading
+        # "no params"/"no result" from behind a stale previous result. Tear down
+        # the per-item writeback editor models first (State requires it).
+        self._writeback.teardown_tab_items(tab_id)
+        self._state.clear_tab_results(tab_id)
+
         # Symmetric release: this lease is released exactly-once on the terminal
         # path — _on_run_finished / _on_run_failed / _on_run_cancelled →
         # _release_lease. A pre-worker failure releases in the except below.
@@ -112,15 +120,6 @@ class RunService(QObject):
         )
         self._bus.emit(GuiEvent.RUN_STARTED, RunStartedPayload(tab_id=tab_id))
         return lease.token
-
-    def get_run_progress(self) -> Tuple[Tuple[int, "ProgressBarModel"], ...]:
-        # Live (handle_id, ProgressBarModel) pairs for the running tab; the caller
-        # reads their methods (format/percent/...) at serialization time. Owner is
-        # the running tab_id, so progress follows the tab across runs.
-        running = self._state.running_tab_id
-        if running is None:
-            return ()
-        return self._progress.bars_for_owner(running)
 
     def cancel_run(self) -> None:
         logger.info("cancel_run")

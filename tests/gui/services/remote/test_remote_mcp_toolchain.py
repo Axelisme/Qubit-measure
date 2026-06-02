@@ -73,20 +73,21 @@ def test_device_active_setup_names_the_device(fx):
         sock.close()
 
 
-def test_device_setup_progress_serializes_live_bars(fx):
-    # Same shape as run.progress: live (token, ProgressBarModel) pairs.
+def test_operation_progress_device_setup_bars(fx):
+    # operation.progress covers device setup too: live (token, ProgressBarModel).
     import time
 
     from zcu_tools.gui.pbar_host import ProgressBarModel
 
     m = ProgressBarModel(label="Ramp", total=10, start_time=time.monotonic())
     m.set_n(3)
-    fx.ctrl.get_device_setup_progress = MagicMock(  # type: ignore[method-assign]
+    fx.ctrl.get_operation_progress = MagicMock(  # type: ignore[method-assign]
         return_value=((1, m),)
     )
     sock = open_client(fx.service.port)
     try:
-        resp = call(sock, "device.setup_progress")
+        # operation.progress is unified across run + device setup, keyed by id.
+        resp = call(sock, "operation.progress", {"operation_id": 7})
         assert resp["ok"] is True
         assert resp["result"]["active"] is True
         bar = resp["result"]["bars"][0]
@@ -94,35 +95,25 @@ def test_device_setup_progress_serializes_live_bars(fx):
         assert bar["maximum"] == 10 and bar["value"] == 3
         assert bar["n"] == 3 and bar["total"] == 10
         assert "Ramp" in bar["format"]
+        fx.ctrl.get_operation_progress.assert_called_with(7)
     finally:
         sock.close()
 
 
-def test_device_setup_progress_idle_returns_empty(fx):
-    fx.ctrl.get_device_setup_progress = MagicMock(return_value=())  # type: ignore[method-assign]
+def test_operation_progress_idle_returns_empty(fx):
+    fx.ctrl.get_operation_progress = MagicMock(return_value=())  # type: ignore[method-assign]
     sock = open_client(fx.service.port)
     try:
-        resp = call(sock, "device.setup_progress")
+        resp = call(sock, "operation.progress", {"operation_id": 7})
         assert resp["ok"] is True
         assert resp["result"] == {"active": False, "bars": []}
     finally:
         sock.close()
 
 
-def test_run_progress_idle_returns_empty(fx):
-    fx.ctrl.get_run_progress = MagicMock(return_value=())  # type: ignore[method-assign]
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "run.progress")
-        assert resp["ok"] is True
-        assert resp["result"] == {"active": False, "bars": []}
-    finally:
-        sock.close()
-
-
-def test_run_progress_serializes_live_bars(fx):
-    # get_run_progress returns live (token, ProgressBarModel) pairs; the wire
-    # layer reads the model's methods (computed at serialization time).
+def test_operation_progress_serializes_live_bars(fx):
+    # get_operation_progress returns live (token, ProgressBarModel) pairs; the
+    # wire layer reads the model's methods (computed at serialization time).
     import time
 
     from zcu_tools.gui.pbar_host import ProgressBarModel
@@ -132,12 +123,12 @@ def test_run_progress_serializes_live_bars(fx):
     m1.set_n(23)
     m2 = ProgressBarModel(label="Reps", total=500, start_time=t)
     m2.set_n(5)
-    fx.ctrl.get_run_progress = MagicMock(  # type: ignore[method-assign]
+    fx.ctrl.get_operation_progress = MagicMock(  # type: ignore[method-assign]
         return_value=((1, m1), (2, m2))
     )
     sock = open_client(fx.service.port)
     try:
-        resp = call(sock, "run.progress")
+        resp = call(sock, "operation.progress", {"operation_id": 7})
         assert resp["ok"] is True
         assert resp["result"]["active"] is True
         bars = {b["token"]: b for b in resp["result"]["bars"]}
@@ -151,16 +142,18 @@ def test_run_progress_serializes_live_bars(fx):
         sock.close()
 
 
-def test_run_progress_unknown_total_has_null_percent(fx):
+def test_operation_progress_unknown_total_has_null_percent(fx):
     import time
 
     from zcu_tools.gui.pbar_host import ProgressBarModel
 
     m = ProgressBarModel(label="working", total=None, start_time=time.monotonic())
-    fx.ctrl.get_run_progress = MagicMock(return_value=((1, m),))  # type: ignore[method-assign]
+    fx.ctrl.get_operation_progress = MagicMock(  # type: ignore[method-assign]
+        return_value=((1, m),)
+    )
     sock = open_client(fx.service.port)
     try:
-        resp = call(sock, "run.progress")
+        resp = call(sock, "operation.progress", {"operation_id": 7})
         assert resp["ok"] is True
         assert resp["result"]["bars"][0]["percent"] is None
     finally:

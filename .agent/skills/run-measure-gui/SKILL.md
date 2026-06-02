@@ -1,13 +1,8 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 4
+skill_version: 6
 ---
-
-> **Copy-sync check.** This skill is hand-copied into `.claude/skills/`,
-> `.codex/skills/`, and `.agent/skills/` (one per agent). `skill_version` must be
-> identical across all three; a mismatch means a copy is stale. Bump it in every
-> copy whenever the skill content changes.
 
 # run-measure-gui
 
@@ -117,7 +112,8 @@ a handle, never by subscribing to a push stream:
 |---|---|
 | fast run / any analyze | **synchronous** — the call returns when done (`gui_analyze` always; `gui_run_start` when it finishes within `wait_seconds`, default 1.0) |
 | `gui_run_start` returned `{status:pending}` | `gui_run_wait(tab_id)` (blocks) or `gui_run_poll(tab_id)` (non-blocking) |
-| want live progress bars | `gui_run_progress(tab_id)` |
+| want live progress bars | already in the `gui_run_poll` reply while `status:running` (active + bars); no separate progress tool |
+| a poll says `status:cancelled` | a user/agent cancel (distinct from `failed`); not an error to recover from |
 
 A `diagnostic{severity}` push (errors / info the GUI would show in a dialog) rides
 along in the *next* tool reply's notifications — you get it without asking. Don't
@@ -244,9 +240,9 @@ a separate sub-procedure layered on top once a π pulse exists.
 
 Flux/RF sources (YOKOGS200, SGS100A) are driven as **devices**:
 `gui_device_connect(type_name, name, address)` → `gui_device_setup(name,
-updates={"value": ...})` ramps an output (cancellable, with progress via
-`gui_device_setup_progress`). `gui_device_setup_spec(name)` lists the settable
-fields. Sweeping a device across an experiment is done in the adapter cfg's
+updates={"value": ...})` ramps an output (cancellable; a slow setup degrades to
+a handle, and its progress bars ride the `gui_device_poll` reply while running).
+`gui_device_setup_spec(name)` lists the settable fields. Sweeping a device across an experiment is done in the adapter cfg's
 `dev` / sweep section, not by manual per-point setup.
 
 **Stash reusable constants in the context (md/ml), then reference them by name
@@ -281,12 +277,14 @@ hardware) — the smoke harness uses it.
   attaches to an EXISTING GUI and needs the port LISTENING (errors "No GUI is
   listening on 127.0.0.1:8765" otherwise). Use launch to start, connect only to
   re-attach to one already up.
-- **Analyze and run are separate operations; both make the tab busy.** Saving
-  or editing while a tab is running/analyzing returns
-  `precondition_failed: ... is busy`. Wait for the operation to settle
-  (`tab.snapshot.interaction.is_analyzing` / `is_running` false, or
-  `gui_run_wait` / `gui_run_poll`) before the next mutating call. (The smoke harness hits
-  this — it waits on `is_analyzing` before `save.data`.)
+- **A run starts by clearing its tab's prior run/analyze/writeback result.** So
+  while a run is in flight — and after it fails or is cancelled — the tab has no
+  result: `gui_analyze` / `gui_save_*` fail-fast with `no_run_result` (the true
+  reason: this run hasn't produced one yet), not a "busy" message. `gui_editor_set_field`
+  while running is the one that returns `precondition_failed: ... is currently running`.
+  Wait for the run to settle (`tab.snapshot.interaction.is_running` false, or
+  `gui_run_wait` / `gui_run_poll`) before analyzing/saving. (The smoke harness
+  waits on `is_analyzing` before `save.data`.)
 - **`run` success is not `analyze` success.** A completed acquisition can still
   produce a bad or misleading fit. On real data, open the figure and verify the
   model visually before you trust `gui_tab_get_analyze_result`, especially for
@@ -328,8 +326,10 @@ hardware) — the smoke harness uses it.
 |---|---|
 | `gui_launch` → `Port 8765 is already in use` | A previous GUI is still running on the port; `gui_stop` it (or kill the stale `run_gui.py`), then relaunch — or launch on another port. |
 | `gui_connect` → `No GUI is listening on 127.0.0.1:8765` | Nothing running there; `gui_launch` first (connect only re-attaches to a running GUI). |
-| `precondition_failed: ... is busy` on save/edit | The tab is still running/analyzing; wait for the operation to finish first. |
-| `precondition_failed` on run/save with no busy tab | Missing active file-backed context or no run result yet — `gui_state_check`, then `gui_startup_apply` + `gui_context_new`/`gui_context_use` if a context is missing. |
+| `precondition_failed: ... is currently running` on `gui_editor_set_field` | The tab is running; wait for it to finish (run clears prior results, so editing mid-run is blocked). |
+| `no_run_result` on `gui_analyze` / `gui_save_*` | No result for *this* run yet — the run is still in flight, or failed/cancelled (a run clears the previous result on start). Wait for it to finish, or re-run. |
+| `precondition_failed: no_project` on `gui_context_new` | No project applied; `gui_startup_apply` first. |
+| `precondition_failed` on run/save with no busy tab | Missing active file-backed context — `gui_state_check`, then `gui_startup_apply` + `gui_context_new`/`gui_context_use` if a context is missing. |
 | `invalid_params` on `gui_editor_set_field` | Path wrong (often a stray `value` segment); re-check `gui_tab_list_paths`. |
 | `Could not locate a VISA implementation` | Real device driver with no VISA backend; use `FakeDevice` or install `pyvisa-py`. |
 | GUI never renders / launch times out | No X display; set `DISPLAY` or run under `xvfb-run -a`. |

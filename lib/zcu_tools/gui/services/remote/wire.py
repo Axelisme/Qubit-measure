@@ -92,7 +92,11 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 #      names a connected flux device whose current value/unit (whitelist:
 #      FakeDevice->none, YOKOGS200->A) name the context; clone_from is an existing
 #      context label to clone. Aligns the agent path with the GUI setup dialog.
-WIRE_VERSION = 19
+# v20: progress query unified by operation_id — added operation.progress
+#      (operation_id) covering run + device setup; removed run.progress and
+#      device.setup_progress (owner-keyed). context.new precondition (no project)
+#      → PRECONDITION_FAILED reason=no_project instead of leaking controller_error.
+WIRE_VERSION = 20
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -139,7 +143,11 @@ WIRE_VERSION = 19
 #     gui_launch(clean=) skip restoring the persisted session at startup
 #     (restore_all(load=False)); the file is left untouched and a normal close
 #     still flushes over it.
-GUI_VERSION = 17
+# v18: run start clears prior run/analyze/writeback result (State.clear_tab_results
+#     in RunService.start_run) so a run-in-flight tab honestly has no result;
+#     progress query unified to operation.progress(operation_id), removing
+#     get_run_progress / DeviceService.setup_progress (WIRE 20, Phase 129).
+GUI_VERSION = 18
 
 # ---------------------------------------------------------------------------
 # Wire envelopes
