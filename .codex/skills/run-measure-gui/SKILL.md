@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 7
+skill_version: 8
 ---
 
 # run-measure-gui
@@ -296,6 +296,11 @@ hardware) — the smoke harness uses it.
 - **Minimum writeback bar: inspect the analysis figure first.** Do not write fit
   results into the context or module library unless the plotted fit matches the
   feature you intended to measure.
+- **Saved data is always `.hdf5`, with a uniqueness suffix.** `gui_save_data` /
+  `gui_save_result` force the `.hdf5` extension and append `_N` (e.g. a
+  `data_path` of `foo` or `foo.h5` lands as `foo_1.hdf5`). The reply's diagnostic
+  and the tab's `save_paths` report the resolved path — read the file back by
+  that, not by the path you passed in.
 - **cfg paths have no `value` segment.** Module sub-fields are
   `modules.qub_pulse.freq`, not `...qub_pulse.value.freq`; an unknown path
   fails `invalid_params` rather than silently no-op'ing. Always confirm against
