@@ -665,6 +665,11 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._ctrl = controller
         self._tab_widgets: dict[str, ExpTabWidget] = {}
+        # Tabs whose next content-change should auto-switch to the Analysis tab —
+        # set only when a run *finished* normally (RUN_FINISHED outcome=finished),
+        # NOT when it was stopped/cancelled (a partial result must not yank the
+        # user to Analysis). Consumed by the following TAB_CONTENT_CHANGED.
+        self._auto_switch_on_result: set[str] = set()
         # ``DialogName -> live QDialog`` registry. ``InspectDialog`` is also
         # tracked through this dict (the legacy ``_inspect_dialog`` attribute
         # is gone — there is now exactly one entry point).
@@ -778,6 +783,14 @@ class MainWindow(QMainWindow):
     def _on_bus_run_finished(self, payload: RunFinishedPayload) -> None:
         # Run lock released.
         self.refresh_run_lock(None)
+        # Arm the auto-switch to Analysis only for a normal finish. A stopped
+        # run (outcome=cancelled) may still leave a partial result, but the user
+        # interrupted it on purpose — don't yank them to the Analysis tab. This
+        # RUN_FINISHED fires before the TAB_CONTENT_CHANGED that consumes it.
+        if payload.outcome == "finished":
+            self._auto_switch_on_result.add(payload.tab_id)
+        else:
+            self._auto_switch_on_result.discard(payload.tab_id)
 
     def _on_bus_context_switched(self, payload: ContextSwitchedPayload) -> None:
         del payload
@@ -822,6 +835,7 @@ class MainWindow(QMainWindow):
     def _on_bus_tab_closed(self, payload: TabClosedPayload) -> None:
         tab_id = payload.tab_id
         logger.info("_on_bus_tab_closed: tab_id=%r", tab_id)
+        self._auto_switch_on_result.discard(tab_id)
         tab_w = self._tab_widgets.pop(tab_id, None)
         if tab_w is not None:
             tab_w.detach()
@@ -843,9 +857,12 @@ class MainWindow(QMainWindow):
         self.refresh_tab_save_paths(tab_id, snapshot)
         self.refresh_tab_figure(tab_id, snapshot)
         assert snapshot.interaction is not None  # render snapshot fills live fields
-        # auto-switch to Analysis tab when a new run result first arrives
-        if snapshot.interaction.has_run_result:
-            tab_w._left_tabs.setCurrentIndex(1)
+        # auto-switch to Analysis tab only after a normally-finished run (armed by
+        # _on_bus_run_finished); a stopped run's partial result must not switch.
+        if tab_id in self._auto_switch_on_result:
+            self._auto_switch_on_result.discard(tab_id)
+            if snapshot.interaction.has_run_result:
+                tab_w._left_tabs.setCurrentIndex(1)
         self.refresh_tab_interaction(tab_id, snapshot)
 
     def _on_bus_predictor_changed(self, payload: PredictorChangedPayload) -> None:

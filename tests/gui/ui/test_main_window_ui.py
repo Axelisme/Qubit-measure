@@ -341,6 +341,51 @@ def test_main_window_content_event_queries_single_tab_snapshot(qapp):
     ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
 
 
+def _run_finished_then_content(window, bus, tab_id: str, outcome: str) -> None:
+    """Replay the real terminal sequence: RUN_FINISHED (carries the outcome)
+    then the TAB_CONTENT_CHANGED that the Controller emits for the result."""
+    from zcu_tools.gui.event_bus import RunFinishedPayload, TabContentChangedPayload
+
+    bus.emit(GuiEvent.RUN_FINISHED, RunFinishedPayload(tab_id=tab_id, outcome=outcome))
+    bus.emit(GuiEvent.TAB_CONTENT_CHANGED, TabContentChangedPayload(tab_id=tab_id))
+
+
+def test_finished_run_auto_switches_to_analysis_tab(qapp):
+    from zcu_tools.gui.ui.main_window import MainWindow
+
+    ctrl = MagicMock()
+    bus = EventBus()
+    ctrl.get_bus.return_value = bus
+    ctrl.get_running_tab_id.return_value = None
+    ctrl.get_tab_snapshot.return_value = _snapshot("tab-1", has_run_result=True)
+    window = MainWindow(ctrl)
+    tab = MagicMock()
+    window._tab_widgets["tab-1"] = tab
+
+    _run_finished_then_content(window, bus, "tab-1", outcome="finished")
+
+    tab._left_tabs.setCurrentIndex.assert_called_once_with(1)
+
+
+def test_stopped_run_does_not_auto_switch_to_analysis_tab(qapp):
+    """A stopped (cancelled) run may leave a partial result, but the user
+    interrupted on purpose — must not yank them to the Analysis tab."""
+    from zcu_tools.gui.ui.main_window import MainWindow
+
+    ctrl = MagicMock()
+    bus = EventBus()
+    ctrl.get_bus.return_value = bus
+    ctrl.get_running_tab_id.return_value = None
+    ctrl.get_tab_snapshot.return_value = _snapshot("tab-1", has_run_result=True)
+    window = MainWindow(ctrl)
+    tab = MagicMock()
+    window._tab_widgets["tab-1"] = tab
+
+    _run_finished_then_content(window, bus, "tab-1", outcome="cancelled")
+
+    tab._left_tabs.setCurrentIndex.assert_not_called()
+
+
 def _editor_wiring_ctrl() -> MagicMock:
     """Mock ctrl that also satisfies LiveModelEnv for a real populate()."""
     ctrl = MagicMock()
