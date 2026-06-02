@@ -479,7 +479,16 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         tool_name="gui_analyze",
     ),
     "tab.get_cfg_summary": MethodSpec(
-        5.0, "Read tab cfg as clean scalar dict", (_str("tab_id"),)
+        5.0,
+        "Read the tab cfg as a nested values view (read-only). Mirrors the cfg "
+        "tree and KEEPS info lowering would drop — EvalValue fields stay as their "
+        "expression string (e.g. 'r_f - 0.1', not the evaluated number) and each "
+        "module/waveform ref node is shown as {chosen, value:{...}}. That ref "
+        "wrapper means its key shape is NOT the editable path shape: a field reads "
+        "as modules.readout.value.pulse_cfg.freq here but edits (editor.set_field) "
+        "use the no-'value' form modules.readout.pulse_cfg.freq. Use this to read "
+        "values/expressions; for editable paths use list_paths.",
+        (_str("tab_id"),),
     ),
     # Writeback workflow — a persistent draft computed once at analyze time.
     "writeback.preview": MethodSpec(

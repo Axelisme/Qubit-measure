@@ -65,11 +65,19 @@ class PersistenceCaretaker:
     def state_path(self) -> Path:
         return self._path
 
-    def restore_all(self) -> RestoreOutcome:
+    def restore_all(self, *, load: bool = True) -> RestoreOutcome:
         """Load the snapshot and hand it to the originator. A missing file or an
         invalid / wrong-version payload falls back to a default snapshot (Fast-
-        Fail on shape, but tolerant of a fresh / incompatible install)."""
-        state, load_error = self._load()
+        Fail on shape, but tolerant of a fresh / incompatible install).
+
+        ``load=False`` (a "clean" start) skips reading the file and restores a
+        default snapshot instead — the originator still gets a snapshot so every
+        service initialises to its default state. The on-disk file is untouched
+        here; a later ``flush`` at close still overwrites it as usual."""
+        if load:
+            state, load_error = self._load()
+        else:
+            state, load_error = AppPersistedState(), None
         report = self._originator.restore_persisted_state(state)
         return RestoreOutcome(report=report, load_error=load_error)
 

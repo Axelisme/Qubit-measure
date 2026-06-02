@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 3
+skill_version: 4
 ---
 
 > **Copy-sync check.** This skill is hand-copied into `.claude/skills/`,
@@ -101,7 +101,7 @@ gui_adapter_list                                  # available experiments
 gui_tab_new(adapter_name="fake/freq") -> tab_id   # readable id, e.g. fake-freq-1a2b3c4d
 gui_tab_snapshot(tab_id) -> editor_id             # the cfg-editing session handle
 gui_tab_list_paths(tab_id)                        # dotted cfg paths (compact: path+kind+choices)
-gui_tab_get_cfg_summary(tab_id)                   # when you only want current values (clean scalar dict)
+gui_tab_get_cfg_summary(tab_id)                   # current values/expressions, nested (ref nodes wrap {chosen,value} → not a path source; see list_paths)
 gui_editor_set_field(editor_id, "rounds", 30)     # WYSIWYG edit of the form's draft
 gui_run_start(tab_id)                             # waits ~1s; finished -> {status:finished,...}, slow -> {status:pending}
 gui_run_wait(tab_id)                              # block until done (only after pending)
@@ -110,8 +110,8 @@ gui_save_data(tab_id) / gui_save_image / gui_save_result
 gui_view_screenshot(tab_id)                       # base64 PNG of the window/tab
 ```
 
-Detecting completion — a small decision table (there are no agent-facing events;
-don't look for `gui_events_*`, they don't exist):
+Detecting completion — completion is observed synchronously or by waiting/polling
+a handle, never by subscribing to a push stream:
 
 | situation | what to do |
 |---|---|
@@ -127,7 +127,7 @@ The full, authoritative tool reference is the **MCP server instructions block**
 (shown by the client when the server connects, defined in
 `lib/zcu_tools/gui/services/remote/mcp_server.py`). Read it for the call
 contract (failed calls raise — never fire duplicates), preconditions, and the
-event/diagnostic model.
+diagnostic-push model.
 
 ## Run (smoke harness — verify the loop without an MCP client)
 
@@ -270,7 +270,7 @@ hardware) — the smoke harness uses it.
 - **`/mcp reconnect` does NOT stop the running GUI — it keeps its port.** A
   reconnect drops the bridge's socket but leaves the old `run_gui.py` listening
   on 8765. So always `gui_stop` (or kill it) before relaunching. `gui_launch`
-  now fails fast if the port is occupied ("Port 8765 is already in use …")
+  fails fast if the port is occupied ("Port 8765 is already in use …")
   rather than silently attaching to the stale process — but if you ignore that
   error you stay on old code. **The handshake alone won't save you:** a stale
   process reports whatever version it was built at, so if it happens to match,
@@ -284,8 +284,8 @@ hardware) — the smoke harness uses it.
 - **Analyze and run are separate operations; both make the tab busy.** Saving
   or editing while a tab is running/analyzing returns
   `precondition_failed: ... is busy`. Wait for the operation to settle
-  (`tab.snapshot.interaction.is_analyzing` / `is_running` false, or the
-  `run_finished` event) before the next mutating call. (The smoke harness hits
+  (`tab.snapshot.interaction.is_analyzing` / `is_running` false, or
+  `gui_run_wait` / `gui_run_poll`) before the next mutating call. (The smoke harness hits
   this — it waits on `is_analyzing` before `save.data`.)
 - **`run` success is not `analyze` success.** A completed acquisition can still
   produce a bad or misleading fit. On real data, open the figure and verify the
@@ -297,7 +297,11 @@ hardware) — the smoke harness uses it.
 - **cfg paths have no `value` segment.** Module sub-fields are
   `modules.qub_pulse.freq`, not `...qub_pulse.value.freq`; an unknown path
   fails `invalid_params` rather than silently no-op'ing. Always confirm against
-  `gui_tab_list_paths`.
+  `gui_tab_list_paths`. **Do NOT lift paths out of `gui_tab_get_cfg_summary`:**
+  that view deliberately wraps each module/waveform ref as `{chosen, value:{...}}`
+  (so it can keep EvalValue expressions and the chosen variant, which lowering
+  would drop) — so its keys carry the extra `.value.` segment. It is a values/
+  expressions view, not a path source; get editable paths from `list_paths`.
 - **Edit through the tab's `editor_id`, not the tab directly.** Take `editor_id`
   from `gui_tab_snapshot`; `gui_editor_set_field` edits the same draft the form
   shows. Switching a ModuleRef key (`<path>.ref`) returns `removed`/`added`

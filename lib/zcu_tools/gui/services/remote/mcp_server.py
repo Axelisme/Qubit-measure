@@ -140,7 +140,11 @@ from zcu_tools.gui.services.remote.wire import (  # noqa: E402
 #      {status:'finished'|'timed_out'|'no_operation', waited_seconds}. Both
 #      timeout flavors (bridge socket TimeoutError, GUI-side "(timeout)") map to
 #      timed_out; a genuine failed/cancelled still raises. No wire change.
-MCP_VERSION = 20
+# MCP 21: gui_launch gains a 'clean' arg (passes --clean to run_gui → skip
+#      restoring the persisted session at startup); tab.get_cfg_summary
+#      description now warns its key shape (the '.value.' nesting) is read-only
+#      and differs from the editable list_paths shape. No wire change.
+MCP_VERSION = 21
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -754,6 +758,7 @@ def tool_gui_launch(arguments: Dict[str, Any]) -> str:
     port = int(arguments.get("port", 8765))
     token: Optional[str] = arguments.get("token")
     auto_connect = bool(arguments.get("auto_connect", True))
+    clean = bool(arguments.get("clean", False))
     repo_root = Path(__file__).parents[
         5
     ]  # lib/zcu_tools/gui/services/remote -> repo root
@@ -794,6 +799,8 @@ def tool_gui_launch(arguments: Dict[str, Any]) -> str:
     ]
     if token:
         cmd += ["--control-token", token]
+    if clean:
+        cmd += ["--clean"]
 
     # Detach the GUI into its own process group/session so a signal to the MCP
     # bridge does not propagate to it. start_new_session is POSIX-only; Windows
@@ -1620,6 +1627,11 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
                     "type": "boolean",
                     "default": True,
                     "description": "Call gui_connect automatically once port is ready (default true)",
+                },
+                "clean": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Start without restoring the previous persisted session (gui_state_v1.json is left untouched at startup; a normal close still flushes over it). Default false.",
                 },
             },
         },

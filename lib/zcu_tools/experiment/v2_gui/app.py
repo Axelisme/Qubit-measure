@@ -32,11 +32,17 @@ def _make_empty_ctx() -> "ExpContext":
     )
 
 
-def run_app(control_opts: Optional["ControlOptions"] = None) -> None:
+def run_app(
+    control_opts: Optional["ControlOptions"] = None, clean: bool = False
+) -> None:
     """Build and launch the GUI. Blocks until the window is closed.
 
     ``control_opts`` (if provided) starts a ``RemoteControlAdapter`` after the
     window is constructed; the adapter is stopped from ``MainWindow.closeEvent``.
+
+    ``clean=True`` starts without restoring the previous persisted session
+    (the on-disk ``gui_state_v1.json`` is left untouched at startup; a normal
+    close still flushes over it).
     """
     from zcu_tools.gui.utils.error_handler import install_global_exception_hook
 
@@ -77,7 +83,7 @@ def run_app(control_opts: Optional["ControlOptions"] = None) -> None:
 
     caretaker = PersistenceCaretaker(ctrl)
     ctrl.attach_caretaker(caretaker)
-    ctrl.restore_all()
+    ctrl.restore_all(load=not clean)
     window.show()
 
     if control_opts is not None:

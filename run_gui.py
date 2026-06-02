@@ -3,6 +3,7 @@
 Examples:
     uv run python run_gui.py                          # default file logging
     uv run python run_gui.py --no-log                 # no file log
+    uv run python run_gui.py --clean                  # don't restore the previous persisted session
     uv run python run_gui.py --control-port 0         # start remote control on an ephemeral loopback port
     uv run python run_gui.py --control-port 8765 --control-token <hex>
 """
@@ -85,6 +86,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Bind the control socket to 0.0.0.0 (requires --control-token).",
     )
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help=(
+            "Start without restoring the previous persisted session "
+            "(gui_state_v1.json is left untouched at startup; a normal close "
+            "still flushes over it)."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -111,4 +121,4 @@ if __name__ == "__main__":
             allow_external=args.control_allow_external,
         )
 
-    run_app(control_opts=control_opts)
+    run_app(control_opts=control_opts, clean=args.clean)

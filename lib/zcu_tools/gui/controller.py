@@ -23,8 +23,8 @@ from .registry import Registry
 from .role_catalog import RoleCatalog
 from .runner import AnalyzeRunner, Runner, SaveDataRunner
 from .services import (
-    ConnectDeviceRequest,
     AppPersistedState,
+    ConnectDeviceRequest,
     DeviceSnapshot,
     DisconnectDeviceRequest,
     PersistedStartup,
@@ -349,9 +349,9 @@ class Controller:
 
     # -- lifecycle façade (run_app startup / MainWindow close) ---------------
 
-    def restore_all(self) -> None:
+    def restore_all(self, *, load: bool = True) -> None:
         assert self._caretaker is not None, "caretaker not attached"
-        outcome = self._caretaker.restore_all()
+        outcome = self._caretaker.restore_all(load=load)
         if outcome.load_error is not None:
             self._report_persistence_error(
                 "Settings restore failed", outcome.load_error

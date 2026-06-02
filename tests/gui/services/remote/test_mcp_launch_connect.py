@@ -42,6 +42,54 @@ def test_launch_refuses_occupied_port(busy_port):
         mcp_server.tool_gui_launch({"port": busy_port})
 
 
+class _FakeProc:
+    pid = 4242
+    stderr = None
+
+    def poll(self):  # alive
+        return None
+
+
+def _capture_launch_cmd(monkeypatch, arguments) -> list[str]:
+    """Run tool_gui_launch with all side effects stubbed, return the spawned cmd."""
+    captured: dict[str, list[str]] = {}
+
+    def fake_popen(cmd, **_kwargs):
+        captured["cmd"] = cmd
+        return _FakeProc()
+
+    # _port_is_open is consulted twice with opposite expectations: the
+    # pre-flight wants it free (False → proceed to spawn), the post-spawn
+    # readiness wait wants it open (True → ready). Return False once, then True.
+    calls = {"n": 0}
+
+    def fake_port_is_open(_port):
+        calls["n"] += 1
+        return calls["n"] > 1
+
+    monkeypatch.setattr(mcp_server, "_port_is_open", fake_port_is_open)
+    monkeypatch.setattr(mcp_server.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(mcp_server, "_write_pid_file", lambda _pid: None)
+    monkeypatch.setattr(mcp_server, "_GUI_PROC", None)
+    try:
+        # auto_connect=False so we never open a real socket; _port_is_open=True
+        # makes the readiness wait return immediately.
+        mcp_server.tool_gui_launch({**arguments, "auto_connect": False})
+    finally:
+        monkeypatch.setattr(mcp_server, "_GUI_PROC", None)
+    return captured["cmd"]
+
+
+def test_launch_clean_flag_adds_clean_arg(monkeypatch):
+    cmd = _capture_launch_cmd(monkeypatch, {"port": 8799, "clean": True})
+    assert "--clean" in cmd
+
+
+def test_launch_without_clean_omits_clean_arg(monkeypatch):
+    cmd = _capture_launch_cmd(monkeypatch, {"port": 8799})
+    assert "--clean" not in cmd
+
+
 def test_connect_errors_clearly_when_no_gui():
     with pytest.raises(RuntimeError, match="No GUI is listening"):
         mcp_server.tool_gui_connect({"port": _free_port()})

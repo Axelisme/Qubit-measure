@@ -27,13 +27,13 @@ from zcu_tools.gui.plot_host import FigureContainer
 from zcu_tools.gui.plot_routing import has_current_container
 from zcu_tools.gui.registry import Registry
 from zcu_tools.gui.runner import Runner
+from zcu_tools.gui.services import PersistenceCaretaker, StartupProjectRequest
 from zcu_tools.gui.services.device import ConnectDeviceRequest
 from zcu_tools.gui.services.operation_gate import (
     OperationConflictError,
     OperationKind,
     OperationOutcome,
 )
-from zcu_tools.gui.services import PersistenceCaretaker, StartupProjectRequest
 from zcu_tools.gui.services.ports import RestoreIssue, RestoreReport
 from zcu_tools.gui.state import DeviceStatus, State
 

@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 3
+skill_version: 4
 ---
 
 > **Copy-sync check.** This skill is hand-copied into `.claude/skills/`,
@@ -27,6 +27,10 @@ Paths below are relative to the repo root (`<repo>` = the directory with
 `run_gui.py` and `.mcp.json`).
 
 ## Before touching real hardware — READ THIS
+
+> **Mock SoC / `FakeDevice` flow? Skip this section.** It is safe and offline —
+> none of the hardware-safety rules below apply. They kick in only when a real
+> `YOKOGS200` / `SGS100A` is involved.
 
 You drive **software only**. You cannot see the cabling, the sample, or the
 fridge. So on a real (non-mock) session you **must get hardware facts from the
@@ -82,7 +86,10 @@ gui_launch                                      # spawns the GUI, connects; bann
 gui_connect_start(kind="mock")                  # mock SoC (or kind="remote", ip, port for hardware)
 gui_startup_apply(chip_name="Q1_Chip",          # apply the project; omit result_dir/database_path
                   qub_name="Q1", res_name="R1")  # to scope them under chip/qub (notebook layout)
-gui_context_new(value=1.0, unit="A")            # create a context (or gui_context_use(label) for an existing one)
+gui_context_new(bind_device="flux")             # create a context bound to a flux device (reads its
+                                                # current value/unit; FakeDevice->none, YOKOGS200->A).
+                                                # Omit bind_device for an unbound context; clone_from=<label>
+                                                # clones an existing one. Or gui_context_use(label) for an existing one.
 gui_state_check                                 # all four flags must be true before running
 gui_soc_info                                    # the board: channels, sample rates, freq ranges
 ```
@@ -93,27 +100,34 @@ Then the experiment loop (per tab):
 gui_adapter_list                                  # available experiments
 gui_tab_new(adapter_name="fake/freq") -> tab_id   # readable id, e.g. fake-freq-1a2b3c4d
 gui_tab_snapshot(tab_id) -> editor_id             # the cfg-editing session handle
-gui_tab_list_paths(tab_id)                        # dotted cfg paths + current values + choices
+gui_tab_list_paths(tab_id)                        # dotted cfg paths (compact: path+kind+choices)
+gui_tab_get_cfg_summary(tab_id)                   # current values/expressions, nested (ref nodes wrap {chosen,value} → not a path source; see list_paths)
 gui_editor_set_field(editor_id, "rounds", 30)     # WYSIWYG edit of the form's draft
-gui_run_start(tab_id)                             # waits ~1s; finished -> {tab}, slow -> {status:pending}
-gui_run_progress                                  # live bars while running (fallback to events)
-gui_run_wait(tab_id)                              # block until done (after pending)
-gui_analyze_start(tab_id)                         # fit; then read gui_tab_get_analyze_result
-gui_save_data(tab_id) / gui_save_image / gui_save_both
+gui_run_start(tab_id)                             # waits ~1s; finished -> {status:finished,...}, slow -> {status:pending}
+gui_run_wait(tab_id)                              # block until done (only after pending)
+gui_analyze(tab_id)                               # SYNCHRONOUS fit; reply folds in figure_path (Read it)
+gui_save_data(tab_id) / gui_save_image / gui_save_result
 gui_view_screenshot(tab_id)                       # base64 PNG of the window/tab
 ```
 
-Detecting completion — **prefer events over polling**: `run_started` /
-`run_finished{outcome}` and `device_setup_started/finished` are auto-subscribed;
-`gui_events_poll` drains them. A `diagnostic{severity}` push carries the same
-error/info the GUI would show in a dialog. `gui_run_progress` is a fallback —
-don't busy-poll `gui_run_running_tab` in a sleep loop.
+Detecting completion — completion is observed synchronously or by waiting/polling
+a handle, never by subscribing to a push stream:
+
+| situation | what to do |
+|---|---|
+| fast run / any analyze | **synchronous** — the call returns when done (`gui_analyze` always; `gui_run_start` when it finishes within `wait_seconds`, default 1.0) |
+| `gui_run_start` returned `{status:pending}` | `gui_run_wait(tab_id)` (blocks) or `gui_run_poll(tab_id)` (non-blocking) |
+| want live progress bars | `gui_run_progress(tab_id)` |
+
+A `diagnostic{severity}` push (errors / info the GUI would show in a dialog) rides
+along in the *next* tool reply's notifications — you get it without asking. Don't
+busy-poll `gui_run_running_tab` in a sleep loop.
 
 The full, authoritative tool reference is the **MCP server instructions block**
 (shown by the client when the server connects, defined in
 `lib/zcu_tools/gui/services/remote/mcp_server.py`). Read it for the call
 contract (failed calls raise — never fire duplicates), preconditions, and the
-event/diagnostic model.
+diagnostic-push model.
 
 ## Run (smoke harness — verify the loop without an MCP client)
 
@@ -238,7 +252,7 @@ fields. Sweeping a device across an experiment is done in the adapter cfg's
 **Stash reusable constants in the context (md/ml), then reference them by name
 in cfg.** Channel numbers, `res_probe_len`, probe-pulse lengths etc. go into the
 MetaDict (`gui_context_set_md_attr`); named waveforms/modules go into the
-ModuleLibrary (`gui_context_new`/role tools). A cfg field can then reference
+ModuleLibrary (`gui_ml_create_from_role`/role tools). A cfg field can then reference
 `md.<attr>` (e.g. a pulse `freq: r_f`) or a module/waveform by its library key,
 instead of hard-coding — the notebook does exactly this (`md.res_ch`,
 `ro_waveform`, `readout_rf`, `pi_amp`).
@@ -256,7 +270,7 @@ hardware) — the smoke harness uses it.
 - **`/mcp reconnect` does NOT stop the running GUI — it keeps its port.** A
   reconnect drops the bridge's socket but leaves the old `run_gui.py` listening
   on 8765. So always `gui_stop` (or kill it) before relaunching. `gui_launch`
-  now fails fast if the port is occupied ("Port 8765 is already in use …")
+  fails fast if the port is occupied ("Port 8765 is already in use …")
   rather than silently attaching to the stale process — but if you ignore that
   error you stay on old code. **The handshake alone won't save you:** a stale
   process reports whatever version it was built at, so if it happens to match,
@@ -270,8 +284,8 @@ hardware) — the smoke harness uses it.
 - **Analyze and run are separate operations; both make the tab busy.** Saving
   or editing while a tab is running/analyzing returns
   `precondition_failed: ... is busy`. Wait for the operation to settle
-  (`tab.snapshot.interaction.is_analyzing` / `is_running` false, or the
-  `run_finished` event) before the next mutating call. (The smoke harness hits
+  (`tab.snapshot.interaction.is_analyzing` / `is_running` false, or
+  `gui_run_wait` / `gui_run_poll`) before the next mutating call. (The smoke harness hits
   this — it waits on `is_analyzing` before `save.data`.)
 - **`run` success is not `analyze` success.** A completed acquisition can still
   produce a bad or misleading fit. On real data, open the figure and verify the
@@ -283,7 +297,11 @@ hardware) — the smoke harness uses it.
 - **cfg paths have no `value` segment.** Module sub-fields are
   `modules.qub_pulse.freq`, not `...qub_pulse.value.freq`; an unknown path
   fails `invalid_params` rather than silently no-op'ing. Always confirm against
-  `gui_tab_list_paths`.
+  `gui_tab_list_paths`. **Do NOT lift paths out of `gui_tab_get_cfg_summary`:**
+  that view deliberately wraps each module/waveform ref as `{chosen, value:{...}}`
+  (so it can keep EvalValue expressions and the chosen variant, which lowering
+  would drop) — so its keys carry the extra `.value.` segment. It is a values/
+  expressions view, not a path source; get editable paths from `list_paths`.
 - **Edit through the tab's `editor_id`, not the tab directly.** Take `editor_id`
   from `gui_tab_snapshot`; `gui_editor_set_field` edits the same draft the form
   shows. Switching a ModuleRef key (`<path>.ref`) returns `removed`/`added`

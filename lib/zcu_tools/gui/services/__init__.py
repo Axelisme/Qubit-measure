@@ -2,6 +2,7 @@
 
 from .analyze import AnalyzeService
 from .app_services import AppServices, build_app_services
+from .caretaker import PersistenceCaretaker, RestoreOutcome
 from .connection import ConnectionService
 from .context import ContextService
 from .device import (
@@ -27,7 +28,6 @@ from .operation_gate import (
     OperationLease,
     OperationOutcome,
 )
-from .caretaker import PersistenceCaretaker, RestoreOutcome
 from .persistence_types import (
     APP_STATE_VERSION,
     DEFAULT_LEFT_PANEL_WIDTH,

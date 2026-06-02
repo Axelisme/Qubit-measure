@@ -54,6 +54,24 @@ def test_flush_then_restore_roundtrip(tmp_path: Path):
     assert receiver.restored == state
 
 
+def test_restore_with_load_false_ignores_file_uses_defaults(tmp_path: Path):
+    # A "clean" start: even though a valid file exists on disk, load=False
+    # restores a default snapshot and never reads it. The file stays untouched.
+    state = _sample_state()
+    PersistenceCaretaker(_FakeOriginator(state), cache_dir=tmp_path).flush()
+
+    receiver = _FakeOriginator(AppPersistedState())
+    caretaker = PersistenceCaretaker(receiver, cache_dir=tmp_path)
+    on_disk_before = caretaker.state_path.read_text(encoding="utf-8")
+
+    outcome = caretaker.restore_all(load=False)
+
+    assert outcome.load_error is None
+    assert receiver.restored == AppPersistedState()  # default, not the file
+    # restore must not touch the file (a later flush at close still overwrites).
+    assert caretaker.state_path.read_text(encoding="utf-8") == on_disk_before
+
+
 def test_restore_missing_file_uses_defaults(tmp_path: Path):
     receiver = _FakeOriginator(AppPersistedState())
     caretaker = PersistenceCaretaker(receiver, cache_dir=tmp_path)
