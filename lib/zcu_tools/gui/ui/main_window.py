@@ -411,9 +411,25 @@ class ExpTabWidget(QWidget):
     def _schedule_handle_layout(self) -> None:
         QTimer.singleShot(0, self._layout_collapsed_handle)
 
-    # ── cfg helpers ───────────────────────────────────────────────────────
+    # ── attach / detach (whole-tab, snapshot-driven) ──────────────────────
 
-    def populate_cfg(self, schema: "CfgSchema", ctrl: "Controller") -> None:
+    def attach(self, snapshot: "TabSnapshot", main_window: "MainWindow") -> None:
+        """Bring this tab widget to life from one snapshot (mirrors
+        ``CfgFormWidget.attach`` at the whole-tab scale): seed every sub-view
+        from the snapshot's live fields, then wire the controller signals.
+        Paired with :meth:`detach`. The snapshot is always a render snapshot
+        (live fields populated)."""
+        self._populate_cfg(snapshot.cfg_schema, self._ctrl)
+        if snapshot.analyze_params is not None and self.has_analyze_params():
+            self.analyze_form.populate_values(snapshot.analyze_params)
+        if snapshot.save_paths is not None:
+            self.set_save_paths(
+                snapshot.save_paths.data_path, snapshot.save_paths.image_path
+            )
+        self.update_interaction_state(snapshot)
+        self._bind_to_controller(main_window)
+
+    def _populate_cfg(self, schema: "CfgSchema", ctrl: "Controller") -> None:
         # The cfg LiveModel is owned by the CfgEditorService (ADR-0010): open a
         # gc=False session seeded from the committed schema, then attach the
         # widget to the service-owned model. tab_id is the owner key so the
@@ -564,7 +580,7 @@ class ExpTabWidget(QWidget):
             idle and state.has_context and state.has_analyze_result
         )
 
-    def bind_to_controller(self, main_window: "MainWindow") -> None:
+    def _bind_to_controller(self, main_window: "MainWindow") -> None:
         tab_id = self.tab_id
 
         def validity_cb(_valid: bool) -> None:
@@ -619,7 +635,11 @@ class ExpTabWidget(QWidget):
         models = tuple(m for _, m in self._ctrl.progress_bars(self.tab_id))
         self.progress_stack.render_models(models)
 
-    def unbind_from_controller(self) -> None:
+    def detach(self) -> None:
+        """Tear this tab widget down (mirrors ``CfgFormWidget.detach`` at the
+        whole-tab scale): drop the controller signal bindings, detach the cfg
+        widget, and tell the service to tear down the model it owns (ADR-0010).
+        Paired with :meth:`attach`."""
         if hasattr(self, "_validity_cb"):
             self.cfg_form.validity_changed.disconnect(self._validity_cb)
         if hasattr(self, "_schema_cb"):
@@ -792,29 +812,19 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(tab_w, tab_label)
         self._tabs.setCurrentWidget(tab_w)
 
+        # Bring the whole tab widget to life from one render snapshot (seed every
+        # sub-view + wire controller signals) — the whole-tab analogue of
+        # CfgFormWidget.attach.
         snapshot = self._ctrl.get_tab_snapshot(tab_id)
-        tab_w.populate_cfg(snapshot.cfg_schema, self._ctrl)
-        if snapshot.analyze_params is not None and tab_w.has_analyze_params():
-            tab_w.analyze_form.populate_values(snapshot.analyze_params)
-        if snapshot.save_paths is not None:
-            tab_w.set_save_paths(
-                snapshot.save_paths.data_path,
-                snapshot.save_paths.image_path,
-            )
-
-        # refresh state (enables/disables buttons based on context)
         self._new_tab_btn.setEnabled(self._ctrl.get_running_tab_id() is None)
-        tab_w.update_interaction_state(snapshot)
-
-        # wire all signals/buttons for this tab
-        tab_w.bind_to_controller(self)
+        tab_w.attach(snapshot, self)
 
     def _on_bus_tab_closed(self, payload: TabClosedPayload) -> None:
         tab_id = payload.tab_id
         logger.info("_on_bus_tab_closed: tab_id=%r", tab_id)
         tab_w = self._tab_widgets.pop(tab_id, None)
         if tab_w is not None:
-            tab_w.unbind_from_controller()
+            tab_w.detach()
             index = self._tabs.indexOf(tab_w)
             if index >= 0:
                 self._tabs.removeTab(index)

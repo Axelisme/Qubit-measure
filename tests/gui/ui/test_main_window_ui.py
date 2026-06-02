@@ -373,13 +373,15 @@ def _pulse_schema():
     return CfgSchema(spec=spec, value=make_default_value(spec))
 
 
-def test_exp_tab_opens_cfg_editor_on_populate(qapp):
+def test_exp_tab_opens_cfg_editor_on_attach(qapp):
+    import dataclasses
+
     from zcu_tools.gui.ui.main_window import ExpTabWidget, MainWindow
 
     ctrl = _editor_wiring_ctrl()
     tab = ExpTabWidget("tab-1", ctrl)
-    tab.populate_cfg(_pulse_schema(), ctrl)
-    tab.bind_to_controller(MainWindow(ctrl))
+    snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
+    tab.attach(snapshot, MainWindow(ctrl))
 
     # Opened a gc=False seeded session keyed by the tab id, and attached the
     # widget to the service-owned model.
@@ -391,14 +393,16 @@ def test_exp_tab_opens_cfg_editor_on_populate(qapp):
     assert tab.cfg_form.get_live_root() is ctrl.get_cfg_editor_root.return_value
 
 
-def test_exp_tab_tears_down_cfg_editor_on_unbind(qapp):
+def test_exp_tab_tears_down_cfg_editor_on_detach(qapp):
+    import dataclasses
+
     from zcu_tools.gui.ui.main_window import ExpTabWidget, MainWindow
 
     ctrl = _editor_wiring_ctrl()
     tab = ExpTabWidget("tab-1", ctrl)
-    tab.populate_cfg(_pulse_schema(), ctrl)
-    tab.bind_to_controller(MainWindow(ctrl))
-    tab.unbind_from_controller()
+    snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
+    tab.attach(snapshot, MainWindow(ctrl))
+    tab.detach()
 
     ctrl.teardown_cfg_editor.assert_called_once_with("editor-tab1")
     assert tab._cfg_editor_id is None
