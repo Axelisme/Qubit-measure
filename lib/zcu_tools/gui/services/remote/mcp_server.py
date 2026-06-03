@@ -792,7 +792,7 @@ def tool_gui_launch(arguments: Dict[str, Any]) -> str:
     # avoids the hardcoded '.venv/bin/python' that does not exist on Windows
     # (which uses '.venv\Scripts\python.exe').
     python = sys.executable
-    run_gui = repo_root / "run_gui.py"
+    run_gui = repo_root / "script" / "run_gui.py"
 
     if not run_gui.exists():
         raise FileNotFoundError(f"run_gui.py not found at {run_gui}")

@@ -302,7 +302,7 @@ def test_inspect_dialog_modify_clears_form_widget_after_exec(qapp, monkeypatch):
 
 
 def _catalog():
-    from zcu_tools.experiment.v2_gui.role_catalog_registry import register_all_roles
+    from zcu_tools.experiment.v2_gui.registry import register_all_roles
     from zcu_tools.gui.role_catalog import RoleCatalog
 
     cat = RoleCatalog()

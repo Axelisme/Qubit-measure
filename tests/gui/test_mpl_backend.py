@@ -9,6 +9,36 @@ from pathlib import Path
 import pytest
 
 
+def test_gui_package_import_is_matplotlib_clean():
+    """``import zcu_tools.gui`` must not pull in matplotlib.
+
+    This is the invariant that lets an entry script do
+    ``from zcu_tools.gui import configure_gui_matplotlib_backend`` first and
+    configure the backend before any pyplot import. Run in a subprocess because
+    the pytest process has already imported matplotlib.
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+    script = textwrap.dedent(
+        """
+        import sys
+        import zcu_tools.gui  # noqa: F401
+
+        leaked = sorted(m for m in sys.modules if m.split(".")[0] == "matplotlib")
+        assert not leaked, f"importing zcu_tools.gui leaked matplotlib: {leaked}"
+        print("ok")
+        """
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "ok" in proc.stdout
+
+
 def test_configure_gui_matplotlib_backend_fails_after_pyplot_import():
     import matplotlib.pyplot as plt
 
@@ -20,7 +50,7 @@ def test_configure_gui_matplotlib_backend_fails_after_pyplot_import():
         configure_gui_matplotlib_backend()
 
 
-def test_custom_backend_supports_pyplot_in_active_container(tmp_path):
+def test_custom_backend_supports_pyplot_in_active_container():
     repo_root = Path(__file__).resolve().parents[2]
     script = textwrap.dedent(
         """
@@ -100,7 +130,7 @@ def test_configure_gui_matplotlib_backend_is_idempotent_after_preconfigure():
 
 
 def test_make_empty_ctx_builds_runtime_context():
-    from zcu_tools.experiment.v2_gui.app import _make_empty_ctx
+    from zcu_tools.gui.app import _make_empty_ctx
 
     ctx = _make_empty_ctx()
 

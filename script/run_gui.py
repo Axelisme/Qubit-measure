@@ -103,11 +103,27 @@ if __name__ == "__main__":
         log_file=Path(args.log_file) if args.log_file else None,
     )
 
-    from zcu_tools.gui.mpl_backend_setup import configure_gui_matplotlib_backend
+    # Configure the matplotlib backend before importing anything that uses
+    # matplotlib. ``zcu_tools.gui`` is import-clean (it does not pull in
+    # matplotlib), so this import cannot load pyplot too early.
+    from zcu_tools.gui import configure_gui_matplotlib_backend
 
     configure_gui_matplotlib_backend()
 
-    from zcu_tools.experiment.v2_gui.app import run_app
+    from zcu_tools.gui.app import run_app
+
+    # Composition root: wire the experiment-adapter layer (experiment.v2_gui)
+    # into the GUI framework. run_app receives the populated registry/catalog,
+    # so the GUI framework itself never imports the experiment layer.
+    from zcu_tools.gui.registry import Registry
+    from zcu_tools.gui.role_catalog import RoleCatalog
+    from zcu_tools.experiment.v2_gui.registry import register_all, register_all_roles
+
+    registry = Registry()
+    register_all(registry)
+
+    role_catalog = RoleCatalog()
+    register_all_roles(role_catalog)
 
     control_opts = None
     if args.control_port is not None:
@@ -119,4 +135,9 @@ if __name__ == "__main__":
             allow_external=args.control_allow_external,
         )
 
-    run_app(control_opts=control_opts, clean=args.clean)
+    run_app(
+        registry,
+        role_catalog,
+        control_opts=control_opts,
+        clean=args.clean,
+    )

@@ -11,7 +11,7 @@ loop keeps pumping while the dialog is visible — this is mandatory for
 remote-driven flows where a follow-up RPC must still be dispatchable.
 ``WA_DeleteOnClose`` + ``finished`` signal handler keep the registry clean.
 
-The ``STARTUP`` factory is registered late by ``experiment/v2_gui/app.py``
+The ``STARTUP`` factory is registered late by ``gui/app.py``
 because the startup dialog construction needs ``startup_mode=True`` and is
 typically opened by the application bootstrap, not by an explicit click.
 """

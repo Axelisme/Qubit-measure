@@ -1,4 +1,15 @@
-"""App entry point — assembles all components and launches the GUI."""
+"""GUI composition root — assembles all components and launches the app.
+
+This module depends only on ``zcu_tools.gui``; it does not know which concrete
+experiments exist. The entry script wires a populated ``Registry`` /
+``RoleCatalog`` (built from ``experiment.v2_gui``) and passes them in — so the
+GUI framework never imports the experiment-adapter layer.
+
+The matplotlib backend must already be configured before ``run_app`` runs (the
+entry script calls ``configure_gui_matplotlib_backend`` before importing this
+module); this module only assembles and launches, it does not configure the
+backend itself.
+"""
 
 from __future__ import annotations
 
@@ -16,8 +27,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.state import State
     from zcu_tools.gui.ui.main_window import MainWindow
 
-from zcu_tools.gui.mpl_backend_setup import configure_gui_matplotlib_backend
-
 
 def _make_empty_ctx() -> "ExpContext":
     """Minimal startup context: real empty MetaDict/ModuleLibrary, no file sync."""
@@ -33,9 +42,16 @@ def _make_empty_ctx() -> "ExpContext":
 
 
 def run_app(
-    control_opts: Optional["ControlOptions"] = None, clean: bool = False
+    registry: "Registry",
+    role_catalog: "RoleCatalog",
+    control_opts: Optional["ControlOptions"] = None,
+    clean: bool = False,
 ) -> None:
     """Build and launch the GUI. Blocks until the window is closed.
+
+    ``registry`` and ``role_catalog`` are already populated by the entry script
+    (the GUI framework does not know which experiments exist — the script wires
+    them from ``experiment.v2_gui``).
 
     ``control_opts`` (if provided) starts a ``RemoteControlAdapter`` after the
     window is constructed; the adapter is stopped from ``MainWindow.closeEvent``.
@@ -48,28 +64,15 @@ def run_app(
 
     install_global_exception_hook()
 
-    configure_gui_matplotlib_backend()
-
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 
     from zcu_tools.gui.io_manager import IOManager
-    from zcu_tools.gui.registry import Registry
-    from zcu_tools.gui.role_catalog import RoleCatalog
     from zcu_tools.gui.runner import Runner
     from zcu_tools.gui.state import State
-
-    from .registry import register_all
-    from .role_catalog_registry import register_all_roles
 
     app = QApplication.instance() or QApplication(sys.argv)
 
     # --- wire up components ---
-    registry = Registry()
-    register_all(registry)
-
-    role_catalog = RoleCatalog()
-    register_all_roles(role_catalog)
-
     state = State(_make_empty_ctx())
     runner = Runner()
     io_manager = IOManager()

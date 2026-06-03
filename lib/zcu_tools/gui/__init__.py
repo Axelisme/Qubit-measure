@@ -28,6 +28,7 @@ from .adapter import (
     reconstruct_params,
 )
 from .io_manager import IOManager
+from .mpl_backend_setup import configure_gui_matplotlib_backend
 from .registry import Registry
 from .state import Session, State
 from .sweep_model import SweepEditor
@@ -39,6 +40,7 @@ __all__ = [
     "CfgSectionSpec",
     "CfgSectionValue",
     "DirectValue",
+    "configure_gui_matplotlib_backend",
     "EvalValue",
     "ExpAdapterProtocol",
     "ExpContext",
