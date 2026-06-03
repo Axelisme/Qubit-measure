@@ -1,0 +1,155 @@
+"""Tests for fluxdep-gui state: VersionTable (copied mechanism) + FluxDepState."""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+from zcu_tools.fluxdep_gui.state import (
+    PROJECT_VERSION_KEY,
+    SELECTION_VERSION_KEY,
+    SPECTRUM_SET_VERSION_KEY,
+    FluxDepState,
+    ProjectInfo,
+    SpectrumEntry,
+    SpecType,
+    VersionTable,
+    spectrum_version_key,
+)
+from zcu_tools.notebook.persistance import PointsData, SpectrumData
+
+
+def _empty_points() -> PointsData:
+    e = np.empty(0, dtype=np.float64)
+    return PointsData(dev_values=e.copy(), fluxs=e.copy(), freqs=e.copy())
+
+
+def _make_entry(name: str, spec_type: SpecType = "OneTone") -> SpectrumEntry:
+    e = np.linspace(0.0, 1.0, 3).astype(np.float64)
+    raw = SpectrumData(
+        dev_values=e.copy(),
+        fluxs=e.copy(),
+        freqs=e.copy(),
+        signals=np.zeros((3, 3), dtype=np.complex128),
+    )
+    return SpectrumEntry(
+        name=name, spec_type=spec_type, raw=raw, points=_empty_points()
+    )
+
+
+# ---------------------------------------------------------------------------
+# VersionTable (copied verbatim from measure — verify mechanism intact)
+# ---------------------------------------------------------------------------
+
+
+def test_version_absent_is_zero():
+    vt = VersionTable()
+    assert vt.get("anything") == 0
+
+
+def test_version_bump_monotonic():
+    vt = VersionTable()
+    assert vt.bump("k") == 1
+    assert vt.bump("k") == 2
+    assert vt.get("k") == 2
+
+
+def test_version_drop_prefix_resets_to_zero():
+    vt = VersionTable()
+    vt.bump("spectrum:a")
+    vt.bump("spectrum:ab")
+    vt.bump("other")
+    vt.drop_prefix("spectrum:a")
+    assert vt.get("spectrum:a") == 0
+    assert vt.get("spectrum:ab") == 0  # prefix match
+    assert vt.get("other") == 1  # untouched
+
+
+def test_version_snapshot_is_copy():
+    vt = VersionTable()
+    vt.bump("k")
+    snap = vt.snapshot()
+    snap["k"] = 99
+    assert vt.get("k") == 1
+
+
+# ---------------------------------------------------------------------------
+# FluxDepState — spectrum collection + version bump↔drop
+# ---------------------------------------------------------------------------
+
+
+def test_put_spectrum_new_bumps_per_key_and_set():
+    st = FluxDepState()
+    st.put_spectrum(_make_entry("a"))
+    assert st.version.get(spectrum_version_key("a")) == 1
+    assert st.version.get(SPECTRUM_SET_VERSION_KEY) == 1
+    assert "a" in st.spectrums
+
+
+def test_put_spectrum_replace_does_not_bump_set():
+    st = FluxDepState()
+    st.put_spectrum(_make_entry("a"))
+    st.put_spectrum(_make_entry("a"))  # replace existing
+    assert st.version.get(spectrum_version_key("a")) == 2  # per-key still moves
+    assert st.version.get(SPECTRUM_SET_VERSION_KEY) == 1  # set unchanged
+
+
+def test_remove_spectrum_drops_key_bumps_set():
+    st = FluxDepState()
+    st.put_spectrum(_make_entry("a"))
+    st.remove_spectrum("a")
+    assert "a" not in st.spectrums
+    assert st.version.get(spectrum_version_key("a")) == 0  # dropped
+    assert st.version.get(SPECTRUM_SET_VERSION_KEY) == 2  # add + remove
+
+
+def test_remove_active_spectrum_clears_active():
+    st = FluxDepState()
+    st.put_spectrum(_make_entry("a"))
+    st.set_active("a")
+    st.remove_spectrum("a")
+    assert st.active_spectrum is None
+
+
+def test_set_active_unknown_raises():
+    st = FluxDepState()
+    with pytest.raises(KeyError):
+        st.set_active("nope")
+
+
+def test_set_alignment_marks_aligned_and_bumps():
+    st = FluxDepState()
+    st.put_spectrum(_make_entry("a"))
+    v0 = st.version.get(spectrum_version_key("a"))
+    st.set_alignment("a", flux_half=1.0, flux_int=2.0, flux_period=2.0)
+    entry = st.spectrums["a"]
+    assert entry.aligned is True
+    assert (entry.flux_half, entry.flux_int, entry.flux_period) == (1.0, 2.0, 2.0)
+    assert st.version.get(spectrum_version_key("a")) == v0 + 1
+
+
+def test_set_points_marks_selected_and_bumps():
+    st = FluxDepState()
+    st.put_spectrum(_make_entry("a"))
+    v0 = st.version.get(spectrum_version_key("a"))
+    pts = PointsData(
+        dev_values=np.array([1.0]),
+        fluxs=np.array([0.5]),
+        freqs=np.array([5.0]),
+    )
+    st.set_points("a", pts)
+    assert st.spectrums["a"].points_selected is True
+    assert st.version.get(spectrum_version_key("a")) == v0 + 1
+
+
+def test_set_selection_bumps_selection():
+    st = FluxDepState()
+    st.set_selection(np.array([True, False, True]))
+    assert st.version.get(SELECTION_VERSION_KEY) == 1
+    assert st.selection.selected is not None
+
+
+def test_set_project_bumps_project():
+    st = FluxDepState()
+    st.set_project(ProjectInfo(chip_name="Q5_2D", qub_name="Q1"))
+    assert st.version.get(PROJECT_VERSION_KEY) == 1
+    assert st.project.chip_name == "Q5_2D"

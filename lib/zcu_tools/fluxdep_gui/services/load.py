@@ -1,0 +1,103 @@
+"""LoadService — read a raw spectrum hdf5 into a SpectrumEntry.
+
+Depends only on the low-level ``load_data`` (pure hdf5 IO) and ``format_rawdata``
+(Hz→GHz + monotonic ordering); it does NOT import ``experiment.v2`` (that would
+pull the whole measure experiment layer into fluxdep). OneTone and TwoTone load
+identically — ``spec_type`` is metadata recorded on the entry and only branches
+the point-selection tool downstream.
+
+This module is the synchronous core. Wrapping it in a worker thread + OperationGate
+(so a slow load degrades to an operation handle, like measure's run/device setup)
+is layered on top later; keeping the core sync makes it directly testable.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from typing import Optional
+
+import numpy as np
+
+from zcu_tools.fluxdep_gui.state import (
+    FluxDepState,
+    SpectrumEntry,
+    SpecType,
+)
+from zcu_tools.notebook.persistance import PointsData, SpectrumData, format_rawdata
+from zcu_tools.simulate import value2flux
+from zcu_tools.utils.datasaver import load_data
+
+logger = logging.getLogger(__name__)
+
+
+def _empty_points() -> PointsData:
+    """A points block with no selected points yet (filled by PointsService)."""
+    empty = np.empty(0, dtype=np.float64)
+    return PointsData(dev_values=empty.copy(), fluxs=empty.copy(), freqs=empty.copy())
+
+
+class LoadService:
+    """Loads raw spectrum hdf5 files into the State's spectrum collection."""
+
+    def __init__(self, state: FluxDepState) -> None:
+        self._state = state
+
+    def load_spectrum(
+        self,
+        filepath: str,
+        spec_type: SpecType,
+        inherit_from: Optional[str] = None,
+    ) -> str:
+        """Load ``filepath`` as a new spectrum and write it into State.
+
+        The spectrum name is the file's basename. ``inherit_from`` (an existing
+        spectrum name) seeds this spectrum's flux alignment as an initial guess;
+        omitted, the alignment starts at the identity (flux_half=0, period=1) and
+        is refined later by the line-picker. The loaded ``fluxs`` are derived from
+        whatever alignment is in effect at load time (re-derived on alignment).
+
+        Returns the spectrum name (basename of ``filepath``).
+        """
+        signals2d, dev_values, freqs = load_data(filepath, return_comment=False)
+        if freqs is None:
+            raise ValueError(f"{filepath!r} has no frequency axis (not a 2D spectrum)")
+
+        dev_values, freqs, signals2d = format_rawdata(dev_values, freqs, signals2d)
+
+        flux_half, flux_int, flux_period = self._initial_alignment(inherit_from)
+        fluxs = value2flux(dev_values, flux_half, flux_period)
+
+        raw = SpectrumData(
+            dev_values=dev_values.astype(np.float64),
+            fluxs=np.asarray(fluxs, dtype=np.float64),
+            freqs=freqs.astype(np.float64),
+            signals=signals2d.astype(np.complex128),
+        )
+
+        name = os.path.basename(filepath)
+        entry = SpectrumEntry(
+            name=name,
+            spec_type=spec_type,
+            raw=raw,
+            points=_empty_points(),
+            flux_half=flux_half,
+            flux_int=flux_int,
+            flux_period=flux_period,
+        )
+        self._state.put_spectrum(entry)
+        logger.debug(
+            "load_spectrum: %r as %s (inherit_from=%r)", name, spec_type, inherit_from
+        )
+        return name
+
+    def _initial_alignment(
+        self, inherit_from: Optional[str]
+    ) -> tuple[float, float, float]:
+        """Seed alignment from an existing spectrum, or the identity default."""
+        if inherit_from is None:
+            return 0.0, 0.0, 1.0
+        src = self._state.spectrums.get(inherit_from)
+        if src is None:
+            raise KeyError(f"inherit_from spectrum {inherit_from!r} not loaded")
+        return src.flux_half, src.flux_int, src.flux_period
