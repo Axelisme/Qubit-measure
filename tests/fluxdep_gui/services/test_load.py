@@ -150,5 +150,6 @@ def test_load_processed_roundtrip(spectrum_hdf5, tmp_path):
     entry = st2.spectrums[name]
     assert entry.aligned is True
     assert entry.points_selected is True
+    assert entry.spec_type == "OneTone"  # type now persisted (was lost → TwoTone)
     assert entry.flux_period == 2.0
     np.testing.assert_allclose(entry.points["freqs"], [5.0, 5.5])

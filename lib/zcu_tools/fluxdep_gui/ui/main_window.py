@@ -97,7 +97,7 @@ class MainWindow(QMainWindow):
         # then the cross-spectrum filter. (Re-do buttons live in the right-side
         # result preview.)
         io_row = QHBoxLayout()
-        self._reload_btn = QPushButton("Load")
+        self._reload_btn = QPushButton("Restore")
         self._reload_btn.clicked.connect(self._on_reload_clicked)
         self._export_btn = QPushButton("Export")
         self._export_btn.clicked.connect(self._on_export_clicked)

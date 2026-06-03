@@ -119,6 +119,10 @@ def dump_spectrums(
     with h5.File(path, mode) as f:
         for name, spectrum in spectrums.items():
             grp = f.create_group(name)
+            # ``type`` (OneTone / TwoTone) is metadata, stored as a group
+            # attribute when present (NotRequired field).
+            if "type" in spectrum:
+                grp.attrs["type"] = spectrum["type"]
             grp.create_dataset("flux_half", data=spectrum["flux_half"])
             grp.create_dataset("flux_int", data=spectrum["flux_int"])
             grp.create_dataset("flux_period", data=spectrum["flux_period"])
@@ -147,7 +151,7 @@ def load_spectrums(path: str) -> dict[str, SpectrumResult]:
             points_grp = grp["points"]
             assert isinstance(spect_grp, h5.Group)
             assert isinstance(points_grp, h5.Group)
-            spectrums[name] = SpectrumResult(
+            result = SpectrumResult(
                 flux_half=grp["flux_half"][()],  # type: ignore
                 flux_int=grp["flux_int"][()],  # type: ignore
                 flux_period=grp["flux_period"][()],  # type: ignore
@@ -163,5 +167,10 @@ def load_spectrums(path: str) -> dict[str, SpectrumResult]:
                     "freqs": points_grp["freqs"][()],  # type: ignore
                 },
             )
+            # ``type`` is optional and absent in legacy files (written as a group
+            # attribute since the type-persistence fix); only set it when present.
+            if "type" in grp.attrs:
+                result["type"] = str(grp.attrs["type"])
+            spectrums[name] = result
 
     return spectrums

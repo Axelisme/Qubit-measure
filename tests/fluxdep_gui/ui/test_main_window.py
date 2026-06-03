@@ -157,5 +157,5 @@ def test_button_labels(window):
 
     labels = [b.text() for b in window.findChildren(QPushButton)]
     assert "Add…" in labels  # raw spectrum add
-    assert "Load" in labels  # processed spectrums.hdf5
+    assert "Restore" in labels  # processed spectrums.hdf5
     assert "Export" in labels
