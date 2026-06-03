@@ -124,3 +124,13 @@ def test_widget_without_flux_markers_ok(qapp):
     w = OneToneWidget(signals, devs, freqs)
     assert w.get_result()[0].size >= 0
     w.deleteLater()
+
+
+def test_threshold_change_reuses_scatter_and_debounces_redraw(widget):
+    # the peak scatters are reused (set_offsets), not rebuilt each tick
+    img0, curve0 = widget._scatter_img, widget._scatter_curve
+    widget._threshold_slider.setValue(int(2.0 * 100))  # emits valueChanged
+    assert widget._scatter_img is img0  # same artist, only offsets moved
+    assert widget._scatter_curve is curve0
+    # the whole-figure redraw is debounced, not immediate
+    assert widget._redraw_timer.isActive()

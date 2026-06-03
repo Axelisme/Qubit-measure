@@ -13,7 +13,7 @@ from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
 from qtpy.QtWidgets import QLabel, QSlider, QWidget  # type: ignore[attr-defined]
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
@@ -88,6 +88,12 @@ class OneToneWidget(InteractiveMplWidget):
         self._s_dev_values: NDArray[np.float64] = np.empty(0, dtype=np.float64)
         self._s_freqs: NDArray[np.float64] = np.empty(0, dtype=np.float64)
 
+        # Debounce the (whole-figure) redraw so rapid slider ticks coalesce.
+        self._redraw_timer = QTimer(self)
+        self._redraw_timer.setSingleShot(True)
+        self._redraw_timer.setInterval(50)
+        self._redraw_timer.timeout.connect(self.redraw)
+
         self._build_controls(threshold)
         self._init_plots()
         self.update_peaks(threshold)
@@ -141,8 +147,13 @@ class OneToneWidget(InteractiveMplWidget):
         self._ax_img.set_ylabel("Frequency (GHz)")
         self._ax_curve.set_xlabel("Device value")
         self._ax_curve.set_ylabel("Normalized Amplitude")
-        self._scatter_img = None
-        self._scatter_curve = None
+        # Pre-create the peak scatters once; update_peaks just moves the offsets
+        # (rebuilding the artist every slider tick was the cost, not the O(N)
+        # find_peaks which is ~0.1ms).
+        self._scatter_img = self._ax_img.scatter([], [], color="red", s=30, zorder=5)
+        self._scatter_curve = self._ax_curve.scatter(
+            [], [], color="red", s=30, zorder=5
+        )
 
     def update_peaks(self, threshold: float) -> None:
         peaks = detect_peaks(self._smoothed, threshold)
@@ -151,17 +162,19 @@ class OneToneWidget(InteractiveMplWidget):
             self._s_dev_values, self._freqs[self._max_freq_idx]
         )
 
-        if self._scatter_img is not None:
-            self._scatter_img.remove()
-        if self._scatter_curve is not None:
-            self._scatter_curve.remove()
-        self._scatter_img = self._ax_img.scatter(
-            self._s_dev_values, self._s_freqs, color="red", s=30, zorder=5
+        def _offsets(xs, ys):
+            return np.column_stack((xs, ys)) if len(xs) else np.empty((0, 2))
+
+        self._scatter_img.set_offsets(_offsets(self._s_dev_values, self._s_freqs))
+        self._scatter_curve.set_offsets(
+            _offsets(self._s_dev_values, self._smoothed[peaks])
         )
-        self._scatter_curve = self._ax_curve.scatter(
-            self._s_dev_values, self._smoothed[peaks], color="red", s=30, zorder=5
-        )
-        self.redraw()
+        self._schedule_redraw()
+
+    def _schedule_redraw(self) -> None:
+        # Coalesce rapid slider ticks: redrawing the whole figure (large imshow)
+        # is the slow part, so debounce it rather than redraw on every tick.
+        self._redraw_timer.start()
 
     def _on_threshold_change(self, _value: int) -> None:
         self.update_peaks(self._threshold())
