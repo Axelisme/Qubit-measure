@@ -6,6 +6,14 @@
 [mcp_servers.measure-gui]
 command = "uv"
 args = ["run", "--extra", "gui", "python", "lib/zcu_tools/gui/services/remote/mcp_server.py"]
+env_vars = [
+  "QT_QPA_PLATFORM",
+  "DISPLAY",
+  "WAYLAND_DISPLAY",
+  "XDG_RUNTIME_DIR",
+  "DBUS_SESSION_BUS_ADDRESS",
+  "XDG_SESSION_TYPE",
+]
 # Auto-approve every measure-gui tool call (no per-call confirmation), the Codex
 # analogue of the "mcp__measure-gui" allow rule in .claude/settings.local.json.
 default_tools_approval_mode = "auto"
@@ -104,4 +112,64 @@ approval_mode = "approve"
 approval_mode = "approve"
 
 [mcp_servers.measure-gui.tools.gui_context_get_md_attr]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_connect]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_view_snapshot]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_app_shutdown]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_context_get_ml]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_adapter_cfg_spec]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_tab_get_cfg_summary]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_run_poll]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_tab_figure_screenshot]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_save_result]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_run_running_tab]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_run_cancel]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_tab_list]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_tab_close]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_dialog_list_open]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_dialog_open]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_device_list]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_view_screenshot]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_dialog_screenshot]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_dialog_close]
+approval_mode = "approve"
+
+[mcp_servers.measure-gui.tools.gui_stop]
 approval_mode = "approve"

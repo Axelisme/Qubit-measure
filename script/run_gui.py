@@ -15,10 +15,8 @@ import logging
 import sys
 from pathlib import Path
 
-# Make sure lib/ is on the path when running from the repo root
-sys.path.insert(0, str(Path(__file__).parent / "lib"))
 
-LOG_FILE = Path(__file__).parent / "gui_debug.log"
+LOG_FILE = Path(__file__).parent.parent / "gui_debug.log"
 LOG_FORMAT = "%(asctime)s.%(msecs)03d [%(levelname)-7s] %(name)s: %(message)s"
 LOG_DATE = "%H:%M:%S"
 
