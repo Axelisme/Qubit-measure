@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import warnings
+from typing import Any
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -8,6 +9,8 @@ from IPython.display import display
 from matplotlib.animation import FFMpegWriter
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+
+from .base import LivePlotBackend
 
 
 def instant_plot(fig: Figure) -> None:
@@ -51,27 +54,6 @@ def instant_plot(fig: Figure) -> None:
     display(canvas)
 
 
-def make_plot_frame(
-    n_row: int, n_col: int, plot_instant=False, **kwargs
-) -> tuple[Figure, list[list[Axes]]]:
-    kwargs.setdefault("squeeze", False)
-    kwargs.setdefault("figsize", (6 * n_col, 4 * n_row))
-    fig, axs = plt.subplots(n_row, n_col, **kwargs)
-
-    if plot_instant:
-        instant_plot(fig)
-
-    return fig, axs
-
-
-def refresh_figure(fig: Figure) -> None:
-    fig.canvas.draw()
-
-
-def close_figure(fig: Figure) -> None:
-    plt.close(fig)
-
-
 def grab_frame_with_instant_plot(writer: FFMpegWriter, **savefig_kwargs) -> None:
     """
     Equivalent to writer.grab_frame, but it work with figure setting by instant_plot.
@@ -98,3 +80,26 @@ def grab_frame_with_instant_plot(writer: FFMpegWriter, **savefig_kwargs) -> None
         dpi=writer.dpi,
         **savefig_kwargs,
     )
+
+
+class JupyterBackend(LivePlotBackend):
+    """Render into a Jupyter notebook (ipympl/widget canvas)."""
+
+    def make_plot_frame(
+        self, n_row: int, n_col: int, plot_instant: bool = False, **kwargs: Any
+    ) -> tuple[Figure, list[list[Axes]]]:
+        kwargs.setdefault("squeeze", False)
+        kwargs.setdefault("figsize", (6 * n_col, 4 * n_row))
+        fig, axs = plt.subplots(n_row, n_col, **kwargs)
+        if plot_instant:
+            instant_plot(fig)
+        return fig, axs
+
+    def instant_plot(self, fig: Figure) -> None:
+        instant_plot(fig)
+
+    def refresh_figure(self, fig: Figure) -> None:
+        fig.canvas.draw()
+
+    def close_figure(self, fig: Figure) -> None:
+        plt.close(fig)

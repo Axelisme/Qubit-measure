@@ -28,6 +28,8 @@ from .plot_host import (
     activate_figure,
     attach_figure_to_current_container,
     get_figure_container,
+    is_main_thread,
+    refresh_figure_in_main_thread,
     remove_canvas,
 )
 
@@ -65,13 +67,32 @@ class GuiFigureCanvas(FigureCanvasQTAgg):
     required_interactive_framework = None
     manager_class = GuiFigureManager
 
+    def draw_idle(self, *args: object, **kwargs: object) -> None:
+        """Thread-safe ``draw_idle``: absorb the worker→main-thread marshalling.
+
+        ``draw_idle`` is the non-blocking "please repaint" request — liveplot's
+        per-update refresh calls it, and that refresh runs on a worker thread.
+        Painting a Qt canvas off the main thread is undefined, so a worker call
+        is marshalled to the main thread fire-and-forget (preserving the
+        non-blocking contract). A main-thread call (e.g. matplotlib internals,
+        analysis) draws inline. The liveplot backend stays Qt/gui-unaware: it
+        just calls ``draw_idle`` as if single-threaded; this canvas hides where
+        the painting actually happens.
+        """
+        if is_main_thread():
+            super().draw_idle(*args, **kwargs)
+        else:
+            refresh_figure_in_main_thread(self.figure)
+
 
 FigureCanvas = GuiFigureCanvas
 FigureManager = GuiFigureManager
 
 
+# Registered into matplotlib's backend registry by @_Backend.export; the class
+# name itself is never referenced (matplotlib convention).
 @_Backend.export
-class _BackendGui(_Backend):
+class _BackendGui(_Backend):  # noqa: F811  # pyright: ignore[reportUnusedClass]
     FigureCanvas = GuiFigureCanvas
     FigureManager = GuiFigureManager
     backend_version = "gui-embedded"

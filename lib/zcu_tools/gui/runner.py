@@ -7,7 +7,10 @@ from typing import Any, Callable, Optional
 from qtpy.QtCore import QObject, QThread, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.experiment.v2.runner.base import ActiveTask
+from zcu_tools.liveplot.backend import set_liveplot_backend
 from zcu_tools.progress_bar.interface import use_pbar_factory
+
+from .adapters.qt_liveplot_backend import QtLivePlotBackend
 
 from .adapter import (
     AnalyzeRequest,
@@ -56,7 +59,11 @@ class RunWorker(QThread):
     def run(self) -> None:
         logger.debug("RunWorker.run: start adapter=%s", type(self._adapter).__name__)
         try:
-            with routing_scope(self._figure_container), ActiveTask(self._stop_event):
+            with (
+                routing_scope(self._figure_container),
+                set_liveplot_backend(QtLivePlotBackend()),
+                ActiveTask(self._stop_event),
+            ):
                 if self._pbar_factory is not None:
                     with use_pbar_factory(self._pbar_factory):
                         result = self._adapter.run(self._req, self._schema)

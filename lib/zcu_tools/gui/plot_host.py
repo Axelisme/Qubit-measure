@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING, Any, Optional
 
 logger = logging.getLogger(__name__)
 
-from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from qtpy.QtCore import (  # type: ignore[attr-defined]
     QCoreApplication,
@@ -91,35 +90,6 @@ class FigureContainer:
 class PlotStateSnapshot:
     active_figure_count: int
     attached_figure_ids: tuple[int, ...]
-
-
-def create_figure_in_current_container(
-    n_row: int, n_col: int, **kwargs: Any
-) -> tuple[Figure, list[list[Axes]]]:
-    container = require_current_container()
-    kwargs.setdefault("squeeze", False)
-    kwargs.setdefault("figsize", (6 * n_col, 4 * n_row))
-    done = threading.Event()
-    result: list[Any] = []
-    errors: list[BaseException] = []
-    _get_bridge().create_requested.emit(
-        {
-            "container": container,
-            "n_row": n_row,
-            "n_col": n_col,
-            "kwargs": kwargs,
-            "result": result,
-            "errors": errors,
-            "done": done,
-        }
-    )
-    done.wait(timeout=5.0)
-    if errors:
-        raise RuntimeError("Failed to create figure in FigureContainer") from errors[0]
-    if not result:
-        raise RuntimeError("Timed out creating figure in FigureContainer")
-    fig, axs = result[0]
-    return fig, axs
 
 
 def attach_existing_figure_to_container(
@@ -195,6 +165,19 @@ def activate_figure(fig: Figure) -> None:
     done = threading.Event()
     _get_bridge().activate_requested.emit({"fig": fig, "done": done})
     done.wait(timeout=5.0)
+
+
+def is_main_thread() -> bool:
+    """True if called on the GUI (main) thread.
+
+    The authority for "am I on the thread that may touch Qt widgets directly".
+    ``GuiFigureCanvas`` uses it to decide whether a draw can run inline or must
+    be marshalled to the main thread.
+    """
+    app = QCoreApplication.instance()
+    if app is None:
+        return False
+    return QThread.currentThread() is app.thread()
 
 
 def refresh_figure_in_main_thread(fig: Figure) -> None:
@@ -294,7 +277,6 @@ def _get_bridge() -> Any:
             )
 
         class _Bridge(QObject):
-            create_requested = Signal(object)
             attach_requested = Signal(object)
             close_requested = Signal(object)
             remove_canvas_requested = Signal(object)
@@ -303,40 +285,11 @@ def _get_bridge() -> Any:
 
             def __init__(self) -> None:
                 super().__init__()
-                self.create_requested.connect(self._on_create)
                 self.attach_requested.connect(self._on_attach)
                 self.close_requested.connect(self._on_close)
                 self.remove_canvas_requested.connect(self._on_remove_canvas)
                 self.activate_requested.connect(self._on_activate)
                 self.refresh_requested.connect(self._on_refresh)
-
-            def _on_create(self, payload: Any) -> None:
-                try:
-                    kwargs = dict(payload["kwargs"])
-                    subplot_kwargs = {
-                        "sharex": kwargs.pop("sharex", False),
-                        "sharey": kwargs.pop("sharey", False),
-                        "squeeze": kwargs.pop("squeeze", False),
-                        "subplot_kw": kwargs.pop("subplot_kw", None),
-                        "gridspec_kw": kwargs.pop("gridspec_kw", None),
-                    }
-                    if kwargs:
-                        fig = Figure(**kwargs)
-                    else:
-                        fig = Figure()
-
-                    container = payload["container"]
-                    n_row = payload["n_row"]
-                    n_col = payload["n_col"]
-                    result = payload["result"]
-
-                    axs = fig.subplots(n_row, n_col, **subplot_kwargs)
-                    _attach_figure_canvas(container, fig)
-                    result.append((fig, axs))
-                except BaseException as exc:
-                    payload["errors"].append(exc)
-                finally:
-                    payload["done"].set()
 
             def _on_attach(self, payload: Any) -> None:
                 try:
@@ -403,10 +356,10 @@ __all__ = [
     "attach_existing_figure_to_container",
     "attach_figure_to_current_container",
     "close_figure",
-    "create_figure_in_current_container",
     "dump_plot_state",
     "ensure_bridge",
     "get_figure_container",
+    "is_main_thread",
     "PlotStateSnapshot",
     "refresh_figure_in_main_thread",
     "remove_canvas",

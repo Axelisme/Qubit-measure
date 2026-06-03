@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import pytest
 from qtpy.QtWidgets import QLabel, QStackedWidget
 from zcu_tools.gui.plot_host import (
     FigureContainer,
     assert_plot_invariants,
     attach_existing_figure_to_container,
     close_figure,
-    create_figure_in_current_container,
     dump_plot_state,
+    is_main_thread,
     set_shutting_down,
 )
 from zcu_tools.gui.plot_routing import (
@@ -38,11 +37,6 @@ def test_routing_scope_round_trip(qapp):
     assert get_current_container() is None
 
 
-def test_create_figure_requires_current_container():
-    with pytest.raises(RuntimeError, match="No active FigureContainer"):
-        create_figure_in_current_container(1, 1)
-
-
 def test_attach_existing_figure_to_container(qapp):
     del qapp
 
@@ -59,34 +53,14 @@ def test_attach_existing_figure_to_container(qapp):
     plt.close(fig)
 
 
-def test_create_figure_in_current_container(qapp):
-    del qapp
-
-    with routing_scope(_make_container()):
-        fig, axs = create_figure_in_current_container(1, 1)
-
-    assert fig is not None
-    assert len(axs) == 1
-    assert len(axs[0]) == 1
-
-
-def test_auto_select_backend_prefers_qt_when_container_is_active(qapp):
-    del qapp
-
-    from zcu_tools.liveplot.backend import auto_select_backend
-
-    with routing_scope(_make_container()):
-        backend = auto_select_backend()
-
-    assert backend.__name__.endswith(".qt")
-
-
 def test_plot_state_snapshot_and_invariants(qapp):
     del qapp
 
+    import matplotlib.pyplot as plt
+
     container = _make_container()
-    with routing_scope(container):
-        fig, _ = create_figure_in_current_container(1, 1)
+    fig = plt.figure()
+    attach_existing_figure_to_container(fig, container)
 
     state = dump_plot_state()
 
@@ -94,14 +68,44 @@ def test_plot_state_snapshot_and_invariants(qapp):
     assert id(fig) in state.attached_figure_ids
     assert_plot_invariants()
 
+    plt.close(fig)
+
+
+def test_is_main_thread_true_on_gui_thread(qapp):
+    del qapp
+    assert is_main_thread() is True
+
+
+def test_gui_canvas_draw_idle_inline_on_main_thread(qapp):
+    """A GuiFigureCanvas.draw_idle on the main thread draws inline (super path),
+    not via the bridge — verified by completing without hanging.
+
+    (The pyplot→GuiFigureCanvas routing is covered by test_mpl_backend.py in a
+    subprocess; here we exercise the overridden draw_idle directly.)
+    """
+    del qapp
+
+    from matplotlib.figure import Figure
+
+    from zcu_tools.gui.mpl_backend import GuiFigureCanvas
+
+    fig = Figure()
+    canvas = GuiFigureCanvas(fig)
+    # Main-thread call: takes the inline super() path, must not raise / hang.
+    canvas.draw_idle()
+
 
 def test_close_figure_noop_when_shutting_down(qapp):
     del qapp
+
+    import matplotlib.pyplot as plt
+
+    fig = plt.figure()
     try:
         set_shutting_down(True)
         container = _make_container()
-        with routing_scope(container):
-            fig, _ = create_figure_in_current_container(1, 1)
+        attach_existing_figure_to_container(fig, container)
         close_figure(fig)
     finally:
         set_shutting_down(False)
+        plt.close(fig)
