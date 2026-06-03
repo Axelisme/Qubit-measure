@@ -1,0 +1,232 @@
+"""FindPointsWidget — two-tone point selection via a hand-painted brush mask.
+
+Port of the notebook's InteractiveFindPoints: an imshow spectrum + a translucent
+selection-mask overlay + scatter of auto-detected peaks. Clicking paints/erases a
+circular brush region of the mask; ``spectrum2d_findpoint`` (reused verbatim)
+re-detects peaks within the mask on every change. Threshold / brush-width /
+smoothing are Qt sliders; Select/Erase is a combo box.
+"""
+
+from __future__ import annotations
+
+from typing import Optional
+
+import numpy as np
+from matplotlib.backend_bases import MouseEvent
+from numpy.typing import NDArray
+from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QCheckBox,
+    QComboBox,
+    QLabel,
+    QPushButton,
+    QSlider,
+    QWidget,
+)
+
+from zcu_tools.fluxdep_gui.ui.interactive.base import InteractiveMplWidget
+from zcu_tools.notebook.analysis.fluxdep.processing import (
+    cast2real_and_norm,
+    spectrum2d_findpoint,
+)
+
+_SCALE = 1000  # int-QSlider scale for float sliders
+
+
+def toggle_near_mask(
+    dev_values: NDArray[np.float64],
+    freqs: NDArray[np.float64],
+    mask: NDArray[np.bool_],
+    x: float,
+    y: float,
+    width: float,
+    select: bool,
+) -> None:
+    """In-place select/erase the mask within a normalised circular brush.
+
+    Pure port of InteractiveFindPoints.toggle_near_mask: points whose normalised
+    (dev, freq) distance² to (x, y) is ≤ width² are set (select) or cleared
+    (erase).
+    """
+    x_d = np.abs(dev_values - x) / (dev_values[-1] - dev_values[0])
+    y_d = np.abs(freqs - y) / (freqs[-1] - freqs[0])
+    d2 = x_d[:, None] ** 2 + y_d[None, :] ** 2
+    region = d2 <= width**2
+    if select:
+        mask |= region
+    else:
+        mask &= ~region
+
+
+class FindPointsWidget(InteractiveMplWidget):
+    """Brush-mask point selection for a two-tone flux spectrum."""
+
+    def __init__(
+        self,
+        signals: NDArray[np.complex128],
+        dev_values: NDArray[np.float64],
+        freqs: NDArray[np.float64],
+        threshold: float = 1.0,
+        brush_width: float = 0.05,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self._signals = signals
+        self._dev_values = dev_values
+        self._freqs = freqs
+        self._mask = np.ones((len(dev_values), len(freqs)), dtype=bool)
+        self._s_dev_values: NDArray[np.float64] = np.empty(0, dtype=np.float64)
+        self._s_freqs: NDArray[np.float64] = np.empty(0, dtype=np.float64)
+
+        self._build_controls(threshold, brush_width)
+        self._init_plots()
+        self.update_points()
+
+    # --- controls --------------------------------------------------------
+
+    def _slider(self, lo: float, hi: float, val: float) -> QSlider:
+        s = QSlider(Qt.Orientation.Horizontal)
+        s.setMinimum(int(lo * _SCALE))
+        s.setMaximum(int(hi * _SCALE))
+        s.setValue(int(val * _SCALE))
+        return s
+
+    def _build_controls(self, threshold: float, brush_width: float) -> None:
+        self.controls_layout.addWidget(QLabel("Threshold"))
+        self._threshold = self._slider(1.0, 20.0, threshold)
+        self._threshold.valueChanged.connect(lambda _v: self.update_points())
+        self.controls_layout.addWidget(self._threshold)
+
+        self.controls_layout.addWidget(QLabel("Brush width"))
+        self._width = self._slider(0.01, 0.1, brush_width)
+        self.controls_layout.addWidget(self._width)
+
+        self.controls_layout.addWidget(QLabel("Smooth"))
+        self._smooth = self._slider(0.0, 5.0, 1.0)
+        self._smooth.valueChanged.connect(lambda _v: self.update_points())
+        self.controls_layout.addWidget(self._smooth)
+
+        self._operation = QComboBox()
+        self._operation.addItems(["Select", "Erase"])
+        self.controls_layout.addWidget(self._operation)
+
+        self._show_mask = QCheckBox("Show mask")
+        self._show_mask.stateChanged.connect(lambda _s: self._refresh_mask_overlay())
+        self.controls_layout.addWidget(self._show_mask)
+
+        self._show_origin = QCheckBox("Show origin")
+        self._show_origin.setChecked(True)
+        self._show_origin.stateChanged.connect(lambda _s: self.update_points())
+        self.controls_layout.addWidget(self._show_origin)
+
+        perform_all = QPushButton("Perform on all")
+        perform_all.clicked.connect(self._on_perform_all)
+        self.controls_layout.addWidget(perform_all)
+
+        self.add_finish_button()
+
+    def _threshold_val(self) -> float:
+        return self._threshold.value() / _SCALE
+
+    def _width_val(self) -> float:
+        return self._width.value() / _SCALE
+
+    def _smooth_val(self) -> float:
+        return self._smooth.value() / _SCALE
+
+    def _operation_select(self) -> bool:
+        return self._operation.currentText() == "Select"
+
+    # --- plotting --------------------------------------------------------
+
+    def _init_plots(self) -> None:
+        self._ax = self.figure.add_subplot(1, 1, 1)
+        amps = cast2real_and_norm(self._signals, sigma=self._smooth_val())
+        dx = (self._dev_values[-1] - self._dev_values[0]) / (len(self._dev_values) - 1)
+        dy = (self._freqs[-1] - self._freqs[0]) / (len(self._freqs) - 1)
+        extent = (
+            self._dev_values[0] - dx / 2,
+            self._dev_values[-1] + dx / 2,
+            self._freqs[0] - dy / 2,
+            self._freqs[-1] + dy / 2,
+        )
+        self._img = self._ax.imshow(
+            amps.T, aspect="auto", origin="lower", interpolation="none", extent=extent
+        )
+        self._mask_img = self._ax.imshow(
+            self._mask.T,
+            aspect="auto",
+            origin="lower",
+            interpolation="none",
+            extent=(
+                self._dev_values[0],
+                self._dev_values[-1],
+                self._freqs[0],
+                self._freqs[-1],
+            ),
+            alpha=0.0,
+            cmap="gray",
+            vmin=0,
+            vmax=1,
+        )
+        self._scatter = self._ax.scatter([], [], color="r", s=2)
+        self._ax.set_xlabel("Device value")
+        self._ax.set_ylabel("Frequency (GHz)")
+
+    def update_points(self) -> None:
+        real_signals = cast2real_and_norm(self._signals, sigma=self._smooth_val())
+        self._s_dev_values, self._s_freqs = spectrum2d_findpoint(
+            self._dev_values,
+            self._freqs,
+            real_signals,
+            self._threshold_val(),
+            weight=self._mask,
+        )
+        self._scatter.set_offsets(
+            np.column_stack((self._s_dev_values, self._s_freqs))
+            if self._s_dev_values.size
+            else np.empty((0, 2))
+        )
+        if self._show_origin.isChecked():
+            self._img.set_data(real_signals.T)
+        else:
+            self._img.set_data((self._mask * real_signals).T)
+        self._img.autoscale()
+        self.redraw()
+
+    def _refresh_mask_overlay(self) -> None:
+        self._mask_img.set_data(self._mask.T)
+        self._mask_img.set_alpha(0.2 if self._show_mask.isChecked() else 0.0)
+        self.redraw()
+
+    # --- interaction -----------------------------------------------------
+
+    def on_press(self, event: MouseEvent) -> None:
+        if event.xdata is None or event.ydata is None:
+            return
+        toggle_near_mask(
+            self._dev_values,
+            self._freqs,
+            self._mask,
+            float(event.xdata),
+            float(event.ydata),
+            self._width_val(),
+            self._operation_select(),
+        )
+        self._refresh_mask_overlay()
+        self.update_points()
+
+    def _on_perform_all(self) -> None:
+        self._mask = (
+            np.ones_like(self._mask)
+            if self._operation_select()
+            else np.zeros_like(self._mask)
+        )
+        self._refresh_mask_overlay()
+        self.update_points()
+
+    # --- result ----------------------------------------------------------
+
+    def get_result(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        order = np.argsort(self._s_dev_values)
+        return self._s_dev_values[order], self._s_freqs[order]
