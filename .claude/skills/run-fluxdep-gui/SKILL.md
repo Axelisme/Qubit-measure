@@ -1,7 +1,7 @@
 ---
 name: run-fluxdep-gui
-description: Run, drive, and smoke-test the fluxdep-gui — a standalone Qt GUI for fluxonium flux-dependence fitting (load spectrum hdf5 → pick half/integer flux lines → select spectral points → cross-spectrum filter → export spectrums.hdf5). Use when asked to launch/start/test the fluxdep-gui app, drive the flux-dependence analysis pipeline via its MCP tools, or follow the recommended analysis flow.
-skill_version: 3
+description: Run, drive, and smoke-test the fluxdep-gui — a standalone Qt GUI for fluxonium flux-dependence fitting (load spectrum hdf5 → pick half/integer flux lines → select spectral points → cross-spectrum filter → export spectrums.hdf5 → search a database for EJ/EC/EL → export params.json). Use when asked to launch/start/test the fluxdep-gui app, drive the flux-dependence analysis pipeline via its MCP tools, or follow the recommended analysis flow.
+skill_version: 4
 ---
 
 # run-fluxdep-gui
@@ -21,7 +21,7 @@ works on a fresh checkout.
 
 Paths below are relative to the repo root (the directory with `.mcp.json`).
 
-## What this tool does (v1)
+## What this tool does
 
 The pipeline, in order — each step feeds the next:
 
@@ -37,9 +37,10 @@ The pipeline, in order — each step feeds the next:
 5. **Cross-spectrum filter** — select/downsample the joint point cloud across all
    spectra.
 6. **Export** `spectrums.hdf5`.
-
-> Database search + scipy fit + result visualisation (EJ/EC/EL → params.json) are
-> **deferred to v2** and not in this build.
+7. **Database search (v2)** — search a precomputed fluxonium database for the
+   best `(EJ, EC, EL)` matching the *selected* joint point cloud, then **export
+   `params.json`**. (Only the database search is ported; the notebook's optional
+   scipy `fit_spectrum` refinement is not.)
 
 ## Prerequisites
 
@@ -77,6 +78,19 @@ fluxdep_selection_set(selected=[true, ...])     # mask over the joint cloud (len
 fluxdep_export_spectrums(filepath="out.hdf5") -> {path}
 fluxdep_spectrum_load_processed(filepath="spectrums.hdf5")  # restore aligned+selected spectra
 fluxdep_resources_versions                      # optimistic-concurrency version table
+```
+
+Then the database-search fit (v2), over the *selected* joint point cloud:
+
+```
+fluxdep_fit_set_params(database_path="…/fluxonium_1.h5",
+                       EJb=[2,15], ECb=[0.2,2], ELb=[0.1,2],
+                       transitions={"transitions": [[0,1],[0,2],[1,2],[1,3]],
+                                    "mirror": [[0,1],[0,2],[0,3],[1,2],[1,3]]},
+                       r_f=5.551, sample_f=9.5846)   # r_f/sample_f optional (0 omits)
+fluxdep_fit_search                              # multi-second sweep -> {EJ, EC, EL}
+fluxdep_fit_result                              # {has_result, params, inputs…}
+fluxdep_fit_export_params(savepath="params.json")  # -> {path}; default <result_dir>/params.json
 ```
 
 ## Run (smoke harness — verify the loop without an MCP client)

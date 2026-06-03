@@ -19,6 +19,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -61,6 +62,27 @@ class Client:
 
     def close(self) -> None:
         self._sock.close()
+
+
+def _make_tiny_database(path: Path) -> None:
+    """Write a tiny synthetic fluxonium database (params/fluxs/energies) for the
+    v2 search step — avoids depending on the multi-hundred-MB real database."""
+    import h5py
+    import numpy as np
+
+    M, L = 21, 4
+    fluxs = np.linspace(0.0, 0.5, M).astype(np.float64)
+    params = np.array(
+        [[3.0, 1.0, 0.5], [5.0, 1.2, 0.4], [6.0, 0.9, 0.6]], dtype=np.float64
+    )
+    energies = np.zeros((len(params), M, L), dtype=np.float64)
+    for n, (EJ, EC, EL) in enumerate(params):
+        for lvl in range(L):
+            energies[n, :, lvl] = lvl * (EC + EL) + EJ * np.cos(2 * np.pi * fluxs) * 0.1
+    with h5py.File(path, "w") as f:
+        f.create_dataset("fluxs", data=fluxs)
+        f.create_dataset("params", data=params)
+        f.create_dataset("energies", data=energies)
 
 
 def _wait_for_port(port: int, proc: subprocess.Popen, timeout: float = 30.0) -> None:
@@ -137,6 +159,29 @@ def main() -> int:
         print(f"[smoke] exported -> {res['path']}")
         assert Path(res["path"]).exists(), "export file missing"
         out.unlink()
+
+        # v2: database search over the selected joint cloud → params.json
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "tiny_db.h5"
+            _make_tiny_database(db)
+            c.call(
+                "fit.set_params",
+                database_path=str(db),
+                EJb=[0.1, 50.0],
+                ECb=[0.01, 10.0],
+                ELb=[0.01, 10.0],
+                transitions={"transitions": [[0, 1], [0, 2]]},
+            )
+            best = c.call("fit.search")
+            print(
+                f"[smoke] search: EJ={best['EJ']:.3f} "
+                f"EC={best['EC']:.3f} EL={best['EL']:.3f}"
+            )
+            params_out = Path(tmp) / "params.json"
+            res = c.call("fit.export_params", savepath=str(params_out))
+            assert Path(res["path"]).exists(), "params.json missing"
+            print(f"[smoke] params -> {res['path']}")
+            print("[smoke] fit.result:", c.call("fit.result")["has_result"])
 
         print("[smoke] state:", c.call("state.check"))
         c.close()
