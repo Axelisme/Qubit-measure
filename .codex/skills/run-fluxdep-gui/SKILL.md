@@ -1,7 +1,7 @@
 ---
 name: run-fluxdep-gui
 description: Run, drive, and smoke-test the fluxdep-gui — a standalone Qt GUI for fluxonium flux-dependence fitting (load spectrum hdf5 → pick half/integer flux lines → select spectral points → cross-spectrum filter → export spectrums.hdf5). Use when asked to launch/start/test the fluxdep-gui app, drive the flux-dependence analysis pipeline via its MCP tools, or follow the recommended analysis flow.
-skill_version: 2
+skill_version: 3
 ---
 
 # run-fluxdep-gui
@@ -72,8 +72,10 @@ fluxdep_alignment_set(name2, ...)
 fluxdep_points_set(name2, ...)
 fluxdep_spectrum_list                           # each spectrum's aligned / points_selected stage
 fluxdep_selection_pointcloud                    # {fluxs, freqs} of the joint cloud
-fluxdep_selection_set(selected=[true, ...])     # mask over the joint cloud (len = cloud size)
+fluxdep_selection_set(selected=[true, ...])     # mask over the joint cloud (len = cloud size);
+                                                # optional min_distance (downsample threshold)
 fluxdep_export_spectrums(filepath="out.hdf5") -> {path}
+fluxdep_spectrum_load_processed(filepath="spectrums.hdf5")  # restore aligned+selected spectra
 fluxdep_resources_versions                      # optimistic-concurrency version table
 ```
 
