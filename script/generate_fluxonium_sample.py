@@ -14,10 +14,11 @@ design: one direction covers a continuous line of parameters via the scale.
 
 Usage (the energy computation is SLOW — minutes to hours for a real run):
 
-    # a real "all"-range database with 10k samples on all cores
+    # a real "all"-range database with 10k samples (serial — scqubits already
+    # multithreads each diagonalisation, so --n-jobs > 1 usually doesn't help)
     .venv/bin/python script/generate_fluxonium_sample.py \
         --output Database/simulation/fluxonium_all.h5 \
-        --preset all --num-samples 10000 --n-jobs -1
+        --preset all --num-samples 10000
 
     # a tiny dry run (random energies, no scqubits) to sanity-check plumbing
     .venv/bin/python script/generate_fluxonium_sample.py \
@@ -213,7 +214,10 @@ def build_database(
 
     ``energy_fn`` maps one ``(EJ, EC, EL)`` to its ``(F, L)`` energies (it closes
     over the flux grid + truncation; injected so tests can pass a cheap stub
-    instead of scqubits). With ``n_jobs != 1`` the rows run in parallel via joblib.
+    instead of scqubits). With ``n_jobs != 1`` the rows run in parallel via joblib
+    — but scqubits already multithreads each diagonalisation, so row-level workers
+    usually just oversubscribe the cores; the default ``n_jobs=1`` (serial) is the
+    right choice unless a parallel win has been measured.
     """
     rows = [tuple(float(v) for v in p) for p in params]
 
@@ -303,7 +307,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--num-flux", type=int, default=120, help="Flux points over [0, 0.5] (mirrored)"
     )
     p.add_argument(
-        "--n-jobs", type=int, default=1, help="Parallel workers (-1 = all cores)"
+        "--n-jobs",
+        type=int,
+        default=1,
+        help="Joblib workers over parameter rows (default 1 = serial). scqubits "
+        "already multithreads each diagonalisation, so spawning workers usually "
+        "just oversubscribes the cores; leave at 1 unless you've measured a win.",
     )
     p.add_argument(
         "--dry-run",

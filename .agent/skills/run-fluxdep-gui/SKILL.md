@@ -108,7 +108,7 @@ diagonalisation dominates.
 # real run (back up any existing DB first — see WARNING below):
 .venv/bin/python script/generate_fluxonium_sample.py \
     --output Database/simulation/fluxonium_all.h5 \
-    --preset all --num-samples 10000 --n-jobs -1 --overwrite
+    --preset all --num-samples 10000 --overwrite
 
 # tiny dry run (random energies, no scqubits) to check plumbing — fast:
 .venv/bin/python script/generate_fluxonium_sample.py \
@@ -118,9 +118,11 @@ diagonalisation dominates.
 Key flags: `--preset normal|integer|all` (named `(EJb, ECb, ELb)` boxes), or set
 `--EJb/--ECb/--ELb min,max` per axis; `--num-samples`, `--cutoff`,
 `--evals-count`, `--num-flux` (flux points over [0, 0.5], mirrored to [0, 1]);
-`--n-jobs -1` for all cores; `--plot` for a 3D scatter of the sampled directions
-(off by default); `--dry-run` (writes a `*_dryrun.h5` sibling, never the real
-path); `--overwrite` (required to replace an existing output).
+`--plot` for a 3D scatter of the sampled directions (off by default); `--dry-run`
+(writes a `*_dryrun.h5` sibling, never the real path); `--overwrite` (required to
+replace an existing output). `--n-jobs` defaults to 1 (serial) — scqubits already
+multithreads each diagonalisation, so row-level workers usually just oversubscribe
+the cores.
 
 > **WARNING — don't clobber a database you can't cheaply rebuild.** The output
 > path must not exist unless `--overwrite` is passed. Before regenerating an
