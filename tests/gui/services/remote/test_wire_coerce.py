@@ -1,7 +1,9 @@
-"""Unit tests for wire.py coercion helpers and typed-request builders.
+"""Unit tests for wire.py field validators and request envelope parsing.
 
-Exercises the strict field validators (_require_*, _optional_*, coerce_*)
-that guard the raw RPC params dict before any controller is touched.
+Exercises the strict field validators (_require_*, _optional_*) and
+parse_request that guard the raw RPC params dict before any controller is
+touched. The domain ``coerce_*`` builders that compose these primitives live in
+dispatch.py and are tested in ``test_dispatch_coerce.py``.
 """
 
 from __future__ import annotations
@@ -13,9 +15,6 @@ from zcu_tools.gui.services.remote.wire import (
     _optional_bool,
     _require_int,
     _require_str,
-    coerce_connect_device_request,
-    coerce_connect_request,
-    coerce_disconnect_device_request,
     parse_request,
     require_json_safe,
     require_object,
@@ -164,72 +163,3 @@ def test_parse_request_params_not_dict():
 def test_parse_request_default_empty_params():
     req = parse_request({"id": "1", "method": "foo"})
     assert req.params == {}
-
-
-# ---------------------------------------------------------------------------
-# coerce_connect_request
-# ---------------------------------------------------------------------------
-
-
-def test_coerce_connect_mock():
-    req = coerce_connect_request({"kind": "mock"})
-    from zcu_tools.gui.services.connection import ConnectMockRequest
-
-    assert isinstance(req, ConnectMockRequest)
-
-
-def test_coerce_connect_remote():
-    req = coerce_connect_request({"kind": "remote", "ip": "192.168.1.1", "port": 8080})
-    from zcu_tools.gui.services.connection import ConnectRemoteRequest
-
-    assert isinstance(req, ConnectRemoteRequest)
-    assert req.ip == "192.168.1.1"
-    assert req.port == 8080
-
-
-def test_coerce_connect_unknown_kind():
-    with pytest.raises(RemoteError):
-        coerce_connect_request({"kind": "ssh"})
-
-
-def test_coerce_connect_remote_missing_port():
-    with pytest.raises(RemoteError):
-        coerce_connect_request({"kind": "remote", "ip": "1.2.3.4"})
-
-
-# ---------------------------------------------------------------------------
-# coerce_connect_device_request
-# ---------------------------------------------------------------------------
-
-
-def test_coerce_connect_device_request_ok():
-    req = coerce_connect_device_request(
-        {"type_name": "SGS100A", "name": "lo", "address": "TCPIP::1.2.3.4"}
-    )
-    assert req.type_name == "SGS100A"
-    assert req.name == "lo"
-    assert req.address == "TCPIP::1.2.3.4"
-    assert req.remember is True  # default
-
-
-def test_coerce_connect_device_request_remember_false():
-    req = coerce_connect_device_request(
-        {
-            "type_name": "SGS100A",
-            "name": "lo",
-            "address": "TCPIP::1.2.3.4",
-            "remember": False,
-        }
-    )
-    assert req.remember is False
-
-
-# ---------------------------------------------------------------------------
-# coerce_disconnect_device_request
-# ---------------------------------------------------------------------------
-
-
-def test_coerce_disconnect_device_request_ok():
-    req = coerce_disconnect_device_request({"name": "lo"})
-    assert req.name == "lo"
-    assert req.remember is True

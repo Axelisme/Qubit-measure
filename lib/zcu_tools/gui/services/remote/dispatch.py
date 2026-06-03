@@ -38,14 +38,20 @@ from zcu_tools.gui.services.context import MlEntryValidationError
 from zcu_tools.gui.services.device import SetupDeviceRequest
 from zcu_tools.gui.services.session_codec import raw_to_schema, schema_to_raw
 
+from zcu_tools.gui.services.connection import (
+    ConnectMockRequest,
+    ConnectRemoteRequest,
+    ConnectRequest,
+)
+from zcu_tools.gui.services.device import (
+    ConnectDeviceRequest,
+    DisconnectDeviceRequest,
+)
+
 from .errors import ErrorCode, RemoteError
 from .method_specs import METHOD_SPECS, MethodSpec
 from .param_spec import ParamSpec
-from .wire import (
-    coerce_connect_device_request,
-    coerce_connect_request,
-    coerce_disconnect_device_request,
-)
+from .wire import _optional_bool, _require_int, _require_str
 
 logger = logging.getLogger(__name__)
 
@@ -629,6 +635,45 @@ def _h_resources_versions(
 # ---------------------------------------------------------------------------
 # Connection / startup / device handlers (typed-request coercion)
 # ---------------------------------------------------------------------------
+#
+# The coercion helpers below turn a raw wire ``params`` mapping into a typed
+# domain request. They live here (beside their only callers) rather than in
+# ``wire.py`` so the wire layer stays a pure transport primitive — it knows the
+# field-level ``_require_*``/``_optional_*`` rules but not the connection/device
+# domain shapes those rules assemble into.
+
+
+def coerce_connect_request(params: Mapping[str, object]) -> ConnectRequest:
+    """Coerce ``{kind: 'mock'}`` or ``{kind: 'remote', ip, port}``."""
+    kind = _require_str(params, "kind")
+    if kind == "mock":
+        return ConnectMockRequest()
+    if kind == "remote":
+        return ConnectRemoteRequest(
+            ip=_require_str(params, "ip"),
+            port=_require_int(params, "port"),
+        )
+    raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown connect kind: {kind!r}")
+
+
+def coerce_connect_device_request(
+    params: Mapping[str, object],
+) -> ConnectDeviceRequest:
+    return ConnectDeviceRequest(
+        type_name=_require_str(params, "type_name"),
+        name=_require_str(params, "name"),
+        address=_require_str(params, "address"),
+        remember=_optional_bool(params, "remember", True),
+    )
+
+
+def coerce_disconnect_device_request(
+    params: Mapping[str, object],
+) -> DisconnectDeviceRequest:
+    return DisconnectDeviceRequest(
+        name=_require_str(params, "name"),
+        remember=_optional_bool(params, "remember", True),
+    )
 
 
 def _h_connect_start(

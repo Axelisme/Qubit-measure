@@ -1,24 +1,20 @@
 """Wire types for RemoteControlAdapter.
 
-Frozen dataclasses for request / response envelopes plus strict JSON ↔ dataclass
-coercion helpers. All raw-dict validation happens here; no ``Any`` from the wire
-ever flows into ``Controller`` or domain services.
+Frozen dataclasses for request / response envelopes plus the field-level
+validation primitives (``_require_*`` / ``_optional_*`` / ``require_object`` /
+``require_json_safe``) that strictly coerce raw wire scalars before any
+``Any`` flows into ``Controller`` or domain services.
+
+This layer is transport-pure: it knows field rules but not the domain shapes
+they assemble into. The typed-request builders (``coerce_connect_request`` etc.)
+that compose these primitives into connection/device requests live in
+``dispatch.py``, beside their only callers.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Mapping, Optional
-
-from zcu_tools.gui.services.connection import (
-    ConnectMockRequest,
-    ConnectRemoteRequest,
-    ConnectRequest,
-)
-from zcu_tools.gui.services.device import (
-    ConnectDeviceRequest,
-    DisconnectDeviceRequest,
-)
 
 from .errors import ErrorCode, ErrorEnvelope, RemoteError
 
@@ -266,41 +262,3 @@ def require_json_safe(params: Mapping[str, object], key: str) -> object:
             ErrorCode.INVALID_PARAMS, f"'{key}' must be JSON-serializable"
         ) from exc
     return val
-
-
-# ---------------------------------------------------------------------------
-# Typed-request coercion
-# ---------------------------------------------------------------------------
-
-
-def coerce_connect_request(params: Mapping[str, object]) -> ConnectRequest:
-    """Coerce ``{kind: 'mock'}`` or ``{kind: 'remote', ip, port}``."""
-    kind = _require_str(params, "kind")
-    if kind == "mock":
-        return ConnectMockRequest()
-    if kind == "remote":
-        return ConnectRemoteRequest(
-            ip=_require_str(params, "ip"),
-            port=_require_int(params, "port"),
-        )
-    raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown connect kind: {kind!r}")
-
-
-def coerce_connect_device_request(
-    params: Mapping[str, object],
-) -> ConnectDeviceRequest:
-    return ConnectDeviceRequest(
-        type_name=_require_str(params, "type_name"),
-        name=_require_str(params, "name"),
-        address=_require_str(params, "address"),
-        remember=_optional_bool(params, "remember", True),
-    )
-
-
-def coerce_disconnect_device_request(
-    params: Mapping[str, object],
-) -> DisconnectDeviceRequest:
-    return DisconnectDeviceRequest(
-        name=_require_str(params, "name"),
-        remember=_optional_bool(params, "remember", True),
-    )
