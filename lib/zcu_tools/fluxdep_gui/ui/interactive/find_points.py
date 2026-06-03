@@ -20,8 +20,8 @@ from qtpy.QtCore import (  # type: ignore[attr-defined]
     Qt,
     QThreadPool,
     QTimer,
+    Signal,  # type: ignore[attr-defined]
 )
-from qtpy.QtCore import Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
     QComboBox,
@@ -235,12 +235,16 @@ class FindPointsWidget(InteractiveMplWidget):
             self._freqs[-1] + dy / 2,
         )
         vmin, vmax = _contrast_limits(amps)
+        # gray_r: low values white, high values (the resonance line) black — so a
+        # red scatter point sitting on the line has strong colour + value contrast
+        # (the points typically land on the high-value feature).
         self._img = self._ax.imshow(
             amps.T,
             aspect="auto",
             origin="lower",
             interpolation="none",
             extent=extent,
+            cmap="gray_r",
             vmin=vmin,
             vmax=vmax,
         )

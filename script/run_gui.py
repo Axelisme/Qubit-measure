@@ -15,7 +15,6 @@ import logging
 import sys
 from pathlib import Path
 
-
 LOG_FILE = Path(__file__).parent.parent / "gui_debug.log"
 LOG_FORMAT = "%(asctime)s.%(msecs)03d [%(levelname)-7s] %(name)s: %(message)s"
 LOG_DATE = "%H:%M:%S"
@@ -110,6 +109,7 @@ if __name__ == "__main__":
 
     configure_gui_matplotlib_backend()
 
+    from zcu_tools.experiment.v2_gui.registry import register_all, register_all_roles
     from zcu_tools.gui.app import run_app
 
     # Composition root: wire the experiment-adapter layer (experiment.v2_gui)
@@ -117,7 +117,6 @@ if __name__ == "__main__":
     # so the GUI framework itself never imports the experiment layer.
     from zcu_tools.gui.registry import Registry
     from zcu_tools.gui.role_catalog import RoleCatalog
-    from zcu_tools.experiment.v2_gui.registry import register_all, register_all_roles
 
     registry = Registry()
     register_all(registry)

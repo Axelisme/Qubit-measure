@@ -43,8 +43,16 @@ def main() -> int:
         signals2d = z.T  # (flux, freq)
         save_data(
             filepath=str(HERE / "fixtures" / name),
-            x_info={"name": "Flux device value", "unit": "a.u.", "values": flux.astype(np.float64)},
-            y_info={"name": "Frequency", "unit": "Hz", "values": freq_hz.astype(np.float64)},
+            x_info={
+                "name": "Flux device value",
+                "unit": "a.u.",
+                "values": flux.astype(np.float64),
+            },
+            y_info={
+                "name": "Frequency",
+                "unit": "Hz",
+                "values": freq_hz.astype(np.float64),
+            },
             z_info={"name": "Signal", "unit": "a.u.", "values": signals2d.T},
         )
         print(f"[make_fixtures] wrote fixtures/{name}_1.hdf5")

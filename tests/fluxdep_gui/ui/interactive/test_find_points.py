@@ -62,6 +62,11 @@ def test_result_sorted_by_dev(widget):
     assert np.all(np.diff(devs) >= 0)
 
 
+def test_spectrum_uses_gray_r_cmap(widget):
+    # gray_r so red points stand out on the dark (high-value) resonance feature
+    assert widget._img.get_cmap().name == "gray_r"
+
+
 def test_update_points_is_debounced_async(widget):
     # update_points schedules a worker (bumps generation, starts the debounce);
     # it does not compute inline.

@@ -86,7 +86,6 @@ def test_gui_canvas_draw_idle_inline_on_main_thread(qapp):
     del qapp
 
     from matplotlib.figure import Figure
-
     from zcu_tools.gui.mpl_backend import GuiFigureCanvas
 
     fig = Figure()

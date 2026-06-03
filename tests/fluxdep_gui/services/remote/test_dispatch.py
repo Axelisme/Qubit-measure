@@ -10,8 +10,8 @@ from __future__ import annotations
 import pytest
 from zcu_tools.fluxdep_gui.controller import Controller
 from zcu_tools.fluxdep_gui.services.remote.dispatch import (
-    METHOD_REGISTRY,
     _HANDLERS,
+    METHOD_REGISTRY,
 )
 from zcu_tools.fluxdep_gui.services.remote.errors import ErrorCode, RemoteError
 from zcu_tools.fluxdep_gui.services.remote.method_specs import METHOD_SPECS

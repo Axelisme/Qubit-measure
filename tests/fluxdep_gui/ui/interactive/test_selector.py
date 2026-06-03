@@ -73,3 +73,26 @@ def test_finished_signal(widget):
     finish = next(b for b in widget.findChildren(QPushButton) if b.text() == "Finish")
     finish.click()
     assert fired == [True]
+
+
+def test_apply_filter_is_debounced_async(widget):
+    g0 = widget._generation
+    widget.apply_filter()
+    assert widget._generation == g0 + 1
+    assert widget._debounce.isActive()
+
+
+def test_stale_downsample_result_is_dropped(widget):
+    widget._generation = 9
+    before = widget._filter_mask.copy()
+    n = widget._selected.sum()
+    widget._on_worker_done(4, np.zeros(n, dtype=bool))  # stale generation
+    np.testing.assert_array_equal(widget._filter_mask, before)
+
+
+def test_fresh_downsample_result_applied(widget):
+    widget._generation = 9
+    n = int(widget._selected.sum())
+    fresh = np.ones(n, dtype=bool)
+    widget._on_worker_done(9, fresh)  # current generation
+    np.testing.assert_array_equal(widget._filter_mask, fresh)

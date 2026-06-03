@@ -80,6 +80,7 @@ class ResultPreviewWidget(QWidget):
             origin="lower",
             interpolation="none",
             extent=(dev[0], dev[-1], freqs[0], freqs[-1]),
+            cmap="gray_r",  # white→black; red points stand out on the dark feature
             vmin=vmin,
             vmax=vmax,
         )

@@ -10,8 +10,6 @@ from zcu_tools.experiment.v2.runner.base import ActiveTask
 from zcu_tools.liveplot.backend import set_liveplot_backend
 from zcu_tools.progress_bar.interface import use_pbar_factory
 
-from .adapters.qt_liveplot_backend import QtLivePlotBackend
-
 from .adapter import (
     AnalyzeRequest,
     CfgSchema,
@@ -19,6 +17,7 @@ from .adapter import (
     RunRequest,
     SaveDataRequest,
 )
+from .adapters.qt_liveplot_backend import QtLivePlotBackend
 from .plot_host import FigureContainer
 from .plot_routing import routing_scope
 

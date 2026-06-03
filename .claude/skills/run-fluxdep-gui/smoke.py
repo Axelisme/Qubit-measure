@@ -114,7 +114,12 @@ def main() -> int:
         c.call("alignment.set", name=two, flux_half=0.0, flux_int=2.0)
 
         # feed explicit points (agent path — bypasses the in-figure picking)
-        c.call("points.set", name=one, dev_values=[-10.0, 0.0, 10.0], freqs=[7.45, 7.45, 7.45])
+        c.call(
+            "points.set",
+            name=one,
+            dev_values=[-10.0, 0.0, 10.0],
+            freqs=[7.45, 7.45, 7.45],
+        )
         c.call("points.set", name=two, dev_values=[-2.0, 1.0], freqs=[4.0, 4.5])
 
         print("[smoke] spectra:", c.call("spectrum.list"))

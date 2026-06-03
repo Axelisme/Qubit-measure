@@ -34,19 +34,18 @@ if TYPE_CHECKING:
     from zcu_tools.gui.controller import RenderView
 
     from .service import RemoteControlAdapter
-from zcu_tools.gui.services.context import MlEntryValidationError
-from zcu_tools.gui.services.device import SetupDeviceRequest
-from zcu_tools.gui.services.session_codec import raw_to_schema, schema_to_raw
-
 from zcu_tools.gui.services.connection import (
     ConnectMockRequest,
     ConnectRemoteRequest,
     ConnectRequest,
 )
+from zcu_tools.gui.services.context import MlEntryValidationError
 from zcu_tools.gui.services.device import (
     ConnectDeviceRequest,
     DisconnectDeviceRequest,
+    SetupDeviceRequest,
 )
+from zcu_tools.gui.services.session_codec import raw_to_schema, schema_to_raw
 
 from .errors import ErrorCode, RemoteError
 from .method_specs import METHOD_SPECS, MethodSpec

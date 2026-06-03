@@ -16,7 +16,14 @@ import numpy as np
 from matplotlib.backend_bases import MouseEvent
 from matplotlib.patches import Ellipse
 from numpy.typing import NDArray
-from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
+from qtpy.QtCore import (  # type: ignore[attr-defined]
+    QObject,
+    QRunnable,
+    Qt,
+    QThreadPool,
+    QTimer,
+    Signal,  # type: ignore[attr-defined]
+)
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QComboBox,
     QLabel,
@@ -33,6 +40,38 @@ from zcu_tools.notebook.analysis.fluxdep.processing import (
 from zcu_tools.notebook.persistance import SpectrumResult
 
 _SCALE = 1000
+
+
+class _DownsampleSignals(QObject):
+    done = Signal(int, object)  # (generation, filter_mask)
+
+
+class _DownsampleWorker(QRunnable):
+    """Off-main-thread downsample_points for one parameter set.
+
+    O(N²), so it stalls the UI on large point clouds (measured ~1.3 s at 5000
+    points). Generation-stamped: a result whose generation is stale (a newer
+    parameter change happened) is dropped by the widget — the "instant cancel".
+    """
+
+    def __init__(
+        self,
+        generation: int,
+        sel_x: NDArray[np.float64],
+        sel_y: NDArray[np.float64],
+        threshold: float,
+        sink: _DownsampleSignals,
+    ) -> None:
+        super().__init__()
+        self._gen = generation
+        self._sel_x = sel_x
+        self._sel_y = sel_y
+        self._threshold = threshold
+        self._sink = sink
+
+    def run(self) -> None:
+        mask = downsample_points(self._sel_x, self._sel_y, self._threshold)
+        self._sink.done.emit(self._gen, mask)
 
 
 class SelectorWidget(InteractiveMplWidget):
@@ -61,6 +100,16 @@ class SelectorWidget(InteractiveMplWidget):
         self._filter_mask = np.ones_like(self._selected, dtype=bool)
         self._temp_circle: Optional[Ellipse] = None
         self._temp_timer: Optional[QTimer] = None
+
+        # Off-main-thread downsample with instant-cancel by generation (O(N²)).
+        self._pool = QThreadPool.globalInstance() or QThreadPool(self)
+        self._worker_signals = _DownsampleSignals()
+        self._worker_signals.done.connect(self._on_worker_done)
+        self._generation = 0
+        self._debounce = QTimer(self)
+        self._debounce.setSingleShot(True)
+        self._debounce.setInterval(80)
+        self._debounce.timeout.connect(self._launch_worker)
 
         self._compute_bounds()
         self._build_controls(brush_width)
@@ -138,6 +187,7 @@ class SelectorWidget(InteractiveMplWidget):
                 origin="lower",
                 interpolation="none",
                 extent=(sp_fluxs[0], sp_fluxs[-1], sp_freqs[0], sp_freqs[-1]),
+                cmap="gray_r",  # neutral grayscale so the coloured points stand out
             )
         self._scatter = self._ax.scatter(
             self._s_fluxs,
@@ -157,12 +207,30 @@ class SelectorWidget(InteractiveMplWidget):
         cur[np.where(self._selected)[0][self._filter_mask]] = True
         return cur
 
-    def apply_filter(self) -> None:
+    def _selected_normalised(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         flux_span = self._flux_bound[1] - self._flux_bound[0]
         freq_span = self._freq_bound[1] - self._freq_bound[0]
-        sel_x = self._s_fluxs[self._selected] / flux_span
-        sel_y = self._s_freqs[self._selected] / freq_span
-        self._filter_mask = downsample_points(sel_x, sel_y, self._thresh_val())
+        return (
+            self._s_fluxs[self._selected] / flux_span,
+            self._s_freqs[self._selected] / freq_span,
+        )
+
+    def apply_filter(self) -> None:
+        """Schedule a (debounced, off-main-thread) downsample re-computation."""
+        self._generation += 1
+        self._debounce.start()
+
+    def _launch_worker(self) -> None:
+        sel_x, sel_y = self._selected_normalised()
+        worker = _DownsampleWorker(
+            self._generation, sel_x, sel_y, self._thresh_val(), self._worker_signals
+        )
+        self._pool.start(worker)
+
+    def _on_worker_done(self, generation: int, filter_mask: NDArray[np.bool_]) -> None:
+        if generation != self._generation:
+            return  # superseded by a newer change — drop the stale result
+        self._filter_mask = filter_mask
         self._scatter.set_array(self._cur_selected().astype(float))
         self.redraw()
 
@@ -223,5 +291,9 @@ class SelectorWidget(InteractiveMplWidget):
     def get_result(
         self,
     ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.bool_]]:
+        # Finish is terminal: compute the final downsample synchronously from the
+        # current parameters (a pending worker may not have run yet).
+        sel_x, sel_y = self._selected_normalised()
+        self._filter_mask = downsample_points(sel_x, sel_y, self._thresh_val())
         cur = self._cur_selected()
         return self._s_fluxs[cur], self._s_freqs[cur], cur
