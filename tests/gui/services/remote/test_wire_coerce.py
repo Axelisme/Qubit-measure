@@ -1,6 +1,6 @@
 """Unit tests for wire.py field validators and request envelope parsing.
 
-Exercises the strict field validators (_require_*, _optional_*) and
+Exercises the strict field validators (require_*, optional_*) and
 parse_request that guard the raw RPC params dict before any controller is
 touched. The domain ``coerce_*`` builders that compose these primitives live in
 dispatch.py and are tested in ``test_dispatch_coerce.py``.
@@ -12,81 +12,81 @@ import pytest
 from zcu_tools.gui.services.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.services.remote.wire import (
     Response,
-    _optional_bool,
-    _require_int,
-    _require_str,
+    optional_bool,
     parse_request,
+    require_int,
     require_json_safe,
     require_object,
+    require_str,
 )
 
 # ---------------------------------------------------------------------------
-# _require_str
+# require_str
 # ---------------------------------------------------------------------------
 
 
-def test_require_str_ok():
-    assert _require_str({"k": "hello"}, "k") == "hello"
+def testrequire_str_ok():
+    assert require_str({"k": "hello"}, "k") == "hello"
 
 
-def test_require_str_missing():
+def testrequire_str_missing():
     with pytest.raises(RemoteError) as exc_info:
-        _require_str({}, "k")
+        require_str({}, "k")
     assert exc_info.value.code == ErrorCode.INVALID_PARAMS
 
 
-def test_require_str_not_string():
+def testrequire_str_not_string():
     with pytest.raises(RemoteError):
-        _require_str({"k": 123}, "k")
+        require_str({"k": 123}, "k")
 
 
-def test_require_str_empty():
+def testrequire_str_empty():
     with pytest.raises(RemoteError):
-        _require_str({"k": ""}, "k")
+        require_str({"k": ""}, "k")
 
 
 # ---------------------------------------------------------------------------
-# _require_int
+# require_int
 # ---------------------------------------------------------------------------
 
 
-def test_require_int_ok():
-    assert _require_int({"k": 42}, "k") == 42
+def testrequire_int_ok():
+    assert require_int({"k": 42}, "k") == 42
 
 
-def test_require_int_rejects_bool():
+def testrequire_int_rejects_bool():
     # bool is a subclass of int — must be explicitly rejected
     with pytest.raises(RemoteError):
-        _require_int({"k": True}, "k")
+        require_int({"k": True}, "k")
 
 
-def test_require_int_rejects_float():
+def testrequire_int_rejects_float():
     with pytest.raises(RemoteError):
-        _require_int({"k": 3.14}, "k")
+        require_int({"k": 3.14}, "k")
 
 
-def test_require_int_rejects_none():
+def testrequire_int_rejects_none():
     with pytest.raises(RemoteError):
-        _require_int({}, "k")
+        require_int({}, "k")
 
 
 # ---------------------------------------------------------------------------
-# _optional_bool
+# optional_bool
 # ---------------------------------------------------------------------------
 
 
-def test_optional_bool_default():
-    assert _optional_bool({}, "k", True) is True
-    assert _optional_bool({}, "k", False) is False
+def testoptional_bool_default():
+    assert optional_bool({}, "k", True) is True
+    assert optional_bool({}, "k", False) is False
 
 
-def test_optional_bool_ok():
-    assert _optional_bool({"k": False}, "k", True) is False
+def testoptional_bool_ok():
+    assert optional_bool({"k": False}, "k", True) is False
 
 
-def test_optional_bool_not_bool():
+def testoptional_bool_not_bool():
     with pytest.raises(RemoteError):
-        _optional_bool({"k": "yes"}, "k", True)
+        optional_bool({"k": "yes"}, "k", True)
 
 
 # ---------------------------------------------------------------------------

@@ -182,8 +182,8 @@ class Response:
 
 
 def parse_request(raw: Mapping[str, object]) -> Request:
-    rid = _require_str(raw, "id")
-    method = _require_str(raw, "method")
+    rid = require_str(raw, "id")
+    method = require_str(raw, "method")
     params = raw.get("params", {})
     if not isinstance(params, dict):
         raise RemoteError(
@@ -198,7 +198,7 @@ def parse_request(raw: Mapping[str, object]) -> Request:
 # ---------------------------------------------------------------------------
 
 
-def _require_str(params: Mapping[str, object], key: str) -> str:
+def require_str(params: Mapping[str, object], key: str) -> str:
     val = params.get(key)
     if val is None:
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"missing '{key}'")
@@ -212,7 +212,7 @@ def _require_str(params: Mapping[str, object], key: str) -> str:
     return val
 
 
-def _require_int(params: Mapping[str, object], key: str) -> int:
+def require_int(params: Mapping[str, object], key: str) -> int:
     val = params.get(key)
     if val is None:
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"missing '{key}'")
@@ -225,7 +225,7 @@ def _require_int(params: Mapping[str, object], key: str) -> int:
     return val
 
 
-def _optional_bool(params: Mapping[str, object], key: str, default: bool) -> bool:
+def optional_bool(params: Mapping[str, object], key: str, default: bool) -> bool:
     val = params.get(key)
     if val is None:
         return default

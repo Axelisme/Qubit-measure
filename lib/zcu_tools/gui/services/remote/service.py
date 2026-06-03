@@ -47,7 +47,7 @@ from .errors import ErrorCode, ErrorEnvelope, RemoteError
 from .events import EVENT_SERIALIZERS, wire_event_name
 from .framing import LINE_TERMINATOR, MAX_LINE_BYTES, decode_line, encode_line
 from .param_spec import validate_params
-from .wire import GUI_VERSION, WIRE_VERSION, Response, _require_str, parse_request
+from .wire import GUI_VERSION, WIRE_VERSION, Response, parse_request, require_str
 
 logger = logging.getLogger(__name__)
 
@@ -762,7 +762,7 @@ class RemoteControlAdapter:
         rid: str,
         params,
     ) -> None:
-        token = _require_str(params, "token")
+        token = require_str(params, "token")
         configured = self._opts.token
         if not configured:
             self._reply_error(

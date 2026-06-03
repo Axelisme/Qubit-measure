@@ -51,7 +51,7 @@ from zcu_tools.gui.services.device import (
 from .errors import ErrorCode, RemoteError
 from .method_specs import METHOD_SPECS, MethodSpec
 from .param_spec import ParamSpec
-from .wire import _optional_bool, _require_int, _require_str
+from .wire import optional_bool, require_int, require_str
 
 logger = logging.getLogger(__name__)
 
@@ -645,13 +645,13 @@ def _h_resources_versions(
 
 def coerce_connect_request(params: Mapping[str, object]) -> ConnectRequest:
     """Coerce ``{kind: 'mock'}`` or ``{kind: 'remote', ip, port}``."""
-    kind = _require_str(params, "kind")
+    kind = require_str(params, "kind")
     if kind == "mock":
         return ConnectMockRequest()
     if kind == "remote":
         return ConnectRemoteRequest(
-            ip=_require_str(params, "ip"),
-            port=_require_int(params, "port"),
+            ip=require_str(params, "ip"),
+            port=require_int(params, "port"),
         )
     raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown connect kind: {kind!r}")
 
@@ -660,10 +660,10 @@ def coerce_connect_device_request(
     params: Mapping[str, object],
 ) -> ConnectDeviceRequest:
     return ConnectDeviceRequest(
-        type_name=_require_str(params, "type_name"),
-        name=_require_str(params, "name"),
-        address=_require_str(params, "address"),
-        remember=_optional_bool(params, "remember", True),
+        type_name=require_str(params, "type_name"),
+        name=require_str(params, "name"),
+        address=require_str(params, "address"),
+        remember=optional_bool(params, "remember", True),
     )
 
 
@@ -671,8 +671,8 @@ def coerce_disconnect_device_request(
     params: Mapping[str, object],
 ) -> DisconnectDeviceRequest:
     return DisconnectDeviceRequest(
-        name=_require_str(params, "name"),
-        remember=_optional_bool(params, "remember", True),
+        name=require_str(params, "name"),
+        remember=optional_bool(params, "remember", True),
     )
 
 
