@@ -7,6 +7,7 @@ or the socket server.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 from zcu_tools.fluxdep_gui.controller import Controller
 from zcu_tools.fluxdep_gui.services.remote.dispatch import (
@@ -279,3 +280,147 @@ def test_spectrum_load_processed_roundtrip(spectrum_hdf5, tmp_path):
     entry = a2.ctrl.state.spectrums[name]
     assert entry.aligned and entry.points_selected
     np.testing.assert_allclose(entry.points["freqs"], [5.0, 5.5])
+
+
+# ---------------------------------------------------------------------------
+# Database-search fit (v2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def _fit_db(tmp_path):
+    """A tiny synthetic fluxonium database for fit.search dispatch tests."""
+    import h5py
+
+    M, L = 21, 4
+    fluxs = np.linspace(0.0, 0.5, M).astype(np.float64)
+    params = np.array(
+        [[3.0, 1.0, 0.5], [5.0, 1.2, 0.4], [6.0, 0.9, 0.6]], dtype=np.float64
+    )
+    energies = np.zeros((len(params), M, L), dtype=np.float64)
+    for n, (EJ, EC, EL) in enumerate(params):
+        for lvl in range(L):
+            energies[n, :, lvl] = lvl * (EC + EL) + EJ * np.cos(2 * np.pi * fluxs) * 0.1
+    path = tmp_path / "fit_db.h5"
+    with h5py.File(path, "w") as f:
+        f.create_dataset("fluxs", data=fluxs)
+        f.create_dataset("params", data=params)
+        f.create_dataset("energies", data=energies)
+    return str(path)
+
+
+def _seed_points(adapter, spectrum_hdf5):
+    filepath, *_ = spectrum_hdf5
+    loaded = _call(
+        adapter, "spectrum.load", {"filepath": filepath, "spec_type": "TwoTone"}
+    )
+    name = loaded["name"]
+    _call(adapter, "alignment.set", {"name": name, "flux_half": 0.0, "flux_int": 0.5})
+    _call(
+        adapter,
+        "points.set",
+        {
+            "name": name,
+            "dev_values": [0.0, 1.0, 2.0, 3.0],
+            "freqs": [5.0, 5.1, 5.2, 5.3],
+        },
+    )
+    return name
+
+
+def test_fit_set_params_and_result(_fit_db, spectrum_hdf5):
+    adapter = _adapter()
+    _seed_points(adapter, spectrum_hdf5)
+    _call(
+        adapter,
+        "fit.set_params",
+        {
+            "database_path": _fit_db,
+            "EJb": [0.1, 50.0],
+            "ECb": [0.01, 10.0],
+            "ELb": [0.01, 10.0],
+            "transitions": {"transitions": [[0, 1], [0, 2]]},
+            "r_f": 5.5,
+        },
+    )
+    res = _call(adapter, "fit.result", {})
+    assert res["has_result"] is False
+    assert res["params"] is None
+    assert res["database_path"] == _fit_db
+    assert res["transitions"]["transitions"] == [[0, 1], [0, 2]]
+    # r_f injected into transitions and surfaced on the result
+    assert res["r_f"] == 5.5
+
+
+def test_fit_search_returns_params_and_records(_fit_db, spectrum_hdf5):
+    adapter = _adapter()
+    _seed_points(adapter, spectrum_hdf5)
+    _call(
+        adapter,
+        "fit.set_params",
+        {
+            "database_path": _fit_db,
+            "EJb": [0.1, 50.0],
+            "ECb": [0.01, 10.0],
+            "ELb": [0.01, 10.0],
+            "transitions": {"transitions": [[0, 1], [0, 2]]},
+        },
+    )
+    res = _call(adapter, "fit.search", {})
+    assert set(res) == {"EJ", "EC", "EL"}
+    # result now recorded on State
+    assert adapter.ctrl.state.fit.has_result
+    after = _call(adapter, "fit.result", {})
+    assert after["has_result"] is True
+    assert after["params"]["EJ"] == res["EJ"]
+
+
+def test_fit_search_fast_fails_without_db(spectrum_hdf5):
+    adapter = _adapter()
+    _seed_points(adapter, spectrum_hdf5)
+    with pytest.raises(RemoteError) as exc:
+        _call(adapter, "fit.search", {})
+    assert exc.value.code == ErrorCode.PRECONDITION_FAILED
+
+
+def test_fit_set_params_rejects_bad_transitions(_fit_db):
+    adapter = _adapter()
+    with pytest.raises(RemoteError) as exc:
+        _call(
+            adapter,
+            "fit.set_params",
+            {
+                "database_path": _fit_db,
+                "EJb": [0.1, 50.0],
+                "ECb": [0.01, 10.0],
+                "ELb": [0.01, 10.0],
+                "transitions": {"transitions": [[0, 1, 2]]},  # bad pair
+            },
+        )
+    assert exc.value.code == ErrorCode.INVALID_PARAMS
+
+
+def test_fit_export_params_roundtrip(tmp_path, _fit_db, spectrum_hdf5):
+    adapter = _adapter()
+    _call(adapter, "project.setup", {"chip_name": "Q9", "qub_name": "Q1"})
+    _seed_points(adapter, spectrum_hdf5)
+    _call(
+        adapter,
+        "fit.set_params",
+        {
+            "database_path": _fit_db,
+            "EJb": [0.1, 50.0],
+            "ECb": [0.01, 10.0],
+            "ELb": [0.01, 10.0],
+            "transitions": {"transitions": [[0, 1]]},
+        },
+    )
+    _call(adapter, "fit.search", {})
+    out = str(tmp_path / "params.json")
+    res = _call(adapter, "fit.export_params", {"savepath": out})
+    assert res["path"] == out
+
+    from zcu_tools.notebook.persistance import load_result
+
+    loaded = load_result(out)
+    assert loaded.get("fluxdep_fit") is not None

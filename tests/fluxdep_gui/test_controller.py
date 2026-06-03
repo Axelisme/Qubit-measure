@@ -111,3 +111,122 @@ def test_full_pipeline_export_roundtrip(spectrum_hdf5, tmp_path):
     loaded = load_spectrums(resolved)
     assert name in loaded
     assert loaded[name]["flux_period"] == 2.0
+
+
+# --- database-search fit (v2) ----------------------------------------------
+
+
+def _fit_db_file(tmp_path) -> str:
+    import h5py
+
+    M, L = 21, 4
+    fluxs = np.linspace(0.0, 0.5, M).astype(np.float64)
+    params = np.array([[3.0, 1.0, 0.5], [5.0, 1.2, 0.4]], dtype=np.float64)
+    energies = np.zeros((len(params), M, L), dtype=np.float64)
+    for n, (EJ, EC, EL) in enumerate(params):
+        for lvl in range(L):
+            energies[n, :, lvl] = lvl * (EC + EL) + EJ * np.cos(2 * np.pi * fluxs) * 0.1
+    path = tmp_path / "db.h5"
+    with h5py.File(path, "w") as f:
+        f.create_dataset("fluxs", data=fluxs)
+        f.create_dataset("params", data=params)
+        f.create_dataset("energies", data=energies)
+    return str(path)
+
+
+def _seed_aligned_points(ctrl: Controller) -> None:
+    from zcu_tools.fluxdep_gui.state import SpectrumEntry
+    from zcu_tools.notebook.persistance import PointsData, SpectrumData
+
+    fluxs = np.array([0.0, 0.1, 0.2, 0.3])
+    raw = SpectrumData(
+        dev_values=fluxs.copy(),
+        fluxs=fluxs.copy(),
+        freqs=np.linspace(4.0, 6.0, 5).astype(np.float64),
+        signals=np.zeros((4, 5), dtype=np.complex128),
+    )
+    points = PointsData(
+        dev_values=fluxs.copy(),
+        fluxs=fluxs.copy(),
+        freqs=np.array([5.0, 5.1, 5.2, 5.3]),
+    )
+    ctrl.state.put_spectrum(
+        SpectrumEntry(
+            name="s1",
+            spec_type="TwoTone",
+            raw=raw,
+            points=points,
+            flux_half=0.0,
+            flux_int=0.5,
+            flux_period=1.0,
+            aligned=True,
+            points_selected=True,
+        )
+    )
+
+
+def test_set_fit_params_emits_fit_changed(tmp_path):
+    from zcu_tools.fluxdep_gui.event_bus import FitChangedPayload
+    from zcu_tools.notebook.persistance import TransitionDict
+
+    ctrl = _ctrl()
+    seen = _record(ctrl, FitChangedPayload)
+    ctrl.set_fit_params(
+        _fit_db_file(tmp_path),
+        (0.1, 50.0),
+        (0.01, 10.0),
+        (0.01, 10.0),
+        TransitionDict({"transitions": [(0, 1)]}),
+        0.0,
+        0.0,
+    )
+    assert len(seen) == 1
+    assert ctrl.state.fit.database_path != ""
+
+
+def test_compute_search_does_not_emit_or_record(tmp_path):
+    from zcu_tools.fluxdep_gui.event_bus import FitChangedPayload
+    from zcu_tools.notebook.persistance import TransitionDict
+
+    ctrl = _ctrl()
+    _seed_aligned_points(ctrl)
+    ctrl.set_fit_params(
+        _fit_db_file(tmp_path),
+        (0.1, 50.0),
+        (0.01, 10.0),
+        (0.01, 10.0),
+        TransitionDict({"transitions": [(0, 1), (0, 2)]}),
+        0.0,
+        0.0,
+    )
+    seen = _record(ctrl, FitChangedPayload)
+    result = ctrl.compute_search(plot=False)
+    # compute_search is pure: no event, no recorded result
+    assert seen == []
+    assert ctrl.state.fit.params is None
+    # recording it emits + writes
+    ctrl.record_search_result(result)
+    assert len(seen) == 1
+    assert ctrl.state.fit.has_result
+
+
+def test_search_database_records_and_emits(tmp_path):
+    from zcu_tools.fluxdep_gui.event_bus import FitChangedPayload
+    from zcu_tools.notebook.persistance import TransitionDict
+
+    ctrl = _ctrl()
+    _seed_aligned_points(ctrl)
+    ctrl.set_fit_params(
+        _fit_db_file(tmp_path),
+        (0.1, 50.0),
+        (0.01, 10.0),
+        (0.01, 10.0),
+        TransitionDict({"transitions": [(0, 1), (0, 2)]}),
+        0.0,
+        0.0,
+    )
+    seen = _record(ctrl, FitChangedPayload)
+    result = ctrl.search_database(plot=False)
+    assert len(result.params) == 3
+    assert ctrl.state.fit.has_result
+    assert len(seen) == 1

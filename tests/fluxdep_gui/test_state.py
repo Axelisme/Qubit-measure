@@ -153,3 +153,48 @@ def test_set_project_bumps_project():
     st.set_project(ProjectInfo(chip_name="Q5_2D", qub_name="Q1"))
     assert st.version.get(PROJECT_VERSION_KEY) == 1
     assert st.project.chip_name == "Q5_2D"
+
+
+# --- FitState (v2) ---------------------------------------------------------
+
+
+def test_set_fit_params_bumps_and_clears_result():
+    from zcu_tools.fluxdep_gui.state import FIT_VERSION_KEY
+    from zcu_tools.notebook.persistance import TransitionDict
+
+    st = FluxDepState()
+    st.set_fit_result((5.0, 1.0, 0.5), best_dist=0.1)  # a stale result
+    assert st.fit.has_result
+    before = st.version.get(FIT_VERSION_KEY)
+    st.set_fit_params(
+        "db.h5",
+        (2.0, 7.0),
+        (0.5, 1.5),
+        (0.2, 0.8),
+        TransitionDict({"transitions": [(0, 1)]}),
+        5.5,
+        9.0,
+    )
+    # changing inputs clears the stale result and bumps the version
+    assert st.fit.params is None
+    assert st.fit.database_path == "db.h5"
+    assert st.fit.r_f == 5.5
+    assert st.version.get(FIT_VERSION_KEY) == before + 1
+
+
+def test_set_fit_result_records_params():
+    from zcu_tools.fluxdep_gui.state import FIT_VERSION_KEY
+
+    st = FluxDepState()
+    before = st.version.get(FIT_VERSION_KEY)
+    st.set_fit_result((4.2, 1.1, 0.3), best_dist=0.05)
+    assert st.fit.params == (4.2, 1.1, 0.3)
+    assert st.fit.has_result
+    assert st.version.get(FIT_VERSION_KEY) == before + 1
+
+
+def test_default_transitions_is_basic_preset():
+    from zcu_tools.fluxdep_gui.state import default_transitions
+
+    t = default_transitions()
+    assert t["transitions"] == [(0, 1), (0, 2), (1, 2), (1, 3)]
