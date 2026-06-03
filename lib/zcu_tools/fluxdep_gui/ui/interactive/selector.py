@@ -80,7 +80,7 @@ class SelectorWidget(InteractiveMplWidget):
     def __init__(
         self,
         spectrums: dict[str, SpectrumResult],
-        selected: Optional[NDArray[np.bool_]] = None,
+        min_distance: float = 0.0,
         brush_width: float = 0.05,
         parent: Optional[QWidget] = None,
     ) -> None:
@@ -92,11 +92,11 @@ class SelectorWidget(InteractiveMplWidget):
         self._s_freqs = np.concatenate(
             [s["points"]["freqs"] for s in spectrums.values()]
         )
-        self._selected = (
-            selected
-            if selected is not None
-            else np.ones_like(self._s_fluxs, dtype=bool)
-        )
+        # Start with EVERYTHING selected (do not inherit the previous brush
+        # selection — removed points would be hard to bring back). The stable
+        # downsample threshold IS inherited via min_distance.
+        self._selected = np.ones_like(self._s_fluxs, dtype=bool)
+        self._init_min_distance = min_distance
         self._filter_mask = np.ones_like(self._selected, dtype=bool)
         self._temp_circle: Optional[Ellipse] = None
         self._temp_timer: Optional[QTimer] = None
@@ -144,7 +144,7 @@ class SelectorWidget(InteractiveMplWidget):
         self.controls_layout.addWidget(self._width)
 
         self.controls_layout.addWidget(QLabel("Min distance"))
-        self._thresh = self._slider(0.0, 0.1, 0.0)
+        self._thresh = self._slider(0.0, 0.1, self._init_min_distance)
         self._thresh.valueChanged.connect(lambda _v: self.apply_filter())
         self.controls_layout.addWidget(self._thresh)
 
@@ -297,3 +297,7 @@ class SelectorWidget(InteractiveMplWidget):
         self._filter_mask = downsample_points(sel_x, sel_y, self._thresh_val())
         cur = self._cur_selected()
         return self._s_fluxs[cur], self._s_freqs[cur], cur
+
+    def min_distance(self) -> float:
+        """The current downsample threshold (remembered for the next session)."""
+        return self._thresh_val()

@@ -268,8 +268,9 @@ def _h_selection_set(
     adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     selected = _coerce_bool_array(params["selected"], "selected")
+    min_distance = float(params.get("min_distance", 0.0))  # type: ignore[arg-type]
     try:
-        adapter.ctrl.set_selection(selected)
+        adapter.ctrl.set_selection(selected, min_distance)
     except ValueError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     return {"ok": True}

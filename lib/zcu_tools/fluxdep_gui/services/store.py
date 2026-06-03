@@ -61,11 +61,14 @@ class SelectionService:
             return empty, empty.copy()
         return np.concatenate(flux_parts), np.concatenate(freq_parts)
 
-    def set_selection(self, selected: NDArray[np.bool_]) -> None:
+    def set_selection(
+        self, selected: NDArray[np.bool_], min_distance: float = 0.0
+    ) -> None:
         """Record the cross-spectrum selection mask over the joint point cloud.
 
         Fast-fails if the mask length disagrees with the current joint cloud size
-        (a stale mask from before a spectrum was added/removed).
+        (a stale mask from before a spectrum was added/removed). ``min_distance``
+        is the downsample threshold, remembered for the next selector session.
         """
         fluxs, _ = self.derive_pointcloud()
         if selected.shape[0] != fluxs.shape[0]:
@@ -73,7 +76,7 @@ class SelectionService:
                 f"selection mask length {selected.shape[0]} != joint point cloud "
                 f"size {fluxs.shape[0]}"
             )
-        self._state.set_selection(np.asarray(selected, dtype=np.bool_))
+        self._state.set_selection(np.asarray(selected, dtype=np.bool_), min_distance)
         logger.debug(
             "set_selection: n_selected=%d/%d", int(selected.sum()), selected.size
         )

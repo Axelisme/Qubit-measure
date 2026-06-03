@@ -139,10 +139,14 @@ class SelectionState:
 
     ``selected`` is a boolean mask over the joint point cloud assembled from all
     spectra's ``points``. The joint cloud itself (s_fluxs / s_freqs) is a derived
-    value computed on query, not stored.
+    value computed on query, not stored. ``min_distance`` is the downsample
+    threshold (a stable filter parameter remembered across selector sessions —
+    the brush selection itself is NOT remembered, so removed points are easy to
+    bring back by re-opening with everything selected).
     """
 
     selected: Optional[NDArray[np.bool_]] = None
+    min_distance: float = 0.0
 
 
 class FluxDepState:
@@ -209,8 +213,10 @@ class FluxDepState:
         )
         self.version.bump(spectrum_version_key(name))
 
-    def set_selection(self, selected: NDArray[np.bool_]) -> None:
-        self.selection = SelectionState(selected=selected)
+    def set_selection(
+        self, selected: NDArray[np.bool_], min_distance: float = 0.0
+    ) -> None:
+        self.selection = SelectionState(selected=selected, min_distance=min_distance)
         self.version.bump(SELECTION_VERSION_KEY)
 
     def set_project(self, project: ProjectInfo) -> None:

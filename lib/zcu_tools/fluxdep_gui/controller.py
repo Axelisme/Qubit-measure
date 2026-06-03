@@ -113,8 +113,10 @@ class Controller:
     def derive_pointcloud(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         return self._selection.derive_pointcloud()
 
-    def set_selection(self, selected: NDArray[np.bool_]) -> None:
-        self._selection.set_selection(selected)
+    def set_selection(
+        self, selected: NDArray[np.bool_], min_distance: float = 0.0
+    ) -> None:
+        self._selection.set_selection(selected, min_distance)
         self._bus.emit(SelectionChangedPayload())
 
     # --- export ----------------------------------------------------------

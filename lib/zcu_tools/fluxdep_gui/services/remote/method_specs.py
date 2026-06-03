@@ -57,6 +57,12 @@ def _json(name: str, desc: str = "") -> ParamSpec:
     return ParamSpec(name, JsonType.JSON, required=True, description=desc)
 
 
+def _num_opt(name: str, default: float, desc: str = "") -> ParamSpec:
+    return ParamSpec(
+        name, JsonType.NUMBER, required=False, default=default, description=desc
+    )
+
+
 def _bool_opt(name: str, desc: str = "") -> ParamSpec:
     return ParamSpec(
         name, JsonType.BOOLEAN, required=False, default=False, description=desc
@@ -156,8 +162,12 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0,
         "Set the cross-spectrum selection mask over the joint point cloud. "
         "'selected' is a JSON array of booleans whose length must equal the "
-        "joint point-cloud size (selection.pointcloud).",
-        (_json("selected", "JSON array of booleans over the joint point cloud"),),
+        "joint point-cloud size (selection.pointcloud). 'min_distance' is the "
+        "downsample threshold remembered for the next selector session.",
+        (
+            _json("selected", "JSON array of booleans over the joint point cloud"),
+            _num_opt("min_distance", 0.0, "Downsample threshold (default 0)"),
+        ),
     ),
     # Export
     "export.spectrums": MethodSpec(

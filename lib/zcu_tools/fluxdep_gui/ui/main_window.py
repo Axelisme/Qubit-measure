@@ -320,12 +320,12 @@ class MainWindow(QMainWindow):
             self._show_error("No points", "No spectrum has selected points yet.")
             return
         selector = SelectorWidget(
-            spectrums, selected=self._ctrl.state.selection.selected
+            spectrums, min_distance=self._ctrl.state.selection.min_distance
         )
 
         def _on_finish() -> None:
             _fluxs, _freqs, selected = selector.get_result()
-            self._ctrl.set_selection(selected)
+            self._ctrl.set_selection(selected, selector.min_distance())
             self._clear_editor()
 
         selector.finished.connect(_on_finish)

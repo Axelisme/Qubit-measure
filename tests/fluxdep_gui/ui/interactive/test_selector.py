@@ -96,3 +96,17 @@ def test_fresh_downsample_result_applied(widget):
     fresh = np.ones(n, dtype=bool)
     widget._on_worker_done(9, fresh)  # current generation
     np.testing.assert_array_equal(widget._filter_mask, fresh)
+
+
+def test_starts_with_everything_selected(qapp):
+    # the brush selection is NOT inherited — all points start selected
+    w = SelectorWidget(_spectrums())
+    assert w._selected.all()
+    w.deleteLater()
+
+
+def test_inherits_min_distance(qapp):
+    w = SelectorWidget(_spectrums(), min_distance=0.05)
+    assert abs(w._thresh_val() - 0.05) < 1e-9
+    assert abs(w.min_distance() - 0.05) < 1e-9
+    w.deleteLater()
