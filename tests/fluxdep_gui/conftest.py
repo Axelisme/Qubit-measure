@@ -32,3 +32,31 @@ def spectrum_hdf5(tmp_path):
     )
     # save_data forces the .hdf5 extension; return the resolved path.
     return filepath + ".hdf5", dev_values, freqs_ghz, signals
+
+
+@pytest.fixture
+def transposed_spectrum_hdf5(tmp_path):
+    """A legacy-layout spectrum: x = frequency (Hz), y = flux (the transpose of
+    the canonical layout). Loading with transpose_axes=True should recover the
+    canonical (x=flux, y=freq) arrays.
+
+    Returns (filepath, flux_values, freqs_GHz, signals_flux_by_freq).
+    """
+    flux = np.linspace(-5.0, 5.0, 8).astype(np.float64)
+    freqs_ghz = np.linspace(5.0, 6.0, 5).astype(np.float64)
+    rng = np.random.RandomState(1)
+    # canonical signals are (flux, freq); the legacy file stores them transposed
+    signals = (
+        rng.randn(len(flux), len(freqs_ghz)) + 1j * rng.randn(len(flux), len(freqs_ghz))
+    ).astype(np.complex128)
+
+    filepath = str(tmp_path / "legacy_flux_1")
+    # legacy layout: x=freq(Hz), y=flux, z stored as (x, y)=(freq, flux) → save_data
+    # wants z_info=(x-major,...).T, i.e. (flux, freq) == signals here.
+    save_data(
+        filepath=filepath,
+        x_info={"name": "Frequency", "unit": "Hz", "values": freqs_ghz * 1e9},
+        y_info={"name": "Flux device value", "unit": "a.u.", "values": flux},
+        z_info={"name": "Signal", "unit": "a.u.", "values": signals},
+    )
+    return filepath + ".hdf5", flux, freqs_ghz, signals

@@ -26,9 +26,7 @@ import logging
 from typing import Optional
 
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-    QFileDialog,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -46,7 +44,7 @@ from zcu_tools.fluxdep_gui.event_bus import (
     SpectrumChangedPayload,
     SpectrumRemovedPayload,
 )
-from zcu_tools.fluxdep_gui.state import SpecType, SpectrumEntry
+from zcu_tools.fluxdep_gui.state import SpectrumEntry
 from zcu_tools.fluxdep_gui.ui.interactive.base import InteractiveMplWidget
 from zcu_tools.fluxdep_gui.ui.interactive.find_points import FindPointsWidget
 from zcu_tools.fluxdep_gui.ui.interactive.line_picker import LinePickerWidget
@@ -278,28 +276,25 @@ class MainWindow(QMainWindow):
         self._mount(selector)
 
     def _on_load_clicked(self) -> None:
-        filepath, _ = QFileDialog.getOpenFileName(
-            self, "Load spectrum", filter="HDF5 (*.hdf5 *.h5);;All files (*)"
-        )
-        if not filepath:
+        from zcu_tools.fluxdep_gui.ui.load_dialog import LoadSpectrumDialog
+
+        dialog = LoadSpectrumDialog(self._ctrl.list_spectrums(), parent=self)
+        if dialog.exec() != int(dialog.DialogCode.Accepted):
             return
-        spec_type = self._ask_spec_type()
-        if spec_type is None:
+        req = dialog.result_request()
+        if req is None:
             return
         try:
-            name = self._ctrl.load_spectrum(filepath, spec_type)
+            name = self._ctrl.load_spectrum(
+                req.filepath,
+                req.spec_type,
+                inherit_from=req.inherit_from,
+                transpose_axes=req.transpose_axes,
+            )
             self._ctrl.set_active_spectrum(name)  # jump straight into line picking
         except Exception as exc:  # noqa: BLE001 — surface load errors, don't crash the shell
             logger.exception("load_spectrum failed")
             self._show_error("Load failed", str(exc))
-
-    def _ask_spec_type(self) -> Optional[SpecType]:
-        choice, ok = QInputDialog.getItem(
-            self, "Spectrum type", "Type:", ["OneTone", "TwoTone"], 0, False
-        )
-        if not ok:
-            return None
-        return "OneTone" if choice == "OneTone" else "TwoTone"
 
     def _on_remove_clicked(self) -> None:
         name = self._ctrl.state.active_spectrum

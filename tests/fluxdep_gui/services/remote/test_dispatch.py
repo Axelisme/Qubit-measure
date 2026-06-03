@@ -226,3 +226,31 @@ def test_resources_versions_snapshot(spectrum_hdf5):
     versions = _call(adapter, "resources.versions", {})["versions"]
     assert isinstance(versions, dict)
     assert any(k.startswith("spectrum:") for k in versions)
+
+
+def test_spectrum_load_transpose_axes(transposed_spectrum_hdf5):
+    import numpy as np
+
+    filepath, flux, freqs_ghz, _signals = transposed_spectrum_hdf5
+    adapter = _adapter()
+    loaded = _call(
+        adapter,
+        "spectrum.load",
+        {"filepath": filepath, "spec_type": "OneTone", "transpose_axes": True},
+    )
+    entry = adapter.ctrl.state.spectrums[loaded["name"]]
+    np.testing.assert_allclose(entry.raw["dev_values"], flux)
+    np.testing.assert_allclose(entry.raw["freqs"], freqs_ghz)
+
+
+def test_spectrum_load_transpose_defaults_false(spectrum_hdf5):
+    # omitting transpose_axes must behave as before (validate_params fills False)
+    filepath, dev_values, *_ = spectrum_hdf5
+    adapter = _adapter()
+    import numpy as np
+
+    loaded = _call(
+        adapter, "spectrum.load", {"filepath": filepath, "spec_type": "OneTone"}
+    )
+    entry = adapter.ctrl.state.spectrums[loaded["name"]]
+    np.testing.assert_allclose(entry.raw["dev_values"], dev_values)

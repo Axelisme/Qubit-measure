@@ -49,16 +49,18 @@ def _str_opt(name: str, desc: str = "") -> ParamSpec:
     return ParamSpec(name, JsonType.STRING, required=False, description=desc)
 
 
-def _obj(name: str, desc: str = "") -> ParamSpec:
-    return ParamSpec(name, JsonType.OBJECT, required=True, description=desc)
-
-
 def _num(name: str, desc: str = "") -> ParamSpec:
     return ParamSpec(name, JsonType.NUMBER, required=True, description=desc)
 
 
 def _json(name: str, desc: str = "") -> ParamSpec:
     return ParamSpec(name, JsonType.JSON, required=True, description=desc)
+
+
+def _bool_opt(name: str, desc: str = "") -> ParamSpec:
+    return ParamSpec(
+        name, JsonType.BOOLEAN, required=False, default=False, description=desc
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -91,11 +93,16 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "Load a raw spectrum hdf5 into the collection and return its assigned "
         "name. spec_type is 'OneTone' or 'TwoTone'. inherit_from optionally "
         "names an already-loaded spectrum whose flux alignment is copied as an "
-        "initial guess.",
+        "initial guess. transpose_axes=true swaps the device-value and frequency "
+        "axes at load (for legacy files stored as x=frequency / y=flux).",
         (
             _str("filepath", "Path to the raw spectrum hdf5 file"),
             _str("spec_type", "'OneTone' or 'TwoTone'"),
             _str_opt("inherit_from", "Loaded spectrum to inherit alignment from"),
+            _bool_opt(
+                "transpose_axes",
+                "Swap dev-value/frequency axes for legacy x=freq/y=flux files",
+            ),
         ),
     ),
     "spectrum.list": MethodSpec(

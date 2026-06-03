@@ -70,8 +70,11 @@ class Controller:
         filepath: str,
         spec_type: SpecType,
         inherit_from: Optional[str] = None,
+        transpose_axes: bool = False,
     ) -> str:
-        name = self._load.load_spectrum(filepath, spec_type, inherit_from)
+        name = self._load.load_spectrum(
+            filepath, spec_type, inherit_from, transpose_axes
+        )
         self._bus.emit(SpectrumAddedPayload(name=name))
         return name
 

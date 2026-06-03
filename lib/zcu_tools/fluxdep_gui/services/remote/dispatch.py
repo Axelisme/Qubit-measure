@@ -149,8 +149,11 @@ def _h_spectrum_load(
     spec_type = _coerce_spec_type(params["spec_type"])
     inherit_raw = params["inherit_from"]
     inherit_from = str(inherit_raw) if inherit_raw is not None else None
+    transpose_axes = bool(params.get("transpose_axes", False))
     try:
-        name = adapter.ctrl.load_spectrum(filepath, spec_type, inherit_from)
+        name = adapter.ctrl.load_spectrum(
+            filepath, spec_type, inherit_from, transpose_axes
+        )
     except (OSError, KeyError, ValueError) as exc:
         raise RemoteError(ErrorCode.CONTROLLER_ERROR, str(exc)) from exc
     return {"name": name}

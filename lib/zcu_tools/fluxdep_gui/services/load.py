@@ -31,6 +31,19 @@ from zcu_tools.utils.datasaver import load_data
 logger = logging.getLogger(__name__)
 
 
+def transpose_spectrum_data(
+    signals2d: np.ndarray, dev_values: np.ndarray, freqs: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Swap the device-value and frequency axes of a raw spectrum.
+
+    Some legacy files store the axes transposed (x=frequency, y=flux,
+    z=(freq, flux)) versus what the loader expects (x=flux, y=freq,
+    z=(flux, freq)). This swaps ``dev_values`` ↔ ``freqs`` and transposes the
+    signal grid accordingly, returning ``(signals.T, freqs, dev_values)``.
+    """
+    return signals2d.T, freqs, dev_values
+
+
 def _empty_points() -> PointsData:
     """A points block with no selected points yet (filled by PointsService)."""
     empty = np.empty(0, dtype=np.float64)
@@ -48,6 +61,7 @@ class LoadService:
         filepath: str,
         spec_type: SpecType,
         inherit_from: Optional[str] = None,
+        transpose_axes: bool = False,
     ) -> str:
         """Load ``filepath`` as a new spectrum and write it into State.
 
@@ -57,11 +71,20 @@ class LoadService:
         is refined later by the line-picker. The loaded ``fluxs`` are derived from
         whatever alignment is in effect at load time (re-derived on alignment).
 
+        ``transpose_axes=True`` swaps the device-value and frequency axes at load
+        time — for legacy files that store x=frequency / y=flux (the transpose of
+        the expected x=flux / y=frequency).
+
         Returns the spectrum name (basename of ``filepath``).
         """
         signals2d, dev_values, freqs = load_data(filepath, return_comment=False)
         if freqs is None:
             raise ValueError(f"{filepath!r} has no frequency axis (not a 2D spectrum)")
+
+        if transpose_axes:
+            signals2d, dev_values, freqs = transpose_spectrum_data(
+                signals2d, dev_values, freqs
+            )
 
         dev_values, freqs, signals2d = format_rawdata(dev_values, freqs, signals2d)
 

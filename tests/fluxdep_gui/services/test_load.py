@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from zcu_tools.fluxdep_gui.services.load import LoadService
+from zcu_tools.fluxdep_gui.services.load import (
+    LoadService,
+    transpose_spectrum_data,
+)
 from zcu_tools.fluxdep_gui.state import FluxDepState, spectrum_version_key
 
 
@@ -65,3 +68,41 @@ def test_load_spectrum_inherit_from_unknown_raises(spectrum_hdf5):
         LoadService(st).load_spectrum(
             filepath, spec_type="OneTone", inherit_from="nope"
         )
+
+
+# --- transpose -------------------------------------------------------------
+
+
+def test_transpose_spectrum_data_swaps_axes_and_signal():
+    z = np.arange(6, dtype=np.complex128).reshape(2, 3)  # (x=2, y=3)
+    x = np.array([0.0, 1.0])
+    y = np.array([10.0, 20.0, 30.0])
+    z2, x2, y2 = transpose_spectrum_data(z, x, y)
+    np.testing.assert_array_equal(z2, z.T)  # (3, 2)
+    np.testing.assert_array_equal(x2, y)  # x ← old y
+    np.testing.assert_array_equal(y2, x)  # y ← old x
+
+
+def test_load_transpose_recovers_canonical_axes(transposed_spectrum_hdf5):
+    """A legacy x=freq/y=flux file loaded with transpose_axes=True must come back
+    with dev_values=flux and freqs in GHz."""
+    filepath, flux, freqs_ghz, signals = transposed_spectrum_hdf5
+    st = FluxDepState()
+    name = LoadService(st).load_spectrum(
+        filepath, spec_type="OneTone", transpose_axes=True
+    )
+    entry = st.spectrums[name]
+    np.testing.assert_allclose(entry.raw["dev_values"], flux)
+    np.testing.assert_allclose(entry.raw["freqs"], freqs_ghz)
+    assert entry.raw["signals"].shape == (len(flux), len(freqs_ghz))
+
+
+def test_load_without_transpose_keeps_legacy_axes_wrong(transposed_spectrum_hdf5):
+    """Sanity: loading the legacy file WITHOUT transpose mis-reads the axes
+    (freqs ≈ 0 after the Hz→GHz scaling of what is really the flux axis)."""
+    filepath, flux, freqs_ghz, _signals = transposed_spectrum_hdf5
+    st = FluxDepState()
+    name = LoadService(st).load_spectrum(filepath, spec_type="OneTone")
+    entry = st.spectrums[name]
+    # dev_values would be the freq axis (Hz, ~5e9), not the flux range
+    assert entry.raw["dev_values"].max() > 1e6  # clearly not the flux range
