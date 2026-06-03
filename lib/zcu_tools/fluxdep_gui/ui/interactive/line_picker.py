@@ -116,18 +116,22 @@ class LinePickerWidget(InteractiveMplWidget):
         freqs: NDArray[np.float64],
         flux_half: Optional[float] = None,
         flux_int: Optional[float] = None,
+        force_magnitude: bool = False,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
         self._signals = signals
         self._dev_values = dev_values
         self._freqs = freqs
+        # OneTone spectra are locked to magnitude-only (phase is uninformative);
+        # the magnitude checkbox is hidden in that case.
+        self._force_magnitude = force_magnitude
 
         self.flux_half, self.flux_int = fold_initial_lines(
             dev_values, flux_half, flux_int
         )
 
-        self._only_use_magnitude = False
+        self._only_use_magnitude = force_magnitude
         self._real_signals = cast2real_and_norm(
             signals, use_phase=not self._only_use_magnitude
         )
@@ -146,9 +150,11 @@ class LinePickerWidget(InteractiveMplWidget):
         self._conjugate_checkbox = QCheckBox("Conjugate Line")
         self.controls_layout.addWidget(self._conjugate_checkbox)
 
-        self._magnitude_checkbox = QCheckBox("Magnitude Only")
-        self._magnitude_checkbox.toggled.connect(self._on_toggle_magnitude)
-        self.controls_layout.addWidget(self._magnitude_checkbox)
+        # Magnitude toggle only when not forced (OneTone locks it on).
+        if not self._force_magnitude:
+            self._magnitude_checkbox = QCheckBox("Magnitude Only")
+            self._magnitude_checkbox.toggled.connect(self._on_toggle_magnitude)
+            self.controls_layout.addWidget(self._magnitude_checkbox)
 
         swap_button = QPushButton("Swap Lines")
         swap_button.clicked.connect(self._on_swap)

@@ -159,6 +159,17 @@ def _h_spectrum_load(
     return {"name": name}
 
 
+def _h_spectrum_load_processed(
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
+) -> Mapping[str, object]:
+    filepath = str(params["filepath"])
+    try:
+        names = adapter.ctrl.load_processed_spectrums(filepath)
+    except (OSError, KeyError, ValueError) as exc:
+        raise RemoteError(ErrorCode.CONTROLLER_ERROR, str(exc)) from exc
+    return {"names": names}
+
+
 def _h_spectrum_list(
     adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -318,6 +329,7 @@ _HANDLERS: dict[str, Handler] = {
     "project.setup": _h_project_setup,
     "project.info": _h_project_info,
     "spectrum.load": _h_spectrum_load,
+    "spectrum.load_processed": _h_spectrum_load_processed,
     "spectrum.list": _h_spectrum_list,
     "spectrum.remove": _h_spectrum_remove,
     "spectrum.set_active": _h_spectrum_set_active,

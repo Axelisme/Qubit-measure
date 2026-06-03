@@ -24,7 +24,12 @@ from zcu_tools.fluxdep_gui.state import (
     SpectrumEntry,
     SpecType,
 )
-from zcu_tools.notebook.persistance import PointsData, SpectrumData, format_rawdata
+from zcu_tools.notebook.persistance import (
+    PointsData,
+    SpectrumData,
+    format_rawdata,
+    load_spectrums,
+)
 from zcu_tools.simulate import value2flux
 from zcu_tools.utils.datasaver import load_data
 
@@ -107,6 +112,9 @@ class LoadService:
             flux_half=flux_half,
             flux_int=flux_int,
             flux_period=flux_period,
+            # inherited alignment is a meaningful seed for the line-picker; a
+            # fresh load (identity default) is not.
+            alignment_seeded=inherit_from is not None,
         )
         self._state.put_spectrum(entry)
         logger.debug(
@@ -124,3 +132,34 @@ class LoadService:
         if src is None:
             raise KeyError(f"inherit_from spectrum {inherit_from!r} not loaded")
         return src.flux_half, src.flux_int, src.flux_period
+
+    def load_processed_spectrums(self, filepath: str) -> list[str]:
+        """Restore a processed ``spectrums.hdf5`` (alignment + selected points).
+
+        Each restored spectrum lands fully advanced — aligned and points-selected
+        — so it shows in the result-preview stage. Returns the loaded names. NOTE:
+        ``dump_spectrums`` does not persist ``spec_type``; a missing type defaults
+        to ``"TwoTone"`` (the user can re-select points to change tooling).
+        """
+        spectrums = load_spectrums(filepath)
+        names: list[str] = []
+        for name, result in spectrums.items():
+            spec_type: SpecType = (
+                "OneTone" if result.get("type") == "OneTone" else "TwoTone"
+            )
+            entry = SpectrumEntry(
+                name=name,
+                spec_type=spec_type,
+                raw=result["spectrum"],
+                points=result["points"],
+                flux_half=result["flux_half"],
+                flux_int=result["flux_int"],
+                flux_period=result["flux_period"],
+                aligned=True,
+                points_selected=result["points"]["freqs"].size > 0,
+                alignment_seeded=True,
+            )
+            self._state.put_spectrum(entry)
+            names.append(name)
+        logger.debug("load_processed_spectrums: %d from %r", len(names), filepath)
+        return names

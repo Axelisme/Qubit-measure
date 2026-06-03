@@ -105,6 +105,13 @@ METHOD_SPECS: dict[str, MethodSpec] = {
             ),
         ),
     ),
+    "spectrum.load_processed": MethodSpec(
+        30.0,
+        "Restore a processed spectrums.hdf5 (aligned spectra with selected "
+        "points) into the collection; returns the loaded names. NOTE: spec_type "
+        "is not persisted, so a missing type defaults to TwoTone.",
+        (_str("filepath", "Path to a processed spectrums.hdf5 file"),),
+    ),
     "spectrum.list": MethodSpec(
         5.0,
         "List the loaded spectra: each {name, spec_type, aligned, points_selected}.",

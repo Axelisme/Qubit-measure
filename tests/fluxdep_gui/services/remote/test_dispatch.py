@@ -254,3 +254,28 @@ def test_spectrum_load_transpose_defaults_false(spectrum_hdf5):
     )
     entry = adapter.ctrl.state.spectrums[loaded["name"]]
     np.testing.assert_allclose(entry.raw["dev_values"], dev_values)
+
+
+def test_spectrum_load_processed_roundtrip(spectrum_hdf5, tmp_path):
+    import numpy as np
+
+    # build + export via one adapter, restore via spectrum.load_processed in another
+    filepath, *_ = spectrum_hdf5
+    a1 = _adapter()
+    loaded = _call(a1, "spectrum.load", {"filepath": filepath, "spec_type": "OneTone"})
+    name = loaded["name"]
+    _call(a1, "alignment.set", {"name": name, "flux_half": 0.0, "flux_int": 1.0})
+    _call(
+        a1,
+        "points.set",
+        {"name": name, "dev_values": [0.0, 2.0], "freqs": [5.0, 5.5]},
+    )
+    out = str(tmp_path / "spectrums.hdf5")
+    _call(a1, "export.spectrums", {"filepath": out})
+
+    a2 = _adapter()
+    res = _call(a2, "spectrum.load_processed", {"filepath": out})
+    assert res["names"] == [name]
+    entry = a2.ctrl.state.spectrums[name]
+    assert entry.aligned and entry.points_selected
+    np.testing.assert_allclose(entry.points["freqs"], [5.0, 5.5])

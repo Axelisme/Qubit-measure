@@ -76,36 +76,35 @@ class MainWindow(QMainWindow):
         central = QWidget()
         root = QHBoxLayout(central)
 
-        # Left panel: spectrum list + actions.
+        # Left panel: collection management above the list, global actions below.
         left = QVBoxLayout()
-        self._list = QListWidget()
-        self._list.currentItemChanged.connect(self._on_list_selection)
-        left.addWidget(QLabel("Spectra"))
-        left.addWidget(self._list, stretch=1)
 
+        # Data management (load / remove this spectrum) — horizontal, above the
+        # list, separate from the global-action area below it.
+        manage_row = QHBoxLayout()
         self._load_btn = QPushButton("Load…")
         self._load_btn.clicked.connect(self._on_load_clicked)
+        self._reload_btn = QPushButton("Load spectrums.hdf5…")
+        self._reload_btn.clicked.connect(self._on_reload_clicked)
         self._remove_btn = QPushButton("Remove")
         self._remove_btn.clicked.connect(self._on_remove_clicked)
-        # Re-do either pipeline stage of the active spectrum (redo alignment, or
-        # redo point selection on the existing alignment).
-        self._repick_lines_btn = QPushButton("Re-pick lines")
-        self._repick_lines_btn.clicked.connect(self._on_repick_lines)
-        self._reselect_points_btn = QPushButton("Re-select points")
-        self._reselect_points_btn.clicked.connect(self._on_reselect_points)
+        manage_row.addWidget(self._load_btn)
+        manage_row.addWidget(self._reload_btn)
+        manage_row.addWidget(self._remove_btn)
+        left.addLayout(manage_row)
+
+        self._list = QListWidget()
+        self._list.currentItemChanged.connect(self._on_list_selection)
+        left.addWidget(self._list, stretch=1)
+
+        # Re-do buttons live in the result preview (right side); kept here only as
+        # bound methods used by ResultPreviewWidget callbacks.
         self._filter_btn = QPushButton("Cross-spectrum filter…")
         self._filter_btn.clicked.connect(self._on_filter_clicked)
         self._export_btn = QPushButton("Export spectrums.hdf5")
         self._export_btn.clicked.connect(self._on_export_clicked)
-        for btn in (
-            self._load_btn,
-            self._remove_btn,
-            self._repick_lines_btn,
-            self._reselect_points_btn,
-            self._filter_btn,
-            self._export_btn,
-        ):
-            left.addWidget(btn)
+        left.addWidget(self._filter_btn)
+        left.addWidget(self._export_btn)
 
         left_panel = QWidget()
         left_panel.setLayout(left)
@@ -183,6 +182,7 @@ class MainWindow(QMainWindow):
             self._ctrl.set_active_spectrum(name)
 
     def _on_active_changed(self, _payload: ActiveSpectrumChangedPayload) -> None:
+        self._refresh_list()  # keep the list selection in sync with the active spectrum
         self._rebuild_editor()
 
     # --- editing area (stage-driven interactive widget) ------------------
@@ -214,7 +214,14 @@ class MainWindow(QMainWindow):
         elif not entry.points_selected:
             self._mount_point_selector(entry)
         else:
-            self._mount(ResultPreviewWidget(entry))  # finished — read-only view
+            # finished — read-only view with the re-do buttons alongside it
+            self._mount(
+                ResultPreviewWidget(
+                    entry,
+                    on_repick_lines=self._on_repick_lines,
+                    on_reselect_points=self._on_reselect_points,
+                )
+            )
 
     def _mount(self, widget: QWidget) -> None:
         self._current_editor = widget
@@ -222,8 +229,16 @@ class MainWindow(QMainWindow):
         self._editor_stack.setCurrentWidget(widget)
 
     def _mount_line_picker(self, entry: SpectrumEntry) -> None:
+        # Seed the picker from the entry's alignment only when it is meaningful
+        # (inherited or already aligned); a fresh load uses the picker defaults.
+        seed = entry.alignment_seeded or entry.aligned
         widget = LinePickerWidget(
-            entry.raw["signals"], entry.raw["dev_values"], entry.raw["freqs"]
+            entry.raw["signals"],
+            entry.raw["dev_values"],
+            entry.raw["freqs"],
+            flux_half=entry.flux_half if seed else None,
+            flux_int=entry.flux_int if seed else None,
+            force_magnitude=entry.spec_type == "OneTone",
         )
         name = entry.name
 
@@ -333,6 +348,24 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001 — surface load errors, don't crash the shell
             logger.exception("load_spectrum failed")
             self._show_error("Load failed", str(exc))
+
+    def _on_reload_clicked(self) -> None:
+        """Restore a processed spectrums.hdf5 (aligned + selected spectra)."""
+        from qtpy.QtWidgets import QFileDialog  # type: ignore[attr-defined]
+
+        filepath, _ = QFileDialog.getOpenFileName(
+            self, "Load spectrums.hdf5", filter="HDF5 (*.hdf5 *.h5);;All files (*)"
+        )
+        if not filepath:
+            return
+        try:
+            names = self._ctrl.load_processed_spectrums(filepath)
+        except Exception as exc:  # noqa: BLE001 — surface load errors, don't crash the shell
+            logger.exception("load_processed_spectrums failed")
+            self._show_error("Load failed", str(exc))
+            return
+        if names:
+            self._ctrl.set_active_spectrum(names[0])
 
     def _on_remove_clicked(self) -> None:
         name = self._ctrl.state.active_spectrum

@@ -127,6 +127,10 @@ class SpectrumEntry:
     flux_period: float = 1.0
     aligned: bool = False
     points_selected: bool = False
+    # True when flux_half/int are a meaningful initial guess (inherited from
+    # another spectrum or already aligned), so the line-picker should seed from
+    # them rather than its centre/edge defaults.
+    alignment_seeded: bool = False
 
 
 @dataclass
@@ -194,6 +198,7 @@ class FluxDepState:
             flux_int=flux_int,
             flux_period=flux_period,
             aligned=True,
+            alignment_seeded=True,
         )
         self.version.bump(spectrum_version_key(name))
 

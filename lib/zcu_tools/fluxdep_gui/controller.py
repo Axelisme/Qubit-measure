@@ -78,6 +78,13 @@ class Controller:
         self._bus.emit(SpectrumAddedPayload(name=name))
         return name
 
+    def load_processed_spectrums(self, filepath: str) -> list[str]:
+        """Restore a processed spectrums.hdf5 (aligned + selected spectra)."""
+        names = self._load.load_processed_spectrums(filepath)
+        for name in names:
+            self._bus.emit(SpectrumAddedPayload(name=name))
+        return names
+
     def remove_spectrum(self, name: str) -> None:
         self._store.remove_spectrum(name)
         self._bus.emit(SpectrumRemovedPayload(name=name))

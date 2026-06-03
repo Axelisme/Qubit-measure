@@ -8,12 +8,17 @@ display — no controls, no interaction. The user returns to editing via the
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from qtpy.QtWidgets import QVBoxLayout, QWidget  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QHBoxLayout,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from zcu_tools.fluxdep_gui.state import SpectrumEntry
 from zcu_tools.notebook.analysis.fluxdep.processing import cast2real_and_norm
@@ -32,19 +37,42 @@ def _contrast_limits(amp: np.ndarray) -> tuple[float, float]:
 class ResultPreviewWidget(QWidget):
     """Read-only spectrum + selected points + flux markers."""
 
-    def __init__(self, entry: SpectrumEntry, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        entry: SpectrumEntry,
+        on_repick_lines: Optional[Callable[[], None]] = None,
+        on_reselect_points: Optional[Callable[[], None]] = None,
+        parent: Optional[QWidget] = None,
+    ) -> None:
         super().__init__(parent)
         self._figure = Figure(figsize=(6, 4))
         self._canvas = FigureCanvasQTAgg(self._figure)
         layout = QVBoxLayout(self)
         layout.addWidget(self._canvas)
+
+        # Re-do buttons sit with the result (right side), not the left panel.
+        if on_repick_lines is not None or on_reselect_points is not None:
+            row = QHBoxLayout()
+            if on_repick_lines is not None:
+                repick = QPushButton("Re-pick lines")
+                repick.clicked.connect(on_repick_lines)
+                row.addWidget(repick)
+            if on_reselect_points is not None:
+                reselect = QPushButton("Re-select points")
+                reselect.clicked.connect(on_reselect_points)
+                row.addWidget(reselect)
+            row.addStretch(1)
+            layout.addLayout(row)
+
         self._render(entry)
 
     def _render(self, entry: SpectrumEntry) -> None:
         ax = self._figure.add_subplot(1, 1, 1)
         dev = entry.raw["dev_values"]
         freqs = entry.raw["freqs"]
-        amp = cast2real_and_norm(entry.raw["signals"])  # no mask
+        # OneTone is locked to magnitude (phase uninformative); TwoTone uses phase.
+        use_phase = entry.spec_type != "OneTone"
+        amp = cast2real_and_norm(entry.raw["signals"], use_phase=use_phase)  # no mask
         vmin, vmax = _contrast_limits(amp)
         ax.imshow(
             amp.T,

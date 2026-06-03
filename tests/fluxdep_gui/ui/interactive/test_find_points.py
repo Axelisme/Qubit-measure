@@ -60,3 +60,36 @@ def test_result_sorted_by_dev(widget):
     widget._on_perform_all()
     devs, _ = widget.get_result()
     assert np.all(np.diff(devs) >= 0)
+
+
+def test_update_points_is_debounced_async(widget):
+    # update_points schedules a worker (bumps generation, starts the debounce);
+    # it does not compute inline.
+    g0 = widget._generation
+    widget.update_points()
+    assert widget._generation == g0 + 1
+    assert widget._debounce.isActive()
+
+
+def test_stale_worker_result_is_dropped(widget):
+    # a worker result tagged with an old generation must be ignored
+    widget._generation = 5
+    before = widget._s_dev_values.copy()
+    widget._on_worker_done(
+        3,  # stale generation
+        np.abs(widget._signals),
+        np.array([99.0]),
+        np.array([99.0]),
+    )
+    np.testing.assert_array_equal(widget._s_dev_values, before)  # unchanged
+
+
+def test_fresh_worker_result_applied(widget):
+    widget._generation = 7
+    widget._on_worker_done(
+        7,  # current generation
+        np.abs(widget._signals),
+        np.array([1.0, 2.0]),
+        np.array([5.0, 5.1]),
+    )
+    np.testing.assert_array_equal(widget._s_dev_values, [1.0, 2.0])

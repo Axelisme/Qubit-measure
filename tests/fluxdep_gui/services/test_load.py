@@ -106,3 +106,49 @@ def test_load_without_transpose_keeps_legacy_axes_wrong(transposed_spectrum_hdf5
     entry = st.spectrums[name]
     # dev_values would be the freq axis (Hz, ~5e9), not the flux range
     assert entry.raw["dev_values"].max() > 1e6  # clearly not the flux range
+
+
+# --- inherit seeding -------------------------------------------------------
+
+
+def test_inherited_load_marks_alignment_seeded(spectrum_hdf5):
+    filepath, *_ = spectrum_hdf5
+    st = FluxDepState()
+    svc = LoadService(st)
+    first = svc.load_spectrum(filepath, spec_type="OneTone")
+    assert st.spectrums[first].alignment_seeded is False  # fresh load
+    st.set_alignment(first, flux_half=1.0, flux_int=2.0, flux_period=2.0)
+    second = svc.load_spectrum(filepath, spec_type="TwoTone", inherit_from=first)
+    # inheriting a spectrum's alignment marks the new one as seeded
+    assert st.spectrums[second].alignment_seeded is True
+    assert st.spectrums[second].flux_half == 1.0
+
+
+# --- processed reload ------------------------------------------------------
+
+
+def test_load_processed_roundtrip(spectrum_hdf5, tmp_path):
+    from zcu_tools.fluxdep_gui.services.alignment import (
+        AlignmentService,
+        PointsService,
+    )
+    from zcu_tools.fluxdep_gui.services.export import ExportService
+
+    # build + export a processed spectrum
+    filepath, *_ = spectrum_hdf5
+    st = FluxDepState()
+    name = LoadService(st).load_spectrum(filepath, spec_type="OneTone")
+    AlignmentService(st).set_alignment(name, flux_half=0.0, flux_int=1.0)
+    PointsService(st).set_points(name, np.array([0.0, 2.0]), np.array([5.0, 5.5]))
+    out = str(tmp_path / "spectrums.hdf5")
+    ExportService(st).export_spectrums(filepath=out)
+
+    # restore into a fresh state
+    st2 = FluxDepState()
+    names = LoadService(st2).load_processed_spectrums(out)
+    assert names == [name]
+    entry = st2.spectrums[name]
+    assert entry.aligned is True
+    assert entry.points_selected is True
+    assert entry.flux_period == 2.0
+    np.testing.assert_allclose(entry.points["freqs"], [5.0, 5.5])

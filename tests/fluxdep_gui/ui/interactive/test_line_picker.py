@@ -68,3 +68,24 @@ def test_widget_finished_signal(widget):
     finish = next(b for b in widget.findChildren(QPushButton) if b.text() == "Finish")
     finish.click()
     assert fired == [True]
+
+
+def test_force_magnitude_hides_checkbox(qapp):
+    from qtpy.QtWidgets import QCheckBox
+
+    sig, devs, freqs = _spectrum()
+    w = LinePickerWidget(sig, devs, freqs, force_magnitude=True)
+    labels = [c.text() for c in w.findChildren(QCheckBox)]
+    assert "Magnitude Only" not in labels  # locked on, checkbox hidden
+    assert w._only_use_magnitude is True
+    w.deleteLater()
+
+
+def test_no_force_keeps_magnitude_checkbox(qapp):
+    from qtpy.QtWidgets import QCheckBox
+
+    sig, devs, freqs = _spectrum()
+    w = LinePickerWidget(sig, devs, freqs)
+    labels = [c.text() for c in w.findChildren(QCheckBox)]
+    assert "Magnitude Only" in labels
+    w.deleteLater()
