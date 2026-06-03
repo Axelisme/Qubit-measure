@@ -1,7 +1,7 @@
 ---
 name: run-fluxdep-gui
 description: Run, drive, and smoke-test the fluxdep-gui — a standalone Qt GUI for fluxonium flux-dependence fitting (load spectrum hdf5 → pick half/integer flux lines → select spectral points → cross-spectrum filter → export spectrums.hdf5 → search a database for EJ/EC/EL → export params.json). Use when asked to launch/start/test the fluxdep-gui app, drive the flux-dependence analysis pipeline via its MCP tools, or follow the recommended analysis flow.
-skill_version: 4
+skill_version: 5
 ---
 
 # run-fluxdep-gui
@@ -92,6 +92,39 @@ fluxdep_fit_search                              # multi-second sweep -> {EJ, EC,
 fluxdep_fit_result                              # {has_result, params, inputs…}
 fluxdep_fit_export_params(savepath="params.json")  # -> {path}; default <result_dir>/params.json
 ```
+
+`database_path` points at a precomputed fluxonium database (`fluxs` / `params` /
+`energies` datasets). The shipped ones live in `Database/simulation/`
+(`fluxonium_all.h5`, `fluxonium_int.h5`, `fluxonium_1.h5`).
+
+## Generating the search database
+
+`script/generate_fluxonium_sample.py` builds a database: it samples `(EJ, EC, EL)`
+points (rays through the `EJb × ECb × ELb` box) and computes each one's energy
+levels vs flux with scqubits. **A real run is SLOW (minutes–hours)** — the energy
+diagonalisation dominates.
+
+```bash
+# real run (back up any existing DB first — see WARNING below):
+.venv/bin/python script/generate_fluxonium_sample.py \
+    --output Database/simulation/fluxonium_all.h5 \
+    --preset all --num-samples 10000 --n-jobs -1 --overwrite
+
+# tiny dry run (random energies, no scqubits) to check plumbing — fast:
+.venv/bin/python script/generate_fluxonium_sample.py \
+    --output /tmp/db.h5 --preset all --num-samples 8 --dry-run
+```
+
+Key flags: `--preset normal|integer|all` (named `(EJb, ECb, ELb)` boxes), or set
+`--EJb/--ECb/--ELb min,max` per axis; `--num-samples`, `--cutoff`,
+`--evals-count`, `--num-flux` (flux points over [0, 0.5], mirrored to [0, 1]);
+`--n-jobs -1` for all cores; `--plot` for a 3D scatter of the sampled directions
+(off by default); `--dry-run` (writes a `*_dryrun.h5` sibling, never the real
+path); `--overwrite` (required to replace an existing output).
+
+> **WARNING — don't clobber a database you can't cheaply rebuild.** The output
+> path must not exist unless `--overwrite` is passed. Before regenerating an
+> existing DB, back it up first: `cp Database/simulation/fluxonium_all.h5 ~/backup/`.
 
 ## Run (smoke harness — verify the loop without an MCP client)
 
