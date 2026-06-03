@@ -1,11 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "mcp__measure-gui"
+      "mcp__measure-gui",
+      "mcp__fluxdep-gui"
     ]
   },
   "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
-    "measure-gui"
+    "measure-gui",
+    "fluxdep-gui"
   ]
 }
