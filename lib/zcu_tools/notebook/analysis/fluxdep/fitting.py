@@ -13,10 +13,11 @@ from matplotlib.figure import Figure
 from numba import set_num_threads
 from numpy.typing import NDArray
 from scipy.optimize import least_squares
-from tqdm.auto import tqdm, trange
+from tqdm.auto import tqdm
 from typing_extensions import Literal, Optional, overload
 
 from zcu_tools.notebook.persistance import TransitionDict
+from zcu_tools.progress_bar import make_pbar
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 
 from .models import compile_transitions, count_max_evals, energy2linearform
@@ -116,7 +117,7 @@ def search_in_database(
     best_params = np.full(3, np.nan)
     results = np.full((N, 2), np.nan)  # (N, 2)
 
-    idx_bar = trange(N, desc="Searching...")
+    idx_bar = make_pbar(total=N, desc="Searching...")
 
     # Pre-compile transitions once so the hot loop calls only nogil njit code.
     tr_pairs, tr_coeffs, tr_offsets = compile_transitions(
@@ -175,7 +176,7 @@ def search_in_database(
             best_scale = float(results[best_idx, 1])
             best_params = f_params[best_idx] * best_scale
 
-        idx_bar.set_description_str("Done! ")
+        idx_bar.set_description("Done! ")
         if fuzzy and np.isfinite(best_dist):
             # recalculate scale with exact method and keep results consistent
             single = _run_kernel(best_idx, best_idx + 1, False)
