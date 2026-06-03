@@ -1,46 +1,237 @@
-# make energies of fluxonium under different external fluxes
-# and save them in a file
+"""Generate a precomputed fluxonium energy database for fluxdep database search.
+
+For each sampled ``(EJ, EC, EL)`` point this computes the lowest ``evals_count``
+energy levels versus external flux (0 → 0.5, then mirrored to 0 → 1 since the
+fluxonium spectrum is symmetric about half-flux) and stores them. The result
+feeds ``zcu_tools.notebook.analysis.fluxdep.search_in_database`` (and the
+fluxdep-gui v2 search): each row is a candidate, and the search scales it to
+cover a continuous neighbourhood of parameter space.
+
+Parameters are sampled as rays from the origin through the ``EJb × ECb × ELb``
+bounding box (Fibonacci-lattice directions, filtered to those that intersect the
+box). Rays — rather than a uniform grid — match the search's ``params[i] * scale``
+design: one direction covers a continuous line of parameters via the scale.
+
+Usage (the energy computation is SLOW — minutes to hours for a real run):
+
+    # a real "all"-range database with 10k samples on all cores
+    .venv/bin/python script/generate_fluxonium_sample.py \
+        --output Database/simulation/fluxonium_all.h5 \
+        --preset all --num-samples 10000 --n-jobs -1
+
+    # a tiny dry run (random energies, no scqubits) to sanity-check plumbing
+    .venv/bin/python script/generate_fluxonium_sample.py \
+        --output /tmp/db.h5 --num-samples 8 --dry-run
+
+The output path must not already exist unless ``--overwrite`` is given (so a real
+run never clobbers an existing database by accident). ``--dry-run`` always writes
+to a ``*_dryrun.h5`` sibling instead of the given path.
+
+WARNING: a real run takes a long time. Back up any existing database first
+(``cp Database/simulation/fluxonium_all.h5 ~/backup/``) before regenerating.
+"""
+
 from __future__ import annotations
 
+import argparse
 import os
 
 import h5py as h5
-import matplotlib.pyplot as plt
 import numpy as np
-import scqubits.settings as scq_settings
-from joblib import Parallel, delayed
 from numpy.typing import NDArray
-from scqubits.core.fluxonium import Fluxonium
-from tqdm.auto import tqdm
-from typing_extensions import cast
-from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
+from typing_extensions import Callable, Optional
 
-# parameters
-data_path = "Database/simulation/fluxonium_all.h5"
-num_sample = 10000
-# normal
-# EJb = (3.0, 15.0)
-# ECb = (0.2, 2.0)
-# ELb = (0.5, 2.0)
-# integer
-# EJb = (2.0, 6.0)
-# ECb = (0.8, 2.0)
-# ELb = (0.01, 0.2)
-# all
-EJb = (1.0, 20.0)
-ECb = (0.1, 4.0)
-ELb = (0.01, 3.0)
+# Preset (EJb, ECb, ELb) bounding boxes — the notebook's named ranges (GHz).
+PRESETS: dict[
+    str, tuple[tuple[float, float], tuple[float, float], tuple[float, float]]
+] = {
+    "normal": ((3.0, 15.0), (0.2, 2.0), (0.5, 2.0)),
+    "integer": ((2.0, 6.0), (0.8, 2.0), (0.01, 0.2)),
+    "all": ((1.0, 20.0), (0.1, 4.0), (0.01, 3.0)),
+}
+
+Bound = tuple[float, float]
+EnergyFn = Callable[[tuple[float, float, float]], NDArray[np.float64]]
 
 
-DRY_RUN = True
-scq_settings.PROGRESSBAR_DISABLED = True
-
-cutoff = 40
-evals_count = 15
-fluxs = np.linspace(0.0, 0.5, 120)
+# ---------------------------------------------------------------------------
+# Pure sampling geometry (no scqubits, no IO — unit-testable)
+# ---------------------------------------------------------------------------
 
 
-fluxonium = Fluxonium(1.0, 1.0, 1.0, flux=0.0, cutoff=cutoff)
+def fibonacci_lattice(K: int) -> NDArray[np.float64]:
+    """K approximately-uniform unit directions on the sphere (Fibonacci lattice).
+
+    Returns an array of shape ``(K, 3)`` of unit vectors.
+    """
+    phi = (1 + np.sqrt(5)) / 2
+    indices = np.arange(K)
+    z = 1 - (2 * indices + 1) / K
+    theta = 2 * np.pi * indices / phi
+    r = np.sqrt(1 - z**2)
+    x = r * np.cos(theta)
+    y = r * np.sin(theta)
+    return np.stack([x, y, z], axis=-1)
+
+
+def fibonacci_lattice_positive(K: int) -> NDArray[np.float64]:
+    """At least ``K`` Fibonacci-lattice directions with all components > 0.
+
+    Oversamples (8·K) and filters to the positive octant; grows K if too few
+    survive (parameter bounds are all positive, so only this octant matters).
+    """
+    while True:
+        directions = fibonacci_lattice(8 * K)
+        x, y, z = directions.T
+        mask = (x > 0) & (y > 0) & (z > 0)
+        valid = directions[mask]
+        if valid.shape[0] >= K:
+            return valid
+        K = int(K * 1.1)
+
+
+def ray_intersects_box(
+    direction: NDArray[np.float64],
+    x_range: Bound,
+    y_range: Bound,
+    z_range: Bound,
+) -> bool:
+    """Whether a ray from the origin along ``direction`` enters the box.
+
+    Slab method: the ray (t ≥ 0) intersects iff the per-axis entry/exit interval
+    overlaps. ``direction`` components are assumed > 0 (positive octant).
+    """
+    t_min = 0.0
+    t_max = np.inf
+    for d, rng in zip(direction, (x_range, y_range, z_range)):
+        t1 = rng[0] / d
+        t2 = rng[1] / d
+        t_min = max(t_min, t1)
+        t_max = min(t_max, t2)
+    return t_min <= t_max
+
+
+def sample_intersecting_rays(
+    x_range: Bound,
+    y_range: Bound,
+    z_range: Bound,
+    n_samples: int,
+    *,
+    max_attempts: int = 10,
+    plot: bool = False,
+) -> NDArray[np.float64]:
+    """Sample ``n_samples`` ray directions (scaled by the box) that hit the box.
+
+    Each returned row is a ``(EJ, EC, EL)`` parameter point on a ray through the
+    bounding box. Grows the candidate count until enough rays intersect; raises
+    if it cannot reach ``n_samples`` within ``max_attempts``. With ``plot=True``
+    shows a 3D debug scatter of the accepted directions vs the box corners.
+    """
+    K = n_samples
+    intersecting: list[NDArray[np.float64]] = []
+    for attempt in range(max_attempts):
+        directions = fibonacci_lattice_positive(K)
+        directions[:, 0] *= x_range[1]
+        directions[:, 1] *= y_range[1]
+        directions[:, 2] *= z_range[1]
+
+        intersecting = [
+            d for d in directions if ray_intersects_box(d, x_range, y_range, z_range)
+        ]
+        if len(intersecting) >= n_samples:
+            params = np.array(intersecting)
+            if plot:
+                _plot_directions(params, x_range, y_range, z_range)
+            return params
+
+        orig_K = K
+        K = int(K * min(max(n_samples / max(len(intersecting), 1), 1.01), 100))
+        print(
+            f"Attempt {attempt + 1}: {len(intersecting)} intersecting rays "
+            f"< {n_samples}; increasing candidates {orig_K} -> {K}."
+        )
+
+    raise ValueError(
+        f"Unable to find {n_samples} intersecting rays after {max_attempts} "
+        f"attempts (found {len(intersecting)})."
+    )
+
+
+def mirror_expand(
+    fluxs: NDArray[np.float64], energies: NDArray[np.float64]
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Mirror a 0→0.5 half-period sweep to a full 0→1 sweep (fluxonium symmetry).
+
+    ``fluxs`` is ``(F,)`` over [0, 0.5]; ``energies`` is ``(N, F, L)``. The
+    fluxonium spectrum is symmetric about flux = 0.5, so each is reflected and
+    concatenated to span [0, 1] with ``2F`` flux points.
+    """
+    full_fluxs = np.concatenate([fluxs, 1.0 - fluxs[::-1]])
+    full_energies = np.concatenate([energies, energies[:, ::-1, :]], axis=1)
+    return full_fluxs, full_energies
+
+
+def _plot_directions(params, x_range, y_range, z_range) -> None:
+    import matplotlib.pyplot as plt
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection="3d")
+    ax.scatter(*np.array(params).T)
+    for x in x_range:
+        for y in y_range:
+            for z in z_range:
+                ax.scatter(x, y, z, color="r")
+    ax.scatter(0, 0, 0, color="b")
+    plt.show()
+
+
+# ---------------------------------------------------------------------------
+# Energy computation + database assembly
+# ---------------------------------------------------------------------------
+
+
+def _make_energy_fn(
+    fluxs: NDArray[np.float64], cutoff: int, evals_count: int
+) -> EnergyFn:
+    """A per-parameter energy function bound to the flux grid + truncation."""
+    from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
+
+    def _fn(params: tuple[float, float, float]) -> NDArray[np.float64]:
+        return calculate_energy_vs_flux(params, fluxs, cutoff, evals_count)[1]
+
+    return _fn
+
+
+def build_database(
+    params: NDArray[np.float64],
+    *,
+    energy_fn: EnergyFn,
+    n_jobs: int = 1,
+    progress: bool = True,
+) -> NDArray[np.float64]:
+    """Compute the ``(N, F, L)`` energy table for every parameter row.
+
+    ``energy_fn`` maps one ``(EJ, EC, EL)`` to its ``(F, L)`` energies (it closes
+    over the flux grid + truncation; injected so tests can pass a cheap stub
+    instead of scqubits). With ``n_jobs != 1`` the rows run in parallel via joblib.
+    """
+    rows = [tuple(float(v) for v in p) for p in params]
+
+    if n_jobs == 1:
+        iterator = rows
+        if progress:
+            from tqdm.auto import tqdm
+
+            iterator = tqdm(rows, desc="Calculating")
+        energies = [energy_fn(p) for p in iterator]  # type: ignore[arg-type]
+    else:
+        from joblib import Parallel, delayed
+
+        energies = Parallel(n_jobs=n_jobs)(  # type: ignore[assignment]
+            delayed(energy_fn)(p) for p in rows
+        )
+
+    return np.asarray(energies, dtype=np.float64)
 
 
 def dump_data(
@@ -50,6 +241,8 @@ def dump_data(
     energies: NDArray[np.float64],
     Ebounds: NDArray[np.float64],
 ) -> None:
+    """Write the database datasets (fluxs / params / energies / Ebounds)."""
+    os.makedirs(os.path.dirname(filepath) or ".", exist_ok=True)
     with h5.File(filepath, "w") as f:
         f.create_dataset("Ebounds", data=Ebounds)
         f.create_dataset("fluxs", data=fluxs)
@@ -57,179 +250,119 @@ def dump_data(
         f.create_dataset("energies", data=energies)
 
 
-def fibonacci_lattice(K) -> NDArray[np.float64]:
-    """
-    在單位球面上生成 K 個近似均勻分布的方向(Fibonacci lattic)）。
-    返回: K 個單位向量，形狀為 (K, 3)。
-    """
-    # 黃金比例
-    phi = (1 + np.sqrt(5)) / 2
-
-    # 生成點的索引
-    indices = np.arange(K)
-
-    # z 坐標，從 -1 到 1
-    z = 1 - (2 * indices + 1) / K
-
-    # 極角 theta 和方位角 phi
-    theta = 2 * np.pi * indices / phi
-    r = np.sqrt(1 - z**2)  # 球面上的半徑
-
-    # 轉換為笛卡爾坐標
-    x = r * np.cos(theta)
-    y = r * np.sin(theta)
-
-    # 組成單位向量
-    directions = np.stack([x, y, z], axis=-1)
-    return directions
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 
 
-def fibonacci_lattice_positive_vectorized(K) -> NDArray[np.float64]:
-    """
-    使用 numpy 向量化生成約均勻分布在球面上的點，並篩選出 xyz 坐標都大於 0 的點，
-    最後返回最少 K 個點。
-    """
-    while True:
-        directions = fibonacci_lattice(8 * K)
-        x, y, z = directions.T
-
-        # 篩選出 xyz 都大於 0 的點
-        mask = (x > 0) & (y > 0) & (z > 0)
-        valid_directions = directions[mask]
-
-        # 如果候選點不足 K 個，可以增加候選點再重試
-        if valid_directions.shape[0] >= K:
-            break
-
-        print(f"Generating more points..., from {K} to {int(K * 1.1)}")
-        K = int(K * 1.1)  # 增加候選點數量
-
-    return valid_directions
+def _parse_bound(text: str) -> Bound:
+    parts = text.split(",")
+    if len(parts) != 2:
+        raise argparse.ArgumentTypeError(f"bound must be 'min,max', got {text!r}")
+    lo, hi = float(parts[0]), float(parts[1])
+    if lo >= hi:
+        raise argparse.ArgumentTypeError(f"bound min must be < max, got {text!r}")
+    return (lo, hi)
 
 
-def ray_intersects_box(
-    direction: NDArray[np.float64],
-    x_range: tuple[float, float],
-    y_range: tuple[float, float],
-    z_range: tuple[float, float],
-) -> bool:
-    """
-    檢查一條從原點出發的射線是否與長方體相交。
-    direction: 單位向量，表示射線方向，形狀為 (3,)
-    x_range, y_range, z_range: 長方體的範圍，例如 [x_min, x_max]
-    返回: True 如果相交, False 如果不相交。
-    """
-    d_x, d_y, d_z = direction
-    t_min = 0.0  # 射線從原點出發，t >= 0
-    t_max = np.inf
-
-    # 對每個坐標軸計算 t 的範圍
-    for d, rng in [(d_x, x_range), (d_y, y_range), (d_z, z_range)]:
-        # 計算射線與邊界的交點
-        t1 = rng[0] / d
-        t2 = rng[1] / d
-        t_min = max(t_min, t1)
-        t_max = min(t_max, t2)
-
-    # 如果 t_min <= t_max, 則射線與長方體相交
-    return t_min <= t_max
+def _resolve_bounds(args: argparse.Namespace) -> tuple[Bound, Bound, Bound]:
+    """Bounds come from --preset, then any explicit --EJb/--ECb/--ELb override."""
+    if args.preset is not None:
+        EJb, ECb, ELb = PRESETS[args.preset]
+    else:
+        EJb = ECb = ELb = None  # require explicit bounds below
+    EJb = args.EJb if args.EJb is not None else EJb
+    ECb = args.ECb if args.ECb is not None else ECb
+    ELb = args.ELb if args.ELb is not None else ELb
+    if EJb is None or ECb is None or ELb is None:
+        raise SystemExit("bounds required: pass --preset, or all of --EJb/--ECb/--ELb")
+    return EJb, ECb, ELb
 
 
-def get_intersecting_rays(
-    x_range: tuple[float, float],
-    y_range: tuple[float, float],
-    z_range: tuple[float, float],
-    N: int,
-    n_jobs: int = -1,
-) -> NDArray[np.float64]:
-    """
-    給定長方體範圍和所需射線數量 N, 回傳正好 N 條與長方體相交的射線方向。
-    使用並行化加速篩選。
-    x_range, y_range, z_range: 長方體的範圍，例如 [x_min, x_max]
-    N: 所需射線數量
-    n_jobs: 並行工作進程數，-1 表示使用所有可用核心
-    返回：與長方體相交的射線方向列表，形狀為 (N, 3)。
-    """
-    # 初始生成較多的候選射線，確保能找到足夠多的相交射線
-    K = N  # 初始候選數量設為 N
-    max_attempts = 10  # 最多嘗試 5 次增加 K
-
-    def check_direction(direction):
-        return direction, ray_intersects_box(direction, x_range, y_range, z_range)
-
-    intersect_dirs = []
-    for attempt in range(max_attempts):
-        # 生成 Fibonacci lattice 上的方向
-        directions = fibonacci_lattice_positive_vectorized(K)  # (K, 3)
-
-        directions[:, 0] *= x_range[1]
-        directions[:, 1] *= y_range[1]
-        directions[:, 2] *= z_range[1]
-
-        # 使用並行化篩選與長方體相交的射線
-        results = Parallel(n_jobs=n_jobs, batch_size=2**14)(  # type: ignore
-            delayed(check_direction)(direction) for direction in directions
-        )
-        results = cast(list[tuple[np.ndarray, bool]], results)
-
-        # 提取相交的方向
-        intersect_dirs = [result[0] for result in results if result[1]]
-
-        # 檢查是否找到足夠多的相交射線
-        if len(intersect_dirs) >= N:
-            # plot directions in 3D space for debugging
-
-            fig = plt.figure()
-            ax = fig.add_subplot(111, projection="3d")
-            ax.scatter(*np.array(intersect_dirs).T)
-            for x in x_range:
-                for y in y_range:
-                    for z in z_range:
-                        ax.scatter(x, y, z, color="r")
-            ax.scatter(0, 0, 0, color="b")
-            plt.show()
-
-            return np.array(intersect_dirs)
-        else:
-            # 如果不夠，增加候選數量 K
-            orig_K = K
-            K = int(K * min(max(N / max(len(intersect_dirs), 1), 1.01), 100))
-            print(
-                f"Attempt {attempt + 1}: Found {len(intersect_dirs)} intersecting rays, less than {N}. Increasing K from {orig_K} to {K}."
-            )
-
-    # 如果多次嘗試後仍不足 N 條，拋出錯誤
-    raise ValueError(
-        f"Unable to find {N} intersecting rays after {max_attempts} attempts. Found only {len(intersect_dirs)} intersecting rays."
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        description="Generate a fluxonium energy database for fluxdep search.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+    p.add_argument("--output", required=True, help="Output .h5 path")
+    p.add_argument(
+        "--preset",
+        choices=sorted(PRESETS),
+        default=None,
+        help="Named (EJb, ECb, ELb) bounding box; overridable per-axis below",
+    )
+    p.add_argument("--EJb", type=_parse_bound, default=None, help="EJ bound 'min,max'")
+    p.add_argument("--ECb", type=_parse_bound, default=None, help="EC bound 'min,max'")
+    p.add_argument("--ELb", type=_parse_bound, default=None, help="EL bound 'min,max'")
+    p.add_argument("--num-samples", type=int, default=10000, help="Parameter samples")
+    p.add_argument("--cutoff", type=int, default=40, help="Fluxonium charge cutoff")
+    p.add_argument(
+        "--evals-count", type=int, default=15, help="Energy levels per point"
+    )
+    p.add_argument(
+        "--num-flux", type=int, default=120, help="Flux points over [0, 0.5] (mirrored)"
+    )
+    p.add_argument(
+        "--n-jobs", type=int, default=1, help="Parallel workers (-1 = all cores)"
+    )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Random energies (skip scqubits); writes to *_dryrun.h5",
+    )
+    p.add_argument(
+        "--plot", action="store_true", help="Show a 3D scatter of sampled directions"
+    )
+    p.add_argument(
+        "--overwrite", action="store_true", help="Allow overwriting an existing output"
+    )
+    p.add_argument("--seed", type=int, default=0, help="RNG seed (dry-run energies)")
+    return p
 
 
-params = get_intersecting_rays(EJb, ECb, ELb, num_sample)
-num_sample = len(params)  # update to the actual number of samples
-print(f"Generated {num_sample} samples.")
-if DRY_RUN:
-    energies = [np.random.randn(evals_count) for _ in range(num_sample)]
-else:
-    energies = [
-        calculate_energy_vs_flux((EJ, EC, EL), fluxs, cutoff, evals_count)[1]
-        for EJ, EC, EL in tqdm(params, desc="Calculating")
-    ]
+def main(argv: Optional[list[str]] = None) -> int:
+    args = build_parser().parse_args(argv)
+    EJb, ECb, ELb = _resolve_bounds(args)
+
+    output = args.output
+    if args.dry_run:
+        output = output.replace(".h5", "_dryrun.h5")
+    if os.path.exists(output) and not args.overwrite:
+        raise SystemExit(
+            f"output already exists: {output} (pass --overwrite to replace it). "
+            "Back up an existing database before regenerating."
+        )
+
+    fluxs = np.linspace(0.0, 0.5, args.num_flux)
+
+    params = sample_intersecting_rays(EJb, ECb, ELb, args.num_samples, plot=args.plot)
+    print(f"Generated {len(params)} samples.")
+
+    if args.dry_run:
+        rng = np.random.RandomState(args.seed)
+        energies = np.stack(
+            [rng.randn(len(fluxs), args.evals_count) for _ in range(len(params))]
+        )
+    else:
+        import scqubits.settings as scq_settings
+
+        scq_settings.PROGRESSBAR_DISABLED = True
+        try:
+            energy_fn = _make_energy_fn(fluxs, args.cutoff, args.evals_count)
+            energies = build_database(params, energy_fn=energy_fn, n_jobs=args.n_jobs)
+        finally:
+            scq_settings.PROGRESSBAR_DISABLED = False
+
+    full_fluxs, full_energies = mirror_expand(fluxs, energies)
+    Ebounds = np.array((EJb, ECb, ELb))
+
+    dump_data(output, full_fluxs, params, full_energies, Ebounds)
+    print(
+        f"Wrote {len(params)} params x {len(full_fluxs)} fluxs x "
+        f"{args.evals_count} levels -> {output}"
+    )
+    return 0
 
 
-scq_settings.PROGRESSBAR_DISABLED = False
-
-# we can flip the data around 0.5 to make the other half
-# since the fluxonium is symmetric
-fluxs = np.concatenate([fluxs, 1.0 - fluxs[::-1]])
-for i in range(len(params)):
-    energies[i] = np.concatenate([energies[i], energies[i][::-1]])
-
-params = np.array(params)
-energies = np.array(energies)
-Ebounds = np.array((EJb, ECb, ELb))
-
-if DRY_RUN:
-    data_path = data_path.replace(".h5", "_dryrun.h5")
-
-os.makedirs(os.path.dirname(data_path), exist_ok=True)
-dump_data(data_path, fluxs, params, energies, Ebounds)
+if __name__ == "__main__":
+    raise SystemExit(main())
