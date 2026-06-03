@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any, Callable, Iterator, Optional
+from typing import Any, Callable, Generator, Optional
 
 from .base import BaseProgressBar
 
@@ -27,7 +27,7 @@ def make_pbar(*args: Any, **kwargs: Any) -> BaseProgressBar:
 @contextmanager
 def use_pbar_factory(
     factory: Callable[..., BaseProgressBar],
-) -> Iterator[None]:
+) -> Generator[None, None, None]:
     """Context manager that installs a custom pbar factory for its duration.
 
     Each thread/task has its own context snapshot, so nested use and concurrent

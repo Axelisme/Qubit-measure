@@ -16,7 +16,7 @@ from __future__ import annotations
 import warnings
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Iterator, Optional
+from typing import Generator, Optional
 
 import matplotlib as mpl
 from matplotlib.axes import Axes
@@ -33,7 +33,7 @@ _backend: ContextVar[Optional[LivePlotBackend]] = ContextVar(
 
 
 @contextmanager
-def set_liveplot_backend(backend: LivePlotBackend) -> Iterator[None]:
+def set_liveplot_backend(backend: LivePlotBackend) -> Generator[None, None, None]:
     """Install a backend for the dynamic extent of the ``with`` block.
 
     Thread/task-safe (ContextVar). The GUI run worker uses this to register its
