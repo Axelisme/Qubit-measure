@@ -109,6 +109,12 @@ class MainWindow(QMainWindow):
         self._filter_btn.clicked.connect(self._on_filter_clicked)
         left.addWidget(self._filter_btn)
 
+        # The v2 fit tail: search a database for (EJ, EC, EL) over the selected
+        # joint point cloud and export params.json.
+        self._fit_btn = QPushButton("Fit spectrum…")
+        self._fit_btn.clicked.connect(self._on_fit_clicked)
+        left.addWidget(self._fit_btn)
+
         left_panel = QWidget()
         left_panel.setLayout(left)
         left_panel.setMinimumWidth(180)
@@ -330,6 +336,16 @@ class MainWindow(QMainWindow):
 
         selector.finished.connect(_on_finish)
         self._mount(selector)
+
+    def _on_fit_clicked(self) -> None:
+        """Open the database-search fit panel over the selected joint point cloud."""
+        from zcu_tools.fluxdep_gui.ui.fit_panel import FitPanelWidget
+
+        if not any(e.points_selected for e in self._ctrl.state.spectrums.values()):
+            self._show_error("No points", "Select points on a spectrum first.")
+            return
+        self._clear_editor()
+        self._mount(FitPanelWidget(self._ctrl))
 
     def _on_load_clicked(self) -> None:
         from zcu_tools.fluxdep_gui.ui.load_dialog import LoadSpectrumDialog
