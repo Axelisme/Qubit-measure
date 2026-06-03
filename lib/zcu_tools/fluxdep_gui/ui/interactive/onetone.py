@@ -138,11 +138,6 @@ class OneToneWidget(InteractiveMplWidget):
                 ax.axvline(self._flux_int, color="blue", linestyle="--", linewidth=1)
         self._ax_curve.plot(self._dev_values, self._smoothed)
         self._ax_curve.set_xlim(self._dev_values[0], self._dev_values[-1])
-        # A horizontal marker on the amplitude curve showing the current
-        # threshold (peak prominence cutoff); it tracks the slider.
-        self._threshold_line = self._ax_curve.axhline(
-            self._threshold(), color="green", linestyle="--", linewidth=1
-        )
         self._ax_img.set_ylabel("Frequency (GHz)")
         self._ax_curve.set_xlabel("Device value")
         self._ax_curve.set_ylabel("Normalized Amplitude")
@@ -150,8 +145,6 @@ class OneToneWidget(InteractiveMplWidget):
         self._scatter_curve = None
 
     def update_peaks(self, threshold: float) -> None:
-        if hasattr(self, "_threshold_line"):
-            self._threshold_line.set_ydata([threshold, threshold])
         peaks = detect_peaks(self._smoothed, threshold)
         self._s_dev_values = self._dev_values[peaks]
         self._s_freqs = np.full_like(

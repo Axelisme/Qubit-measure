@@ -124,12 +124,3 @@ def test_widget_without_flux_markers_ok(qapp):
     w = OneToneWidget(signals, devs, freqs)
     assert w.get_result()[0].size >= 0
     w.deleteLater()
-
-
-def test_threshold_marker_tracks_slider(qapp):
-    signals, devs, freqs, _ = _crafted_spectrum()
-    w = OneToneWidget(signals, devs, freqs, threshold=1.0)
-    assert float(np.asarray(w._threshold_line.get_ydata())[0]) == 1.0
-    w._threshold_slider.setValue(int(3.0 * 100))  # emits valueChanged
-    assert float(np.asarray(w._threshold_line.get_ydata())[0]) == 3.0
-    w.deleteLater()

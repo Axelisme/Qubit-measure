@@ -48,9 +48,8 @@ class ResultPreviewWidget(QWidget):
         self._figure = Figure(figsize=(6, 4))
         self._canvas = FigureCanvasQTAgg(self._figure)
         layout = QVBoxLayout(self)
-        layout.addWidget(self._canvas)
 
-        # Re-do buttons sit with the result (right side), not the left panel.
+        # Re-do buttons sit above the figure (with the result, on the right side).
         if on_repick_lines is not None or on_reselect_points is not None:
             row = QHBoxLayout()
             if on_repick_lines is not None:
@@ -64,6 +63,7 @@ class ResultPreviewWidget(QWidget):
             row.addStretch(1)
             layout.addLayout(row)
 
+        layout.addWidget(self._canvas)
         self._render(entry)
 
     def _render(self, entry: SpectrumEntry) -> None:

@@ -79,17 +79,13 @@ class MainWindow(QMainWindow):
         # Left panel: collection management above the list, global actions below.
         left = QVBoxLayout()
 
-        # Data management (load / remove this spectrum) — horizontal, above the
-        # list, separate from the global-action area below it.
+        # Above the list: add a raw spectrum / remove this one.
         manage_row = QHBoxLayout()
-        self._load_btn = QPushButton("Load…")
-        self._load_btn.clicked.connect(self._on_load_clicked)
-        self._reload_btn = QPushButton("Load spectrums.hdf5…")
-        self._reload_btn.clicked.connect(self._on_reload_clicked)
+        self._add_btn = QPushButton("Add…")
+        self._add_btn.clicked.connect(self._on_load_clicked)
         self._remove_btn = QPushButton("Remove")
         self._remove_btn.clicked.connect(self._on_remove_clicked)
-        manage_row.addWidget(self._load_btn)
-        manage_row.addWidget(self._reload_btn)
+        manage_row.addWidget(self._add_btn)
         manage_row.addWidget(self._remove_btn)
         left.addLayout(manage_row)
 
@@ -97,14 +93,21 @@ class MainWindow(QMainWindow):
         self._list.currentItemChanged.connect(self._on_list_selection)
         left.addWidget(self._list, stretch=1)
 
-        # Re-do buttons live in the result preview (right side); kept here only as
-        # bound methods used by ResultPreviewWidget callbacks.
+        # Below the list: load / export the processed spectrums.hdf5 collection,
+        # then the cross-spectrum filter. (Re-do buttons live in the right-side
+        # result preview.)
+        io_row = QHBoxLayout()
+        self._reload_btn = QPushButton("Load")
+        self._reload_btn.clicked.connect(self._on_reload_clicked)
+        self._export_btn = QPushButton("Export")
+        self._export_btn.clicked.connect(self._on_export_clicked)
+        io_row.addWidget(self._reload_btn)
+        io_row.addWidget(self._export_btn)
+        left.addLayout(io_row)
+
         self._filter_btn = QPushButton("Cross-spectrum filter…")
         self._filter_btn.clicked.connect(self._on_filter_clicked)
-        self._export_btn = QPushButton("Export spectrums.hdf5")
-        self._export_btn.clicked.connect(self._on_export_clicked)
         left.addWidget(self._filter_btn)
-        left.addWidget(self._export_btn)
 
         left_panel = QWidget()
         left_panel.setLayout(left)
@@ -369,13 +372,35 @@ class MainWindow(QMainWindow):
 
     def _on_remove_clicked(self) -> None:
         name = self._ctrl.state.active_spectrum
-        if name is not None:
-            self._ctrl.remove_spectrum(name)
+        if name is None:
+            return
+        # Pick the spectrum to focus next (the following one, else the previous).
+        names = self._ctrl.list_spectrums()
+        idx = names.index(name) if name in names else -1
+        successor = None
+        if idx >= 0:
+            rest = names[idx + 1 :] + names[:idx][::-1]
+            successor = rest[0] if rest else None
+
+        self._ctrl.remove_spectrum(name)
+        if successor is not None:
+            self._ctrl.set_active_spectrum(successor)
 
     def _on_export_clicked(self) -> None:
+        from zcu_tools.fluxdep_gui.ui.export_dialog import ExportSpectrumsDialog
+
+        project = self._ctrl.state.project
+        dialog = ExportSpectrumsDialog(
+            chip_name=project.chip_name, qub_name=project.qub_name, parent=self
+        )
+        if dialog.exec() != int(dialog.DialogCode.Accepted):
+            return
+        path = dialog.export_path()
+        if path is None:
+            return
         try:
-            path = self._ctrl.export_spectrums(mode="w")
-            self._show_info("Exported", f"Wrote {path}")
+            resolved = self._ctrl.export_spectrums(filepath=path, mode="w")
+            self._show_info("Exported", f"Wrote {resolved}")
         except Exception as exc:  # noqa: BLE001
             logger.exception("export failed")
             self._show_error("Export failed", str(exc))

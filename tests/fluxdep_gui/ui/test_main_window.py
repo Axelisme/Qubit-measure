@@ -6,6 +6,8 @@ block), and asserts the spectrum list reflects State.
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pytest
 from zcu_tools.fluxdep_gui.controller import Controller
@@ -133,3 +135,27 @@ def test_reselect_points_reopens_selector(window, spectrum_hdf5):
     window._ctrl.set_points(name, np.array([0.0, 1.0]), np.array([5.0, 5.1]))
     window._on_reselect_points()  # redo point selection on a finished spectrum
     assert isinstance(window._current_editor, OneToneWidget)
+
+
+def test_remove_focuses_next_spectrum(window, spectrum_hdf5):
+    filepath, *_ = spectrum_hdf5
+    a = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
+    # second load replaces same basename; use a distinct file path via tmp copy
+    import shutil
+    import tempfile
+
+    second_path = os.path.join(tempfile.mkdtemp(), "other.hdf5")
+    shutil.copy(filepath, second_path)
+    b = window._ctrl.load_spectrum(second_path, spec_type="OneTone")
+    window._ctrl.set_active_spectrum(a)
+    window._on_remove_clicked()  # remove a → focus the next one (b)
+    assert window._ctrl.state.active_spectrum == b
+
+
+def test_button_labels(window):
+    from qtpy.QtWidgets import QPushButton
+
+    labels = [b.text() for b in window.findChildren(QPushButton)]
+    assert "Add…" in labels  # raw spectrum add
+    assert "Load" in labels  # processed spectrums.hdf5
+    assert "Export" in labels
