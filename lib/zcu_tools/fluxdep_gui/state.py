@@ -14,13 +14,13 @@ replaces measure's tab/device/context model.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Literal, Optional
 
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.notebook.persistance import PointsData, SpectrumData
+from zcu_tools.notebook.persistance import PointsData, SpectrumData, TransitionDict
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,22 @@ SpecType = Literal["OneTone", "TwoTone"]
 SPECTRUM_SET_VERSION_KEY = "spectrums:__set__"
 SELECTION_VERSION_KEY = "selection"
 PROJECT_VERSION_KEY = "project"
+FIT_VERSION_KEY = "fit"
+
+
+def default_transitions() -> TransitionDict:
+    """The default transition set (the notebook's common 'basic' choice).
+
+    A fresh ``FitState`` starts here; the fit panel's preset dropdown swaps the
+    whole dict and the form lets the user fine-tune each category. Frequencies
+    (r_f / sample_f) are NOT stored here — they live on ``FitState`` directly.
+    """
+    return TransitionDict(
+        {
+            "transitions": [(0, 1), (0, 2), (1, 2), (1, 3)],
+            "mirror": [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3)],
+        }
+    )
 
 
 def spectrum_version_key(name: str) -> str:
@@ -149,6 +165,34 @@ class SelectionState:
     min_distance: float = 0.0
 
 
+@dataclass
+class FitState:
+    """Database-search fit inputs and result (the v2 pipeline tail).
+
+    The inputs (``database_path`` / bounds / ``transitions`` / ``r_f`` /
+    ``sample_f``) parameterise ``search_in_database``; the result
+    (``params`` = (EJ, EC, EL) + ``best_dist``) is filled by a search. All of it
+    is a process-lifetime singleton on State — one fit per session — so its
+    version key (``fit``) is never dropped, only bumped.
+
+    ``transitions`` is a ``TransitionDict`` (TypedDict, accessed with ``[...]``).
+    """
+
+    database_path: str = ""
+    EJb: tuple[float, float] = (2.0, 15.0)
+    ECb: tuple[float, float] = (0.2, 2.0)
+    ELb: tuple[float, float] = (0.1, 2.0)
+    transitions: TransitionDict = field(default_factory=default_transitions)
+    r_f: float = 0.0
+    sample_f: float = 0.0
+    params: Optional[tuple[float, float, float]] = None  # (EJ, EC, EL)
+    best_dist: Optional[float] = None
+
+    @property
+    def has_result(self) -> bool:
+        return self.params is not None
+
+
 class FluxDepState:
     """Passive GUI state container for the fluxdep analysis pipeline."""
 
@@ -157,6 +201,7 @@ class FluxDepState:
         self.spectrums: dict[str, SpectrumEntry] = {}
         self.active_spectrum: Optional[str] = None
         self.selection: SelectionState = SelectionState()
+        self.fit: FitState = FitState()
         self.version = VersionTable()
 
     # ------------------------------------------------------------------
@@ -222,3 +267,37 @@ class FluxDepState:
     def set_project(self, project: ProjectInfo) -> None:
         self.project = project
         self.version.bump(PROJECT_VERSION_KEY)
+
+    def set_fit_params(
+        self,
+        database_path: str,
+        EJb: tuple[float, float],
+        ECb: tuple[float, float],
+        ELb: tuple[float, float],
+        transitions: TransitionDict,
+        r_f: float,
+        sample_f: float,
+    ) -> None:
+        """Record the search inputs; clears any stale result.
+
+        Changing the inputs invalidates a prior search result (it was for the old
+        parameters), so ``params`` / ``best_dist`` reset to None — a downstream
+        reader never sees a result that disagrees with the inputs it reads.
+        """
+        self.fit = FitState(
+            database_path=database_path,
+            EJb=EJb,
+            ECb=ECb,
+            ELb=ELb,
+            transitions=transitions,
+            r_f=r_f,
+            sample_f=sample_f,
+        )
+        self.version.bump(FIT_VERSION_KEY)
+
+    def set_fit_result(
+        self, params: tuple[float, float, float], best_dist: float
+    ) -> None:
+        """Record a search result onto the current fit inputs."""
+        self.fit = replace(self.fit, params=params, best_dist=best_dist)
+        self.version.bump(FIT_VERSION_KEY)

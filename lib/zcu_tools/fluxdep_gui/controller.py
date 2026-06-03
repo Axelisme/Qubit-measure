@@ -21,6 +21,7 @@ from numpy.typing import NDArray
 from zcu_tools.fluxdep_gui.event_bus import (
     ActiveSpectrumChangedPayload,
     EventBus,
+    FitChangedPayload,
     ProjectChangedPayload,
     SelectionChangedPayload,
     SpectrumAddedPayload,
@@ -29,9 +30,11 @@ from zcu_tools.fluxdep_gui.event_bus import (
 )
 from zcu_tools.fluxdep_gui.services.alignment import AlignmentService, PointsService
 from zcu_tools.fluxdep_gui.services.export import ExportService
+from zcu_tools.fluxdep_gui.services.fit import FitService, PbarFactory, SearchResult
 from zcu_tools.fluxdep_gui.services.load import LoadService
 from zcu_tools.fluxdep_gui.services.store import SelectionService, SpectrumStore
 from zcu_tools.fluxdep_gui.state import FluxDepState, ProjectInfo, SpecType
+from zcu_tools.notebook.persistance import TransitionDict
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +51,7 @@ class Controller:
         self._store = SpectrumStore(state)
         self._selection = SelectionService(state)
         self._export = ExportService(state)
+        self._fit = FitService(state)
 
     @property
     def state(self) -> FluxDepState:
@@ -123,3 +127,63 @@ class Controller:
 
     def export_spectrums(self, filepath: Optional[str] = None, mode: str = "x") -> str:
         return self._export.export_spectrums(filepath, mode)
+
+    # --- database-search fit (v2) ---------------------------------------
+
+    def set_fit_params(
+        self,
+        database_path: str,
+        EJb: tuple[float, float],
+        ECb: tuple[float, float],
+        ELb: tuple[float, float],
+        transitions: TransitionDict,
+        r_f: float,
+        sample_f: float,
+    ) -> None:
+        self._fit.set_params(database_path, EJb, ECb, ELb, transitions, r_f, sample_f)
+        self._bus.emit(FitChangedPayload(has_result=self._state.fit.has_result))
+
+    def selected_pointcloud(
+        self,
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        return self._fit.selected_pointcloud()
+
+    def compute_search(
+        self,
+        *,
+        pbar_factory: Optional[PbarFactory] = None,
+        plot: bool = False,
+    ) -> SearchResult:
+        """Run the search WITHOUT touching State (safe on a worker thread).
+
+        Pair with ``record_search_result`` on the main thread. The GUI worker
+        calls this off-main, then marshals the result to the main thread to
+        record it; the RPC convenience ``search_database`` does both in sequence
+        on the main thread.
+        """
+        return self._fit.compute_search(pbar_factory=pbar_factory, plot=plot)
+
+    def record_search_result(self, result: SearchResult) -> None:
+        """Write a computed search result onto State (MAIN THREAD only)."""
+        self._fit.record_result(result)
+        self._bus.emit(FitChangedPayload(has_result=True))
+
+    def search_database(
+        self,
+        *,
+        pbar_factory: Optional[PbarFactory] = None,
+        plot: bool = False,
+    ) -> SearchResult:
+        """Main-thread convenience: compute the search then record it (RPC path).
+
+        Runs the blocking search inline on the calling (main) thread — used by the
+        RPC dispatch, where momentary GUI unresponsiveness is acceptable and the
+        State write must stay on the main thread anyway. The GUI uses the split
+        ``compute_search`` / ``record_search_result`` to keep the search off-main.
+        """
+        result = self._fit.compute_search(pbar_factory=pbar_factory, plot=plot)
+        self.record_search_result(result)
+        return result
+
+    def export_params(self, savepath: Optional[str] = None) -> str:
+        return self._fit.export_params(savepath)

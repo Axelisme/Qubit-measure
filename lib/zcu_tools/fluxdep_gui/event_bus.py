@@ -28,6 +28,7 @@ class FluxDepEvent(str, Enum):
     ACTIVE_SPECTRUM_CHANGED = "active_spectrum_changed"  # the active spectrum switched
     SELECTION_CHANGED = "selection_changed"  # cross-spectrum selection mask changed
     PROJECT_CHANGED = "project_changed"  # the project info (chip/qub/paths) changed
+    FIT_CHANGED = "fit_changed"  # the database-search fit inputs or result changed
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,12 @@ class SelectionChangedPayload(Payload):
 @dataclass(frozen=True)
 class ProjectChangedPayload(Payload):
     EVENT: ClassVar[FluxDepEvent] = FluxDepEvent.PROJECT_CHANGED
+
+
+@dataclass(frozen=True)
+class FitChangedPayload(Payload):
+    EVENT: ClassVar[FluxDepEvent] = FluxDepEvent.FIT_CHANGED
+    has_result: bool = False
 
 
 P = TypeVar("P", bound=Payload)
