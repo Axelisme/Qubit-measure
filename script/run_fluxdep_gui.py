@@ -17,7 +17,7 @@ LOG_FORMAT = "%(asctime)s.%(msecs)03d [%(levelname)-7s] %(name)s: %(message)s"
 LOG_DATE = "%H:%M:%S"
 
 
-def _setup_logging(to_file: bool = True) -> None:
+def _setup_logging(to_file: bool = True, log_file: Path = LOG_FILE) -> None:
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
 
@@ -27,13 +27,13 @@ def _setup_logging(to_file: bool = True) -> None:
     root.addHandler(stderr_handler)
 
     if to_file:
-        file_handler = logging.FileHandler(LOG_FILE, mode="w", encoding="utf-8")
+        file_handler = logging.FileHandler(log_file, mode="w", encoding="utf-8")
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE))
         log = logging.getLogger("zcu_tools.fluxdep_gui")
         log.addHandler(file_handler)
         log.setLevel(logging.DEBUG)
-        print(f"[run_fluxdep_gui] Logging DEBUG output to: {LOG_FILE}", file=sys.stderr)
+        print(f"[run_fluxdep_gui] Logging DEBUG output to: {log_file}", file=sys.stderr)
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -46,15 +46,41 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--qub", type=str, default="", help="Qubit name")
     parser.add_argument("--result-dir", type=str, default="", help="Result directory")
     parser.add_argument("--database-path", type=str, default="", help="Raw data root")
+    parser.add_argument(
+        "--control-port",
+        type=int,
+        default=None,
+        help="Start the remote-control TCP server on this port (for agents/MCP)",
+    )
+    parser.add_argument(
+        "--control-token",
+        type=str,
+        default=None,
+        help="Shared auth token required by remote-control clients",
+    )
+    parser.add_argument(
+        "--log-file",
+        type=str,
+        default=None,
+        help="Override the DEBUG log file path",
+    )
     return parser.parse_args(argv)
 
 
 if __name__ == "__main__":
     args = _parse_args(sys.argv[1:])
-    _setup_logging(to_file=not args.no_log)
+    log_file = Path(args.log_file) if args.log_file else LOG_FILE
+    _setup_logging(to_file=not args.no_log, log_file=log_file)
 
     from zcu_tools.fluxdep_gui.app import run_app
+    from zcu_tools.fluxdep_gui.services.remote.service import ControlOptions
     from zcu_tools.fluxdep_gui.state import ProjectInfo
+
+    control = (
+        ControlOptions(port=args.control_port, token=args.control_token)
+        if args.control_port is not None
+        else None
+    )
 
     run_app(
         ProjectInfo(
@@ -62,5 +88,6 @@ if __name__ == "__main__":
             qub_name=args.qub,
             result_dir=args.result_dir,
             database_path=args.database_path,
-        )
+        ),
+        control=control,
     )
