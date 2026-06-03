@@ -17,6 +17,7 @@ from typing import Callable, Mapping, Optional
 
 from zcu_tools.fluxdep_gui.event_bus import (
     ActiveSpectrumChangedPayload,
+    FitChangedPayload,
     Payload,
     ProjectChangedPayload,
     SelectionChangedPayload,
@@ -68,6 +69,11 @@ def _ser_project_changed(payload: Payload) -> WirePayload:
     return {"requery": ["project.info"]}
 
 
+def _ser_fit_changed(payload: Payload) -> WirePayload:
+    assert isinstance(payload, FitChangedPayload)
+    return {"has_result": payload.has_result, "requery": ["fit.result"]}
+
+
 # ---------------------------------------------------------------------------
 # Registry — keyed by payload type (the fluxdep EventBus subscribe key).
 # ---------------------------------------------------------------------------
@@ -80,6 +86,7 @@ EVENT_SERIALIZERS: dict[type[Payload], Serializer] = {
     ActiveSpectrumChangedPayload: _ser_active_spectrum_changed,
     SelectionChangedPayload: _ser_selection_changed,
     ProjectChangedPayload: _ser_project_changed,
+    FitChangedPayload: _ser_fit_changed,
 }
 
 

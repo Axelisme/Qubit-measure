@@ -87,6 +87,17 @@ Typical analysis loop (per spectrum):
   - fluxdep_export_spectrums([filepath]) writes spectrums.hdf5 (default path is
     result_dir/data/fluxdep/spectrums.hdf5) and returns the path.
 
+Database-search fit (v2, after points/selection):
+  - fluxdep_fit_set_params(database_path, EJb, ECb, ELb, transitions[, r_f,
+    sample_f]) sets the search inputs. EJb/ECb/ELb are [min, max] pairs;
+    transitions is {category: [[i,j], ...]} (categories: 'transitions', 'mirror',
+    'red side', 'blue side', or 'transitionsN'/'mirrorN').
+  - fluxdep_fit_search runs the database search over the SELECTED joint point
+    cloud and returns {EJ, EC, EL} (a multi-second blocking sweep).
+  - fluxdep_fit_result reads the current inputs + result.
+  - fluxdep_fit_export_params([savepath]) writes params.json (the fluxdep_fit
+    block) and returns the path; default is <result_dir>/params.json.
+
 fluxdep_state_check returns {has_project, spectrum_count, has_active}. A failed
 call always raises — issue mutating calls (load/set/remove/export) exactly once.
 """

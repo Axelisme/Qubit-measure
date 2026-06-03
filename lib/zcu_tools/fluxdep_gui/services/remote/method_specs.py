@@ -169,6 +169,46 @@ METHOD_SPECS: dict[str, MethodSpec] = {
             _num_opt("min_distance", 0.0, "Downsample threshold (default 0)"),
         ),
     ),
+    # Database-search fit (v2)
+    "fit.set_params": MethodSpec(
+        10.0,
+        "Set the database-search inputs (clears any prior result). 'database_path' "
+        "is the precomputed fluxonium database hdf5. EJb/ECb/ELb are [min, max] "
+        "bound pairs. 'transitions' is a JSON object mapping a category "
+        "('transitions' / 'mirror' / 'red side' / 'blue side', or 'transitionsN' / "
+        "'mirrorN') to a list of [i, j] level pairs. r_f / sample_f are the "
+        "readout / sample frequencies (GHz; 0 omits the matching reference line).",
+        (
+            _str("database_path", "Precomputed fluxonium database hdf5 path"),
+            _json("EJb", "[min, max] EJ bound pair"),
+            _json("ECb", "[min, max] EC bound pair"),
+            _json("ELb", "[min, max] EL bound pair"),
+            _json("transitions", "Category -> list of [i, j] level pairs"),
+            _num_opt("r_f", 0.0, "Readout frequency (GHz); 0 to omit"),
+            _num_opt("sample_f", 0.0, "Sample frequency (GHz); 0 to omit"),
+        ),
+    ),
+    "fit.search": MethodSpec(
+        180.0,
+        "Search the database for the best (EJ, EC, EL) over the selected joint "
+        "point cloud, using the inputs from fit.set_params. Returns {EJ, EC, EL}. "
+        "A multi-second blocking sweep run on the GUI main thread (the GUI is "
+        "momentarily unresponsive); the timeout is generous. Fast-fails without a "
+        "database path or selected points.",
+    ),
+    "fit.result": MethodSpec(
+        5.0,
+        "Read the current fit inputs and result: {has_result, params:{EJ,EC,EL} "
+        "or null, database_path, EJb, ECb, ELb, transitions, r_f, sample_f}.",
+    ),
+    "fit.export_params": MethodSpec(
+        15.0,
+        "Write the fit result to params.json (the fluxdep_fit block) and return "
+        "its path. Omit savepath for the notebook-layout default "
+        "(<result_dir>/params.json). Fast-fails without a result or an aligned "
+        "spectrum.",
+        (_str_opt("savepath", "Override the params.json path"),),
+    ),
     # Export
     "export.spectrums": MethodSpec(
         30.0,

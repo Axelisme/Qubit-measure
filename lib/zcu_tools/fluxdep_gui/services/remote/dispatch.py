@@ -20,6 +20,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.fluxdep_gui.state import ProjectInfo, SpecType
+from zcu_tools.notebook.persistance import TransitionDict
 
 if TYPE_CHECKING:
     # Type-only: a runtime import of the adapter would cycle (service.py imports
@@ -99,6 +100,56 @@ def _coerce_bool_array(value: object, field: str) -> NDArray[np.bool_]:
             ErrorCode.INVALID_PARAMS, f"'{field}' must be an array of booleans"
         )
     return np.asarray(value, dtype=np.bool_)
+
+
+def _coerce_bound(value: object, field: str) -> tuple[float, float]:
+    """Coerce a JSON ``[min, max]`` array to a float bound pair."""
+    if not isinstance(value, list) or len(value) != 2:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, f"'{field}' must be a [min, max] pair"
+        )
+    try:
+        return float(value[0]), float(value[1])
+    except (TypeError, ValueError) as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, f"'{field}' bounds must be numbers: {exc}"
+        ) from exc
+
+
+def _coerce_transitions(value: object) -> TransitionDict:
+    """Coerce a JSON object (category -> list of [i, j]) to a TransitionDict.
+
+    Each value must be a list of 2-int pairs; an empty/malformed entry fails
+    fast. r_f / sample_f are NOT carried here (they are separate params on
+    fit.set_params and injected by the handler).
+    """
+    if not isinstance(value, dict):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"'transitions' must be a JSON object, got {type(value).__name__}",
+        )
+    result: dict[str, list[tuple[int, int]]] = {}
+    for key, pairs in value.items():
+        if not isinstance(pairs, list):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"transitions[{key!r}] must be a list of [i, j] pairs",
+            )
+        coerced: list[tuple[int, int]] = []
+        for pair in pairs:
+            if (
+                not isinstance(pair, (list, tuple))
+                or len(pair) != 2
+                or not all(isinstance(v, int) for v in pair)
+            ):
+                raise RemoteError(
+                    ErrorCode.INVALID_PARAMS,
+                    f"transitions[{key!r}] entries must be [i, j] integer pairs, "
+                    f"got {pair!r}",
+                )
+            coerced.append((int(pair[0]), int(pair[1])))
+        result[str(key)] = coerced
+    return cast(TransitionDict, result)
 
 
 # ---------------------------------------------------------------------------
@@ -296,6 +347,87 @@ def _h_export_spectrums(
 
 
 # ---------------------------------------------------------------------------
+# Database-search fit handlers (v2)
+# ---------------------------------------------------------------------------
+
+
+def _h_fit_set_params(
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
+) -> Mapping[str, object]:
+    database_path = str(params["database_path"])
+    EJb = _coerce_bound(params["EJb"], "EJb")
+    ECb = _coerce_bound(params["ECb"], "ECb")
+    ELb = _coerce_bound(params["ELb"], "ELb")
+    transitions = _coerce_transitions(params["transitions"])
+    r_f = float(params.get("r_f", 0.0))  # type: ignore[arg-type]
+    sample_f = float(params.get("sample_f", 0.0))  # type: ignore[arg-type]
+    if r_f:
+        transitions["r_f"] = r_f
+    if sample_f:
+        transitions["sample_f"] = sample_f
+    adapter.ctrl.set_fit_params(
+        database_path, EJb, ECb, ELb, transitions, r_f, sample_f
+    )
+    return {"ok": True}
+
+
+def _h_fit_search(
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
+) -> Mapping[str, object]:
+    del params
+    try:
+        result = adapter.ctrl.search_database(plot=False)
+    except ValueError as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    except (OSError, KeyError, RuntimeError) as exc:
+        raise RemoteError(ErrorCode.CONTROLLER_ERROR, str(exc)) from exc
+    EJ, EC, EL = result.params
+    return {"EJ": EJ, "EC": EC, "EL": EL}
+
+
+def _h_fit_result(
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
+) -> Mapping[str, object]:
+    del params
+    fit = adapter.ctrl.state.fit
+    params_payload = (
+        {"EJ": fit.params[0], "EC": fit.params[1], "EL": fit.params[2]}
+        if fit.params is not None
+        else None
+    )
+    # transitions is a TypedDict with tuple values; lists serialise over JSON.
+    transitions_payload = {
+        key: [list(p) for p in value] if isinstance(value, list) else value
+        for key, value in fit.transitions.items()
+    }
+    return {
+        "has_result": fit.has_result,
+        "params": params_payload,
+        "database_path": fit.database_path,
+        "EJb": list(fit.EJb),
+        "ECb": list(fit.ECb),
+        "ELb": list(fit.ELb),
+        "transitions": transitions_payload,
+        "r_f": fit.r_f,
+        "sample_f": fit.sample_f,
+    }
+
+
+def _h_fit_export_params(
+    adapter: "RemoteControlAdapter", params: Mapping[str, object]
+) -> Mapping[str, object]:
+    savepath_raw = params.get("savepath")
+    savepath = str(savepath_raw) if savepath_raw is not None else None
+    try:
+        path = adapter.ctrl.export_params(savepath)
+    except ValueError as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    except OSError as exc:
+        raise RemoteError(ErrorCode.CONTROLLER_ERROR, str(exc)) from exc
+    return {"path": path}
+
+
+# ---------------------------------------------------------------------------
 # Resource versions / state handlers
 # ---------------------------------------------------------------------------
 
@@ -338,6 +470,10 @@ _HANDLERS: dict[str, Handler] = {
     "points.set": _h_points_set,
     "selection.pointcloud": _h_selection_pointcloud,
     "selection.set": _h_selection_set,
+    "fit.set_params": _h_fit_set_params,
+    "fit.search": _h_fit_search,
+    "fit.result": _h_fit_result,
+    "fit.export_params": _h_fit_export_params,
     "export.spectrums": _h_export_spectrums,
     "resources.versions": _h_resources_versions,
     "state.check": _h_state_check,
