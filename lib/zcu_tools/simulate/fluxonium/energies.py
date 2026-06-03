@@ -85,8 +85,8 @@ def calculate_energy_vs_flux_fast(
     fluxs: NDArray[np.float64],
     cutoff: int = 40,
     evals_count: int = 20,
-) -> tuple[None, NDArray[np.float64]]:
-    """Fast drop-in for :func:`calculate_energy_vs_flux` (same energies, ~100x).
+) -> tuple[SpectrumData, NDArray[np.float64]]:
+    """Fast drop-in for :func:`calculate_energy_vs_flux` (same result, ~100x).
 
     The profiled cost of the scqubits path is rebuilding the Hamiltonian at every
     flux: ``cos_phi_operator(beta)`` calls ``scipy.linalg.cosm`` (a matrix cosine)
@@ -96,12 +96,15 @@ def calculate_energy_vs_flux_fast(
     point using ``cos(phi + beta) = cos(phi) cos(beta) - sin(phi) sin(beta)``
     (exact, since ``beta * I`` commutes with ``phi``).
 
-    Returns ``(None, energies)`` — same shape/values as
-    ``calculate_energy_vs_flux``'s second element (verified to ~1e-13 in tests),
-    but no ``SpectrumData`` (no caller uses it). Energies are absolute (in the LC
-    oscillator basis), matching the scqubits convention.
+    Returns ``(SpectrumData, energies)`` matching ``calculate_energy_vs_flux``:
+    the ``SpectrumData`` mirrors the scqubits one (``energy_table`` /
+    ``param_vals`` over the folded-unique flux grid; ``state_table`` is None, as
+    when states are not stored), and ``energies`` is per-INPUT-flux (reordered).
+    Energies match the baseline to ~1e-13 (see tests). They are absolute (in the
+    LC oscillator basis), per the scqubits convention.
     """
     from scqubits.core.fluxonium import Fluxonium
+    from scqubits.core.storage import SpectrumData
 
     folded_fluxs, sort_idxs, uni_idxs = _fold_unique_fluxs(fluxs)
 
@@ -116,15 +119,24 @@ def calculate_energy_vs_flux_fast(
     sin_phi = np.asarray(fluxonium.sin_phi_operator(beta=0.0), dtype=np.float64)
     EJ = float(fluxonium.EJ)
 
-    energies = np.empty((len(folded_fluxs), evals_count), dtype=np.float64)
+    # Per folded-unique flux (the SpectrumData grid).
+    unique_energies = np.empty((len(folded_fluxs), evals_count), dtype=np.float64)
     for k, flux in enumerate(folded_fluxs):
         beta = 2.0 * np.pi * flux
         cos_mat = cos_phi * np.cos(beta) - sin_phi * np.sin(beta)
         hamiltonian = np.diag(lc_diag) - EJ * cos_mat
-        energies[k] = np.linalg.eigvalsh(hamiltonian)[:evals_count]
+        unique_energies[k] = np.linalg.eigvalsh(hamiltonian)[:evals_count]
 
-    # map per-unique-flux energies back to the original flux order
-    energies[sort_idxs, :] = energies
+    spectrum_data = SpectrumData(
+        energy_table=unique_energies.copy(),
+        system_params=fluxonium.get_initdata(),
+        param_name="flux",
+        param_vals=folded_fluxs,
+    )
+
+    # Map the per-unique energies back to the original input flux order.
+    energies = np.empty_like(unique_energies)
+    energies[sort_idxs, :] = unique_energies
     energies = energies[uni_idxs, :]
 
-    return None, energies
+    return spectrum_data, energies

@@ -41,13 +41,23 @@ FLUX_CASES = {
 @pytest.mark.parametrize("flux_label", list(FLUX_CASES))
 def test_fast_matches_baseline(params, flux_label):
     fluxs = FLUX_CASES[flux_label]
-    _, slow = calculate_energy_vs_flux(params, fluxs, cutoff=40, evals_count=15)
-    none_sd, fast = calculate_energy_vs_flux_fast(
+    sd_slow, slow = calculate_energy_vs_flux(params, fluxs, cutoff=40, evals_count=15)
+    sd_fast, fast = calculate_energy_vs_flux_fast(
         params, fluxs, cutoff=40, evals_count=15
     )
-    assert none_sd is None  # fast variant returns no SpectrumData
+    # the returned (per-input-flux) energies match
     assert fast.shape == slow.shape
     np.testing.assert_allclose(fast, slow, atol=1e-11, rtol=0)
+    # the SpectrumData is a faithful drop-in (folded-unique grid)
+    np.testing.assert_allclose(
+        np.asarray(sd_fast.energy_table),
+        np.asarray(sd_slow.energy_table),
+        atol=1e-11,
+        rtol=0,
+    )
+    np.testing.assert_allclose(sd_fast.param_vals, sd_slow.param_vals)
+    assert sd_fast.param_name == sd_slow.param_name == "flux"
+    assert set(sd_fast.system_params) == set(sd_slow.system_params)
 
 
 def test_fast_shape_and_order_preserved():
