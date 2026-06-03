@@ -72,12 +72,16 @@ class OneToneWidget(InteractiveMplWidget):
         dev_values: NDArray[np.float64],
         freqs: NDArray[np.float64],
         threshold: float = 1.0,
+        flux_half: Optional[float] = None,
+        flux_int: Optional[float] = None,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
         self._signals = signals
         self._dev_values = dev_values
         self._freqs = freqs
+        self._flux_half = flux_half
+        self._flux_int = flux_int
 
         self._max_freq_idx = max_dispersion_freq_index(signals, freqs)
         self._smoothed = smoothed_slice(signals, self._max_freq_idx)
@@ -125,6 +129,13 @@ class OneToneWidget(InteractiveMplWidget):
         self._ax_img.axhline(
             self._freqs[self._max_freq_idx], color="red", label="max freqs"
         )
+        # Half-flux (red) / integer-flux (blue) vertical markers from the
+        # line-picker, on both panels (read-only reference for point selection).
+        for ax in (self._ax_img, self._ax_curve):
+            if self._flux_half is not None:
+                ax.axvline(self._flux_half, color="red", linestyle="--", linewidth=1)
+            if self._flux_int is not None:
+                ax.axvline(self._flux_int, color="blue", linestyle="--", linewidth=1)
         self._ax_curve.plot(self._dev_values, self._smoothed)
         self._ax_curve.set_xlim(self._dev_values[0], self._dev_values[-1])
         self._ax_img.set_ylabel("Frequency (GHz)")

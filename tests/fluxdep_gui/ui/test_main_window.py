@@ -97,11 +97,39 @@ def test_aligned_twotone_shows_find_points_widget(window, spectrum_hdf5):
     assert isinstance(window._current_editor, FindPointsWidget)
 
 
-def test_selected_returns_to_placeholder(window, spectrum_hdf5):
+def test_selected_shows_result_preview(window, spectrum_hdf5):
+    from zcu_tools.fluxdep_gui.ui.interactive.result_preview import (
+        ResultPreviewWidget,
+    )
+
     filepath, *_ = spectrum_hdf5
     name = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
     window._ctrl.set_active_spectrum(name)
     window._ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
     window._ctrl.set_points(name, np.array([0.0, 1.0]), np.array([5.0, 5.1]))
-    assert window._current_editor is None  # back to placeholder
-    assert window._editor_stack.currentWidget() is window._placeholder
+    # finished → a read-only result preview (not the placeholder)
+    assert isinstance(window._current_editor, ResultPreviewWidget)
+
+
+def test_repick_lines_reopens_line_picker(window, spectrum_hdf5):
+    from zcu_tools.fluxdep_gui.ui.interactive.line_picker import LinePickerWidget
+
+    filepath, *_ = spectrum_hdf5
+    name = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
+    window._ctrl.set_active_spectrum(name)
+    window._ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
+    window._ctrl.set_points(name, np.array([0.0, 1.0]), np.array([5.0, 5.1]))
+    window._on_repick_lines()  # redo alignment on a finished spectrum
+    assert isinstance(window._current_editor, LinePickerWidget)
+
+
+def test_reselect_points_reopens_selector(window, spectrum_hdf5):
+    from zcu_tools.fluxdep_gui.ui.interactive.onetone import OneToneWidget
+
+    filepath, *_ = spectrum_hdf5
+    name = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
+    window._ctrl.set_active_spectrum(name)
+    window._ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
+    window._ctrl.set_points(name, np.array([0.0, 1.0]), np.array([5.0, 5.1]))
+    window._on_reselect_points()  # redo point selection on a finished spectrum
+    assert isinstance(window._current_editor, OneToneWidget)

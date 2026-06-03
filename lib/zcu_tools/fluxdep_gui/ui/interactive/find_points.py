@@ -33,6 +33,23 @@ from zcu_tools.notebook.analysis.fluxdep.processing import (
 _SCALE = 1000  # int-QSlider scale for float sliders
 
 
+def _contrast_limits(amp: np.ndarray) -> tuple[float, float]:
+    """Robust display limits (2nd–98th percentile) to boost feature contrast.
+
+    Clipping the colour range to percentiles (instead of min/max) keeps a few
+    outliers from compressing the dynamic range, so the spectral feature stands
+    out against the background. NaNs are ignored; a degenerate range falls back
+    to ``(min, max)``.
+    """
+    finite = amp[np.isfinite(amp)]
+    if finite.size == 0:
+        return 0.0, 1.0
+    lo, hi = np.percentile(finite, [2.0, 98.0])
+    if hi <= lo:
+        return float(finite.min()), float(finite.max()) or 1.0
+    return float(lo), float(hi)
+
+
 def toggle_near_mask(
     dev_values: NDArray[np.float64],
     freqs: NDArray[np.float64],
@@ -150,8 +167,15 @@ class FindPointsWidget(InteractiveMplWidget):
             self._freqs[0] - dy / 2,
             self._freqs[-1] + dy / 2,
         )
+        vmin, vmax = _contrast_limits(amps)
         self._img = self._ax.imshow(
-            amps.T, aspect="auto", origin="lower", interpolation="none", extent=extent
+            amps.T,
+            aspect="auto",
+            origin="lower",
+            interpolation="none",
+            extent=extent,
+            vmin=vmin,
+            vmax=vmax,
         )
         self._mask_img = self._ax.imshow(
             self._mask.T,
@@ -169,7 +193,9 @@ class FindPointsWidget(InteractiveMplWidget):
             vmin=0,
             vmax=1,
         )
-        self._scatter = self._ax.scatter([], [], color="r", s=2)
+        self._scatter = self._ax.scatter(
+            [], [], color="r", s=18, edgecolors="white", linewidths=0.3
+        )
         self._ax.set_xlabel("Device value")
         self._ax.set_ylabel("Frequency (GHz)")
 
@@ -187,11 +213,14 @@ class FindPointsWidget(InteractiveMplWidget):
             if self._s_dev_values.size
             else np.empty((0, 2))
         )
-        if self._show_origin.isChecked():
-            self._img.set_data(real_signals.T)
-        else:
-            self._img.set_data((self._mask * real_signals).T)
-        self._img.autoscale()
+        shown = (
+            real_signals
+            if self._show_origin.isChecked()
+            else (self._mask * real_signals)
+        )
+        self._img.set_data(shown.T)
+        vmin, vmax = _contrast_limits(shown)
+        self._img.set_clim(vmin, vmax)
         self.redraw()
 
     def _refresh_mask_overlay(self) -> None:

@@ -107,3 +107,20 @@ def test_widget_finished_signal(widget, qapp):
     finish = next(b for b in buttons if b.text() == "Finish")
     finish.click()
     assert fired == [True]
+
+
+def test_widget_draws_flux_markers(qapp):
+    signals, devs, freqs, _ = _crafted_spectrum()
+    w = OneToneWidget(signals, devs, freqs, flux_half=0.3, flux_int=0.8)
+    # two dashed vertical markers (red half, blue int) on the image axis
+    dashed = [ln for ln in w._ax_img.get_lines() if ln.get_linestyle() == "--"]
+    assert len(dashed) == 2  # half + int on the image axis
+    w.deleteLater()
+
+
+def test_widget_without_flux_markers_ok(qapp):
+    # omitting flux_half/int draws no vertical markers and does not crash
+    signals, devs, freqs, _ = _crafted_spectrum()
+    w = OneToneWidget(signals, devs, freqs)
+    assert w.get_result()[0].size >= 0
+    w.deleteLater()

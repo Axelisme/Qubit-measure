@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QHBoxLayout,
     QLabel,
@@ -32,6 +33,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QListWidgetItem,
     QMainWindow,
     QPushButton,
+    QSplitter,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -49,6 +51,7 @@ from zcu_tools.fluxdep_gui.ui.interactive.base import InteractiveMplWidget
 from zcu_tools.fluxdep_gui.ui.interactive.find_points import FindPointsWidget
 from zcu_tools.fluxdep_gui.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.fluxdep_gui.ui.interactive.onetone import OneToneWidget
+from zcu_tools.fluxdep_gui.ui.interactive.result_preview import ResultPreviewWidget
 from zcu_tools.fluxdep_gui.ui.interactive.selector import SelectorWidget
 
 logger = logging.getLogger(__name__)
@@ -84,8 +87,12 @@ class MainWindow(QMainWindow):
         self._load_btn.clicked.connect(self._on_load_clicked)
         self._remove_btn = QPushButton("Remove")
         self._remove_btn.clicked.connect(self._on_remove_clicked)
-        self._realign_btn = QPushButton("Re-align active")
-        self._realign_btn.clicked.connect(self._on_realign_clicked)
+        # Re-do either pipeline stage of the active spectrum (redo alignment, or
+        # redo point selection on the existing alignment).
+        self._repick_lines_btn = QPushButton("Re-pick lines")
+        self._repick_lines_btn.clicked.connect(self._on_repick_lines)
+        self._reselect_points_btn = QPushButton("Re-select points")
+        self._reselect_points_btn.clicked.connect(self._on_reselect_points)
         self._filter_btn = QPushButton("Cross-spectrum filter…")
         self._filter_btn.clicked.connect(self._on_filter_clicked)
         self._export_btn = QPushButton("Export spectrums.hdf5")
@@ -93,7 +100,8 @@ class MainWindow(QMainWindow):
         for btn in (
             self._load_btn,
             self._remove_btn,
-            self._realign_btn,
+            self._repick_lines_btn,
+            self._reselect_points_btn,
             self._filter_btn,
             self._export_btn,
         ):
@@ -101,7 +109,7 @@ class MainWindow(QMainWindow):
 
         left_panel = QWidget()
         left_panel.setLayout(left)
-        left_panel.setFixedWidth(280)
+        left_panel.setMinimumWidth(180)
 
         # Right panel: editing area (stacked). The active spectrum's pipeline
         # stage decides which interactive widget is shown; _current_editor is
@@ -110,10 +118,16 @@ class MainWindow(QMainWindow):
         self._placeholder = QLabel("Select or load a spectrum to begin.")
         self._placeholder.setEnabled(False)
         self._editor_stack.addWidget(self._placeholder)
-        self._current_editor: Optional[InteractiveMplWidget] = None
+        self._current_editor: Optional[QWidget] = None
 
-        root.addWidget(left_panel)
-        root.addWidget(self._editor_stack, stretch=1)
+        # A draggable splitter lets the user resize the spectrum list vs editor.
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.addWidget(left_panel)
+        splitter.addWidget(self._editor_stack)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([280, 820])
+        root.addWidget(splitter)
         self.setCentralWidget(central)
 
     def _subscribe_events(self) -> None:
@@ -184,9 +198,10 @@ class MainWindow(QMainWindow):
         """Show the interactive widget for the active spectrum's current stage.
 
         Stages: not-aligned → LinePicker; aligned-not-selected → OneTone/FindPoints
-        (by spec_type); selected → placeholder (use Re-align / Cross-spectrum
-        filter to continue). The widget's ``finished`` signal writes its result
-        back through the Controller, which advances the stage and re-triggers this.
+        (by spec_type); selected → a read-only ResultPreview (use Re-pick lines /
+        Re-select points to redo a stage). The widget's ``finished`` signal writes
+        its result back through the Controller, which advances the stage and
+        re-triggers this.
         """
         self._clear_editor()
         name = self._ctrl.state.active_spectrum
@@ -198,9 +213,10 @@ class MainWindow(QMainWindow):
             self._mount_line_picker(entry)
         elif not entry.points_selected:
             self._mount_point_selector(entry)
-        # else: selected — leave the placeholder; the points are set.
+        else:
+            self._mount(ResultPreviewWidget(entry))  # finished — read-only view
 
-    def _mount(self, widget: InteractiveMplWidget) -> None:
+    def _mount(self, widget: QWidget) -> None:
         self._current_editor = widget
         self._editor_stack.addWidget(widget)
         self._editor_stack.setCurrentWidget(widget)
@@ -221,7 +237,11 @@ class MainWindow(QMainWindow):
     def _mount_point_selector(self, entry: SpectrumEntry) -> None:
         if entry.spec_type == "OneTone":
             widget: InteractiveMplWidget = OneToneWidget(
-                entry.raw["signals"], entry.raw["dev_values"], entry.raw["freqs"]
+                entry.raw["signals"],
+                entry.raw["dev_values"],
+                entry.raw["freqs"],
+                flux_half=entry.flux_half,
+                flux_int=entry.flux_int,
             )
         else:
             widget = FindPointsWidget(
@@ -236,13 +256,31 @@ class MainWindow(QMainWindow):
         widget.finished.connect(_on_finish)
         self._mount(widget)
 
-    def _on_realign_clicked(self) -> None:
+    def _on_repick_lines(self) -> None:
         """Re-open the line picker for the active spectrum (redo alignment)."""
         name = self._ctrl.state.active_spectrum
         if name is None:
             return
         self._clear_editor()
         self._mount_line_picker(self._ctrl.state.spectrums[name])
+
+    def _on_reselect_points(self) -> None:
+        """Re-open the point selector for the active spectrum (redo selection).
+
+        Requires the spectrum to be aligned (points are placed on its flux axis);
+        warns otherwise.
+        """
+        name = self._ctrl.state.active_spectrum
+        if name is None:
+            return
+        entry = self._ctrl.state.spectrums[name]
+        if not entry.aligned:
+            self._show_error(
+                "Not aligned", "Pick the flux lines first (Re-pick lines)."
+            )
+            return
+        self._clear_editor()
+        self._mount_point_selector(entry)
 
     def _on_filter_clicked(self) -> None:
         """Open the cross-spectrum selector over all spectra with selected points."""

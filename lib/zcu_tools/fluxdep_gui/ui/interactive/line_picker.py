@@ -180,8 +180,10 @@ class LinePickerWidget(InteractiveMplWidget):
     def _init_plots(self) -> None:
         # add_subplot (vs figure.subplots) gives a precise Axes type to pyright,
         # avoiding the subplots() overload's "not iterable" unpacking error.
-        self._ax_main = self.figure.add_subplot(1, 2, 1)
-        self._ax_loss = self.figure.add_subplot(1, 2, 2)
+        # Stacked vertically: the main spectrum on top, the mirror-loss view below
+        # (so both share the device-value x-axis at a glance).
+        self._ax_main = self.figure.add_subplot(2, 1, 1)
+        self._ax_loss = self.figure.add_subplot(2, 1, 2)
 
         self._main_im = self._ax_main.imshow(
             self._real_signals.T,
