@@ -1,7 +1,7 @@
 ---
 name: run-fluxdep-gui
 description: Run, drive, and smoke-test the fluxdep-gui — a standalone Qt GUI for fluxonium flux-dependence fitting (load spectrum hdf5 → pick half/integer flux lines → select spectral points → cross-spectrum filter → export spectrums.hdf5). Use when asked to launch/start/test the fluxdep-gui app, drive the flux-dependence analysis pipeline via its MCP tools, or follow the recommended analysis flow.
-skill_version: 1
+skill_version: 2
 ---
 
 # run-fluxdep-gui
@@ -63,6 +63,7 @@ Then the analysis loop:
 
 ```
 fluxdep_spectrum_load(filepath="…/onetone_flux.hdf5", spec_type="OneTone") -> {name}
+# legacy files stored x=freq / y=flux: add transpose_axes=true to swap at load
 fluxdep_alignment_set(name, flux_half=0.0, flux_int=10.0)   # half/integer flux device values
 fluxdep_points_set(name, dev_values=[...], freqs=[...])     # paired selected points (sorted by dev)
 fluxdep_spectrum_load(filepath="…/twotone_flux.hdf5",
@@ -111,8 +112,12 @@ the raw `Database/Q3_2D/` files, regenerate them once:
 ```
 
 The raw files store their axes **transposed** (x=freq(Hz), y=flux) versus what
-the loader expects (x=flux, y=freq(Hz)); `make_fixtures.py` re-saves them in the
-canonical layout. Any raw hdf5 with that transpose needs the same fix first.
+the loader expects (x=flux, y=freq(Hz)). Two ways to handle that:
+
+- **`make_fixtures.py`** re-saves them in the canonical layout (used by smoke.py).
+- **`transpose_axes=true`** on `spectrum.load` (or the dialog's "Transpose axes"
+  toggle) swaps them at load — so the raw `Database/Q3_2D/` files load directly
+  with no pre-conversion. Verified against both raw files.
 
 ## Gotchas
 
