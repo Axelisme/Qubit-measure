@@ -88,7 +88,9 @@ class SelectorWidget(InteractiveMplWidget):
         brush_width: float = 0.05,
         parent: Optional[QWidget] = None,
     ) -> None:
-        super().__init__(parent)
+        # Controls on the LEFT to match the Search / Show tabs (the cross-spectrum
+        # filter lives in the same Analyze panel).
+        super().__init__(parent, controls_side="left")
         self._spectrums = spectrums
         self._s_fluxs = np.concatenate(
             [s["points"]["fluxs"] for s in spectrums.values()]

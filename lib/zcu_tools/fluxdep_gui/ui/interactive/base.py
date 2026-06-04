@@ -39,18 +39,28 @@ class InteractiveMplWidget(QWidget):
 
     finished = Signal()
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self, parent: Optional[QWidget] = None, controls_side: str = "right"
+    ) -> None:
         super().__init__(parent)
         self.figure = Figure(figsize=(8, 5))
         self.canvas = FigureCanvasQTAgg(self.figure)
 
-        self._root = QHBoxLayout(self)
-        self._root.addWidget(self.canvas, stretch=1)
-
         controls = QWidget()
         self.controls_layout = QVBoxLayout(controls)
         controls.setFixedWidth(220)
-        self._root.addWidget(controls)
+
+        # ``controls_side`` places the control column left or right of the canvas.
+        # Default "right" suits the standalone editor widgets; the analysis tabs
+        # put their controls on the LEFT, so the cross-spectrum filter uses "left"
+        # to match Search / Show.
+        self._root = QHBoxLayout(self)
+        if controls_side == "left":
+            self._root.addWidget(controls)
+            self._root.addWidget(self.canvas, stretch=1)
+        else:
+            self._root.addWidget(self.canvas, stretch=1)
+            self._root.addWidget(controls)
 
         # Subclasses populate controls_layout before/after super().__init__;
         # the Finish button is appended at the bottom by add_finish_button().
