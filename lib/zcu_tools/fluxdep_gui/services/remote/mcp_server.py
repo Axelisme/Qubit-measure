@@ -3,10 +3,12 @@
 
 Communicates with an MCP host (Gemini / Claude / VS Code) via stdio JSON-RPC
 2.0, and forwards calls to the live fluxdep GUI's ``RemoteControlAdapter`` over a
-single persistent TCP socket. Most tools are generated 1:1 from the wire-method
-contract table (``METHOD_SPECS``); lifecycle tools (``fluxdep_launch`` /
-``fluxdep_stop`` / ``fluxdep_connect``) are hand-written and fork
-``script/run_fluxdep_gui.py``.
+single persistent TCP socket. The exposed tools are READ-ONLY: every analysis
+method tool is generated 1:1 from the wire-method contract table (``METHOD_SPECS``,
+all pure queries — the user drives the GUI); the agent-facing lifecycle tools
+(``fluxdep_launch`` / ``fluxdep_connect`` / ``fluxdep_disconnect``) are
+hand-written and fork ``script/run_fluxdep_gui.py``. ``tool_fluxdep_stop`` exists
+only for the server's own exit cleanup — it is NOT exposed as an agent tool.
 
 Threading:
   - Main (stdio) thread: reads MCP request lines, dispatches into tool handlers,
@@ -67,41 +69,33 @@ from zcu_tools.fluxdep_gui.services.remote.wire import (  # noqa: E402
 MCP_VERSION = 1
 
 _SERVER_INSTRUCTIONS = """\
-Drive a live fluxdep-gui (fluxonium flux-dependence analysis) over a TCP socket.
+Observe a live fluxdep-gui (fluxonium flux-dependence analysis) over a TCP socket.
+
+This bridge is READ-ONLY: the USER drives the analysis in the GUI (load spectra,
+pick half/integer flux lines, select spectral points, cross-spectrum filter, run
+the database fit, export). The agent's job is to watch and report current state —
+there are no load / align / point-pick / select / fit / export tools, because
+point-picking and axis-orientation judgement need the user's eye on the preview.
 
 Getting started:
-  1. fluxdep_launch (auto-connects to a fresh GUI subprocess).
-  2. fluxdep_project_setup(chip_name, qub_name[, result_dir, database_path]) —
-     fluxdep never touches hardware; this only locates input/output files.
-     result_dir / database_path default to result/<chip>/<qubit> when omitted.
-  3. fluxdep_spectrum_load(filepath, spec_type='OneTone'|'TwoTone'[, inherit_from])
-     to load each raw spectrum hdf5; it returns the assigned name.
+  1. fluxdep_launch opens a GUI subprocess for the user (auto-connects the bridge).
+     Or fluxdep_connect to attach to a GUI the user already started.
+  2. The user does the analysis in the GUI; you observe it with the read tools.
+  fluxdep_disconnect detaches the bridge without stopping the GUI. There is no
+  stop tool — the agent never closes the user's GUI.
 
-Typical analysis loop (per spectrum):
-  - fluxdep_spectrum_list to see loaded spectra (name/spec_type/aligned/
-    points_selected). fluxdep_spectrum_set_active(name) to focus one.
-  - fluxdep_alignment_set(name, flux_half, flux_int) to set flux alignment.
-  - fluxdep_points_set(name, dev_values, freqs) — dev_values/freqs are JSON
-    arrays of equal length (the spectrum's selected points). freqs are in GHz
-    (a MHz value makes the later fit fail "all parameter bounds infeasible").
-  - Cross-spectrum: fluxdep_selection_pointcloud derives the joint (fluxs, freqs)
-    cloud; fluxdep_selection_set(selected) sets a boolean mask of that length.
-  - fluxdep_export_spectrums([filepath]) writes spectrums.hdf5 (default path is
-    result_dir/data/fluxdep/spectrums.hdf5) and returns the path.
+Read tools (all pure queries):
+  - fluxdep_state_check → {has_project, spectrum_count, has_active}.
+  - fluxdep_project_info → {chip_name, qub_name, result_dir, database_path}.
+  - fluxdep_spectrum_list → each loaded spectrum's {name, spec_type, aligned,
+    points_selected} (i.e. how far the user has taken each spectrum).
+  - fluxdep_selection_pointcloud → the joint {fluxs, freqs} cloud assembled from
+    every spectrum's selected points (freqs in GHz).
+  - fluxdep_fit_result → {has_result, params:{EJ,EC,EL} or null, database_path,
+    EJb, ECb, ELb, transitions, r_f, sample_f} — the user's fit inputs + result.
 
-Database-search fit (v2, after points/selection):
-  - fluxdep_fit_set_params(database_path, EJb, ECb, ELb, transitions[, r_f,
-    sample_f]) sets the search inputs. EJb/ECb/ELb are [min, max] pairs;
-    transitions is {category: [[i,j], ...]} (categories: 'transitions', 'mirror',
-    'red side', 'blue side', or 'transitionsN'/'mirrorN').
-  - fluxdep_fit_search runs the database search over the SELECTED joint point
-    cloud and returns {EJ, EC, EL} (a multi-second blocking sweep).
-  - fluxdep_fit_result reads the current inputs + result.
-  - fluxdep_fit_export_params([savepath]) writes params.json (the fluxdep_fit
-    block) and returns the path; default is <result_dir>/params.json.
-
-fluxdep_state_check returns {has_project, spectrum_count, has_active}. A failed
-call always raises — issue mutating calls (load/set/remove/export) exactly once.
+A failed call always raises; the read tools are idempotent, so retrying a read is
+safe.
 """
 
 # ---------------------------------------------------------------------------
@@ -396,8 +390,9 @@ def tool_fluxdep_launch(arguments: Dict[str, Any]) -> str:
 
     if _port_is_open(port):
         raise RuntimeError(
-            f"Port {port} is already in use — a previous GUI is likely still "
-            f"running. Stop it first (fluxdep_stop) or launch on a different port."
+            f"Port {port} is already in use — a GUI is likely already running "
+            f"there. Use fluxdep_connect to attach to it, or launch on a "
+            f"different port."
         )
 
     cmd = [
@@ -636,7 +631,7 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
         "handler": tool_fluxdep_disconnect,
         "description": (
             "Disconnect the MCP bridge from the GUI control port. Does NOT stop "
-            "the GUI process — use fluxdep_stop for that."
+            "the GUI process — it keeps running for the user to drive."
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },
@@ -667,32 +662,14 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
-    "fluxdep_stop": {
-        "handler": tool_fluxdep_stop,
-        "description": (
-            "Stop the GUI started by fluxdep_launch, then disconnect the MCP "
-            "socket. Sends SIGTERM (clean Qt quit) and waits up to 'timeout' s; if "
-            "it does not exit and timeout_kill=true (default), force-kills."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "timeout": {
-                    "type": "number",
-                    "description": "Seconds to wait for exit (default 10)",
-                },
-                "timeout_kill": {
-                    "type": "boolean",
-                    "description": "Force-kill on timeout (default true)",
-                },
-            },
-        },
-    },
+    # NOTE: there is deliberately no "fluxdep_stop" entry — see _OVERRIDE_NAMES.
 }
 
-_OVERRIDE_NAMES = frozenset(
-    {"fluxdep_connect", "fluxdep_disconnect", "fluxdep_launch", "fluxdep_stop"}
-)
+# fluxdep_stop is intentionally NOT exposed as an agent tool: the agent observes a
+# GUI the user drives and must not kill the user's GUI. tool_fluxdep_stop is kept
+# as a function for the MCP server's own _cleanup_on_exit (so a server-launched
+# GUI is not orphaned when the server process ends), but it is not registered here.
+_OVERRIDE_NAMES = frozenset({"fluxdep_connect", "fluxdep_disconnect", "fluxdep_launch"})
 
 
 def _assemble_tools() -> Dict[str, Dict[str, Any]]:

@@ -1,46 +1,47 @@
 ---
 name: run-fluxdep-gui
-description: Run, drive, and smoke-test the fluxdep-gui — a standalone Qt GUI for fluxonium flux-dependence fitting (load spectrum hdf5 → pick half/integer flux lines → select spectral points → cross-spectrum filter → export spectrums.hdf5 → search a database for EJ/EC/EL → export params.json). Use when asked to launch/start/test the fluxdep-gui app, drive the flux-dependence analysis pipeline via its MCP tools, or follow the recommended analysis flow.
-skill_version: 6
+description: Launch the fluxdep-gui (a standalone Qt GUI for fluxonium flux-dependence fitting) for the user, and observe its state over MCP. The USER drives the analysis in the GUI (load spectrum hdf5 → pick half/integer flux lines → select spectral points → cross-spectrum filter → export spectrums.hdf5 → search a database for EJ/EC/EL → export params.json); the agent is READ-ONLY and reports current state. Use when asked to open/launch the fluxdep-gui app, check what state it is in, or build its search database.
+skill_version: 7
 ---
 
 # run-fluxdep-gui
 
 `fluxdep-gui` is a Qt desktop GUI for fluxonium **flux-dependence fitting** — an
 optional analysis tool, fully independent of `measure-gui` (its own state /
-services / MCP server / skill). It is driven headlessly through an MCP server
-(`fluxdep-gui`, configured in `.mcp.json`) that launches the GUI subprocess and
-relays a newline-delimited JSON RPC over a TCP control socket. **You drive it
-with the `mcp__fluxdep-gui__fluxdep_*` tools** — the tool sequence *is* the
-harness.
+services / MCP server / skill). It is launched and observed through an MCP server
+(`fluxdep-gui`, configured in `.mcp.json`) that starts the GUI subprocess and
+relays a newline-delimited JSON RPC over a TCP control socket.
 
-A standalone smoke driver (`smoke.py`, next to this file) talks the same socket
-directly (wire method names, no MCP client) and runs the whole pipeline against
-the converted real fixtures — use it to verify the GUI launches and the loop
-works on a fresh checkout.
+**The agent is READ-ONLY.** The user performs the analysis in the GUI; the agent
+launches it and reports current state with the `mcp__fluxdep-gui__fluxdep_*` read
+tools. There are deliberately no load / align / point-pick / select / fit / export
+tools: point-picking (dragging lines, painting the brush mask) and judging whether
+a spectrum's axes are oriented correctly need the user's eye on the GUI preview,
+which the agent does not have.
 
 Paths below are relative to the repo root (the directory with `.mcp.json`).
 
-## What this tool does
+## The analysis pipeline (what the USER does in the GUI)
 
-The pipeline, in order — each step feeds the next:
+Each step feeds the next; the agent can observe how far the user has progressed
+via `fluxdep_spectrum_list` (per-spectrum `aligned` / `points_selected` flags) and
+`fluxdep_fit_result`:
 
 1. **Load** a raw spectrum hdf5 (a OneTone resonator-flux or TwoTone qubit-flux
-   sweep) into the spectrum collection.
-2. **Align** — pick the *half-flux* and *integer-flux* lines on the spectrum;
-   this fixes `flux_period = 2·|int − half|` and the flux coordinate.
-3. **Select points** — mark the spectral feature's (device-value, frequency)
-   points. OneTone uses an automatic threshold; TwoTone uses a hand-painted brush
-   mask (in the GUI) — over RPC you feed the points directly.
-4. Repeat 1–3 to **accumulate several spectra**; a new spectrum can **inherit**
-   an existing one's alignment as its starting guess.
-5. **Cross-spectrum filter** — select/downsample the joint point cloud across all
-   spectra.
+   sweep). The GUI's "Transpose axes" toggle handles files whose Labber step
+   channels are ordered freq-then-flux (common for OneTone) — the user judges this
+   from the preview.
+2. **Align** — pick the *half-flux* and *integer-flux* lines; this fixes
+   `flux_period = 2·|int − half|` and the flux coordinate.
+3. **Select points** — mark the spectral feature's points (an automatic threshold
+   for OneTone; a hand-painted brush mask for TwoTone).
+4. Repeat 1–3 to **accumulate several spectra** (a new one can inherit an existing
+   one's alignment as its starting guess).
+5. **Cross-spectrum filter** — select/downsample the joint point cloud.
 6. **Export** `spectrums.hdf5`.
-7. **Database search (v2)** — search a precomputed fluxonium database for the
-   best `(EJ, EC, EL)` matching the *selected* joint point cloud, then **export
-   `params.json`**. (Only the database search is ported; the notebook's optional
-   scipy `fit_spectrum` refinement is not.)
+7. **Database search (v2)** — search a precomputed fluxonium database for the best
+   `(EJ, EC, EL)` matching the selected joint point cloud, then **export
+   `params.json`**.
 
 ## Prerequisites
 
@@ -51,51 +52,19 @@ The pipeline, in order — each step feeds the next:
 
 ## Run (agent path — MCP tools)
 
-The MCP server auto-launches the GUI; you call tools.
-
 ```
-fluxdep_launch                                  # spawns the GUI, connects (control port 8766)
-fluxdep_project_setup(chip_name="Q3_2D",        # locate files (no hardware connection)
-                      qub_name="Q2")
-fluxdep_state_check                             # {has_project, spectrum_count, has_active}
-```
-
-Then the analysis loop:
-
-```
-fluxdep_spectrum_load(filepath="…/onetone_flux.hdf5", spec_type="OneTone") -> {name}
-# legacy files stored x=freq / y=flux: add transpose_axes=true to swap at load
-fluxdep_alignment_set(name, flux_half=0.0, flux_int=10.0)   # half/integer flux device values
-fluxdep_points_set(name, dev_values=[...], freqs=[...])     # paired selected points (sorted by dev)
-fluxdep_spectrum_load(filepath="…/twotone_flux.hdf5",
-                      spec_type="TwoTone", inherit_from=name)  # inherit the first's alignment
-fluxdep_alignment_set(name2, ...)
-fluxdep_points_set(name2, ...)
-fluxdep_spectrum_list                           # each spectrum's aligned / points_selected stage
-fluxdep_selection_pointcloud                    # {fluxs, freqs} of the joint cloud
-fluxdep_selection_set(selected=[true, ...])     # mask over the joint cloud (len = cloud size);
-                                                # optional min_distance (downsample threshold)
-fluxdep_export_spectrums(filepath="out.hdf5") -> {path}
-fluxdep_spectrum_load_processed(filepath="spectrums.hdf5")  # restore aligned+selected spectra
-fluxdep_resources_versions                      # optimistic-concurrency version table
+fluxdep_launch                 # opens the GUI for the user, connects (control port 8766)
+                               # or fluxdep_connect to attach to a GUI the user already started
+fluxdep_state_check            # {has_project, spectrum_count, has_active}
+fluxdep_project_info           # {chip_name, qub_name, result_dir, database_path}
+fluxdep_spectrum_list          # each spectrum's {name, spec_type, aligned, points_selected}
+fluxdep_selection_pointcloud   # the joint {fluxs, freqs} cloud (freqs in GHz)
+fluxdep_fit_result             # {has_result, params:{EJ,EC,EL} or null, inputs…}
+fluxdep_disconnect             # detach the bridge; does NOT stop the user's GUI
 ```
 
-Then the database-search fit (v2), over the *selected* joint point cloud:
-
-```
-fluxdep_fit_set_params(database_path="…/fluxonium_1.h5",
-                       EJb=[2,15], ECb=[0.2,2], ELb=[0.1,2],
-                       transitions={"transitions": [[0,1],[0,2],[1,2],[1,3]],
-                                    "mirror": [[0,1],[0,2],[0,3],[1,2],[1,3]]},
-                       r_f=5.551, sample_f=9.5846)   # r_f/sample_f optional (0 omits)
-fluxdep_fit_search                              # multi-second sweep -> {EJ, EC, EL}
-fluxdep_fit_result                              # {has_result, params, inputs…}
-fluxdep_fit_export_params(savepath="params.json")  # -> {path}; default <result_dir>/params.json
-```
-
-`database_path` points at a precomputed fluxonium database (`fluxs` / `params` /
-`energies` datasets). The shipped ones live in `Database/simulation/`
-(`fluxonium_all.h5`, `fluxonium_int.h5`, `fluxonium_1.h5`).
+That is the whole agent surface: launch/connect/disconnect plus the five read
+tools. The agent never mutates the analysis and never stops the GUI.
 
 ## Generating the search database
 
@@ -125,70 +94,24 @@ replace an existing output). `--n-jobs` defaults to -1 (all cores) — BLAS is
 pinned to 1 thread so per-row process workers parallelise cleanly (~5x on 8
 cores); set `--n-jobs 1` for serial.
 
+The shipped databases live in `Database/simulation/` (`fluxonium_all.h5`,
+`fluxonium_int.h5`, `fluxonium_1.h5`); each has `fluxs` / `params` / `energies`
+datasets.
+
 > **WARNING — don't clobber a database you can't cheaply rebuild.** The output
 > path must not exist unless `--overwrite` is passed. Before regenerating an
 > existing DB, back it up first: `cp Database/simulation/fluxonium_all.h5 ~/backup/`.
 
-## Run (smoke harness — verify the loop without an MCP client)
-
-```bash
-# desktop session (DISPLAY set):
-.venv/bin/python .claude/skills/run-fluxdep-gui/smoke.py
-# headless:
-xvfb-run -a .venv/bin/python .claude/skills/run-fluxdep-gui/smoke.py
-```
-
-Expected tail:
-
-```
-[smoke] connected on 8788
-[smoke] loaded OneTone: onetone_flux_Q2_1.hdf5
-[smoke] loaded TwoTone: twotone_flux_Q1_1.hdf5
-[smoke] joint cloud: 5 points
-[smoke] exported -> …/fluxdep_smoke_out.hdf5
-[smoke] SMOKE OK
-```
-
-It uses control port **8788** so a live MCP session on the default 8766 is
-undisturbed.
-
-## Fixtures
-
-The smoke fixtures (`fixtures/onetone_flux_Q2_1.hdf5`, `fixtures/twotone_flux_Q1_1.hdf5`)
-are real Q3_2D spectra converted to the canonical axis layout. **They are
-gitignored** (large `.hdf5` + under `Database/`), so on a fresh checkout that has
-the raw `Database/Q3_2D/` files, regenerate them once:
-
-```bash
-.venv/bin/python .claude/skills/run-fluxdep-gui/make_fixtures.py
-```
-
-The raw files store their axes **transposed** (x=freq(Hz), y=flux) versus what
-the loader expects (x=flux, y=freq(Hz)). Two ways to handle that:
-
-- **`make_fixtures.py`** re-saves them in the canonical layout (used by smoke.py).
-- **`transpose_axes=true`** on `spectrum.load` (or the dialog's "Transpose axes"
-  toggle) swaps them at load — so the raw `Database/Q3_2D/` files load directly
-  with no pre-conversion. Verified against both raw files.
-
 ## Gotchas
 
-- **`fluxdep_points_set` takes *paired* points**, not separate axes: `dev_values`
-  and `freqs` must be equal length (one (dev, freq) point per index). A
-  length mismatch returns `invalid_params`. **`freqs` are in GHz** (the loader
-  converts the raw Hz axis to GHz, and the database search is in GHz); feeding MHz
-  makes the fit fail with `all parameter bounds infeasible`.
-- **Alignment before points.** `points.set` derives each point's flux coordinate
-  from the spectrum's alignment, so set the lines first.
-- **The in-figure picking (drag lines / brush points) is a GUI-only human
-  action.** Over RPC you feed `alignment.set` / `points.set` / `selection.set`
-  numerically — that drives the same state, but it is *not* a simulation of the
-  user dragging. Say so honestly when reporting a smoke run.
-- **`spec_type` is not persisted** by `export_spectrums` (a known limitation of
-  the underlying `dump_spectrums`): re-loading the exported file loses OneTone/
-  TwoTone, which must be re-supplied.
+- **Read-only over RPC.** If asked to "run the analysis", the agent cannot — it
+  launches the GUI and the user drives it. Report the state you can read; do not
+  claim to have performed steps you cannot perform.
+- **Spectrum frequencies are in GHz** everywhere (the loader converts the raw Hz
+  axis to GHz, and `fluxdep_selection_pointcloud` returns GHz).
 - **Launch vs connect** (both default port 8766): `fluxdep_launch` starts a NEW
-  GUI (needs the port free); `fluxdep_connect` attaches to an existing one.
-  `fluxdep_stop` before relaunching.
+  GUI for the user (needs the port free); `fluxdep_connect` attaches to one the
+  user already started. There is no stop tool — the agent never closes the user's
+  GUI; `fluxdep_disconnect` only detaches the bridge.
 - **After editing GUI code**, `/mcp reconnect fluxdep-gui` then `fluxdep_launch`
   — the MCP server is a separate process and caches old code until reconnected.

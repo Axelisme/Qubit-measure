@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .param_spec import JsonType, ParamSpec
+from .param_spec import ParamSpec
 
 
 @dataclass(frozen=True)
@@ -25,8 +25,12 @@ class MethodSpec:
 
     ``off_main_thread`` marks a blocking handler that must NOT be marshalled
     onto the Qt main thread. The fluxdep method set has no such handler (every
-    action is a fast main-thread state mutation), but the flag is kept for
-    mechanism parity with the dispatcher.
+    method is a fast main-thread state read), but the flag is kept for mechanism
+    parity with the dispatcher.
+
+    The fluxdep method set is entirely read-only (see ``METHOD_SPECS`` below), so
+    no method here takes parameters — the ParamSpec machinery is retained only for
+    the validation/schema mechanism and the (empty) ``params`` default.
     """
 
     timeout_seconds: float
@@ -37,137 +41,27 @@ class MethodSpec:
 
 
 # ---------------------------------------------------------------------------
-# ParamSpec factory shorthands — keep the table readable.
-# ---------------------------------------------------------------------------
-
-
-def _str(name: str, desc: str = "") -> ParamSpec:
-    return ParamSpec(name, JsonType.STRING, required=True, description=desc)
-
-
-def _str_opt(name: str, desc: str = "") -> ParamSpec:
-    return ParamSpec(name, JsonType.STRING, required=False, description=desc)
-
-
-def _num(name: str, desc: str = "") -> ParamSpec:
-    return ParamSpec(name, JsonType.NUMBER, required=True, description=desc)
-
-
-def _json(name: str, desc: str = "") -> ParamSpec:
-    return ParamSpec(name, JsonType.JSON, required=True, description=desc)
-
-
-def _num_opt(name: str, default: float, desc: str = "") -> ParamSpec:
-    return ParamSpec(
-        name, JsonType.NUMBER, required=False, default=default, description=desc
-    )
-
-
-def _num_opt_none(name: str, desc: str = "") -> ParamSpec:
-    """Optional NUMBER whose omitted / null value stays None (not a default)."""
-    return ParamSpec(
-        name, JsonType.NUMBER, required=False, default=None, description=desc
-    )
-
-
-def _bool_opt(name: str, desc: str = "") -> ParamSpec:
-    return ParamSpec(
-        name, JsonType.BOOLEAN, required=False, default=False, description=desc
-    )
-
-
-# ---------------------------------------------------------------------------
 # The contract table. Keys are dotted wire-method names.
 # ---------------------------------------------------------------------------
 
 
+# The agent is READ-ONLY: it observes a fluxdep-gui that the user drives, it does
+# not perform the analysis. Every method here is a pure query — there is no
+# load / align / point-pick / select / fit / export method. Those are user
+# actions in the GUI (point-picking and axis judgement need the human's eye on the
+# preview, which the agent does not have). The agent's job is to read the current
+# state and report it.
 METHOD_SPECS: dict[str, MethodSpec] = {
     # Project
-    "project.setup": MethodSpec(
-        10.0,
-        "Set the analysis project: chip / qubit names plus optional result_dir "
-        "(root for processed output) and database_path (root for raw spectrum "
-        "hdf5 files). Both paths default to result/<chip>/<qubit> when omitted "
-        "(derived from the names); pass a value to override. fluxdep never touches "
-        "hardware, so this only locates files.",
-        (
-            _str("chip_name"),
-            _str("qub_name"),
-            _str_opt(
-                "result_dir",
-                "Root for processed output (default: result/<chip>/<qubit>)",
-            ),
-            _str_opt(
-                "database_path",
-                "Root for raw spectrum hdf5 files (default: result/<chip>/<qubit>)",
-            ),
-        ),
-    ),
     "project.info": MethodSpec(
         5.0,
         "Read the current project info (chip_name, qub_name, result_dir, "
         "database_path).",
     ),
     # Spectrum collection
-    "spectrum.load": MethodSpec(
-        30.0,
-        "Load a raw spectrum hdf5 into the collection and return its assigned "
-        "name. spec_type is 'OneTone' or 'TwoTone'. inherit_from optionally "
-        "names an already-loaded spectrum whose flux alignment is copied as an "
-        "initial guess. transpose_axes=true swaps the device-value and frequency "
-        "axes at load (for legacy files stored as x=frequency / y=flux).",
-        (
-            _str("filepath", "Path to the raw spectrum hdf5 file"),
-            _str("spec_type", "'OneTone' or 'TwoTone'"),
-            _str_opt("inherit_from", "Loaded spectrum to inherit alignment from"),
-            _bool_opt(
-                "transpose_axes",
-                "Swap dev-value/frequency axes for legacy x=freq/y=flux files",
-            ),
-        ),
-    ),
-    "spectrum.load_processed": MethodSpec(
-        30.0,
-        "Restore a processed spectrums.hdf5 (aligned spectra with selected "
-        "points) into the collection; returns the loaded names. NOTE: spec_type "
-        "is not persisted, so a missing type defaults to TwoTone.",
-        (_str("filepath", "Path to a processed spectrums.hdf5 file"),),
-    ),
     "spectrum.list": MethodSpec(
         5.0,
         "List the loaded spectra: each {name, spec_type, aligned, points_selected}.",
-    ),
-    "spectrum.remove": MethodSpec(
-        5.0, "Remove a loaded spectrum by name", (_str("name", "Spectrum name"),)
-    ),
-    "spectrum.set_active": MethodSpec(
-        5.0,
-        "Set the active spectrum (the one the editor view operates on)",
-        (_str("name", "Spectrum name to activate"),),
-    ),
-    # Alignment / points
-    "alignment.set": MethodSpec(
-        5.0,
-        "Set a spectrum's flux alignment (flux_half / flux_int) and mark it "
-        "aligned. Both are flux numbers.",
-        (
-            _str("name", "Spectrum name"),
-            _num("flux_half", "Flux value of the half-flux-quantum point"),
-            _num("flux_int", "Flux value of the integer-flux-quantum point"),
-        ),
-    ),
-    "points.set": MethodSpec(
-        10.0,
-        "Set a spectrum's selected points and mark points selected. dev_values "
-        "and freqs are JSON arrays of equal length (converted to numpy arrays "
-        "server-side). freqs are in GHz, matching the loaded spectrum's frequency "
-        "axis and the database search (a MHz value lands far outside any database "
-        "candidate, so the fit fails with 'all parameter bounds infeasible').",
-        (
-            _str("name", "Spectrum name"),
-            _json("dev_values", "JSON array of device values"),
-            _json("freqs", "JSON array of frequencies (GHz)"),
-        ),
     ),
     # Cross-spectrum selection
     "selection.pointcloud": MethodSpec(
@@ -175,66 +69,11 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "Derive the joint (flux, freq) point cloud assembled from every "
         "spectrum's selected points. Returns {fluxs:[...], freqs:[...]}.",
     ),
-    "selection.set": MethodSpec(
-        5.0,
-        "Set the cross-spectrum selection mask over the joint point cloud. "
-        "'selected' is a JSON array of booleans whose length must equal the "
-        "joint point-cloud size (selection.pointcloud). 'min_distance' is the "
-        "downsample threshold remembered for the next selector session.",
-        (
-            _json("selected", "JSON array of booleans over the joint point cloud"),
-            _num_opt("min_distance", 0.0, "Downsample threshold (default 0)"),
-        ),
-    ),
-    # Database-search fit (v2)
-    "fit.set_params": MethodSpec(
-        10.0,
-        "Set the database-search inputs (clears any prior result). 'database_path' "
-        "is the precomputed fluxonium database hdf5. EJb/ECb/ELb are [min, max] "
-        "bound pairs. 'transitions' is a JSON object mapping a category "
-        "('transitions' / 'mirror' / 'red side' / 'blue side', or 'transitionsN' / "
-        "'mirrorN') to a list of [i, j] level pairs. r_f / sample_f are the "
-        "readout / sample frequencies (GHz). Omit / null when unused; a category "
-        "that needs one (blue/red side need r_f, mirror needs sample_f) requires "
-        "it to be set, else the search fails.",
-        (
-            _str("database_path", "Precomputed fluxonium database hdf5 path"),
-            _json("EJb", "[min, max] EJ bound pair"),
-            _json("ECb", "[min, max] EC bound pair"),
-            _json("ELb", "[min, max] EL bound pair"),
-            _json("transitions", "Category -> list of [i, j] level pairs"),
-            _num_opt_none("r_f", "Readout frequency (GHz); omit / null if unused"),
-            _num_opt_none("sample_f", "Sample frequency (GHz); omit / null if unused"),
-        ),
-    ),
-    "fit.search": MethodSpec(
-        180.0,
-        "Search the database for the best (EJ, EC, EL) over the selected joint "
-        "point cloud, using the inputs from fit.set_params. Returns {EJ, EC, EL}. "
-        "A multi-second blocking sweep run on the GUI main thread (the GUI is "
-        "momentarily unresponsive); the timeout is generous. Fast-fails without a "
-        "database path or selected points.",
-    ),
+    # Database-search fit (v2) — read only
     "fit.result": MethodSpec(
         5.0,
         "Read the current fit inputs and result: {has_result, params:{EJ,EC,EL} "
         "or null, database_path, EJb, ECb, ELb, transitions, r_f, sample_f}.",
-    ),
-    "fit.export_params": MethodSpec(
-        15.0,
-        "Write the fit result to params.json (the fluxdep_fit block) and return "
-        "its path. Omit savepath for the notebook-layout default "
-        "(<result_dir>/params.json). Fast-fails without a result or an aligned "
-        "spectrum.",
-        (_str_opt("savepath", "Override the params.json path"),),
-    ),
-    # Export
-    "export.spectrums": MethodSpec(
-        30.0,
-        "Write the whole spectrum collection to a spectrums.hdf5 file and return "
-        "its path. Omit filepath to use the notebook-layout default "
-        "(result_dir/data/fluxdep/spectrums.hdf5).",
-        (_str_opt("filepath", "Override the export path"),),
     ),
     # Resource version table (optimistic-concurrency guard baseline). Full
     # snapshot the mcp layer reads to track last-seen versions; the version

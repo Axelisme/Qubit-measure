@@ -1,17 +1,14 @@
 #!/usr/bin/env bash
 # Sync this skill (.claude is the source of truth) into the other agents' skill
 # dirs (.agent, .codex). The three are independent files — NOT hard-linked (the
-# editor's write-then-rename breaks links) — so run this after editing SKILL.md,
-# smoke.py, or the fixtures here. .gemini has no skill copy, so it is left alone.
+# editor's write-then-rename breaks links) — so run this after editing SKILL.md.
+# .gemini has no skill copy, so it is left alone.
 #
 # Usage:  bash .claude/skills/run-fluxdep-gui/sync_skills.sh
 set -euo pipefail
 
 SKILL_REL="skills/run-fluxdep-gui"
-FILES=(SKILL.md smoke.py make_fixtures.py)
-# .hdf5 fixtures are gitignored (large); copied if present, regenerated via
-# make_fixtures.py otherwise. Not required for the sync to succeed.
-FIXTURES=(fixtures/onetone_flux_Q2_1.hdf5 fixtures/twotone_flux_Q1_1.hdf5)
+FILES=(SKILL.md)
 DESTS=(.agent .codex)
 
 # Repo root = three levels up from this script (.claude/skills/run-fluxdep-gui).
@@ -25,12 +22,9 @@ done
 
 for dst in "${DESTS[@]}"; do
     dst_dir="$REPO_ROOT/$dst/$SKILL_REL"
-    mkdir -p "$dst_dir/fixtures"
+    mkdir -p "$dst_dir"
     for f in "${FILES[@]}"; do
         cp "$SRC_DIR/$f" "$dst_dir/$f"
-    done
-    for f in "${FIXTURES[@]}"; do  # optional (gitignored, may be absent)
-        [ -f "$SRC_DIR/$f" ] && cp "$SRC_DIR/$f" "$dst_dir/$f" || true
     done
 done
 
