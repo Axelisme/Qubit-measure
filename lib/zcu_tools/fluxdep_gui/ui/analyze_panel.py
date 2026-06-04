@@ -213,6 +213,12 @@ class AnalyzePanelWidget(QWidget):
         selector.finished.connect(_on_finish)
         self._filter_widget = selector
         self._filter_layout.addWidget(selector)
+        # Force a repaint on the next event-loop turn, once the widget is shown.
+        # Building the selector while it's not yet visible leaves draw_idle()
+        # queued but unpainted, so the figure only appeared after switching tabs.
+        from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
+
+        QTimer.singleShot(0, selector.canvas.draw_idle)
 
     # --- Search tab ------------------------------------------------------
 

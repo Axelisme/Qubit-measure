@@ -118,6 +118,7 @@ class SelectorWidget(InteractiveMplWidget):
         self._compute_bounds()
         self._build_controls(brush_width)
         self._init_plots()
+        self.redraw()  # show the background immediately (don't wait for the worker)
         self.apply_filter()
 
     # --- bounds + controls ----------------------------------------------
