@@ -43,6 +43,16 @@ def test_compute_preprocess_shapes_and_norm():
     np.testing.assert_allclose(result.norm_phases.max(axis=1), 1.0)
     assert result.edelays.shape == (len(fluxs),)
     assert np.isfinite(result.edelay)
+    # median_rf is the median over flux of each row's peak frequency, in range
+    assert float(freqs.min()) <= result.median_rf <= float(freqs.max())
+
+
+def test_median_rf_lands_on_the_resonance_band():
+    # the synthetic onetone's resonance sweeps around 5.3 GHz (±0.2 cos); the median
+    # of per-flux peak frequencies should land in that band, not at an axis edge.
+    fluxs, freqs, signals = _synthetic_onetone(n_flux=12, n_freq=80)
+    result = compute_preprocess(fluxs, freqs, signals, n_jobs=1)
+    assert 5.1 <= result.median_rf <= 5.5
 
 
 def test_compute_preprocess_small_grid_does_not_crash():

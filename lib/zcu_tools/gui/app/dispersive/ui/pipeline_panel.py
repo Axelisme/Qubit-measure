@@ -53,7 +53,11 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.app.dispersive.controller import Controller
-from zcu_tools.gui.app.dispersive.services.viz import render_tune_figure
+from zcu_tools.gui.app.dispersive.services.viz import (
+    render_tune_figure,
+    set_dispersion_lines,
+    update_bare_line,
+)
 from zcu_tools.gui.app.dispersive.state import PreprocessResult
 
 from .error_messages import friendly_fit_message, friendly_io_message
@@ -63,12 +67,15 @@ from .tune_canvas import TuneCanvasWidget
 
 logger = logging.getLogger(__name__)
 
+# The r_f slider has this many ticks across the data's frequency span, so its
+# precision is (freq span) / _RF_TICKS independent of the span's width.
+_RF_TICKS = 300
+
 
 @dataclass(frozen=True)
 class _TuneParams:
     g: float
     bare_rf: float
-    res_dim: int
     step: int
 
 
@@ -79,7 +86,6 @@ class _TuneData:
     t_fluxs: np.ndarray
     g: float
     bare_rf: float
-    res_dim: int
     step: int
 
 
@@ -128,16 +134,14 @@ class _PredictWorker(QRunnable):
         try:
             p = self._p
             rf_0, rf_1 = self._ctrl.predict_dispersive(
-                p.g, p.bare_rf, res_dim=p.res_dim, step=p.step, return_dim=2
+                p.g, p.bare_rf, step=p.step, return_dim=2
             )
             t_fluxs = self._ctrl.predict_flux_axis(p.step)
         except Exception as exc:  # noqa: BLE001 — surface to the panel
             logger.exception("predict worker failed")
             self.signals.failed.emit(str(exc))
             return
-        self.signals.done.emit(
-            _TuneData(rf_0, rf_1, t_fluxs, p.g, p.bare_rf, p.res_dim, p.step)
-        )
+        self.signals.done.emit(_TuneData(rf_0, rf_1, t_fluxs, p.g, p.bare_rf, p.step))
 
 
 class PipelinePanelWidget(QWidget):
@@ -223,25 +227,36 @@ class PipelinePanelWidget(QWidget):
         # spinbox does NOT compute; only "Use these g/r_f" runs the (off-main)
         # predictor, draws the figure, and records the result (the manual tuning IS
         # the final fit). The button is disabled while a prediction is in flight.
-        self._tune_box = QGroupBox("4. Tune g / r_f  (drag to match, then accept)")
+        from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+        from qtpy.QtWidgets import QSlider  # type: ignore[attr-defined]
+
+        self._tune_box = QGroupBox("4. Tune g / r_f  (drag r_f to match, then accept)")
         outer = QVBoxLayout(self._tune_box)
         row = QHBoxLayout()
         self._g_spin = self._mhz_spin(60.0, 0.0, 200.0)
-        self._rf_spin = self._mhz_spin(5300.0, 1000.0, 12000.0)
-        self._res_dim = self._int_spin(4)
         self._step = self._int_spin(1)
+        # r_f is a slider with a FIXED 0..RF_TICKS tick range, so its precision is
+        # always (freq span)/RF_TICKS regardless of how wide the data's span is. The
+        # GHz value is mapped from the tick (see _rf_ghz); the span/default are set
+        # from the preprocessing result in _init_tune_view. Dragging moves the r_f
+        # line live (no scqubits); the label shows the current value.
+        self._rf_lo_ghz = 5.0  # data freq span, set in _init_tune_view
+        self._rf_hi_ghz = 6.0
+        self._rf_slider = QSlider(Qt.Orientation.Horizontal)
+        self._rf_slider.setRange(0, _RF_TICKS)
+        self._rf_slider.setValue(_RF_TICKS // 2)
+        self._rf_slider.valueChanged.connect(self._on_rf_slider)
+        self._rf_label = QLabel("")
         row.addWidget(QLabel("g (MHz)"))
         row.addWidget(self._g_spin)
-        row.addWidget(QLabel("r_f (MHz)"))
-        row.addWidget(self._rf_spin)
-        row.addWidget(QLabel("res_dim"))
-        row.addWidget(self._res_dim)
         row.addWidget(QLabel("step"))
         row.addWidget(self._step)
+        row.addWidget(QLabel("r_f (MHz)"))
+        row.addWidget(self._rf_slider, stretch=1)
+        row.addWidget(self._rf_label)
         self._tune_btn = QPushButton("Use these g / r_f")
         self._tune_btn.clicked.connect(self._on_tune)
         row.addWidget(self._tune_btn)
-        row.addStretch(1)
         outer.addLayout(row)
         self._tune_progress = QProgressBar()
         self._tune_progress.setVisible(False)
@@ -265,7 +280,7 @@ class PipelinePanelWidget(QWidget):
         return self._tabs
 
     def _build_export_section(self) -> QWidget:
-        self._export_box = QGroupBox("6. Export")
+        self._export_box = QGroupBox("5. Export")
         layout = QHBoxLayout(self._export_box)
         self._export_btn = QPushButton("Export to params.json")
         self._export_btn.clicked.connect(self._on_export)
@@ -334,7 +349,6 @@ class PipelinePanelWidget(QWidget):
             f"flux_half={inputs.flux_half:.4g} period={inputs.flux_period:.4g} · "
             f"bare_rf seed={inputs.bare_rf_seed:.4f} GHz"
         )
-        self._rf_spin.setValue(1e3 * inputs.bare_rf_seed)
         self._sync_enabled()
 
     # --- section 2: load onetone ----------------------------------------
@@ -378,8 +392,40 @@ class PipelinePanelWidget(QWidget):
         self._preprocess_btn.setEnabled(True)
         self._end_progress()
         self._render_diagnostic(result)
+        self._init_tune_view(result)
         self._show_tab(self._diag_canvas)
         self._sync_enabled()
+
+    def _init_tune_view(self, result: PreprocessResult) -> None:
+        """Set up the Tune tab from a fresh preprocessing result.
+
+        The r_f slider spans the data's frequency range over a fixed _RF_TICKS ticks
+        (so its precision is span/_RF_TICKS); its default tick is the one nearest the
+        median peak frequency. The tune figure shows the norm-phase background + the
+        r_f line right away (no dispersion lines until "Use these g/r_f" predicts).
+        """
+        self._rf_lo_ghz = float(result.sp_freqs.min())
+        self._rf_hi_ghz = float(result.sp_freqs.max())
+        self._rf_slider.blockSignals(True)
+        self._rf_slider.setValue(self._rf_tick_for(result.median_rf))
+        self._rf_slider.blockSignals(False)
+        self._rf_label.setText(f"{1e3 * self._rf_ghz():.1f} MHz")
+        self._tune_artists = render_tune_figure(
+            self._tune_canvas.figure,
+            result.sp_fluxs,
+            result.sp_freqs,
+            result.norm_phases,
+            self._rf_ghz(),
+        )
+        self._tune_canvas.redraw()
+
+    def _rf_tick_for(self, rf_ghz: float) -> int:
+        """The slider tick nearest a GHz r_f value (clamped into range)."""
+        span = self._rf_hi_ghz - self._rf_lo_ghz
+        if span <= 0.0:
+            return 0
+        frac = (rf_ghz - self._rf_lo_ghz) / span
+        return min(max(int(round(frac * _RF_TICKS)), 0), _RF_TICKS)
 
     def _on_preprocess_failed(self, message: str) -> None:
         self._preprocess_btn.setEnabled(True)
@@ -428,21 +474,33 @@ class PipelinePanelWidget(QWidget):
         fig.tight_layout()
         self._diag_canvas.draw_idle()
 
-    # --- section 4: tune (button-triggered, off-main predict) -----------
+    # --- section 4: tune (r_f slider live; predict on "Use these g/r_f") -
+
+    def _rf_ghz(self) -> float:
+        """The r_f slider value in GHz (tick mapped into the data's freq span)."""
+        frac = self._rf_slider.value() / _RF_TICKS
+        return self._rf_lo_ghz + frac * (self._rf_hi_ghz - self._rf_lo_ghz)
+
+    def _on_rf_slider(self, _tick: int) -> None:
+        """Live: move the r_f line as the slider drags (no scqubits)."""
+        rf_ghz = self._rf_ghz()
+        self._rf_label.setText(f"{1e3 * rf_ghz:.1f} MHz")
+        if self._tune_artists is not None:
+            update_bare_line(self._tune_artists, rf_ghz)
+            self._tune_canvas.redraw()
 
     def _on_tune(self) -> None:
-        """Run the predictor off-main for the current spinbox values, draw + record.
+        """Run the predictor off-main for the current g + r_f slider, draw + record.
 
         The manual tuning IS the final fit: the done slot records the accepted
-        g/bare_rf and draws the figure. The button is disabled while the prediction
-        is in flight, so a new run cannot start until the previous one finishes.
+        g/bare_rf and draws the dispersion lines. The button is disabled while the
+        prediction is in flight, so a new run cannot start until it finishes.
         """
         if self._ctrl.state.preprocess is None:
             return
         params = _TuneParams(
             g=1e-3 * self._g_spin.value(),
-            bare_rf=1e-3 * self._rf_spin.value(),
-            res_dim=self._res_dim.value(),
+            bare_rf=self._rf_ghz(),
             step=self._step.value(),
         )
         self._tune_btn.setEnabled(False)
@@ -453,21 +511,15 @@ class PipelinePanelWidget(QWidget):
         self._pool.start(worker)
 
     def _on_tune_done(self, data: _TuneData) -> None:
-        st = self._ctrl.state
         self._tune_btn.setEnabled(True)
         self._end_progress()
-        if st.preprocess is None:
+        if self._ctrl.state.preprocess is None or self._tune_artists is None:
             return
-        # The accepted tuning IS the result: record g/bare_rf (+ its resolution),
-        # then draw the tune figure.
-        self._ctrl.set_manual_fit(
-            data.g, data.bare_rf, res_dim=data.res_dim, step=data.step
-        )
-        self._tune_artists = render_tune_figure(
-            self._tune_canvas.figure,
-            st.preprocess.sp_fluxs,
-            st.preprocess.sp_freqs,
-            st.preprocess.norm_phases,
+        # The accepted tuning IS the result: record g/bare_rf, then draw the
+        # dispersion lines over the (already-drawn) background + r_f line.
+        self._ctrl.set_manual_fit(data.g, data.bare_rf, step=data.step)
+        set_dispersion_lines(
+            self._tune_artists,
             data.t_fluxs,
             data.rf_0,
             data.rf_1,

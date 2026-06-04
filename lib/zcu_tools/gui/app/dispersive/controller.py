@@ -7,9 +7,10 @@ independently testable); the Controller calls a service and then emits the
 corresponding EventBus event so Views can react.
 
 It has only the dispersive single-flow pipeline actions: load fit inputs from
-params.json → load a one-tone spectrum → preprocess → tune / auto-fit g & bare_rf
-→ export the dispersive section back to params.json. ``predict_dispersive`` is a
-synchronous read for the live tuning canvas (no State write, no event).
+params.json → load a one-tone spectrum → preprocess → manually tune g & bare_rf
+(``set_manual_fit`` records the accepted values — there is no auto-fit) → export the
+dispersive section back to params.json. ``predict_dispersive`` is a read for the
+tuning figure (no State write, no event).
 """
 
 from __future__ import annotations
@@ -110,14 +111,11 @@ class Controller:
         g: float,
         bare_rf: float,
         *,
-        res_dim: int = 4,
         step: int = 1,
         return_dim: int = 2,
     ) -> tuple[NDArray[np.float64], ...]:
         """LRU-cached dispersive prediction over the preprocessed flux axis."""
-        return self._predictor().predict(
-            g, bare_rf, res_dim=res_dim, step=step, return_dim=return_dim
-        )
+        return self._predictor().predict(g, bare_rf, step=step, return_dim=return_dim)
 
     def predict_flux_axis(self, step: int) -> NDArray[np.float64]:
         """The down-sampled flux axis for a ``predict_dispersive(step=step)`` call."""

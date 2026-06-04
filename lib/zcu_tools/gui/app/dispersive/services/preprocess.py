@@ -109,12 +109,18 @@ def compute_preprocess(
     norm_phases = np.abs(norm_phases)
     norm_phases /= np.max(norm_phases, axis=1, keepdims=True)
 
+    # Data-derived r_f seed: each flux row's peak (the resonance), median over flux
+    # (robust to outlier rows). The slider defaults here.
+    peak_freqs = sp_freqs[np.argmax(norm_phases, axis=1)]
+    median_rf = float(np.median(peak_freqs))
+
     return PreprocessResult(
         sp_fluxs=sp_fluxs.astype(np.float64),
         sp_freqs=sp_freqs.astype(np.float64),
         norm_phases=norm_phases.astype(np.float64),
         edelays=edelays,
         edelay=edelay,
+        median_rf=median_rf,
         signature=(EDELAY_SMOOTH_DIV, PHASE_SMOOTH_DIV, n_flux, n_freq),
     )
 
