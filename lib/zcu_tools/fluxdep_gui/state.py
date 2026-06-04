@@ -14,6 +14,7 @@ replaces measure's tab/device/context model.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field, replace
 from typing import Literal, Optional
 
@@ -154,6 +155,28 @@ DEFAULT_CHIP = "unknown_chip"
 DEFAULT_QUBIT = "unknown_qubit"
 
 
+def default_result_dir(chip_name: str, qub_name: str) -> str:
+    """The notebook-layout result dir for a chip/qubit (``result/<chip>/<qubit>``).
+
+    Empty names fall back to ``unknown_chip`` / ``unknown_qubit`` so the path is
+    always well-formed.
+    """
+    chip = chip_name or DEFAULT_CHIP
+    qub = qub_name or DEFAULT_QUBIT
+    return os.path.join("result", chip, qub)
+
+
+def default_database_root(chip_name: str, qub_name: str) -> str:
+    """The default *raw spectrum* root for a chip/qubit.
+
+    Raw measurement hdf5 files share the chip/qubit result tree, so this is the
+    same ``result/<chip>/<qubit>`` directory. (This is the project's
+    ``database_path``, distinct from the precomputed *search* database, whose
+    default is the bundled ``Database/simulation`` — see ``ui/paths.database_dir``.)
+    """
+    return default_result_dir(chip_name, qub_name)
+
+
 @dataclass
 class ProjectInfo:
     """Where to read raw spectra from and where to write processed results.
@@ -161,14 +184,31 @@ class ProjectInfo:
     Locates files only — there is no chip/qub connection concept (fluxdep never
     touches hardware). A value-only block, so not versioned via a guarded op
     unless ``project.setup`` bumps ``project`` on replacement. The chip / qubit
-    names default to the ``unknown_*`` placeholders so the export path and the
-    Project dialog always show a well-formed name.
+    names default to the ``unknown_*`` placeholders.
+
+    ``result_dir`` and ``database_path`` are always concrete paths, never an empty
+    sentinel: leave a field unset (empty) at construction and ``__post_init__``
+    derives it from the chip/qubit names — so however a ``ProjectInfo`` is built,
+    both paths come out well-formed and every save site can
+    ``makedirs(exist_ok=True)`` a real directory without per-call-site fallback.
+    Pass a non-empty value to *override* the derivation (the GUI does this when the
+    user edits or browses the field). The empty placeholder never leaks out: it is
+    resolved in ``__post_init__`` before the instance is observable.
     """
 
     chip_name: str = DEFAULT_CHIP
     qub_name: str = DEFAULT_QUBIT
-    result_dir: str = ""  # root for processed output (result_dir/data/fluxdep/...)
-    database_path: str = ""  # root for raw spectrum hdf5 files
+    # Empty = "derive from chip/qubit in __post_init__"; a value overrides it.
+    result_dir: str = ""  # → result/<chip>/<qubit>
+    database_path: str = ""  # raw spectrum root → result/<chip>/<qubit>
+
+    def __post_init__(self) -> None:
+        # Single derivation point: an unset (empty) path becomes the chip/qubit
+        # default; a provided path is kept as the user's override.
+        if not self.result_dir:
+            self.result_dir = default_result_dir(self.chip_name, self.qub_name)
+        if not self.database_path:
+            self.database_path = default_database_root(self.chip_name, self.qub_name)
 
 
 @dataclass

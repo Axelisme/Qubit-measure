@@ -53,18 +53,14 @@ class SearchResult:
     figure: Optional[Figure] = None
 
 
-def default_params_path(result_dir: str, chip_name: str, qub_name: str) -> str:
+def default_params_path(result_dir: str) -> str:
     """The notebook-layout default params.json path (``<result_dir>/params.json``).
 
-    Falls back to the chip/qubit-derived result dir (``result/<chip>/<qubit>``)
-    when ``result_dir`` is unset, so the path is always well-formed (a bare
-    ``params.json`` would make ``dump_result``'s ``makedirs(dirname)`` fail on the
-    empty dirname).
+    ``result_dir`` is the project's result dir, which is always a concrete path
+    (``ProjectInfo`` derives it from chip/qubit eagerly), so the dirname is never
+    empty and ``dump_result``'s ``makedirs(dirname, exist_ok=True)`` always works.
     """
-    from zcu_tools.fluxdep_gui.services.export import default_result_dir
-
-    root = result_dir or default_result_dir(chip_name, qub_name)
-    return os.path.join(root, "params.json")
+    return os.path.join(result_dir, "params.json")
 
 
 class FitService:
@@ -213,12 +209,8 @@ class FitService:
         path = (
             savepath
             if savepath is not None
-            else default_params_path(
-                project.result_dir, project.chip_name, project.qub_name
-            )
+            else default_params_path(project.result_dir)
         )
-        if not path:
-            raise ValueError("no result_dir set and no savepath given")
 
         EJ, EC, EL = fit.params
         result = FluxDepFitResult(

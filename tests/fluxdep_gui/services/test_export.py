@@ -47,19 +47,16 @@ def test_export_roundtrips_via_load_spectrums(spectrum_hdf5, tmp_path):
     )
 
 
-def test_default_path_uses_chip_qubit():
+def test_default_export_path_under_result_dir():
     from zcu_tools.fluxdep_gui.services.export import default_export_path
 
-    assert default_export_path("Q5_2D", "Q1") == os.path.join(
+    assert default_export_path(os.path.join("result", "Q5_2D", "Q1")) == os.path.join(
         "result", "Q5_2D", "Q1", "data", "fluxdep", "spectrums.hdf5"
-    )
-    # empty names fall back to the unknown_* placeholders
-    assert default_export_path("", "") == os.path.join(
-        "result", "unknown_chip", "unknown_qubit", "data", "fluxdep", "spectrums.hdf5"
     )
 
 
 def test_export_service_default_path_from_project():
+    # ProjectInfo derives result_dir from chip/qubit in __post_init__.
     st = FluxDepState(ProjectInfo(chip_name="Q5_2D", qub_name="Q1"))
     assert ExportService(st).default_path() == os.path.join(
         "result", "Q5_2D", "Q1", "data", "fluxdep", "spectrums.hdf5"

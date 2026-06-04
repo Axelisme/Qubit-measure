@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import os
 
-from zcu_tools.fluxdep_gui.services.export import default_result_dir
 from zcu_tools.fluxdep_gui.state import ProjectInfo
 
 # The repo's bundled simulation databases (relative to the cwd a launch uses).
+# This is the home of the precomputed *search* database (fluxonium*.h5) — a
+# shared resource, unrelated to a chip/qubit, so it is NOT derived from the
+# project (cf. the project's database_path, which is the *raw spectrum* root).
 _SIM_DB_DIR = os.path.join("Database", "simulation")
 
 
@@ -34,11 +36,6 @@ def _nearest_existing(path: str) -> str:
     return path
 
 
-def _project_result_dir(project: ProjectInfo) -> str:
-    """The project's result dir, or the chip/qubit-derived default if unset."""
-    return project.result_dir or default_result_dir(project.chip_name, project.qub_name)
-
-
 def raw_spectrum_dir(project: ProjectInfo) -> str:
     """Where raw spectrum hdf5 files live — the project's database_path root."""
     return _nearest_existing(project.database_path)
@@ -46,42 +43,40 @@ def raw_spectrum_dir(project: ProjectInfo) -> str:
 
 def processed_spectrum_dir(project: ProjectInfo) -> str:
     """Where exported spectrums.hdf5 lives — ``<result_dir>/data/fluxdep``."""
-    target = os.path.join(_project_result_dir(project), "data", "fluxdep")
+    target = os.path.join(project.result_dir, "data", "fluxdep")
     return _nearest_existing(target)
 
 
 def database_dir(project: ProjectInfo) -> str:
-    """Where the precomputed search database lives.
+    """Where the precomputed *search* database lives — the bundled simulation dir.
 
-    The project's database_path if set, else the repo's bundled
-    ``Database/simulation`` directory.
+    The search database (fluxonium*.h5) is a shared resource unrelated to the
+    chip/qubit, so it is the repo's bundled ``Database/simulation`` — NOT derived
+    from the project (whose ``database_path`` is the raw spectrum root).
     """
-    if project.database_path:
-        return _nearest_existing(project.database_path)
+    del project  # search db location is project-independent
     return _nearest_existing(_SIM_DB_DIR)
 
 
 def params_dir(project: ProjectInfo) -> str:
     """Where params.json is written — the project's result_dir."""
-    return _nearest_existing(_project_result_dir(project))
+    return _nearest_existing(project.result_dir)
 
 
 def default_database_file(project: ProjectInfo) -> str:
-    """A pre-fillable default database FILE, so the user often need not browse.
+    """A pre-fillable default *search* database FILE, so the user often need not browse.
 
-    If ``database_path`` points at a file, use it; if it's a directory (or the
-    bundled ``Database/simulation`` exists), pick the first ``fluxonium*.h5`` in
-    it. Returns "" when nothing suitable is found.
+    Picks the first ``fluxonium*.h5`` in the bundled ``Database/simulation`` dir.
+    Returns "" when none is found. (Project-independent — the search database is a
+    shared resource, not a per-chip/qubit file; cf. ``database_dir``.)
     """
-    if project.database_path and os.path.isfile(project.database_path):
-        return project.database_path
-    for directory in (project.database_path, _SIM_DB_DIR):
-        if directory and os.path.isdir(directory):
-            candidates = sorted(
-                f
-                for f in os.listdir(directory)
-                if f.startswith("fluxonium") and f.endswith((".h5", ".hdf5"))
-            )
-            if candidates:
-                return os.path.join(directory, candidates[0])
+    del project  # search db location is project-independent
+    if os.path.isdir(_SIM_DB_DIR):
+        candidates = sorted(
+            f
+            for f in os.listdir(_SIM_DB_DIR)
+            if f.startswith("fluxonium") and f.endswith((".h5", ".hdf5"))
+        )
+        if candidates:
+            return os.path.join(_SIM_DB_DIR, candidates[0])
     return ""

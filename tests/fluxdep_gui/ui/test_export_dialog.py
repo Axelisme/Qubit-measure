@@ -15,19 +15,19 @@ from zcu_tools.fluxdep_gui.ui.export_dialog import ExportSpectrumsDialog
 
 @pytest.fixture
 def dialog(qapp):
-    d = ExportSpectrumsDialog()
+    d = ExportSpectrumsDialog(os.path.join("result", "unknown_chip", "unknown_qubit"))
     yield d
     d.deleteLater()
 
 
-def test_default_path_uses_unknown_chip_qub(dialog):
+def test_default_path_under_result_dir(dialog):
     assert dialog.export_path() == os.path.join(
         "result", "unknown_chip", "unknown_qubit", "data", "fluxdep", "spectrums.hdf5"
     )
 
 
-def test_default_path_from_project_names(qapp):
-    d = ExportSpectrumsDialog(chip_name="Q5_2D", qub_name="Q1")
+def test_default_path_from_project_result_dir(qapp):
+    d = ExportSpectrumsDialog(os.path.join("result", "Q5_2D", "Q1"))
     assert d.export_path() == os.path.join(
         "result", "Q5_2D", "Q1", "data", "fluxdep", "spectrums.hdf5"
     )

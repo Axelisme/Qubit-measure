@@ -87,12 +87,20 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         10.0,
         "Set the analysis project: chip / qubit names plus optional result_dir "
         "(root for processed output) and database_path (root for raw spectrum "
-        "hdf5 files). fluxdep never touches hardware, so this only locates files.",
+        "hdf5 files). Both paths default to result/<chip>/<qubit> when omitted "
+        "(derived from the names); pass a value to override. fluxdep never touches "
+        "hardware, so this only locates files.",
         (
             _str("chip_name"),
             _str("qub_name"),
-            _str_opt("result_dir", "Root for processed output"),
-            _str_opt("database_path", "Root for raw spectrum hdf5 files"),
+            _str_opt(
+                "result_dir",
+                "Root for processed output (default: result/<chip>/<qubit>)",
+            ),
+            _str_opt(
+                "database_path",
+                "Root for raw spectrum hdf5 files (default: result/<chip>/<qubit>)",
+            ),
         ),
     ),
     "project.info": MethodSpec(

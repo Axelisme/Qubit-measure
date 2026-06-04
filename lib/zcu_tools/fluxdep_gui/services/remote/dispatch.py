@@ -175,6 +175,9 @@ def _h_project_setup(
     qub = str(params["qub_name"])
     result_dir = params["result_dir"]
     database_path = params["database_path"]
+    # Omitted / None result_dir / database_path → empty, which ProjectInfo's
+    # __post_init__ derives from chip/qubit (the single derivation point); a value
+    # overrides it.
     adapter.ctrl.setup_project(
         ProjectInfo(
             chip_name=chip,

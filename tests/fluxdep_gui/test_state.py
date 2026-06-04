@@ -155,6 +155,36 @@ def test_set_project_bumps_project():
     assert st.project.chip_name == "Q5_2D"
 
 
+def test_project_info_derives_paths_from_names():
+    import os
+
+    # unset result_dir / database_path are derived from chip/qubit in __post_init__
+    p = ProjectInfo(chip_name="Q5_2D", qub_name="Q1")
+    assert p.result_dir == os.path.join("result", "Q5_2D", "Q1")
+    assert p.database_path == os.path.join("result", "Q5_2D", "Q1")
+
+
+def test_project_info_default_names_derive_unknown_paths():
+    import os
+
+    # a bare ProjectInfo still has concrete (never empty) paths
+    p = ProjectInfo()
+    assert p.result_dir == os.path.join("result", "unknown_chip", "unknown_qubit")
+    assert p.database_path == os.path.join("result", "unknown_chip", "unknown_qubit")
+
+
+def test_project_info_explicit_paths_override_derivation():
+    # a provided path is kept as the user's override, not re-derived
+    p = ProjectInfo(
+        chip_name="Q5_2D",
+        qub_name="Q1",
+        result_dir="/custom/out",
+        database_path="/custom/raw",
+    )
+    assert p.result_dir == "/custom/out"
+    assert p.database_path == "/custom/raw"
+
+
 # --- FitState (v2) ---------------------------------------------------------
 
 

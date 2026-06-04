@@ -73,6 +73,7 @@ Getting started:
   1. fluxdep_launch (auto-connects to a fresh GUI subprocess).
   2. fluxdep_project_setup(chip_name, qub_name[, result_dir, database_path]) —
      fluxdep never touches hardware; this only locates input/output files.
+     result_dir / database_path default to result/<chip>/<qubit> when omitted.
   3. fluxdep_spectrum_load(filepath, spec_type='OneTone'|'TwoTone'[, inherit_from])
      to load each raw spectrum hdf5; it returns the assigned name.
 

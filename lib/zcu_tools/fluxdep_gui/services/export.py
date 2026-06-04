@@ -12,40 +12,38 @@ import logging
 import os
 from typing import Optional
 
-from zcu_tools.fluxdep_gui.state import DEFAULT_CHIP, DEFAULT_QUBIT, FluxDepState
+from zcu_tools.fluxdep_gui.state import (
+    DEFAULT_CHIP,
+    DEFAULT_QUBIT,
+    FluxDepState,
+    default_database_root,
+    default_result_dir,
+)
 from zcu_tools.notebook.persistance import SpectrumResult, dump_spectrums
 
 logger = logging.getLogger(__name__)
 
-# Re-exported from state (their home) for callers that import them from here.
+# ``default_result_dir`` / ``default_database_root`` / DEFAULT_* live in state.py
+# (the ProjectInfo's home); re-export them here for callers that import from this
+# service module.
 __all__ = [
     "DEFAULT_CHIP",
     "DEFAULT_QUBIT",
     "default_result_dir",
+    "default_database_root",
     "default_export_path",
     "ExportService",
 ]
 
 
-def default_result_dir(chip_name: str, qub_name: str) -> str:
-    """The notebook-layout result dir for a chip/qubit (``result/<chip>/<qubit>``).
+def default_export_path(result_dir: str) -> str:
+    """The notebook-layout default export path under a result dir.
 
-    Empty names fall back to ``unknown_chip`` / ``unknown_qubit`` so the path is
-    always well-formed.
+    ``<result_dir>/data/fluxdep/spectrums.hdf5``. ``result_dir`` is the project's
+    result dir (always concrete — derived from chip/qubit eagerly, or overridden),
+    so this respects a user-overridden result dir rather than re-deriving it.
     """
-    chip = chip_name or DEFAULT_CHIP
-    qub = qub_name or DEFAULT_QUBIT
-    return os.path.join("result", chip, qub)
-
-
-def default_export_path(chip_name: str, qub_name: str) -> str:
-    """The notebook-layout default export path for a chip/qubit.
-
-    ``<result_dir>/data/fluxdep/spectrums.hdf5``.
-    """
-    return os.path.join(
-        default_result_dir(chip_name, qub_name), "data", "fluxdep", "spectrums.hdf5"
-    )
+    return os.path.join(result_dir, "data", "fluxdep", "spectrums.hdf5")
 
 
 class ExportService:
@@ -55,10 +53,8 @@ class ExportService:
         self._state = state
 
     def default_path(self) -> str:
-        """Default export path from the project's chip/qubit names."""
-        return default_export_path(
-            self._state.project.chip_name, self._state.project.qub_name
-        )
+        """Default export path under the project's result dir."""
+        return default_export_path(self._state.project.result_dir)
 
     def export_spectrums(self, filepath: Optional[str] = None, mode: str = "x") -> str:
         """Write every loaded spectrum to ``filepath`` (or the default path).

@@ -409,12 +409,10 @@ class MainWindow(QMainWindow):
     def _on_export_clicked(self) -> None:
         from zcu_tools.fluxdep_gui.ui.export_dialog import ExportSpectrumsDialog
 
-        # The default path comes from the project's chip/qubit (set via Project…);
+        # The default path comes from the project's result dir (set via Project…);
         # the dialog only confirms / overrides the path.
         project = self._ctrl.state.project
-        dialog = ExportSpectrumsDialog(
-            chip_name=project.chip_name, qub_name=project.qub_name, parent=self
-        )
+        dialog = ExportSpectrumsDialog(result_dir=project.result_dir, parent=self)
         if dialog.exec() != int(dialog.DialogCode.Accepted):
             return
         path = dialog.export_path()

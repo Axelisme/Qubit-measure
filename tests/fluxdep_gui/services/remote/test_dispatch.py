@@ -7,6 +7,8 @@ or the socket server.
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pytest
 from zcu_tools.fluxdep_gui.controller import Controller
@@ -64,8 +66,9 @@ def test_project_setup_and_info():
     info = _call(adapter, "project.info", {})
     assert info["chip_name"] == "Q5_2D"
     assert info["qub_name"] == "Q1"
+    # explicit result_dir is kept; omitted database_path is derived from chip/qubit
     assert info["result_dir"] == "/tmp/out"
-    assert info["database_path"] == ""
+    assert info["database_path"] == os.path.join("result", "Q5_2D", "Q1")
 
 
 def test_state_check_reflects_project_and_spectra(spectrum_hdf5):

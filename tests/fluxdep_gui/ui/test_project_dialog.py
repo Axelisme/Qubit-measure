@@ -55,6 +55,26 @@ def test_manual_result_dir_stops_auto_derivation(qapp):
     d.deleteLater()
 
 
+def test_database_path_auto_derives_from_names(qapp):
+    import os
+
+    d = ProjectDialog(ProjectInfo())
+    d._chip_edit.setText("Q5_2D")
+    d._qub_edit.setText("Q1")
+    # the raw-spectrum root tracks chip/qubit just like result_dir
+    assert d._database_edit.text() == os.path.join("result", "Q5_2D", "Q1")
+    d.deleteLater()
+
+
+def test_manual_database_path_stops_auto_derivation(qapp):
+    d = ProjectDialog(ProjectInfo())
+    d._database_edit.setText("/custom/raw")
+    d._on_database_edited("/custom/raw")  # simulate textEdited
+    d._chip_edit.setText("Q5_2D")  # must NOT overwrite the manual db path
+    assert d._database_edit.text() == "/custom/raw"
+    d.deleteLater()
+
+
 def test_browse_buttons_exist(dialog):
     from qtpy.QtWidgets import QPushButton
 

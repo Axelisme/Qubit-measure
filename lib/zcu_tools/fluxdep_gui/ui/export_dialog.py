@@ -1,10 +1,9 @@
 """ExportSpectrumsDialog — confirm the export path for spectrums.hdf5.
 
-The default path is derived from the project's chip / qubit names (set via the
-Project… dialog) as ``result/<chip>/<qubit>/data/fluxdep/spectrums.hdf5``
-(defaulting to ``unknown_chip`` / ``unknown_qubit``). This dialog only shows that
-path and lets the user override it via Browse. Returns the resolved filepath (or
-None on cancel).
+The default path comes from the project's result dir (set/derived via the
+Project… dialog) as ``<result_dir>/data/fluxdep/spectrums.hdf5``. This dialog only
+shows that path and lets the user override it via Browse. Returns the resolved
+filepath (or None on cancel).
 """
 
 from __future__ import annotations
@@ -23,11 +22,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.fluxdep_gui.services.export import (
-    DEFAULT_CHIP,
-    DEFAULT_QUBIT,
-    default_export_path,
-)
+from zcu_tools.fluxdep_gui.services.export import default_export_path
 
 
 class ExportSpectrumsDialog(QDialog):
@@ -35,23 +30,21 @@ class ExportSpectrumsDialog(QDialog):
 
     def __init__(
         self,
-        chip_name: str = "",
-        qub_name: str = "",
+        result_dir: str,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Export spectrums.hdf5")
         self.resize(560, 130)
-        default = default_export_path(
-            chip_name or DEFAULT_CHIP, qub_name or DEFAULT_QUBIT
-        )
-        self._build_ui(default)
+        self._build_ui(default_export_path(result_dir))
 
     def _build_ui(self, default_path: str) -> None:
         root = QVBoxLayout(self)
 
         root.addWidget(
-            QLabel("Set chip / qubit via the Project… button to change the default.")
+            QLabel(
+                "Set chip / qubit (or result dir) via Project… to change the default."
+            )
         )
 
         path_row = QHBoxLayout()
