@@ -14,28 +14,33 @@ from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
-from zcu_tools.gui.adapter import CfgSchema, ContextReadiness, DirectValue, ExpContext
-from zcu_tools.gui.controller import Controller
-from zcu_tools.gui.event_bus import (
+from zcu_tools.gui.app.main.adapter import (
+    CfgSchema,
+    ContextReadiness,
+    DirectValue,
+    ExpContext,
+)
+from zcu_tools.gui.app.main.controller import Controller
+from zcu_tools.gui.app.main.event_bus import (
     GuiEvent,
     RunFinishedPayload,
     RunStartedPayload,
     TabContentChangedPayload,
 )
-from zcu_tools.gui.io_manager import IOManager
-from zcu_tools.gui.plot_host import FigureContainer
-from zcu_tools.gui.plot_routing import has_current_container
-from zcu_tools.gui.registry import Registry
-from zcu_tools.gui.runner import Runner
-from zcu_tools.gui.services import PersistenceCaretaker, StartupProjectRequest
-from zcu_tools.gui.services.device import ConnectDeviceRequest
-from zcu_tools.gui.services.operation_gate import (
+from zcu_tools.gui.app.main.io_manager import IOManager
+from zcu_tools.gui.app.main.plot_host import FigureContainer
+from zcu_tools.gui.app.main.plot_routing import has_current_container
+from zcu_tools.gui.app.main.registry import Registry
+from zcu_tools.gui.app.main.runner import Runner
+from zcu_tools.gui.app.main.services import PersistenceCaretaker, StartupProjectRequest
+from zcu_tools.gui.app.main.services.device import ConnectDeviceRequest
+from zcu_tools.gui.app.main.services.operation_gate import (
     OperationConflictError,
     OperationKind,
     OperationOutcome,
 )
-from zcu_tools.gui.services.ports import RestoreIssue, RestoreReport
-from zcu_tools.gui.state import DeviceStatus, State
+from zcu_tools.gui.app.main.services.ports import RestoreIssue, RestoreReport
+from zcu_tools.gui.app.main.state import DeviceStatus, State
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -87,7 +92,7 @@ class ControllerFixture:
         self.view = _make_view()
         io_manager = IOManager()
         io_manager._em = MagicMock()  # simulate a project being set up
-        from zcu_tools.gui.event_bus import EventBus
+        from zcu_tools.gui.app.main.event_bus import EventBus
 
         self.bus = EventBus()
         self.bus.emit = MagicMock()

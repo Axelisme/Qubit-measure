@@ -7,9 +7,9 @@ that keep the agent-facing tool contract stable and drift-free.
 
 from __future__ import annotations
 
-from zcu_tools.gui.services.remote import mcp_server as m
-from zcu_tools.gui.services.remote.dispatch import METHOD_REGISTRY
-from zcu_tools.gui.services.remote.method_specs import METHOD_SPECS
+from zcu_tools.gui.app.main.services.remote import mcp_server as m
+from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
+from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
 
 
 def test_handlers_and_specs_match():

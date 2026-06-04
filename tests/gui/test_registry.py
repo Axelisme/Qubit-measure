@@ -1,4 +1,4 @@
-"""Unit tests for zcu_tools.gui.registry."""
+"""Unit tests for zcu_tools.gui.app.main.registry."""
 
 from __future__ import annotations
 
@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from typing import ClassVar, Sequence
 
 import pytest
-from zcu_tools.gui.adapter import (
+from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
+    AdapterGuide,
     AnalyzeRequest,
     CfgSchema,
     CfgSectionSpec,
@@ -18,7 +19,7 @@ from zcu_tools.gui.adapter import (
     SaveDataRequest,
     WritebackRequest,
 )
-from zcu_tools.gui.registry import Registry
+from zcu_tools.gui.app.main.registry import Registry
 
 
 class _DummyExp:
@@ -58,6 +59,16 @@ class _DummyAdapter:
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:
         return CfgSectionSpec()
+
+    @classmethod
+    def guide(cls) -> AdapterGuide:
+        return AdapterGuide(
+            behavior="dummy",
+            expects_md="dummy",
+            expects_ml="dummy",
+            typical_writeback="dummy",
+            recommended="dummy",
+        )
 
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:  # noqa: ARG002
         return CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())

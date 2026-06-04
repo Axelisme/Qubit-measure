@@ -17,7 +17,7 @@ from zcu_tools.experiment.v2_gui.adapters.onetone.power_dep import (
     OneTonePowerDepAdapter,
     OneTonePowerDepRunResult,
 )
-from zcu_tools.gui.adapter import AnalyzeRequest, CfgSchema, RunRequest
+from zcu_tools.gui.app.main.adapter import AnalyzeRequest, CfgSchema, RunRequest
 from zcu_tools.meta_tool import MetaDict
 from zcu_tools.program.v2 import ModuleCfgFactory, SweepCfg
 
@@ -91,7 +91,7 @@ def test_onetone_2d_build_exp_cfg_delegates_to_ml_make_cfg(adapter, cfg_model) -
 
 
 def test_onetone_power_dep_default_sweep_freq_uses_eval_value() -> None:
-    from zcu_tools.gui.adapter import CfgSectionValue, EvalValue, SweepValue
+    from zcu_tools.gui.app.main.adapter import CfgSectionValue, EvalValue, SweepValue
 
     ctx = _make_ctx(_make_ml())
     ctx.md.r_f = 6100.0
@@ -108,7 +108,7 @@ def test_onetone_power_dep_default_sweep_freq_uses_eval_value() -> None:
 
 
 def test_onetone_flux_dep_default_sweep_freq_uses_eval_value() -> None:
-    from zcu_tools.gui.adapter import CfgSectionValue, EvalValue, SweepValue
+    from zcu_tools.gui.app.main.adapter import CfgSectionValue, EvalValue, SweepValue
 
     ctx = _make_ctx(_make_ml())
     ctx.md.r_f = 6100.0
@@ -157,7 +157,7 @@ def test_real_onetone_run_without_soc_fast_fails(adapter) -> None:
 
 
 def test_onetone_freq_default_fallback_uses_direct_values_without_md_keys() -> None:
-    from zcu_tools.gui.adapter import (
+    from zcu_tools.gui.app.main.adapter import (
         CfgSectionValue,
         DirectValue,
         ModuleRefValue,
@@ -196,7 +196,7 @@ def test_onetone_freq_default_fallback_uses_direct_values_without_md_keys() -> N
 
 
 def test_onetone_freq_default_uses_eval_when_md_keys_exist() -> None:
-    from zcu_tools.gui.adapter import (
+    from zcu_tools.gui.app.main.adapter import (
         CfgSectionValue,
         EvalValue,
         ModuleRefValue,
@@ -233,7 +233,7 @@ def test_onetone_freq_default_uses_eval_when_md_keys_exist() -> None:
 
 
 def test_onetone_freq_default_ignores_library_readout() -> None:
-    from zcu_tools.gui.adapter import CfgSectionValue, ModuleRefValue
+    from zcu_tools.gui.app.main.adapter import CfgSectionValue, ModuleRefValue
     from zcu_tools.meta_tool import ModuleLibrary
 
     ml = ModuleLibrary()

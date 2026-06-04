@@ -10,10 +10,10 @@ import pytest
 
 
 def test_gui_package_import_is_matplotlib_clean():
-    """``import zcu_tools.gui`` must not pull in matplotlib.
+    """``import zcu_tools.gui.app.main`` must not pull in matplotlib.
 
     This is the invariant that lets an entry script do
-    ``from zcu_tools.gui import configure_gui_matplotlib_backend`` first and
+    ``from zcu_tools.gui.app.main import configure_gui_matplotlib_backend`` first and
     configure the backend before any pyplot import. Run in a subprocess because
     the pytest process has already imported matplotlib.
     """
@@ -21,10 +21,10 @@ def test_gui_package_import_is_matplotlib_clean():
     script = textwrap.dedent(
         """
         import sys
-        import zcu_tools.gui  # noqa: F401
+        import zcu_tools.gui.app.main  # noqa: F401
 
         leaked = sorted(m for m in sys.modules if m.split(".")[0] == "matplotlib")
-        assert not leaked, f"importing zcu_tools.gui leaked matplotlib: {leaked}"
+        assert not leaked, f"importing zcu_tools.gui.app.main leaked matplotlib: {leaked}"
         print("ok")
         """
     )
@@ -44,7 +44,9 @@ def test_configure_gui_matplotlib_backend_fails_after_pyplot_import():
 
     del plt
 
-    from zcu_tools.gui.mpl_backend_setup import configure_gui_matplotlib_backend
+    from zcu_tools.gui.app.main.mpl_backend_setup import (
+        configure_gui_matplotlib_backend,
+    )
 
     with pytest.raises(RuntimeError, match="already imported"):
         configure_gui_matplotlib_backend()
@@ -54,7 +56,7 @@ def test_custom_backend_supports_pyplot_in_active_container():
     repo_root = Path(__file__).resolve().parents[2]
     script = textwrap.dedent(
         """
-        from zcu_tools.gui.mpl_backend_setup import (
+        from zcu_tools.gui.app.main.mpl_backend_setup import (
             BACKEND_NAME,
             configure_gui_matplotlib_backend,
         )
@@ -62,8 +64,8 @@ def test_custom_backend_supports_pyplot_in_active_container():
         configure_gui_matplotlib_backend()
 
         from qtpy.QtWidgets import QApplication, QLabel, QStackedWidget
-        from zcu_tools.gui.plot_host import FigureContainer
-        from zcu_tools.gui.plot_routing import routing_scope
+        from zcu_tools.gui.app.main.plot_host import FigureContainer
+        from zcu_tools.gui.app.main.plot_routing import routing_scope
 
         import matplotlib
         import matplotlib.pyplot as plt
@@ -106,7 +108,7 @@ def test_configure_gui_matplotlib_backend_is_idempotent_after_preconfigure():
     repo_root = Path(__file__).resolve().parents[2]
     script = textwrap.dedent(
         """
-        from zcu_tools.gui.mpl_backend_setup import configure_gui_matplotlib_backend
+        from zcu_tools.gui.app.main.mpl_backend_setup import configure_gui_matplotlib_backend
 
         configure_gui_matplotlib_backend()
 
@@ -114,7 +116,7 @@ def test_configure_gui_matplotlib_backend_is_idempotent_after_preconfigure():
 
         configure_gui_matplotlib_backend()
 
-        assert plt.get_backend().lower() == "module://zcu_tools.gui.mpl_backend"
+        assert plt.get_backend().lower() == "module://zcu_tools.gui.app.main.mpl_backend"
         print("ok")
         """
     )
@@ -130,7 +132,7 @@ def test_configure_gui_matplotlib_backend_is_idempotent_after_preconfigure():
 
 
 def test_make_empty_ctx_builds_runtime_context():
-    from zcu_tools.gui.app import _make_empty_ctx
+    from zcu_tools.gui.app.main.app import _make_empty_ctx
 
     ctx = _make_empty_ctx()
 

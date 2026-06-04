@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.role_catalog import RoleCatalog, RoleEntry
+from zcu_tools.gui.app.main.role_catalog import RoleCatalog, RoleEntry
 
 
 def _entry(role_id: str, kind: str) -> RoleEntry:

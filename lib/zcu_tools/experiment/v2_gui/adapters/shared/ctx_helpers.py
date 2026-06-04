@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Union
 
-from zcu_tools.gui.adapter import (
+from zcu_tools.gui.app.main.adapter import (
     DirectValue,
     EvalValue,
     ScalarValue,
@@ -12,7 +12,7 @@ from zcu_tools.gui.adapter import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.adapter import ExpContext
+    from zcu_tools.gui.app.main.adapter import ExpContext
 
 
 def md_get_float(ctx: ExpContext, key: str, default: float) -> float:

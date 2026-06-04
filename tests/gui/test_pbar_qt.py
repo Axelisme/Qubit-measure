@@ -13,7 +13,7 @@ pytest.importorskip("qtpy")
 
 
 def _make_stack(qapp):  # noqa: ARG001
-    from zcu_tools.gui.ui.progress_stack import ProgressStack
+    from zcu_tools.gui.app.main.ui.progress_stack import ProgressStack
 
     return ProgressStack()
 
@@ -25,8 +25,10 @@ def _make_factory(stack, *, operation_id: int = 1, owner_id: str = "owner"):
     owner-attached listener that re-renders the stack on every change, mirroring
     how a real View attaches. Returns the worker-side factory.
     """
-    from zcu_tools.gui.adapters.qt_progress_transport import QtProgressTransport
-    from zcu_tools.gui.services.progress import ProgressService
+    from zcu_tools.gui.app.main.adapters.qt_progress_transport import (
+        QtProgressTransport,
+    )
+    from zcu_tools.gui.app.main.services.progress import ProgressService
 
     svc = ProgressService(QtProgressTransport())
     svc.attach_by_owner(
@@ -132,7 +134,7 @@ def test_total_setter(qapp):
     stack = _make_stack(qapp)
     factory = _make_factory(stack)
 
-    from zcu_tools.gui.pbar_host import _FLOAT_SCALE
+    from zcu_tools.gui.app.main.pbar_host import _FLOAT_SCALE
 
     # integer total → max == raw value
     pbar = factory(desc="t", total=5, leave=False)
@@ -163,7 +165,7 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
     """FakeFreqAdapter.run() completes; leave=True outer bar stays, reset_all clears."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
     from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
-    from zcu_tools.gui.adapter import ExpContext, RunRequest
+    from zcu_tools.gui.app.main.adapter import ExpContext, RunRequest
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
     from zcu_tools.progress_bar.interface import use_pbar_factory
 
@@ -175,10 +177,10 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
     schema = adapter.make_default_cfg(ctx)
 
     # Override to small values so the test is fast
-    from zcu_tools.gui.adapter import DirectValue, SweepValue
+    from zcu_tools.gui.app.main.adapter import DirectValue, SweepValue
 
     schema.value.fields["rounds"] = DirectValue(2)
-    from zcu_tools.gui.adapter import CfgSectionValue
+    from zcu_tools.gui.app.main.adapter import CfgSectionValue
 
     schema.value.fields["sweep"] = CfgSectionValue(
         fields={"freq": SweepValue(start=5800.0, stop=5808.0, expts=5)}

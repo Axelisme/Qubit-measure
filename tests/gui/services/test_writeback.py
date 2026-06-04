@@ -10,21 +10,21 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.adapter import (
+from zcu_tools.gui.app.main.adapter import (
     ContextReadiness,
     MetaDictWriteback,
     ModuleWriteback,
     WaveformWriteback,
 )
-from zcu_tools.gui.event_bus import (
+from zcu_tools.gui.app.main.event_bus import (
     EventBus,
     GuiEvent,
     MdChangedPayload,
     MlChangedPayload,
 )
-from zcu_tools.gui.services.guard import WritebackPermit
-from zcu_tools.gui.services.writeback import WritebackService
-from zcu_tools.gui.state import ExpContext, Session, State
+from zcu_tools.gui.app.main.services.guard import WritebackPermit
+from zcu_tools.gui.app.main.services.writeback import WritebackService
+from zcu_tools.gui.app.main.state import ExpContext, Session, State
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 

@@ -1,4 +1,4 @@
-"""Unit tests for zcu_tools.gui.adapter (Spec/Value split)."""
+"""Unit tests for zcu_tools.gui.app.main.adapter (Spec/Value split)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
-from zcu_tools.gui.adapter import (
+from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     CfgSchema,
     CfgSectionSpec,
@@ -27,8 +27,8 @@ from zcu_tools.gui.adapter import (
     make_default_value,
     require_soc_handles,
 )
-from zcu_tools.gui.adapter.lowering import _find_allowed_spec
-from zcu_tools.gui.adapter.protocol import NoAnalyzeParams
+from zcu_tools.gui.app.main.adapter.lowering import _find_allowed_spec
+from zcu_tools.gui.app.main.adapter.protocol import NoAnalyzeParams
 from zcu_tools.meta_tool import MetaDict
 
 # ---------------------------------------------------------------------------
@@ -48,7 +48,7 @@ def _schema(spec_fields: dict, val_fields: dict | None = None) -> CfgSchema:
 
 
 def test_require_soc_handles_is_framework_request_validation() -> None:
-    from zcu_tools.gui.adapter import RunRequest
+    from zcu_tools.gui.app.main.adapter import RunRequest
 
     with pytest.raises(RuntimeError, match="soc is required"):
         require_soc_handles(
@@ -221,7 +221,7 @@ def test_sweepvalue_auto_norm_expts_one_gives_zero_step():
 def test_sweepvalue_auto_norm_skips_evalvalue_bounds():
     # EvalValue bounds are left to SweepEditor (resolved-edge handling); auto_norm
     # never touches an EvalValue's resolved, so the supplied step stays.
-    from zcu_tools.gui.adapter import EvalValue
+    from zcu_tools.gui.app.main.adapter import EvalValue
 
     v = SweepValue(start=EvalValue("r_f - 0.1"), stop=600.0, expts=11, step=0.5)
     assert v.step == pytest.approx(0.5)
@@ -639,7 +639,7 @@ def _make_concrete_adapter() -> BaseAdapter:
 
 
 def _make_ctx(**kwargs):
-    from zcu_tools.gui.adapter import ContextReadiness, ExpContext
+    from zcu_tools.gui.app.main.adapter import ContextReadiness, ExpContext
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
     defaults = dict(
@@ -689,7 +689,7 @@ def test_base_adapter_get_analyze_params_raises_by_default():
 
 
 def test_base_adapter_analyze_raises_by_default():
-    from zcu_tools.gui.adapter import AnalyzeRequest
+    from zcu_tools.gui.app.main.adapter import AnalyzeRequest
 
     adapter = _make_concrete_adapter()
     req = AnalyzeRequest(

@@ -9,8 +9,8 @@ dispatch.py and are tested in ``test_dispatch_coerce.py``.
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.services.remote.errors import ErrorCode, RemoteError
-from zcu_tools.gui.services.remote.wire import (
+from zcu_tools.gui.app.main.services.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.app.main.services.remote.wire import (
     Response,
     optional_bool,
     parse_request,
@@ -141,7 +141,7 @@ def test_response_to_wire_ok():
 
 
 def test_response_to_wire_error():
-    from zcu_tools.gui.services.remote.errors import ErrorEnvelope
+    from zcu_tools.gui.app.main.services.remote.errors import ErrorEnvelope
 
     env = ErrorEnvelope(code=ErrorCode.INVALID_PARAMS, message="bad")
     r = Response(id="2", ok=False, error=env)

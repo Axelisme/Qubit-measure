@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
-from zcu_tools.gui.adapter import ParamMeta
-from zcu_tools.gui.ui.analyze_form import AnalyzeFormWidget
-from zcu_tools.gui.ui.widgets import TrimDoubleSpinBox
+from zcu_tools.gui.app.main.adapter import ParamMeta
+from zcu_tools.gui.app.main.ui.analyze_form import AnalyzeFormWidget
+from zcu_tools.gui.app.main.ui.widgets import TrimDoubleSpinBox
 
 
 @dataclass

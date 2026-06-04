@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
-from zcu_tools.gui.adapter import SavePaths
-from zcu_tools.gui.services.persistence_types import (
+from zcu_tools.gui.app.main.adapter import SavePaths
+from zcu_tools.gui.app.main.services.persistence_types import (
     APP_STATE_VERSION,
     AppPersistedState,
     PersistedDeviceEntry,

@@ -3,12 +3,15 @@ from __future__ import annotations
 from typing import cast
 from unittest.mock import MagicMock
 
-from zcu_tools.gui.event_bus import EventBus, GuiEvent, TabAddedPayload
-from zcu_tools.gui.services import workspace as workspace_mod
-from zcu_tools.gui.services.persistence_types import PersistedSession, PersistedTab
-from zcu_tools.gui.services.session_codec import SessionCodecError
-from zcu_tools.gui.services.workspace import WorkspaceService
-from zcu_tools.gui.state import State
+from zcu_tools.gui.app.main.event_bus import EventBus, GuiEvent, TabAddedPayload
+from zcu_tools.gui.app.main.services import workspace as workspace_mod
+from zcu_tools.gui.app.main.services.persistence_types import (
+    PersistedSession,
+    PersistedTab,
+)
+from zcu_tools.gui.app.main.services.session_codec import SessionCodecError
+from zcu_tools.gui.app.main.services.workspace import WorkspaceService
+from zcu_tools.gui.app.main.state import State
 
 
 def _make_service() -> tuple[WorkspaceService, State, MagicMock, EventBus]:

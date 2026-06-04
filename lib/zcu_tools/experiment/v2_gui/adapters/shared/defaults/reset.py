@@ -11,12 +11,12 @@ from typing import TYPE_CHECKING
 
 from typing_extensions import Literal, Union, overload
 
-from zcu_tools.gui.adapter import (
+from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     DisabledRefValue,
     ModuleRefValue,
 )
-from zcu_tools.gui.specs.reset import (
+from zcu_tools.gui.app.main.specs.reset import (
     make_bath_reset_spec,
     make_none_reset_spec,
     make_pulse_reset_spec,
@@ -28,7 +28,7 @@ from ..ctx_helpers import md_scalar_float, md_scalar_int
 from .helpers import make_default_value, patch_pulse_fields, select_named_module_value
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.adapter import ExpContext
+    from zcu_tools.gui.app.main.adapter import ExpContext
 
 RESET_NAMES = ["reset_bath", "reset_10", "reset_120"]
 

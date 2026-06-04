@@ -5,7 +5,7 @@
 # no cwd; keep this in sync with .mcp.json when the launch command changes.
 [mcp_servers.measure-gui]
 command = "uv"
-args = ["run", "--extra", "gui", "python", "lib/zcu_tools/gui/services/remote/mcp_server.py"]
+args = ["run", "--extra", "gui", "python", "lib/zcu_tools/gui/app/main/services/remote/mcp_server.py"]
 env_vars = [
   "QT_QPA_PLATFORM",
   "DISPLAY",

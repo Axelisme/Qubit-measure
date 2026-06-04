@@ -9,12 +9,12 @@ only callers) rather than in the transport-pure ``wire.py``; the field-level
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.services.remote.dispatch import (
+from zcu_tools.gui.app.main.services.remote.dispatch import (
     coerce_connect_device_request,
     coerce_connect_request,
     coerce_disconnect_device_request,
 )
-from zcu_tools.gui.services.remote.errors import RemoteError
+from zcu_tools.gui.app.main.services.remote.errors import RemoteError
 
 # ---------------------------------------------------------------------------
 # coerce_connect_request
@@ -23,14 +23,14 @@ from zcu_tools.gui.services.remote.errors import RemoteError
 
 def test_coerce_connect_mock():
     req = coerce_connect_request({"kind": "mock"})
-    from zcu_tools.gui.services.connection import ConnectMockRequest
+    from zcu_tools.gui.app.main.services.connection import ConnectMockRequest
 
     assert isinstance(req, ConnectMockRequest)
 
 
 def test_coerce_connect_remote():
     req = coerce_connect_request({"kind": "remote", "ip": "192.168.1.1", "port": 8080})
-    from zcu_tools.gui.services.connection import ConnectRemoteRequest
+    from zcu_tools.gui.app.main.services.connection import ConnectRemoteRequest
 
     assert isinstance(req, ConnectRemoteRequest)
     assert req.ip == "192.168.1.1"

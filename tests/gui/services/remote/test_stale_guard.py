@@ -12,8 +12,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.services.remote import ControlOptions, RemoteControlAdapter
-from zcu_tools.gui.services.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.app.main.services.remote import ControlOptions, RemoteControlAdapter
+from zcu_tools.gui.app.main.services.remote.errors import ErrorCode, RemoteError
 
 
 @pytest.fixture(autouse=True)

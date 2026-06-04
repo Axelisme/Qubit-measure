@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from typing import Annotated, Literal, get_type_hints
 
 import pytest
-from zcu_tools.gui.adapter import ParamMeta
-from zcu_tools.gui.adapter.analyze_params import (
+from zcu_tools.gui.app.main.adapter import ParamMeta
+from zcu_tools.gui.app.main.adapter.analyze_params import (
     _resolve_field_info,
     reconstruct_params,
 )
@@ -87,7 +87,7 @@ def test_unsupported_annotation_raises(qapp):  # noqa: ARG001
     class P:
         val: list
 
-    from zcu_tools.gui.ui.analyze_form import AnalyzeFormWidget
+    from zcu_tools.gui.app.main.ui.analyze_form import AnalyzeFormWidget
 
     form = AnalyzeFormWidget()
     with pytest.raises(TypeError, match="Unsupported analyze parameter annotation"):

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from zcu_tools.gui.services.ports import ProgressEvent
+from zcu_tools.gui.app.main.services.ports import ProgressEvent
 
 
 class DirectProgressTransport:

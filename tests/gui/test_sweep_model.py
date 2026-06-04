@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui import EvalValue, SweepEditor, SweepValue
+from zcu_tools.gui.app.main import EvalValue, SweepEditor, SweepValue
 
 
 def test_canonicalize_derives_step_from_numeric_bounds() -> None:

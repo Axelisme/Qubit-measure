@@ -9,8 +9,8 @@ import threading
 import time
 
 from qtpy.QtCore import QCoreApplication
-from zcu_tools.gui.adapters.qt_shutdown_driver import QtShutdownDriver
-from zcu_tools.gui.services.operation_gate import (
+from zcu_tools.gui.app.main.adapters.qt_shutdown_driver import QtShutdownDriver
+from zcu_tools.gui.app.main.services.operation_gate import (
     OperationGate,
     OperationKind,
     OperationOutcome,

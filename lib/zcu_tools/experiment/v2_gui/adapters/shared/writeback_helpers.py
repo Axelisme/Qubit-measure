@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from zcu_tools.gui.adapter import MetaDictWriteback, WritebackItem
+from zcu_tools.gui.app.main.adapter import MetaDictWriteback, WritebackItem
 
 
 def make_onetone_freq_writeback_items(

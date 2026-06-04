@@ -15,7 +15,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_readout_default,
     proper_res_freq_range,
 )
-from zcu_tools.gui.adapter import (
+from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     CfgSchema,

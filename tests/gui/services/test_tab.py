@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from zcu_tools.gui.adapter import ContextReadiness, ExpContext, SavePaths
-from zcu_tools.gui.services.tab import TabService
-from zcu_tools.gui.state import Session, State
+from zcu_tools.gui.app.main.adapter import ContextReadiness, ExpContext, SavePaths
+from zcu_tools.gui.app.main.services.tab import TabService
+from zcu_tools.gui.app.main.state import Session, State
 
 
 def test_tab_snapshot_is_single_pure_render_model() -> None:

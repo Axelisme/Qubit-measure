@@ -16,7 +16,7 @@ from zcu_tools.experiment.v2_gui.adapters.twotone.ro_optimize import (
     RoOptLengthAdapter,
     RoOptPowerAdapter,
 )
-from zcu_tools.gui.adapter import CfgSchema, RunRequest
+from zcu_tools.gui.app.main.adapter import CfgSchema, RunRequest
 from zcu_tools.meta_tool import MetaDict
 from zcu_tools.program.v2 import SweepCfg
 

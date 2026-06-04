@@ -10,7 +10,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 from PIL import Image  # noqa: E402
-from zcu_tools.gui.figure_export import (  # noqa: E402
+from zcu_tools.gui.app.main.figure_export import (  # noqa: E402
     SAVE_DPI,
     SAVE_FIGSIZE,
     render_figure_png,

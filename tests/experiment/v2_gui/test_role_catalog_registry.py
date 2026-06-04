@@ -9,10 +9,10 @@ from zcu_tools.experiment.v2_gui.registry import (
     ALL_ROLE_ENTRIES,
     register_all_roles,
 )
-from zcu_tools.gui.adapter import ExpContext
-from zcu_tools.gui.cfg_schemas import _MODULE_SPEC_FACTORIES
-from zcu_tools.gui.role_catalog import RoleCatalog
-from zcu_tools.gui.specs import make_waveform_spec_by_style
+from zcu_tools.gui.app.main.adapter import ExpContext
+from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
+from zcu_tools.gui.app.main.role_catalog import RoleCatalog
+from zcu_tools.gui.app.main.specs import make_waveform_spec_by_style
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 

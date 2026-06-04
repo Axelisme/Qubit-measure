@@ -11,8 +11,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.services.remote import ControlOptions, RemoteControlAdapter
-from zcu_tools.gui.services.remote.service import _ClientState
+from zcu_tools.gui.app.main.services.remote import ControlOptions, RemoteControlAdapter
+from zcu_tools.gui.app.main.services.remote.service import _ClientState
 
 
 @pytest.fixture(autouse=True)
@@ -144,7 +144,7 @@ def test_editor_subscribe_handler_updates_state():
 
 
 def test_editor_subscribe_rejects_bad_id():
-    from zcu_tools.gui.services.remote.errors import ErrorCode, RemoteError
+    from zcu_tools.gui.app.main.services.remote.errors import ErrorCode, RemoteError
 
     svc, _ = _service()
     state = _state()

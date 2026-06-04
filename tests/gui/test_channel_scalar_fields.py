@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.adapter import (
+from zcu_tools.gui.app.main.adapter import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,

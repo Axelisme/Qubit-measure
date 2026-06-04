@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from typing import Optional
 
-from zcu_tools.gui.adapter import CfgSchema, ModuleRefSpec
-from zcu_tools.gui.cfg_schemas import module_cfg_to_value
-from zcu_tools.gui.specs.pulse import make_pulse_spec
-from zcu_tools.gui.specs.readout import (
+from zcu_tools.gui.app.main.adapter import CfgSchema, ModuleRefSpec
+from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
+from zcu_tools.gui.app.main.specs.pulse import make_pulse_spec
+from zcu_tools.gui.app.main.specs.readout import (
     make_direct_readout_spec,
     make_pulse_readout_spec,
 )
-from zcu_tools.gui.specs.reset import (
+from zcu_tools.gui.app.main.specs.reset import (
     make_bath_reset_spec,
     make_none_reset_spec,
     make_pulse_reset_spec,

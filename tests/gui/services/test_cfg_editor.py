@@ -10,8 +10,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.event_bus import EventBus
-from zcu_tools.gui.services.cfg_editor import CfgEditorError, CfgEditorService
+from zcu_tools.gui.app.main.event_bus import EventBus
+from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorError, CfgEditorService
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
@@ -85,7 +85,7 @@ def test_session_is_the_aggregate_with_behaviour(service, ml):
     """The session the Repository hands out operates its own draft directly:
     set_field / commit live on the aggregate, reachable without going back
     through the service."""
-    from zcu_tools.gui.services.cfg_editor import CfgEditorSession
+    from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorSession
 
     editor_id, _ = service.open("module", discriminator="pulse")
     session = service._require(editor_id)  # Repository looks up the aggregate
@@ -103,7 +103,7 @@ def test_session_is_the_aggregate_with_behaviour(service, ml):
     # commit_schema is the aggregate's own behaviour: it yields the un-lowered
     # CfgSchema (ADR-0011 — lowering + register belong to the write authority).
     session.set_field("ch", 0)
-    from zcu_tools.gui.adapter import CfgSchema
+    from zcu_tools.gui.app.main.adapter import CfgSchema
 
     schema = session.commit_schema()
     assert isinstance(schema, CfgSchema)
@@ -116,8 +116,8 @@ def test_seeded_session_rejects_commit_on_the_aggregate(service):
     """commit-guard (item_kind is None) is enforced on the aggregate, not just
     the service facade. A seeded session (tab cfg / writeback draft) is
     teardown-only."""
-    from zcu_tools.gui.adapter import CfgSchema, make_default_value
-    from zcu_tools.gui.cfg_schemas import _MODULE_SPEC_FACTORIES
+    from zcu_tools.gui.app.main.adapter import CfgSchema, make_default_value
+    from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
 
     spec = _MODULE_SPEC_FACTORIES["pulse"]()
     seed = CfgSchema(spec=spec, value=make_default_value(spec))
@@ -272,8 +272,8 @@ def test_commit_failure_keeps_session(service, ctrl):
 
 def _make_tab_seed():
     """Build a CfgSchema seed as a tab cfg / writeback draft would carry."""
-    from zcu_tools.gui.adapter import CfgSchema, make_default_value
-    from zcu_tools.gui.cfg_schemas import _MODULE_SPEC_FACTORIES
+    from zcu_tools.gui.app.main.adapter import CfgSchema, make_default_value
+    from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
 
     spec = _MODULE_SPEC_FACTORIES["pulse"]()
     return CfgSchema(spec=spec, value=make_default_value(spec))
@@ -339,7 +339,7 @@ def test_discard_for_client_skips_gc_false_sessions(service):
 
 
 def test_gc_lru_evicts_oldest(service):
-    from zcu_tools.gui.services.cfg_editor import _MAX_HEADLESS_EDITORS
+    from zcu_tools.gui.app.main.services.cfg_editor import _MAX_HEADLESS_EDITORS
 
     ids = [
         service.open("module", discriminator="pulse")[0]
@@ -354,7 +354,7 @@ def test_gc_lru_evicts_oldest(service):
 
 
 def test_lru_does_not_count_gc_false_sessions(service):
-    from zcu_tools.gui.services.cfg_editor import _MAX_HEADLESS_EDITORS
+    from zcu_tools.gui.app.main.services.cfg_editor import _MAX_HEADLESS_EDITORS
 
     # Many gc=False sessions must not push gc=True ones out (different owners).
     for i in range(_MAX_HEADLESS_EDITORS + 5):
@@ -458,8 +458,8 @@ def test_no_dangling_hook_after_every_removal_path(service):
 def _service_with_version_table(ctrl):
     """A CfgEditorService wired to a real VersionTable via bump/drop, so we can
     assert the editor:<id> resource version lifecycle (edit bumps, teardown drops)."""
-    from zcu_tools.gui.event_bus import EventBus
-    from zcu_tools.gui.state import VersionTable
+    from zcu_tools.gui.app.main.event_bus import EventBus
+    from zcu_tools.gui.app.main.state import VersionTable
 
     table = VersionTable()
 

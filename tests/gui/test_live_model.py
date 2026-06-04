@@ -6,7 +6,7 @@ from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.adapter import (
+from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
@@ -21,8 +21,8 @@ from zcu_tools.gui.adapter import (
     WaveformRefSpec,
     WaveformRefValue,
 )
-from zcu_tools.gui.event_bus import EventBus, GuiEvent
-from zcu_tools.gui.live_model import (
+from zcu_tools.gui.app.main.event_bus import EventBus, GuiEvent
+from zcu_tools.gui.app.main.live_model import (
     CallbackList,
     LibraryBindingState,
     LiveModelEnv,
@@ -292,7 +292,7 @@ def test_module_ref_sub_edit_marks_overridden_in_get_value(env, monkeypatch):
     # The library HAS lib_mod (so the ref is a genuine modified library ref, not
     # dangling). Stub the lookup to return the synthetic spec (avoids a real cfg
     # round-trip — this test is about the is_overridden flag, not conversion).
-    import zcu_tools.gui.ui.fields.utils as _utils
+    import zcu_tools.gui.app.main.ui.fields.utils as _utils
 
     _orig = _utils._spec_value_for_chosen
 
@@ -358,7 +358,7 @@ def test_modified_ref_self_heals_when_library_key_deleted_at_runtime(env, monkey
     """A MODIFIED (edited) library ref whose key is deleted at runtime must also
     self-heal to Custom on ML_CHANGED — _refresh_library_binding's old LINKED-only
     guard skipped MODIFIED refs, leaving a dangling chosen_key that broke lowering."""
-    from zcu_tools.gui.event_bus import GuiEvent
+    from zcu_tools.gui.app.main.event_bus import GuiEvent
 
     inner = CfgSectionSpec(
         label="Const",
@@ -372,7 +372,7 @@ def test_modified_ref_self_heals_when_library_key_deleted_at_runtime(env, monkey
     )
 
     present = {"yes": True}
-    import zcu_tools.gui.ui.fields.utils as _utils
+    import zcu_tools.gui.app.main.ui.fields.utils as _utils
 
     _orig = _utils._spec_value_for_chosen
 
@@ -451,7 +451,7 @@ def test_linked_ref_missing_key_is_invalid_and_relinks_on_readd(env, monkeypatch
     )
 
     present = {"yes": False}
-    import zcu_tools.gui.ui.fields.utils as _utils
+    import zcu_tools.gui.app.main.ui.fields.utils as _utils
 
     _orig = _utils._spec_value_for_chosen
 

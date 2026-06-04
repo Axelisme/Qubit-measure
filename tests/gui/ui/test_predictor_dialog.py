@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from zcu_tools.gui.services.connection import (
+from zcu_tools.gui.app.main.services.connection import (
     LoadPredictorRequest,
     PredictFreqRequest,
     PredictorLoadError,
     PredictorNotLoaded,
 )
-from zcu_tools.gui.ui.predictor_dialog import PredictorDialog
+from zcu_tools.gui.app.main.ui.predictor_dialog import PredictorDialog
 
 
 def test_predictor_dialog_init_and_load_dispatches_request(qapp):

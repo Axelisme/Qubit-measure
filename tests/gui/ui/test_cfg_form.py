@@ -6,7 +6,7 @@ from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.adapter import (
+from zcu_tools.gui.app.main.adapter import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -21,8 +21,8 @@ from zcu_tools.gui.adapter import (
     WaveformRefSpec,
     WaveformRefValue,
 )
-from zcu_tools.gui.event_bus import EventBus
-from zcu_tools.gui.live_model import SweepLiveField
+from zcu_tools.gui.app.main.event_bus import EventBus
+from zcu_tools.gui.app.main.live_model import SweepLiveField
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -52,7 +52,7 @@ def _attach(w, schema: CfgSchema, ctrl):
     widget ``attach``es (ADR-0010). The model is returned for tests that drive it
     directly (e.g. external refresh, which the service performs in production).
     """
-    from zcu_tools.gui.live_model import LiveModelEnv, SectionLiveField
+    from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
 
     model = SectionLiveField(schema.spec, LiveModelEnv(ctrl=ctrl), schema.value)
     w.attach(model)
@@ -60,7 +60,7 @@ def _attach(w, schema: CfgSchema, ctrl):
 
 
 def _make_ctx():
-    from zcu_tools.gui.adapter import ExpContext
+    from zcu_tools.gui.app.main.adapter import ExpContext
 
     return ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None)
 
@@ -104,7 +104,7 @@ def test_sweep_value_step_mode():
 
 
 def test_scalar_int_widget_round_trip(qapp):
-    from zcu_tools.gui.ui.fields import make_scalar_widget, read_scalar_widget
+    from zcu_tools.gui.app.main.ui.fields import make_scalar_widget, read_scalar_widget
 
     spec = ScalarSpec(label="X", type=int)
     w = make_scalar_widget(spec, 42)
@@ -112,7 +112,7 @@ def test_scalar_int_widget_round_trip(qapp):
 
 
 def test_scalar_float_widget_round_trip(qapp):
-    from zcu_tools.gui.ui.fields import make_scalar_widget, read_scalar_widget
+    from zcu_tools.gui.app.main.ui.fields import make_scalar_widget, read_scalar_widget
 
     spec = ScalarSpec(label="Pi", type=float)
     w = make_scalar_widget(spec, 3.14)
@@ -120,7 +120,7 @@ def test_scalar_float_widget_round_trip(qapp):
 
 
 def test_scalar_bool_widget_round_trip(qapp):
-    from zcu_tools.gui.ui.fields import make_scalar_widget, read_scalar_widget
+    from zcu_tools.gui.app.main.ui.fields import make_scalar_widget, read_scalar_widget
 
     spec = ScalarSpec(label="Flag", type=bool)
     w = make_scalar_widget(spec, True)
@@ -128,7 +128,7 @@ def test_scalar_bool_widget_round_trip(qapp):
 
 
 def test_scalar_choices_widget_round_trip(qapp):
-    from zcu_tools.gui.ui.fields import make_scalar_widget, read_scalar_widget
+    from zcu_tools.gui.app.main.ui.fields import make_scalar_widget, read_scalar_widget
 
     spec = ScalarSpec(label="Model", type=str, choices=["hm", "t", "auto"])
     w = make_scalar_widget(spec, "hm")
@@ -136,7 +136,7 @@ def test_scalar_choices_widget_round_trip(qapp):
 
 
 def test_scalar_editable_false_widget_disabled(qapp):
-    from zcu_tools.gui.ui.fields import make_scalar_widget
+    from zcu_tools.gui.app.main.ui.fields import make_scalar_widget
 
     spec = ScalarSpec(label="RO", type=float, editable=False)
     w = make_scalar_widget(spec, 1.0)
@@ -144,7 +144,7 @@ def test_scalar_editable_false_widget_disabled(qapp):
 
 
 def test_scalar_widget_minimum_width_reduced(qapp):
-    from zcu_tools.gui.ui.fields import make_scalar_widget
+    from zcu_tools.gui.app.main.ui.fields import make_scalar_widget
 
     spec = ScalarSpec(label="Name", type=str)
     w = make_scalar_widget(spec, "demo")
@@ -152,8 +152,8 @@ def test_scalar_widget_minimum_width_reduced(qapp):
 
 
 def test_scalar_widget_eval_mode_shows_resolved_ghost(qapp, ctrl):
-    from zcu_tools.gui.live_model import LiveModelEnv, ScalarLiveField
-    from zcu_tools.gui.ui.fields.common import ScalarWidget
+    from zcu_tools.gui.app.main.live_model import LiveModelEnv, ScalarLiveField
+    from zcu_tools.gui.app.main.ui.fields.common import ScalarWidget
     from zcu_tools.meta_tool import MetaDict
 
     md = MetaDict()
@@ -171,8 +171,8 @@ def test_scalar_widget_eval_mode_shows_resolved_ghost(qapp, ctrl):
 
 
 def test_scalar_widget_eval_mode_marks_unresolved_red(qapp, ctrl):
-    from zcu_tools.gui.live_model import LiveModelEnv, ScalarLiveField
-    from zcu_tools.gui.ui.fields.common import ScalarWidget
+    from zcu_tools.gui.app.main.live_model import LiveModelEnv, ScalarLiveField
+    from zcu_tools.gui.app.main.ui.fields.common import ScalarWidget
     from zcu_tools.meta_tool import MetaDict
 
     ctrl.get_current_md.return_value = MetaDict()
@@ -190,8 +190,8 @@ def test_scalar_widget_eval_mode_marks_unresolved_red(qapp, ctrl):
 
 def test_scalar_widget_eval_menu_extends_standard_line_edit_menu(qapp, ctrl):
     from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
-    from zcu_tools.gui.live_model import LiveModelEnv, ScalarLiveField
-    from zcu_tools.gui.ui.fields.common import ScalarWidget
+    from zcu_tools.gui.app.main.live_model import LiveModelEnv, ScalarLiveField
+    from zcu_tools.gui.app.main.ui.fields.common import ScalarWidget
     from zcu_tools.meta_tool import MetaDict
 
     md = MetaDict()
@@ -216,8 +216,8 @@ def test_scalar_widget_eval_menu_extends_standard_line_edit_menu(qapp, ctrl):
 
 def test_scalar_widget_unresolved_eval_can_switch_back_to_direct(qapp, ctrl):
     from qtpy.QtWidgets import QDoubleSpinBox  # type: ignore[attr-defined]
-    from zcu_tools.gui.live_model import LiveModelEnv, ScalarLiveField
-    from zcu_tools.gui.ui.fields.common import ScalarWidget
+    from zcu_tools.gui.app.main.live_model import LiveModelEnv, ScalarLiveField
+    from zcu_tools.gui.app.main.ui.fields.common import ScalarWidget
     from zcu_tools.meta_tool import MetaDict
 
     ctrl.get_current_md.return_value = MetaDict()
@@ -246,7 +246,7 @@ def test_scalar_widget_unresolved_eval_can_switch_back_to_direct(qapp, ctrl):
 
 
 def test_read_values_before_populate_raises(qapp):
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
 
     w = CfgFormWidget()
     with pytest.raises(RuntimeError):
@@ -254,7 +254,7 @@ def test_read_values_before_populate_raises(qapp):
 
 
 def test_read_schema_before_populate_raises(qapp):
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
 
     w = CfgFormWidget()
     with pytest.raises(RuntimeError):
@@ -262,7 +262,7 @@ def test_read_schema_before_populate_raises(qapp):
 
 
 def test_populate_scalar_fields_round_trip(qapp, ctrl):
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
 
     schema = _schema(
         {
@@ -290,8 +290,8 @@ def test_cfg_form_reflects_model_external_refresh(qapp, ctrl):
     Here we drive the model directly (the service-bus path is covered in
     test_cfg_editor) and assert the widget's read-back + schema_changed fire.
     """
-    from zcu_tools.gui.event_bus import GuiEvent
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.event_bus import GuiEvent
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
     from zcu_tools.meta_tool import MetaDict
 
     md = MetaDict()
@@ -318,7 +318,7 @@ def test_cfg_form_reflects_model_external_refresh(qapp, ctrl):
 def test_cfg_form_does_not_subscribe_bus(qapp, ctrl):
     """The widget no longer touches the EventBus (ADR-0010 moved refresh to the
     service). attach/detach must not register any bus subscription."""
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
 
     schema = _schema(
         {"freq": ScalarSpec(label="Freq", type=float)},
@@ -333,7 +333,7 @@ def test_cfg_form_does_not_subscribe_bus(qapp, ctrl):
 
 
 def test_read_schema_returns_cfg_schema(qapp, ctrl):
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
 
     schema = _schema(
         {"reps": ScalarSpec(label="Reps", type=int)},
@@ -348,7 +348,7 @@ def test_read_schema_returns_cfg_schema(qapp, ctrl):
 
 def test_read_values_does_not_mutate_original(qapp, ctrl):
     from qtpy.QtWidgets import QSpinBox  # type: ignore[attr-defined]
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
 
     schema = _schema(
         {"reps": ScalarSpec(label="Reps", type=int)},
@@ -367,7 +367,7 @@ def test_read_values_does_not_mutate_original(qapp, ctrl):
 
 
 def test_populate_sweep_field_round_trip(qapp, ctrl):
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
 
     schema = _schema(
         {"f": SweepSpec(label="Freq")},
@@ -386,7 +386,7 @@ def test_populate_sweep_field_round_trip(qapp, ctrl):
 
 
 def test_populate_sweep_field_step_preserved(qapp, ctrl):
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
 
     schema = _schema(
         {"f": SweepSpec(label="Freq")},
@@ -402,8 +402,8 @@ def test_populate_sweep_field_step_preserved(qapp, ctrl):
 
 
 def test_sweep_widget_step_change_recomputes_expts_and_stop(qapp, ctrl):
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.ui.fields.common import SweepWidget
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.ui.fields.common import SweepWidget
 
     schema = _schema(
         {"f": SweepSpec(label="Freq")},
@@ -424,8 +424,8 @@ def test_sweep_widget_step_change_recomputes_expts_and_stop(qapp, ctrl):
 
 
 def test_sweep_widget_non_step_change_recomputes_step(qapp, ctrl):
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.ui.fields.common import SweepWidget
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.ui.fields.common import SweepWidget
 
     schema = _schema(
         {"f": SweepSpec(label="Freq")},
@@ -444,9 +444,9 @@ def test_sweep_widget_non_step_change_recomputes_step(qapp, ctrl):
 
 
 def test_sweep_widget_start_supports_eval_mode(qapp, ctrl):
-    from zcu_tools.gui.adapter import EvalValue
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.ui.fields.common import SweepWidget
+    from zcu_tools.gui.app.main.adapter import EvalValue
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.ui.fields.common import SweepWidget
 
     schema = _schema(
         {"f": SweepSpec(label="Freq")},
@@ -468,7 +468,7 @@ def test_sweep_widget_start_supports_eval_mode(qapp, ctrl):
 
 
 def test_populate_nested_section_round_trip(qapp, ctrl):
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
 
     schema = _schema(
         {
@@ -491,7 +491,7 @@ def test_literal_rows_are_hidden_regardless_of_key(qapp, ctrl):
     """All LiteralSpec fields render no widget — discriminators (type/style) and
     adapter lock_literal'd fields (e.g. a sweep-driven freq) alike."""
     from qtpy.QtWidgets import QLabel
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
 
     schema = _schema(
         {
@@ -522,8 +522,8 @@ def test_literal_rows_are_hidden_regardless_of_key(qapp, ctrl):
 
 def test_module_ref_toggle_sits_left_of_combo_and_controls_subsection(qapp, ctrl):
     from qtpy.QtWidgets import QComboBox, QHBoxLayout, QToolButton
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.ui.fields.containers import ModuleRefWidget
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.ui.fields.containers import ModuleRefWidget
 
     custom_spec = CfgSectionSpec(
         label="Pulse Shape",
@@ -570,8 +570,8 @@ def test_module_ref_toggle_sits_left_of_combo_and_controls_subsection(qapp, ctrl
 
 def test_waveform_ref_toggle_sits_left_of_combo(qapp, ctrl):
     from qtpy.QtWidgets import QComboBox, QHBoxLayout, QToolButton
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.ui.fields.containers import ModuleRefWidget
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.ui.fields.containers import ModuleRefWidget
 
     custom_spec = CfgSectionSpec(
         label="Gaussian",
@@ -609,8 +609,8 @@ def test_waveform_ref_toggle_sits_left_of_combo(qapp, ctrl):
 
 def test_cfg_form_does_not_wrap_module_ref_row(qapp, ctrl):
     from qtpy.QtWidgets import QFormLayout
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.ui.fields.containers import SectionWidget
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.ui.fields.containers import SectionWidget
 
     custom_spec = CfgSectionSpec(
         label="Long Custom Module Name",
@@ -638,8 +638,8 @@ def test_cfg_form_does_not_wrap_module_ref_row(qapp, ctrl):
 
 
 def test_populate_module_ref_field_round_trip(qapp, ctrl):
-    from zcu_tools.gui.adapter import ModuleRefSpec, ModuleRefValue
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.adapter import ModuleRefSpec, ModuleRefValue
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
 
     allowed_spec = CfgSectionSpec(
         label="Pulse",
@@ -671,8 +671,8 @@ def test_populate_module_ref_field_round_trip(qapp, ctrl):
 def test_populate_full_fake_freq_schema(qapp, ctrl):
     """Smoke test: FakeFreqAdapter default schema populates and round-trips."""
     from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
-    from zcu_tools.gui.adapter import ModuleRefSpec
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.adapter import ModuleRefSpec
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
 
     ctx = _make_ctx()
     schema = FakeFreqAdapter().make_default_cfg(ctx)
@@ -699,8 +699,8 @@ def test_populate_full_fake_freq_schema(qapp, ctrl):
 
 
 def test_section_widget_no_header(qapp, ctrl):
-    from zcu_tools.gui.live_model import LiveModelEnv, SectionLiveField
-    from zcu_tools.gui.ui.fields.containers import SectionWidget
+    from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
+    from zcu_tools.gui.app.main.ui.fields.containers import SectionWidget
 
     spec = CfgSectionSpec(
         label="TestSection",
@@ -724,16 +724,16 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     from typing import Any, cast
 
     from qtpy.QtWidgets import QDoubleSpinBox
-    from zcu_tools.gui.live_model import ModuleRefLiveField
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.ui.fields.containers import ModuleRefWidget
+    from zcu_tools.gui.app.main.live_model import ModuleRefLiveField
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.ui.fields.containers import ModuleRefWidget
     from zcu_tools.meta_tool import ModuleLibrary
 
     ml = ModuleLibrary()
     ml.modules["my_pulse"] = cast(Any, {"type": "readout/direct", "ro_freq": 7000.0})
     ctrl.get_current_ml.return_value = ml
 
-    from zcu_tools.gui.cfg_schemas import module_cfg_to_value
+    from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
 
     lib_spec, lib_val = module_cfg_to_value(
         {"type": "readout/direct", "ro_freq": 7000.0}
@@ -774,7 +774,7 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     assert ref_widget._combo.currentText() == "Lib: my_pulse (modified)"
 
     # 3. Trigger MD_CHANGED and verify it does not overwrite modified value
-    from zcu_tools.gui.event_bus import GuiEvent, MdChangedPayload
+    from zcu_tools.gui.app.main.event_bus import GuiEvent, MdChangedPayload
     from zcu_tools.meta_tool import MetaDict
 
     md = MetaDict()
@@ -817,7 +817,7 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
 
 
 def _make_optional_module_ref_schema(enabled: bool = True) -> CfgSchema:
-    from zcu_tools.gui.adapter import ModuleRefSpec, ModuleRefValue
+    from zcu_tools.gui.app.main.adapter import ModuleRefSpec, ModuleRefValue
 
     inner_spec = CfgSectionSpec(
         label="Pulse",
@@ -845,8 +845,8 @@ def _make_optional_module_ref_schema(enabled: bool = True) -> CfgSchema:
 
 
 def test_optional_module_ref_renders_none_option(qapp, ctrl):
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.ui.fields.containers import ModuleRefWidget
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.ui.fields.containers import ModuleRefWidget
 
     schema = _make_optional_module_ref_schema(enabled=True)
     w = CfgFormWidget()
@@ -861,9 +861,9 @@ def test_optional_module_ref_renders_none_option(qapp, ctrl):
 
 
 def test_optional_module_ref_select_none_disables_sub(qapp, ctrl):
-    from zcu_tools.gui.live_model import ModuleRefLiveField
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.ui.fields.containers import ModuleRefWidget
+    from zcu_tools.gui.app.main.live_model import ModuleRefLiveField
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.ui.fields.containers import ModuleRefWidget
 
     schema = _make_optional_module_ref_schema(enabled=True)
     w = CfgFormWidget()
@@ -887,10 +887,10 @@ def test_optional_module_ref_select_none_disables_sub(qapp, ctrl):
 def test_module_ref_missing_library_shows_red_badge_and_invalid(qapp, ctrl):
     """A LINKED ref to an absent library key shows the red missing-ref badge and
     is invalid (recoverable — re-adding the name re-links it)."""
-    from zcu_tools.gui.adapter import LiteralSpec
-    from zcu_tools.gui.live_model import ModuleRefLiveField
-    from zcu_tools.gui.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.ui.fields.containers import ModuleRefWidget
+    from zcu_tools.gui.app.main.adapter import LiteralSpec
+    from zcu_tools.gui.app.main.live_model import ModuleRefLiveField
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.ui.fields.containers import ModuleRefWidget
     from zcu_tools.meta_tool import ModuleLibrary
 
     pulse_spec = CfgSectionSpec(

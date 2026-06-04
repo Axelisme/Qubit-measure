@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QEventLoop
-from zcu_tools.gui.event_bus import EventBus, GuiEvent
-from zcu_tools.gui.services.connection import (
+from zcu_tools.gui.app.main.event_bus import EventBus, GuiEvent
+from zcu_tools.gui.app.main.services.connection import (
     ConnectionService,
     ConnectMockRequest,
     ConnectRemoteRequest,
@@ -16,12 +16,12 @@ from zcu_tools.gui.services.connection import (
     PredictorLoadError,
     PredictorNotLoaded,
 )
-from zcu_tools.gui.services.operation_gate import (
+from zcu_tools.gui.app.main.services.operation_gate import (
     OperationConflictError,
     OperationGate,
     OperationKind,
 )
-from zcu_tools.gui.state import ExpContext, State
+from zcu_tools.gui.app.main.state import ExpContext, State
 
 
 def _make_svc(gate: OperationGate | None = None) -> ConnectionService:

@@ -10,14 +10,14 @@ from typing import TYPE_CHECKING
 
 from typing_extensions import Literal, Union, overload
 
-from zcu_tools.gui.adapter import DisabledRefValue, ModuleRefValue
+from zcu_tools.gui.app.main.adapter import DisabledRefValue, ModuleRefValue
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 
 from .helpers import select_named_module_value
 from .qub_probe import make_qub_probe_default
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.adapter import ExpContext
+    from zcu_tools.gui.app.main.adapter import ExpContext
 
 PI_PULSE_NAMES = ["pi_amp", "pi_len"]
 

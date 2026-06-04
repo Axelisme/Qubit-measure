@@ -4,7 +4,7 @@ import threading
 import time
 
 import pytest
-from zcu_tools.gui.services.operation_gate import (
+from zcu_tools.gui.app.main.services.operation_gate import (
     OperationConflictError,
     OperationGate,
     OperationKind,

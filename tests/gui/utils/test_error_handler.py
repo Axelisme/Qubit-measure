@@ -27,7 +27,7 @@ def _restore_hooks() -> None:
 
 
 def test_install_replaces_sys_excepthook(qapp):  # noqa: ARG001
-    from zcu_tools.gui.utils.error_handler import install_global_exception_hook
+    from zcu_tools.gui.app.main.utils.error_handler import install_global_exception_hook
 
     try:
         install_global_exception_hook()
@@ -37,7 +37,7 @@ def test_install_replaces_sys_excepthook(qapp):  # noqa: ARG001
 
 
 def test_install_replaces_threading_excepthook(qapp):  # noqa: ARG001
-    from zcu_tools.gui.utils.error_handler import install_global_exception_hook
+    from zcu_tools.gui.app.main.utils.error_handler import install_global_exception_hook
 
     try:
         install_global_exception_hook()
@@ -49,8 +49,8 @@ def test_install_replaces_threading_excepthook(qapp):  # noqa: ARG001
 
 
 def test_keyboard_interrupt_bypasses_dialog(qapp):  # noqa: ARG001
-    import zcu_tools.gui.utils.error_handler as _mod
-    from zcu_tools.gui.utils.error_handler import install_global_exception_hook
+    import zcu_tools.gui.app.main.utils.error_handler as _mod
+    from zcu_tools.gui.app.main.utils.error_handler import install_global_exception_hook
 
     # Reset first so install() wraps exactly one layer.
     _restore_hooks()
@@ -64,8 +64,8 @@ def test_keyboard_interrupt_bypasses_dialog(qapp):  # noqa: ARG001
 
 
 def test_ordinary_exception_calls_show_dialog(qapp):  # noqa: ARG001
-    import zcu_tools.gui.utils.error_handler as _mod
-    from zcu_tools.gui.utils.error_handler import install_global_exception_hook
+    import zcu_tools.gui.app.main.utils.error_handler as _mod
+    from zcu_tools.gui.app.main.utils.error_handler import install_global_exception_hook
 
     _restore_hooks()
     try:
@@ -80,12 +80,12 @@ def test_ordinary_exception_calls_show_dialog(qapp):  # noqa: ARG001
 
 
 def test_thread_keyboard_interrupt_bypasses_log(qapp):  # noqa: ARG001
-    from zcu_tools.gui.utils.error_handler import install_global_exception_hook
+    from zcu_tools.gui.app.main.utils.error_handler import install_global_exception_hook
 
     _restore_hooks()
     try:
         install_global_exception_hook()
-        with patch("zcu_tools.gui.utils.error_handler.logger") as mock_log:
+        with patch("zcu_tools.gui.app.main.utils.error_handler.logger") as mock_log:
             args = threading.ExceptHookArgs(
                 [KeyboardInterrupt, KeyboardInterrupt(), None, None]
             )
@@ -96,12 +96,12 @@ def test_thread_keyboard_interrupt_bypasses_log(qapp):  # noqa: ARG001
 
 
 def test_thread_ordinary_exception_logs_error(qapp):  # noqa: ARG001
-    from zcu_tools.gui.utils.error_handler import install_global_exception_hook
+    from zcu_tools.gui.app.main.utils.error_handler import install_global_exception_hook
 
     _restore_hooks()
     try:
         install_global_exception_hook()
-        with patch("zcu_tools.gui.utils.error_handler.logger") as mock_log:
+        with patch("zcu_tools.gui.app.main.utils.error_handler.logger") as mock_log:
             exc_type = RuntimeError
             exc_val = RuntimeError("thread boom")
             exc_tb = MagicMock()  # fake traceback — avoids actual exception raising
@@ -114,9 +114,9 @@ def test_thread_ordinary_exception_logs_error(qapp):  # noqa: ARG001
 
 
 def test_show_error_dialog_formats_exception(qapp):  # noqa: ARG001
-    from zcu_tools.gui.utils.error_handler import _show_error_dialog
+    from zcu_tools.gui.app.main.utils.error_handler import _show_error_dialog
 
-    with patch("zcu_tools.gui.utils.error_handler.QMessageBox") as mock_mb_cls:
+    with patch("zcu_tools.gui.app.main.utils.error_handler.QMessageBox") as mock_mb_cls:
         mock_mb = MagicMock()
         mock_mb_cls.return_value = mock_mb
         mock_mb_cls.Icon = MagicMock()

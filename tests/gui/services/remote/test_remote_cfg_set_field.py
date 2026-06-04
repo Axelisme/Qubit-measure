@@ -28,7 +28,7 @@ class _LiveFixture(Fixture):
     def __init__(self) -> None:
         super().__init__()
         from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
-        from zcu_tools.gui.state import Session
+        from zcu_tools.gui.app.main.state import Session
 
         cfg = FakeAdapter().make_default_cfg(self.state.exp_context)
         self._tab_id = "tab-live"
@@ -50,7 +50,7 @@ class _LiveFixture(Fixture):
 
     def get_value(self, path: str):
         """Read the current value of a path off the live session draft."""
-        from zcu_tools.gui.services.remote.path_resolver import (
+        from zcu_tools.gui.app.main.services.remote.path_resolver import (
             list_settable_paths_full,
         )
 
@@ -372,7 +372,7 @@ def test_list_paths_unknown_tab_rejected(lf):
 def test_list_paths_form_not_populated_rejected(qapp):  # noqa: ARG001
     """A tab with no cfg-editor session yet → precondition_failed."""
     from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
-    from zcu_tools.gui.state import Session
+    from zcu_tools.gui.app.main.state import Session
 
     f = Fixture()
     f.start()
@@ -407,8 +407,8 @@ def _fakefreq_root():
     from unittest.mock import MagicMock
 
     from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
-    from zcu_tools.gui.adapter import ExpContext
-    from zcu_tools.gui.live_model import LiveModelEnv, SectionLiveField
+    from zcu_tools.gui.app.main.adapter import ExpContext
+    from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
     ctx = ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
@@ -421,7 +421,7 @@ def _fakefreq_root():
 
 
 def test_moduleref_bare_label_normalized_to_custom_tag(qapp):  # noqa: ARG001
-    from zcu_tools.gui.services.remote.path_resolver import (
+    from zcu_tools.gui.app.main.services.remote.path_resolver import (
         list_settable_paths_full,
         resolve_and_set,
     )
@@ -438,7 +438,7 @@ def test_moduleref_bare_label_normalized_to_custom_tag(qapp):  # noqa: ARG001
 
 
 def test_moduleref_tagged_key_passes_through(qapp):  # noqa: ARG001
-    from zcu_tools.gui.services.remote.path_resolver import (
+    from zcu_tools.gui.app.main.services.remote.path_resolver import (
         list_settable_paths_full,
         resolve_and_set,
     )

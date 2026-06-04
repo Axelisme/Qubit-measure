@@ -22,7 +22,7 @@ from zcu_tools.experiment.v2_gui.adapters.twotone import (
     T2EchoAdapter,
     T2RamseyAdapter,
 )
-from zcu_tools.gui.adapter import CfgSchema, RunRequest
+from zcu_tools.gui.app.main.adapter import CfgSchema, RunRequest
 from zcu_tools.meta_tool import MetaDict
 from zcu_tools.program.v2 import ModuleCfgFactory, SweepCfg
 
@@ -169,7 +169,7 @@ def test_t2echo_modules_contain_both_pulses() -> None:
     "adapter", [FreqAdapter(), PowerDepAdapter(), FluxDepAdapter()]
 )
 def test_twotone_defaults_ignore_library_readout(adapter: Any) -> None:
-    from zcu_tools.gui.adapter import CfgSectionValue, ModuleRefValue
+    from zcu_tools.gui.app.main.adapter import CfgSectionValue, ModuleRefValue
     from zcu_tools.meta_tool import ModuleLibrary
 
     ml = ModuleLibrary()

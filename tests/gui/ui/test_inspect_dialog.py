@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
-from zcu_tools.gui.ui import inspect_dialog
-from zcu_tools.gui.ui.inspect_dialog import (
+from zcu_tools.gui.app.main.ui import inspect_dialog
+from zcu_tools.gui.app.main.ui.inspect_dialog import (
     InspectDialog,
     _MlCreateDialog,
     _MlModifyDialog,
@@ -50,8 +50,11 @@ def _wire_cfg_editor(ctrl: MagicMock) -> None:
     per open so attach() works, keyed by a fake editor_id, with owner→id discovery,
     commit (records last commit), and teardown.
     """
-    from zcu_tools.gui.cfg_schemas import module_cfg_to_value, waveform_cfg_to_value
-    from zcu_tools.gui.live_model import LiveModelEnv, SectionLiveField
+    from zcu_tools.gui.app.main.cfg_schemas import (
+        module_cfg_to_value,
+        waveform_cfg_to_value,
+    )
+    from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
 
     ml = ctrl.get_current_ml.return_value
     roots: dict[str, SectionLiveField] = {}
@@ -303,7 +306,7 @@ def test_inspect_dialog_modify_clears_form_widget_after_exec(qapp, monkeypatch):
 
 def _catalog():
     from zcu_tools.experiment.v2_gui.registry import register_all_roles
-    from zcu_tools.gui.role_catalog import RoleCatalog
+    from zcu_tools.gui.app.main.role_catalog import RoleCatalog
 
     cat = RoleCatalog()
     register_all_roles(cat)

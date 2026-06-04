@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from zcu_tools.gui.state import (
+from zcu_tools.gui.app.main.state import (
     DEVICE_SET_VERSION_KEY,
     DeviceState,
     DeviceStatus,

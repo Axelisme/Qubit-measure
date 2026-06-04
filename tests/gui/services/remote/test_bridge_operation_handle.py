@@ -14,7 +14,7 @@ from typing import Any, Dict
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.services.remote import mcp_server
+from zcu_tools.gui.app.main.services.remote import mcp_server
 
 
 @pytest.fixture()

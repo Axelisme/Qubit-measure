@@ -1,8 +1,8 @@
 from unittest.mock import MagicMock, patch
 
 from qtpy.QtWidgets import QCheckBox, QDialog, QLineEdit, QPushButton
-from zcu_tools.gui.adapter import MetaDictWriteback, ModuleWriteback
-from zcu_tools.gui.ui.writeback_widget import WritebackWidget
+from zcu_tools.gui.app.main.adapter import MetaDictWriteback, ModuleWriteback
+from zcu_tools.gui.app.main.ui.writeback_widget import WritebackWidget
 
 
 def _find_open_dialog(title_prefix: str) -> QDialog:
@@ -77,7 +77,7 @@ def test_edit_md_item_rejects_blank_target_name(qapp):
         )
         # The validation error pops a modal QMessageBox; stub it so the test
         # does not block on it.
-        with patch("zcu_tools.gui.ui.writeback_widget.QMessageBox.critical"):
+        with patch("zcu_tools.gui.app.main.ui.writeback_widget.QMessageBox.critical"):
             save_btn.click()
 
         # Blank name is rejected: target_name unchanged, dialog stays open.

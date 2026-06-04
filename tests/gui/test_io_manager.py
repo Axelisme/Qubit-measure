@@ -10,8 +10,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.adapter import ExpContext
-from zcu_tools.gui.io_manager import IOManager
+from zcu_tools.gui.app.main.adapter import ExpContext
+from zcu_tools.gui.app.main.io_manager import IOManager
 
 
 def _make_base_ctx(**overrides) -> ExpContext:

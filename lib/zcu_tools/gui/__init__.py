@@ -1,68 +1,7 @@
-from __future__ import annotations
+"""GUI applications namespace.
 
-from .adapter import (
-    CfgNodeSpec,
-    CfgNodeValue,
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    DirectValue,
-    EvalValue,
-    ExpAdapterProtocol,
-    ExpContext,
-    MetaDictWriteback,
-    ModuleRefSpec,
-    ModuleRefValue,
-    ModuleWriteback,
-    ParamMeta,
-    SavePaths,
-    ScalarSpec,
-    ScalarValue,
-    SweepSpec,
-    SweepValue,
-    WaveformRefSpec,
-    WaveformRefValue,
-    WaveformWriteback,
-    WritebackItem,
-    make_default_value,
-    reconstruct_params,
-)
-from .io_manager import IOManager
-from .mpl_backend_setup import configure_gui_matplotlib_backend
-from .registry import Registry
-from .state import Session, State
-from .sweep_model import SweepEditor
-
-__all__ = [
-    "CfgNodeSpec",
-    "CfgNodeValue",
-    "CfgSchema",
-    "CfgSectionSpec",
-    "CfgSectionValue",
-    "DirectValue",
-    "configure_gui_matplotlib_backend",
-    "EvalValue",
-    "ExpAdapterProtocol",
-    "ExpContext",
-    "IOManager",
-    "MetaDictWriteback",
-    "ModuleRefSpec",
-    "ModuleRefValue",
-    "ModuleWriteback",
-    "ParamMeta",
-    "Registry",
-    "SavePaths",
-    "ScalarSpec",
-    "ScalarValue",
-    "State",
-    "SweepSpec",
-    "SweepEditor",
-    "SweepValue",
-    "Session",
-    "WaveformRefSpec",
-    "WaveformRefValue",
-    "WaveformWriteback",
-    "WritebackItem",
-    "make_default_value",
-    "reconstruct_params",
-]
+Each GUI app lives under ``app/`` (e.g. ``app/main`` = the measure-gui). This
+parent package re-exports nothing and stays import-clean: importing
+``zcu_tools.gui`` pulls in neither Qt nor matplotlib. Import a concrete app
+explicitly, e.g. ``from zcu_tools.gui.app.main import State``.
+"""

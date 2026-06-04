@@ -9,9 +9,9 @@ from qtpy.QtCore import QEventLoop
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDevice
 from zcu_tools.device.yoko import YOKOGS200Info
-from zcu_tools.gui.event_bus import EventBus
-from zcu_tools.gui.services.device import ConnectDeviceRequest, DeviceService
-from zcu_tools.gui.state import State
+from zcu_tools.gui.app.main.event_bus import EventBus
+from zcu_tools.gui.app.main.services.device import ConnectDeviceRequest, DeviceService
+from zcu_tools.gui.app.main.state import State
 
 
 @pytest.fixture(autouse=True)

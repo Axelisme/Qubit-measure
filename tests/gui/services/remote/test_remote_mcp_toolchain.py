@@ -7,14 +7,17 @@ from unittest.mock import MagicMock, patch
 import pytest
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
-from zcu_tools.gui.event_bus import (
+from zcu_tools.gui.app.main.event_bus import (
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
     GuiEvent,
 )
-from zcu_tools.gui.services.device import DeviceSetupSnapshot, SetupDeviceRequest
-from zcu_tools.gui.services.remote.dispatch import METHOD_REGISTRY
-from zcu_tools.gui.services.remote.mcp_server import TOOLS
+from zcu_tools.gui.app.main.services.device import (
+    DeviceSetupSnapshot,
+    SetupDeviceRequest,
+)
+from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
+from zcu_tools.gui.app.main.services.remote.mcp_server import TOOLS
 
 from ._helpers import Fixture, call, open_client, recv_push
 
@@ -77,7 +80,7 @@ def test_operation_progress_device_setup_bars(fx):
     # operation.progress covers device setup too: live (token, ProgressBarModel).
     import time
 
-    from zcu_tools.gui.pbar_host import ProgressBarModel
+    from zcu_tools.gui.app.main.pbar_host import ProgressBarModel
 
     m = ProgressBarModel(label="Ramp", total=10, start_time=time.monotonic())
     m.set_n(3)
@@ -116,7 +119,7 @@ def test_operation_progress_serializes_live_bars(fx):
     # wire layer reads the model's methods (computed at serialization time).
     import time
 
-    from zcu_tools.gui.pbar_host import ProgressBarModel
+    from zcu_tools.gui.app.main.pbar_host import ProgressBarModel
 
     t = time.monotonic()
     m1 = ProgressBarModel(label="Rounds", total=100, start_time=t)
@@ -145,7 +148,7 @@ def test_operation_progress_serializes_live_bars(fx):
 def test_operation_progress_unknown_total_has_null_percent(fx):
     import time
 
-    from zcu_tools.gui.pbar_host import ProgressBarModel
+    from zcu_tools.gui.app.main.pbar_host import ProgressBarModel
 
     m = ProgressBarModel(label="working", total=None, start_time=time.monotonic())
     fx.ctrl.get_operation_progress = MagicMock(  # type: ignore[method-assign]
@@ -362,7 +365,7 @@ def test_mcp_tool_schemas_include_required_discovery_tools():
 def _add_fake_tab(fx, tab_id: str) -> None:
     """Register a minimal Session so has_tab(tab_id) is True."""
     from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
-    from zcu_tools.gui.state import Session
+    from zcu_tools.gui.app.main.state import Session
 
     adapter = FakeAdapter()
     cfg = adapter.make_default_cfg(fx.state.exp_context)
@@ -406,7 +409,7 @@ def test_tab_update_cfg_blocked_while_running(fx):
 
 
 def test_mcp_wrappers_map_to_expected_rpc(monkeypatch):
-    from zcu_tools.gui.services.remote import mcp_server
+    from zcu_tools.gui.app.main.services.remote import mcp_server
 
     calls: list[tuple[str, dict]] = []
 
@@ -433,7 +436,7 @@ def test_mcp_wrappers_map_to_expected_rpc(monkeypatch):
 def test_device_setup_wrapper_issues_setup_then_short_wait(monkeypatch):
     """gui_device_setup is not a 1:1 wrapper: it starts device.setup then waits
     briefly (operation.await) and reports a snapshot/handle (short-wait degrade)."""
-    from zcu_tools.gui.services.remote import mcp_server
+    from zcu_tools.gui.app.main.services.remote import mcp_server
 
     calls: list[tuple[str, dict]] = []
 
@@ -457,7 +460,7 @@ def test_device_setup_wrapper_issues_setup_then_short_wait(monkeypatch):
 
 
 def test_set_fields_fans_out_in_order_and_returns_valid(monkeypatch):
-    from zcu_tools.gui.services.remote import mcp_server
+    from zcu_tools.gui.app.main.services.remote import mcp_server
 
     calls: list[tuple[str, dict]] = []
 
@@ -492,7 +495,7 @@ def test_set_fields_fans_out_in_order_and_returns_valid(monkeypatch):
 
 
 def test_set_fields_fail_fast_stops_and_reports_progress(monkeypatch):
-    from zcu_tools.gui.services.remote import mcp_server
+    from zcu_tools.gui.app.main.services.remote import mcp_server
 
     calls: list[str] = []
 
@@ -523,7 +526,7 @@ def test_set_fields_fail_fast_stops_and_reports_progress(monkeypatch):
 
 
 def test_set_md_attrs_fans_out_in_order(monkeypatch):
-    from zcu_tools.gui.services.remote import mcp_server
+    from zcu_tools.gui.app.main.services.remote import mcp_server
 
     calls: list[tuple[str, dict]] = []
 
@@ -545,7 +548,7 @@ def test_set_md_attrs_fans_out_in_order(monkeypatch):
 
 
 def test_batch_tools_reject_malformed_items_before_any_rpc(monkeypatch):
-    from zcu_tools.gui.services.remote import mcp_server
+    from zcu_tools.gui.app.main.services.remote import mcp_server
 
     calls: list[str] = []
 
@@ -787,7 +790,7 @@ def test_every_registered_adapter_has_a_written_guide():
 
 
 def test_analyze_reply_includes_figure_path_when_figure_exists(monkeypatch):
-    from zcu_tools.gui.services.remote import mcp_server
+    from zcu_tools.gui.app.main.services.remote import mcp_server
 
     calls: list[tuple[str, dict]] = []
 
@@ -820,7 +823,7 @@ def test_analyze_reply_includes_figure_path_when_figure_exists(monkeypatch):
 
 
 def test_analyze_reply_omits_figure_path_when_no_figure(monkeypatch):
-    from zcu_tools.gui.services.remote import mcp_server
+    from zcu_tools.gui.app.main.services.remote import mcp_server
 
     def fake_send(method: str, params: dict, timeout_seconds: float = 30.0) -> dict:
         del timeout_seconds, params
@@ -848,7 +851,7 @@ def test_analyze_reply_omits_figure_path_when_no_figure(monkeypatch):
 
 
 def test_run_poll_running_when_op_in_flight(monkeypatch):
-    from zcu_tools.gui.services.remote import mcp_server
+    from zcu_tools.gui.app.main.services.remote import mcp_server
 
     monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"tab:t1": 7})
 
@@ -865,7 +868,7 @@ def test_run_poll_running_when_op_in_flight(monkeypatch):
 
 
 def test_run_poll_finished_attaches_figure(monkeypatch):
-    from zcu_tools.gui.services.remote import mcp_server
+    from zcu_tools.gui.app.main.services.remote import mcp_server
 
     monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"tab:t1": 7})
 
@@ -886,7 +889,7 @@ def test_run_poll_finished_attaches_figure(monkeypatch):
 
 
 def test_run_poll_failed_does_not_raise(monkeypatch):
-    from zcu_tools.gui.services.remote import mcp_server
+    from zcu_tools.gui.app.main.services.remote import mcp_server
 
     monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"tab:t1": 7})
 
@@ -902,7 +905,7 @@ def test_run_poll_failed_does_not_raise(monkeypatch):
 
 
 def test_run_poll_no_operation_when_untracked(monkeypatch):
-    from zcu_tools.gui.services.remote import mcp_server
+    from zcu_tools.gui.app.main.services.remote import mcp_server
 
     monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {})
     out = mcp_server.TOOLS["gui_run_poll"]["handler"]({"tab_id": "t1"})
@@ -916,7 +919,7 @@ def test_run_poll_no_operation_when_untracked(monkeypatch):
 
 
 def test_describe_stale_keys_translates_to_agent_language():
-    from zcu_tools.gui.services.remote import mcp_server
+    from zcu_tools.gui.app.main.services.remote import mcp_server
 
     out = mcp_server._describe_stale_keys(
         ["context", "soc", "tab:abc123:cfg", "device:flux", "devices:__set__"]
@@ -931,7 +934,7 @@ def test_describe_stale_keys_translates_to_agent_language():
 
 
 def test_stale_error_message_names_changed_resources(monkeypatch):
-    from zcu_tools.gui.services.remote import mcp_server
+    from zcu_tools.gui.app.main.services.remote import mcp_server
 
     def fake_raw(method, params, timeout_seconds=30.0):
         del method, params, timeout_seconds

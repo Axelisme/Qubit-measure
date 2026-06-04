@@ -39,7 +39,7 @@ def _setup_logging(to_file: bool = True, log_file: "Path | None" = None) -> None
         file_handler = logging.FileHandler(target, mode="w", encoding="utf-8")
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE))
-        for name in ("zcu_tools.gui", "zcu_tools.experiment.v2_gui"):
+        for name in ("zcu_tools.gui.app.main", "zcu_tools.experiment.v2_gui"):
             log = logging.getLogger(name)
             log.addHandler(file_handler)
             log.setLevel(logging.DEBUG)
@@ -103,20 +103,20 @@ if __name__ == "__main__":
     )
 
     # Configure the matplotlib backend before importing anything that uses
-    # matplotlib. ``zcu_tools.gui`` is import-clean (it does not pull in
+    # matplotlib. ``zcu_tools.gui.app.main`` is import-clean (it does not pull in
     # matplotlib), so this import cannot load pyplot too early.
-    from zcu_tools.gui import configure_gui_matplotlib_backend
+    from zcu_tools.gui.app.main import configure_gui_matplotlib_backend
 
     configure_gui_matplotlib_backend()
 
     from zcu_tools.experiment.v2_gui.registry import register_all, register_all_roles
-    from zcu_tools.gui.app import run_app
+    from zcu_tools.gui.app.main.app import run_app
 
     # Composition root: wire the experiment-adapter layer (experiment.v2_gui)
     # into the GUI framework. run_app receives the populated registry/catalog,
     # so the GUI framework itself never imports the experiment layer.
-    from zcu_tools.gui.registry import Registry
-    from zcu_tools.gui.role_catalog import RoleCatalog
+    from zcu_tools.gui.app.main.registry import Registry
+    from zcu_tools.gui.app.main.role_catalog import RoleCatalog
 
     registry = Registry()
     register_all(registry)
@@ -126,7 +126,7 @@ if __name__ == "__main__":
 
     control_opts = None
     if args.control_port is not None:
-        from zcu_tools.gui.services.remote import ControlOptions
+        from zcu_tools.gui.app.main.services.remote import ControlOptions
 
         control_opts = ControlOptions(
             port=args.control_port,

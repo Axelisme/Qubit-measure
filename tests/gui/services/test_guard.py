@@ -5,8 +5,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.adapter import AdapterCapabilities, ContextReadiness
-from zcu_tools.gui.services.guard import (
+from zcu_tools.gui.app.main.adapter import AdapterCapabilities, ContextReadiness
+from zcu_tools.gui.app.main.services.guard import (
     AnalyzePermit,
     GuardError,
     GuardService,
@@ -14,7 +14,7 @@ from zcu_tools.gui.services.guard import (
     SavePermit,
     WritebackPermit,
 )
-from zcu_tools.gui.state import ExpContext, Session, State
+from zcu_tools.gui.app.main.state import ExpContext, Session, State
 
 
 def _make_state(

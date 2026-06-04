@@ -13,15 +13,15 @@ from typing import TYPE_CHECKING
 
 from typing_extensions import Literal, Union, overload
 
-from zcu_tools.gui.adapter import DisabledRefValue, ModuleRefValue
-from zcu_tools.gui.specs.pulse import make_pulse_spec
+from zcu_tools.gui.app.main.adapter import DisabledRefValue, ModuleRefValue
+from zcu_tools.gui.app.main.specs.pulse import make_pulse_spec
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 
 from ..ctx_helpers import md_scalar_float, md_scalar_int
 from .helpers import make_default_value, patch_pulse_fields, select_named_module_value
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.adapter import ExpContext
+    from zcu_tools.gui.app.main.adapter import ExpContext
 
 # Library names this role prefers when resolving a ref (user-chosen convention).
 QUB_PROBE_NAMES = ["qub_probe"]

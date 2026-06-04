@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.services.ports import (
+from zcu_tools.gui.app.main.services.ports import (
     ProgressEvent,
     ProgressEventKind,
 )
-from zcu_tools.gui.services.progress import ProgressService
+from zcu_tools.gui.app.main.services.progress import ProgressService
 
 from ._progress_fakes import DirectProgressTransport
 

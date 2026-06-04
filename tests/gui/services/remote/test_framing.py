@@ -8,8 +8,8 @@ from __future__ import annotations
 import json
 
 import pytest
-from zcu_tools.gui.services.remote.errors import ErrorCode, RemoteError
-from zcu_tools.gui.services.remote.framing import (
+from zcu_tools.gui.app.main.services.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.app.main.services.remote.framing import (
     MAX_LINE_BYTES,
     decode_line,
     encode_line,

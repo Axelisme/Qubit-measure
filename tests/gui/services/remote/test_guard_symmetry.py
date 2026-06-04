@@ -14,17 +14,17 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
-from zcu_tools.gui.adapter import ContextReadiness, ExpContext
-from zcu_tools.gui.controller import Controller
-from zcu_tools.gui.event_bus import EventBus
-from zcu_tools.gui.io_manager import IOManager
-from zcu_tools.gui.registry import Registry
-from zcu_tools.gui.runner import Runner
-from zcu_tools.gui.services.guard import GuardError
-from zcu_tools.gui.services.remote.dispatch import METHOD_REGISTRY
-from zcu_tools.gui.services.remote.errors import ErrorCode, RemoteError
-from zcu_tools.gui.services.remote.param_spec import validate_params
-from zcu_tools.gui.state import State
+from zcu_tools.gui.app.main.adapter import ContextReadiness, ExpContext
+from zcu_tools.gui.app.main.controller import Controller
+from zcu_tools.gui.app.main.event_bus import EventBus
+from zcu_tools.gui.app.main.io_manager import IOManager
+from zcu_tools.gui.app.main.registry import Registry
+from zcu_tools.gui.app.main.runner import Runner
+from zcu_tools.gui.app.main.services.guard import GuardError
+from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
+from zcu_tools.gui.app.main.services.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.app.main.services.remote.param_spec import validate_params
+from zcu_tools.gui.app.main.state import State
 
 
 def _make_controller(readiness: ContextReadiness) -> Controller:
@@ -65,7 +65,7 @@ def _dispatch(ctrl: Controller, method: str, params: dict) -> object:
     from types import SimpleNamespace
     from typing import cast
 
-    from zcu_tools.gui.services.remote.service import RemoteControlAdapter
+    from zcu_tools.gui.app.main.services.remote.service import RemoteControlAdapter
 
     spec = METHOD_REGISTRY[method]
     handler_params = validate_params(spec.params, params) if spec.params else params

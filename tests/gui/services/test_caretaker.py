@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from zcu_tools.gui.services.caretaker import PersistenceCaretaker
-from zcu_tools.gui.services.persistence_types import (
+from zcu_tools.gui.app.main.services.caretaker import PersistenceCaretaker
+from zcu_tools.gui.app.main.services.persistence_types import (
     APP_STATE_VERSION,
     AppPersistedState,
     PersistedSession,
@@ -26,7 +26,7 @@ class _FakeOriginator:
 
     def restore_persisted_state(self, state: AppPersistedState):
         self.restored = state
-        from zcu_tools.gui.services.ports import RestoreReport
+        from zcu_tools.gui.app.main.services.ports import RestoreReport
 
         return RestoreReport(restored_tabs=len(state.session.tabs), rejected_tabs=())
 

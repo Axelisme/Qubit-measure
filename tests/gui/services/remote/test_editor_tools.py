@@ -9,10 +9,10 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.services.cfg_editor import CfgEditorError
-from zcu_tools.gui.services.context import MlEntryValidationError
-from zcu_tools.gui.services.remote.dispatch import METHOD_REGISTRY
-from zcu_tools.gui.services.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorError
+from zcu_tools.gui.app.main.services.context import MlEntryValidationError
+from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
+from zcu_tools.gui.app.main.services.remote.errors import ErrorCode, RemoteError
 
 from ._helpers import dispatch_handler as _dispatch  # noqa: E402
 

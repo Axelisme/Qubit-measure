@@ -44,7 +44,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_readout_module_spec,
     md_get_float,
 )
-from zcu_tools.gui.adapter import (
+from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalyzeRequest,

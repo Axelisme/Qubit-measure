@@ -1,8 +1,8 @@
-"""Unit tests for zcu_tools.gui.state.VersionTable."""
+"""Unit tests for zcu_tools.gui.app.main.state.VersionTable."""
 
 from __future__ import annotations
 
-from zcu_tools.gui.state import VersionTable
+from zcu_tools.gui.app.main.state import VersionTable
 
 
 def test_unbumped_key_reads_zero():

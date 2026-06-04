@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
-from zcu_tools.gui.adapter import CfgSchema, RunRequest
+from zcu_tools.gui.app.main.adapter import CfgSchema, RunRequest
 from zcu_tools.meta_tool import MetaDict
 
 
@@ -86,7 +86,7 @@ def test_fakefreq_modules_are_readout_only():
 
 def test_fakefreq_make_default_cfg_spec_structure():
     """Spec structure matches FakeFreqCfg nesting."""
-    from zcu_tools.gui.adapter import CfgSectionSpec, SweepSpec
+    from zcu_tools.gui.app.main.adapter import CfgSectionSpec, SweepSpec
 
     ctx = _make_ctx()
     schema = FakeFreqAdapter().make_default_cfg(ctx)
@@ -117,15 +117,15 @@ def test_fakefreq_make_default_cfg_spec_structure():
 
 def _real_ctx():
     """A real ExpContext so run/analyze actually compute (not MagicMock)."""
-    from zcu_tools.gui.adapter import ExpContext
+    from zcu_tools.gui.app.main.adapter import ExpContext
     from zcu_tools.meta_tool import ModuleLibrary
 
     return ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
 
 
 def _run_and_fit(adapter: FakeFreqAdapter):
-    from zcu_tools.gui.adapter import AnalyzeRequest
-    from zcu_tools.gui.adapter import RunRequest as RR
+    from zcu_tools.gui.app.main.adapter import AnalyzeRequest
+    from zcu_tools.gui.app.main.adapter import RunRequest as RR
 
     ctx = _real_ctx()
     schema = adapter.make_default_cfg(ctx)
@@ -171,7 +171,7 @@ def test_transmission_blind_sweep_finds_hidden_resonance():
 
 
 def _run_for_save(adapter: FakeFreqAdapter):
-    from zcu_tools.gui.adapter import RunRequest as RR
+    from zcu_tools.gui.app.main.adapter import RunRequest as RR
 
     ctx = _real_ctx()
     schema = adapter.make_default_cfg(ctx)
@@ -179,7 +179,7 @@ def _run_for_save(adapter: FakeFreqAdapter):
 
 
 def _save_request(result, data_path: str):
-    from zcu_tools.gui.adapter import SaveDataRequest
+    from zcu_tools.gui.app.main.adapter import SaveDataRequest
 
     return SaveDataRequest(
         run_result=result,

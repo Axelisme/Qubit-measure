@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from qtpy.QtWidgets import QLabel, QStackedWidget
-from zcu_tools.gui.plot_host import (
+from zcu_tools.gui.app.main.plot_host import (
     FigureContainer,
     assert_plot_invariants,
     attach_existing_figure_to_container,
@@ -10,7 +10,7 @@ from zcu_tools.gui.plot_host import (
     is_main_thread,
     set_shutting_down,
 )
-from zcu_tools.gui.plot_routing import (
+from zcu_tools.gui.app.main.plot_routing import (
     get_current_container,
     has_current_container,
     routing_scope,
@@ -86,7 +86,7 @@ def test_gui_canvas_draw_idle_inline_on_main_thread(qapp):
     del qapp
 
     from matplotlib.figure import Figure
-    from zcu_tools.gui.mpl_backend import GuiFigureCanvas
+    from zcu_tools.gui.app.main.mpl_backend import GuiFigureCanvas
 
     fig = Figure()
     canvas = GuiFigureCanvas(fig)

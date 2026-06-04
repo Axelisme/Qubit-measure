@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 import pytest
-from zcu_tools.gui.adapter import (
+from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,

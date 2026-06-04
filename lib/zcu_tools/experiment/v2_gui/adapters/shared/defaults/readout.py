@@ -15,13 +15,13 @@ from typing import TYPE_CHECKING
 
 from typing_extensions import Literal, Union, overload
 
-from zcu_tools.gui.adapter import (
+from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     DisabledRefValue,
     ModuleRefValue,
     WaveformRefValue,
 )
-from zcu_tools.gui.specs.readout import (
+from zcu_tools.gui.app.main.specs.readout import (
     make_direct_readout_spec,
     make_pulse_readout_spec,
 )
@@ -37,7 +37,7 @@ from .helpers import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.adapter import ExpContext
+    from zcu_tools.gui.app.main.adapter import ExpContext
 
 READOUT_NAMES = ["readout_dpm", "readout_rf", "readout", "res_readout"]
 
@@ -64,7 +64,7 @@ def make_pulse_readout_default(ctx: ExpContext) -> ModuleRefValue:
             isinstance(waveform_ref, WaveformRefValue)
             and "ro_waveform" in ctx.ml.waveforms
         ):
-            from zcu_tools.gui.cfg_schemas import waveform_cfg_to_value
+            from zcu_tools.gui.app.main.cfg_schemas import waveform_cfg_to_value
 
             _, wav_val = waveform_cfg_to_value(ctx.ml.waveforms["ro_waveform"])
             pulse_cfg.fields["waveform"] = WaveformRefValue(
@@ -129,7 +129,7 @@ def make_readout_dpm_default(ctx: ExpContext) -> ModuleRefValue:
             isinstance(waveform_ref, WaveformRefValue)
             and "ro_waveform" in ctx.ml.waveforms
         ):
-            from zcu_tools.gui.cfg_schemas import waveform_cfg_to_value
+            from zcu_tools.gui.app.main.cfg_schemas import waveform_cfg_to_value
 
             _, wav_val = waveform_cfg_to_value(ctx.ml.waveforms["ro_waveform"])
             pulse_cfg.fields["waveform"] = WaveformRefValue(

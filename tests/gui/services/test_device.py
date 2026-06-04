@@ -9,21 +9,21 @@ import pytest
 from qtpy.QtCore import QEventLoop
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDeviceInfo
-from zcu_tools.gui.event_bus import EventBus, GuiEvent
-from zcu_tools.gui.services.device import (
+from zcu_tools.gui.app.main.event_bus import EventBus, GuiEvent
+from zcu_tools.gui.app.main.services.device import (
     ConnectDeviceRequest,
     DeviceService,
     DeviceStatus,
     DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
-from zcu_tools.gui.services.operation_gate import (
+from zcu_tools.gui.app.main.services.operation_gate import (
     OperationConflictError,
     OperationGate,
     OperationKind,
     OperationOutcome,
 )
-from zcu_tools.gui.state import State
+from zcu_tools.gui.app.main.state import State
 
 
 @pytest.fixture(autouse=True)

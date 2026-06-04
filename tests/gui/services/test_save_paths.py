@@ -4,10 +4,10 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
-from zcu_tools.gui.adapter import ContextReadiness, ExpContext
-from zcu_tools.gui.registry import Registry
-from zcu_tools.gui.services.tab import TabService
-from zcu_tools.gui.state import State
+from zcu_tools.gui.app.main.adapter import ContextReadiness, ExpContext
+from zcu_tools.gui.app.main.registry import Registry
+from zcu_tools.gui.app.main.services.tab import TabService
+from zcu_tools.gui.app.main.state import State
 
 
 def _make_context(tmp_path: Path) -> ExpContext:

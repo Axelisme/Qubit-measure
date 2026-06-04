@@ -7,13 +7,16 @@ raw-dict entry anymore.
 
 from __future__ import annotations
 
-from zcu_tools.gui.adapter import CfgSchema, ContextReadiness
-from zcu_tools.gui.cfg_schemas import module_cfg_to_value, waveform_cfg_to_value
-from zcu_tools.gui.event_bus import EventBus
-from zcu_tools.gui.io_manager import IOManager
-from zcu_tools.gui.services.context import ContextService
-from zcu_tools.gui.services.ports import ContextWrites
-from zcu_tools.gui.state import ExpContext, State
+from zcu_tools.gui.app.main.adapter import CfgSchema, ContextReadiness
+from zcu_tools.gui.app.main.cfg_schemas import (
+    module_cfg_to_value,
+    waveform_cfg_to_value,
+)
+from zcu_tools.gui.app.main.event_bus import EventBus
+from zcu_tools.gui.app.main.io_manager import IOManager
+from zcu_tools.gui.app.main.services.context import ContextService
+from zcu_tools.gui.app.main.services.ports import ContextWrites
+from zcu_tools.gui.app.main.state import ExpContext, State
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 _READOUT_RAW = {
@@ -112,7 +115,7 @@ def test_apply_writes_empty_is_noop():
 
 def test_apply_writes_emits_once_per_kind():
     svc = _make_svc()
-    from zcu_tools.gui.event_bus import GuiEvent
+    from zcu_tools.gui.app.main.event_bus import GuiEvent
 
     md_events = 0
     ml_events = 0

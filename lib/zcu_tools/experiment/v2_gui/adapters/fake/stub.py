@@ -12,7 +12,7 @@ from typing_extensions import Annotated, ClassVar, Optional, Sequence, TypeAlias
 from zcu_tools.experiment.base import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
-from zcu_tools.gui.adapter import (
+from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AnalyzeRequest,
     AnalyzeResultBase,

@@ -8,15 +8,15 @@ import pytest
 from qtpy.QtCore import QEventLoop
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDeviceInfo
-from zcu_tools.gui.adapter import DeviceRefSpec, DirectValue
-from zcu_tools.gui.event_bus import DeviceChangedPayload, EventBus, GuiEvent
-from zcu_tools.gui.live_model import DeviceRefLiveField, LiveModelEnv
-from zcu_tools.gui.services.device import (
+from zcu_tools.gui.app.main.adapter import DeviceRefSpec, DirectValue
+from zcu_tools.gui.app.main.event_bus import DeviceChangedPayload, EventBus, GuiEvent
+from zcu_tools.gui.app.main.live_model import DeviceRefLiveField, LiveModelEnv
+from zcu_tools.gui.app.main.services.device import (
     ConnectDeviceRequest,
     DeviceService,
     DisconnectDeviceRequest,
 )
-from zcu_tools.gui.state import State
+from zcu_tools.gui.app.main.state import State
 
 
 @pytest.fixture(autouse=True)

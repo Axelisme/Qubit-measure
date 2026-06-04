@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 
 from typing_extensions import Any, ClassVar, Generic, Sequence
 
-from zcu_tools.gui.adapter import (
+from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalyzeRequest,
@@ -42,7 +42,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     ``capabilities = AdapterCapabilities(supports_analysis=False)`` so the framework
     never routes analysis to them.
 
-    Structurally satisfies ``zcu_tools.gui.adapter.ExpAdapterProtocol``; the GUI
+    Structurally satisfies ``zcu_tools.gui.app.main.adapter.ExpAdapterProtocol``; the GUI
     holds adapters only through that generic-free Protocol.
     """
 

@@ -12,8 +12,8 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
-from zcu_tools.gui.adapter import ExpContext
-from zcu_tools.gui.registry import Registry
+from zcu_tools.gui.app.main.adapter import ExpContext
+from zcu_tools.gui.app.main.registry import Registry
 
 
 def _registry() -> Registry:

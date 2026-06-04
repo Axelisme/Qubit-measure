@@ -24,7 +24,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import zcu_tools.gui.services as services_pkg
+import zcu_tools.gui.app.main.services as services_pkg
 
 _SERVICES_DIR = Path(services_pkg.__file__).parent
 

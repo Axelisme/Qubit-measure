@@ -4,6 +4,21 @@ declared in ports.py, which also prevents a back-edge / cycle from forming.
 
 This is an import-discipline gate: it scans the offender modules' source for a
 concrete sibling-service import and asserts there is none.
+
+It detects BOTH relative (``from .guard import ...``) and absolute
+(``from zcu_tools.gui.app.main.services.guard import ...``) sibling imports — a
+sibling dependency written either way is the same coupling, and an absolute path
+must not let it slip past the gate.
+
+What does NOT count as a forbidden dependency, and why:
+- **Importing a value/credential TYPE** that happens to live in a sibling module
+  (e.g. ``XxxPermit`` from ``guard``). The ADR-0001 Permit dataclasses live in
+  ``guard.py`` next to ``GuardService``, but importing a Permit type is not a
+  runtime dependency on the GuardService — it's a typed token the orchestrator
+  receives. Only importing the concrete ``*Service`` class is the coupling we ban.
+- **TYPE_CHECKING-only imports** (e.g. ``WritebackService`` under
+  ``if TYPE_CHECKING:`` for an annotation). These have no runtime effect; the
+  runtime wiring goes through the injected port (``WritebackQueryPort``).
 """
 
 from __future__ import annotations
@@ -11,9 +26,13 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import zcu_tools.gui.services as services_pkg
+import zcu_tools.gui.app.main.services as services_pkg
 
 _SERVICES_DIR = Path(services_pkg.__file__).parent
+
+# The dotted prefix of the moved services package, used to recognise an absolute
+# sibling import (``from zcu_tools.gui.app.main.services.<mod> import ...``).
+_SERVICES_PKG = services_pkg.__name__  # "zcu_tools.gui.app.main.services"
 
 # Modules that are application services (not ports / DTOs / infra adapters).
 _APP_SERVICE_MODULES = {
@@ -31,16 +50,63 @@ _APP_SERVICE_MODULES = {
 }
 
 
+def _is_service_symbol(name: str) -> bool:
+    """A concrete service class (the banned coupling), not a value/credential type.
+
+    The forbidden dependency is importing another service's *implementation*
+    (``GuardService``, ``WritebackService``). Importing a credential type that
+    merely lives in the same module (``AnalyzePermit``) is not — it is a typed
+    token, not a handle to the service.
+    """
+    return name.endswith("Service")
+
+
 def _imported_service_modules(path: Path) -> set[str]:
-    """Sibling .services.<mod> names imported by ``path`` (concrete deps)."""
+    """Sibling ``services.<mod>`` whose concrete *service class* ``path`` imports.
+
+    Covers both relative (``from .tab import TabService``) and absolute
+    (``from zcu_tools.gui.app.main.services.tab import TabService``) forms.
+    Skips imports inside ``if TYPE_CHECKING:`` blocks (annotation-only, no runtime
+    coupling) and imports of non-service symbols (Permit/Error value types).
+    """
     tree = ast.parse(path.read_text(encoding="utf-8"))
+
+    # Collect the line ranges of TYPE_CHECKING blocks to exclude them.
+    type_checking_ranges: list[tuple[int, int]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If):
+            test = node.test
+            is_tc = (isinstance(test, ast.Name) and test.id == "TYPE_CHECKING") or (
+                isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+            )
+            if is_tc:
+                end = getattr(node, "end_lineno", node.lineno)
+                type_checking_ranges.append((node.lineno, end))
+
+    def in_type_checking(lineno: int) -> bool:
+        return any(lo <= lineno <= hi for lo, hi in type_checking_ranges)
+
     found: set[str] = set()
     for node in ast.walk(tree):
-        # `from .tab import TabService`  → level=1, module="tab"
-        if isinstance(node, ast.ImportFrom) and node.level == 1 and node.module:
+        if not isinstance(node, ast.ImportFrom) or not node.module:
+            continue
+        if in_type_checking(node.lineno):
+            continue
+
+        # Determine the sibling module name, for relative or absolute form.
+        head: str | None = None
+        if node.level == 1:  # from .<mod> import ...
             head = node.module.split(".")[0]
-            if head in _APP_SERVICE_MODULES:
-                found.add(head)
+        elif node.level == 0 and node.module.startswith(_SERVICES_PKG + "."):
+            # from zcu_tools.gui.app.main.services.<mod>... import ...
+            rest = node.module[len(_SERVICES_PKG) + 1 :]
+            head = rest.split(".")[0]
+        if head not in _APP_SERVICE_MODULES:
+            continue
+
+        # Only a concrete service-class import is the banned coupling.
+        if any(_is_service_symbol(alias.name) for alias in node.names):
+            found.add(head)
     return found
 
 

@@ -10,13 +10,17 @@ from typing import TYPE_CHECKING
 
 from typing_extensions import Literal, Union, overload
 
-from zcu_tools.gui.adapter import DirectValue, DisabledRefValue, WaveformRefValue
-from zcu_tools.gui.specs.waveform import make_const_waveform_spec
+from zcu_tools.gui.app.main.adapter import (
+    DirectValue,
+    DisabledRefValue,
+    WaveformRefValue,
+)
+from zcu_tools.gui.app.main.specs.waveform import make_const_waveform_spec
 
 from .helpers import make_default_value, select_named_waveform_value
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.adapter import ExpContext
+    from zcu_tools.gui.app.main.adapter import ExpContext
 
 RES_WAVEFORM_NAMES = ["res_flat", "res_const"]
 

@@ -14,13 +14,13 @@ from unittest.mock import MagicMock
 import pytest
 from qtpy.QtCore import QEventLoop
 from zcu_tools.device import FakeDevice, FakeDeviceInfo, GlobalDeviceManager
-from zcu_tools.gui.event_bus import (
+from zcu_tools.gui.app.main.event_bus import (
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
     EventBus,
     GuiEvent,
 )
-from zcu_tools.gui.services.device import (
+from zcu_tools.gui.app.main.services.device import (
     ConnectDeviceRequest,
     DeviceRegistrationError,
     DeviceService,
@@ -28,7 +28,7 @@ from zcu_tools.gui.services.device import (
     SetupDeviceRequest,
     _DeviceSetupWorker,
 )
-from zcu_tools.gui.state import State
+from zcu_tools.gui.app.main.state import State
 
 
 @pytest.fixture(autouse=True)

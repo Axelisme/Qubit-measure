@@ -4,7 +4,7 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.event_bus import (
+from zcu_tools.gui.app.main.event_bus import (
     EventBus,
     GuiEvent,
     MdChangedPayload,

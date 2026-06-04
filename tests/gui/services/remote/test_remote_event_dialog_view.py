@@ -18,7 +18,7 @@ import base64
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.event_bus import (
+from zcu_tools.gui.app.main.event_bus import (
     GuiEvent,
     MdChangedPayload,
     PredictorChangedPayload,
@@ -27,7 +27,7 @@ from zcu_tools.gui.event_bus import (
     SocChangedPayload,
     TabAddedPayload,
 )
-from zcu_tools.gui.services.remote.events import (
+from zcu_tools.gui.app.main.services.remote.events import (
     _ser_predictor_changed,
     _ser_run_finished,
     _ser_run_started,
@@ -328,7 +328,7 @@ def test_run_lifecycle_pushes_run_started_then_finished(fx):
 
 
 def test_unauthenticated_subscribe_rejected(qapp):  # noqa: ARG001
-    from zcu_tools.gui.services.remote import ControlOptions
+    from zcu_tools.gui.app.main.services.remote import ControlOptions
 
     f = Fixture(ControlOptions(port=0, token="s3cr3t"))
     f.start()

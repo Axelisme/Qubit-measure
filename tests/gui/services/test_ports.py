@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from typing import Optional
 
-from zcu_tools.gui.adapter import ExpContext
-from zcu_tools.gui.event_bus import EventBus
-from zcu_tools.gui.services.ports import ProjectIOPort
+from zcu_tools.gui.app.main.adapter import ExpContext
+from zcu_tools.gui.app.main.event_bus import EventBus
+from zcu_tools.gui.app.main.services.ports import ProjectIOPort
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
@@ -46,13 +46,13 @@ class _FakeProjectIO:
 
 
 def test_concrete_io_manager_satisfies_port():
-    from zcu_tools.gui.io_manager import IOManager
+    from zcu_tools.gui.app.main.io_manager import IOManager
 
     assert isinstance(IOManager(), ProjectIOPort)
 
 
 def test_context_service_runs_against_fake_io():
-    from zcu_tools.gui.services.context import ContextService
+    from zcu_tools.gui.app.main.services.context import ContextService
 
     fake = _FakeProjectIO()
     assert isinstance(fake, ProjectIOPort)
@@ -64,6 +64,6 @@ def test_context_service_runs_against_fake_io():
 
 
 def _make_state():
-    from zcu_tools.gui.state import State
+    from zcu_tools.gui.app.main.state import State
 
     return State(ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None))

@@ -10,18 +10,18 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.adapter import (
+from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     RunRequest,
 )
-from zcu_tools.gui.event_bus import EventBus
-from zcu_tools.gui.services.guard import RunPermit
-from zcu_tools.gui.services.operation_gate import OperationGate, OperationKind
-from zcu_tools.gui.services.run import RunService
-from zcu_tools.gui.state import ExpContext, Session, State
+from zcu_tools.gui.app.main.event_bus import EventBus
+from zcu_tools.gui.app.main.services.guard import RunPermit
+from zcu_tools.gui.app.main.services.operation_gate import OperationGate, OperationKind
+from zcu_tools.gui.app.main.services.run import RunService
+from zcu_tools.gui.app.main.state import ExpContext, Session, State
 
 
 def _empty_schema() -> CfgSchema:
@@ -53,7 +53,7 @@ def _make_permit(state: State, tab_id: str, adapter: MagicMock) -> RunPermit:
 
 
 def _make_run_service(state: State) -> tuple[RunService, OperationGate, MagicMock]:
-    from zcu_tools.gui.services.progress import ProgressService
+    from zcu_tools.gui.app.main.services.progress import ProgressService
 
     from ._progress_fakes import DirectProgressTransport
 
@@ -103,7 +103,7 @@ def test_start_run_releases_lease_when_worker_start_raises():
 
 
 def _last_run_finished_payload(bus_emit: MagicMock):
-    from zcu_tools.gui.event_bus import GuiEvent, RunFinishedPayload
+    from zcu_tools.gui.app.main.event_bus import GuiEvent, RunFinishedPayload
 
     for call in reversed(bus_emit.call_args_list):
         event, payload = call.args
@@ -165,7 +165,7 @@ def test_run_cancelled_with_partial_result_reports_cancelled_and_keeps_result():
 
 
 def test_run_cancelled_without_result_reports_cancelled_and_keeps_no_result():
-    from zcu_tools.gui.runner import NO_RESULT
+    from zcu_tools.gui.app.main.runner import NO_RESULT
 
     state, tab_id, adapter = _make_state()
     svc, _gate, _runner = _make_run_service(state)

@@ -9,8 +9,8 @@ from __future__ import annotations
 from typing import cast
 
 import pytest
-from zcu_tools.gui.services.remote.errors import ErrorCode, RemoteError
-from zcu_tools.gui.services.remote.param_spec import (
+from zcu_tools.gui.app.main.services.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.app.main.services.remote.param_spec import (
     JsonType,
     ParamSpec,
     build_input_schema,

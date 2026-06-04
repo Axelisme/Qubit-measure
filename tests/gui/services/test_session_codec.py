@@ -6,7 +6,7 @@ types); this file covers only the cfg lowering / rebuild transforms."""
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.adapter import (
+from zcu_tools.gui.app.main.adapter import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -21,7 +21,7 @@ from zcu_tools.gui.adapter import (
     WaveformRefSpec,
     WaveformRefValue,
 )
-from zcu_tools.gui.services.session_codec import (
+from zcu_tools.gui.app.main.services.session_codec import (
     SessionCodecError,
     raw_to_schema,
     schema_to_raw,

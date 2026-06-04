@@ -5,10 +5,10 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from qtpy.QtCore import Qt
-from zcu_tools.gui.adapter import AdapterCapabilities
-from zcu_tools.gui.event_bus import EventBus, GuiEvent, SocChangedPayload
-from zcu_tools.gui.services import TabSnapshot
-from zcu_tools.gui.state import TabInteractionState
+from zcu_tools.gui.app.main.adapter import AdapterCapabilities
+from zcu_tools.gui.app.main.event_bus import EventBus, GuiEvent, SocChangedPayload
+from zcu_tools.gui.app.main.services import TabSnapshot
+from zcu_tools.gui.app.main.state import TabInteractionState
 
 
 def _mock_ctrl() -> MagicMock:
@@ -58,7 +58,7 @@ def _snapshot(
 
 def test_left_panel_toggle_is_attached_to_tab_bar(qapp):
     from qtpy.QtWidgets import QApplication
-    from zcu_tools.gui.ui.main_window import ExpTabWidget
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.show()
@@ -71,7 +71,7 @@ def test_left_panel_toggle_is_attached_to_tab_bar(qapp):
 
 def test_left_panel_toggle_uses_collapsed_boundary_handle(qapp):
     from qtpy.QtWidgets import QApplication
-    from zcu_tools.gui.ui.main_window import ExpTabWidget
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.resize(1000, 700)
@@ -100,7 +100,7 @@ def test_left_panel_toggle_uses_collapsed_boundary_handle(qapp):
 
 def test_left_panel_handle_tracks_splitter_boundary(qapp):
     from qtpy.QtWidgets import QApplication
-    from zcu_tools.gui.ui.main_window import ExpTabWidget
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.resize(1000, 700)
@@ -123,7 +123,7 @@ def test_left_panel_handle_tracks_splitter_boundary(qapp):
 
 
 def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
-    from zcu_tools.gui.ui.main_window import ExpTabWidget
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.update_writeback_items([MagicMock(selected=True)])
@@ -149,7 +149,7 @@ def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
 
 
 def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(qapp):
-    from zcu_tools.gui.ui.main_window import ExpTabWidget
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.update_interaction_state(
@@ -174,7 +174,7 @@ def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(qapp):
 
 
 def test_exp_tab_disables_save_buttons_while_saving_data(qapp):
-    from zcu_tools.gui.ui.main_window import ExpTabWidget
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.update_interaction_state(
@@ -200,7 +200,7 @@ def test_exp_tab_disables_save_buttons_while_saving_data(qapp):
 
 
 def test_exp_tab_run_tooltip_shows_no_soc_reason(qapp):
-    from zcu_tools.gui.ui.main_window import ExpTabWidget
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.update_interaction_state(
@@ -224,7 +224,7 @@ def test_exp_tab_run_tooltip_shows_no_soc_reason(qapp):
 
 
 def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(qapp):
-    from zcu_tools.gui.ui.main_window import ExpTabWidget
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.cfg_form.first_invalid_reason = MagicMock(
@@ -252,7 +252,7 @@ def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(qapp):
 
 
 def test_exp_tab_draft_context_allows_analysis_but_disables_run_and_save(qapp):
-    from zcu_tools.gui.ui.main_window import ExpTabWidget
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget("tab-1", _mock_ctrl())
     tab.update_writeback_items([MagicMock(selected=True)])
@@ -282,7 +282,7 @@ def test_exp_tab_draft_context_allows_analysis_but_disables_run_and_save(qapp):
 
 
 def test_main_window_run_lock_disables_only_new_tab_and_run(qapp):
-    from zcu_tools.gui.ui.main_window import MainWindow
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     ctrl = MagicMock()
     ctrl.get_bus.return_value = EventBus()
@@ -307,7 +307,7 @@ def test_main_window_run_lock_disables_only_new_tab_and_run(qapp):
 
 
 def test_main_window_soc_changed_refreshes_run_lock(qapp):
-    from zcu_tools.gui.ui.main_window import MainWindow
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     ctrl = MagicMock()
     bus = EventBus()
@@ -326,8 +326,8 @@ def test_main_window_soc_changed_refreshes_run_lock(qapp):
 
 
 def test_main_window_content_event_queries_single_tab_snapshot(qapp):
-    from zcu_tools.gui.event_bus import TabContentChangedPayload
-    from zcu_tools.gui.ui.main_window import MainWindow
+    from zcu_tools.gui.app.main.event_bus import TabContentChangedPayload
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     ctrl = MagicMock()
     bus = EventBus()
@@ -342,7 +342,7 @@ def test_main_window_content_event_queries_single_tab_snapshot(qapp):
 
 
 def _emit_run_finished(bus, tab_id: str, outcome: str) -> None:
-    from zcu_tools.gui.event_bus import RunFinishedPayload
+    from zcu_tools.gui.app.main.event_bus import RunFinishedPayload
 
     bus.emit(GuiEvent.RUN_FINISHED, RunFinishedPayload(tab_id=tab_id, outcome=outcome))
 
@@ -350,7 +350,7 @@ def _emit_run_finished(bus, tab_id: str, outcome: str) -> None:
 def test_finished_run_auto_switches_to_analysis_tab(qapp):
     """RUN_FINISHED with outcome=finished switches the tab to Analysis — the
     decision reads the outcome straight off the RUN_FINISHED payload."""
-    from zcu_tools.gui.ui.main_window import MainWindow
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     ctrl = MagicMock()
     bus = EventBus()
@@ -369,7 +369,7 @@ def test_finished_run_auto_switches_to_analysis_tab(qapp):
 def test_stopped_run_does_not_auto_switch_to_analysis_tab(qapp):
     """A stopped (cancelled) run may leave a partial result, but the user
     interrupted on purpose — must not yank them to the Analysis tab."""
-    from zcu_tools.gui.ui.main_window import MainWindow
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     ctrl = MagicMock()
     bus = EventBus()
@@ -398,9 +398,9 @@ def _editor_wiring_ctrl() -> MagicMock:
     # populate_cfg now opens a service-owned (gc=False) seeded session and
     # attaches the widget to the service-owned model (ADR-0010). Build a real
     # SectionLiveField for get_cfg_editor_root so attach() works.
-    from zcu_tools.gui.adapter import make_default_value
-    from zcu_tools.gui.cfg_schemas import _MODULE_SPEC_FACTORIES
-    from zcu_tools.gui.live_model import LiveModelEnv, SectionLiveField
+    from zcu_tools.gui.app.main.adapter import make_default_value
+    from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
+    from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
 
     spec = _MODULE_SPEC_FACTORIES["pulse"]()
     model = SectionLiveField(spec, LiveModelEnv(ctrl=ctrl), make_default_value(spec))
@@ -410,8 +410,8 @@ def _editor_wiring_ctrl() -> MagicMock:
 
 
 def _pulse_schema():
-    from zcu_tools.gui.adapter import CfgSchema, make_default_value
-    from zcu_tools.gui.cfg_schemas import _MODULE_SPEC_FACTORIES
+    from zcu_tools.gui.app.main.adapter import CfgSchema, make_default_value
+    from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
 
     spec = _MODULE_SPEC_FACTORIES["pulse"]()
     return CfgSchema(spec=spec, value=make_default_value(spec))
@@ -420,7 +420,7 @@ def _pulse_schema():
 def test_exp_tab_opens_cfg_editor_on_attach(qapp):
     import dataclasses
 
-    from zcu_tools.gui.ui.main_window import ExpTabWidget, MainWindow
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
 
     ctrl = _editor_wiring_ctrl()
     tab = ExpTabWidget("tab-1", ctrl)
@@ -440,7 +440,7 @@ def test_exp_tab_opens_cfg_editor_on_attach(qapp):
 def test_exp_tab_tears_down_cfg_editor_on_detach(qapp):
     import dataclasses
 
-    from zcu_tools.gui.ui.main_window import ExpTabWidget, MainWindow
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
 
     ctrl = _editor_wiring_ctrl()
     tab = ExpTabWidget("tab-1", ctrl)
@@ -462,7 +462,7 @@ def test_main_window_confirms_and_begins_shutdown_when_operations_active(
     from qtpy.QtCore import QCoreApplication
     from qtpy.QtGui import QCloseEvent
     from qtpy.QtWidgets import QMessageBox
-    from zcu_tools.gui.ui.main_window import MainWindow
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     ctrl = MagicMock()
     ctrl.get_bus.return_value = EventBus()
@@ -485,7 +485,7 @@ def test_main_window_confirms_and_begins_shutdown_when_operations_active(
 def test_main_window_declining_confirmation_keeps_window_open(qapp, monkeypatch):
     from qtpy.QtGui import QCloseEvent
     from qtpy.QtWidgets import QMessageBox
-    from zcu_tools.gui.ui.main_window import MainWindow
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     ctrl = MagicMock()
     ctrl.get_bus.return_value = EventBus()
@@ -511,7 +511,7 @@ def test_main_window_persists_session_on_close_when_idle(qapp):
     deferred turn fires, begin_shutdown runs _perform_close → persist."""
     from qtpy.QtCore import QCoreApplication
     from qtpy.QtGui import QCloseEvent
-    from zcu_tools.gui.ui.main_window import MainWindow
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     ctrl = MagicMock()
     ctrl.get_bus.return_value = EventBus()
@@ -537,7 +537,7 @@ def test_main_window_persists_session_on_close_when_idle(qapp):
 
 def test_new_tab_menu_supports_nested_paths(qapp, monkeypatch):
     from qtpy.QtWidgets import QMenu
-    from zcu_tools.gui.ui.main_window import MainWindow
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     del qapp
     ctrl = MagicMock()
@@ -574,14 +574,14 @@ def test_new_tab_menu_supports_nested_paths(qapp, monkeypatch):
 
 def test_show_analysis_figure_draws_canvas(qapp, monkeypatch):
     from matplotlib.figure import Figure
-    from zcu_tools.gui.ui.main_window import ExpTabWidget
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     del qapp
     tab = ExpTabWidget("tab-1", _mock_ctrl())
     canvas = MagicMock()
 
     monkeypatch.setattr(
-        "zcu_tools.gui.ui.main_window.attach_existing_figure_to_container",
+        "zcu_tools.gui.app.main.ui.main_window.attach_existing_figure_to_container",
         lambda fig, container: canvas,
     )
 
@@ -594,7 +594,7 @@ def test_show_analysis_figure_draws_canvas(qapp, monkeypatch):
 def test_show_analysis_figure_keeps_new_canvas_current_when_replacing_old(qapp):
     from matplotlib.figure import Figure
     from qtpy.QtWidgets import QApplication
-    from zcu_tools.gui.ui.main_window import ExpTabWidget
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     del qapp
     tab = ExpTabWidget("tab-1", _mock_ctrl())

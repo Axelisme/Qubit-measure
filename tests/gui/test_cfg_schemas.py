@@ -6,8 +6,8 @@ from __future__ import annotations
 from typing import cast
 
 import pytest
-from zcu_tools.gui.adapter import DirectValue, WaveformRefValue
-from zcu_tools.gui.cfg_schemas import (
+from zcu_tools.gui.app.main.adapter import DirectValue, WaveformRefValue
+from zcu_tools.gui.app.main.cfg_schemas import (
     module_cfg_to_value,
     waveform_cfg_to_value,
 )
@@ -87,7 +87,10 @@ def test_waveform_cfg_to_value_invalid_type():
 
 
 def test_pulse_spec_registered():
-    from zcu_tools.gui.cfg_schemas import _MODULE_SPEC_FACTORIES, _MODULE_VALUE_BUILDERS
+    from zcu_tools.gui.app.main.cfg_schemas import (
+        _MODULE_SPEC_FACTORIES,
+        _MODULE_VALUE_BUILDERS,
+    )
 
     assert "pulse" in _MODULE_SPEC_FACTORIES
     assert "pulse" in _MODULE_VALUE_BUILDERS
@@ -124,7 +127,7 @@ def test_module_cfg_to_value_pulse_missing_fields():
 
 def test_module_cfg_to_value_pulse_round_trip():
 
-    from zcu_tools.gui.adapter import CfgSchema
+    from zcu_tools.gui.app.main.adapter import CfgSchema
 
     cfg = {
         "type": "pulse",

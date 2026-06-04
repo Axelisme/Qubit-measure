@@ -19,15 +19,15 @@ import pytest
 from qtpy.QtCore import QCoreApplication
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
-from zcu_tools.gui.adapter import ContextReadiness, ExpContext
-from zcu_tools.gui.controller import Controller
-from zcu_tools.gui.event_bus import EventBus
-from zcu_tools.gui.io_manager import IOManager
-from zcu_tools.gui.registry import Registry
-from zcu_tools.gui.runner import Runner
-from zcu_tools.gui.services.remote import ControlOptions, RemoteControlAdapter
-from zcu_tools.gui.services.remote.wire import GUI_VERSION, WIRE_VERSION
-from zcu_tools.gui.state import State
+from zcu_tools.gui.app.main.adapter import ContextReadiness, ExpContext
+from zcu_tools.gui.app.main.controller import Controller
+from zcu_tools.gui.app.main.event_bus import EventBus
+from zcu_tools.gui.app.main.io_manager import IOManager
+from zcu_tools.gui.app.main.registry import Registry
+from zcu_tools.gui.app.main.runner import Runner
+from zcu_tools.gui.app.main.services.remote import ControlOptions, RemoteControlAdapter
+from zcu_tools.gui.app.main.services.remote.wire import GUI_VERSION, WIRE_VERSION
+from zcu_tools.gui.app.main.state import State
 
 # ---------------------------------------------------------------------------
 # Fixtures

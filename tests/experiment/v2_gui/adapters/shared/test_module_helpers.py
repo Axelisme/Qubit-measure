@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.adapter import ExpContext
+    from zcu_tools.gui.app.main.adapter import ExpContext
 
 from typing_extensions import cast
 from zcu_tools.experiment.v2_gui.adapters.shared import (
@@ -11,7 +11,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     schema_from_module,
     select_named_module_value,
 )
-from zcu_tools.gui.adapter import (
+from zcu_tools.gui.app.main.adapter import (
     CfgSchema,
     CfgSectionValue,
     DirectValue,
@@ -146,7 +146,7 @@ def test_select_named_module_value_returns_none_when_preferred_missing():
 
 
 def _make_ctx(ml: ModuleLibrary) -> "ExpContext":
-    from zcu_tools.gui.adapter import ExpContext
+    from zcu_tools.gui.app.main.adapter import ExpContext
 
     return ExpContext(
         md=MetaDict(),
@@ -264,7 +264,7 @@ def test_make_readout_ref_default_fallback_uses_directvalue_when_md_missing():
 
 
 def test_make_readout_ref_default_fallback_prefers_ro_waveform_if_present():
-    from zcu_tools.gui.adapter import WaveformRefValue
+    from zcu_tools.gui.app.main.adapter import WaveformRefValue
 
     ml = ModuleLibrary()
     ml.register_waveform(

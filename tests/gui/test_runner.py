@@ -9,8 +9,13 @@ from typing import Any
 import pytest
 from qtpy.QtCore import QCoreApplication
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter, FakeAnalyzeParams
-from zcu_tools.gui.adapter import AnalyzeRequest, CfgSchema, ExpContext, RunRequest
-from zcu_tools.gui.runner import (
+from zcu_tools.gui.app.main.adapter import (
+    AnalyzeRequest,
+    CfgSchema,
+    ExpContext,
+    RunRequest,
+)
+from zcu_tools.gui.app.main.runner import (
     AnalyzeRunner,
     AnalyzeWorker,
     Runner,
@@ -243,7 +248,7 @@ def test_analyzeworker_emits_analyze_finished(qapp):
 def test_savedataworker_emits_save_finished(qapp):
     adapter = FakeAdapter()
     req = _analyze_req()
-    from zcu_tools.gui.adapter import SaveDataRequest
+    from zcu_tools.gui.app.main.adapter import SaveDataRequest
 
     finished = []
     running_at_notification = []
@@ -284,7 +289,7 @@ def test_analyze_runner_emits_finished(qapp):
 
 
 def test_save_data_runner_emits_finished(qapp):
-    from zcu_tools.gui.adapter import SaveDataRequest
+    from zcu_tools.gui.app.main.adapter import SaveDataRequest
 
     runner = SaveDataRunner()
     adapter = FakeAdapter()

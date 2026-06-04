@@ -3,16 +3,16 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.services.persistence_types import (
+from zcu_tools.gui.app.main.services.persistence_types import (
     PersistedDeviceEntry,
     PersistedStartup,
 )
-from zcu_tools.gui.services.startup import (
+from zcu_tools.gui.app.main.services.startup import (
     StartupConnectionRequest,
     StartupProjectRequest,
     StartupService,
 )
-from zcu_tools.gui.state import DeviceState, DeviceStatus, State
+from zcu_tools.gui.app.main.state import DeviceState, DeviceStatus, State
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
@@ -73,7 +73,7 @@ def test_remember_connection_records_prefs() -> None:
 def test_derive_project_paths_scopes_under_chip_qubit() -> None:
     from datetime import datetime
 
-    from zcu_tools.gui.services.startup import derive_project_paths
+    from zcu_tools.gui.app.main.services.startup import derive_project_paths
 
     result_dir, database_path = derive_project_paths("Q5_2D", "Q1", "/root")
     assert result_dir == "/root/result/Q5_2D/Q1"

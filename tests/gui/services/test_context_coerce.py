@@ -5,11 +5,11 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.adapter import ContextReadiness
-from zcu_tools.gui.event_bus import EventBus
-from zcu_tools.gui.io_manager import IOManager
-from zcu_tools.gui.services.context import ContextService, MdValueError
-from zcu_tools.gui.state import ExpContext, State
+from zcu_tools.gui.app.main.adapter import ContextReadiness
+from zcu_tools.gui.app.main.event_bus import EventBus
+from zcu_tools.gui.app.main.io_manager import IOManager
+from zcu_tools.gui.app.main.services.context import ContextService, MdValueError
+from zcu_tools.gui.app.main.state import ExpContext, State
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 

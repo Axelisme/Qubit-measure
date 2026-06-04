@@ -20,7 +20,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_reset_module_spec,
     make_reset_ref_default,
 )
-from zcu_tools.gui.adapter import (
+from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,

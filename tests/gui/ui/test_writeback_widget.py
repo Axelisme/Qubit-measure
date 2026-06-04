@@ -8,13 +8,13 @@ from zcu_tools.experiment.v2_gui.adapters.fake.freq import (
     FakeFreqAnalyzeParams,
     FakeFreqRunResult,
 )
-from zcu_tools.gui.adapter import (
+from zcu_tools.gui.app.main.adapter import (
     AnalyzeRequest,
     ExpContext,
     RunRequest,
     WritebackRequest,
 )
-from zcu_tools.gui.ui.writeback_widget import WritebackWidget
+from zcu_tools.gui.app.main.ui.writeback_widget import WritebackWidget
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 

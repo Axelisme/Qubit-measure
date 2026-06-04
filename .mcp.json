@@ -8,7 +8,7 @@
         "--extra",
         "gui",
         "python",
-        "lib/zcu_tools/gui/services/remote/mcp_server.py"
+        "lib/zcu_tools/gui/app/main/services/remote/mcp_server.py"
       ],
       "env": {}
     },

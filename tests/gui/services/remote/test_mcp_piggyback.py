@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from zcu_tools.gui.services.remote import mcp_server
+from zcu_tools.gui.app.main.services.remote import mcp_server
 
 
 def _clear() -> None:

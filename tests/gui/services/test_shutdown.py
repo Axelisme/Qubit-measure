@@ -7,12 +7,12 @@ from __future__ import annotations
 import threading
 
 import pytest
-from zcu_tools.gui.services.operation_gate import (
+from zcu_tools.gui.app.main.services.operation_gate import (
     OperationGate,
     OperationKind,
     OperationOutcome,
 )
-from zcu_tools.gui.services.shutdown import ShutdownCoordinator, ShutdownState
+from zcu_tools.gui.app.main.services.shutdown import ShutdownCoordinator, ShutdownState
 
 
 class _FakeClock:

@@ -22,16 +22,16 @@ from __future__ import annotations
 
 from typing import Callable, Union
 
-from zcu_tools.gui.adapter import (
+from zcu_tools.gui.app.main.adapter import (
     ExpContext,
     ModuleRefValue,
     WaveformRefValue,
     make_default_value,
 )
-from zcu_tools.gui.cfg_schemas import _MODULE_SPEC_FACTORIES
-from zcu_tools.gui.registry import Registry
-from zcu_tools.gui.role_catalog import RoleCatalog, RoleEntry
-from zcu_tools.gui.specs import make_waveform_spec_by_style
+from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
+from zcu_tools.gui.app.main.registry import Registry
+from zcu_tools.gui.app.main.role_catalog import RoleCatalog, RoleEntry
+from zcu_tools.gui.app.main.specs import make_waveform_spec_by_style
 
 from .adapters.fake.freq import FakeFreqAdapter
 from .adapters.lookback import LookbackAdapter
