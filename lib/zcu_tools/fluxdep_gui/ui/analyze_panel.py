@@ -194,8 +194,16 @@ class AnalyzePanelWidget(QWidget):
             self._filter_placeholder.setVisible(True)
             return
         self._filter_placeholder.setVisible(False)
+        import time as _time
+
+        _t0 = _time.perf_counter()
         selector = SelectorWidget(
             spectrums, min_distance=self._ctrl.state.selection.min_distance
+        )
+        logger.debug(
+            "filter tab: built SelectorWidget for %d spectra in %.0fms",
+            len(spectrums),
+            (_time.perf_counter() - _t0) * 1000,
         )
 
         def _on_finish() -> None:

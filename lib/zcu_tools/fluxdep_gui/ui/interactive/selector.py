@@ -10,7 +10,11 @@ threading.Timer).
 
 from __future__ import annotations
 
+import logging
+import time
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 from matplotlib.backend_bases import MouseEvent
@@ -171,21 +175,31 @@ class SelectorWidget(InteractiveMplWidget):
 
     def _init_plots(self) -> None:
         self._ax = self.figure.add_subplot(1, 1, 1)
-        for spect in self._spectrums.values():
-            signals = spect["spectrum"]["signals"] ** 1.5  # improve contrast
+        for name, spect in self._spectrums.items():
+            t0 = time.perf_counter()
+            signals = spect["spectrum"]["signals"]
             flux_mask = np.any(~np.isnan(signals), axis=1)
             freq_mask = np.any(~np.isnan(signals), axis=0)
             signals = signals[flux_mask, :][:, freq_mask]
-            real_signals = cast2real_and_norm(signals)
             sp_fluxs = spect["spectrum"]["fluxs"][flux_mask]
             sp_freqs = spect["spectrum"]["freqs"][freq_mask]
             if sp_fluxs.size == 0 or sp_freqs.size == 0:
                 continue
+            # Contrast boost on the REAL magnitude (cast2real_and_norm already
+            # takes abs): a fractional power on the complex array is ~30x slower
+            # for no benefit (it gets abs'd anyway).
+            real_signals = cast2real_and_norm(signals) ** 1.5
+            logger.debug(
+                "selector background %r: cast %.0fms, shape=%s",
+                name,
+                (time.perf_counter() - t0) * 1000,
+                real_signals.shape,
+            )
             self._ax.imshow(
                 real_signals.T,
                 aspect="auto",
                 origin="lower",
-                interpolation="none",
+                interpolation="antialiased",  # downsample large images (was "none")
                 extent=(sp_fluxs[0], sp_fluxs[-1], sp_freqs[0], sp_freqs[-1]),
                 cmap="gray_r",  # neutral grayscale so the coloured points stand out
             )
