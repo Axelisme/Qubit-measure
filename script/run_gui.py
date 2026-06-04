@@ -103,11 +103,11 @@ if __name__ == "__main__":
     )
 
     # Configure the matplotlib backend before importing anything that uses
-    # matplotlib. ``zcu_tools.gui.app.main`` is import-clean (it does not pull in
-    # matplotlib), so this import cannot load pyplot too early.
-    from zcu_tools.gui.app.main import configure_gui_matplotlib_backend
+    # matplotlib. ``zcu_tools.gui.plotting.setup`` is import-clean (it does not
+    # pull in matplotlib), so this import cannot load pyplot too early.
+    from zcu_tools.gui.plotting.setup import configure_matplotlib_backend
 
-    configure_gui_matplotlib_backend()
+    configure_matplotlib_backend()
 
     from zcu_tools.experiment.v2_gui.registry import register_all, register_all_roles
     from zcu_tools.gui.app.main.app import run_app

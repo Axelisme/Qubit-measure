@@ -7,8 +7,8 @@ from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.main.adapter import AnalyzeRequest
 from zcu_tools.gui.app.main.event_bus import GuiEvent, TabInteractionChangedPayload
-from zcu_tools.gui.app.main.plot_host import FigureContainer
 from zcu_tools.gui.app.main.runner import AnalyzeRunner
+from zcu_tools.gui.plotting import FigureContainer
 
 from .guard import AnalyzePermit
 from .operation_gate import (

@@ -6,8 +6,9 @@ experiments exist. The entry script wires a populated ``Registry`` /
 GUI framework never imports the experiment-adapter layer.
 
 The matplotlib backend must already be configured before ``run_app`` runs (the
-entry script calls ``configure_gui_matplotlib_backend`` before importing this
-module); this module only assembles and launches, it does not configure the
+entry script calls ``configure_matplotlib_backend`` from
+``zcu_tools.gui.plotting.setup`` before importing this module); this module only
+assembles and launches, it does not configure the
 backend itself.
 """
 

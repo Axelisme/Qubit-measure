@@ -8,6 +8,7 @@ from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 logger = logging.getLogger(__name__)
 
 from zcu_tools.device.base import BaseDeviceInfo
+from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 from .adapter import CfgSchema, ExpContext, SavePaths, SocCfgHandle, WritebackItem
@@ -18,7 +19,6 @@ from .event_bus import (
     TabInteractionChangedPayload,
 )
 from .io_manager import IOManager
-from .plot_host import FigureContainer
 from .registry import Registry
 from .role_catalog import RoleCatalog
 from .runner import AnalyzeRunner, Runner, SaveDataRunner

@@ -12,8 +12,8 @@ from zcu_tools.gui.app.main.event_bus import (
     RunStartedPayload,
     TabInteractionChangedPayload,
 )
-from zcu_tools.gui.app.main.plot_host import FigureContainer
 from zcu_tools.gui.app.main.runner import NO_RESULT
+from zcu_tools.gui.plotting import FigureContainer
 
 from .guard import RunPermit
 from .operation_gate import (

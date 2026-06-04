@@ -22,7 +22,9 @@ logger = logging.getLogger(__name__)
 # VersionTable is the shared optimistic-concurrency mechanism (app-agnostic);
 # re-exported so ``state.VersionTable`` stays resolvable. The domain key set +
 # bump↔drop contract are documented below beside the *_VERSION_KEY constants.
-from zcu_tools.gui.version_table import VersionTable as VersionTable  # noqa: E402  (re-export)
+from zcu_tools.gui.version_table import (
+    VersionTable as VersionTable,  # noqa: E402  (re-export)
+)
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure

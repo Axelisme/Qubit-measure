@@ -1,19 +1,15 @@
-"""mpl_backend — client side of fluxdep's embedded-matplotlib substrate.
+"""GUI matplotlib backend — the client that intercepts pyplot figure creation.
 
-Registered as the active matplotlib backend (``module://...``) so that plain
-``plt.figure()`` / ``plt.show()`` inside analysis code (notably the notebook's
-``search_in_database(plot=True)``) are intercepted and routed into the GUI's
-current ``FigureContainer`` (see ``plot_host``) instead of opening a detached
-window or crashing on ``plt.show()`` off the main thread.
+The ``module://`` target matplotlib loads (see ``setup.BACKEND_NAME``). It is the
+*client*: it intercepts ``plt.figure()`` / ``plt.subplots()`` / ``plt.show()`` /
+``draw_idle`` and forwards each to the ``host`` (the single main-thread bridge),
+which embeds the figure into the current ``FigureContainer`` instead of opening a
+detached window. The client is stateless — routing/registry/marshalling all live
+in ``host``.
 
-The figure may be created on a worker thread (the search runs off-main), so the
-canvas marshals any worker-thread ``draw_idle`` to the main thread. This keeps
-``fitting.py`` untouched: it just uses pyplot, and the backend handles embedding
-and threading.
-
-Process-wide selection — incompatible with a Jupyter backend in the same
-process. The entry point must configure it BEFORE pyplot is first imported
-(see ``mpl_backend_setup``).
+This is a **process-wide** backend selection; incompatible with a Jupyter-notebook
+backend in the same process. The GUI selects this backend before any ``pyplot``
+import (the "configure backend before pyplot" invariant — see ``setup``).
 """
 
 from __future__ import annotations
@@ -25,7 +21,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
 
-from .plot_host import (
+from .host import (
     activate_figure,
     attach_figure_to_current_container,
     get_figure_container,
@@ -56,9 +52,8 @@ class GuiFigureManager(FigureManagerBase):
         return None
 
     def show(self) -> None:
-        # plt.show() → just make this figure current in its container (no window).
         if get_figure_container(self.canvas.figure) is None:
-            raise RuntimeError("figure is not attached to any FigureContainer")
+            raise RuntimeError("Figure is not attached to any FigureContainer")
         activate_figure(self.canvas.figure)
 
     def destroy(self) -> None:
@@ -70,11 +65,16 @@ class GuiFigureCanvas(FigureCanvasQTAgg):
     manager_class = GuiFigureManager
 
     def draw_idle(self, *args: object, **kwargs: object) -> None:
-        """Thread-safe ``draw_idle``: marshal a worker-thread call to the main thread.
+        """Thread-safe ``draw_idle``: absorb the worker→main-thread marshalling.
 
-        Painting a Qt canvas off the main thread is undefined; the search worker
-        creates the diagnostic figure, so its draws are marshalled fire-and-forget
-        to the main thread. A main-thread call draws inline.
+        ``draw_idle`` is the non-blocking "please repaint" request — liveplot's
+        per-update refresh calls it, and that refresh runs on a worker thread.
+        Painting a Qt canvas off the main thread is undefined, so a worker call
+        is marshalled to the main thread fire-and-forget (preserving the
+        non-blocking contract). A main-thread call (e.g. matplotlib internals,
+        analysis) draws inline. The liveplot backend stays Qt/gui-unaware: it
+        just calls ``draw_idle`` as if single-threaded; this canvas hides where
+        the painting actually happens.
         """
         if is_main_thread():
             super().draw_idle(*args, **kwargs)
@@ -86,9 +86,10 @@ FigureCanvas = GuiFigureCanvas
 FigureManager = GuiFigureManager
 
 
-# Registered into matplotlib's backend registry by @_Backend.export.
+# Registered into matplotlib's backend registry by @_Backend.export; the class
+# name itself is never referenced (matplotlib convention).
 @_Backend.export
 class _BackendGui(_Backend):  # noqa: F811  # pyright: ignore[reportUnusedClass]
     FigureCanvas = GuiFigureCanvas
     FigureManager = GuiFigureManager
-    backend_version = "fluxdep-embedded"
+    backend_version = "zcu-gui-embedded"

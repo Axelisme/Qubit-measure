@@ -76,11 +76,9 @@ if __name__ == "__main__":
     # matplotlib (the "configure backend before pyplot" invariant) — this routes
     # search_in_database(plot=True)'s pyplot figure into the GUI instead of a
     # detached window. The setup module is import-clean (pulls in no matplotlib).
-    from zcu_tools.gui.app.fluxdep.ui.mpl_backend_setup import (
-        configure_fluxdep_matplotlib_backend,
-    )
+    from zcu_tools.gui.plotting.setup import configure_matplotlib_backend
 
-    configure_fluxdep_matplotlib_backend()
+    configure_matplotlib_backend()
 
     from zcu_tools.gui.app.fluxdep.app import run_app
     from zcu_tools.gui.app.fluxdep.services.remote.service import ControlOptions

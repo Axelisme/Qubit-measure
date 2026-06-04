@@ -1,19 +1,27 @@
-"""Plot host — Qt canvas lifecycle + main-thread bridge for figures.
+"""Plot host — the single main-thread bridge + figure registry.
 
-One of three plotting-substrate modules (see also ``plot_routing`` = task-local
-routing, ``mpl_backend`` = interception; full picture in AI_NOTE "Plotting
-Substrate").
+The host owns:
+- a **single module-level QObject** (``_host``) with the forwarding signals
+  (attach/activate/refresh/remove/close). The client (``backend.py``) forwards a
+  plotting operation by calling a host entry function; the host runs the work on
+  the main thread (Qt AutoConnection: a same-thread emit runs the slot inline; a
+  worker emit is queued onto the host's thread). Communication is one-way
+  worker→host plus a ``threading.Event`` round-trip that hands the attached
+  canvas back to the worker. Containers (``container.py``) are passive widgets
+  the host operates — they hold no signals.
+- the **figure registry** (``id(figure) → FigureContainer``). ``show`` / draw /
+  ``close`` start from a bare ``Figure`` and resolve its container here; routing
+  (``routing.py``) is only consulted at *attach* (which container new figures go
+  to). Resolving refresh/activate/close from the registry — never from the
+  routing ContextVar — is what keeps concurrent workers from cross-routing.
 
-Behaviour guarantees this module provides / requires:
-- **The bridge MUST be initialised first on the GUI (main) thread.** Qt canvas
-  objects take the thread affinity of wherever they are first created; if a
-  worker thread triggers the first bridge init, every later canvas attaches to
-  the wrong thread and repaints crash / hang. The app initialises the bridge at
-  startup on the main thread before any worker runs.
-- Canvas attach/detach is marshalled to the main thread; worker code only
-  *selects* a ``FigureContainer`` (via routing), it never touches Qt widgets.
-- ``plt.show()`` under this host only activates an already-created canvas; it
-  does NOT take over the QApplication event loop (that stays the main window's).
+Invariants:
+- **The host QObject MUST be created first on the GUI (main) thread.** A worker
+  triggering the first init would give every later canvas the wrong thread
+  affinity and crash repaints. ``FigureContainer.__init__`` calls ``ensure_host``
+  on the main thread to guarantee this.
+- ``plt.show()`` only activates an already-created canvas; it never takes over
+  the QApplication event loop.
 """
 
 from __future__ import annotations
@@ -32,15 +40,17 @@ from qtpy.QtCore import (  # type: ignore[attr-defined]
     QThread,
     Signal,  # type: ignore[reportPrivateImportUsage]
 )
-from qtpy.QtWidgets import QStackedWidget, QWidget  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
 
-from .plot_routing import require_current_container
+from .routing import require_current_container
 
 if TYPE_CHECKING:
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
+    from .container import FigureContainer
+
 _fig_container_registry: dict[int, "FigureContainer"] = {}
-_bridge: Any = None
+_host: Any = None
 _shutting_down: bool = False
 
 
@@ -49,41 +59,9 @@ def set_shutting_down(value: bool) -> None:
     _shutting_down = value
 
 
-class FigureContainer:
-    """Thin host wrapper around a plot stack with a fixed placeholder widget."""
-
-    def __init__(self, stack: QStackedWidget, placeholder: QWidget) -> None:
-        self._stack = stack
-        self._placeholder = placeholder
-        ensure_bridge()
-
-    def attach_canvas(self, canvas: QWidget) -> None:
-        if self._stack.indexOf(canvas) < 0:
-            self._stack.addWidget(canvas)
-        self._stack.setCurrentWidget(canvas)
-
-    def detach_canvas(self, canvas: QWidget) -> None:
-        was_current = self._stack.currentWidget() is canvas
-        if self._stack.indexOf(canvas) >= 0:
-            self._stack.removeWidget(canvas)
-        if was_current:
-            self._stack.setCurrentWidget(self._placeholder)
-
-    def set_current_canvas(self, canvas: QWidget) -> None:
-        if self._stack.indexOf(canvas) < 0:
-            raise RuntimeError("Canvas is not attached to this FigureContainer")
-        self._stack.setCurrentWidget(canvas)
-
-    def clear_dynamic_canvases(self) -> None:
-        while self._stack.count() > 1:
-            widget = self._stack.widget(self._stack.count() - 1)
-            self._stack.removeWidget(widget)
-            if widget is not None:
-                figure = getattr(widget, "figure", None)
-                if isinstance(figure, Figure):
-                    _fig_container_registry.pop(id(figure), None)
-                widget.deleteLater()
-        self._stack.setCurrentWidget(self._placeholder)
+def drop_from_registry(fig: Figure) -> None:
+    """Forget a figure→container mapping (called by Container.clear)."""
+    _fig_container_registry.pop(id(fig), None)
 
 
 @dataclass(frozen=True)
@@ -93,12 +71,12 @@ class PlotStateSnapshot:
 
 
 def attach_existing_figure_to_container(
-    fig: Figure, container: FigureContainer
+    fig: Figure, container: "FigureContainer"
 ) -> QWidget:
     done = threading.Event()
     result: list[Any] = []
     errors: list[BaseException] = []
-    _get_bridge().attach_requested.emit(
+    _get_host().attach_requested.emit(
         {
             "container": container,
             "fig": fig,
@@ -117,13 +95,13 @@ def attach_existing_figure_to_container(
 
 def attach_figure_to_current_container(
     fig: Figure,
-    canvas_class: Optional[type[FigureCanvasQTAgg]] = None,
-) -> FigureCanvasQTAgg:
+    canvas_class: Optional[type["FigureCanvasQTAgg"]] = None,
+) -> "FigureCanvasQTAgg":
     container = require_current_container()
     done = threading.Event()
     result: list[Any] = []
     errors: list[BaseException] = []
-    _get_bridge().attach_requested.emit(
+    _get_host().attach_requested.emit(
         {
             "container": container,
             "fig": fig,
@@ -147,7 +125,7 @@ def close_figure(fig: Figure) -> None:
     if _shutting_down:
         return
     done = threading.Event()
-    _get_bridge().close_requested.emit({"fig": fig, "done": done})
+    _get_host().close_requested.emit({"fig": fig, "done": done})
     done.wait(timeout=5.0)
 
 
@@ -155,7 +133,7 @@ def remove_canvas(canvas: QWidget) -> None:
     if _shutting_down:
         return
     done = threading.Event()
-    _get_bridge().remove_canvas_requested.emit({"canvas": canvas, "done": done})
+    _get_host().remove_canvas_requested.emit({"canvas": canvas, "done": done})
     done.wait(timeout=5.0)
 
 
@@ -163,7 +141,7 @@ def activate_figure(fig: Figure) -> None:
     if _shutting_down:
         return
     done = threading.Event()
-    _get_bridge().activate_requested.emit({"fig": fig, "done": done})
+    _get_host().activate_requested.emit({"fig": fig, "done": done})
     done.wait(timeout=5.0)
 
 
@@ -181,13 +159,13 @@ def is_main_thread() -> bool:
 
 
 def refresh_figure_in_main_thread(fig: Figure) -> None:
-    """Dispatch draw_idle() to the main thread via the Qt bridge (fire-and-forget)."""
+    """Dispatch draw_idle() to the main thread via the host (fire-and-forget)."""
     if _shutting_down:
         return
-    _get_bridge().refresh_requested.emit(fig)
+    _get_host().refresh_requested.emit(fig)
 
 
-def get_figure_container(fig: Figure) -> Optional[FigureContainer]:
+def get_figure_container(fig: Figure) -> Optional["FigureContainer"]:
     return _fig_container_registry.get(id(fig))
 
 
@@ -229,10 +207,10 @@ def assert_plot_invariants() -> None:
 
 
 def _attach_figure_canvas(
-    container: FigureContainer,
+    container: "FigureContainer",
     fig: Figure,
-    canvas_class: Optional[type[FigureCanvasQTAgg]] = None,
-) -> FigureCanvasQTAgg:
+    canvas_class: Optional[type["FigureCanvasQTAgg"]] = None,
+) -> "FigureCanvasQTAgg":
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
     canvas = fig.canvas
@@ -263,20 +241,20 @@ def _remove_canvas_impl(canvas: QWidget) -> None:
     container.detach_canvas(canvas)
 
 
-def _get_bridge() -> Any:
-    global _bridge
-    if _bridge is None:
+def _get_host() -> Any:
+    global _host
+    if _host is None:
         app = QCoreApplication.instance()
         if app is None:
             raise RuntimeError(
-                "QCoreApplication must exist before initializing plot host bridge"
+                "QCoreApplication must exist before initializing the plot host"
             )
         if QThread.currentThread() is not app.thread():
             raise RuntimeError(
-                "Plot host bridge must be initialized from the GUI thread before worker plotting"
+                "Plot host must be initialized from the GUI thread before worker plotting"
             )
 
-        class _Bridge(QObject):
+        class _PlotHost(QObject):
             attach_requested = Signal(object)
             close_requested = Signal(object)
             remove_canvas_requested = Signal(object)
@@ -341,26 +319,9 @@ def _get_bridge() -> Any:
                 if isinstance(fig, Figure):
                     fig.canvas.draw_idle()
 
-        _bridge = _Bridge()
-    return _bridge
+        _host = _PlotHost()
+    return _host
 
 
-def ensure_bridge() -> None:
-    _get_bridge()
-
-
-__all__ = [
-    "FigureContainer",
-    "activate_figure",
-    "assert_plot_invariants",
-    "attach_existing_figure_to_container",
-    "attach_figure_to_current_container",
-    "close_figure",
-    "dump_plot_state",
-    "ensure_bridge",
-    "get_figure_container",
-    "is_main_thread",
-    "PlotStateSnapshot",
-    "refresh_figure_in_main_thread",
-    "remove_canvas",
-]
+def ensure_host() -> None:
+    _get_host()

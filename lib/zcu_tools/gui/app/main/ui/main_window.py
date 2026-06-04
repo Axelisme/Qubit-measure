@@ -22,13 +22,13 @@ from zcu_tools.gui.app.main.event_bus import (
     TabContentChangedPayload,
     TabInteractionChangedPayload,
 )
-from zcu_tools.gui.app.main.plot_host import (
+from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
+from zcu_tools.gui.plotting import (
     FigureContainer,
     attach_existing_figure_to_container,
     remove_canvas,
     set_shutting_down,
 )
-from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
 
 logger = logging.getLogger(__name__)
 

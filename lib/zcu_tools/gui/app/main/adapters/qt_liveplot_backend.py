@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
-from zcu_tools.gui.app.main.plot_host import refresh_figure_in_main_thread
+from zcu_tools.gui.plotting import refresh_figure_in_main_thread
 from zcu_tools.liveplot.backend.base import LivePlotBackend
 
 

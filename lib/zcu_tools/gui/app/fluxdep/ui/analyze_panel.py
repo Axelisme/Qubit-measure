@@ -52,11 +52,11 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.services.fit import SearchResult
 from zcu_tools.gui.app.fluxdep.services.viz import derive_auto_limits, render_fit_figure
+from zcu_tools.gui.plotting import FigureContainer, routing_scope
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 
 from .error_messages import friendly_fit_message
 from .gui_pbar import GuiProgressBarChannel
-from .plot_host import FigureContainer, set_current_container
 from .transitions_form import TransitionsForm
 
 logger = logging.getLogger(__name__)
@@ -114,17 +114,24 @@ class _SearchSignals(QObject):
 class _SearchWorker(QRunnable):
     """Runs the PURE ``compute_search`` off the main thread (it releases the GIL)."""
 
-    def __init__(self, ctrl: Controller, pbar_factory) -> None:
+    def __init__(self, ctrl: Controller, pbar_factory, container) -> None:
         super().__init__()
         self.signals = _SearchSignals()
         self._ctrl = ctrl
         self._pbar_factory = pbar_factory
+        # The worker enters this container's routing_scope ITSELF: a ContextVar
+        # set on the main thread is not visible to a QThreadPool worker, so the
+        # routing target must be captured here and entered inside run().
+        self._container = container
 
     def run(self) -> None:
         try:
-            result = self._ctrl.compute_search(
-                pbar_factory=self._pbar_factory, plot=True
-            )
+            # compute_search's plot=True does plt.figure() on this worker thread;
+            # the shared backend reads the current routing container, so scope it.
+            with routing_scope(self._container):
+                result = self._ctrl.compute_search(
+                    pbar_factory=self._pbar_factory, plot=True
+                )
         except Exception as exc:  # noqa: BLE001 — surface to the panel
             logger.exception("search worker failed")
             self.signals.failed.emit(str(exc))
@@ -471,10 +478,13 @@ class AnalyzePanelWidget(QWidget):
         import matplotlib.pyplot as plt
 
         plt.close("all")
-        self._diag_container.clear()
-        set_current_container(self._diag_container)
+        self._diag_container.clear_dynamic_canvases()
 
-        worker = _SearchWorker(self._ctrl, self._channel.factory())
+        # The worker enters routing_scope(self._diag_container) itself (R4) — the
+        # diagnostic figure created on the worker thread routes here.
+        worker = _SearchWorker(
+            self._ctrl, self._channel.factory(), self._diag_container
+        )
         worker.signals.done.connect(self._on_search_done)  # type: ignore[arg-type]
         worker.signals.failed.connect(self._on_search_failed)
         self._pool.start(worker)
@@ -489,7 +499,6 @@ class AnalyzePanelWidget(QWidget):
             self._status.setText(desc)
 
     def _on_search_done(self, result: SearchResult) -> None:
-        set_current_container(None)
         self._search_btn.setEnabled(True)
         self._progress.setVisible(False)
         self._ctrl.record_search_result(result)
@@ -502,7 +511,6 @@ class AnalyzePanelWidget(QWidget):
         # (EJ/EC/EL + diagnostic) is visible; the user switches to Show when ready.
 
     def _on_search_failed(self, message: str) -> None:
-        set_current_container(None)
         self._search_btn.setEnabled(True)
         self._progress.setVisible(False)
         self._status.setText("Search failed.")

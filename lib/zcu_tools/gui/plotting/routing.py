@@ -1,8 +1,7 @@
 """Plot routing — task-local destination for matplotlib output.
 
-One of three plotting-substrate modules (see also ``mpl_backend`` =
-interception, ``plot_host`` = Qt canvas lifecycle; the full picture is in
-AI_NOTE "Plotting Substrate").
+One of the shared plotting-substrate modules (see also ``backend`` =
+interception client, ``host`` = Qt canvas lifecycle + main-thread bridge).
 
 Behaviour guarantee this module provides:
 - The active ``FigureContainer`` is held in a ``ContextVar`` (task-local), NOT a
@@ -23,7 +22,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Iterator, Optional
 
 if TYPE_CHECKING:
-    from .plot_host import FigureContainer
+    from .container import FigureContainer
 
 _current_container: ContextVar[Optional["FigureContainer"]] = ContextVar(
     "zcu_tools_gui_current_figure_container",

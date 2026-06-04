@@ -29,7 +29,9 @@ logger = logging.getLogger(__name__)
 # re-exported so ``state.VersionTable`` stays resolvable. fluxdep's key set
 # (project / selection / spectrum:<name> / spectrums:__set__ / fit) is
 # documented beside the *_VERSION_KEY constants below.
-from zcu_tools.gui.version_table import VersionTable as VersionTable  # noqa: E402  (re-export)
+from zcu_tools.gui.version_table import (
+    VersionTable as VersionTable,  # noqa: E402  (re-export)
+)
 
 SpecType = Literal["OneTone", "TwoTone"]
 

@@ -22,6 +22,12 @@ _SHARED_MODULES = [
     "zcu_tools.gui.remote.param_spec",
     "zcu_tools.gui.remote.wire",
     "zcu_tools.gui.version_table",
+    # The plotting package + its backend-select module must stay import-clean so
+    # an entry script can configure the matplotlib backend before any pyplot
+    # import. The heavy plotting submodules (backend/host/container) DO pull in
+    # qtpy/matplotlib by design and are intentionally NOT listed here.
+    "zcu_tools.gui.plotting",
+    "zcu_tools.gui.plotting.setup",
 ]
 
 

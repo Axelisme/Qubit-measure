@@ -33,19 +33,19 @@ def run_app(
     """
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 
-    import zcu_tools.gui.app.fluxdep.ui.plot_host as plot_host
     from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
+    from zcu_tools.gui.plotting import ensure_host, set_shutting_down
 
     app = QApplication.instance() or QApplication(sys.argv)
 
-    # Create the plot-host bridge now, on the Qt main thread: the embedded
+    # Create the plot host now, on the Qt main thread: the shared embedded
     # matplotlib backend marshals worker-thread figure work through it, and it
     # must be built on the GUI thread before any worker plots (e.g. the search).
-    plot_host.ensure_bridge()
-    # On teardown, mark the plot host down BEFORE Qt deletes the bridge, so the
+    ensure_host()
+    # On teardown, mark the plot host down BEFORE Qt deletes its widgets, so the
     # matplotlib atexit hook (Gcf.destroy_all → backend destroy → remove_canvas)
-    # becomes a no-op instead of touching a deleted _Bridge.
-    app.aboutToQuit.connect(plot_host.shutdown)  # type: ignore[attr-defined]
+    # becomes a no-op instead of touching a deleted container.
+    app.aboutToQuit.connect(lambda: set_shutting_down(True))
 
     state = FluxDepState(project)
     ctrl = Controller(state, EventBus())
