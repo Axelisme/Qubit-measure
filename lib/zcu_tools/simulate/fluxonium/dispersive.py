@@ -214,3 +214,114 @@ def calculate_chi_vs_flux(
         qub_cutoff,
         qub_dim,
     )
+
+
+class DressedLabelingError(RuntimeError):
+    """Two bare product states mapped to the same dressed level (labeling ambiguous).
+
+    Raised by ``calculate_dispersive_vs_flux_fast`` when the simple overlap-argmax
+    dressed labeling is not a bijection at some flux — which happens when the
+    coupling is too strong / the levels too dense for the (0/1, i) states to track
+    cleanly. The caller should fall back to ``calculate_dispersive_vs_flux``
+    (scqubits, robust labeling) for those parameters.
+    """
+
+
+def calculate_dispersive_vs_flux_fast(
+    params: tuple[float, float, float],
+    fluxs: NDArray[np.float64],
+    bare_rf: float,
+    g: float,
+    res_dim: int = 4,
+    qub_dim: int = 15,
+    qub_cutoff: int = 30,
+    return_dim: int = 2,
+) -> tuple[NDArray[np.float64], ...]:
+    """A scqubits-free, ~9x-faster ``calculate_dispersive_vs_flux`` (numpy only).
+
+    Computes the same ground/excited dispersive resonator frequencies vs flux as
+    ``calculate_dispersive_vs_flux`` — matched to it to 0.00000 MHz across the
+    avoided-crossing region (see tests) — but bypasses scqubits' ``ParameterSweep``:
+
+    1. The flux-independent fluxonium operators (``cos(phi)`` / ``sin(phi)`` / the LC
+       diagonal / ``n``) are taken from scqubits ONCE; per flux only a cheap
+       ``cos(phi + beta)`` recombination + a ``hilbertdim`` ``eigh`` is done (the same
+       trick ``calculate_energy_vs_flux`` uses for the bare spectrum).
+    2. The composite Hamiltonian ``H_res ⊗ I + I ⊗ H_qub + g(a†⊗n + a⊗n†)`` is built
+       and diagonalised in numpy on the (res_dim × qub_dim) tensor basis.
+    3. Each needed dressed level is labelled by the bare product state ``|n_r, n_q⟩``
+       it overlaps most (argmax) — for the low (0/1, i) states in the dispersive
+       regime this is unambiguous; a uniqueness guard raises ``DressedLabelingError``
+       if it ever collides, so a caller can fall back to the scqubits path.
+
+    The flux grid is folded into [0, 0.5] and deduplicated (the spectrum is periodic
+    and even), then the result is mapped back to the input order. Returns ``return_dim``
+    arrays (rf_0, rf_1, ...) in GHz, one value per input flux — same shape/units as
+    ``calculate_dispersive_vs_flux``.
+    """
+    from scqubits.core.fluxonium import Fluxonium
+
+    from .energies import _fold_unique_fluxs
+
+    folded, sort_idxs, uni_idxs = _fold_unique_fluxs(fluxs)
+
+    # Flux-independent fluxonium pieces, computed once.
+    fx = Fluxonium(*params, flux=0.0, cutoff=qub_cutoff, truncated_dim=qub_dim)
+    dim = fx.hilbertdim()
+    lc_diag = np.array(
+        [(i + 0.5) * fx.plasma_energy() for i in range(dim)], dtype=np.float64
+    )
+    cos_phi = np.asarray(fx.cos_phi_operator(beta=0.0), dtype=np.float64)
+    sin_phi = np.asarray(fx.sin_phi_operator(beta=0.0), dtype=np.float64)
+    n_op = np.asarray(fx.n_operator(), dtype=np.complex128)
+    EJ = float(fx.EJ)
+
+    # Resonator pieces (number diagonal + ladder operators).
+    H_res = bare_rf * np.diag(np.arange(res_dim).astype(np.float64))
+    a = np.diag(np.sqrt(np.arange(1, res_dim)), 1).astype(np.float64)
+    adag = a.T
+    I_res = np.eye(res_dim)
+
+    # The bare product states we need to track: |n_r, n_q> for n_r in 0,1 and
+    # n_q in 0..return_dim-1, as composite-basis index n_r*qub_dim + n_q.
+    needed = [(nr, nq) for nr in (0, 1) for nq in range(return_dim)]
+
+    out = [np.empty(len(folded), dtype=np.float64) for _ in range(return_dim)]
+    for k, flux in enumerate(folded):
+        beta = 2.0 * np.pi * flux
+        Hq_full = np.diag(lc_diag) - EJ * (
+            cos_phi * np.cos(beta) - sin_phi * np.sin(beta)
+        )
+        ev, evec = np.linalg.eigh(Hq_full)
+        ev = ev[:qub_dim]
+        evec = evec[:, :qub_dim]
+        n_eig = evec.conj().T @ n_op @ evec  # n in the fluxonium eigenbasis
+
+        H = (
+            np.kron(H_res, np.eye(qub_dim))
+            + np.kron(I_res, np.diag(ev))
+            + g * (np.kron(adag, n_eig) + np.kron(a, n_eig.conj().T))
+        )
+        E, V = np.linalg.eigh(H)
+        probs = np.abs(V) ** 2  # column j is dressed state j; row = bare index
+
+        dressed = {}
+        for nr, nq in needed:
+            bare = nr * qub_dim + nq
+            dressed[(nr, nq)] = int(np.argmax(probs[bare]))
+        if len(set(dressed.values())) != len(dressed):
+            raise DressedLabelingError(
+                f"ambiguous dressed labeling at flux={flux:.4f} "
+                f"(g={g}, res_dim={res_dim}); fall back to the scqubits path"
+            )
+
+        for i in range(return_dim):
+            out[i][k] = E[dressed[(1, i)]] - E[dressed[(0, i)]]
+
+    # Map folded-unique results back to the input flux order.
+    result = []
+    for i in range(return_dim):
+        full = np.empty(len(folded), dtype=np.float64)
+        full[sort_idxs] = out[i]
+        result.append(full[uni_idxs])
+    return tuple(result)

@@ -48,7 +48,7 @@ def _params_json(tmp_path):
 
 
 def test_full_pipeline(monkeypatch, tmp_path, onetone_hdf5):
-    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux", _stub)
+    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux_fast", _stub)
     onetone_path, *_ = onetone_hdf5
     params_path = _params_json(tmp_path)
 
@@ -100,7 +100,7 @@ def test_full_pipeline(monkeypatch, tmp_path, onetone_hdf5):
 
 
 def test_predictor_rebuilt_when_inputs_change(monkeypatch, tmp_path, onetone_hdf5):
-    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux", _stub)
+    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux_fast", _stub)
     onetone_path, *_ = onetone_hdf5
     params_path = _params_json(tmp_path)
     state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))

@@ -98,7 +98,7 @@ def test_sections_gated_on_pipeline_progress(qapp):
 
 
 def test_preprocess_done_slot_records_and_enables(qapp, monkeypatch):
-    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux", _stub)
+    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux_fast", _stub)
     state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
     state.set_fit_inputs(_inputs())
     state.set_onetone(_onetone())
@@ -210,7 +210,7 @@ def test_tune_button_disabled_during_compute(qapp, monkeypatch):
     # so a new compute cannot start while one is in flight.
     from zcu_tools.gui.app.dispersive.ui.pipeline_panel import _TuneData
 
-    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux", _stub)
+    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux_fast", _stub)
     state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
     state.set_fit_inputs(_inputs())
     state.set_onetone(_onetone())
