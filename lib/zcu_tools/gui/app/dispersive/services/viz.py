@@ -166,24 +166,38 @@ def render_dispersive_with_onetone(
     ax.legend(loc="upper right", fontsize="small")
 
 
-def render_dispersive_shift(
-    figure: Figure,
+def compute_chi_vs_flux(
     params: tuple[float, float, float],
     t_fluxs: NDArray[np.float64],
     bare_rf: float,
     g: float,
     upto: int = 5,
+) -> NDArray[np.float64]:
+    """The chi-vs-flux array for the dispersive-shift figure (scqubits — heavy).
+
+    Pure and off-main-safe: this is the expensive part of the result figure, split
+    out so it can run on a worker thread while ``render_dispersive_shift`` (drawing
+    only) stays on the Qt main thread.
+    """
+    return calculate_chi_vs_flux(
+        params, t_fluxs, bare_rf, g, progress=False, res_dim=upto + 2
+    )
+
+
+def render_dispersive_shift(
+    figure: Figure,
+    params: tuple[float, float, float],
+    t_fluxs: NDArray[np.float64],
+    chi: NDArray[np.float64],
+    upto: int = 5,
 ) -> None:
     """matplotlib port of ``plot_dispersive_shift`` (product figure 2, chi in MHz).
 
-    Computes chi vs flux via ``calculate_chi_vs_flux`` (scqubits — heavy) and plots
-    the per-level differences in MHz.
+    ``chi`` is precomputed by ``compute_chi_vs_flux`` (off-main); this only draws the
+    per-level differences in MHz, so it is cheap and stays on the main thread.
     """
     figure.clear()
     ax = figure.add_subplot(1, 1, 1)
-    chi = calculate_chi_vs_flux(
-        params, t_fluxs, bare_rf, g, progress=False, res_dim=upto + 2
-    )
     ax.axhline(y=0.0, color="black", linewidth=2, linestyle="--")
     abs_mean = 0.0
     for i in range(upto):

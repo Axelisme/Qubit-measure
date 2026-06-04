@@ -91,11 +91,10 @@ def test_sections_gated_on_pipeline_progress(qapp):
     panel._sync_enabled()
     assert panel._tune_box.isEnabled()
     assert panel._autofit_box.isEnabled()
-    assert not panel._result_box.isEnabled()
+    assert not panel._export_box.isEnabled()  # no result yet
 
     state.set_disp_result(g=0.06, bare_rf=5.3, auto=True)
     panel._sync_enabled()
-    assert panel._result_box.isEnabled()
     assert panel._export_box.isEnabled()
 
 
@@ -144,8 +143,18 @@ def test_each_worker_routes_to_its_own_bar(qapp):
     panel._end_progress()
 
 
-def test_autofit_done_slot_records_and_updates_sliders(qapp, monkeypatch):
+def test_autofit_done_records_and_triggers_result_render(qapp, monkeypatch):
+    # auto-fit done records the result + sliders, then auto-spawns the result
+    # worker (no separate render button). Stub both scqubits paths so the spawned
+    # worker is instant, and wait for the pool so it cannot outlive the panel.
+    import zcu_tools.gui.app.dispersive.ui.pipeline_panel as panel_mod
+
     monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux", _stub)
+    monkeypatch.setattr(
+        panel_mod,
+        "compute_chi_vs_flux",
+        lambda params, t_fluxs, bare_rf, g, upto=5: np.zeros((len(t_fluxs), upto + 2)),
+    )
     state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
     state.set_fit_inputs(_inputs())
     state.set_onetone(_onetone())
@@ -159,10 +168,38 @@ def test_autofit_done_slot_records_and_updates_sliders(qapp, monkeypatch):
     # sliders reflect the fitted values (MHz)
     assert panel._g_spin.value() == pytest.approx(70.0)
     assert panel._rf_spin.value() == pytest.approx(5350.0)
-    assert panel._result_box.isEnabled()
+    assert panel._export_box.isEnabled()  # result available
+    panel._pool.waitForDone(5000)  # let the result worker finish before teardown
 
 
-def test_tune_slider_change_predicts_without_crash(qapp, monkeypatch):
+def test_tune_done_slot_records_manual_fit_and_draws(qapp):
+    # the predict worker's main-thread done slot: records the chosen g/bare_rf and
+    # draws the tune figure (no scqubits — _TuneData carries precomputed arrays).
+    from zcu_tools.gui.app.dispersive.ui.pipeline_panel import _TuneData
+
+    state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
+    state.set_fit_inputs(_inputs())
+    state.set_onetone(_onetone())
+    state.set_preprocess(_preprocess())
+    panel = _panel(qapp, state)
+
+    t = np.linspace(0.0, 1.0, 12)
+    data = _TuneData(
+        rf_0=np.full(12, 5.4), rf_1=np.full(12, 5.6), t_fluxs=t, g=0.065, bare_rf=5.32
+    )
+    panel._on_tune_done(data)
+
+    assert state.disp_fit.g == pytest.approx(0.065)
+    assert state.disp_fit.bare_rf == pytest.approx(5.32)
+    assert state.disp_fit.auto_fit_done is False
+    assert panel._tune_artists is not None  # figure drawn
+
+
+def test_tune_button_disabled_during_compute(qapp, monkeypatch):
+    # pressing "Use these g/r_f" disables the button until the worker finishes,
+    # so a new compute cannot start while one is in flight.
+    from zcu_tools.gui.app.dispersive.ui.pipeline_panel import _TuneData
+
     monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux", _stub)
     state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
     state.set_fit_inputs(_inputs())
@@ -170,23 +207,9 @@ def test_tune_slider_change_predicts_without_crash(qapp, monkeypatch):
     state.set_preprocess(_preprocess())
     panel = _panel(qapp, state)
 
-    # a slider move triggers _on_tune_changed → predict → redraw (no raise)
-    panel._g_spin.setValue(80.0)
-    panel._on_tune_changed()
-    assert panel._tune_artists is not None
-
-
-def test_finish_tune_records_manual_result(qapp):
-    state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
-    state.set_fit_inputs(_inputs())
-    state.set_onetone(_onetone())
-    state.set_preprocess(_preprocess())
-    panel = _panel(qapp, state)
-
-    panel._g_spin.setValue(65.0)
-    panel._rf_spin.setValue(5320.0)
-    panel._on_finish_tune()
-
-    assert state.disp_fit.g == pytest.approx(0.065)
-    assert state.disp_fit.bare_rf == pytest.approx(5.32)
-    assert state.disp_fit.auto_fit_done is False
+    panel._on_tune()  # spawns the worker
+    assert panel._tune_btn.isEnabled() is False
+    # the done slot re-enables it
+    t = np.linspace(0.0, 1.0, 12)
+    panel._on_tune_done(_TuneData(np.full(12, 5.4), np.full(12, 5.6), t, 0.06, 5.3))
+    assert panel._tune_btn.isEnabled() is True

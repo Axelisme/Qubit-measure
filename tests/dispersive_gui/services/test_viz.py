@@ -53,13 +53,22 @@ def test_render_dispersive_with_onetone_dejumps():
     assert len(fig.axes) == 1
 
 
-def test_render_dispersive_shift_uses_chi(monkeypatch):
+def test_compute_chi_vs_flux_passthrough(monkeypatch):
+    from zcu_tools.gui.app.dispersive.services.viz import compute_chi_vs_flux
+
     def fake_chi(params, fluxs, bare_rf, g, *, progress=False, res_dim=7):
-        # (len(fluxs), res_dim) increasing per column so diffs are positive
         return np.outer(np.ones(len(fluxs)), np.arange(res_dim)) * 0.01
 
     monkeypatch.setattr(viz_mod, "calculate_chi_vs_flux", fake_chi)
     t = np.linspace(0.0, 1.0, 40).astype(np.float64)
+    chi = compute_chi_vs_flux((4.0, 1.0, 0.5), t, 5.3, 0.06, upto=5)
+    assert chi.shape == (40, 7)  # res_dim = upto + 2
+
+
+def test_render_dispersive_shift_draws_precomputed_chi():
+    # render takes a precomputed chi (the heavy compute is split out); no scqubits.
+    t = np.linspace(0.0, 1.0, 40).astype(np.float64)
+    chi = np.outer(np.ones(40), np.arange(7)) * 0.01
     fig = Figure()
-    render_dispersive_shift(fig, (4.0, 1.0, 0.5), t, 5.3, 0.06, upto=5)
+    render_dispersive_shift(fig, (4.0, 1.0, 0.5), t, chi, upto=5)
     assert len(fig.axes) == 1
