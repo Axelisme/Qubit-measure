@@ -1,56 +1,69 @@
 """Sensible default starting directories for the file dialogs.
 
 Derived from the project (chip / qubit / result_dir / database_path) so the user
-doesn't have to navigate from scratch each time. Each helper returns a directory
-that exists where possible (falling back up the tree, then to ""), so passing it
-to a Qt file dialog just opens it at a useful place.
+doesn't have to navigate from scratch each time. The *intended* directory is
+computed from the project layout (e.g. ``result/<chip>/<qubit>/data/fluxdep`` for
+processed spectra) even when it doesn't exist yet (before the first export); the
+helper then returns the nearest existing ancestor, so the dialog opens close to
+the right place instead of at the root.
 """
 
 from __future__ import annotations
 
 import os
 
+from zcu_tools.fluxdep_gui.services.export import default_result_dir
 from zcu_tools.fluxdep_gui.state import ProjectInfo
 
 # The repo's bundled simulation databases (relative to the cwd a launch uses).
 _SIM_DB_DIR = os.path.join("Database", "simulation")
 
 
-def _first_existing(*candidates: str) -> str:
-    """The first candidate path that exists, else ""."""
-    for path in candidates:
-        if path and os.path.isdir(path):
-            return path
-    return ""
+def _nearest_existing(path: str) -> str:
+    """The deepest existing ancestor of ``path`` (``path`` itself if it exists).
+
+    Lets a dialog open near a not-yet-created target instead of at the cwd/root.
+    Returns "" if nothing in the chain exists (then Qt opens the cwd).
+    """
+    path = os.path.abspath(path) if path else ""
+    while path and not os.path.isdir(path):
+        parent = os.path.dirname(path)
+        if parent == path:  # reached the filesystem root
+            return ""
+        path = parent
+    return path
+
+
+def _project_result_dir(project: ProjectInfo) -> str:
+    """The project's result dir, or the chip/qubit-derived default if unset."""
+    return project.result_dir or default_result_dir(project.chip_name, project.qub_name)
 
 
 def raw_spectrum_dir(project: ProjectInfo) -> str:
     """Where raw spectrum hdf5 files live — the project's database_path root."""
-    return _first_existing(project.database_path)
+    return _nearest_existing(project.database_path)
 
 
 def processed_spectrum_dir(project: ProjectInfo) -> str:
     """Where exported spectrums.hdf5 lives — ``<result_dir>/data/fluxdep``."""
-    if project.result_dir:
-        return _first_existing(
-            os.path.join(project.result_dir, "data", "fluxdep"),
-            project.result_dir,
-        )
-    return ""
+    target = os.path.join(_project_result_dir(project), "data", "fluxdep")
+    return _nearest_existing(target)
 
 
 def database_dir(project: ProjectInfo) -> str:
     """Where the precomputed search database lives.
 
-    Prefers the project's database_path, then the repo's bundled
+    The project's database_path if set, else the repo's bundled
     ``Database/simulation`` directory.
     """
-    return _first_existing(project.database_path, _SIM_DB_DIR)
+    if project.database_path:
+        return _nearest_existing(project.database_path)
+    return _nearest_existing(_SIM_DB_DIR)
 
 
 def params_dir(project: ProjectInfo) -> str:
     """Where params.json is written — the project's result_dir."""
-    return _first_existing(project.result_dir)
+    return _nearest_existing(_project_result_dir(project))
 
 
 def default_database_file(project: ProjectInfo) -> str:
