@@ -126,6 +126,10 @@ class PipelinePanelWidget(QWidget):
         self._channel = GuiProgressBarChannel()
         self._channel.progress.connect(self._on_progress)
         self._tune_artists = None
+        # The progress signal is shared by both workers (only one runs at a time);
+        # this points at the bar of whichever worker is currently active, so the
+        # preprocess (step 3) and auto-fit (step 5) bars stay independent.
+        self._active_progress: Optional[QProgressBar] = None
 
         self._build_ui()
         self._sync_enabled()
@@ -134,8 +138,12 @@ class PipelinePanelWidget(QWidget):
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.addWidget(self._build_inputs_section())
-        root.addWidget(self._build_load_section())
+        # Steps 1 & 2 are small (a couple of buttons + a label each), so place them
+        # side by side instead of two full-width rows.
+        top_row = QHBoxLayout()
+        top_row.addWidget(self._build_inputs_section(), stretch=1)
+        top_row.addWidget(self._build_load_section(), stretch=1)
+        root.addLayout(top_row)
         root.addWidget(self._build_preprocess_section())
         root.addWidget(self._build_tune_section(), stretch=1)
         root.addWidget(self._build_autofit_section())
@@ -183,7 +191,7 @@ class PipelinePanelWidget(QWidget):
         self._progress = QProgressBar()
         self._progress.setVisible(False)
         layout.addWidget(self._progress)
-        self._diag_figure = Figure(figsize=(9, 3))
+        self._diag_figure = Figure(figsize=(5, 9))
         self._diag_canvas = FigureCanvasQTAgg(self._diag_figure)
         layout.addWidget(self._diag_canvas)
         return self._preprocess_box
@@ -244,6 +252,9 @@ class PipelinePanelWidget(QWidget):
         self._autofit_btn = QPushButton("Auto-fit g")
         self._autofit_btn.clicked.connect(self._on_autofit)
         layout.addWidget(self._autofit_btn)
+        self._autofit_progress = QProgressBar()
+        self._autofit_progress.setVisible(False)
+        layout.addWidget(self._autofit_progress)
         self._autofit_label = QLabel("")
         layout.addWidget(self._autofit_label)
         return self._autofit_box
@@ -372,8 +383,7 @@ class PipelinePanelWidget(QWidget):
 
     def _on_preprocess(self) -> None:
         self._preprocess_btn.setEnabled(False)
-        self._progress.setVisible(True)
-        self._progress.setRange(0, 0)
+        self._begin_progress(self._progress)
         worker = _PreprocessWorker(self._ctrl, self._channel.factory())
         worker.signals.done.connect(self._on_preprocess_done)
         worker.signals.failed.connect(self._on_preprocess_failed)
@@ -382,14 +392,14 @@ class PipelinePanelWidget(QWidget):
     def _on_preprocess_done(self, result: PreprocessResult) -> None:
         self._ctrl.record_preprocess(result)
         self._preprocess_btn.setEnabled(True)
-        self._progress.setVisible(False)
+        self._end_progress()
         self._render_diagnostic(result)
         self._sync_enabled()
         self._refresh_tune()
 
     def _on_preprocess_failed(self, message: str) -> None:
         self._preprocess_btn.setEnabled(True)
-        self._progress.setVisible(False)
+        self._end_progress()
         self._warn("Preprocess failed", friendly_fit_message("Preprocess", message))
 
     def _render_diagnostic(self, result: PreprocessResult) -> None:
@@ -400,10 +410,11 @@ class PipelinePanelWidget(QWidget):
         fig = self._diag_figure
         fig.clear()
         # add_subplot (vs subplots) gives a precise Axes type to pyright, avoiding
-        # the subplots() overload's "not iterable" unpacking error.
-        ax1 = fig.add_subplot(1, 3, 1)
-        ax2 = fig.add_subplot(1, 3, 2)
-        ax3 = fig.add_subplot(1, 3, 3)
+        # the subplots() overload's "not iterable" unpacking error. Stacked
+        # vertically so the three share the flux x-axis at a glance.
+        ax1 = fig.add_subplot(3, 1, 1)
+        ax2 = fig.add_subplot(3, 1, 2)
+        ax3 = fig.add_subplot(3, 1, 3)
         extent = (
             float(result.sp_fluxs[0]),
             float(result.sp_fluxs[-1]),
@@ -522,8 +533,7 @@ class PipelinePanelWidget(QWidget):
             self._warn("Auto-fit failed", friendly_fit_message("Auto-fit", exc))
             return
         self._autofit_btn.setEnabled(False)
-        self._progress.setVisible(True)
-        self._progress.setRange(0, 0)
+        self._begin_progress(self._autofit_progress)
         self._autofit_label.setText("Fitting…")
         worker = _AutoFitWorker(self._ctrl, self._channel.factory())
         worker.signals.done.connect(self._on_autofit_done)
@@ -533,7 +543,7 @@ class PipelinePanelWidget(QWidget):
     def _on_autofit_done(self, result: AutoFitResult) -> None:
         self._ctrl.record_autofit_result(result)
         self._autofit_btn.setEnabled(True)
-        self._progress.setVisible(False)
+        self._end_progress()
         fit = self._ctrl.state.disp_fit
         assert fit.g is not None and fit.bare_rf is not None
         self._g_spin.setValue(1e3 * fit.g)
@@ -546,7 +556,7 @@ class PipelinePanelWidget(QWidget):
 
     def _on_autofit_failed(self, message: str) -> None:
         self._autofit_btn.setEnabled(True)
-        self._progress.setVisible(False)
+        self._end_progress()
         self._autofit_label.setText("Auto-fit failed.")
         self._warn("Auto-fit failed", friendly_fit_message("Auto-fit", message))
 
@@ -605,12 +615,27 @@ class PipelinePanelWidget(QWidget):
 
     # --- progress + messages --------------------------------------------
 
+    def _begin_progress(self, bar: QProgressBar) -> None:
+        """Show ``bar`` and route the shared progress signal to it."""
+        self._active_progress = bar
+        bar.setVisible(True)
+        bar.setRange(0, 0)
+
+    def _end_progress(self) -> None:
+        """Hide the active progress bar and stop routing to it."""
+        if self._active_progress is not None:
+            self._active_progress.setVisible(False)
+        self._active_progress = None
+
     def _on_progress(self, n: float, total: float, desc: str) -> None:
+        bar = self._active_progress
+        if bar is None:
+            return
         if total > 0:
-            self._progress.setRange(0, int(total))
-            self._progress.setValue(int(n))
+            bar.setRange(0, int(total))
+            bar.setValue(int(n))
         else:
-            self._progress.setRange(0, 0)
+            bar.setRange(0, 0)
 
     def _warn(self, title: str, message: str) -> None:
         QMessageBox.warning(self, title, message)

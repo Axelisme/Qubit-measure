@@ -113,6 +113,37 @@ def test_preprocess_done_slot_records_and_enables(qapp, monkeypatch):
     assert panel._tune_box.isEnabled()
 
 
+def test_preprocess_and_autofit_have_independent_progress_bars(qapp):
+    state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
+    panel = _panel(qapp, state)
+    # two distinct bars, both hidden initially
+    assert panel._progress is not panel._autofit_progress
+    assert not panel._progress.isVisible()
+    assert not panel._autofit_progress.isVisible()
+
+    # routing the shared progress signal targets whichever bar is active
+    panel._begin_progress(panel._autofit_progress)
+    assert panel._active_progress is panel._autofit_progress
+    panel._on_progress(3.0, 10.0, "Fitting")
+    assert panel._autofit_progress.value() == 3  # auto-fit bar advanced
+    panel._end_progress()
+    assert not panel._autofit_progress.isVisible()
+    assert panel._active_progress is None
+    # with no active worker, a stray progress signal is ignored (no bar updated)
+    panel._on_progress(5.0, 10.0, "stray")  # must not raise / touch any bar
+
+
+def test_each_worker_routes_to_its_own_bar(qapp):
+    state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
+    panel = _panel(qapp, state)
+    # preprocess routes to the preprocess bar
+    panel._begin_progress(panel._progress)
+    panel._on_progress(4.0, 8.0, "edelay")
+    assert panel._progress.value() == 4
+    assert panel._active_progress is panel._progress
+    panel._end_progress()
+
+
 def test_autofit_done_slot_records_and_updates_sliders(qapp, monkeypatch):
     monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux", _stub)
     state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
