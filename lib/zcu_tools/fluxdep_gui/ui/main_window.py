@@ -52,7 +52,6 @@ from zcu_tools.fluxdep_gui.ui.interactive.find_points import FindPointsWidget
 from zcu_tools.fluxdep_gui.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.fluxdep_gui.ui.interactive.onetone import OneToneWidget
 from zcu_tools.fluxdep_gui.ui.interactive.result_preview import ResultPreviewWidget
-from zcu_tools.fluxdep_gui.ui.interactive.selector import SelectorWidget
 
 logger = logging.getLogger(__name__)
 
@@ -105,15 +104,12 @@ class MainWindow(QMainWindow):
         io_row.addWidget(self._export_btn)
         left.addLayout(io_row)
 
-        self._filter_btn = QPushButton("Cross-spectrum filter…")
-        self._filter_btn.clicked.connect(self._on_filter_clicked)
-        left.addWidget(self._filter_btn)
-
-        # The v2 fit tail: search a database for (EJ, EC, EL) over the selected
-        # joint point cloud and export params.json.
-        self._fit_btn = QPushButton("Fit spectrum…")
-        self._fit_btn.clicked.connect(self._on_fit_clicked)
-        left.addWidget(self._fit_btn)
+        # The v2 analysis tail: one panel with Filter / Search / Show tabs over
+        # the selected joint point cloud (cross-spectrum filter → database search
+        # → fit visualisation + display tools → export params.json).
+        self._analyze_btn = QPushButton("Analyze…")
+        self._analyze_btn.clicked.connect(self._on_analyze_clicked)
+        left.addWidget(self._analyze_btn)
 
         left_panel = QWidget()
         left_panel.setLayout(left)
@@ -127,11 +123,11 @@ class MainWindow(QMainWindow):
         self._placeholder.setEnabled(False)
         self._editor_stack.addWidget(self._placeholder)
         self._current_editor: Optional[QWidget] = None
-        # The fit panel is a SINGLETON kept alive in the stack: built once on
-        # first use and only shown/hidden after, so its form / paths / figures
-        # survive switching away and back (it is not a _current_editor that
-        # _clear_editor would destroy).
-        self._fit_panel: Optional[QWidget] = None
+        # The analyze panel is a SINGLETON kept alive in the stack: built once on
+        # first use and only shown/hidden after, so its tabs / form / paths /
+        # figures survive switching away and back (it is not a _current_editor
+        # that _clear_editor would destroy).
+        self._analyze_panel: Optional[QWidget] = None
 
         # A draggable splitter lets the user resize the spectrum list vs editor.
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -311,56 +307,25 @@ class MainWindow(QMainWindow):
         self._clear_editor()
         self._mount_point_selector(entry)
 
-    def _on_filter_clicked(self) -> None:
-        """Open the cross-spectrum selector over all spectra with selected points."""
-        from zcu_tools.notebook.persistance import SpectrumResult
-
-        spectrums: dict[str, SpectrumResult] = {
-            n: SpectrumResult(
-                type=e.spec_type,
-                flux_half=e.flux_half,
-                flux_int=e.flux_int,
-                flux_period=e.flux_period,
-                spectrum=e.raw,
-                points=e.points,
-            )
-            for n, e in self._ctrl.state.spectrums.items()
-            if e.points_selected
-        }
-        if not spectrums:
-            self._show_error("No points", "No spectrum has selected points yet.")
-            return
-        selector = SelectorWidget(
-            spectrums, min_distance=self._ctrl.state.selection.min_distance
-        )
-
-        def _on_finish() -> None:
-            _fluxs, _freqs, selected = selector.get_result()
-            self._ctrl.set_selection(selected, selector.min_distance())
-            self._clear_editor()
-
-        selector.finished.connect(_on_finish)
-        self._mount(selector)
-
-    def _on_fit_clicked(self) -> None:
-        """Show the database-search fit panel (a persistent singleton).
+    def _on_analyze_clicked(self) -> None:
+        """Show the analysis panel (Filter / Search / Show tabs) — a singleton.
 
         Built once and kept in the stack; switching to a spectrum clears the
         stage-driven ``_current_editor`` but leaves this panel alive, so its
-        form / database path / figures are preserved across switches.
+        tabs / form / database path / figures are preserved across switches.
         """
-        from zcu_tools.fluxdep_gui.ui.fit_panel import FitPanelWidget
+        from zcu_tools.fluxdep_gui.ui.analyze_panel import AnalyzePanelWidget
 
         if not any(e.points_selected for e in self._ctrl.state.spectrums.values()):
             self._show_error("No points", "Select points on a spectrum first.")
             return
-        # Drop the stage-driven editor (its widget is transient) but DON'T touch
-        # the fit panel; then show the panel, building it on first use.
+        # Drop the stage-driven editor (transient) but DON'T touch the analyze
+        # panel; show it, building it on first use.
         self._clear_editor()
-        if self._fit_panel is None:
-            self._fit_panel = FitPanelWidget(self._ctrl)
-            self._editor_stack.addWidget(self._fit_panel)
-        self._editor_stack.setCurrentWidget(self._fit_panel)
+        if self._analyze_panel is None:
+            self._analyze_panel = AnalyzePanelWidget(self._ctrl)
+            self._editor_stack.addWidget(self._analyze_panel)
+        self._editor_stack.setCurrentWidget(self._analyze_panel)
 
     def _on_load_clicked(self) -> None:
         from zcu_tools.fluxdep_gui.ui.load_dialog import LoadSpectrumDialog

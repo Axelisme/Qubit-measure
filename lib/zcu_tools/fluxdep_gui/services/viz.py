@@ -35,6 +35,71 @@ from zcu_tools.simulate import flux2value
 logger = logging.getLogger(__name__)
 
 
+def derive_auto_limits(
+    spectrums: dict[str, SpectrumEntry],
+    s_fluxs: NDArray[np.float64],
+    s_freqs: NDArray[np.float64],
+    r_f: float = 0.0,
+    sample_f: float = 0.0,
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Auto (x, y) limits matching the notebook visualiser's ``auto_derive_limits``.
+
+    Accumulates the min/max over the same traces the plotly ``FreqFluxDependVisualizer``
+    does: each spectrum's background (flux × freq) range, the selected points, and
+    the constant-frequency reference lines (r_f / half·sample_f / mirror r_f).
+    Returns ``((x_min, x_max), (y_min, y_max))``; falls back to a unit box if there
+    is nothing to bound.
+    """
+    xs_lo, xs_hi = np.inf, -np.inf
+    ys_lo, ys_hi = np.inf, -np.inf
+
+    def _acc_x(lo: float, hi: float) -> None:
+        nonlocal xs_lo, xs_hi
+        xs_lo, xs_hi = min(xs_lo, lo), max(xs_hi, hi)
+
+    def _acc_y(lo: float, hi: float) -> None:
+        nonlocal ys_lo, ys_hi
+        ys_lo, ys_hi = min(ys_lo, lo), max(ys_hi, hi)
+
+    for entry in spectrums.values():
+        spect = entry.raw
+        signals = spect["signals"]
+        flux_mask = np.any(~np.isnan(signals), axis=1)
+        freq_mask = np.any(~np.isnan(signals), axis=0)
+        if not flux_mask.any() or not freq_mask.any():
+            continue
+        fluxs = np.asarray(spect["fluxs"], dtype=np.float64)[flux_mask]
+        freqs = np.asarray(spect["freqs"], dtype=np.float64)[freq_mask]
+        _acc_x(float(fluxs.min()), float(fluxs.max()))
+        _acc_y(float(freqs.min()), float(freqs.max()))
+
+    if s_fluxs.size:
+        _acc_x(float(np.min(s_fluxs)), float(np.max(s_fluxs)))
+    if s_freqs.size:
+        _acc_y(float(np.min(s_freqs)), float(np.max(s_freqs)))
+
+    for freq, _label in _constant_freqs(r_f, sample_f):
+        _acc_y(freq, freq)
+
+    if not np.isfinite(xs_lo):
+        xs_lo, xs_hi = 0.0, 1.0
+    if not np.isfinite(ys_lo):
+        ys_lo, ys_hi = 0.0, 1.0
+    return (xs_lo, xs_hi), (ys_lo, ys_hi)
+
+
+def _constant_freqs(r_f: float, sample_f: float) -> list[tuple[float, str]]:
+    """The (freq, label) constant-frequency reference lines that are non-zero."""
+    lines: list[tuple[float, str]] = []
+    if r_f:
+        lines.append((r_f, "r_f"))
+    if sample_f:
+        lines.append((0.5 * sample_f, "half sample_f"))
+    if sample_f and r_f:
+        lines.append((sample_f - r_f, "mirror r_f"))
+    return lines
+
+
 def _plot_background(ax, spectrums: dict[str, SpectrumEntry]) -> None:
     """Draw each spectrum's normalised amplitude as a gray_r heatmap."""
     for entry in spectrums.values():
@@ -72,14 +137,7 @@ def _plot_simulation_lines(
 
 def _plot_constant_freqs(ax, r_f: float, sample_f: float) -> None:
     """Draw the r_f / half·sample_f / mirror-r_f horizontal reference lines."""
-    lines = []
-    if r_f:
-        lines.append((r_f, "r_f"))
-    if sample_f:
-        lines.append((0.5 * sample_f, "half sample_f"))
-    if sample_f and r_f:
-        lines.append((sample_f - r_f, "mirror r_f"))
-    for freq, name in lines:
+    for freq, name in _constant_freqs(r_f, sample_f):
         ax.axhline(freq, linestyle="--", linewidth=1.0, color="gray", zorder=1)
         ax.text(
             ax.get_xlim()[0],
@@ -122,23 +180,35 @@ def render_fit_figure(
     flux_half: Optional[float] = None,
     flux_period: Optional[float] = None,
     title: str = "",
+    xlim: Optional[tuple[float, float]] = None,
+    ylim: Optional[tuple[float, float]] = None,
+    show_const_freq: bool = True,
+    plot_transitions: Optional[TransitionDict] = None,
 ) -> None:
     """Render the full fit visualisation onto ``figure`` (cleared first).
 
     ``t_fluxs`` / ``energies`` are the simulated grid (caller computes the latter
     via ``calculate_energy_vs_flux``). ``s_fluxs`` / ``s_freqs`` are the selected
     fit points. ``flux_half`` / ``flux_period`` drive the dev-value secondary axis
-    (omit to skip it). The legend lists the transition lines only.
+    (omit to skip it).
+
+    Show-tab controls:
+    - ``xlim`` / ``ylim`` set the axis limits; ``None`` (default) derives them via
+      :func:`derive_auto_limits` (matching the notebook's ``auto_derive_limits``).
+    - ``show_const_freq`` toggles the r_f / sample_f reference lines.
+    - ``plot_transitions`` overrides which transition categories are drawn (the
+      display subset); ``None`` uses ``transitions`` (the fit set).
     """
     figure.clear()
     ax = figure.add_subplot(1, 1, 1)
 
     _plot_background(ax, spectrums)
-    _plot_simulation_lines(ax, t_fluxs, energies, transitions)
+    _plot_simulation_lines(ax, t_fluxs, energies, plot_transitions or transitions)
     ax.scatter(
         s_fluxs, s_freqs, color="blue", s=12, alpha=0.5, zorder=2, label="_points"
     )
-    _plot_constant_freqs(ax, r_f, sample_f)
+    if show_const_freq:
+        _plot_constant_freqs(ax, r_f, sample_f)
 
     ax.set_xlabel("Flux")
     ax.set_ylabel("Frequency (GHz)")
@@ -157,6 +227,11 @@ def render_fit_figure(
             fontsize=7,
             loc="upper right",
         )
+
+    # Limits: explicit override, else auto (notebook auto_derive_limits parity).
+    auto_x, auto_y = derive_auto_limits(spectrums, s_fluxs, s_freqs, r_f, sample_f)
+    ax.set_xlim(*(xlim if xlim is not None else auto_x))
+    ax.set_ylim(*(ylim if ylim is not None else auto_y))
 
     if flux_half is not None and flux_period:
         _add_dev_value_axis(ax, flux_half, flux_period)

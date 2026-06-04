@@ -1,16 +1,19 @@
-"""FitPanelWidget — the v2 database-search fit panel.
+"""AnalyzePanelWidget — the v2 analysis panel: Filter / Search / Show tabs.
 
-Shown in the editing area (via the "Fit spectrum…" button). A structured form
-collects the search inputs; a worker thread runs ``search_in_database`` (it
-releases the GIL in numba, so a thread keeps the UI live without process IPC);
-the result is the best (EJ, EC, EL) plus a matplotlib visualisation and the
-search's native per-parameter diagnostic figure. An Export button writes
-``params.json``.
+One panel (a MainWindow singleton) gathers the three post-selection analysis
+steps that used to be separate buttons:
 
-The search is NOT cancellable (a single deterministic sweep) — the panel just
-disables the Search button and shows progress while it runs. Progress is fed from
-the worker through a ``GuiProgressBarChannel`` (queued Qt signal) so the notebook
-search's ``make_pbar`` calls drive a real Qt progress bar.
+- **Filter**: the cross-spectrum selector over the joint point cloud.
+- **Search**: the database-search form + the search's native diagnostic figure.
+- **Show**: the fit visualisation (background / simulation lines / points /
+  constant-freq lines), with display tools — y/x axis limits (default matching
+  the notebook's ``auto_derive_limits``), r_f / sample_f reference-line toggles,
+  and a transition display subset.
+
+The search runs on a worker thread; its pyplot diagnostic figure is routed into
+a FigureContainer by the embedded matplotlib backend (see ``mpl_backend`` /
+``plot_host``). pyplot's global figure stack is cleared before each search so a
+stale figure cannot resurface.
 """
 
 from __future__ import annotations
@@ -25,11 +28,11 @@ from matplotlib.figure import Figure
 from qtpy.QtCore import (  # type: ignore[attr-defined]
     QObject,
     QRunnable,
-    Qt,  # type: ignore[attr-defined]
     QThreadPool,
-    Signal,  # type: ignore[attr-defined]
+    Signal,
 )
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
@@ -40,15 +43,16 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QLineEdit,
     QProgressBar,
     QPushButton,
-    QSplitter,
     QStackedWidget,
     QTabWidget,
+    QVBoxLayout,
     QWidget,
 )
 
 from zcu_tools.fluxdep_gui.controller import Controller
 from zcu_tools.fluxdep_gui.services.fit import SearchResult
-from zcu_tools.fluxdep_gui.services.viz import render_fit_figure
+from zcu_tools.fluxdep_gui.services.viz import derive_auto_limits, render_fit_figure
+from zcu_tools.fluxdep_gui.ui.error_messages import friendly_fit_message
 from zcu_tools.fluxdep_gui.ui.gui_pbar import GuiProgressBarChannel
 from zcu_tools.fluxdep_gui.ui.plot_host import FigureContainer, set_current_container
 from zcu_tools.fluxdep_gui.ui.transitions_form import TransitionsForm
@@ -59,7 +63,6 @@ logger = logging.getLogger(__name__)
 _N_SIM_FLUX = 1000  # simulated flux grid resolution for the visualisation
 
 # (EJb, ECb, ELb) bound presets — the notebook's named fitting ranges (GHz).
-# Selecting a preset fills the bound spin boxes; transitions are independent.
 _BOUND_PRESETS: dict[str, tuple[tuple[float, float], ...]] = {
     "general": ((2.0, 15.0), (0.2, 2.0), (0.1, 2.0)),
     "integer": ((3.0, 6.0), (0.8, 2.0), (0.08, 0.2)),
@@ -67,9 +70,9 @@ _BOUND_PRESETS: dict[str, tuple[tuple[float, float], ...]] = {
 }
 
 
-def _bound_spinbox(value: float) -> QDoubleSpinBox:
+def _bound_spinbox(value: float, hi: float = 1000.0) -> QDoubleSpinBox:
     box = QDoubleSpinBox()
-    box.setRange(0.0, 1000.0)
+    box.setRange(-hi, hi)
     box.setDecimals(3)
     box.setSingleStep(0.1)
     box.setValue(value)
@@ -77,21 +80,12 @@ def _bound_spinbox(value: float) -> QDoubleSpinBox:
 
 
 class _SearchSignals(QObject):
-    # SearchResult on success; (message) on error.
     done = Signal(object)
     failed = Signal(str)
 
 
 class _SearchWorker(QRunnable):
-    """Runs the PURE ``compute_search`` off the main thread (it releases the GIL).
-
-    ``compute_search`` reads State up front but writes nothing, so it is safe to
-    run on a worker thread (per the main-thread State invariant). The result is
-    emitted to the main thread, where ``_on_search_done`` records it on State via
-    ``record_search_result``. The numba kernel releases the GIL, so a thread (not
-    a process) keeps the UI live without paying the cost of pickling the large
-    signal arrays across a process boundary.
-    """
+    """Runs the PURE ``compute_search`` off the main thread (it releases the GIL)."""
 
     def __init__(self, ctrl: Controller, pbar_factory) -> None:
         super().__init__()
@@ -111,8 +105,8 @@ class _SearchWorker(QRunnable):
         self.signals.done.emit(result)
 
 
-class FitPanelWidget(QWidget):
-    """Structured search-parameter form + result visualisation + export."""
+class AnalyzePanelWidget(QWidget):
+    """Filter / Search / Show tabs over the selected joint point cloud."""
 
     def __init__(self, ctrl: Controller, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -120,6 +114,7 @@ class FitPanelWidget(QWidget):
         self._pool = QThreadPool.globalInstance() or QThreadPool(self)
         self._channel = GuiProgressBarChannel()
         self._channel.progress.connect(self._on_progress)
+        self._filter_widget: Optional[QWidget] = None
 
         self._build_ui()
         self._load_from_state()
@@ -127,9 +122,70 @@ class FitPanelWidget(QWidget):
     # --- construction ----------------------------------------------------
 
     def _build_ui(self) -> None:
-        root = QHBoxLayout(self)
+        root = QVBoxLayout(self)
+        self._tabs = QTabWidget()
+        self._tabs.addTab(self._build_filter_tab(), "Filter")
+        self._tabs.addTab(self._build_search_tab(), "Search")
+        self._tabs.addTab(self._build_show_tab(), "Show")
+        self._tabs.currentChanged.connect(self._on_tab_changed)
+        root.addWidget(self._tabs)
 
-        # Left: the structured form (width adjustable via the splitter).
+    # --- Filter tab ------------------------------------------------------
+
+    def _build_filter_tab(self) -> QWidget:
+        holder = QWidget()
+        self._filter_layout = QVBoxLayout(holder)
+        self._filter_placeholder = QLabel(
+            "Select points on a spectrum first, then open this tab."
+        )
+        self._filter_placeholder.setEnabled(False)
+        self._filter_layout.addWidget(self._filter_placeholder)
+        return holder
+
+    def _refresh_filter_tab(self) -> None:
+        """(Re)build the cross-spectrum selector for the current spectra."""
+        from zcu_tools.fluxdep_gui.ui.interactive.selector import SelectorWidget
+        from zcu_tools.notebook.persistance import SpectrumResult
+
+        if self._filter_widget is not None:
+            self._filter_layout.removeWidget(self._filter_widget)
+            self._filter_widget.deleteLater()
+            self._filter_widget = None
+
+        spectrums: dict[str, SpectrumResult] = {
+            n: SpectrumResult(
+                type=e.spec_type,
+                flux_half=e.flux_half,
+                flux_int=e.flux_int,
+                flux_period=e.flux_period,
+                spectrum=e.raw,
+                points=e.points,
+            )
+            for n, e in self._ctrl.state.spectrums.items()
+            if e.points_selected
+        }
+        if not spectrums:
+            self._filter_placeholder.setVisible(True)
+            return
+        self._filter_placeholder.setVisible(False)
+        selector = SelectorWidget(
+            spectrums, min_distance=self._ctrl.state.selection.min_distance
+        )
+
+        def _on_finish() -> None:
+            _fluxs, _freqs, selected = selector.get_result()
+            self._ctrl.set_selection(selected, selector.min_distance())
+
+        selector.finished.connect(_on_finish)
+        self._filter_widget = selector
+        self._filter_layout.addWidget(selector)
+
+    # --- Search tab ------------------------------------------------------
+
+    def _build_search_tab(self) -> QWidget:
+        from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+        from qtpy.QtWidgets import QSplitter  # type: ignore[attr-defined]
+
         form_box = QGroupBox("Search parameters")
         form = QFormLayout(form_box)
 
@@ -143,10 +199,9 @@ class FitPanelWidget(QWidget):
         db_holder.setLayout(db_row)
         form.addRow("Database", db_holder)
 
-        # Preset selects a named (EJb, ECb, ELb) range → fills the bound boxes.
         self._preset = QComboBox()
         self._preset.addItems(sorted(_BOUND_PRESETS))
-        self._preset.activated.connect(self._on_preset_selected)  # only on user pick
+        self._preset.activated.connect(self._on_preset_selected)
         form.addRow("Bounds preset", self._preset)
 
         self._ej_lo, self._ej_hi = _bound_spinbox(2.0), _bound_spinbox(15.0)
@@ -181,32 +236,67 @@ class FitPanelWidget(QWidget):
         self._status = QLabel("")
         form.addRow(self._status)
 
-        # Right: two figures in tabs (each gets the full space). Tab 1 is our fit
-        # visualisation; tab 2 is the search's native diagnostic figure — a
-        # FigureContainer the embedded matplotlib backend routes
-        # search_in_database(plot=True)'s pyplot figure into (so fitting.py just
-        # uses pyplot and the figure lands here).
-        self._tabs = QTabWidget()
-
-        self._fit_figure = Figure(figsize=(6, 4))
-        self._fit_canvas = FigureCanvasQTAgg(self._fit_figure)
-        self._tabs.addTab(self._fit_canvas, "Fit")
-
+        # Right: the search's native diagnostic figure (routed via the backend).
         self._diag_stack = QStackedWidget()
         diag_placeholder = QLabel("Search to see the diagnostic plot.")
         diag_placeholder.setEnabled(False)
         self._diag_stack.addWidget(diag_placeholder)
         self._diag_container = FigureContainer(self._diag_stack, diag_placeholder)
-        self._tabs.addTab(self._diag_stack, "Diagnostic")
 
-        # A draggable splitter lets the user resize the form vs the figures.
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(form_box)
-        splitter.addWidget(self._tabs)
+        splitter.addWidget(self._diag_stack)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([360, 640])
-        root.addWidget(splitter)
+        holder = QWidget()
+        QVBoxLayout(holder).addWidget(splitter)
+        return holder
+
+    # --- Show tab --------------------------------------------------------
+
+    def _build_show_tab(self) -> QWidget:
+        from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+        from qtpy.QtWidgets import QSplitter  # type: ignore[attr-defined]
+
+        tools_box = QGroupBox("Display")
+        tools = QFormLayout(tools_box)
+
+        self._x_lo, self._x_hi = _bound_spinbox(0.0), _bound_spinbox(1.0)
+        self._y_lo, self._y_hi = _bound_spinbox(0.0), _bound_spinbox(10.0)
+        tools.addRow("x limits", self._bound_row(self._x_lo, self._x_hi))
+        tools.addRow("y limits", self._bound_row(self._y_lo, self._y_hi))
+        auto_btn = QPushButton("Auto limits")
+        auto_btn.clicked.connect(self._apply_auto_limits)
+        tools.addRow(auto_btn)
+
+        self._show_const_freq = QCheckBox("r_f / sample_f reference lines")
+        self._show_const_freq.setChecked(True)
+        tools.addRow(self._show_const_freq)
+
+        self._transitions_show = TransitionsForm()
+        tools.addRow(QLabel("Transitions to show"))
+        tools.addRow(self._transitions_show)
+
+        redraw = QPushButton("Apply")
+        redraw.clicked.connect(self._redraw_show)
+        tools.addRow(redraw)
+
+        self._fit_figure = Figure(figsize=(6, 4))
+        self._fit_canvas = FigureCanvasQTAgg(self._fit_figure)
+
+        tools_box.setMaximumWidth(380)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.addWidget(tools_box)
+        splitter.addWidget(self._fit_canvas)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([360, 640])
+        holder = QWidget()
+        QVBoxLayout(holder).addWidget(splitter)
+        return holder
+
+    # --- helpers ---------------------------------------------------------
 
     def _bound_row(self, lo: QDoubleSpinBox, hi: QDoubleSpinBox) -> QWidget:
         row = QHBoxLayout()
@@ -230,12 +320,16 @@ class FitPanelWidget(QWidget):
         self._r_f.setValue(fit.r_f)
         self._sample_f.setValue(fit.sample_f)
         self._transitions_form.set_transitions(fit.transitions)
+        self._transitions_show.set_transitions(fit.transitions)
         self._export_btn.setEnabled(fit.has_result)
 
-    # --- form → State ----------------------------------------------------
+    def _on_tab_changed(self, index: int) -> None:
+        if self._tabs.tabText(index) == "Filter":
+            self._refresh_filter_tab()
+
+    # --- Search actions --------------------------------------------------
 
     def _commit_params(self) -> None:
-        """Read the form into State (fast-fails on a malformed transition field)."""
         transitions = self._transitions_form.get_transitions()
         r_f = self._r_f.value()
         sample_f = self._sample_f.value()
@@ -253,10 +347,7 @@ class FitPanelWidget(QWidget):
             sample_f=sample_f,
         )
 
-    # --- actions ---------------------------------------------------------
-
     def _on_preset_selected(self, _index: int) -> None:
-        """User picked a bounds preset → fill the EJ/EC/EL bound spin boxes."""
         preset = _BOUND_PRESETS.get(self._preset.currentText())
         if preset is None:
             return
@@ -276,8 +367,6 @@ class FitPanelWidget(QWidget):
             self._db_edit.setText(path)
 
     def _on_search(self) -> None:
-        # Block early on an empty / missing database path (don't run the worker
-        # just to fast-fail with a traceback).
         db_path = self._db_edit.text().strip()
         if not db_path:
             self._status.setText("Select a database first.")
@@ -293,17 +382,11 @@ class FitPanelWidget(QWidget):
         self._search_btn.setEnabled(False)
         self._export_btn.setEnabled(False)
         self._progress.setVisible(True)
-        self._progress.setRange(0, 0)  # busy until the first progress tick
+        self._progress.setRange(0, 0)
         self._status.setText("Searching…")
 
-        # Route the search's pyplot diagnostic figure into our container. Set on
-        # the main thread before the worker; cleared when it finishes (the worker
-        # thread reads this module-level value during search_in_database).
-        # Close any pyplot figure left over from a previous search first: pyplot's
-        # global figure stack (Gcf) keeps every plt.figure() that is never closed,
-        # so a second search's plt.show() would otherwise act on a stale, already-
-        # detached figure and raise "not attached". Closing only drops pyplot's
-        # reference; the embedded canvas already lives in the container.
+        # Clear pyplot's global figure stack so a previous search's figure can't
+        # resurface (its embedded canvas already lives in the container).
         import matplotlib.pyplot as plt
 
         plt.close("all")
@@ -325,10 +408,6 @@ class FitPanelWidget(QWidget):
             self._status.setText(desc)
 
     def _on_search_done(self, result: SearchResult) -> None:
-        # Main thread: record the worker's pure result onto State (the search
-        # itself ran off-main and touched no State), then render. The diagnostic
-        # figure is already embedded in the container (the backend routed the
-        # search's pyplot figure there), so we only stop routing now.
         set_current_container(None)
         self._search_btn.setEnabled(True)
         self._progress.setVisible(False)
@@ -336,13 +415,12 @@ class FitPanelWidget(QWidget):
         EJ, EC, EL = result.params
         self._status.setText(f"EJ={EJ:.3f}  EC={EC:.3f}  EL={EL:.3f}")
         self._export_btn.setEnabled(True)
-        self._render_result(result.params)
-        # surface the freshly embedded diagnostic figure
-        self._tabs.setCurrentWidget(self._diag_stack)
+        self._apply_auto_limits()
+        self._redraw_show()
+        # surface the fit visualisation
+        self._tabs.setCurrentIndex(self._tabs.count() - 1)  # Show tab
 
     def _on_search_failed(self, message: str) -> None:
-        from zcu_tools.fluxdep_gui.ui.error_messages import friendly_fit_message
-
         set_current_container(None)
         self._search_btn.setEnabled(True)
         self._progress.setVisible(False)
@@ -350,8 +428,6 @@ class FitPanelWidget(QWidget):
         self._show_message("Search failed", friendly_fit_message("Search", message))
 
     def _on_export(self) -> None:
-        from zcu_tools.fluxdep_gui.ui.error_messages import friendly_fit_message
-
         try:
             path = self._ctrl.export_params()
         except Exception as exc:  # noqa: BLE001 — surface to the panel
@@ -365,23 +441,34 @@ class FitPanelWidget(QWidget):
 
         QMessageBox.warning(self, title, message)
 
-    # --- rendering -------------------------------------------------------
+    # --- Show actions ----------------------------------------------------
 
-    def _render_result(self, params: tuple) -> None:
-        """Draw the fit visualisation (background + sim lines + points + ...)."""
+    def _apply_auto_limits(self) -> None:
+        """Set the x/y limit boxes to the auto-derived (notebook) limits."""
+        fit = self._ctrl.state.fit
+        s_fluxs, s_freqs = self._ctrl.selected_pointcloud()
+        (x_lo, x_hi), (y_lo, y_hi) = derive_auto_limits(
+            self._ctrl.state.spectrums, s_fluxs, s_freqs, fit.r_f, fit.sample_f
+        )
+        self._x_lo.setValue(x_lo)
+        self._x_hi.setValue(x_hi)
+        self._y_lo.setValue(y_lo)
+        self._y_hi.setValue(y_hi)
+
+    def _redraw_show(self) -> None:
+        """Render the fit visualisation with the current display tools."""
+        fit = self._ctrl.state.fit
+        if fit.params is None:
+            return
         spectrums = self._ctrl.state.spectrums
         s_fluxs, s_freqs = self._ctrl.selected_pointcloud()
-        if s_fluxs.size == 0:
-            return
-        flux_lo, flux_hi = float(np.min(s_fluxs)), float(np.max(s_fluxs))
-        if flux_hi <= flux_lo:
-            flux_lo, flux_hi = flux_lo - 0.1, flux_hi + 0.1
+        x_lo, x_hi = self._x_lo.value(), self._x_hi.value()
+        flux_lo, flux_hi = (x_lo, x_hi) if x_hi > x_lo else (0.0, 1.0)
         t_fluxs = np.linspace(flux_lo, flux_hi, _N_SIM_FLUX)
         _, energies = calculate_energy_vs_flux(
-            params, t_fluxs, cutoff=40, evals_count=15
+            fit.params, t_fluxs, cutoff=40, evals_count=15
         )
 
-        fit = self._ctrl.state.fit
         aligned = next((e for e in spectrums.values() if e.aligned), None)
         render_fit_figure(
             self._fit_figure,
@@ -395,6 +482,13 @@ class FitPanelWidget(QWidget):
             sample_f=fit.sample_f,
             flux_half=aligned.flux_half if aligned else None,
             flux_period=aligned.flux_period if aligned else None,
-            title=f"EJ/EC/EL = ({params[0]:.2f}, {params[1]:.2f}, {params[2]:.2f})",
+            title=(
+                f"EJ/EC/EL = ({fit.params[0]:.2f}, {fit.params[1]:.2f}, "
+                f"{fit.params[2]:.2f})"
+            ),
+            xlim=(self._x_lo.value(), self._x_hi.value()),
+            ylim=(self._y_lo.value(), self._y_hi.value()),
+            show_const_freq=self._show_const_freq.isChecked(),
+            plot_transitions=self._transitions_show.get_transitions(),
         )
         self._fit_canvas.draw_idle()
