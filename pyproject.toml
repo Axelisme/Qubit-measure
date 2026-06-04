@@ -29,6 +29,7 @@ client = [
   "nbformat>=4.2.0",
   "scikit-learn",
   "joblib",
+  "threadpoolctl",
   "numba",
   "requests",
   "flask",
