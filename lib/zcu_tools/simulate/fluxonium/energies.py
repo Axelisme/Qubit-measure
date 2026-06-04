@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import TYPE_CHECKING
+from typing_extensions import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from scqubits.core.storage import SpectrumData
@@ -46,6 +46,7 @@ def calculate_energy_vs_flux(
     fluxs: NDArray[np.float64],
     cutoff: int = 40,
     evals_count: int = 20,
+    spectrum_data: Optional[SpectrumData] = None,
 ) -> tuple[SpectrumData, NDArray[np.float64]]:
     """Fluxonium energy levels vs external flux — ~100x faster than scqubits.
 
@@ -58,6 +59,10 @@ def calculate_energy_vs_flux(
     per point using ``cos(phi + beta) = cos(phi) cos(beta) - sin(phi) sin(beta)``
     (exact, since ``beta * I`` commutes with ``phi``).
 
+    Pass a previously returned ``spectrum_data`` to skip the computation entirely
+    and reuse its ``energy_table`` (handy when iterating interactively on a
+    spectrum you've already computed).
+
     Returns ``(SpectrumData, energies)``: the ``SpectrumData`` mirrors the
     scqubits one (``energy_table`` / ``param_vals`` over the folded-unique flux
     grid; ``state_table`` is None, as when states are not stored), and
@@ -67,6 +72,10 @@ def calculate_energy_vs_flux(
     """
     from scqubits.core.fluxonium import Fluxonium
     from scqubits.core.storage import SpectrumData
+
+    if spectrum_data is not None:
+        energies = np.asarray(spectrum_data.energy_table, dtype=np.float64)
+        return spectrum_data, energies  # reuse a precomputed spectrum, skip work
 
     folded_fluxs, sort_idxs, uni_idxs = _fold_unique_fluxs(fluxs)
 

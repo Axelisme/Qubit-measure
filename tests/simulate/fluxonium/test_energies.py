@@ -98,3 +98,21 @@ def test_flux_symmetry_about_half():
         (5.0, 1.0, 0.5), np.array([0.3, 0.7]), cutoff=40, evals_count=10
     )
     np.testing.assert_allclose(energies[0], energies[1], atol=1e-11)
+
+
+def test_spectrum_data_passthrough_skips_computation():
+    # passing a previously returned spectrum_data reuses it (no recomputation):
+    # the same object is returned, and energies come from its energy_table.
+    fluxs = np.linspace(0.0, 0.5, 12)
+    sd, _ = calculate_energy_vs_flux((5.0, 1.0, 0.5), fluxs, cutoff=40, evals_count=10)
+
+    # bogus params/fluxs would give wrong energies IF it recomputed — it must not
+    sd2, energies = calculate_energy_vs_flux(
+        (99.0, 99.0, 99.0),
+        np.array([0.0]),
+        cutoff=40,
+        evals_count=10,
+        spectrum_data=sd,
+    )
+    assert sd2 is sd
+    np.testing.assert_array_equal(energies, np.asarray(sd.energy_table))
