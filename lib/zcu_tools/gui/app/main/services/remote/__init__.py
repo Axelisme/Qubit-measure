@@ -11,7 +11,7 @@ in the Qt-bound adapter layer.
 
 from typing import TYPE_CHECKING
 
-from .errors import ErrorCode, ErrorEnvelope, RemoteError
+from zcu_tools.gui.remote.errors import ErrorCode, ErrorEnvelope, RemoteError
 
 if TYPE_CHECKING:
     from .service import ControlOptions, RemoteControlAdapter

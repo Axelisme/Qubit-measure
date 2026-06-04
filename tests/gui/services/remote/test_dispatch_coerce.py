@@ -14,7 +14,7 @@ from zcu_tools.gui.app.main.services.remote.dispatch import (
     coerce_connect_request,
     coerce_disconnect_device_request,
 )
-from zcu_tools.gui.app.main.services.remote.errors import RemoteError
+from zcu_tools.gui.remote.errors import RemoteError
 
 # ---------------------------------------------------------------------------
 # coerce_connect_request

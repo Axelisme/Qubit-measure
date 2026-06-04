@@ -42,12 +42,19 @@ if TYPE_CHECKING:
     # checking handler/ctrl method names while the runtime import never happens.
     from zcu_tools.gui.app.main.controller import Controller, RenderView, Severity
 
+from zcu_tools.gui.remote.errors import ErrorCode, ErrorEnvelope, RemoteError
+from zcu_tools.gui.remote.framing import (
+    LINE_TERMINATOR,
+    MAX_LINE_BYTES,
+    decode_line,
+    encode_line,
+)
+from zcu_tools.gui.remote.param_spec import validate_params
+from zcu_tools.gui.remote.wire import Response, parse_request, require_str
+
 from .dispatch import METHOD_REGISTRY
-from .errors import ErrorCode, ErrorEnvelope, RemoteError
 from .events import EVENT_SERIALIZERS, wire_event_name
-from .framing import LINE_TERMINATOR, MAX_LINE_BYTES, decode_line, encode_line
-from .param_spec import validate_params
-from .wire import GUI_VERSION, WIRE_VERSION, Response, parse_request, require_str
+from .wire_version import GUI_VERSION, WIRE_VERSION
 
 logger = logging.getLogger(__name__)
 

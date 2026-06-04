@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.app.fluxdep.services.remote.errors import (
+from zcu_tools.gui.app.fluxdep.services.remote.wire_version import (
+    GUI_VERSION,
+    WIRE_VERSION,
+)
+from zcu_tools.gui.remote.errors import (
     ErrorCode,
     ErrorEnvelope,
     RemoteError,
 )
-from zcu_tools.gui.app.fluxdep.services.remote.wire import (
-    GUI_VERSION,
-    WIRE_VERSION,
+from zcu_tools.gui.remote.wire import (
     Response,
     parse_request,
     require_int,

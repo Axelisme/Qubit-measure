@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .param_spec import JsonType, ParamSpec
+from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 
 @dataclass(frozen=True)

@@ -1,12 +1,14 @@
-"""Wire types for the fluxdep-gui RemoteControlAdapter.
+"""Shared wire types for the GUI RemoteControlAdapter (app-agnostic).
 
 Frozen dataclasses for request / response envelopes plus the field-level
-validation primitives (``require_str`` / ``require_int`` / ``optional_bool`` /
-``require_object`` / ``require_json_safe``) that strictly coerce raw wire
-scalars before any ``object`` flows into the ``Controller`` or its services.
+validation primitives (``_require_*`` / ``_optional_*`` / ``require_object`` /
+``require_json_safe``) that strictly coerce raw wire scalars before any
+``Any`` flows into ``Controller`` or domain services.
 
-This layer is transport-pure: it knows field rules but not the fluxdep domain
-shapes they assemble into.
+This layer is transport-pure: it knows field rules but not the domain shapes
+they assemble into. Each GUI app owns its per-app wire/code version constants
+(``WIRE_VERSION`` / ``GUI_VERSION``) in its own ``wire_version.py`` — this
+shared module carries only the envelope + field-primitive mechanism.
 """
 
 from __future__ import annotations
@@ -15,24 +17,6 @@ from dataclasses import dataclass
 from typing import Mapping, Optional
 
 from .errors import ErrorCode, ErrorEnvelope, RemoteError
-
-# Two independent hand-maintained versions reported by the no-auth
-# ``wire.version`` handshake (which also surfaces the MCP server's own
-# MCP_VERSION). Only WIRE_VERSION is *compared*; the code revisions are
-# *reported* so an agent can eyeball whether a reload took effect:
-#
-#   WIRE_VERSION — the mcp<->RPC *interface contract* (RPC method set, their
-#     params, event/serialization shape). The MCP server pins it; a mismatch
-#     means the two sides speak different protocols → hard MISMATCH. Bump ONLY
-#     on a contract change.
-#   GUI_VERSION  — this GUI code's *revision*. Reported, never compared. Bump on
-#     any meaningful GUI change you want to be able to spot a reload of,
-#     INCLUDING pure-internal logic changes that don't touch the wire.
-WIRE_VERSION = 1
-
-# GUI code revision (see header). Bump on any meaningful GUI change you want a
-# stale-process check to flag; independent of WIRE_VERSION.
-GUI_VERSION = 1
 
 # ---------------------------------------------------------------------------
 # Wire envelopes

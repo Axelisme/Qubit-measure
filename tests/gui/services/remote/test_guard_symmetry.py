@@ -22,9 +22,9 @@ from zcu_tools.gui.app.main.registry import Registry
 from zcu_tools.gui.app.main.runner import Runner
 from zcu_tools.gui.app.main.services.guard import GuardError
 from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
-from zcu_tools.gui.app.main.services.remote.errors import ErrorCode, RemoteError
-from zcu_tools.gui.app.main.services.remote.param_spec import validate_params
 from zcu_tools.gui.app.main.state import State
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.remote.param_spec import validate_params
 
 
 def _make_controller(readiness: ContextReadiness) -> Controller:

@@ -26,7 +26,10 @@ from zcu_tools.gui.app.main.io_manager import IOManager
 from zcu_tools.gui.app.main.registry import Registry
 from zcu_tools.gui.app.main.runner import Runner
 from zcu_tools.gui.app.main.services.remote import ControlOptions, RemoteControlAdapter
-from zcu_tools.gui.app.main.services.remote.wire import GUI_VERSION, WIRE_VERSION
+from zcu_tools.gui.app.main.services.remote.wire_version import (
+    GUI_VERSION,
+    WIRE_VERSION,
+)
 from zcu_tools.gui.app.main.state import State
 
 # ---------------------------------------------------------------------------

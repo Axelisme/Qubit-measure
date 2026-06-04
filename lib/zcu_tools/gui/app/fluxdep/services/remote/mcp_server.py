@@ -54,14 +54,15 @@ for _gui_dep in ("qtpy",):
         )
         raise SystemExit(1)
 
-from .method_specs import (  # noqa: E402
-    METHOD_SPECS,
-)
-from .param_spec import (  # noqa: E402
+from zcu_tools.gui.remote.param_spec import (  # noqa: E402
     JsonType,
     build_input_schema,
 )
-from .wire import (  # noqa: E402
+
+from .method_specs import (  # noqa: E402
+    METHOD_SPECS,
+)
+from .wire_version import (  # noqa: E402
     WIRE_VERSION as MCP_WIRE_VERSION,
 )
 

@@ -1,22 +1,13 @@
-"""Wire types for RemoteControlAdapter.
+"""Per-app wire / GUI code version constants for measure-gui.
 
-Frozen dataclasses for request / response envelopes plus the field-level
-validation primitives (``_require_*`` / ``_optional_*`` / ``require_object`` /
-``require_json_safe``) that strictly coerce raw wire scalars before any
-``Any`` flows into ``Controller`` or domain services.
-
-This layer is transport-pure: it knows field rules but not the domain shapes
-they assemble into. The typed-request builders (``coerce_connect_request`` etc.)
-that compose these primitives into connection/device requests live in
-``dispatch.py``, beside their only callers.
+These are the two hand-maintained version integers reported by the no-auth
+``wire.version`` handshake. They are intentionally NOT in the shared
+``zcu_tools.gui.remote.wire`` module — each GUI app evolves its own wire contract
+independently, so the constants (and their per-app changelog) live beside the
+app's own RemoteControlAdapter.
 """
 
 from __future__ import annotations
-
-from dataclasses import dataclass
-from typing import Mapping, Optional
-
-from .errors import ErrorCode, ErrorEnvelope, RemoteError
 
 # Two independent hand-maintained versions reported by the no-auth
 # ``wire.version`` handshake (which also surfaces the MCP server's own
@@ -148,117 +139,3 @@ WIRE_VERSION = 20
 #     step from start/stop/expts at construction (auto_norm, SweepEditor opts
 #     out) so default cfg step is consistent across views (Phase 130, WIRE 20).
 GUI_VERSION = 19
-
-# ---------------------------------------------------------------------------
-# Wire envelopes
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class Request:
-    id: str
-    method: str
-    params: Mapping[str, object]
-
-
-@dataclass(frozen=True)
-class Response:
-    id: str
-    ok: bool
-    result: Optional[Mapping[str, object]] = None
-    error: Optional[ErrorEnvelope] = None
-
-    def to_wire(self) -> dict[str, object]:
-        if self.ok:
-            wire: dict[str, object] = {
-                "id": self.id,
-                "ok": True,
-                "result": self.result or {},
-            }
-        else:
-            assert self.error is not None
-            wire = {"id": self.id, "ok": False, "error": self.error.to_wire()}
-        return wire
-
-
-def parse_request(raw: Mapping[str, object]) -> Request:
-    rid = require_str(raw, "id")
-    method = require_str(raw, "method")
-    params = raw.get("params", {})
-    if not isinstance(params, dict):
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            f"'params' must be an object, got {type(params).__name__}",
-        )
-    return Request(id=rid, method=method, params=params)
-
-
-# ---------------------------------------------------------------------------
-# Field helpers
-# ---------------------------------------------------------------------------
-
-
-def require_str(params: Mapping[str, object], key: str) -> str:
-    val = params.get(key)
-    if val is None:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"missing '{key}'")
-    if not isinstance(val, str):
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            f"'{key}' must be a string, got {type(val).__name__}",
-        )
-    if not val:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"'{key}' must be non-empty")
-    return val
-
-
-def require_int(params: Mapping[str, object], key: str) -> int:
-    val = params.get(key)
-    if val is None:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"missing '{key}'")
-    # bool is a subclass of int in Python; reject it explicitly
-    if isinstance(val, bool) or not isinstance(val, int):
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            f"'{key}' must be an integer, got {type(val).__name__}",
-        )
-    return val
-
-
-def optional_bool(params: Mapping[str, object], key: str, default: bool) -> bool:
-    val = params.get(key)
-    if val is None:
-        return default
-    if not isinstance(val, bool):
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            f"'{key}' must be a boolean if present, got {type(val).__name__}",
-        )
-    return val
-
-
-def require_object(params: Mapping[str, object], key: str) -> Mapping[str, object]:
-    val = params.get(key)
-    if val is None:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"missing '{key}'")
-    if not isinstance(val, dict):
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            f"'{key}' must be an object, got {type(val).__name__}",
-        )
-    return val
-
-
-def require_json_safe(params: Mapping[str, object], key: str) -> object:
-    import json
-
-    val = params.get(key)
-    if key not in params:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"missing '{key}'")
-    try:
-        json.dumps(val)
-    except (TypeError, ValueError) as exc:
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS, f"'{key}' must be JSON-serializable"
-        ) from exc
-    return val

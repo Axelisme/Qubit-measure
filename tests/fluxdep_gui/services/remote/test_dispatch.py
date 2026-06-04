@@ -22,8 +22,8 @@ from zcu_tools.gui.app.fluxdep.services.remote.dispatch import (
     METHOD_REGISTRY,
 )
 from zcu_tools.gui.app.fluxdep.services.remote.method_specs import METHOD_SPECS
-from zcu_tools.gui.app.fluxdep.services.remote.param_spec import validate_params
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, ProjectInfo
+from zcu_tools.gui.remote.param_spec import validate_params
 from zcu_tools.notebook.persistance import TransitionDict
 
 

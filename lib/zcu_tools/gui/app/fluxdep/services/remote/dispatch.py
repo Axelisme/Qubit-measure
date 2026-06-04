@@ -21,8 +21,9 @@ if TYPE_CHECKING:
     # this module). String annotations keep pyright checking the call sites.
     from .service import RemoteControlAdapter
 
+from zcu_tools.gui.remote.param_spec import ParamSpec
+
 from .method_specs import METHOD_SPECS, MethodSpec
-from .param_spec import ParamSpec
 
 logger = logging.getLogger(__name__)
 

@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.gui.app.main.adapter import MetaDictWriteback, ModuleWriteback
 from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
-from zcu_tools.gui.app.main.services.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 
 def _items() -> list:

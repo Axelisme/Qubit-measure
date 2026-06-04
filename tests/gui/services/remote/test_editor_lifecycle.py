@@ -144,7 +144,7 @@ def test_editor_subscribe_handler_updates_state():
 
 
 def test_editor_subscribe_rejects_bad_id():
-    from zcu_tools.gui.app.main.services.remote.errors import ErrorCode, RemoteError
+    from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
     svc, _ = _service()
     state = _state()

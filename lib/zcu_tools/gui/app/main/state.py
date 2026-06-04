@@ -19,6 +19,11 @@ from .adapter import (
 
 logger = logging.getLogger(__name__)
 
+# VersionTable is the shared optimistic-concurrency mechanism (app-agnostic);
+# re-exported so ``state.VersionTable`` stays resolvable. The domain key set +
+# bump↔drop contract are documented below beside the *_VERSION_KEY constants.
+from zcu_tools.gui.version_table import VersionTable as VersionTable  # noqa: E402  (re-export)
+
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
@@ -145,64 +150,6 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
 # guarded op depending on the whole set (run.start) declares this key so a
 # concurrently-added device is detected, which a per-member glob cannot reveal.
 DEVICE_SET_VERSION_KEY = "devices:__set__"
-
-
-class VersionTable:
-    """Monotonic per-resource version counters (optimistic-concurrency guard).
-
-    A passive container: each resource key maps to an integer that only ever
-    increases by one per mutation. Callers (the resource-owning service, on the
-    Qt main thread) ``bump`` a key when they actually write that resource's
-    state. The guard compares an op's declared ``expected_versions`` against the
-    current table atomically inside the main-thread dispatch sequence.
-
-    Resource keys are mid-grained: ``context``, ``soc``, ``device:<name>``,
-    ``devices:__set__`` (device-set cardinality), ``tab:<id>:cfg`` / ``:result``
-    / ``:save_path``, ``tab:<id>`` (existence) and ``editor:<id>``. A key absent
-    from the table means version 0 (never bumped, or its resource was dropped —
-    both read as "gone" by the guard).
-    """
-
-    def __init__(self) -> None:
-        self._versions: dict[str, int] = {}
-
-    def bump(self, key: str) -> int:
-        """Advance a resource's version (a semantic write happened).
-
-        PAIRING CONTRACT — every resource that gets bumped must be dropped by its
-        owner's teardown, or a stale dependency would spuriously match a retained
-        version (the editor bug in Phase 100). The bump↔drop map:
-            tab:<id>* / tab:<id>:cfg/:result/:analyze/:save_path  → State.remove_tab (drop_prefix tab:<id>)
-            device:<name>                                         → State.remove_device (drop_prefix device:<name>)
-            devices:__set__                                       → monotonic set-cardinality counter, never dropped
-            editor:<id>                                           → Controller.drop_editor_version (CfgEditorService._remove)
-            context / soc                                         → process-lifetime singletons, never dropped
-        Adding a new bumped key means adding its drop to the owner's teardown.
-        """
-        new = self._versions.get(key, 0) + 1
-        self._versions[key] = new
-        logger.debug("version bump: %s -> %d", key, new)
-        return new
-
-    def get(self, key: str) -> int:
-        """Current version of ``key`` (0 if never bumped / dropped)."""
-        return self._versions.get(key, 0)
-
-    def snapshot(self) -> dict[str, int]:
-        """Full table copy (the ``resources.versions`` RPC payload)."""
-        return dict(self._versions)
-
-    def drop_prefix(self, prefix: str) -> None:
-        """Forget every key starting with ``prefix`` (e.g. a closed tab).
-
-        A dependency on a dropped key reads as version 0, which the guard
-        treats as stale (the resource the caller depended on is gone).
-        """
-        doomed = [k for k in self._versions if k.startswith(prefix)]
-        for k in doomed:
-            del self._versions[k]
-        if doomed:
-            logger.debug("version drop_prefix: %s -> dropped %s", prefix, doomed)
 
 
 @dataclass(frozen=True)

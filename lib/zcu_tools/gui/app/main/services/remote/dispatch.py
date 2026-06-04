@@ -46,11 +46,11 @@ from zcu_tools.gui.app.main.services.device import (
     SetupDeviceRequest,
 )
 from zcu_tools.gui.app.main.services.session_codec import raw_to_schema, schema_to_raw
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.remote.param_spec import ParamSpec
+from zcu_tools.gui.remote.wire import optional_bool, require_int, require_str
 
-from .errors import ErrorCode, RemoteError
 from .method_specs import METHOD_SPECS, MethodSpec
-from .param_spec import ParamSpec
-from .wire import optional_bool, require_int, require_str
 
 logger = logging.getLogger(__name__)
 

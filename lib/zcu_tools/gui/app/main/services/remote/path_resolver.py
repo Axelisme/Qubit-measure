@@ -45,8 +45,7 @@ from zcu_tools.gui.app.main.live_model import (
     SweepLiveField,
 )
 from zcu_tools.gui.app.main.sweep_model import SweepEditor
-
-from .errors import ErrorCode, RemoteError
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import CfgNodeSpec
