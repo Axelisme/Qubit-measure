@@ -198,3 +198,49 @@ def test_default_transitions_is_basic_preset():
 
     t = default_transitions()
     assert t["transitions"] == [(0, 1), (0, 2), (1, 2), (1, 3)]
+
+
+# --- transitions r_f/sample_f helpers (Optional) ---------------------------
+
+
+def test_transitions_need_r_f():
+    from zcu_tools.fluxdep_gui.state import transitions_need_r_f
+    from zcu_tools.notebook.persistance import TransitionDict
+
+    assert transitions_need_r_f(TransitionDict({"red side": [(0, 1)]}))
+    assert transitions_need_r_f(TransitionDict({"blue side": [(0, 1)]}))
+    assert not transitions_need_r_f(TransitionDict({"transitions": [(0, 1)]}))
+    assert not transitions_need_r_f(
+        TransitionDict({"mirror": [(0, 1)]})
+    )  # needs sample_f
+
+
+def test_transitions_need_sample_f():
+    from zcu_tools.fluxdep_gui.state import transitions_need_sample_f
+    from zcu_tools.notebook.persistance import TransitionDict
+
+    assert transitions_need_sample_f(TransitionDict({"mirror": [(0, 1)]}))
+    assert transitions_need_sample_f(TransitionDict({"mirror blue": [(0, 1)]}))
+    assert not transitions_need_sample_f(TransitionDict({"transitions": [(0, 1)]}))
+
+
+def test_transitions_with_freqs_injects_only_set():
+    from zcu_tools.fluxdep_gui.state import transitions_with_freqs
+    from zcu_tools.notebook.persistance import TransitionDict
+
+    base = TransitionDict({"mirror": [(0, 1)]})
+    # only sample_f set → only sample_f key added; r_f stays absent
+    out = transitions_with_freqs(base, None, 9.5)
+    assert out.get("sample_f") == 9.5
+    assert "r_f" not in out
+    # both set
+    out2 = transitions_with_freqs(base, 5.5, 9.5)
+    assert out2.get("r_f") == 5.5 and out2.get("sample_f") == 9.5
+    # original not mutated
+    assert "r_f" not in base and "sample_f" not in base
+
+
+def test_fit_state_freqs_default_none():
+    st = FluxDepState()
+    assert st.fit.r_f is None
+    assert st.fit.sample_f is None

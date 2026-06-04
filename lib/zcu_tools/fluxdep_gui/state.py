@@ -48,6 +48,44 @@ def default_transitions() -> TransitionDict:
     )
 
 
+# Transition categories that require r_f / sample_f to be present (the model
+# raises if a category here is used without the corresponding frequency key).
+_R_F_CATEGORIES = ("blue side", "red side", "mirror blue", "mirror red")
+
+
+def transitions_need_r_f(transitions: TransitionDict) -> bool:
+    """Whether any present category needs ``r_f`` (blue/red side, mirror blue/red)."""
+    return any(transitions.get(name) for name in _R_F_CATEGORIES)
+
+
+def transitions_need_sample_f(transitions: TransitionDict) -> bool:
+    """Whether any present category needs ``sample_f`` (anything with 'mirror')."""
+    return any(
+        "mirror" in name and transitions.get(name)
+        for name in transitions
+        if isinstance(name, str)
+    )
+
+
+def transitions_with_freqs(
+    transitions: TransitionDict,
+    r_f: Optional[float],
+    sample_f: Optional[float],
+) -> TransitionDict:
+    """A copy of ``transitions`` with r_f / sample_f keys added when provided.
+
+    The transition model keys on KEY PRESENCE (not value), and None means
+    "unset", so only a provided frequency is injected. Callers should validate
+    (via ``transitions_need_*``) that a needed frequency is present before search.
+    """
+    out: dict = dict(transitions)
+    if r_f is not None:
+        out["r_f"] = r_f
+    if sample_f is not None:
+        out["sample_f"] = sample_f
+    return TransitionDict(out)  # type: ignore[arg-type]
+
+
 def spectrum_version_key(name: str) -> str:
     """Per-spectrum version key (``spectrum:<name>``)."""
     return f"spectrum:{name}"
@@ -192,8 +230,10 @@ class FitState:
     ECb: tuple[float, float] = (0.2, 2.0)
     ELb: tuple[float, float] = (0.1, 2.0)
     transitions: TransitionDict = field(default_factory=default_transitions)
-    r_f: float = 0.0
-    sample_f: float = 0.0
+    # None means "not provided" (distinct from 0.0); a transition category that
+    # needs one (blue/red side → r_f, mirror → sample_f) must have it set.
+    r_f: Optional[float] = None
+    sample_f: Optional[float] = None
     params: Optional[tuple[float, float, float]] = None  # (EJ, EC, EL)
     best_dist: Optional[float] = None
 
@@ -284,8 +324,8 @@ class FluxDepState:
         ECb: tuple[float, float],
         ELb: tuple[float, float],
         transitions: TransitionDict,
-        r_f: float,
-        sample_f: float,
+        r_f: Optional[float],
+        sample_f: Optional[float],
     ) -> None:
         """Record the search inputs; clears any stale result.
 

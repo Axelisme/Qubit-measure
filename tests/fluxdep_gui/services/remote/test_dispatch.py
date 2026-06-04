@@ -424,3 +424,44 @@ def test_fit_export_params_roundtrip(tmp_path, _fit_db, spectrum_hdf5):
 
     loaded = load_result(out)
     assert loaded.get("fluxdep_fit") is not None
+
+
+def test_fit_set_params_accepts_null_freqs(_fit_db, spectrum_hdf5):
+    adapter = _adapter()
+    _seed_points(adapter, spectrum_hdf5)
+    # omit r_f/sample_f entirely → stored as None (not 0.0)
+    _call(
+        adapter,
+        "fit.set_params",
+        {
+            "database_path": _fit_db,
+            "EJb": [0.1, 50.0],
+            "ECb": [0.01, 10.0],
+            "ELb": [0.01, 10.0],
+            "transitions": {"transitions": [[0, 1], [0, 2]]},
+        },
+    )
+    res = _call(adapter, "fit.result", {})
+    assert res["r_f"] is None
+    assert res["sample_f"] is None
+    assert adapter.ctrl.state.fit.r_f is None
+
+
+def test_fit_set_params_explicit_null(_fit_db, spectrum_hdf5):
+    adapter = _adapter()
+    _seed_points(adapter, spectrum_hdf5)
+    _call(
+        adapter,
+        "fit.set_params",
+        {
+            "database_path": _fit_db,
+            "EJb": [0.1, 50.0],
+            "ECb": [0.01, 10.0],
+            "ELb": [0.01, 10.0],
+            "transitions": {"transitions": [[0, 1]]},
+            "r_f": 5.5,
+            "sample_f": None,
+        },
+    )
+    assert adapter.ctrl.state.fit.r_f == 5.5
+    assert adapter.ctrl.state.fit.sample_f is None

@@ -79,6 +79,32 @@ def _bound_spinbox(value: float, hi: float = 1000.0) -> QDoubleSpinBox:
     return box
 
 
+def _freq_edit() -> QLineEdit:
+    """A nullable frequency field: blank means unset, else a float."""
+    from qtpy.QtGui import QDoubleValidator  # type: ignore[attr-defined]
+
+    edit = QLineEdit()
+    edit.setPlaceholderText("(unset)")
+    edit.setValidator(QDoubleValidator())
+    return edit
+
+
+def _parse_freq(edit: QLineEdit) -> "float | None":
+    """The field's value as float, or None when blank / unparseable."""
+    text = edit.text().strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _set_freq(edit: QLineEdit, value: "float | None") -> None:
+    """Show ``value`` in the field (blank when None)."""
+    edit.setText("" if value is None else f"{value:g}")
+
+
 class _SearchSignals(QObject):
     done = Signal(object)
     failed = Signal(str)
@@ -211,8 +237,10 @@ class AnalyzePanelWidget(QWidget):
         form.addRow("EC bounds", self._bound_row(self._ec_lo, self._ec_hi))
         form.addRow("EL bounds", self._bound_row(self._el_lo, self._el_hi))
 
-        self._r_f = _bound_spinbox(0.0)
-        self._sample_f = _bound_spinbox(0.0)
+        # r_f / sample_f are optional (blank = unset); a transition category that
+        # needs one is validated before search.
+        self._r_f = _freq_edit()
+        self._sample_f = _freq_edit()
         form.addRow("r_f (GHz)", self._r_f)
         form.addRow("sample_f (GHz)", self._sample_f)
 
@@ -322,8 +350,8 @@ class AnalyzePanelWidget(QWidget):
         self._ec_hi.setValue(fit.ECb[1])
         self._el_lo.setValue(fit.ELb[0])
         self._el_hi.setValue(fit.ELb[1])
-        self._r_f.setValue(fit.r_f)
-        self._sample_f.setValue(fit.sample_f)
+        _set_freq(self._r_f, fit.r_f)
+        _set_freq(self._sample_f, fit.sample_f)
         self._transitions_form.set_transitions(fit.transitions)
         self._transitions_show.set_transitions(fit.transitions)
         self._export_btn.setEnabled(fit.has_result)
@@ -334,14 +362,29 @@ class AnalyzePanelWidget(QWidget):
 
     # --- Search actions --------------------------------------------------
 
+    def _missing_freq_message(self, transitions, r_f, sample_f):
+        """Return a message if a chosen transition needs an unset r_f/sample_f."""
+        from zcu_tools.fluxdep_gui.state import (
+            transitions_need_r_f,
+            transitions_need_sample_f,
+        )
+
+        if transitions_need_r_f(transitions) and r_f is None:
+            return (
+                "The transitions include a blue/red-side or mirror category, which "
+                "needs r_f. Fill r_f (GHz), or remove those transitions."
+            )
+        if transitions_need_sample_f(transitions) and sample_f is None:
+            return (
+                "The transitions include a mirror category, which needs sample_f. "
+                "Fill sample_f (GHz), or remove the mirror transitions."
+            )
+        return None
+
     def _commit_params(self) -> None:
         transitions = self._transitions_form.get_transitions()
-        r_f = self._r_f.value()
-        sample_f = self._sample_f.value()
-        if r_f:
-            transitions["r_f"] = r_f
-        if sample_f:
-            transitions["sample_f"] = sample_f
+        r_f = _parse_freq(self._r_f)
+        sample_f = _parse_freq(self._sample_f)
         self._ctrl.set_fit_params(
             database_path=self._db_edit.text().strip(),
             EJb=(self._ej_lo.value(), self._ej_hi.value()),
@@ -386,6 +429,16 @@ class AnalyzePanelWidget(QWidget):
             return
         if not os.path.isfile(db_path):
             self._status.setText(f"Database not found: {db_path}")
+            return
+        # Pre-check that needed r_f / sample_f are filled for the chosen
+        # transitions (else search_in_database would fail with a cryptic error).
+        missing = self._missing_freq_message(
+            self._transitions_form.get_transitions(),
+            _parse_freq(self._r_f),
+            _parse_freq(self._sample_f),
+        )
+        if missing:
+            self._show_message("Missing frequency", missing)
             return
         try:
             self._commit_params()
@@ -482,26 +535,39 @@ class AnalyzePanelWidget(QWidget):
             fit.params, t_fluxs, cutoff=40, evals_count=15
         )
 
+        # The show-transitions subset may need an r_f/sample_f that's unset;
+        # check before drawing so it surfaces a friendly message, not a crash.
+        show_transitions = self._transitions_show.get_transitions()
+        missing = self._missing_freq_message(show_transitions, fit.r_f, fit.sample_f)
+        if missing:
+            self._status.setText("Show: " + missing.split(".")[0] + ".")
+            show_transitions = self._transitions_form.get_transitions()  # fit set
+
         aligned = next((e for e in spectrums.values() if e.aligned), None)
-        render_fit_figure(
-            self._fit_figure,
-            spectrums,
-            t_fluxs,
-            energies,
-            fit.transitions,
-            s_fluxs,
-            s_freqs,
-            r_f=fit.r_f,
-            sample_f=fit.sample_f,
-            flux_half=aligned.flux_half if aligned else None,
-            flux_period=aligned.flux_period if aligned else None,
-            title=(
-                f"EJ/EC/EL = ({fit.params[0]:.2f}, {fit.params[1]:.2f}, "
-                f"{fit.params[2]:.2f})"
-            ),
-            xlim=(self._x_lo.value(), self._x_hi.value()),
-            ylim=(self._y_lo.value(), self._y_hi.value()),
-            show_const_freq=self._show_const_freq.isChecked(),
-            plot_transitions=self._transitions_show.get_transitions(),
-        )
+        try:
+            render_fit_figure(
+                self._fit_figure,
+                spectrums,
+                t_fluxs,
+                energies,
+                fit.transitions,
+                s_fluxs,
+                s_freqs,
+                r_f=fit.r_f,
+                sample_f=fit.sample_f,
+                flux_half=aligned.flux_half if aligned else None,
+                flux_period=aligned.flux_period if aligned else None,
+                title=(
+                    f"EJ/EC/EL = ({fit.params[0]:.2f}, {fit.params[1]:.2f}, "
+                    f"{fit.params[2]:.2f})"
+                ),
+                xlim=(self._x_lo.value(), self._x_hi.value()),
+                ylim=(self._y_lo.value(), self._y_hi.value()),
+                show_const_freq=self._show_const_freq.isChecked(),
+                plot_transitions=show_transitions,
+            )
+        except Exception as exc:  # noqa: BLE001 — a show-config issue, not fatal
+            logger.exception("render_fit_figure failed")
+            self._status.setText(f"Could not draw: {exc}")
+            return
         self._fit_canvas.draw_idle()

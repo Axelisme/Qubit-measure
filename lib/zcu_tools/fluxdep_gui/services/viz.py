@@ -26,7 +26,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
-from zcu_tools.fluxdep_gui.state import SpectrumEntry
+from zcu_tools.fluxdep_gui.state import SpectrumEntry, transitions_with_freqs
 from zcu_tools.notebook.analysis.fluxdep.models import energy2transition
 from zcu_tools.notebook.analysis.fluxdep.processing import cast2real_and_norm
 from zcu_tools.notebook.persistance import TransitionDict
@@ -39,8 +39,8 @@ def derive_auto_limits(
     spectrums: dict[str, SpectrumEntry],
     s_fluxs: NDArray[np.float64],
     s_freqs: NDArray[np.float64],
-    r_f: float = 0.0,
-    sample_f: float = 0.0,
+    r_f: Optional[float] = None,
+    sample_f: Optional[float] = None,
 ) -> tuple[tuple[float, float], tuple[float, float]]:
     """Auto (x, y) limits matching the notebook visualiser's ``auto_derive_limits``.
 
@@ -88,14 +88,16 @@ def derive_auto_limits(
     return (xs_lo, xs_hi), (ys_lo, ys_hi)
 
 
-def _constant_freqs(r_f: float, sample_f: float) -> list[tuple[float, str]]:
-    """The (freq, label) constant-frequency reference lines that are non-zero."""
+def _constant_freqs(
+    r_f: Optional[float], sample_f: Optional[float]
+) -> list[tuple[float, str]]:
+    """The (freq, label) constant-frequency reference lines that are set (non-None)."""
     lines: list[tuple[float, str]] = []
-    if r_f:
+    if r_f is not None:
         lines.append((r_f, "r_f"))
-    if sample_f:
+    if sample_f is not None:
         lines.append((0.5 * sample_f, "half sample_f"))
-    if sample_f and r_f:
+    if sample_f is not None and r_f is not None:
         lines.append((sample_f - r_f, "mirror r_f"))
     return lines
 
@@ -135,7 +137,7 @@ def _plot_simulation_lines(
         ax.plot(t_fluxs, freqs[:, i], label=label, linewidth=1.0, zorder=1)
 
 
-def _plot_constant_freqs(ax, r_f: float, sample_f: float) -> None:
+def _plot_constant_freqs(ax, r_f: Optional[float], sample_f: Optional[float]) -> None:
     """Draw the r_f / half·sample_f / mirror-r_f horizontal reference lines."""
     for freq, name in _constant_freqs(r_f, sample_f):
         ax.axhline(freq, linestyle="--", linewidth=1.0, color="gray", zorder=1)
@@ -174,8 +176,8 @@ def render_fit_figure(
     transitions: TransitionDict,
     s_fluxs: NDArray[np.float64],
     s_freqs: NDArray[np.float64],
-    r_f: float = 0.0,
-    sample_f: float = 0.0,
+    r_f: Optional[float] = None,
+    sample_f: Optional[float] = None,
     *,
     flux_half: Optional[float] = None,
     flux_period: Optional[float] = None,
@@ -202,8 +204,17 @@ def render_fit_figure(
     figure.clear()
     ax = figure.add_subplot(1, 1, 1)
 
+    # The transition model needs r_f / sample_f keys present for the categories
+    # that use them; inject the provided ones so a 'mirror' / 'red side' display
+    # subset never raises a missing-key error.
+    sim_transitions = transitions_with_freqs(
+        plot_transitions if plot_transitions is not None else transitions,
+        r_f,
+        sample_f,
+    )
+
     _plot_background(ax, spectrums)
-    _plot_simulation_lines(ax, t_fluxs, energies, plot_transitions or transitions)
+    _plot_simulation_lines(ax, t_fluxs, energies, sim_transitions)
     ax.scatter(
         s_fluxs, s_freqs, color="blue", s=12, alpha=0.5, zorder=2, label="_points"
     )

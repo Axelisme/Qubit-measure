@@ -89,3 +89,26 @@ def test_auto_limits_match_visualizer(panel, qapp):
     # y spans the spectrum's freq range [4, 6]
     assert w._y_lo.value() == pytest.approx(4.0)
     assert w._y_hi.value() == pytest.approx(6.0)
+
+
+def test_missing_freq_check_blocks_mirror_without_sample_f(panel):
+    from zcu_tools.notebook.persistance import TransitionDict
+
+    w, _ = panel
+    # mirror needs sample_f
+    msg = w._missing_freq_message(TransitionDict({"mirror": [(0, 1)]}), None, None)
+    assert msg is not None and "sample_f" in msg
+    # red side needs r_f
+    msg2 = w._missing_freq_message(TransitionDict({"red side": [(0, 1)]}), None, None)
+    assert msg2 is not None and "r_f" in msg2
+    # plain transitions need neither
+    assert (
+        w._missing_freq_message(TransitionDict({"transitions": [(0, 1)]}), None, None)
+        is None
+    )
+
+
+def test_freq_fields_are_blank_by_default(panel):
+    w, _ = panel
+    assert w._r_f.text() == ""
+    assert w._sample_f.text() == ""

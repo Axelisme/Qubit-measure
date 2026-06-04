@@ -102,6 +102,17 @@ def _coerce_bool_array(value: object, field: str) -> NDArray[np.bool_]:
     return np.asarray(value, dtype=np.bool_)
 
 
+def _coerce_opt_float(value: object, field: str) -> "float | None":
+    """Coerce an optional number: None / missing → None, else float."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, f"'{field}' must be a number or null"
+        )
+    return float(value)
+
+
 def _coerce_bound(value: object, field: str) -> tuple[float, float]:
     """Coerce a JSON ``[min, max]`` array to a float bound pair."""
     if not isinstance(value, list) or len(value) != 2:
@@ -359,12 +370,10 @@ def _h_fit_set_params(
     ECb = _coerce_bound(params["ECb"], "ECb")
     ELb = _coerce_bound(params["ELb"], "ELb")
     transitions = _coerce_transitions(params["transitions"])
-    r_f = float(params.get("r_f", 0.0))  # type: ignore[arg-type]
-    sample_f = float(params.get("sample_f", 0.0))  # type: ignore[arg-type]
-    if r_f:
-        transitions["r_f"] = r_f
-    if sample_f:
-        transitions["sample_f"] = sample_f
+    # r_f / sample_f are optional: omitted or null → None (not provided). The
+    # service injects the keys into the transitions when set.
+    r_f = _coerce_opt_float(params.get("r_f"), "r_f")
+    sample_f = _coerce_opt_float(params.get("sample_f"), "sample_f")
     adapter.ctrl.set_fit_params(
         database_path, EJb, ECb, ELb, transitions, r_f, sample_f
     )

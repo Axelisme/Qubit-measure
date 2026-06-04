@@ -26,7 +26,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
-from zcu_tools.fluxdep_gui.state import FluxDepState
+from zcu_tools.fluxdep_gui.state import FluxDepState, transitions_with_freqs
 from zcu_tools.notebook.analysis.fluxdep.fitting import search_in_database
 from zcu_tools.notebook.persistance import (
     FluxDepFitResult,
@@ -73,8 +73,8 @@ class FitService:
         ECb: tuple[float, float],
         ELb: tuple[float, float],
         transitions: TransitionDict,
-        r_f: float,
-        sample_f: float,
+        r_f: Optional[float],
+        sample_f: Optional[float],
     ) -> None:
         """Record the search inputs (clears any stale result)."""
         self._state.set_fit_params(
@@ -142,9 +142,10 @@ class FitService:
             raise ValueError("no selected points to fit (select points first)")
 
         # Snapshot every State-derived input now (this call may run on a worker
-        # thread; reading State here is fine, writing it is not).
+        # thread; reading State here is fine, writing it is not). Inject the
+        # r_f / sample_f keys the transition model needs (only when provided).
         database_path = fit.database_path
-        transitions = fit.transitions
+        transitions = transitions_with_freqs(fit.transitions, fit.r_f, fit.sample_f)
         EJb, ECb, ELb = fit.EJb, fit.ECb, fit.ELb
 
         def _run() -> tuple[tuple[float, float, float], Optional[Figure]]:

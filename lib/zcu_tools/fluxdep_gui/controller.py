@@ -137,8 +137,8 @@ class Controller:
         ECb: tuple[float, float],
         ELb: tuple[float, float],
         transitions: TransitionDict,
-        r_f: float,
-        sample_f: float,
+        r_f: Optional[float],
+        sample_f: Optional[float],
     ) -> None:
         self._fit.set_params(database_path, EJb, ECb, ELb, transitions, r_f, sample_f)
         self._bus.emit(FitChangedPayload(has_result=self._state.fit.has_result))

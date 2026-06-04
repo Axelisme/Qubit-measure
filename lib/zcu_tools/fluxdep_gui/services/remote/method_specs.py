@@ -63,6 +63,13 @@ def _num_opt(name: str, default: float, desc: str = "") -> ParamSpec:
     )
 
 
+def _num_opt_none(name: str, desc: str = "") -> ParamSpec:
+    """Optional NUMBER whose omitted / null value stays None (not a default)."""
+    return ParamSpec(
+        name, JsonType.NUMBER, required=False, default=None, description=desc
+    )
+
+
 def _bool_opt(name: str, desc: str = "") -> ParamSpec:
     return ParamSpec(
         name, JsonType.BOOLEAN, required=False, default=False, description=desc
@@ -177,15 +184,17 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "bound pairs. 'transitions' is a JSON object mapping a category "
         "('transitions' / 'mirror' / 'red side' / 'blue side', or 'transitionsN' / "
         "'mirrorN') to a list of [i, j] level pairs. r_f / sample_f are the "
-        "readout / sample frequencies (GHz; 0 omits the matching reference line).",
+        "readout / sample frequencies (GHz). Omit / null when unused; a category "
+        "that needs one (blue/red side need r_f, mirror needs sample_f) requires "
+        "it to be set, else the search fails.",
         (
             _str("database_path", "Precomputed fluxonium database hdf5 path"),
             _json("EJb", "[min, max] EJ bound pair"),
             _json("ECb", "[min, max] EC bound pair"),
             _json("ELb", "[min, max] EL bound pair"),
             _json("transitions", "Category -> list of [i, j] level pairs"),
-            _num_opt("r_f", 0.0, "Readout frequency (GHz); 0 to omit"),
-            _num_opt("sample_f", 0.0, "Sample frequency (GHz); 0 to omit"),
+            _num_opt_none("r_f", "Readout frequency (GHz); omit / null if unused"),
+            _num_opt_none("sample_f", "Sample frequency (GHz); omit / null if unused"),
         ),
     ),
     "fit.search": MethodSpec(
