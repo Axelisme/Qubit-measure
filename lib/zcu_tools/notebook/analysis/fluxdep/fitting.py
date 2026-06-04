@@ -6,6 +6,9 @@ including candidate breakpoint search, database search, and spectrum fitting.
 
 from __future__ import annotations
 
+import os
+from functools import lru_cache
+
 import matplotlib.pyplot as plt
 import numpy as np
 from h5py import File
@@ -21,6 +24,51 @@ from zcu_tools.progress_bar import make_pbar
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 
 from .models import compile_transitions, count_max_evals, energy2linearform
+
+
+@lru_cache(maxsize=4)
+def _load_database_cached(
+    datapath: str, _mtime: float, _size: int
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    """Load (fluxs, params, energies) from a fluxonium database, cached on the file.
+
+    The database file (~290 MB for the full grid) is re-read on every search; the
+    GUI re-runs the search against the *same* database many times (each parameter
+    tweak), so reading it once and serving the cached arrays cuts ~0.13 s off every
+    repeat call. The cache key includes the file's mtime and size, so editing or
+    regenerating the database invalidates the entry rather than serving stale data.
+    The returned arrays are the cache's own copies — callers must NOT mutate them.
+    """
+    with File(datapath, "r") as file:
+        if "fluxs" in file:
+            f_fluxs = file["fluxs"][:]  # (P,) # type: ignore[index]
+        elif "flxs" in file:  # legacy typo
+            f_fluxs = file["flxs"][:]  # (P,) # type: ignore[index]
+        else:
+            raise KeyError("Database file must contain 'fluxs' or 'flxs' dataset.")
+        f_params = file["params"][:]  # (N, 3) # type: ignore[index]
+        f_energies = file["energies"][:]  # (N, P, M) # type: ignore[index]
+    assert isinstance(f_fluxs, np.ndarray)
+    assert isinstance(f_params, np.ndarray)
+    assert isinstance(f_energies, np.ndarray)
+    return (
+        np.ascontiguousarray(f_fluxs, dtype=np.float64),
+        np.ascontiguousarray(f_params, dtype=np.float64),
+        np.ascontiguousarray(f_energies, dtype=np.float64),
+    )
+
+
+def load_database(
+    datapath: str,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    """Load (f_fluxs, f_params, f_energies) from a fluxonium database, file-cached.
+
+    Stats the file for its (mtime, size) and serves a cached load when unchanged
+    (see ``_load_database_cached``). Returns float64 C-contiguous arrays shared with
+    the cache — treat them as read-only.
+    """
+    stat = os.stat(datapath)
+    return _load_database_cached(datapath, stat.st_mtime, stat.st_size)
 
 
 @overload
@@ -85,29 +133,34 @@ def search_in_database(
     """
     from .njit import _apply_interp, _interp_weights, _search_kernel
 
-    # Load data from database
-    with File(datapath, "r") as file:
-        if "fluxs" in file:
-            f_fluxs = file["fluxs"][:]  # (f_fluxs, ) # type: ignore[index]
-        elif "flxs" in file:  # legacy typo
-            f_fluxs = file["flxs"][:]  # (f_fluxs, ) # type: ignore[index]
-        else:
-            raise KeyError("Database file must contain 'fluxs' or 'flxs' dataset.")
-        f_params = file["params"][:]  # (N, 3) # type: ignore[index]
-        f_energies = file["energies"][:]  # (N, f_fluxs, M) # type: ignore[index]
-    assert isinstance(f_fluxs, np.ndarray)
-    assert isinstance(f_params, np.ndarray)
-    assert isinstance(f_energies, np.ndarray)
+    # Load the database (file-cached: the GUI re-runs the search against the same
+    # database on every parameter tweak, so the ~290 MB read is amortised).
+    f_fluxs, f_params, f_energies = load_database(datapath)
+    M = f_energies.shape[2]
+
+    # Pre-compile transitions once so the hot loop calls only nogil njit code.
+    tr_pairs, tr_coeffs, tr_offsets = compile_transitions(transitions, M)
+
+    # Only the energy levels actually referenced by the transitions enter the
+    # linear form, so interpolate (and carry into the parallel kernel) just those
+    # levels instead of all M. This shrinks the interpolated array — for the usual
+    # 0->1/0->2/1->2 set that is 3 of 15 levels, a ~5x smaller working set — which
+    # both speeds the interpolation and lets the bandwidth-bound parallel kernel
+    # scale better. The transition pairs are remapped to the reduced level index
+    # space so the linear form is numerically identical.
+    used_levels = np.unique(tr_pairs.reshape(-1)) if tr_pairs.size else np.arange(M)
+    level_pos = np.full(M, -1, dtype=np.int64)
+    level_pos[used_levels] = np.arange(used_levels.shape[0])
+    tr_pairs_reduced = level_pos[tr_pairs].astype(np.int32)
 
     # Interpolate points. f_fluxs is strictly increasing and shared across all
     # entries, so precompute (idx, w) once then apply with a parallel njit
-    # kernel — avoids 4396*M Python-level np.interp calls.
+    # kernel — avoids N*M Python-level np.interp calls.
     fluxs = np.mod(fluxs, 1.0)
-    f_energies_c = np.ascontiguousarray(f_energies, dtype=np.float64)
-    f_fluxs_c = np.ascontiguousarray(f_fluxs, dtype=np.float64)
     fluxs_c = np.ascontiguousarray(fluxs, dtype=np.float64)
-    idxs, ws = _interp_weights(fluxs_c, f_fluxs_c)
-    sf_energies = _apply_interp(f_energies_c, idxs, ws)
+    idxs, ws = _interp_weights(fluxs_c, f_fluxs)
+    energies_used = np.ascontiguousarray(f_energies[:, :, used_levels])
+    sf_energies = _apply_interp(energies_used, idxs, ws)
 
     # Initialize variables
     N = f_params.shape[0]
@@ -118,11 +171,6 @@ def search_in_database(
     results = np.full((N, 2), np.nan)  # (N, 2)
 
     idx_bar = make_pbar(total=N, desc="Searching...")
-
-    # Pre-compile transitions once so the hot loop calls only nogil njit code.
-    tr_pairs, tr_coeffs, tr_offsets = compile_transitions(
-        transitions, f_energies.shape[2]
-    )
 
     def find_close_points(freqs, energies, scale, allows) -> np.ndarray:
         Bs, Cs = energy2linearform(energies, allows)
@@ -136,8 +184,6 @@ def search_in_database(
     f_params_c = np.ascontiguousarray(f_params, dtype=np.float64)
     freqs_c = np.ascontiguousarray(freqs, dtype=np.float64)
 
-    import os
-
     n_workers = n_jobs if n_jobs > 0 else (os.cpu_count() or 1)
     set_num_threads(n_workers)
 
@@ -145,7 +191,7 @@ def search_in_database(
         return _search_kernel(
             sf_energies_c[start:end],
             f_params_c[start:end],
-            tr_pairs,
+            tr_pairs_reduced,
             tr_coeffs,
             tr_offsets,
             freqs_c,
@@ -204,9 +250,12 @@ def search_in_database(
             f"Best Distance: {best_dist:.2g}, EJ={best_params[0]:.2f}, EC={best_params[1]:.2f}, EL={best_params[2]:.2f}"
         )
 
-        p_freqs = find_close_points(
-            freqs, sf_energies[best_idx], best_scale, transitions
-        )
+        # The kernel ran on the reduced level set; reconstruct the best entry's
+        # full-level interpolated energies for the (full transition dict) plot.
+        best_full = _apply_interp(
+            np.ascontiguousarray(f_energies[best_idx : best_idx + 1]), idxs, ws
+        )[0]
+        p_freqs = find_close_points(freqs, best_full, best_scale, transitions)
 
         # Frequency comparison plot
         ax_freq = fig.add_subplot(gs[:, 0])
