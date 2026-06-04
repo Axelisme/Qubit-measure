@@ -66,12 +66,11 @@ def test_perform_all_select_restores(widget):
 
 
 def test_finished_signal(widget):
-    from qtpy.QtWidgets import QPushButton
-
+    # the cross-spectrum filter's commit button is "Apply" (not terminal Finish)
     fired = []
     widget.finished.connect(lambda: fired.append(True))
-    finish = next(b for b in widget.findChildren(QPushButton) if b.text() == "Finish")
-    finish.click()
+    assert widget.apply_button.text() == "Apply"
+    widget.apply_button.click()
     assert fired == [True]
 
 

@@ -213,6 +213,8 @@ class AnalyzePanelWidget(QWidget):
         def _on_finish() -> None:
             _fluxs, _freqs, selected = selector.get_result()
             self._ctrl.set_selection(selected, selector.min_distance())
+            n, total = int(selected.sum()), int(selected.size)
+            selector.status_label.setText(f"Applied: {n}/{total} points selected")
 
         selector.finished.connect(_on_finish)
         self._filter_widget = selector

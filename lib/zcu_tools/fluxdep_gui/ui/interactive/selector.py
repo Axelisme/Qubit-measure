@@ -162,7 +162,12 @@ class SelectorWidget(InteractiveMplWidget):
         perform_all.clicked.connect(self._on_perform_all)
         self.controls_layout.addWidget(perform_all)
 
-        self.add_finish_button()
+        # "Apply" (not "Finish"): the cross-spectrum filter is not a terminal
+        # pipeline step — it commits the current selection to State for Search.
+        self.apply_button = self.add_finish_button("Apply")
+        self.status_label = QLabel("")
+        self.status_label.setWordWrap(True)
+        self.controls_layout.addWidget(self.status_label)
 
     def _width_val(self) -> float:
         return self._width.value() / _SCALE
@@ -205,11 +210,18 @@ class SelectorWidget(InteractiveMplWidget):
                 extent=(sp_fluxs[0], sp_fluxs[-1], sp_freqs[0], sp_freqs[-1]),
                 cmap="gray_r",  # neutral grayscale so the coloured points stand out
             )
+        # Two-colour map: kept points red (stands out on the gray_r background),
+        # dropped points a faint blue-grey. Yellow (viridis default) was hard to
+        # see on the black/white feature lines.
+        from matplotlib.colors import ListedColormap
+
+        self._point_cmap = ListedColormap(["#4a6fa5", "#e02020"])  # 0=dropped, 1=kept
         self._scatter = self._ax.scatter(
             self._s_fluxs,
             self._s_freqs,
             c=self._selected.astype(float),
-            s=2,
+            s=6,
+            cmap=self._point_cmap,
             vmin=0,
             vmax=1,
         )

@@ -59,12 +59,18 @@ class InteractiveMplWidget(QWidget):
         self.canvas.mpl_connect("motion_notify_event", self._dispatch_move)
         self.canvas.mpl_connect("button_release_event", self._dispatch_release)
 
-    def add_finish_button(self) -> None:
-        """Append the Finish button (call after adding subclass controls)."""
+    def add_finish_button(self, label: str = "Finish") -> QPushButton:
+        """Append the finish/apply button (call after adding subclass controls).
+
+        ``label`` lets a subclass name it for its semantics (e.g. "Apply" for the
+        non-terminal cross-spectrum filter). Returns the button so callers can
+        give feedback on it.
+        """
         self.controls_layout.addStretch(1)
-        finish = QPushButton("Finish")
+        finish = QPushButton(label)
         finish.clicked.connect(self.finished.emit)
         self.controls_layout.addWidget(finish)
+        return finish
 
     def redraw(self) -> None:
         self.canvas.draw_idle()
