@@ -79,6 +79,11 @@ class MainWindow(QMainWindow):
         left = QVBoxLayout()
 
         # Above the list: add a raw spectrum / remove this one.
+        # Project (chip / qubit names) — drives the default export layout.
+        self._project_btn = QPushButton("Project…")
+        self._project_btn.clicked.connect(self._on_project_clicked)
+        left.addWidget(self._project_btn)
+
         manage_row = QHBoxLayout()
         self._add_btn = QPushButton("Add…")
         self._add_btn.clicked.connect(self._on_load_clicked)
@@ -382,9 +387,20 @@ class MainWindow(QMainWindow):
         if successor is not None:
             self._ctrl.set_active_spectrum(successor)
 
+    def _on_project_clicked(self) -> None:
+        """Edit the project chip/qubit names (and optional roots)."""
+        from zcu_tools.fluxdep_gui.ui.project_dialog import ProjectDialog
+
+        dialog = ProjectDialog(self._ctrl.state.project, parent=self)
+        if dialog.exec() != int(dialog.DialogCode.Accepted):
+            return
+        self._ctrl.setup_project(dialog.result_project())
+
     def _on_export_clicked(self) -> None:
         from zcu_tools.fluxdep_gui.ui.export_dialog import ExportSpectrumsDialog
 
+        # The default path comes from the project's chip/qubit (set via Project…);
+        # the dialog only confirms / overrides the path.
         project = self._ctrl.state.project
         dialog = ExportSpectrumsDialog(
             chip_name=project.chip_name, qub_name=project.qub_name, parent=self

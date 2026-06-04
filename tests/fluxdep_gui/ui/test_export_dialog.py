@@ -1,4 +1,9 @@
-"""Headless tests for ExportSpectrumsDialog (chip/qubit → dynamic default path)."""
+"""Headless tests for ExportSpectrumsDialog.
+
+The dialog no longer edits chip/qubit (those move to the Project dialog) — it
+just shows the default path derived from the project's chip/qubit and lets the
+user override it.
+"""
 
 from __future__ import annotations
 
@@ -15,32 +20,26 @@ def dialog(qapp):
     d.deleteLater()
 
 
-def test_default_names_and_path(dialog):
-    assert dialog._chip_edit.text() == "unknown_chip"
-    assert dialog._qub_edit.text() == "unknown_qubit"
+def test_default_path_uses_unknown_chip_qub(dialog):
     assert dialog.export_path() == os.path.join(
         "result", "unknown_chip", "unknown_qubit", "data", "fluxdep", "spectrums.hdf5"
     )
 
 
-def test_changing_names_updates_path(dialog):
-    dialog._chip_edit.setText("Q5_2D")
-    dialog._qub_edit.setText("Q1")
-    assert dialog.export_path() == os.path.join(
-        "result", "Q5_2D", "Q1", "data", "fluxdep", "spectrums.hdf5"
-    )
-
-
-def test_initial_names_from_project(qapp):
-    d = ExportSpectrumsDialog(chip_name="Chip", qub_name="Qub")
+def test_default_path_from_project_names(qapp):
+    d = ExportSpectrumsDialog(chip_name="Q5_2D", qub_name="Q1")
     assert d.export_path() == os.path.join(
-        "result", "Chip", "Qub", "data", "fluxdep", "spectrums.hdf5"
+        "result", "Q5_2D", "Q1", "data", "fluxdep", "spectrums.hdf5"
     )
     d.deleteLater()
 
 
-def test_manual_path_override_detaches_from_names(dialog):
+def test_path_can_be_overridden(dialog):
     dialog._path_edit.setText("/tmp/custom.hdf5")
-    dialog._on_path_edited("/tmp/custom.hdf5")  # simulate textEdited
-    dialog._chip_edit.setText("Q5_2D")  # should NOT overwrite the manual path
     assert dialog.export_path() == "/tmp/custom.hdf5"
+
+
+def test_no_chip_qub_edit_fields(dialog):
+    # the chip/qubit editing moved to the Project dialog
+    assert not hasattr(dialog, "_chip_edit")
+    assert not hasattr(dialog, "_qub_edit")

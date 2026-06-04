@@ -1,10 +1,10 @@
-"""ExportSpectrumsDialog — choose chip/qubit + export path for spectrums.hdf5.
+"""ExportSpectrumsDialog — confirm the export path for spectrums.hdf5.
 
-chip_name / qub_name drive the default path
-``result/<chip>/<qubit>/data/fluxdep/spectrums.hdf5`` (defaulting to
-``unknown_chip`` / ``unknown_qubit``); typing in either field updates the shown
-path live. The user can override the path entirely via Browse. Returns the
-resolved filepath (or None on cancel).
+The default path is derived from the project's chip / qubit names (set via the
+Project… dialog) as ``result/<chip>/<qubit>/data/fluxdep/spectrums.hdf5``
+(defaulting to ``unknown_chip`` / ``unknown_qubit``). This dialog only shows that
+path and lets the user override it via Browse. Returns the resolved filepath (or
+None on cancel).
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from zcu_tools.fluxdep_gui.services.export import (
 
 
 class ExportSpectrumsDialog(QDialog):
-    """Pick chip/qubit (→ default path) and confirm the export filepath."""
+    """Show the default export path (from the project) and confirm / override it."""
 
     def __init__(
         self,
@@ -41,29 +41,22 @@ class ExportSpectrumsDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Export spectrums.hdf5")
-        self.resize(560, 160)
-        # whether the path was manually overridden (stop auto-updating it then)
-        self._path_overridden = False
-        self._build_ui(chip_name or DEFAULT_CHIP, qub_name or DEFAULT_QUBIT)
+        self.resize(560, 130)
+        default = default_export_path(
+            chip_name or DEFAULT_CHIP, qub_name or DEFAULT_QUBIT
+        )
+        self._build_ui(default)
 
-    def _build_ui(self, chip: str, qub: str) -> None:
+    def _build_ui(self, default_path: str) -> None:
         root = QVBoxLayout(self)
 
-        names_row = QHBoxLayout()
-        names_row.addWidget(QLabel("Chip:"))
-        self._chip_edit = QLineEdit(chip)
-        self._chip_edit.textChanged.connect(self._on_names_changed)
-        names_row.addWidget(self._chip_edit)
-        names_row.addWidget(QLabel("Qubit:"))
-        self._qub_edit = QLineEdit(qub)
-        self._qub_edit.textChanged.connect(self._on_names_changed)
-        names_row.addWidget(self._qub_edit)
-        root.addLayout(names_row)
+        root.addWidget(
+            QLabel("Set chip / qubit via the Project… button to change the default.")
+        )
 
         path_row = QHBoxLayout()
         path_row.addWidget(QLabel("Path:"))
-        self._path_edit = QLineEdit(default_export_path(chip, qub))
-        self._path_edit.textEdited.connect(self._on_path_edited)
+        self._path_edit = QLineEdit(default_path)
         path_row.addWidget(self._path_edit, stretch=1)
         browse = QPushButton("Browse…")
         browse.clicked.connect(self._on_browse)
@@ -77,17 +70,6 @@ class ExportSpectrumsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
 
-    def _on_names_changed(self, _text: str) -> None:
-        if self._path_overridden:
-            return
-        self._path_edit.setText(
-            default_export_path(self._chip_edit.text(), self._qub_edit.text())
-        )
-
-    def _on_path_edited(self, _text: str) -> None:
-        # a manual edit detaches the path from the chip/qubit auto-derivation
-        self._path_overridden = True
-
     def _on_browse(self) -> None:
         filepath, _ = QFileDialog.getSaveFileName(
             self,
@@ -96,7 +78,6 @@ class ExportSpectrumsDialog(QDialog):
             filter="HDF5 (*.hdf5 *.h5);;All files (*)",
         )
         if filepath:
-            self._path_overridden = True
             self._path_edit.setText(filepath)
 
     def export_path(self) -> Optional[str]:
