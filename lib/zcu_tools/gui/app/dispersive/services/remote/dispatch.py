@@ -113,12 +113,8 @@ def _h_fit_result(
         "has_result": fit.has_result,
         "g": fit.g,
         "bare_rf": fit.bare_rf,
-        "g_bound": list(fit.g_bound),
-        "fit_bare_rf": fit.fit_bare_rf,
-        "qub_dim": fit.qub_dim,
-        "qub_cutoff": fit.qub_cutoff,
         "res_dim": fit.res_dim,
-        "auto_fit_done": fit.auto_fit_done,
+        "step": fit.step,
     }
 
 

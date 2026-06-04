@@ -155,24 +155,19 @@ class PreprocessResult:
 
 @dataclass
 class DispFitState:
-    """The ``g`` / ``bare_rf`` tuning inputs and the (manual or auto) fit result.
+    """The manually-tuned ``g`` / ``bare_rf`` result + its simulation resolution.
 
     Frequencies are stored in **GHz** throughout (the slider UI converts to/from
-    MHz for display). ``g`` is None until a result (manual Finish or auto-fit)
-    is recorded; ``has_result`` keys off it. The simulation-resolution knobs
-    (``qub_dim`` / ``qub_cutoff`` / ``res_dim`` / ``step``) mirror the notebook's
-    ``search_proper_g`` parameter inputs.
+    MHz for display). ``g`` is None until the user accepts a tuning ("Use these
+    g/r_f"); ``has_result`` keys off it. ``res_dim`` / ``step`` are the
+    simulation-resolution knobs the user can still tune (``qub_dim`` / ``qub_cutoff``
+    are fixed in the predictor).
     """
 
     g: Optional[float] = None  # GHz
     bare_rf: Optional[float] = None  # GHz
-    g_bound: tuple[float, float] = (0.0, 0.2)
-    fit_bare_rf: bool = False
-    qub_dim: int = 15
-    qub_cutoff: int = 30
     res_dim: int = 4
     step: int = 1
-    auto_fit_done: bool = False
 
     @property
     def has_result(self) -> bool:
@@ -220,7 +215,7 @@ class DispersiveState:
         """
         self.onetone = entry
         self.preprocess = None
-        self.disp_fit = replace(self.disp_fit, g=None, auto_fit_done=False)
+        self.disp_fit = replace(self.disp_fit, g=None)
         self.version.bump(ONETONE_VERSION_KEY)
         self.version.drop_prefix(PREPROCESS_VERSION_KEY)
         self.version.drop_prefix(FIT_VERSION_KEY)
@@ -236,41 +231,16 @@ class DispersiveState:
         prior_sig = self.preprocess.signature if self.preprocess is not None else None
         self.preprocess = result
         if prior_sig is not None and prior_sig != result.signature:
-            self.disp_fit = replace(self.disp_fit, g=None, auto_fit_done=False)
+            self.disp_fit = replace(self.disp_fit, g=None)
             self.version.drop_prefix(FIT_VERSION_KEY)
         self.version.bump(PREPROCESS_VERSION_KEY)
 
-    def set_disp_params(
-        self,
-        *,
-        g_bound: tuple[float, float],
-        fit_bare_rf: bool,
-        qub_dim: int,
-        qub_cutoff: int,
-        res_dim: int,
-        step: int,
+    def set_disp_result(
+        self, g: float, bare_rf: float, *, res_dim: int, step: int
     ) -> None:
-        """Record the tuning / simulation inputs; clears any stale fit result.
-
-        Changing the search inputs invalidates a prior result, so ``g`` /
-        ``auto_fit_done`` reset (mirrors fluxdep's ``set_fit_params``). ``bare_rf``
-        is kept (it is a tuning value, not a result of these inputs).
-        """
+        """Record the manually-tuned g / bare_rf result + its simulation resolution."""
         self.disp_fit = replace(
-            self.disp_fit,
-            g=None,
-            g_bound=g_bound,
-            fit_bare_rf=fit_bare_rf,
-            qub_dim=qub_dim,
-            qub_cutoff=qub_cutoff,
-            res_dim=res_dim,
-            step=step,
-            auto_fit_done=False,
+            self.disp_fit, g=g, bare_rf=bare_rf, res_dim=res_dim, step=step
         )
         self.version.bump(FIT_VERSION_KEY)
-
-    def set_disp_result(self, g: float, bare_rf: float, *, auto: bool) -> None:
-        """Record a g / bare_rf result (manual Finish or auto-fit)."""
-        self.disp_fit = replace(self.disp_fit, g=g, bare_rf=bare_rf, auto_fit_done=auto)
-        self.version.bump(FIT_VERSION_KEY)
-        logger.debug("set_disp_result: g=%s bare_rf=%s auto=%s", g, bare_rf, auto)
+        logger.debug("set_disp_result: g=%s bare_rf=%s", g, bare_rf)

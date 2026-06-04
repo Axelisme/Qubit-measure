@@ -53,11 +53,10 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0,
         "Read the preprocessing status: {has_preprocess, n_flux, n_freq, edelay}.",
     ),
-    # Dispersive fit (g / bare_rf) — read only
+    # Dispersive result (the user's accepted g / bare_rf tuning) — read only
     "fit.result": MethodSpec(
         5.0,
-        "Read the dispersive fit inputs and result: {has_result, g, bare_rf, "
-        "g_bound, fit_bare_rf, qub_dim, qub_cutoff, res_dim, auto_fit_done}.",
+        "Read the accepted dispersive result: {has_result, g, bare_rf, res_dim, step}.",
     ),
     # Resource version table (mcp/RPC bookkeeping; never surfaced to the agent).
     "resources.versions": MethodSpec(5.0, "Snapshot of all resource versions"),

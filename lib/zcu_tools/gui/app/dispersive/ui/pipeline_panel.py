@@ -1,9 +1,9 @@
 """PipelinePanelWidget — the dispersive single-flow analysis panel.
 
-Layout: the step controls sit in compact rows at the top (steps 1 & 2 side by
-side; steps 3, 4, 5 side by side), and a single tabbed figure area below holds all
-the plots (Preprocess diagnostic / Tune / Result) so each gets the full width and
-height instead of competing for vertical space.
+Layout: the step controls sit in compact rows at the top (steps 1/2/3 side by side,
+step 4 on its own row), and a single tabbed figure area below holds the plots
+(Preprocess diagnostic / Tune) so each gets the full width and height instead of
+competing for vertical space.
 
 The pipeline (each step enabled only once the prior completes — fast-fail UX):
 
@@ -11,16 +11,15 @@ The pipeline (each step enabled only once the prior completes — fast-fail UX):
 2. **Load one-tone** — browse + transpose a raw one-tone hdf5.
 3. **Preprocess** — run the (off-main) signal pipeline → the Preprocess tab.
 4. **Tune g / r_f** — edit the spinboxes, then "Use these g/r_f" runs the predictor
-   off-main and draws the Tune tab; the button is disabled while computing.
-5. **Auto-fit** — the (off-main) scipy fit; on completion it automatically computes
-   and draws the Result tab (no separate manual render step).
-6. **Export** — write the dispersive section back to params.json.
+   off-main, draws the Tune tab, and records the result (the manual tuning IS the
+   final fit — there is no separate auto-fit). The button is disabled while computing.
+5. **Export** — write the dispersive section back to params.json.
 
-ALL heavy work (preprocess, predict, auto-fit, the chi result figure) runs on a
-``QThreadPool`` worker that calls only the pure ``compute_*`` controller methods and
-returns plain data; the worker's ``done`` slot — on the Qt main thread — records
-State and draws the figure (the worker never touches Qt widgets or pyplot, per
-ADR-0017). The figures live on local ``FigureCanvasQTAgg`` widgets in the tabs.
+The heavy work (preprocess, predict) runs on a ``QThreadPool`` worker that calls only
+the pure ``compute_*`` / ``predict_*`` controller methods and returns plain data; the
+worker's ``done`` slot — on the Qt main thread — records State and draws the figure
+(the worker never touches Qt widgets or pyplot, per ADR-0017). The figures live on
+local ``FigureCanvasQTAgg`` widgets in the tabs.
 """
 
 from __future__ import annotations
@@ -40,10 +39,8 @@ from qtpy.QtCore import (  # type: ignore[attr-defined]
     Signal,  # type: ignore[attr-defined]
 )
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-    QCheckBox,
     QDoubleSpinBox,
     QFileDialog,
-    QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -56,13 +53,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.app.dispersive.controller import Controller
-from zcu_tools.gui.app.dispersive.services.fit import AutoFitResult
-from zcu_tools.gui.app.dispersive.services.viz import (
-    compute_chi_vs_flux,
-    render_dispersive_shift,
-    render_dispersive_with_onetone,
-    render_tune_figure,
-)
+from zcu_tools.gui.app.dispersive.services.viz import render_tune_figure
 from zcu_tools.gui.app.dispersive.state import PreprocessResult
 
 from .error_messages import friendly_fit_message, friendly_io_message
@@ -72,15 +63,11 @@ from .tune_canvas import TuneCanvasWidget
 
 logger = logging.getLogger(__name__)
 
-_N_TUNE_FLUX = 501  # result-figure flux resolution (notebook cell 12)
-
 
 @dataclass(frozen=True)
 class _TuneParams:
     g: float
     bare_rf: float
-    qub_dim: int
-    qub_cutoff: int
     res_dim: int
     step: int
 
@@ -92,21 +79,8 @@ class _TuneData:
     t_fluxs: np.ndarray
     g: float
     bare_rf: float
-
-
-@dataclass(frozen=True)
-class _ResultParams:
-    g: float
-    bare_rf: float
-    params: tuple
-    t_fluxs: np.ndarray
-
-
-@dataclass(frozen=True)
-class _ResultData:
-    plot_rfs: tuple
-    overlay_fluxs: np.ndarray
-    chi: np.ndarray
+    res_dim: int
+    step: int
 
 
 class _WorkerSignals(QObject):
@@ -136,31 +110,12 @@ class _PreprocessWorker(QRunnable):
         self.signals.done.emit(result)
 
 
-class _AutoFitWorker(QRunnable):
-    """Runs the pure ``compute_autofit`` off the main thread (scipy + scqubits)."""
-
-    def __init__(self, ctrl: Controller, pbar_factory) -> None:
-        super().__init__()
-        self.signals = _WorkerSignals()
-        self._ctrl = ctrl
-        self._pbar_factory = pbar_factory
-
-    def run(self) -> None:
-        try:
-            result = self._ctrl.compute_autofit(pbar_factory=self._pbar_factory)
-        except Exception as exc:  # noqa: BLE001 — surface to the panel
-            logger.exception("auto-fit worker failed")
-            self.signals.failed.emit(str(exc))
-            return
-        self.signals.done.emit(result)
-
-
 class _PredictWorker(QRunnable):
     """Runs the LRU-cached predictor off the main thread for the tuning figure.
 
-    Returns ``TuneData`` (the rf arrays + axis + the g/bare_rf used); the main-thread
-    ``done`` slot draws it. The predictor reads State but does not write it, so it is
-    safe off-main.
+    Returns ``_TuneData`` (the rf arrays + axis + the g/bare_rf used); the main-thread
+    ``done`` slot draws it and records the result. The predictor reads State but does
+    not write it, so it is safe off-main.
     """
 
     def __init__(self, ctrl: Controller, params: "_TuneParams") -> None:
@@ -173,48 +128,16 @@ class _PredictWorker(QRunnable):
         try:
             p = self._p
             rf_0, rf_1 = self._ctrl.predict_dispersive(
-                p.g,
-                p.bare_rf,
-                qub_dim=p.qub_dim,
-                qub_cutoff=p.qub_cutoff,
-                res_dim=p.res_dim,
-                step=p.step,
-                return_dim=2,
+                p.g, p.bare_rf, res_dim=p.res_dim, step=p.step, return_dim=2
             )
             t_fluxs = self._ctrl.predict_flux_axis(p.step)
         except Exception as exc:  # noqa: BLE001 — surface to the panel
             logger.exception("predict worker failed")
             self.signals.failed.emit(str(exc))
             return
-        self.signals.done.emit(_TuneData(rf_0, rf_1, t_fluxs, p.g, p.bare_rf))
-
-
-class _ResultWorker(QRunnable):
-    """Computes the two result figures' data off the main thread (scqubits heavy).
-
-    Returns ``ResultData`` (the overlay rf lines + the chi array); the main-thread
-    ``done`` slot draws both figures. Reads State but does not write it.
-    """
-
-    def __init__(self, ctrl: Controller, params: "_ResultParams") -> None:
-        super().__init__()
-        self.signals = _WorkerSignals()
-        self._ctrl = ctrl
-        self._p = params
-
-    def run(self) -> None:
-        try:
-            p = self._p
-            plot_rfs = self._ctrl.predict_dispersive(
-                p.g, p.bare_rf, res_dim=3, return_dim=3, step=1
-            )
-            overlay_fluxs = self._ctrl.predict_flux_axis(1)
-            chi = compute_chi_vs_flux(p.params, p.t_fluxs, p.bare_rf, p.g)
-        except Exception as exc:  # noqa: BLE001 — surface to the panel
-            logger.exception("result worker failed")
-            self.signals.failed.emit(str(exc))
-            return
-        self.signals.done.emit(_ResultData(plot_rfs, overlay_fluxs, chi))
+        self.signals.done.emit(
+            _TuneData(rf_0, rf_1, t_fluxs, p.g, p.bare_rf, p.res_dim, p.step)
+        )
 
 
 class PipelinePanelWidget(QWidget):
@@ -227,9 +150,8 @@ class PipelinePanelWidget(QWidget):
         self._channel = GuiProgressBarChannel()
         self._channel.progress.connect(self._on_progress)
         self._tune_artists = None
-        # The progress signal is shared by both workers (only one runs at a time);
-        # this points at the bar of whichever worker is currently active, so the
-        # preprocess (step 3) and auto-fit (step 5) bars stay independent.
+        # The progress signal is shared by the workers (only one runs at a time);
+        # this points at the bar of whichever worker is currently active.
         self._active_progress: Optional[QProgressBar] = None
 
         self._build_ui()
@@ -239,20 +161,16 @@ class PipelinePanelWidget(QWidget):
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        # Compact control rows at the top: steps 1 & 2 side by side, then steps
-        # 3, 4, 5 side by side — all the plots go in the shared tabbed area below,
-        # so the controls stay small and the figures get the full space.
+        # Compact control rows at the top: steps 1/2/3 side by side, step 4 on its
+        # own row (it has more controls). The plots go in the shared tabbed area
+        # below, so the figures get the full space.
         top_row = QHBoxLayout()
         top_row.addWidget(self._build_inputs_section(), stretch=1)
         top_row.addWidget(self._build_load_section(), stretch=1)
+        top_row.addWidget(self._build_preprocess_section(), stretch=1)
         root.addLayout(top_row)
 
-        steps_row = QHBoxLayout()
-        steps_row.addWidget(self._build_preprocess_section(), stretch=1)
-        steps_row.addWidget(self._build_tune_section(), stretch=1)
-        steps_row.addWidget(self._build_autofit_section(), stretch=1)
-        root.addLayout(steps_row)
-
+        root.addWidget(self._build_tune_section())
         root.addWidget(self._build_figure_tabs(), stretch=1)
         root.addWidget(self._build_export_section())
 
@@ -303,59 +221,35 @@ class PipelinePanelWidget(QWidget):
     def _build_tune_section(self) -> QWidget:
         # Controls only — the tune figure lives in the shared tab area. Editing a
         # spinbox does NOT compute; only "Use these g/r_f" runs the (off-main)
-        # predictor, and the button is disabled while a prediction is in flight.
-        self._tune_box = QGroupBox("4. Tune g / r_f")
-        form = QFormLayout(self._tune_box)
+        # predictor, draws the figure, and records the result (the manual tuning IS
+        # the final fit). The button is disabled while a prediction is in flight.
+        self._tune_box = QGroupBox("4. Tune g / r_f  (drag to match, then accept)")
+        outer = QVBoxLayout(self._tune_box)
+        row = QHBoxLayout()
         self._g_spin = self._mhz_spin(60.0, 0.0, 200.0)
         self._rf_spin = self._mhz_spin(5300.0, 1000.0, 12000.0)
-        form.addRow("g (MHz)", self._g_spin)
-        form.addRow("r_f (MHz)", self._rf_spin)
-        self._qub_dim = self._int_spin(15)
-        self._qub_cutoff = self._int_spin(30)
         self._res_dim = self._int_spin(4)
         self._step = self._int_spin(1)
-        form.addRow("qub_dim", self._qub_dim)
-        form.addRow("qub_cutoff", self._qub_cutoff)
-        form.addRow("res_dim", self._res_dim)
-        form.addRow("step", self._step)
+        row.addWidget(QLabel("g (MHz)"))
+        row.addWidget(self._g_spin)
+        row.addWidget(QLabel("r_f (MHz)"))
+        row.addWidget(self._rf_spin)
+        row.addWidget(QLabel("res_dim"))
+        row.addWidget(self._res_dim)
+        row.addWidget(QLabel("step"))
+        row.addWidget(self._step)
         self._tune_btn = QPushButton("Use these g / r_f")
         self._tune_btn.clicked.connect(self._on_tune)
-        form.addRow(self._tune_btn)
+        row.addWidget(self._tune_btn)
+        row.addStretch(1)
+        outer.addLayout(row)
         self._tune_progress = QProgressBar()
         self._tune_progress.setVisible(False)
-        form.addRow(self._tune_progress)
+        outer.addWidget(self._tune_progress)
         return self._tune_box
 
-    def _build_autofit_section(self) -> QWidget:
-        self._autofit_box = QGroupBox("5. Auto-fit g")
-        layout = QVBoxLayout(self._autofit_box)
-        bound_row = QHBoxLayout()
-        self._g_lo = self._mhz_spin(0.0, 0.0, 200.0)
-        self._g_hi = self._mhz_spin(200.0, 0.0, 200.0)
-        bound_row.addWidget(QLabel("g bound (MHz)"))
-        bound_row.addWidget(self._g_lo)
-        bound_row.addWidget(QLabel("–"))
-        bound_row.addWidget(self._g_hi)
-        layout.addLayout(bound_row)
-        self._fit_bare_rf = QCheckBox("also fit bare_rf (±2 MHz)")
-        layout.addWidget(self._fit_bare_rf)
-        self._autofit_btn = QPushButton("Auto-fit g")
-        self._autofit_btn.clicked.connect(self._on_autofit)
-        layout.addWidget(self._autofit_btn)
-        self._autofit_progress = QProgressBar()
-        self._autofit_progress.setVisible(False)
-        layout.addWidget(self._autofit_progress)
-        self._autofit_label = QLabel("")
-        self._autofit_label.setWordWrap(True)
-        layout.addWidget(self._autofit_label)
-        return self._autofit_box
-
     def _build_figure_tabs(self) -> QWidget:
-        """The shared tabbed figure area: Preprocess / Tune / Result.
-
-        Tune and Result share one overlay canvas (auto-fit redraws the tuning
-        figure into a result figure); the Result tab adds the chi-shift figure.
-        """
+        """The shared tabbed figure area: Preprocess / Tune."""
         from qtpy.QtWidgets import QTabWidget  # type: ignore[attr-defined]
 
         self._tabs = QTabWidget()
@@ -365,14 +259,9 @@ class PipelinePanelWidget(QWidget):
         self._diag_canvas = FigureCanvasQTAgg(self._diag_figure)
         self._tabs.addTab(self._diag_canvas, "Preprocess")
 
-        # Tune figure (also reused as the result overlay).
+        # Tune figure (g/r_f lines over the norm-phase image — the final result).
         self._tune_canvas = TuneCanvasWidget()
         self._tabs.addTab(self._tune_canvas, "Tune")
-
-        # Result chi-shift figure.
-        self._chi_figure = Figure(figsize=(6, 5))
-        self._chi_canvas = FigureCanvasQTAgg(self._chi_figure)
-        self._tabs.addTab(self._chi_canvas, "Result (chi)")
         return self._tabs
 
     def _build_export_section(self) -> QWidget:
@@ -414,7 +303,6 @@ class PipelinePanelWidget(QWidget):
         self._load_box.setEnabled(has_inputs)
         self._preprocess_box.setEnabled(has_onetone)
         self._tune_box.setEnabled(has_preprocess)
-        self._autofit_box.setEnabled(has_preprocess)
         self._export_box.setEnabled(has_result)
 
     # --- section 1: inputs ----------------------------------------------
@@ -543,18 +431,17 @@ class PipelinePanelWidget(QWidget):
     # --- section 4: tune (button-triggered, off-main predict) -----------
 
     def _on_tune(self) -> None:
-        """Run the predictor off-main for the current spinbox values and draw it.
+        """Run the predictor off-main for the current spinbox values, draw + record.
 
-        The button is disabled while the prediction is in flight, so a new run
-        cannot start until the previous one finishes (no concurrent compute).
+        The manual tuning IS the final fit: the done slot records the accepted
+        g/bare_rf and draws the figure. The button is disabled while the prediction
+        is in flight, so a new run cannot start until the previous one finishes.
         """
         if self._ctrl.state.preprocess is None:
             return
         params = _TuneParams(
             g=1e-3 * self._g_spin.value(),
             bare_rf=1e-3 * self._rf_spin.value(),
-            qub_dim=self._qub_dim.value(),
-            qub_cutoff=self._qub_cutoff.value(),
             res_dim=self._res_dim.value(),
             step=self._step.value(),
         )
@@ -571,8 +458,11 @@ class PipelinePanelWidget(QWidget):
         self._end_progress()
         if st.preprocess is None:
             return
-        # Record the chosen g/bare_rf as the manual fit, then draw the tune figure.
-        self._ctrl.set_manual_fit(data.g, data.bare_rf)
+        # The accepted tuning IS the result: record g/bare_rf (+ its resolution),
+        # then draw the tune figure.
+        self._ctrl.set_manual_fit(
+            data.g, data.bare_rf, res_dim=data.res_dim, step=data.step
+        )
         self._tune_artists = render_tune_figure(
             self._tune_canvas.figure,
             st.preprocess.sp_fluxs,
@@ -592,121 +482,6 @@ class PipelinePanelWidget(QWidget):
         self._tune_btn.setEnabled(True)
         self._end_progress()
         self._warn("Tune failed", friendly_fit_message("Tune", message))
-
-    # --- section 5: auto-fit (off-main, auto-renders the result) --------
-
-    def _on_autofit(self) -> None:
-        try:
-            self._ctrl.set_disp_params(
-                g_bound=(1e-3 * self._g_lo.value(), 1e-3 * self._g_hi.value()),
-                fit_bare_rf=self._fit_bare_rf.isChecked(),
-                qub_dim=self._qub_dim.value(),
-                qub_cutoff=self._qub_cutoff.value(),
-                res_dim=self._res_dim.value(),
-                step=self._step.value(),
-            )
-        except Exception as exc:  # noqa: BLE001
-            self._warn("Auto-fit failed", friendly_fit_message("Auto-fit", exc))
-            return
-        self._autofit_btn.setEnabled(False)
-        self._tune_btn.setEnabled(False)  # one compute at a time
-        self._begin_progress(self._autofit_progress)
-        self._autofit_label.setText("Fitting…")
-        worker = _AutoFitWorker(self._ctrl, self._channel.factory())
-        worker.signals.done.connect(self._on_autofit_done)
-        worker.signals.failed.connect(self._on_autofit_failed)
-        self._pool.start(worker)
-
-    def _on_autofit_done(self, result: AutoFitResult) -> None:
-        self._ctrl.record_autofit_result(result)
-        fit = self._ctrl.state.disp_fit
-        assert fit.g is not None and fit.bare_rf is not None
-        self._g_spin.setValue(1e3 * fit.g)
-        self._rf_spin.setValue(1e3 * fit.bare_rf)
-        self._autofit_label.setText(
-            f"g = {1e3 * fit.g:.1f} MHz, r_f = {1e3 * fit.bare_rf:.1f} MHz · rendering result…"
-        )
-        self._sync_enabled()
-        # The progress bar stays on for the result render that follows immediately.
-        self._start_result_render()
-
-    def _on_autofit_failed(self, message: str) -> None:
-        self._autofit_btn.setEnabled(True)
-        self._tune_btn.setEnabled(True)
-        self._end_progress()
-        self._autofit_label.setText("Auto-fit failed.")
-        self._warn("Auto-fit failed", friendly_fit_message("Auto-fit", message))
-
-    # --- result (off-main, runs automatically after auto-fit) -----------
-
-    def _start_result_render(self) -> None:
-        """Spawn the result worker (scqubits chi compute) after a successful fit."""
-        st = self._ctrl.state
-        fit = st.disp_fit
-        if not fit.has_result or st.preprocess is None or st.fit_inputs is None:
-            self._finish_after_result()
-            return
-        assert fit.g is not None and fit.bare_rf is not None
-        pp = st.preprocess
-        t_fluxs = np.linspace(
-            float(pp.sp_fluxs.min()), float(pp.sp_fluxs.max()), _N_TUNE_FLUX
-        ).astype(np.float64)
-        params = _ResultParams(
-            g=fit.g, bare_rf=fit.bare_rf, params=st.fit_inputs.params, t_fluxs=t_fluxs
-        )
-        worker = _ResultWorker(self._ctrl, params)
-        worker.signals.done.connect(self._on_result_done)
-        worker.signals.failed.connect(self._on_result_failed)
-        self._pool.start(worker)
-
-    def _on_result_done(self, data: _ResultData) -> None:
-        st = self._ctrl.state
-        fit = st.disp_fit
-        if (
-            st.preprocess is None
-            or st.fit_inputs is None
-            or fit.g is None
-            or fit.bare_rf is None
-        ):
-            self._finish_after_result()
-            return
-        pp = st.preprocess
-        # The overlay is drawn onto the shared tune canvas; chi onto its own.
-        render_dispersive_with_onetone(
-            self._tune_canvas.figure,
-            fit.bare_rf,
-            fit.g,
-            data.overlay_fluxs,
-            data.plot_rfs,
-            pp.sp_fluxs,
-            pp.sp_freqs,
-            pp.norm_phases,
-        )
-        self._tune_artists = None  # the shared figure is now a result figure
-        self._tune_canvas.redraw()
-        render_dispersive_shift(
-            self._chi_figure, st.fit_inputs.params, self._result_t_fluxs(), data.chi
-        )
-        self._chi_canvas.draw_idle()
-        self._show_tab(self._chi_canvas)
-        self._finish_after_result()
-
-    def _on_result_failed(self, message: str) -> None:
-        self._finish_after_result()
-        self._warn("Render failed", friendly_fit_message("Render", message))
-
-    def _finish_after_result(self) -> None:
-        self._autofit_btn.setEnabled(True)
-        self._tune_btn.setEnabled(True)
-        self._end_progress()
-
-    def _result_t_fluxs(self) -> np.ndarray:
-        st = self._ctrl.state
-        assert st.preprocess is not None
-        pp = st.preprocess
-        return np.linspace(
-            float(pp.sp_fluxs.min()), float(pp.sp_fluxs.max()), _N_TUNE_FLUX
-        ).astype(np.float64)
 
     # --- tabs + export --------------------------------------------------
 

@@ -12,7 +12,6 @@ import numpy as np
 import pytest
 import zcu_tools.gui.app.dispersive.services.predict as predict_mod
 from zcu_tools.gui.app.dispersive.controller import Controller
-from zcu_tools.gui.app.dispersive.services.fit import AutoFitResult
 from zcu_tools.gui.app.dispersive.state import (
     DispersiveState,
     FluxoniumInputs,
@@ -90,10 +89,9 @@ def test_sections_gated_on_pipeline_progress(qapp):
     state.set_preprocess(_preprocess())
     panel._sync_enabled()
     assert panel._tune_box.isEnabled()
-    assert panel._autofit_box.isEnabled()
     assert not panel._export_box.isEnabled()  # no result yet
 
-    state.set_disp_result(g=0.06, bare_rf=5.3, auto=True)
+    state.set_disp_result(g=0.06, bare_rf=5.3, res_dim=4, step=1)
     panel._sync_enabled()
     assert panel._export_box.isEnabled()
 
@@ -112,69 +110,36 @@ def test_preprocess_done_slot_records_and_enables(qapp, monkeypatch):
     assert panel._tune_box.isEnabled()
 
 
-def test_preprocess_and_autofit_have_independent_progress_bars(qapp):
+def test_progress_routes_to_the_active_bar(qapp):
     state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
     panel = _panel(qapp, state)
-    # two distinct bars, both hidden initially
-    assert panel._progress is not panel._autofit_progress
+    # preprocess (step 3) and tune (step 4) each have their own bar
+    assert panel._progress is not panel._tune_progress
     assert not panel._progress.isVisible()
-    assert not panel._autofit_progress.isVisible()
+    assert not panel._tune_progress.isVisible()
 
     # routing the shared progress signal targets whichever bar is active
-    panel._begin_progress(panel._autofit_progress)
-    assert panel._active_progress is panel._autofit_progress
-    panel._on_progress(3.0, 10.0, "Fitting")
-    assert panel._autofit_progress.value() == 3  # auto-fit bar advanced
+    panel._begin_progress(panel._tune_progress)
+    assert panel._active_progress is panel._tune_progress
+    panel._on_progress(3.0, 10.0, "Predicting")
+    assert panel._tune_progress.value() == 3
     panel._end_progress()
-    assert not panel._autofit_progress.isVisible()
+    assert not panel._tune_progress.isVisible()
     assert panel._active_progress is None
     # with no active worker, a stray progress signal is ignored (no bar updated)
     panel._on_progress(5.0, 10.0, "stray")  # must not raise / touch any bar
 
-
-def test_each_worker_routes_to_its_own_bar(qapp):
-    state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
-    panel = _panel(qapp, state)
-    # preprocess routes to the preprocess bar
+    # preprocess routes to its own bar
     panel._begin_progress(panel._progress)
     panel._on_progress(4.0, 8.0, "edelay")
     assert panel._progress.value() == 4
-    assert panel._active_progress is panel._progress
     panel._end_progress()
 
 
-def test_autofit_done_records_and_triggers_result_render(qapp, monkeypatch):
-    # auto-fit done records the result + sliders, then auto-spawns the result
-    # worker (no separate render button). Stub both scqubits paths so the spawned
-    # worker is instant, and wait for the pool so it cannot outlive the panel.
-    import zcu_tools.gui.app.dispersive.ui.pipeline_panel as panel_mod
-
-    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux", _stub)
-    monkeypatch.setattr(
-        panel_mod,
-        "compute_chi_vs_flux",
-        lambda params, t_fluxs, bare_rf, g, upto=5: np.zeros((len(t_fluxs), upto + 2)),
-    )
-    state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
-    state.set_fit_inputs(_inputs())
-    state.set_onetone(_onetone())
-    state.set_preprocess(_preprocess())
-    panel = _panel(qapp, state)
-
-    panel._on_autofit_done(AutoFitResult(g=0.07, bare_rf=5.35))
-
-    assert state.disp_fit.g == 0.07
-    assert state.disp_fit.bare_rf == 5.35
-    # sliders reflect the fitted values (MHz)
-    assert panel._g_spin.value() == pytest.approx(70.0)
-    assert panel._rf_spin.value() == pytest.approx(5350.0)
-    assert panel._export_box.isEnabled()  # result available
-    panel._pool.waitForDone(5000)  # let the result worker finish before teardown
-
-
 def test_tune_done_slot_records_manual_fit_and_draws(qapp):
-    # the predict worker's main-thread done slot: records the chosen g/bare_rf and
-    # draws the tune figure (no scqubits — _TuneData carries precomputed arrays).
+    # the predict worker's main-thread done slot: records the chosen g/bare_rf (the
+    # manual tuning IS the final fit) and draws the tune figure (no scqubits —
+    # _TuneData carries precomputed arrays).
     from zcu_tools.gui.app.dispersive.ui.pipeline_panel import _TuneData
 
     state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
@@ -185,13 +150,20 @@ def test_tune_done_slot_records_manual_fit_and_draws(qapp):
 
     t = np.linspace(0.0, 1.0, 12)
     data = _TuneData(
-        rf_0=np.full(12, 5.4), rf_1=np.full(12, 5.6), t_fluxs=t, g=0.065, bare_rf=5.32
+        rf_0=np.full(12, 5.4),
+        rf_1=np.full(12, 5.6),
+        t_fluxs=t,
+        g=0.065,
+        bare_rf=5.32,
+        res_dim=5,
+        step=2,
     )
     panel._on_tune_done(data)
 
     assert state.disp_fit.g == pytest.approx(0.065)
     assert state.disp_fit.bare_rf == pytest.approx(5.32)
-    assert state.disp_fit.auto_fit_done is False
+    assert state.disp_fit.res_dim == 5 and state.disp_fit.step == 2
+    assert panel._export_box.isEnabled()  # the tuning is the result
     assert panel._tune_artists is not None  # figure drawn
 
 
@@ -211,5 +183,7 @@ def test_tune_button_disabled_during_compute(qapp, monkeypatch):
     assert panel._tune_btn.isEnabled() is False
     # the done slot re-enables it
     t = np.linspace(0.0, 1.0, 12)
-    panel._on_tune_done(_TuneData(np.full(12, 5.4), np.full(12, 5.6), t, 0.06, 5.3))
+    panel._on_tune_done(
+        _TuneData(np.full(12, 5.4), np.full(12, 5.6), t, 0.06, 5.3, res_dim=4, step=1)
+    )
     assert panel._tune_btn.isEnabled() is True

@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 
 import numpy as np
-import zcu_tools.gui.app.dispersive.services.fit as fit_mod
 import zcu_tools.gui.app.dispersive.services.predict as predict_mod
 from zcu_tools.gui.app.dispersive.controller import Controller
 from zcu_tools.gui.app.dispersive.event_bus import (
@@ -49,7 +48,6 @@ def _params_json(tmp_path):
 
 
 def test_full_pipeline(monkeypatch, tmp_path, onetone_hdf5):
-    monkeypatch.setattr(fit_mod, "calculate_dispersive_vs_flux", _stub)
     monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux", _stub)
     onetone_path, *_ = onetone_hdf5
     params_path = _params_json(tmp_path)
@@ -82,19 +80,14 @@ def test_full_pipeline(monkeypatch, tmp_path, onetone_hdf5):
     assert state.preprocess is not None
     assert "PreprocessChangedPayload" in events
 
-    # 4. predict (cached, stubbed)
+    # 4. predict (cached, stubbed) — the tune worker's compute
     rf = ctrl.predict_dispersive(0.06, 5.3, step=1, return_dim=2)
     assert len(rf) == 2
 
-    # 5. auto-fit (compute off-main, record on main). The stub's overlap landscape
-    # is not aligned with the *real* preprocessed signal here, so we assert only
-    # that the pipeline runs and records an in-bounds result — the precise-
-    # convergence check lives in test_fit.py with a controlled synthetic signal.
-    fit_result = ctrl.compute_autofit()
-    ctrl.record_autofit_result(fit_result)
+    # 5. accept the tuning — the manual g/bare_rf IS the final fit (no auto-fit)
+    ctrl.set_manual_fit(0.06, 5.3, res_dim=4, step=1)
     assert state.disp_fit.has_result
-    assert state.disp_fit.g is not None
-    assert 0.0 <= state.disp_fit.g <= 0.2  # within g_bound
+    assert state.disp_fit.g == 0.06 and state.disp_fit.bare_rf == 5.3
     assert "DispFitChangedPayload" in events
 
     # 6. export preserves fluxdep_fit

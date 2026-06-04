@@ -29,11 +29,6 @@ from zcu_tools.gui.app.dispersive.event_bus import (
     ProjectChangedPayload,
 )
 from zcu_tools.gui.app.dispersive.services.export import ExportService
-from zcu_tools.gui.app.dispersive.services.fit import (
-    AutoFitResult,
-    FitService,
-    PbarFactory,
-)
 from zcu_tools.gui.app.dispersive.services.load import LoadService
 from zcu_tools.gui.app.dispersive.services.predict import PredictService
 from zcu_tools.gui.app.dispersive.services.preprocess import PreprocessService
@@ -56,7 +51,6 @@ class Controller:
         self._project = ProjectService(state)
         self._load = LoadService(state)
         self._preprocess = PreprocessService(state)
-        self._fit = FitService(state)
         self._export = ExportService(state)
         # PredictService is bound to one (params, flux-axis); rebuilt lazily when
         # the preprocessing result or fit inputs change (see _predictor).
@@ -116,69 +110,26 @@ class Controller:
         g: float,
         bare_rf: float,
         *,
-        qub_dim: int = 15,
-        qub_cutoff: int = 30,
         res_dim: int = 4,
         step: int = 1,
         return_dim: int = 2,
     ) -> tuple[NDArray[np.float64], ...]:
         """LRU-cached dispersive prediction over the preprocessed flux axis."""
         return self._predictor().predict(
-            g,
-            bare_rf,
-            qub_dim=qub_dim,
-            qub_cutoff=qub_cutoff,
-            res_dim=res_dim,
-            step=step,
-            return_dim=return_dim,
+            g, bare_rf, res_dim=res_dim, step=step, return_dim=return_dim
         )
 
     def predict_flux_axis(self, step: int) -> NDArray[np.float64]:
         """The down-sampled flux axis for a ``predict_dispersive(step=step)`` call."""
         return self._predictor().flux_axis(step)
 
-    # --- fit -------------------------------------------------------------
+    # --- result (the user's tuning is the final fit) --------------------
 
-    def set_disp_params(
-        self,
-        *,
-        g_bound: tuple[float, float],
-        fit_bare_rf: bool,
-        qub_dim: int,
-        qub_cutoff: int,
-        res_dim: int,
-        step: int,
+    def set_manual_fit(
+        self, g: float, bare_rf: float, *, res_dim: int = 4, step: int = 1
     ) -> None:
-        self._state.set_disp_params(
-            g_bound=g_bound,
-            fit_bare_rf=fit_bare_rf,
-            qub_dim=qub_dim,
-            qub_cutoff=qub_cutoff,
-            res_dim=res_dim,
-            step=step,
-        )
-        self._bus.emit(DispFitChangedPayload(has_result=False))
-
-    def compute_autofit(
-        self, *, pbar_factory: Optional[PbarFactory] = None
-    ) -> AutoFitResult:
-        """Run the auto-fit — pure, off-main-safe (no State write, no event)."""
-        return self._fit.compute_autofit(pbar_factory=pbar_factory)
-
-    def record_autofit_result(self, result: AutoFitResult) -> None:
-        """Write a computed auto-fit onto State (MAIN THREAD only)."""
-        self._fit.record_result(result)
-        self._bus.emit(DispFitChangedPayload(has_result=True))
-
-    def autofit(self, *, pbar_factory: Optional[PbarFactory] = None) -> AutoFitResult:
-        """Compute + record inline (RPC / convenience path, main thread)."""
-        result = self._fit.autofit(pbar_factory=pbar_factory)
-        self._bus.emit(DispFitChangedPayload(has_result=True))
-        return result
-
-    def set_manual_fit(self, g: float, bare_rf: float) -> None:
-        """Record the current slider g / bare_rf as the (manual) result."""
-        self._fit.set_manual_fit(g, bare_rf)
+        """Record the accepted g / bare_rf (+ its sim resolution) as the result."""
+        self._state.set_disp_result(g, bare_rf, res_dim=res_dim, step=step)
         self._bus.emit(DispFitChangedPayload(has_result=True))
 
     # --- export ----------------------------------------------------------

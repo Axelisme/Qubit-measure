@@ -77,11 +77,11 @@ _SERVER_INSTRUCTIONS = """\
 Observe a live dispersive-fit-gui (fluxonium dispersive-shift analysis) over a TCP socket.
 
 This bridge is READ-ONLY: the USER drives the analysis in the GUI (load the
-fluxonium fit from params.json, load a one-tone spectrum, preprocess it, tune the
-coupling g and resonator frequency bare_rf — by slider or auto-fit — and export the
-dispersive section). The agent's job is to watch and report current state — there
-are no load / preprocess / tune / fit / export tools, because the slider tuning and
-the judgement of when the fit matches the spectrum need the user's eye on the plot.
+fluxonium fit from params.json, load a one-tone spectrum, preprocess it, manually
+tune the coupling g and resonator frequency bare_rf until the predicted lines match
+the spectrum, and export the dispersive section). The agent's job is to watch and
+report current state — there are no load / preprocess / tune / export tools, because
+the tuning and the judgement of when it matches need the user's eye on the plot.
 
 The fit inputs come from fluxdep-gui: dispersive reads the ``fluxdep_fit`` section of
 params.json (EJ/EC/EL + flux alignment) and writes a ``dispersive`` section
@@ -101,8 +101,8 @@ Read tools (all pure queries):
   - dispersive_fit_inputs_info → {has_inputs, params:{EJ,EC,EL} or null, flux_half,
     flux_int, flux_period, bare_rf_seed} — the fluxdep_fit handoff.
   - dispersive_preprocess_status → {has_preprocess, n_flux, n_freq, edelay}.
-  - dispersive_fit_result → {has_result, g, bare_rf, g_bound, fit_bare_rf, qub_dim,
-    qub_cutoff, res_dim, auto_fit_done} — the user's tuning inputs + fit result.
+  - dispersive_fit_result → {has_result, g, bare_rf, res_dim, step} — the user's
+    accepted tuning result.
 
 A failed call always raises; the read tools are idempotent, so retrying a read is
 safe.

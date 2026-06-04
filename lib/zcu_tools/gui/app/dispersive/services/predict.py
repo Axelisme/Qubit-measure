@@ -21,6 +21,11 @@ from zcu_tools.simulate.fluxonium import calculate_dispersive_vs_flux
 
 logger = logging.getLogger(__name__)
 
+# Fluxonium Hilbert-space resolution, fixed (the notebook's defaults). These are not
+# user-tunable in the GUI — only res_dim / step are.
+_QUB_DIM = 15
+_QUB_CUTOFF = 30
+
 
 class PredictService:
     """LRU-cached dispersive prediction for one (params, flux-axis) combination."""
@@ -37,8 +42,6 @@ class PredictService:
         def _cached(
             g: float,
             bare_rf: float,
-            qub_dim: int,
-            qub_cutoff: int,
             res_dim: int,
             step: int,
             return_dim: int,
@@ -50,8 +53,8 @@ class PredictService:
                 g,
                 progress=False,
                 res_dim=res_dim,
-                qub_cutoff=qub_cutoff,
-                qub_dim=qub_dim,
+                qub_cutoff=_QUB_CUTOFF,
+                qub_dim=_QUB_DIM,
                 return_dim=return_dim,
             )
 
@@ -62,8 +65,6 @@ class PredictService:
         g: float,
         bare_rf: float,
         *,
-        qub_dim: int = 15,
-        qub_cutoff: int = 30,
         res_dim: int = 4,
         step: int = 1,
         return_dim: int = 2,
@@ -71,10 +72,10 @@ class PredictService:
         """The dispersive-shifted resonator frequencies (GHz) for these inputs.
 
         Returns ``return_dim`` arrays (rf_0, rf_1, ...) each over the down-sampled
-        flux axis ``sp_fluxs[::step]``. Cache-keyed on every argument, so a repeated
-        slider position is free.
+        flux axis ``sp_fluxs[::step]`` (qub_dim / qub_cutoff fixed). Cache-keyed on
+        every argument, so a repeated slider position is free.
         """
-        return self._cached(g, bare_rf, qub_dim, qub_cutoff, res_dim, step, return_dim)
+        return self._cached(g, bare_rf, res_dim, step, return_dim)
 
     def flux_axis(self, step: int) -> NDArray[np.float64]:
         """The down-sampled flux axis matching a ``predict(..., step=step)`` call."""
