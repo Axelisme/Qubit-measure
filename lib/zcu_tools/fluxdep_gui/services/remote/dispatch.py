@@ -443,9 +443,17 @@ def _h_state_check(
     adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
+    from zcu_tools.fluxdep_gui.state import DEFAULT_CHIP, DEFAULT_QUBIT
+
     state = adapter.ctrl.state
     project = state.project
-    has_project = bool(project.chip_name and project.qub_name)
+    # "has_project" means the user set a real chip/qubit — not the unknown_*
+    # placeholders the project defaults to.
+    has_project = bool(
+        project.chip_name
+        and project.qub_name
+        and (project.chip_name, project.qub_name) != (DEFAULT_CHIP, DEFAULT_QUBIT)
+    )
     return {
         "has_project": has_project,
         "spectrum_count": len(state.spectrums),

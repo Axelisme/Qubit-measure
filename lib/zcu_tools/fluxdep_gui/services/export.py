@@ -12,13 +12,13 @@ import logging
 import os
 from typing import Optional
 
-from zcu_tools.fluxdep_gui.state import FluxDepState
+from zcu_tools.fluxdep_gui.state import DEFAULT_CHIP, DEFAULT_QUBIT, FluxDepState
 from zcu_tools.notebook.persistance import SpectrumResult, dump_spectrums
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CHIP = "unknown_chip"
-DEFAULT_QUBIT = "unknown_qubit"
+# Re-exported from state (their home) for callers that import them from here.
+__all__ = ["DEFAULT_CHIP", "DEFAULT_QUBIT", "default_export_path", "ExportService"]
 
 
 def default_export_path(chip_name: str, qub_name: str) -> str:

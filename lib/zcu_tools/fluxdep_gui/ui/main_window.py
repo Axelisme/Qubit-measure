@@ -334,8 +334,13 @@ class MainWindow(QMainWindow):
 
     def _on_load_clicked(self) -> None:
         from zcu_tools.fluxdep_gui.ui.load_dialog import LoadSpectrumDialog
+        from zcu_tools.fluxdep_gui.ui.paths import raw_spectrum_dir
 
-        dialog = LoadSpectrumDialog(self._ctrl.list_spectrums(), parent=self)
+        dialog = LoadSpectrumDialog(
+            self._ctrl.list_spectrums(),
+            parent=self,
+            start_dir=raw_spectrum_dir(self._ctrl.state.project),
+        )
         if dialog.exec() != int(dialog.DialogCode.Accepted):
             return
         req = dialog.result_request()
@@ -357,8 +362,13 @@ class MainWindow(QMainWindow):
         """Restore a processed spectrums.hdf5 (aligned + selected spectra)."""
         from qtpy.QtWidgets import QFileDialog  # type: ignore[attr-defined]
 
+        from zcu_tools.fluxdep_gui.ui.paths import processed_spectrum_dir
+
         filepath, _ = QFileDialog.getOpenFileName(
-            self, "Load spectrums.hdf5", filter="HDF5 (*.hdf5 *.h5);;All files (*)"
+            self,
+            "Load spectrums.hdf5",
+            processed_spectrum_dir(self._ctrl.state.project),
+            filter="HDF5 (*.hdf5 *.h5);;All files (*)",
         )
         if not filepath:
             return

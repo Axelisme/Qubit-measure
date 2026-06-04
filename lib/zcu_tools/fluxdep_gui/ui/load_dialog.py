@@ -46,13 +46,17 @@ class LoadSpectrumDialog(QDialog):
     """Modal dialog returning a LoadRequest (or None on cancel)."""
 
     def __init__(
-        self, loaded_names: list[str], parent: Optional[QWidget] = None
+        self,
+        loaded_names: list[str],
+        parent: Optional[QWidget] = None,
+        start_dir: str = "",
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Load spectrum")
         self.resize(640, 480)
         self._filepath = ""
         self._transpose = False
+        self._start_dir = start_dir
         # best-effort cache of the raw (signals, x, y) for preview
         self._raw: Optional[tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]] = None
 
@@ -117,7 +121,10 @@ class LoadSpectrumDialog(QDialog):
 
     def _on_browse(self) -> None:
         filepath, _ = QFileDialog.getOpenFileName(
-            self, "Load spectrum", filter="HDF5 (*.hdf5 *.h5);;All files (*)"
+            self,
+            "Load spectrum",
+            self._start_dir,
+            filter="HDF5 (*.hdf5 *.h5);;All files (*)",
         )
         if not filepath:
             return

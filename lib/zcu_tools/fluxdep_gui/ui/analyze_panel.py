@@ -29,7 +29,7 @@ from qtpy.QtCore import (  # type: ignore[attr-defined]
     QObject,
     QRunnable,
     QThreadPool,
-    Signal,
+    Signal,  # type: ignore[attr-defined]
 )
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
@@ -308,9 +308,14 @@ class AnalyzePanelWidget(QWidget):
         return holder
 
     def _load_from_state(self) -> None:
+        from zcu_tools.fluxdep_gui.ui.paths import default_database_file
+
         fit = self._ctrl.state.fit
-        if fit.database_path:
-            self._db_edit.setText(fit.database_path)
+        # Seed the database path: the prior fit's path, else a bundled default so
+        # the user usually doesn't have to browse at all.
+        self._db_edit.setText(
+            fit.database_path or default_database_file(self._ctrl.state.project)
+        )
         self._ej_lo.setValue(fit.EJb[0])
         self._ej_hi.setValue(fit.EJb[1])
         self._ec_lo.setValue(fit.ECb[0])
@@ -360,8 +365,16 @@ class AnalyzePanelWidget(QWidget):
         self._el_hi.setValue(el[1])
 
     def _on_browse_db(self) -> None:
+        from zcu_tools.fluxdep_gui.ui.paths import database_dir
+
+        # Start in the current path's folder if set, else the project / bundled
+        # simulation database directory.
+        current = self._db_edit.text().strip()
+        start = os.path.dirname(current) if current else ""
+        if not start or not os.path.isdir(start):
+            start = database_dir(self._ctrl.state.project)
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select database", filter="HDF5 (*.h5 *.hdf5);;All files (*)"
+            self, "Select database", start, filter="HDF5 (*.h5 *.hdf5);;All files (*)"
         )
         if path:
             self._db_edit.setText(path)

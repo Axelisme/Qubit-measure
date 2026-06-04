@@ -92,12 +92,16 @@ if __name__ == "__main__":
         else None
     )
 
-    run_app(
-        ProjectInfo(
-            chip_name=args.chip,
-            qub_name=args.qub,
-            result_dir=args.result_dir,
-            database_path=args.database_path,
-        ),
-        control=control,
-    )
+    # Only override a ProjectInfo field when the arg was actually given, so an
+    # omitted --chip / --qub keeps the unknown_* defaults instead of becoming "".
+    project_kwargs = {
+        k: v
+        for k, v in (
+            ("chip_name", args.chip),
+            ("qub_name", args.qub),
+            ("result_dir", args.result_dir),
+            ("database_path", args.database_path),
+        )
+        if v
+    }
+    run_app(ProjectInfo(**project_kwargs), control=control)

@@ -109,17 +109,26 @@ class VersionTable:
             logger.debug("version drop_prefix: %s -> dropped %s", prefix, doomed)
 
 
+# Placeholder chip / qubit names used until the user sets a real project. They
+# live here (the ProjectInfo's home) so both the export path and ProjectInfo's
+# defaults share one source; export.py re-exports them for back-compat.
+DEFAULT_CHIP = "unknown_chip"
+DEFAULT_QUBIT = "unknown_qubit"
+
+
 @dataclass
 class ProjectInfo:
     """Where to read raw spectra from and where to write processed results.
 
     Locates files only — there is no chip/qub connection concept (fluxdep never
     touches hardware). A value-only block, so not versioned via a guarded op
-    unless ``project.setup`` bumps ``project`` on replacement.
+    unless ``project.setup`` bumps ``project`` on replacement. The chip / qubit
+    names default to the ``unknown_*`` placeholders so the export path and the
+    Project dialog always show a well-formed name.
     """
 
-    chip_name: str = ""
-    qub_name: str = ""
+    chip_name: str = DEFAULT_CHIP
+    qub_name: str = DEFAULT_QUBIT
     result_dir: str = ""  # root for processed output (result_dir/data/fluxdep/...)
     database_path: str = ""  # root for raw spectrum hdf5 files
 
