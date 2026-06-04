@@ -12,10 +12,14 @@ bounding box (Fibonacci-lattice directions, filtered to those that intersect the
 box). Rays — rather than a uniform grid — match the search's ``params[i] * scale``
 design: one direction covers a continuous line of parameters via the scale.
 
-Usage (the energy computation is SLOW — minutes to hours for a real run):
+Speed: the per-sample energy sweep uses ``calculate_energy_vs_flux`` (a fast
+precompute path, ~100x over the stock scqubits sweep), and the BLAS backend is
+pinned to a single thread so per-row process workers (``--n-jobs``, default all
+cores) parallelise cleanly. A 10k "all" database runs in a few minutes, not hours.
 
-    # a real "all"-range database with 10k samples (serial — scqubits already
-    # multithreads each diagonalisation, so --n-jobs > 1 usually doesn't help)
+Usage:
+
+    # a real "all"-range database with 10k samples (all cores)
     .venv/bin/python script/generate_fluxonium_sample.py \
         --output Database/simulation/fluxonium_all.h5 \
         --preset all --num-samples 10000
@@ -28,7 +32,7 @@ The output path must not already exist unless ``--overwrite`` is given (so a rea
 run never clobbers an existing database by accident). ``--dry-run`` always writes
 to a ``*_dryrun.h5`` sibling instead of the given path.
 
-WARNING: a real run takes a long time. Back up any existing database first
+WARNING: back up any existing database first
 (``cp Database/simulation/fluxonium_all.h5 ~/backup/``) before regenerating.
 """
 
@@ -36,6 +40,16 @@ from __future__ import annotations
 
 import argparse
 import os
+
+# Pin the BLAS backend to a single thread BEFORE numpy is imported (numpy locks
+# the BLAS thread count at import time). On these tiny 40x40 Hamiltonians,
+# OpenBLAS multithreading is a NET LOSS — the thread-coordination overhead
+# dwarfs the work, so a single eigvalsh runs ~100x faster single-threaded (a
+# benchmarked finding). Parallelism is recovered at the parameter level via
+# --n-jobs (one process per worker, each single-threaded), which is far more
+# effective here. Respect any value the caller already exported.
+for _blas_var in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_blas_var, "1")
 
 import h5py as h5
 import numpy as np
@@ -207,17 +221,19 @@ def build_database(
     params: NDArray[np.float64],
     *,
     energy_fn: EnergyFn,
-    n_jobs: int = 1,
+    n_jobs: int = -1,
     progress: bool = True,
 ) -> NDArray[np.float64]:
     """Compute the ``(N, F, L)`` energy table for every parameter row.
 
     ``energy_fn`` maps one ``(EJ, EC, EL)`` to its ``(F, L)`` energies (it closes
     over the flux grid + truncation; injected so tests can pass a cheap stub
-    instead of scqubits). With ``n_jobs != 1`` the rows run in parallel via joblib
-    — but scqubits already multithreads each diagonalisation, so row-level workers
-    usually just oversubscribe the cores; the default ``n_jobs=1`` (serial) is the
-    right choice unless a parallel win has been measured.
+    instead of scqubits). The rows are independent, so they parallelise cleanly:
+    with the BLAS backend pinned to one thread (see the module top), one PROCESS
+    per worker (joblib's ``loky`` backend) scales near-linearly — benchmarked at
+    ~5x on 8 cores. Threads are NOT used: the per-row work is mostly small,
+    GIL-holding Python ops, so thread workers contend and run slower than serial.
+    ``n_jobs=-1`` (default) uses all cores; ``n_jobs=1`` forces serial.
     """
     rows = [tuple(float(v) for v in p) for p in params]
 
@@ -231,7 +247,7 @@ def build_database(
     else:
         from joblib import Parallel, delayed
 
-        energies = Parallel(n_jobs=n_jobs)(  # type: ignore[assignment]
+        energies = Parallel(n_jobs=n_jobs, backend="loky")(  # type: ignore[assignment]
             delayed(energy_fn)(p) for p in rows
         )
 
@@ -309,10 +325,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--n-jobs",
         type=int,
-        default=1,
-        help="Joblib workers over parameter rows (default 1 = serial). scqubits "
-        "already multithreads each diagonalisation, so spawning workers usually "
-        "just oversubscribes the cores; leave at 1 unless you've measured a win.",
+        default=-1,
+        help="Parameter-row worker PROCESSES (joblib loky). Default -1 = all "
+        "cores. The BLAS backend is pinned to 1 thread (module top) so process "
+        "workers don't oversubscribe; this scales ~5x on 8 cores. Set 1 for serial.",
     )
     p.add_argument(
         "--dry-run",

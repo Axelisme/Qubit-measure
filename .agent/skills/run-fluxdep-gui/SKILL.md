@@ -101,8 +101,9 @@ fluxdep_fit_export_params(savepath="params.json")  # -> {path}; default <result_
 
 `script/generate_fluxonium_sample.py` builds a database: it samples `(EJ, EC, EL)`
 points (rays through the `EJb × ECb × ELb` box) and computes each one's energy
-levels vs flux with scqubits. **A real run is SLOW (minutes–hours)** — the energy
-diagonalisation dominates.
+levels vs flux. It uses the fast `calculate_energy_vs_flux` (~100x over the stock
+scqubits sweep), pins BLAS to one thread, and parallelises across cores, so a 10k
+"all" database runs in a **few minutes**, not hours.
 
 ```bash
 # real run (back up any existing DB first — see WARNING below):
@@ -120,9 +121,9 @@ Key flags: `--preset normal|integer|all` (named `(EJb, ECb, ELb)` boxes), or set
 `--evals-count`, `--num-flux` (flux points over [0, 0.5], mirrored to [0, 1]);
 `--plot` for a 3D scatter of the sampled directions (off by default); `--dry-run`
 (writes a `*_dryrun.h5` sibling, never the real path); `--overwrite` (required to
-replace an existing output). `--n-jobs` defaults to 1 (serial) — scqubits already
-multithreads each diagonalisation, so row-level workers usually just oversubscribe
-the cores.
+replace an existing output). `--n-jobs` defaults to -1 (all cores) — BLAS is
+pinned to 1 thread so per-row process workers parallelise cleanly (~5x on 8
+cores); set `--n-jobs 1` for serial.
 
 > **WARNING — don't clobber a database you can't cheaply rebuild.** The output
 > path must not exist unless `--overwrite` is passed. Before regenerating an
