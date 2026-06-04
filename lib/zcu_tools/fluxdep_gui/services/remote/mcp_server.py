@@ -82,7 +82,8 @@ Typical analysis loop (per spectrum):
     points_selected). fluxdep_spectrum_set_active(name) to focus one.
   - fluxdep_alignment_set(name, flux_half, flux_int) to set flux alignment.
   - fluxdep_points_set(name, dev_values, freqs) — dev_values/freqs are JSON
-    arrays of equal length (the spectrum's selected points).
+    arrays of equal length (the spectrum's selected points). freqs are in GHz
+    (a MHz value makes the later fit fail "all parameter bounds infeasible").
   - Cross-spectrum: fluxdep_selection_pointcloud derives the joint (fluxs, freqs)
     cloud; fluxdep_selection_set(selected) sets a boolean mask of that length.
   - fluxdep_export_spectrums([filepath]) writes spectrums.hdf5 (default path is

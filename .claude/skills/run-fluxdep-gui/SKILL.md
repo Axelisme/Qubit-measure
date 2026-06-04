@@ -1,7 +1,7 @@
 ---
 name: run-fluxdep-gui
 description: Run, drive, and smoke-test the fluxdep-gui — a standalone Qt GUI for fluxonium flux-dependence fitting (load spectrum hdf5 → pick half/integer flux lines → select spectral points → cross-spectrum filter → export spectrums.hdf5 → search a database for EJ/EC/EL → export params.json). Use when asked to launch/start/test the fluxdep-gui app, drive the flux-dependence analysis pipeline via its MCP tools, or follow the recommended analysis flow.
-skill_version: 5
+skill_version: 6
 ---
 
 # run-fluxdep-gui
@@ -175,7 +175,9 @@ the loader expects (x=flux, y=freq(Hz)). Two ways to handle that:
 
 - **`fluxdep_points_set` takes *paired* points**, not separate axes: `dev_values`
   and `freqs` must be equal length (one (dev, freq) point per index). A
-  length mismatch returns `invalid_params`.
+  length mismatch returns `invalid_params`. **`freqs` are in GHz** (the loader
+  converts the raw Hz axis to GHz, and the database search is in GHz); feeding MHz
+  makes the fit fail with `all parameter bounds infeasible`.
 - **Alignment before points.** `points.set` derives each point's flux coordinate
   from the spectrum's alignment, so set the lines first.
 - **The in-figure picking (drag lines / brush points) is a GUI-only human

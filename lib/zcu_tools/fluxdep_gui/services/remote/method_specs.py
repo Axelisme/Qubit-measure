@@ -160,11 +160,13 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         10.0,
         "Set a spectrum's selected points and mark points selected. dev_values "
         "and freqs are JSON arrays of equal length (converted to numpy arrays "
-        "server-side).",
+        "server-side). freqs are in GHz, matching the loaded spectrum's frequency "
+        "axis and the database search (a MHz value lands far outside any database "
+        "candidate, so the fit fails with 'all parameter bounds infeasible').",
         (
             _str("name", "Spectrum name"),
             _json("dev_values", "JSON array of device values"),
-            _json("freqs", "JSON array of frequencies (MHz)"),
+            _json("freqs", "JSON array of frequencies (GHz)"),
         ),
     ),
     # Cross-spectrum selection
