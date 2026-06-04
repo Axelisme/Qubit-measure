@@ -82,7 +82,7 @@ def search_in_database(
     ELb: tuple[float, float],
     *,
     n_jobs: int = 1,
-    fuzzy: bool = True,
+    fuzzy: bool = False,
     plot: Literal[True] = True,
 ) -> tuple[tuple[float, float, float], Figure]: ...
 
@@ -98,7 +98,7 @@ def search_in_database(
     ELb: tuple[float, float],
     *,
     n_jobs: int = 1,
-    fuzzy: bool = True,
+    fuzzy: bool = False,
     plot: Literal[False],
 ) -> tuple[tuple[float, float, float], None]: ...
 
@@ -113,7 +113,7 @@ def search_in_database(
     ELb: tuple[float, float],
     *,
     n_jobs: int = 1,
-    fuzzy: bool = True,
+    fuzzy: bool = False,
     plot: bool = True,
 ) -> tuple[tuple[float, float, float], Optional[Figure]]:
     """Search a precomputed fluxonium database for (EJ, EC, EL) best matching
@@ -131,7 +131,13 @@ def search_in_database(
     Python code sits on the hot path. The kernel is called in batches purely
     to give tqdm progress feedback.
     """
-    from .njit import _apply_interp, _interp_weights, _search_kernel
+    from .njit import (
+        _apply_interp,
+        _interp_weights,
+        _lower_bound_kernel,
+        _search_kernel,
+        search_one_entry,
+    )
 
     # Load the database (file-cached: the GUI re-runs the search against the same
     # database on every parameter tweak, so the ~290 MB read is amortised).
@@ -168,9 +174,10 @@ def search_in_database(
     best_scale = 1.0
     best_dist = np.inf
     best_params = np.full(3, np.nan)
+    # results[i] = (mean distance, scale) per entry. The exact path fills only the
+    # entries it actually searches (the prune skips provably-worse ones); the rest
+    # keep their lower bound (a valid distance floor) for the diagnostic scatter.
     results = np.full((N, 2), np.nan)  # (N, 2)
-
-    idx_bar = make_pbar(total=N, desc="Searching...")
 
     def find_close_points(freqs, energies, scale, allows) -> np.ndarray:
         Bs, Cs = energy2linearform(energies, allows)
@@ -187,10 +194,19 @@ def search_in_database(
     n_workers = n_jobs if n_jobs > 0 else (os.cpu_count() or 1)
     set_num_threads(n_workers)
 
-    def _run_kernel(start: int, end: int, fuzzy_flag: bool) -> NDArray[np.float64]:
-        return _search_kernel(
-            sf_energies_c[start:end],
-            f_params_c[start:end],
+    if not fuzzy:
+        # Exact search with a lower-bound prune. The objective per entry is
+        # F(a) = mean_i min_j |A_i - |a*B_ij + C_ij||; ``entry_lower_bound`` gives a
+        # valid floor LB(entry) <= min_a F(a) in O(N*K²). Searching entries in
+        # increasing-LB order while tracking the incumbent best distance lets us STOP
+        # once LB > incumbent — every remaining entry provably cannot beat it, so the
+        # winner is IDENTICAL to scanning all entries, but typically only a tiny
+        # fraction are fully searched (the true match sorts to the front and drives
+        # the incumbent to ~0). The parallel LB pass is cheap; the exact per-entry
+        # ``candidate_breakpoint_search`` is the part we avoid for pruned entries.
+        lbs = _lower_bound_kernel(
+            sf_energies_c,
+            f_params_c,
             tr_pairs_reduced,
             tr_coeffs,
             tr_offsets,
@@ -201,40 +217,91 @@ def search_in_database(
             ECb[1],
             ELb[0],
             ELb[1],
-            fuzzy_flag,
         )
+        results[:, 0] = lbs  # unsearched entries keep their LB for the scatter
+        order = np.argsort(lbs)
+        idx_bar = make_pbar(total=N, desc="Searching...")
+        searched = 0
+        try:
+            for oi in order:
+                oi = int(oi)
+                lb = lbs[oi]
+                if not np.isfinite(lb) or lb > best_dist:
+                    break  # all remaining entries have LB >= this -> cannot win
+                p0, p1, p2 = f_params[oi]
+                a_min = max(EJb[0] / p0, ECb[0] / p1, ELb[0] / p2)
+                a_max = min(EJb[1] / p0, ECb[1] / p1, ELb[1] / p2)
+                d, a = search_one_entry(
+                    sf_energies_c[oi],
+                    tr_pairs_reduced,
+                    tr_coeffs,
+                    tr_offsets,
+                    freqs_c,
+                    a_min,
+                    a_max,
+                )
+                results[oi] = d, a
+                searched += 1
+                if searched % 64 == 0:
+                    idx_bar.update(64)
+                if d < best_dist:
+                    best_dist = d
+                    best_scale = a
+                    best_idx = oi
+                    best_params = f_params[oi] * a
+            idx_bar.set_description("Done! ")
+        except KeyboardInterrupt:
+            pass
+        finally:
+            idx_bar.close()
+    else:
+        # Heuristic fuzzy search: the parallel kernel over every entry (no prune —
+        # fuzzy per-entry distances are approximate, so the LB-prune's exact
+        # early-stop guarantee would not hold). Kept for callers that explicitly
+        # opt into the faster-but-approximate density heuristic.
+        idx_bar = make_pbar(total=N, desc="Searching...")
+        batch_size = max(64, (N + 19) // 20)
 
-    # ~20 batches amortise prange dispatch (sweet spot 256–1024 on this
-    # workload) while still giving the pbar enough ticks to feel live. Floor
-    # at 64 so small-N cases still hit multiple threads per batch.
-    batch_size = max(64, (N + 19) // 20)
+        def _run_kernel(start: int, end: int, fuzzy_flag: bool) -> NDArray[np.float64]:
+            return _search_kernel(
+                sf_energies_c[start:end],
+                f_params_c[start:end],
+                tr_pairs_reduced,
+                tr_coeffs,
+                tr_offsets,
+                freqs_c,
+                EJb[0],
+                EJb[1],
+                ECb[0],
+                ECb[1],
+                ELb[0],
+                ELb[1],
+                fuzzy_flag,
+            )
 
-    try:
-        for start in range(0, N, batch_size):
-            end = min(start + batch_size, N)
-            results[start:end] = _run_kernel(start, end, fuzzy)
-            idx_bar.update(end - start)
+        try:
+            for start in range(0, N, batch_size):
+                end = min(start + batch_size, N)
+                results[start:end] = _run_kernel(start, end, True)
+                idx_bar.update(end - start)
 
-        finite_mask = np.isfinite(results[:, 0])
-        if finite_mask.any():
-            best_idx = int(np.argmin(np.where(finite_mask, results[:, 0], np.inf)))
-            best_dist = float(results[best_idx, 0])
-            best_scale = float(results[best_idx, 1])
-            best_params = f_params[best_idx] * best_scale
+            finite_mask = np.isfinite(results[:, 0])
+            if finite_mask.any():
+                best_idx = int(np.argmin(np.where(finite_mask, results[:, 0], np.inf)))
+                best_scale = float(results[best_idx, 1])
 
-        idx_bar.set_description("Done! ")
-        if fuzzy and np.isfinite(best_dist):
-            # recalculate scale with exact method and keep results consistent
-            single = _run_kernel(best_idx, best_idx + 1, False)
-            best_dist = float(single[0, 0])
-            best_scale = float(single[0, 1])
-            best_params = f_params[best_idx] * best_scale
-            results[best_idx] = best_dist, best_scale
-
-    except KeyboardInterrupt:
-        pass
-    finally:
-        idx_bar.close()
+            idx_bar.set_description("Done! ")
+            if finite_mask.any():
+                # recalculate the winner's scale with the exact method (consistent a)
+                single = _run_kernel(best_idx, best_idx + 1, False)
+                best_dist = float(single[0, 0])
+                best_scale = float(single[0, 1])
+                best_params = f_params[best_idx] * best_scale
+                results[best_idx] = best_dist, best_scale
+        except KeyboardInterrupt:
+            pass
+        finally:
+            idx_bar.close()
 
     if not np.isfinite(best_dist):
         raise RuntimeError(

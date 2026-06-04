@@ -293,6 +293,135 @@ def _apply_interp(
 
 
 @njit(
+    "float64(float64[:], float64[:,:], float64[:,:], float64, float64)",
+    nogil=True,
+)
+def entry_lower_bound(
+    A: NDArray[np.float64],
+    B: NDArray[np.float64],
+    C: NDArray[np.float64],
+    a_min: float,
+    a_max: float,
+) -> float:
+    """A valid lower bound on ``candidate_breakpoint_search``'s mean distance.
+
+    The objective is F(a) = mean_i min_j |A_i - |a*B_ij + C_ij|| over a single shared
+    scale ``a``. Relaxing the shared-``a`` constraint — letting *each point* pick its
+    own best ``a`` in [a_min, a_max] — can only lower the sum, so
+
+        LB = mean_i  min_{a in [a_min,a_max]}  min_j |A_i - |a*B_ij + C_ij||
+
+    is a true lower bound: LB <= min_a F(a). For each point, the inner objective is a
+    min of "W"-shapes whose only kinks are at the term's zero crossing
+    (a = -C_ij/B_ij) and its ±A_i breakpoints (a = (±A_i - C_ij)/B_ij); the minimum
+    over the range is at one of those (clipped into range) or a range endpoint. O(N*K²).
+
+    Used to prune entries that cannot beat the running incumbent in the exact search
+    (an entry with LB > incumbent provably cannot win), so the prune is exact.
+    """
+    N = A.shape[0]
+    K = B.shape[1]
+    total = 0.0
+    for i in range(N):
+        gmin = np.inf
+        # candidate a's where this point's per-term distance can be minimal
+        for j in range(K):
+            if B[i, j] != 0.0:
+                inv = 1.0 / B[i, j]
+                for a in (
+                    -C[i, j] * inv,
+                    (A[i] - C[i, j]) * inv,
+                    (-A[i] - C[i, j]) * inv,
+                ):
+                    aa = a_min if a < a_min else (a_max if a > a_max else a)
+                    g = np.inf
+                    for jj in range(K):
+                        d = np.abs(A[i] - np.abs(aa * B[i, jj] + C[i, jj]))
+                        if d < g:
+                            g = d
+                    if g < gmin:
+                        gmin = g
+        # the range endpoints (cover the case where no breakpoint lies inside)
+        for aa in (a_min, a_max):
+            g = np.inf
+            for jj in range(K):
+                d = np.abs(A[i] - np.abs(aa * B[i, jj] + C[i, jj]))
+                if d < g:
+                    g = d
+            if g < gmin:
+                gmin = g
+        total += gmin
+    return total / N
+
+
+@njit(
+    (
+        "float64[:]("
+        "float64[:,:,:], float64[:,:], int32[:,:], float64[:], float64[:], float64[:],"
+        " float64, float64, float64, float64, float64, float64)"
+    ),
+    nogil=True,
+    parallel=True,
+)
+def _lower_bound_kernel(
+    sf_energies: NDArray[np.float64],
+    f_params: NDArray[np.float64],
+    pairs: NDArray[np.int32],
+    coeffs: NDArray[np.float64],
+    offsets: NDArray[np.float64],
+    freqs: NDArray[np.float64],
+    EJ_lo: float,
+    EJ_hi: float,
+    EC_lo: float,
+    EC_hi: float,
+    EL_lo: float,
+    EL_hi: float,
+) -> NDArray[np.float64]:
+    """Per-entry ``entry_lower_bound`` over all database entries (parallel).
+
+    Returns ``inf`` for entries whose parameter bounds make the scale range empty
+    (same infeasibility test as ``_search_kernel``).
+    """
+    N = f_params.shape[0]
+    out = np.empty(N, dtype=np.float64)
+    for i in prange(N):
+        p0 = f_params[i, 0]
+        p1 = f_params[i, 1]
+        p2 = f_params[i, 2]
+        a_min = max(EJ_lo / p0, EC_lo / p1, EL_lo / p2)
+        a_max = min(EJ_hi / p0, EC_hi / p1, EL_hi / p2)
+        if a_min > a_max:
+            out[i] = np.inf
+            continue
+        Bs, Cs = energy2linearform_nb(sf_energies[i], pairs, coeffs, offsets)
+        out[i] = entry_lower_bound(freqs, Bs, Cs, a_min, a_max)
+    return out
+
+
+@njit(
+    "Tuple((float64, float64))(float64[:,:], int32[:,:], float64[:], float64[:], "
+    "float64[:], float64, float64)",
+    nogil=True,
+)
+def search_one_entry(
+    sf_energies_i: NDArray[np.float64],
+    pairs: NDArray[np.int32],
+    coeffs: NDArray[np.float64],
+    offsets: NDArray[np.float64],
+    freqs: NDArray[np.float64],
+    a_min: float,
+    a_max: float,
+) -> tuple[float, float]:
+    """Exact (best_dist, best_a) for one entry — the linear form + breakpoint search.
+
+    The per-entry core of the LB-pruned exact search: builds B/C from the entry's
+    interpolated energies, then runs the exact ``candidate_breakpoint_search``.
+    """
+    Bs, Cs = energy2linearform_nb(sf_energies_i, pairs, coeffs, offsets)
+    return candidate_breakpoint_search(freqs, Bs, Cs, a_min, a_max)
+
+
+@njit(
     (
         "float64[:,:]("
         "float64[:,:,:], float64[:,:], int32[:,:], float64[:], float64[:], float64[:],"

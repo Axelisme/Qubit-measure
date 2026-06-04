@@ -136,12 +136,14 @@ def _clean_observation(db_path, idx, transitions, n_fluxs=128):
 
 @_skip_db
 def test_search_matches_recorded_baseline():
-    # The reduced-level / load-cache optimisation must be bit-identical to the
-    # pre-optimisation result for the canonical 0->1/0->2/1->2 transition set.
+    # Both search paths recover the recorded result for the canonical
+    # 0->1/0->2/1->2 transition set on a clean (noiseless) cloud — where the exact
+    # (default, LB-pruned) and fuzzy heuristic paths agree. This pins the value
+    # across the load-cache / reduced-level / LB-prune optimisations.
     transitions: TransitionDict = {"transitions": [(0, 1), (0, 2), (1, 2)]}  # type: ignore[typeddict-unknown-key]
     fluxs, freqs, _ = _clean_observation(_DB, 100, transitions)
     baseline = (4.8467594372, 0.2941233938, 1.8697251889)
-    for fuzzy in (True, False):
+    for fuzzy in (False, True):
         params, _ = search_in_database(
             fluxs, freqs, _DB, transitions, _EJb, _ECb, _ELb, fuzzy=fuzzy, plot=False
         )
@@ -169,3 +171,119 @@ def test_load_database_is_cached_by_file():
     a = load_database(_DB)
     b = load_database(_DB)
     assert all(x is y for x, y in zip(a, b))
+
+
+# --- exact lower-bound prune (the default exact path) ----------------------
+# The prune searches entries in increasing-lower-bound order and stops once the
+# bound exceeds the incumbent. Skipped entries provably cannot win, so the result
+# must be IDENTICAL to a full exact scan over every entry. We verify this directly
+# against an unpruned full exact search, on noisy clouds where many entries are
+# near-degenerate (the case where the prune searches the most entries).
+
+
+def _full_exact_scan(db_path, fluxs, freqs, transitions, EJb, ECb, ELb):
+    """A reference full exact scan: search EVERY feasible entry (no prune)."""
+    from zcu_tools.notebook.analysis.fluxdep.models import compile_transitions
+    from zcu_tools.notebook.analysis.fluxdep.njit import (
+        _apply_interp,
+        _interp_weights,
+        search_one_entry,
+    )
+
+    f_fluxs, f_params, f_energies = load_database(db_path)
+    M = f_energies.shape[2]
+    pairs, coeffs, offsets = compile_transitions(transitions, M)
+    used = np.unique(pairs.reshape(-1)) if pairs.size else np.arange(M)
+    pos = np.full(M, -1, dtype=np.int64)
+    pos[used] = np.arange(used.shape[0])
+    pr = pos[pairs].astype(np.int32)
+    idxs, ws = _interp_weights(
+        np.ascontiguousarray(np.mod(fluxs, 1.0)), np.ascontiguousarray(f_fluxs)
+    )
+    sf = np.ascontiguousarray(
+        _apply_interp(np.ascontiguousarray(f_energies[:, :, used]), idxs, ws)
+    )
+    freqs_c = np.ascontiguousarray(freqs, dtype=np.float64)
+
+    best_d, best_params = np.inf, None
+    for i in range(f_params.shape[0]):
+        p0, p1, p2 = f_params[i]
+        am = max(EJb[0] / p0, ECb[0] / p1, ELb[0] / p2)
+        aM = min(EJb[1] / p0, ECb[1] / p1, ELb[1] / p2)
+        if am > aM:
+            continue
+        d, a = search_one_entry(sf[i], pr, coeffs, offsets, freqs_c, am, aM)
+        if d < best_d:
+            best_d, best_params = d, tuple(f_params[i] * a)
+    return best_params
+
+
+@_skip_db
+@pytest.mark.parametrize("seed", [0, 1, 5])
+def test_prune_is_identical_to_full_exact_scan(seed):
+    # Build a noisy cloud (the prune searches more entries here) and assert the
+    # default (pruned exact) result matches a full unpruned exact scan exactly.
+    transitions: TransitionDict = {"transitions": [(0, 1), (0, 2), (1, 2)]}  # type: ignore[typeddict-unknown-key]
+    f_fluxs, f_params, f_energies = load_database(_DB)
+    rng = np.random.RandomState(seed)
+    src = rng.randint(0, f_params.shape[0])
+    fs, _ = energy2transition(f_energies[src], transitions)  # (n_flux, K)
+    fl, fr = [], []
+    for _ in range(400):
+        fi = rng.randint(0, len(f_fluxs))
+        ki = rng.randint(0, fs.shape[1])
+        fl.append(f_fluxs[fi])
+        fr.append(fs[fi, ki])
+    fluxs = np.asarray(fl)
+    freqs = np.asarray(fr) + rng.standard_normal(len(fr)) * 0.02  # noise
+
+    pruned, _ = search_in_database(
+        fluxs, freqs, _DB, transitions, _EJb, _ECb, _ELb, fuzzy=False, plot=False
+    )
+    full = _full_exact_scan(_DB, fluxs, freqs, transitions, _EJb, _ECb, _ELb)
+    assert full is not None
+    np.testing.assert_allclose(pruned, full, atol=1e-9)
+
+
+@_skip_db
+def test_entry_lower_bound_is_a_valid_floor():
+    # entry_lower_bound(...) must never exceed the entry's true best distance
+    # (else the prune could wrongly skip the winner).
+    from zcu_tools.notebook.analysis.fluxdep.models import compile_transitions
+    from zcu_tools.notebook.analysis.fluxdep.njit import (
+        _apply_interp,
+        _interp_weights,
+        candidate_breakpoint_search,
+        energy2linearform_nb,
+        entry_lower_bound,
+    )
+
+    transitions: TransitionDict = {"transitions": [(0, 1), (0, 2), (1, 2)]}  # type: ignore[typeddict-unknown-key]
+    fluxs, freqs, _ = _clean_observation(_DB, 100, transitions)
+    f_fluxs, f_params, f_energies = load_database(_DB)
+    M = f_energies.shape[2]
+    pairs, coeffs, offsets = compile_transitions(transitions, M)
+    used = np.unique(pairs.reshape(-1))
+    pos = np.full(M, -1, dtype=np.int64)
+    pos[used] = np.arange(used.shape[0])
+    pr = pos[pairs].astype(np.int32)
+    idxs, ws = _interp_weights(
+        np.ascontiguousarray(np.mod(fluxs, 1.0)), np.ascontiguousarray(f_fluxs)
+    )
+    sf = np.ascontiguousarray(
+        _apply_interp(np.ascontiguousarray(f_energies[:, :, used]), idxs, ws)
+    )
+    freqs_c = np.ascontiguousarray(freqs)
+
+    for i in range(0, f_params.shape[0], 250):  # sample entries
+        p0, p1, p2 = f_params[i]
+        am = max(_EJb[0] / p0, _ECb[0] / p1, _ELb[0] / p2)
+        aM = min(_EJb[1] / p0, _ECb[1] / p1, _ELb[1] / p2)
+        if am > aM:
+            continue
+        Bs, Cs = energy2linearform_nb(sf[i], pr, coeffs, offsets)
+        lb = entry_lower_bound(freqs_c, Bs, Cs, am, aM)
+        d, _ = candidate_breakpoint_search(freqs_c, Bs, Cs, am, aM)
+        assert lb <= d + 1e-9, (
+            f"lower bound {lb} exceeds true distance {d} at entry {i}"
+        )
