@@ -34,8 +34,14 @@ def run_app(
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 
     from zcu_tools.fluxdep_gui.ui.main_window import MainWindow
+    from zcu_tools.fluxdep_gui.ui.plot_host import ensure_bridge
 
     app = QApplication.instance() or QApplication(sys.argv)
+
+    # Create the plot-host bridge now, on the Qt main thread: the embedded
+    # matplotlib backend marshals worker-thread figure work through it, and it
+    # must be built on the GUI thread before any worker plots (e.g. the search).
+    ensure_bridge()
 
     state = FluxDepState(project)
     ctrl = Controller(state, EventBus())

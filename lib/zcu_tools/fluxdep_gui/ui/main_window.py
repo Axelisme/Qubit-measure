@@ -127,6 +127,11 @@ class MainWindow(QMainWindow):
         self._placeholder.setEnabled(False)
         self._editor_stack.addWidget(self._placeholder)
         self._current_editor: Optional[QWidget] = None
+        # The fit panel is a SINGLETON kept alive in the stack: built once on
+        # first use and only shown/hidden after, so its form / paths / figures
+        # survive switching away and back (it is not a _current_editor that
+        # _clear_editor would destroy).
+        self._fit_panel: Optional[QWidget] = None
 
         # A draggable splitter lets the user resize the spectrum list vs editor.
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -338,14 +343,24 @@ class MainWindow(QMainWindow):
         self._mount(selector)
 
     def _on_fit_clicked(self) -> None:
-        """Open the database-search fit panel over the selected joint point cloud."""
+        """Show the database-search fit panel (a persistent singleton).
+
+        Built once and kept in the stack; switching to a spectrum clears the
+        stage-driven ``_current_editor`` but leaves this panel alive, so its
+        form / database path / figures are preserved across switches.
+        """
         from zcu_tools.fluxdep_gui.ui.fit_panel import FitPanelWidget
 
         if not any(e.points_selected for e in self._ctrl.state.spectrums.values()):
             self._show_error("No points", "Select points on a spectrum first.")
             return
+        # Drop the stage-driven editor (its widget is transient) but DON'T touch
+        # the fit panel; then show the panel, building it on first use.
         self._clear_editor()
-        self._mount(FitPanelWidget(self._ctrl))
+        if self._fit_panel is None:
+            self._fit_panel = FitPanelWidget(self._ctrl)
+            self._editor_stack.addWidget(self._fit_panel)
+        self._editor_stack.setCurrentWidget(self._fit_panel)
 
     def _on_load_clicked(self) -> None:
         from zcu_tools.fluxdep_gui.ui.load_dialog import LoadSpectrumDialog

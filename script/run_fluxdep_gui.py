@@ -72,6 +72,16 @@ if __name__ == "__main__":
     log_file = Path(args.log_file) if args.log_file else LOG_FILE
     _setup_logging(to_file=not args.no_log, log_file=log_file)
 
+    # Select the embedded matplotlib backend BEFORE importing anything that uses
+    # matplotlib (the "configure backend before pyplot" invariant) — this routes
+    # search_in_database(plot=True)'s pyplot figure into the GUI instead of a
+    # detached window. The setup module is import-clean (pulls in no matplotlib).
+    from zcu_tools.fluxdep_gui.ui.mpl_backend_setup import (
+        configure_fluxdep_matplotlib_backend,
+    )
+
+    configure_fluxdep_matplotlib_backend()
+
     from zcu_tools.fluxdep_gui.app import run_app
     from zcu_tools.fluxdep_gui.services.remote.service import ControlOptions
     from zcu_tools.fluxdep_gui.state import ProjectInfo

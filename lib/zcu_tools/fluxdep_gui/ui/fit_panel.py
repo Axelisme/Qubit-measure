@@ -16,6 +16,7 @@ search's ``make_pbar`` calls drive a real Qt progress bar.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Optional
 
 import numpy as np
@@ -28,6 +29,7 @@ from qtpy.QtCore import (  # type: ignore[attr-defined]
     Signal,  # type: ignore[attr-defined]
 )
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QComboBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
@@ -37,6 +39,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QLineEdit,
     QProgressBar,
     QPushButton,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -45,12 +48,21 @@ from zcu_tools.fluxdep_gui.controller import Controller
 from zcu_tools.fluxdep_gui.services.fit import SearchResult
 from zcu_tools.fluxdep_gui.services.viz import render_fit_figure
 from zcu_tools.fluxdep_gui.ui.gui_pbar import GuiProgressBarChannel
+from zcu_tools.fluxdep_gui.ui.plot_host import FigureContainer, set_current_container
 from zcu_tools.fluxdep_gui.ui.transitions_form import TransitionsForm
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 
 logger = logging.getLogger(__name__)
 
 _N_SIM_FLUX = 1000  # simulated flux grid resolution for the visualisation
+
+# (EJb, ECb, ELb) bound presets — the notebook's named fitting ranges (GHz).
+# Selecting a preset fills the bound spin boxes; transitions are independent.
+_BOUND_PRESETS: dict[str, tuple[tuple[float, float], ...]] = {
+    "general": ((2.0, 15.0), (0.2, 2.0), (0.1, 2.0)),
+    "integer": ((3.0, 6.0), (0.8, 2.0), (0.08, 0.2)),
+    "all": ((1.0, 20.0), (0.1, 4.0), (0.01, 3.0)),
+}
 
 
 def _bound_spinbox(value: float) -> QDoubleSpinBox:
@@ -129,6 +141,12 @@ class FitPanelWidget(QWidget):
         db_holder.setLayout(db_row)
         form.addRow("Database", db_holder)
 
+        # Preset selects a named (EJb, ECb, ELb) range → fills the bound boxes.
+        self._preset = QComboBox()
+        self._preset.addItems(sorted(_BOUND_PRESETS))
+        self._preset.activated.connect(self._on_preset_selected)  # only on user pick
+        form.addRow("Bounds preset", self._preset)
+
         self._ej_lo, self._ej_hi = _bound_spinbox(2.0), _bound_spinbox(15.0)
         self._ec_lo, self._ec_hi = _bound_spinbox(0.2), _bound_spinbox(2.0)
         self._el_lo, self._el_hi = _bound_spinbox(0.1), _bound_spinbox(2.0)
@@ -164,15 +182,21 @@ class FitPanelWidget(QWidget):
         form_box.setFixedWidth(360)
         root.addWidget(form_box)
 
-        # Right: result + diagnostic figures.
+        # Right: our fit visualisation (top) + the search's native diagnostic
+        # figure (bottom). The diagnostic is a FigureContainer the embedded
+        # matplotlib backend routes search_in_database(plot=True)'s pyplot figure
+        # into — so fitting.py just uses pyplot and the figure lands here.
         right = QVBoxLayout()
         self._fit_figure = Figure(figsize=(6, 4))
         self._fit_canvas = FigureCanvasQTAgg(self._fit_figure)
         right.addWidget(self._fit_canvas, stretch=2)
 
-        self._diag_canvas: Optional[FigureCanvasQTAgg] = None
-        self._diag_holder = QVBoxLayout()
-        right.addLayout(self._diag_holder, stretch=2)
+        self._diag_stack = QStackedWidget()
+        diag_placeholder = QLabel("Search to see the diagnostic plot.")
+        diag_placeholder.setEnabled(False)
+        self._diag_stack.addWidget(diag_placeholder)
+        self._diag_container = FigureContainer(self._diag_stack, diag_placeholder)
+        right.addWidget(self._diag_stack, stretch=2)
 
         right_holder = QWidget()
         right_holder.setLayout(right)
@@ -225,6 +249,19 @@ class FitPanelWidget(QWidget):
 
     # --- actions ---------------------------------------------------------
 
+    def _on_preset_selected(self, _index: int) -> None:
+        """User picked a bounds preset → fill the EJ/EC/EL bound spin boxes."""
+        preset = _BOUND_PRESETS.get(self._preset.currentText())
+        if preset is None:
+            return
+        (ej, ec, el) = preset
+        self._ej_lo.setValue(ej[0])
+        self._ej_hi.setValue(ej[1])
+        self._ec_lo.setValue(ec[0])
+        self._ec_hi.setValue(ec[1])
+        self._el_lo.setValue(el[0])
+        self._el_hi.setValue(el[1])
+
     def _on_browse_db(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, "Select database", filter="HDF5 (*.h5 *.hdf5);;All files (*)"
@@ -233,6 +270,15 @@ class FitPanelWidget(QWidget):
             self._db_edit.setText(path)
 
     def _on_search(self) -> None:
+        # Block early on an empty / missing database path (don't run the worker
+        # just to fast-fail with a traceback).
+        db_path = self._db_edit.text().strip()
+        if not db_path:
+            self._status.setText("Select a database first.")
+            return
+        if not os.path.isfile(db_path):
+            self._status.setText(f"Database not found: {db_path}")
+            return
         try:
             self._commit_params()
         except ValueError as exc:
@@ -243,6 +289,12 @@ class FitPanelWidget(QWidget):
         self._progress.setVisible(True)
         self._progress.setRange(0, 0)  # busy until the first progress tick
         self._status.setText("Searching…")
+
+        # Route the search's pyplot diagnostic figure into our container. Set on
+        # the main thread before the worker; cleared when it finishes (the worker
+        # thread reads this module-level value during search_in_database).
+        self._diag_container.clear()
+        set_current_container(self._diag_container)
 
         worker = _SearchWorker(self._ctrl, self._channel.factory())
         worker.signals.done.connect(self._on_search_done)  # type: ignore[arg-type]
@@ -260,7 +312,10 @@ class FitPanelWidget(QWidget):
 
     def _on_search_done(self, result: SearchResult) -> None:
         # Main thread: record the worker's pure result onto State (the search
-        # itself ran off-main and touched no State), then render.
+        # itself ran off-main and touched no State), then render. The diagnostic
+        # figure is already embedded in the container (the backend routed the
+        # search's pyplot figure there), so we only stop routing now.
+        set_current_container(None)
         self._search_btn.setEnabled(True)
         self._progress.setVisible(False)
         self._ctrl.record_search_result(result)
@@ -268,9 +323,9 @@ class FitPanelWidget(QWidget):
         self._status.setText(f"EJ={EJ:.3f}  EC={EC:.3f}  EL={EL:.3f}")
         self._export_btn.setEnabled(True)
         self._render_result(result.params)
-        self._show_diagnostic(result.figure)
 
     def _on_search_failed(self, message: str) -> None:
+        set_current_container(None)
         self._search_btn.setEnabled(True)
         self._progress.setVisible(False)
         self._status.setText(f"Search failed: {message}")
@@ -316,15 +371,3 @@ class FitPanelWidget(QWidget):
             title=f"EJ/EC/EL = ({params[0]:.2f}, {params[1]:.2f}, {params[2]:.2f})",
         )
         self._fit_canvas.draw_idle()
-
-    def _show_diagnostic(self, figure: object) -> None:
-        """Embed the search's native diagnostic Figure below the result figure."""
-        if self._diag_canvas is not None:
-            self._diag_holder.removeWidget(self._diag_canvas)
-            self._diag_canvas.deleteLater()
-            self._diag_canvas = None
-        if not isinstance(figure, Figure):
-            return
-        self._diag_canvas = FigureCanvasQTAgg(figure)
-        self._diag_holder.addWidget(self._diag_canvas)
-        self._diag_canvas.draw_idle()
