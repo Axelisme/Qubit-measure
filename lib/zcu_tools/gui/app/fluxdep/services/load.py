@@ -19,7 +19,7 @@ from typing import Optional
 
 import numpy as np
 
-from zcu_tools.fluxdep_gui.state import (
+from zcu_tools.gui.app.fluxdep.state import (
     FluxDepState,
     SpectrumEntry,
     SpecType,

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.fluxdep_gui.services.remote.errors import (
+from zcu_tools.gui.app.fluxdep.services.remote.errors import (
     ErrorCode,
     ErrorEnvelope,
     RemoteError,
 )
-from zcu_tools.fluxdep_gui.services.remote.wire import (
+from zcu_tools.gui.app.fluxdep.services.remote.wire import (
     GUI_VERSION,
     WIRE_VERSION,
     Response,

@@ -22,7 +22,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.fluxdep_gui.services.export import default_export_path
+from zcu_tools.gui.app.fluxdep.services.export import default_export_path
 
 
 class ExportSpectrumsDialog(QDialog):

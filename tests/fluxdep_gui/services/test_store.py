@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from zcu_tools.fluxdep_gui.services.alignment import PointsService
-from zcu_tools.fluxdep_gui.services.store import SelectionService, SpectrumStore
-from zcu_tools.fluxdep_gui.state import (
+from zcu_tools.gui.app.fluxdep.services.alignment import PointsService
+from zcu_tools.gui.app.fluxdep.services.store import SelectionService, SpectrumStore
+from zcu_tools.gui.app.fluxdep.state import (
     SELECTION_VERSION_KEY,
     FluxDepState,
     SpectrumEntry,

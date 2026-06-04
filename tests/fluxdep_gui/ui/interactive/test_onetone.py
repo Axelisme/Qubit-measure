@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from zcu_tools.fluxdep_gui.ui.interactive.onetone import (
+from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import (
     OneToneWidget,
     detect_peaks,
     max_dispersion_freq_index,

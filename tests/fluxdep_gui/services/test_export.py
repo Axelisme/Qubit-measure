@@ -6,10 +6,10 @@ import os
 
 import numpy as np
 import pytest
-from zcu_tools.fluxdep_gui.services.alignment import AlignmentService, PointsService
-from zcu_tools.fluxdep_gui.services.export import ExportService
-from zcu_tools.fluxdep_gui.services.load import LoadService
-from zcu_tools.fluxdep_gui.state import FluxDepState, ProjectInfo
+from zcu_tools.gui.app.fluxdep.services.alignment import AlignmentService, PointsService
+from zcu_tools.gui.app.fluxdep.services.export import ExportService
+from zcu_tools.gui.app.fluxdep.services.load import LoadService
+from zcu_tools.gui.app.fluxdep.state import FluxDepState, ProjectInfo
 from zcu_tools.notebook.persistance import load_spectrums
 
 
@@ -48,7 +48,7 @@ def test_export_roundtrips_via_load_spectrums(spectrum_hdf5, tmp_path):
 
 
 def test_default_export_path_under_result_dir():
-    from zcu_tools.fluxdep_gui.services.export import default_export_path
+    from zcu_tools.gui.app.fluxdep.services.export import default_export_path
 
     assert default_export_path(os.path.join("result", "Q5_2D", "Q1")) == os.path.join(
         "result", "Q5_2D", "Q1", "data", "fluxdep", "spectrums.hdf5"

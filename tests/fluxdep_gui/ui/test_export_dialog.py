@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 
 import pytest
-from zcu_tools.fluxdep_gui.ui.export_dialog import ExportSpectrumsDialog
+from zcu_tools.gui.app.fluxdep.ui.export_dialog import ExportSpectrumsDialog
 
 
 @pytest.fixture

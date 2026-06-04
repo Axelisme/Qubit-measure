@@ -37,7 +37,8 @@ from typing import Any, Callable, Dict, Optional, Tuple
 # This bridge is launched standalone (``python .../mcp_server.py``), so the repo
 # ``lib`` dir is not on sys.path by default. Add it so the wire-contract modules
 # import cleanly.
-_LIB_DIR = Path(__file__).resolve().parents[4]
+# lib/zcu_tools/gui/app/fluxdep/services/remote -> lib
+_LIB_DIR = Path(__file__).resolve().parents[6]
 if str(_LIB_DIR) not in sys.path:
     sys.path.insert(0, str(_LIB_DIR))
 
@@ -53,14 +54,14 @@ for _gui_dep in ("qtpy",):
         )
         raise SystemExit(1)
 
-from zcu_tools.fluxdep_gui.services.remote.method_specs import (  # noqa: E402
+from .method_specs import (  # noqa: E402
     METHOD_SPECS,
 )
-from zcu_tools.fluxdep_gui.services.remote.param_spec import (  # noqa: E402
+from .param_spec import (  # noqa: E402
     JsonType,
     build_input_schema,
 )
-from zcu_tools.fluxdep_gui.services.remote.wire import (  # noqa: E402
+from .wire import (  # noqa: E402
     WIRE_VERSION as MCP_WIRE_VERSION,
 )
 
@@ -381,7 +382,8 @@ def tool_fluxdep_launch(arguments: Dict[str, Any]) -> str:
     port = int(arguments.get("port", 8766))
     token: Optional[str] = arguments.get("token")
     auto_connect = bool(arguments.get("auto_connect", True))
-    repo_root = Path(__file__).parents[5]
+    # lib/zcu_tools/gui/app/fluxdep/services/remote -> repo root
+    repo_root = Path(__file__).parents[7]
     python = sys.executable
     run_gui = repo_root / "script" / "run_fluxdep_gui.py"
 

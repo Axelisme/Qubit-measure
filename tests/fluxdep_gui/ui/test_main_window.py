@@ -10,9 +10,9 @@ import os
 
 import numpy as np
 import pytest
-from zcu_tools.fluxdep_gui.controller import Controller
-from zcu_tools.fluxdep_gui.state import FluxDepState
-from zcu_tools.fluxdep_gui.ui.main_window import MainWindow
+from zcu_tools.gui.app.fluxdep.controller import Controller
+from zcu_tools.gui.app.fluxdep.state import FluxDepState
+from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 
 
 @pytest.fixture
@@ -71,7 +71,7 @@ def test_selecting_list_item_sets_active(window, spectrum_hdf5):
 
 
 def test_active_unaligned_shows_line_picker(window, spectrum_hdf5):
-    from zcu_tools.fluxdep_gui.ui.interactive.line_picker import LinePickerWidget
+    from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 
     filepath, *_ = spectrum_hdf5
     name = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
@@ -80,7 +80,7 @@ def test_active_unaligned_shows_line_picker(window, spectrum_hdf5):
 
 
 def test_aligned_onetone_shows_onetone_widget(window, spectrum_hdf5):
-    from zcu_tools.fluxdep_gui.ui.interactive.onetone import OneToneWidget
+    from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
 
     filepath, *_ = spectrum_hdf5
     name = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
@@ -90,7 +90,7 @@ def test_aligned_onetone_shows_onetone_widget(window, spectrum_hdf5):
 
 
 def test_aligned_twotone_shows_find_points_widget(window, spectrum_hdf5):
-    from zcu_tools.fluxdep_gui.ui.interactive.find_points import FindPointsWidget
+    from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
 
     filepath, *_ = spectrum_hdf5
     name = window._ctrl.load_spectrum(filepath, spec_type="TwoTone")
@@ -100,7 +100,7 @@ def test_aligned_twotone_shows_find_points_widget(window, spectrum_hdf5):
 
 
 def test_selected_shows_result_preview(window, spectrum_hdf5):
-    from zcu_tools.fluxdep_gui.ui.interactive.result_preview import (
+    from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import (
         ResultPreviewWidget,
     )
 
@@ -114,7 +114,7 @@ def test_selected_shows_result_preview(window, spectrum_hdf5):
 
 
 def test_repick_lines_reopens_line_picker(window, spectrum_hdf5):
-    from zcu_tools.fluxdep_gui.ui.interactive.line_picker import LinePickerWidget
+    from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 
     filepath, *_ = spectrum_hdf5
     name = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
@@ -126,7 +126,7 @@ def test_repick_lines_reopens_line_picker(window, spectrum_hdf5):
 
 
 def test_reselect_points_reopens_selector(window, spectrum_hdf5):
-    from zcu_tools.fluxdep_gui.ui.interactive.onetone import OneToneWidget
+    from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
 
     filepath, *_ = spectrum_hdf5
     name = window._ctrl.load_spectrum(filepath, spec_type="OneTone")

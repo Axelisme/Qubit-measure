@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from zcu_tools.fluxdep_gui.ui.load_dialog import LoadSpectrumDialog
+from zcu_tools.gui.app.fluxdep.ui.load_dialog import LoadSpectrumDialog
 
 
 @pytest.fixture

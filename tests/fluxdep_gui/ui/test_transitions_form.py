@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.fluxdep_gui.ui.transitions_form import (
+from zcu_tools.gui.app.fluxdep.ui.transitions_form import (
     PRESETS,
     TransitionsForm,
     format_pairs,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from zcu_tools.fluxdep_gui.ui.interactive.selector import SelectorWidget
+from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
 from zcu_tools.notebook.persistance import (
     PointsData,
     SpectrumData,

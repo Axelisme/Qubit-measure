@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import pytest
 from qtpy.QtWidgets import QTabWidget  # type: ignore[attr-defined]
-from zcu_tools.fluxdep_gui.controller import Controller
-from zcu_tools.fluxdep_gui.state import FluxDepState
-from zcu_tools.fluxdep_gui.ui.analyze_panel import _BOUND_PRESETS, AnalyzePanelWidget
+from zcu_tools.gui.app.fluxdep.controller import Controller
+from zcu_tools.gui.app.fluxdep.state import FluxDepState
+from zcu_tools.gui.app.fluxdep.ui.analyze_panel import (
+    _BOUND_PRESETS,
+    AnalyzePanelWidget,
+)
 
 
 @pytest.fixture
@@ -72,7 +75,7 @@ def test_show_tab_has_display_tools(panel):
 
 def test_auto_limits_match_visualizer(panel, qapp):
     import numpy as np
-    from zcu_tools.fluxdep_gui.state import SpectrumEntry
+    from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
     from zcu_tools.notebook.persistance import PointsData, SpectrumData
 
     w, ctrl = panel
@@ -116,8 +119,8 @@ def test_freq_fields_are_blank_by_default(panel):
 
 def test_filter_selector_built_eagerly_when_points_exist(qapp):
     import numpy as np
-    from zcu_tools.fluxdep_gui.state import SpectrumEntry
-    from zcu_tools.fluxdep_gui.ui.interactive.selector import SelectorWidget
+    from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
+    from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
     from zcu_tools.notebook.persistance import PointsData, SpectrumData
 
     st = FluxDepState()

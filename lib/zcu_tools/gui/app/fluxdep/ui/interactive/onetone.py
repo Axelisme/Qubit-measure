@@ -18,7 +18,7 @@ from qtpy.QtWidgets import QLabel, QSlider, QWidget  # type: ignore[attr-defined
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 
-from zcu_tools.fluxdep_gui.ui.interactive.base import InteractiveMplWidget
+from .base import InteractiveMplWidget
 
 # FloatSlider(0..5, step 0.01) emulated on an int QSlider scaled by 100.
 _THRESHOLD_SCALE = 100

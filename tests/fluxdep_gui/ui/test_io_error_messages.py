@@ -7,10 +7,10 @@ a fix hint, keeping the raw error on a "Details:" line. Pure function — no Qt.
 
 from __future__ import annotations
 
-from zcu_tools.fluxdep_gui.ui.error_messages import (
+from zcu_tools.gui.app.fluxdep.ui.error_messages import (
     friendly_fit_message,
 )
-from zcu_tools.fluxdep_gui.ui.error_messages import (
+from zcu_tools.gui.app.fluxdep.ui.error_messages import (
     friendly_io_message as _friendly_io_message,
 )
 

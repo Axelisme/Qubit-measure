@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Callable, Mapping, Optional
 
-from zcu_tools.fluxdep_gui.event_bus import (
+from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
     FitChangedPayload,
     Payload,

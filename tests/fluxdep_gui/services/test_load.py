@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from zcu_tools.fluxdep_gui.services.load import (
+from zcu_tools.gui.app.fluxdep.services.load import (
     LoadService,
     transpose_spectrum_data,
 )
-from zcu_tools.fluxdep_gui.state import FluxDepState, spectrum_version_key
+from zcu_tools.gui.app.fluxdep.state import FluxDepState, spectrum_version_key
 
 
 def test_load_spectrum_populates_state(spectrum_hdf5):
@@ -128,11 +128,11 @@ def test_inherited_load_marks_alignment_seeded(spectrum_hdf5):
 
 
 def test_load_processed_roundtrip(spectrum_hdf5, tmp_path):
-    from zcu_tools.fluxdep_gui.services.alignment import (
+    from zcu_tools.gui.app.fluxdep.services.alignment import (
         AlignmentService,
         PointsService,
     )
-    from zcu_tools.fluxdep_gui.services.export import ExportService
+    from zcu_tools.gui.app.fluxdep.services.export import ExportService
 
     # build + export a processed spectrum
     filepath, *_ = spectrum_hdf5

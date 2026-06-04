@@ -12,7 +12,7 @@ import matplotlib
 import pytest
 from matplotlib.figure import Figure
 from qtpy.QtWidgets import QLabel, QStackedWidget  # type: ignore[attr-defined]
-from zcu_tools.fluxdep_gui.ui.plot_host import (
+from zcu_tools.gui.app.fluxdep.ui.plot_host import (
     FigureContainer,
     ensure_bridge,
     get_figure_container,
@@ -99,14 +99,16 @@ def _current_is_none() -> bool:
 
 
 def test_backend_name_matches_module():
-    from zcu_tools.fluxdep_gui.ui.mpl_backend_setup import BACKEND_NAME
+    from zcu_tools.gui.app.fluxdep.ui.mpl_backend_setup import BACKEND_NAME
 
-    assert BACKEND_NAME == "module://zcu_tools.fluxdep_gui.ui.mpl_backend"
+    assert BACKEND_NAME == "module://zcu_tools.gui.app.fluxdep.ui.mpl_backend"
 
 
 def test_backend_is_selectable():
     # The custom backend must be importable + registerable by matplotlib.
     # (It is already active in this test process if run after the GUI, but
     # selecting it again must not raise.)
-    matplotlib.use("module://zcu_tools.fluxdep_gui.ui.mpl_backend", force=True)
-    assert matplotlib.get_backend() == "module://zcu_tools.fluxdep_gui.ui.mpl_backend"
+    matplotlib.use("module://zcu_tools.gui.app.fluxdep.ui.mpl_backend", force=True)
+    assert (
+        matplotlib.get_backend() == "module://zcu_tools.gui.app.fluxdep.ui.mpl_backend"
+    )

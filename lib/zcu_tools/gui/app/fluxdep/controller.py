@@ -18,7 +18,7 @@ from typing import Optional
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.fluxdep_gui.event_bus import (
+from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
     EventBus,
     FitChangedPayload,
@@ -28,12 +28,12 @@ from zcu_tools.fluxdep_gui.event_bus import (
     SpectrumChangedPayload,
     SpectrumRemovedPayload,
 )
-from zcu_tools.fluxdep_gui.services.alignment import AlignmentService, PointsService
-from zcu_tools.fluxdep_gui.services.export import ExportService
-from zcu_tools.fluxdep_gui.services.fit import FitService, PbarFactory, SearchResult
-from zcu_tools.fluxdep_gui.services.load import LoadService
-from zcu_tools.fluxdep_gui.services.store import SelectionService, SpectrumStore
-from zcu_tools.fluxdep_gui.state import FluxDepState, ProjectInfo, SpecType
+from zcu_tools.gui.app.fluxdep.services.alignment import AlignmentService, PointsService
+from zcu_tools.gui.app.fluxdep.services.export import ExportService
+from zcu_tools.gui.app.fluxdep.services.fit import FitService, PbarFactory, SearchResult
+from zcu_tools.gui.app.fluxdep.services.load import LoadService
+from zcu_tools.gui.app.fluxdep.services.store import SelectionService, SpectrumStore
+from zcu_tools.gui.app.fluxdep.state import FluxDepState, ProjectInfo, SpecType
 from zcu_tools.notebook.persistance import TransitionDict
 
 logger = logging.getLogger(__name__)

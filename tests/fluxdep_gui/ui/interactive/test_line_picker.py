@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from zcu_tools.fluxdep_gui.ui.interactive.line_picker import (
+from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import (
     LinePickerWidget,
     find_best_mirror_position,
     fold_initial_lines,

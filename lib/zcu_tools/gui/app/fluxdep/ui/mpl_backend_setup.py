@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sys
 
-BACKEND_NAME = "module://zcu_tools.fluxdep_gui.ui.mpl_backend"
+BACKEND_NAME = "module://zcu_tools.gui.app.fluxdep.ui.mpl_backend"
 
 _configured = False
 

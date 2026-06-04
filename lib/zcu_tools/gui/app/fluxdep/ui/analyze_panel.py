@@ -49,14 +49,15 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.fluxdep_gui.controller import Controller
-from zcu_tools.fluxdep_gui.services.fit import SearchResult
-from zcu_tools.fluxdep_gui.services.viz import derive_auto_limits, render_fit_figure
-from zcu_tools.fluxdep_gui.ui.error_messages import friendly_fit_message
-from zcu_tools.fluxdep_gui.ui.gui_pbar import GuiProgressBarChannel
-from zcu_tools.fluxdep_gui.ui.plot_host import FigureContainer, set_current_container
-from zcu_tools.fluxdep_gui.ui.transitions_form import TransitionsForm
+from zcu_tools.gui.app.fluxdep.controller import Controller
+from zcu_tools.gui.app.fluxdep.services.fit import SearchResult
+from zcu_tools.gui.app.fluxdep.services.viz import derive_auto_limits, render_fit_figure
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
+
+from .error_messages import friendly_fit_message
+from .gui_pbar import GuiProgressBarChannel
+from .plot_host import FigureContainer, set_current_container
+from .transitions_form import TransitionsForm
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +175,7 @@ class AnalyzePanelWidget(QWidget):
 
     def _refresh_filter_tab(self) -> None:
         """(Re)build the cross-spectrum selector for the current spectra."""
-        from zcu_tools.fluxdep_gui.ui.interactive.selector import SelectorWidget
+        from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
         from zcu_tools.notebook.persistance import SpectrumResult
 
         if self._filter_widget is not None:
@@ -350,7 +351,7 @@ class AnalyzePanelWidget(QWidget):
         return holder
 
     def _load_from_state(self) -> None:
-        from zcu_tools.fluxdep_gui.ui.paths import default_database_file
+        from .paths import default_database_file
 
         fit = self._ctrl.state.fit
         # Seed the database path: the prior fit's path, else a bundled default so
@@ -378,7 +379,7 @@ class AnalyzePanelWidget(QWidget):
 
     def _missing_freq_message(self, transitions, r_f, sample_f):
         """Return a message if a chosen transition needs an unset r_f/sample_f."""
-        from zcu_tools.fluxdep_gui.state import (
+        from zcu_tools.gui.app.fluxdep.state import (
             transitions_need_r_f,
             transitions_need_sample_f,
         )
@@ -422,7 +423,7 @@ class AnalyzePanelWidget(QWidget):
         self._el_hi.setValue(el[1])
 
     def _on_browse_db(self) -> None:
-        from zcu_tools.fluxdep_gui.ui.paths import database_dir
+        from .paths import database_dir
 
         # Start in the current path's folder if set, else the project / bundled
         # simulation database directory.

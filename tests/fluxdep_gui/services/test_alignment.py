@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from zcu_tools.fluxdep_gui.services.alignment import AlignmentService, PointsService
-from zcu_tools.fluxdep_gui.services.load import LoadService
-from zcu_tools.fluxdep_gui.state import FluxDepState
+from zcu_tools.gui.app.fluxdep.services.alignment import AlignmentService, PointsService
+from zcu_tools.gui.app.fluxdep.services.load import LoadService
+from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.simulate import value2flux
 
 

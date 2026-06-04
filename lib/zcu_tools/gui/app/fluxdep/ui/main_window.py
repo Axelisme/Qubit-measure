@@ -39,19 +39,19 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.fluxdep_gui.controller import Controller
-from zcu_tools.fluxdep_gui.event_bus import (
+from zcu_tools.gui.app.fluxdep.controller import Controller
+from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
     SpectrumAddedPayload,
     SpectrumChangedPayload,
     SpectrumRemovedPayload,
 )
-from zcu_tools.fluxdep_gui.state import SpectrumEntry
-from zcu_tools.fluxdep_gui.ui.interactive.base import InteractiveMplWidget
-from zcu_tools.fluxdep_gui.ui.interactive.find_points import FindPointsWidget
-from zcu_tools.fluxdep_gui.ui.interactive.line_picker import LinePickerWidget
-from zcu_tools.fluxdep_gui.ui.interactive.onetone import OneToneWidget
-from zcu_tools.fluxdep_gui.ui.interactive.result_preview import ResultPreviewWidget
+from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
+from zcu_tools.gui.app.fluxdep.ui.interactive.base import InteractiveMplWidget
+from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
+from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
+from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
+from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import ResultPreviewWidget
 
 logger = logging.getLogger(__name__)
 
@@ -319,7 +319,7 @@ class MainWindow(QMainWindow):
         stage-driven ``_current_editor`` but leaves this panel alive, so its
         tabs / form / database path / figures are preserved across switches.
         """
-        from zcu_tools.fluxdep_gui.ui.analyze_panel import AnalyzePanelWidget
+        from .analyze_panel import AnalyzePanelWidget
 
         if not any(e.points_selected for e in self._ctrl.state.spectrums.values()):
             self._show_error("No points", "Select points on a spectrum first.")
@@ -333,8 +333,8 @@ class MainWindow(QMainWindow):
         self._editor_stack.setCurrentWidget(self._analyze_panel)
 
     def _on_load_clicked(self) -> None:
-        from zcu_tools.fluxdep_gui.ui.load_dialog import LoadSpectrumDialog
-        from zcu_tools.fluxdep_gui.ui.paths import raw_spectrum_dir
+        from .load_dialog import LoadSpectrumDialog
+        from .paths import raw_spectrum_dir
 
         dialog = LoadSpectrumDialog(
             self._ctrl.list_spectrums(),
@@ -362,7 +362,7 @@ class MainWindow(QMainWindow):
         """Restore a processed spectrums.hdf5 (aligned + selected spectra)."""
         from qtpy.QtWidgets import QFileDialog  # type: ignore[attr-defined]
 
-        from zcu_tools.fluxdep_gui.ui.paths import processed_spectrum_dir
+        from .paths import processed_spectrum_dir
 
         filepath, _ = QFileDialog.getOpenFileName(
             self,
@@ -399,7 +399,7 @@ class MainWindow(QMainWindow):
 
     def _on_project_clicked(self) -> None:
         """Edit the project chip/qubit names (and optional roots)."""
-        from zcu_tools.fluxdep_gui.ui.project_dialog import ProjectDialog
+        from .project_dialog import ProjectDialog
 
         dialog = ProjectDialog(self._ctrl.state.project, parent=self)
         if dialog.exec() != int(dialog.DialogCode.Accepted):
@@ -407,7 +407,7 @@ class MainWindow(QMainWindow):
         self._ctrl.setup_project(dialog.result_project())
 
     def _on_export_clicked(self) -> None:
-        from zcu_tools.fluxdep_gui.ui.export_dialog import ExportSpectrumsDialog
+        from .export_dialog import ExportSpectrumsDialog
 
         # The default path comes from the project's result dir (set via Project…);
         # the dialog only confirms / overrides the path.
@@ -434,7 +434,7 @@ class MainWindow(QMainWindow):
 
     def _show_io_error(self, action: str, filepath: str, exc: Exception) -> None:
         """Show a friendly message for a file IO failure (load / restore / export)."""
-        from zcu_tools.fluxdep_gui.ui.error_messages import friendly_io_message
+        from .error_messages import friendly_io_message
 
         self._show_error(f"{action} failed", friendly_io_message(action, filepath, exc))
 

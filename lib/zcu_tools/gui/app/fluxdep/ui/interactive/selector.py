@@ -36,12 +36,13 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.fluxdep_gui.ui.interactive.base import InteractiveMplWidget
 from zcu_tools.notebook.analysis.fluxdep.processing import (
     cast2real_and_norm,
     downsample_points,
 )
 from zcu_tools.notebook.persistance import SpectrumResult
+
+from .base import InteractiveMplWidget
 
 _SCALE = 1000
 

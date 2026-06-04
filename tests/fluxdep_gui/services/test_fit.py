@@ -14,12 +14,12 @@ import os
 import h5py
 import numpy as np
 import pytest
-from zcu_tools.fluxdep_gui.services.fit import (
+from zcu_tools.gui.app.fluxdep.services.fit import (
     FitService,
     SearchResult,
     default_params_path,
 )
-from zcu_tools.fluxdep_gui.state import (
+from zcu_tools.gui.app.fluxdep.state import (
     FIT_VERSION_KEY,
     FluxDepState,
     ProjectInfo,

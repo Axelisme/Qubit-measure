@@ -40,12 +40,12 @@ from typing import TYPE_CHECKING, Callable, Mapping, Optional
 
 from qtpy.QtCore import QObject, Qt, Signal  # type: ignore[attr-defined]
 
-from zcu_tools.fluxdep_gui.event_bus import EventBus, Payload
+from zcu_tools.gui.app.fluxdep.event_bus import EventBus, Payload
 
 if TYPE_CHECKING:
     # Type-only: importing Controller at runtime would not cycle here, but the
     # string annotation keeps the import graph lean and pyright happy.
-    from zcu_tools.fluxdep_gui.controller import Controller
+    from zcu_tools.gui.app.fluxdep.controller import Controller
 
 from .dispatch import METHOD_REGISTRY
 from .errors import ErrorCode, ErrorEnvelope, RemoteError

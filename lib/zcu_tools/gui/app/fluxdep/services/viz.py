@@ -26,7 +26,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
-from zcu_tools.fluxdep_gui.state import SpectrumEntry, transitions_with_freqs
+from zcu_tools.gui.app.fluxdep.state import SpectrumEntry, transitions_with_freqs
 from zcu_tools.notebook.analysis.fluxdep.models import energy2transition
 from zcu_tools.notebook.analysis.fluxdep.processing import cast2real_and_norm
 from zcu_tools.notebook.persistance import TransitionDict

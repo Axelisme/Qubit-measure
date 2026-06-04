@@ -20,7 +20,7 @@
         "--extra",
         "gui",
         "python",
-        "lib/zcu_tools/fluxdep_gui/services/remote/mcp_server.py"
+        "lib/zcu_tools/gui/app/fluxdep/services/remote/mcp_server.py"
       ],
       "env": {}
     }

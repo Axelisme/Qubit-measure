@@ -23,7 +23,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.fluxdep_gui.state import (
+from zcu_tools.gui.app.fluxdep.state import (
     ProjectInfo,
     default_database_root,
     default_result_dir,

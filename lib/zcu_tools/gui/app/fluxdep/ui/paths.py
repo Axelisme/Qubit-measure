@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 
-from zcu_tools.fluxdep_gui.state import ProjectInfo
+from zcu_tools.gui.app.fluxdep.state import ProjectInfo
 
 # The repo's bundled simulation databases (relative to the cwd a launch uses).
 # This is the home of the precomputed *search* database (fluxonium*.h5) — a

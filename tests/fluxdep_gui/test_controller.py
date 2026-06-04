@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import numpy as np
-from zcu_tools.fluxdep_gui.controller import Controller
-from zcu_tools.fluxdep_gui.event_bus import (
+from zcu_tools.gui.app.fluxdep.controller import Controller
+from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
     Payload,
     ProjectChangedPayload,
@@ -13,7 +13,7 @@ from zcu_tools.fluxdep_gui.event_bus import (
     SpectrumChangedPayload,
     SpectrumRemovedPayload,
 )
-from zcu_tools.fluxdep_gui.state import FluxDepState, ProjectInfo
+from zcu_tools.gui.app.fluxdep.state import FluxDepState, ProjectInfo
 
 
 def _ctrl() -> Controller:
@@ -135,7 +135,7 @@ def _fit_db_file(tmp_path) -> str:
 
 
 def _seed_aligned_points(ctrl: Controller) -> None:
-    from zcu_tools.fluxdep_gui.state import SpectrumEntry
+    from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
     from zcu_tools.notebook.persistance import PointsData, SpectrumData
 
     fluxs = np.array([0.0, 0.1, 0.2, 0.3])
@@ -166,7 +166,7 @@ def _seed_aligned_points(ctrl: Controller) -> None:
 
 
 def test_set_fit_params_emits_fit_changed(tmp_path):
-    from zcu_tools.fluxdep_gui.event_bus import FitChangedPayload
+    from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
     from zcu_tools.notebook.persistance import TransitionDict
 
     ctrl = _ctrl()
@@ -185,7 +185,7 @@ def test_set_fit_params_emits_fit_changed(tmp_path):
 
 
 def test_compute_search_does_not_emit_or_record(tmp_path):
-    from zcu_tools.fluxdep_gui.event_bus import FitChangedPayload
+    from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
     from zcu_tools.notebook.persistance import TransitionDict
 
     ctrl = _ctrl()
@@ -211,7 +211,7 @@ def test_compute_search_does_not_emit_or_record(tmp_path):
 
 
 def test_search_database_records_and_emits(tmp_path):
-    from zcu_tools.fluxdep_gui.event_bus import FitChangedPayload
+    from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
     from zcu_tools.notebook.persistance import TransitionDict
 
     ctrl = _ctrl()

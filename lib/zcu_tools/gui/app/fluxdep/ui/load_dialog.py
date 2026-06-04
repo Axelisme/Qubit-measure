@@ -29,7 +29,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.fluxdep_gui.state import SpecType
+from zcu_tools.gui.app.fluxdep.state import SpecType
 from zcu_tools.utils.datasaver import load_data
 
 logger = logging.getLogger(__name__)

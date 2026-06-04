@@ -12,7 +12,7 @@ import logging
 import os
 from typing import Optional
 
-from zcu_tools.fluxdep_gui.state import (
+from zcu_tools.gui.app.fluxdep.state import (
     DEFAULT_CHIP,
     DEFAULT_QUBIT,
     FluxDepState,

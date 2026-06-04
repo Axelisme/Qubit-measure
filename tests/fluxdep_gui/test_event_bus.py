@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from zcu_tools.fluxdep_gui.event_bus import (
+from zcu_tools.gui.app.fluxdep.event_bus import (
     EventBus,
     FluxDepEvent,
     SpectrumAddedPayload,

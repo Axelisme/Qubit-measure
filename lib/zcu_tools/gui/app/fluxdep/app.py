@@ -12,13 +12,13 @@ from __future__ import annotations
 import sys
 from typing import Optional
 
-from zcu_tools.fluxdep_gui.controller import Controller
-from zcu_tools.fluxdep_gui.event_bus import EventBus
-from zcu_tools.fluxdep_gui.services.remote.service import (
+from zcu_tools.gui.app.fluxdep.controller import Controller
+from zcu_tools.gui.app.fluxdep.event_bus import EventBus
+from zcu_tools.gui.app.fluxdep.services.remote.service import (
     ControlOptions,
     RemoteControlAdapter,
 )
-from zcu_tools.fluxdep_gui.state import FluxDepState, ProjectInfo
+from zcu_tools.gui.app.fluxdep.state import FluxDepState, ProjectInfo
 
 
 def run_app(
@@ -33,8 +33,8 @@ def run_app(
     """
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 
-    import zcu_tools.fluxdep_gui.ui.plot_host as plot_host
-    from zcu_tools.fluxdep_gui.ui.main_window import MainWindow
+    import zcu_tools.gui.app.fluxdep.ui.plot_host as plot_host
+    from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 
     app = QApplication.instance() or QApplication(sys.argv)
 

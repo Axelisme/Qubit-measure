@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from zcu_tools.fluxdep_gui.state import (
+from zcu_tools.gui.app.fluxdep.state import (
     PROJECT_VERSION_KEY,
     SELECTION_VERSION_KEY,
     SPECTRUM_SET_VERSION_KEY,
@@ -189,7 +189,7 @@ def test_project_info_explicit_paths_override_derivation():
 
 
 def test_set_fit_params_bumps_and_clears_result():
-    from zcu_tools.fluxdep_gui.state import FIT_VERSION_KEY
+    from zcu_tools.gui.app.fluxdep.state import FIT_VERSION_KEY
     from zcu_tools.notebook.persistance import TransitionDict
 
     st = FluxDepState()
@@ -213,7 +213,7 @@ def test_set_fit_params_bumps_and_clears_result():
 
 
 def test_set_fit_result_records_params():
-    from zcu_tools.fluxdep_gui.state import FIT_VERSION_KEY
+    from zcu_tools.gui.app.fluxdep.state import FIT_VERSION_KEY
 
     st = FluxDepState()
     before = st.version.get(FIT_VERSION_KEY)
@@ -224,7 +224,7 @@ def test_set_fit_result_records_params():
 
 
 def test_default_transitions_is_basic_preset():
-    from zcu_tools.fluxdep_gui.state import default_transitions
+    from zcu_tools.gui.app.fluxdep.state import default_transitions
 
     t = default_transitions()
     assert t["transitions"] == [(0, 1), (0, 2), (1, 2), (1, 3)]
@@ -234,7 +234,7 @@ def test_default_transitions_is_basic_preset():
 
 
 def test_transitions_need_r_f():
-    from zcu_tools.fluxdep_gui.state import transitions_need_r_f
+    from zcu_tools.gui.app.fluxdep.state import transitions_need_r_f
     from zcu_tools.notebook.persistance import TransitionDict
 
     assert transitions_need_r_f(TransitionDict({"red side": [(0, 1)]}))
@@ -246,7 +246,7 @@ def test_transitions_need_r_f():
 
 
 def test_transitions_need_sample_f():
-    from zcu_tools.fluxdep_gui.state import transitions_need_sample_f
+    from zcu_tools.gui.app.fluxdep.state import transitions_need_sample_f
     from zcu_tools.notebook.persistance import TransitionDict
 
     assert transitions_need_sample_f(TransitionDict({"mirror": [(0, 1)]}))
@@ -255,7 +255,7 @@ def test_transitions_need_sample_f():
 
 
 def test_transitions_with_freqs_injects_only_set():
-    from zcu_tools.fluxdep_gui.state import transitions_with_freqs
+    from zcu_tools.gui.app.fluxdep.state import transitions_with_freqs
     from zcu_tools.notebook.persistance import TransitionDict
 
     base = TransitionDict({"mirror": [(0, 1)]})

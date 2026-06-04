@@ -30,7 +30,7 @@ def _setup_logging(to_file: bool = True, log_file: Path = LOG_FILE) -> None:
         file_handler = logging.FileHandler(log_file, mode="w", encoding="utf-8")
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE))
-        log = logging.getLogger("zcu_tools.fluxdep_gui")
+        log = logging.getLogger("zcu_tools.gui.app.fluxdep")
         log.addHandler(file_handler)
         log.setLevel(logging.DEBUG)
         print(f"[run_fluxdep_gui] Logging DEBUG output to: {log_file}", file=sys.stderr)
@@ -76,15 +76,15 @@ if __name__ == "__main__":
     # matplotlib (the "configure backend before pyplot" invariant) — this routes
     # search_in_database(plot=True)'s pyplot figure into the GUI instead of a
     # detached window. The setup module is import-clean (pulls in no matplotlib).
-    from zcu_tools.fluxdep_gui.ui.mpl_backend_setup import (
+    from zcu_tools.gui.app.fluxdep.ui.mpl_backend_setup import (
         configure_fluxdep_matplotlib_backend,
     )
 
     configure_fluxdep_matplotlib_backend()
 
-    from zcu_tools.fluxdep_gui.app import run_app
-    from zcu_tools.fluxdep_gui.services.remote.service import ControlOptions
-    from zcu_tools.fluxdep_gui.state import ProjectInfo
+    from zcu_tools.gui.app.fluxdep.app import run_app
+    from zcu_tools.gui.app.fluxdep.services.remote.service import ControlOptions
+    from zcu_tools.gui.app.fluxdep.state import ProjectInfo
 
     control = (
         ControlOptions(port=args.control_port, token=args.control_token)

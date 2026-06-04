@@ -14,7 +14,7 @@ from typing import Optional
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.fluxdep_gui.state import FluxDepState, SpectrumEntry
+from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpectrumEntry
 
 logger = logging.getLogger(__name__)
 

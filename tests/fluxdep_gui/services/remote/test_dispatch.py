@@ -16,14 +16,14 @@ from __future__ import annotations
 import os
 
 import numpy as np
-from zcu_tools.fluxdep_gui.controller import Controller
-from zcu_tools.fluxdep_gui.services.remote.dispatch import (
+from zcu_tools.gui.app.fluxdep.controller import Controller
+from zcu_tools.gui.app.fluxdep.services.remote.dispatch import (
     _HANDLERS,
     METHOD_REGISTRY,
 )
-from zcu_tools.fluxdep_gui.services.remote.method_specs import METHOD_SPECS
-from zcu_tools.fluxdep_gui.services.remote.param_spec import validate_params
-from zcu_tools.fluxdep_gui.state import FluxDepState, ProjectInfo
+from zcu_tools.gui.app.fluxdep.services.remote.method_specs import METHOD_SPECS
+from zcu_tools.gui.app.fluxdep.services.remote.param_spec import validate_params
+from zcu_tools.gui.app.fluxdep.state import FluxDepState, ProjectInfo
 from zcu_tools.notebook.persistance import TransitionDict
 
 
