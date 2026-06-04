@@ -87,9 +87,9 @@ class Controller:
 
     # --- preprocess ------------------------------------------------------
 
-    def compute_preprocess(self, *, n_jobs: int = -1) -> PreprocessResult:
+    def compute_preprocess(self) -> PreprocessResult:
         """Run preprocessing — pure, off-main-safe (no State write, no event)."""
-        return self._preprocess.compute(n_jobs=n_jobs)
+        return self._preprocess.compute()
 
     def record_preprocess(self, result: PreprocessResult) -> None:
         """Write a computed preprocessing result onto State (MAIN THREAD only)."""
@@ -97,9 +97,9 @@ class Controller:
         self._invalidate_predictor()
         self._bus.emit(PreprocessChangedPayload())
 
-    def preprocess(self, *, n_jobs: int = -1) -> PreprocessResult:
+    def preprocess(self) -> PreprocessResult:
         """Compute + record inline (RPC / convenience path, main thread)."""
-        result = self._preprocess.preprocess(n_jobs=n_jobs)
+        result = self._preprocess.preprocess()
         self._invalidate_predictor()
         self._bus.emit(PreprocessChangedPayload())
         return result

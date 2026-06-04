@@ -1,4 +1,4 @@
-"""Tests for dispersive PreprocessService — the signal pipeline (n_jobs=1, deterministic)."""
+"""Tests for dispersive PreprocessService — the signal pipeline (numba edelay kernel)."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def _synthetic_onetone(n_flux=10, n_freq=60):
 
 def test_compute_preprocess_shapes_and_norm():
     fluxs, freqs, signals = _synthetic_onetone()
-    result = compute_preprocess(fluxs, freqs, signals, n_jobs=1)
+    result = compute_preprocess(fluxs, freqs, signals)
 
     assert result.norm_phases.shape == signals.shape
     np.testing.assert_allclose(result.sp_fluxs, fluxs)
@@ -51,21 +51,21 @@ def test_median_rf_lands_on_the_resonance_band():
     # the synthetic onetone's resonance sweeps around 5.3 GHz (±0.2 cos); the median
     # of per-flux peak frequencies should land in that band, not at an axis edge.
     fluxs, freqs, signals = _synthetic_onetone(n_flux=12, n_freq=80)
-    result = compute_preprocess(fluxs, freqs, signals, n_jobs=1)
+    result = compute_preprocess(fluxs, freqs, signals)
     assert 5.1 <= result.median_rf <= 5.5
 
 
 def test_compute_preprocess_small_grid_does_not_crash():
     # fewer freqs than a smoothing divisor → σ would be 0; the floor must save it.
     fluxs, freqs, signals = _synthetic_onetone(n_flux=6, n_freq=8)
-    result = compute_preprocess(fluxs, freqs, signals, n_jobs=1)
+    result = compute_preprocess(fluxs, freqs, signals)
     assert result.norm_phases.shape == signals.shape
 
 
 def test_compute_preprocess_signature_is_deterministic():
     fluxs, freqs, signals = _synthetic_onetone()
-    r1 = compute_preprocess(fluxs, freqs, signals, n_jobs=1)
-    r2 = compute_preprocess(fluxs, freqs, signals, n_jobs=1)
+    r1 = compute_preprocess(fluxs, freqs, signals)
+    r2 = compute_preprocess(fluxs, freqs, signals)
     assert r1.signature == r2.signature
     # signature encodes smoothing divisors + grid shape
     assert r1.signature == (30, 10, len(fluxs), len(freqs))
@@ -74,7 +74,7 @@ def test_compute_preprocess_signature_is_deterministic():
 def test_service_compute_requires_onetone():
     st = DispersiveState()
     with pytest.raises(RuntimeError, match="no one-tone"):
-        PreprocessService(st).compute(n_jobs=1)
+        PreprocessService(st).compute()
 
 
 def test_service_compute_then_record_writes_state():
@@ -101,7 +101,7 @@ def test_service_compute_then_record_writes_state():
         )
     )
     svc = PreprocessService(st)
-    result = svc.compute(n_jobs=1)  # pure, no State write yet
+    result = svc.compute()  # pure, no State write yet
     assert st.preprocess is None
     svc.record(result)  # main-thread write
     assert st.preprocess is result

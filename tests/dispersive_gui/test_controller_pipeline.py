@@ -74,8 +74,8 @@ def test_full_pipeline(monkeypatch, tmp_path, onetone_hdf5):
     assert state.onetone is not None
     assert "OnetoneLoadedPayload" in events
 
-    # 3. preprocess (real pipeline, n_jobs=1)
-    result = ctrl.compute_preprocess(n_jobs=1)
+    # 3. preprocess (real pipeline)
+    result = ctrl.compute_preprocess()
     ctrl.record_preprocess(result)
     assert state.preprocess is not None
     assert "PreprocessChangedPayload" in events
@@ -108,9 +108,9 @@ def test_predictor_rebuilt_when_inputs_change(monkeypatch, tmp_path, onetone_hdf
 
     ctrl.load_fit_inputs(params_path)
     ctrl.load_onetone(onetone_path)
-    ctrl.record_preprocess(ctrl.compute_preprocess(n_jobs=1))
+    ctrl.record_preprocess(ctrl.compute_preprocess())
     p1 = ctrl._predictor()
     # re-recording preprocess (new object) rebuilds the predictor
-    ctrl.record_preprocess(ctrl.compute_preprocess(n_jobs=1))
+    ctrl.record_preprocess(ctrl.compute_preprocess())
     p2 = ctrl._predictor()
     assert p1 is not p2

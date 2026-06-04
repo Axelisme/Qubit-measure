@@ -151,30 +151,24 @@ def test_rf_slider_precision_is_span_over_300(qapp):
     assert 1e3 * (panel._rf_ghz() - base) == pytest.approx(1000.0 / 300.0, abs=1e-6)
 
 
-def test_progress_routes_to_the_active_bar(qapp):
+def test_busy_progress_bars_show_and_hide(qapp):
+    # use isHidden() (the explicit shown/hidden flag) rather than isVisible(), which
+    # is False for any widget whose top-level window has not been shown (offscreen).
     state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
     panel = _panel(qapp, state)
-    # preprocess (step 3) and tune (step 4) each have their own bar
+    # preprocess (step 3) and tune (step 4) each have their own busy bar
     assert panel._progress is not panel._tune_progress
-    assert not panel._progress.isVisible()
-    assert not panel._tune_progress.isVisible()
+    assert panel._progress.isHidden()
+    assert panel._tune_progress.isHidden()
 
-    # routing the shared progress signal targets whichever bar is active
+    # begin → that bar shows as indeterminate (range 0,0 = busy spinner)
     panel._begin_progress(panel._tune_progress)
     assert panel._active_progress is panel._tune_progress
-    panel._on_progress(3.0, 10.0, "Predicting")
-    assert panel._tune_progress.value() == 3
+    assert not panel._tune_progress.isHidden()
+    assert panel._tune_progress.maximum() == 0  # indeterminate
     panel._end_progress()
-    assert not panel._tune_progress.isVisible()
+    assert panel._tune_progress.isHidden()
     assert panel._active_progress is None
-    # with no active worker, a stray progress signal is ignored (no bar updated)
-    panel._on_progress(5.0, 10.0, "stray")  # must not raise / touch any bar
-
-    # preprocess routes to its own bar
-    panel._begin_progress(panel._progress)
-    panel._on_progress(4.0, 8.0, "edelay")
-    assert panel._progress.value() == 4
-    panel._end_progress()
 
 
 def test_tune_done_slot_records_manual_fit_and_draws(qapp):

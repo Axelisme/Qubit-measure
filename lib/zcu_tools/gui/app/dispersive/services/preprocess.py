@@ -4,16 +4,16 @@ Extracts the normalized phase image the dispersive tuning / fit work against fro
 the raw complex S-parameter signals: fit + remove the electronic delay, smooth,
 fit a common circle centre, take the phase, then differentiate / abs / row-normalize.
 
-Pure and Qt-free. The heavy per-flux ``fit_edelay`` (a 1000-point grid search each)
-runs under joblib ``Parallel`` in the loky PROCESS pool (the default) — it is scipy
-``linalg.eig``-bound and does NOT release the GIL, so a threading backend is ~4x
-slower (measured); only real processes parallelise it. ``return_as="generator"``
-yields results in submission order as workers finish, so the progress bar is driven
-on the calling (worker) thread while the parallel jobs run the pure, picklable
-``fit_edelay`` and never touch the bar (a ``GuiProgressBar``'s QObject channel cannot
-survive a fork — same shape as fluxdep's search). The whole ``compute`` is run on a
-worker thread by the GUI so it does not block the event loop. Reuses the resonance
-fitting primitives verbatim from ``zcu_tools.utils.fitting.resonance``.
+Pure and Qt-free. The heavy per-flux electronic-delay fit (a 1000-point grid search
+each) runs through ``fast_edelays`` — a GUI-local numba kernel that JIT-compiles the
+whole (n_flux × grid) double loop and parallelises the per-flux outer loop in
+``prange`` (~14x over the previous loky-fork path, measured). numba releases the GIL,
+so the parallelism needs no process fork — nothing is pickled, so a Qt
+``GuiProgressBar`` cannot leak across a worker boundary; since the kernel is a single
+black-box call (~0.1s), the GUI shows a busy/indeterminate bar rather than per-flux
+ticks. The whole ``compute`` still runs on a worker thread so it cannot block the
+event loop. The remaining steps reuse the resonance primitives from
+``zcu_tools.utils.fitting.resonance``.
 """
 
 from __future__ import annotations
@@ -21,16 +21,14 @@ from __future__ import annotations
 import logging
 
 import numpy as np
-from joblib import Parallel, delayed
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 
+from zcu_tools.gui.app.dispersive.services._fast_edelay import fast_edelays
 from zcu_tools.gui.app.dispersive.state import DispersiveState, PreprocessResult
-from zcu_tools.progress_bar import make_pbar
 from zcu_tools.utils.fitting.resonance import (
     calc_phase,
     fit_circle_params,
-    fit_edelay,
     remove_edelay,
 )
 
@@ -59,35 +57,15 @@ def compute_preprocess(
     sp_fluxs: NDArray[np.float64],
     sp_freqs: NDArray[np.float64],
     signals: NDArray[np.complex128],
-    *,
-    n_jobs: int = -1,
 ) -> PreprocessResult:
     """Run the preprocessing pipeline on a raw one-tone spectrum (pure, off-main-safe).
 
     ``signals`` is the (n_flux, n_freq) complex grid; ``sp_freqs`` is in GHz. Returns
-    the ``PreprocessResult`` (norm_phases + axes + edelay diagnostics). Drives the
-    active ``make_pbar`` over the per-flux edelay fits.
+    the ``PreprocessResult`` (norm_phases + axes + edelay diagnostics).
     """
-    n_flux = signals.shape[0]
-    # ``fit_edelay`` is the heavy step (a 1000-point grid search, each point a scipy
-    # ``linalg.eig`` circle fit) and does NOT release the GIL — so it must run in
-    # the loky PROCESS pool (the joblib default), not a threading backend, to
-    # actually parallelise (sharedmem threads are ~4x SLOWER here, measured).
-    # ``return_as="generator"`` yields results in submission order as they complete,
-    # so the progress bar is driven HERE on the worker thread and the parallel jobs
-    # run the pure picklable ``fit_edelay`` and never see the bar (a GuiProgressBar's
-    # QObject channel cannot survive a fork — same shape as fluxdep's search).
-    pbar = make_pbar(total=n_flux, desc="Fitting edelay")
-    try:
-        edelays = np.empty(n_flux, dtype=np.float64)
-        results = Parallel(n_jobs=n_jobs, return_as="generator")(
-            delayed(fit_edelay)(sp_freqs, sig) for sig in signals
-        )
-        for i, value in enumerate(results):
-            edelays[i] = value
-            pbar.update(1)
-    finally:
-        pbar.close()
+    # The heavy per-flux edelay fit, parallelised in the numba kernel (see
+    # _fast_edelay); the median over flux is the spectrum's electronic delay.
+    edelays = fast_edelays(sp_freqs, signals)
     edelay = float(np.median(edelays))
 
     n_freq = int(signals.shape[1])
@@ -121,7 +99,7 @@ def compute_preprocess(
         edelays=edelays,
         edelay=edelay,
         median_rf=median_rf,
-        signature=(EDELAY_SMOOTH_DIV, PHASE_SMOOTH_DIV, n_flux, n_freq),
+        signature=(EDELAY_SMOOTH_DIV, PHASE_SMOOTH_DIV, int(signals.shape[0]), n_freq),
     )
 
 
@@ -131,7 +109,7 @@ class PreprocessService:
     def __init__(self, state: DispersiveState) -> None:
         self._state = state
 
-    def compute(self, *, n_jobs: int = -1) -> PreprocessResult:
+    def compute(self) -> PreprocessResult:
         """Run the pipeline on the loaded one-tone — pure, off-main-safe (no State write).
 
         Snapshots the spectrum off State first (a fast read), then runs the heavy
@@ -142,16 +120,14 @@ class PreprocessService:
         if entry is None:
             raise RuntimeError("no one-tone spectrum loaded (call load_onetone first)")
         raw = entry.raw
-        return compute_preprocess(
-            raw["fluxs"], raw["freqs"], raw["signals"], n_jobs=n_jobs
-        )
+        return compute_preprocess(raw["fluxs"], raw["freqs"], raw["signals"])
 
     def record(self, result: PreprocessResult) -> None:
         """Write a computed preprocessing result onto State (MAIN THREAD only)."""
         self._state.set_preprocess(result)
 
-    def preprocess(self, *, n_jobs: int = -1) -> PreprocessResult:
+    def preprocess(self) -> PreprocessResult:
         """Compute + record inline (RPC / convenience path, main thread)."""
-        result = self.compute(n_jobs=n_jobs)
+        result = self.compute()
         self.record(result)
         return result

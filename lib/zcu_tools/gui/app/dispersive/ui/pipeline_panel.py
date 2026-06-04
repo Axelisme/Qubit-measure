@@ -61,7 +61,6 @@ from zcu_tools.gui.app.dispersive.services.viz import (
 from zcu_tools.gui.app.dispersive.state import PreprocessResult
 
 from .error_messages import friendly_fit_message, friendly_io_message
-from .gui_pbar import GuiProgressBarChannel
 from .project_dialog import ProjectDialog
 from .tune_canvas import TuneCanvasWidget
 
@@ -95,20 +94,20 @@ class _WorkerSignals(QObject):
 
 
 class _PreprocessWorker(QRunnable):
-    """Runs the pure ``compute_preprocess`` off the main thread (joblib edelay fit)."""
+    """Runs the pure ``compute_preprocess`` off the main thread (numba edelay kernel).
 
-    def __init__(self, ctrl: Controller, pbar_factory) -> None:
+    The kernel is a single black-box call (~0.1s), so there is no per-flux progress —
+    the panel shows a busy bar. No pbar factory is needed.
+    """
+
+    def __init__(self, ctrl: Controller) -> None:
         super().__init__()
         self.signals = _WorkerSignals()
         self._ctrl = ctrl
-        self._pbar_factory = pbar_factory
 
     def run(self) -> None:
         try:
-            from zcu_tools.progress_bar import use_pbar_factory
-
-            with use_pbar_factory(self._pbar_factory):
-                result = self._ctrl.compute_preprocess()
+            result = self._ctrl.compute_preprocess()
         except Exception as exc:  # noqa: BLE001 — surface to the panel
             logger.exception("preprocess worker failed")
             self.signals.failed.emit(str(exc))
@@ -151,11 +150,9 @@ class PipelinePanelWidget(QWidget):
         super().__init__(parent)
         self._ctrl = ctrl
         self._pool = QThreadPool.globalInstance() or QThreadPool(self)
-        self._channel = GuiProgressBarChannel()
-        self._channel.progress.connect(self._on_progress)
         self._tune_artists = None
-        # The progress signal is shared by the workers (only one runs at a time);
-        # this points at the bar of whichever worker is currently active.
+        # Points at whichever step's busy bar is currently active (preprocess /
+        # predict). Both run a black-box compute, so the bars are indeterminate.
         self._active_progress: Optional[QProgressBar] = None
 
         self._build_ui()
@@ -381,8 +378,10 @@ class PipelinePanelWidget(QWidget):
 
     def _on_preprocess(self) -> None:
         self._preprocess_btn.setEnabled(False)
-        self._begin_progress(self._progress)
-        worker = _PreprocessWorker(self._ctrl, self._channel.factory())
+        self._begin_progress(
+            self._progress
+        )  # busy/indeterminate (numba is a black box)
+        worker = _PreprocessWorker(self._ctrl)
         worker.signals.done.connect(self._on_preprocess_done)
         worker.signals.failed.connect(self._on_preprocess_failed)
         self._pool.start(worker)
@@ -555,26 +554,16 @@ class PipelinePanelWidget(QWidget):
     # --- progress + messages --------------------------------------------
 
     def _begin_progress(self, bar: QProgressBar) -> None:
-        """Show ``bar`` and route the shared progress signal to it."""
+        """Show ``bar`` as a busy/indeterminate spinner (the compute is a black box)."""
         self._active_progress = bar
         bar.setVisible(True)
         bar.setRange(0, 0)
 
     def _end_progress(self) -> None:
-        """Hide the active progress bar and stop routing to it."""
+        """Hide the active progress bar."""
         if self._active_progress is not None:
             self._active_progress.setVisible(False)
         self._active_progress = None
-
-    def _on_progress(self, n: float, total: float, desc: str) -> None:
-        bar = self._active_progress
-        if bar is None:
-            return
-        if total > 0:
-            bar.setRange(0, int(total))
-            bar.setValue(int(n))
-        else:
-            bar.setRange(0, 0)
 
     def _warn(self, title: str, message: str) -> None:
         QMessageBox.warning(self, title, message)
