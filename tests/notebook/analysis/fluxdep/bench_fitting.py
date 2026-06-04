@@ -38,8 +38,8 @@ from zcu_tools.notebook.analysis.fluxdep.fitting import (
 )
 from zcu_tools.notebook.analysis.fluxdep.njit import (
     candidate_breakpoint_search,
+    entry_lower_bound,
     eval_dist_bounded,
-    smart_fuzzy_search,
 )
 from zcu_tools.notebook.persistance import TransitionDict
 
@@ -70,7 +70,7 @@ def warm_up():
     A, B, C = synth_ABC(N=10, K=4, a_true=1.5)
     eval_dist_bounded(A, 1.5, B, C, 1.0)
     candidate_breakpoint_search(A, B, C, 0.5, 3.0)
-    smart_fuzzy_search(A, B, C, 0.5, 3.0)
+    entry_lower_bound(A, B, C, 0.5, 3.0)
 
 
 def micro_benches(quick: bool) -> dict:
@@ -95,8 +95,8 @@ def micro_benches(quick: bool) -> dict:
         out[f"candidate_breakpoint_search/{key}"] = _timed(
             lambda: candidate_breakpoint_search(A, B, C, 0.5, 3.0), repeat=repeat
         )
-        out[f"smart_fuzzy_search/{key}"] = _timed(
-            lambda: smart_fuzzy_search(A, B, C, 0.5, 3.0), repeat=repeat
+        out[f"entry_lower_bound/{key}"] = _timed(
+            lambda: entry_lower_bound(A, B, C, 0.5, 3.0), repeat=repeat
         )
 
         # Correctness assert for regressions.
@@ -154,16 +154,12 @@ def macro_benches(db_path: str, quick: bool, n_fluxs: int | None = None) -> dict
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    cases: list[tuple[str, int, bool]] = [
-        ("search_njobs1_fuzzy", 1, True),
-        ("search_njobsN_fuzzy", -1, True),
-        ("search_njobs1_exact", 1, False),
-        ("search_njobsN_exact", -1, False),
+    cases: list[tuple[str, int]] = [
+        ("search_njobs1", 1),
+        ("search_njobsN", -1),
     ]
-    if quick:
-        cases = cases[:2]
 
-    for name, n_jobs, fuzzy in cases:
+    for name, n_jobs in cases:
         t0 = time.perf_counter()
         best_params, fig = search_in_database(
             fluxs,
@@ -174,7 +170,6 @@ def macro_benches(db_path: str, quick: bool, n_fluxs: int | None = None) -> dict
             ECb,
             ELb,
             n_jobs=n_jobs,
-            fuzzy=fuzzy,
         )
         dt = time.perf_counter() - t0
         plt.close(fig)

@@ -10,7 +10,6 @@ from zcu_tools.notebook.analysis.fluxdep.models import energy2transition
 from zcu_tools.notebook.analysis.fluxdep.njit import (
     candidate_breakpoint_search,
     eval_dist_bounded,
-    smart_fuzzy_search,
 )
 from zcu_tools.notebook.persistance import TransitionDict
 
@@ -67,49 +66,6 @@ def test_cbs_equal_bounds_returns_midpoint_with_inf_when_no_breakpoint_hits():
     assert not np.isfinite(dist)
 
 
-# ---------------------- smart_fuzzy_search --------------------------
-
-
-def test_sfs_matches_cbs_on_small_input():
-    # N*K = 40 < DOWNSAMPLE_THRESHOLD (1000): both evaluate all candidates.
-    A, B, C = _synth(N=10, K=4, a_true=1.1)
-    d_cbs, a_cbs = candidate_breakpoint_search(A, B, C, 0.5, 3.0)
-    d_sfs, a_sfs = smart_fuzzy_search(A, B, C, 0.5, 3.0)
-    assert np.isclose(a_sfs, a_cbs)
-    assert np.isclose(d_sfs, d_cbs)
-
-
-def test_sfs_large_input_triggers_downsample_and_returns_in_range():
-    # N*K = 2000 > DOWNSAMPLE_THRESHOLD (1000): fuzzy path activates.
-    # Signal is only in column 0 (noise-heavy input), so we only require
-    # the result to be in-range and finite — not parameter-recoverable.
-    a_true = 1.5
-    A, B, C = _synth(N=50, K=40, a_true=a_true)
-    dist, a = smart_fuzzy_search(A, B, C, 0.5, 3.0)
-    assert 0.5 <= a <= 3.0
-    assert np.isfinite(dist)
-
-
-def test_sfs_large_input_with_strong_signal_recovers_a():
-    # Multiple columns encode a_true so the density peak is detectable.
-    a_true = 1.5
-    rng = np.random.default_rng(0)
-    N, K = 60, 40
-    B = rng.standard_normal((N, K))
-    C = rng.standard_normal((N, K))
-    # Make every row's A match half the columns at a_true.
-    # For each row i, pick column 0 as the signal column that A matches.
-    A = np.abs(a_true * B[:, 0] + C[:, 0])
-    # Replicate the signal column into many columns so density search sees
-    # a clear peak at a_true.
-    for k in range(1, K // 2):
-        B[:, k] = B[:, 0] + rng.standard_normal(N) * 1e-3
-        C[:, k] = C[:, 0] + rng.standard_normal(N) * 1e-3
-    dist, a = smart_fuzzy_search(A, B, C, 0.5, 3.0)
-    assert abs(a - a_true) / a_true < 0.05
-    assert dist < 0.1
-
-
 # ------------------- search_in_database (full path) -----------------
 # These exercise the real database search end-to-end. The reduced-level
 # interpolation + file-load cache must NOT change the result, so we pin the
@@ -136,18 +92,16 @@ def _clean_observation(db_path, idx, transitions, n_fluxs=128):
 
 @_skip_db
 def test_search_matches_recorded_baseline():
-    # Both search paths recover the recorded result for the canonical
-    # 0->1/0->2/1->2 transition set on a clean (noiseless) cloud — where the exact
-    # (default, LB-pruned) and fuzzy heuristic paths agree. This pins the value
-    # across the load-cache / reduced-level / LB-prune optimisations.
+    # The exact LB-pruned search recovers the recorded result for the canonical
+    # 0->1/0->2/1->2 transition set, pinning the value across the load-cache /
+    # reduced-level / LB-prune optimisations.
     transitions: TransitionDict = {"transitions": [(0, 1), (0, 2), (1, 2)]}  # type: ignore[typeddict-unknown-key]
     fluxs, freqs, _ = _clean_observation(_DB, 100, transitions)
     baseline = (4.8467594372, 0.2941233938, 1.8697251889)
-    for fuzzy in (False, True):
-        params, _ = search_in_database(
-            fluxs, freqs, _DB, transitions, _EJb, _ECb, _ELb, fuzzy=fuzzy, plot=False
-        )
-        np.testing.assert_allclose(params, baseline, atol=1e-9)
+    params, _ = search_in_database(
+        fluxs, freqs, _DB, transitions, _EJb, _ECb, _ELb, plot=False
+    )
+    np.testing.assert_allclose(params, baseline, atol=1e-9)
 
 
 @_skip_db
@@ -158,7 +112,7 @@ def test_search_non_prefix_levels_remap_correctly():
     transitions: TransitionDict = {"transitions": [(0, 1), (0, 4), (1, 7)]}  # type: ignore[typeddict-unknown-key]
     fluxs, freqs, true_params = _clean_observation(_DB, 100, transitions)
     params, _ = search_in_database(
-        fluxs, freqs, _DB, transitions, _EJb, _ECb, _ELb, fuzzy=True, plot=False
+        fluxs, freqs, _DB, transitions, _EJb, _ECb, _ELb, plot=False
     )
     rel = max(abs(p - t) / t for p, t in zip(params, true_params))
     assert rel < 0.05, f"non-prefix-level search drifted: {params} vs {true_params}"
@@ -238,7 +192,7 @@ def test_prune_is_identical_to_full_exact_scan(seed):
     freqs = np.asarray(fr) + rng.standard_normal(len(fr)) * 0.02  # noise
 
     pruned, _ = search_in_database(
-        fluxs, freqs, _DB, transitions, _EJb, _ECb, _ELb, fuzzy=False, plot=False
+        fluxs, freqs, _DB, transitions, _EJb, _ECb, _ELb, plot=False
     )
     full = _full_exact_scan(_DB, fluxs, freqs, transitions, _EJb, _ECb, _ELb)
     assert full is not None
