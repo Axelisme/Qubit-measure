@@ -118,8 +118,9 @@ class SelectorWidget(InteractiveMplWidget):
         self._compute_bounds()
         self._build_controls(brush_width)
         self._init_plots()
-        self.redraw()  # show the background immediately (don't wait for the worker)
-        self.apply_filter()
+        # Initial render is synchronous so the figure is complete on first show
+        # (the debounced apply_filter only runs later, on interaction).
+        self._run_filter()
 
     # --- bounds + controls ----------------------------------------------
 
@@ -231,9 +232,28 @@ class SelectorWidget(InteractiveMplWidget):
         )
 
     def apply_filter(self) -> None:
-        """Schedule a (debounced, off-main-thread) downsample re-computation."""
+        """Re-apply the downsample filter, debounced + off-main (interactive use).
+
+        The public entry for slider / brush changes: it just schedules the
+        synchronous worker (``_run_filter``) after a debounce so rapid changes
+        coalesce and the O(N²) downsample never stalls the UI. The first render
+        calls ``_run_filter`` directly (below) so the figure is complete at once.
+        """
         self._generation += 1
         self._debounce.start()
+
+    def _run_filter(self) -> None:
+        """Compute the downsample filter synchronously and redraw at once.
+
+        The core both paths share: the debounced ``apply_filter`` runs it on a
+        worker thread; the initial render calls it directly so the figure shows
+        its final content immediately (rather than blank until a tab switch
+        forced a repaint).
+        """
+        self._generation += 1
+        sel_x, sel_y = self._selected_normalised()
+        mask = downsample_points(sel_x, sel_y, self._thresh_val())
+        self._set_filter_mask(mask)
 
     def _launch_worker(self) -> None:
         sel_x, sel_y = self._selected_normalised()
@@ -245,6 +265,10 @@ class SelectorWidget(InteractiveMplWidget):
     def _on_worker_done(self, generation: int, filter_mask: NDArray[np.bool_]) -> None:
         if generation != self._generation:
             return  # superseded by a newer change — drop the stale result
+        self._set_filter_mask(filter_mask)
+
+    def _set_filter_mask(self, filter_mask: NDArray[np.bool_]) -> None:
+        """Record the downsample mask, recolour the scatter, and redraw."""
         self._filter_mask = filter_mask
         self._scatter.set_array(self._cur_selected().astype(float))
         self.redraw()

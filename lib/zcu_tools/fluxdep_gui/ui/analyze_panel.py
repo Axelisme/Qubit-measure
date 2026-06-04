@@ -144,6 +144,10 @@ class AnalyzePanelWidget(QWidget):
 
         self._build_ui()
         self._load_from_state()
+        # Filter is the initially-current tab, but currentChanged does NOT fire
+        # for the already-selected tab — so build its selector now, else it stayed
+        # a placeholder until the user switched away and back.
+        self._refresh_filter_tab()
 
     # --- construction ----------------------------------------------------
 
@@ -213,12 +217,6 @@ class AnalyzePanelWidget(QWidget):
         selector.finished.connect(_on_finish)
         self._filter_widget = selector
         self._filter_layout.addWidget(selector)
-        # Force a repaint on the next event-loop turn, once the widget is shown.
-        # Building the selector while it's not yet visible leaves draw_idle()
-        # queued but unpainted, so the figure only appeared after switching tabs.
-        from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
-
-        QTimer.singleShot(0, selector.canvas.draw_idle)
 
     # --- Search tab ------------------------------------------------------
 

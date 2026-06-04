@@ -112,3 +112,35 @@ def test_freq_fields_are_blank_by_default(panel):
     w, _ = panel
     assert w._r_f.text() == ""
     assert w._sample_f.text() == ""
+
+
+def test_filter_selector_built_eagerly_when_points_exist(qapp):
+    import numpy as np
+    from zcu_tools.fluxdep_gui.state import SpectrumEntry
+    from zcu_tools.fluxdep_gui.ui.interactive.selector import SelectorWidget
+    from zcu_tools.notebook.persistance import PointsData, SpectrumData
+
+    st = FluxDepState()
+    fx = np.array([0.0, 0.1, 0.2, 0.3])
+    raw = SpectrumData(
+        dev_values=fx,
+        fluxs=fx,
+        freqs=np.linspace(4, 6, 5),
+        signals=np.ones((4, 5), complex),
+    )
+    pts = PointsData(dev_values=fx, fluxs=fx, freqs=np.full(4, 5.0))
+    st.put_spectrum(
+        SpectrumEntry(
+            name="s1",
+            spec_type="TwoTone",
+            raw=raw,
+            points=pts,
+            aligned=True,
+            points_selected=True,
+        )
+    )
+    w = AnalyzePanelWidget(Controller(st))
+    # selector exists right after construction (Filter tab is current but
+    # currentChanged doesn't fire for it) — no tab switch needed
+    assert isinstance(w._filter_widget, SelectorWidget)
+    w.deleteLater()
