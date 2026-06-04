@@ -497,8 +497,8 @@ class AnalyzePanelWidget(QWidget):
         self._export_btn.setEnabled(True)
         self._apply_auto_limits()
         self._redraw_show()
-        # surface the fit visualisation
-        self._tabs.setCurrentIndex(self._tabs.count() - 1)  # Show tab
+        # The Show tab is rendered and ready, but stay on Search so the result
+        # (EJ/EC/EL + diagnostic) is visible; the user switches to Show when ready.
 
     def _on_search_failed(self, message: str) -> None:
         set_current_container(None)

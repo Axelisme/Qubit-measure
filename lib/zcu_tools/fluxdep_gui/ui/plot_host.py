@@ -279,6 +279,20 @@ def ensure_bridge() -> None:
     _get_bridge()
 
 
+def shutdown() -> None:
+    """Mark the plot host as shutting down and drop the bridge.
+
+    Call on app teardown (aboutToQuit). After this, ``remove_canvas`` /
+    ``activate_figure`` / ``refresh_figure_in_main_thread`` are no-ops, so the
+    matplotlib atexit hook (``Gcf.destroy_all`` → backend ``destroy`` →
+    ``remove_canvas``) does not touch the already-deleted Qt ``_Bridge`` and
+    raise "wrapped C/C++ object ... has been deleted".
+    """
+    global _shutting_down, _bridge
+    _shutting_down = True
+    _bridge = None
+
+
 __all__ = [
     "FigureContainer",
     "use_container",
@@ -291,4 +305,5 @@ __all__ = [
     "remove_canvas",
     "refresh_figure_in_main_thread",
     "ensure_bridge",
+    "shutdown",
 ]

@@ -210,21 +210,15 @@ class SelectorWidget(InteractiveMplWidget):
                 extent=(sp_fluxs[0], sp_fluxs[-1], sp_freqs[0], sp_freqs[-1]),
                 cmap="gray_r",  # neutral grayscale so the coloured points stand out
             )
-        # Two-colour map: kept points red (stands out on the gray_r background),
-        # dropped points a faint blue-grey. Yellow (viridis default) was hard to
-        # see on the black/white feature lines.
-        from matplotlib.colors import ListedColormap
-
-        self._point_cmap = ListedColormap(["#4a6fa5", "#e02020"])  # 0=dropped, 1=kept
-        self._scatter = self._ax.scatter(
-            self._s_fluxs,
-            self._s_freqs,
-            c=self._selected.astype(float),
-            s=6,
-            cmap=self._point_cmap,
-            vmin=0,
-            vmax=1,
+        # Kept points red (stands out on the gray_r background), dropped points a
+        # faint blue-grey. Two separate scatters so the kept points draw ON TOP
+        # of the dropped ones (a single scatter draws in index order, letting
+        # dropped points cover kept ones). Yellow (viridis) was hard to see.
+        self._scatter_dropped = self._ax.scatter(
+            [], [], c="#4a6fa5", s=6, zorder=2, alpha=0.6
         )
+        self._scatter_kept = self._ax.scatter([], [], c="#e02020", s=8, zorder=3)
+        self._update_scatters()
         self._ax.set_xlim(*self._flux_bound)
         self._ax.set_ylim(*self._freq_bound)
         self._ax.set_xlabel("Flux")
@@ -234,6 +228,18 @@ class SelectorWidget(InteractiveMplWidget):
         cur = np.zeros_like(self._selected, dtype=bool)
         cur[np.where(self._selected)[0][self._filter_mask]] = True
         return cur
+
+    def _update_scatters(self) -> None:
+        """Put kept points in the top scatter, dropped in the bottom one."""
+        kept = self._cur_selected()
+
+        def _offsets(mask: NDArray[np.bool_]) -> NDArray[np.float64]:
+            if not mask.any():
+                return np.empty((0, 2), dtype=np.float64)
+            return np.column_stack((self._s_fluxs[mask], self._s_freqs[mask]))
+
+        self._scatter_kept.set_offsets(_offsets(kept))
+        self._scatter_dropped.set_offsets(_offsets(~kept))
 
     def _selected_normalised(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         flux_span = self._flux_bound[1] - self._flux_bound[0]
@@ -280,9 +286,9 @@ class SelectorWidget(InteractiveMplWidget):
         self._set_filter_mask(filter_mask)
 
     def _set_filter_mask(self, filter_mask: NDArray[np.bool_]) -> None:
-        """Record the downsample mask, recolour the scatter, and redraw."""
+        """Record the downsample mask, re-split kept/dropped scatters, and redraw."""
         self._filter_mask = filter_mask
-        self._scatter.set_array(self._cur_selected().astype(float))
+        self._update_scatters()
         self.redraw()
 
     # --- interaction -----------------------------------------------------
