@@ -1,9 +1,11 @@
-"""Equivalence tests: calculate_energy_vs_flux_fast vs the scqubits baseline.
+"""Correctness tests for calculate_energy_vs_flux (the precompute-cos/sin path).
 
-The fast variant precomputes the flux-independent ``cos(phi)`` / ``sin(phi)``
-operators once and recombines them per flux point (instead of scqubits rebuilding
-the Hamiltonian — a matrix cosine — at every flux). These tests pin that it
-returns the SAME energies as the original ``calculate_energy_vs_flux`` to machine
+calculate_energy_vs_flux precomputes the flux-independent ``cos(phi)`` /
+``sin(phi)`` operators once and recombines them per flux point, instead of
+scqubits rebuilding the Hamiltonian (a matrix cosine) at every flux. To keep a
+ground truth after that optimisation replaced the old scqubits path, these tests
+compute an INDEPENDENT reference straight from ``Fluxonium`` (per-flux
+``hamiltonian()`` + ``eigvalsh``) and assert our energies match to machine
 precision, across several parameter sets and tricky flux orderings (unsorted,
 duplicated, outside [0, 0.5]) that exercise the fold/dedup/reorder logic.
 
@@ -15,10 +17,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import scqubits.settings as scq_settings
-from zcu_tools.simulate.fluxonium import (
-    calculate_energy_vs_flux,
-    calculate_energy_vs_flux_fast,
-)
+from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 
 scq_settings.PROGRESSBAR_DISABLED = True
 
@@ -37,33 +36,46 @@ FLUX_CASES = {
 }
 
 
+def _reference_energies(params, fluxs, cutoff, evals_count):
+    """Independent scqubits ground truth: build H per flux, eigvalsh, in order.
+
+    Deliberately the naive per-flux path (no folding/dedup) so it cannot share a
+    bug with the implementation under test.
+    """
+    from scqubits.core.fluxonium import Fluxonium
+
+    fluxonium = Fluxonium(*params, flux=0.0, cutoff=cutoff, truncated_dim=evals_count)
+    out = np.empty((len(fluxs), evals_count), dtype=np.float64)
+    for i, flux in enumerate(fluxs):
+        fluxonium.flux = float(flux)
+        H = fluxonium.hamiltonian()
+        out[i] = np.linalg.eigvalsh(H)[:evals_count]
+    return out
+
+
 @pytest.mark.parametrize("params", PARAMS)
 @pytest.mark.parametrize("flux_label", list(FLUX_CASES))
-def test_fast_matches_baseline(params, flux_label):
+def test_matches_scqubits_reference(params, flux_label):
     fluxs = FLUX_CASES[flux_label]
-    sd_slow, slow = calculate_energy_vs_flux(params, fluxs, cutoff=40, evals_count=15)
-    sd_fast, fast = calculate_energy_vs_flux_fast(
-        params, fluxs, cutoff=40, evals_count=15
-    )
-    # the returned (per-input-flux) energies match
-    assert fast.shape == slow.shape
-    np.testing.assert_allclose(fast, slow, atol=1e-11, rtol=0)
-    # the SpectrumData is a faithful drop-in (folded-unique grid)
-    np.testing.assert_allclose(
-        np.asarray(sd_fast.energy_table),
-        np.asarray(sd_slow.energy_table),
-        atol=1e-11,
-        rtol=0,
-    )
-    np.testing.assert_allclose(sd_fast.param_vals, sd_slow.param_vals)
-    assert sd_fast.param_name == sd_slow.param_name == "flux"
-    assert set(sd_fast.system_params) == set(sd_slow.system_params)
+    sd, energies = calculate_energy_vs_flux(params, fluxs, cutoff=40, evals_count=15)
+    reference = _reference_energies(params, fluxs, cutoff=40, evals_count=15)
+
+    assert energies.shape == reference.shape
+    np.testing.assert_allclose(energies, reference, atol=1e-11, rtol=0)
+
+    # SpectrumData mirrors the scqubits layout: folded-unique flux grid.
+    folded = fluxs % 1.0
+    folded = np.where(folded < 0.5, folded, 1.0 - folded)
+    expected_grid = np.unique(folded)
+    np.testing.assert_allclose(sd.param_vals, expected_grid)
+    assert sd.param_name == "flux"
+    assert np.asarray(sd.energy_table).shape == (len(expected_grid), 15)
 
 
-def test_fast_shape_and_order_preserved():
+def test_shape_and_order_preserved():
     # the returned energies must line up with the INPUT flux order, not folded
     fluxs = np.array([0.4, 0.1, 0.4])  # 0.4 repeated → rows 0 and 2 equal
-    _, energies = calculate_energy_vs_flux_fast(
+    _, energies = calculate_energy_vs_flux(
         (5.0, 1.0, 0.5), fluxs, cutoff=40, evals_count=10
     )
     assert energies.shape == (3, 10)
@@ -71,10 +83,18 @@ def test_fast_shape_and_order_preserved():
     assert not np.allclose(energies[0], energies[1])
 
 
-def test_fast_respects_evals_count():
+def test_respects_evals_count():
     fluxs = np.linspace(0.0, 0.5, 10)
     for n in (5, 12, 20):
-        _, energies = calculate_energy_vs_flux_fast(
+        _, energies = calculate_energy_vs_flux(
             (5.0, 1.0, 0.5), fluxs, cutoff=40, evals_count=n
         )
         assert energies.shape == (10, n)
+
+
+def test_flux_symmetry_about_half():
+    # the spectrum is even about flux = 0.5: E(0.5 + d) == E(0.5 - d)
+    _, energies = calculate_energy_vs_flux(
+        (5.0, 1.0, 0.5), np.array([0.3, 0.7]), cutoff=40, evals_count=10
+    )
+    np.testing.assert_allclose(energies[0], energies[1], atol=1e-11)

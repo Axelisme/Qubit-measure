@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import TYPE_CHECKING, Optional
+from typing_extensions import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from scqubits.core.storage import SpectrumData
@@ -46,62 +46,24 @@ def calculate_energy_vs_flux(
     fluxs: NDArray[np.float64],
     cutoff: int = 40,
     evals_count: int = 20,
-    spectrum_data: Optional[SpectrumData] = None,
 ) -> tuple[SpectrumData, NDArray[np.float64]]:
-    """
-    Calculate the energy of a fluxonium qubit.
-    """
+    """Fluxonium energy levels vs external flux — ~100x faster than scqubits.
 
-    from scqubits.core.fluxonium import Fluxonium
-
-    if spectrum_data is not None:
-        energies = np.asarray(spectrum_data.energy_table, dtype=np.float64)
-        return spectrum_data, energies  # early return
-
-    # because energy is periodic, remove repeated values and record index
-    fluxs = fluxs % 1.0
-    fluxs = np.where(fluxs < 0.5, fluxs, 1.0 - fluxs)
-
-    fluxs, uni_idxs = np.unique(fluxs, return_inverse=True)
-    sort_idxs = np.argsort(fluxs)
-    fluxs = fluxs[sort_idxs]
-
-    # calculate energy vs flux
-    fluxonium = Fluxonium(*params, flux=0.0, cutoff=cutoff, truncated_dim=evals_count)
-    spectrum_data = fluxonium.get_spectrum_vs_paramvals(
-        "flux", fluxs, evals_count=evals_count
-    )
-    energies = np.asarray(spectrum_data.energy_table, dtype=np.float64)
-
-    # rearrange energies to match the original order of fluxs
-    energies[sort_idxs, :] = energies
-    energies = energies[uni_idxs, :]
-
-    return spectrum_data, energies
-
-
-def calculate_energy_vs_flux_fast(
-    params: tuple[float, float, float],
-    fluxs: NDArray[np.float64],
-    cutoff: int = 40,
-    evals_count: int = 20,
-) -> tuple[SpectrumData, NDArray[np.float64]]:
-    """Fast drop-in for :func:`calculate_energy_vs_flux` (same result, ~100x).
-
-    The profiled cost of the scqubits path is rebuilding the Hamiltonian at every
-    flux: ``cos_phi_operator(beta)`` calls ``scipy.linalg.cosm`` (a matrix cosine)
-    once per flux point — ~90% of the time — while the 40x40 diagonalisation is
-    ~1%. Only the cosine's phase ``beta = 2*pi*flux`` changes with flux, so this
-    precomputes the flux-independent pieces once and combines them cheaply per
-    point using ``cos(phi + beta) = cos(phi) cos(beta) - sin(phi) sin(beta)``
+    scqubits' ``get_spectrum_vs_paramvals`` rebuilds the Hamiltonian at every
+    flux point, and ``cos_phi_operator(beta)`` there calls ``scipy.linalg.cosm``
+    (a matrix cosine) once per point — profiled at ~90% of the cost, while the
+    40x40 diagonalisation is ~1%. Only the cosine's phase ``beta = 2*pi*flux``
+    changes with flux, so this precomputes the flux-independent ``cos(phi)`` /
+    ``sin(phi)`` operators (and the LC diagonal) ONCE, then combines them cheaply
+    per point using ``cos(phi + beta) = cos(phi) cos(beta) - sin(phi) sin(beta)``
     (exact, since ``beta * I`` commutes with ``phi``).
 
-    Returns ``(SpectrumData, energies)`` matching ``calculate_energy_vs_flux``:
-    the ``SpectrumData`` mirrors the scqubits one (``energy_table`` /
-    ``param_vals`` over the folded-unique flux grid; ``state_table`` is None, as
-    when states are not stored), and ``energies`` is per-INPUT-flux (reordered).
-    Energies match the baseline to ~1e-13 (see tests). They are absolute (in the
-    LC oscillator basis), per the scqubits convention.
+    Returns ``(SpectrumData, energies)``: the ``SpectrumData`` mirrors the
+    scqubits one (``energy_table`` / ``param_vals`` over the folded-unique flux
+    grid; ``state_table`` is None, as when states are not stored), and
+    ``energies`` is per-INPUT-flux (reordered back from the folded grid). Energies
+    are absolute (in the LC oscillator basis), per the scqubits convention; they
+    match a direct scqubits computation to ~1e-13 (see tests).
     """
     from scqubits.core.fluxonium import Fluxonium
     from scqubits.core.storage import SpectrumData

@@ -12,11 +12,7 @@ from .dispersive import (
     calculate_dispersive_sweep,
     calculate_dispersive_vs_flux,
 )
-from .energies import (
-    calculate_energy,
-    calculate_energy_vs_flux,
-    calculate_energy_vs_flux_fast,
-)
+from .energies import calculate_energy, calculate_energy_vs_flux
 from .matrix_element import (
     calculate_n_oper,
     calculate_n_oper_vs_flux,
@@ -44,7 +40,6 @@ __all__ = [
     # energies
     "calculate_energy",
     "calculate_energy_vs_flux",
-    "calculate_energy_vs_flux_fast",
     # matrix element
     "calculate_n_oper",
     "calculate_n_oper_vs_flux",
