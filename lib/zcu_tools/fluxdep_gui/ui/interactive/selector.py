@@ -212,14 +212,15 @@ class SelectorWidget(InteractiveMplWidget):
                 extent=(sp_fluxs[0], sp_fluxs[-1], sp_freqs[0], sp_freqs[-1]),
                 cmap="gray_r",  # neutral grayscale so the coloured points stand out
             )
-        # Kept points red (stands out on the gray_r background), dropped points a
-        # faint blue-grey. Two separate scatters so the kept points draw ON TOP
-        # of the dropped ones (a single scatter draws in index order, letting
-        # dropped points cover kept ones). Yellow (viridis) was hard to see.
-        self._scatter_dropped = self._ax.scatter(
-            [], [], c="#4a6fa5", s=6, zorder=2, alpha=0.6
-        )
-        self._scatter_kept = self._ax.scatter([], [], c="#e02020", s=8, zorder=3)
+        # Kept points red, dropped points a saturated blue: red/blue is a
+        # warm/cool complementary pair, so both stand out against the gray_r
+        # background and against each other (the earlier faint blue-grey had too
+        # little contrast with the red). Kept points are also drawn larger than
+        # dropped so the selection reads at a glance. Two separate scatters so the
+        # kept points draw ON TOP of the dropped ones (a single scatter draws in
+        # index order, letting dropped points cover kept ones).
+        self._scatter_dropped = self._ax.scatter([], [], c="#1f77ff", s=6, zorder=2)
+        self._scatter_kept = self._ax.scatter([], [], c="#e02020", s=18, zorder=3)
         self._update_scatters()
         self._ax.set_xlim(*self._flux_bound)
         self._ax.set_ylim(*self._freq_bound)
