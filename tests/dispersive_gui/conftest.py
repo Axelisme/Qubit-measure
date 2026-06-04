@@ -1,0 +1,56 @@
+"""Shared fixtures for dispersive-fit-gui tests."""
+
+from __future__ import annotations
+
+import json
+
+import numpy as np
+import pytest
+from zcu_tools.utils.datasaver import save_data
+
+
+@pytest.fixture
+def onetone_hdf5(tmp_path):
+    """A small 2D one-tone spectrum hdf5 (canonical x=flux, y=freq[Hz], z=signals.T).
+
+    Returns (filepath, dev_values, freqs_GHz, signals[flux, freq]). Mirrors how
+    FluxDepExp.save lays out the axes so ``load_data`` + ``format_rawdata`` recover
+    GHz frequencies and the (flux, freq) signal grid.
+    """
+    dev_values = np.linspace(-5.0, 5.0, 16).astype(np.float64)
+    freqs_ghz = np.linspace(5.0, 6.0, 40).astype(np.float64)
+    rng = np.random.RandomState(0)
+    signals = (
+        rng.randn(len(dev_values), len(freqs_ghz))
+        + 1j * rng.randn(len(dev_values), len(freqs_ghz))
+    ).astype(np.complex128)
+
+    filepath = str(tmp_path / "R1_flux_1")
+    save_data(
+        filepath=filepath,
+        x_info={"name": "Flux device value", "unit": "a.u.", "values": dev_values},
+        y_info={"name": "Frequency", "unit": "Hz", "values": freqs_ghz * 1e9},
+        z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
+    )
+    return filepath + ".hdf5", dev_values, freqs_ghz, signals
+
+
+@pytest.fixture
+def params_json(tmp_path):
+    """A params.json holding a fluxdep_fit section (dispersive's hard input).
+
+    Returns (filepath, fluxdep_fit_dict). The fit gives (EJ, EC, EL), the flux
+    alignment, and a plot_transitions.r_f (so the bare_rf priority chain has a
+    middle tier to exercise).
+    """
+    fluxdep_fit = {
+        "params": {"EJ": 4.0, "EC": 1.0, "EL": 0.5},
+        "flux_half": 0.5,
+        "flux_int": 1.0,
+        "flux_period": 2.0,
+        "plot_transitions": {"r_f": 5.3, "transitions": [[0, 1]]},
+    }
+    path = str(tmp_path / "params.json")
+    with open(path, "w", encoding="utf8") as f:
+        json.dump({"name": "Q1", "fluxdep_fit": fluxdep_fit}, f)
+    return path, fluxdep_fit

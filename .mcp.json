@@ -23,6 +23,18 @@
         "lib/zcu_tools/gui/app/fluxdep/services/remote/mcp_server.py"
       ],
       "env": {}
+    },
+    "dispersive-gui": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--extra",
+        "gui",
+        "python",
+        "lib/zcu_tools/gui/app/dispersive/services/remote/mcp_server.py"
+      ],
+      "env": {}
     }
   }
 }

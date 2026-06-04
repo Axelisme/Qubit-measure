@@ -94,6 +94,7 @@ def test_apps_keep_their_own_wire_versions() -> None:
 _MCP_SERVERS = [
     "lib/zcu_tools/gui/app/main/services/remote/mcp_server.py",
     "lib/zcu_tools/gui/app/fluxdep/services/remote/mcp_server.py",
+    "lib/zcu_tools/gui/app/dispersive/services/remote/mcp_server.py",
 ]
 
 
