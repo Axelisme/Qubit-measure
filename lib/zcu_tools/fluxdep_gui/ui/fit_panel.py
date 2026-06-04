@@ -25,6 +25,7 @@ from matplotlib.figure import Figure
 from qtpy.QtCore import (  # type: ignore[attr-defined]
     QObject,
     QRunnable,
+    Qt,  # type: ignore[attr-defined]
     QThreadPool,
     Signal,  # type: ignore[attr-defined]
 )
@@ -39,8 +40,9 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QLineEdit,
     QProgressBar,
     QPushButton,
+    QSplitter,
     QStackedWidget,
-    QVBoxLayout,
+    QTabWidget,
     QWidget,
 )
 
@@ -127,7 +129,7 @@ class FitPanelWidget(QWidget):
     def _build_ui(self) -> None:
         root = QHBoxLayout(self)
 
-        # Left: the structured form.
+        # Left: the structured form (width adjustable via the splitter).
         form_box = QGroupBox("Search parameters")
         form = QFormLayout(form_box)
 
@@ -179,28 +181,32 @@ class FitPanelWidget(QWidget):
         self._status = QLabel("")
         form.addRow(self._status)
 
-        form_box.setFixedWidth(360)
-        root.addWidget(form_box)
+        # Right: two figures in tabs (each gets the full space). Tab 1 is our fit
+        # visualisation; tab 2 is the search's native diagnostic figure — a
+        # FigureContainer the embedded matplotlib backend routes
+        # search_in_database(plot=True)'s pyplot figure into (so fitting.py just
+        # uses pyplot and the figure lands here).
+        self._tabs = QTabWidget()
 
-        # Right: our fit visualisation (top) + the search's native diagnostic
-        # figure (bottom). The diagnostic is a FigureContainer the embedded
-        # matplotlib backend routes search_in_database(plot=True)'s pyplot figure
-        # into — so fitting.py just uses pyplot and the figure lands here.
-        right = QVBoxLayout()
         self._fit_figure = Figure(figsize=(6, 4))
         self._fit_canvas = FigureCanvasQTAgg(self._fit_figure)
-        right.addWidget(self._fit_canvas, stretch=2)
+        self._tabs.addTab(self._fit_canvas, "Fit")
 
         self._diag_stack = QStackedWidget()
         diag_placeholder = QLabel("Search to see the diagnostic plot.")
         diag_placeholder.setEnabled(False)
         self._diag_stack.addWidget(diag_placeholder)
         self._diag_container = FigureContainer(self._diag_stack, diag_placeholder)
-        right.addWidget(self._diag_stack, stretch=2)
+        self._tabs.addTab(self._diag_stack, "Diagnostic")
 
-        right_holder = QWidget()
-        right_holder.setLayout(right)
-        root.addWidget(right_holder, stretch=1)
+        # A draggable splitter lets the user resize the form vs the figures.
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.addWidget(form_box)
+        splitter.addWidget(self._tabs)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([360, 640])
+        root.addWidget(splitter)
 
     def _bound_row(self, lo: QDoubleSpinBox, hi: QDoubleSpinBox) -> QWidget:
         row = QHBoxLayout()
@@ -293,6 +299,14 @@ class FitPanelWidget(QWidget):
         # Route the search's pyplot diagnostic figure into our container. Set on
         # the main thread before the worker; cleared when it finishes (the worker
         # thread reads this module-level value during search_in_database).
+        # Close any pyplot figure left over from a previous search first: pyplot's
+        # global figure stack (Gcf) keeps every plt.figure() that is never closed,
+        # so a second search's plt.show() would otherwise act on a stale, already-
+        # detached figure and raise "not attached". Closing only drops pyplot's
+        # reference; the embedded canvas already lives in the container.
+        import matplotlib.pyplot as plt
+
+        plt.close("all")
         self._diag_container.clear()
         set_current_container(self._diag_container)
 
@@ -323,6 +337,8 @@ class FitPanelWidget(QWidget):
         self._status.setText(f"EJ={EJ:.3f}  EC={EC:.3f}  EL={EL:.3f}")
         self._export_btn.setEnabled(True)
         self._render_result(result.params)
+        # surface the freshly embedded diagnostic figure
+        self._tabs.setCurrentWidget(self._diag_stack)
 
     def _on_search_failed(self, message: str) -> None:
         set_current_container(None)

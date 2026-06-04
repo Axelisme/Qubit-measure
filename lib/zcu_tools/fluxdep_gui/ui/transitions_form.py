@@ -18,7 +18,6 @@ from __future__ import annotations
 from typing import Optional
 
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-    QComboBox,
     QFormLayout,
     QLineEdit,
     QWidget,
@@ -88,17 +87,17 @@ def parse_pairs(text: str) -> list[tuple[int, int]]:
 
 
 class TransitionsForm(QWidget):
-    """Preset combo + per-category ``(i, j)`` line edits → ``TransitionDict``."""
+    """Per-category ``(i, j)`` line edits → ``TransitionDict`` (hand-entered).
+
+    Transitions are independent of the bounds preset (which the fit panel owns):
+    each category is a free-text list of ``(i, j)`` level pairs, seeded with the
+    default basic set. There is no preset dropdown here — bounds presets live on
+    the fit panel.
+    """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         layout = QFormLayout(self)
-
-        self._preset = QComboBox()
-        self._preset.addItems(sorted(PRESETS.keys()))
-        self._preset.setCurrentText(_DEFAULT_PRESET)
-        self._preset.currentTextChanged.connect(self._apply_preset)
-        layout.addRow("Preset", self._preset)
 
         self._fields: dict[str, QLineEdit] = {}
         for cat in CATEGORIES:
@@ -106,12 +105,10 @@ class TransitionsForm(QWidget):
             self._fields[cat] = edit
             layout.addRow(cat, edit)
 
-        self._apply_preset(_DEFAULT_PRESET)
-
-    def _apply_preset(self, name: str) -> None:
-        preset = PRESETS.get(name, {})
+        # Seed with the default basic transition set so the form is not empty.
+        default = PRESETS[_DEFAULT_PRESET]
         for cat, edit in self._fields.items():
-            edit.setText(format_pairs(preset.get(cat, [])))
+            edit.setText(format_pairs(default.get(cat, [])))
 
     def set_transitions(self, transitions: TransitionDict) -> None:
         """Fill the fields from an existing ``TransitionDict`` (categories only)."""

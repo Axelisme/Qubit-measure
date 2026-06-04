@@ -8,6 +8,7 @@ pressing Search with no database path is blocked before any worker runs.
 from __future__ import annotations
 
 import pytest
+from qtpy.QtWidgets import QSplitter, QTabWidget  # type: ignore[attr-defined]
 from zcu_tools.fluxdep_gui.controller import Controller
 from zcu_tools.fluxdep_gui.state import FluxDepState
 from zcu_tools.fluxdep_gui.ui.fit_panel import _BOUND_PRESETS, FitPanelWidget
@@ -19,6 +20,19 @@ def panel(qapp):
     w = FitPanelWidget(ctrl)
     yield w, ctrl
     w.deleteLater()
+
+
+def test_form_and_figures_are_in_a_splitter(panel):
+    w, _ = panel
+    assert len(w.findChildren(QSplitter)) >= 1  # form vs figures resizable
+
+
+def test_figures_are_in_tabs(panel):
+    w, _ = panel
+    tabs = w.findChildren(QTabWidget)
+    assert len(tabs) == 1
+    labels = [tabs[0].tabText(i) for i in range(tabs[0].count())]
+    assert labels == ["Fit", "Diagnostic"]
 
 
 def test_presets_cover_the_notebook_ranges():
