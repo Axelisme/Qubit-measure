@@ -9,6 +9,8 @@ search State refactor) is that ``compute_search`` performs NO State write — on
 
 from __future__ import annotations
 
+import os
+
 import h5py
 import numpy as np
 import pytest
@@ -220,4 +222,25 @@ def test_export_params_fast_fails_without_aligned():
 
 
 def test_default_params_path():
-    assert default_params_path("result/Q9/Q1") == "result/Q9/Q1/params.json"
+    assert default_params_path("result/Q9/Q1", "Q9", "Q1") == "result/Q9/Q1/params.json"
+
+
+def test_default_params_path_falls_back_to_chip_qub():
+    # empty result_dir → derive from chip/qubit (never a bare 'params.json',
+    # which would make dump_result's makedirs(dirname='') fail)
+    path = default_params_path("", "Q9", "Q1")
+    assert path == os.path.join("result", "Q9", "Q1", "params.json")
+    assert os.path.dirname(path)  # non-empty dirname (the bug was '')
+
+
+def test_export_params_empty_result_dir(tmp_path, monkeypatch):
+    # the reported crash: export with no result_dir → "[Errno 2] ... ''".
+    # With the fix it writes to result/<chip>/<qub>/params.json (cwd-relative).
+    monkeypatch.chdir(tmp_path)
+    st = _state_with_points()
+    st.project.chip_name = "Q9"
+    st.project.qub_name = "Q1"
+    st.set_fit_result((5.0, 1.2, 0.4), best_dist=0.01)
+    path = FitService(st).export_params()  # no savepath, no result_dir
+    assert path.endswith(os.path.join("result", "Q9", "Q1", "params.json"))
+    assert os.path.isfile(path)
