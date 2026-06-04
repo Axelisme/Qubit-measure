@@ -81,11 +81,11 @@ def test_full_pipeline(monkeypatch, tmp_path, onetone_hdf5):
     assert "PreprocessChangedPayload" in events
 
     # 4. predict (cached, stubbed) — the tune worker's compute
-    rf = ctrl.predict_dispersive(0.06, 5.3, step=1, return_dim=2)
+    rf = ctrl.predict_dispersive(0.06, 5.3, return_dim=2)
     assert len(rf) == 2
 
     # 5. accept the tuning — the manual g/bare_rf IS the final fit (no auto-fit)
-    ctrl.set_manual_fit(0.06, 5.3, res_dim=4, step=1)
+    ctrl.set_manual_fit(0.06, 5.3, res_dim=4)
     assert state.disp_fit.has_result
     assert state.disp_fit.g == 0.06 and state.disp_fit.bare_rf == 5.3
     assert "DispFitChangedPayload" in events

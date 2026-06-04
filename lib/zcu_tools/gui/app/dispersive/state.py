@@ -162,15 +162,14 @@ class DispFitState:
 
     Frequencies are stored in **GHz** throughout (the slider UI converts to/from
     MHz for display). ``g`` is None until the user accepts a tuning ("Use these
-    g/r_f"); ``has_result`` keys off it. ``res_dim`` / ``step`` are the
-    simulation-resolution knobs the user can still tune (``qub_dim`` / ``qub_cutoff``
-    are fixed in the predictor).
+    g/r_f"); ``has_result`` keys off it. ``res_dim`` is the resonator-truncation
+    the simulation used (``qub_dim`` / ``qub_cutoff`` are fixed in the predictor);
+    the prediction always covers the full flux axis (there is no down-sampling).
     """
 
     g: Optional[float] = None  # GHz
     bare_rf: Optional[float] = None  # GHz
     res_dim: int = 4
-    step: int = 1
 
     @property
     def has_result(self) -> bool:
@@ -238,12 +237,8 @@ class DispersiveState:
             self.version.drop_prefix(FIT_VERSION_KEY)
         self.version.bump(PREPROCESS_VERSION_KEY)
 
-    def set_disp_result(
-        self, g: float, bare_rf: float, *, res_dim: int, step: int
-    ) -> None:
+    def set_disp_result(self, g: float, bare_rf: float, *, res_dim: int) -> None:
         """Record the manually-tuned g / bare_rf result + its simulation resolution."""
-        self.disp_fit = replace(
-            self.disp_fit, g=g, bare_rf=bare_rf, res_dim=res_dim, step=step
-        )
+        self.disp_fit = replace(self.disp_fit, g=g, bare_rf=bare_rf, res_dim=res_dim)
         self.version.bump(FIT_VERSION_KEY)
         logger.debug("set_disp_result: g=%s bare_rf=%s", g, bare_rf)

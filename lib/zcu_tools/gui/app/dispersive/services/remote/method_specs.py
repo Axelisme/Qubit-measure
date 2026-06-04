@@ -56,7 +56,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     # Dispersive result (the user's accepted g / bare_rf tuning) — read only
     "fit.result": MethodSpec(
         5.0,
-        "Read the accepted dispersive result: {has_result, g, bare_rf, res_dim, step}.",
+        "Read the accepted dispersive result: {has_result, g, bare_rf, res_dim}.",
     ),
     # Resource version table (mcp/RPC bookkeeping; never surfaced to the agent).
     "resources.versions": MethodSpec(5.0, "Snapshot of all resource versions"),

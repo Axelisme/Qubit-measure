@@ -106,7 +106,7 @@ def test_set_fit_inputs_seeds_bare_rf_and_bumps_project():
 
 def test_set_fit_inputs_does_not_clobber_existing_bare_rf():
     st = DispersiveState()
-    st.set_disp_result(g=0.06, bare_rf=5.9, res_dim=4, step=1)
+    st.set_disp_result(g=0.06, bare_rf=5.9, res_dim=4)
     st.set_fit_inputs(_inputs(bare_rf=5.3))
     assert st.disp_fit.bare_rf == 5.9  # kept the prior value
 
@@ -114,7 +114,7 @@ def test_set_fit_inputs_does_not_clobber_existing_bare_rf():
 def test_set_onetone_drops_preprocess_and_fit():
     st = DispersiveState()
     st.set_preprocess(_make_preprocess())
-    st.set_disp_result(g=0.06, bare_rf=5.3, res_dim=4, step=1)
+    st.set_disp_result(g=0.06, bare_rf=5.3, res_dim=4)
     pre_pp = st.version.get(PREPROCESS_VERSION_KEY)
     pre_fit = st.version.get(FIT_VERSION_KEY)
 
@@ -131,7 +131,7 @@ def test_set_onetone_drops_preprocess_and_fit():
 def test_set_preprocess_invalidates_fit_on_signature_change():
     st = DispersiveState()
     st.set_preprocess(_make_preprocess(signature=("a",)))
-    st.set_disp_result(g=0.06, bare_rf=5.3, res_dim=4, step=1)
+    st.set_disp_result(g=0.06, bare_rf=5.3, res_dim=4)
     # re-preprocess with a DIFFERENT signature → fit goes stale
     st.set_preprocess(_make_preprocess(signature=("b",)))
     assert st.disp_fit.g is None
@@ -140,7 +140,7 @@ def test_set_preprocess_invalidates_fit_on_signature_change():
 def test_set_preprocess_keeps_fit_on_same_signature():
     st = DispersiveState()
     st.set_preprocess(_make_preprocess(signature=("a",)))
-    st.set_disp_result(g=0.06, bare_rf=5.3, res_dim=4, step=1)
+    st.set_disp_result(g=0.06, bare_rf=5.3, res_dim=4)
     st.set_preprocess(_make_preprocess(signature=("a",)))
     assert st.disp_fit.g == 0.06  # unchanged
 
@@ -148,10 +148,10 @@ def test_set_preprocess_keeps_fit_on_same_signature():
 def test_set_disp_result_records_and_bumps_fit():
     st = DispersiveState()
     before = st.version.get(FIT_VERSION_KEY)
-    st.set_disp_result(g=0.07, bare_rf=5.35, res_dim=5, step=2)
+    st.set_disp_result(g=0.07, bare_rf=5.35, res_dim=5)
     assert st.disp_fit.has_result is True
     assert st.disp_fit.g == 0.07 and st.disp_fit.bare_rf == 5.35
-    assert st.disp_fit.res_dim == 5 and st.disp_fit.step == 2
+    assert st.disp_fit.res_dim == 5
     assert st.version.get(FIT_VERSION_KEY) > before
 
 

@@ -14,6 +14,6 @@ independently, so the constants live beside the app's own RemoteControlAdapter.
 
 from __future__ import annotations
 
-WIRE_VERSION = 2  # v2: simplified fit.result (removed auto-fit fields)
+WIRE_VERSION = 3  # v3: fit.result dropped `step` (prediction always covers full axis)
 
-GUI_VERSION = 2
+GUI_VERSION = 3

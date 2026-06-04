@@ -101,7 +101,7 @@ Read tools (all pure queries):
   - dispersive_fit_inputs_info → {has_inputs, params:{EJ,EC,EL} or null, flux_half,
     flux_int, flux_period, bare_rf_seed} — the fluxdep_fit handoff.
   - dispersive_preprocess_status → {has_preprocess, n_flux, n_freq, edelay}.
-  - dispersive_fit_result → {has_result, g, bare_rf, res_dim, step} — the user's
+  - dispersive_fit_result → {has_result, g, bare_rf, res_dim} — the user's
     accepted tuning result.
 
 A failed call always raises; the read tools are idempotent, so retrying a read is

@@ -86,3 +86,35 @@ def test_dressed_labeling_error_is_a_runtime_error():
     # the guard type exists and is catchable (the fallback in PredictService relies
     # on it); we don't force a collision here — that needs pathological parameters.
     assert issubclass(DressedLabelingError, RuntimeError)
+
+
+def test_flux_independent_operators_are_cached():
+    # The expensive flux-independent fluxonium operators are memoised by
+    # (params, cutoff, dim), so repeated calls (the live tuning path) do not rebuild
+    # them. Caching must not change the result — verified by re-running after a hit.
+    from zcu_tools.simulate.fluxonium.dispersive import _fluxonium_operators
+
+    _fluxonium_operators.cache_clear()
+    params = (4.0, 1.0, 0.5)
+    fluxs = np.linspace(0.0, 0.5, 8)
+    first = calculate_dispersive_vs_flux_fast(
+        params, fluxs, 5.3, 0.06, qub_cutoff=30, qub_dim=15
+    )
+    info_after_first = _fluxonium_operators.cache_info()
+    assert info_after_first.misses == 1  # built once
+
+    second = calculate_dispersive_vs_flux_fast(
+        params, fluxs, 5.4, 0.07, qub_cutoff=30, qub_dim=15
+    )
+    info_after_second = _fluxonium_operators.cache_info()
+    assert info_after_second.hits >= 1  # same (params, cutoff, dim) → cache hit
+    assert info_after_second.misses == 1  # not rebuilt
+
+    # and the cached path is still numerically exact vs a fresh build
+    _fluxonium_operators.cache_clear()
+    fresh = calculate_dispersive_vs_flux_fast(
+        params, fluxs, 5.4, 0.07, qub_cutoff=30, qub_dim=15
+    )
+    for a, b in zip(second, fresh):
+        np.testing.assert_allclose(a, b, atol=1e-12)
+    del first  # (kept above only to populate the cache)

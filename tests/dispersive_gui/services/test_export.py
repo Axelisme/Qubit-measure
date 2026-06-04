@@ -11,7 +11,7 @@ from zcu_tools.notebook.persistance import load_result
 def test_export_writes_dispersive_and_preserves_fluxdep_fit(params_json):
     path, fit = params_json
     st = DispersiveState()
-    st.set_disp_result(g=0.068, bare_rf=5.35, res_dim=4, step=1)
+    st.set_disp_result(g=0.068, bare_rf=5.35, res_dim=4)
 
     written = ExportService(st).export_params(path)
 
@@ -34,6 +34,6 @@ def test_export_without_result_fast_fails(params_json):
 
 def test_export_missing_file_fast_fails(tmp_path):
     st = DispersiveState()
-    st.set_disp_result(g=0.068, bare_rf=5.35, res_dim=4, step=1)
+    st.set_disp_result(g=0.068, bare_rf=5.35, res_dim=4)
     with pytest.raises(FileNotFoundError, match="must already hold"):
         ExportService(st).export_params(str(tmp_path / "nope.json"))

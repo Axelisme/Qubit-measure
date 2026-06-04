@@ -92,7 +92,7 @@ def test_sections_gated_on_pipeline_progress(qapp):
     assert panel._tune_box.isEnabled()
     assert not panel._export_box.isEnabled()  # no result yet
 
-    state.set_disp_result(g=0.06, bare_rf=5.3, res_dim=4, step=1)
+    state.set_disp_result(g=0.06, bare_rf=5.3, res_dim=4)
     panel._sync_enabled()
     assert panel._export_box.isEnabled()
 
@@ -192,13 +192,11 @@ def test_tune_done_slot_records_manual_fit_and_draws(qapp):
         t_fluxs=t,
         g=0.065,
         bare_rf=5.32,
-        step=2,
     )
     panel._on_tune_done(data)
 
     assert state.disp_fit.g == pytest.approx(0.065)
     assert state.disp_fit.bare_rf == pytest.approx(5.32)
-    assert state.disp_fit.step == 2
     assert panel._export_box.isEnabled()  # the tuning is the result
     # dispersion lines now drawn on the tune figure
     assert panel._tune_artists is not None
@@ -224,7 +222,114 @@ def test_tune_button_disabled_during_compute(qapp, monkeypatch):
     panel._pool.waitForDone(5000)  # let the spawned worker finish before teardown
     # the done slot re-enables it
     t = np.linspace(0.0, 1.0, 12)
-    panel._on_tune_done(
-        _TuneData(np.full(12, 5.4), np.full(12, 5.6), t, 0.06, 5.3, step=1)
-    )
+    panel._on_tune_done(_TuneData(np.full(12, 5.4), np.full(12, 5.6), t, 0.06, 5.3))
     assert panel._tune_btn.isEnabled() is True
+
+
+# --- sample-flux lines ------------------------------------------------------
+
+
+def _tune_panel(qapp, monkeypatch, median_rf=5.4):
+    """A panel with inputs/onetone/preprocess set and the tune view initialised."""
+    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux_fast", _stub)
+    state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
+    state.set_fit_inputs(_inputs())
+    state.set_onetone(_onetone())
+    pp = _preprocess(median_rf=median_rf)
+    state.set_preprocess(pp)
+    panel = _panel(qapp, state)
+    panel._init_tune_view(pp)
+    return panel
+
+
+def test_add_sample_drops_line_with_dots(qapp, monkeypatch):
+    panel = _tune_panel(qapp, monkeypatch)
+    panel._on_add_sample()
+    assert panel._tune_artists is not None
+    assert len(panel._tune_artists.samples) == 1
+    s = panel._tune_artists.samples[0]
+    # dropped at the flux-axis centre (0.0..1.0 → 0.5)
+    assert s.flux == pytest.approx(0.5)
+    # the stub returns 5.4 / 5.5 GHz → dots exist (red/blue)
+    assert s.dot_ground is not None and s.dot_excited is not None
+    assert float(np.asarray(s.dot_ground.get_ydata())[0]) == pytest.approx(5400.0)
+
+
+def test_rf_slider_refreshes_sample_dots_live(qapp, monkeypatch):
+    # the stub returns g+0.1*k independent of r_f, so to prove the refresh path runs
+    # we make the stub echo bare_rf into the ground value (patched AFTER _tune_panel,
+    # which installs its own _stub).
+    panel = _tune_panel(qapp, monkeypatch)
+
+    def echo_rf(params, fluxs, bare_rf, g, *, progress=False, res_dim=4, **kw):
+        return tuple(
+            np.full(len(fluxs), bare_rf + k) for k in range(kw.get("return_dim", 2))
+        )
+
+    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux_fast", echo_rf)
+    panel._on_add_sample()
+    s = panel._tune_artists.samples[0]  # type: ignore[union-attr]
+
+    panel._rf_slider.setValue(165)  # → 5.55 GHz
+    # the dot's ground y now reflects the new r_f (echoed by the stub), in MHz
+    assert float(np.asarray(s.dot_ground.get_ydata())[0]) == pytest.approx(5550.0)
+
+
+def test_g_change_refreshes_sample_dots_live(qapp, monkeypatch):
+    panel = _tune_panel(qapp, monkeypatch)
+
+    def echo_g(params, fluxs, bare_rf, g, *, progress=False, res_dim=4, **kw):
+        return tuple(np.full(len(fluxs), g + k) for k in range(kw.get("return_dim", 2)))
+
+    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux_fast", echo_g)
+    panel._on_add_sample()
+    s = panel._tune_artists.samples[0]  # type: ignore[union-attr]
+
+    panel._g_spin.setValue(90.0)  # 90 MHz → g = 0.09 GHz
+    # ground dot y = g (echoed) in MHz = 0.09 GHz → 90 MHz
+    assert float(np.asarray(s.dot_ground.get_ydata())[0]) == pytest.approx(90.0)
+
+
+def test_drag_moves_line_and_recomputes_dot(qapp, monkeypatch):
+    panel = _tune_panel(qapp, monkeypatch)
+
+    def echo_flux(params, fluxs, bare_rf, g, *, progress=False, res_dim=4, **kw):
+        # echo the flux into the ground value so we can see the recompute
+        arr = np.asarray(fluxs, dtype=float)
+        return tuple(arr + k for k in range(kw.get("return_dim", 2)))
+
+    monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux_fast", echo_flux)
+    panel._on_add_sample()
+    s = panel._tune_artists.samples[0]  # type: ignore[union-attr]
+
+    panel._on_sample_drag(s, 0.3)
+    assert s.flux == pytest.approx(0.3)
+    assert float(np.asarray(s.line.get_xdata())[0]) == pytest.approx(0.3)
+    # the dot ground y = flux (echoed) in MHz = 0.3 GHz → 300 MHz
+    assert float(np.asarray(s.dot_ground.get_ydata())[0]) == pytest.approx(300.0)
+
+
+def test_drag_clamps_flux_to_axis_range(qapp, monkeypatch):
+    panel = _tune_panel(qapp, monkeypatch)
+    panel._on_add_sample()
+    s = panel._tune_artists.samples[0]  # type: ignore[union-attr]
+    panel._on_sample_drag(s, 5.0)  # way past the 0..1 flux axis
+    assert s.flux == pytest.approx(1.0)  # clamped to the axis max
+
+
+def test_clear_samples_removes_all(qapp, monkeypatch):
+    panel = _tune_panel(qapp, monkeypatch)
+    panel._on_add_sample()
+    panel._on_add_sample()
+    assert len(panel._tune_artists.samples) == 2  # type: ignore[union-attr]
+    panel._on_clear_samples()
+    assert panel._tune_artists.samples == []  # type: ignore[union-attr]
+
+
+def test_fresh_preprocess_drops_sample_lines(qapp, monkeypatch):
+    panel = _tune_panel(qapp, monkeypatch)
+    panel._on_add_sample()
+    assert len(panel._tune_artists.samples) == 1  # type: ignore[union-attr]
+    # re-initialising the tune view (a new preprocess) starts with no sample lines
+    panel._init_tune_view(_preprocess())
+    assert panel._tune_artists.samples == []  # type: ignore[union-attr]

@@ -140,11 +140,12 @@ def test_fit_result_handler():
     out = _call(adapter, "fit.result")
     assert out["has_result"] is False and out["g"] is None
 
-    state.set_disp_result(g=0.068, bare_rf=5.35, res_dim=5, step=2)
+    state.set_disp_result(g=0.068, bare_rf=5.35, res_dim=5)
     out = _call(adapter, "fit.result")
     assert out["has_result"] is True
     assert out["g"] == 0.068 and out["bare_rf"] == 5.35
-    assert out["res_dim"] == 5 and out["step"] == 2
+    assert out["res_dim"] == 5
+    assert "step" not in out
 
 
 def test_resources_versions_handler():

@@ -1,7 +1,7 @@
 ---
 name: run-dispersive-gui
 description: Launch the dispersive-fit-gui (a standalone Qt GUI for fluxonium dispersive-shift fitting) for the user, and observe its state over MCP. The USER drives the analysis in the GUI (load the fluxonium fit from params.json → load a one-tone spectrum → preprocess → tune the coupling g and resonator frequency bare_rf by slider or auto-fit → export the dispersive section back to params.json); the agent is READ-ONLY and reports current state. Use when asked to open/launch the dispersive-fit-gui app or check what state it is in.
-skill_version: 1
+skill_version: 2
 ---
 
 # run-dispersive-gui
@@ -33,12 +33,13 @@ A single linear flow (each step enables the next; the agent observes progress vi
 3. **Preprocess** — fit + remove the electronic delay, smooth, fit a common circle
    centre, take the phase, differentiate / normalize → the normalized phase image
    the tuning works against (a 3-panel diagnostic shows signal / edelay / phases).
-4. **Tune g / r_f** — sliders drive a live prediction of the ground/excited
-   dispersive frequencies over the spectrum; the user matches them by eye. Or
-   **auto-fit** — a scipy optimizer fits `g` (and optionally `bare_rf` within ±2 MHz)
-   by maximizing the overlap with the signal.
-5. **Render** the result figures (dispersive-with-onetone + chi-shift).
-6. **Export** — write the `dispersive = {g, bare_rf}` section back to `params.json`,
+4. **Tune g / r_f** — a `g` spinbox + an `r_f` slider drive a live prediction of the
+   ground/excited dispersive frequencies over the spectrum; the user matches them by
+   eye and clicks "Use these g/r_f" to accept (the manual tuning IS the final fit —
+   there is no auto-fit). They can drop draggable **sample-flux lines** that show the
+   ground (red) / excited (blue) frequency at a single flux, updated live as g / r_f
+   change — quick feedback at a few fluxes without recomputing the whole spectrum.
+5. **Export** — write the `dispersive = {g, bare_rf}` section back to `params.json`,
    preserving the `fluxdep_fit` section it read.
 
 ## Cross-app data flow
@@ -65,7 +66,7 @@ dispersive_state_check         # {has_project, has_fit_inputs, has_onetone, has_
 dispersive_project_info        # {chip_name, qub_name, result_dir, database_path}
 dispersive_fit_inputs_info     # {has_inputs, params:{EJ,EC,EL} or null, flux_half, flux_int, flux_period, bare_rf_seed}
 dispersive_preprocess_status   # {has_preprocess, n_flux, n_freq, edelay}
-dispersive_fit_result          # {has_result, g, bare_rf, g_bound, fit_bare_rf, qub_dim, qub_cutoff, res_dim, auto_fit_done}
+dispersive_fit_result          # {has_result, g, bare_rf, res_dim}
 dispersive_disconnect          # detach the bridge; does NOT stop the user's GUI
 ```
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from functools import lru_cache
+
 import numpy as np
 from numpy.typing import NDArray
 from typing_extensions import TYPE_CHECKING, Any, Callable, Union
@@ -7,6 +9,41 @@ from typing_extensions import TYPE_CHECKING, Any, Callable, Union
 if TYPE_CHECKING:
     from scqubits.core.fluxonium import Fluxonium
     from scqubits.core.param_sweep import ParameterSweep
+
+
+@lru_cache(maxsize=32)
+def _fluxonium_operators(
+    params: tuple[float, float, float], qub_cutoff: int, qub_dim: int
+) -> tuple[
+    NDArray[np.float64],
+    NDArray[np.float64],
+    NDArray[np.float64],
+    NDArray[np.complex128],
+    float,
+]:
+    """The flux-independent fluxonium pieces of ``calculate_dispersive_vs_flux_fast``.
+
+    Returns ``(lc_diag, cos_phi, sin_phi, n_op, EJ)`` — none depend on flux, so they
+    are built ONCE per (params, cutoff, dim) and memoised. This is the live tuning's
+    hot fix: ``cos_phi_operator`` / ``sin_phi_operator`` go through scipy's matrix
+    ``cosm`` / ``sinm`` (an ``expm`` each), ~80 ms on a fresh ``Fluxonium`` — rebuilding
+    them on every sample-flux drag / r_f move would dominate. With them cached, only
+    the cheap per-flux recombination + eigensolve (~1 ms/flux) runs per update.
+
+    The returned arrays are the cache's own copies — callers must NOT mutate them
+    (the fast path only reads them).
+    """
+    from scqubits.core.fluxonium import Fluxonium
+
+    fx = Fluxonium(*params, flux=0.0, cutoff=qub_cutoff, truncated_dim=qub_dim)
+    dim = fx.hilbertdim()
+    lc_diag = np.array(
+        [(i + 0.5) * fx.plasma_energy() for i in range(dim)], dtype=np.float64
+    )
+    cos_phi = np.asarray(fx.cos_phi_operator(beta=0.0), dtype=np.float64)
+    sin_phi = np.asarray(fx.sin_phi_operator(beta=0.0), dtype=np.float64)
+    n_op = np.asarray(fx.n_operator(), dtype=np.complex128)
+    return lc_diag, cos_phi, sin_phi, n_op, float(fx.EJ)
 
 
 def calculate_dispersive(
@@ -259,22 +296,16 @@ def calculate_dispersive_vs_flux_fast(
     arrays (rf_0, rf_1, ...) in GHz, one value per input flux — same shape/units as
     ``calculate_dispersive_vs_flux``.
     """
-    from scqubits.core.fluxonium import Fluxonium
-
     from .energies import _fold_unique_fluxs
 
     folded, sort_idxs, uni_idxs = _fold_unique_fluxs(fluxs)
 
-    # Flux-independent fluxonium pieces, computed once.
-    fx = Fluxonium(*params, flux=0.0, cutoff=qub_cutoff, truncated_dim=qub_dim)
-    dim = fx.hilbertdim()
-    lc_diag = np.array(
-        [(i + 0.5) * fx.plasma_energy() for i in range(dim)], dtype=np.float64
+    # Flux-independent fluxonium pieces — built once per (params, cutoff, dim) and
+    # memoised (the expensive cos/sin matrix functions would otherwise dominate the
+    # live single-point tuning path; see _fluxonium_operators).
+    lc_diag, cos_phi, sin_phi, n_op, EJ = _fluxonium_operators(
+        params, qub_cutoff, qub_dim
     )
-    cos_phi = np.asarray(fx.cos_phi_operator(beta=0.0), dtype=np.float64)
-    sin_phi = np.asarray(fx.sin_phi_operator(beta=0.0), dtype=np.float64)
-    n_op = np.asarray(fx.n_operator(), dtype=np.complex128)
-    EJ = float(fx.EJ)
 
     # Resonator pieces (number diagonal + ladder operators).
     H_res = bare_rf * np.diag(np.arange(res_dim).astype(np.float64))

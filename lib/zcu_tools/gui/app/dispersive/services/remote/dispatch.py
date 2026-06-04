@@ -114,7 +114,6 @@ def _h_fit_result(
         "g": fit.g,
         "bare_rf": fit.bare_rf,
         "res_dim": fit.res_dim,
-        "step": fit.step,
     }
 
 

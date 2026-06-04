@@ -47,16 +47,20 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QMessageBox,
     QProgressBar,
     QPushButton,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from zcu_tools.gui.app.dispersive.controller import Controller
 from zcu_tools.gui.app.dispersive.services.viz import (
+    SampleArtists,
+    add_sample_line,
+    move_sample_line,
+    remove_sample_line,
     render_tune_figure,
     set_dispersion_lines,
     update_bare_line,
+    update_sample_dots,
 )
 from zcu_tools.gui.app.dispersive.state import PreprocessResult
 
@@ -75,7 +79,6 @@ _RF_TICKS = 300
 class _TuneParams:
     g: float
     bare_rf: float
-    step: int
 
 
 @dataclass(frozen=True)
@@ -85,7 +88,6 @@ class _TuneData:
     t_fluxs: np.ndarray
     g: float
     bare_rf: float
-    step: int
 
 
 class _WorkerSignals(QObject):
@@ -132,15 +134,13 @@ class _PredictWorker(QRunnable):
     def run(self) -> None:
         try:
             p = self._p
-            rf_0, rf_1 = self._ctrl.predict_dispersive(
-                p.g, p.bare_rf, step=p.step, return_dim=2
-            )
-            t_fluxs = self._ctrl.predict_flux_axis(p.step)
+            rf_0, rf_1 = self._ctrl.predict_dispersive(p.g, p.bare_rf, return_dim=2)
+            t_fluxs = self._ctrl.predict_flux_axis()
         except Exception as exc:  # noqa: BLE001 — surface to the panel
             logger.exception("predict worker failed")
             self.signals.failed.emit(str(exc))
             return
-        self.signals.done.emit(_TuneData(rf_0, rf_1, t_fluxs, p.g, p.bare_rf, p.step))
+        self.signals.done.emit(_TuneData(rf_0, rf_1, t_fluxs, p.g, p.bare_rf))
 
 
 class PipelinePanelWidget(QWidget):
@@ -231,7 +231,10 @@ class PipelinePanelWidget(QWidget):
         outer = QVBoxLayout(self._tune_box)
         row = QHBoxLayout()
         self._g_spin = self._mhz_spin(60.0, 0.0, 200.0)
-        self._step = self._int_spin(1)
+        # Editing g refreshes the sample-flux dots live (a cheap single-point predict
+        # at each sample line) — but does NOT run the full all-flux dispersion (that
+        # waits for "Use these g/r_f").
+        self._g_spin.valueChanged.connect(self._on_tune_param_changed)
         # r_f is a slider with a FIXED 0..RF_TICKS tick range, so its precision is
         # always (freq span)/RF_TICKS regardless of how wide the data's span is. The
         # GHz value is mapped from the tick (see _rf_ghz); the span/default are set
@@ -246,8 +249,6 @@ class PipelinePanelWidget(QWidget):
         self._rf_label = QLabel("")
         row.addWidget(QLabel("g (MHz)"))
         row.addWidget(self._g_spin)
-        row.addWidget(QLabel("step"))
-        row.addWidget(self._step)
         row.addWidget(QLabel("r_f (MHz)"))
         row.addWidget(self._rf_slider, stretch=1)
         row.addWidget(self._rf_label)
@@ -255,6 +256,20 @@ class PipelinePanelWidget(QWidget):
         self._tune_btn.clicked.connect(self._on_tune)
         row.addWidget(self._tune_btn)
         outer.addLayout(row)
+
+        # Sample-flux lines: add draggable vertical lines whose ground/excited dots
+        # track g / r_f live (a few single-point predicts, not the full recompute).
+        sample_row = QHBoxLayout()
+        self._add_sample_btn = QPushButton("Add sample flux")
+        self._add_sample_btn.clicked.connect(self._on_add_sample)
+        self._clear_samples_btn = QPushButton("Clear samples")
+        self._clear_samples_btn.clicked.connect(self._on_clear_samples)
+        sample_row.addWidget(self._add_sample_btn)
+        sample_row.addWidget(self._clear_samples_btn)
+        sample_row.addWidget(QLabel("drag a line to move it; red=ground blue=excited"))
+        sample_row.addStretch(1)
+        outer.addLayout(sample_row)
+
         self._tune_progress = QProgressBar()
         self._tune_progress.setVisible(False)
         outer.addWidget(self._tune_progress)
@@ -294,13 +309,6 @@ class PipelinePanelWidget(QWidget):
         box.setDecimals(1)
         box.setSingleStep(1.0)
         box.setKeyboardTracking(False)  # emit on commit, not per keystroke
-        box.setValue(value)
-        return box
-
-    def _int_spin(self, value: int) -> QSpinBox:
-        box = QSpinBox()
-        box.setRange(1, 200)
-        box.setKeyboardTracking(False)
         box.setValue(value)
         return box
 
@@ -416,6 +424,9 @@ class PipelinePanelWidget(QWidget):
             result.norm_phases,
             self._rf_ghz(),
         )
+        # A fresh background drops any prior sample lines; re-arm drag on the new
+        # artists so dragging targets them.
+        self._tune_canvas.bind_drag(self._tune_artists, self._on_sample_drag)
         self._tune_canvas.redraw()
 
     def _rf_tick_for(self, rf_ghz: float) -> int:
@@ -481,12 +492,75 @@ class PipelinePanelWidget(QWidget):
         return self._rf_lo_ghz + frac * (self._rf_hi_ghz - self._rf_lo_ghz)
 
     def _on_rf_slider(self, _tick: int) -> None:
-        """Live: move the r_f line as the slider drags (no scqubits)."""
+        """Live: move the r_f line as the slider drags + refresh the sample dots."""
         rf_ghz = self._rf_ghz()
         self._rf_label.setText(f"{1e3 * rf_ghz:.1f} MHz")
         if self._tune_artists is not None:
             update_bare_line(self._tune_artists, rf_ghz)
+            self._refresh_sample_dots()
             self._tune_canvas.redraw()
+
+    def _on_tune_param_changed(self, _value: float) -> None:
+        """Editing g refreshes the sample dots live (single-point predict, no full run)."""
+        if self._tune_artists is not None:
+            self._refresh_sample_dots()
+            self._tune_canvas.redraw()
+
+    # --- sample-flux lines (draggable; live single-point dots) -----------
+
+    def _on_add_sample(self) -> None:
+        """Drop a new sample-flux line at the center of the flux axis + its dots."""
+        if self._tune_artists is None or self._ctrl.state.preprocess is None:
+            return
+        sp_fluxs = self._ctrl.state.preprocess.sp_fluxs
+        flux = float(0.5 * (sp_fluxs[0] + sp_fluxs[-1]))
+        add_sample_line(self._tune_artists, flux)
+        self._refresh_sample_dots()
+        self._tune_canvas.redraw()
+
+    def _on_clear_samples(self) -> None:
+        """Remove every sample line + its dots in place (keeps the dispersion lines)."""
+        if self._tune_artists is None:
+            return
+        for sample in list(self._tune_artists.samples):
+            remove_sample_line(self._tune_artists, sample)
+        self._tune_canvas.redraw()
+
+    def _on_sample_drag(self, sample: SampleArtists, flux: float) -> None:
+        """Drag callback: move the grabbed line + recompute only its dots."""
+        if self._tune_artists is None or self._ctrl.state.preprocess is None:
+            return
+        sp_fluxs = self._ctrl.state.preprocess.sp_fluxs
+        flux = float(np.clip(flux, sp_fluxs[0], sp_fluxs[-1]))
+        move_sample_line(sample, flux)
+        self._compute_sample_dots([sample])
+        self._tune_canvas.redraw()
+
+    def _refresh_sample_dots(self) -> None:
+        """Recompute every sample line's ground/excited dots for the current g/r_f."""
+        if self._tune_artists is not None and self._tune_artists.samples:
+            self._compute_sample_dots(self._tune_artists.samples)
+
+    def _compute_sample_dots(self, samples: list[SampleArtists]) -> None:
+        """Predict + set the dots for the given sample lines (current g / r_f slider).
+
+        A single batched single-point predict over the sample fluxs (a few ms). The
+        compute reads State (fit_inputs.params) but does not write it, so it is safe
+        on the main thread. Failures (e.g. labeling fallback raising) are swallowed
+        with a warning — a bad sample dot must not break the tuning UI.
+        """
+        if self._tune_artists is None or not samples:
+            return
+        g = 1e-3 * self._g_spin.value()
+        bare_rf = self._rf_ghz()
+        fluxs = np.array([s.flux for s in samples], dtype=np.float64)
+        try:
+            rf_0, rf_1 = self._ctrl.predict_sample_points(fluxs, g, bare_rf)
+        except Exception:  # noqa: BLE001 — a sample dot must not break tuning
+            logger.exception("sample-point prediction failed")
+            return
+        for sample, r0, r1 in zip(samples, rf_0, rf_1):
+            update_sample_dots(self._tune_artists, sample, float(r0), float(r1))
 
     def _on_tune(self) -> None:
         """Run the predictor off-main for the current g + r_f slider, draw + record.
@@ -500,7 +574,6 @@ class PipelinePanelWidget(QWidget):
         params = _TuneParams(
             g=1e-3 * self._g_spin.value(),
             bare_rf=self._rf_ghz(),
-            step=self._step.value(),
         )
         self._tune_btn.setEnabled(False)
         self._begin_progress(self._tune_progress)
@@ -516,7 +589,7 @@ class PipelinePanelWidget(QWidget):
             return
         # The accepted tuning IS the result: record g/bare_rf, then draw the
         # dispersion lines over the (already-drawn) background + r_f line.
-        self._ctrl.set_manual_fit(data.g, data.bare_rf, step=data.step)
+        self._ctrl.set_manual_fit(data.g, data.bare_rf)
         set_dispersion_lines(
             self._tune_artists,
             data.t_fluxs,

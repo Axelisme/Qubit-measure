@@ -111,23 +111,39 @@ class Controller:
         g: float,
         bare_rf: float,
         *,
-        step: int = 1,
         return_dim: int = 2,
     ) -> tuple[NDArray[np.float64], ...]:
-        """LRU-cached dispersive prediction over the preprocessed flux axis."""
-        return self._predictor().predict(g, bare_rf, step=step, return_dim=return_dim)
+        """LRU-cached dispersive prediction over the full preprocessed flux axis."""
+        return self._predictor().predict(g, bare_rf, return_dim=return_dim)
 
-    def predict_flux_axis(self, step: int) -> NDArray[np.float64]:
-        """The down-sampled flux axis for a ``predict_dispersive(step=step)`` call."""
-        return self._predictor().flux_axis(step)
+    def predict_flux_axis(self) -> NDArray[np.float64]:
+        """The preprocessed flux axis a ``predict_dispersive`` call runs over."""
+        return self._predictor().flux_axis()
+
+    def predict_sample_points(
+        self,
+        fluxs: NDArray[np.float64],
+        g: float,
+        bare_rf: float,
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """Ground/excited resonator frequencies (GHz) at arbitrary sample fluxs.
+
+        The live single-point path for the draggable sample-flux lines (read-only,
+        synchronous, cheap). Fast-fails if no fit inputs are loaded.
+        """
+        from zcu_tools.gui.app.dispersive.services.predict import predict_dispersive_at
+
+        inputs = self._state.fit_inputs
+        if inputs is None:
+            raise RuntimeError("no fluxonium fit inputs (load params.json first)")
+        rf_0, rf_1 = predict_dispersive_at(inputs.params, fluxs, g, bare_rf)
+        return rf_0, rf_1
 
     # --- result (the user's tuning is the final fit) --------------------
 
-    def set_manual_fit(
-        self, g: float, bare_rf: float, *, res_dim: int = 4, step: int = 1
-    ) -> None:
+    def set_manual_fit(self, g: float, bare_rf: float, *, res_dim: int = 4) -> None:
         """Record the accepted g / bare_rf (+ its sim resolution) as the result."""
-        self._state.set_disp_result(g, bare_rf, res_dim=res_dim, step=step)
+        self._state.set_disp_result(g, bare_rf, res_dim=res_dim)
         self._bus.emit(DispFitChangedPayload(has_result=True))
 
     # --- export ----------------------------------------------------------

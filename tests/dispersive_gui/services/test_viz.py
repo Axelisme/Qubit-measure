@@ -9,9 +9,13 @@ matplotlib.use("Agg")
 import numpy as np  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
 from zcu_tools.gui.app.dispersive.services.viz import (  # noqa: E402
+    add_sample_line,
+    move_sample_line,
+    remove_sample_line,
     render_tune_figure,
     set_dispersion_lines,
     update_bare_line,
+    update_sample_dots,
 )
 
 
@@ -63,3 +67,57 @@ def test_set_dispersion_lines_adds_then_updates():
     # after a prediction, the r_f slider's title keeps g
     update_bare_line(artists, 5.40)
     assert "g = 70.0" in artists.ax.get_title()
+
+
+# --- sample-flux lines -----------------------------------------------------
+
+
+def test_add_sample_line_appends_vertical_line():
+    fluxs, freqs, norm = _axes()
+    artists = render_tune_figure(Figure(), fluxs, freqs, norm, 5.3)
+    s = add_sample_line(artists, 0.3)
+    assert artists.samples == [s]
+    assert s.flux == 0.3
+    assert s.dot_ground is None and s.dot_excited is None
+    # the line is vertical at x = flux
+    xdata = np.asarray(s.line.get_xdata())
+    assert float(xdata[0]) == 0.3 and float(xdata[1]) == 0.3
+
+
+def test_move_sample_line_updates_flux_and_x():
+    fluxs, freqs, norm = _axes()
+    artists = render_tune_figure(Figure(), fluxs, freqs, norm, 5.3)
+    s = add_sample_line(artists, 0.3)
+    move_sample_line(s, 0.45)
+    assert s.flux == 0.45
+    xdata = np.asarray(s.line.get_xdata())
+    assert float(xdata[0]) == 0.45
+
+
+def test_update_sample_dots_creates_then_moves_red_blue():
+    fluxs, freqs, norm = _axes()
+    artists = render_tune_figure(Figure(), fluxs, freqs, norm, 5.3)
+    s = add_sample_line(artists, 0.3)
+
+    update_sample_dots(artists, s, 5.41, 5.62)  # GHz
+    assert s.dot_ground is not None and s.dot_excited is not None
+    gy = np.asarray(s.dot_ground.get_ydata())
+    ey = np.asarray(s.dot_excited.get_ydata())
+    assert float(gy[0]) == 5410.0 and float(ey[0]) == 5620.0  # MHz
+    assert s.dot_ground.get_color() == "red"
+    assert s.dot_excited.get_color() == "blue"
+
+    # second call moves them in place (same artists)
+    g_dot = s.dot_ground
+    update_sample_dots(artists, s, 5.40, 5.60)
+    assert s.dot_ground is g_dot
+    assert float(np.asarray(s.dot_ground.get_ydata())[0]) == 5400.0
+
+
+def test_remove_sample_line_drops_line_and_dots():
+    fluxs, freqs, norm = _axes()
+    artists = render_tune_figure(Figure(), fluxs, freqs, norm, 5.3)
+    s = add_sample_line(artists, 0.3)
+    update_sample_dots(artists, s, 5.4, 5.6)
+    remove_sample_line(artists, s)
+    assert artists.samples == []
