@@ -341,18 +341,29 @@ class FitPanelWidget(QWidget):
         self._tabs.setCurrentWidget(self._diag_stack)
 
     def _on_search_failed(self, message: str) -> None:
+        from zcu_tools.fluxdep_gui.ui.error_messages import friendly_fit_message
+
         set_current_container(None)
         self._search_btn.setEnabled(True)
         self._progress.setVisible(False)
-        self._status.setText(f"Search failed: {message}")
+        self._status.setText("Search failed.")
+        self._show_message("Search failed", friendly_fit_message("Search", message))
 
     def _on_export(self) -> None:
+        from zcu_tools.fluxdep_gui.ui.error_messages import friendly_fit_message
+
         try:
             path = self._ctrl.export_params()
         except Exception as exc:  # noqa: BLE001 — surface to the panel
-            self._status.setText(f"Export failed: {exc}")
+            self._status.setText("Export failed.")
+            self._show_message("Export failed", friendly_fit_message("Export", exc))
             return
         self._status.setText(f"Exported → {path}")
+
+    def _show_message(self, title: str, message: str) -> None:
+        from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
+
+        QMessageBox.warning(self, title, message)
 
     # --- rendering -------------------------------------------------------
 

@@ -7,7 +7,12 @@ a fix hint, keeping the raw error on a "Details:" line. Pure function — no Qt.
 
 from __future__ import annotations
 
-from zcu_tools.fluxdep_gui.ui.main_window import _friendly_io_message
+from zcu_tools.fluxdep_gui.ui.error_messages import (
+    friendly_fit_message,
+)
+from zcu_tools.fluxdep_gui.ui.error_messages import (
+    friendly_io_message as _friendly_io_message,
+)
 
 
 def test_missing_file():
@@ -68,3 +73,48 @@ def test_unknown_error_falls_back_gracefully():
     msg = _friendly_io_message("Load", "/tmp/weird.hdf5", RuntimeError("boom"))
     assert "Load of 'weird.hdf5' failed" in msg
     assert "boom" in msg  # raw error still shown
+
+
+# --- fit (search / export params) messages ---------------------------------
+
+
+def test_fit_no_database():
+    msg = friendly_fit_message("Search", "no database path set (call set_params first)")
+    assert "Select a database" in msg
+
+
+def test_fit_mirror_needs_sample_f():
+    msg = friendly_fit_message("Search", "sample_f is required for mirror transitions")
+    assert "sample_f" in msg
+    assert "mirror" in msg
+
+
+def test_fit_no_candidate():
+    msg = friendly_fit_message(
+        "Search",
+        "No valid candidate found in database (all parameter bounds infeasible).",
+    )
+    assert "No match found" in msg
+    assert "Widen" in msg
+
+
+def test_fit_export_no_result():
+    msg = friendly_fit_message(
+        "Export", ValueError("no fit result to export (run search first)")
+    )
+    assert "run a search first" in msg
+
+
+def test_fit_export_no_aligned():
+    msg = friendly_fit_message(
+        "Export", ValueError("no aligned spectrum (align one before exporting)")
+    )
+    assert "Align at least one spectrum" in msg
+
+
+def test_fit_accepts_both_string_and_exception():
+    # search crosses a worker signal as a string; export catches the exception
+    from_str = friendly_fit_message("Search", "no selected points to fit")
+    from_exc = friendly_fit_message("Search", ValueError("no selected points to fit"))
+    assert "select points" in from_str.lower()
+    assert from_str.split("\n")[0] == from_exc.split("\n")[0]

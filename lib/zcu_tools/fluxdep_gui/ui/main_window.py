@@ -57,52 +57,6 @@ from zcu_tools.fluxdep_gui.ui.interactive.selector import SelectorWidget
 logger = logging.getLogger(__name__)
 
 
-def _friendly_io_message(action: str, filepath: str, exc: Exception) -> str:
-    """Map a file-IO exception to a human message with a fix hint.
-
-    Covers the common ways load / restore / export fail. ``action`` is the verb
-    ("Load" / "Restore" / "Export") so the wording fits the context; ``filepath``
-    is the file involved. The raw error text is appended for the curious (the
-    full traceback is in the debug log).
-    """
-    import os
-
-    raw = str(exc).strip()
-    name = os.path.basename(filepath) or filepath
-
-    if isinstance(exc, FileNotFoundError) or "unable to open file" in raw.lower():
-        if action == "Export":
-            head = (
-                f"Could not write {name!r}. The folder may not exist or is not "
-                "writable — pick a different location."
-            )
-        elif not os.path.exists(filepath):
-            head = f"File not found: {name!r}. Check the path and try again."
-        else:
-            head = f"Could not open {name!r} — it may not be a valid HDF5 file."
-    elif "file signature not found" in raw.lower() or "not a valid" in raw.lower():
-        head = f"{name!r} is not a valid HDF5 file."
-    elif action == "Restore" and (
-        isinstance(exc, (AssertionError, KeyError)) or not raw
-    ):
-        head = (
-            f"{name!r} is not a processed spectrums.hdf5 (it lacks the expected "
-            "structure). To load a raw spectrum, use Add instead of Restore."
-        )
-    elif "no frequency axis" in raw.lower():
-        head = (
-            f"{name!r} is not a 2D spectrum (no frequency axis). Add expects a "
-            "device-value × frequency sweep."
-        )
-    elif "no spectra to export" in raw.lower():
-        head = "Nothing to export — load and annotate a spectrum first."
-    else:
-        head = f"{action} of {name!r} failed."
-
-    detail = raw if raw else type(exc).__name__
-    return f"{head}\n\nDetails: {detail}"
-
-
 class MainWindow(QMainWindow):
     """The fluxdep analysis window shell."""
 
@@ -490,16 +444,10 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, title, message)
 
     def _show_io_error(self, action: str, filepath: str, exc: Exception) -> None:
-        """Show a friendly message for a file IO failure (load / restore / export).
+        """Show a friendly message for a file IO failure (load / restore / export)."""
+        from zcu_tools.fluxdep_gui.ui.error_messages import friendly_io_message
 
-        Translates the common low-level exceptions (h5py / OSError / a bare
-        AssertionError from a wrong file format) into a message that says what
-        went wrong and how to fix it, with the raw error kept on a second line
-        for the curious. The full traceback is already in the debug log.
-        """
-        self._show_error(
-            f"{action} failed", _friendly_io_message(action, filepath, exc)
-        )
+        self._show_error(f"{action} failed", friendly_io_message(action, filepath, exc))
 
     def _show_info(self, title: str, message: str) -> None:
         from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
