@@ -77,3 +77,32 @@ def test_apps_keep_their_own_wire_versions() -> None:
     assert main_wv.WIRE_VERSION >= 1
     assert flux_wv.WIRE_VERSION == 1
     assert flux_wv.GUI_VERSION == 1
+
+
+# mcp_server.py is launched as a SCRIPT (``python .../mcp_server.py`` per
+# .mcp.json), so it has no parent package — a relative import would die at launch
+# with "attempted relative import with no known parent package", which only
+# surfaces on an MCP reconnect (not in the test suite, which imports it as a
+# module). Guard the absolute-import invariant statically so a future
+# import-rewrite cannot regress it silently.
+_MCP_SERVERS = [
+    "lib/zcu_tools/gui/app/main/services/remote/mcp_server.py",
+    "lib/zcu_tools/gui/app/fluxdep/services/remote/mcp_server.py",
+]
+
+
+@pytest.mark.parametrize("rel_path", _MCP_SERVERS)
+def test_mcp_server_has_no_relative_imports(rel_path: str) -> None:
+    import ast
+
+    repo_root = Path(__file__).resolve().parents[2]
+    tree = ast.parse((repo_root / rel_path).read_text(encoding="utf-8"))
+    offenders = [
+        f"line {node.lineno}: from {'.' * node.level}{node.module or ''} import ..."
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.level > 0
+    ]
+    assert not offenders, (
+        f"{rel_path} is launched as a script and must use absolute imports; "
+        f"found relative: {offenders}"
+    )
