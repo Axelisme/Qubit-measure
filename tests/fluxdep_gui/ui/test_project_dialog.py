@@ -34,3 +34,30 @@ def test_result_project_returns_edited_values(dialog):
 def test_names_are_trimmed(dialog):
     dialog._chip_edit.setText("  spacey  ")
     assert dialog.result_project().chip_name == "spacey"
+
+
+def test_result_dir_auto_derives_from_names(qapp):
+    import os
+
+    d = ProjectDialog(ProjectInfo())
+    d._chip_edit.setText("Q5_2D")
+    d._qub_edit.setText("Q1")
+    assert d._result_edit.text() == os.path.join("result", "Q5_2D", "Q1")
+    d.deleteLater()
+
+
+def test_manual_result_dir_stops_auto_derivation(qapp):
+    d = ProjectDialog(ProjectInfo())
+    d._result_edit.setText("/custom/out")
+    d._on_result_edited("/custom/out")  # simulate textEdited
+    d._chip_edit.setText("Q5_2D")  # must NOT overwrite the manual dir
+    assert d._result_edit.text() == "/custom/out"
+    d.deleteLater()
+
+
+def test_browse_buttons_exist(dialog):
+    from qtpy.QtWidgets import QPushButton
+
+    labels = [b.text() for b in dialog.findChildren(QPushButton)]
+    # a Browse… for result dir and one for database path
+    assert labels.count("Browse…") == 2

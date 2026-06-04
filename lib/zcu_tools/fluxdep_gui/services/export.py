@@ -18,18 +18,34 @@ from zcu_tools.notebook.persistance import SpectrumResult, dump_spectrums
 logger = logging.getLogger(__name__)
 
 # Re-exported from state (their home) for callers that import them from here.
-__all__ = ["DEFAULT_CHIP", "DEFAULT_QUBIT", "default_export_path", "ExportService"]
+__all__ = [
+    "DEFAULT_CHIP",
+    "DEFAULT_QUBIT",
+    "default_result_dir",
+    "default_export_path",
+    "ExportService",
+]
+
+
+def default_result_dir(chip_name: str, qub_name: str) -> str:
+    """The notebook-layout result dir for a chip/qubit (``result/<chip>/<qubit>``).
+
+    Empty names fall back to ``unknown_chip`` / ``unknown_qubit`` so the path is
+    always well-formed.
+    """
+    chip = chip_name or DEFAULT_CHIP
+    qub = qub_name or DEFAULT_QUBIT
+    return os.path.join("result", chip, qub)
 
 
 def default_export_path(chip_name: str, qub_name: str) -> str:
     """The notebook-layout default export path for a chip/qubit.
 
-    ``result/<chip>/<qubit>/data/fluxdep/spectrums.hdf5``. Empty names fall back
-    to ``unknown_chip`` / ``unknown_qubit`` so the path is always well-formed.
+    ``<result_dir>/data/fluxdep/spectrums.hdf5``.
     """
-    chip = chip_name or DEFAULT_CHIP
-    qub = qub_name or DEFAULT_QUBIT
-    return os.path.join("result", chip, qub, "data", "fluxdep", "spectrums.hdf5")
+    return os.path.join(
+        default_result_dir(chip_name, qub_name), "data", "fluxdep", "spectrums.hdf5"
+    )
 
 
 class ExportService:
