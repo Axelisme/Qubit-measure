@@ -290,6 +290,52 @@ def test_exp_tab_draft_context_allows_analysis_but_disables_run_and_save(qapp):
     assert tab.save_result_btn.isEnabled() is False
 
 
+def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(qapp):
+    """flux_dep / power_dep adapters (supports_analysis=False) hide only the
+    analysis widgets, never the Save section. Regression: the whole second tab
+    used to be hidden, so the user could not save a 2D-sweep run at all."""
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
+
+    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab.update_interaction_state(
+        _snapshot(
+            "tab-1",
+            has_run_result=True,
+            has_active_context=True,
+            supports_analysis=False,
+            analyze_params=None,
+        )
+    )
+
+    # The second tab stays present and is labelled for what it now holds.
+    # (isHidden reflects the widget's own setVisible state independent of whether
+    # an ancestor is shown — the tab widget is never .show()n in this test.)
+    assert tab._left_tabs.isTabVisible(1) is True
+    assert tab._left_tabs.tabText(1) == "Save"
+    # Analysis widgets are hidden ...
+    assert tab._analyze_section.isHidden() is True
+    assert tab.analyze_btn.isHidden() is True
+    # ... but Save stays reachable and usable (run result + active context).
+    assert tab.save_data_btn.isHidden() is False
+    assert tab.save_data_btn.isEnabled() is True
+
+
+def test_analysis_adapter_shows_analysis_widgets_and_labels_tab(qapp):
+    """An analysis adapter keeps the analysis widgets visible and the second tab
+    labelled 'Analysis' — the counterpart to the non-analysis case."""
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
+
+    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab.update_interaction_state(
+        _snapshot("tab-1", has_run_result=True, supports_analysis=True)
+    )
+
+    assert tab._left_tabs.tabText(1) == "Analysis"
+    assert tab._analyze_section.isHidden() is False
+    assert tab.analyze_btn.isHidden() is False
+    assert tab.save_data_btn.isHidden() is False
+
+
 def test_main_window_run_lock_disables_only_new_tab_and_run(qapp):
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
@@ -394,10 +440,12 @@ def test_stopped_run_does_not_auto_switch_to_analysis_tab(qapp):
     tab._left_tabs.setCurrentIndex.assert_not_called()
 
 
-def test_non_analysis_adapter_run_does_not_auto_switch_to_analysis_tab(qapp):
-    """flux_dep / power_dep adapters (supports_analysis=False) hide the Analysis
-    tab, so a finished run must not switch to it (switching to a hidden tab is a
-    no-op at best, a stuck-on-hidden-tab UI at worst)."""
+def test_non_analysis_adapter_run_auto_switches_to_second_tab(qapp):
+    """flux_dep / power_dep adapters (supports_analysis=False) keep the second
+    tab — its analysis widgets are hidden but the Save section stays — so a
+    finished run still switches there, landing the user on Save (where they save
+    the 2D sweep). Regression: switching used to be skipped, and earlier the
+    whole tab was hidden so the user could not save at all."""
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     ctrl = MagicMock()
@@ -413,7 +461,7 @@ def test_non_analysis_adapter_run_does_not_auto_switch_to_analysis_tab(qapp):
 
     _emit_run_finished(bus, "tab-1", outcome="finished")
 
-    tab._left_tabs.setCurrentIndex.assert_not_called()
+    tab._left_tabs.setCurrentIndex.assert_called_once_with(1)
 
 
 def test_refresh_analyze_form_skips_non_analysis_adapter_without_raising(qapp):

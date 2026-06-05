@@ -564,8 +564,19 @@ class ExpTabWidget(QWidget):
         idle = not local_busy
         self.cfg_form.setEnabled(idle)
 
+        # Non-analysis adapters (flux_dep / power_dep) hide only the analysis
+        # widgets, NOT the whole tab — the Save section lives in this same tab and
+        # must stay reachable so any run can be saved. (Writeback is already
+        # gated by item count in update_writeback_items; hide it here too so it
+        # never lingers from a previous analysis adapter on the same tab.)
         has_analysis = capabilities.supports_analysis
-        self._left_tabs.setTabVisible(1, has_analysis)
+        self._analyze_section.setVisible(has_analysis)
+        self.analyze_btn.setVisible(has_analysis)
+        if not has_analysis:
+            self.writeback_section.setVisible(False)
+        # The second tab carries analysis widgets + Save; when analysis is hidden
+        # only Save remains, so label it accordingly instead of "Analysis".
+        self._left_tabs.setTabText(1, "Analysis" if has_analysis else "Save")
         self.analyze_form.setEnabled(idle and has_analysis)
         self.analyze_btn.setEnabled(
             idle and has_analysis and state.has_context and state.has_run_result
@@ -782,11 +793,15 @@ class MainWindow(QMainWindow):
     def _on_bus_run_finished(self, payload: RunFinishedPayload) -> None:
         # Run lock released.
         self.refresh_run_lock(None)
-        # Auto-switch to the Analysis tab only on a normal finish — RUN_FINISHED
-        # carries the outcome directly, so the decision lives here. A stopped run
+        # Auto-switch to the second tab on a normal finish — RUN_FINISHED carries
+        # the outcome directly, so the decision lives here. A stopped run
         # (outcome=cancelled) may leave a partial result, but the user interrupted
-        # it on purpose; don't yank them to Analysis. RunService writes the result
-        # to State before emitting RUN_FINISHED, so has_run_result is already set.
+        # it on purpose; don't yank them away. RunService writes the result to
+        # State before emitting RUN_FINISHED, so has_run_result is already set.
+        # The second tab holds analysis widgets AND the Save section; for a
+        # non-analysis adapter (flux_dep / power_dep) the analysis widgets are
+        # hidden but Save stays — switching there lands the user on Save, which is
+        # exactly what they want after a 2D sweep.
         if payload.outcome != "finished":
             return
         tab_w = self._tab_widgets.get(payload.tab_id)
@@ -794,15 +809,7 @@ class MainWindow(QMainWindow):
             return
         snapshot = self._ctrl.get_tab_snapshot(payload.tab_id)
         assert snapshot.interaction is not None  # render snapshot fills live fields
-        assert snapshot.capabilities is not None  # render snapshot fills live fields
-        # Only auto-switch to the Analysis tab for adapters that have one;
-        # non-analysis adapters (flux_dep / power_dep) hide it (setTabVisible(1,
-        # False) in update_interaction_state), so switching there is a no-op at
-        # best and leaves the UI on a hidden tab at worst.
-        if (
-            snapshot.interaction.has_run_result
-            and snapshot.capabilities.supports_analysis
-        ):
+        if snapshot.interaction.has_run_result:
             tab_w._left_tabs.setCurrentIndex(1)
 
     def _on_bus_context_switched(self, payload: ContextSwitchedPayload) -> None:
