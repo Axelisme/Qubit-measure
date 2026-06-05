@@ -92,15 +92,16 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             allow_array=True,
         )
 
-        freq1_param = sweep2param("freq1", freq1_sweep)
-        modules.tested_reset.set_param("freq1", freq1_param)
-
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, FreqCfg],
             update_hook: Optional[Callable],
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
+
+            freq1_param = sweep2param("freq1", cfg.sweep.freq1)
+            modules.tested_reset.set_param("freq1", freq1_param)
+
             return ModularProgramV2(
                 soccfg,
                 cfg,
@@ -169,17 +170,18 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             {"soccfg": soccfg, "gen_ch": reset_cfg.pulse2_cfg.ch},
         )
 
-        freq1_param = sweep2param("freq1", cfg.sweep.freq1)
-        freq2_param = sweep2param("freq2", cfg.sweep.freq2)
-        modules.tested_reset.set_param("freq1", freq1_param)
-        modules.tested_reset.set_param("freq2", freq2_param)
-
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, FreqCfg],
             update_hook: Optional[Callable],
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
+
+            freq1_param = sweep2param("freq1", cfg.sweep.freq1)
+            freq2_param = sweep2param("freq2", cfg.sweep.freq2)
+            modules.tested_reset.set_param("freq1", freq1_param)
+            modules.tested_reset.set_param("freq2", freq2_param)
+
             return ModularProgramV2(
                 soccfg,
                 cfg,

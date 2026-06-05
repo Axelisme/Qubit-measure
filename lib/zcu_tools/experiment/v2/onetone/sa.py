@@ -56,6 +56,7 @@ def safreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 class SA_FreqExp(AbsExperiment[SA_FreqResult, SA_FreqCfg]):
     def run(self, soc, soccfg, cfg: SA_FreqCfg) -> SA_FreqResult:
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -110,10 +111,9 @@ class SA_FreqExp(AbsExperiment[SA_FreqResult, SA_FreqCfg]):
                 ),
             )
 
-        # record last cfg and result
-        self.last_cfg = deepcopy(cfg)
+        # record result
         self.last_result = SA_FreqResult(
-            freqs=freqs, signals=signals, cfg_snapshot=self.last_cfg
+            freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
         )
 
         return self.last_result

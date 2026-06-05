@@ -75,8 +75,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
-        rounds = cfg.rounds
-        cfg.rounds = 1  # implemented round loop by scan
+        rounds = cfg.rounds  # implemented round loop by scan, see measure_fn
 
         length_sweep = cfg.sweep.length
         tested_reset = modules.tested_reset
@@ -99,6 +98,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
             update_hook: Optional[Callable],
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
+            cfg.rounds = 1  # round loop is driven by the scan's .repeat("rounds", ...)
             modules = cfg.modules
 
             tested_reset = modules.tested_reset
@@ -155,8 +155,6 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
                 ),
             )
             signals = average_signals(signals)
-
-        cfg.rounds = rounds
 
         # Cache results
         self.last_result = LengthResult(lengths, signals, cfg_snapshot=cfg)

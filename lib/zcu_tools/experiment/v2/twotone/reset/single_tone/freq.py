@@ -7,13 +7,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Optional, TypeAlias
+from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import Task, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
@@ -81,35 +81,38 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             {"soccfg": soccfg, "gen_ch": reset_cfg.pulse_cfg.ch},
         )
 
-        freq_param = sweep2param("freq", cfg.sweep.freq)
-        reset_cfg.set_param("freq", freq_param)
+        def measure_fn(
+            ctx: TaskState, update_hook: Optional[Callable]
+        ) -> list[NDArray[np.float64]]:
+            cfg = ctx.cfg
+            modules = cfg.modules
+
+            freq_param = sweep2param("freq", cfg.sweep.freq)
+            modules.tested_reset.set_param("freq", freq_param)
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                sweep=[("freq", cfg.sweep.freq)],
+                modules=[
+                    Reset("reset", modules.reset),
+                    Pulse("init_pulse", modules.init_pulse),
+                    PulseReset("tested_reset", modules.tested_reset),
+                    Readout("readout", modules.readout),
+                ],
+            ).acquire(
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
+            )
 
         with LivePlot1D("Frequency (MHz)", "Amplitude") as viewer:
             signals = run_task(
                 task=Task(
                     pbar_n=cfg.rounds,
-                    measure_fn=lambda ctx, update_hook: (
-                        (modules := ctx.cfg.modules)
-                        and (
-                            ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                sweep=[("freq", ctx.cfg.sweep.freq)],
-                                modules=[
-                                    Reset("reset", modules.reset),
-                                    Pulse("init_pulse", modules.init_pulse),
-                                    PulseReset("tested_reset", modules.tested_reset),
-                                    Readout("readout", modules.readout),
-                                ],
-                            ).acquire(
-                                soc,
-                                progress=False,
-                                round_hook=update_hook,
-                                stop_checkers=[ctx.is_stop],
-                                **(acquire_kwargs or {}),
-                            )
-                        )
-                    ),
+                    measure_fn=measure_fn,
                     result_shape=(len(freqs),),
                 ),
                 init_cfg=cfg,

@@ -363,31 +363,41 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
             {"soccfg": soccfg, "gen_ch": modules.test_pulse.ch},
         )
 
-        length_param = sweep2param("length", cfg.sweep.length)
-        modules.test_pulse.set_param("length", length_param)
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any, T1WithToneCfg],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg = ctx.cfg
+            modules = cfg.modules
+
+            length_sweep = cfg.sweep.length
+            length_param = sweep2param("length", length_sweep)
+            modules.test_pulse.set_param("length", length_param)
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.reset),
+                    Pulse(name="pi_pulse", cfg=modules.pi_pulse),
+                    Pulse(name="test_pulse", cfg=modules.test_pulse),
+                    Readout("readout", modules.readout),
+                ],
+                sweep=[("length", length_sweep)],
+            ).acquire(
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
+            )
 
         with LivePlot1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
         ) as viewer:
             signals = run_task(
                 task=Task(
-                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
-                        soccfg,
-                        ctx.cfg,
-                        modules=[
-                            Reset("reset", modules.reset),
-                            Pulse(name="pi_pulse", cfg=modules.pi_pulse),
-                            Pulse(name="test_pulse", cfg=modules.test_pulse),
-                            Readout("readout", modules.readout),
-                        ],
-                        sweep=[("length", ctx.cfg.sweep.length)],
-                    ).acquire(
-                        soc,
-                        progress=False,
-                        round_hook=update_hook,
-                        stop_checkers=[ctx.is_stop],
-                        **(acquire_kwargs or {}),
-                    ),
+                    measure_fn=measure_fn,
                     result_shape=(len(lengths),),
                     pbar_n=cfg.rounds,
                 ),

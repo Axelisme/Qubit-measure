@@ -59,6 +59,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
     def run(
         self, soc, soccfg, cfg: PowerDepCfg, *, earlystop_snr: Optional[float] = None
     ) -> PowerDepResult:
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -147,10 +148,9 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
             )
             signals = np.asarray(signals)
 
-        # record last cfg and result
-        self.last_cfg = deepcopy(cfg)
+        # record result
         self.last_result = PowerDepResult(
-            gains=gains, freqs=freqs, signals=signals, cfg_snapshot=self.last_cfg
+            gains=gains, freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
         )
 
         return self.last_result

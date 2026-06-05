@@ -55,6 +55,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> PowerResult:
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -114,10 +115,9 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             )
             signals = np.asarray(signals)
 
-        # Cache results
-        self.last_cfg = deepcopy(cfg)
+        # record result
         self.last_result = PowerResult(
-            gains=gains, freqs=freqs, signals=signals, cfg_snapshot=self.last_cfg
+            gains=gains, freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
         )
 
         return self.last_result

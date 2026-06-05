@@ -55,6 +55,8 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         cfg: LenRabiCfg,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> LenRabiResult:
+        orig_cfg = deepcopy(cfg)
+
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -103,9 +105,10 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                 ),
             )
 
-        # record last cfg and result
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = LenRabiResult(lengths=lengths, signals=signals)
+        # record result
+        self.last_result = LenRabiResult(
+            lengths=lengths, signals=signals, cfg_snapshot=orig_cfg
+        )
 
         return self.last_result
 
@@ -116,6 +119,8 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         cfg: LenRabiCfg,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> LenRabiResult:
+        orig_cfg = deepcopy(cfg)
+
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -180,9 +185,10 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
             )
             signals = average_round(signals)
 
-        # record last cfg and result
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = LenRabiResult(lengths=lengths, signals=signals)
+        # record result
+        self.last_result = LenRabiResult(
+            lengths=lengths, signals=signals, cfg_snapshot=orig_cfg
+        )
 
         return self.last_result
 
@@ -298,7 +304,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
             _cfg, _, _ = parse_comment(comment)
 
             if _cfg is not None:
-                self.last_cfg = LenRabiCfg.validate_or_warn(_cfg, source=filepath)
+                cfg_snapshot = LenRabiCfg.validate_or_warn(_cfg, source=filepath)
         self.last_result = LenRabiResult(
             lengths=lens, signals=signals, cfg_snapshot=cfg_snapshot
         )

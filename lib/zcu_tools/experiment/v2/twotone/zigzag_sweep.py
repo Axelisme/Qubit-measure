@@ -85,7 +85,7 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
         repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse",
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> ZigZagScanResult:
-        original_cfg = deepcopy(cfg)
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -174,10 +174,9 @@ class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
             )
             signals = np.asarray(signals, dtype=np.complex128)
 
-        # record last cfg and result
-        self.last_cfg = original_cfg
+        # record result
         self.last_result = ZigZagScanResult(
-            times=times, values=values, signals=signals, cfg_snapshot=self.last_cfg
+            times=times, values=values, signals=signals, cfg_snapshot=orig_cfg
         )
 
         return self.last_result

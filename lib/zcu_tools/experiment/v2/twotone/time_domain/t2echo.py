@@ -75,6 +75,8 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
         detune: float = 0.0,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> tuple[T2EchoResult, float]:
+        orig_cfg = deepcopy(cfg)
+
         setup_devices(cfg, progress=True)
 
         lengths = sweep2array(
@@ -151,10 +153,9 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
                 ),
             )
 
-        # record last cfg and result
-        self.last_cfg = deepcopy(cfg)
+        # record result
         self.last_result = T2EchoResult(
-            times=lengths, signals=signals, cfg_snapshot=self.last_cfg
+            times=lengths, signals=signals, cfg_snapshot=orig_cfg
         )
 
         return self.last_result, true_detune
@@ -258,7 +259,7 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
             _cfg, _, _ = parse_comment(comment)
 
             if _cfg is not None:
-                self.last_cfg = T2EchoCfg.validate_or_warn(_cfg, source=filepath)
+                cfg_snapshot = T2EchoCfg.validate_or_warn(_cfg, source=filepath)
         self.last_result = T2EchoResult(
             times=Ts, signals=signals, cfg_snapshot=cfg_snapshot
         )

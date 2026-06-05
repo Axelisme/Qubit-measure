@@ -61,7 +61,7 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
         fail_retry: int = 0,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> FreqFluxResult:
-        original_cfg = deepcopy(cfg)
+        orig_cfg = deepcopy(cfg)
         modules = cfg.modules
 
         value_sweep = cfg.sweep.flux
@@ -114,10 +114,9 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
             )
             signals = np.asarray(signals)
 
-        # Cache results
-        self.last_cfg = original_cfg
+        # record result
         self.last_result = FreqFluxResult(
-            values=dev_values, freqs=freqs, signals=signals
+            values=dev_values, freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
         )
 
         return self.last_result

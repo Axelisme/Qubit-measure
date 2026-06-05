@@ -74,13 +74,13 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
             "time",
             {"soccfg": soccfg, "ro_ch": readout_cfg.ro_cfg.ro_ch},
         )
-        modules.readout.set_param("length", lengths.max() + 0.11)
 
         def measure_fn(
             ctx: TaskState[NDArray[np.float64], Any, LengthCfg], update_hook
         ):
             cfg = ctx.cfg
             modules = cfg.modules
+            modules.readout.set_param("length", lengths.max() + 0.11)
 
             prog = ModularProgramV2(
                 soccfg,

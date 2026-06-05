@@ -32,6 +32,8 @@ def fake_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 class FakeExp(AbsExperiment[FakeResult, FakeCfg]):
     def run(self, cfg: FakeCfg) -> FakeResult:
+        orig_cfg = deepcopy(cfg)
+
         # Predicted frequency points (before mapping to ADC domain)
         freqs = np.linspace(4.5, 5.5, 201)  # MHz
 
@@ -72,10 +74,9 @@ class FakeExp(AbsExperiment[FakeResult, FakeCfg]):
                 ),
             )
 
-        # record last cfg and result
-        self.last_cfg = deepcopy(cfg)
+        # record result
         self.last_result = FakeResult(
-            freqs=freqs, signals=signals, cfg_snapshot=self.last_cfg
+            freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
         )
 
         return self.last_result
@@ -125,7 +126,6 @@ class FakeExp(AbsExperiment[FakeResult, FakeCfg]):
         freqs = freqs.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = None
         self.last_result = FakeResult(freqs=freqs, signals=signals)
 
         return self.last_result

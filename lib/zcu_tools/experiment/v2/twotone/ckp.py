@@ -107,6 +107,8 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> CKP_Result:
+        orig_cfg = deepcopy(cfg)
+
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -207,10 +209,12 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
             )
         plt.close(fig)
 
-        # Cache results
-        self.last_cfg = deepcopy(cfg)
+        # record result
         self.last_result = CKP_Result(
-            res_freqs=res_freqs, qub_freqs=qub_freqs, signals=signals
+            res_freqs=res_freqs,
+            qub_freqs=qub_freqs,
+            signals=signals,
+            cfg_snapshot=orig_cfg,
         )
 
         return self.last_result

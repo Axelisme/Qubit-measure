@@ -71,6 +71,8 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
         detune: float = 0.0,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> tuple[T2RamseyResult, float]:
+        orig_cfg = deepcopy(cfg)
+
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -144,10 +146,9 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
                 ),
             )
 
-        # record last cfg and result
-        self.last_cfg = deepcopy(cfg)
+        # record result
         self.last_result = T2RamseyResult(
-            times=lengths, signals=signals, cfg_snapshot=self.last_cfg
+            times=lengths, signals=signals, cfg_snapshot=orig_cfg
         )
 
         return self.last_result, true_detune
@@ -241,7 +242,7 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
             _cfg, _, _ = parse_comment(comment)
 
             if _cfg is not None:
-                self.last_cfg = T2RamseyCfg.validate_or_warn(_cfg, source=filepath)
+                cfg_snapshot = T2RamseyCfg.validate_or_warn(_cfg, source=filepath)
         self.last_result = T2RamseyResult(
             times=Ts, signals=signals, cfg_snapshot=cfg_snapshot
         )

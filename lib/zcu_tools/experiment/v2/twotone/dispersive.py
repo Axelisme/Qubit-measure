@@ -9,13 +9,13 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from numpy.typing import NDArray
-from typing_extensions import Any, Optional
+from typing_extensions import Any, Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import Task, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
@@ -76,6 +76,8 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> DispersiveResult:
+        orig_cfg = deepcopy(cfg)
+
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -87,8 +89,35 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
-        freq_param = sweep2param("freq", freq_sweep)
-        modules.readout.set_param("freq", freq_param)
+        def measure_fn(ctx: TaskState, update_hook: Optional[Callable]):
+            cfg = ctx.cfg
+            freq_param = sweep2param("freq", cfg.sweep.freq)
+            cfg.modules.readout.set_param("freq", freq_param)
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", cfg.modules.reset),
+                    Pulse("init_pulse", cfg.modules.init_pulse),
+                    Branch(
+                        "ge",
+                        [],
+                        Pulse("qub_pulse", cfg.modules.qub_pulse),
+                    ),
+                    PulseReadout("readout", cfg.modules.readout),
+                ],
+                sweep=[
+                    ("ge", 2),
+                    ("freq", cfg.sweep.freq),
+                ],
+            ).acquire(
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
+            )
 
         with LivePlot1D(
             "Frequency (MHz)", "Amplitude", segment_kwargs=dict(num_lines=2)
@@ -96,30 +125,7 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
             signals = run_task(
                 task=Task(
                     pbar_n=cfg.rounds,
-                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
-                        soccfg,
-                        ctx.cfg,
-                        modules=[
-                            Reset("reset", ctx.cfg.modules.reset),
-                            Pulse("init_pulse", ctx.cfg.modules.init_pulse),
-                            Branch(
-                                "ge",
-                                [],
-                                Pulse("qub_pulse", ctx.cfg.modules.qub_pulse),
-                            ),
-                            PulseReadout("readout", ctx.cfg.modules.readout),
-                        ],
-                        sweep=[
-                            ("ge", 2),
-                            ("freq", ctx.cfg.sweep.freq),
-                        ],
-                    ).acquire(
-                        soc,
-                        progress=False,
-                        round_hook=update_hook,
-                        stop_checkers=[ctx.is_stop],
-                        **(acquire_kwargs or {}),
-                    ),
+                    measure_fn=measure_fn,
                     result_shape=(2, len(freqs)),
                 ),
                 init_cfg=cfg,
@@ -128,10 +134,9 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
                 ),
             )
 
-        # Cache results
-        self.last_cfg = deepcopy(cfg)
+        # record result
         self.last_result = DispersiveResult(
-            freqs=freqs, signals=signals, cfg_snapshot=self.last_cfg
+            freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
         )
 
         return self.last_result

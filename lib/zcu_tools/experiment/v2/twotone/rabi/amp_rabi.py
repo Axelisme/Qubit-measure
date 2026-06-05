@@ -7,13 +7,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Any, Optional
+from typing_extensions import Any, Callable, Optional
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runner import Task, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
@@ -56,6 +56,8 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> AmpRabiResult:
+        orig_cfg = deepcopy(cfg)
+
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -65,24 +67,28 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
-        gain_param = sweep2param("gain", cfg.sweep.gain)
-        modules.qub_pulse.set_param("gain", gain_param)
+        def measure_fn(ctx: TaskState, update_hook: Optional[Callable]):
+            cfg = ctx.cfg
+            gain_param = sweep2param("gain", cfg.sweep.gain)
+            cfg.modules.qub_pulse.set_param("gain", gain_param)
+
+            return TwoToneProgram(
+                soccfg,
+                cfg,
+                sweep=[("gain", cfg.sweep.gain)],
+            ).acquire(
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                stop_checkers=[ctx.is_stop],
+                **(acquire_kwargs or {}),
+            )
 
         with LivePlot1D("Pulse gain", "Amplitude") as viewer:
             signals = run_task(
                 task=Task(
                     pbar_n=cfg.rounds,
-                    measure_fn=lambda ctx, update_hook: TwoToneProgram(
-                        soccfg,
-                        ctx.cfg,
-                        sweep=[("gain", ctx.cfg.sweep.gain)],
-                    ).acquire(
-                        soc,
-                        progress=False,
-                        round_hook=update_hook,
-                        stop_checkers=[ctx.is_stop],
-                        **(acquire_kwargs or {}),
-                    ),
+                    measure_fn=measure_fn,
                     result_shape=(len(gains),),
                 ),
                 init_cfg=cfg,
@@ -91,9 +97,9 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
                 ),
             )
 
-        self.last_cfg = deepcopy(cfg)
+        # record result
         self.last_result = AmpRabiResult(
-            amps=gains, signals=signals, cfg_snapshot=self.last_cfg
+            amps=gains, signals=signals, cfg_snapshot=orig_cfg
         )
 
         return self.last_result

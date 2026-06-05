@@ -64,7 +64,7 @@ class FluxDepCfg(ProgramV2Cfg, ExpCfgModel):
 
 class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
     def run(self, soc, soccfg, cfg: FluxDepCfg) -> FluxDepResult:
-        original_cfg = deepcopy(cfg)
+        orig_cfg = deepcopy(cfg)
         modules = cfg.modules
         freq_sweep = cfg.sweep.freq
         flux_sweep = cfg.sweep.flux
@@ -131,10 +131,9 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             )
             signals = np.asarray(signals)
 
-        # record last cfg and result
-        self.last_cfg = original_cfg
+        # record result
         self.last_result = FluxDepResult(
-            values=dev_values, freqs=freqs, signals=signals
+            values=dev_values, freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
         )
 
         return self.last_result

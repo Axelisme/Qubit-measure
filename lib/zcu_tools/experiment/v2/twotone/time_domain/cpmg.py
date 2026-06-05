@@ -85,6 +85,8 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         earlystop_snr: Optional[float] = None,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> CPMG_Result:
+        orig_cfg = deepcopy(cfg)
+
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -242,10 +244,9 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
             )
             signals = np.asarray(signals)
 
-        # record last cfg and result
-        self.last_cfg = deepcopy(cfg)
+        # record result
         self.last_result = CPMG_Result(
-            ns=times, delays=lengths, signals=signals, cfg_snapshot=self.last_cfg
+            ns=times, delays=lengths, signals=signals, cfg_snapshot=orig_cfg
         )
 
         return self.last_result

@@ -50,7 +50,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> FreqResult:
-        original_cfg = deepcopy(cfg)
+        orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
@@ -90,10 +90,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                 ),
             )
 
-        # cache
-        self.last_cfg = original_cfg
+        # record result
         self.last_result = FreqResult(
-            freqs=freqs, signals=signals, cfg_snapshot=self.last_cfg
+            freqs=freqs, signals=signals, cfg_snapshot=orig_cfg
         )
 
         return self.last_result

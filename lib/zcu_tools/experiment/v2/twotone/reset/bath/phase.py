@@ -83,15 +83,14 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
             },
         )
 
-        phase_param = sweep2param("phase", cfg.sweep.phase)
-        modules.tested_reset.set_param("pi2_phase", phase_param)
-
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any, PhaseCfg],
             update_hook: Optional[Callable],
         ) -> list[NDArray[np.float64]]:
             cfg = ctx.cfg
             modules = cfg.modules
+            phase_param = sweep2param("phase", cfg.sweep.phase)
+            modules.tested_reset.set_param("pi2_phase", phase_param)
             return ModularProgramV2(
                 soccfg,
                 cfg,

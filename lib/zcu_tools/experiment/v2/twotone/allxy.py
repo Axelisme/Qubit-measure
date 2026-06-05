@@ -136,6 +136,8 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> AllXY_Result:
+        orig_cfg = deepcopy(cfg)
+
         setup_devices(cfg, progress=True)
 
         def measure_fn(
@@ -224,9 +226,8 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
                 ),
             )
 
-        # Cache results
-        self.last_cfg = deepcopy(cfg)
-        self.last_result = AllXY_Result(signals=signals, cfg_snapshot=self.last_cfg)
+        # record result
+        self.last_result = AllXY_Result(signals=signals, cfg_snapshot=orig_cfg)
 
         return self.last_result
 
