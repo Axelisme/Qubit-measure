@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 8
+skill_version: 9
 ---
 
 # run-measure-gui
@@ -19,7 +19,7 @@ against a **mock SoC** — use it to verify the GUI launches and the loop works 
 a fresh checkout.
 
 Paths below are relative to the repo root (`<repo>` = the directory with
-`run_gui.py` and `.mcp.json`).
+`run_measure_gui.py` and `.mcp.json`).
 
 ## Before touching real hardware — READ THIS
 
@@ -264,7 +264,7 @@ hardware) — the smoke harness uses it.
   caches the old code until reconnected. `wire` mismatch = hard error; `gui
   code` / `mcp code` are reported, you eyeball them to confirm the reload.
 - **`/mcp reconnect` does NOT stop the running GUI — it keeps its port.** A
-  reconnect drops the bridge's socket but leaves the old `run_gui.py` listening
+  reconnect drops the bridge's socket but leaves the old `run_measure_gui.py` listening
   on 8765. So always `gui_stop` (or kill it) before relaunching. `gui_launch`
   fails fast if the port is occupied ("Port 8765 is already in use …")
   rather than silently attaching to the stale process — but if you ignore that
@@ -333,7 +333,7 @@ hardware) — the smoke harness uses it.
 
 | Symptom | Fix |
 |---|---|
-| `gui_launch` → `Port 8765 is already in use` | A previous GUI is still running on the port; `gui_stop` it (or kill the stale `run_gui.py`), then relaunch — or launch on another port. |
+| `gui_launch` → `Port 8765 is already in use` | A previous GUI is still running on the port; `gui_stop` it (or kill the stale `run_measure_gui.py`), then relaunch — or launch on another port. |
 | `gui_connect` → `No GUI is listening on 127.0.0.1:8765` | Nothing running there; `gui_launch` first (connect only re-attaches to a running GUI). |
 | `precondition_failed: ... is currently running` on `gui_editor_set_field` | The tab is running; wait for it to finish (run clears prior results, so editing mid-run is blocked). |
 | `no_run_result` on `gui_analyze` / `gui_save_*` | No result for *this* run yet — the run is still in flight, failed, or was cancelled before producing a partial result (a run clears the previous result on start). Wait for it to finish, or re-run. |

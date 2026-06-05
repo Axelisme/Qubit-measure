@@ -145,7 +145,7 @@ from zcu_tools.gui.remote.param_spec import (  # noqa: E402
 #      {status:'finished'|'timed_out'|'no_operation', waited_seconds}. Both
 #      timeout flavors (bridge socket TimeoutError, GUI-side "(timeout)") map to
 #      timed_out; a genuine failed/cancelled still raises. No wire change.
-# MCP 21: gui_launch gains a 'clean' arg (passes --clean to run_gui → skip
+# MCP 21: gui_launch gains a 'clean' arg (passes --clean to run_measure_gui → skip
 #      restoring the persisted session at startup); tab.get_cfg_summary
 #      description now warns its key shape (the '.value.' nesting) is read-only
 #      and differs from the editable list_paths shape. No wire change.
@@ -339,7 +339,7 @@ _GUI_PROC: Optional[subprocess.Popen] = None
 _GUI_PID_FILE = Path(gettempdir()) / "zcu_tools_gui.pid"
 
 # DEBUG log for GUIs we launch (OS temp dir, not the repo). gui_launch points
-# run_gui.py here so an agent can read the server-side event flow for debugging.
+# run_measure_gui.py here so an agent can read the server-side event flow for debugging.
 _GUI_LOG_FILE = Path(gettempdir()) / "zcu_tools_gui_debug.log"
 
 
@@ -797,10 +797,10 @@ def tool_gui_launch(arguments: Dict[str, Any]) -> str:
     # avoids the hardcoded '.venv/bin/python' that does not exist on Windows
     # (which uses '.venv\Scripts\python.exe').
     python = sys.executable
-    run_gui = repo_root / "script" / "run_gui.py"
+    run_gui = repo_root / "script" / "run_measure_gui.py"
 
     if not run_gui.exists():
-        raise FileNotFoundError(f"run_gui.py not found at {run_gui}")
+        raise FileNotFoundError(f"run_measure_gui.py not found at {run_gui}")
 
     # Pre-flight: if the port is ALREADY accepting connections, someone else
     # (a stale GUI from a previous session that wasn't stopped, or a foreign
@@ -813,7 +813,7 @@ def tool_gui_launch(arguments: Dict[str, Any]) -> str:
             f"running (its socket is open). This MCP server does not manage it, "
             f"so launching here would either fail or connect to that stale "
             f"process (old code, despite a fresh pid). Stop the old GUI first "
-            f"(gui_stop, or kill the run_gui.py holding port {port}), or launch "
+            f"(gui_stop, or kill the run_measure_gui.py holding port {port}), or launch "
             f"on a different port."
         )
 

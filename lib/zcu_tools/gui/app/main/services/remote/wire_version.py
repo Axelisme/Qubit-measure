@@ -126,7 +126,7 @@ WIRE_VERSION = 20
 #     Controller.new_context(bind_device, clone_from) resolves unit/value from
 #     the device (read-only, strict whitelist) instead of taking raw value/unit;
 #     the setup dialog's "New context" button drives the same path.
-# v17: clean start (WIRE unchanged) — run_app(clean=) / run_gui --clean /
+# v17: clean start (WIRE unchanged) — run_app(clean=) / run_measure_gui --clean /
 #     gui_launch(clean=) skip restoring the persisted session at startup
 #     (restore_all(load=False)); the file is left untouched and a normal close
 #     still flushes over it.

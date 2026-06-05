@@ -2,7 +2,7 @@
 """Standalone smoke driver for the measure-gui control socket.
 
 This is the harness behind the run-measure-gui skill. It launches the GUI
-exactly the way the MCP bridge does (``run_gui.py --control-port 0`` under
+exactly the way the MCP bridge does (``run_measure_gui.py --control-port 0`` under
 xvfb), then speaks the *same* newline-delimited JSON RPC the bridge speaks —
 so it verifies the whole experiment loop without needing an MCP client.
 
@@ -72,7 +72,7 @@ def main() -> int:
     proc = subprocess.Popen(
         [
             sys.executable,
-            str(REPO / "run_gui.py"),
+            str(REPO / "script" / "run_measure_gui.py"),
             "--control-port",
             str(PORT),
             "--no-log",

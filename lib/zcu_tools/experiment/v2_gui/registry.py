@@ -3,7 +3,7 @@
 The GUI defines the ``Registry`` (experiment adapters) and ``RoleCatalog``
 (module/waveform role templates) interfaces; this module — in the experiment
 layer, which may import gui — fills both. Wired once at startup by the entry
-script (``run_gui.py``), which builds the empty containers and passes them in.
+script (``run_measure_gui.py``), which builds the empty containers and passes them in.
 
 Role kinds (``RoleCatalog``):
 

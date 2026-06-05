@@ -1,11 +1,11 @@
 """Launcher for the v2 GUI.
 
 Examples:
-    uv run python run_gui.py                          # default file logging
-    uv run python run_gui.py --no-log                 # no file log
-    uv run python run_gui.py --clean                  # don't restore the previous persisted session
-    uv run python run_gui.py --control-port 0         # start remote control on an ephemeral loopback port
-    uv run python run_gui.py --control-port 8765 --control-token <hex>
+    uv run python run_measure_gui.py                          # default file logging
+    uv run python run_measure_gui.py --no-log                 # no file log
+    uv run python run_measure_gui.py --clean                  # don't restore the previous persisted session
+    uv run python run_measure_gui.py --control-port 0         # start remote control on an ephemeral loopback port
+    uv run python run_measure_gui.py --control-port 8765 --control-token <hex>
 """
 
 from __future__ import annotations
@@ -44,12 +44,12 @@ def _setup_logging(to_file: bool = True, log_file: "Path | None" = None) -> None
             log.addHandler(file_handler)
             log.setLevel(logging.DEBUG)
 
-        print(f"[run_gui] Logging DEBUG output to: {target}", file=sys.stderr)
+        print(f"[run_measure_gui] Logging DEBUG output to: {target}", file=sys.stderr)
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="run_gui",
+        prog="run_measure_gui",
         description="Launch the v2 GUI for ZCU qubit-measure",
     )
     parser.add_argument(
@@ -61,7 +61,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--log-file",
         type=str,
         default=None,
-        help="Override the DEBUG log file path (default: gui_debug.log beside run_gui.py).",
+        help="Override the DEBUG log file path (default: gui_debug.log beside run_measure_gui.py).",
     )
     parser.add_argument(
         "--control-port",
