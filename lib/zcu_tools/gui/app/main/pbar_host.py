@@ -56,6 +56,9 @@ class ProgressBarModel:
     def set_n(self, n: ProgressValue) -> None:
         self.n = n
 
+    def set_total(self, total: ProgressTotal) -> None:
+        self.total = total
+
     def set_label(self, label: str) -> None:
         self.label = label
 
@@ -185,8 +188,11 @@ class ProgressBar(BaseProgressBar):
     def total(self, value: ProgressTotal) -> None:
         self._total = value
         if not self._disabled:
-            # total change re-creates the bar entry (CREATE carries total).
-            self._emit(ProgressEventKind.CREATE)
+            # A total change is an in-place mutation of an existing bar, not a
+            # re-create: emit UPDATE (which carries the new total) so the main
+            # thread keeps the same model + widget (no flicker), preserving the
+            # bar's start_time. force=True so the new total is not throttled away.
+            self._publish(force=True)
 
     @property
     def n(self) -> ProgressValue:

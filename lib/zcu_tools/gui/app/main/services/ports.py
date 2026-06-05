@@ -304,7 +304,7 @@ class ProgressEvent:
     handle_id: int
     kind: ProgressEventKind
     label: str = ""
-    total: ProgressTotal = None  # meaningful on CREATE
+    total: ProgressTotal = None  # carried on CREATE and UPDATE (total may change)
     n: ProgressValue = 0  # meaningful on UPDATE
 
 

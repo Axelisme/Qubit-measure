@@ -75,9 +75,25 @@ class ProgressStack(QWidget):
         """Replace visible bars with the service-owned live bar models (the View
         calls this from its ProgressService progress listener). Derived values
         are read live off each model (the SSOT) — the widget computes nothing.
+
+        When the *number* of bars is unchanged (the common case: a live bar
+        advancing, or its total being reset between sweep points), the existing
+        QProgressBar widgets are updated in place — no layout remove/re-add — so
+        the bars never flicker out of view. Only a change in bar count rebuilds
+        the stack from the pool.
         """
+        shown = models[: self.MAX_LAYERS]
+        if len(shown) == len(self._active):
+            for bar, model in zip(self._active, shown):
+                self._apply_model(bar, model)
+            return
         self.reset_all()
-        for model in models[: self.MAX_LAYERS]:
+        for model in shown:
             bar = self.push(total=model.qt_maximum())
-            bar.setFormat(model.format())
-            bar.setValue(model.qt_value())
+            self._apply_model(bar, model)
+
+    @staticmethod
+    def _apply_model(bar: QProgressBar, model: "ProgressBarModel") -> None:
+        bar.setMaximum(model.qt_maximum())
+        bar.setFormat(model.format())
+        bar.setValue(model.qt_value())

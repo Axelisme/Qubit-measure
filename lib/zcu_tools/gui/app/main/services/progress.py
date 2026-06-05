@@ -55,6 +55,7 @@ class ProgressContainer:
                 model = ProgressBarModel(event.label, event.total, now)
                 self._bars[event.handle_id] = model
             model.set_label(event.label)
+            model.set_total(event.total)
             model.set_n(event.n)
         elif event.kind is ProgressEventKind.CLOSE:
             self._bars.pop(event.handle_id, None)

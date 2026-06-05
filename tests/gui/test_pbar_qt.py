@@ -156,6 +156,36 @@ def test_total_setter(qapp):
     QApplication.processEvents()
 
 
+def test_total_change_updates_widget_in_place_no_flicker(qapp):
+    """Changing a live bar's ``total`` (e.g. ``Task.set_pbar_n`` between sweep
+    points) must update the existing QProgressBar in place, never remove+re-add
+    it. Regression: the total setter used to emit CREATE, which rebuilt the model
+    and made render_models reset_all() the stack — the bar flickered out of view
+    on every sweep point.
+    """
+    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+
+    stack = _make_stack(qapp)
+    factory = _make_factory(stack)
+
+    pbar = factory(desc="rounds", total=10, leave=True)
+    QApplication.processEvents()
+    widget = stack._active[0]  # the specific QProgressBar instance shown
+
+    # Mutating total many times (simulating per-sweep-point set_pbar_n) keeps the
+    # *same* widget object in place — it is never popped back to the pool.
+    for new_total in (20, 30, 40):
+        pbar.total = new_total
+        pbar.refresh()
+        QApplication.processEvents()
+        assert len(stack._active) == 1
+        assert stack._active[0] is widget  # same widget, not rebuilt
+        assert widget.maximum() == new_total
+
+    pbar.close()
+    QApplication.processEvents()
+
+
 # ---------------------------------------------------------------------------
 # FakeFreqAdapter pbar integration — use_pbar_factory with ProgressFactory
 # ---------------------------------------------------------------------------
