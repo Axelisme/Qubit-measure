@@ -139,3 +139,46 @@ def test_run_switches_detail_to_run_tab(app):
     # the run_started slot (main thread) switched to the run sub-tab + showed Stop
     assert captured.get("tab") == 1
     assert captured.get("btn") == "■ Stop"
+
+
+def test_multiple_real_experiments_each_get_a_liveplot(qapp):
+    # a real multi-experiment workflow: each measurement provider gets its own
+    # sweep-lived canvas + plotter, and the Sweep1DPlotter path redraws on the
+    # main thread (the qubit_freq + Sweep1D experiments all share the same wiring).
+    ctrl = build_core()
+    for t in ("qubit_freq", "t1", "ro_optimize", "mist"):
+        ctrl.add_node_by_type(t)
+    win = MainWindow(ctrl)
+    win._list.select_index(1)  # follow t1's plot
+    redraws = {"t1": 0}
+
+    def patch_counter():
+        if "t1" in win._plots:
+            _canvas, plotter = win._plots["t1"]
+            orig = plotter.update
+
+            def wrapped(result, idx, _o=orig):
+                redraws["t1"] += 1
+                _o(result, idx)
+
+            plotter.update = wrapped
+
+    ctrl.set_flux_values([0.0, 0.5, 1.0])
+    ctrl.setup(use_mock=True)
+    win._list._refresh_buttons()
+    win._start()
+    patch_counter()  # wrap after _build_plots created the plotter
+    for _ in range(4000):
+        QApplication.processEvents()
+        if win._worker is None and not ctrl.is_running:
+            break
+
+    # every measurement provider built a canvas + plotter (predictor Service none)
+    assert set(win._plots) == {"qubit_freq", "t1", "ro_optimize", "mist"}
+    for name in win._plots:
+        canvas, plotter = win._plots[name]
+        assert canvas is not None and plotter is not None
+    # t1's Sweep1DPlotter redrew on the main thread as rows filled
+    assert redraws["t1"] >= 1
+    win.close()
+    win.deleteLater()

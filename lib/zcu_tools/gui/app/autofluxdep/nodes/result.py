@@ -86,3 +86,94 @@ class QubitFreqResult:
     @property
     def n_detune(self) -> int:
         return self.detune.shape[0]
+
+
+@dataclass
+class Sweep1DResult:
+    """A generic (n_flux, n_x) sweep Result for the 1D experiments.
+
+    Shared by t1 (x=relax time), lenrabi (x=pulse length), t2ramsey / t2echo
+    (x=delay time), and mist (x=gain) — all sweep one trailing axis per flux
+    point and (except mist) fit a single scalar from the row.
+
+    - ``flux`` — (n_flux,) flux axis, filled per row by ``produce``.
+    - ``x`` — (n_x,) the trailing sweep axis (param-only, same every row); its
+      meaning (``x_label``) and unit are Node-type domain knowledge.
+    - ``signal`` — (n_flux, n_x) the rotated-to-real signal, filled per row.
+    - ``fit_curve`` — (n_flux, n_x) the fitted curve per row (nan until fit;
+      all-nan for mist, which has no fit).
+    - ``fit_value`` — (n_flux,) the primary fitted scalar per row (t1 / pi_length
+      / t2 …; nan for mist or a failed fit). What the colormap overlay tracks.
+    - ``x_label`` — the trailing-axis label (for the Plotter's x axis).
+    """
+
+    flux: NDArray[np.float64]
+    x: NDArray[np.float64]
+    signal: NDArray[np.float64]
+    fit_curve: NDArray[np.float64]
+    fit_value: NDArray[np.float64]
+    x_label: str = "x"
+
+    @classmethod
+    def allocate(
+        cls, n_flux: int, x: NDArray[np.float64], x_label: str = "x"
+    ) -> "Sweep1DResult":
+        xs = np.asarray(x, dtype=np.float64)
+        n_x = xs.shape[0]
+        return cls(
+            flux=np.full(n_flux, np.nan, dtype=np.float64),
+            x=xs,
+            signal=np.full((n_flux, n_x), np.nan, dtype=np.float64),
+            fit_curve=np.full((n_flux, n_x), np.nan, dtype=np.float64),
+            fit_value=np.full(n_flux, np.nan, dtype=np.float64),
+            x_label=x_label,
+        )
+
+    @property
+    def n_flux(self) -> int:
+        return self.flux.shape[0]
+
+    @property
+    def n_x(self) -> int:
+        return self.x.shape[0]
+
+
+@dataclass
+class Sweep2DResult:
+    """ro_optimize's (n_flux, n_freq, n_gain) Result: a per-flux 2D landscape.
+
+    Each flux point sweeps freq × gain and takes the argmax (no fit). Unlike the
+    accumulating 1D maps, the Plotter shows only the *current* flux row's
+    freq×gain landscape with the peak marked (overwrite, not accumulate).
+
+    - ``flux`` — (n_flux,) flux axis, filled per row.
+    - ``freq`` / ``gain`` — the two trailing axes (param-only).
+    - ``signal`` — (n_flux, n_freq, n_gain) the magnitude landscape per row.
+    - ``best_freq`` / ``best_gain`` — (n_flux,) the argmax point per row.
+    """
+
+    flux: NDArray[np.float64]
+    freq: NDArray[np.float64]
+    gain: NDArray[np.float64]
+    signal: NDArray[np.float64]
+    best_freq: NDArray[np.float64]
+    best_gain: NDArray[np.float64]
+
+    @classmethod
+    def allocate(
+        cls, n_flux: int, freq: NDArray[np.float64], gain: NDArray[np.float64]
+    ) -> "Sweep2DResult":
+        f = np.asarray(freq, dtype=np.float64)
+        g = np.asarray(gain, dtype=np.float64)
+        return cls(
+            flux=np.full(n_flux, np.nan, dtype=np.float64),
+            freq=f,
+            gain=g,
+            signal=np.full((n_flux, f.shape[0], g.shape[0]), np.nan, dtype=np.float64),
+            best_freq=np.full(n_flux, np.nan, dtype=np.float64),
+            best_gain=np.full(n_flux, np.nan, dtype=np.float64),
+        )
+
+    @property
+    def n_flux(self) -> int:
+        return self.flux.shape[0]
