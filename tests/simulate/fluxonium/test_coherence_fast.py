@@ -17,6 +17,7 @@ import pytest
 import scqubits.settings as scq_settings
 from zcu_tools.simulate.fluxonium import (
     UnsupportedNoiseChannelError,
+    UnsupportedNoiseOptionError,
     calculate_eff_t1,
     calculate_eff_t1_fast,
     calculate_eff_t1_vs_flux,
@@ -117,3 +118,52 @@ def test_unsupported_channel_raises():
             (4.0, 1.0, 0.5), _FLUXS, [("tphi_1_over_f_flux", {})], _TEMP
         )
     assert issubclass(UnsupportedNoiseChannelError, ValueError)
+
+
+_PARAMS = (4.0, 1.0, 0.5)
+
+
+def test_top_level_total_false_raises():
+    # The fast path fixes total=True; total=False must error, not be silently dropped.
+    with pytest.raises(UnsupportedNoiseOptionError):
+        calculate_eff_t1_vs_flux_fast(
+            _PARAMS, _FLUXS, [("t1_capacitive", {})], _TEMP, total=False
+        )
+    assert issubclass(UnsupportedNoiseOptionError, ValueError)
+
+
+def test_single_flux_total_false_raises():
+    with pytest.raises(UnsupportedNoiseOptionError):
+        calculate_eff_t1_fast(0.3, _PARAMS, [("t1_capacitive", {})], _TEMP, total=False)
+
+
+def test_per_channel_total_false_raises():
+    with pytest.raises(UnsupportedNoiseOptionError):
+        calculate_eff_t1_vs_flux_fast(
+            _PARAMS, _FLUXS, [("t1_capacitive", {"total": False})], _TEMP
+        )
+
+
+def test_per_channel_unknown_option_raises():
+    # any option a channel does not accept is rejected (not silently ignored)
+    with pytest.raises(UnsupportedNoiseOptionError):
+        calculate_eff_t1_vs_flux_fast(
+            _PARAMS, _FLUXS, [("t1_capacitive", {"foo": 1})], _TEMP
+        )
+    # an option valid for a different channel (M is for flux_bias_line) is also wrong
+    with pytest.raises(UnsupportedNoiseOptionError):
+        calculate_eff_t1_vs_flux_fast(
+            _PARAMS, _FLUXS, [("t1_capacitive", {"M": 400.0})], _TEMP
+        )
+
+
+def test_valid_per_channel_options_still_work():
+    # the validation must not break the legitimate option keys
+    noise = [
+        ("t1_capacitive", {"Q_cap": 1e6}),
+        ("t1_inductive", {"Q_ind": 5e8}),
+        ("t1_flux_bias_line", {"M": 500.0, "Z": 30.0}),
+        ("t1_quasiparticle_tunneling", {"x_qp": 1e-6, "Delta": 3e-4}),
+    ]
+    out = calculate_eff_t1_vs_flux_fast(_PARAMS, _FLUXS, noise, _TEMP)
+    assert np.all(np.isfinite(out))

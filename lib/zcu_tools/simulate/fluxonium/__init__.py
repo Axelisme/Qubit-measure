@@ -1,5 +1,6 @@
 from .coherence import (
     UnsupportedNoiseChannelError,
+    UnsupportedNoiseOptionError,
     calculate_eff_t1,
     calculate_eff_t1_fast,
     calculate_eff_t1_vs_flux,
@@ -38,6 +39,7 @@ __all__ = [
     "calculate_eff_t1_vs_flux_fast",
     "calculate_eff_t1_fast",
     "UnsupportedNoiseChannelError",
+    "UnsupportedNoiseOptionError",
     "calculate_percell_t1_vs_flux",
     # dispersive
     "DressedLabelingError",

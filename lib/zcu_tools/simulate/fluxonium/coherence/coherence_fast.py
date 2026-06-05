@@ -50,6 +50,15 @@ class UnsupportedNoiseChannelError(ValueError):
     """A requested noise channel has no fast (numpy) implementation here."""
 
 
+class UnsupportedNoiseOptionError(ValueError):
+    """A noise-channel option (or top-level kwarg) the fast path does not support.
+
+    The fast path fixes ``total=True`` and only accepts each channel's documented
+    options, so an unknown option (e.g. ``total``) raises rather than being silently
+    ignored — silently dropping it would return a wrong-but-plausible T1.
+    """
+
+
 def _therm_ratio(omega: float, T: float, *, omega_in_std: bool = False) -> float:
     """``hbar * omega / (k_B * T)`` — scqubits ``calc_therm_ratio`` (omega in system
     rad units = 2*pi*GHz unless already standard)."""
@@ -156,29 +165,39 @@ def _s_quasiparticle(omega, T, EJ, x_qp=_DEF_X_QP, Delta=_DEF_DELTA, Y_qp=None):
     )
 
 
-# Each channel: (operator key, spectral-density builder taking the resolved options).
-# The operator keys index the per-flux eigenbasis operators built in the sweep.
-_CHANNELS: dict[str, tuple[str, Callable[..., Callable[[float, float], float]]]] = {
+# Each channel: (operator key, allowed per-channel option keys, spectral-density
+# builder). The operator key indexes the per-flux eigenbasis operators built in the
+# sweep; the allowed-keys set is validated so an unknown / unsupported option (e.g.
+# ``total``, which the fast path fixes to True) raises instead of being silently
+# ignored. The option keys mirror the scqubits channel signatures.
+_CHANNELS: dict[
+    str, tuple[str, frozenset[str], Callable[..., Callable[[float, float], float]]]
+] = {
     "t1_capacitive": (
         "n",
+        frozenset({"Q_cap"}),
         lambda EC, **o: lambda w, T: _s_capacitive(w, T, EC, o.get("Q_cap")),
     ),
     "t1_charge_impedance": (
         "n",
+        frozenset({"Z"}),
         lambda **o: lambda w, T: _s_charge_impedance(w, T, o.get("Z", _DEF_Z)),
     ),
     "t1_inductive": (
         "phi",
+        frozenset({"Q_ind"}),
         lambda EL, **o: lambda w, T: _s_inductive(w, T, EL, o.get("Q_ind")),
     ),
     "t1_flux_bias_line": (
         "dHdflux",
+        frozenset({"M", "Z"}),
         lambda **o: (
             lambda w, T: _s_flux_bias_line(w, T, o.get("M", _DEF_M), o.get("Z", _DEF_Z))
         ),
     ),
     "t1_quasiparticle_tunneling": (
         "sinhalf",
+        frozenset({"Y_qp", "x_qp", "Delta"}),
         lambda EJ, **o: (
             lambda w, T: _s_quasiparticle(
                 w,
@@ -201,7 +220,12 @@ def _resolve_channels(
     EC: float,
     EL: float,
 ) -> list[tuple[str, Callable[[float, float], float]]]:
-    """Resolve ``noise_channels`` (str or (str, opts)) to (op_key, spectral_density)."""
+    """Resolve ``noise_channels`` (str or (str, opts)) to (op_key, spectral_density).
+
+    Each channel's option keys are validated against its allowed set, so an unknown
+    option (e.g. ``total``, ``i``/``j`` placed in a channel dict) raises rather than
+    being silently dropped.
+    """
     resolved = []
     for ch in noise_channels:
         name, opts = (ch[0], dict(ch[1])) if isinstance(ch, tuple) else (ch, {})
@@ -210,9 +234,16 @@ def _resolve_channels(
                 f"noise channel {name!r} is not supported by the fast path "
                 f"(supported: {sorted(_CHANNELS)})"
             )
-        op_key, builder = _CHANNELS[name]
-        # The qubit-parameter args each builder needs are passed by name; extra
-        # per-channel options (Q_cap, M, Z, x_qp, ...) flow through **opts.
+        op_key, allowed, builder = _CHANNELS[name]
+        unknown = set(opts) - allowed
+        if unknown:
+            raise UnsupportedNoiseOptionError(
+                f"noise channel {name!r} got unsupported option(s) "
+                f"{sorted(unknown)} (the fast path fixes total=True and accepts only "
+                f"{sorted(allowed)} here)"
+            )
+        # The qubit-parameter args each builder needs are passed by name; the
+        # validated per-channel options (Q_cap, M, Z, x_qp, ...) flow through **opts.
         sfunc = builder(EJ=EJ, EC=EC, EL=EL, **opts)
         resolved.append((op_key, sfunc))
     return resolved
@@ -241,6 +272,7 @@ def calculate_eff_t1_vs_flux_fast(
     qub_dim: int = 20,
     i: int = 1,
     j: int = 0,
+    **other_noise_options,
 ) -> NDArray[np.float64]:
     """Effective T1 (ns) vs flux for a Fluxonium — scqubits-free, ~60x faster.
 
@@ -254,8 +286,19 @@ def calculate_eff_t1_vs_flux_fast(
     Delta), same as scqubits. Only the five Fluxonium T1 channels are supported; an
     unknown channel raises ``UnsupportedNoiseChannelError``. ``i, j`` select the
     transition (default 1->0).
+
+    The fast path fixes ``total=True``; any other top-level keyword (e.g.
+    ``total=False``) raises ``UnsupportedNoiseOptionError`` rather than being silently
+    dropped.
     """
     from scqubits.core.fluxonium import Fluxonium
+
+    if other_noise_options:
+        raise UnsupportedNoiseOptionError(
+            f"unsupported keyword option(s) {sorted(other_noise_options)} for the fast "
+            f"T1 path (it fixes total=True; only cutoff / qub_dim / i / j and "
+            f"per-channel options are accepted)"
+        )
 
     EJ, EC, EL = params
     fluxs = np.asarray(fluxs, dtype=np.float64)
@@ -320,9 +363,11 @@ def calculate_eff_t1_fast(
     qub_dim: int = 20,
     i: int = 1,
     j: int = 0,
+    **other_noise_options,
 ) -> float:
     """Single-flux effective T1 (ns) — the scalar form of
-    ``calculate_eff_t1_vs_flux_fast`` (one flux point)."""
+    ``calculate_eff_t1_vs_flux_fast`` (one flux point). Unsupported options raise the
+    same ``UnsupportedNoiseOptionError`` as the vs-flux form."""
     out = calculate_eff_t1_vs_flux_fast(
         params,
         np.array([flux], dtype=np.float64),
@@ -332,6 +377,7 @@ def calculate_eff_t1_fast(
         qub_dim=qub_dim,
         i=i,
         j=j,
+        **other_noise_options,
     )
     return float(out[0])
 
@@ -343,4 +389,5 @@ __all__ = [
     "calculate_eff_t1_vs_flux_fast",
     "calculate_eff_t1_fast",
     "UnsupportedNoiseChannelError",
+    "UnsupportedNoiseOptionError",
 ]

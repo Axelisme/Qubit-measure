@@ -6,6 +6,7 @@ from .coherence import (
 )
 from .coherence_fast import (
     UnsupportedNoiseChannelError,
+    UnsupportedNoiseOptionError,
     calculate_eff_t1_fast,
     calculate_eff_t1_vs_flux_fast,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "calculate_eff_t1_vs_flux_fast",
     "calculate_eff_t1_fast",
     "UnsupportedNoiseChannelError",
+    "UnsupportedNoiseOptionError",
     # percell
     "calculate_percell_t1_vs_flux",
 ]
