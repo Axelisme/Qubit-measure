@@ -20,7 +20,6 @@ class EventType(str, Enum):
     SETUP_DONE = "setup_done"  # resources built → Run enabled
     # run lifecycle (drive edit↔run UI + progress)
     RUN_STARTED = "run_started"
-    NODE_STARTED = "node_started"  # payload: (node_name, flux_idx)
     POINT_DONE = "point_done"  # payload: flux_idx (advance global progress)
     RUN_FINISHED = "run_finished"
     RUN_STOPPED = "run_stopped"

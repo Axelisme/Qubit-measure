@@ -1,10 +1,10 @@
-"""ParamForm — a dynamic settings form generated from a Node's base_params.
+"""ParamForm — a dynamic settings form generated from a provider's base_params.
 
-Prototype: each ``NodeSpec.base_params`` name becomes a labelled line edit; the
+Prototype: each ``Builder.base_params`` name becomes a labelled line edit; the
 value is stored/read as text (typed widgets per param are §7 future work). The
 form also shows a read-only dependency / provides summary so the user sees what
-the Node consumes and produces. ``set_read_only`` locks every field during a run
-(values stay visible — "what this run used"). Mirrors the fluxdep
+the provider consumes and produces. ``set_read_only`` locks every field during a
+run (values stay visible — "what this run used"). Mirrors the fluxdep
 ``transitions_form`` convention (QFormLayout + per-field widget + get/set).
 """
 
@@ -21,13 +21,13 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.app.autofluxdep.nodes.spec import NodeInstance
+from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode
 
 
 class ParamForm(QWidget):
-    """Settings form for one NodeInstance, plus a read-only dep/provides summary."""
+    """Settings form for one PlacedNode, plus a read-only dep/provides summary."""
 
-    def __init__(self, node: NodeInstance, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, node: PlacedNode, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._node = node
         self._edits: dict[str, QLineEdit] = {}
@@ -35,7 +35,7 @@ class ParamForm(QWidget):
         root = QVBoxLayout(self)
 
         form = QFormLayout()
-        for key in node.spec.base_params:
+        for key in node.builder.base_params:
             edit = QLineEdit(str(node.params.get(key, "")))
             self._edits[key] = edit
             form.addRow(key, edit)
@@ -46,7 +46,7 @@ class ParamForm(QWidget):
         root.addStretch(1)
 
     def _summary_text(self) -> str:
-        s = self._node.spec
+        s = self._node.builder
         req = ", ".join(d.key for d in s.requires) or "—"
         opt = (
             ", ".join(

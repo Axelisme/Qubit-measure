@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 from typing_extensions import Any, Optional
 
-from zcu_tools.gui.app.autofluxdep.nodes.spec import NodeInstance
+from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode
 from zcu_tools.gui.version_table import VersionTable
 
 # VersionTable resource keys (optimistic concurrency, shared mechanism).
@@ -60,12 +60,22 @@ class SetupResources:
 
 @dataclass
 class AutoFluxDepState:
-    """Mutable working set: the workflow the user is assembling + run resources."""
+    """Mutable working set: the workflow the user is assembling + run resources.
+
+    ``run_results`` maps a provider name → its sweep-lived Result (the
+    accumulated domain data — read by the Plotter, by saving, by an Info dialog
+    — so it goes in State even though it is not serialisable). The main thread
+    builds the empty Result containers at Run start; the worker fills their rows
+    in place. Filling pre-allocated numpy rows is NOT a State semantic write (no
+    key add/remove, no version bump), so it does not violate the "State writes
+    only on the main thread" invariant. Cleared/rebuilt at each Run start.
+    """
 
     project: Optional[ProjectInfo] = None
-    nodes: list[NodeInstance] = field(default_factory=list)
+    nodes: list[PlacedNode] = field(default_factory=list)
     flux_values: list[float] = field(default_factory=list)
     resources: Optional[SetupResources] = None
+    run_results: dict[str, Any] = field(default_factory=dict)
     version: VersionTable = field(default_factory=VersionTable)
 
     @property

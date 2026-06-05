@@ -2,23 +2,22 @@
 
 Covers the snapshot-in / patch-out boundary: a Snapshot holds exactly the
 declared keys (undeclared → KeyError), and merging a Patch validates every key
-is in the Node's ``provides`` (else PatchContractError). Also the orchestrator
-end-to-end: a Node producing an undeclared key fast-fails.
+is in the provider's ``provides`` (else PatchContractError). Also the
+orchestrator end-to-end: a Node producing an undeclared key fast-fails.
 """
 
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.app.autofluxdep.controller import Controller
-from zcu_tools.gui.app.autofluxdep.event_bus import EventBus
 from zcu_tools.gui.app.autofluxdep.nodes.io import (
     Patch,
     PatchContractError,
     Snapshot,
     validate_patch,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.spec import NodeInstance, NodeSpec
-from zcu_tools.gui.app.autofluxdep.state import AutoFluxDepState
+from zcu_tools.gui.app.autofluxdep.orchestrator import Orchestrator
+
+from ._helpers import make_builder, place
 
 # --- Snapshot: read-only projection of declared keys ---
 
@@ -97,26 +96,20 @@ def test_snapshot_module_reads_declared_undeclared_raises():
 
 
 def test_orchestrator_fast_fails_on_undeclared_value():
-    spec = NodeSpec(name="bad", provides=("a",))
-    state = AutoFluxDepState(flux_values=[0.0])
-    ctrl = Controller(state, EventBus())
-    ctrl.add_node(spec)
-
-    def run_node(node: NodeInstance, _snap, _tools) -> Patch:
-        return Patch({"b": 1})  # "b" not in provides
-
+    bad = place(
+        make_builder(
+            "bad", provides=("a",), produce_fn=lambda _e, _s: Patch({"b": 1})
+        )  # "b" not in provides
+    )
     with pytest.raises(PatchContractError):
-        ctrl.dry_run(run_node)
+        Orchestrator([bad]).run([0.0])
 
 
 def test_orchestrator_fast_fails_on_undeclared_module():
-    spec = NodeSpec(name="bad", provides=())  # provides_modules empty
-    state = AutoFluxDepState(flux_values=[0.0])
-    ctrl = Controller(state, EventBus())
-    ctrl.add_node(spec)
-
-    def run_node(node: NodeInstance, _snap, _tools) -> Patch:
-        return Patch(modules={"readout": "RO"})  # not in provides_modules
-
+    bad = place(
+        make_builder(
+            "bad", produce_fn=lambda _e, _s: Patch(modules={"readout": "RO"})
+        )  # provides_modules empty
+    )
     with pytest.raises(PatchContractError):
-        ctrl.dry_run(run_node)
+        Orchestrator([bad]).run([0.0])

@@ -3,13 +3,15 @@
 Shows ONE Node at a time (whichever the left list selects). Inner QTabWidget:
 - "編輯" (Edit): the ParamForm (settings + dep summary). Locked read-only during a
   run so the user can still see "what this run used".
-- "執行" (Run): the Node's liveplot. Prototype: a placeholder label (real
-  matplotlib canvas + worker marshal is Phase C). Shows a "started / waiting"
-  status the auto-follow updates.
+- "執行" (Run): the Node's liveplot — a bare matplotlib ``FigureCanvasQTAgg``
+  embedded directly (NOT via gui/plotting's backend; the worker never draws, so
+  the plain Qt canvas suffices — see ADR-0018). The MainWindow owns the per-Node
+  Figure + Plotter (built at Run start, lifetime = sweep) and hands this pane the
+  canvas to show for the selected Node via ``show_run_canvas``.
 
-``show_node`` rebuilds for a new selection; ``set_running`` flips edit→run lock
-and switches to the run tab; ``focus_run`` is called by auto-follow when the Node
-starts executing.
+``show_node`` rebuilds the edit form for a new selection; ``set_running`` flips
+the edit→run lock and switches to the run tab; ``show_run_canvas`` swaps in the
+selected Node's live canvas (or a placeholder when there is none).
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.app.autofluxdep.nodes.spec import NodeInstance
+from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode
 
 from .param_form import ParamForm
 
@@ -36,9 +38,10 @@ class NodeDetailPane(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self._node: Optional[NodeInstance] = None
+        self._node: Optional[PlacedNode] = None
         self._form: Optional[ParamForm] = None
         self._running = False
+        self._canvas: Optional[QWidget] = None
 
         root = QVBoxLayout(self)
         self._title = QLabel("(no node selected)")
@@ -52,16 +55,17 @@ class NodeDetailPane(QWidget):
         self._edit_layout = QVBoxLayout(self._edit_host)
         self._tabs.addTab(self._edit_host, "編輯")
 
-        # Run tab: liveplot placeholder
+        # Run tab: a host whose single child is either the live canvas or a
+        # placeholder label (swapped by show_run_canvas).
         self._run_host = QWidget()
-        run_layout = QVBoxLayout(self._run_host)
-        self._plot_label = QLabel("(liveplot appears here during a run)")
-        run_layout.addWidget(self._plot_label)
+        self._run_layout = QVBoxLayout(self._run_host)
+        self._run_placeholder = QLabel("(liveplot appears here during a run)")
+        self._run_layout.addWidget(self._run_placeholder)
         self._tabs.addTab(self._run_host, "執行")
 
     # --- selection ---
 
-    def show_node(self, node: Optional[NodeInstance]) -> None:
+    def show_node(self, node: Optional[PlacedNode]) -> None:
         self._node = node
         # clear old form
         if self._form is not None:
@@ -69,13 +73,29 @@ class NodeDetailPane(QWidget):
             self._form = None
         if node is None:
             self._title.setText("(no node selected)")
-            self._plot_label.setText("(no node selected)")
             return
         self._title.setText(node.name)
         self._form = ParamForm(node)
         self._form.set_read_only(self._running)
         self._edit_layout.addWidget(self._form)
-        self._plot_label.setText(f"{node.name} — (liveplot appears here during a run)")
+
+    def show_run_canvas(self, canvas: Optional[QWidget]) -> None:
+        """Swap the run tab's content to ``canvas`` (or the placeholder if None).
+
+        The MainWindow owns the canvases; this pane only displays the selected
+        Node's. A detached canvas is hidden, not destroyed (it keeps drawing as
+        the sweep fills its Result, so re-selecting shows the latest state).
+        """
+        if self._canvas is not None:
+            self._canvas.setParent(None)
+            self._canvas = None
+        if canvas is None:
+            self._run_placeholder.show()
+            return
+        self._run_placeholder.hide()
+        self._canvas = canvas
+        self._run_layout.addWidget(canvas)
+        canvas.show()
 
     # --- run state ---
 
@@ -89,10 +109,9 @@ class NodeDetailPane(QWidget):
         else:
             self._tabs.setCurrentIndex(_EDIT_TAB)
 
-    def focus_run(self, node_name: str, flux_idx: int) -> None:
-        """Auto-follow: a Node started executing → show its run tab + status."""
+    def focus_run(self) -> None:
+        """Auto-follow: switch to the run tab (the running Node is selected)."""
         self._tabs.setCurrentIndex(_RUN_TAB)
-        self._plot_label.setText(f"{node_name} — running (flux point {flux_idx})")
 
     # --- testing accessors ---
 

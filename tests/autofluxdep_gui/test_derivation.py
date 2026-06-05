@@ -11,20 +11,16 @@ reads the raw value. The producer Node reports RAW only.
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.app.autofluxdep.controller import Controller
 from zcu_tools.gui.app.autofluxdep.derivation import (
     SmoothConflictError,
     SmoothingService,
     SmoothRule,
 )
-from zcu_tools.gui.app.autofluxdep.event_bus import EventBus
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
-from zcu_tools.gui.app.autofluxdep.nodes.spec import (
-    Dependency,
-    NodeInstance,
-    NodeSpec,
-)
-from zcu_tools.gui.app.autofluxdep.state import AutoFluxDepState
+from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency
+from zcu_tools.gui.app.autofluxdep.orchestrator import Orchestrator
+
+from ._helpers import make_builder, place
 
 # --- SmoothingService construction + dedup ---
 
@@ -61,41 +57,41 @@ def test_derive_emits_smoothed_and_skips_absent_raw():
 
 def test_smoothed_and_raw_consumers_coexist_under_same_key():
     # producer reports raw t1; one consumer wants it smoothed, another raw.
-    producer = NodeSpec(name="t1node", provides=("t1",))
-    smoothed_consumer = NodeSpec(
-        name="sc",
-        provides=(),
-        optional=(Dependency("t1", smooth="ewma", default=lambda: None),),
-    )
-    raw_consumer = NodeSpec(
-        name="rc", provides=(), optional=(Dependency("t1", default=lambda: None),)
-    )
     raw = {0: 10.0, 1: 20.0, 2: 5.0}
     smoothed_seen: list = []
     raw_seen: list = []
 
-    def run_node(node: NodeInstance, snap, _tools) -> Patch:
-        if node.name == "t1node":
-            return Patch({"t1": raw[node_idx[0]]})  # HONEST raw
-        if node.name == "sc":
-            smoothed_seen.append(snap.get("t1"))
-        else:
-            raw_seen.append(snap.get("t1"))
+    def produce_t1(env, _snap):
+        return Patch({"t1": raw[env.flux_idx]})  # HONEST raw
+
+    def read_smoothed(_env, snap):
+        smoothed_seen.append(snap.get("t1"))
         return Patch()
 
-    node_idx = [0]
+    def read_raw(_env, snap):
+        raw_seen.append(snap.get("t1"))
+        return Patch()
 
-    def pre_point(idx, _flux, _info, _tools):
-        node_idx[0] = idx
+    producer = place(make_builder("t1node", provides=("t1",), produce_fn=produce_t1))
+    smoothed_consumer = place(
+        make_builder(
+            "sc",
+            optional=(Dependency("t1", smooth="ewma", default=lambda: None),),
+            produce_fn=read_smoothed,
+        )
+    )
+    raw_consumer = place(
+        make_builder(
+            "rc",
+            optional=(Dependency("t1", default=lambda: None),),
+            produce_fn=read_raw,
+        )
+    )
 
-    state = AutoFluxDepState(flux_values=[0.0, 1.0, 2.0])
-    ctrl = Controller(state, EventBus())
     # producer first so consumers see this point's value
-    ctrl.add_node(producer)
-    ctrl.add_node(smoothed_consumer)
-    ctrl.add_node(raw_consumer)
-
-    info = ctrl.dry_run(run_node, pre_point=pre_point)
+    info = Orchestrator([producer, smoothed_consumer, raw_consumer]).run(
+        [0.0, 1.0, 2.0]
+    )
 
     # smoothed consumer reads the PREVIOUS point's smoothed t1 (this point's is
     # derived only after all Nodes run):
@@ -110,23 +106,16 @@ def test_smoothed_and_raw_consumers_coexist_under_same_key():
 
 
 def test_orchestrator_raises_on_conflicting_declarations():
-    a = NodeSpec(
-        name="a",
-        provides=(),
-        optional=(Dependency("x", smooth="ewma", default=lambda: None),),
+    a = place(
+        make_builder(
+            "a", optional=(Dependency("x", smooth="ewma", default=lambda: None),)
+        )
     )
-    b = NodeSpec(
-        name="b",
-        provides=(),
-        optional=(Dependency("x", smooth="step_weighted", default=lambda: None),),
+    b = place(
+        make_builder(
+            "b",
+            optional=(Dependency("x", smooth="step_weighted", default=lambda: None),),
+        )
     )
-    state = AutoFluxDepState(flux_values=[0.0])
-    ctrl = Controller(state, EventBus())
-    ctrl.add_node(a)
-    ctrl.add_node(b)
-
-    def run_node(node: NodeInstance, _snap, _tools) -> Patch:
-        return Patch()
-
     with pytest.raises(SmoothConflictError):
-        ctrl.dry_run(run_node)
+        Orchestrator([a, b])  # conflict detected at construction (__post_init__)
