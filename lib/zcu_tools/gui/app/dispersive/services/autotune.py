@@ -30,6 +30,13 @@ from .predict import predict_dispersive_at
 
 logger = logging.getLogger(__name__)
 
+# The coarse global scan grid (a 2D r_f × g grid evaluated before the local refine).
+# This makes auto-tune robust to a far / decoy seed: a purely local optimiser can
+# stick in a spurious phase band's basin, but the grid finds the global best region
+# first. ~500 single-point predictions (~ms each) ≈ a couple of seconds on a worker.
+_COARSE_N_RF = 50
+_COARSE_N_G = 10
+
 
 def _interp_norm_phase(
     sp_fluxs: NDArray[np.float64],
@@ -76,6 +83,52 @@ def sample_score(
     return float(np.mean(np.maximum(v0, v1)))
 
 
+def _coarse_seed(
+    params: tuple[float, float, float],
+    sp_fluxs: NDArray[np.float64],
+    sp_freqs: NDArray[np.float64],
+    norm_phases: NDArray[np.float64],
+    sample_fluxs: NDArray[np.float64],
+    g0: float,
+    bare_rf0: float,
+    g_bounds: tuple[float, float],
+    rf_bounds: tuple[float, float],
+) -> tuple[float, float]:
+    """The highest-scoring (g, bare_rf) on a coarse grid (plus the current g0/rf0).
+
+    A global pre-scan: evaluate ``sample_score`` on a ``_COARSE_N_RF × _COARSE_N_G``
+    grid over the bounds and return the best point, also considering the caller's
+    current slider position so a good manual guess is never lost to the grid. This
+    becomes the seed for the local refine, so the optimiser starts in the globally
+    best region rather than wherever the slider happened to be.
+    """
+    g_lo, g_hi = g_bounds
+    rf_lo, rf_hi = rf_bounds
+    gs = np.linspace(g_lo, g_hi, _COARSE_N_G)
+    rfs = np.linspace(rf_lo, rf_hi, _COARSE_N_RF)
+
+    best_score = sample_score(
+        params, sp_fluxs, sp_freqs, norm_phases, sample_fluxs, g0, bare_rf0
+    )
+    best = (g0, bare_rf0)
+    for rf in rfs:
+        for g in gs:
+            s = sample_score(
+                params,
+                sp_fluxs,
+                sp_freqs,
+                norm_phases,
+                sample_fluxs,
+                float(g),
+                float(rf),
+            )
+            if s > best_score:
+                best_score = s
+                best = (float(g), float(rf))
+    logger.debug("coarse seed: g=%s bare_rf=%s score=%s", best[0], best[1], best_score)
+    return best
+
+
 def auto_tune(
     params: tuple[float, float, float],
     sp_fluxs: NDArray[np.float64],
@@ -87,10 +140,13 @@ def auto_tune(
     g_bounds: tuple[float, float],
     rf_bounds: tuple[float, float],
 ) -> tuple[float, float]:
-    """Optimise (g, bare_rf) to maximise ``sample_score`` from the seed (g0, bare_rf0).
+    """Optimise (g, bare_rf) to maximise ``sample_score``.
 
-    Returns the best (g, bare_rf) found within the bounds. Fast-fails if there are no
-    sample fluxes (the objective is undefined). Runnable on a worker thread (no State,
+    A coarse 2D grid scan over the bounds (plus the current g0/bare_rf0) picks the
+    globally best region, then Nelder-Mead refines from there — so the result does not
+    depend on the seed being near the answer (a purely local search can stick in a
+    spurious phase band's basin). Returns the best (g, bare_rf) within the bounds.
+    Fast-fails if there are no sample fluxes. Runnable on a worker thread (no State,
     no Qt). Nelder-Mead is bounded by clamping inside the objective + rejecting
     out-of-range points with a large penalty.
     """
@@ -101,6 +157,19 @@ def auto_tune(
 
     g_lo, g_hi = g_bounds
     rf_lo, rf_hi = rf_bounds
+
+    # Global pre-scan: seed the local refine from the best coarse-grid point.
+    g0, bare_rf0 = _coarse_seed(
+        params,
+        sp_fluxs,
+        sp_freqs,
+        norm_phases,
+        sample_fluxs,
+        g0,
+        bare_rf0,
+        g_bounds,
+        rf_bounds,
+    )
 
     def neg_score(x: NDArray[np.float64]) -> float:
         g, bare_rf = float(x[0]), float(x[1])

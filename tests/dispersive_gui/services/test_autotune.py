@@ -110,6 +110,61 @@ def test_auto_tune_respects_bounds(monkeypatch):
     assert bare_rf <= 5.6 + 1e-9
 
 
+def test_auto_tune_grid_scan_escapes_a_decoy(monkeypatch):
+    # The coarse grid scan must escape a spurious (decoy) phase band that a purely
+    # local search, seeded right next to it, would stick in. The TRUE peak is at
+    # 5.5 GHz; a brighter-but-wrong decoy sits at 5.15, and the seed starts on it.
+    sp_fluxs, sp_freqs = _grid()
+    true_band = np.exp(-((sp_freqs - 5.5) ** 2) / (2 * 0.05**2))
+    decoy_band = 0.6 * np.exp(-((sp_freqs - 5.15) ** 2) / (2 * 0.03**2))
+    norm = (true_band + decoy_band)[None, :] + np.zeros((len(sp_fluxs), 1))
+
+    def stub(params, fluxs, g, bare_rf, *, return_dim=2):
+        # both lines sit at bare_rf so the score is driven purely by where r_f lands
+        return (np.full(len(fluxs), bare_rf), np.full(len(fluxs), bare_rf))
+
+    monkeypatch.setattr(autotune_mod, "predict_dispersive_at", stub)
+    g, bare_rf = auto_tune(
+        (4.0, 1.0, 0.5),
+        sp_fluxs,
+        sp_freqs,
+        norm,
+        np.array([0.1, 0.3]),
+        g0=0.06,
+        bare_rf0=5.16,  # seed sitting on the decoy
+        g_bounds=(0.0, 0.2),
+        rf_bounds=(5.0, 6.0),
+    )
+    # the grid scan finds the (taller) true peak at 5.5, not the decoy at 5.15
+    assert abs(bare_rf - 5.5) < 0.05
+
+
+def test_auto_tune_keeps_a_good_current_seed(monkeypatch):
+    # If the current slider is already at the optimum and no grid point beats it,
+    # the result stays there (the current g0/bare_rf0 is always a candidate seed).
+    sp_fluxs, sp_freqs = _grid()
+    norm = np.exp(-((sp_freqs[None, :] - 5.5) ** 2) / (2 * 0.08**2)) + np.zeros(
+        (len(sp_fluxs), 1)
+    )
+
+    def stub(params, fluxs, g, bare_rf, *, return_dim=2):
+        return (np.full(len(fluxs), bare_rf), np.full(len(fluxs), bare_rf))
+
+    monkeypatch.setattr(autotune_mod, "predict_dispersive_at", stub)
+    g, bare_rf = auto_tune(
+        (4.0, 1.0, 0.5),
+        sp_fluxs,
+        sp_freqs,
+        norm,
+        np.array([0.2]),
+        g0=0.06,
+        bare_rf0=5.5,  # already at the peak
+        g_bounds=(0.0, 0.2),
+        rf_bounds=(5.0, 6.0),
+    )
+    assert abs(bare_rf - 5.5) < 0.02
+
+
 def test_auto_tune_fast_fails_without_samples():
     sp_fluxs, sp_freqs = _grid()
     norm = np.zeros((len(sp_fluxs), len(sp_freqs)))
