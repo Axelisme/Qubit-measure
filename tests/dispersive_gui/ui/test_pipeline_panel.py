@@ -90,11 +90,11 @@ def test_sections_gated_on_pipeline_progress(qapp):
     state.set_preprocess(_preprocess())
     panel._sync_enabled()
     assert panel._tune_box.isEnabled()
-    assert not panel._export_box.isEnabled()  # no result yet
+    assert not panel._export_btn.isEnabled()  # export (in step 4) — no result yet
 
     state.set_disp_result(g=0.06, bare_rf=5.3, res_dim=4)
     panel._sync_enabled()
-    assert panel._export_box.isEnabled()
+    assert panel._export_btn.isEnabled()
 
 
 def test_preprocess_done_slot_records_and_enables(qapp, monkeypatch):
@@ -151,6 +151,29 @@ def test_rf_slider_precision_is_span_over_300(qapp):
     assert 1e3 * (panel._rf_ghz() - base) == pytest.approx(1000.0 / 300.0, abs=1e-6)
 
 
+def test_g_slider_range_and_default(qapp):
+    # g is a slider over a fixed 0..200 MHz (1 MHz ticks), default 50 MHz.
+    state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
+    panel = _panel(qapp, state)
+    assert panel._g_slider.minimum() == 0
+    assert panel._g_slider.maximum() == 200
+    assert panel._g_slider.value() == 50
+    assert panel._g_mhz() == pytest.approx(50.0)
+    assert "50.0 MHz" in panel._g_label.text()
+    panel._g_slider.setValue(120)
+    assert panel._g_mhz() == pytest.approx(120.0)
+    assert "120.0 MHz" in panel._g_label.text()
+
+
+def test_export_button_lives_in_tune_section(qapp):
+    # Step 5 is gone: the export button is part of step 4 and gated on a result.
+    state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
+    panel = _panel(qapp, state)
+    assert not hasattr(panel, "_export_box")
+    assert panel._export_btn.parent() is panel._tune_box
+    assert not panel._export_btn.isEnabled()  # no result yet
+
+
 def test_busy_progress_bars_show_and_hide(qapp):
     # use isHidden() (the explicit shown/hidden flag) rather than isVisible(), which
     # is False for any widget whose top-level window has not been shown (offscreen).
@@ -197,7 +220,7 @@ def test_tune_done_slot_records_manual_fit_and_draws(qapp):
 
     assert state.disp_fit.g == pytest.approx(0.065)
     assert state.disp_fit.bare_rf == pytest.approx(5.32)
-    assert panel._export_box.isEnabled()  # the tuning is the result
+    assert panel._export_btn.isEnabled()  # the tuning is the result
     # dispersion lines now drawn on the tune figure
     assert panel._tune_artists is not None
     assert panel._tune_artists.line_ground is not None
@@ -272,6 +295,7 @@ def test_rf_slider_refreshes_sample_dots_live(qapp, monkeypatch):
 
     panel._rf_slider.setValue(165)  # → 5.55 GHz
     # the dot's ground y now reflects the new r_f (echoed by the stub), in MHz
+    assert s.dot_ground is not None
     assert float(np.asarray(s.dot_ground.get_ydata())[0]) == pytest.approx(5550.0)
 
 
@@ -285,8 +309,9 @@ def test_g_change_refreshes_sample_dots_live(qapp, monkeypatch):
     panel._on_add_sample()
     s = panel._tune_artists.samples[0]  # type: ignore[union-attr]
 
-    panel._g_spin.setValue(90.0)  # 90 MHz → g = 0.09 GHz
+    panel._g_slider.setValue(90)  # 90 MHz → g = 0.09 GHz
     # ground dot y = g (echoed) in MHz = 0.09 GHz → 90 MHz
+    assert s.dot_ground is not None
     assert float(np.asarray(s.dot_ground.get_ydata())[0]) == pytest.approx(90.0)
 
 
@@ -306,6 +331,7 @@ def test_drag_moves_line_and_recomputes_dot(qapp, monkeypatch):
     assert s.flux == pytest.approx(0.3)
     assert float(np.asarray(s.line.get_xdata())[0]) == pytest.approx(0.3)
     # the dot ground y = flux (echoed) in MHz = 0.3 GHz → 300 MHz
+    assert s.dot_ground is not None
     assert float(np.asarray(s.dot_ground.get_ydata())[0]) == pytest.approx(300.0)
 
 

@@ -39,7 +39,6 @@ from qtpy.QtCore import (  # type: ignore[attr-defined]
     Signal,  # type: ignore[attr-defined]
 )
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-    QDoubleSpinBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -73,6 +72,11 @@ logger = logging.getLogger(__name__)
 # The r_f slider has this many ticks across the data's frequency span, so its
 # precision is (freq span) / _RF_TICKS independent of the span's width.
 _RF_TICKS = 300
+
+# The g slider spans a fixed 0..200 MHz in 1 MHz ticks (default 50 MHz).
+_G_MIN_MHZ = 0
+_G_MAX_MHZ = 200
+_G_DEFAULT_MHZ = 50
 
 
 @dataclass(frozen=True)
@@ -163,8 +167,8 @@ class PipelinePanelWidget(QWidget):
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
         # Compact control rows at the top: steps 1/2/3 side by side, step 4 on its
-        # own row (it has more controls). The plots go in the shared tabbed area
-        # below, so the figures get the full space.
+        # own row (it has more controls, and now owns Export too). The plots go in
+        # the shared tabbed area below, so the figures get the full space.
         top_row = QHBoxLayout()
         top_row.addWidget(self._build_inputs_section(), stretch=1)
         top_row.addWidget(self._build_load_section(), stretch=1)
@@ -173,7 +177,6 @@ class PipelinePanelWidget(QWidget):
 
         root.addWidget(self._build_tune_section())
         root.addWidget(self._build_figure_tabs(), stretch=1)
-        root.addWidget(self._build_export_section())
 
     def _build_inputs_section(self) -> QWidget:
         box = QGroupBox("1. Project & fit inputs")
@@ -220,60 +223,81 @@ class PipelinePanelWidget(QWidget):
         return self._preprocess_box
 
     def _build_tune_section(self) -> QWidget:
-        # Controls only — the tune figure lives in the shared tab area. Editing a
-        # spinbox does NOT compute; only "Use these g/r_f" runs the (off-main)
-        # predictor, draws the figure, and records the result (the manual tuning IS
-        # the final fit). The button is disabled while a prediction is in flight.
-        from qtpy.QtCore import Qt  # type: ignore[attr-defined]
-        from qtpy.QtWidgets import QSlider  # type: ignore[attr-defined]
-
-        self._tune_box = QGroupBox("4. Tune g / r_f  (drag r_f to match, then accept)")
+        # The tune figure lives in the shared tab area below. Dragging a slider moves
+        # its line + refreshes the sample dots live (cheap single-point predicts); only
+        # "Use these g/r_f" runs the full off-main predictor, draws the dispersion
+        # lines, and records the result (the manual tuning IS the final fit). Export
+        # (writing the dispersive section to params.json) lives at the bottom-right of
+        # this section — it enables once a tuning has been accepted.
+        self._tune_box = QGroupBox("4. Tune g / r_f  (drag to match, accept, export)")
         outer = QVBoxLayout(self._tune_box)
-        row = QHBoxLayout()
-        self._g_spin = self._mhz_spin(60.0, 0.0, 200.0)
-        # Editing g refreshes the sample-flux dots live (a cheap single-point predict
-        # at each sample line) — but does NOT run the full all-flux dispersion (that
-        # waits for "Use these g/r_f").
-        self._g_spin.valueChanged.connect(self._on_tune_param_changed)
-        # r_f is a slider with a FIXED 0..RF_TICKS tick range, so its precision is
-        # always (freq span)/RF_TICKS regardless of how wide the data's span is. The
-        # GHz value is mapped from the tick (see _rf_ghz); the span/default are set
-        # from the preprocessing result in _init_tune_view. Dragging moves the r_f
-        # line live (no scqubits); the label shows the current value.
-        self._rf_lo_ghz = 5.0  # data freq span, set in _init_tune_view
-        self._rf_hi_ghz = 6.0
-        self._rf_slider = QSlider(Qt.Orientation.Horizontal)
-        self._rf_slider.setRange(0, _RF_TICKS)
-        self._rf_slider.setValue(_RF_TICKS // 2)
-        self._rf_slider.valueChanged.connect(self._on_rf_slider)
-        self._rf_label = QLabel("")
-        row.addWidget(QLabel("g (MHz)"))
-        row.addWidget(self._g_spin)
-        row.addWidget(QLabel("r_f (MHz)"))
-        row.addWidget(self._rf_slider, stretch=1)
-        row.addWidget(self._rf_label)
-        self._tune_btn = QPushButton("Use these g / r_f")
-        self._tune_btn.clicked.connect(self._on_tune)
-        row.addWidget(self._tune_btn)
-        outer.addLayout(row)
 
-        # Sample-flux lines: add draggable vertical lines whose ground/excited dots
-        # track g / r_f live (a few single-point predicts, not the full recompute).
-        sample_row = QHBoxLayout()
+        # Two sliders stacked vertically at the top: g, then r_f.
+        self._g_slider, self._g_label = self._build_g_slider()
+        outer.addLayout(self._slider_row("g (MHz)", self._g_slider, self._g_label))
+        self._rf_slider, self._rf_label = self._build_rf_slider()
+        outer.addLayout(self._slider_row("r_f (MHz)", self._rf_slider, self._rf_label))
+
+        # Bottom row: action buttons on the left, Export pushed to the right.
+        bottom = QHBoxLayout()
         self._add_sample_btn = QPushButton("Add sample flux")
         self._add_sample_btn.clicked.connect(self._on_add_sample)
         self._clear_samples_btn = QPushButton("Clear samples")
         self._clear_samples_btn.clicked.connect(self._on_clear_samples)
-        sample_row.addWidget(self._add_sample_btn)
-        sample_row.addWidget(self._clear_samples_btn)
-        sample_row.addWidget(QLabel("drag a line to move it; red=ground blue=excited"))
-        sample_row.addStretch(1)
-        outer.addLayout(sample_row)
+        self._tune_btn = QPushButton("Use these g / r_f")
+        self._tune_btn.clicked.connect(self._on_tune)
+        bottom.addWidget(self._add_sample_btn)
+        bottom.addWidget(self._clear_samples_btn)
+        bottom.addWidget(self._tune_btn)
+        bottom.addStretch(1)
+        self._export_label = QLabel("")
+        bottom.addWidget(self._export_label)
+        self._export_btn = QPushButton("Export to params.json")
+        self._export_btn.clicked.connect(self._on_export)
+        bottom.addWidget(self._export_btn)
+        outer.addLayout(bottom)
 
         self._tune_progress = QProgressBar()
         self._tune_progress.setVisible(False)
         outer.addWidget(self._tune_progress)
         return self._tune_box
+
+    def _slider_row(self, name: str, slider: "QWidget", value_label: QLabel):
+        """A horizontal row: a fixed-width name label, the slider, and its value."""
+        row = QHBoxLayout()
+        label = QLabel(name)
+        label.setFixedWidth(60)
+        row.addWidget(label)
+        row.addWidget(slider, stretch=1)
+        value_label.setFixedWidth(80)
+        row.addWidget(value_label)
+        return row
+
+    def _build_g_slider(self):
+        """The g slider: 0..200 MHz in 1 MHz ticks (default 50). Live-refreshes dots."""
+        from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+        from qtpy.QtWidgets import QSlider  # type: ignore[attr-defined]
+
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setRange(_G_MIN_MHZ, _G_MAX_MHZ)  # 1 tick = 1 MHz
+        slider.setValue(_G_DEFAULT_MHZ)
+        slider.valueChanged.connect(self._on_g_slider)
+        return slider, QLabel(f"{_G_DEFAULT_MHZ}.0 MHz")
+
+    def _build_rf_slider(self):
+        """The r_f slider: a FIXED 0..RF_TICKS tick range across the data's freq span,
+        so its precision is always (freq span)/RF_TICKS. The GHz value is mapped from
+        the tick (see _rf_ghz); the span/default are set in _init_tune_view."""
+        from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+        from qtpy.QtWidgets import QSlider  # type: ignore[attr-defined]
+
+        self._rf_lo_ghz = 5.0  # data freq span, set in _init_tune_view
+        self._rf_hi_ghz = 6.0
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setRange(0, _RF_TICKS)
+        slider.setValue(_RF_TICKS // 2)
+        slider.valueChanged.connect(self._on_rf_slider)
+        return slider, QLabel("")
 
     def _build_figure_tabs(self) -> QWidget:
         """The shared tabbed figure area: Preprocess / Tune."""
@@ -291,27 +315,6 @@ class PipelinePanelWidget(QWidget):
         self._tabs.addTab(self._tune_canvas, "Tune")
         return self._tabs
 
-    def _build_export_section(self) -> QWidget:
-        self._export_box = QGroupBox("5. Export")
-        layout = QHBoxLayout(self._export_box)
-        self._export_btn = QPushButton("Export to params.json")
-        self._export_btn.clicked.connect(self._on_export)
-        layout.addWidget(self._export_btn)
-        self._export_label = QLabel("")
-        layout.addWidget(self._export_label, stretch=1)
-        return self._export_box
-
-    # --- widget helpers --------------------------------------------------
-
-    def _mhz_spin(self, value: float, lo: float, hi: float) -> QDoubleSpinBox:
-        box = QDoubleSpinBox()
-        box.setRange(lo, hi)
-        box.setDecimals(1)
-        box.setSingleStep(1.0)
-        box.setKeyboardTracking(False)  # emit on commit, not per keystroke
-        box.setValue(value)
-        return box
-
     # --- enable/disable gating ------------------------------------------
 
     def _sync_enabled(self) -> None:
@@ -323,7 +326,8 @@ class PipelinePanelWidget(QWidget):
         self._load_box.setEnabled(has_inputs)
         self._preprocess_box.setEnabled(has_onetone)
         self._tune_box.setEnabled(has_preprocess)
-        self._export_box.setEnabled(has_result)
+        # Export (now inside step 4) only enables once a tuning has been accepted.
+        self._export_btn.setEnabled(has_result)
 
     # --- section 1: inputs ----------------------------------------------
 
@@ -491,6 +495,10 @@ class PipelinePanelWidget(QWidget):
         frac = self._rf_slider.value() / _RF_TICKS
         return self._rf_lo_ghz + frac * (self._rf_hi_ghz - self._rf_lo_ghz)
 
+    def _g_mhz(self) -> float:
+        """The g slider value in MHz (1 tick = 1 MHz)."""
+        return float(self._g_slider.value())
+
     def _on_rf_slider(self, _tick: int) -> None:
         """Live: move the r_f line as the slider drags + refresh the sample dots."""
         rf_ghz = self._rf_ghz()
@@ -500,8 +508,9 @@ class PipelinePanelWidget(QWidget):
             self._refresh_sample_dots()
             self._tune_canvas.redraw()
 
-    def _on_tune_param_changed(self, _value: float) -> None:
-        """Editing g refreshes the sample dots live (single-point predict, no full run)."""
+    def _on_g_slider(self, value: int) -> None:
+        """Live: dragging g refreshes the sample dots (single-point predict, no full run)."""
+        self._g_label.setText(f"{value}.0 MHz")
         if self._tune_artists is not None:
             self._refresh_sample_dots()
             self._tune_canvas.redraw()
@@ -551,7 +560,7 @@ class PipelinePanelWidget(QWidget):
         """
         if self._tune_artists is None or not samples:
             return
-        g = 1e-3 * self._g_spin.value()
+        g = 1e-3 * self._g_mhz()
         bare_rf = self._rf_ghz()
         fluxs = np.array([s.flux for s in samples], dtype=np.float64)
         try:
@@ -572,7 +581,7 @@ class PipelinePanelWidget(QWidget):
         if self._ctrl.state.preprocess is None:
             return
         params = _TuneParams(
-            g=1e-3 * self._g_spin.value(),
+            g=1e-3 * self._g_mhz(),
             bare_rf=self._rf_ghz(),
         )
         self._tune_btn.setEnabled(False)

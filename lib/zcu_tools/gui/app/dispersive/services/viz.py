@@ -182,18 +182,19 @@ def update_sample_dots(
     rf_ground: float,
     rf_excited: float,
 ) -> None:
-    """Set the red (ground) / blue (excited) dots on a sample line (MHz on the y-axis).
+    """Set the ground (blue) / excited (red) dots on a sample line (MHz on the y-axis).
 
-    Creates the two dot artists on first call, then moves them in place. The x stays
-    at the line's current flux; the y is the predicted resonator frequency in MHz.
+    The colours match the dispersion lines (ground = blue, excited = red). Creates the
+    two dot artists on first call, then moves them in place. The x stays at the line's
+    current flux; the y is the predicted resonator frequency in MHz.
     """
     x = sample.flux
     if sample.dot_ground is None:
         (sample.dot_ground,) = artists.ax.plot(
-            [x], [1e3 * rf_ground], "o", color="red", markersize=7, zorder=5
+            [x], [1e3 * rf_ground], "o", color="blue", markersize=7, zorder=5
         )
         (sample.dot_excited,) = artists.ax.plot(
-            [x], [1e3 * rf_excited], "o", color="blue", markersize=7, zorder=5
+            [x], [1e3 * rf_excited], "o", color="red", markersize=7, zorder=5
         )
     else:
         sample.dot_ground.set_data([x], [1e3 * rf_ground])

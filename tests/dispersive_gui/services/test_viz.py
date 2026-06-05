@@ -94,7 +94,7 @@ def test_move_sample_line_updates_flux_and_x():
     assert float(xdata[0]) == 0.45
 
 
-def test_update_sample_dots_creates_then_moves_red_blue():
+def test_update_sample_dots_creates_then_moves_with_matching_colours():
     fluxs, freqs, norm = _axes()
     artists = render_tune_figure(Figure(), fluxs, freqs, norm, 5.3)
     s = add_sample_line(artists, 0.3)
@@ -104,8 +104,9 @@ def test_update_sample_dots_creates_then_moves_red_blue():
     gy = np.asarray(s.dot_ground.get_ydata())
     ey = np.asarray(s.dot_excited.get_ydata())
     assert float(gy[0]) == 5410.0 and float(ey[0]) == 5620.0  # MHz
-    assert s.dot_ground.get_color() == "red"
-    assert s.dot_excited.get_color() == "blue"
+    # colours match the dispersion lines: ground = blue, excited = red
+    assert s.dot_ground.get_color() == "blue"
+    assert s.dot_excited.get_color() == "red"
 
     # second call moves them in place (same artists)
     g_dot = s.dot_ground
