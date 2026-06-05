@@ -235,6 +235,7 @@ class Orchestrator:
         flux_values: list[float],
         pre_point: Optional[PrePoint] = None,
         on_point: Optional[OnPoint] = None,
+        should_stop: Optional[Callable[[], bool]] = None,
     ) -> InfoStore:
         """Sweep flux × Nodes in order.
 
@@ -244,15 +245,23 @@ class Orchestrator:
         auto-built SmoothingService derives smoothed values into
         ``point_smoothed``, then any extra ``derivations`` run, then
         ``on_point`` (the place to refresh plots).
+
+        ``should_stop`` is polled before each flux point (and before each Node)
+        for cooperative cancellation; when it returns True the sweep stops and
+        returns the InfoStore as-is.
         """
         info = InfoStore()
         for idx, flux in enumerate(flux_values):
+            if should_stop is not None and should_stop():
+                break
             info.begin_point()
             info.point["flux_value"] = flux
             info.point["flux_idx"] = idx
             if pre_point is not None:
                 pre_point(idx, flux, info, self.tools)
             for node in self.nodes:
+                if should_stop is not None and should_stop():
+                    break
                 snapshot = project_snapshot(node, info, self.ml)
                 if snapshot is None:
                     continue  # skipped this point (a required dep/module missing)

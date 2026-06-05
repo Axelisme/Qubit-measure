@@ -1,17 +1,17 @@
-"""Composition root for autofluxdep-gui (skeleton, hardware-free).
+"""Composition root for autofluxdep-gui.
 
-Assembles State + EventBus + Controller. The Qt MainWindow and the
-RemoteControlAdapter are Phase C/D — this skeleton stops at the domain core so
-the Node dependency model can be exercised (see ``demo_dry_run``) without a UI
-or hardware.
+``build_core`` assembles State + EventBus + Controller (the testable domain
+core). ``run_app`` adds the Qt MainWindow and runs the event loop.
 
-Unlike fluxdep/dispersive this app is *control type*: Phase B wires the soc /
-device connection and a run worker (the heavy half is aligned with measure-gui,
-not the analysis GUIs). The full ``run_app`` that opens a window lands in
-Phase C.
+Prototype (Phase C): Setup builds fake resources and Run drives the orchestrator
+on fake data — no hardware. Unlike fluxdep/dispersive this app is *control type*:
+Phase B wires the real soc / device connection + acquire (the heavy half aligned
+with measure-gui).
 """
 
 from __future__ import annotations
+
+import sys
 
 from typing_extensions import Optional
 
@@ -21,10 +21,19 @@ from zcu_tools.gui.app.autofluxdep.state import AutoFluxDepState, ProjectInfo
 
 
 def build_core(project: Optional[ProjectInfo] = None) -> Controller:
-    """Wire State + EventBus + Controller — the testable domain core.
-
-    Phase C: a ``run_app`` will call this, then build the MainWindow and (when
-    control opts are given) the RemoteControlAdapter, and run the Qt loop.
-    """
+    """Wire State + EventBus + Controller — the testable domain core."""
     state = AutoFluxDepState(project=project)
     return Controller(state, EventBus())
+
+
+def run_app(project: Optional[ProjectInfo] = None) -> None:
+    """Build and launch the autofluxdep-gui. Blocks until the window closes."""
+    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+
+    from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    ctrl = build_core(project)
+    window = MainWindow(ctrl)
+    window.show()
+    sys.exit(app.exec())

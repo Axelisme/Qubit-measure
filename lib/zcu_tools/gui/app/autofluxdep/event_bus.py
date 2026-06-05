@@ -1,8 +1,8 @@
-"""EventBus for autofluxdep-gui (skeleton).
+"""EventBus for autofluxdep-gui.
 
-Same typed enum + subscribe/emit pattern as fluxdep/dispersive (ADR-0013). Only
-the workflow-editing events exist in the skeleton; run-progress events
-(PointStarted, NodeCompleted, ...) are Phase B/C additions.
+Same typed enum + subscribe/emit pattern as fluxdep/dispersive (ADR-0013).
+Workflow-editing events drive the node list; setup/run events drive the
+edit↔run state switch and the progress display.
 """
 
 from __future__ import annotations
@@ -17,6 +17,13 @@ class EventType(str, Enum):
     PROJECT_CHANGED = "project_changed"
     WORKFLOW_CHANGED = "workflow_changed"  # nodes added/removed/reordered
     FLUX_CHANGED = "flux_changed"
+    SETUP_DONE = "setup_done"  # resources built → Run enabled
+    # run lifecycle (drive edit↔run UI + progress)
+    RUN_STARTED = "run_started"
+    NODE_STARTED = "node_started"  # payload: (node_name, flux_idx)
+    POINT_DONE = "point_done"  # payload: flux_idx (advance global progress)
+    RUN_FINISHED = "run_finished"
+    RUN_STOPPED = "run_stopped"
 
 
 @dataclass(frozen=True)
