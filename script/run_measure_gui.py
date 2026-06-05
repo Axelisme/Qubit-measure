@@ -134,9 +134,16 @@ if __name__ == "__main__":
             allow_external=args.control_allow_external,
         )
 
+    # Anchor default result/database paths at the repo root (this script lives in
+    # script/, so its parent is the repo root) rather than cwd — a .bat launcher
+    # does `cd /d "%~dp0"` into script/, which would otherwise scope defaults
+    # under script/.
+    project_root = str(Path(__file__).parent.parent)
+
     run_app(
         registry,
         role_catalog,
         control_opts=control_opts,
         clean=args.clean,
+        project_root=project_root,
     )

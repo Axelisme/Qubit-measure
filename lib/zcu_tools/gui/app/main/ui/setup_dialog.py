@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
@@ -293,7 +292,7 @@ class SetupDialog(QDialog):
         # fall back to the persisted paths only when chip/qub are absent.
         if data.chip_name and data.qub_name:
             result_dir, database_path = derive_project_paths(
-                data.chip_name, data.qub_name, os.getcwd()
+                data.chip_name, data.qub_name, self._ctrl.get_project_root()
             )
             self._result_dir_edit.setText(result_dir)
             self._db_path_edit.setText(database_path)
@@ -313,7 +312,9 @@ class SetupDialog(QDialog):
         chip = self._chip_edit.text().strip()
         qub = self._qub_edit.text().strip()
         if chip and qub:
-            result_dir, database_path = derive_project_paths(chip, qub, os.getcwd())
+            result_dir, database_path = derive_project_paths(
+                chip, qub, self._ctrl.get_project_root()
+            )
             self._result_dir_edit.setText(result_dir)
             self._db_path_edit.setText(database_path)
 

@@ -85,7 +85,9 @@ def make_view() -> MagicMock:
 class Fixture:
     """Holds strong refs to Controller + service to survive GC mid-test."""
 
-    def __init__(self, opts: Optional[ControlOptions] = None) -> None:
+    def __init__(
+        self, opts: Optional[ControlOptions] = None, project_root: Optional[str] = None
+    ) -> None:
         self.state = State(make_ctx())
         self.runner = Runner()
         self.registry = Registry()
@@ -103,6 +105,7 @@ class Fixture:
             io_manager=io_manager,
             view=self.view,
             bus=self.bus,
+            project_root=project_root,
         )
         if opts is None:
             opts = ControlOptions(port=0)

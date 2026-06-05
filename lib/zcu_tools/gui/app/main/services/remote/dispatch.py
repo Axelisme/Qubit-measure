@@ -693,8 +693,6 @@ def _h_startup_apply(
     # layout. (The setup dialog keeps its own empty-result_dir = DRAFT path for
     # interactive use; this agent-facing entry intentionally defaults to runnable
     # rather than DRAFT.)
-    import os
-
     from zcu_tools.gui.app.main.services.startup import (
         StartupProjectRequest,
         derive_project_paths,
@@ -705,7 +703,9 @@ def _h_startup_apply(
     result_dir = str(params["result_dir"] or "")
     database_path = str(params["database_path"] or "")
     if not result_dir or not database_path:
-        default_result, default_db = derive_project_paths(chip, qub, os.getcwd())
+        default_result, default_db = derive_project_paths(
+            chip, qub, adapter.ctrl.get_project_root()
+        )
         result_dir = result_dir or default_result
         database_path = database_path or default_db
 

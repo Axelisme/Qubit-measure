@@ -574,41 +574,50 @@ def test_batch_tools_reject_malformed_items_before_any_rpc(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_startup_apply_optional_dirs_default_to_scoped_roots(fx):
+def test_startup_apply_optional_dirs_default_to_project_root(qapp):  # noqa: ARG001
     """Omitting result_dir/database_path fills the default per-qubit roots
-    (<cwd>/result/<chip>/<qub>) via the RPC — so an agent gets a runnable
-    project without knowing the path layout (the setup dialog pre-fills the
-    same; this agent entry defaults to runnable, not DRAFT)."""
+    (<project_root>/result/<chip>/<qub>) via the RPC — anchored at the injected
+    project root (the repo root), NOT cwd, so a .bat launcher that cd's into
+    script/ still scopes defaults under the repo root. An agent gets a runnable
+    project without knowing the path layout."""
     import os
 
-    captured = {}
+    from ._helpers import Fixture
 
-    def _apply(req):
-        captured["req"] = req
-        return True
-
-    fx.ctrl.apply_startup_project = MagicMock(side_effect=_apply)  # type: ignore[method-assign]
-    sock = open_client(fx.service.port)
+    root = os.path.join(os.sep, "tmp", "fake_repo_root")
+    fx = Fixture(project_root=root)
+    fx.start()
     try:
-        resp = call(
-            sock,
-            "startup.apply",
-            {"chip_name": "C", "qub_name": "Q", "res_name": "R"},
-        )
-        assert resp["ok"] is True
-        req = captured["req"]
-        assert req.chip_name == "C"
-        cwd = os.getcwd()
-        assert req.result_dir == os.path.join(cwd, "result", "C", "Q")
-        # database_path carries today's dated data folder (derive owns the date).
-        from datetime import datetime
+        captured = {}
 
-        yy, mm, dd = datetime.today().strftime("%Y-%m-%d").split("-")
-        assert req.database_path == os.path.join(
-            cwd, "Database", "C", "Q", yy, mm, f"Data_{mm}{dd}"
-        )
+        def _apply(req):
+            captured["req"] = req
+            return True
+
+        fx.ctrl.apply_startup_project = MagicMock(side_effect=_apply)  # type: ignore[method-assign]
+        sock = open_client(fx.service.port)
+        try:
+            resp = call(
+                sock,
+                "startup.apply",
+                {"chip_name": "C", "qub_name": "Q", "res_name": "R"},
+            )
+            assert resp["ok"] is True
+            req = captured["req"]
+            assert req.chip_name == "C"
+            # Anchored at the injected project root, NOT os.getcwd().
+            assert req.result_dir == os.path.join(root, "result", "C", "Q")
+            # database_path carries today's dated data folder (derive owns the date).
+            from datetime import datetime
+
+            yy, mm, dd = datetime.today().strftime("%Y-%m-%d").split("-")
+            assert req.database_path == os.path.join(
+                root, "Database", "C", "Q", yy, mm, f"Data_{mm}{dd}"
+            )
+        finally:
+            sock.close()
     finally:
-        sock.close()
+        fx.stop()
 
 
 def test_startup_apply_missing_required_rejected(fx):

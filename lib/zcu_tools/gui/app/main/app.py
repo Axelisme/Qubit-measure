@@ -47,6 +47,7 @@ def run_app(
     role_catalog: "RoleCatalog",
     control_opts: Optional["ControlOptions"] = None,
     clean: bool = False,
+    project_root: Optional[str] = None,
 ) -> None:
     """Build and launch the GUI. Blocks until the window is closed.
 
@@ -60,6 +61,10 @@ def run_app(
     ``clean=True`` starts without restoring the previous persisted session
     (the on-disk ``gui_state_v1.json`` is left untouched at startup; a normal
     close still flushes over it).
+
+    ``project_root`` is the base dir the default result/database paths anchor
+    under; the entry script passes the repo root so a .bat launcher that cd's
+    into script/ does not scope defaults under script/. None falls back to cwd.
     """
     from zcu_tools.gui.app.main.utils.error_handler import install_global_exception_hook
 
@@ -78,7 +83,9 @@ def run_app(
     runner = Runner()
     io_manager = IOManager()
 
-    ctrl, window = _build_window(state, runner, registry, role_catalog, io_manager)
+    ctrl, window = _build_window(
+        state, runner, registry, role_catalog, io_manager, project_root
+    )
 
     # App-level PersistenceCaretaker (Memento Caretaker): owns the single
     # gui_state_v1.json file. The Controller is the Originator; restore at
@@ -134,6 +141,7 @@ def _build_window(
     registry: "Registry",
     role_catalog: "RoleCatalog",
     io_manager: "IOManager",
+    project_root: Optional[str] = None,
 ) -> tuple["Controller", "MainWindow"]:
     """Create Controller + MainWindow in the correct order."""
 
@@ -151,6 +159,7 @@ def _build_window(
         io_manager=io_manager,
         view=None,
         bus=bus,
+        project_root=project_root,
     )
 
     window = MainWindow(ctrl)

@@ -126,8 +126,17 @@ class Controller:
         bus: EventBus,
         role_catalog: Optional["RoleCatalog"] = None,
         progress_transport: Optional["ProgressTransport"] = None,
+        project_root: Optional[str] = None,
     ) -> None:
         self._state = state
+        # Base directory the default per-qubit result/database paths are anchored
+        # under. The entry script injects the repo root (Path(__file__).parent...)
+        # so a .bat launcher that cd's into script/ does not scope defaults under
+        # script/. None falls back to cwd — fine for tests / direct `python -m`
+        # runs from the repo root, where cwd already IS the repo root.
+        import os
+
+        self._project_root = project_root if project_root is not None else os.getcwd()
         # Views attached as diagnostic sinks (fan-out target). A full Qt View is
         # also the single RenderHost (run/analyze Qt artefacts). The remote
         # adapter is a diagnostic-only View — it holds its own RenderView.
@@ -907,6 +916,13 @@ class Controller:
     # ------------------------------------------------------------------
     # Startup application workflow (StartupService)
     # ------------------------------------------------------------------
+
+    def get_project_root(self) -> str:
+        """The base directory default result/database paths are anchored under
+        (the repo root, injected by the entry script). Setup dialog + startup RPC
+        derive defaults through ``derive_project_paths`` against this, NOT cwd, so
+        a .bat launcher that cd's into script/ still scopes under the repo root."""
+        return self._project_root
 
     def get_persisted_startup(self) -> PersistedStartup:
         """The remembered startup prefs (for the setup dialog's prefill). Reads

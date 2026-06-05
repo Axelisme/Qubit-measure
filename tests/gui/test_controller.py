@@ -82,7 +82,7 @@ def _make_view() -> MagicMock:
 class ControllerFixture:
     """Holds all objects to prevent premature GC during tests."""
 
-    def __init__(self, cache_dir=None) -> None:
+    def __init__(self, cache_dir=None, project_root=None) -> None:
         self.state = State(_make_ctx())
         self.runner = Runner()
         self.registry = Registry()
@@ -103,6 +103,7 @@ class ControllerFixture:
             io_manager=io_manager,
             view=self.view,
             bus=self.bus,
+            project_root=project_root,
         )
         self.caretaker = PersistenceCaretaker(self.ctrl, cache_dir=cache_dir)
         self.ctrl.attach_caretaker(self.caretaker)
@@ -135,6 +136,29 @@ def _make_figure_container() -> FigureContainer:
     placeholder = QLabel("(placeholder)")
     stack.addWidget(placeholder)
     return FigureContainer(stack, placeholder)
+
+
+# ---------------------------------------------------------------------------
+# project_root anchoring (default result/database paths)
+# ---------------------------------------------------------------------------
+
+
+def test_get_project_root_returns_injected_root(qapp, tmp_path):  # noqa: ARG001
+    """The entry script injects the repo root; the Controller exposes it so the
+    setup dialog / startup RPC anchor default paths there instead of cwd (the
+    .bat launcher cd's into script/, so cwd is the wrong base)."""
+    injected = str(tmp_path / "repo_root")
+    fixture = ControllerFixture(cache_dir=tmp_path, project_root=injected)
+    assert fixture.ctrl.get_project_root() == injected
+
+
+def test_get_project_root_falls_back_to_cwd_when_not_injected(qapp, tmp_path):  # noqa: ARG001
+    """No injection (tests / `python -m` from the repo root) → cwd, the existing
+    behaviour, so nothing regresses for callers that don't pass a root."""
+    import os
+
+    fixture = ControllerFixture(cache_dir=tmp_path, project_root=None)
+    assert fixture.ctrl.get_project_root() == os.getcwd()
 
 
 # ---------------------------------------------------------------------------
