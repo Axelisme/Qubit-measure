@@ -8,15 +8,11 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.optimize import minimize
-from typing_extensions import TYPE_CHECKING, Callable, Optional, Union
+from typing_extensions import Callable, Optional, Union
 
 from zcu_tools.notebook.analysis.t1_curve.utils import format_exponent
 from zcu_tools.simulate import flux2value, value2flux
-from zcu_tools.simulate.fluxonium import calculate_eff_t1_vs_flux_with
-
-if TYPE_CHECKING:
-    from scqubits.core.fluxonium import Fluxonium
-    from scqubits.core.storage import SpectrumData
+from zcu_tools.simulate.fluxonium import calculate_eff_t1_vs_flux_fast
 
 
 def find_proper_Temp(
@@ -191,8 +187,7 @@ def plot_t1_with_sample(
     s_T1errs: NDArray[np.float64],
     flux_half: float,
     flux_period: float,
-    fluxonium: Fluxonium,
-    spectrum_data: SpectrumData,
+    params: tuple[float, float, float],
     t_fluxs: NDArray[np.float64],
     *,
     name: str,
@@ -202,18 +197,17 @@ def plot_t1_with_sample(
     ],
     Temp: float,
     xlabel: str = "Current (mA)",
-    **other_noise_options: dict,
+    **other_noise_options,
 ) -> tuple[Figure, Axes]:
     """T1s: ns"""
     s_fluxs = value2flux(s_dev_values, flux_half, flux_period)
 
     t1_effs = [
-        calculate_eff_t1_vs_flux_with(
+        calculate_eff_t1_vs_flux_fast(
+            params,
             t_fluxs,
             noise_channels=[(noise_name, {name: v})],  # type: ignore
             Temp=Temp,
-            fluxonium=fluxonium,
-            spectrum_data=spectrum_data,
             **other_noise_options,
         )
         for v in noise_values
