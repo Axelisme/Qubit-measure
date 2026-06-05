@@ -24,12 +24,17 @@ from zcu_tools.gui.app.fluxdep.state import FluxDepState, ProjectInfo
 def run_app(
     project: Optional[ProjectInfo] = None,
     control: Optional[ControlOptions] = None,
+    project_root: Optional[str] = None,
 ) -> None:
     """Build and launch the fluxdep-gui. Blocks until the window is closed.
 
     When ``control`` is given, a ``RemoteControlAdapter`` is started so an
     automation agent (or the MCP server) can drive the GUI over TCP; it is
     stopped on the Qt main thread when the app quits.
+
+    ``project_root`` is the base dir the default result/database paths anchor
+    under; the entry script passes the repo root so a .bat launcher that cd's
+    into script/ does not scope defaults under script/. None falls back to cwd.
     """
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 
@@ -48,7 +53,7 @@ def run_app(
     app.aboutToQuit.connect(lambda: set_shutting_down(True))
 
     state = FluxDepState(project)
-    ctrl = Controller(state, EventBus())
+    ctrl = Controller(state, EventBus(), project_root=project_root)
     window = MainWindow(ctrl)
     window.show()
 

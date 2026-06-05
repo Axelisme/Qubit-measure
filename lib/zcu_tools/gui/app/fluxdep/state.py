@@ -107,26 +107,34 @@ DEFAULT_CHIP = "unknown_chip"
 DEFAULT_QUBIT = "unknown_qubit"
 
 
-def default_result_dir(chip_name: str, qub_name: str) -> str:
+def default_result_dir(chip_name: str, qub_name: str, root: str = "") -> str:
     """The notebook-layout result dir for a chip/qubit (``result/<chip>/<qubit>``).
 
     Empty names fall back to ``unknown_chip`` / ``unknown_qubit`` so the path is
-    always well-formed.
+    always well-formed. ``root`` (the repo root, injected by the entry script)
+    anchors the result tree there instead of leaving it relative to cwd — a .bat
+    launcher does ``cd /d "%~dp0"`` into script/, which would otherwise scope the
+    default under script/. Empty ``root`` keeps the legacy cwd-relative form.
     """
     chip = chip_name or DEFAULT_CHIP
     qub = qub_name or DEFAULT_QUBIT
-    return os.path.join("result", chip, qub)
+    return (
+        os.path.join(root, "result", chip, qub)
+        if root
+        else os.path.join("result", chip, qub)
+    )
 
 
-def default_database_root(chip_name: str, qub_name: str) -> str:
+def default_database_root(chip_name: str, qub_name: str, root: str = "") -> str:
     """The default *raw spectrum* root for a chip/qubit.
 
     Raw measurement hdf5 files share the chip/qubit result tree, so this is the
     same ``result/<chip>/<qubit>`` directory. (This is the project's
     ``database_path``, distinct from the precomputed *search* database, whose
     default is the bundled ``Database/simulation`` — see ``ui/paths.database_dir``.)
+    ``root`` anchors it at the repo root (see ``default_result_dir``).
     """
-    return default_result_dir(chip_name, qub_name)
+    return default_result_dir(chip_name, qub_name, root)
 
 
 @dataclass
@@ -153,14 +161,22 @@ class ProjectInfo:
     # Empty = "derive from chip/qubit in __post_init__"; a value overrides it.
     result_dir: str = ""  # → result/<chip>/<qubit>
     database_path: str = ""  # raw spectrum root → result/<chip>/<qubit>
+    # Base dir the derived defaults are anchored under (the repo root, injected by
+    # the entry script). Empty keeps the legacy cwd-relative default. Not a path
+    # itself — only seeds the derivation below; the GUI re-derives via the dialog.
+    root_dir: str = ""
 
     def __post_init__(self) -> None:
         # Single derivation point: an unset (empty) path becomes the chip/qubit
-        # default; a provided path is kept as the user's override.
+        # default (anchored at root_dir); a provided path is kept as the override.
         if not self.result_dir:
-            self.result_dir = default_result_dir(self.chip_name, self.qub_name)
+            self.result_dir = default_result_dir(
+                self.chip_name, self.qub_name, self.root_dir
+            )
         if not self.database_path:
-            self.database_path = default_database_root(self.chip_name, self.qub_name)
+            self.database_path = default_database_root(
+                self.chip_name, self.qub_name, self.root_dir
+            )
 
 
 @dataclass

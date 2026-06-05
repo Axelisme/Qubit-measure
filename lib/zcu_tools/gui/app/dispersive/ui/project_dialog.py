@@ -38,8 +38,17 @@ class ProjectDialog(QDialog):
         self.setWindowTitle("Project")
         self.resize(560, 220)
 
-        derived_result = default_result_dir(project.chip_name, project.qub_name)
-        derived_db = default_database_root(project.chip_name, project.qub_name)
+        # Anchor derived defaults at the same repo root the project was built
+        # with, so the auto-derivation matches the project's actual paths (else a
+        # root-anchored project.result_dir would be mis-detected as overridden).
+        self._root = project.root_dir
+
+        derived_result = default_result_dir(
+            project.chip_name, project.qub_name, self._root
+        )
+        derived_db = default_database_root(
+            project.chip_name, project.qub_name, self._root
+        )
         self._result_overridden = bool(
             project.result_dir and project.result_dir != derived_result
         )
@@ -88,9 +97,9 @@ class ProjectDialog(QDialog):
         chip = self._chip_edit.text().strip()
         qub = self._qub_edit.text().strip()
         if not self._result_overridden:
-            self._result_edit.setText(default_result_dir(chip, qub))
+            self._result_edit.setText(default_result_dir(chip, qub, self._root))
         if not self._database_overridden:
-            self._database_edit.setText(default_database_root(chip, qub))
+            self._database_edit.setText(default_database_root(chip, qub, self._root))
 
     def _on_result_edited(self, _text: str) -> None:
         self._result_overridden = True
@@ -125,4 +134,5 @@ class ProjectDialog(QDialog):
             qub_name=self._qub_edit.text().strip(),
             result_dir=self._result_edit.text().strip(),
             database_path=self._database_edit.text().strip(),
+            root_dir=self._root,
         )

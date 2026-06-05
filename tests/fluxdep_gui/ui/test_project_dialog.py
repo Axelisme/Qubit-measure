@@ -46,6 +46,21 @@ def test_result_dir_auto_derives_from_names(qapp):
     d.deleteLater()
 
 
+def test_auto_derivation_anchors_at_project_root_dir(qapp):
+    import os
+
+    # A project carrying a root_dir (injected repo root) makes the dialog's
+    # auto-derivation anchor there, not at the cwd-relative default.
+    root = os.path.join(os.sep, "repo")
+    d = ProjectDialog(ProjectInfo(root_dir=root))
+    d._chip_edit.setText("Q5_2D")
+    d._qub_edit.setText("Q1")
+    assert d._result_edit.text() == os.path.join(root, "result", "Q5_2D", "Q1")
+    # result_project carries the root_dir forward so re-derivation stays anchored.
+    assert d.result_project().root_dir == root
+    d.deleteLater()
+
+
 def test_manual_result_dir_stops_auto_derivation(qapp):
     d = ProjectDialog(ProjectInfo())
     d._result_edit.setText("/custom/out")

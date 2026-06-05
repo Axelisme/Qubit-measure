@@ -76,6 +76,23 @@ def test_project_info_empty_names_fall_back_to_placeholders():
     assert p.result_dir == os.path.join("result", "unknown_chip", "unknown_qubit")
 
 
+def test_project_info_root_dir_anchors_derived_defaults():
+    # root_dir (the repo root, injected by the entry script) anchors the derived
+    # defaults there instead of leaving them relative to cwd — the .bat-launcher
+    # fix: a launcher that cd's into script/ must not scope defaults under script/.
+    root = os.path.join(os.sep, "repo")
+    p = ProjectInfo(chip_name="ChipA", qub_name="Q1", root_dir=root)
+    assert p.result_dir == os.path.join(root, "result", "ChipA", "Q1")
+    assert p.database_path == os.path.join(root, "Database", "ChipA", "Q1")
+
+
+def test_project_info_empty_root_dir_keeps_relative_default():
+    # No injection → the legacy cwd-relative default, so nothing regresses.
+    p = ProjectInfo(chip_name="ChipA", qub_name="Q1", root_dir="")
+    assert p.result_dir == os.path.join("result", "ChipA", "Q1")
+    assert p.database_path == os.path.join("Database", "ChipA", "Q1")
+
+
 # --- VersionTable is the shared mechanism ------------------------------
 
 

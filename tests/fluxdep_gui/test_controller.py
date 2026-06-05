@@ -26,6 +26,20 @@ def _record(ctrl: Controller, payload_type: type[Payload]) -> list:
     return seen
 
 
+def test_get_project_root_returns_injected_root():
+    # The entry script injects the repo root so default paths anchor there, not
+    # cwd (the .bat launcher cd's into script/).
+    ctrl = Controller(FluxDepState(), project_root="/repo")
+    assert ctrl.get_project_root() == "/repo"
+
+
+def test_get_project_root_falls_back_to_cwd_when_not_injected():
+    import os
+
+    ctrl = Controller(FluxDepState())
+    assert ctrl.get_project_root() == os.getcwd()
+
+
 def test_setup_project_mutates_and_emits():
     ctrl = _ctrl()
     seen = _record(ctrl, ProjectChangedPayload)

@@ -46,9 +46,20 @@ logger = logging.getLogger(__name__)
 class Controller:
     """Command façade over the dispersive pipeline services."""
 
-    def __init__(self, state: DispersiveState, bus: Optional[EventBus] = None) -> None:
+    def __init__(
+        self,
+        state: DispersiveState,
+        bus: Optional[EventBus] = None,
+        project_root: Optional[str] = None,
+    ) -> None:
         self._state = state
         self._bus = bus if bus is not None else EventBus()
+        # Base dir the default result/database paths anchor under (the repo root,
+        # injected by the entry script) so a .bat launcher that cd's into script/
+        # does not scope defaults under script/. None → cwd (legacy / tests).
+        import os
+
+        self._project_root = project_root if project_root is not None else os.getcwd()
         self._project = ProjectService(state)
         self._load = LoadService(state)
         self._preprocess = PreprocessService(state)
@@ -65,6 +76,13 @@ class Controller:
     @property
     def bus(self) -> EventBus:
         return self._bus
+
+    def get_project_root(self) -> str:
+        """Base dir the default result/database paths anchor under (the repo
+        root, injected by the entry script). The project dialog derives defaults
+        through ``default_result_dir`` against this, NOT cwd, so a .bat launcher
+        that cd's into script/ still scopes under the repo root."""
+        return self._project_root
 
     # --- project ---------------------------------------------------------
 

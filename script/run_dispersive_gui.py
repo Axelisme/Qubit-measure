@@ -93,8 +93,15 @@ if __name__ == "__main__":
 
         control = ControlOptions(port=args.control_port, token=args.control_token)
 
+    # Anchor default result/database paths at the repo root (this script lives in
+    # script/, so its parent is the repo root) rather than cwd — a .bat launcher
+    # does `cd /d "%~dp0"` into script/, which would otherwise scope defaults
+    # under script/.
+    project_root = str(Path(__file__).parent.parent)
+
     # Only override a ProjectInfo field when the arg was actually given, so an
     # omitted --chip / --qub keeps the unknown_* defaults instead of becoming "".
+    # root_dir seeds the derived-default anchoring inside ProjectInfo.__post_init__.
     project_kwargs = {
         k: v
         for k, v in (
@@ -105,4 +112,8 @@ if __name__ == "__main__":
         )
         if v
     }
-    run_app(ProjectInfo(**project_kwargs), control=control)
+    run_app(
+        ProjectInfo(root_dir=project_root, **project_kwargs),
+        control=control,
+        project_root=project_root,
+    )

@@ -31,3 +31,17 @@ def test_controller_exposes_state_and_bus():
     ctrl = Controller(state)
     assert ctrl.state is state
     assert isinstance(ctrl.bus, EventBus)
+
+
+def test_get_project_root_returns_injected_root():
+    # The entry script injects the repo root so default paths anchor there, not
+    # cwd (the .bat launcher cd's into script/).
+    ctrl = Controller(DispersiveState(), project_root="/repo")
+    assert ctrl.get_project_root() == "/repo"
+
+
+def test_get_project_root_falls_back_to_cwd_when_not_injected():
+    import os
+
+    ctrl = Controller(DispersiveState())
+    assert ctrl.get_project_root() == os.getcwd()

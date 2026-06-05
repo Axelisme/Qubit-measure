@@ -27,8 +27,14 @@ if TYPE_CHECKING:
 def run_app(
     project: Optional[ProjectInfo] = None,
     control: Optional["ControlOptions"] = None,
+    project_root: Optional[str] = None,
 ) -> None:
-    """Build and launch the dispersive-fit-gui. Blocks until the window is closed."""
+    """Build and launch the dispersive-fit-gui. Blocks until the window is closed.
+
+    ``project_root`` is the base dir the default result/database paths anchor
+    under; the entry script passes the repo root so a .bat launcher that cd's
+    into script/ does not scope defaults under script/. None falls back to cwd.
+    """
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 
     from zcu_tools.gui.app.dispersive.ui.main_window import MainWindow
@@ -43,7 +49,7 @@ def run_app(
     app.aboutToQuit.connect(lambda: set_shutting_down(True))
 
     state = DispersiveState(project)
-    ctrl = Controller(state, EventBus())
+    ctrl = Controller(state, EventBus(), project_root=project_root)
     window = MainWindow(ctrl)
     window.show()
 
