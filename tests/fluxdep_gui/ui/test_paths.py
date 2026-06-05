@@ -45,6 +45,23 @@ def test_database_dir_falls_back_to_bundled_when_unset():
     )
 
 
+def test_database_dir_anchors_bundled_at_injected_root(tmp_path):
+    # The bundled search database is repo-relative; the injected repo root anchors
+    # it there instead of relative to cwd — the .bat-launcher fix (cwd is script/).
+    sim = tmp_path / "Database" / "simulation"
+    sim.mkdir(parents=True)
+    p = ProjectInfo()
+    assert paths.database_dir(p, str(tmp_path)) == str(sim)
+
+
+def test_default_database_file_anchors_bundled_at_injected_root(tmp_path):
+    sim = tmp_path / "Database" / "simulation"
+    sim.mkdir(parents=True)
+    (sim / "fluxonium_db.h5").touch()
+    p = ProjectInfo()
+    assert paths.default_database_file(p, str(tmp_path)) == str(sim / "fluxonium_db.h5")
+
+
 def test_existing_dirs_are_returned_as_is(tmp_path):
     p = ProjectInfo(database_path=str(tmp_path))
     assert paths.raw_spectrum_dir(p) == str(tmp_path)

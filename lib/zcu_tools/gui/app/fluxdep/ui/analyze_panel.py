@@ -364,7 +364,10 @@ class AnalyzePanelWidget(QWidget):
         # Seed the database path: the prior fit's path, else a bundled default so
         # the user usually doesn't have to browse at all.
         self._db_edit.setText(
-            fit.database_path or default_database_file(self._ctrl.state.project)
+            fit.database_path
+            or default_database_file(
+                self._ctrl.state.project, self._ctrl.get_project_root()
+            )
         )
         self._ej_lo.setValue(fit.EJb[0])
         self._ej_hi.setValue(fit.EJb[1])
@@ -437,7 +440,9 @@ class AnalyzePanelWidget(QWidget):
         current = self._db_edit.text().strip()
         start = os.path.dirname(current) if current else ""
         if not start or not os.path.isdir(start):
-            start = database_dir(self._ctrl.state.project)
+            start = database_dir(
+                self._ctrl.state.project, self._ctrl.get_project_root()
+            )
         path, _ = QFileDialog.getOpenFileName(
             self, "Select database", start, filter="HDF5 (*.h5 *.hdf5);;All files (*)"
         )
