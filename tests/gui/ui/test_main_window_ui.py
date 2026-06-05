@@ -17,6 +17,11 @@ def _mock_ctrl() -> MagicMock:
     return ctrl
 
 
+# Distinguishes "caller did not specify analyze_params" (default to a MagicMock)
+# from "caller explicitly wants None" (a non-analysis adapter's snapshot).
+_DEFAULT_PARAMS = object()
+
+
 def _snapshot(
     tab_id: str,
     *,
@@ -30,6 +35,8 @@ def _snapshot(
     has_run_result: bool = True,
     has_analyze_result: bool = True,
     has_figure: bool = True,
+    supports_analysis: bool = True,
+    analyze_params: object = _DEFAULT_PARAMS,
 ) -> TabSnapshot:
     return TabSnapshot(
         adapter_name="fake",
@@ -48,8 +55,10 @@ def _snapshot(
         ),
         cfg_schema=MagicMock(),
         save_paths_override=None,
-        capabilities=AdapterCapabilities(),
-        analyze_params=MagicMock(),
+        capabilities=AdapterCapabilities(supports_analysis=supports_analysis),
+        analyze_params=MagicMock()
+        if analyze_params is _DEFAULT_PARAMS
+        else analyze_params,
         writeback_items=(),
         save_paths=None,
         figure=None,
@@ -383,6 +392,51 @@ def test_stopped_run_does_not_auto_switch_to_analysis_tab(qapp):
     _emit_run_finished(bus, "tab-1", outcome="cancelled")
 
     tab._left_tabs.setCurrentIndex.assert_not_called()
+
+
+def test_non_analysis_adapter_run_does_not_auto_switch_to_analysis_tab(qapp):
+    """flux_dep / power_dep adapters (supports_analysis=False) hide the Analysis
+    tab, so a finished run must not switch to it (switching to a hidden tab is a
+    no-op at best, a stuck-on-hidden-tab UI at worst)."""
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = MagicMock()
+    bus = EventBus()
+    ctrl.get_bus.return_value = bus
+    ctrl.get_running_tab_id.return_value = None
+    ctrl.get_tab_snapshot.return_value = _snapshot(
+        "tab-1", has_run_result=True, supports_analysis=False, analyze_params=None
+    )
+    window = MainWindow(ctrl)
+    tab = MagicMock()
+    window._tab_widgets["tab-1"] = tab
+
+    _emit_run_finished(bus, "tab-1", outcome="finished")
+
+    tab._left_tabs.setCurrentIndex.assert_not_called()
+
+
+def test_refresh_analyze_form_skips_non_analysis_adapter_without_raising(qapp):
+    """A finished run on a non-analysis adapter has no analyze params; the
+    content refresh must skip the analyze form rather than hit the Fast-Fail
+    guard that demands initialized params (regression: it used to raise)."""
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = MagicMock()
+    bus = EventBus()
+    ctrl.get_bus.return_value = bus
+    ctrl.get_running_tab_id.return_value = None
+    ctrl.get_tab_snapshot.return_value = _snapshot(
+        "tab-1", has_run_result=True, supports_analysis=False, analyze_params=None
+    )
+    window = MainWindow(ctrl)
+    tab = MagicMock()
+    window._tab_widgets["tab-1"] = tab
+
+    # Must not raise "Run result has no initialized analyze parameters".
+    window.refresh_tab_analyze_form("tab-1")
+
+    tab.populate_analyze_params.assert_not_called()
 
 
 def _editor_wiring_ctrl() -> MagicMock:

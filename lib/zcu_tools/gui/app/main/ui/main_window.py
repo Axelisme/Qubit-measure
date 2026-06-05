@@ -794,7 +794,15 @@ class MainWindow(QMainWindow):
             return
         snapshot = self._ctrl.get_tab_snapshot(payload.tab_id)
         assert snapshot.interaction is not None  # render snapshot fills live fields
-        if snapshot.interaction.has_run_result:
+        assert snapshot.capabilities is not None  # render snapshot fills live fields
+        # Only auto-switch to the Analysis tab for adapters that have one;
+        # non-analysis adapters (flux_dep / power_dep) hide it (setTabVisible(1,
+        # False) in update_interaction_state), so switching there is a no-op at
+        # best and leaves the UI on a hidden tab at worst.
+        if (
+            snapshot.interaction.has_run_result
+            and snapshot.capabilities.supports_analysis
+        ):
             tab_w._left_tabs.setCurrentIndex(1)
 
     def _on_bus_context_switched(self, payload: ContextSwitchedPayload) -> None:
@@ -891,6 +899,13 @@ class MainWindow(QMainWindow):
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
         assert current.interaction is not None  # render snapshot fills live fields
+        assert current.capabilities is not None  # render snapshot fills live fields
+        # Non-analysis adapters (flux_dep / power_dep 2D sweeps) intentionally
+        # have no analyze params after a run — there is no analyze form to fill,
+        # so skip before the Fast-Fail below (which guards the *analysis* adapter
+        # contract: a run result must carry initialized params).
+        if not current.capabilities.supports_analysis:
+            return
         if not current.interaction.has_run_result:
             return
         if current.analyze_params is None:
