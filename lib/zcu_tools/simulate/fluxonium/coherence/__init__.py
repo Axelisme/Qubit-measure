@@ -4,14 +4,23 @@ from .coherence import (
     calculate_eff_t1_vs_flux_with,
     calculate_eff_t1_with,
 )
+from .coherence_fast import (
+    UnsupportedNoiseChannelError,
+    calculate_eff_t1_fast,
+    calculate_eff_t1_vs_flux_fast,
+)
 from .percell import calculate_percell_t1_vs_flux
 
 __all__ = [
-    # coherence
+    # coherence (scqubits)
     "calculate_eff_t1",
     "calculate_eff_t1_vs_flux",
     "calculate_eff_t1_vs_flux_with",
     "calculate_eff_t1_with",
+    # coherence (scqubits-free fast path)
+    "calculate_eff_t1_vs_flux_fast",
+    "calculate_eff_t1_fast",
+    "UnsupportedNoiseChannelError",
     # percell
     "calculate_percell_t1_vs_flux",
 ]
