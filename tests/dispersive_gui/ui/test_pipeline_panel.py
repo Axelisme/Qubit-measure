@@ -278,10 +278,9 @@ def test_add_sample_drops_line_with_dots(qapp, monkeypatch):
     assert float(np.asarray(s.dot_ground.get_ydata())[0]) == pytest.approx(5400.0)
 
 
-def test_rf_slider_refreshes_sample_dots_live(qapp, monkeypatch):
-    # the stub returns g+0.1*k independent of r_f, so to prove the refresh path runs
-    # we make the stub echo bare_rf into the ground value (patched AFTER _tune_panel,
-    # which installs its own _stub).
+def test_rf_slider_refreshes_sample_dots_after_debounce(qapp, monkeypatch):
+    # The slider move debounces the dot recompute (a QTimer): moving the slider does
+    # NOT recompute synchronously; firing the debounce slot does. Stub echoes bare_rf.
     panel = _tune_panel(qapp, monkeypatch)
 
     def echo_rf(params, fluxs, bare_rf, g, *, progress=False, res_dim=4, **kw):
@@ -293,13 +292,15 @@ def test_rf_slider_refreshes_sample_dots_live(qapp, monkeypatch):
     panel._on_add_sample()
     s = panel._tune_artists.samples[0]  # type: ignore[union-attr]
 
-    panel._rf_slider.setValue(165)  # → 5.55 GHz
+    panel._rf_slider.setValue(165)  # → 5.55 GHz; the debounce timer is (re)started
+    assert panel._dot_debounce.isActive()  # recompute is pending, not done yet
+    panel._on_dot_debounce_fired()  # simulate the timer firing
     # the dot's ground y now reflects the new r_f (echoed by the stub), in MHz
     assert s.dot_ground is not None
     assert float(np.asarray(s.dot_ground.get_ydata())[0]) == pytest.approx(5550.0)
 
 
-def test_g_change_refreshes_sample_dots_live(qapp, monkeypatch):
+def test_g_change_refreshes_sample_dots_after_debounce(qapp, monkeypatch):
     panel = _tune_panel(qapp, monkeypatch)
 
     def echo_g(params, fluxs, bare_rf, g, *, progress=False, res_dim=4, **kw):
@@ -309,13 +310,17 @@ def test_g_change_refreshes_sample_dots_live(qapp, monkeypatch):
     panel._on_add_sample()
     s = panel._tune_artists.samples[0]  # type: ignore[union-attr]
 
-    panel._g_slider.setValue(90)  # 90 MHz → g = 0.09 GHz
+    panel._g_slider.setValue(90)  # 90 MHz → g = 0.09 GHz; debounce started
+    assert panel._dot_debounce.isActive()
+    panel._on_dot_debounce_fired()
     # ground dot y = g (echoed) in MHz = 0.09 GHz → 90 MHz
     assert s.dot_ground is not None
     assert float(np.asarray(s.dot_ground.get_ydata())[0]) == pytest.approx(90.0)
 
 
-def test_drag_moves_line_and_recomputes_dot(qapp, monkeypatch):
+def test_drag_moves_line_without_recompute_until_drop(qapp, monkeypatch):
+    # While dragging, the line moves but the dot is NOT recomputed (no compute spam);
+    # the recompute happens only on _on_sample_drop (mouse release).
     panel = _tune_panel(qapp, monkeypatch)
 
     def echo_flux(params, fluxs, bare_rf, g, *, progress=False, res_dim=4, **kw):
@@ -326,12 +331,16 @@ def test_drag_moves_line_and_recomputes_dot(qapp, monkeypatch):
     monkeypatch.setattr(predict_mod, "calculate_dispersive_vs_flux_fast", echo_flux)
     panel._on_add_sample()
     s = panel._tune_artists.samples[0]  # type: ignore[union-attr]
+    before = float(np.asarray(s.dot_ground.get_ydata())[0])  # type: ignore[union-attr]
 
-    panel._on_sample_drag(s, 0.3)
+    panel._on_sample_drag(s, 0.3)  # motion: line moves, dot unchanged
     assert s.flux == pytest.approx(0.3)
     assert float(np.asarray(s.line.get_xdata())[0]) == pytest.approx(0.3)
-    # the dot ground y = flux (echoed) in MHz = 0.3 GHz → 300 MHz
     assert s.dot_ground is not None
+    assert float(np.asarray(s.dot_ground.get_ydata())[0]) == pytest.approx(before)
+
+    panel._on_sample_drop(s)  # release: now recompute
+    # the dot ground y = flux (echoed) in MHz = 0.3 GHz → 300 MHz
     assert float(np.asarray(s.dot_ground.get_ydata())[0]) == pytest.approx(300.0)
 
 
@@ -359,3 +368,40 @@ def test_fresh_preprocess_drops_sample_lines(qapp, monkeypatch):
     # re-initialising the tune view (a new preprocess) starts with no sample lines
     panel._init_tune_view(_preprocess())
     assert panel._tune_artists.samples == []  # type: ignore[union-attr]
+
+
+# --- auto tune --------------------------------------------------------------
+
+
+def test_auto_tune_button_enabled_only_with_samples(qapp, monkeypatch):
+    panel = _tune_panel(qapp, monkeypatch)
+    # no sample lines yet → Auto tune disabled
+    assert panel._auto_tune_btn.isEnabled() is False
+    panel._on_add_sample()
+    assert panel._auto_tune_btn.isEnabled() is True
+    panel._on_clear_samples()
+    assert panel._auto_tune_btn.isEnabled() is False
+
+
+def test_auto_tune_done_writes_back_sliders(qapp, monkeypatch):
+    # the done slot sets the g / r_f sliders to the optimised values (it does NOT
+    # accept the fit — no result is recorded).
+    from zcu_tools.gui.app.dispersive.ui.pipeline_panel import _AutoTuneResult
+
+    panel = _tune_panel(qapp, monkeypatch, median_rf=5.4)  # freqs 5.0..6.0
+    panel._on_add_sample()
+    # optimum g = 0.085 GHz → 85 MHz tick; bare_rf = 5.55 GHz → tick 165 (span 1.0)
+    panel._on_auto_tune_done(_AutoTuneResult(g=0.085, bare_rf=5.55))
+    assert panel._g_slider.value() == 85
+    assert panel._rf_ghz() == pytest.approx(5.55)
+    # auto-tune does not accept → no result recorded, export still disabled
+    assert not panel._ctrl.state.disp_fit.has_result
+    assert not panel._export_btn.isEnabled()
+
+
+def test_auto_tune_disables_button_during_compute(qapp, monkeypatch):
+    panel = _tune_panel(qapp, monkeypatch)
+    panel._on_add_sample()
+    panel._on_auto_tune()  # spawns the worker
+    assert panel._auto_tune_btn.isEnabled() is False
+    panel._pool.waitForDone(5000)  # let the spawned worker finish before teardown

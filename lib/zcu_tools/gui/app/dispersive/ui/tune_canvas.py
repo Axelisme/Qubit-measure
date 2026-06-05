@@ -51,7 +51,9 @@ class TuneCanvasWidget(QWidget):
 
         self._artists: Optional["TuneArtists"] = None
         self._on_drag: Optional[Callable[["SampleArtists", float], None]] = None
+        self._on_drop: Optional[Callable[["SampleArtists"], None]] = None
         self._dragging: Optional["SampleArtists"] = None
+        self._dragged: bool = False  # whether the grabbed line actually moved
 
         self.canvas.mpl_connect("button_press_event", self._on_press)
         self.canvas.mpl_connect("motion_notify_event", self._on_move)
@@ -64,16 +66,20 @@ class TuneCanvasWidget(QWidget):
         self,
         artists: "TuneArtists",
         on_drag: Callable[["SampleArtists", float], None],
+        on_drop: Callable[["SampleArtists"], None],
     ) -> None:
-        """Register the live artists + the per-move drag callback for sample lines.
+        """Register the live artists + sample-line drag callbacks.
 
         Called whenever the tune figure is (re)rendered so dragging targets the
         current artists. ``on_drag(sample, flux)`` runs on each motion event while a
-        sample line is grabbed (the panel moves the line + recomputes its dots).
+        sample line is grabbed (move the line VISUALLY — no compute); ``on_drop(sample)``
+        runs once on release (recompute the dot only after the user stops moving it).
         """
         self._artists = artists
         self._on_drag = on_drag
+        self._on_drop = on_drop
         self._dragging = None
+        self._dragged = False
 
     # --- drag interaction ------------------------------------------------
 
@@ -100,14 +106,21 @@ class TuneCanvasWidget(QWidget):
         sample = self._pick_sample(float(mouse.xdata))
         if sample is not None:
             self._dragging = sample
+            self._dragged = False
 
     def _on_move(self, event: Event) -> None:
         mouse = cast(MouseEvent, event)
         if self._dragging is None or mouse.inaxes is None or mouse.xdata is None:
             return
+        self._dragged = True
         if self._on_drag is not None:
             self._on_drag(self._dragging, float(mouse.xdata))
 
     def _on_release(self, event: Event) -> None:
         del event
+        # Recompute the dot only on release (after the user stops moving the line),
+        # and only if it actually moved.
+        if self._dragging is not None and self._dragged and self._on_drop is not None:
+            self._on_drop(self._dragging)
         self._dragging = None
+        self._dragged = False

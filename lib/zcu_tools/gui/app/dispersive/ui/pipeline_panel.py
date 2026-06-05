@@ -78,6 +78,10 @@ _G_MIN_MHZ = 0
 _G_MAX_MHZ = 200
 _G_DEFAULT_MHZ = 50
 
+# Sample-dot recompute is debounced this long after the last g / r_f slider move
+# (the line itself still moves live on every tick).
+_SLIDER_DEBOUNCE_MS = 150
+
 
 @dataclass(frozen=True)
 class _TuneParams:
@@ -147,10 +151,54 @@ class _PredictWorker(QRunnable):
         self.signals.done.emit(_TuneData(rf_0, rf_1, t_fluxs, p.g, p.bare_rf))
 
 
+@dataclass(frozen=True)
+class _AutoTuneParams:
+    sample_fluxs: np.ndarray
+    g0: float  # GHz
+    bare_rf0: float  # GHz
+    g_bounds: tuple[float, float]  # GHz
+    rf_bounds: tuple[float, float]  # GHz
+
+
+@dataclass(frozen=True)
+class _AutoTuneResult:
+    g: float  # GHz
+    bare_rf: float  # GHz
+
+
+class _AutoTuneWorker(QRunnable):
+    """Runs the (slow, iterative) scipy auto-tune off the main thread.
+
+    Optimises (g, bare_rf) to best match the sample-flux lines; the main-thread
+    ``done`` slot writes the result back into the sliders. Pure read of State, no
+    write, so it is safe off-main.
+    """
+
+    def __init__(self, ctrl: Controller, params: "_AutoTuneParams") -> None:
+        super().__init__()
+        self.signals = _WorkerSignals()
+        self._ctrl = ctrl
+        self._p = params
+
+    def run(self) -> None:
+        try:
+            p = self._p
+            g, bare_rf = self._ctrl.auto_tune(
+                p.sample_fluxs, p.g0, p.bare_rf0, p.g_bounds, p.rf_bounds
+            )
+        except Exception as exc:  # noqa: BLE001 — surface to the panel
+            logger.exception("auto-tune worker failed")
+            self.signals.failed.emit(str(exc))
+            return
+        self.signals.done.emit(_AutoTuneResult(g, bare_rf))
+
+
 class PipelinePanelWidget(QWidget):
     """The dispersive single-flow analysis panel."""
 
     def __init__(self, ctrl: Controller, parent: Optional[QWidget] = None) -> None:
+        from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
+
         super().__init__(parent)
         self._ctrl = ctrl
         self._pool = QThreadPool.globalInstance() or QThreadPool(self)
@@ -158,6 +206,14 @@ class PipelinePanelWidget(QWidget):
         # Points at whichever step's busy bar is currently active (preprocess /
         # predict). Both run a black-box compute, so the bars are indeterminate.
         self._active_progress: Optional[QProgressBar] = None
+
+        # Debounce the sample-dot recompute while a g / r_f slider is being dragged:
+        # the line moves live on every tick, but the (heavier) per-flux prediction
+        # only fires _SLIDER_DEBOUNCE_MS after the last move (when the user pauses).
+        self._dot_debounce = QTimer(self)
+        self._dot_debounce.setSingleShot(True)
+        self._dot_debounce.setInterval(_SLIDER_DEBOUNCE_MS)
+        self._dot_debounce.timeout.connect(self._on_dot_debounce_fired)
 
         self._build_ui()
         self._sync_enabled()
@@ -175,10 +231,15 @@ class PipelinePanelWidget(QWidget):
         top_row.addWidget(self._build_preprocess_section(), stretch=1)
         root.addLayout(top_row)
 
+        # Shared info bar between the step 1/2/3 row and step 4 (keeps those boxes
+        # short by moving their loaded-state text here).
+        root.addWidget(self._build_info_row())
         root.addWidget(self._build_tune_section())
         root.addWidget(self._build_figure_tabs(), stretch=1)
 
     def _build_inputs_section(self) -> QWidget:
+        # Buttons only — the loaded-inputs text shows in the shared info row below
+        # (built by _build_info_row), so this box stays short.
         box = QGroupBox("1. Project & fit inputs")
         layout = QVBoxLayout(box)
         row = QHBoxLayout()
@@ -190,12 +251,10 @@ class PipelinePanelWidget(QWidget):
         row.addWidget(load_btn)
         row.addStretch(1)
         layout.addLayout(row)
-        self._inputs_label = QLabel("Load the fluxonium fit (fluxdep_fit) first.")
-        self._inputs_label.setWordWrap(True)
-        layout.addWidget(self._inputs_label)
         return box
 
     def _build_load_section(self) -> QWidget:
+        # Button only — the loaded one-tone status shows in the shared info row below.
         self._load_box = QGroupBox("2. Load one-tone spectrum")
         layout = QVBoxLayout(self._load_box)
         row = QHBoxLayout()
@@ -206,8 +265,6 @@ class PipelinePanelWidget(QWidget):
         row.addWidget(self._browse_btn)
         row.addStretch(1)
         layout.addLayout(row)
-        self._onetone_label = QLabel("(no one-tone loaded)")
-        layout.addWidget(self._onetone_label)
         return self._load_box
 
     def _build_preprocess_section(self) -> QWidget:
@@ -221,6 +278,19 @@ class PipelinePanelWidget(QWidget):
         layout.addWidget(self._progress)
         layout.addStretch(1)
         return self._preprocess_box
+
+    def _build_info_row(self) -> QWidget:
+        """A shared single-line info bar (between steps 1/2/3 and step 4) that shows
+        the loaded fit inputs and one-tone status, so the step boxes above stay short."""
+        bar = QWidget()
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(4, 0, 4, 0)
+        self._inputs_label = QLabel("Load the fluxonium fit (fluxdep_fit) first.")
+        self._inputs_label.setWordWrap(True)
+        self._onetone_label = QLabel("(no one-tone loaded)")
+        layout.addWidget(self._inputs_label, stretch=3)
+        layout.addWidget(self._onetone_label, stretch=1)
+        return bar
 
     def _build_tune_section(self) -> QWidget:
         # The tune figure lives in the shared tab area below. Dragging a slider moves
@@ -244,10 +314,15 @@ class PipelinePanelWidget(QWidget):
         self._add_sample_btn.clicked.connect(self._on_add_sample)
         self._clear_samples_btn = QPushButton("Clear samples")
         self._clear_samples_btn.clicked.connect(self._on_clear_samples)
+        # Auto tune optimises g / r_f against the sample lines; only meaningful once
+        # at least one sample line exists, so it is enabled/disabled in _sync_enabled.
+        self._auto_tune_btn = QPushButton("Auto tune")
+        self._auto_tune_btn.clicked.connect(self._on_auto_tune)
         self._tune_btn = QPushButton("Use these g / r_f")
         self._tune_btn.clicked.connect(self._on_tune)
         bottom.addWidget(self._add_sample_btn)
         bottom.addWidget(self._clear_samples_btn)
+        bottom.addWidget(self._auto_tune_btn)
         bottom.addWidget(self._tune_btn)
         bottom.addStretch(1)
         self._export_label = QLabel("")
@@ -328,6 +403,16 @@ class PipelinePanelWidget(QWidget):
         self._tune_box.setEnabled(has_preprocess)
         # Export (now inside step 4) only enables once a tuning has been accepted.
         self._export_btn.setEnabled(has_result)
+        self._sync_auto_tune_enabled()
+
+    def _sync_auto_tune_enabled(self) -> None:
+        """Auto tune needs sample-flux lines to define its objective; enable it only
+        when at least one exists (sample lines live in the artists, not State, so this
+        is called on add/clear too, not just on _sync_enabled)."""
+        has_samples = (
+            self._tune_artists is not None and len(self._tune_artists.samples) > 0
+        )
+        self._auto_tune_btn.setEnabled(has_samples)
 
     # --- section 1: inputs ----------------------------------------------
 
@@ -429,8 +514,10 @@ class PipelinePanelWidget(QWidget):
             self._rf_ghz(),
         )
         # A fresh background drops any prior sample lines; re-arm drag on the new
-        # artists so dragging targets them.
-        self._tune_canvas.bind_drag(self._tune_artists, self._on_sample_drag)
+        # artists so dragging targets them (move on drag, recompute on drop).
+        self._tune_canvas.bind_drag(
+            self._tune_artists, self._on_sample_drag, self._on_sample_drop
+        )
         self._tune_canvas.redraw()
 
     def _rf_tick_for(self, rf_ghz: float) -> int:
@@ -500,17 +587,22 @@ class PipelinePanelWidget(QWidget):
         return float(self._g_slider.value())
 
     def _on_rf_slider(self, _tick: int) -> None:
-        """Live: move the r_f line as the slider drags + refresh the sample dots."""
+        """Live: move the r_f line as the slider drags; debounce the dot recompute."""
         rf_ghz = self._rf_ghz()
         self._rf_label.setText(f"{1e3 * rf_ghz:.1f} MHz")
         if self._tune_artists is not None:
-            update_bare_line(self._tune_artists, rf_ghz)
-            self._refresh_sample_dots()
+            update_bare_line(self._tune_artists, rf_ghz)  # cheap, every tick
             self._tune_canvas.redraw()
+            self._dot_debounce.start()  # recompute dots only when the user pauses
 
     def _on_g_slider(self, value: int) -> None:
-        """Live: dragging g refreshes the sample dots (single-point predict, no full run)."""
+        """Live: update the g label; debounce the (heavier) sample-dot recompute."""
         self._g_label.setText(f"{value}.0 MHz")
+        if self._tune_artists is not None:
+            self._dot_debounce.start()
+
+    def _on_dot_debounce_fired(self) -> None:
+        """Recompute all sample dots once the g / r_f slider has settled."""
         if self._tune_artists is not None:
             self._refresh_sample_dots()
             self._tune_canvas.redraw()
@@ -526,6 +618,7 @@ class PipelinePanelWidget(QWidget):
         add_sample_line(self._tune_artists, flux)
         self._refresh_sample_dots()
         self._tune_canvas.redraw()
+        self._sync_auto_tune_enabled()  # first sample enables Auto tune
 
     def _on_clear_samples(self) -> None:
         """Remove every sample line + its dots in place (keeps the dispersion lines)."""
@@ -534,14 +627,22 @@ class PipelinePanelWidget(QWidget):
         for sample in list(self._tune_artists.samples):
             remove_sample_line(self._tune_artists, sample)
         self._tune_canvas.redraw()
+        self._sync_auto_tune_enabled()  # no samples left disables Auto tune
 
     def _on_sample_drag(self, sample: SampleArtists, flux: float) -> None:
-        """Drag callback: move the grabbed line + recompute only its dots."""
+        """Motion callback: move the grabbed line VISUALLY only (no compute while
+        dragging — the dot is recomputed on release in ``_on_sample_drop``)."""
         if self._tune_artists is None or self._ctrl.state.preprocess is None:
             return
         sp_fluxs = self._ctrl.state.preprocess.sp_fluxs
         flux = float(np.clip(flux, sp_fluxs[0], sp_fluxs[-1]))
         move_sample_line(sample, flux)
+        self._tune_canvas.redraw()
+
+    def _on_sample_drop(self, sample: SampleArtists) -> None:
+        """Release callback: recompute the dropped line's dot now the drag has ended."""
+        if self._tune_artists is None or self._ctrl.state.preprocess is None:
+            return
         self._compute_sample_dots([sample])
         self._tune_canvas.redraw()
 
@@ -615,6 +716,50 @@ class PipelinePanelWidget(QWidget):
         self._tune_btn.setEnabled(True)
         self._end_progress()
         self._warn("Tune failed", friendly_fit_message("Tune", message))
+
+    # --- auto tune (scipy optimiser over the sample lines) ---------------
+
+    def _on_auto_tune(self) -> None:
+        """Optimise g / r_f against the sample lines off-main; write back the sliders.
+
+        The slow iterative scipy search runs on a worker; the done slot sets the g/r_f
+        sliders to the result and refreshes the sample dots (it does NOT accept the
+        fit — the user still presses "Use these g/r_f"). The button is disabled while
+        running so only one optimisation is in flight.
+        """
+        if self._tune_artists is None or self._ctrl.state.preprocess is None:
+            return
+        sample_fluxs = np.array(
+            [s.flux for s in self._tune_artists.samples], dtype=np.float64
+        )
+        if sample_fluxs.size == 0:
+            return
+        params = _AutoTuneParams(
+            sample_fluxs=sample_fluxs,
+            g0=1e-3 * self._g_mhz(),
+            bare_rf0=self._rf_ghz(),
+            g_bounds=(1e-3 * _G_MIN_MHZ, 1e-3 * _G_MAX_MHZ),
+            rf_bounds=(self._rf_lo_ghz, self._rf_hi_ghz),
+        )
+        self._auto_tune_btn.setEnabled(False)
+        self._begin_progress(self._tune_progress)
+        worker = _AutoTuneWorker(self._ctrl, params)
+        worker.signals.done.connect(self._on_auto_tune_done)
+        worker.signals.failed.connect(self._on_auto_tune_failed)
+        self._pool.start(worker)
+
+    def _on_auto_tune_done(self, result: _AutoTuneResult) -> None:
+        self._end_progress()
+        self._sync_auto_tune_enabled()  # re-enable (if samples still present)
+        # Write the optimised values back into the sliders (their valueChanged slots
+        # move the lines + refresh the sample dots). Does NOT accept the fit.
+        self._g_slider.setValue(int(round(1e3 * result.g)))
+        self._rf_slider.setValue(self._rf_tick_for(result.bare_rf))
+
+    def _on_auto_tune_failed(self, message: str) -> None:
+        self._end_progress()
+        self._sync_auto_tune_enabled()
+        self._warn("Auto tune failed", friendly_fit_message("Auto tune", message))
 
     # --- tabs + export --------------------------------------------------
 

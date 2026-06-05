@@ -139,6 +139,41 @@ class Controller:
         rf_0, rf_1 = predict_dispersive_at(inputs.params, fluxs, g, bare_rf)
         return rf_0, rf_1
 
+    def auto_tune(
+        self,
+        sample_fluxs: NDArray[np.float64],
+        g0: float,
+        bare_rf0: float,
+        g_bounds: tuple[float, float],
+        rf_bounds: tuple[float, float],
+    ) -> tuple[float, float]:
+        """Optimise (g, bare_rf) to best match the sample-flux lines (read-only).
+
+        Snapshots the fit params + preprocessing off State, then runs the scipy
+        optimiser. Pure and State-free, so the (slow, iterative) call is safe on a
+        worker thread; the caller records the result on the main thread. Fast-fails
+        if inputs / preprocessing are missing or there are no sample fluxes.
+        """
+        from zcu_tools.gui.app.dispersive.services.autotune import auto_tune
+
+        inputs = self._state.fit_inputs
+        pp = self._state.preprocess
+        if inputs is None:
+            raise RuntimeError("no fluxonium fit inputs (load params.json first)")
+        if pp is None:
+            raise RuntimeError("no preprocessing result (run preprocessing first)")
+        return auto_tune(
+            inputs.params,
+            pp.sp_fluxs,
+            pp.sp_freqs,
+            pp.norm_phases,
+            sample_fluxs,
+            g0,
+            bare_rf0,
+            g_bounds,
+            rf_bounds,
+        )
+
     # --- result (the user's tuning is the final fit) --------------------
 
     def set_manual_fit(self, g: float, bare_rf: float, *, res_dim: int = 4) -> None:
