@@ -129,6 +129,22 @@ class BuildCfg(Protocol):
     ) -> Optional[Any]: ...
 
 
+class RunBody(Protocol):
+    """Per-Node-type execution body — measure + fit, producing a Patch.
+
+    Runs after ``build_cfg`` for one flux point: given the built ``cfg``, the
+    Node's ``snapshot`` (declared info + modules), ``tools`` (predictor), and
+    ``soc`` (the connected board), it acquires a signal, fits it, and returns a
+    ``Patch`` of its provides / provides_modules. The dry-run implementation
+    *synthesises* a physically-plausible signal (Lorentzian peak, exponential
+    decay, ...) and fits it with the real fitting functions — ``soc`` is the
+    connected (mock) board but its noise-only acquire is not used; Phase B swaps
+    in real ``soc.acquire``.
+    """
+
+    def __call__(self, cfg: Any, snapshot: Any, tools: Any, soc: Any) -> Any: ...
+
+
 @dataclass(frozen=True)
 class NodeSpec:
     """Static declaration of one measurement Node type.
@@ -136,6 +152,11 @@ class NodeSpec:
     ``base_params`` lists the user-tunable attribute keys (detune_sweep,
     num_expts, reps, rounds, earlystop_snr, ...) — what the GUI property form
     exposes. The runtime values live on the Node instance / State, not here.
+
+    ``build_cfg`` builds the experiment cfg from the snapshot; ``run_body``
+    executes it (acquire + fit) into a Patch. The orchestrator's driver calls
+    build_cfg then run_body. A Node without run_body is declaration-only (the
+    prototype injects a fake run_node for those).
     """
 
     name: str
@@ -147,6 +168,7 @@ class NodeSpec:
     provides_modules: tuple[str, ...] = ()
     base_params: tuple[str, ...] = ()
     build_cfg: Optional[BuildCfg] = None
+    run_body: Optional[RunBody] = None
 
     def all_dependencies(self) -> tuple[Dependency, ...]:
         return self.requires + self.optional

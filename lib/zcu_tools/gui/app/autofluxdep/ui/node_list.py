@@ -129,8 +129,10 @@ class NodeListPane(QWidget):
         self.select_index(new_idx)
 
     def _on_setup(self) -> None:
-        # prototype: no dialog — build fake resources directly
-        self._ctrl.setup()
+        from .setup_dialog import SetupDialog
+
+        dlg = SetupDialog(self._ctrl, self)
+        dlg.exec()  # setup() is called inside on OK; refresh either way
         self._refresh_buttons()
 
     # --- run / stop ---

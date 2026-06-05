@@ -32,13 +32,18 @@ captured at import time.
 
 from __future__ import annotations
 
+import numpy as np
 from typing_extensions import Any, Mapping, Optional
 
+from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.spec import (
     Dependency,
     ModuleDep,
     NodeSpec,
 )
+from zcu_tools.gui.app.autofluxdep.nodes.synth import lorentzian_dip
+from zcu_tools.utils.fitting import fit_qubit_freq
+from zcu_tools.utils.process import rotate2real
 
 
 # --- placeholder external bindings (Phase B: inject from project/metadata) ---
@@ -93,6 +98,61 @@ def _build_cfg(snapshot: Any, params: Mapping[str, Any], tools: Any) -> Optional
     }
 
 
+def _parse_detune_sweep(spec: Any) -> np.ndarray:
+    """Parse the detune sweep (text "start,stop,step" or a tuple) into an axis.
+
+    Falls back to (-20, 50, 0.5) MHz if unset/unparseable — the prototype's
+    field is free text, so a malformed value degrades to the default rather than
+    failing the sweep."""
+    try:
+        if isinstance(spec, str) and spec.strip():
+            start, stop, step = (float(x) for x in spec.split(","))
+        elif isinstance(spec, (tuple, list)) and len(spec) == 3:
+            start, stop, step = (float(x) for x in spec)
+        else:
+            start, stop, step = -20.0, 50.0, 0.5
+    except (ValueError, TypeError):
+        start, stop, step = -20.0, 50.0, 0.5
+    n = max(2, int(round((stop - start) / step)) + 1)
+    return np.linspace(start, stop, n)
+
+
+def _signal2real(signals: np.ndarray) -> np.ndarray:
+    """PCA-rotate to the real axis and normalise to [0, 1] (a dip near 0)."""
+    real = rotate2real(signals.astype(np.complex128)).real
+    lo, hi = float(real.min()), float(real.max())
+    real = (real - lo) / (hi - lo + 1e-12)
+    # orient so the resonance is a dip (start/end high, centre low)
+    if real[0] + real[-1] < real[len(real) // 2]:
+        real = 1.0 - real
+    return real
+
+
+def _run_body(cfg: Any, snapshot: Any, tools: Any, soc: Any) -> Patch:
+    """Dry-run body: synthesise a Lorentzian dip vs detune, fit it, produce the
+    raw qubit_freq / fit_detune / fit_kappa. Does NOT call soc.acquire (MockSoc
+    gives only noise); ``soc`` is the connected board, unused here."""
+    _ = tools, soc
+    pred_qf = float(snapshot["predict_freq"])
+    detunes = _parse_detune_sweep(cfg["sweep"]["detune"])
+    freqs = pred_qf + detunes  # absolute frequency axis
+
+    # plant a true resonance slightly off the prediction, with a realistic width
+    true_freq = pred_qf + 1.5  # MHz offset from prediction
+    true_fwhm = 2.0  # MHz
+    flux_idx = int(snapshot["flux_idx"]) if "flux_idx" in snapshot else 0
+    signals = lorentzian_dip(freqs, true_freq, true_fwhm, seed=flux_idx)
+
+    real = _signal2real(signals)
+    freq, _freq_err, fwhm, _fwhm_err, _fit, _ = fit_qubit_freq(freqs, real)
+
+    patch = Patch()
+    patch.set("qubit_freq", float(freq))
+    patch.set("fit_detune", float(freq - pred_qf))
+    patch.set("fit_kappa", float(fwhm))
+    return patch
+
+
 # The Node reports RAW fit results only — qubit_freq, fit_detune, fit_kappa — and
 # reads the readout MODULE (which a tuning Node like ro_optimize may produce, or
 # the ml library presets). A consumer that wants the smoothed kappa just adds
@@ -113,4 +173,5 @@ QUBIT_FREQ_SPEC = NodeSpec(
     optional_modules=(ModuleDep("readout", default=_default_readout),),
     base_params=("detune_sweep", "reps", "rounds", "relax_delay", "earlystop_snr"),
     build_cfg=_build_cfg,
+    run_body=_run_body,
 )

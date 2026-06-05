@@ -27,7 +27,8 @@ def app(qapp):
 
 def _list_labels(win: MainWindow) -> list[str]:
     lst = win._list._list
-    return [lst.item(i).text() for i in range(lst.count())]
+    items = [lst.item(i) for i in range(lst.count())]
+    return [it.text() for it in items if it is not None]
 
 
 # --- workflow editing reflects in the list ---
@@ -70,9 +71,11 @@ def test_selection_shows_node_form(app):
 
 
 def test_run_disabled_until_setup(app):
-    _ctrl, win = app
+    ctrl, win = app
     assert not win._list._run_btn.isEnabled()  # no setup yet
-    win._list._on_setup()
+    # call setup directly (the dialog is modal; tested separately in test_setup)
+    ctrl.setup(use_mock=True)
+    win._list._refresh_buttons()
     assert win._list._run_btn.isEnabled()
     assert "ok" in win._list._setup_light.text()
 
@@ -82,7 +85,8 @@ def test_run_disabled_until_setup(app):
 
 def _run_to_completion(ctrl, win):
     ctrl.set_flux_values([0.0, 1.0, 2.0])
-    win._list._on_setup()
+    ctrl.setup(use_mock=True)
+    win._list._refresh_buttons()
     win._start()
     # pump the event loop until the worker finishes and run-done fires
     for _ in range(2000):

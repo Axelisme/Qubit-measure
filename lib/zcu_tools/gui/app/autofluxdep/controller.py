@@ -2,8 +2,9 @@
 
 State + EventBus coordinator, mirroring fluxdep/dispersive. Owns the workflow
 definition commands (add/remove/reorder Nodes, set flux, set Node params), a
-fake Setup that builds placeholder run resources, and a cancellable run that
-drives the orchestrator on fake data and emits run-lifecycle events. The
+Setup that builds a MockSoc + FakeDevice flux board (the prototype's offline
+resources), and a cancellable run that drives each Node through its build_cfg +
+run_body (synthetic acquire + real fit) and emits run-lifecycle events. The
 hardware-free ``dry_run`` remains for direct testing of the dependency model.
 """
 
@@ -99,16 +100,35 @@ class Controller:
         self._state.version.bump(FLUX_VERSION_KEY)
         self._bus.emit(Event(EventType.FLUX_CHANGED, len(values)))
 
-    # --- setup (prototype: build fake resources, no hardware) ---
+    # --- setup (prototype: MockSoc + FakeDevice, no hardware) ---
 
-    def setup(self, resources: Optional[SetupResources] = None) -> None:
-        """Build the run prerequisites. Prototype: a fake SetupResources unless
-        one is supplied. Real soc/device/ml/predictor wiring is Phase B."""
-        self._state.resources = resources or SetupResources(
-            soc="<fake-soc>", soccfg="<fake-soccfg>", ml=None, predictor=None
-        )
+    def setup(
+        self,
+        resources: Optional[SetupResources] = None,
+        *,
+        use_mock: bool = True,
+    ) -> None:
+        """Build the run prerequisites. Prototype: ``use_mock`` builds a MockSoc
+        + a FakeDevice flux board (registered as "flux_dev" in the global device
+        manager). Real make_soc_proxy / ml / predictor wiring is Phase B; pass an
+        explicit ``resources`` to inject them."""
+        if resources is None:
+            resources = self._build_mock_resources() if use_mock else SetupResources()
+        self._state.resources = resources
         self._state.version.bump(SETUP_VERSION_KEY)
         self._bus.emit(Event(EventType.SETUP_DONE, None))
+
+    @staticmethod
+    def _build_mock_resources() -> SetupResources:
+        """MockSoc + soccfg + a FakeDevice flux board (no hardware)."""
+        from zcu_tools.device import FakeDevice, GlobalDeviceManager
+        from zcu_tools.program.v2.mocksoc import make_mock_soc, make_mock_soccfg
+
+        soc = make_mock_soc()
+        soccfg = make_mock_soccfg()
+        if "flux_dev" not in GlobalDeviceManager.get_all_devices():
+            GlobalDeviceManager.register_device("flux_dev", FakeDevice(fast_mode=True))
+        return SetupResources(soc=soc, soccfg=soccfg, ml=None, predictor=None)
 
     # --- run control (cancellable; prototype uses fake per-Node execution) ---
 
@@ -117,28 +137,45 @@ class Controller:
         self._stop = True
 
     def start_run(self) -> InfoStore:
-        """Run flux × Nodes with a fake per-Node body, emitting run events.
+        """Run flux × Nodes, emitting run events. Drives each Node through its
+        build_cfg + run_body (synthetic acquire + real fit) when available, else
+        a fake fallback.
 
         Blocks until the sweep finishes or is stopped — the UI calls this on a
         worker thread. Emits RUN_STARTED, NODE_STARTED(name, idx) before each
         Node, POINT_DONE(idx) after each flux point, and RUN_FINISHED /
-        RUN_STOPPED at the end. Prototype: each Node produces fake values for its
-        provides (and a fake module for provides_modules).
+        RUN_STOPPED at the end.
         """
         self._stop = False
         self._running = True
         self._bus.emit(Event(EventType.RUN_STARTED, None))
 
-        def run_node(node: NodeInstance, _snap, _tools) -> Patch:
+        soc = self._state.resources.soc if self._state.resources else None
+
+        def run_node(node: NodeInstance, snapshot, tools) -> Patch:
             self._bus.emit(Event(EventType.NODE_STARTED, (node.name, self._cur_idx)))
-            data = {k: (0.05 if "kappa" in k else 1.0) for k in node.spec.provides}
-            mods = {m: f"<{node.name}:{m}>" for m in node.spec.provides_modules}
+            spec = node.spec
+            if spec.build_cfg is not None and spec.run_body is not None:
+                cfg = spec.build_cfg(snapshot, node.params, tools)
+                if cfg is None:
+                    return Patch()  # build_cfg asked to skip this Node this point
+                return spec.run_body(cfg, snapshot, tools, soc)
+            # declaration-only Node (no body yet) → fake fallback
+            data = {k: (0.05 if "kappa" in k else 1.0) for k in spec.provides}
+            mods = {m: f"<{node.name}:{m}>" for m in spec.provides_modules}
             return Patch(data, mods)
 
-        def pre_point(idx: int, _flux, info: InfoStore, _tools) -> None:
+        def pre_point(idx: int, flux, info: InfoStore, tools) -> None:
             self._cur_idx = idx
-            # seed the values Nodes require but no Node provides (e.g. predict_freq)
-            info.point["predict_freq"] = 5000.0 + idx
+            # seed predict_freq (the pre-step's job): real predictor if set up,
+            # else a flux-dependent stand-in so the synthetic Lorentzian moves.
+            predictor = (
+                self._state.resources.predictor if self._state.resources else None
+            )
+            if predictor is not None:
+                info.point["predict_freq"] = float(predictor.predict_freq(flux))
+            else:
+                info.point["predict_freq"] = 5000.0 + 50.0 * idx
 
         def on_point(idx: int, _flux, _info) -> None:
             self._bus.emit(Event(EventType.POINT_DONE, idx))
