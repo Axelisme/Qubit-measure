@@ -1,9 +1,16 @@
 """mcp_server-side optimistic-concurrency bookkeeping.
 
-Drives send_gui_rpc with the socket layer mocked: _send_line synchronously
-delivers a per-method crafted reply via _deliver_reply, so we assert the mcp
-policy (attach expected_versions for guarded ops, translate a stale rejection,
-refresh _LAST_SEEN after every successful RPC) without a real GUI.
+Drives send_gui_rpc with the socket layer mocked: the bridge's _send_line
+synchronously delivers a per-method crafted reply via the bridge's
+_deliver_reply, so we assert the mcp policy (attach expected_versions for guarded
+ops, translate a stale rejection, refresh _LAST_SEEN after every successful RPC)
+without a real GUI.
+
+Post-E4: socket I/O lives on the shared McpBridge instance ``mcp_server._BRIDGE``
+(``_sock`` / ``_send_line`` / ``_deliver_reply``), while the mcp policy
+(``send_gui_rpc`` / ``_LAST_SEEN`` / guard) stays on ``mcp_server``. So the
+fixture patches the socket layer on ``_BRIDGE`` and keeps asserting policy on
+``mcp_server``.
 """
 
 from __future__ import annotations
@@ -22,7 +29,8 @@ def wired(monkeypatch):
     Returns a dict you populate as ``{method: reply_envelope}``; ``sent`` records
     every outgoing ``(method, params)`` so tests can assert what was attached.
     """
-    monkeypatch.setattr(mcp_server, "_GUI_SOCK", MagicMock())
+    bridge = mcp_server._BRIDGE
+    monkeypatch.setattr(bridge, "_sock", MagicMock())
     monkeypatch.setattr(mcp_server, "_LAST_SEEN", {}, raising=False)
     replies: Dict[str, Dict[str, Any]] = {}
     sent: list[tuple[str, Dict[str, Any]]] = []
@@ -32,9 +40,9 @@ def wired(monkeypatch):
         sent.append((method, payload["params"]))
         resp = dict(replies.get(method, {"ok": True, "result": {}}))
         resp["id"] = payload["id"]
-        mcp_server._deliver_reply(resp)
+        bridge._deliver_reply(resp)
 
-    monkeypatch.setattr(mcp_server, "_send_line", fake_send_line)
+    monkeypatch.setattr(bridge, "_send_line", fake_send_line)
     replies["sent"] = sent  # type: ignore[assignment]
     return replies
 

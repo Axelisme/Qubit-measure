@@ -11,6 +11,7 @@ import socket
 
 import pytest
 from zcu_tools.gui.app.main.services.remote import mcp_server
+from zcu_tools.gui.remote import mcp_bridge
 
 
 @pytest.fixture
@@ -31,8 +32,8 @@ def _free_port() -> int:
 
 
 def test_port_is_open_detects_listener(busy_port):
-    assert mcp_server._port_is_open(busy_port) is True
-    assert mcp_server._port_is_open(_free_port()) is False
+    assert mcp_bridge._port_is_open(busy_port) is True
+    assert mcp_bridge._port_is_open(_free_port()) is False
 
 
 def test_launch_refuses_occupied_port(busy_port):
@@ -67,16 +68,21 @@ def _capture_launch_cmd(monkeypatch, arguments) -> list[str]:
         calls["n"] += 1
         return calls["n"] > 1
 
-    monkeypatch.setattr(mcp_server, "_port_is_open", fake_port_is_open)
-    monkeypatch.setattr(mcp_server.subprocess, "Popen", fake_popen)
-    monkeypatch.setattr(mcp_server, "_write_pid_file", lambda _pid: None)
-    monkeypatch.setattr(mcp_server, "_GUI_PROC", None)
+    # Post-E4: the socket/subprocess plumbing moved into the shared McpBridge.
+    # _port_is_open is a module-level helper in mcp_bridge (the bridge's
+    # launch/connect call it internally); subprocess.Popen lives in mcp_bridge;
+    # the pid-file writer and launched-process handle are instance state on
+    # mcp_server._BRIDGE.
+    monkeypatch.setattr(mcp_bridge, "_port_is_open", fake_port_is_open)
+    monkeypatch.setattr(mcp_bridge.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(mcp_server._BRIDGE, "_write_pid_file", lambda _pid: None)
+    monkeypatch.setattr(mcp_server._BRIDGE, "_proc", None)
     try:
         # auto_connect=False so we never open a real socket; _port_is_open=True
         # makes the readiness wait return immediately.
         mcp_server.tool_gui_launch({**arguments, "auto_connect": False})
     finally:
-        monkeypatch.setattr(mcp_server, "_GUI_PROC", None)
+        monkeypatch.setattr(mcp_server._BRIDGE, "_proc", None)
     return captured["cmd"]
 
 
@@ -100,7 +106,7 @@ def test_connect_port_defaults_to_8765():
     # 8765. (Skip if something is actually listening on 8765 — e.g. a live GUI
     # during interactive testing — so the assertion stays about the default, not
     # the environment.)
-    if mcp_server._port_is_open(8765):
+    if mcp_bridge._port_is_open(8765):
         pytest.skip("port 8765 is in use (live GUI); cannot assert the no-GUI path")
     with pytest.raises(RuntimeError, match="No GUI is listening on 127.0.0.1:8765"):
         mcp_server.tool_gui_connect({})

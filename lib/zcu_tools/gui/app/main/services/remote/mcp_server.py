@@ -23,10 +23,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
-import signal
-import socket
-import subprocess
 import sys
 import threading
 import time
@@ -34,7 +30,7 @@ import traceback
 from collections import deque
 from pathlib import Path
 from tempfile import gettempdir
-from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
+from typing import Any, Callable, Deque, Dict, List, Optional
 
 # This bridge is launched standalone (``python .../mcp_server.py``), so the repo
 # ``lib`` dir is not on sys.path by default. Add it so the wire-contract modules
@@ -71,9 +67,11 @@ from zcu_tools.gui.app.main.services.remote.method_specs import (  # noqa: E402
 from zcu_tools.gui.app.main.services.remote.wire_version import (  # noqa: E402
     WIRE_VERSION as MCP_WIRE_VERSION,
 )
-from zcu_tools.gui.remote.param_spec import (  # noqa: E402
-    JsonType,
-    build_input_schema,
+from zcu_tools.gui.remote.mcp_bridge import (  # noqa: E402
+    McpBridge,
+    MCPBridgeConfig,
+    assemble_tools,
+    generate_tools,
 )
 
 # This MCP server's own code revision — reported (not compared) in the version
@@ -243,17 +241,10 @@ Call contract — read before issuing defensive/duplicate calls:
 """
 
 # ---------------------------------------------------------------------------
-# Connection state (module-level so tools are thin wrappers)
+# App-specific state (socket I/O lives in the shared McpBridge; what stays here
+# is measure-gui's policy: the diagnostic queue, the optimistic-concurrency
+# bookkeeping, and the async-operation handle map)
 # ---------------------------------------------------------------------------
-
-_GUI_SOCK_LOCK = threading.Lock()
-_GUI_SOCK: Optional[socket.socket] = None
-
-# RPC bookkeeping — ``_PENDING`` maps rid -> result holder; the reader thread
-# unblocks the matching waiter via ``_RID_COND``.
-_RID_COND = threading.Condition()
-_RID_COUNTER = 0
-_PENDING: Dict[str, Dict[str, Any]] = {}
 
 # Diagnostic push queue (FIFO, drop-oldest when full). The GUI still emits its
 # full EventBus stream + diagnostics on the wire, but the agent is exposed only
@@ -329,144 +320,6 @@ _OP_KEY_OF: Dict[str, "Callable[[Dict[str, Any]], str]"] = {
     "analyze.start": lambda p: f"analyze:{p.get('tab_id', '')}",
 }
 
-_READER_THREAD: Optional[threading.Thread] = None
-_READER_STOP = threading.Event()
-
-# GUI subprocess (when launched via gui_launch tool).
-_GUI_PROC: Optional[subprocess.Popen] = None
-
-# PID file for cross-session GUI process tracking.
-_GUI_PID_FILE = Path(gettempdir()) / "zcu_tools_gui.pid"
-
-# DEBUG log for GUIs we launch (OS temp dir, not the repo). gui_launch points
-# run_measure_gui.py here so an agent can read the server-side event flow for debugging.
-_GUI_LOG_FILE = Path(gettempdir()) / "zcu_tools_gui_debug.log"
-
-
-def _pid_alive(pid: int) -> bool:
-    """Cross-platform 'is this pid still running?'.
-
-    POSIX: ``os.kill(pid, 0)`` raises ProcessLookupError when gone. Windows has
-    no signal 0, so probe via the process handle (OpenProcess + exit code)."""
-    if os.name == "nt":
-        import ctypes
-
-        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-        STILL_ACTIVE = 259
-        handle = ctypes.windll.kernel32.OpenProcess(  # type: ignore[attr-defined]
-            PROCESS_QUERY_LIMITED_INFORMATION, False, pid
-        )
-        if not handle:
-            return False
-        try:
-            code = ctypes.c_ulong()
-            if not ctypes.windll.kernel32.GetExitCodeProcess(  # type: ignore[attr-defined]
-                handle, ctypes.byref(code)
-            ):
-                return False
-            return code.value == STILL_ACTIVE
-        finally:
-            ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except OSError:
-        return True  # exists but not signalable (e.g. permissions)
-
-
-def _write_pid_file(pid: int) -> None:
-    try:
-        _GUI_PID_FILE.write_text(str(pid))
-    except OSError:
-        pass
-
-
-def _read_pid_file() -> Optional[int]:
-    try:
-        return int(_GUI_PID_FILE.read_text().strip())
-    except (OSError, ValueError):
-        return None
-
-
-def _clear_pid_file() -> None:
-    _GUI_PID_FILE.unlink(missing_ok=True)
-
-
-# ---------------------------------------------------------------------------
-# Socket I/O
-# ---------------------------------------------------------------------------
-
-
-def _next_rid() -> str:
-    global _RID_COUNTER
-    with _RID_COND:
-        _RID_COUNTER += 1
-        return f"mcp-{_RID_COUNTER}"
-
-
-def _send_line(payload: Dict[str, Any]) -> None:
-    """Send a single NDJSON line on the GUI socket (lock-guarded)."""
-    if _GUI_SOCK is None:
-        raise RuntimeError("GUI not connected. Call gui_connect first.")
-    data = (json.dumps(payload) + "\n").encode("utf-8")
-    with _GUI_SOCK_LOCK:
-        _GUI_SOCK.sendall(data)
-
-
-def _reader_loop() -> None:
-    """Sole reader of the GUI socket; routes replies vs event pushes."""
-    buf = bytearray()
-    while not _READER_STOP.is_set():
-        if _GUI_SOCK is None:
-            return
-        try:
-            chunk = _GUI_SOCK.recv(4096)
-        except socket.timeout:
-            continue
-        except OSError:
-            break
-        if not chunk:
-            break
-        buf.extend(chunk)
-        while True:
-            nl = buf.find(b"\n")
-            if nl < 0:
-                break
-            line = bytes(buf[:nl])
-            del buf[: nl + 1]
-            if not line:
-                continue
-            try:
-                msg = json.loads(line.decode("utf-8"))
-            except Exception:
-                continue
-            if isinstance(msg, dict) and "id" in msg:
-                _deliver_reply(msg)
-            elif isinstance(msg, dict) and "event" in msg:
-                _deliver_event(msg)
-            # Anything else is silently dropped.
-    # Wake everyone so callers see "disconnected".
-    with _RID_COND:
-        for holder in _PENDING.values():
-            holder["error"] = "GUI socket closed unexpectedly."
-            holder["done"] = True
-        _RID_COND.notify_all()
-
-
-def _deliver_reply(msg: Dict[str, Any]) -> None:
-    rid = msg.get("id")
-    if not isinstance(rid, str):
-        return
-    with _RID_COND:
-        holder = _PENDING.pop(rid, None)
-        if holder is None:
-            return
-        holder["message"] = msg
-        holder["done"] = True
-        _RID_COND.notify_all()
-
 
 def _deliver_event(msg: Dict[str, Any]) -> None:
     # The GUI still emits its full EventBus stream over the wire (RPC-side
@@ -492,68 +345,26 @@ def _drain_pending() -> Dict[str, list]:
     return {"diagnostics": diagnostics}
 
 
-def _send_gui_rpc_raw(
-    method: str,
-    params: Dict[str, Any],
-    timeout_seconds: float,
-) -> Dict[str, Any]:
-    """Issue one RPC and return its parsed reply envelope (no guard logic)."""
-    if _GUI_SOCK is None:
-        raise RuntimeError("GUI not connected. Call gui_connect first.")
-    rid = _next_rid()
-    holder: Dict[str, Any] = {"done": False}
-    with _RID_COND:
-        _PENDING[rid] = holder
-    try:
-        _send_line({"id": rid, "method": method, "params": params})
-    except Exception:
-        with _RID_COND:
-            _PENDING.pop(rid, None)
-        raise
+# The shared transport bridge for this process. ``on_event=_deliver_event`` routes
+# the GUI's event-push stream through measure-gui's diagnostic filter (only
+# diagnostics are queued for piggyback; resource-change events are dropped). All
+# socket I/O, the reader thread, RID routing, the launched subprocess + pid/log
+# files live in the bridge; this module composes its ``send_rpc_raw`` with the
+# version guard + operation tracking below.
+_CONFIG = MCPBridgeConfig(
+    app_name="gui",
+    tool_prefix="gui_",
+    default_port=8765,
+    mcp_version=MCP_VERSION,
+    wire_version=MCP_WIRE_VERSION,
+    server_display_name="qubit-measure-control",
+    server_instructions=_SERVER_INSTRUCTIONS,
+    pid_file=Path(gettempdir()) / "zcu_tools_gui.pid",
+    log_file=Path(gettempdir()) / "zcu_tools_gui_debug.log",
+    run_script_name="run_measure_gui.py",
+)
 
-    deadline = time.monotonic() + timeout_seconds
-    with _RID_COND:
-        while not holder["done"]:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                _PENDING.pop(rid, None)
-                raise TimeoutError(
-                    f"GUI RPC {method!r} did not complete within {timeout_seconds}s"
-                )
-            _RID_COND.wait(timeout=remaining)
-    if "error" in holder and "message" not in holder:
-        raise ConnectionError(holder["error"])
-    return holder["message"]
-
-
-def _wire_version_note() -> str:
-    """Build a version note for connect/launch replies showing all three
-    versions, so an agent can confirm a reload took effect by eyeballing the
-    numbers (no need for this layer to judge "stale").
-
-    ``wire.version`` is a no-auth probe, so this works right after connect.
-      - WIRE_VERSION is the only *compared* axis (mcp pins it): a mismatch means
-        the two sides speak different protocols → hard MISMATCH.
-      - GUI_VERSION and MCP_VERSION are *reported* (code revisions of each
-        process). They are shown, not compared — the agent reads them to verify
-        its own edits reloaded.
-    """
-    try:
-        resp = _send_gui_rpc_raw("wire.version", {}, 5.0)
-        result = resp.get("result", {})
-        wire_ver = result.get("wire_version")
-        gui_ver = result.get("gui_version", "?")  # absent on a pre-split GUI
-    except Exception as exc:  # noqa: BLE001 — probe is best-effort
-        return f" versions: mcp wire=v{MCP_WIRE_VERSION} mcp=v{MCP_VERSION}, gui=unknown ({exc})"
-    if wire_ver != MCP_WIRE_VERSION:
-        return (
-            f" WIRE VERSION MISMATCH: mcp wire=v{MCP_WIRE_VERSION}, gui wire=v{wire_ver}"
-            " — the two processes speak different protocols; restart the stale one."
-        )
-    return (
-        f" wire v{MCP_WIRE_VERSION} (mcp==gui); gui code v{gui_ver}, "
-        f"mcp code v{MCP_VERSION}."
-    )
+_BRIDGE = McpBridge(_CONFIG, on_event=_deliver_event)
 
 
 def _refresh_versions() -> None:
@@ -564,7 +375,7 @@ def _refresh_versions() -> None:
     baselines. Failures are swallowed — a missing table just means no guard.
     """
     try:
-        resp = _send_gui_rpc_raw("resources.versions", {}, 5.0)
+        resp = _BRIDGE.send_rpc_raw("resources.versions", {}, 5.0)
     except Exception:  # pragma: no cover — best-effort resync
         return
     if not resp.get("ok", False):
@@ -667,7 +478,7 @@ def send_gui_rpc(
         send_params = dict(params)
         send_params["expected_versions"] = _build_expected_versions(method, params)
 
-    resp = _send_gui_rpc_raw(method, send_params, timeout_seconds)
+    resp = _BRIDGE.send_rpc_raw(method, send_params, timeout_seconds)
     if not resp.get("ok", False):
         err = resp.get("error", {})
         if err.get("reason") == "stale_version":
@@ -706,274 +517,52 @@ def send_gui_rpc(
 
 
 def tool_gui_connect(arguments: Dict[str, Any]) -> str:
-    global _GUI_SOCK, _READER_THREAD
     # Default port 8765, symmetric with gui_launch — but opposite expectation:
     # connect attaches to a GUI that is ALREADY running there (launch starts a
     # new one on a free port). So a missing GUI is the error case here.
-    port = arguments.get("port", 8765)
+    port = arguments.get("port", _CONFIG.default_port)
     if not isinstance(port, int):
         raise ValueError("Invalid 'port' argument (must be integer)")
-    token = arguments.get("token")
-
-    # Tear down any existing connection / reader before replacing it.
-    tool_gui_disconnect({})
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(5.0)
-    try:
-        sock.connect(("127.0.0.1", port))
-    except OSError as exc:
-        sock.close()
-        raise RuntimeError(
-            f"No GUI is listening on 127.0.0.1:{port} ({exc}). gui_connect "
-            f"attaches to an already-running GUI; start one first with "
-            f"gui_launch, or pass the port of a running GUI."
-        ) from exc
-    sock.settimeout(1.0)  # short blocking timeout for reader loop responsiveness
-    _GUI_SOCK = sock
-    _READER_STOP.clear()
-    _READER_THREAD = threading.Thread(
-        target=_reader_loop, name="mcp-gui-reader", daemon=True
-    )
-    _READER_THREAD.start()
-
-    if token:
-        send_gui_rpc("auth", {"token": token})
-        return (
-            f"Connected to GUI on 127.0.0.1:{port} with token authentication."
-            + _wire_version_note()
-        )
-    return f"Connected to GUI on 127.0.0.1:{port}." + _wire_version_note()
+    return _BRIDGE.connect(port, arguments.get("token"))
 
 
 def tool_gui_disconnect(arguments: Dict[str, Any]) -> str:
-    global _GUI_SOCK, _READER_THREAD
     del arguments
-    if _GUI_SOCK is None:
-        return "Not connected."
-    _READER_STOP.set()
-    try:
-        _GUI_SOCK.shutdown(socket.SHUT_RDWR)
-    except OSError:
-        pass
-    try:
-        _GUI_SOCK.close()
-    except OSError:
-        pass
-    _GUI_SOCK = None
-    t = _READER_THREAD
-    if t is not None and t.is_alive():
-        t.join(timeout=2.0)
-    _READER_THREAD = None
+    note = _BRIDGE.disconnect()
+    # App-specific housekeeping: drop any buffered diagnostics — they belong to
+    # the connection that just closed.
     with _DIAGNOSTIC_COND:
         _DIAGNOSTIC_QUEUE.clear()
-    return "Disconnected from GUI."
-
-
-def _port_is_open(port: int) -> bool:
-    """True if something is already accepting TCP connections on the port."""
-    try:
-        socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
-        return True
-    except OSError:
-        return False
+    return note
 
 
 def tool_gui_launch(arguments: Dict[str, Any]) -> str:
-    global _GUI_PROC
-    if _GUI_PROC is not None and _GUI_PROC.poll() is None:
-        return f"GUI already running (pid={_GUI_PROC.pid})."
-
-    port = int(arguments.get("port", 8765))
+    port = int(arguments.get("port", _CONFIG.default_port))
     token: Optional[str] = arguments.get("token")
     auto_connect = bool(arguments.get("auto_connect", True))
     clean = bool(arguments.get("clean", False))
-    repo_root = Path(__file__).parents[
-        7
-    ]  # lib/zcu_tools/gui/app/main/services/remote -> repo root
-    # Use this MCP server's own interpreter to spawn the GUI: it is the venv
-    # Python (with the 'gui' extra) that 'uv run' launched the bridge under, so
-    # the GUI child has the same dependencies. This is also cross-platform —
-    # avoids the hardcoded '.venv/bin/python' that does not exist on Windows
-    # (which uses '.venv\Scripts\python.exe').
-    python = sys.executable
-    run_gui = repo_root / "script" / "run_measure_gui.py"
-
-    if not run_gui.exists():
-        raise FileNotFoundError(f"run_measure_gui.py not found at {run_gui}")
-
-    # Pre-flight: if the port is ALREADY accepting connections, someone else
-    # (a stale GUI from a previous session that wasn't stopped, or a foreign
-    # process) owns it. Spawning now would crash with 'Address already in use'
-    # and we'd silently connect to the OTHER process instead — reporting a fresh
-    # pid while talking to old code. Fail fast with an actionable message.
-    if _port_is_open(port):
-        raise RuntimeError(
-            f"Port {port} is already in use — a previous GUI is likely still "
-            f"running (its socket is open). This MCP server does not manage it, "
-            f"so launching here would either fail or connect to that stale "
-            f"process (old code, despite a fresh pid). Stop the old GUI first "
-            f"(gui_stop, or kill the run_measure_gui.py holding port {port}), or launch "
-            f"on a different port."
-        )
-
-    # stderr to a file so a startup crash (e.g. bind failure) is reportable.
-    cmd = [
-        str(python),
-        str(run_gui),
-        "--control-port",
-        str(port),
-        "--log-file",
-        str(_GUI_LOG_FILE),
-    ]
-    if token:
-        cmd += ["--control-token", token]
-    if clean:
-        cmd += ["--clean"]
-
-    # Detach the GUI into its own process group/session so a signal to the MCP
-    # bridge does not propagate to it. start_new_session is POSIX-only; Windows
-    # uses CREATE_NEW_PROCESS_GROUP.
-    if os.name == "nt":
-        _GUI_PROC = subprocess.Popen(
-            cmd,
-            cwd=str(repo_root),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,  # type: ignore[attr-defined]
-        )
-    else:
-        _GUI_PROC = subprocess.Popen(
-            cmd,
-            cwd=str(repo_root),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            start_new_session=True,
-        )
-    _write_pid_file(_GUI_PROC.pid)
-
-    # Wait until the port is listening (up to 15 s). Each iteration first checks
-    # the child is still alive: if it died (e.g. the port got taken between the
-    # pre-flight check and bind), report the crash instead of connecting to
-    # whatever now answers on the port.
-    deadline = time.monotonic() + 15.0
-    ready = False
-    while time.monotonic() < deadline:
-        rc = _GUI_PROC.poll()
-        if rc is not None:
-            stderr = b""
-            if _GUI_PROC.stderr is not None:
-                stderr = _GUI_PROC.stderr.read() or b""
-            tail = stderr.decode("utf-8", "replace").strip().splitlines()[-5:]
-            _GUI_PROC = None
-            raise RuntimeError(
-                f"GUI process exited during startup (returncode={rc}) before "
-                f"port {port} was ready. Last stderr:\n" + "\n".join(tail)
-            )
-        if _port_is_open(port):
-            ready = True
-            break
-        time.sleep(0.3)
-
-    pid = _GUI_PROC.pid
-    if not ready:
-        return (
-            f"GUI launched (pid={pid}) but port {port} not yet reachable — "
-            "call gui_connect manually when ready."
-        )
-
-    log_note = f" DEBUG log: {_GUI_LOG_FILE}"
-    if auto_connect:
-        tool_gui_connect({"port": port, "token": token} if token else {"port": port})
-        return (
-            f"GUI launched (pid={pid}), listening on port {port}, and connected."
-            + _wire_version_note()
-            + log_note
-        )
-
-    return f"GUI launched (pid={pid}) and listening on port {port}." + log_note
-
-
-def _pid_for_stop() -> Tuple[Optional[int], Optional[subprocess.Popen]]:
-    """The GUI pid (+ Popen if this process owns it) to stop, or (None, None)."""
-    proc = _GUI_PROC
-    if proc is not None and proc.poll() is None:
-        return proc.pid, proc
-    # Fallback: recover pid from file (handles cross-session restarts).
-    return _read_pid_file(), None
-
-
-def _await_exit(pid: int, proc: Optional[subprocess.Popen], timeout: float) -> bool:
-    """Block up to ``timeout`` for the GUI to exit; True if it did."""
-    if proc is not None:
-        try:
-            proc.wait(timeout=timeout)
-            return True
-        except subprocess.TimeoutExpired:
-            return False
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if not _pid_alive(pid):
-            return True
-        time.sleep(0.2)
-    return False
+    # lib/zcu_tools/gui/app/main/services/remote -> repo root
+    repo_root = Path(__file__).parents[7]
+    # clean → run_measure_gui --clean (skip restoring the persisted session).
+    extra_args = ["--clean"] if clean else None
+    return _BRIDGE.launch(repo_root, port, token, auto_connect, extra_args=extra_args)
 
 
 def tool_gui_stop(arguments: Dict[str, Any]) -> str:
-    global _GUI_PROC
-    pid, proc = _pid_for_stop()
-    if pid is None:
-        _GUI_PROC = None
-        tool_gui_disconnect({})
-        return "No GUI process managed by this MCP server."
-
+    # Graceful close over the existing RPC channel (app.shutdown runs the GUI's
+    # normal window-close path on its main thread, no OS signal), then await /
+    # optionally force-kill. timeout_kill defaults False here (measure-gui prefers
+    # leaving a slow-closing GUI alone for a retry rather than killing it).
     timeout = float(arguments.get("timeout", 10.0))
     timeout_kill = bool(arguments.get("timeout_kill", False))
-
-    # Graceful close over the existing RPC channel — runs the GUI's normal
-    # window-close path (persist session, disconnect devices, cleanup) on its
-    # main thread, with no OS signal. This is cross-platform (no SIGKILL /
-    # process-group handling). Send BEFORE disconnecting the socket the RPC
-    # travels on.
-    try:
-        send_gui_rpc("app.shutdown", {})
-    except Exception as exc:
-        # stderr is safe (stdout is the JSON-RPC channel); proceed to await/kill.
-        sys.stderr.write(f"gui_stop: app.shutdown RPC failed: {exc!r}\n")
-
-    exited = _await_exit(pid, proc, timeout)
-    tool_gui_disconnect({})
-
-    if not exited and timeout_kill:
-        # Opt-in fallback: the GUI did not close gracefully in time. terminate()
-        # / kill() are cross-platform (POSIX SIGTERM/SIGKILL, Windows
-        # TerminateProcess). pid-only path uses os.kill (SIGTERM both platforms;
-        # SIGKILL POSIX-only).
-        try:
-            if proc is not None:
-                proc.kill()
-                proc.wait(timeout=5.0)
-            else:
-                sig = signal.SIGKILL if hasattr(signal, "SIGKILL") else signal.SIGTERM
-                os.kill(pid, sig)
-        except (ProcessLookupError, OSError, subprocess.TimeoutExpired):
-            pass
-        _GUI_PROC = None
-        _clear_pid_file()
-        return f"GUI process (pid={pid}) force-killed after graceful close timed out."
-
-    if not exited:
-        # Left running on purpose (no timeout_kill). Do not clear our handle —
-        # a later gui_stop can retry.
-        return (
-            f"app.shutdown sent but GUI (pid={pid}) has not exited within "
-            f"{timeout:.0f}s. It may be finishing cleanup, or stuck. Re-run "
-            f"gui_stop, or pass timeout_kill=true to force-kill on timeout."
-        )
-
-    _GUI_PROC = None
-    _clear_pid_file()
-    return f"GUI process (pid={pid}) closed gracefully."
+    note = _BRIDGE.stop(
+        timeout=timeout, timeout_kill=timeout_kill, shutdown_rpc="app.shutdown"
+    )
+    # The bridge's disconnect does not clear measure-gui's diagnostic queue; do it
+    # here so a later session does not see the previous one's buffered messages.
+    with _DIAGNOSTIC_COND:
+        _DIAGNOSTIC_QUEUE.clear()
+    return note
 
 
 # ---------------------------------------------------------------------------
@@ -1553,61 +1142,9 @@ _NON_GENERATED_METHODS = frozenset(
 )
 
 
-def _tool_name_for(method: str, spec) -> str:
-    return spec.tool_name or "gui_" + method.replace(".", "_")
-
-
-def _coerce_arg(value: object, json_type: "JsonType") -> object:
-    if value is None:
-        return None
-    if json_type is JsonType.STRING:
-        return str(value)
-    if json_type is JsonType.INTEGER:
-        return int(value)  # type: ignore[arg-type]
-    if json_type is JsonType.NUMBER:
-        return float(value)  # type: ignore[arg-type]
-    if json_type is JsonType.BOOLEAN:
-        return bool(value)
-    if json_type is JsonType.OBJECT:
-        return dict(value)  # type: ignore[call-overload]
-    return value  # JSON: pass through
-
-
-def _make_forwarder(method: str, spec):
-    """Build an MCP forwarder that projects arguments into RPC params per spec.
-
-    Required params are coerced and always sent. Optional params are coerced and
-    sent only when present and non-None, matching the legacy hand-written
-    forwarders (which used ``if arguments.get(k) is not None``).
-    """
-    rpc_timeout = max(float(spec.timeout_seconds), 30.0)
-
-    def _forwarder(arguments: Dict[str, Any]) -> Dict[str, Any]:
-        rpc_params: Dict[str, Any] = {}
-        for p in spec.params:
-            if p.required:
-                if p.name not in arguments or arguments[p.name] is None:
-                    raise ValueError(f"missing {p.name!r}")
-                rpc_params[p.name] = _coerce_arg(arguments[p.name], p.json_type)
-            elif arguments.get(p.name) is not None:
-                rpc_params[p.name] = _coerce_arg(arguments[p.name], p.json_type)
-        return send_gui_rpc(method, rpc_params, timeout_seconds=rpc_timeout)
-
-    return _forwarder
-
-
-def _generate_tools() -> Dict[str, Dict[str, Any]]:
-    out: Dict[str, Dict[str, Any]] = {}
-    for method, spec in METHOD_SPECS.items():
-        if method in _NON_GENERATED_METHODS:
-            continue
-        tool_name = _tool_name_for(method, spec)
-        out[tool_name] = {
-            "handler": _make_forwarder(method, spec),
-            "description": spec.description or method,
-            "inputSchema": build_input_schema(spec.params),
-        }
-    return out
+# Tool generation (coerce / forward / per-spec schema) is the shared
+# ``generate_tools`` helper; measure-gui's guarded ``send_gui_rpc`` is injected as
+# the send_fn so generated forwarders carry the version guard + operation capture.
 
 
 # ---------------------------------------------------------------------------
@@ -2146,25 +1683,14 @@ _OVERRIDE_NAMES = frozenset(
 )
 
 
-def _assemble_tools() -> Dict[str, Dict[str, Any]]:
-    """Generated tools overlaid with the hand-written override subset.
-
-    The generator owns every 1:1 RPC tool (schema from the ParamSpec SSOT);
-    overrides own lifecycle / fan-out / file-write / coercion tools. The two
-    sets are disjoint by name — a collision means an override leaked into the
-    generatable set and is a programming error.
-    """
-    generated = _generate_tools()
-    overrides = {
-        name: spec for name, spec in _OVERRIDE_TOOLS.items() if name in _OVERRIDE_NAMES
-    }
-    collisions = set(generated) & set(overrides)
-    if collisions:
-        raise RuntimeError(f"override/generated tool collision: {sorted(collisions)}")
-    return {**generated, **overrides}
-
-
-TOOLS: Dict[str, Dict[str, Any]] = _assemble_tools()
+# Generated tools (schema from the ParamSpec SSOT, forwarding through the guarded
+# send_gui_rpc) overlaid with the hand-written override subset (lifecycle /
+# fan-out / file-write / coercion). assemble_tools fails fast on a name collision.
+TOOLS: Dict[str, Dict[str, Any]] = assemble_tools(
+    generate_tools(_CONFIG, METHOD_SPECS, _NON_GENERATED_METHODS, send_gui_rpc),
+    _OVERRIDE_TOOLS,
+    _OVERRIDE_NAMES,
+)
 
 
 # ---------------------------------------------------------------------------

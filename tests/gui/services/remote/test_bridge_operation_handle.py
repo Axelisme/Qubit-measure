@@ -20,7 +20,12 @@ from zcu_tools.gui.app.main.services.remote import mcp_server
 @pytest.fixture()
 def wired(monkeypatch):
     """Synchronous in-memory responder keyed by method; records what was sent."""
-    monkeypatch.setattr(mcp_server, "_GUI_SOCK", MagicMock())
+    # The socket layer moved into mcp_server._BRIDGE (an McpBridge): the live
+    # socket is _BRIDGE._sock and the send/deliver primitives are
+    # _BRIDGE._send_line / _BRIDGE._deliver_reply. Patching _sock to a truthy
+    # mock makes send_rpc_raw's "is None" guard pass; the fake _send_line
+    # synchronously delivers a reply via the bridge's _deliver_reply.
+    monkeypatch.setattr(mcp_server._BRIDGE, "_sock", MagicMock())
     monkeypatch.setattr(mcp_server, "_LAST_SEEN", {}, raising=False)
     monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {}, raising=False)
     replies: Dict[str, Dict[str, Any]] = {}
@@ -31,9 +36,9 @@ def wired(monkeypatch):
         sent.append((method, payload["params"]))
         resp = dict(replies.get(method, {"ok": True, "result": {}}))
         resp["id"] = payload["id"]
-        mcp_server._deliver_reply(resp)
+        mcp_server._BRIDGE._deliver_reply(resp)
 
-    monkeypatch.setattr(mcp_server, "_send_line", fake_send_line)
+    monkeypatch.setattr(mcp_server._BRIDGE, "_send_line", fake_send_line)
     replies["sent"] = sent  # type: ignore[assignment]
     return replies
 

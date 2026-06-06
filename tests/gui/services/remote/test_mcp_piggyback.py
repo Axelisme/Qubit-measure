@@ -54,8 +54,12 @@ def test_drain_pending_takes_diagnostics_and_empties():
 
 def _note_with(wire_ver, gui_ver) -> str:
     resp = {"result": {"wire_version": wire_ver, "gui_version": gui_ver}}
-    with patch.object(mcp_server, "_send_gui_rpc_raw", return_value=resp):
-        return mcp_server._wire_version_note()
+    # Socket-layer probe moved into the shared bridge (E4): patch its send_rpc_raw
+    # and call the bridge's wire_version_note. The version-note INTENT (wire match
+    # shows three versions; wire mismatch is hard; differing gui code is not a
+    # mismatch) is unchanged.
+    with patch.object(mcp_server._BRIDGE, "send_rpc_raw", return_value=resp):
+        return mcp_server._BRIDGE.wire_version_note()
 
 
 def test_note_wire_match_shows_all_three_versions():
@@ -87,7 +91,7 @@ def test_note_differing_gui_version_is_not_a_mismatch():
 def test_short_wait_settles_returns_product():
     # operation.await returns in time -> {status:finished, **product()}.
     mcp_server._OP_BY_KEY["tab:t1"] = 42
-    with patch.object(mcp_server, "_send_gui_rpc_raw", return_value={"result": {}}):
+    with patch.object(mcp_server._BRIDGE, "send_rpc_raw", return_value={"result": {}}):
         with patch.object(
             mcp_server, "send_gui_rpc", return_value={"status": "finished"}
         ):

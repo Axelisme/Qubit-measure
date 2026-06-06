@@ -408,8 +408,16 @@ def test_tab_update_cfg_blocked_while_running(fx):
         sock.close()
 
 
-def test_mcp_wrappers_map_to_expected_rpc(monkeypatch):
+def test_mcp_wrappers_map_to_expected_rpc():
+    # These three are GENERATED forwarders (not in _OVERRIDE_TOOLS): post-E4 they
+    # capture the guarded send_gui_rpc as a closure (send_fn) at import time, so
+    # patching mcp_server.send_gui_rpc no longer reaches them. Re-generate them
+    # with a recording send_fn via the shared generate_tools — same projection
+    # the real bridge builds — to assert the wrapper -> (method, params) mapping
+    # without the guard mutating params.
     from zcu_tools.gui.app.main.services.remote import mcp_server
+    from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
+    from zcu_tools.gui.remote.mcp_bridge import generate_tools
 
     calls: list[tuple[str, dict]] = []
 
@@ -418,13 +426,13 @@ def test_mcp_wrappers_map_to_expected_rpc(monkeypatch):
         calls.append((method, params))
         return {}
 
-    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-
-    mcp_server.TOOLS["gui_context_use"]["handler"]({"label": "ctx1"})
-    mcp_server.TOOLS["gui_device_reconnect"]["handler"]({"name": "bias"})
-    mcp_server.TOOLS["gui_save_image"]["handler"](
-        {"tab_id": "tab1", "image_path": "/tmp/a.png"}
+    tools = generate_tools(
+        mcp_server._CONFIG, METHOD_SPECS, mcp_server._NON_GENERATED_METHODS, fake_send
     )
+
+    tools["gui_context_use"]["handler"]({"label": "ctx1"})
+    tools["gui_device_reconnect"]["handler"]({"name": "bias"})
+    tools["gui_save_image"]["handler"]({"tab_id": "tab1", "image_path": "/tmp/a.png"})
 
     assert calls == [
         ("context.use", {"label": "ctx1"}),
@@ -957,7 +965,7 @@ def test_stale_error_message_names_changed_resources(monkeypatch):
             },
         }
 
-    monkeypatch.setattr(mcp_server, "_send_gui_rpc_raw", fake_raw)
+    monkeypatch.setattr(mcp_server._BRIDGE, "send_rpc_raw", fake_raw)
     monkeypatch.setattr(mcp_server, "_refresh_versions", lambda: None)
     with pytest.raises(RuntimeError) as ei:
         mcp_server.send_gui_rpc("run.start", {"tab_id": "t"})

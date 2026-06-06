@@ -10,6 +10,14 @@ from __future__ import annotations
 from zcu_tools.gui.app.main.services.remote import mcp_server as m
 from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
+from zcu_tools.gui.remote.mcp_bridge import generate_tools
+
+
+def _tool_name_for(method: str, spec) -> str:
+    # The shared generate_tools derives a tool name as spec.tool_name or the
+    # app's tool_prefix + method-with-dots-as-underscores. Mirror that here so
+    # the coverage assertion below stays pinned to the same naming rule.
+    return spec.tool_name or m._CONFIG.tool_prefix + method.replace(".", "_")
 
 
 def test_handlers_and_specs_match():
@@ -27,7 +35,9 @@ def test_every_tool_has_callable_handler_and_object_schema():
 
 
 def test_generated_and_override_sets_are_disjoint():
-    generated = m._generate_tools()
+    generated = generate_tools(
+        m._CONFIG, METHOD_SPECS, m._NON_GENERATED_METHODS, m.send_gui_rpc
+    )
     overrides = {n for n in m._OVERRIDE_TOOLS if n in m._OVERRIDE_NAMES}
     assert set(generated).isdisjoint(overrides)
 
@@ -37,7 +47,7 @@ def test_every_non_generated_method_is_covered_by_an_override():
     # otherwise an RPC method would have no MCP entry point.
     generated_methods = set(METHOD_SPECS) - m._NON_GENERATED_METHODS
     generated_tool_names = {
-        m._tool_name_for(meth, METHOD_SPECS[meth]) for meth in generated_methods
+        _tool_name_for(meth, METHOD_SPECS[meth]) for meth in generated_methods
     }
     assert generated_tool_names.issubset(set(m.TOOLS))
 
