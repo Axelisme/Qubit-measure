@@ -36,8 +36,9 @@ from zcu_tools.utils.process import rotate2real
 # whole sweep finishing in milliseconds. It is a *param default* (the user can
 # tune it, the run reads it from params) — NOT a produce-time fallback, so a
 # directly-constructed Node with no params (tests) sleeps zero and runs instantly.
-# Phase B leaves it at 0 (the real acquire IS the wall-clock cost).
-DEFAULT_ACQUIRE_DELAY = 0.1
+# Phase B leaves it at 0 (the real acquire IS the wall-clock cost). One second per
+# point makes each Node's liveplot clearly watchable as the sweep advances.
+DEFAULT_ACQUIRE_DELAY = 1.0
 
 
 def simulate_acquire_delay(seconds: float) -> None:
