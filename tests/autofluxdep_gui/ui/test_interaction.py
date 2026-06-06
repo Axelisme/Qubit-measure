@@ -86,16 +86,28 @@ def test_run_disabled_until_setup(app):
 # --- run lifecycle: edit↔run lock, liveplot canvas, progress ---
 
 
+def _zero_delays(ctrl):
+    # zero the per-Node acquire delay so a test runs instantly (the delay is a
+    # GUI-pacing default seeded by add_node_by_type; its behaviour is tested
+    # separately — UI tests must not wait on it).
+    for node in ctrl.state.nodes:
+        node.params["acquire_delay"] = 0
+
+
+def _pump_until_done(ctrl, win):
+    for _ in range(20000):
+        QApplication.processEvents()
+        if win._worker is None and not ctrl.is_running:
+            break
+
+
 def _run_to_completion(ctrl, win):
+    _zero_delays(ctrl)
     ctrl.set_flux_values([0.0, 1.0, 2.0])
     ctrl.setup(use_mock=True)
     win._list._refresh_buttons()
     win._start()
-    # pump the event loop until the worker finishes and run-done fires
-    for _ in range(4000):
-        QApplication.processEvents()
-        if win._worker is None and not ctrl.is_running:
-            break
+    _pump_until_done(ctrl, win)
 
 
 def test_run_locks_then_unlocks(app):
@@ -163,15 +175,13 @@ def test_multiple_real_experiments_each_get_a_liveplot(qapp):
 
             plotter.update = wrapped
 
+    _zero_delays(ctrl)
     ctrl.set_flux_values([0.0, 0.5, 1.0])
     ctrl.setup(use_mock=True)
     win._list._refresh_buttons()
     win._start()
     patch_counter()  # wrap after _build_plots created the plotter
-    for _ in range(4000):
-        QApplication.processEvents()
-        if win._worker is None and not ctrl.is_running:
-            break
+    _pump_until_done(ctrl, win)
 
     # every measurement provider built a canvas + plotter (predictor Service none)
     assert set(win._plots) == {"qubit_freq", "t1", "ro_optimize", "mist"}
@@ -200,14 +210,12 @@ def test_run_auto_follows_each_entered_node(qapp):
         followed.append((name, win._list.selected_index, win._detail.current_tab))
 
     win._bridge.node_entered.connect(on_entered)
+    _zero_delays(ctrl)
     ctrl.set_flux_values([0.0, 0.5])
     ctrl.setup(use_mock=True)
     win._list._refresh_buttons()
     win._start()
-    for _ in range(4000):
-        QApplication.processEvents()
-        if win._worker is None and not ctrl.is_running:
-            break
+    _pump_until_done(ctrl, win)
 
     nav = {name: (row, tab) for name, row, tab in followed}
     # each Node, when entered, selected its own list row and showed the run tab
@@ -232,14 +240,12 @@ def test_rename_updates_list_and_keeps_canvas_key(qapp):
     win._list.refresh_list()
     assert _list_labels(win) == ["g_mist", "e_mist"]
 
+    _zero_delays(ctrl)
     ctrl.set_flux_values([0.0, 0.5])
     ctrl.setup(use_mock=True)
     win._list._refresh_buttons()
     win._start()
-    for _ in range(4000):
-        QApplication.processEvents()
-        if win._worker is None and not ctrl.is_running:
-            break
+    _pump_until_done(ctrl, win)
 
     # canvases are keyed by instance name, independent per placement
     assert set(win._plots) == {"g_mist", "e_mist"}

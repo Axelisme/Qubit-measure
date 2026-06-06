@@ -19,6 +19,10 @@ def _run_all(flux_values):
     ctrl = build_core()
     for t in _ALL:
         ctrl.add_node_by_type(t)
+    # add_node_by_type seeds a GUI-pacing acquire_delay; zero it so the headless
+    # integration run is instant (the delay is exercised in test_synth).
+    for node in ctrl.state.nodes:
+        node.params["acquire_delay"] = 0
     ctrl.setup(use_mock=True)
     ctrl.set_flux_values(flux_values)
     info = ctrl.start_run()

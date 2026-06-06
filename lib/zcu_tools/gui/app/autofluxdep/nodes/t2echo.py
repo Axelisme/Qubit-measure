@@ -36,7 +36,9 @@ from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.synth import (
     decay_cos,
     parse_linear_axis,
+    resolve_acquire_delay,
     signal_to_real,
+    simulate_acquire_delay,
 )
 from zcu_tools.utils.fitting import fit_decay_fringe
 
@@ -98,6 +100,9 @@ class T2EchoNode(Node):
         if env.round_hook is not None:
             env.round_hook(idx)
 
+        # emulate the acquire's wall-clock cost so the liveplot advances visibly
+        simulate_acquire_delay(resolve_acquire_delay(env.params))
+
         t2f, _, _, _, fit_curve, _ = fit_decay_fringe(times, real)
         result.fit_value[idx] = float(t2f)
         np.copyto(result.fit_curve[idx], np.asarray(fit_curve, dtype=np.float64))
@@ -139,6 +144,7 @@ class T2EchoBuilder(Builder):
         "reps",
         "rounds",
         "earlystop_snr",
+        "acquire_delay",
     )
 
     def make_init_result(self, params: Mapping[str, Any], n_flux: int) -> Sweep1DResult:

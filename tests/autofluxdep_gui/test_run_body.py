@@ -91,6 +91,7 @@ def test_controller_run_drives_real_produce_with_predictor_service():
 
     ctrl = build_core()
     ctrl.add_node_by_type("qubit_freq")
+    ctrl.state.nodes[0].params["acquire_delay"] = 0  # instant headless run
     ctrl.setup(use_mock=True)
     ctrl.set_flux_values([0.0, 1.0])
     info = ctrl.start_run()

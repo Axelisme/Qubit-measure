@@ -68,12 +68,18 @@ if __name__ == "__main__":
     log_file = Path(args.log_file) if args.log_file else LOG_FILE
     _setup_logging(to_file=not args.no_log, log_file=log_file)
 
-    # Configure the embedded matplotlib backend BEFORE importing pyplot-using
-    # code (the "configure backend before pyplot" invariant), so the run's real
-    # liveplots route into the GUI rather than detached windows. Import-clean.
-    from zcu_tools.gui.plotting.setup import configure_matplotlib_backend
+    # Force a NON-interactive backend BEFORE any pyplot import. Unlike
+    # measure-gui / fluxdep, autofluxdep does NOT use the custom
+    # ``module://zcu_tools.gui.plotting.backend`` (that backend is for the
+    # worker-draws-then-marshals model — ADR-0017). autofluxdep's worker never
+    # touches matplotlib; the main thread embeds each Node's figure with a bare
+    # ``FigureCanvasQTAgg`` (ADR-0018). With ``Agg`` selected, pyplot can never
+    # pop a detached window, while the directly-constructed embed canvases work
+    # as normal. (Selecting the custom pyplot backend here would route stray
+    # pyplot figures to detached windows — the bug this avoids.)
+    import matplotlib
 
-    configure_matplotlib_backend()
+    matplotlib.use("Agg")
 
     from zcu_tools.gui.app.autofluxdep.app import run_app
 

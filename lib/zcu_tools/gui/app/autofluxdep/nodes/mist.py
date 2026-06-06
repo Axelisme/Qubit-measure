@@ -30,7 +30,12 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import Sweep1DPlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import ModuleDep
-from zcu_tools.gui.app.autofluxdep.nodes.synth import parse_linear_axis, variance_curve
+from zcu_tools.gui.app.autofluxdep.nodes.synth import (
+    parse_linear_axis,
+    resolve_acquire_delay,
+    simulate_acquire_delay,
+    variance_curve,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +83,9 @@ class MistNode(Node):
         if env.round_hook is not None:
             env.round_hook(idx)
 
+        # emulate the acquire's wall-clock cost so the liveplot advances visibly
+        simulate_acquire_delay(resolve_acquire_delay(env.params))
+
         logger.debug(
             "mist @flux%d: success, variance range [%.3f, %.3f]",
             idx,
@@ -106,7 +114,7 @@ class MistBuilder(Builder):
     provides_modules: tuple[str, ...] = ()
     requires_modules = (ModuleDep("pi_pulse", default=_placeholder_pi_pulse),)
     optional_modules = (ModuleDep("opt_readout", default=_default_opt_readout),)
-    base_params = ("gain_sweep", "reps", "rounds")
+    base_params = ("gain_sweep", "reps", "rounds", "acquire_delay")
 
     def make_init_result(self, params: Mapping[str, Any], n_flux: int) -> Sweep1DResult:
         gains = parse_linear_axis(params.get("gain_sweep"), _DEFAULT_GAIN_SWEEP)

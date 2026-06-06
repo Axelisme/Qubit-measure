@@ -22,12 +22,54 @@ reproducible without using process-global RNG state.
 
 from __future__ import annotations
 
+import time
+
 import numpy as np
 from numpy.typing import NDArray
 from typing_extensions import Any
 
 from zcu_tools.utils.fitting.base import cosfunc, decaycos, expfunc, lorfunc
 from zcu_tools.utils.process import rotate2real
+
+# The default per-flux-point delay (seconds) the controller seeds into a freshly
+# placed Node's params, so the synthetic liveplot advances visibly instead of the
+# whole sweep finishing in milliseconds. It is a *param default* (the user can
+# tune it, the run reads it from params) — NOT a produce-time fallback, so a
+# directly-constructed Node with no params (tests) sleeps zero and runs instantly.
+# Phase B leaves it at 0 (the real acquire IS the wall-clock cost).
+DEFAULT_ACQUIRE_DELAY = 0.1
+
+
+def simulate_acquire_delay(seconds: float) -> None:
+    """Sleep ``seconds`` to emulate a real acquire's duration (worker thread).
+
+    Called inside a Node's ``produce`` on the run worker, NOT the Qt main
+    thread, so it never freezes the UI — it only paces how fast the sweep fills
+    rows, letting the main-thread liveplot redraw between points. A
+    non-positive value is a no-op (so a Node with no delay param runs instantly).
+    """
+    if seconds > 0:
+        time.sleep(seconds)
+
+
+def resolve_acquire_delay(params: Any) -> float:
+    """The acquire delay (seconds) from a Node's params, or ``0`` if unset/bad.
+
+    Missing → 0 (no sleep): a directly-constructed Node (tests) runs instantly;
+    a GUI-placed Node carries ``DEFAULT_ACQUIRE_DELAY`` in its params (seeded by
+    the controller). The prototype's param field is free text, so an unparseable
+    value degrades to 0 rather than failing the sweep.
+    """
+    try:
+        value = params.get("acquire_delay")
+    except AttributeError:
+        return 0.0
+    if value is None or value == "":
+        return 0.0
+    try:
+        return max(0.0, float(value))
+    except (ValueError, TypeError):
+        return 0.0
 
 
 def signal_to_real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:

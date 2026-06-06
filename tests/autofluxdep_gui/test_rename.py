@@ -65,6 +65,8 @@ def test_two_mist_instances_get_independent_results():
     ctrl.rename_node(0, "g_mist")
     ctrl.add_node_by_type("mist")
     ctrl.rename_node(1, "e_mist")
+    for node in ctrl.state.nodes:
+        node.params["acquire_delay"] = 0  # instant headless run
     ctrl.setup(use_mock=True)
     ctrl.set_flux_values([0.0, 0.5])
     ctrl.start_run()
@@ -93,6 +95,8 @@ def test_node_entered_excludes_predictor_service():
     ctrl.add_node_by_type("qubit_freq")
     ctrl.add_node_by_type("mist")
     ctrl.rename_node(1, "g_mist")
+    for node in ctrl.state.nodes:
+        node.params["acquire_delay"] = 0  # instant headless run
     ctrl.setup(use_mock=True)
     ctrl.set_flux_values([0.0, 1.0])
 

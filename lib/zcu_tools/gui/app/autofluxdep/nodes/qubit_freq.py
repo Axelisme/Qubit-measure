@@ -49,7 +49,11 @@ from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
-from zcu_tools.gui.app.autofluxdep.nodes.synth import lorentzian_dip
+from zcu_tools.gui.app.autofluxdep.nodes.synth import (
+    lorentzian_dip,
+    resolve_acquire_delay,
+    simulate_acquire_delay,
+)
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
 
@@ -138,6 +142,9 @@ class QubitFreqNode(Node):
         np.copyto(result.signal[idx], real)
         if env.round_hook is not None:
             env.round_hook(idx)
+
+        # emulate the acquire's wall-clock cost so the liveplot advances visibly
+        simulate_acquire_delay(resolve_acquire_delay(env.params))
 
         # fit, then fill the fit fields + notify again (fit curve now present)
         freq, _, fwhm, _, fit_curve, _ = fit_qubit_freq(freqs, real)
@@ -230,7 +237,14 @@ class QubitFreqBuilder(Builder):
     )
     # the readout module: Node-produced (ro_optimize) → ml preset → default.
     optional_modules = (ModuleDep("readout", default=_default_readout),)
-    base_params = ("detune_sweep", "reps", "rounds", "relax_delay", "earlystop_snr")
+    base_params = (
+        "detune_sweep",
+        "reps",
+        "rounds",
+        "relax_delay",
+        "earlystop_snr",
+        "acquire_delay",
+    )
 
     def make_init_result(
         self, params: Mapping[str, Any], n_flux: int

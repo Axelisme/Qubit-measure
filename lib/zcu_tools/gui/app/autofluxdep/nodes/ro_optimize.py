@@ -34,6 +34,8 @@ from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.synth import (
     gaussian_peak_2d,
     parse_linear_axis,
+    resolve_acquire_delay,
+    simulate_acquire_delay,
 )
 
 logger = logging.getLogger(__name__)
@@ -119,6 +121,9 @@ class RoOptimizeNode(Node):
         if env.round_hook is not None:
             env.round_hook(idx)
 
+        # emulate the acquire's wall-clock cost so the liveplot advances visibly
+        simulate_acquire_delay(resolve_acquire_delay(env.params))
+
         logger.debug(
             "ro_optimize @flux%d: best_freq=%.3f best_gain=%.3f (plant freq=%.3f gain=%.3f)",
             idx,
@@ -156,7 +161,7 @@ class RoOptimizeBuilder(Builder):
     )
     requires_modules = (ModuleDep("pi_pulse", default=_placeholder_pi_pulse),)
     optional_modules = (ModuleDep("readout", default=_default_readout),)
-    base_params = ("freq_expts", "gain_expts", "reps", "rounds")
+    base_params = ("freq_expts", "gain_expts", "reps", "rounds", "acquire_delay")
 
     def make_init_result(self, params: Mapping[str, Any], n_flux: int) -> Sweep2DResult:
         freq_expts: int = int(params.get("freq_expts") or _DEFAULT_FREQ[2])
