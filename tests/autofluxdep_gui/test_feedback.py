@@ -155,3 +155,26 @@ def test_sweep_adapts_prediction_to_measurements():
     # rather than the bare linear base. Check a calibrated flux moved.
     physical_base_at_04 = 5000.0 + 50.0 * 0.4  # 5020
     assert abs(predictor.predict_freq(0.4) - physical_base_at_04) > 0.8
+
+
+# --- SNR-trough dead points are skipped (no key, no calibrate) ---
+
+
+def test_sweep_skips_snr_trough_dead_points():
+    # the SNR varies to 0 at troughs; those flux points are pure noise, so the
+    # fit-quality gate discards them — fit_freq stays nan and the predictor is
+    # not calibrated there, but the sweep keeps going (good points still tracked).
+    ctrl = build_core()
+    ctrl.add_node_by_type("qubit_freq")
+    for node in ctrl.state.nodes:
+        node.params["acquire_delay"] = 0
+        node.params["rounds"] = 4
+    ctrl.setup(use_mock=True)
+    ctrl.set_flux_values(list(np.linspace(0.0, 1.0, 11)))
+    ctrl.start_run()
+
+    res = ctrl.state.run_results["qubit_freq"]
+    n_dead = int(np.sum(np.isnan(res.fit_freq)))
+    n_good = int(np.sum(~np.isnan(res.fit_freq)))
+    assert n_dead >= 1  # at least one SNR-trough dead point was rejected
+    assert n_good >= 5  # most points still fit + drove feedback

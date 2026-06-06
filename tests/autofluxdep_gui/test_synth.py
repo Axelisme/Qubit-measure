@@ -20,8 +20,12 @@ from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.synth import (
     DEFAULT_ACQUIRE_DELAY,
     DEFAULT_ROUNDS,
+    SNR_PERIOD,
     accumulate_rounds,
     exp_decay,
+    flux_drift,
+    flux_snr,
+    is_good_fit,
     resolve_acquire_delay,
     resolve_rounds,
     signal_to_real,
@@ -196,3 +200,52 @@ def test_produce_notifies_once_per_round_plus_fit():
     node.produce(snap)
     # 6 per-round redraws (the row settling) + 1 after the fit fills the curve
     assert len(notifies) == 7
+
+
+# --- flux_drift: a parabolic flux dependence (the adaptivity test substrate) ---
+
+
+def test_flux_drift_is_a_parabola_peaking_at_center():
+    # vertex at flux 0.5 equals the baseline; symmetric rise to both edges
+    assert flux_drift(0.5, baseline=5000.0, amplitude=100.0) == 5000.0
+    edge0 = flux_drift(0.0, baseline=5000.0, amplitude=100.0)
+    edge1 = flux_drift(1.0, baseline=5000.0, amplitude=100.0)
+    assert edge0 == edge1  # symmetric
+    assert edge0 > 5000.0  # higher at the edges
+
+
+def test_flux_drift_amplitude_scales_the_spread():
+    small = flux_drift(0.0, baseline=0.0, amplitude=1.0)
+    big = flux_drift(0.0, baseline=0.0, amplitude=10.0)
+    assert big == small * 10.0
+
+
+# --- flux_snr: sinusoidal in [0, 1], reaching 0 at troughs ---
+
+
+def test_flux_snr_stays_in_unit_interval():
+    snrs = [flux_snr(f) for f in np.linspace(0.0, 2.0, 200)]
+    assert min(snrs) >= 0.0
+    assert max(snrs) <= 1.0
+
+
+def test_flux_snr_reaches_a_zero_trough():
+    # over a couple of periods the sinusoid must touch ~0 somewhere
+    snrs = [flux_snr(f) for f in np.linspace(0.0, 2 * SNR_PERIOD, 400)]
+    assert min(snrs) < 0.02
+
+
+# --- is_good_fit: rejects an all-noise (SNR-trough) fit ---
+
+
+def test_is_good_fit_accepts_a_clean_fit():
+    x = np.linspace(0, 10, 100)
+    clean = np.exp(-x / 3.0)  # a real decay
+    assert is_good_fit(clean, clean)  # residual 0 vs a real span
+
+
+def test_is_good_fit_rejects_a_flat_or_noisy_fit():
+    x = np.linspace(0, 10, 100)
+    flat = np.zeros_like(x)  # a dead fit (no span)
+    noisy = np.random.RandomState(0).randn(100) * 0.5
+    assert not is_good_fit(noisy, flat)  # span 0 → rejected

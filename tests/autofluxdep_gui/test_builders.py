@@ -24,12 +24,18 @@ from zcu_tools.gui.app.autofluxdep.nodes.t2ramsey import T2RamseyBuilder
 
 
 def _run(builder, snapshot_data, snapshot_modules, params=None, flux_idx=1):
-    """Build the Result + Node, run produce; return (patch, result, fired)."""
+    """Build the Result + Node, run produce; return (patch, result, fired).
+
+    Uses flux_arr[flux_idx] as the flux value (not float(flux_idx)) so that the
+    fit-quality gate always sees a deterministic SNR for the chosen array index.
+    flux_idx=1 → flux=0.1 (SNR≈0.97), a high-SNR point safe for recovery tests.
+    """
     params = params or {}
-    result = builder.make_init_result(params, np.linspace(0.0, 1.0, 4))
+    flux_arr = np.linspace(0.0, 1.0, 11)  # 11-point sweep; idx=1→flux=0.1 (SNR≈0.97)
+    result = builder.make_init_result(params, flux_arr)
     fired: list = []
     env = RunEnv(
-        flux=float(flux_idx),
+        flux=float(flux_arr[flux_idx]),
         flux_idx=flux_idx,
         params=params,
         result=result,
@@ -45,14 +51,14 @@ def _run(builder, snapshot_data, snapshot_modules, params=None, flux_idx=1):
 
 
 def test_t1_recovers_planted_decay():
-    # plant t1 = prev * 1.1 = 10 * 1.1 = 11
+    # flux=linspace(0,1,11)[1]=0.1 → flux_drift(0.1,10,40)=16.4 us
     patch, result, fired = _run(
         T1Builder(),
         {"t1": 10.0},
         {"pi_pulse": "<pi>", "opt_readout": None},
     )
     assert set(patch.values()) == {"t1"}
-    assert abs(patch.values()["t1"] - 11.0) < 1.5
+    assert abs(patch.values()["t1"] - 16.4) < 2.0
     assert not np.isnan(result.signal[1]).any()  # row filled
     assert not np.isnan(result.fit_value[1])  # fitted scalar present
     assert np.isnan(result.fit_value[0])  # untouched row stays nan
@@ -60,6 +66,7 @@ def test_t1_recovers_planted_decay():
 
 
 def test_lenrabi_recovers_pi_lengths_and_produces_pulse_modules():
+    # flux=0.1 → rabi_freq=flux_drift(0.1,0.5,0.4)=0.564, pi≈0.886 us
     patch, result, _fired = _run(
         LenRabiBuilder(),
         {"qubit_freq": 5000.0, "smooth_pi_product": 0.3},
@@ -67,8 +74,8 @@ def test_lenrabi_recovers_pi_lengths_and_produces_pulse_modules():
     )
     vals = patch.values()
     assert set(vals) == {"pi_length", "pi2_length", "rabi_freq"}
-    assert abs(vals["rabi_freq"] - 0.5) < 0.05  # planted rabi_freq = 0.5
-    assert abs(vals["pi_length"] - 1.0) < 0.1  # pi at 1/(2*freq) = 1.0 us
+    assert abs(vals["rabi_freq"] - 0.564) < 0.07  # planted rabi_freq at flux=0.1
+    assert abs(vals["pi_length"] - 0.887) < 0.12  # pi at 1/(2*0.564) ≈ 0.887 us
     # produces the pi/pi2 pulse modules for downstream Nodes
     mods = patch.modules()
     assert set(mods) == {"pi_pulse", "pi2_pulse"}
@@ -77,6 +84,7 @@ def test_lenrabi_recovers_pi_lengths_and_produces_pulse_modules():
 
 
 def test_t2ramsey_recovers_t2_and_detune():
+    # flux=0.1 → flux_drift(0.1,5.0,15.0)=7.4 us
     patch, _result, _fired = _run(
         T2RamseyBuilder(),
         {"t1": 10.0, "t2r": 5.0},
@@ -84,11 +92,12 @@ def test_t2ramsey_recovers_t2_and_detune():
     )
     vals = patch.values()
     assert set(vals) == {"t2r", "t2r_detune"}
-    assert abs(vals["t2r"] - 5.5) < 1.0  # planted t2 = 5.0 * 1.1
+    assert abs(vals["t2r"] - 7.4) < 2.0  # planted t2 at flux=0.1
     assert abs(vals["t2r_detune"] - 0.3) < 0.05  # planted fringe = 0.3
 
 
 def test_t2echo_recovers_t2():
+    # flux=0.1 → flux_drift(0.1,6.0,15.0)=8.4 us
     patch, _result, _fired = _run(
         T2EchoBuilder(),
         {"t1": 10.0, "t2e": 5.0},
@@ -96,7 +105,7 @@ def test_t2echo_recovers_t2():
     )
     vals = patch.values()
     assert set(vals) == {"t2e"}
-    assert abs(vals["t2e"] - 5.5) < 1.0  # planted t2 = 5.0 * 1.1
+    assert abs(vals["t2e"] - 8.4) < 2.0  # planted t2 at flux=0.1
 
 
 # --- 2D argmax (ro_optimize) ---
@@ -138,6 +147,122 @@ def test_mist_fills_variance_and_reports_success():
     assert not np.isnan(result.signal[1]).any()
     assert np.isnan(result.fit_value[1])
     assert np.isnan(result.fit_curve[1]).all()
+
+
+# --- fit-quality gate (SNR-trough points yield empty Patch + nan fit_value) ---
+
+# flux=linspace(0,1,11): idx=6 (flux=0.6) is the SNR dead point (snr≈0.001),
+# so the gating logic must discard the fit and return an empty Patch.  idx=8
+# (flux=0.8, snr≈0.97) is a healthy point that must produce the full key-set.
+
+_DEAD_IDX = 6  # flux=0.6: SNR ≈ 0.001 → gated out
+_GOOD_IDX = 8  # flux=0.8: SNR ≈ 0.965 → passes gate
+
+
+def _run_sweep(builder, snap_data, snap_modules, flux_idx):
+    """Run one flux point over an 11-point sweep; return (patch, result)."""
+    flux_arr = np.linspace(0.0, 1.0, 11)
+    params = {"rounds": 4, "acquire_delay": 0}
+    result = builder.make_init_result(params, flux_arr)
+    env = RunEnv(
+        flux=float(flux_arr[flux_idx]),
+        flux_idx=flux_idx,
+        params=params,
+        result=result,
+    )
+    snap = Snapshot(snap_data, modules=snap_modules)
+    patch = builder.build_node(env).produce(snap)
+    return patch, result
+
+
+def test_t1_snr_gate_dead_point_yields_empty_patch():
+    patch, result = _run_sweep(
+        T1Builder(),
+        {"t1": 10.0},
+        {"pi_pulse": "<pi>", "opt_readout": None},
+        _DEAD_IDX,
+    )
+    assert patch.values() == {}  # no t1 produced
+    assert np.isnan(result.fit_value[_DEAD_IDX])
+
+
+def test_t1_snr_gate_good_point_yields_t1():
+    patch, result = _run_sweep(
+        T1Builder(),
+        {"t1": 10.0},
+        {"pi_pulse": "<pi>", "opt_readout": None},
+        _GOOD_IDX,
+    )
+    assert "t1" in patch.values()
+    assert not np.isnan(result.fit_value[_GOOD_IDX])
+
+
+def test_lenrabi_snr_gate_dead_point_yields_empty_patch():
+    patch, result = _run_sweep(
+        LenRabiBuilder(),
+        {"qubit_freq": 5000.0, "smooth_pi_product": 0.3},
+        {"opt_readout": None},
+        _DEAD_IDX,
+    )
+    assert patch.values() == {}
+    assert patch.modules() == {}  # no pi_pulse/pi2_pulse modules either
+    assert np.isnan(result.fit_value[_DEAD_IDX])
+
+
+def test_lenrabi_snr_gate_good_point_yields_pi_lengths():
+    patch, result = _run_sweep(
+        LenRabiBuilder(),
+        {"qubit_freq": 5000.0, "smooth_pi_product": 0.3},
+        {"opt_readout": None},
+        _GOOD_IDX,
+    )
+    assert {"pi_length", "pi2_length", "rabi_freq"} == set(patch.values())
+    assert {"pi_pulse", "pi2_pulse"} == set(patch.modules())
+    assert not np.isnan(result.fit_value[_GOOD_IDX])
+
+
+def test_t2ramsey_snr_gate_dead_point_yields_empty_patch():
+    patch, result = _run_sweep(
+        T2RamseyBuilder(),
+        {"t1": 10.0, "t2r": 5.0},
+        {"pi2_pulse": "<pi2>", "opt_readout": None},
+        _DEAD_IDX,
+    )
+    assert patch.values() == {}
+    assert np.isnan(result.fit_value[_DEAD_IDX])
+
+
+def test_t2ramsey_snr_gate_good_point_yields_t2r():
+    patch, result = _run_sweep(
+        T2RamseyBuilder(),
+        {"t1": 10.0, "t2r": 5.0},
+        {"pi2_pulse": "<pi2>", "opt_readout": None},
+        _GOOD_IDX,
+    )
+    assert {"t2r", "t2r_detune"} == set(patch.values())
+    assert not np.isnan(result.fit_value[_GOOD_IDX])
+
+
+def test_t2echo_snr_gate_dead_point_yields_empty_patch():
+    patch, result = _run_sweep(
+        T2EchoBuilder(),
+        {"t1": 10.0, "t2e": 5.0},
+        {"pi_pulse": "<pi>", "pi2_pulse": "<pi2>", "opt_readout": None},
+        _DEAD_IDX,
+    )
+    assert patch.values() == {}
+    assert np.isnan(result.fit_value[_DEAD_IDX])
+
+
+def test_t2echo_snr_gate_good_point_yields_t2e():
+    patch, result = _run_sweep(
+        T2EchoBuilder(),
+        {"t1": 10.0, "t2e": 5.0},
+        {"pi_pulse": "<pi>", "pi2_pulse": "<pi2>", "opt_readout": None},
+        _GOOD_IDX,
+    )
+    assert {"t2e"} == set(patch.values())
+    assert not np.isnan(result.fit_value[_GOOD_IDX])
 
 
 # --- registry exposes all migrated measurement types ---

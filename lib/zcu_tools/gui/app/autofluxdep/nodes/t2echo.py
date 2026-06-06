@@ -37,6 +37,9 @@ from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.synth import (
     accumulate_rounds,
     decay_cos,
+    flux_drift,
+    flux_snr,
+    is_good_fit,
     parse_linear_axis,
     resolve_acquire_delay,
     resolve_rounds,
@@ -83,7 +86,9 @@ class T2EchoNode(Node):
     def produce(self, snapshot: Snapshot) -> Patch:
         env = self._env
         _ = snapshot["t1"]  # optional smoothed t1 (available for cfg sanity)
-        prev_t2e = float(snapshot["t2e"])  # smoothed (declared smooth="ewma")
+        _ = float(
+            snapshot["t2e"]
+        )  # smoothed (declared smooth="ewma") — dependency contract
         _ = snapshot.module("pi_pulse")  # required module — prototype does not use
         _ = snapshot.module("pi2_pulse")  # required module — prototype does not use
         _ = snapshot.module("opt_readout")  # optional — prototype does not use
@@ -91,8 +96,10 @@ class T2EchoNode(Node):
         result: Sweep1DResult = env.result
         times = result.x
 
-        # plant t2 slightly above the smoothed estimate so the sweep tracks it
-        true_t2 = prev_t2e * 1.1
+        # t2e drifts parabolically with flux: ~6 us at sweet spot, up to ~21 us at
+        # the edges. SNR varies sinusoidally to 0 at its troughs (dead points).
+        true_t2 = flux_drift(env.flux, baseline=6.0, amplitude=15.0)
+        snr = flux_snr(env.flux)
 
         idx = env.flux_idx
         result.flux[idx] = env.flux
@@ -100,7 +107,7 @@ class T2EchoNode(Node):
         base = env.flux_idx * 1000
 
         def make_round(k: int) -> NDArray[np.complex128]:
-            return decay_cos(times, true_t2, _FRINGE_FREQ, seed=base + k)
+            return decay_cos(times, true_t2, _FRINGE_FREQ, snr=snr, seed=base + k)
 
         def on_round(avg: NDArray[np.complex128], _k: int) -> None:
             np.copyto(result.signal[idx], signal_to_real(avg))
@@ -116,6 +123,13 @@ class T2EchoNode(Node):
         real = signal_to_real(averaged)
 
         t2f, _, _, _, fit_curve, _ = fit_decay_fringe(times, real)
+
+        if not is_good_fit(real, fit_curve):
+            logger.debug("t2echo fit @flux%d: poor fit (SNR-trough?) — discarded", idx)
+            if env.round_hook is not None:
+                env.round_hook(idx)  # raw row already shown; fit fields stay nan
+            return Patch()  # partial: omit t2e → downstream fallback
+
         result.fit_value[idx] = float(t2f)
         np.copyto(result.fit_curve[idx], np.asarray(fit_curve, dtype=np.float64))
         if env.round_hook is not None:

@@ -51,6 +51,9 @@ from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.synth import (
     accumulate_rounds,
+    flux_drift,
+    flux_snr,
+    is_good_fit,
     lorentzian_dip,
     resolve_acquire_delay,
     resolve_rounds,
@@ -130,9 +133,14 @@ class QubitFreqNode(Node):
         detunes = result.detune
         freqs = pred_qf + detunes  # absolute frequency axis
 
-        # plant a true resonance slightly off the prediction, realistic width.
-        true_freq = pred_qf + 1.5  # MHz offset from prediction
+        # the true resonance DRIFTS with flux (a parabolic sweet-spot offset over
+        # the prediction), so the predictor has a moving target to track via
+        # feedback — a fixed offset couldn't exercise adaptivity. The SNR varies
+        # sinusoidally to 0 at its troughs (those flux points are pure noise, so
+        # the fit-quality gate rejects them and skips calibration).
+        true_freq = pred_qf + flux_drift(env.flux, baseline=1.5, amplitude=20.0)
         true_fwhm = 2.0  # MHz
+        snr = flux_snr(env.flux)
 
         idx = env.flux_idx
         result.flux[idx] = env.flux
@@ -145,7 +153,7 @@ class QubitFreqNode(Node):
         base = env.flux_idx * 1000
 
         def make_round(k: int) -> NDArray[np.complex128]:
-            return lorentzian_dip(freqs, true_freq, true_fwhm, seed=base + k)
+            return lorentzian_dip(freqs, true_freq, true_fwhm, snr=snr, seed=base + k)
 
         def on_round(avg: NDArray[np.complex128], _k: int) -> None:
             np.copyto(result.signal[idx], _signal2real(avg))
@@ -167,17 +175,11 @@ class QubitFreqNode(Node):
         # discarded — it does NOT enter the Result, does NOT feed the predictor,
         # and is omitted from the Patch so downstream falls back to the latest
         # good value (and the next point predicts from the last good calibration).
-        residual = float(np.mean(np.abs(real - np.asarray(fit_curve))))
-        span = float(np.ptp(np.asarray(fit_curve)))
-        good_fit = span > 0 and residual < 0.2 * span
-
-        if not good_fit:
+        if not is_good_fit(real, fit_curve):
             logger.debug(
-                "qubit_freq fit @flux%d: poor fit (residual=%.3f vs span=%.3f) — "
+                "qubit_freq fit @flux%d: poor fit (SNR-trough?) — "
                 "discarded, no calibrate, no qubit_freq produced",
                 idx,
-                residual,
-                span,
             )
             if env.round_hook is not None:
                 env.round_hook(idx)  # raw row already shown; fit fields stay nan

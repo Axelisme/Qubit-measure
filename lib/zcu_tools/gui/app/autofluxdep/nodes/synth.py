@@ -168,6 +168,61 @@ def parse_linear_axis(
     return np.linspace(lo, hi, max(2, n))
 
 
+# --- flux-dependent drift + SNR (the prototype's adaptivity test substrate) ---
+#
+# Real fluxonium parameters vary with flux; a fixed plant can't exercise the
+# closed-loop feedback (the predictor would have nothing to track). So each
+# physical quantity drifts parabolically with flux (sweet-spot-like), and the
+# signal SNR varies sinusoidally down to 0 at its troughs — those flux points are
+# pure noise, so the fit-quality gate rejects them (no calibrate), testing the
+# feedback's robustness to dead points. Module constants, not user params.
+FLUX_DRIFT_CENTER = 0.5  # the parabola's vertex (sweet spot) in flux units
+SNR_PERIOD = 0.35  # flux period of the SNR sinusoid
+SNR_PHASE = 0.15  # flux phase offset (so troughs land mid-sweep, not at flux 0)
+
+
+def flux_drift(
+    flux: float, baseline: float, amplitude: float, center: float = FLUX_DRIFT_CENTER
+) -> float:
+    """A physical quantity's flux dependence: a parabola peaking at ``center``.
+
+    ``baseline + amplitude * (flux - center)**2`` — a sweet-spot-like curve the
+    predictor must track. Each quantity (qubit freq, t1, …) uses its own
+    baseline / amplitude so they drift independently across the sweep.
+    """
+    return baseline + amplitude * (flux - center) ** 2
+
+
+def flux_snr(flux: float) -> float:
+    """The signal-to-noise coefficient at ``flux`` — sinusoidal in [0, 1].
+
+    ``(1 + sin(2π·flux/period + phase)) / 2`` reaches 0 at its troughs, where the
+    synthetic signal is all noise (SNR = 0) and the fit-quality gate discards the
+    point. Multiplies the signal amplitude in the synth functions.
+    """
+    return 0.5 * (1.0 + np.sin(2.0 * np.pi * flux / SNR_PERIOD + SNR_PHASE))
+
+
+def is_good_fit(
+    real: NDArray[np.float64], fit_curve: NDArray[np.float64], threshold: float = 0.2
+) -> bool:
+    """Whether a fit is good enough to trust (the runner module's mean_err gate).
+
+    Compares the mean absolute residual to the fit's peak-to-peak span: a good
+    fit tracks the signal so the residual is a small fraction of the span. At an
+    SNR-trough flux point the signal is pure noise — the fitted curve is nearly
+    flat (tiny span) while the residual is large, so this returns False, and the
+    Node omits that point's provides key (no downstream contamination) and skips
+    calibration. Mirrors ``mean_err < threshold * ptp(fit)`` per experiment.
+    """
+    fit = np.asarray(fit_curve, dtype=np.float64)
+    span = float(np.ptp(fit))
+    if span <= 0 or not np.all(np.isfinite(fit)):
+        return False
+    residual = float(np.mean(np.abs(np.asarray(real, dtype=np.float64) - fit)))
+    return residual < threshold * span
+
+
 def _phase_and_noise(
     real: NDArray[np.float64],
     rng: np.random.RandomState,
@@ -191,15 +246,17 @@ def lorentzian_dip(
     baseline: float = 0.5,
     noise: float = 0.02,
     phase_deg: float = 37.0,
+    snr: float = 1.0,
     seed: int = 0,
 ) -> NDArray[np.complex128]:
     """A qubit-frequency resonance: a Lorentzian dip at ``center`` of width
     ``fwhm`` (= 2·gamma), as a complex IQ signal. Fits with ``fit_qubit_freq``.
+    ``snr`` (∈[0,1]) scales the dip depth — at 0 the signal is pure noise.
     """
     rng = np.random.RandomState(seed)
     gamma = fwhm / 2.0
     # lorfunc params: [y0, slope, yscale, x0, gamma]; negative yscale → a dip
-    real = lorfunc(freqs, baseline, 0.0, -depth, center, gamma)
+    real = lorfunc(freqs, baseline, 0.0, -depth * snr, center, gamma)
     return _phase_and_noise(real, rng, noise, phase_deg)
 
 
@@ -211,14 +268,16 @@ def exp_decay(
     baseline: float = 0.1,
     noise: float = 0.02,
     phase_deg: float = 37.0,
+    snr: float = 1.0,
     seed: int = 0,
 ) -> NDArray[np.complex128]:
     """A T1 relaxation: an exponential decay with time constant ``t1`` (us), as a
-    complex IQ signal. Fits with ``fit_decay`` to recover ``t1``.
+    complex IQ signal. Fits with ``fit_decay`` to recover ``t1``. ``snr`` (∈[0,1])
+    scales the decay amplitude — at 0 the signal is pure noise.
     """
     rng = np.random.RandomState(seed)
     # expfunc params: [y0, yscale, decay_time]
-    real = expfunc(times, baseline, amp, t1)
+    real = expfunc(times, baseline, amp * snr, t1)
     return _phase_and_noise(real, rng, noise, phase_deg)
 
 
@@ -231,16 +290,18 @@ def rabi_oscillation(
     phase_deg_curve: float = 0.0,
     noise: float = 0.02,
     phase_deg: float = 37.0,
+    snr: float = 1.0,
     seed: int = 0,
 ) -> NDArray[np.complex128]:
     """A length-Rabi oscillation: a cosine of frequency ``rabi_freq`` (1/us) vs
     pulse length, as a complex IQ signal. Fits with ``fit_rabi`` to recover the
     pi/pi-half lengths and the Rabi frequency. ``phase_deg_curve`` is the cosine's
-    own phase (degrees), distinct from the readout ``phase_deg``.
+    own phase (degrees), distinct from the readout ``phase_deg``; ``snr`` (∈[0,1])
+    scales the oscillation amplitude — at 0 the signal is pure noise.
     """
     rng = np.random.RandomState(seed)
     # cosfunc params: [y0, yscale, freq (1/x), phase (deg)]
-    real = cosfunc(lengths, baseline, amp, rabi_freq, phase_deg_curve)
+    real = cosfunc(lengths, baseline, amp * snr, rabi_freq, phase_deg_curve)
     return _phase_and_noise(real, rng, noise, phase_deg)
 
 
@@ -254,15 +315,17 @@ def decay_cos(
     phase_deg_curve: float = 0.0,
     noise: float = 0.02,
     phase_deg: float = 37.0,
+    snr: float = 1.0,
     seed: int = 0,
 ) -> NDArray[np.complex128]:
     """A Ramsey/echo fringe: a cosine of frequency ``fringe_freq`` (1/us) under an
     exponential envelope of time constant ``t2`` (us), as a complex IQ signal.
-    Fits with ``fit_decay_fringe`` to recover ``t2`` and the detune.
+    Fits with ``fit_decay_fringe`` to recover ``t2`` and the detune. ``snr``
+    (∈[0,1]) scales the fringe amplitude — at 0 the signal is pure noise.
     """
     rng = np.random.RandomState(seed)
     # decaycos params: [y0, yscale, freq, phase, decay_time]
-    real = decaycos(times, baseline, amp, fringe_freq, phase_deg_curve, t2)
+    real = decaycos(times, baseline, amp * snr, fringe_freq, phase_deg_curve, t2)
     return _phase_and_noise(real, rng, noise, phase_deg)
 
 

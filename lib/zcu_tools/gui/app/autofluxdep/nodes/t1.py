@@ -35,6 +35,9 @@ from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.synth import (
     accumulate_rounds,
     exp_decay,
+    flux_drift,
+    flux_snr,
+    is_good_fit,
     parse_linear_axis,
     resolve_acquire_delay,
     resolve_rounds,
@@ -69,14 +72,16 @@ class T1Node(Node):
 
     def produce(self, snapshot: Snapshot) -> Patch:
         env = self._env
-        prev_t1 = float(snapshot["t1"])  # smoothed (declared smooth="ewma")
+        _ = snapshot["t1"]  # smoothed (declared smooth="ewma") — dependency contract
         _ = snapshot.module("pi_pulse"), snapshot.module("opt_readout")
 
         result: Sweep1DResult = env.result
         times = result.x
 
-        # plant a true t1 near the smoothed estimate (so the sweep tracks it)
-        true_t1 = prev_t1 * 1.1
+        # t1 drifts parabolically with flux: ~10 us at the sweet spot, up to ~50 us
+        # at the edges. SNR varies sinusoidally to 0 at its troughs (dead points).
+        true_t1 = flux_drift(env.flux, baseline=10.0, amplitude=40.0)
+        snr = flux_snr(env.flux)
 
         idx = env.flux_idx
         result.flux[idx] = env.flux
@@ -84,7 +89,7 @@ class T1Node(Node):
         base = env.flux_idx * 1000
 
         def make_round(k: int) -> NDArray[np.complex128]:
-            return exp_decay(times, true_t1, seed=base + k)
+            return exp_decay(times, true_t1, snr=snr, seed=base + k)
 
         def on_round(avg: NDArray[np.complex128], _k: int) -> None:
             np.copyto(result.signal[idx], signal_to_real(avg))
@@ -100,6 +105,13 @@ class T1Node(Node):
         real = signal_to_real(averaged)
 
         t1, _t1err, fit_curve, _ = fit_decay(times, real)
+
+        if not is_good_fit(real, fit_curve):
+            logger.debug("t1 fit @flux%d: poor fit (SNR-trough?) — discarded", idx)
+            if env.round_hook is not None:
+                env.round_hook(idx)  # raw row already shown; fit fields stay nan
+            return Patch()  # partial: omit t1 → downstream fallback
+
         result.fit_value[idx] = float(t1)
         np.copyto(result.fit_curve[idx], np.asarray(fit_curve, dtype=np.float64))
         if env.round_hook is not None:

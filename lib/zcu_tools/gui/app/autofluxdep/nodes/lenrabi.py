@@ -32,6 +32,9 @@ from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.synth import (
     accumulate_rounds,
+    flux_drift,
+    flux_snr,
+    is_good_fit,
     parse_linear_axis,
     rabi_oscillation,
     resolve_acquire_delay,
@@ -49,7 +52,6 @@ def _last_fit(result: Any) -> float:
     return float(valid[-1]) if valid.size else float("nan")
 
 
-_DEFAULT_RABI_FREQ = 0.5  # 1/us — planted Rabi frequency for the prototype
 _DEFAULT_SWEEP = (0.0, 6.0, 121)  # pulse-length axis (us): start, stop, npts
 
 
@@ -76,8 +78,10 @@ class LenRabiNode(Node):
         result: Sweep1DResult = env.result
         lengths = result.x
 
-        # plant a Rabi frequency near the default; the sweep should recover it
-        rabi_freq = _DEFAULT_RABI_FREQ
+        # rabi_freq drifts parabolically with flux: ~0.5 1/us at sweet spot, up to
+        # ~0.9 1/us at the edges. SNR varies sinusoidally to 0 at its troughs.
+        rabi_freq = flux_drift(env.flux, baseline=0.5, amplitude=0.4)
+        snr = flux_snr(env.flux)
 
         idx = env.flux_idx
         result.flux[idx] = env.flux
@@ -85,7 +89,7 @@ class LenRabiNode(Node):
         base = env.flux_idx * 1000
 
         def make_round(k: int) -> NDArray[np.complex128]:
-            return rabi_oscillation(lengths, rabi_freq, seed=base + k)
+            return rabi_oscillation(lengths, rabi_freq, snr=snr, seed=base + k)
 
         def on_round(avg: NDArray[np.complex128], _k: int) -> None:
             np.copyto(result.signal[idx], signal_to_real(avg))
@@ -101,6 +105,13 @@ class LenRabiNode(Node):
         real = signal_to_real(averaged)
 
         pi_x, _, pi2_x, _, freq, _, fit_curve, _ = fit_rabi(lengths, real)
+
+        if not is_good_fit(real, fit_curve):
+            logger.debug("lenrabi fit @flux%d: poor fit (SNR-trough?) — discarded", idx)
+            if env.round_hook is not None:
+                env.round_hook(idx)  # raw row already shown; fit fields stay nan
+            return Patch()  # partial: omit pi_length/pi2_length/rabi_freq + modules → downstream fallback
+
         result.fit_value[idx] = float(pi_x)
         np.copyto(result.fit_curve[idx], np.asarray(fit_curve, dtype=np.float64))
         if env.round_hook is not None:
