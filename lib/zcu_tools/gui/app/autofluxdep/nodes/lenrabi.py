@@ -7,10 +7,6 @@ and pi2 lengths plus the Rabi frequency.
 
 - requires ``qubit_freq`` (a hard require via Dependency): the Rabi experiment
   drives the qubit on resonance, so no qubit frequency → no sensible cfg.
-- reads ``smooth_pi_product`` declared ``smooth="step_weighted"`` (the notebook's
-  smooth_m / smooth_step_weighted, used for cfg tuning); treated as optional with
-  default 0.3 — if absent the prototype ignores it (prototype doesn't build a
-  real cfg).
 - the ``opt_readout`` module is optional (ro_optimize produces it → ml preset →
   default).
 - provides the ``pi_pulse`` and ``pi2_pulse`` modules (placeholder dicts in the
@@ -55,10 +51,6 @@ def _last_fit(result: Any) -> float:
 _DEFAULT_SWEEP = (0.0, 6.0, 121)  # pulse-length axis (us): start, stop, npts
 
 
-def _default_smooth_pi_product() -> float:
-    return 0.3
-
-
 def _default_readout() -> Optional[Any]:
     return None
 
@@ -72,7 +64,6 @@ class LenRabiNode(Node):
     def produce(self, snapshot: Snapshot) -> Patch:
         env = self._env
         _ = snapshot["qubit_freq"]  # required — drives on resonance
-        _ = snapshot["smooth_pi_product"]  # optional smoothed product param
         _ = snapshot.module("opt_readout")  # optional — prototype does not use
 
         result: Sweep1DResult = env.result
@@ -148,13 +139,6 @@ class LenRabiBuilder(Builder):
     provides = ("pi_length", "pi2_length", "rabi_freq")
     provides_modules = ("pi_pulse", "pi2_pulse")
     requires = (Dependency("qubit_freq"),)
-    optional = (
-        Dependency(
-            "smooth_pi_product",
-            smooth="step_weighted",
-            default=_default_smooth_pi_product,
-        ),
-    )
     optional_modules = (ModuleDep("opt_readout", default=_default_readout),)
     base_params = (
         "sweep_range",

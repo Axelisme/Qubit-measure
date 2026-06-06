@@ -5,9 +5,10 @@ relax time (time constant planted from the smoothed previous t1), fits it with
 the real ``fit_decay``, fills its sweep Result row in place, and returns the raw
 ``t1`` Patch.
 
-- requires the ``pi_pulse`` module (lenrabi produces it) — without a pi-pulse
-  there is no excited state to relax, so it is a *required* module (skip if
-  absent everywhere) with a placeholder default for the prototype.
+- needs the ``pi_pulse`` module (lenrabi produces it) — without a pi-pulse there
+  is no excited state to relax. In the prototype it carries a placeholder
+  default, so it never actually skips; Phase B drops the default (real lenrabi
+  output) to restore true skip-if-absent.
 - reads ``t1`` declared ``smooth="ewma"`` (the notebook's smooth_t1) for the
   relax_delay guess + the planted decay constant; reports raw ``t1`` back.
 - the ``opt_readout`` module is optional (ro_optimize produces it → ml preset →

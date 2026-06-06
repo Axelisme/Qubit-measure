@@ -11,9 +11,10 @@ real-hardware difference is purely in the pulse sequence). The prototype
 uniformly uses the decay-cosine / fringe path regardless of the ``detune_ratio``
 param (no branch).
 
-- requires the ``pi_pulse`` and ``pi2_pulse`` modules (lenrabi produces both)
-  — the Hahn echo needs both a pi refocusing pulse and two pi/2 pulses; both
-  are required module deps with placeholder defaults for the prototype.
+- needs the ``pi_pulse`` and ``pi2_pulse`` modules (lenrabi produces both) — the
+  Hahn echo needs both a pi refocusing pulse and two pi/2 pulses. In the
+  prototype both carry placeholder defaults, so they never actually skip;
+  Phase B drops the defaults (real lenrabi output) to restore true skip.
 - reads ``t1`` (smooth="ewma") and ``t2e`` (smooth="ewma") as optional deps:
   ``t2e`` seeds the planted t2 so the sweep tracks a plausible echo time;
   ``t1`` is available for cfg sanity checks (not used directly in the prototype).

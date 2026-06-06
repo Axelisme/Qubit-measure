@@ -132,6 +132,22 @@ def test_ro_optimize_recovers_peak_and_produces_readout_module():
     assert mods["opt_readout"]["freq"] == pytest.approx(vals["best_ro_freq"])
 
 
+def test_ro_optimize_clamps_planted_freq_to_grid_edge():
+    # a prev best already at the freq grid's upper edge would, with the raw
+    # +0.2 drift, plant the Gaussian centre OUTSIDE the [4998, 5002] grid — the
+    # peak would fall off and argmax would pin to the boundary on noise. With
+    # the clamp, the planted centre stays at the edge and argmax recovers it.
+    patch, _result, _fired = _run(
+        RoOptimizeBuilder(),
+        {"t1": 10.0, "best_ro_freq": 5002.0, "best_ro_gain": 0.5},  # at top edge
+        {"pi_pulse": "<pi>", "readout": None},
+    )
+    best = patch.values()["best_ro_freq"]
+    # planted centre clamped to 5002.0 (not 5002.2); recovered best sits at the
+    # top of the grid, never beyond it
+    assert 5001.0 <= best <= 5002.0
+
+
 # --- variance, no fit (mist) ---
 
 

@@ -7,8 +7,9 @@ and ``best_ro_gain``, plus the ``opt_readout`` module constructed from them.
 
 - requires the ``pi_pulse`` module (a pi-pulse is needed to prepare the excited
   state before measuring readout fidelity); placeholder default for the prototype.
-- reads optional ``best_ro_freq`` and ``best_ro_gain`` (smoothed prev-point values
-  used to plant the Gaussian centre so the optimum tracks across flux points), with
+- reads optional ``best_ro_freq`` and ``best_ro_gain`` (raw prev-point values —
+  no smoothing flag: the tracking loop deliberately follows the actual last best
+  to plant the Gaussian centre so the optimum tracks across flux points), with
   sensible MHz defaults when absent.
 - reads optional ``t1`` (smoothed prev-point T1) for the prototype only — unused
   in computation but declared to exercise the dependency mechanism.
@@ -99,8 +100,10 @@ class RoOptimizeNode(Node):
         gains = result.gain
 
         # plant the peak slightly offset from the previous best so it drifts,
-        # clamped to the gain grid so the argmax stays recoverable
-        plant_freq = prev_best_freq + 0.2
+        # clamped to BOTH grids so the planted centre stays inside the sweep
+        # window — otherwise the +0.2/point freq drift walks off the freq grid
+        # after ~10 flux points and the argmax pins to the boundary.
+        plant_freq = float(np.clip(prev_best_freq + 0.2, freqs[0], freqs[-1]))
         plant_gain = float(np.clip(prev_best_gain, gains[0], gains[-1]))
 
         idx = env.flux_idx

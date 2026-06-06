@@ -6,8 +6,10 @@ row in place. ``fit_value`` and ``fit_curve`` remain nan (allocated as nan by
 ``Sweep1DResult.allocate``); the ``ColormapLinePlotter`` shows the flux × gain
 colormap with the latest flux rows as traces (no fit marker).
 
-- requires the ``pi_pulse`` module (pi-pulse prepares the excited state whose
-  disturbance the variance measures); placeholder default for the prototype.
+- needs the ``pi_pulse`` module (pi-pulse prepares the excited state whose
+  disturbance the variance measures). In the prototype it carries a placeholder
+  default, so it never actually skips; Phase B drops the default to restore true
+  skip-if-absent.
 - the ``opt_readout`` module is optional (ro_optimize produces it); unused in the
   prototype body but declared to mirror the real experiment's dependency.
 
