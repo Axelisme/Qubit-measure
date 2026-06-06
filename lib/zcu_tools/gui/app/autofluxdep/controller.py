@@ -37,6 +37,7 @@ from zcu_tools.gui.app.autofluxdep.state import (
     SETUP_VERSION_KEY,
     WORKFLOW_VERSION_KEY,
     AutoFluxDepState,
+    SetupRequest,
     SetupResources,
 )
 from zcu_tools.gui.app.autofluxdep.tools import SimplePredictor, Tools
@@ -176,21 +177,32 @@ class Controller:
             logger.debug("set_flux_values: cleared")
         self._bus.emit(Event(EventType.FLUX_CHANGED, len(values)))
 
-    # --- setup (prototype: MockSoc + FakeDevice, no hardware) ---
+    # --- setup (MockSoc + FakeDevice, or a real ZCU + YOKO + predictor) ---
 
     def setup(
         self,
-        resources: Optional[SetupResources] = None,
+        request: Optional[SetupRequest] = None,
         *,
         use_mock: bool = True,
     ) -> None:
-        """Build the run prerequisites. Prototype: ``use_mock`` builds a MockSoc
-        + a FakeDevice flux board (registered as "flux_dev" in the global device
-        manager) + a SimplePredictor stand-in. Real make_soc_proxy / ml /
-        FluxoniumPredictor wiring is Phase B; pass an explicit ``resources`` to
-        inject them."""
-        if resources is None:
-            resources = self._build_mock_resources() if use_mock else SetupResources()
+        """Build the run prerequisites from a ``SetupRequest``.
+
+        With no ``request`` a mock setup is built (the convenience for tests /
+        the ``use_mock`` shorthand). Otherwise the request's ``use_mock`` picks
+        the path: mock (MockSoc + FakeDevice + SimplePredictor) or real (the soc
+        proxy + a YOKOGS200 flux source + a FluxoniumPredictor from params.json).
+
+        A real connection that fails raises (Fast Fail — the dialog reports it
+        and stays open); a missing / unloadable predictor file degrades to a
+        SimplePredictor with a warning rather than blocking the run.
+        """
+        if request is None:
+            request = SetupRequest(use_mock=use_mock)
+        resources = (
+            self._build_mock_resources()
+            if request.use_mock
+            else self._build_real_resources(request)
+        )
         self._state.resources = resources
         self._state.version.bump(SETUP_VERSION_KEY)
         logger.info(
@@ -199,7 +211,7 @@ class Controller:
             type(resources.predictor).__name__
             if resources.predictor is not None
             else None,
-            use_mock,
+            request.use_mock,
         )
         self._bus.emit(Event(EventType.SETUP_DONE, None))
 
@@ -216,6 +228,69 @@ class Controller:
         return SetupResources(
             soc=soc, soccfg=soccfg, ml=None, predictor=SimplePredictor()
         )
+
+    @staticmethod
+    def _build_real_resources(request: SetupRequest) -> SetupResources:
+        """Connect a real ZCU + YOKOGS200 flux source + load the predictor.
+
+        Each step uses the existing library API directly (no gui-external module
+        is modified). A connection failure propagates (Fast Fail). The flux
+        device is registered as "flux_dev" in the global manager so the run finds
+        it; the predictor degrades to a SimplePredictor if params.json is absent
+        or unloadable.
+        """
+        from zcu_tools.remote import make_soc_proxy
+
+        logger.info("connecting real ZCU at %s:%d", request.ip, request.port)
+        soc, soccfg = make_soc_proxy(request.ip, request.port)
+
+        Controller._connect_flux_device(request.flux_device_address)
+        predictor = Controller._load_predictor(request.params_path)
+
+        return SetupResources(soc=soc, soccfg=soccfg, ml=None, predictor=predictor)
+
+    @staticmethod
+    def _connect_flux_device(address: str) -> None:
+        """Connect a YOKOGS200 at ``address`` and register it as "flux_dev".
+
+        Raises if the address is blank (a real run needs a flux source) or the
+        VISA connection fails (Fast Fail — surfaced by the dialog).
+        """
+        from zcu_tools.device import GlobalDeviceManager
+        from zcu_tools.device.yoko import YOKOGS200
+
+        if not address.strip():
+            raise ValueError("A flux device address is required for a real setup")
+        import pyvisa  # type: ignore[import-untyped]
+
+        logger.info("connecting YOKOGS200 flux source at %s", address)
+        device = YOKOGS200(address.strip(), pyvisa.ResourceManager())
+        GlobalDeviceManager.register_device("flux_dev", device)
+
+    @staticmethod
+    def _load_predictor(params_path: str) -> object:
+        """Load a FluxoniumPredictor from ``params_path``; degrade on failure.
+
+        A blank path or an unreadable / invalid params.json logs a warning and
+        falls back to the SimplePredictor stand-in, so a missing fit file does
+        not block the run (the prediction is just a linear stand-in then).
+        """
+        if not params_path.strip():
+            logger.warning("no params.json given; using SimplePredictor stand-in")
+            return SimplePredictor()
+        try:
+            from zcu_tools.simulate.fluxonium import FluxoniumPredictor
+
+            predictor = FluxoniumPredictor.from_file(params_path.strip())
+            logger.info("loaded FluxoniumPredictor from %s", params_path)
+            return predictor
+        except Exception as exc:
+            logger.warning(
+                "could not load predictor from %s (%s); using SimplePredictor",
+                params_path,
+                exc,
+            )
+            return SimplePredictor()
 
     # --- run control (cancellable) ---
 

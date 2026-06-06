@@ -1,13 +1,10 @@
-"""State SSOT for autofluxdep-gui (skeleton).
+"""State SSOT for autofluxdep-gui.
 
-Holds the workflow definition the user edits — the ordered Node instances, the
-flux sweep, and the project handle — plus run results once Phase B/C add
-execution. Mirrors the fluxdep/dispersive State pattern (frozen project info +
-mutable working set guarded by a VersionTable), but the domain content is the
-Node graph, not spectra.
-
-This is a skeleton: only the workflow-definition fields exist. Run progress,
-per-point/per-Node results, and predictor state are Phase B/C additions.
+Holds the workflow definition the user edits — the ordered Node placements, the
+flux sweep, and the project handle — plus the Setup resources (soc / flux device
+/ predictor) and the per-Node run Results. Mirrors the fluxdep/dispersive State
+pattern (frozen project info + mutable working set guarded by a VersionTable),
+but the domain content is the Node graph, not spectra.
 """
 
 from __future__ import annotations
@@ -29,8 +26,8 @@ SETUP_VERSION_KEY = "setup"
 class ProjectInfo:
     """Project handle — chip/qubit identity + where params.json lives.
 
-    The predictor (FluxoniumPredictor) is loaded from ``params_path`` in
-    Phase B; here we only carry the locations.
+    The Setup step loads the FluxoniumPredictor from ``params_path`` (see
+    ``SetupRequest`` / ``Controller.setup``).
     """
 
     chip_name: str
@@ -39,16 +36,35 @@ class ProjectInfo:
     params_path: str
 
 
+@dataclass(frozen=True)
+class SetupRequest:
+    """What the Setup dialog asks the controller to build.
+
+    ``use_mock`` picks the offline path (MockSoc + FakeDevice + a SimplePredictor
+    stand-in) — every other field is then ignored. Otherwise the real path:
+    ``ip`` / ``port`` make the soc proxy, ``flux_device_address`` connects the
+    YOKOGS200 flux source, and ``params_path`` loads the FluxoniumPredictor (a
+    blank / missing / unloadable file degrades to a SimplePredictor).
+    """
+
+    use_mock: bool = True
+    ip: str = "192.168.10.179"
+    port: int = 8887
+    flux_device_address: str = ""
+    params_path: str = ""
+
+
 @dataclass
 class SetupResources:
     """The run prerequisites built by the Setup step (held as live objects).
 
-    In the prototype these are fakes; Phase B binds the real soc/soccfg
-    (make_soc_proxy), ml (ModuleLibrary), predictor (FluxoniumPredictor), and md
-    (metadata). device is a global singleton (GlobalDeviceManager), not held
-    here — State only records that setup completed via ``AutoFluxDepState
-    .has_setup``. These objects stay owned by the main thread; the run worker
-    uses them by reference.
+    Mock: a MockSoc + a FakeDevice flux board + a SimplePredictor stand-in. Real:
+    the soc/soccfg from ``make_soc_proxy``, a YOKOGS200 flux source, and a
+    ``FluxoniumPredictor`` loaded from params.json. The flux device is registered
+    in the global ``GlobalDeviceManager`` (a singleton), not held here — State
+    records that setup completed via ``AutoFluxDepState.has_setup``. These objects
+    stay owned by the main thread; the run worker uses them by reference. ``ml``
+    (ModuleLibrary) / ``md`` (metadata) stay unbound until those features land.
     """
 
     soc: Any = None
