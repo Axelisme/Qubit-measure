@@ -1,56 +1,55 @@
-"""RemoteControlAdapter — local socket interface for automation agents.
+"""RemoteControlAdapter — measure-gui's second View (driving adapter).
 
-Bind defaults to 127.0.0.1. NDJSON request/response (plus optional event push)
-over plain TCP.
+The RPC face onto the Controller, peer to the Qt ``MainWindow`` (ADR-0008 /
+ADR-0013): the second user-facing client (user = an automation agent / another
+server). Pure transport — the socket lifecycle, NDJSON framing, the per-client
+writer, the ``wire.version`` / ``auth`` handshakes, and the push fan-out
+primitive — lives in the shared :class:`NdjsonRpcEndpoint`. This adapter is the
+richest of the three; it keeps all of measure-gui's *dispatch policy + domain*:
 
-Threading:
-  - Server thread (daemon): listens, accepts, reads request lines per client,
-    parses, dispatches handlers via a queued Qt signal onto the main thread,
-    waits (timeout-bounded) for the handler to set its event, then enqueues
-    the reply onto that client's outbound queue.
-  - Per-client writer thread (daemon, one per accepted connection): is the
-    sole writer to its client socket. Loops on a ``queue.Queue``; receives
-    pre-encoded reply lines and pushed event lines in enqueue order.
-  - Main thread (Qt): runs dispatch handlers and EventBus callbacks. The
-    bus callbacks serialize a payload and enqueue bytes onto each subscribed
-    client's outbound queue.
-  - Shutdown is initiated from the main thread; it unsubscribes EventBus
-    handlers synchronously on the main thread (Phase 81), enqueues sentinels
-    to every writer queue, joins writers, then wakes and joins the server
-    thread via a ``socket.socketpair`` self-pipe.
+  - the :class:`EndpointRouter` seam: ``route`` (events.* + editor.* state-owning
+    handlers, then METHOD_REGISTRY lookup + ParamSpec validation + dispatch),
+    ``on_client_open`` (per-connection subscription + editor-session sets),
+    ``on_client_close`` (reclaim this connection's CfgEditor sessions);
+  - ``_dispatch_on_main``: the marshal (via the shared
+    :class:`MainThreadDispatcher`) composed with measure-gui's own policy — the
+    ``off_main_thread`` blocking-handler branch, the version guard
+    (``_guard_versions``, run inside the main-thread ``_run`` so its
+    compare-and-act is atomic), and ``_track_editor_lifecycle``;
+  - EventBus push (keyed by :class:`GuiEvent`), the out-of-band diagnostic
+    channel (``notify_diagnostic``), and the per-editor change stream
+    (``_on_editor_event``) — all pushed via ``endpoint.broadcast``.
+
+Handlers receive *this adapter* (not the bare ctrl), so they reach commands
+through ``adapter.ctrl.<façade>`` and View-side surfaces (render/snapshot)
+through ``adapter.render_view``. Construct after ``Controller`` / ``MainWindow``
+exist; inert until ``start()``.
 """
 
 from __future__ import annotations
 
 import base64
-import hmac
 import logging
-import queue
-import selectors
-import socket
 import threading
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Mapping, Optional
 
-from qtpy.QtCore import QObject, Qt, Signal  # type: ignore[attr-defined]
-
 from zcu_tools.gui.app.main.event_bus import EventBus, GuiEvent, Payload
+from zcu_tools.gui.remote.control_adapter import (
+    ClientLink,
+    ControlOptions,
+    MainThreadDispatcher,
+    NdjsonRpcEndpoint,
+)
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.remote.framing import encode_line
+from zcu_tools.gui.remote.param_spec import validate_params
+from zcu_tools.gui.remote.wire import Request
 
 if TYPE_CHECKING:
     # Type-only: importing Controller at runtime would form a cycle
     # (controller.py imports remote.dialogs). String annotation keeps pyright
     # checking handler/ctrl method names while the runtime import never happens.
     from zcu_tools.gui.app.main.controller import Controller, RenderView, Severity
-
-from zcu_tools.gui.remote.errors import ErrorCode, ErrorEnvelope, RemoteError
-from zcu_tools.gui.remote.framing import (
-    LINE_TERMINATOR,
-    MAX_LINE_BYTES,
-    decode_line,
-    encode_line,
-)
-from zcu_tools.gui.remote.param_spec import validate_params
-from zcu_tools.gui.remote.wire import Response, parse_request, require_str
 
 from .dispatch import METHOD_REGISTRY
 from .events import EVENT_SERIALIZERS, wire_event_name
@@ -59,112 +58,38 @@ from .wire_version import GUI_VERSION, WIRE_VERSION
 logger = logging.getLogger(__name__)
 
 
-# Outbound queue capacity per client. Slow / wedged readers cause messages to
-# be dropped past this point (with a WARN log); see ``_QUEUE_DROP_BUDGET``.
-_OUTBOUND_QUEUE_MAX = 256
+class _ClientCtx:
+    """measure-gui's per-connection semantic state (attached to ``link.app_ctx``).
 
-# Consecutive drops on the same client before we proactively close it. This
-# stops a wedged reader from indefinitely accumulating dropped event pushes.
-_QUEUE_DROP_BUDGET = 8
-
-_SHUTDOWN_SENTINEL: bytes = b""
-
-
-@dataclass(frozen=True)
-class ControlOptions:
-    """Knobs for the remote control endpoint.
-
-    ``port=0`` asks the OS for an ephemeral free port — useful for tests.
-    ``allow_external`` flips the bind from loopback to all interfaces; combined
-    with a missing ``token`` this is refused at startup.
+    Tracks event subscriptions plus the CfgEditor sessions this connection owns
+    (reclaimed on drop) and subscribed to (for the per-editor change stream).
     """
 
-    port: int
-    token: Optional[str] = None
-    allow_external: bool = False
-
-    def host(self) -> str:
-        return "0.0.0.0" if self.allow_external else "127.0.0.1"
-
-
-class _MainThreadDispatcher(QObject):
-    """QObject living on the Qt main thread.
-
-    Server threads ``emit`` ``invoke`` to schedule a callable on the main thread
-    via Qt's queued connection — this is the supported way to marshal arbitrary
-    work onto the Qt event loop from a foreign thread (``QTimer.singleShot``
-    must run on the timer's own thread).
-    """
-
-    invoke = Signal(object)
+    __slots__ = ("subscribed", "editor_ids", "subscribed_editors")
 
     def __init__(self) -> None:
-        super().__init__()
-        # type=QueuedConnection ensures the slot runs on this QObject's owning
-        # thread (the Qt main thread) when emitted from a foreign thread.
-        self.invoke.connect(self._run, type=Qt.ConnectionType.QueuedConnection)  # type: ignore[call-arg]
-
-    def _run(self, fn: Callable[[], None]) -> None:
-        fn()
-
-
-# ---------------------------------------------------------------------------
-# Per-client bookkeeping
-# ---------------------------------------------------------------------------
-
-
-class _ClientState:
-    """Tracks per-connection authentication, buffer, subscriptions, writer."""
-
-    __slots__ = (
-        "authed",
-        "buffer",
-        "peer",
-        "subscribed",
-        "outbound",
-        "writer_thread",
-        "consecutive_drops",
-        "closing",
-        "editor_ids",
-        "subscribed_editors",
-    )
-
-    def __init__(self, peer: str, token_required: bool) -> None:
-        self.peer = peer
-        # If no token is configured, every client starts authenticated.
-        self.authed = not token_required
-        self.buffer = bytearray()
         self.subscribed: set[str] = set()
-        self.outbound: queue.Queue[bytes] = queue.Queue(maxsize=_OUTBOUND_QUEUE_MAX)
-        self.writer_thread: Optional[threading.Thread] = None
-        self.consecutive_drops: int = 0
-        self.closing: bool = False
         # CfgEditor session ids opened by this connection; reclaimed on drop.
         self.editor_ids: set[str] = set()
         # CfgEditor session ids this connection subscribed to for change push.
         self.subscribed_editors: set[str] = set()
 
 
-# ---------------------------------------------------------------------------
-# Service
-# ---------------------------------------------------------------------------
+def _ctx(link: ClientLink) -> _ClientCtx:
+    ctx = link.app_ctx
+    assert isinstance(ctx, _ClientCtx)
+    return ctx
 
 
 class RemoteControlAdapter:
-    """Driving adapter: an NDJSON RPC face onto the Controller, peer to the Qt
-    ``MainWindow`` (ADR-0008 / ADR-0013).
+    """Driving adapter: an NDJSON RPC face onto the measure-gui ``Controller``.
 
-    It is a *View* — the second user-facing client (user = an automation agent /
-    another server). It holds the concrete ``Controller`` (command face) and
-    pulls EventBus from it via ``controller.get_bus()``. Dispatch handlers
-    receive *this adapter* (not the bare ctrl), so they reach commands through
-    ``adapter.ctrl.<façade>`` and View-side surfaces (render/snapshot) through
-    the adapter's own methods. Construct after ``Controller`` / ``MainWindow``
-    exist; inert until ``start()``.
-
-    Handlers that merely forward to the façade call ``adapter.ctrl.<m>``
-    directly (no wrapper). Wrap a call as an adapter method only when the RPC
-    side needs its own logic (e.g. render queries that use ``render_view``).
+    Holds the concrete ``Controller`` (command face) and a
+    :class:`NdjsonRpcEndpoint` (transport); pulls EventBus from the controller
+    via ``get_bus()``. Dispatch handlers reach commands through ``adapter.ctrl``
+    and the canvas-bearing View's pure-read surface through ``adapter.render_view``
+    (screenshot / snapshot / dialog). ``render_view`` is None in a headless
+    process; render handlers fail-fast then.
     """
 
     def __init__(
@@ -173,28 +98,16 @@ class RemoteControlAdapter:
         opts: ControlOptions,
         render_view: Optional["RenderView"] = None,
     ) -> None:
-        if opts.allow_external and not opts.token:
-            raise RuntimeError(
-                "Remote control must specify a token when --control-allow-external is set"
-            )
-        # Public: dispatch handlers reach the command face through ``adapter.ctrl``
-        # and the canvas-bearing View's pure-read surface through
-        # ``adapter.render_view`` (screenshot / snapshot / dialog). render_view is
-        # None in a headless process; render handlers fail-fast then.
         self.ctrl = controller
         self.render_view = render_view
-        self._opts = opts
-        self._dispatcher = _MainThreadDispatcher()
-        self._stopping = threading.Event()
-        self._server_sock: Optional[socket.socket] = None
-        self._wake_r: Optional[socket.socket] = None
-        self._wake_w: Optional[socket.socket] = None
-        self._thread: Optional[threading.Thread] = None
-        self._actual_port: Optional[int] = None
-        # Clients held both by the server thread (mutating set) and by the
-        # main-thread EventBus callback (iterating set). Guarded by lock.
-        self._clients: dict[socket.socket, _ClientState] = {}
-        self._clients_lock = threading.Lock()
+        self._dispatcher = MainThreadDispatcher()
+        self._endpoint = NdjsonRpcEndpoint(
+            opts,
+            wire_version=WIRE_VERSION,
+            gui_version=GUI_VERSION,
+            server_name="RemoteControlServer",
+            router=self,
+        )
         # EventBus subscriptions registered in start(); unsubscribed in stop().
         self._bus: Optional[EventBus] = None
         self._bus_subs: list[tuple[GuiEvent, Callable[[Payload], None]]] = []
@@ -204,614 +117,101 @@ class RemoteControlAdapter:
     # ------------------------------------------------------------------
 
     def start(self) -> int:
-        """Bind, listen, spawn the server thread, hook EventBus.
+        """Hook EventBus + editor stream + diagnostic sink, then start the endpoint.
 
-        Returns the actual bound port.
+        Returns the bound port. The app-side wiring happens before the socket
+        opens so no event/diagnostic is missed.
         """
-        if self._thread is not None:
-            raise RuntimeError("RemoteControlAdapter.start() called twice")
-        host = self._opts.host()
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # Allow rebinding while a previous bind lingers in TIME-WAIT, so a
-        # gui_stop -> gui_launch cycle does not fail with EADDRINUSE for ~60s
-        # (standard server-socket convention; bind is still exclusive of a live
-        # listener, so a stale *running* process is still correctly rejected).
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            sock.bind((host, self._opts.port))
-        except OSError as exc:
-            sock.close()
-            raise RuntimeError(
-                f"RemoteControlAdapter bind {host}:{self._opts.port} failed: {exc}"
-            ) from exc
-        sock.listen(8)
-        sock.setblocking(False)
-        self._server_sock = sock
-        port = int(sock.getsockname()[1])
-        self._actual_port = port
-
-        wake_r, wake_w = socket.socketpair()
-        wake_r.setblocking(False)
-        self._wake_r, self._wake_w = wake_r, wake_w
-
         self._subscribe_event_bus()
         self._wire_editor_change_listener()
         # Become a diagnostic-only View (ADR-0013): receive ctrl error/info
         # fan-out and push it to clients out-of-band of EventBus.
         self.ctrl.add_diagnostic_sink(self)
-
-        self._thread = threading.Thread(
-            target=self._serve_forever, name="RemoteControlServer", daemon=True
-        )
-        self._thread.start()
-        logger.info(
-            "RemoteControlAdapter listening on %s:%d (token=%s)",
-            host,
-            port,
-            "yes" if self._opts.token else "no",
-        )
-        return port
+        return self._endpoint.start()
 
     def stop(self) -> None:
-        """Wake the selector loop, close all sockets, join threads.
+        """Unwire app-side listeners, then stop the endpoint. Idempotent. Main thread.
 
-        Idempotent. Must be called from the Qt main thread (it unsubscribes
-        EventBus callbacks synchronously).
+        Unsubscribe EventBus + editor change stream + diagnostic sink first so no
+        more enqueues happen; the endpoint then reclaims editors (via
+        ``on_client_close``), drains writers, and closes sockets.
         """
-        if self._stopping.is_set():
-            return
-        self._stopping.set()
-
-        # 1) Unsubscribe EventBus + editor change stream + diagnostic sink so no
-        #    more enqueues.
         self._unsubscribe_event_bus()
         self._unwire_editor_change_listener()
         self.ctrl.remove_diagnostic_sink(self)
-
-        # 2) Signal every writer to exit; join them.
-        with self._clients_lock:
-            client_snapshot = list(self._clients.items())
-        for _sock, state in client_snapshot:
-            # stop() runs on the main thread, so reclaim editors directly.
-            self._reclaim_editors(state, marshal=False)
-            state.closing = True
-            try:
-                state.outbound.put_nowait(_SHUTDOWN_SENTINEL)
-            except queue.Full:
-                # Force-drain one slot then push sentinel so writer wakes.
-                try:
-                    state.outbound.get_nowait()
-                except queue.Empty:
-                    pass
-                try:
-                    state.outbound.put_nowait(_SHUTDOWN_SENTINEL)
-                except queue.Full:
-                    pass
-        for _sock, state in client_snapshot:
-            t = state.writer_thread
-            if t is not None and t.is_alive():
-                t.join(timeout=2.0)
-
-        # 3) Wake the server selector loop.
-        if self._wake_w is not None:
-            try:
-                self._wake_w.send(b"x")
-            except OSError:
-                pass
-        thread = self._thread
-        if thread is not None and thread.is_alive():
-            thread.join(timeout=2.0)
-
-        # 4) Close all sockets.
-        with self._clients_lock:
-            for sock in list(self._clients.keys()):
-                try:
-                    sock.close()
-                except OSError:
-                    pass
-            self._clients.clear()
-        for sock in (self._server_sock, self._wake_r, self._wake_w):
-            if sock is not None:
-                try:
-                    sock.close()
-                except OSError:
-                    pass
-        self._server_sock = None
-        self._wake_r = None
-        self._wake_w = None
-        self._thread = None
-        logger.info("RemoteControlAdapter stopped")
+        self._endpoint.stop()
 
     @property
     def port(self) -> int:
-        port = self._actual_port
-        if port is None:
-            raise RuntimeError("RemoteControlAdapter.start() was not called")
-        return port
+        return self._endpoint.port
 
     # ------------------------------------------------------------------
-    # EventBus integration
+    # EndpointRouter seam
     # ------------------------------------------------------------------
 
-    def _subscribe_event_bus(self) -> None:
-        """Subscribe one callback per serialised GuiEvent on the main thread."""
-        bus = self.ctrl.get_bus()
-        self._bus = bus
-        for event in EVENT_SERIALIZERS.keys():
-            cb = self._make_bus_callback(event)
-            try:
-                bus.subscribe(event, cb)
-            except Exception:  # pragma: no cover — bus.subscribe is straightforward
-                logger.exception("Failed to subscribe %s on EventBus", event)
-                continue
-            self._bus_subs.append((event, cb))
-        logger.debug(
-            "event-flow: subscribed %d EventBus events for push+buffer: %s",
-            len(self._bus_subs),
-            [e.value for e, _ in self._bus_subs],
-        )
+    def on_client_open(self, link: ClientLink) -> None:
+        link.app_ctx = _ClientCtx()
 
-    def _unsubscribe_event_bus(self) -> None:
-        if self._bus is None:
+    def on_client_close(self, link: ClientLink, *, on_main_thread: bool) -> None:
+        # Reclaim this connection's CfgEditor sessions. On a drop (IO thread) the
+        # LiveModel teardown must be marshalled onto the Qt main thread; during
+        # stop() the endpoint already calls us there, so reclaim directly.
+        self._reclaim_editors(_ctx(link), marshal=not on_main_thread)
+
+    def route(self, link: ClientLink, request: object) -> None:
+        """Handle one parsed, authenticated request on the IO thread."""
+        assert isinstance(request, Request)
+        req = request
+        # Subscription methods are state-owning (per-connection sets), so handled
+        # here, not via dispatch.
+        if req.method == "events.subscribe":
+            self._handle_subscribe(link, req.id, req.params)
             return
-        for event, cb in self._bus_subs:
-            try:
-                self._bus.unsubscribe(event, cb)
-            except Exception:  # pragma: no cover
-                logger.exception("Failed to unsubscribe %s on EventBus", event)
-        self._bus_subs.clear()
-        self._bus = None
-
-    def _make_bus_callback(self, event: GuiEvent) -> Callable[[Payload], None]:
-        serializer = EVENT_SERIALIZERS[event]
-        wire_name = wire_event_name(event)
-
-        def _on_event(payload: Payload) -> None:
-            # Runs on the Qt main thread. Serialize and push to subscribers; this
-            # is the agent's notification face ("what changed"). Resource version
-            # bookkeeping happens at the mutation site (State.version), not here.
-            try:
-                wire_payload = serializer(payload)
-            except Exception:  # pragma: no cover — serializer must not raise
-                logger.exception("Event serializer for %s raised", event)
-                return
-            if wire_payload is None:
-                return
-            try:
-                line = encode_line({"event": wire_name, "payload": wire_payload})
-            except Exception:
-                logger.exception(
-                    "Failed to encode push line for %s payload=%r", event, wire_payload
-                )
-                return
-            self._broadcast(wire_name, line)
-
-        return _on_event
-
-    def _broadcast(self, wire_name: str, line: bytes) -> None:
-        with self._clients_lock:
-            clients = list(self._clients.values())
-        for state in clients:
-            if wire_name not in state.subscribed:
-                continue
-            self._enqueue(state, line, is_push=True)
-
-    # ------------------------------------------------------------------
-    # Diagnostic channel (DiagnosticSink impl) — independent of EventBus
-    # ------------------------------------------------------------------
-
-    def notify_diagnostic(self, severity: "Severity", title: str, message: str) -> None:
-        """Push a Controller diagnostic to every client. Runs on the Qt main
-        thread (ctrl fans out there). Deliberately *not* gated by event
-        subscription and *not* routed through EventBus — diagnostics must reach
-        the agent regardless of what it subscribed to, and a channel that
-        reports a fault must not be the faulty channel (ADR-0013)."""
-        try:
-            line = encode_line(
-                {
-                    "event": "diagnostic",
-                    "payload": {
-                        "severity": severity,
-                        "title": title,
-                        "message": message,
-                    },
-                }
-            )
-        except Exception:  # pragma: no cover — payload is plain strings
-            logger.exception("failed to encode diagnostic %r/%r", severity, title)
+        if req.method == "events.unsubscribe":
+            self._handle_unsubscribe(link, req.id, req.params)
             return
-        with self._clients_lock:
-            clients = list(self._clients.values())
-        for state in clients:
-            self._enqueue(state, line, is_push=True)
-
-    # ------------------------------------------------------------------
-    # CfgEditor per-session change stream (independent of EventBus)
-    # ------------------------------------------------------------------
-
-    def _wire_editor_change_listener(self) -> None:
-        """Inject ``_on_editor_event`` into the CfgEditorService (via ctrl)."""
-        self.ctrl.set_cfg_editor_change_listener(self._on_editor_event)
-
-    def _unwire_editor_change_listener(self) -> None:
-        self.ctrl.set_cfg_editor_change_listener(None)
-
-    def _on_editor_event(self, editor_id: str, event_name: str, payload: dict) -> None:
-        """Push a per-editor notification. Runs on the Qt main thread.
-
-        ``event_name`` ∈ {editor_changed, editor_closed}. Only clients that
-        subscribed to ``editor_id`` receive it. On editor_closed we also drop
-        the id from every client's subscription set. (The editor's resource
-        version is bumped at the edit site, not here.)
-        """
-        body = dict(payload)
-        body["editor_id"] = editor_id
-        try:
-            line = encode_line({"event": event_name, "payload": body})
-        except Exception:
-            logger.exception(
-                "failed to encode editor push %s/%s", editor_id, event_name
+        if req.method == "events.list":
+            self._endpoint.reply_ok(
+                link,
+                rid=req.id,
+                result={
+                    "events": sorted(wire_event_name(e) for e in EVENT_SERIALIZERS),
+                    "subscribed": sorted(_ctx(link).subscribed),
+                },
             )
             return
-        with self._clients_lock:
-            clients = list(self._clients.values())
-        for state in clients:
-            if editor_id not in state.subscribed_editors:
-                continue
-            self._enqueue(state, line, is_push=True)
-            if event_name == "editor_closed":
-                state.subscribed_editors.discard(editor_id)
-
-    def _enqueue(self, state: _ClientState, line: bytes, *, is_push: bool) -> None:
-        if state.closing:
+        # editor.subscribe/unsubscribe are state-owning (per-connection editor
+        # subscription set), so handled here, not via dispatch.
+        if req.method == "editor.subscribe":
+            self._handle_editor_subscribe(link, req.id, req.params, subscribe=True)
             return
-        try:
-            state.outbound.put_nowait(line)
-            state.consecutive_drops = 0
-        except queue.Full:
-            state.consecutive_drops += 1
-            logger.warning(
-                "remote client %s outbound queue full (drops=%d, push=%s)",
-                state.peer,
-                state.consecutive_drops,
-                is_push,
+        if req.method == "editor.unsubscribe":
+            self._handle_editor_subscribe(link, req.id, req.params, subscribe=False)
+            return
+        spec = METHOD_REGISTRY.get(req.method)
+        if spec is None:
+            self._endpoint.reply_error(
+                link,
+                rid=req.id,
+                code=ErrorCode.UNKNOWN_METHOD,
+                message=f"unknown method: {req.method!r}",
             )
-            if state.consecutive_drops >= _QUEUE_DROP_BUDGET:
-                logger.warning(
-                    "remote client %s exceeded drop budget; closing",
-                    state.peer,
-                )
-                state.closing = True
-                # The writer thread will exit when it next finds the queue
-                # empty after we forcefully push a sentinel; do so on a
-                # best-effort basis after draining one slot.
-                try:
-                    state.outbound.get_nowait()
-                except queue.Empty:
-                    pass
-                try:
-                    state.outbound.put_nowait(_SHUTDOWN_SENTINEL)
-                except queue.Full:
-                    pass
-
-    # ------------------------------------------------------------------
-    # Server loop
-    # ------------------------------------------------------------------
-
-    def _serve_forever(self) -> None:
-        assert self._server_sock is not None
-        assert self._wake_r is not None
-        sel = selectors.DefaultSelector()
-        sel.register(self._server_sock, selectors.EVENT_READ, data=("listener", None))
-        sel.register(self._wake_r, selectors.EVENT_READ, data=("wake", None))
-        token_required = bool(self._opts.token)
-        try:
-            while not self._stopping.is_set():
-                events = sel.select(timeout=0.5)
-                for key, _mask in events:
-                    kind, _ = key.data
-                    if kind == "wake":
-                        try:
-                            self._wake_r.recv(64)
-                        except OSError:
-                            pass
-                    elif kind == "listener":
-                        self._accept_one(sel, token_required)
-                    elif kind == "client":
-                        sock = key.fileobj
-                        assert isinstance(sock, socket.socket)
-                        with self._clients_lock:
-                            state = self._clients.get(sock)
-                        if state is None:
-                            sel.unregister(sock)
-                            sock.close()
-                            continue
-                        self._service_client(sel, sock, state)
-        finally:
-            with self._clients_lock:
-                client_socks = list(self._clients.keys())
-            for sock in client_socks:
-                try:
-                    sel.unregister(sock)
-                except (KeyError, ValueError):
-                    pass
-            try:
-                sel.unregister(self._server_sock)
-            except (KeyError, ValueError):
-                pass
-            try:
-                sel.unregister(self._wake_r)
-            except (KeyError, ValueError):
-                pass
-            sel.close()
-
-    def _accept_one(
-        self,
-        sel: selectors.BaseSelector,
-        token_required: bool,
-    ) -> None:
-        assert self._server_sock is not None
-        try:
-            csock, addr = self._server_sock.accept()
-        except (BlockingIOError, InterruptedError):
             return
-        csock.setblocking(False)
-        peer = f"{addr[0]}:{addr[1]}"
-        state = _ClientState(peer=peer, token_required=token_required)
-        with self._clients_lock:
-            self._clients[csock] = state
-        sel.register(csock, selectors.EVENT_READ, data=("client", peer))
-        # Spawn writer thread (sole writer for this socket).
-        writer = threading.Thread(
-            target=self._client_writer,
-            args=(csock, state),
-            name=f"RemoteControlWriter[{peer}]",
-            daemon=True,
-        )
-        state.writer_thread = writer
-        writer.start()
-        logger.info("remote client connected: %s", peer)
-
-    def _client_writer(self, sock: socket.socket, state: _ClientState) -> None:
-        """Drain the outbound queue to the socket; exits on sentinel / close."""
-        while True:
-            try:
-                line = state.outbound.get(timeout=1.0)
-            except queue.Empty:
-                if state.closing or self._stopping.is_set():
-                    return
-                continue
-            if line is _SHUTDOWN_SENTINEL or line == _SHUTDOWN_SENTINEL:
-                return
-            try:
-                sock.sendall(line)
-            except OSError as exc:
-                logger.info("remote client writer %s exit on send: %s", state.peer, exc)
-                state.closing = True
-                return
-
-    def _service_client(
-        self,
-        sel: selectors.BaseSelector,
-        sock: socket.socket,
-        state: _ClientState,
-    ) -> None:
-        try:
-            chunk = sock.recv(4096)
-        except (BlockingIOError, InterruptedError):
-            return
-        except OSError as exc:
-            logger.info("remote client recv error %s: %s", state.peer, exc)
-            self._drop_client(sel, sock, state)
-            return
-        if not chunk:
-            self._drop_client(sel, sock, state)
-            return
-        state.buffer.extend(chunk)
-        # Process every complete line currently in the buffer.
-        while True:
-            nl = state.buffer.find(LINE_TERMINATOR)
-            if nl < 0:
-                if len(state.buffer) > MAX_LINE_BYTES:
-                    self._reply_error(
-                        state,
-                        rid="",
-                        code=ErrorCode.INVALID_PARAMS,
-                        message=f"request line exceeded {MAX_LINE_BYTES} bytes",
-                    )
-                    self._drop_client(sel, sock, state)
-                return
-            line = bytes(state.buffer[:nl])
-            del state.buffer[: nl + 1]
-            self._handle_line(state, line)
-
-    def _drop_client(
-        self,
-        sel: selectors.BaseSelector,
-        sock: socket.socket,
-        state: _ClientState,
-    ) -> None:
-        try:
-            sel.unregister(sock)
-        except (KeyError, ValueError):
-            pass
-        state.closing = True
-        # Wake writer to exit.
-        try:
-            state.outbound.put_nowait(_SHUTDOWN_SENTINEL)
-        except queue.Full:
-            pass
-        try:
-            sock.close()
-        except OSError:
-            pass
-        with self._clients_lock:
-            self._clients.pop(sock, None)
-        # Reclaim this connection's CfgEditor sessions on the main thread
-        # (LiveModel teardown is main-thread-owned). Fire-and-forget: the
-        # client is already gone, so no reply is awaited.
-        self._reclaim_editors(state, marshal=True)
-        logger.info("remote client disconnected: %s", state.peer)
-
-    def _reclaim_editors(self, state: _ClientState, *, marshal: bool) -> None:
-        """Discard CfgEditor sessions opened by ``state``; clears its id set.
-
-        ``marshal=True`` schedules the discard on the Qt main thread (use from
-        the IO/server thread, e.g. ``_drop_client``); ``marshal=False`` calls
-        directly (use from the main thread, e.g. ``stop``).
-        """
-        ids = list(state.editor_ids)
-        state.editor_ids.clear()
-        if not ids:
-            return
-
-        def _run() -> None:
-            try:
-                self.ctrl.discard_cfg_editors(ids)
-            except Exception:  # pragma: no cover — best-effort cleanup
-                logger.exception("failed to reclaim editor sessions %r", ids)
-
-        if marshal:
-            self._dispatcher.invoke.emit(_run)
+        # Validate params against the method's ParamSpec contract on the IO
+        # thread (pure, no Qt needed) so malformed requests fail fast without
+        # consuming a main-thread hop. Methods that have not declared params yet
+        # pass their raw params through unchanged.
+        if spec.params:
+            handler_params = validate_params(spec.params, req.params)
         else:
-            _run()
+            handler_params = req.params
+        self._dispatch_on_main(link, req.id, req.method, spec, handler_params)
 
     # ------------------------------------------------------------------
-    # Per-request handling
+    # events.* / editor.* state-owning handlers
     # ------------------------------------------------------------------
 
-    def _handle_line(self, state: _ClientState, line: bytes) -> None:
-        rid = ""
-        try:
-            raw = decode_line(line)
-            req = parse_request(raw)
-            rid = req.id
-            # wire.version is a no-auth handshake probe: it lets a caller read
-            # the server's wire-contract version + GUI code revision before
-            # authenticating, so an incompatible contract or a stale GUI process
-            # is detectable on connect.
-            if req.method == "wire.version":
-                self._reply_ok(
-                    state,
-                    rid=req.id,
-                    result={"wire_version": WIRE_VERSION, "gui_version": GUI_VERSION},
-                )
-                return
-            if req.method == "auth":
-                self._handle_auth(state, req.id, req.params)
-                return
-            if not state.authed:
-                self._reply_error(
-                    state,
-                    rid=req.id,
-                    code=ErrorCode.UNAUTHORIZED,
-                    message="auth required: send {method: 'auth', params: {token: ...}} first",
-                )
-                return
-            # Subscription methods are handled by the service itself (state-owning).
-            if req.method == "events.subscribe":
-                self._handle_subscribe(state, req.id, req.params)
-                return
-            if req.method == "events.unsubscribe":
-                self._handle_unsubscribe(state, req.id, req.params)
-                return
-            if req.method == "events.list":
-                self._reply_ok(
-                    state,
-                    rid=req.id,
-                    result={
-                        "events": sorted(wire_event_name(e) for e in EVENT_SERIALIZERS),
-                        "subscribed": sorted(state.subscribed),
-                    },
-                )
-                return
-            # editor.subscribe/unsubscribe are state-owning (per-connection
-            # editor subscription set), so handled here, not via dispatch.
-            if req.method == "editor.subscribe":
-                self._handle_editor_subscribe(state, req.id, req.params, subscribe=True)
-                return
-            if req.method == "editor.unsubscribe":
-                self._handle_editor_subscribe(
-                    state, req.id, req.params, subscribe=False
-                )
-                return
-            spec = METHOD_REGISTRY.get(req.method)
-            if spec is None:
-                self._reply_error(
-                    state,
-                    rid=req.id,
-                    code=ErrorCode.UNKNOWN_METHOD,
-                    message=f"unknown method: {req.method!r}",
-                )
-                return
-            # Validate params against the method's ParamSpec contract on the IO
-            # thread (pure, no Qt needed) so malformed requests fail fast without
-            # consuming a main-thread hop. Methods that have not declared params
-            # yet pass their raw params through unchanged.
-            if spec.params:
-                handler_params = validate_params(spec.params, req.params)
-            else:
-                handler_params = req.params
-            self._dispatch_on_main(state, req.id, req.method, spec, handler_params)
-        except RemoteError as exc:
-            self._reply_error(
-                state,
-                rid=rid,
-                code=exc.code,
-                message=exc.message,
-                reason=exc.reason,
-                data=exc.data,
-            )
-
-    def _handle_auth(
-        self,
-        state: _ClientState,
-        rid: str,
-        params,
-    ) -> None:
-        token = require_str(params, "token")
-        configured = self._opts.token
-        if not configured:
-            self._reply_error(
-                state,
-                rid=rid,
-                code=ErrorCode.PRECONDITION_FAILED,
-                message="auth disabled on this server",
-            )
-            return
-        if hmac.compare_digest(token, configured):
-            state.authed = True
-            self._reply_ok(state, rid=rid, result={})
-        else:
-            self._reply_error(
-                state,
-                rid=rid,
-                code=ErrorCode.UNAUTHORIZED,
-                message="invalid token",
-            )
-
-    def _handle_editor_subscribe(
-        self, state: _ClientState, rid: str, params, *, subscribe: bool
-    ) -> None:
-        editor_id = params.get("editor_id")
-        if not isinstance(editor_id, str) or not editor_id:
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS, "'editor_id' must be a non-empty string"
-            )
-        # No existence check: subscription is a pure per-connection filter. A
-        # client may subscribe before/around open; pushes only flow for live
-        # sessions, and editor_closed cleans the set.
-        if subscribe:
-            state.subscribed_editors.add(editor_id)
-        else:
-            state.subscribed_editors.discard(editor_id)
-        self._reply_ok(
-            state,
-            rid=rid,
-            result={"subscribed_editors": sorted(state.subscribed_editors)},
-        )
-
-    def _handle_subscribe(self, state: _ClientState, rid: str, params) -> None:
+    def _handle_subscribe(self, link: ClientLink, rid: str, params) -> None:
         events = params.get("events")
         if not isinstance(events, list):
             raise RemoteError(
@@ -828,32 +228,64 @@ class RemoteControlAdapter:
                 raise RemoteError(
                     ErrorCode.INVALID_PARAMS, f"unknown event name: {ev!r}"
                 )
+        ctx = _ctx(link)
         for ev in events:
             assert isinstance(ev, str)
-            state.subscribed.add(ev)
-        self._reply_ok(state, rid=rid, result={"subscribed": sorted(state.subscribed)})
+            ctx.subscribed.add(ev)
+        self._endpoint.reply_ok(
+            link, rid=rid, result={"subscribed": sorted(ctx.subscribed)}
+        )
 
-    def _handle_unsubscribe(self, state: _ClientState, rid: str, params) -> None:
+    def _handle_unsubscribe(self, link: ClientLink, rid: str, params) -> None:
         events = params.get("events")
         if not isinstance(events, list):
             raise RemoteError(
                 ErrorCode.INVALID_PARAMS, "'events' must be a list of event names"
             )
+        ctx = _ctx(link)
         for ev in events:
             if isinstance(ev, str):
-                state.subscribed.discard(ev)
-        self._reply_ok(state, rid=rid, result={"subscribed": sorted(state.subscribed)})
+                ctx.subscribed.discard(ev)
+        self._endpoint.reply_ok(
+            link, rid=rid, result={"subscribed": sorted(ctx.subscribed)}
+        )
 
-    def _dispatch_on_main(self, state: _ClientState, rid, method, spec, params) -> None:
+    def _handle_editor_subscribe(
+        self, link: ClientLink, rid: str, params, *, subscribe: bool
+    ) -> None:
+        editor_id = params.get("editor_id")
+        if not isinstance(editor_id, str) or not editor_id:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, "'editor_id' must be a non-empty string"
+            )
+        # No existence check: subscription is a pure per-connection filter. A
+        # client may subscribe before/around open; pushes only flow for live
+        # sessions, and editor_closed cleans the set.
+        ctx = _ctx(link)
+        if subscribe:
+            ctx.subscribed_editors.add(editor_id)
+        else:
+            ctx.subscribed_editors.discard(editor_id)
+        self._endpoint.reply_ok(
+            link,
+            rid=rid,
+            result={"subscribed_editors": sorted(ctx.subscribed_editors)},
+        )
+
+    # ------------------------------------------------------------------
+    # Dispatch: marshal + measure-gui policy (off-main / guard / lifecycle)
+    # ------------------------------------------------------------------
+
+    def _dispatch_on_main(self, link: ClientLink, rid, method, spec, params) -> None:
         holder: dict[str, object] = {}
 
         if spec.off_main_thread:
-            # Blocking handler (operation.await): run on THIS IO worker
-            # thread, never the main thread — marshalling it onto the main
-            # thread would deadlock (it would occupy the event loop that must
-            # dispatch the worker signal it awaits). It must only do thread-safe
-            # waiting and must not touch the change buffer / stale guard /
-            # origin scope, so none of those are set here.
+            # Blocking handler (operation.await): run on THIS IO worker thread,
+            # never the main thread — marshalling it onto the main thread would
+            # deadlock (it would occupy the event loop that must dispatch the
+            # worker signal it awaits). It must only do thread-safe waiting and
+            # must not touch the version guard / editor lifecycle, so none of
+            # those are run here.
             try:
                 holder["result"] = spec.handler(self, params)
             except RemoteError as exc:
@@ -881,8 +313,8 @@ class RemoteControlAdapter:
 
             self._dispatcher.invoke.emit(_run)
             if not done.wait(timeout=spec.timeout_seconds):
-                self._reply_error(
-                    state,
+                self._endpoint.reply_error(
+                    link,
                     rid=rid,
                     code=ErrorCode.TIMEOUT,
                     message=f"handler did not complete within {spec.timeout_seconds}s",
@@ -891,17 +323,19 @@ class RemoteControlAdapter:
         if "remote_error" in holder:
             exc = holder["remote_error"]
             assert isinstance(exc, RemoteError)
-            self._reply_error(
-                state, rid=rid, code=exc.code, message=exc.message, reason=exc.reason
+            self._endpoint.reply_error(
+                link,
+                rid=rid,
+                code=exc.code,
+                message=exc.message,
+                reason=exc.reason,
+                data=exc.data,
             )
             return
         if "controller_error" in holder:
             err = holder["controller_error"]
-            self._reply_error(
-                state,
-                rid=rid,
-                code=ErrorCode.CONTROLLER_ERROR,
-                message=str(err),
+            self._endpoint.reply_error(
+                link, rid=rid, code=ErrorCode.CONTROLLER_ERROR, message=str(err)
             )
             return
         # Every handler returns a wire dict (Mapping[str, object]); guard the
@@ -909,8 +343,8 @@ class RemoteControlAdapter:
         # input, so the check is not redundant with wire validation).
         result = holder["result"]
         assert isinstance(result, dict), f"handler {method!r} returned non-dict result"
-        self._track_editor_lifecycle(state, method, params, result)
-        self._reply_ok(state, rid=rid, result=result)
+        self._track_editor_lifecycle(_ctx(link), method, params, result)
+        self._endpoint.reply_ok(link, rid=rid, result=result)
 
     def _guard_versions(self, params: Mapping[str, object]) -> None:
         """Atomically reject an op whose declared resource versions are stale.
@@ -972,7 +406,7 @@ class RemoteControlAdapter:
 
     def _track_editor_lifecycle(
         self,
-        state: _ClientState,
+        ctx: _ClientCtx,
         method: str,
         params: Mapping[str, object],
         result: object,
@@ -981,49 +415,168 @@ class RemoteControlAdapter:
 
         ``editor.open`` binds the returned id to this client so a disconnect
         reclaims it; ``commit``/``discard`` forget it (the session is already
-        gone server-side). Runs on the IO thread, where ``state.editor_ids``
-        lives.
+        gone server-side). Runs on the IO thread, where ``ctx.editor_ids`` lives.
         """
         if method == "editor.open":
             editor_id = result.get("editor_id") if isinstance(result, dict) else None
             if isinstance(editor_id, str):
-                state.editor_ids.add(editor_id)
+                ctx.editor_ids.add(editor_id)
         elif method in ("editor.commit", "editor.discard"):
             editor_id = params.get("editor_id")
             if isinstance(editor_id, str):
-                state.editor_ids.discard(editor_id)
+                ctx.editor_ids.discard(editor_id)
+
+    def _reclaim_editors(self, ctx: _ClientCtx, *, marshal: bool) -> None:
+        """Discard CfgEditor sessions opened by ``ctx``; clears its id set.
+
+        ``marshal=True`` schedules the discard on the Qt main thread (use when
+        called from the IO/server thread, i.e. a client drop); ``marshal=False``
+        calls directly (use from the main thread, i.e. ``stop``).
+        """
+        ids = list(ctx.editor_ids)
+        ctx.editor_ids.clear()
+        if not ids:
+            return
+
+        def _run() -> None:
+            try:
+                self.ctrl.discard_cfg_editors(ids)
+            except Exception:  # pragma: no cover — best-effort cleanup
+                logger.exception("failed to reclaim editor sessions %r", ids)
+
+        if marshal:
+            self._dispatcher.invoke.emit(_run)
+        else:
+            _run()
 
     # ------------------------------------------------------------------
-    # Reply helpers (enqueue onto outbound queue; never write directly)
+    # EventBus integration (subscribe on main thread; push via broadcast)
     # ------------------------------------------------------------------
 
-    def _reply_ok(self, state: _ClientState, *, rid: str, result) -> None:
-        resp = Response(id=rid, ok=True, result=result)
-        try:
-            line = encode_line(resp.to_wire())
-        except Exception:
-            logger.exception("failed to encode reply for %s", rid)
-            return
-        self._enqueue(state, line, is_push=False)
+    def _subscribe_event_bus(self) -> None:
+        """Subscribe one callback per serialised GuiEvent on the main thread."""
+        bus = self.ctrl.get_bus()
+        self._bus = bus
+        for event in EVENT_SERIALIZERS.keys():
+            cb = self._make_bus_callback(event)
+            try:
+                bus.subscribe(event, cb)
+            except Exception:  # pragma: no cover — bus.subscribe is straightforward
+                logger.exception("Failed to subscribe %s on EventBus", event)
+                continue
+            self._bus_subs.append((event, cb))
+        logger.debug(
+            "event-flow: subscribed %d EventBus events for push: %s",
+            len(self._bus_subs),
+            [e.value for e, _ in self._bus_subs],
+        )
 
-    def _reply_error(
-        self,
-        state: _ClientState,
-        *,
-        rid: str,
-        code: ErrorCode,
-        message: str,
-        reason: str = "",
-        data: "Optional[dict]" = None,
-    ) -> None:
-        env = ErrorEnvelope(code=code.value, message=message, reason=reason, data=data)
-        resp = Response(id=rid, ok=False, error=env)
-        try:
-            line = encode_line(resp.to_wire())
-        except Exception:
-            logger.exception("failed to encode error reply for %s", rid)
+    def _unsubscribe_event_bus(self) -> None:
+        if self._bus is None:
             return
-        self._enqueue(state, line, is_push=False)
+        for event, cb in self._bus_subs:
+            try:
+                self._bus.unsubscribe(event, cb)
+            except Exception:  # pragma: no cover
+                logger.exception("Failed to unsubscribe %s on EventBus", event)
+        self._bus_subs.clear()
+        self._bus = None
+
+    def _make_bus_callback(self, event: GuiEvent) -> Callable[[Payload], None]:
+        serializer = EVENT_SERIALIZERS[event]
+        wire_name = wire_event_name(event)
+
+        def _on_event(payload: Payload) -> None:
+            # Runs on the Qt main thread. Serialize and push to subscribers; this
+            # is the agent's notification face ("what changed"). Resource version
+            # bookkeeping happens at the mutation site (State.version), not here.
+            try:
+                wire_payload = serializer(payload)
+            except Exception:  # pragma: no cover — serializer must not raise
+                logger.exception("Event serializer for %s raised", event)
+                return
+            if wire_payload is None:
+                return
+            try:
+                line = encode_line({"event": wire_name, "payload": wire_payload})
+            except Exception:
+                logger.exception(
+                    "Failed to encode push line for %s payload=%r", event, wire_payload
+                )
+                return
+            self._endpoint.broadcast(
+                line, predicate=lambda link: wire_name in _ctx(link).subscribed
+            )
+
+        return _on_event
+
+    # ------------------------------------------------------------------
+    # Diagnostic channel (DiagnosticSink impl) — independent of EventBus
+    # ------------------------------------------------------------------
+
+    def notify_diagnostic(self, severity: "Severity", title: str, message: str) -> None:
+        """Push a Controller diagnostic to every client. Runs on the Qt main
+        thread (ctrl fans out there). Deliberately *not* gated by event
+        subscription and *not* routed through EventBus — diagnostics must reach
+        the agent regardless of what it subscribed to, and a channel that
+        reports a fault must not be the faulty channel (ADR-0013)."""
+        try:
+            line = encode_line(
+                {
+                    "event": "diagnostic",
+                    "payload": {
+                        "severity": severity,
+                        "title": title,
+                        "message": message,
+                    },
+                }
+            )
+        except Exception:  # pragma: no cover — payload is plain strings
+            logger.exception("failed to encode diagnostic %r/%r", severity, title)
+            return
+        # Diagnostics reach every client, regardless of subscription.
+        self._endpoint.broadcast(line, predicate=lambda link: True)
+
+    # ------------------------------------------------------------------
+    # CfgEditor per-session change stream (independent of EventBus)
+    # ------------------------------------------------------------------
+
+    def _wire_editor_change_listener(self) -> None:
+        """Inject ``_on_editor_event`` into the CfgEditorService (via ctrl)."""
+        self.ctrl.set_cfg_editor_change_listener(self._on_editor_event)
+
+    def _unwire_editor_change_listener(self) -> None:
+        self.ctrl.set_cfg_editor_change_listener(None)
+
+    def _on_editor_event(self, editor_id: str, event_name: str, payload: dict) -> None:
+        """Push a per-editor notification. Runs on the Qt main thread.
+
+        ``event_name`` ∈ {editor_changed, editor_closed}. Only clients that
+        subscribed to ``editor_id`` receive it. On editor_closed we also drop the
+        id from every client's subscription set. (The editor's resource version
+        is bumped at the edit site, not here.)
+        """
+        body = dict(payload)
+        body["editor_id"] = editor_id
+        try:
+            line = encode_line({"event": event_name, "payload": body})
+        except Exception:
+            logger.exception(
+                "failed to encode editor push %s/%s", editor_id, event_name
+            )
+            return
+        closing = event_name == "editor_closed"
+
+        def _predicate(link: ClientLink) -> bool:
+            ctx = _ctx(link)
+            if editor_id not in ctx.subscribed_editors:
+                return False
+            # On editor_closed, drop the id from this client's set as we push.
+            if closing:
+                ctx.subscribed_editors.discard(editor_id)
+            return True
+
+        self._endpoint.broadcast(line, predicate=_predicate)
 
 
 # Re-export base64 helpers used by view.screenshot.

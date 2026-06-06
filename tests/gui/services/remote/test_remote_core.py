@@ -143,7 +143,8 @@ def _open_client(port: int) -> socket.socket:
 
 
 def test_service_binds_loopback_only(fx):
-    addr = fx.service._server_sock.getsockname()
+    # The socket lives in the shared transport endpoint post-E3.
+    addr = fx.service._endpoint._server_sock.getsockname()
     assert addr[0] == "127.0.0.1"
     assert fx.service.port > 0
 

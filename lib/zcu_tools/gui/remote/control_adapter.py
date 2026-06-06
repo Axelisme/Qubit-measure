@@ -170,10 +170,14 @@ class EndpointRouter(Protocol):
         """
         ...
 
-    def on_client_close(self, link: ClientLink) -> None:
+    def on_client_close(self, link: ClientLink, *, on_main_thread: bool) -> None:
         """A client is dropping — release any app-specific per-connection state.
 
-        Called on drop (IO thread) and during ``stop()`` (main thread).
+        Called on drop (IO/server thread, ``on_main_thread=False``) and during
+        ``stop()`` (Qt main thread, ``on_main_thread=True``). The flag lets a
+        router that must touch main-thread-owned state (e.g. reclaim editor
+        sessions) choose between marshalling and a direct call — the endpoint
+        owns the thread context and reports it; the router owns the cleanup.
         """
         ...
 
@@ -273,7 +277,7 @@ class NdjsonRpcEndpoint:
         for _sock, link in client_snapshot:
             # Release app state on the main thread (stop() runs here) before
             # tearing the connection down.
-            self._router.on_client_close(link)
+            self._router.on_client_close(link, on_main_thread=True)
             link.closing = True
             try:
                 link.outbound.put_nowait(_SHUTDOWN_SENTINEL)
@@ -541,7 +545,7 @@ class NdjsonRpcEndpoint:
         # Let the app release per-connection state (editor sessions etc.). On a
         # drop this runs on the IO thread; the router marshals to the main
         # thread itself if its cleanup must.
-        self._router.on_client_close(link)
+        self._router.on_client_close(link, on_main_thread=False)
         logger.info("remote client disconnected: %s", link.peer)
 
     # ------------------------------------------------------------------

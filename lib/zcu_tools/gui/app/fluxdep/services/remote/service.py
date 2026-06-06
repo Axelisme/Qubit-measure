@@ -116,10 +116,10 @@ class RemoteControlAdapter:
     def on_client_open(self, link: ClientLink) -> None:
         link.app_ctx = _ClientCtx()
 
-    def on_client_close(self, link: ClientLink) -> None:
+    def on_client_close(self, link: ClientLink, *, on_main_thread: bool) -> None:
         # fluxdep holds no per-connection resources beyond the subscription set
         # (which dies with the link); nothing to reclaim.
-        del link
+        del link, on_main_thread
 
     def route(self, link: ClientLink, request: object) -> None:
         """Handle one parsed, authenticated request on the IO thread."""
