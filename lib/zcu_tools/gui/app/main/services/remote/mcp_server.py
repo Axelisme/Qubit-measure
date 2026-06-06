@@ -2072,8 +2072,9 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             "to set an output value, ramped/cancellable, no separate set_value). "
             "Waits up to wait_seconds (default 1.0): returns {status:'finished', "
             "snapshot:{...}} if it lands in time, else {status:'pending'} (await "
-            "with gui_device_wait_operation, or read progress via "
-            "gui_device_active_setup). The device must already be connected."
+            "with gui_device_wait_operation or gui_device_poll — a 'running' poll "
+            "reply carries the live progress bars, e.g. a setup ramp). The device "
+            "must already be connected."
         ),
         "inputSchema": {
             "type": "object",

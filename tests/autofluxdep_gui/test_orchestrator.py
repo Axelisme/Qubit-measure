@@ -157,3 +157,59 @@ def test_on_node_does_not_fire_for_a_skipped_provider():
     Orchestrator([runnable, skipped]).run([0.0], on_node=lambda n, i: seen.append(n))
     # the skipped provider (required dep missing) never fires on_node
     assert seen == ["ok"]
+
+
+# --- cooperative cancellation (should_stop) ---
+
+
+def test_should_stop_before_a_flux_point_exits_early():
+    # should_stop returns True once two points have completed → the sweep must
+    # break before flux idx 2 and never start it.
+    done_points: list[int] = []
+
+    def on_point(idx, _flux, _info):
+        done_points.append(idx)
+
+    p = place(make_builder("n"))
+    info = Orchestrator([p]).run(
+        [0.0, 1.0, 2.0, 3.0],
+        on_point=on_point,
+        should_stop=lambda: len(done_points) >= 2,
+    )
+    # only points 0 and 1 ran; the sweep stopped before point 2
+    assert done_points == [0, 1]
+    # the returned InfoStore reflects the last completed point, not point 2/3
+    assert info.point["flux_idx"] == 1
+
+
+def test_should_stop_within_a_point_skips_remaining_providers():
+    # should_stop flips True after the first provider of a point runs → the
+    # second provider of that point must not run (orchestrator breaks the
+    # provider loop). on_point still fires for that partially-run point (the
+    # provider-loop break does not skip it), but the next flux point never
+    # starts (should_stop is re-checked at its top).
+    ran: list[str] = []
+    flip = {"stop": False}
+
+    def first(_env, _snap):
+        ran.append("a")
+        flip["stop"] = True  # request stop after the first provider
+        return Patch()
+
+    def second(_env, _snap):
+        ran.append("b")
+        return Patch()
+
+    a = place(make_builder("a", produce_fn=first))
+    b = place(make_builder("b", produce_fn=second))
+    points: list[int] = []
+    Orchestrator([a, b]).run(
+        [0.0, 1.0],
+        on_point=lambda idx, _f, _i: points.append(idx),
+        should_stop=lambda: flip["stop"],
+    )
+    # only the first provider of point 0 ran; "b" was skipped by the break
+    assert ran == ["a"]
+    # the partially-run point 0 still completed (on_point fired); point 1 never
+    # started because should_stop is True at its top
+    assert points == [0]

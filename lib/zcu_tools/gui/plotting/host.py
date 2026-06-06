@@ -125,24 +125,38 @@ def close_figure(fig: Figure) -> None:
     if _shutting_down:
         return
     done = threading.Event()
-    _get_host().close_requested.emit({"fig": fig, "done": done})
-    done.wait(timeout=5.0)
+    errors: list[BaseException] = []
+    _get_host().close_requested.emit({"fig": fig, "errors": errors, "done": done})
+    if not done.wait(timeout=5.0):
+        raise RuntimeError("Timed out closing figure")
+    if errors:
+        raise RuntimeError("Failed to close figure") from errors[0]
 
 
 def remove_canvas(canvas: QWidget) -> None:
     if _shutting_down:
         return
     done = threading.Event()
-    _get_host().remove_canvas_requested.emit({"canvas": canvas, "done": done})
-    done.wait(timeout=5.0)
+    errors: list[BaseException] = []
+    _get_host().remove_canvas_requested.emit(
+        {"canvas": canvas, "errors": errors, "done": done}
+    )
+    if not done.wait(timeout=5.0):
+        raise RuntimeError("Timed out removing canvas")
+    if errors:
+        raise RuntimeError("Failed to remove canvas") from errors[0]
 
 
 def activate_figure(fig: Figure) -> None:
     if _shutting_down:
         return
     done = threading.Event()
-    _get_host().activate_requested.emit({"fig": fig, "done": done})
-    done.wait(timeout=5.0)
+    errors: list[BaseException] = []
+    _get_host().activate_requested.emit({"fig": fig, "errors": errors, "done": done})
+    if not done.wait(timeout=5.0):
+        raise RuntimeError("Timed out activating figure")
+    if errors:
+        raise RuntimeError("Failed to activate figure") from errors[0]
 
 
 def is_main_thread() -> bool:
@@ -285,35 +299,45 @@ def _get_host() -> Any:
             def _on_close(self, payload: Any) -> None:
                 import matplotlib.pyplot as _plt
 
-                fig = payload["fig"]
-                done = payload["done"]
-
-                canvas = fig.canvas
-                container = _fig_container_registry.pop(id(fig), None)
-                if container is not None and isinstance(canvas, QWidget):
-                    container.detach_canvas(canvas)
-                    canvas.deleteLater()
-                _plt.close(fig)
-                done.set()
+                try:
+                    fig = payload["fig"]
+                    canvas = fig.canvas
+                    container = _fig_container_registry.pop(id(fig), None)
+                    if container is not None and isinstance(canvas, QWidget):
+                        container.detach_canvas(canvas)
+                        canvas.deleteLater()
+                    _plt.close(fig)
+                except BaseException as exc:
+                    payload["errors"].append(exc)
+                finally:
+                    payload["done"].set()
 
             def _on_remove_canvas(self, payload: Any) -> None:
-                canvas = payload["canvas"]
-                done = payload["done"]
-                _remove_canvas_impl(canvas)
-                canvas.deleteLater()
-                done.set()
+                try:
+                    canvas = payload["canvas"]
+                    _remove_canvas_impl(canvas)
+                    canvas.deleteLater()
+                except BaseException as exc:
+                    payload["errors"].append(exc)
+                finally:
+                    payload["done"].set()
 
             def _on_activate(self, payload: Any) -> None:
-                fig = payload["fig"]
-                done = payload["done"]
-                container = _fig_container_registry.get(id(fig))
-                if container is None:
-                    raise RuntimeError("Figure is not attached to any FigureContainer")
-                canvas = fig.canvas
-                if not isinstance(canvas, QWidget):
-                    raise RuntimeError("Figure canvas is not a QWidget")
-                container.set_current_canvas(canvas)
-                done.set()
+                try:
+                    fig = payload["fig"]
+                    container = _fig_container_registry.get(id(fig))
+                    if container is None:
+                        raise RuntimeError(
+                            "Figure is not attached to any FigureContainer"
+                        )
+                    canvas = fig.canvas
+                    if not isinstance(canvas, QWidget):
+                        raise RuntimeError("Figure canvas is not a QWidget")
+                    container.set_current_canvas(canvas)
+                except BaseException as exc:
+                    payload["errors"].append(exc)
+                finally:
+                    payload["done"].set()
 
             def _on_refresh(self, fig: object) -> None:
                 if isinstance(fig, Figure):

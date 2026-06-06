@@ -108,8 +108,8 @@ class DeviceSnapshot:
 
     Assembled by ``DeviceService._project`` from the State-owned ``DeviceState``
     (name/type/address/status/info/error). Live setup progress is not spliced
-    here — it is polled separately via ``setup_progress`` (ProgressService).
-    It is never stored — State is the device-state SSOT.
+    here — it is polled separately via ``operation.progress`` (by operation_id,
+    ProgressService). It is never stored — State is the device-state SSOT.
     """
 
     name: str
@@ -129,8 +129,9 @@ class DeviceEntry:
 
 @dataclass(frozen=True)
 class DeviceSetupSnapshot:
-    # Live progress is polled via device.setup_progress (ADR-0013 device↔run
-    # alignment), not carried here — this names *which* device is setting up.
+    # Live progress is polled via operation.progress (by operation_id, ADR-0013
+    # device↔run alignment), not carried here — this names *which* device is
+    # setting up.
     device_name: str
 
 
@@ -425,7 +426,7 @@ class DeviceService(QObject):
         """Assemble the read-time projection of a device-state entry from State.
 
         Live setup progress is no longer spliced here — it is polled separately
-        via setup_progress (ADR-0013 device↔run alignment).
+        via operation.progress (by operation_id, ADR-0013 device↔run alignment).
         """
         return DeviceSnapshot(
             name=dev.name,

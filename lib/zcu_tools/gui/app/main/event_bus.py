@@ -126,7 +126,7 @@ class DeviceChangedPayload(Payload):
 @dataclass(frozen=True)
 class DeviceSetupStartedPayload(Payload):
     """Payload for DEVICE_SETUP_STARTED: a setup began on device ``name`` (its
-    progress is now pollable via device.setup_progress)."""
+    progress is pollable via operation.progress, by operation_id)."""
 
     name: str
 

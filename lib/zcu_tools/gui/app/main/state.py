@@ -70,7 +70,8 @@ class DeviceState:
 
     There is deliberately no ``progress`` field: setup progress is live
     telemetry owned by ``ProgressService`` (keyed by the operation token) and is
-    polled separately via ``device.setup_progress`` — never spliced into state.
+    polled separately via ``operation.progress`` (by operation_id) — never
+    spliced into state.
     """
 
     name: str

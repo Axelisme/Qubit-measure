@@ -102,7 +102,7 @@ def _ser_device_changed(payload: Payload) -> WirePayload:
 
 def _ser_device_setup_started(payload: Payload) -> WirePayload:
     assert isinstance(payload, DeviceSetupStartedPayload)
-    # Live progress is polled via device.setup_progress, not pushed.
+    # Live progress is polled via operation.progress (by operation_id), not pushed.
     return {"name": payload.name}
 
 
