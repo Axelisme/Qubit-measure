@@ -34,7 +34,7 @@ import threading
 from typing import TYPE_CHECKING, Callable, Mapping, Optional
 
 from zcu_tools.gui.app.main.event_bus import EventBus, GuiEvent, Payload
-from zcu_tools.gui.remote.control_adapter import (
+from zcu_tools.gui.remote.rpc_endpoint import (
     ClientLink,
     ControlOptions,
     MainThreadDispatcher,

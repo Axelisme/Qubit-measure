@@ -20,7 +20,7 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.gui.app.main.services.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.main.services.remote.service import _ClientCtx
-from zcu_tools.gui.remote.control_adapter import ClientLink
+from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 
 
 @pytest.fixture(autouse=True)
