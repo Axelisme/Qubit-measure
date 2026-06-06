@@ -184,49 +184,53 @@ class QubitFreqNode(Node):
 
 
 class QubitFreqPlotter:
-    """Accumulating flux×detune colormap, redrawn each flux point on the main thread.
+    """qubit_freq's two-panel liveplot, aligned with the runner module.
 
-    Built once at Run start (lifetime = whole sweep) with a bare matplotlib
-    ``Figure``. ``update(result, idx)`` is called on the main thread after each
-    row-updated notification: it redraws the whole accumulated colormap (every
-    settled flux row plus the current one) and overlays the per-row fitted freq
-    as a tracking line. Holds drawing state but never owns the Qt widget.
+    Built once at Run start with a bare matplotlib ``Figure``; reuses
+    ``zcu_tools.liveplot`` (LivePlot1D / LivePlot2DwithLine) embedded into the
+    Figure's axes via ``existed_axes`` (the liveplot fig is None then — the host
+    refreshes; see ``zcu_tools.liveplot.segments.base``). ``update(result, idx)``
+    on the main thread after each row notification feeds:
+
+    - ``fit_freq`` (LivePlot1D): flux value → fitted absolute qubit frequency.
+    - ``detune`` (LivePlot2DwithLine): the flux × detune signal colormap plus the
+      latest few flux rows as 1-D traces; a red dashed line marks the current
+      fit_detune (matching the runner's ``freq_line``).
     """
 
     def __init__(self, figure: Any) -> None:
+        from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
+
         self._fig = figure
-        self._ax = figure.add_subplot(111)
-        self._im = None
-        self._fit_line = None
-        self._ax.set_xlabel("detune (MHz)")
-        self._ax.set_ylabel("flux index")
-        self._ax.set_title("qubit_freq")
+        ax_fit = figure.add_subplot(2, 1, 1)
+        ax_2d = figure.add_subplot(2, 2, 3)
+        ax_line = figure.add_subplot(2, 2, 4)
+        self._freq_line = ax_line.axvline(np.nan, color="red", linestyle="--")
+        self._fit = LivePlot1D(
+            "Flux device value",
+            "Frequency (MHz)",
+            existed_axes=[[ax_fit]],
+            segment_kwargs=dict(title="qubit_freq (fit_freq)"),
+        )
+        self._detune = LivePlot2DwithLine(
+            "Flux device value",
+            "Detune (MHz)",
+            line_axis=1,
+            num_lines=3,
+            title="qubit_freq (detune)",
+            existed_axes=[[ax_2d, ax_line]],
+        )
+        self._fit.__enter__()
+        self._detune.__enter__()
 
     def update(self, result: QubitFreqResult, idx: int) -> None:
         del idx  # the whole accumulated map is redrawn; idx is just the trigger
-        det = result.detune
-        extent = (float(det[0]), float(det[-1]), -0.5, result.n_flux - 0.5)
-        if self._im is None:
-            self._im = self._ax.imshow(
-                result.signal,
-                aspect="auto",
-                origin="lower",
-                extent=extent,
-                interpolation="nearest",
-            )
-        else:
-            self._im.set_data(result.signal)
-            self._im.autoscale()
-
-        # overlay the fitted qubit freq as a detune offset (freq - predict_freq)
-        fit_detune = result.fit_freq - result.predict_freq
-        rows = np.arange(result.n_flux, dtype=np.float64)
-        if self._fit_line is None:
-            (self._fit_line,) = self._ax.plot(
-                fit_detune, rows, "r.-", linewidth=1.0, markersize=3
-            )
-        else:
-            self._fit_line.set_data(fit_detune, rows)
+        self._fit.update(result.flux, result.fit_freq, refresh=False)
+        self._detune.update(result.flux, result.detune, result.signal, refresh=False)
+        # mark the current fit as a detune offset (freq - predict_freq)
+        offset = result.fit_freq - result.predict_freq
+        valid = offset[~np.isnan(offset)]
+        self._freq_line.set_xdata([valid[-1] if valid.size else np.nan])
         self._fig.canvas.draw_idle()
 
 
@@ -260,11 +264,9 @@ class QubitFreqBuilder(Builder):
         "acquire_delay",
     )
 
-    def make_init_result(
-        self, params: Mapping[str, Any], n_flux: int
-    ) -> QubitFreqResult:
+    def make_init_result(self, params: Mapping[str, Any], flux: Any) -> QubitFreqResult:
         detune = parse_detune_sweep(params.get("detune_sweep"))
-        return QubitFreqResult.allocate(n_flux, detune)
+        return QubitFreqResult.allocate(flux, detune)
 
     def make_plotter(self, figure: Any) -> QubitFreqPlotter:
         return QubitFreqPlotter(figure)

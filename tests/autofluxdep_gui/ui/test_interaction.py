@@ -155,8 +155,8 @@ def test_run_switches_detail_to_run_tab(app):
 
 def test_multiple_real_experiments_each_get_a_liveplot(qapp):
     # a real multi-experiment workflow: each measurement provider gets its own
-    # sweep-lived canvas + plotter, and the Sweep1DPlotter path redraws on the
-    # main thread (the qubit_freq + Sweep1D experiments all share the same wiring).
+    # sweep-lived canvas + plotter, and the LivePlot-backed Plotter redraws on the
+    # main thread (every experiment shares the same notify→update→draw wiring).
     ctrl = build_core()
     for t in ("qubit_freq", "t1", "ro_optimize", "mist"):
         ctrl.add_node_by_type(t)
@@ -188,7 +188,7 @@ def test_multiple_real_experiments_each_get_a_liveplot(qapp):
     for name in win._plots:
         canvas, plotter = win._plots[name]
         assert canvas is not None and plotter is not None
-    # t1's Sweep1DPlotter redrew on the main thread as rows filled
+    # t1's Plotter redrew on the main thread as rows filled
     assert redraws["t1"] >= 1
     win.close()
     win.deleteLater()

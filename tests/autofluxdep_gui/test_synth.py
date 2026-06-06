@@ -95,7 +95,9 @@ def test_produce_sleeps_for_positive_delay():
     from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 
     builder = QubitFreqBuilder()
-    result = builder.make_init_result({"detune_sweep": "-20,50,0.5"}, n_flux=2)
+    result = builder.make_init_result(
+        {"detune_sweep": "-20,50,0.5"}, np.linspace(0.0, 1.0, 2)
+    )
     env = RunEnv(
         flux=0.0,
         flux_idx=0,
@@ -176,7 +178,9 @@ def test_produce_notifies_once_per_round_plus_fit():
     from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 
     builder = QubitFreqBuilder()
-    result = builder.make_init_result({"detune_sweep": "-20,50,0.5"}, n_flux=2)
+    result = builder.make_init_result(
+        {"detune_sweep": "-20,50,0.5"}, np.linspace(0.0, 1.0, 2)
+    )
     notifies = []
     env = RunEnv(
         flux=0.0,

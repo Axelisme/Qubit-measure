@@ -25,7 +25,7 @@ from typing_extensions import Any, Mapping, Optional
 
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
-from zcu_tools.gui.app.autofluxdep.nodes.plotters import Sweep1DPlotter
+from zcu_tools.gui.app.autofluxdep.nodes.plotters import Decay1DPlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.synth import (
@@ -146,12 +146,14 @@ class T2RamseyBuilder(Builder):
         "acquire_delay",
     )
 
-    def make_init_result(self, params: Mapping[str, Any], n_flux: int) -> Sweep1DResult:
+    def make_init_result(self, params: Mapping[str, Any], flux: Any) -> Sweep1DResult:
         times = parse_linear_axis(params.get("sweep_range"), _DEFAULT_SWEEP)
-        return Sweep1DResult.allocate(n_flux, times, x_label="delay time (us)")
+        return Sweep1DResult.allocate(flux, times, x_label="delay time (us)")
 
-    def make_plotter(self, figure: Any) -> Sweep1DPlotter:
-        return Sweep1DPlotter(figure, title="t2ramsey", value_label="t2r (us)")
+    def make_plotter(self, figure: Any) -> Decay1DPlotter:
+        return Decay1DPlotter(
+            figure, title="t2ramsey", value_label="T2Ramsey (us)", x_label="Time (us)"
+        )
 
     def build_node(self, env: RunEnv) -> T2RamseyNode:
         return T2RamseyNode(env)

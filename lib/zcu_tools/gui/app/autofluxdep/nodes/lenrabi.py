@@ -27,7 +27,7 @@ from typing_extensions import Any, Mapping, Optional
 
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
-from zcu_tools.gui.app.autofluxdep.nodes.plotters import Sweep1DPlotter
+from zcu_tools.gui.app.autofluxdep.nodes.plotters import ColormapLinePlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.synth import (
@@ -41,6 +41,13 @@ from zcu_tools.gui.app.autofluxdep.nodes.synth import (
 from zcu_tools.utils.fitting import fit_rabi
 
 logger = logging.getLogger(__name__)
+
+
+def _last_fit(result: Any) -> float:
+    """Return the last non-nan fit_value (the most recent pi_length)."""
+    valid = result.fit_value[~np.isnan(result.fit_value)]
+    return float(valid[-1]) if valid.size else float("nan")
+
 
 _DEFAULT_RABI_FREQ = 0.5  # 1/us — planted Rabi frequency for the prototype
 _DEFAULT_SWEEP = (0.0, 6.0, 121)  # pulse-length axis (us): start, stop, npts
@@ -143,12 +150,18 @@ class LenRabiBuilder(Builder):
         "acquire_delay",
     )
 
-    def make_init_result(self, params: Mapping[str, Any], n_flux: int) -> Sweep1DResult:
+    def make_init_result(self, params: Mapping[str, Any], flux: Any) -> Sweep1DResult:
         lengths = parse_linear_axis(params.get("sweep_range"), _DEFAULT_SWEEP)
-        return Sweep1DResult.allocate(n_flux, lengths, x_label="pulse length (us)")
+        return Sweep1DResult.allocate(flux, lengths, x_label="pulse length (us)")
 
-    def make_plotter(self, figure: Any) -> Sweep1DPlotter:
-        return Sweep1DPlotter(figure, title="lenrabi", value_label="pi_length (us)")
+    def make_plotter(self, figure: Any) -> ColormapLinePlotter:
+        return ColormapLinePlotter(
+            figure,
+            title="lenrabi",
+            y_label="Pulse length (us)",
+            num_lines=3,
+            marker_of=_last_fit,
+        )
 
     def build_node(self, env: RunEnv) -> LenRabiNode:
         return LenRabiNode(env)

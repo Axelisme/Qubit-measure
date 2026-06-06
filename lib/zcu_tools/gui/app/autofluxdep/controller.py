@@ -311,16 +311,17 @@ class Controller:
         predictor = self._state.resources.predictor if self._state.resources else None
         return Tools(predictor=predictor)
 
-    def _allocate_results(self, n_flux: int) -> dict[str, Any]:
+    def _allocate_results(self, flux: "Any") -> dict[str, Any]:
         """Pre-allocate each user provider's sweep Result on the main thread.
 
-        A Service (predictor) has no Result (``make_init_result`` returns None),
-        so it is absent from the map — the orchestrator curries no Result for it
-        and the UI builds no figure, with no ``isinstance`` anywhere.
+        ``flux`` is the full flux axis (filled into each Result up front for the
+        Plotter's x). A Service (predictor) has no Result (``make_init_result``
+        returns None), so it is absent from the map — the orchestrator curries no
+        Result for it and the UI builds no figure, with no ``isinstance``.
         """
         results: dict[str, Any] = {}
         for node in self._state.nodes:
-            result = node.builder.make_init_result(node.params, n_flux)
+            result = node.builder.make_init_result(node.params, flux)
             if result is not None:
                 results[node.name] = result
         return results
@@ -399,8 +400,10 @@ class Controller:
         The UI calls this before starting the worker so the Plotters bind to the
         same Result objects the worker fills. Returns the name→Result map.
         """
-        n_flux = max(1, len(self._state.flux_values))
-        self._state.run_results = self._allocate_results(n_flux)
+        import numpy as np
+
+        flux = np.asarray(self._state.flux_values or [0.0], dtype=np.float64)
+        self._state.run_results = self._allocate_results(flux)
         return self._state.run_results
 
     # --- dry run (headless: real orchestrator, no Results / notify) ---

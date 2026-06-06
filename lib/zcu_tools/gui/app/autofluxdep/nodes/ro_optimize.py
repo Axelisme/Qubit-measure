@@ -29,7 +29,7 @@ from typing_extensions import Any, Mapping, Optional
 
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
-from zcu_tools.gui.app.autofluxdep.nodes.plotters import Sweep2DPlotter
+from zcu_tools.gui.app.autofluxdep.nodes.plotters import Landscape2DPlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep2DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.synth import (
@@ -171,7 +171,7 @@ class RoOptimizeBuilder(Builder):
     optional_modules = (ModuleDep("readout", default=_default_readout),)
     base_params = ("freq_expts", "gain_expts", "reps", "rounds", "acquire_delay")
 
-    def make_init_result(self, params: Mapping[str, Any], n_flux: int) -> Sweep2DResult:
+    def make_init_result(self, params: Mapping[str, Any], flux: Any) -> Sweep2DResult:
         freq_expts: int = int(params.get("freq_expts") or _DEFAULT_FREQ[2])
         gain_expts: int = int(params.get("gain_expts") or _DEFAULT_GAIN[2])
 
@@ -183,10 +183,10 @@ class RoOptimizeBuilder(Builder):
             params.get("gain_range"),
             (_DEFAULT_GAIN[0], _DEFAULT_GAIN[1], gain_expts),
         )
-        return Sweep2DResult.allocate(n_flux, freqs, gains)
+        return Sweep2DResult.allocate(flux, freqs, gains)
 
-    def make_plotter(self, figure: Any) -> Sweep2DPlotter:
-        return Sweep2DPlotter(figure, title="ro_optimize")
+    def make_plotter(self, figure: Any) -> Landscape2DPlotter:
+        return Landscape2DPlotter(figure, title="ro_optimize")
 
     def build_node(self, env: RunEnv) -> RoOptimizeNode:
         return RoOptimizeNode(env)

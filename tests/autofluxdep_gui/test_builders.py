@@ -16,6 +16,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.mist import MistBuilder
+from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder
 from zcu_tools.gui.app.autofluxdep.nodes.t2echo import T2EchoBuilder
@@ -25,7 +26,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.t2ramsey import T2RamseyBuilder
 def _run(builder, snapshot_data, snapshot_modules, params=None, flux_idx=1):
     """Build the Result + Node, run produce; return (patch, result, fired)."""
     params = params or {}
-    result = builder.make_init_result(params, n_flux=4)
+    result = builder.make_init_result(params, np.linspace(0.0, 1.0, 4))
     fired: list = []
     env = RunEnv(
         flux=float(flux_idx),
@@ -155,3 +156,53 @@ def test_registry_exposes_all_experiments():
         "t2echo",
         "mist",
     }
+
+
+# --- liveplot alignment: each Builder builds the runner module's subplot layout ---
+
+
+@pytest.mark.parametrize(
+    ("type_name", "n_axes"),
+    [
+        ("qubit_freq", 3),  # fit_freq (1) + detune 2DwithLine (2)
+        ("lenrabi", 2),  # rabi_curve 2DwithLine (2D + line)
+        ("ro_optimize", 1),  # snr 2D landscape
+        ("t1", 2),  # scalar scatter + current-point curve
+        ("t2ramsey", 2),
+        ("t2echo", 2),
+        ("mist", 2),  # flux×gain 2DwithLine
+    ],
+)
+def test_make_plotter_builds_aligned_subplots(type_name, n_axes):
+    # each experiment's Plotter embeds the same LivePlot panels the runner module
+    # draws, so the figure has the matching number of axes.
+    from matplotlib.figure import Figure
+    from zcu_tools.gui.app.autofluxdep.registry import create_placement
+
+    builder = create_placement(type_name).builder
+    figure = Figure()
+    plotter = builder.make_plotter(figure)
+    assert plotter is not None
+    assert len(figure.axes) == n_axes
+
+
+def test_plotter_update_runs_after_a_real_produce():
+    # build qubit_freq's Result + Plotter, fill a row via produce, redraw — the
+    # LivePlot-backed update path must not raise (existed_axes + host draw).
+    from matplotlib.figure import Figure
+
+    builder = QubitFreqBuilder()
+    flux = np.linspace(0.0, 1.0, 3)
+    result = builder.make_init_result({"detune_sweep": "-20,50,0.5"}, flux)
+    figure = Figure()
+    plotter = builder.make_plotter(figure)
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        params={"rounds": 2, "acquire_delay": 0},
+        result=result,
+    )
+    builder.build_node(env).produce(
+        Snapshot({"predict_freq": 5000.0, "fit_kappa": 0.05}, modules={"readout": None})
+    )
+    plotter.update(result, 0)  # must not raise

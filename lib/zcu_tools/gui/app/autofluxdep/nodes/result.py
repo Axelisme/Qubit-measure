@@ -62,16 +62,20 @@ class QubitFreqResult:
     predict_freq: NDArray[np.float64]
 
     @classmethod
-    def allocate(cls, n_flux: int, detune: NDArray[np.float64]) -> "QubitFreqResult":
-        """Pre-allocate a nan-filled Result for ``n_flux × n_detune``.
+    def allocate(
+        cls, flux: NDArray[np.float64], detune: NDArray[np.float64]
+    ) -> "QubitFreqResult":
+        """Pre-allocate a Result over the full ``flux`` axis × ``detune``.
 
-        The flux axis is nan up front (each ``produce`` writes its own row's
-        flux value); the detune axis is param-only and identical every row.
+        The flux axis is filled up front (known at Run start, used as the
+        Plotter's x); the trailing signal / fit fields stay nan until each
+        ``produce`` fills its row. The detune axis is param-only.
         """
+        fx = np.asarray(flux, dtype=np.float64)
         det = np.asarray(detune, dtype=np.float64)
-        n_detune = det.shape[0]
+        n_flux, n_detune = fx.shape[0], det.shape[0]
         return cls(
-            flux=np.full(n_flux, np.nan, dtype=np.float64),
+            flux=fx,
             detune=det,
             signal=np.full((n_flux, n_detune), np.nan, dtype=np.float64),
             fit_curve=np.full((n_flux, n_detune), np.nan, dtype=np.float64),
@@ -116,12 +120,13 @@ class Sweep1DResult:
 
     @classmethod
     def allocate(
-        cls, n_flux: int, x: NDArray[np.float64], x_label: str = "x"
+        cls, flux: NDArray[np.float64], x: NDArray[np.float64], x_label: str = "x"
     ) -> "Sweep1DResult":
+        fx = np.asarray(flux, dtype=np.float64)
         xs = np.asarray(x, dtype=np.float64)
-        n_x = xs.shape[0]
+        n_flux, n_x = fx.shape[0], xs.shape[0]
         return cls(
-            flux=np.full(n_flux, np.nan, dtype=np.float64),
+            flux=fx,
             x=xs,
             signal=np.full((n_flux, n_x), np.nan, dtype=np.float64),
             fit_curve=np.full((n_flux, n_x), np.nan, dtype=np.float64),
@@ -161,12 +166,17 @@ class Sweep2DResult:
 
     @classmethod
     def allocate(
-        cls, n_flux: int, freq: NDArray[np.float64], gain: NDArray[np.float64]
+        cls,
+        flux: NDArray[np.float64],
+        freq: NDArray[np.float64],
+        gain: NDArray[np.float64],
     ) -> "Sweep2DResult":
+        fx = np.asarray(flux, dtype=np.float64)
         f = np.asarray(freq, dtype=np.float64)
         g = np.asarray(gain, dtype=np.float64)
+        n_flux = fx.shape[0]
         return cls(
-            flux=np.full(n_flux, np.nan, dtype=np.float64),
+            flux=fx,
             freq=f,
             gain=g,
             signal=np.full((n_flux, f.shape[0], g.shape[0]), np.nan, dtype=np.float64),

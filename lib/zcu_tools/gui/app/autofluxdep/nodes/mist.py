@@ -3,8 +3,8 @@
 Synthesises a state-disturbance curve (``variance_curve``) over a gain axis,
 reads the variance directly — there is no fit step — and fills its Sweep1DResult
 row in place. ``fit_value`` and ``fit_curve`` remain nan (allocated as nan by
-``Sweep1DResult.allocate``), which signals ``Sweep1DPlotter`` to show only the
-colormap without the fit-scalar tracking line.
+``Sweep1DResult.allocate``); the ``ColormapLinePlotter`` shows the flux × gain
+colormap with the latest flux rows as traces (no fit marker).
 
 - requires the ``pi_pulse`` module (pi-pulse prepares the excited state whose
   disturbance the variance measures); placeholder default for the prototype.
@@ -28,7 +28,7 @@ from typing_extensions import Any, Mapping, Optional
 
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
-from zcu_tools.gui.app.autofluxdep.nodes.plotters import Sweep1DPlotter
+from zcu_tools.gui.app.autofluxdep.nodes.plotters import ColormapLinePlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.synth import (
@@ -59,8 +59,8 @@ class MistNode(Node):
 
     No fit step: ``variance_curve`` returns a real (n_gain,) magnitude directly.
     ``fit_value[idx]`` and ``fit_curve[idx]`` are left as nan (already the
-    allocate default), so ``Sweep1DPlotter`` skips the tracking-line overlay and
-    shows only the colormap. Calls ``round_hook`` once after filling the row.
+    allocate default), so the ``ColormapLinePlotter`` shows only the colormap
+    (no fit marker). Calls ``round_hook`` once per round while filling the row.
     """
 
     def __init__(self, env: RunEnv) -> None:
@@ -112,8 +112,8 @@ class MistBuilder(Builder):
     """The MIST provider — variance-curve synth, no fit, accumulating colormap.
 
     Sweeps a gain axis per flux point, synthesises a state-disturbance curve, and
-    records the variance directly (no fit). ``fit_value`` stays nan so
-    ``Sweep1DPlotter`` renders only the gain×flux colormap. Provides ``success``
+    records the variance directly (no fit). ``fit_value`` stays nan so the
+    ``ColormapLinePlotter`` renders only the flux×gain colormap. Provides ``success``
     (float 1.0) to signal that the MIST pass completed; the ``opt_readout``
     module is consumed (from ro_optimize) to configure the readout during the real
     measurement.
@@ -126,13 +126,14 @@ class MistBuilder(Builder):
     optional_modules = (ModuleDep("opt_readout", default=_default_opt_readout),)
     base_params = ("gain_sweep", "reps", "rounds", "acquire_delay")
 
-    def make_init_result(self, params: Mapping[str, Any], n_flux: int) -> Sweep1DResult:
+    def make_init_result(self, params: Mapping[str, Any], flux: Any) -> Sweep1DResult:
         gains = parse_linear_axis(params.get("gain_sweep"), _DEFAULT_GAIN_SWEEP)
-        return Sweep1DResult.allocate(n_flux, gains, x_label="gain")
+        return Sweep1DResult.allocate(flux, gains, x_label="gain")
 
-    def make_plotter(self, figure: Any) -> Sweep1DPlotter:
-        # value_label="" because fit_value stays nan — Plotter omits the line
-        return Sweep1DPlotter(figure, title="mist", value_label="")
+    def make_plotter(self, figure: Any) -> ColormapLinePlotter:
+        return ColormapLinePlotter(
+            figure, title="mist", y_label="Readout Gain (a.u.)", num_lines=1
+        )
 
     def build_node(self, env: RunEnv) -> MistNode:
         return MistNode(env)

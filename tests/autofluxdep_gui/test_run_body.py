@@ -18,7 +18,9 @@ from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
 def _produce(predict_freq: float, flux_idx: int = 0, detune_sweep: str = "-20,50,0.5"):
     """Build the Result + Node for one point and run produce; return (patch, result)."""
     builder = QubitFreqBuilder()
-    result = builder.make_init_result({"detune_sweep": detune_sweep}, n_flux=8)
+    result = builder.make_init_result(
+        {"detune_sweep": detune_sweep}, np.linspace(0.0, 1.0, 8)
+    )
     fired: list = []
     env = RunEnv(
         flux=float(flux_idx),

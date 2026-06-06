@@ -122,9 +122,16 @@ class Builder(ABC):
 
     # --- sweep-lived factories (Run start; no-op for pure-compute Services) ---
 
-    def make_init_result(self, params: Mapping[str, Any], n_flux: int) -> Any:
-        """Pre-allocate the empty (nan-filled) sweep Result. None = no Result."""
-        del params, n_flux  # base is a no-op; measurement Builders override
+    def make_init_result(self, params: Mapping[str, Any], flux: Any) -> Any:
+        """Pre-allocate the empty sweep Result. None = no Result.
+
+        ``flux`` is the full (n_flux,) flux axis — known at Run start, so the
+        Result fills its flux axis up front (the trailing signal/fit fields stay
+        nan until each ``produce`` fills its row). The Plotter needs the complete
+        flux axis as its colormap/line x, which is why the whole array is passed
+        (not just the length).
+        """
+        del params, flux  # base is a no-op; measurement Builders override
         return None
 
     def make_plotter(self, figure: Any) -> Any:
