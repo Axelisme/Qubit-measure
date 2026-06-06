@@ -34,9 +34,9 @@ from .operation_gate import (
 )
 
 # DeviceMemoryInfo lives in the contract layer (ports) — the element type of
-# RememberedDevicePort. Re-exported here for back-compat with imports of
-# ``from .device import DeviceMemoryInfo``.
-from .ports import DeviceMemoryInfo  # noqa: F401
+# RememberedDevicePort, used here as the parameter type of
+# register_remembered_devices.
+from .ports import DeviceMemoryInfo
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.event_bus import EventBus

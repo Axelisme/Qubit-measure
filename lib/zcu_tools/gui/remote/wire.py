@@ -1,9 +1,9 @@
 """Shared wire types for the GUI RemoteControlAdapter (app-agnostic).
 
 Frozen dataclasses for request / response envelopes plus the field-level
-validation primitives (``_require_*`` / ``_optional_*`` / ``require_object`` /
-``require_json_safe``) that strictly coerce raw wire scalars before any
-``Any`` flows into ``Controller`` or domain services.
+validation primitives (``require_str`` / ``require_int`` / ``optional_bool``)
+that strictly coerce raw wire scalars before any ``Any`` flows into
+``Controller`` or domain services.
 
 This layer is transport-pure: it knows field rules but not the domain shapes
 they assemble into. Each GUI app owns its per-app wire/code version constants
@@ -103,31 +103,4 @@ def optional_bool(params: Mapping[str, object], key: str, default: bool) -> bool
             ErrorCode.INVALID_PARAMS,
             f"'{key}' must be a boolean if present, got {type(val).__name__}",
         )
-    return val
-
-
-def require_object(params: Mapping[str, object], key: str) -> Mapping[str, object]:
-    val = params.get(key)
-    if val is None:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"missing '{key}'")
-    if not isinstance(val, dict):
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            f"'{key}' must be an object, got {type(val).__name__}",
-        )
-    return val
-
-
-def require_json_safe(params: Mapping[str, object], key: str) -> object:
-    import json
-
-    val = params.get(key)
-    if key not in params:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"missing '{key}'")
-    try:
-        json.dumps(val)
-    except (TypeError, ValueError) as exc:
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS, f"'{key}' must be JSON-serializable"
-        ) from exc
     return val

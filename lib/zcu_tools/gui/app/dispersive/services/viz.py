@@ -10,7 +10,7 @@ single figure is both the tuning view and the result.
 On top of that, the user can drop **sample-flux lines** (draggable vertical lines):
 for each one the ground/excited resonator frequency at that single flux is computed
 live (a fast single-point dispersive call) as the user drags r_f / changes g, shown
-as a red (ground) / blue (excited) dot on the line. This gives instant feedback at a
+as a blue (ground) / red (excited) dot on the line. This gives instant feedback at a
 few fluxes without the full all-flux recompute (which only runs on "Use these g/r_f").
 
 These are pure functions that draw onto a caller-supplied ``Figure`` and mutate the
@@ -39,7 +39,7 @@ class SampleArtists:
     """The artists of one draggable sample-flux line: the vertical line + its dots.
 
     ``flux`` is the line's current x position; ``dot_ground`` / ``dot_excited`` are
-    the red/blue markers showing the predicted ground/excited resonator frequency at
+    the blue/red markers showing the predicted ground/excited resonator frequency at
     that flux (None until first computed).
     """
 

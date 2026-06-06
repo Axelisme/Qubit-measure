@@ -15,8 +15,6 @@ from zcu_tools.gui.remote.wire import (
     optional_bool,
     parse_request,
     require_int,
-    require_json_safe,
-    require_object,
     require_str,
 )
 
@@ -87,44 +85,6 @@ def testoptional_bool_ok():
 def testoptional_bool_not_bool():
     with pytest.raises(RemoteError):
         optional_bool({"k": "yes"}, "k", True)
-
-
-# ---------------------------------------------------------------------------
-# require_object
-# ---------------------------------------------------------------------------
-
-
-def test_require_object_ok():
-    assert require_object({"k": {"a": 1}}, "k") == {"a": 1}
-
-
-def test_require_object_missing():
-    with pytest.raises(RemoteError):
-        require_object({}, "k")
-
-
-def test_require_object_not_dict():
-    with pytest.raises(RemoteError):
-        require_object({"k": [1, 2]}, "k")
-
-
-# ---------------------------------------------------------------------------
-# require_json_safe
-# ---------------------------------------------------------------------------
-
-
-def test_require_json_safe_ok():
-    assert require_json_safe({"k": {"a": [1, 2, None]}}, "k") == {"a": [1, 2, None]}
-
-
-def test_require_json_safe_missing():
-    with pytest.raises(RemoteError):
-        require_json_safe({}, "k")
-
-
-def test_require_json_safe_not_serializable():
-    with pytest.raises(RemoteError):
-        require_json_safe({"k": object()}, "k")
 
 
 # ---------------------------------------------------------------------------

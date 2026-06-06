@@ -459,8 +459,8 @@ class Controller:
         # Terminal: this only launches the worker. The outcome lands on the Qt
         # main thread in ``RunService._on_run_finished`` / ``_on_run_failed``,
         # which bump ``tab:<id>:result`` (finished only), release the RUN lease
-        # exactly-once, and emit ``RUN_LOCK_CHANGED`` with the outcome
-        # (finished / failed / cancelled).
+        # exactly-once, and emit ``RUN_FINISHED`` carrying the outcome in its
+        # payload (finished / failed / cancelled).
         permit = self._guard_svc.acquire_run_permit(tab_id)
         # Headless (no Qt RenderHost, e.g. a pure-agent process): RunService
         # tolerates a None live container. The progress factory is minted by
