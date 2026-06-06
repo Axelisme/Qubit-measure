@@ -36,6 +36,7 @@ SmoothingService's own internal state, not dependencies.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 from typing_extensions import Any, Callable, Mapping, Optional, Protocol
@@ -50,6 +51,8 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import (
     validate_patch,
 )
 from zcu_tools.gui.app.autofluxdep.tools import Tools
+
+logger = logging.getLogger(__name__)
 
 
 class ModuleSource(Protocol):
@@ -174,6 +177,7 @@ def project_snapshot(
     that resolves to nothing anywhere (and has no default) → None (skip the
     provider this point).
     """
+    name = getattr(provider, "name", "?")
     deps = provider.all_dependencies()
     resolved: dict[str, Any] = {}
     for d in deps:
@@ -182,6 +186,9 @@ def project_snapshot(
             if d.default is not None:
                 resolved[d.key] = d.default()
             elif not d.is_optional:
+                logger.debug(
+                    "skip %r: required info %r unavailable everywhere", name, d.key
+                )
                 return None  # required, no value anywhere, no default → skip
         else:
             resolved[d.key] = value
@@ -193,6 +200,9 @@ def project_snapshot(
             if m.default is not None:
                 modules[m.name] = m.default()
             elif not m.is_optional:
+                logger.debug(
+                    "skip %r: required module %r unavailable everywhere", name, m.name
+                )
                 return None  # required module unavailable everywhere → skip
         else:
             modules[m.name] = mod
@@ -289,15 +299,24 @@ class Orchestrator:
         provider) for cooperative cancellation; when it returns True the sweep
         stops and returns the InfoStore as-is.
         """
+        logger.info(
+            "sweep: %d provider(s) %s over %d flux point(s)",
+            len(self.providers),
+            [p.name for p in self.providers],
+            len(flux_values),
+        )
         info = InfoStore()
         for idx, flux in enumerate(flux_values):
             if should_stop is not None and should_stop():
+                logger.info("sweep stopped before flux idx %d", idx)
                 break
             info.begin_point()
             info.point["flux_value"] = flux
             info.point["flux_idx"] = idx
+            logger.debug("flux point %d: value=%g", idx, flux)
             for provider in self.providers:
                 if should_stop is not None and should_stop():
+                    logger.info("sweep stopped within flux idx %d", idx)
                     break
                 snapshot = project_snapshot(provider, info, self.ml)
                 if snapshot is None:
@@ -311,8 +330,17 @@ class Orchestrator:
                 )  # provides / provides_modules = the output contract
                 info.point.update(patch.values())
                 info.module_point.update(patch.modules())
+                logger.debug(
+                    "  %s produced: %s%s",
+                    provider.name,
+                    patch.values(),
+                    f" modules={list(patch.modules())}" if patch.modules() else "",
+                )
             if self._smoothing is not None:
-                info.point_smoothed.update(self._smoothing.derive(info.point))
+                smoothed = self._smoothing.derive(info.point)
+                info.point_smoothed.update(smoothed)
+                if smoothed:
+                    logger.debug("  smoothed: %s", smoothed)
             for svc in self.derivations:
                 info.point.update(svc.derive(info.point))
             if on_point is not None:

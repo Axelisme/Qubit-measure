@@ -23,6 +23,8 @@ param (no branch).
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 from typing_extensions import Any, Mapping, Optional
 
@@ -37,6 +39,8 @@ from zcu_tools.gui.app.autofluxdep.nodes.synth import (
     signal_to_real,
 )
 from zcu_tools.utils.fitting import fit_decay_fringe
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_T1 = 10.0  # us — smoothed t1 fallback
 _DEFAULT_T2E = 5.0  # us — smoothed t2e fallback
@@ -99,6 +103,13 @@ class T2EchoNode(Node):
         np.copyto(result.fit_curve[idx], np.asarray(fit_curve, dtype=np.float64))
         if env.round_hook is not None:
             env.round_hook(idx)
+
+        logger.debug(
+            "t2echo fit @flux%d: t2e=%.3f us (plant t2=%.3f)",
+            idx,
+            float(t2f),
+            true_t2,
+        )
 
         patch = Patch()
         patch.set("t2e", float(t2f))

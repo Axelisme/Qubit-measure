@@ -21,6 +21,8 @@ ro_optimize / t2*), so no separate ``smooth_t1`` key exists.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 from typing_extensions import Any, Mapping, Optional
 
@@ -35,6 +37,8 @@ from zcu_tools.gui.app.autofluxdep.nodes.synth import (
     signal_to_real,
 )
 from zcu_tools.utils.fitting import fit_decay
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_T1 = 10.0  # us — md.t1 stand-in (the smoothed-t1 fallback)
 _DEFAULT_SWEEP = (0.5, 60.0, 101)  # relax-time axis (us): start, stop, npts
@@ -83,6 +87,13 @@ class T1Node(Node):
         np.copyto(result.fit_curve[idx], np.asarray(fit_curve, dtype=np.float64))
         if env.round_hook is not None:
             env.round_hook(idx)
+
+        logger.debug(
+            "t1 fit @flux%d: t1=%.3f us (plant=%.3f)",
+            idx,
+            float(t1),
+            true_t1,
+        )
 
         patch = Patch()
         patch.set("t1", float(t1))

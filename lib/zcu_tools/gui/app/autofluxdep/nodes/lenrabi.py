@@ -19,6 +19,8 @@ and pi2 lengths plus the Rabi frequency.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 from typing_extensions import Any, Mapping, Optional
 
@@ -33,6 +35,8 @@ from zcu_tools.gui.app.autofluxdep.nodes.synth import (
     signal_to_real,
 )
 from zcu_tools.utils.fitting import fit_rabi
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_RABI_FREQ = 0.5  # 1/us — planted Rabi frequency for the prototype
 _DEFAULT_SWEEP = (0.0, 6.0, 121)  # pulse-length axis (us): start, stop, npts
@@ -77,6 +81,14 @@ class LenRabiNode(Node):
         np.copyto(result.fit_curve[idx], np.asarray(fit_curve, dtype=np.float64))
         if env.round_hook is not None:
             env.round_hook(idx)
+
+        logger.debug(
+            "lenrabi fit @flux%d: rabi_freq=%.4f pi_len=%.3f pi2_len=%.3f",
+            idx,
+            float(freq),
+            float(pi_x),
+            float(pi2_x),
+        )
 
         patch = Patch()
         patch.set("pi_length", float(pi_x))

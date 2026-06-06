@@ -39,6 +39,8 @@ hardware. Phase B swaps the synthesis for ``soc.acquire``.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 from numpy.typing import NDArray
 from typing_extensions import Any, Mapping, Optional
@@ -50,6 +52,8 @@ from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.synth import lorentzian_dip
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_DETUNE = (-20.0, 50.0, 0.5)  # MHz: start, stop, step
 
@@ -141,6 +145,15 @@ class QubitFreqNode(Node):
         np.copyto(result.fit_curve[idx], np.asarray(fit_curve, dtype=np.float64))
         if env.round_hook is not None:
             env.round_hook(idx)
+
+        logger.debug(
+            "qubit_freq fit @flux%d: freq=%.3f (predict=%.3f, detune=%+.3f) kappa=%.3f",
+            idx,
+            float(freq),
+            pred_qf,
+            float(freq) - pred_qf,
+            float(fwhm),
+        )
 
         patch = Patch()
         patch.set("qubit_freq", float(freq))

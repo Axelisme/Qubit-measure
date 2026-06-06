@@ -21,6 +21,8 @@ No fit step: the 2D landscape is computed in one shot (one effective "round"), s
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 from typing_extensions import Any, Mapping, Optional
 
@@ -33,6 +35,8 @@ from zcu_tools.gui.app.autofluxdep.nodes.synth import (
     gaussian_peak_2d,
     parse_linear_axis,
 )
+
+logger = logging.getLogger(__name__)
 
 # Default axis specs: (start, stop, npts)
 _DEFAULT_FREQ: tuple[float, float, int] = (4998.0, 5002.0, 21)
@@ -114,6 +118,15 @@ class RoOptimizeNode(Node):
         # one-shot: the 2D sweep is complete after one compute step
         if env.round_hook is not None:
             env.round_hook(idx)
+
+        logger.debug(
+            "ro_optimize @flux%d: best_freq=%.3f best_gain=%.3f (plant freq=%.3f gain=%.3f)",
+            idx,
+            best_freq,
+            best_gain,
+            plant_freq,
+            plant_gain,
+        )
 
         patch = Patch()
         patch.set("best_ro_freq", best_freq)

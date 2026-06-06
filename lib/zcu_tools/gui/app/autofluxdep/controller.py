@@ -13,6 +13,8 @@ dependency model.
 
 from __future__ import annotations
 
+import logging
+
 from typing_extensions import Any, Optional
 
 from zcu_tools.gui.app.autofluxdep.derivation import DerivationService
@@ -34,6 +36,8 @@ from zcu_tools.gui.app.autofluxdep.state import (
     SetupResources,
 )
 from zcu_tools.gui.app.autofluxdep.tools import SimplePredictor, Tools
+
+logger = logging.getLogger(__name__)
 
 
 class Controller:
@@ -79,6 +83,7 @@ class Controller:
         node = PlacedNode(builder=builder, name=name, params=dict(params))
         self._state.nodes.append(node)
         self._state.version.bump(WORKFLOW_VERSION_KEY)
+        logger.debug("add_node: %r (type=%r) params=%s", name, builder.name, params)
         self._bus.emit(Event(EventType.WORKFLOW_CHANGED, node.name))
         return node
 
@@ -92,6 +97,7 @@ class Controller:
         node.name = self._unique_name(node.name)
         self._state.nodes.append(node)
         self._state.version.bump(WORKFLOW_VERSION_KEY)
+        logger.debug("add_node_by_type: %r -> %r", type_name, node.name)
         self._bus.emit(Event(EventType.WORKFLOW_CHANGED, node.name))
         return node
 
@@ -106,15 +112,22 @@ class Controller:
         node = self._state.nodes[index]
         cleaned = new_name.strip()
         if not cleaned:
+            logger.debug(
+                "rename_node[%d]: blank name rejected, kept %r", index, node.name
+            )
             return node.name  # blank → no-op, keep current name
+        old = node.name
         node.name = self._unique_name(cleaned, exclude=node)
         self._state.version.bump(WORKFLOW_VERSION_KEY)
+        logger.debug("rename_node[%d]: %r -> %r", index, old, node.name)
         self._bus.emit(Event(EventType.WORKFLOW_CHANGED, node.name))
         return node.name
 
     def remove_node(self, name: str) -> None:
+        before = len(self._state.nodes)
         self._state.nodes = [n for n in self._state.nodes if n.name != name]
         self._state.version.bump(WORKFLOW_VERSION_KEY)
+        logger.debug("remove_node: %r (%d -> %d)", name, before, len(self._state.nodes))
         self._bus.emit(Event(EventType.WORKFLOW_CHANGED, name))
 
     def reorder(self, index: int, delta: int) -> int:
@@ -125,6 +138,7 @@ class Controller:
             return index  # out of range → no-op
         nodes[index], nodes[new_index] = nodes[new_index], nodes[index]
         self._state.version.bump(WORKFLOW_VERSION_KEY)
+        logger.debug("reorder: %d <-> %d", index, new_index)
         self._bus.emit(Event(EventType.WORKFLOW_CHANGED, None))
         return new_index
 
@@ -132,11 +146,23 @@ class Controller:
         """Replace the tuned params of the Node at ``index``."""
         self._state.nodes[index].params = dict(params)
         self._state.version.bump(WORKFLOW_VERSION_KEY)
+        logger.debug(
+            "set_node_params[%d] (%r): %s", index, self._state.nodes[index].name, params
+        )
         self._bus.emit(Event(EventType.WORKFLOW_CHANGED, None))
 
     def set_flux_values(self, values: list[float]) -> None:
         self._state.flux_values = list(values)
         self._state.version.bump(FLUX_VERSION_KEY)
+        if values:
+            logger.debug(
+                "set_flux_values: n=%d range=[%g, %g]",
+                len(values),
+                values[0],
+                values[-1],
+            )
+        else:
+            logger.debug("set_flux_values: cleared")
         self._bus.emit(Event(EventType.FLUX_CHANGED, len(values)))
 
     # --- setup (prototype: MockSoc + FakeDevice, no hardware) ---
@@ -156,6 +182,14 @@ class Controller:
             resources = self._build_mock_resources() if use_mock else SetupResources()
         self._state.resources = resources
         self._state.version.bump(SETUP_VERSION_KEY)
+        logger.info(
+            "setup done: soc=%s predictor=%s (use_mock=%s)",
+            type(resources.soc).__name__ if resources.soc is not None else None,
+            type(resources.predictor).__name__
+            if resources.predictor is not None
+            else None,
+            use_mock,
+        )
         self._bus.emit(Event(EventType.SETUP_DONE, None))
 
     @staticmethod
@@ -176,6 +210,7 @@ class Controller:
 
     def stop_run(self) -> None:
         """Request cooperative cancellation of an in-progress run."""
+        logger.info("stop_run requested (at flux idx %d)", self._cur_idx)
         self._stop = True
 
     def _build_providers(self) -> list[PlacedNode]:
@@ -217,6 +252,12 @@ class Controller:
         self._stop = False
         self._running = True
         self._cur_idx = 0
+        logger.info(
+            "run start: %d user Node(s) %s over %d flux point(s)",
+            len(self._state.nodes),
+            self._state.node_names(),
+            len(self._state.flux_values),
+        )
         self._bus.emit(Event(EventType.RUN_STARTED, None))
 
         soc = self._state.resources.soc if self._state.resources else None
@@ -257,6 +298,10 @@ class Controller:
             should_stop=lambda: self._stop,
         )
         self._running = False
+        if self._stop:
+            logger.info("run stopped at flux idx %d", self._cur_idx)
+        else:
+            logger.info("run finished: %d flux point(s)", len(self._state.flux_values))
         self._bus.emit(
             Event(EventType.RUN_STOPPED if self._stop else EventType.RUN_FINISHED, None)
         )

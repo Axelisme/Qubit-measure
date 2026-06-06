@@ -17,6 +17,8 @@ its sweep Result row in place, and returns the raw t2r and the measured detune.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 from typing_extensions import Any, Mapping, Optional
 
@@ -31,6 +33,8 @@ from zcu_tools.gui.app.autofluxdep.nodes.synth import (
     signal_to_real,
 )
 from zcu_tools.utils.fitting import fit_decay_fringe
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_T1 = 10.0  # us — smoothed t1 fallback
 _DEFAULT_T2R = 5.0  # us — smoothed t2r fallback
@@ -87,6 +91,14 @@ class T2RamseyNode(Node):
         np.copyto(result.fit_curve[idx], np.asarray(fit_curve, dtype=np.float64))
         if env.round_hook is not None:
             env.round_hook(idx)
+
+        logger.debug(
+            "t2ramsey fit @flux%d: t2r=%.3f us detune=%.4f (plant t2=%.3f)",
+            idx,
+            float(t2f),
+            float(detune),
+            true_t2,
+        )
 
         patch = Patch()
         patch.set("t2r", float(t2f))

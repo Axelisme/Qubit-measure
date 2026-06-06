@@ -20,6 +20,8 @@ that the MIST pass completed without a hardware error.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 from typing_extensions import Any, Mapping, Optional
 
@@ -29,6 +31,8 @@ from zcu_tools.gui.app.autofluxdep.nodes.plotters import Sweep1DPlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.synth import parse_linear_axis, variance_curve
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_GAIN_SWEEP: tuple[float, float, int] = (0.0, 1.0, 51)
 _ONSET_GAIN = 0.5  # fixed onset for the prototype variance curve
@@ -73,6 +77,13 @@ class MistNode(Node):
 
         if env.round_hook is not None:
             env.round_hook(idx)
+
+        logger.debug(
+            "mist @flux%d: success, variance range [%.3f, %.3f]",
+            idx,
+            float(curve.min()),
+            float(curve.max()),
+        )
 
         patch = Patch()
         patch.set("success", 1.0)  # float: consistent with info-value domain
