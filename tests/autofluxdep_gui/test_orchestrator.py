@@ -136,3 +136,24 @@ def test_skipped_provider_does_not_run():
     p = place(make_builder("n", requires=(Dependency("missing"),), produce_fn=fn))
     Orchestrator([p]).run([0.0])
     assert ran == []  # never built / produced
+
+
+# --- on_node (auto-follow) fires per resolved provider, skips skipped ones ---
+
+
+def test_on_node_fires_for_each_resolved_provider_in_order():
+    seen: list = []
+    a = place(make_builder("a"))
+    b = place(make_builder("b"))
+    Orchestrator([a, b]).run([0.0, 1.0], on_node=lambda n, i: seen.append((n, i)))
+    # both providers, both flux points, in list order
+    assert seen == [("a", 0), ("b", 0), ("a", 1), ("b", 1)]
+
+
+def test_on_node_does_not_fire_for_a_skipped_provider():
+    seen: list = []
+    runnable = place(make_builder("ok"))
+    skipped = place(make_builder("skip", requires=(Dependency("missing"),)))
+    Orchestrator([runnable, skipped]).run([0.0], on_node=lambda n, i: seen.append(n))
+    # the skipped provider (required dep missing) never fires on_node
+    assert seen == ["ok"]

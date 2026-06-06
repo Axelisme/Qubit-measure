@@ -142,24 +142,38 @@ class Builder(ABC):
 
 @dataclass
 class PlacedNode:
-    """A provider placed in a workflow: its Builder + the user's tuned params.
+    """A provider placed in a workflow: its Builder + a name + the user's params.
 
     This is the unit State holds and the GUI edits — distinct from the Builder
-    (the stateless kind): the same Builder could be placed twice with different
-    params. The user tunes ``params`` (the Builder's ``base_params``) and the
-    list order; ``produce``/Result/Plotter are domain code they never edit.
+    (the stateless kind): the same Builder can be placed twice with different
+    params and *different names* (e.g. two ``mist`` placements named ``g_mist`` /
+    ``e_mist``). The user tunes ``params`` (the Builder's ``base_params``), the
+    list order, and the instance ``name``; ``produce``/Result/Plotter are domain
+    code they never edit.
 
-    ``name`` mirrors the Builder's name. The declaration helpers delegate so a
-    PlacedNode satisfies the orchestrator's ``Provider`` view directly (the
-    orchestrator reads the declarations off the placement and builds Nodes via
-    ``builder.build_node`` with the placement's params curried in).
+    ``name`` is the **instance identity** — the display label, the key into
+    ``run_results`` / the Plotter map, the auto-follow / remove target. It
+    defaults to the Builder's type name and is unique within a workflow (the
+    controller de-dups). It is distinct from what the placement *provides*: the
+    ``provides`` / ``requires`` info keys come from the Builder unchanged (two
+    ``mist`` placements both provide ``success`` — info keys are flat, not
+    instance-scoped), so renaming changes identity, not the dependency wiring.
+
+    The declaration helpers delegate to the Builder so a PlacedNode satisfies the
+    orchestrator's ``Provider`` view directly.
     """
 
     builder: Builder
+    name: str = ""
     params: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if not self.name:
+            self.name = self.builder.name
+
     @property
-    def name(self) -> str:
+    def type_name(self) -> str:
+        """The Builder's type name (e.g. ``mist``) — the registry key."""
         return self.builder.name
 
     @property

@@ -182,3 +182,67 @@ def test_multiple_real_experiments_each_get_a_liveplot(qapp):
     assert redraws["t1"] >= 1
     win.close()
     win.deleteLater()
+
+
+def test_run_auto_follows_each_entered_node(qapp):
+    # as the sweep enters each provider, the left list selects it + the detail
+    # pane switches to its run tab (the canvas it shows follows the selection).
+    ctrl = build_core()
+    for t in ("qubit_freq", "t1", "mist"):
+        ctrl.add_node_by_type(t)
+    win = MainWindow(ctrl)
+    win._list.select_index(0)
+
+    # record which row was selected + the sub-tab when each Node was entered
+    followed = []
+
+    def on_entered(name, _idx):
+        followed.append((name, win._list.selected_index, win._detail.current_tab))
+
+    win._bridge.node_entered.connect(on_entered)
+    ctrl.set_flux_values([0.0, 0.5])
+    ctrl.setup(use_mock=True)
+    win._list._refresh_buttons()
+    win._start()
+    for _ in range(4000):
+        QApplication.processEvents()
+        if win._worker is None and not ctrl.is_running:
+            break
+
+    nav = {name: (row, tab) for name, row, tab in followed}
+    # each Node, when entered, selected its own list row and showed the run tab
+    assert nav["qubit_freq"] == (0, 1)
+    assert nav["t1"] == (1, 1)
+    assert nav["mist"] == (2, 1)
+    # the predictor Service never drives navigation (filtered by the controller)
+    assert "predictor" not in nav
+    win.close()
+    win.deleteLater()
+
+
+def test_rename_updates_list_and_keeps_canvas_key(qapp):
+    # renaming two mist placements to g_mist / e_mist relabels the list and keys
+    # each one's liveplot canvas under its instance name.
+    ctrl = build_core()
+    ctrl.add_node_by_type("mist")
+    ctrl.add_node_by_type("mist")
+    win = MainWindow(ctrl)
+    ctrl.rename_node(0, "g_mist")
+    ctrl.rename_node(1, "e_mist")
+    win._list.refresh_list()
+    assert _list_labels(win) == ["g_mist", "e_mist"]
+
+    ctrl.set_flux_values([0.0, 0.5])
+    ctrl.setup(use_mock=True)
+    win._list._refresh_buttons()
+    win._start()
+    for _ in range(4000):
+        QApplication.processEvents()
+        if win._worker is None and not ctrl.is_running:
+            break
+
+    # canvases are keyed by instance name, independent per placement
+    assert set(win._plots) == {"g_mist", "e_mist"}
+    assert win._plots["g_mist"][0] is not win._plots["e_mist"][0]
+    win.close()
+    win.deleteLater()

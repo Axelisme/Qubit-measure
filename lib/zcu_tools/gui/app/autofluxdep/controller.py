@@ -60,20 +60,57 @@ class Controller:
 
     # --- workflow definition (the only writes the user makes) ---
 
+    def _unique_name(self, base: str, *, exclude: Optional[PlacedNode] = None) -> str:
+        """A workflow-unique instance name from ``base`` (append _2, _3, … if taken).
+
+        ``exclude`` is a placement allowed to keep its own name (for rename — a
+        no-op rename to the current name must not bump to _2).
+        """
+        taken = {n.name for n in self._state.nodes if n is not exclude}
+        if base not in taken:
+            return base
+        i = 2
+        while f"{base}_{i}" in taken:
+            i += 1
+        return f"{base}_{i}"
+
     def add_node(self, builder: Builder, **params: Any) -> PlacedNode:
-        node = PlacedNode(builder=builder, params=dict(params))
+        name = self._unique_name(builder.name)
+        node = PlacedNode(builder=builder, name=name, params=dict(params))
         self._state.nodes.append(node)
         self._state.version.bump(WORKFLOW_VERSION_KEY)
         self._bus.emit(Event(EventType.WORKFLOW_CHANGED, node.name))
         return node
 
     def add_node_by_type(self, type_name: str) -> PlacedNode:
-        """Add a fresh provider of ``type_name`` (from the registry) to the end."""
+        """Add a fresh provider of ``type_name`` (from the registry) to the end.
+
+        The instance name defaults to the type name, de-duped within the
+        workflow (a second ``mist`` becomes ``mist_2``); the user can rename it.
+        """
         node = create_placement(type_name)
+        node.name = self._unique_name(node.name)
         self._state.nodes.append(node)
         self._state.version.bump(WORKFLOW_VERSION_KEY)
         self._bus.emit(Event(EventType.WORKFLOW_CHANGED, node.name))
         return node
+
+    def rename_node(self, index: int, new_name: str) -> str:
+        """Rename the placement at ``index`` to a workflow-unique ``new_name``.
+
+        Returns the actual name applied (de-duped + stripped). A blank name is
+        rejected (kept unchanged) — fast-fail on the empty case rather than
+        silently naming it the type. Used to distinguish repeated placements
+        (e.g. two ``mist`` → ``g_mist`` / ``e_mist``).
+        """
+        node = self._state.nodes[index]
+        cleaned = new_name.strip()
+        if not cleaned:
+            return node.name  # blank → no-op, keep current name
+        node.name = self._unique_name(cleaned, exclude=node)
+        self._state.version.bump(WORKFLOW_VERSION_KEY)
+        self._bus.emit(Event(EventType.WORKFLOW_CHANGED, node.name))
+        return node.name
 
     def remove_node(self, name: str) -> None:
         self._state.nodes = [n for n in self._state.nodes if n.name != name]
@@ -195,6 +232,17 @@ class Controller:
             self._cur_idx = idx
             self._bus.emit(Event(EventType.POINT_DONE, idx))
 
+        user_node_names = {n.name for n in self._state.nodes}
+
+        def on_node(name: str, idx: int) -> None:
+            # a provider is about to run → let the UI auto-follow to its run tab.
+            # The orchestrator fires for every provider (it does not distinguish a
+            # Service); the controller knows the Service boundary, so it only
+            # forwards user-list Nodes — the predictor Service has no list row to
+            # navigate to.
+            if name in user_node_names:
+                self._bus.emit(Event(EventType.NODE_ENTERED, (name, idx)))
+
         orch = Orchestrator(
             providers=self._build_providers(),
             tools=self._build_tools(),
@@ -205,6 +253,7 @@ class Controller:
         info = orch.run(
             self._state.flux_values,
             on_point=on_point,
+            on_node=on_node,
             should_stop=lambda: self._stop,
         )
         self._running = False

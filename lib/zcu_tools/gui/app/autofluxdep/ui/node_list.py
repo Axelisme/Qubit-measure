@@ -43,15 +43,23 @@ class NodeListPane(QWidget):
         root.addWidget(QLabel("Nodes"))
         self._list = QListWidget()
         self._list.currentRowChanged.connect(self._on_row_changed)
+        self._list.itemDoubleClicked.connect(lambda _it: self._on_rename())
         root.addWidget(self._list, 1)
 
-        # add / remove / reorder
+        # add / remove / reorder / rename
         btns = QHBoxLayout()
         self._add_btn = _btn("+", self._on_add)
         self._del_btn = _btn("−", self._on_remove)
         self._up_btn = _btn("↑", lambda: self._on_move(-1))
         self._down_btn = _btn("↓", lambda: self._on_move(+1))
-        for b in (self._add_btn, self._del_btn, self._up_btn, self._down_btn):
+        self._rename_btn = _btn("✎", self._on_rename)
+        for b in (
+            self._add_btn,
+            self._del_btn,
+            self._up_btn,
+            self._down_btn,
+            self._rename_btn,
+        ):
             btns.addWidget(b)
         root.addLayout(btns)
 
@@ -128,6 +136,21 @@ class NodeListPane(QWidget):
         self.refresh_list()
         self.select_index(new_idx)
 
+    def _on_rename(self) -> None:
+        if self._running:
+            return  # names are locked while a run is in progress
+        idx = self._list.currentRow()
+        if not (0 <= idx < len(self._ctrl.state.nodes)):
+            return
+        current = self._ctrl.state.nodes[idx].name
+        new_name, ok = QInputDialog.getText(
+            self, "Rename Node", "Instance name:", text=current
+        )
+        if ok:
+            self._ctrl.rename_node(idx, new_name)
+            self.refresh_list()
+            self.select_index(idx)
+
     def _on_setup(self) -> None:
         from .setup_dialog import SetupDialog
 
@@ -164,6 +187,7 @@ class NodeListPane(QWidget):
             self._del_btn,
             self._up_btn,
             self._down_btn,
+            self._rename_btn,
             self._setup_btn,
             self._flux_start,
             self._flux_stop,

@@ -79,6 +79,10 @@ class DepDeclaring(Protocol):
 # an index), no figure crosses the thread (ADR-0018).
 Notify = Callable[[str, int], None]
 OnPoint = Callable[[int, float, "InfoStore"], None]
+# on_node(provider_name, flux_idx): fired when a provider is about to run (after
+# it resolved — a skipped provider does not fire). The UI uses it to auto-follow
+# (select the running Node + show its run tab). Pure data, like Notify.
+OnNode = Callable[[str, int], None]
 
 
 @dataclass
@@ -269,14 +273,17 @@ class Orchestrator:
         self,
         flux_values: list[float],
         on_point: Optional[OnPoint] = None,
+        on_node: Optional[OnNode] = None,
         should_stop: Optional[Callable[[], bool]] = None,
     ) -> InfoStore:
         """Sweep flux × providers in order.
 
         Per flux point, each provider is projected → built → produced → merged.
-        After all providers, the auto-built SmoothingService derives smoothed
-        values into ``point_smoothed``, then any extra ``derivations`` run, then
-        ``on_point`` (the place to react to a finished point).
+        ``on_node`` fires just before a *resolved* provider runs (a skipped one
+        does not fire) — the UI auto-follows to that Node's run tab. After all
+        providers, the auto-built SmoothingService derives smoothed values into
+        ``point_smoothed``, then any extra ``derivations`` run, then ``on_point``
+        (the place to react to a finished point).
 
         ``should_stop`` is polled before each flux point (and before each
         provider) for cooperative cancellation; when it returns True the sweep
@@ -295,6 +302,8 @@ class Orchestrator:
                 snapshot = project_snapshot(provider, info, self.ml)
                 if snapshot is None:
                     continue  # skipped this point (a required dep/module missing)
+                if on_node is not None:
+                    on_node(provider.name, idx)
                 node = provider.builder.build_node(self._make_env(provider, idx, flux))
                 patch = node.produce(snapshot)
                 validate_patch(

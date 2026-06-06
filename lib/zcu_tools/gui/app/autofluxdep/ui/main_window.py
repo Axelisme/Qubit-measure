@@ -32,7 +32,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.app.autofluxdep.controller import Controller
-from zcu_tools.gui.app.autofluxdep.event_bus import EventType
+from zcu_tools.gui.app.autofluxdep.event_bus import Event, EventType
 
 from .node_detail import NodeDetailPane
 from .node_list import NodeListPane
@@ -60,10 +60,12 @@ class _RunBridge(QObject):
     The controller emits EventBus events on the worker thread; this bridge
     subscribes and re-emits as Qt signals (delivered on the main thread because
     they are connected there). ``row_updated`` is the row-updated notification
-    the worker's round_hook fires (a provider name + flux index — no figure).
+    the worker's round_hook fires (a provider name + flux index — no figure);
+    ``node_entered`` is the auto-follow notification (a provider started running).
     """
 
     run_started = Signal()
+    node_entered = Signal(str, int)
     point_done = Signal(int)
     run_finished = Signal()
     run_stopped = Signal()
@@ -73,11 +75,16 @@ class _RunBridge(QObject):
         super().__init__()
         bus = ctrl.bus
         bus.subscribe(EventType.RUN_STARTED, lambda e: self.run_started.emit())
+        bus.subscribe(EventType.NODE_ENTERED, self._on_node_entered)
         bus.subscribe(
             EventType.POINT_DONE, lambda e: self.point_done.emit(int(e.payload))
         )
         bus.subscribe(EventType.RUN_FINISHED, lambda e: self.run_finished.emit())
         bus.subscribe(EventType.RUN_STOPPED, lambda e: self.run_stopped.emit())
+
+    def _on_node_entered(self, e: Event) -> None:
+        name, idx = e.payload
+        self.node_entered.emit(str(name), int(idx))
 
     def notify(self, name: str, idx: int) -> None:
         """The worker-thread notify callback — re-emits as a queued Qt signal."""
@@ -117,6 +124,7 @@ class MainWindow(QMainWindow):
         # run bridge (worker thread → main thread)
         self._bridge = _RunBridge(ctrl)
         self._bridge.run_started.connect(self._on_run_started)
+        self._bridge.node_entered.connect(self._on_node_entered)
         self._bridge.point_done.connect(self._on_point_done)
         self._bridge.row_updated.connect(self._on_row_updated)
         self._bridge.run_finished.connect(self._on_run_done)
@@ -184,6 +192,19 @@ class MainWindow(QMainWindow):
     def _on_run_started(self) -> None:
         self._list.set_running(True)
         self._detail.set_running(True)
+        self._detail.focus_run()
+
+    def _on_node_entered(self, name: str, idx: int) -> None:
+        """Auto-follow: a provider started → select it + show its run tab/plot.
+
+        The predictor Service (not in the user's list) and any name absent from
+        the list are skipped — there is nothing to navigate to.
+        """
+        del idx
+        names = self._ctrl.state.node_names()
+        if name not in names:
+            return  # a Service (predictor) or unknown name → no navigation
+        self._list.select_index(names.index(name))  # → _on_select shows its canvas
         self._detail.focus_run()
 
     def _on_row_updated(self, name: str, idx: int) -> None:
