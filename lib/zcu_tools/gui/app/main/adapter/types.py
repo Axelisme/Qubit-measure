@@ -245,7 +245,6 @@ class MetaDictWriteback(WritebackItem):
 @dataclass
 class ModuleWriteback(WritebackItem):
     edit_schema: Optional["CfgSchema"] = None
-    edited_schema: Optional["CfgSchema"] = None
     # editor_id of the service-owned (gc=False) cfg model that holds this item's
     # live draft (ADR-0010). Stamped by WritebackService at compute time; the
     # agent edits via editor.set_field(editor_id, …), the user's Edit dialog
@@ -256,7 +255,6 @@ class ModuleWriteback(WritebackItem):
 @dataclass
 class WaveformWriteback(WritebackItem):
     edit_schema: Optional["CfgSchema"] = None
-    edited_schema: Optional["CfgSchema"] = None
     editor_id: Optional[str] = field(default=None, init=False)
 
 

@@ -50,7 +50,13 @@ def test_load_spectrum_inherits_alignment(spectrum_hdf5):
     svc = LoadService(st)
 
     first = svc.load_spectrum(filepath, spec_type="OneTone")
-    st.set_alignment(first, flux_half=1.0, flux_int=2.0, flux_period=2.0)
+    st.set_alignment(
+        first,
+        flux_half=1.0,
+        flux_int=2.0,
+        flux_period=2.0,
+        new_fluxs=st.spectrums[first].raw["dev_values"].copy(),
+    )
 
     # load again (same file → same basename would clash; use a second file)
     second = svc.load_spectrum(filepath, spec_type="TwoTone", inherit_from=first)
@@ -117,7 +123,13 @@ def test_inherited_load_marks_alignment_seeded(spectrum_hdf5):
     svc = LoadService(st)
     first = svc.load_spectrum(filepath, spec_type="OneTone")
     assert st.spectrums[first].alignment_seeded is False  # fresh load
-    st.set_alignment(first, flux_half=1.0, flux_int=2.0, flux_period=2.0)
+    st.set_alignment(
+        first,
+        flux_half=1.0,
+        flux_int=2.0,
+        flux_period=2.0,
+        new_fluxs=st.spectrums[first].raw["dev_values"].copy(),
+    )
     second = svc.load_spectrum(filepath, spec_type="TwoTone", inherit_from=first)
     # inheriting a spectrum's alignment marks the new one as seeded
     assert st.spectrums[second].alignment_seeded is True

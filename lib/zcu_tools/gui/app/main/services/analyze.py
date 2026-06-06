@@ -117,12 +117,11 @@ class AnalyzeService(QObject):
         )
         # Tear down the previous analyze's writeback editor models before the new
         # draft replaces them (ADR-0010: per-item gc=False models are tied to a
-        # specific analyze result). Then set the result so compute can read it,
-        # compute the fresh persistent draft once, and store it.
+        # specific analyze result). Compute the fresh persistent draft from the
+        # new result (passed in, not written to State early), then commit result
+        # + figure + items through the single mutator (which bumps the version).
         self._writeback.teardown_tab_items(tab_id)
-        tab = self._state.get_tab(tab_id)
-        tab.analyze_result = analyze_result
-        items = self._writeback.compute_items_for_tab(tab_id)
+        items = self._writeback.compute_items_for_tab(tab_id, analyze_result)
         self._state.update_tab_analyze(
             tab_id, analyze_result, analyze_result.figure, writeback_items=items
         )

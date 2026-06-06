@@ -172,7 +172,7 @@ def test_fit_result_reports_inputs_and_result():
     assert res["r_f"] is None
     assert res["sample_f"] is None
 
-    adapter.ctrl.state.set_fit_result((5.0, 1.2, 0.4), best_dist=0.01)
+    adapter.ctrl.state.set_fit_result((5.0, 1.2, 0.4))
     res = _call(adapter, "fit.result", {})
     assert res["has_result"] is True
     assert res["params"] == {"EJ": 5.0, "EC": 1.2, "EL": 0.4}

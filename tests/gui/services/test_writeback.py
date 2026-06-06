@@ -166,7 +166,7 @@ def test_compute_stamps_per_kind_session_ids():
     state = _make_state_with_tab()
     state.update_tab_result("t1", object())
     tab = state.get_tab("t1")
-    tab.analyze_result = MagicMock()
+    analyze_result = MagicMock()  # passed in explicitly, not read from State
 
     md1 = MetaDictWriteback(target_name="r_f", description="d", proposed_value=1.0)
     wf1 = WaveformWriteback(target_name="wf_a", description="d")  # no edit_schema
@@ -176,7 +176,7 @@ def test_compute_stamps_per_kind_session_ids():
     adapter.get_writeback_items.return_value = [md1, wf1, ml1, wf2]
 
     svc = _svc(state)
-    items = svc.compute_items_for_tab("t1")
+    items = svc.compute_items_for_tab("t1", analyze_result)
 
     ids = [it.session_id for it in items]
     assert ids == ["md-1", "wf-1", "ml-1", "wf-2"]

@@ -39,11 +39,14 @@ class AlignmentService:
         if flux_period == 0.0:
             raise ValueError("flux_int must differ from flux_half (period is zero)")
 
-        new_fluxs = value2flux(entry.raw["dev_values"], flux_half, flux_period)
-        # raw is a TypedDict (mutable); re-map the flux axis in place, then write
-        # the alignment scalars through State (which bumps the version).
-        entry.raw["fluxs"] = np.asarray(new_fluxs, dtype=np.float64)
-        self._state.set_alignment(name, flux_half, flux_int, flux_period)
+        # Compute the re-mapped flux axis here (this service owns the value2flux
+        # mapping), then hand it to State, which writes the axis + alignment
+        # scalars together under one version bump (no bypassing the boundary).
+        new_fluxs = np.asarray(
+            value2flux(entry.raw["dev_values"], flux_half, flux_period),
+            dtype=np.float64,
+        )
+        self._state.set_alignment(name, flux_half, flux_int, flux_period, new_fluxs)
         logger.debug(
             "set_alignment: %r half=%g int=%g period=%g",
             name,

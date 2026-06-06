@@ -197,7 +197,7 @@ def test_export_params_writes_json(tmp_path):
     st.project.chip_name = "Q9"
     st.project.qub_name = "Q1"
     svc = FitService(st)
-    st.set_fit_result((5.0, 1.2, 0.4), best_dist=0.01)
+    st.set_fit_result((5.0, 1.2, 0.4))
 
     out = str(tmp_path / "params.json")
     path = svc.export_params(out)
@@ -221,7 +221,7 @@ def test_export_params_fast_fails_without_result():
 
 def test_export_params_fast_fails_without_aligned():
     st = FluxDepState()  # no aligned spectrum
-    st.set_fit_result((5.0, 1.2, 0.4), best_dist=0.01)
+    st.set_fit_result((5.0, 1.2, 0.4))
     with pytest.raises(ValueError, match="aligned"):
         FitService(st).export_params("/tmp/x.json")
 
@@ -239,7 +239,7 @@ def test_export_params_uses_project_result_dir(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     st = _state_with_points()
     st.project = ProjectInfo(chip_name="Q9", qub_name="Q1")
-    st.set_fit_result((5.0, 1.2, 0.4), best_dist=0.01)
+    st.set_fit_result((5.0, 1.2, 0.4))
     path = FitService(st).export_params()  # no savepath
     assert path == os.path.join("result", "Q9", "Q1", "params.json")
     assert os.path.isfile(path)

@@ -435,7 +435,6 @@ def test_module_writeback_valid():
     item = ModuleWriteback(target_name="pulse_a", description="d")
     assert item.target_name == "pulse_a"
     assert item.edit_schema is None
-    assert item.edited_schema is None
     assert item.editor_id is None
     assert item.session_id == ""
 

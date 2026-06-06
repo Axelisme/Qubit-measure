@@ -120,7 +120,10 @@ def test_set_alignment_marks_aligned_and_bumps():
     st = FluxDepState()
     st.put_spectrum(_make_entry("a"))
     v0 = st.version.get(spectrum_version_key("a"))
-    st.set_alignment("a", flux_half=1.0, flux_int=2.0, flux_period=2.0)
+    new_fluxs = st.spectrums["a"].raw["dev_values"].copy()
+    st.set_alignment(
+        "a", flux_half=1.0, flux_int=2.0, flux_period=2.0, new_fluxs=new_fluxs
+    )
     entry = st.spectrums["a"]
     assert entry.aligned is True
     assert (entry.flux_half, entry.flux_int, entry.flux_period) == (1.0, 2.0, 2.0)
@@ -138,6 +141,22 @@ def test_set_points_marks_selected_and_bumps():
     )
     st.set_points("a", pts)
     assert st.spectrums["a"].points_selected is True
+    assert st.version.get(spectrum_version_key("a")) == v0 + 1
+
+
+def test_set_points_empty_does_not_mark_selected():
+    # an empty point set (user deselected everything) is recorded but must not be
+    # flagged points_selected — downstream readers would crash on an empty cloud.
+    st = FluxDepState()
+    st.put_spectrum(_make_entry("a"))
+    v0 = st.version.get(spectrum_version_key("a"))
+    empty = PointsData(
+        dev_values=np.array([], dtype=np.float64),
+        fluxs=np.array([], dtype=np.float64),
+        freqs=np.array([], dtype=np.float64),
+    )
+    st.set_points("a", empty)
+    assert st.spectrums["a"].points_selected is False
     assert st.version.get(spectrum_version_key("a")) == v0 + 1
 
 
@@ -214,7 +233,7 @@ def test_set_fit_params_bumps_and_clears_result():
     from zcu_tools.notebook.persistance import TransitionDict
 
     st = FluxDepState()
-    st.set_fit_result((5.0, 1.0, 0.5), best_dist=0.1)  # a stale result
+    st.set_fit_result((5.0, 1.0, 0.5))  # a stale result
     assert st.fit.has_result
     before = st.version.get(FIT_VERSION_KEY)
     st.set_fit_params(
@@ -238,7 +257,7 @@ def test_set_fit_result_records_params():
 
     st = FluxDepState()
     before = st.version.get(FIT_VERSION_KEY)
-    st.set_fit_result((4.2, 1.1, 0.3), best_dist=0.05)
+    st.set_fit_result((4.2, 1.1, 0.3))
     assert st.fit.params == (4.2, 1.1, 0.3)
     assert st.fit.has_result
     assert st.version.get(FIT_VERSION_KEY) == before + 1

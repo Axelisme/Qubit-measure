@@ -181,9 +181,9 @@ class FitService:
         thread while this single State write happens on the Qt main thread, per
         the main-thread State invariant. ``search_in_database`` raises if no
         candidate is feasible, so a ``SearchResult`` here always carries a real
-        result; ``best_dist`` is not surfaced separately, so it is recorded as NaN.
+        result.
         """
-        self._state.set_fit_result(result.params, best_dist=float("nan"))
+        self._state.set_fit_result(result.params)
         logger.debug("record_result: params=%s", result.params)
 
     # --- export ----------------------------------------------------------

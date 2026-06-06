@@ -66,17 +66,22 @@ class WritebackService:
     # Compute once (analyze sink) + read
     # ------------------------------------------------------------------
 
-    def compute_items_for_tab(self, tab_id: str) -> list[WritebackItem]:
+    def compute_items_for_tab(
+        self, tab_id: str, analyze_result: Any
+    ) -> list[WritebackItem]:
         """Compute the tab's writeback items once (analyze sink calls this).
 
-        Calls the adapter, stamps a stable per-kind ``session_id``, and for each
-        module/waveform item opens a gc=False CfgEditorService model seeded from
-        its ``edit_schema`` (storing the ``editor_id``). The returned list is
-        stored on ``Session.writeback_items`` by the analyze sink.
+        The fresh ``analyze_result`` is passed in explicitly (not read from
+        State): the analyze sink computes the draft *before* committing the
+        result through ``update_tab_analyze``, so State must not be written
+        early just to make this readable. Calls the adapter, stamps a stable
+        per-kind ``session_id``, and for each module/waveform item opens a
+        gc=False CfgEditorService model seeded from its ``edit_schema`` (storing
+        the ``editor_id``). The returned list is stored on
+        ``Session.writeback_items`` by the analyze sink.
         """
         tab = self._state.get_tab(tab_id)
         run_result = tab.run_result
-        analyze_result = tab.analyze_result
         if run_result is None or analyze_result is None:
             return []
         items = list(
@@ -130,7 +135,6 @@ class WritebackService:
         selected: Optional[bool] = None,
         target_name: Optional[str] = None,
         proposed_value: Any = _UNSET,
-        edited_schema: Optional[CfgSchema] = _UNSET,  # type: ignore[assignment]
     ) -> None:
         item = self._find_item(tab_id, session_id)
         if selected is not None:
@@ -143,13 +147,6 @@ class WritebackService:
                     f"{session_id!r} is not a metadict item; proposed_value invalid"
                 )
             item.proposed_value = proposed_value
-        if edited_schema is not _UNSET:
-            if not isinstance(item, (ModuleWriteback, WaveformWriteback)):
-                raise RuntimeError(
-                    f"{session_id!r} is not a module/waveform item; "
-                    "edited_schema invalid"
-                )
-            item.edited_schema = edited_schema
 
     def _find_item(self, tab_id: str, session_id: str) -> WritebackItem:
         for item in self._state.get_tab(tab_id).writeback_items:
@@ -205,12 +202,12 @@ class WritebackService:
 
         The persistent draft lives in the service-owned model (``editor_id``); a
         snapshot of it is the authoritative edited schema. Falls back to
-        ``edited_schema`` / ``edit_schema`` when there is no model.
+        ``edit_schema`` when there is no model.
         """
         if item.editor_id is not None:
             root = self._cfg_editor.get_root(item.editor_id)
             return CfgSchema(spec=root.spec, value=root.get_value())
-        schema = item.edited_schema or item.edit_schema
+        schema = item.edit_schema
         if schema is None:
             raise RuntimeError(f"writeback '{item.session_id}' has no editable schema")
         return schema

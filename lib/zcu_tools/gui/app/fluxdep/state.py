@@ -226,9 +226,9 @@ class FitState:
 
     The inputs (``database_path`` / bounds / ``transitions`` / ``r_f`` /
     ``sample_f``) parameterise ``search_in_database``; the result
-    (``params`` = (EJ, EC, EL) + ``best_dist``) is filled by a search. All of it
-    is a process-lifetime singleton on State — one fit per session — so its
-    version key (``fit``) is never dropped, only bumped.
+    (``params`` = (EJ, EC, EL)) is filled by a search. All of it is a
+    process-lifetime singleton on State — one fit per session — so its version
+    key (``fit``) is never dropped, only bumped.
 
     ``transitions`` is a ``TransitionDict`` (TypedDict, accessed with ``[...]``).
     """
@@ -243,7 +243,6 @@ class FitState:
     r_f: Optional[float] = None
     sample_f: Optional[float] = None
     params: Optional[tuple[float, float, float]] = None  # (EJ, EC, EL)
-    best_dist: Optional[float] = None
 
     @property
     def has_result(self) -> bool:
@@ -295,11 +294,25 @@ class FluxDepState:
         self.active_spectrum = name
 
     def set_alignment(
-        self, name: str, flux_half: float, flux_int: float, flux_period: float
+        self,
+        name: str,
+        flux_half: float,
+        flux_int: float,
+        flux_period: float,
+        new_fluxs: NDArray[np.float64],
     ) -> None:
-        """Record a spectrum's flux alignment and mark it aligned."""
+        """Record a spectrum's flux alignment and re-mapped flux axis.
+
+        ``new_fluxs`` is the re-derived raw flux axis (computed by the caller,
+        which owns the ``value2flux`` mapping). It is written in place on the
+        entry's raw TypedDict here so every mutation of this spectrum — the
+        alignment scalars and the flux axis — happens at this single State
+        boundary under one version bump.
+        """
+        entry = self.spectrums[name]
+        entry.raw["fluxs"] = np.asarray(new_fluxs, dtype=np.float64)
         self.spectrums[name] = replace(
-            self.spectrums[name],
+            entry,
             flux_half=flux_half,
             flux_int=flux_int,
             flux_period=flux_period,
@@ -309,9 +322,18 @@ class FluxDepState:
         self.version.bump(spectrum_version_key(name))
 
     def set_points(self, name: str, points: PointsData) -> None:
-        """Record a spectrum's selected points and mark points selected."""
+        """Record a spectrum's selected points; mark selected iff non-empty.
+
+        An empty point set is a legal outcome (the user deselected everything),
+        but it must not be flagged ``points_selected`` — downstream readers
+        (e.g. the cross-spectrum SelectorWidget) treat that flag as "has points
+        to work with" and would crash on an empty cloud. Same ``freqs.size > 0``
+        rule the load path uses (see ``LoadService``).
+        """
         self.spectrums[name] = replace(
-            self.spectrums[name], points=points, points_selected=True
+            self.spectrums[name],
+            points=points,
+            points_selected=points["freqs"].size > 0,
         )
         self.version.bump(spectrum_version_key(name))
 
@@ -338,8 +360,8 @@ class FluxDepState:
         """Record the search inputs; clears any stale result.
 
         Changing the inputs invalidates a prior search result (it was for the old
-        parameters), so ``params`` / ``best_dist`` reset to None — a downstream
-        reader never sees a result that disagrees with the inputs it reads.
+        parameters), so ``params`` resets to None — a downstream reader never
+        sees a result that disagrees with the inputs it reads.
         """
         self.fit = FitState(
             database_path=database_path,
@@ -352,9 +374,7 @@ class FluxDepState:
         )
         self.version.bump(FIT_VERSION_KEY)
 
-    def set_fit_result(
-        self, params: tuple[float, float, float], best_dist: float
-    ) -> None:
+    def set_fit_result(self, params: tuple[float, float, float]) -> None:
         """Record a search result onto the current fit inputs."""
-        self.fit = replace(self.fit, params=params, best_dist=best_dist)
+        self.fit = replace(self.fit, params=params)
         self.version.bump(FIT_VERSION_KEY)
