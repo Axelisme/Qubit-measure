@@ -2,8 +2,23 @@
 
 One subpackage per standalone GUI app: ``main`` (the measure-gui), ``fluxdep``
 (flux-dependence analysis), ``dispersive`` (dispersive-shift fitting), and
-``autofluxdep`` (automated multi-task flux sweeps). The apps are independent; the
-only extracted shared layers so far are ``gui/remote`` and ``gui/plotting`` —
-each app otherwise carries its own copy of the common machinery (decision D2:
-don't abstract prematurely; converge once requirements stabilize).
+``autofluxdep`` (automated multi-task flux sweeps).
+
+The extracted shared layers (Stage E) carry the *mechanism*, never the domain
+(decision D2 — domain stays per-app: each keeps its own state, handlers, method
+specs, serializers):
+
+- ``gui/remote`` — the RPC + MCP transport: wire primitives (``framing`` /
+  ``errors`` / ``wire`` / ``param_spec`` / ``method_spec``), the
+  ``NdjsonRpcEndpoint`` GUI-side server (``rpc_endpoint``), and the ``McpBridge``
+  client-side bridge (``mcp_bridge``).
+- ``gui/event_bus`` — the ``BaseEventBus`` / ``BasePayload`` publish/subscribe
+  mechanism (payload-type keyed); each app supplies its own event enum +
+  payloads. (main keeps a separate enum-keyed scheme; it does not build on this.)
+- ``gui/plotting`` — the embedded matplotlib backend + plot host.
+
+Each app's ``RemoteControlAdapter`` is a thin router over the shared endpoint;
+its ``mcp_server`` is config + overrides over the shared bridge. App-specific
+policy (measure-gui's version guard / operation tracking / diagnostic channel)
+lives only in that app, never in the shared layer.
 """
