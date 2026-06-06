@@ -133,16 +133,20 @@ class QubitFreqNode(Node):
         detunes = result.detune
         freqs = pred_qf + detunes  # absolute frequency axis
 
-        # the true resonance DRIFTS with flux (a parabolic sweet-spot offset over
-        # the prediction), so the predictor has a moving target to track via
-        # feedback — a fixed offset couldn't exercise adaptivity. The SNR varies
-        # sinusoidally to 0 at its troughs (those flux points are pure noise, so
-        # the fit-quality gate rejects them and skips calibration).
-        true_freq = pred_qf + flux_drift(env.flux, baseline=1.5, amplitude=20.0)
-        true_fwhm = 2.0  # MHz
-        snr = flux_snr(env.flux)
-
+        # The drift / SNR use the flux point's NORMALISED position in the sweep
+        # (0 → 1), not the raw flux value: real flux values are tiny (mA-scale),
+        # while the drift/SNR shapes are defined over [0, 1]. Using the position
+        # makes the whole sweep span one parabola of drift and a few SNR cycles,
+        # whatever the actual flux range. The true resonance DRIFTS so the
+        # predictor has a moving target to track via feedback; the SNR varies
+        # sinusoidally to 0 at its troughs (those points are pure noise → the
+        # fit-quality gate rejects them and skips calibration).
         idx = env.flux_idx
+        pos = idx / max(1, result.n_flux - 1)
+        true_freq = pred_qf + flux_drift(pos, baseline=1.5, amplitude=20.0)
+        true_fwhm = 2.0  # MHz
+        snr = flux_snr(pos)
+
         result.flux[idx] = env.flux
         result.predict_freq[idx] = pred_qf
 

@@ -80,8 +80,12 @@ class T1Node(Node):
 
         # t1 drifts parabolically with flux: ~10 us at the sweet spot, up to ~50 us
         # at the edges. SNR varies sinusoidally to 0 at its troughs (dead points).
-        true_t1 = flux_drift(env.flux, baseline=10.0, amplitude=40.0)
-        snr = flux_snr(env.flux)
+        # normalised sweep position (0→1): the drift/SNR shapes live on
+        # [0,1], while real flux values are tiny — use the position so the
+        # whole sweep spans one drift parabola and a few SNR cycles.
+        pos = env.flux_idx / max(1, result.n_flux - 1)
+        true_t1 = flux_drift(pos, baseline=10.0, amplitude=40.0)
+        snr = flux_snr(pos)
 
         idx = env.flux_idx
         result.flux[idx] = env.flux

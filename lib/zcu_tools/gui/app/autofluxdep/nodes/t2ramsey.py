@@ -86,8 +86,12 @@ class T2RamseyNode(Node):
 
         # t2r drifts parabolically with flux: ~5 us at sweet spot, up to ~20 us at
         # the edges. SNR varies sinusoidally to 0 at its troughs (dead points).
-        true_t2 = flux_drift(env.flux, baseline=5.0, amplitude=15.0)
-        snr = flux_snr(env.flux)
+        # normalised sweep position (0→1): the drift/SNR shapes live on
+        # [0,1], while real flux values are tiny — use the position so the
+        # whole sweep spans one drift parabola and a few SNR cycles.
+        pos = env.flux_idx / max(1, result.n_flux - 1)
+        true_t2 = flux_drift(pos, baseline=5.0, amplitude=15.0)
+        snr = flux_snr(pos)
 
         idx = env.flux_idx
         result.flux[idx] = env.flux

@@ -80,8 +80,12 @@ class LenRabiNode(Node):
 
         # rabi_freq drifts parabolically with flux: ~0.5 1/us at sweet spot, up to
         # ~0.9 1/us at the edges. SNR varies sinusoidally to 0 at its troughs.
-        rabi_freq = flux_drift(env.flux, baseline=0.5, amplitude=0.4)
-        snr = flux_snr(env.flux)
+        # normalised sweep position (0→1): the drift/SNR shapes live on
+        # [0,1], while real flux values are tiny — use the position so the
+        # whole sweep spans one drift parabola and a few SNR cycles.
+        pos = env.flux_idx / max(1, result.n_flux - 1)
+        rabi_freq = flux_drift(pos, baseline=0.5, amplitude=0.4)
+        snr = flux_snr(pos)
 
         idx = env.flux_idx
         result.flux[idx] = env.flux

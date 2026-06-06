@@ -41,38 +41,42 @@ def _produce(predict_freq: float, flux=0.0, flux_idx: int = 0, sweep="-20,50,0.5
     return patch, result, fired
 
 
-def _planted_freq(predict_freq: float, flux: float) -> float:
-    """The drifted true resonance qubit_freq's produce plants at ``flux``."""
+def _planted_freq(predict_freq: float, flux_idx: int, n_flux: int = 8) -> float:
+    """The drifted true resonance qubit_freq plants at sweep position ``flux_idx``.
+
+    The drift uses the NORMALISED sweep position (flux_idx/(n_flux-1)), not the
+    raw flux value — so the expected plant is computed from the same position.
+    """
     from zcu_tools.gui.app.autofluxdep.nodes.synth import flux_drift
 
-    return predict_freq + flux_drift(flux, baseline=1.5, amplitude=20.0)
+    pos = flux_idx / max(1, n_flux - 1)
+    return predict_freq + flux_drift(pos, baseline=1.5, amplitude=20.0)
 
 
 def test_produce_recovers_planted_freq_and_kappa():
-    # at the sweet-spot flux 0.5 the drift offset is just the baseline 1.5
-    patch, _result, _fired = _produce(5000.0, flux=0.5)
+    # flux_idx 3 of 8 → pos ≈ 0.43, a full-SNR point near the drift sweet spot
+    patch, _result, _fired = _produce(5000.0, flux=0.5, flux_idx=3)
     vals = patch.values()
-    expected = _planted_freq(5000.0, 0.5)  # 5000 + 1.5
+    expected = _planted_freq(5000.0, flux_idx=3)
     assert abs(vals["qubit_freq"] - expected) < 0.5
-    assert abs(vals["fit_detune"] - 1.5) < 0.5
     assert abs(vals["fit_kappa"] - 2.0) < 0.6
 
 
 def test_produce_emits_exactly_the_declared_keys():
-    patch, _result, _fired = _produce(5000.0, flux=0.5)
+    patch, _result, _fired = _produce(5000.0, flux=0.5, flux_idx=3)
     assert set(patch.values()) == {"qubit_freq", "fit_detune", "fit_kappa"}
     assert patch.modules() == {}  # qubit_freq produces no module
 
 
 def test_produce_fills_the_result_row_in_place():
     patch, result, _fired = _produce(5000.0, flux=0.5, flux_idx=3)
-    assert "qubit_freq" in patch.values()  # a good fit at the sweet spot
+    assert "qubit_freq" in patch.values()  # a good fit near the sweet spot
     # the produced row carries flux, predict_freq, signal, fit curve + fit_freq
     assert result.flux[3] == 0.5
     assert result.predict_freq[3] == 5000.0
     assert not np.isnan(result.signal[3]).any()
     assert not np.isnan(result.fit_curve[3]).any()
-    assert abs(result.fit_freq[3] - _planted_freq(5000.0, 0.5)) < 0.5
+    assert abs(result.fit_freq[3] - _planted_freq(5000.0, flux_idx=3)) < 0.5
     # untouched rows stay nan (honest "not measured")
     assert np.isnan(result.fit_freq[0])
     assert np.isnan(result.signal[0]).all()

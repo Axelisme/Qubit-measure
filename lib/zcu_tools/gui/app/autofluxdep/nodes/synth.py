@@ -139,7 +139,9 @@ def signal_to_real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     The shared pre-fit step for the 1D experiments (t1 / lenrabi / t2ramsey /
     t2echo / mist): ``rotate2real`` then min-max normalise. The fitters
     (``fit_decay`` / ``fit_rabi`` / ``fit_decay_fringe``) are baseline-agnostic,
-    so no orientation flip is needed (unlike qubit_freq's dip).
+    so no orientation flip is needed (unlike qubit_freq's dip). Min-max scaling
+    is linear, so it does NOT change the SNR (signal and noise scale together) —
+    a low-SNR row reads as noisier texture in the colormap, not a flatter one.
     """
     real = rotate2real(signals.astype(np.complex128)).real
     lo, hi = float(real.min()), float(real.max())
