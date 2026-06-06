@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 
 import numpy as np
+from numpy.typing import NDArray
 from typing_extensions import Any, Mapping, Optional
 
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
@@ -32,10 +33,11 @@ from zcu_tools.gui.app.autofluxdep.nodes.plotters import Sweep2DPlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep2DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.synth import (
+    accumulate_rounds,
     gaussian_peak_2d,
     parse_linear_axis,
     resolve_acquire_delay,
-    simulate_acquire_delay,
+    resolve_rounds,
 )
 
 logger = logging.getLogger(__name__)
@@ -101,8 +103,24 @@ class RoOptimizeNode(Node):
         plant_freq = prev_best_freq + 0.2
         plant_gain = float(np.clip(prev_best_gain, gains[0], gains[-1]))
 
-        landscape = gaussian_peak_2d(
-            freqs, gains, plant_freq, plant_gain, seed=env.flux_idx
+        idx = env.flux_idx
+        result.flux[idx] = env.flux
+
+        base = env.flux_idx * 1000
+
+        def make_round(k: int) -> NDArray[np.float64]:
+            return gaussian_peak_2d(freqs, gains, plant_freq, plant_gain, seed=base + k)
+
+        def on_round(avg: NDArray[np.float64], _k: int) -> None:
+            np.copyto(result.signal[idx], avg)
+            if env.round_hook is not None:
+                env.round_hook(idx)
+
+        landscape = accumulate_rounds(
+            make_round,
+            resolve_rounds(env.params),
+            on_round,
+            delay=resolve_acquire_delay(env.params),
         )
 
         # argmax: project onto each axis and take the index of the max
@@ -111,18 +129,8 @@ class RoOptimizeNode(Node):
         best_freq = float(freqs[best_fi])
         best_gain = float(gains[best_gi])
 
-        idx = env.flux_idx
-        result.flux[idx] = env.flux
-        np.copyto(result.signal[idx], landscape)
         result.best_freq[idx] = best_freq
         result.best_gain[idx] = best_gain
-
-        # one-shot: the 2D sweep is complete after one compute step
-        if env.round_hook is not None:
-            env.round_hook(idx)
-
-        # emulate the acquire's wall-clock cost so the liveplot advances visibly
-        simulate_acquire_delay(resolve_acquire_delay(env.params))
 
         logger.debug(
             "ro_optimize @flux%d: best_freq=%.3f best_gain=%.3f (plant freq=%.3f gain=%.3f)",

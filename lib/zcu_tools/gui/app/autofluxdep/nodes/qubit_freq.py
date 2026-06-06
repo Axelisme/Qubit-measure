@@ -50,9 +50,10 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.synth import (
+    accumulate_rounds,
     lorentzian_dip,
     resolve_acquire_delay,
-    simulate_acquire_delay,
+    resolve_rounds,
 )
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
@@ -132,21 +133,34 @@ class QubitFreqNode(Node):
         # plant a true resonance slightly off the prediction, realistic width.
         true_freq = pred_qf + 1.5  # MHz offset from prediction
         true_fwhm = 2.0  # MHz
-        signals = lorentzian_dip(freqs, true_freq, true_fwhm, seed=env.flux_idx)
-        real = _signal2real(signals)
 
-        # fill the raw row first (a mid-acquire row has signal, nan fit) + notify
         idx = env.flux_idx
         result.flux[idx] = env.flux
         result.predict_freq[idx] = pred_qf
-        np.copyto(result.signal[idx], real)
-        if env.round_hook is not None:
-            env.round_hook(idx)
 
-        # emulate the acquire's wall-clock cost so the liveplot advances visibly
-        simulate_acquire_delay(resolve_acquire_delay(env.params))
+        # emulate a multi-round acquire: each round is a fresh noise realisation,
+        # the running average settles round by round (the row grows clearer as the
+        # acquire progresses), and each round overwrites the row + notifies so the
+        # liveplot shows the row converging. The total delay is split over rounds.
+        base = env.flux_idx * 1000
 
-        # fit, then fill the fit fields + notify again (fit curve now present)
+        def make_round(k: int) -> NDArray[np.complex128]:
+            return lorentzian_dip(freqs, true_freq, true_fwhm, seed=base + k)
+
+        def on_round(avg: NDArray[np.complex128], _k: int) -> None:
+            np.copyto(result.signal[idx], _signal2real(avg))
+            if env.round_hook is not None:
+                env.round_hook(idx)
+
+        averaged = accumulate_rounds(
+            make_round,
+            resolve_rounds(env.params),
+            on_round,
+            delay=resolve_acquire_delay(env.params),
+        )
+        real = _signal2real(averaged)
+
+        # fit the fully-averaged signal, then fill the fit fields + notify again
         freq, _, fwhm, _, fit_curve, _ = fit_qubit_freq(freqs, real)
         result.fit_freq[idx] = float(freq)
         np.copyto(result.fit_curve[idx], np.asarray(fit_curve, dtype=np.float64))

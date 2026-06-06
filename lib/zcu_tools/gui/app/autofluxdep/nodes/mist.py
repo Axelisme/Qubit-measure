@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 
 import numpy as np
+from numpy.typing import NDArray
 from typing_extensions import Any, Mapping, Optional
 
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
@@ -31,9 +32,10 @@ from zcu_tools.gui.app.autofluxdep.nodes.plotters import Sweep1DPlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.synth import (
+    accumulate_rounds,
     parse_linear_axis,
     resolve_acquire_delay,
-    simulate_acquire_delay,
+    resolve_rounds,
     variance_curve,
 )
 
@@ -73,18 +75,26 @@ class MistNode(Node):
         result: Sweep1DResult = env.result
         gains = result.x
 
-        curve = variance_curve(gains, _ONSET_GAIN, seed=env.flux_idx)
-
         idx = env.flux_idx
         result.flux[idx] = env.flux
-        np.copyto(result.signal[idx], curve)
         # fit_value[idx] and fit_curve[idx] remain nan — mist has no fit scalar
 
-        if env.round_hook is not None:
-            env.round_hook(idx)
+        base = env.flux_idx * 1000
 
-        # emulate the acquire's wall-clock cost so the liveplot advances visibly
-        simulate_acquire_delay(resolve_acquire_delay(env.params))
+        def make_round(k: int) -> NDArray[np.float64]:
+            return variance_curve(gains, _ONSET_GAIN, seed=base + k)
+
+        def on_round(avg: NDArray[np.float64], _k: int) -> None:
+            np.copyto(result.signal[idx], avg)
+            if env.round_hook is not None:
+                env.round_hook(idx)
+
+        curve = accumulate_rounds(
+            make_round,
+            resolve_rounds(env.params),
+            on_round,
+            delay=resolve_acquire_delay(env.params),
+        )
 
         logger.debug(
             "mist @flux%d: success, variance range [%.3f, %.3f]",

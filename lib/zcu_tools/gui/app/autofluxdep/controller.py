@@ -21,7 +21,10 @@ from zcu_tools.gui.app.autofluxdep.derivation import DerivationService
 from zcu_tools.gui.app.autofluxdep.event_bus import Event, EventBus, EventType
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, PlacedNode
 from zcu_tools.gui.app.autofluxdep.nodes.predictor import PredictorBuilder
-from zcu_tools.gui.app.autofluxdep.nodes.synth import DEFAULT_ACQUIRE_DELAY
+from zcu_tools.gui.app.autofluxdep.nodes.synth import (
+    DEFAULT_ACQUIRE_DELAY,
+    DEFAULT_ROUNDS,
+)
 from zcu_tools.gui.app.autofluxdep.orchestrator import (
     InfoStore,
     ModuleSource,
@@ -93,13 +96,16 @@ class Controller:
 
         The instance name defaults to the type name, de-duped within the
         workflow (a second ``mist`` becomes ``mist_2``); the user can rename it.
-        A Node that exposes ``acquire_delay`` is seeded with the default so the
-        GUI run paces the synthetic liveplot visibly (the user can tune it).
+        A Node is seeded with the default ``acquire_delay`` / ``rounds`` so the
+        GUI run paces the synthetic liveplot visibly and shows the per-round
+        accumulation (the user can tune both).
         """
         node = create_placement(type_name)
         node.name = self._unique_name(node.name)
         if "acquire_delay" in node.builder.base_params:
             node.params.setdefault("acquire_delay", DEFAULT_ACQUIRE_DELAY)
+        if "rounds" in node.builder.base_params:
+            node.params.setdefault("rounds", DEFAULT_ROUNDS)
         self._state.nodes.append(node)
         self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("add_node_by_type: %r -> %r", type_name, node.name)

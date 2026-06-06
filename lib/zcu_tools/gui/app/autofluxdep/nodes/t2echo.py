@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 
 import numpy as np
+from numpy.typing import NDArray
 from typing_extensions import Any, Mapping, Optional
 
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
@@ -34,11 +35,12 @@ from zcu_tools.gui.app.autofluxdep.nodes.plotters import Sweep1DPlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.synth import (
+    accumulate_rounds,
     decay_cos,
     parse_linear_axis,
     resolve_acquire_delay,
+    resolve_rounds,
     signal_to_real,
-    simulate_acquire_delay,
 )
 from zcu_tools.utils.fitting import fit_decay_fringe
 
@@ -91,17 +93,27 @@ class T2EchoNode(Node):
 
         # plant t2 slightly above the smoothed estimate so the sweep tracks it
         true_t2 = prev_t2e * 1.1
-        signals = decay_cos(times, true_t2, _FRINGE_FREQ, seed=env.flux_idx)
-        real = signal_to_real(signals)
 
         idx = env.flux_idx
         result.flux[idx] = env.flux
-        np.copyto(result.signal[idx], real)
-        if env.round_hook is not None:
-            env.round_hook(idx)
 
-        # emulate the acquire's wall-clock cost so the liveplot advances visibly
-        simulate_acquire_delay(resolve_acquire_delay(env.params))
+        base = env.flux_idx * 1000
+
+        def make_round(k: int) -> NDArray[np.complex128]:
+            return decay_cos(times, true_t2, _FRINGE_FREQ, seed=base + k)
+
+        def on_round(avg: NDArray[np.complex128], _k: int) -> None:
+            np.copyto(result.signal[idx], signal_to_real(avg))
+            if env.round_hook is not None:
+                env.round_hook(idx)
+
+        averaged = accumulate_rounds(
+            make_round,
+            resolve_rounds(env.params),
+            on_round,
+            delay=resolve_acquire_delay(env.params),
+        )
+        real = signal_to_real(averaged)
 
         t2f, _, _, _, fit_curve, _ = fit_decay_fringe(times, real)
         result.fit_value[idx] = float(t2f)

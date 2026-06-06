@@ -26,7 +26,7 @@ import time
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any
+from typing_extensions import Any, Callable
 
 from zcu_tools.utils.fitting.base import cosfunc, decaycos, expfunc, lorfunc
 from zcu_tools.utils.process import rotate2real
@@ -71,6 +71,66 @@ def resolve_acquire_delay(params: Any) -> float:
         return max(0.0, float(value))
     except (ValueError, TypeError):
         return 0.0
+
+
+# How many running-average rounds a synthetic acquire emulates. A real acquire
+# averages many shots; each round's running-averaged trace is noisier early and
+# settles as rounds accumulate. The default keeps the per-round redraw cadence
+# watchable (delay / n_rounds per round); the user tunes it via the ``rounds``
+# param. A directly-constructed Node (tests) gets 1 round (instant single pass).
+DEFAULT_ROUNDS = 10
+
+
+def resolve_rounds(params: Any) -> int:
+    """The emulated round count from a Node's params, or ``1`` if unset/bad.
+
+    Missing → 1 (a single pass, no accumulation): tests run instantly. A
+    GUI-placed Node carries ``DEFAULT_ROUNDS`` (seeded by the controller). An
+    unparseable value degrades to 1 rather than failing the sweep.
+    """
+    try:
+        value = params.get("rounds")
+    except AttributeError:
+        return 1
+    if value is None or value == "":
+        return 1
+    try:
+        return max(1, int(value))
+    except (ValueError, TypeError):
+        return 1
+
+
+def accumulate_rounds(
+    make_round: Callable[[int], NDArray[Any]],
+    n_rounds: int,
+    on_round: Callable[[NDArray[Any], int], None],
+    delay: float = 0.0,
+) -> NDArray[Any]:
+    """Emulate a multi-round acquire: running-average ``n_rounds`` noisy passes.
+
+    Each round, ``make_round(round_idx)`` returns that round's raw signal (a
+    fresh noise realisation of the same underlying physics — the Node uses
+    ``seed=base+round_idx`` so each round differs). The running average over
+    rounds 0..k is fed to ``on_round(running_average, round_idx)`` — where the
+    Node overwrites its Result row and notifies the main thread — so the same
+    row visibly settles round by round (noise ∝ 1/√k). ``delay`` (the acquire's
+    total wall-clock) is split evenly across rounds so the redraws pace out.
+
+    Returns the final running average (all ``n_rounds`` folded in) for the
+    Node to fit. ``n_rounds`` is at least 1 (a single pass = no accumulation).
+    """
+    n = max(1, n_rounds)
+    per_round_delay = delay / n if delay > 0 else 0.0
+    running_sum = make_round(0)
+    running_avg = running_sum
+    on_round(running_avg, 0)
+    simulate_acquire_delay(per_round_delay)
+    for k in range(1, n):
+        running_sum = running_sum + make_round(k)
+        running_avg = running_sum / (k + 1)
+        on_round(running_avg, k)
+        simulate_acquire_delay(per_round_delay)
+    return running_avg
 
 
 def signal_to_real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
