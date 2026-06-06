@@ -103,9 +103,19 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("autofluxdep-gui")
         self.resize(1100, 800)
 
+        # Hidden park for canvases not currently shown. Every Node's Plotter
+        # redraws each run point (even the off-screen ones); a parentless canvas
+        # becomes a top-level window the moment it draws, so it would flash as a
+        # stray window. Parenting every canvas here (hidden) keeps it off-screen
+        # but never a window. Parented to the MainWindow (shares its lifetime),
+        # never shown.
+        self._canvas_park = QWidget(self)
+        self._canvas_park.hide()
+
         split = QSplitter()
         self._list = NodeListPane(ctrl)
         self._detail = NodeDetailPane()
+        self._detail.set_canvas_park(self._canvas_park)
         split.addWidget(self._list)
         split.addWidget(self._detail)
         split.setStretchFactor(1, 1)
@@ -168,10 +178,12 @@ class MainWindow(QMainWindow):
         from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
         from matplotlib.figure import Figure
 
-        # tear down any previous run's canvases
+        # tear down any previous run's canvases (detach the shown one first, then
+        # destroy every canvas — they are discarded, never drawn again)
         self._detail.show_run_canvas(None)
         for canvas, _ in self._plots.values():
             canvas.setParent(None)
+            canvas.deleteLater()
         self._plots = {}
 
         results = self._ctrl.prepare_run_results()
@@ -180,7 +192,10 @@ class MainWindow(QMainWindow):
             if result is None:
                 continue  # a provider without a Result (none in the prototype)
             figure = Figure(figsize=(5, 4), tight_layout=True)
+            # parent the canvas to the hidden park so it is never a top-level
+            # window — only the selected one is re-parented into the run tab.
             canvas = FigureCanvasQTAgg(figure)
+            canvas.setParent(self._canvas_park)
             plotter = node.builder.make_plotter(figure)
             self._plots[node.name] = (canvas, plotter)
         # show the currently selected Node's fresh canvas

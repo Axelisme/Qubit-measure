@@ -42,6 +42,13 @@ class NodeDetailPane(QWidget):
         self._form: Optional[ParamForm] = None
         self._running = False
         self._canvas: Optional[QWidget] = None
+        # Where a de-selected canvas is parked instead of being left parentless.
+        # A parentless QWidget becomes a top-level window the moment it draws —
+        # and every Node's Plotter redraws each run point, even off-screen ones —
+        # so a de-selected canvas would flash as a stray window. Parking it under
+        # a hidden widget keeps it parented (never a window) while it keeps
+        # drawing into its Result. Set by the MainWindow that owns the canvases.
+        self._canvas_park: Optional[QWidget] = None
 
         root = QVBoxLayout(self)
         self._title = QLabel("(no node selected)")
@@ -79,15 +86,25 @@ class NodeDetailPane(QWidget):
         self._form.set_read_only(self._running)
         self._edit_layout.addWidget(self._form)
 
+    def set_canvas_park(self, park: QWidget) -> None:
+        """Inject the hidden widget de-selected canvases are parked under.
+
+        The MainWindow owns the canvases and this park; this pane only moves a
+        canvas between the run tab and the park (never leaves one parentless).
+        """
+        self._canvas_park = park
+
     def show_run_canvas(self, canvas: Optional[QWidget]) -> None:
         """Swap the run tab's content to ``canvas`` (or the placeholder if None).
 
         The MainWindow owns the canvases; this pane only displays the selected
-        Node's. A detached canvas is hidden, not destroyed (it keeps drawing as
-        the sweep fills its Result, so re-selecting shows the latest state).
+        Node's. A de-selected canvas is re-parented to the hidden park (NOT left
+        parentless — a parentless canvas flashes as a stray window when its
+        Plotter redraws), so it keeps drawing into its Result and re-selecting
+        shows the latest state.
         """
         if self._canvas is not None:
-            self._canvas.setParent(None)
+            self._canvas.setParent(self._canvas_park)  # park, don't detach
             self._canvas = None
         if canvas is None:
             self._run_placeholder.show()

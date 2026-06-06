@@ -252,3 +252,38 @@ def test_rename_updates_list_and_keeps_canvas_key(qapp):
     assert win._plots["g_mist"][0] is not win._plots["e_mist"][0]
     win.close()
     win.deleteLater()
+
+
+def test_no_canvas_is_ever_a_toplevel_window(qapp):
+    # every Node's Plotter redraws each run point, even off-screen ones; a
+    # parentless canvas becomes a top-level window the moment it draws (the
+    # "stray window flashing" bug). All canvases must stay parented — the shown
+    # one in the run tab, the rest under the hidden park — so none is a window.
+    ctrl = build_core()
+    for t in ("qubit_freq", "t1", "mist"):
+        ctrl.add_node_by_type(t)
+    win = MainWindow(ctrl)
+    win.show()
+    win._list.select_index(0)
+    _zero_delays(ctrl)
+    ctrl.set_flux_values([0.0, 0.5])
+    ctrl.setup(use_mock=True)
+    win._list._refresh_buttons()
+    win._start()
+    _pump_until_done(ctrl, win)
+
+    park = win._canvas_park
+    for name, (canvas, _plotter) in win._plots.items():
+        assert not canvas.isWindow(), f"{name} canvas is a top-level window"
+        assert canvas.parent() is not None, f"{name} canvas is parentless"
+
+    # de-selecting a Node parks its canvas (never leaves it parentless)
+    win._list.select_index(1)  # switch away from whatever is shown
+    QApplication.processEvents()
+    for name, (canvas, _plotter) in win._plots.items():
+        assert not canvas.isWindow(), f"{name} canvas became a window after switch"
+        # the de-selected canvases sit under the park
+        if win._detail._canvas is not canvas:
+            assert canvas.parent() is park, f"{name} not parked after de-select"
+    win.close()
+    win.deleteLater()
