@@ -25,22 +25,34 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from typing_extensions import Optional, Protocol
+from typing_extensions import Any, Optional, Protocol
 
 # SmoothMode is owned by nodes.spec (a dependency's ``smooth`` flag is one);
 # re-used here so Smoother and the SmoothingService speak the same modes.
 from zcu_tools.gui.app.autofluxdep.nodes.spec import SmoothMode
+from zcu_tools.utils.math import IDWInterpolation
+
+
+def _make_idw() -> IDWInterpolation:
+    """A fresh inverse-distance-weighted error model (the predictors' corrector).
+
+    Each predictor owns one: ``calibrate`` feeds it (flux → residual) and
+    ``predict_freq`` adds its ``predict`` back, so the prediction tracks the
+    measured trend across the sweep (the runner module's ``freq_err_pred``).
+    """
+    return IDWInterpolation()
 
 
 class Predictor(Protocol):
-    """The stateful flux→freq predictor (FluxoniumPredictor in Phase B).
+    """The stateful flux→freq predictor (SimplePredictor / FluxoniumPredictorAdapter).
 
     *Query* face (pure): ``predict_freq`` / ``predict_matrix_element`` — used by
     the predictor Service Node to produce ``predict_freq`` / ``cur_m``.
     *Calibration* face (mutating, triggered by a Node not the orchestrator):
     ``calibrate`` folds a measured freq into the prediction so the next flux
-    point's ``predict_freq`` reflects this point's measurement (adaptivity). The
-    bias/IDW logic is encapsulated here; a Node never touches the internals.
+    point's ``predict_freq`` reflects this point's measurement (adaptivity) — the
+    closed loop the runner module gets from ``update_bias`` + ``freq_err_pred``.
+    The bias/IDW logic is encapsulated here; a Node never touches the internals.
     """
 
     def predict_freq(self, flux: float) -> float: ...
@@ -52,28 +64,71 @@ class Predictor(Protocol):
 class SimplePredictor:
     """A prototype flux→freq stand-in (no scqubits, no FluxoniumPredictor).
 
-    ``predict_freq(flux) = base + slope * flux`` — enough to move the synthetic
-    Lorentzian across the sweep so the qubit_freq liveplot tracks a sloped line.
-    The matrix element is a flat stand-in. ``calibrate`` nudges the base toward
-    the measured freq (a crude adaptivity placeholder); Phase B swaps in the
-    real ``FluxoniumPredictor`` (scqubits eigenvalues + bias root-find).
+    Mirrors the real predictor's *structure*, not its physics: a linear physical
+    base (``base + slope * flux``) plus a learned IDW error correction. Each
+    ``calibrate`` folds the residual (measured − physical base) into the IDW
+    model, so ``predict_freq`` for the *next* flux point reflects this point's
+    measurement — the closed-loop adaptivity the runner module gets from
+    ``FluxoniumPredictor.update_bias`` + ``freq_err_pred``. The matrix element is
+    a flat stand-in. ``FluxoniumPredictorAdapter`` is the same shape over the
+    real predictor.
     """
 
     base: float = 5000.0
     slope: float = 50.0
     matrix_element: float = 0.1
-    _bias: float = 0.0
+    _idw: "IDWInterpolation" = field(default_factory=lambda: _make_idw())
+
+    def _physical(self, flux: float) -> float:
+        return self.base + self.slope * flux
 
     def predict_freq(self, flux: float) -> float:
-        return self.base + self.slope * flux + self._bias
+        # physical base + the learned error correction (0 until first calibrate)
+        return self._physical(flux) + self._idw.predict(flux)
 
     def predict_matrix_element(self, flux: float) -> float:
         del flux
         return self.matrix_element
 
     def calibrate(self, flux: float, measured_freq: float) -> None:
-        # nudge the bias so the next point's prediction drifts toward measured
-        self._bias += 0.5 * (measured_freq - self.predict_freq(flux))
+        # learn the residual between measurement and the physical base, so the
+        # next point's prediction tracks toward the measured trend.
+        self._idw.update(flux, measured_freq - self._physical(flux))
+
+
+@dataclass
+class FluxoniumPredictorAdapter:
+    """Wraps a real ``FluxoniumPredictor`` into the ``Predictor`` interface.
+
+    The runner module's feedback (``qubit_freq.py``) is two closed loops over the
+    real predictor: ``calculate_bias`` + ``update_bias`` adapt the physical
+    prediction, and a private ``IDWInterpolation`` learns the residual error.
+    This adapter encapsulates exactly that — ``predict_freq`` is the physical
+    prediction plus the IDW correction, and ``calibrate`` runs both loops — so
+    qubit_freq drives feedback through the same ``calibrate`` call regardless of
+    which predictor (Simple stand-in or real Fluxonium) is bound. The wrapped
+    ``FluxoniumPredictor`` and ``IDWInterpolation`` are reused from the library
+    unchanged; only the adapter glue lives here.
+    """
+
+    fluxonium: Any  # a zcu_tools.simulate.fluxonium.FluxoniumPredictor
+    _idw: IDWInterpolation = field(default_factory=_make_idw)
+
+    def predict_freq(self, flux: float) -> float:
+        return float(self.fluxonium.predict_freq(flux)) + self._idw.predict(flux)
+
+    def predict_matrix_element(self, flux: float) -> float:
+        return float(self.fluxonium.predict_matrix_element(flux))
+
+    def calibrate(self, flux: float, measured_freq: float) -> None:
+        # loop 1: adapt the physical predictor's bias to the measurement
+        bias = self.fluxonium.calculate_bias(flux, measured_freq)
+        self.fluxonium.update_bias(bias)
+        # loop 2: learn whatever residual the (now bias-corrected) physical model
+        # still misses — measured minus the *post-calibration* physical value, so
+        # the two loops do not double-count the same error.
+        physical_after = float(self.fluxonium.predict_freq(flux))
+        self._idw.update(flux, measured_freq - physical_after)
 
 
 @dataclass

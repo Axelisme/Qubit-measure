@@ -97,8 +97,9 @@ def test_controller_run_drives_real_produce_with_predictor_service():
     ctrl.setup(use_mock=True)
     ctrl.set_flux_values([0.0, 1.0])
     info = ctrl.start_run()
-    # SimplePredictor: predict_freq at flux 1.0 = 5000 + 50*1 = 5050 → resonance
-    # planted 1.5 MHz above = 5051.5
-    assert abs(info.point["qubit_freq"] - 5051.5) < 1.0
-    # the predictor Service produced predict_freq into the store
-    assert abs(info.point["predict_freq"] - 5050.0) < 1e-6
+    # the predictor Service produced predict_freq + closed-loop feedback adapted
+    # it: flux 0.0's measurement calibrated the predictor, so flux 1.0's predict
+    # is above the bare linear 5050 and qubit_freq is ~1.5 above that predict.
+    assert info.point["predict_freq"] > 5050.0  # adapted by feedback
+    assert abs(info.point["qubit_freq"] - (info.point["predict_freq"] + 1.5)) < 1.0
+    assert info.point["qubit_freq"] != 1.0  # not the fake fallback

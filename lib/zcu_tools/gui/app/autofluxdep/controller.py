@@ -279,11 +279,14 @@ class Controller:
             logger.warning("no params.json given; using SimplePredictor stand-in")
             return SimplePredictor()
         try:
+            from zcu_tools.gui.app.autofluxdep.tools import FluxoniumPredictorAdapter
             from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 
-            predictor = FluxoniumPredictor.from_file(params_path.strip())
+            fluxonium = FluxoniumPredictor.from_file(params_path.strip())
             logger.info("loaded FluxoniumPredictor from %s", params_path)
-            return predictor
+            # wrap into the Predictor interface (physical prediction + IDW error
+            # correction) so qubit_freq's calibrate drives the same feedback loops
+            return FluxoniumPredictorAdapter(fluxonium=fluxonium)
         except Exception as exc:
             logger.warning(
                 "could not load predictor from %s (%s); using SimplePredictor",

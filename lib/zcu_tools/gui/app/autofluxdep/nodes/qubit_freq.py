@@ -160,15 +160,44 @@ class QubitFreqNode(Node):
         )
         real = _signal2real(averaged)
 
-        # fit the fully-averaged signal, then fill the fit fields + notify again
+        # fit the fully-averaged signal
         freq, _, fwhm, _, fit_curve, _ = fit_qubit_freq(freqs, real)
+
+        # fit-quality gate (the runner module's mean_err vs ptp): a poor fit is
+        # discarded — it does NOT enter the Result, does NOT feed the predictor,
+        # and is omitted from the Patch so downstream falls back to the latest
+        # good value (and the next point predicts from the last good calibration).
+        residual = float(np.mean(np.abs(real - np.asarray(fit_curve))))
+        span = float(np.ptp(np.asarray(fit_curve)))
+        good_fit = span > 0 and residual < 0.2 * span
+
+        if not good_fit:
+            logger.debug(
+                "qubit_freq fit @flux%d: poor fit (residual=%.3f vs span=%.3f) — "
+                "discarded, no calibrate, no qubit_freq produced",
+                idx,
+                residual,
+                span,
+            )
+            if env.round_hook is not None:
+                env.round_hook(idx)  # raw row already shown; fit fields stay nan
+            return Patch()  # partial: omit qubit_freq → downstream latest-available
+
+        # good fit: fill the Result's fit fields + feed the closed-loop feedback
         result.fit_freq[idx] = float(freq)
         np.copyto(result.fit_curve[idx], np.asarray(fit_curve, dtype=np.float64))
         if env.round_hook is not None:
             env.round_hook(idx)
 
+        # CLOSED-LOOP FEEDBACK: hand the measured frequency to the predictor so
+        # the next flux point's predict_freq adapts (bias + IDW). qubit_freq
+        # triggers calibration; it never touches the predictor's internals.
+        if env.tools is not None and env.tools.predictor is not None:
+            env.tools.predictor.calibrate(env.flux, float(freq))
+
         logger.debug(
-            "qubit_freq fit @flux%d: freq=%.3f (predict=%.3f, detune=%+.3f) kappa=%.3f",
+            "qubit_freq fit @flux%d: freq=%.3f (predict=%.3f, detune=%+.3f) kappa=%.3f"
+            " → calibrated predictor",
             idx,
             float(freq),
             pred_qf,
