@@ -2,11 +2,14 @@ import logging
 import sys
 import threading
 import traceback
-from typing import Any
+from typing import Any, Callable
 
 from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
 
 logger = logging.getLogger(__name__)
+
+# An unhandled-exception presenter: (exc_type, exc_value, exc_traceback) -> None.
+ShowDialogFn = Callable[[type, BaseException, Any], None]
 
 
 def _show_error_dialog(
@@ -27,12 +30,18 @@ def _show_error_dialog(
     msg_box.exec()
 
 
-def install_global_exception_hook() -> None:
+def install_global_exception_hook(
+    show_dialog: ShowDialogFn = _show_error_dialog,
+) -> None:
     """Installs global exception hooks for PyQt.
 
     Catches both main thread sys.excepthook and threading.excepthook,
     displaying a QMessageBox for unexpected errors to ensure Fast Fail
     and minimal surprise.
+
+    ``show_dialog`` is the unhandled-exception presenter (defaults to the
+    QMessageBox one); injecting it lets tests pass a recording fake instead of
+    patching the module-private symbol.
     """
     original_excepthook = sys.excepthook
 
@@ -42,7 +51,7 @@ def install_global_exception_hook() -> None:
         if issubclass(exc_type, KeyboardInterrupt):
             original_excepthook(exc_type, exc_value, exc_traceback)
             return
-        _show_error_dialog(exc_type, exc_value, exc_traceback)
+        show_dialog(exc_type, exc_value, exc_traceback)
         original_excepthook(exc_type, exc_value, exc_traceback)
 
     sys.excepthook = _excepthook

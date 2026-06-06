@@ -49,32 +49,31 @@ def test_install_replaces_threading_excepthook(qapp):  # noqa: ARG001
 
 
 def test_keyboard_interrupt_bypasses_dialog(qapp):  # noqa: ARG001
-    import zcu_tools.gui.app.main.utils.error_handler as _mod
     from zcu_tools.gui.app.main.utils.error_handler import install_global_exception_hook
 
     # Reset first so install() wraps exactly one layer.
     _restore_hooks()
     try:
-        install_global_exception_hook()
-        with patch.object(_mod, "_show_error_dialog") as mock_show:
-            sys.excepthook(KeyboardInterrupt, KeyboardInterrupt(), None)
-            mock_show.assert_not_called()
+        # Inject a recording presenter instead of patching the private symbol.
+        mock_show = MagicMock()
+        install_global_exception_hook(show_dialog=mock_show)
+        sys.excepthook(KeyboardInterrupt, KeyboardInterrupt(), None)
+        mock_show.assert_not_called()
     finally:
         _restore_hooks()
 
 
 def test_ordinary_exception_calls_show_dialog(qapp):  # noqa: ARG001
-    import zcu_tools.gui.app.main.utils.error_handler as _mod
     from zcu_tools.gui.app.main.utils.error_handler import install_global_exception_hook
 
     _restore_hooks()
     try:
-        install_global_exception_hook()
-        with patch.object(_mod, "_show_error_dialog") as mock_show:
-            exc_type = ValueError
-            exc_val = ValueError("boom")
-            sys.excepthook(exc_type, exc_val, None)
-            mock_show.assert_called_once_with(exc_type, exc_val, None)
+        mock_show = MagicMock()
+        install_global_exception_hook(show_dialog=mock_show)
+        exc_type = ValueError
+        exc_val = ValueError("boom")
+        sys.excepthook(exc_type, exc_val, None)
+        mock_show.assert_called_once_with(exc_type, exc_val, None)
     finally:
         _restore_hooks()
 
