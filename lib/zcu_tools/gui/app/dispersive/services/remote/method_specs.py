@@ -13,27 +13,10 @@ and the slider tuning). The agent reads the current state and reports it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from zcu_tools.gui.remote.method_spec import MethodSpec
 
-from zcu_tools.gui.remote.param_spec import ParamSpec
-
-
-@dataclass(frozen=True)
-class MethodSpec:
-    """Contract for one wire method, independent of its handler.
-
-    ``timeout_seconds`` is the main-thread handler budget. ``params`` is the
-    parameter contract (validation + MCP ``inputSchema``). ``tool_name`` overrides
-    the derived ``dispersive_<method>`` MCP tool name when non-empty. The dispersive
-    method set is entirely read-only, so no method takes parameters.
-    """
-
-    timeout_seconds: float
-    description: str
-    params: tuple[ParamSpec, ...] = ()
-    tool_name: str = ""
-    off_main_thread: bool = False
-
+# The dispersive method set is entirely read-only — every method is a pure
+# query, so no method takes parameters (``MethodSpec.params`` defaults to ()).
 
 METHOD_SPECS: dict[str, MethodSpec] = {
     # Project

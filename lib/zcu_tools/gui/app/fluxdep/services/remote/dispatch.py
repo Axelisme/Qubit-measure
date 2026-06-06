@@ -13,7 +13,6 @@ Adding a method:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Mapping
 
 if TYPE_CHECKING:
@@ -21,36 +20,15 @@ if TYPE_CHECKING:
     # this module). String annotations keep pyright checking the call sites.
     from .service import RemoteControlAdapter
 
-from zcu_tools.gui.remote.param_spec import ParamSpec
+from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
 
-from .method_specs import METHOD_SPECS, MethodSpec
+from .method_specs import METHOD_SPECS
 
 logger = logging.getLogger(__name__)
 
+# Precise per-app handler alias (assignable to the shared, unconstrained
+# ``method_spec.Handler``): every handler takes this app's RemoteControlAdapter.
 Handler = Callable[["RemoteControlAdapter", Mapping[str, object]], Mapping[str, object]]
-
-
-# ---------------------------------------------------------------------------
-# Runtime registry entry — binds a synchronous handler to a Qt-free MethodSpec.
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class BoundMethod:
-    handler: Handler
-    spec: MethodSpec
-
-    @property
-    def timeout_seconds(self) -> float:
-        return self.spec.timeout_seconds
-
-    @property
-    def params(self) -> tuple[ParamSpec, ...]:
-        return self.spec.params
-
-    @property
-    def off_main_thread(self) -> bool:
-        return self.spec.off_main_thread
 
 
 # ---------------------------------------------------------------------------
@@ -179,17 +157,4 @@ _HANDLERS: dict[str, Handler] = {
     "state.check": _h_state_check,
 }
 
-# Every spec must have a handler and vice versa — fail fast on drift.
-if set(_HANDLERS) != set(METHOD_SPECS):
-    missing_spec = sorted(set(_HANDLERS) - set(METHOD_SPECS))
-    missing_handler = sorted(set(METHOD_SPECS) - set(_HANDLERS))
-    raise RuntimeError(
-        "dispatch/method_specs drift — "
-        f"handlers without spec: {missing_spec}; specs without handler: {missing_handler}"
-    )
-
-# `auth` is a sentinel handled by the service before the registry — left out here.
-METHOD_REGISTRY: dict[str, BoundMethod] = {
-    method: BoundMethod(handler=_HANDLERS[method], spec=METHOD_SPECS[method])
-    for method in METHOD_SPECS
-}
+METHOD_REGISTRY: dict[str, BoundMethod] = build_method_registry(_HANDLERS, METHOD_SPECS)

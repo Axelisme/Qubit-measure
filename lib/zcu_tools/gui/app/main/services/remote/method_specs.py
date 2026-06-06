@@ -9,35 +9,8 @@ synchronous handler to each spec here to form its runtime registry.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
+from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
-
-
-@dataclass(frozen=True)
-class MethodSpec:
-    """Contract for one wire method, independent of its handler.
-
-    ``timeout_seconds`` is the main-thread handler budget. ``params`` is the
-    parameter contract used both for runtime validation (dispatch/service) and
-    MCP ``inputSchema`` generation (mcp_server). ``tool_name`` overrides the
-    derived ``gui_<method>`` MCP tool name when non-empty.
-
-    ``off_main_thread`` marks a blocking handler that must NOT be marshalled
-    onto the Qt main thread — it runs on the IO worker thread instead. Required
-    for handlers that block waiting on a worker-thread completion (e.g.
-    ``operation.await``): marshalling them onto the main thread would deadlock
-    (the handler occupies the event loop that must dispatch the very signal it
-    awaits). Off-main handlers must only do thread-safe waiting and must not
-    touch main-thread-owned state, the stale guard, or the origin scope.
-    """
-
-    timeout_seconds: float
-    description: str
-    params: tuple[ParamSpec, ...] = ()
-    tool_name: str = ""
-    off_main_thread: bool = False
-
 
 # ---------------------------------------------------------------------------
 # ParamSpec factory shorthands — keep the table readable.

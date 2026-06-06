@@ -5,40 +5,14 @@ This module is intentionally free of Qt and of any handler/Controller code so
 that the lightweight ``mcp_server`` bridge can import it (to generate MCP tool
 schemas) without pulling in the Qt-bound service layer. ``dispatch`` binds a
 synchronous handler to each spec here to form its runtime registry.
+
+The fluxdep method set is entirely read-only (see ``METHOD_SPECS`` below), so no
+method here takes parameters — every ``MethodSpec.params`` keeps its empty default.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-from zcu_tools.gui.remote.param_spec import ParamSpec
-
-
-@dataclass(frozen=True)
-class MethodSpec:
-    """Contract for one wire method, independent of its handler.
-
-    ``timeout_seconds`` is the main-thread handler budget. ``params`` is the
-    parameter contract used both for runtime validation (dispatch/service) and
-    MCP ``inputSchema`` generation (mcp_server). ``tool_name`` overrides the
-    derived ``fluxdep_<method>`` MCP tool name when non-empty.
-
-    ``off_main_thread`` marks a blocking handler that must NOT be marshalled
-    onto the Qt main thread. The fluxdep method set has no such handler (every
-    method is a fast main-thread state read), but the flag is kept for mechanism
-    parity with the dispatcher.
-
-    The fluxdep method set is entirely read-only (see ``METHOD_SPECS`` below), so
-    no method here takes parameters — the ParamSpec machinery is retained only for
-    the validation/schema mechanism and the (empty) ``params`` default.
-    """
-
-    timeout_seconds: float
-    description: str
-    params: tuple[ParamSpec, ...] = ()
-    tool_name: str = ""
-    off_main_thread: bool = False
-
+from zcu_tools.gui.remote.method_spec import MethodSpec
 
 # ---------------------------------------------------------------------------
 # The contract table. Keys are dotted wire-method names.
