@@ -11,36 +11,30 @@ timeout -> pending handle).
 from __future__ import annotations
 
 from typing import Any, Dict
-from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.services.remote import mcp_server
 
+from ._helpers import FakeTransport
+
 
 @pytest.fixture()
 def wired(monkeypatch):
-    """Synchronous in-memory responder keyed by method; records what was sent."""
-    # The socket layer moved into mcp_server._BRIDGE (an McpBridge): the live
-    # socket is _BRIDGE._sock and the send/deliver primitives are
-    # _BRIDGE._send_line / _BRIDGE._deliver_reply. Patching _sock to a truthy
-    # mock makes send_rpc_raw's "is None" guard pass; the fake _send_line
-    # synchronously delivers a reply via the bridge's _deliver_reply.
-    monkeypatch.setattr(mcp_server._BRIDGE, "_sock", MagicMock())
+    """Inject a synchronous FakeTransport into the bridge; reset mcp policy state.
+
+    No socket internals are patched: the bridge runs its REAL send_rpc_raw over
+    the fake transport, which echoes a reply per ``replies[method]``. ``_LAST_SEEN``
+    / ``_OP_BY_KEY`` are measure-gui mcp policy (reset for isolation). The returned
+    dict carries ``["sent"]`` = the transport's recorded outgoing (method, params).
+    """
+    fake = FakeTransport()
+    mcp_server._BRIDGE.set_transport(fake)
     monkeypatch.setattr(mcp_server, "_LAST_SEEN", {}, raising=False)
     monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {}, raising=False)
-    replies: Dict[str, Dict[str, Any]] = {}
-    sent: list[tuple[str, Dict[str, Any]]] = []
-
-    def fake_send_line(payload):
-        method = payload["method"]
-        sent.append((method, payload["params"]))
-        resp = dict(replies.get(method, {"ok": True, "result": {}}))
-        resp["id"] = payload["id"]
-        mcp_server._BRIDGE._deliver_reply(resp)
-
-    monkeypatch.setattr(mcp_server._BRIDGE, "_send_line", fake_send_line)
-    replies["sent"] = sent  # type: ignore[assignment]
-    return replies
+    replies: Dict[str, Dict[str, Any]] = fake.replies
+    replies["sent"] = fake.sent  # type: ignore[assignment]
+    yield replies
+    mcp_server._BRIDGE.set_transport(None)
 
 
 def _versions(table: Dict[str, int]) -> Dict[str, Any]:

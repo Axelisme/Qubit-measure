@@ -47,7 +47,7 @@ import time
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Protocol, Tuple
 
 from zcu_tools.gui.remote.param_spec import JsonType, build_input_schema
 
@@ -118,72 +118,118 @@ def _pid_alive(pid: int) -> bool:
         return True
 
 
-class McpBridge:
-    """One MCP server process's bridge to a live GUI over a TCP socket.
+# A line arrived from the GUI: route it (reply keyed by id / event push).
+DeliverFn = Callable[[Dict[str, Any]], None]
+# The transport closed (real socket dropped): wake any pending RPC waiters.
+OnClosedFn = Callable[[], None]
 
-    Holds all socket + subprocess state as instance attributes. Construct with
-    the app :class:`MCPBridgeConfig`; optionally pass ``on_event`` to receive
-    event-push lines (else they are dropped). Inert until :meth:`connect` /
-    :meth:`launch`.
+
+class Transport(Protocol):
+    """The seam between :class:`McpBridge` and how lines reach the GUI.
+
+    The bridge owns the RPC bookkeeping (pending map, RID condition) and routing
+    logic; a transport owns only *moving bytes*. The bridge injects its routing
+    callbacks once via :meth:`attach`; the transport calls them when a line
+    arrives. The real transport is a TCP socket + reader thread
+    (:class:`SocketTransport`); tests inject a synchronous fake.
     """
 
-    def __init__(
-        self,
-        config: MCPBridgeConfig,
-        on_event: Optional[Callable[[Dict[str, Any]], None]] = None,
+    def attach(
+        self, deliver_reply: DeliverFn, deliver_event: DeliverFn, on_closed: OnClosedFn
     ) -> None:
-        self.config = config
-        self._on_event = on_event
-        self._sock_lock = threading.Lock()
-        self._sock: Optional[socket.socket] = None
-        self._rid_cond = threading.Condition()
-        self._rid_counter = 0
-        self._pending: Dict[str, Dict[str, Any]] = {}
-        self._reader_thread: Optional[threading.Thread] = None
-        self._reader_stop = threading.Event()
-        self._proc: Optional[subprocess.Popen] = None
+        """Hand the transport the bridge's routing callbacks (once)."""
+        ...
 
     @property
-    def is_connected(self) -> bool:
+    def is_open(self) -> bool: ...
+
+    def send_line(self, payload: Dict[str, Any]) -> None:
+        """Serialise + send one NDJSON line toward the GUI."""
+        ...
+
+    def close(self) -> None:
+        """Tear down (idempotent)."""
+        ...
+
+
+class SocketTransport:
+    """The real transport: a TCP socket + a dedicated NDJSON reader thread.
+
+    Owns the socket, the sole-reader thread (recv + frame + route via the
+    attached callbacks), and the line writer (lock-guarded sendall). The bridge's
+    pending map / RID condition stay in the bridge — on socket drop the reader
+    calls the attached ``on_closed`` so the bridge can wake its waiters.
+    """
+
+    def __init__(self, app_name: str) -> None:
+        self._app_name = app_name
+        self._sock_lock = threading.Lock()
+        self._sock: Optional[socket.socket] = None
+        self._reader_thread: Optional[threading.Thread] = None
+        self._reader_stop = threading.Event()
+        self._deliver_reply: Optional[DeliverFn] = None
+        self._deliver_event: Optional[DeliverFn] = None
+        self._on_closed: Optional[OnClosedFn] = None
+
+    def attach(
+        self, deliver_reply: DeliverFn, deliver_event: DeliverFn, on_closed: OnClosedFn
+    ) -> None:
+        self._deliver_reply = deliver_reply
+        self._deliver_event = deliver_event
+        self._on_closed = on_closed
+
+    @property
+    def is_open(self) -> bool:
         return self._sock is not None
 
-    # ------------------------------------------------------------------
-    # pid file
-    # ------------------------------------------------------------------
+    def open(self, port: int) -> None:
+        """Connect to 127.0.0.1:port and start the reader thread.
 
-    def _write_pid_file(self, pid: int) -> None:
+        Raises OSError if nothing is listening (the caller maps it to an
+        actionable message).
+        """
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(5.0)
         try:
-            self.config.pid_file.write_text(str(pid))
+            sock.connect(("127.0.0.1", port))
         except OSError:
-            pass
+            sock.close()
+            raise
+        # Short blocking timeout so the reader loop wakes to observe the stop flag.
+        sock.settimeout(1.0)
+        self._sock = sock
+        self._reader_stop.clear()
+        self._reader_thread = threading.Thread(
+            target=self._reader_loop, name=f"mcp-{self._app_name}-reader", daemon=True
+        )
+        self._reader_thread.start()
 
-    def _read_pid_file(self) -> Optional[int]:
-        try:
-            return int(self.config.pid_file.read_text().strip())
-        except (OSError, ValueError):
-            return None
-
-    def _clear_pid_file(self) -> None:
-        self.config.pid_file.unlink(missing_ok=True)
-
-    # ------------------------------------------------------------------
-    # Socket I/O
-    # ------------------------------------------------------------------
-
-    def _next_rid(self) -> str:
-        with self._rid_cond:
-            self._rid_counter += 1
-            return f"mcp-{self._rid_counter}"
-
-    def _send_line(self, payload: Dict[str, Any]) -> None:
+    def send_line(self, payload: Dict[str, Any]) -> None:
         sock = self._sock
         if sock is None:
-            raise RuntimeError(
-                f"GUI not connected. Call {self.config.tool_prefix}connect first."
-            )
+            raise RuntimeError("transport not open")
         data = (json.dumps(payload) + "\n").encode("utf-8")
         with self._sock_lock:
             sock.sendall(data)
+
+    def close(self) -> None:
+        sock = self._sock
+        if sock is None:
+            return
+        self._reader_stop.set()
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        try:
+            sock.close()
+        except OSError:
+            pass
+        self._sock = None
+        t = self._reader_thread
+        if t is not None and t.is_alive():
+            t.join(timeout=2.0)
+        self._reader_thread = None
 
     def _reader_loop(self) -> None:
         """Sole reader of the GUI socket; routes replies, hands events to hook."""
@@ -214,17 +260,101 @@ class McpBridge:
                 except Exception:
                     continue
                 if isinstance(msg, dict) and "id" in msg:
-                    self._deliver_reply(msg)
+                    if self._deliver_reply is not None:
+                        self._deliver_reply(msg)
                 elif isinstance(msg, dict) and "event" in msg:
-                    if self._on_event is not None:
-                        self._on_event(msg)
+                    if self._deliver_event is not None:
+                        self._deliver_event(msg)
                     # else: event pushes are dropped (read-only apps).
-        # Wake everyone so callers see "disconnected".
+        # Socket dropped: let the bridge wake any pending RPC waiters.
+        if self._on_closed is not None:
+            self._on_closed()
+
+
+class McpBridge:
+    """One MCP server process's bridge to a live GUI over a TCP socket.
+
+    Holds all socket + subprocess state as instance attributes. Construct with
+    the app :class:`MCPBridgeConfig`; optionally pass ``on_event`` to receive
+    event-push lines (else they are dropped). Inert until :meth:`connect` /
+    :meth:`launch`.
+    """
+
+    def __init__(
+        self,
+        config: MCPBridgeConfig,
+        on_event: Optional[Callable[[Dict[str, Any]], None]] = None,
+        transport: Optional[Transport] = None,
+    ) -> None:
+        self.config = config
+        self._on_event = on_event
+        self._rid_cond = threading.Condition()
+        self._rid_counter = 0
+        self._pending: Dict[str, Dict[str, Any]] = {}
+        self._proc: Optional[subprocess.Popen] = None
+        # The wire transport. None until connect()/launch() builds a real
+        # SocketTransport, or a test injects a fake via set_transport / the ctor.
+        self._transport: Optional[Transport] = None
+        if transport is not None:
+            self.set_transport(transport)
+
+    def set_transport(self, transport: Optional[Transport]) -> None:
+        """Swap the wire transport (the seam for tests + connect()).
+
+        Attaching wires the bridge's routing callbacks into the transport; the
+        bridge keeps the pending map / RID condition. Passing None detaches.
+        """
+        self._transport = transport
+        if transport is not None:
+            transport.attach(
+                self._deliver_reply, self._deliver_event, self._on_socket_closed
+            )
+
+    def _deliver_event(self, msg: Dict[str, Any]) -> None:
+        # Preserve the drop-if-None semantics: read-only apps wire no on_event.
+        if self._on_event is not None:
+            self._on_event(msg)
+
+    def _on_socket_closed(self) -> None:
+        # The reader thread saw the socket drop: wake every pending RPC waiter so
+        # callers see "disconnected" instead of blocking to their timeout.
         with self._rid_cond:
             for holder in self._pending.values():
                 holder["error"] = "GUI socket closed unexpectedly."
                 holder["done"] = True
             self._rid_cond.notify_all()
+
+    @property
+    def is_connected(self) -> bool:
+        return self._transport is not None and self._transport.is_open
+
+    # ------------------------------------------------------------------
+    # pid file
+    # ------------------------------------------------------------------
+
+    def _write_pid_file(self, pid: int) -> None:
+        try:
+            self.config.pid_file.write_text(str(pid))
+        except OSError:
+            pass
+
+    def _read_pid_file(self) -> Optional[int]:
+        try:
+            return int(self.config.pid_file.read_text().strip())
+        except (OSError, ValueError):
+            return None
+
+    def _clear_pid_file(self) -> None:
+        self.config.pid_file.unlink(missing_ok=True)
+
+    # ------------------------------------------------------------------
+    # Socket I/O
+    # ------------------------------------------------------------------
+
+    def _next_rid(self) -> str:
+        with self._rid_cond:
+            self._rid_counter += 1
+            return f"mcp-{self._rid_counter}"
 
     def _deliver_reply(self, msg: Dict[str, Any]) -> None:
         rid = msg.get("id")
@@ -246,7 +376,8 @@ class McpBridge:
         Returns the raw wire response dict (``{ok, result}`` or ``{ok:False,
         error}``). App layers wrap this to raise on ``ok:False`` and add policy.
         """
-        if self._sock is None:
+        transport = self._transport
+        if transport is None or not transport.is_open:
             raise RuntimeError(
                 f"GUI not connected. Call {self.config.tool_prefix}connect first."
             )
@@ -255,7 +386,7 @@ class McpBridge:
         with self._rid_cond:
             self._pending[rid] = holder
         try:
-            self._send_line({"id": rid, "method": method, "params": params})
+            transport.send_line({"id": rid, "method": method, "params": params})
         except Exception:
             with self._rid_cond:
                 self._pending.pop(rid, None)
@@ -314,24 +445,17 @@ class McpBridge:
         cfg = self.config
         self.disconnect()
 
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(5.0)
+        transport = SocketTransport(cfg.app_name)
+        self.set_transport(transport)
         try:
-            sock.connect(("127.0.0.1", port))
+            transport.open(port)
         except OSError as exc:
-            sock.close()
+            self.set_transport(None)
             raise RuntimeError(
                 f"No GUI is listening on 127.0.0.1:{port} ({exc}). "
                 f"{cfg.tool_prefix}connect attaches to an already-running GUI; "
                 f"start one with {cfg.tool_prefix}launch."
             ) from exc
-        sock.settimeout(1.0)
-        self._sock = sock
-        self._reader_stop.clear()
-        self._reader_thread = threading.Thread(
-            target=self._reader_loop, name=f"mcp-{cfg.app_name}-reader", daemon=True
-        )
-        self._reader_thread.start()
 
         if token:
             resp = self.send_rpc_raw("auth", {"token": token}, 30.0)
@@ -350,23 +474,11 @@ class McpBridge:
         )
 
     def disconnect(self) -> str:
-        sock = self._sock
-        if sock is None:
+        transport = self._transport
+        if transport is None or not transport.is_open:
             return "Not connected."
-        self._reader_stop.set()
-        try:
-            sock.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass
-        try:
-            sock.close()
-        except OSError:
-            pass
-        self._sock = None
-        t = self._reader_thread
-        if t is not None and t.is_alive():
-            t.join(timeout=2.0)
-        self._reader_thread = None
+        transport.close()
+        self._transport = None
         return "Disconnected from GUI."
 
     def launch(

@@ -120,6 +120,42 @@ class Fixture:
         self.service.stop()
 
 
+class FakeTransport:
+    """Synchronous in-memory Transport for McpBridge tests (no socket/thread).
+
+    Implements the ``zcu_tools.gui.remote.mcp_bridge.Transport`` protocol. On
+    ``send_line`` it records the outgoing ``(method, params)`` in ``sent`` and
+    immediately delivers a reply (from ``replies[method]``, defaulting to
+    ``{ok: True, result: {}}``) via the bridge's ``deliver_reply`` callback — so
+    a synchronous ``send_rpc_raw`` round-trip completes without a real GUI. Inject
+    via ``bridge.set_transport(FakeTransport())``; populate ``replies`` per test.
+    """
+
+    def __init__(self) -> None:
+        self.replies: dict[str, dict] = {}
+        self.sent: list[tuple[str, dict]] = []
+        self._deliver_reply: Optional[Callable[[dict], None]] = None
+
+    def attach(self, deliver_reply, deliver_event, on_closed) -> None:
+        # Reply-only fake: the event / on_closed callbacks are unused.
+        del deliver_event, on_closed
+        self._deliver_reply = deliver_reply
+
+    @property
+    def is_open(self) -> bool:
+        return True
+
+    def send_line(self, payload: dict) -> None:
+        self.sent.append((payload["method"], payload["params"]))
+        resp = dict(self.replies.get(payload["method"], {"ok": True, "result": {}}))
+        resp["id"] = payload["id"]
+        assert self._deliver_reply is not None, "FakeTransport used before attach()"
+        self._deliver_reply(resp)
+
+    def close(self) -> None:
+        pass
+
+
 def dispatch_handler(ctrl: Any, method: str, params: dict) -> Mapping[str, object]:
     """Invoke a dispatch handler directly with a ctrl mock/real Controller.
 

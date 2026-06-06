@@ -1,50 +1,41 @@
 """mcp_server-side optimistic-concurrency bookkeeping.
 
-Drives send_gui_rpc with the socket layer mocked: the bridge's _send_line
-synchronously delivers a per-method crafted reply via the bridge's
-_deliver_reply, so we assert the mcp policy (attach expected_versions for guarded
-ops, translate a stale rejection, refresh _LAST_SEEN after every successful RPC)
-without a real GUI.
+Drives send_gui_rpc over a synchronous FakeTransport injected into the bridge:
+each send_line echoes a per-method crafted reply, so we assert the mcp policy
+(attach expected_versions for guarded ops, translate a stale rejection, refresh
+_LAST_SEEN after every successful RPC) without a real GUI.
 
-Post-E4: socket I/O lives on the shared McpBridge instance ``mcp_server._BRIDGE``
-(``_sock`` / ``_send_line`` / ``_deliver_reply``), while the mcp policy
-(``send_gui_rpc`` / ``_LAST_SEEN`` / guard) stays on ``mcp_server``. So the
-fixture patches the socket layer on ``_BRIDGE`` and keeps asserting policy on
-``mcp_server``.
+Post-E4/F: socket I/O lives behind the McpBridge transport seam — tests inject a
+synchronous ``FakeTransport`` (no socket, no thread) and run the bridge's REAL
+``send_rpc_raw``; the mcp policy (``send_gui_rpc`` / ``_LAST_SEEN`` / guard) stays
+on ``mcp_server`` and is asserted there. No socket internals are patched.
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict
-from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.services.remote import mcp_server
 
+from ._helpers import FakeTransport
+
 
 @pytest.fixture()
 def wired(monkeypatch):
-    """Wire send_gui_rpc to a synchronous in-memory responder keyed by method.
+    """Inject a FakeTransport into the bridge; reset the guard baseline.
 
-    Returns a dict you populate as ``{method: reply_envelope}``; ``sent`` records
-    every outgoing ``(method, params)`` so tests can assert what was attached.
+    Returns a dict you populate as ``{method: reply_envelope}``; ``["sent"]``
+    records every outgoing ``(method, params)`` so tests can assert what the guard
+    attached.
     """
-    bridge = mcp_server._BRIDGE
-    monkeypatch.setattr(bridge, "_sock", MagicMock())
+    fake = FakeTransport()
+    mcp_server._BRIDGE.set_transport(fake)
     monkeypatch.setattr(mcp_server, "_LAST_SEEN", {}, raising=False)
-    replies: Dict[str, Dict[str, Any]] = {}
-    sent: list[tuple[str, Dict[str, Any]]] = []
-
-    def fake_send_line(payload):
-        method = payload["method"]
-        sent.append((method, payload["params"]))
-        resp = dict(replies.get(method, {"ok": True, "result": {}}))
-        resp["id"] = payload["id"]
-        bridge._deliver_reply(resp)
-
-    monkeypatch.setattr(bridge, "_send_line", fake_send_line)
-    replies["sent"] = sent  # type: ignore[assignment]
-    return replies
+    replies: Dict[str, Dict[str, Any]] = fake.replies
+    replies["sent"] = fake.sent  # type: ignore[assignment]
+    yield replies
+    mcp_server._BRIDGE.set_transport(None)
 
 
 def _versions_reply(table: Dict[str, int]) -> Dict[str, Any]:
