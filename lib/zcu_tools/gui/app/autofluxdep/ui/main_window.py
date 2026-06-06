@@ -32,7 +32,14 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.app.autofluxdep.controller import Controller
-from zcu_tools.gui.app.autofluxdep.event_bus import Event, EventType
+from zcu_tools.gui.app.autofluxdep.event_bus import (
+    NodeEnteredPayload,
+    PointDonePayload,
+    RunFinishedPayload,
+    RunStartedPayload,
+    RunStoppedPayload,
+    SetupDonePayload,
+)
 
 from .node_detail import NodeDetailPane
 from .node_list import NodeListPane
@@ -74,17 +81,14 @@ class _RunBridge(QObject):
     def __init__(self, ctrl: Controller) -> None:
         super().__init__()
         bus = ctrl.bus
-        bus.subscribe(EventType.RUN_STARTED, lambda e: self.run_started.emit())
-        bus.subscribe(EventType.NODE_ENTERED, self._on_node_entered)
-        bus.subscribe(
-            EventType.POINT_DONE, lambda e: self.point_done.emit(int(e.payload))
-        )
-        bus.subscribe(EventType.RUN_FINISHED, lambda e: self.run_finished.emit())
-        bus.subscribe(EventType.RUN_STOPPED, lambda e: self.run_stopped.emit())
+        bus.subscribe(RunStartedPayload, lambda p: self.run_started.emit())
+        bus.subscribe(NodeEnteredPayload, self._on_node_entered)
+        bus.subscribe(PointDonePayload, lambda p: self.point_done.emit(p.idx))
+        bus.subscribe(RunFinishedPayload, lambda p: self.run_finished.emit())
+        bus.subscribe(RunStoppedPayload, lambda p: self.run_stopped.emit())
 
-    def _on_node_entered(self, e: Event) -> None:
-        name, idx = e.payload
-        self.node_entered.emit(str(name), int(idx))
+    def _on_node_entered(self, p: NodeEnteredPayload) -> None:
+        self.node_entered.emit(p.name, p.idx)
 
     def notify(self, name: str, idx: int) -> None:
         """The worker-thread notify callback — re-emits as a queued Qt signal."""
@@ -141,9 +145,7 @@ class MainWindow(QMainWindow):
         self._bridge.run_stopped.connect(self._on_run_done)
 
         # also reflect workflow edits in the setup light / run-enabled
-        ctrl.bus.subscribe(
-            EventType.SETUP_DONE, lambda e: self._list._refresh_buttons()
-        )
+        ctrl.bus.subscribe(SetupDonePayload, lambda p: self._list._refresh_buttons())
 
         self._on_select(self._list.selected_index)
 

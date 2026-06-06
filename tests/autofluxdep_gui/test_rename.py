@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import numpy as np
 from zcu_tools.gui.app.autofluxdep.app import build_core
-from zcu_tools.gui.app.autofluxdep.event_bus import EventType
+from zcu_tools.gui.app.autofluxdep.event_bus import (
+    NodeEnteredPayload,
+    WorkflowChangedPayload,
+)
 
 
 def test_repeated_placement_auto_dedups_name():
@@ -54,7 +57,7 @@ def test_rename_emits_workflow_changed():
     ctrl = build_core()
     ctrl.add_node_by_type("mist")
     seen = []
-    ctrl.bus.subscribe(EventType.WORKFLOW_CHANGED, lambda e: seen.append(e.payload))
+    ctrl.bus.subscribe(WorkflowChangedPayload, lambda p: seen.append(p.name))
     ctrl.rename_node(0, "g_mist")
     assert "g_mist" in seen
 
@@ -101,7 +104,7 @@ def test_node_entered_excludes_predictor_service():
     ctrl.set_flux_values([0.0, 1.0])
 
     entered = []
-    ctrl.bus.subscribe(EventType.NODE_ENTERED, lambda e: entered.append(e.payload[0]))
+    ctrl.bus.subscribe(NodeEnteredPayload, lambda p: entered.append(p.name))
     ctrl.start_run()
     assert "predictor" not in entered
     assert set(entered) == {"qubit_freq", "g_mist"}

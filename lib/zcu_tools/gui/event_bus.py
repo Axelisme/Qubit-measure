@@ -9,9 +9,9 @@ wrong event. Apps subclass :class:`BasePayload` with their own event enum (each
 narrowing ``EVENT`` to that concrete enum) and alias :class:`BaseEventBus`.
 
 This module owns only the *mechanism*; it knows nothing of any concrete event,
-payload, or app. main-gui and autofluxdep-gui deliberately use different
-schemes (``@overload`` keyed on an event enum / a single ``Event`` wrapper) and
-do not build on this base.
+payload, or app. fluxdep, dispersive, and autofluxdep build on this base.
+main-gui deliberately uses a different scheme (``@overload`` keyed on an event
+enum) and does not build on this base.
 """
 
 from __future__ import annotations

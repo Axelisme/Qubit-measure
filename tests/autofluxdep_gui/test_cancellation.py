@@ -10,7 +10,12 @@ orchestrator over synthetic signals, no Qt.
 from __future__ import annotations
 
 from zcu_tools.gui.app.autofluxdep.app import build_core
-from zcu_tools.gui.app.autofluxdep.event_bus import Event, EventType
+from zcu_tools.gui.app.autofluxdep.event_bus import (
+    EventType,
+    PointDonePayload,
+    RunFinishedPayload,
+    RunStoppedPayload,
+)
 
 _FLUX = [0.0, 0.25, 0.5, 0.75, 1.0]
 
@@ -30,17 +35,17 @@ def test_stop_run_mid_sweep_emits_run_stopped_not_finished():
     ctrl = _build_ready_controller()
 
     events: list[EventType] = []
-    ctrl.bus.subscribe(EventType.RUN_STOPPED, lambda e: events.append(e.type))
-    ctrl.bus.subscribe(EventType.RUN_FINISHED, lambda e: events.append(e.type))
+    ctrl.bus.subscribe(RunStoppedPayload, lambda p: events.append(p.EVENT))
+    ctrl.bus.subscribe(RunFinishedPayload, lambda p: events.append(p.EVENT))
 
     points: list[int] = []
 
-    def on_point_done(e: Event) -> None:
-        points.append(e.payload)
+    def on_point_done(p: PointDonePayload) -> None:
+        points.append(p.idx)
         if len(points) == 2:  # request cancel after the 2nd point completes
             ctrl.stop_run()
 
-    ctrl.bus.subscribe(EventType.POINT_DONE, on_point_done)
+    ctrl.bus.subscribe(PointDonePayload, on_point_done)
 
     info = ctrl.start_run()
 
@@ -57,11 +62,11 @@ def test_full_run_without_stop_emits_run_finished():
     ctrl = _build_ready_controller()
 
     events: list[EventType] = []
-    ctrl.bus.subscribe(EventType.RUN_STOPPED, lambda e: events.append(e.type))
-    ctrl.bus.subscribe(EventType.RUN_FINISHED, lambda e: events.append(e.type))
+    ctrl.bus.subscribe(RunStoppedPayload, lambda p: events.append(p.EVENT))
+    ctrl.bus.subscribe(RunFinishedPayload, lambda p: events.append(p.EVENT))
 
     points: list[int] = []
-    ctrl.bus.subscribe(EventType.POINT_DONE, lambda e: points.append(e.payload))
+    ctrl.bus.subscribe(PointDonePayload, lambda p: points.append(p.idx))
 
     info = ctrl.start_run()
 

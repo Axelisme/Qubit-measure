@@ -18,7 +18,17 @@ import logging
 from typing_extensions import Any, Optional
 
 from zcu_tools.gui.app.autofluxdep.derivation import DerivationService
-from zcu_tools.gui.app.autofluxdep.event_bus import Event, EventBus, EventType
+from zcu_tools.gui.app.autofluxdep.event_bus import (
+    EventBus,
+    FluxChangedPayload,
+    NodeEnteredPayload,
+    PointDonePayload,
+    RunFinishedPayload,
+    RunStartedPayload,
+    RunStoppedPayload,
+    SetupDonePayload,
+    WorkflowChangedPayload,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, PlacedNode
 from zcu_tools.gui.app.autofluxdep.nodes.predictor import PredictorBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.synth import (
@@ -89,7 +99,7 @@ class Controller:
         self._state.nodes.append(node)
         self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("add_node: %r (type=%r) params=%s", name, builder.name, params)
-        self._bus.emit(Event(EventType.WORKFLOW_CHANGED, node.name))
+        self._bus.emit(WorkflowChangedPayload(name=node.name))
         return node
 
     def add_node_by_type(self, type_name: str) -> PlacedNode:
@@ -110,7 +120,7 @@ class Controller:
         self._state.nodes.append(node)
         self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("add_node_by_type: %r -> %r", type_name, node.name)
-        self._bus.emit(Event(EventType.WORKFLOW_CHANGED, node.name))
+        self._bus.emit(WorkflowChangedPayload(name=node.name))
         return node
 
     def rename_node(self, index: int, new_name: str) -> str:
@@ -132,7 +142,7 @@ class Controller:
         node.name = self._unique_name(cleaned, exclude=node)
         self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("rename_node[%d]: %r -> %r", index, old, node.name)
-        self._bus.emit(Event(EventType.WORKFLOW_CHANGED, node.name))
+        self._bus.emit(WorkflowChangedPayload(name=node.name))
         return node.name
 
     def remove_node(self, name: str) -> None:
@@ -140,7 +150,7 @@ class Controller:
         self._state.nodes = [n for n in self._state.nodes if n.name != name]
         self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("remove_node: %r (%d -> %d)", name, before, len(self._state.nodes))
-        self._bus.emit(Event(EventType.WORKFLOW_CHANGED, name))
+        self._bus.emit(WorkflowChangedPayload(name=name))
 
     def reorder(self, index: int, delta: int) -> int:
         """Move the Node at ``index`` by ``delta`` (±1). Returns the new index."""
@@ -151,7 +161,7 @@ class Controller:
         nodes[index], nodes[new_index] = nodes[new_index], nodes[index]
         self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("reorder: %d <-> %d", index, new_index)
-        self._bus.emit(Event(EventType.WORKFLOW_CHANGED, None))
+        self._bus.emit(WorkflowChangedPayload(name=None))
         return new_index
 
     def set_node_params(self, index: int, params: dict[str, Any]) -> None:
@@ -161,7 +171,7 @@ class Controller:
         logger.debug(
             "set_node_params[%d] (%r): %s", index, self._state.nodes[index].name, params
         )
-        self._bus.emit(Event(EventType.WORKFLOW_CHANGED, None))
+        self._bus.emit(WorkflowChangedPayload(name=None))
 
     def set_flux_values(self, values: list[float]) -> None:
         self._state.flux_values = list(values)
@@ -175,7 +185,7 @@ class Controller:
             )
         else:
             logger.debug("set_flux_values: cleared")
-        self._bus.emit(Event(EventType.FLUX_CHANGED, len(values)))
+        self._bus.emit(FluxChangedPayload(count=len(values)))
 
     # --- setup (MockSoc + FakeDevice, or a real ZCU + YOKO + predictor) ---
 
@@ -213,7 +223,7 @@ class Controller:
             else None,
             request.use_mock,
         )
-        self._bus.emit(Event(EventType.SETUP_DONE, None))
+        self._bus.emit(SetupDonePayload())
 
     @staticmethod
     def _build_mock_resources() -> SetupResources:
@@ -348,7 +358,7 @@ class Controller:
             self._state.node_names(),
             len(self._state.flux_values),
         )
-        self._bus.emit(Event(EventType.RUN_STARTED, None))
+        self._bus.emit(RunStartedPayload())
 
         soc = self._state.resources.soc if self._state.resources else None
         # The UI pre-allocates Results (+ binds Plotters) before starting the
@@ -361,7 +371,7 @@ class Controller:
         def on_point(idx: int, flux: float, info: InfoStore) -> None:
             del flux, info  # POINT_DONE carries only the index
             self._cur_idx = idx
-            self._bus.emit(Event(EventType.POINT_DONE, idx))
+            self._bus.emit(PointDonePayload(idx=idx))
 
         user_node_names = {n.name for n in self._state.nodes}
 
@@ -372,7 +382,7 @@ class Controller:
             # forwards user-list Nodes — the predictor Service has no list row to
             # navigate to.
             if name in user_node_names:
-                self._bus.emit(Event(EventType.NODE_ENTERED, (name, idx)))
+                self._bus.emit(NodeEnteredPayload(name=name, idx=idx))
 
         orch = Orchestrator(
             providers=self._build_providers(),
@@ -392,9 +402,7 @@ class Controller:
             logger.info("run stopped at flux idx %d", self._cur_idx)
         else:
             logger.info("run finished: %d flux point(s)", len(self._state.flux_values))
-        self._bus.emit(
-            Event(EventType.RUN_STOPPED if self._stop else EventType.RUN_FINISHED, None)
-        )
+        self._bus.emit(RunStoppedPayload() if self._stop else RunFinishedPayload())
         return info
 
     def prepare_run_results(self) -> dict[str, Any]:

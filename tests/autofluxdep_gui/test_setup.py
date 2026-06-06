@@ -35,11 +35,11 @@ def test_setup_legacy_use_mock_still_works():
 
 
 def test_setup_emits_setup_done():
-    from zcu_tools.gui.app.autofluxdep.event_bus import EventType
+    from zcu_tools.gui.app.autofluxdep.event_bus import SetupDonePayload
 
     ctrl = build_core()
     seen = []
-    ctrl.bus.subscribe(EventType.SETUP_DONE, lambda e: seen.append(True))
+    ctrl.bus.subscribe(SetupDonePayload, lambda p: seen.append(True))
     ctrl.setup(use_mock=True)
     assert seen == [True]
 
