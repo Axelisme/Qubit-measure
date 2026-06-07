@@ -30,7 +30,7 @@ from zcu_tools.gui.app.main.adapter import (
 )
 from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
 from zcu_tools.gui.app.main.registry import Registry
-from zcu_tools.gui.app.main.role_catalog import RoleCatalog, RoleEntry
+from zcu_tools.gui.app.main.role_catalog import RoleCatalog, RoleEntry, RoleItemKind
 from zcu_tools.gui.app.main.specs import make_waveform_spec_by_style
 
 from .adapters.fake.freq import FakeFreqAdapter
@@ -38,21 +38,7 @@ from .adapters.lookback import LookbackAdapter
 from .adapters.onetone.flux_dep import OneToneFluxDepAdapter
 from .adapters.onetone.freq import OneToneFreqAdapter
 from .adapters.onetone.power_dep import OneTonePowerDepAdapter
-from .adapters.shared import (
-    make_bath_reset_default,
-    make_direct_readout_default,
-    make_none_reset_default,
-    make_pi2_pulse_default,
-    make_pi_pulse_default,
-    make_pulse_readout_default,
-    make_pulse_reset_default,
-    make_qub_probe_default,
-    make_qub_waveform_default,
-    make_readout_dpm_default,
-    make_res_probe_default,
-    make_res_waveform_default,
-    make_two_pulse_reset_default,
-)
+from .adapters.shared import ROLE_FACTORIES
 from .adapters.twotone.flux_dep import FluxDepAdapter
 from .adapters.twotone.freq import FreqAdapter
 from .adapters.twotone.power_dep import PowerDepAdapter
@@ -147,32 +133,31 @@ def _blank_entries() -> list[RoleEntry]:
     return entries
 
 
-# Insertion order = dropdown order. Readout/probe first, then pulses, then
-# resets, then waveforms.
+# Catalog dropdown entries: (role_id, label, item_kind). Insertion order =
+# dropdown order. Readout/probe first, then pulses, then resets, then waveforms.
+# The factory is the role's *blank* builder, taken from the shared ROLE_FACTORIES
+# table (single source) — creating from a role seeds a fresh entry, never a
+# library reference, so the library-aware composite roles ("readout" / "reset")
+# are deliberately absent (only their concrete shapes appear here).
+_CATALOG_ROLES: list[tuple[str, str, RoleItemKind]] = [
+    ("res_probe", "Resonator probe", "module"),
+    ("pulse_readout", "Pulse readout", "module"),
+    ("readout_dpm", "Optimized readout (DPM)", "module"),
+    ("direct_readout", "Direct readout", "module"),
+    ("qub_probe", "Qubit probe pulse", "module"),
+    ("pi_pulse", "Pi pulse", "module"),
+    ("pi2_pulse", "Pi/2 pulse", "module"),
+    ("none_reset", "No reset", "module"),
+    ("pulse_reset", "Pulse reset", "module"),
+    ("two_pulse_reset", "Two-pulse reset", "module"),
+    ("bath_reset", "Bath reset", "module"),
+    ("qub_waveform", "Qubit drive waveform", "waveform"),
+    ("res_waveform", "Res-probe waveform", "waveform"),
+]
+
 ROLE_ENTRIES: list[RoleEntry] = [
-    RoleEntry("res_probe", "Resonator probe", "module", make_res_probe_default),
-    RoleEntry("pulse_readout", "Pulse readout", "module", make_pulse_readout_default),
-    RoleEntry(
-        "readout_dpm", "Optimized readout (DPM)", "module", make_readout_dpm_default
-    ),
-    RoleEntry(
-        "direct_readout", "Direct readout", "module", make_direct_readout_default
-    ),
-    RoleEntry("qub_probe", "Qubit probe pulse", "module", make_qub_probe_default),
-    RoleEntry("pi_pulse", "Pi pulse", "module", make_pi_pulse_default),
-    RoleEntry("pi2_pulse", "Pi/2 pulse", "module", make_pi2_pulse_default),
-    RoleEntry("none_reset", "No reset", "module", make_none_reset_default),
-    RoleEntry("pulse_reset", "Pulse reset", "module", make_pulse_reset_default),
-    RoleEntry(
-        "two_pulse_reset", "Two-pulse reset", "module", make_two_pulse_reset_default
-    ),
-    RoleEntry("bath_reset", "Bath reset", "module", make_bath_reset_default),
-    RoleEntry(
-        "qub_waveform", "Qubit drive waveform", "waveform", make_qub_waveform_default
-    ),
-    RoleEntry(
-        "res_waveform", "Res-probe waveform", "waveform", make_res_waveform_default
-    ),
+    RoleEntry(role_id, label, kind, ROLE_FACTORIES[role_id].blank)
+    for role_id, label, kind in _CATALOG_ROLES
 ]
 
 

@@ -30,6 +30,7 @@ from .types import (
     RunRequest,
     SaveDataRequest,
     SavePaths,
+    ScalarLeafInput,
     ScalarSpec,
     ScalarValue,
     SocCfgHandle,

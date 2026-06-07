@@ -9,9 +9,9 @@ from typing_extensions import Annotated, Any, ClassVar, Sequence, TypeAlias
 from zcu_tools.experiment.v2.lookback import LookbackCfg, LookbackExp, LookbackResult
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
+    CfgBuilder,
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
-    make_readout_default,
     make_reset_module_spec,
     make_trig_offset,
 )
@@ -22,7 +22,6 @@ from zcu_tools.gui.app.main.adapter import (
     AnalyzeResultBase,
     CfgSectionSpec,
     CfgSectionValue,
-    DirectValue,
     ExpContext,
     LiteralSpec,
     MetaDictWriteback,
@@ -128,34 +127,21 @@ class LookbackAdapter(
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        root_val = CfgSectionValue(
-            fields={
-                "modules": CfgSectionValue(
-                    fields={
-                        "readout": make_readout_default(ctx)
-                        .with_field("pulse_cfg.gain", 1.0)
-                        .with_field("ro_cfg.ro_length", 1.4)
-                        .with_field(
-                            "ro_cfg.trig_offset",
-                            make_trig_offset(
-                                ctx,
-                                trig_expr="timeFly - 0.1",
-                                trig_fallback=0.4,
-                            ),
-                        ),
-                        # optional modules default to disabled (None entry)
-                        "init_pulse": None,
-                        "reset": None,
-                    }
-                ),
-                # reps is locked to 1 by the LiteralSpec in cfg_spec(); the value
-                # must carry the locked literal.
-                "reps": DirectValue(1),
-                "rounds": DirectValue(500),
-                "relax_delay": DirectValue(0.0),
-            }
+        # reps is locked to 1 by the LiteralSpec in cfg_spec(); the L1 blank
+        # already carries that literal, so it is not set here. The optional
+        # init_pulse / reset default to disabled (None) via the L1 blank too.
+        return (
+            CfgBuilder(ctx, self.cfg_spec())
+            .scalars(rounds=500, relax_delay=0.0)
+            .role("modules.readout", "readout", prefer_blank=True)
+            .set("modules.readout.pulse_cfg.gain", 1.0)
+            .set("modules.readout.ro_cfg.ro_length", 1.4)
+            .set(
+                "modules.readout.ro_cfg.trig_offset",
+                make_trig_offset(ctx, trig_expr="timeFly - 0.1", trig_fallback=0.4),
+            )
+            .build()
         )
-        return root_val
 
     def get_analyze_params(
         self, result: LookbackRunResult, ctx: ExpContext

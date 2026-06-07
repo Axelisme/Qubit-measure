@@ -35,8 +35,12 @@ from .reset import (
     make_reset_ref_default,
     make_two_pulse_reset_default,
 )
+from .role_factories import ROLE_FACTORIES, RoleFactorySpec
 
 __all__ = [
+    # role factory table (single source for RoleCatalog + CfgBuilder)
+    "ROLE_FACTORIES",
+    "RoleFactorySpec",
     # shared helpers
     "make_default_value",
     "make_trig_offset",

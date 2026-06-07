@@ -13,22 +13,18 @@ from zcu_tools.experiment.v2.twotone.rabi.amp_rabi import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
+    CfgBuilder,
     make_pulse_module_spec,
-    make_qub_probe_default,
     make_readout_module_spec,
-    make_readout_ref_default,
     make_reset_module_spec,
-    make_reset_ref_default,
     md_eval_scaled,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    CfgNodeValue,
     CfgSectionSpec,
     CfgSectionValue,
-    DirectValue,
     ExpContext,
     MetaDictWriteback,
     ParamMeta,
@@ -130,28 +126,19 @@ class AmpRabiAdapter(
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+        # gain sweep spans up to 2*pi_amp (md-linked) → an EvalValue stop edge,
+        # so the sweep is pre-built and mounted via set_sweep.
         sweep_stop = md_eval_scaled(ctx, "pi_amp", factor=2.0, fallback=0.5)
-        root_val = CfgSectionValue(
-            fields={
-                "modules": CfgSectionValue(
-                    fields={
-                        "qub_pulse": make_qub_probe_default(ctx),
-                        "readout": make_readout_ref_default(ctx),
-                        # optional → None (disabled) when no library reset (ADR-0021)
-                        "reset": make_reset_ref_default(ctx, optional=True),
-                    }
-                ),
-                "reps": DirectValue(100),
-                "rounds": DirectValue(100),
-                "relax_delay": DirectValue(10.5),
-                "sweep": CfgSectionValue(
-                    fields={
-                        "gain": SweepValue(start=-0.3, stop=sweep_stop, expts=51),
-                    }
-                ),
-            }
+        return (
+            CfgBuilder(ctx, self.cfg_spec())
+            .scalars(reps=100, rounds=100, relax_delay=10.5)
+            .role("modules.qub_pulse", "qub_probe", prefer_blank=True)
+            .role("modules.readout", "readout")
+            # optional → None (disabled) when no library reset (ADR-0021)
+            .role("modules.reset", "reset", optional=True)
+            .set_sweep("sweep.gain", SweepValue(start=-0.3, stop=sweep_stop, expts=51))
+            .build()
         )
-        return root_val
 
     def get_analyze_params(
         self, result: AmpRabiRunResult, ctx: ExpContext

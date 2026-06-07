@@ -1,3 +1,4 @@
+from .cfg_builder import CfgBuilder
 from .ctx_helpers import (
     md_eval_scaled,
     md_get_float,
@@ -11,7 +12,9 @@ from .ctx_helpers import (
     proper_res_freq_range,
 )
 from .defaults import (
+    ROLE_FACTORIES,
     NamedModuleValue,
+    RoleFactorySpec,
     make_bath_reset_default,
     make_direct_readout_default,
     make_none_reset_default,
@@ -48,6 +51,8 @@ from .spec_helpers import (
 from .writeback_helpers import make_onetone_freq_writeback_items
 
 __all__ = [
+    # value-tree assembly
+    "CfgBuilder",
     # ctx helpers
     "md_get_float",
     "make_onetone_freq_writeback_items",
@@ -60,6 +65,9 @@ __all__ = [
     "proper_res_freq_range",
     "proper_qub_freq_range",
     "proper_flux_range",
+    # Role factory table (single source for RoleCatalog + CfgBuilder)
+    "ROLE_FACTORIES",
+    "RoleFactorySpec",
     # Module defaults (low-level)
     "NamedModuleValue",
     "select_named_module_value",
