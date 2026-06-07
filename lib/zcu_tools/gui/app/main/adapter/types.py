@@ -596,14 +596,25 @@ class CfgSchema:
     def validate(self, ml: "Optional[ModuleLibrary]") -> None:
         """Fast-fail if the value tree is structurally incomplete or violates the
         spec — the *static* contract (structure complete, every spec field has an
-        entry, LiteralSpec == spec.value, DirectValue scalar type/choices). The
-        *dynamic* contract (required must have a value, EvalValue must resolve) is
-        enforced by lowering with the live md. Called at finished-cfg boundaries
-        (``make_default_cfg`` output, ``to_raw_dict`` before lowering); NOT in
-        ``__post_init__`` (that would reject legal editing intermediates)."""
+        entry, LiteralSpec == spec.value, DirectValue scalar type/choices).
+        Called at finished-cfg boundaries (``make_default_cfg`` output,
+        ``to_raw_dict`` before lowering); NOT in ``__post_init__`` (that would
+        reject legal editing intermediates)."""
         from .lowering import validate_section
 
         validate_section(self.spec, self.value, ml, [])
+
+    def validate_dynamic(self, md: "MetaDict", ml: "Optional[ModuleLibrary]") -> None:
+        """Fast-fail if the value tree cannot be lowered with the given md.
+
+        The *dynamic* contract: every scalar must have a value (no
+        DirectValue(None)), every EvalValue must resolve against md, every
+        device ref must be selected. Called by ``to_raw_dict`` before lowering
+        when md is available — the lowering itself has its own (overlapping)
+        checks as a safety net."""
+        from .lowering import validate_dynamic_section
+
+        validate_dynamic_section(self.spec, self.value, md, ml, [])
 
     def to_raw_dict(
         self, md: "Optional[MetaDict]", ml: "Optional[ModuleLibrary]"
@@ -618,4 +629,6 @@ class CfgSchema:
         from .lowering import _section_to_dict_inner
 
         self.validate(ml)
+        if md is not None:
+            self.validate_dynamic(md, ml)
         return _section_to_dict_inner(self.spec, self.value, ml, [], md)

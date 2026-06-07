@@ -398,3 +398,120 @@ def _validate_scalar(spec: ScalarSpec, node_val: DirectValue, full_path: str) ->
             f"Config field '{full_path}' value {val!r} is not in allowed choices "
             f"{spec.choices!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Dynamic schema validation — every value must be lowerable with the given md.
+#
+# This is the "dynamic" half: every scalar must have a value (no
+# DirectValue(None)), every EvalValue must resolve against md, every device
+# ref must be selected. Checked by ``to_raw_dict`` before lowering when md
+# is available. The lowering itself has its own (overlapping) checks as a
+# safety net (plan A — redundant but safe).
+# ---------------------------------------------------------------------------
+
+
+def validate_dynamic_section(
+    spec: CfgSectionSpec,
+    value: CfgSectionValue,
+    md: "MetaDict",
+    ml: "Optional[ModuleLibrary]",
+    path: "list[str]",
+) -> None:
+    """Fast-fail if ``value`` cannot be lowered with the given ``md``.
+
+    Raises ``RuntimeError`` at the first problem (the path is reported).
+    """
+    for key, node_spec in spec.fields.items():
+        full_path = ".".join([*path, key])
+        node_val = value.fields.get(key)
+        _validate_dynamic_node(node_spec, node_val, md, ml, full_path)
+
+
+def _validate_dynamic_node(
+    spec: object,
+    node_val: object,
+    md: "MetaDict",
+    ml: "Optional[ModuleLibrary]",
+    full_path: str,
+) -> None:
+    if node_val is None:
+        if isinstance(spec, (ModuleRefSpec, WaveformRefSpec)) and spec.optional:
+            return
+        # Non-optional None is a static error (caught by validate_section);
+        # if we reach here it means static validation was skipped — bail out.
+        return
+
+    if isinstance(spec, LiteralSpec):
+        return
+
+    if isinstance(spec, ScalarSpec):
+        if isinstance(node_val, DirectValue):
+            if node_val.value is None:
+                label = spec.label or full_path.rsplit(".", 1)[-1]
+                raise RuntimeError(
+                    f"Config field '{full_path}' ({label}) is unset (no value to lower)"
+                )
+            return
+        if isinstance(node_val, EvalValue):
+            label = spec.label or full_path.rsplit(".", 1)[-1]
+            _validate_eval(node_val, md, spec.type, full_path, label)
+            return
+        return
+
+    if isinstance(spec, SweepSpec):
+        if isinstance(node_val, SweepValue):
+            if isinstance(node_val.start, EvalValue):
+                _validate_eval(
+                    node_val.start, md, float, f"{full_path}.start", "Sweep start"
+                )
+            if isinstance(node_val.stop, EvalValue):
+                _validate_eval(
+                    node_val.stop, md, float, f"{full_path}.stop", "Sweep stop"
+                )
+        return
+
+    if isinstance(spec, DeviceRefSpec):
+        if isinstance(node_val, DirectValue):
+            if not isinstance(node_val.value, str) or not node_val.value:
+                label = spec.label or full_path.rsplit(".", 1)[-1]
+                raise RuntimeError(
+                    f"Config field '{full_path}' ({label}) device not selected"
+                )
+        return
+
+    if isinstance(spec, (ModuleRefSpec, WaveformRefSpec)):
+        if isinstance(node_val, (ModuleRefValue, WaveformRefValue)):
+            if isinstance(node_val.value, CfgSectionValue):
+                chosen_spec = _find_allowed_spec(spec, node_val, ml)
+                validate_dynamic_section(
+                    chosen_spec, node_val.value, md, ml, [full_path]
+                )
+        return
+
+    if isinstance(spec, CfgSectionSpec):
+        if isinstance(node_val, CfgSectionValue):
+            validate_dynamic_section(spec, node_val, md, ml, [full_path])
+        return
+
+
+def _validate_eval(
+    value: EvalValue,
+    md: "MetaDict",
+    type_: type,
+    full_path: str,
+    label: str,
+) -> None:
+    from zcu_tools.gui.app.main.expression import (
+        coerce_eval_result,
+        evaluate_numeric_expr,
+    )
+
+    try:
+        result = evaluate_numeric_expr(value.expr, md)
+        coerce_eval_result(result, type_)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Config field '{full_path}' ({label}) expression "
+            f"{value.expr!r} failed: {exc}"
+        ) from exc
