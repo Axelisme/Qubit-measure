@@ -12,7 +12,7 @@ went to the Caretaker, this codec stays as WorkspaceService's helper.
 
 from __future__ import annotations
 
-from typing import Optional, Union
+from typing import Union
 
 from zcu_tools.gui.app.main.adapter import (
     CfgNodeSpec,
@@ -22,7 +22,6 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     DeviceRefSpec,
     DirectValue,
-    DisabledRefValue,
     EvalValue,
     LiteralSpec,
     ModuleRefSpec,
@@ -75,23 +74,41 @@ def raw_to_schema(base_schema: CfgSchema, raw_cfg: dict[str, object]) -> CfgSche
 def _section_value_to_raw(
     spec: CfgSectionSpec, value: CfgSectionValue
 ) -> dict[str, object]:
+    # A ``None`` entry for an *optional ref* is the disabled state (ADR-0021) and
+    # serialises to a ``{"__kind": "disabled"}`` marker (the key is written, not
+    # omitted) so the disabled state survives reload. A ``None`` for any other
+    # node means the adapter's default value tree left it out (e.g. a locked
+    # LiteralSpec, or a key the adapter omits) — fall back to the node's default
+    # so the persisted payload stays a faithful, complete picture.
     payload: dict[str, object] = {}
     for key, node_spec in spec.fields.items():
         node_val = value.fields.get(key)
         if node_val is None:
-            continue
-        payload[key] = _node_value_to_raw(node_spec, node_val)
+            if isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
+                payload[key] = {"__kind": "disabled"}
+            else:
+                payload[key] = _node_value_to_raw(
+                    node_spec, _default_node_value(node_spec)
+                )
+        else:
+            payload[key] = _node_value_to_raw(node_spec, node_val)
     return payload
+
+
+def _default_node_value(spec: CfgNodeSpec) -> CfgNodeValue:
+    """Build the default value for a single spec node (the adapter omitted its
+    key, e.g. a locked LiteralSpec). Mirrors make_default_value for one node.
+    Only called for non-ref specs, whose default is never None."""
+    wrapper = make_default_value(CfgSectionSpec(fields={"_": spec}))
+    default = wrapper.fields["_"]
+    assert default is not None
+    return default
 
 
 def _node_value_to_raw(spec: CfgNodeSpec, value: CfgNodeValue) -> object:
     if isinstance(spec, LiteralSpec):
         # Fixed-value field; the literal value is canonical.
-        return {
-            "__kind": "direct",
-            "value": _to_json_compatible(spec.value),
-            "is_unset": False,
-        }
+        return {"__kind": "direct", "value": _to_json_compatible(spec.value)}
     if isinstance(spec, ScalarSpec):
         assert isinstance(value, (DirectValue, EvalValue))
         if isinstance(value, EvalValue):
@@ -99,11 +116,7 @@ def _node_value_to_raw(spec: CfgNodeSpec, value: CfgNodeValue) -> object:
                 "__kind": "eval",
                 "expr": value.expr,
             }
-        return {
-            "__kind": "direct",
-            "value": _to_json_compatible(value.value),
-            "is_unset": value.is_unset,
-        }
+        return {"__kind": "direct", "value": _to_json_compatible(value.value)}
     if isinstance(spec, SweepSpec):
         assert isinstance(value, SweepValue)
         return {
@@ -114,20 +127,11 @@ def _node_value_to_raw(spec: CfgNodeSpec, value: CfgNodeValue) -> object:
         }
     if isinstance(spec, DeviceRefSpec):
         assert isinstance(value, DirectValue)
-        return {
-            "__kind": "direct",
-            "value": _to_json_compatible(value.value),
-            "is_unset": value.is_unset,
-        }
+        return {"__kind": "direct", "value": _to_json_compatible(value.value)}
     if isinstance(spec, CfgSectionSpec):
         assert isinstance(value, CfgSectionValue)
         return _section_value_to_raw(spec, value)
     if isinstance(spec, ModuleRefSpec):
-        # An optional ModuleRef that is disabled carries a DisabledRefValue
-        # marker (ADR-0012), not a ModuleRefValue — persist it as such so the
-        # disabled state survives reload.
-        if isinstance(value, DisabledRefValue):
-            return {"__kind": "disabled"}
         assert isinstance(value, ModuleRefValue)
         return {
             "__kind": "module_ref",
@@ -139,8 +143,6 @@ def _node_value_to_raw(spec: CfgNodeSpec, value: CfgNodeValue) -> object:
             ),
         }
     if isinstance(spec, WaveformRefSpec):
-        if isinstance(value, DisabledRefValue):
-            return {"__kind": "disabled"}
         assert isinstance(value, WaveformRefValue)
         return {
             "__kind": "waveform_ref",
@@ -164,20 +166,30 @@ def _section_value_from_raw(
     spec: CfgSectionSpec,
     raw: dict[str, object],
 ) -> CfgSectionValue:
+    # Start from the complete default (ADR-0021); override each key present in
+    # ``raw``. A ``{"__kind": "disabled"}`` marker → ``None`` (disabled). A key
+    # genuinely absent from ``raw`` (old file / new field) keeps the default —
+    # which for an optional ref is already ``None`` (disabled), faithfully
+    # restoring the disabled state.
     value = make_default_value(spec)
     for key, node_spec in spec.fields.items():
         if key not in raw:
             continue
-        parsed = _node_value_from_raw(node_spec, raw[key])
-        if parsed is not None:
-            value.fields[key] = parsed
+        raw_node = raw[key]
+        if isinstance(raw_node, dict) and raw_node.get("__kind") == "disabled":
+            value.fields[key] = None
+        else:
+            value.fields[key] = _node_value_from_raw(node_spec, raw_node)
     return value
 
 
 def _node_value_from_raw(
     spec: CfgNodeSpec,
     raw: object,
-) -> Optional[CfgNodeValue]:
+) -> CfgNodeValue:
+    if isinstance(spec, LiteralSpec):
+        # Locked field: the value is canonical from the spec, ignore the payload.
+        return DirectValue(spec.value)
     if isinstance(spec, ScalarSpec):
         if (
             isinstance(raw, dict)
@@ -186,9 +198,8 @@ def _node_value_from_raw(
         ):
             return EvalValue(expr=raw["expr"], resolved=None, error=None)
         if isinstance(raw, dict) and raw.get("__kind") == "direct":
-            value = raw.get("value")
-            is_unset = bool(raw.get("is_unset", False))
-            return DirectValue(value=value, is_unset=is_unset)
+            # ``value`` is None when the scalar is unset (ADR-0021).
+            return DirectValue(value=raw.get("value"))
         if isinstance(raw, str) and raw.strip().startswith("="):
             raise RuntimeError("Legacy scalar '=expr' payload is unsupported")
         return DirectValue(raw)
@@ -208,7 +219,7 @@ def _node_value_from_raw(
             value = raw.get("value")
             if not isinstance(value, str):
                 raise RuntimeError("Device reference value must be string")
-            return DirectValue(value, is_unset=bool(raw.get("is_unset", False)))
+            return DirectValue(value)
         raise RuntimeError("Device reference must use direct payload encoding")
     if isinstance(spec, CfgSectionSpec):
         if not isinstance(raw, dict):
@@ -218,7 +229,7 @@ def _node_value_from_raw(
         return _ref_value_from_raw(spec, raw)
     if isinstance(spec, WaveformRefSpec):
         return _waveform_ref_value_from_raw(spec, raw)
-    return None
+    raise RuntimeError(f"Unsupported spec node for restore: {type(spec).__name__}")
 
 
 def _parse_sweep_edge(raw: object) -> Union[float, EvalValue]:
@@ -238,9 +249,9 @@ def _parse_sweep_edge(raw: object) -> Union[float, EvalValue]:
 def _ref_value_from_raw(
     spec: ModuleRefSpec,
     raw: object,
-) -> Union[ModuleRefValue, DisabledRefValue]:
-    if isinstance(raw, dict) and raw.get("__kind") == "disabled":
-        return DisabledRefValue()
+) -> ModuleRefValue:
+    # The disabled marker is handled by the caller (``_section_value_from_raw``
+    # maps it to None) — this only decodes an enabled ref.
     if (
         isinstance(raw, dict)
         and raw.get("__kind") == "module_ref"
@@ -261,9 +272,7 @@ def _ref_value_from_raw(
 def _waveform_ref_value_from_raw(
     spec: WaveformRefSpec,
     raw: object,
-) -> Union[WaveformRefValue, DisabledRefValue]:
-    if isinstance(raw, dict) and raw.get("__kind") == "disabled":
-        return DisabledRefValue()
+) -> WaveformRefValue:
     if (
         isinstance(raw, dict)
         and raw.get("__kind") == "waveform_ref"

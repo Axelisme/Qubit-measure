@@ -232,8 +232,8 @@ def test_scalar_widget_unresolved_eval_can_switch_back_to_direct(qapp, ctrl):
 
     value = field.get_value()
     assert isinstance(value, DirectValue)
-    assert value.is_unset is True
-    assert value.value == pytest.approx(0.0)
+    # unset scalar is value=None (ADR-0021) — no placeholder default
+    assert value.value is None
     assert w._mode == "direct"
     spin = w.findChild(QDoubleSpinBox)
     assert spin is not None

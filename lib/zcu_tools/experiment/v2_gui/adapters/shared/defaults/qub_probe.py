@@ -9,11 +9,11 @@ the field is optional and nothing matches. See ADR-0009.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
-from typing_extensions import Literal, Union, overload
+from typing_extensions import Literal, overload
 
-from zcu_tools.gui.app.main.adapter import DisabledRefValue, ModuleRefValue
+from zcu_tools.gui.app.main.adapter import ModuleRefValue
 from zcu_tools.gui.app.main.specs.pulse import make_pulse_spec
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 
@@ -56,7 +56,7 @@ def make_qub_probe_ref_default(
     preferred_names: list[str] = ...,
     *,
     optional: Literal[True],
-) -> Union[ModuleRefValue, DisabledRefValue]: ...
+) -> Optional[ModuleRefValue]: ...
 
 
 def make_qub_probe_ref_default(
@@ -64,7 +64,7 @@ def make_qub_probe_ref_default(
     preferred_names: list[str] = QUB_PROBE_NAMES,
     *,
     optional: bool = False,
-) -> Union[ModuleRefValue, DisabledRefValue]:
+) -> Optional[ModuleRefValue]:
     """Reference a library qubit probe pulse, else fall back to the blank one."""
     selected = select_named_module_value(
         ml=ctx.ml, module_type=PulseCfg, preferred_names=preferred_names
@@ -72,5 +72,5 @@ def make_qub_probe_ref_default(
     if selected is not None:
         return ModuleRefValue(chosen_key=selected.name, value=selected.value)
     if optional:
-        return DisabledRefValue()  # ADR-0012: present-but-disabled marker
+        return None  # optional ref disabled (ADR-0021)
     return make_qub_probe_default(ctx)

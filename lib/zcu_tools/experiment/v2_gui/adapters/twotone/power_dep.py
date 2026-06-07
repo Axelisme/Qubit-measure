@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from typing_extensions import Any, ClassVar, TypeAlias
+from typing_extensions import Any, ClassVar, Optional, TypeAlias
 
 from zcu_tools.experiment.v2.twotone.power_dep import PowerCfg, PowerExp, PowerResult
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
@@ -107,10 +107,10 @@ class PowerDepAdapter(BaseAdapter[PowerCfg, PowerDepRunResult]):
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        _module_fields: dict[str, CfgNodeValue] = {
+        _module_fields: dict[str, Optional[CfgNodeValue]] = {
             "qub_pulse": make_qub_probe_default(ctx),
             "readout": make_readout_default(ctx),
-            # optional → DisabledRefValue when no library reset (ADR-0012)
+            # optional → None (disabled) when no library reset (ADR-0021)
             "reset": make_reset_ref_default(ctx, optional=True),
         }
         root_val = CfgSectionValue(

@@ -17,7 +17,6 @@ from .types import (
     ContextReadiness,
     DeviceRefSpec,
     DirectValue,
-    DisabledRefValue,
     EvalValue,
     ExpContext,
     ExperimentProtocol,

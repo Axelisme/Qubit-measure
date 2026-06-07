@@ -6,7 +6,11 @@ from __future__ import annotations
 from typing import cast
 
 import pytest
-from zcu_tools.gui.app.main.adapter import DirectValue, WaveformRefValue
+from zcu_tools.gui.app.main.adapter import (
+    CfgSectionValue,
+    DirectValue,
+    WaveformRefValue,
+)
 from zcu_tools.gui.app.main.cfg_schemas import (
     module_cfg_to_value,
     waveform_cfg_to_value,
@@ -20,16 +24,16 @@ def test_waveform_cfg_to_value():
     assert cast(DirectValue, val.fields["style"]).value == "gauss"
     assert cast(DirectValue, val.fields["length"]).value == 2.0
     assert cast(DirectValue, val.fields["sigma"]).value == 0.5
-    assert cast(DirectValue, val.fields["sigma"]).is_unset is False
+    # present key → value set (not unset, ADR-0021)
+    assert cast(DirectValue, val.fields["sigma"]).value is not None
 
 
 def test_waveform_cfg_to_value_missing_fields():
     cfg = {"style": "gauss"}
     spec, val = waveform_cfg_to_value(cfg)
 
-    # Defaults should be loaded but marked as unset
-    assert cast(DirectValue, val.fields["length"]).value == 1.0
-    assert cast(DirectValue, val.fields["length"]).is_unset is True
+    # A missing key is unset (value is None, ADR-0021) — no hard-coded default.
+    assert cast(DirectValue, val.fields["length"]).value is None
 
 
 def test_waveform_cfg_flat_top():
@@ -52,8 +56,8 @@ def test_module_cfg_to_value_direct_readout():
 
     assert cast(DirectValue, val.fields["type"]).value == "readout/direct"
     assert cast(DirectValue, val.fields["ro_freq"]).value == 7000.0
-    assert cast(DirectValue, val.fields["ro_length"]).is_unset is True
-    assert cast(DirectValue, val.fields["ro_length"]).value == 1.0
+    # missing key → unset (value is None, no hard-coded default; ADR-0021)
+    assert cast(DirectValue, val.fields["ro_length"]).value is None
 
 
 def test_module_cfg_to_value_pulse_reset():
@@ -61,9 +65,9 @@ def test_module_cfg_to_value_pulse_reset():
     spec, val = module_cfg_to_value(cfg)
 
     assert cast(DirectValue, val.fields["type"]).value == "reset/pulse"
-    pulse_val = val.fields["pulse_cfg"]
+    pulse_val = cast(CfgSectionValue, val.fields["pulse_cfg"])
     assert cast(DirectValue, pulse_val.fields["freq"]).value == 5000.0
-    assert cast(DirectValue, pulse_val.fields["gain"]).is_unset is True
+    assert cast(DirectValue, pulse_val.fields["gain"]).value is None
 
 
 def test_module_cfg_to_value_unknown_type_raises():
@@ -113,16 +117,16 @@ def test_module_cfg_to_value_pulse_basic():
     assert cast(DirectValue, val.fields["type"]).value == "pulse"
     assert cast(DirectValue, val.fields["freq"]).value == 5500.0
     assert cast(DirectValue, val.fields["gain"]).value == 0.8
-    assert cast(DirectValue, val.fields["freq"]).is_unset is False
+    assert cast(DirectValue, val.fields["freq"]).value is not None
 
 
 def test_module_cfg_to_value_pulse_missing_fields():
     cfg = {"type": "pulse"}
     spec, val = module_cfg_to_value(cfg)
 
-    assert cast(DirectValue, val.fields["freq"]).is_unset is True
-    assert cast(DirectValue, val.fields["freq"]).value == 6000.0
-    assert cast(DirectValue, val.fields["gain"]).is_unset is True
+    # missing keys → unset (value is None, ADR-0021)
+    assert cast(DirectValue, val.fields["freq"]).value is None
+    assert cast(DirectValue, val.fields["gain"]).value is None
 
 
 def test_module_cfg_to_value_pulse_round_trip():

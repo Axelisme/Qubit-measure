@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass
 
 from matplotlib.figure import Figure
-from typing_extensions import Annotated, Any, ClassVar, Sequence, TypeAlias
+from typing_extensions import Annotated, Any, ClassVar, Optional, Sequence, TypeAlias
 
 from zcu_tools.experiment.v2.twotone.rabi.len_rabi import (
     LenRabiCfg,
@@ -131,10 +131,10 @@ class LenRabiAdapter(
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         sweep_stop = md_eval_scaled(ctx, "pi_len", factor=4.0, fallback=0.1)
-        _module_fields: dict[str, CfgNodeValue] = {
+        _module_fields: dict[str, Optional[CfgNodeValue]] = {
             "qub_pulse": make_qub_probe_default(ctx),
             "readout": make_readout_ref_default(ctx),
-            # optional → DisabledRefValue when no library reset (ADR-0012)
+            # optional → None (disabled) when no library reset (ADR-0021)
             "reset": make_reset_ref_default(ctx, optional=True),
         }
         root_val = CfgSectionValue(

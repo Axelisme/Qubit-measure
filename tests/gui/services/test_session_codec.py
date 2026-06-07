@@ -12,9 +12,10 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     DeviceRefSpec,
     DirectValue,
-    DisabledRefValue,
     EvalValue,
+    LiteralSpec,
     ModuleRefSpec,
+    ModuleRefValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
@@ -126,7 +127,8 @@ def test_waveform_ref_roundtrip():
 
 
 def test_disabled_module_ref_roundtrip():
-    """A disabled optional ModuleRef (DisabledRefValue, ADR-0012) survives."""
+    """A disabled optional ModuleRef is ``None`` in the value tree (ADR-0021)
+    and survives capture/restore as None — not re-enabled to the first allowed."""
     inner_spec = CfgSectionSpec(
         fields={"gain": ScalarSpec(label="Gain", type=float)},
         label="Pulse",
@@ -139,13 +141,30 @@ def test_disabled_module_ref_roundtrip():
                 ),
             }
         ),
-        value=CfgSectionValue(fields={"reset": DisabledRefValue()}),
+        value=CfgSectionValue(fields={"reset": None}),
     )
 
     raw = schema_to_raw(schema)
     assert raw["reset"] == {"__kind": "disabled"}
     restored = raw_to_schema(_empty(schema.spec), raw)
-    assert isinstance(restored.value.fields["reset"], DisabledRefValue)
+    assert restored.value.fields["reset"] is None
+
+
+def test_disabled_module_ref_missing_key_restores_to_none():
+    """A key absent from the persisted payload (old file / never stored) for an
+    optional ref restores to None (disabled), not the enabled allowed[0] —
+    this is the lookback persist bug (ADR-0021)."""
+    inner_spec = CfgSectionSpec(
+        fields={"gain": ScalarSpec(label="Gain", type=float)},
+        label="Pulse",
+    )
+    spec = CfgSectionSpec(
+        fields={
+            "reset": ModuleRefSpec(allowed=[inner_spec], label="Reset", optional=True),
+        }
+    )
+    restored = raw_to_schema(CfgSchema(spec=spec, value=_empty(spec).value), {})
+    assert restored.value.fields["reset"] is None
 
 
 def test_disabled_waveform_ref_roundtrip():
@@ -161,13 +180,41 @@ def test_disabled_waveform_ref_roundtrip():
                 ),
             }
         ),
-        value=CfgSectionValue(fields={"wf": DisabledRefValue()}),
+        value=CfgSectionValue(fields={"wf": None}),
     )
 
     raw = schema_to_raw(schema)
     assert raw["wf"] == {"__kind": "disabled"}
     restored = raw_to_schema(_empty(schema.spec), raw)
-    assert isinstance(restored.value.fields["wf"], DisabledRefValue)
+    assert restored.value.fields["wf"] is None
+
+
+def test_enabled_module_ref_roundtrip():
+    """A non-disabled optional ModuleRef survives as an enabled ModuleRefValue."""
+    inner_spec = CfgSectionSpec(
+        fields={"gain": ScalarSpec(label="Gain", type=float)},
+        label="Pulse",
+    )
+    spec = CfgSectionSpec(
+        fields={
+            "reset": ModuleRefSpec(allowed=[inner_spec], label="Reset", optional=True),
+        }
+    )
+    schema = CfgSchema(
+        spec=spec,
+        value=CfgSectionValue(
+            fields={
+                "reset": ModuleRefValue(
+                    "<Custom:Pulse>",
+                    CfgSectionValue(fields={"gain": DirectValue(0.3)}),
+                )
+            }
+        ),
+    )
+    restored = raw_to_schema(_empty(spec), schema_to_raw(schema))
+    reset = restored.value.fields["reset"]
+    assert isinstance(reset, ModuleRefValue)
+    assert reset.value.fields["gain"] == DirectValue(0.3)
 
 
 def test_waveform_ref_preserves_override():
@@ -215,7 +262,7 @@ def test_device_ref_value_must_be_string():
     ):
         raw_to_schema(
             base,
-            {"dev": {"__kind": "direct", "value": 123, "is_unset": False}},
+            {"dev": {"__kind": "direct", "value": 123}},
         )
 
 
@@ -226,3 +273,27 @@ def test_device_ref_must_use_direct_encoding():
     )
     with pytest.raises(SessionCodecError, match="Device reference must use direct"):
         raw_to_schema(base, {"dev": "lo_device"})
+
+
+def test_omitted_literal_key_round_trips_to_spec_value_not_disabled():
+    """A LiteralSpec key the adapter omits from its default value tree (e.g.
+    lookback's locked ``reps``) must serialise as its spec value, NOT as a
+    disabled marker — only optional refs use ``disabled`` (ADR-0021 regression:
+    lookback ``reps`` showed null in the cfg summary)."""
+    spec = CfgSectionSpec(
+        fields={
+            "reps": LiteralSpec(value=1, label="Reps"),
+            "rounds": ScalarSpec(label="Rounds", type=int),
+        }
+    )
+    # Adapter default omits the locked LiteralSpec key.
+    schema = CfgSchema(
+        spec=spec, value=CfgSectionValue(fields={"rounds": DirectValue(500)})
+    )
+
+    raw = schema_to_raw(schema)
+    assert raw["reps"] == {"__kind": "direct", "value": 1}  # not {"__kind":"disabled"}
+
+    restored = raw_to_schema(_empty(spec), raw)
+    reps = restored.value.fields["reps"]
+    assert isinstance(reps, DirectValue) and reps.value == 1

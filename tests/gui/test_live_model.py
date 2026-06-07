@@ -272,14 +272,49 @@ def test_optional_module_ref_noop_for_non_optional(env):
     assert field.is_enabled is True
 
 
-def test_optional_module_ref_parent_skips_key_when_disabled(env):
+def test_optional_module_ref_disabled_is_none_in_value(env):
+    """A disabled optional ModuleRef self-reports None — the key is present in
+    the (complete) value tree with value None, not omitted (ADR-0021)."""
     spec = _make_optional_module_ref_spec()
     initial = CfgSectionValue(fields={"reps": DirectValue(10)})
     parent = SectionLiveField(spec, env, initial_val=initial)
 
     val = parent.get_value()
-    assert "module" not in val.fields
+    assert val.fields["module"] is None
     assert val.fields["reps"] == DirectValue(10)
+
+
+def test_module_ref_set_value_none_disables(env):
+    """set_value(None) disables an optional ref; get_value round-trips to None
+    (ADR-0021) — symmetric set/get, no TypeError."""
+    spec = _make_optional_module_ref_spec()
+    inner_val = ModuleRefValue(
+        "<Custom:Pulse>", CfgSectionValue(fields={"ch": DirectValue(3)})
+    )
+    parent = SectionLiveField(
+        spec, env, initial_val=CfgSectionValue(fields={"module": inner_val})
+    )
+    field = cast(ModuleRefLiveField, parent.fields["module"])
+    assert field.is_enabled is True
+    assert field.get_value() is not None
+
+    field.set_value(None)
+    assert field.is_enabled is False
+    assert field.get_value() is None
+
+
+def test_module_ref_disabled_then_reenabled_round_trips(env):
+    """Disable then re-enable an optional ref: re-enabling reveals the default
+    shape (chosen_key set), not a crash."""
+    spec = _make_optional_module_ref_spec()
+    parent = SectionLiveField(spec, env, initial_val=CfgSectionValue(fields={}))
+    field = cast(ModuleRefLiveField, parent.fields["module"])
+    assert field.is_enabled is False
+    assert field.get_value() is None
+
+    field.set_enabled(True)
+    out = field.get_value()
+    assert isinstance(out, ModuleRefValue)
 
 
 def test_module_ref_sub_edit_marks_overridden_in_get_value(env, monkeypatch):
@@ -317,6 +352,7 @@ def test_module_ref_sub_edit_marks_overridden_in_get_value(env, monkeypatch):
     field = cast(ModuleRefLiveField, section.fields["module"])
 
     out = field.get_value()
+    assert out is not None
     assert out.chosen_key == "lib_mod"
     assert out.is_overridden is True
 
@@ -350,6 +386,7 @@ def test_module_ref_overridden_dangling_self_heals_to_custom(env):
     assert field.get_chosen_key() == "<Custom:Pulse>"
     assert field.is_valid() is True
     out = field.get_value()
+    assert out is not None
     ch = out.value.fields["ch"]
     assert isinstance(ch, DirectValue) and ch.value == 7
 
@@ -409,7 +446,9 @@ def test_modified_ref_self_heals_when_library_key_deleted_at_runtime(env, monkey
 
     assert field.get_chosen_key() == "<Custom:Const>"
     assert field.is_valid() is True
-    length = field.get_value().value.fields["length"]
+    out = field.get_value()
+    assert out is not None
+    length = out.value.fields["length"]
     assert isinstance(length, DirectValue)
     assert length.value == 99.9
 
@@ -433,7 +472,9 @@ def test_module_ref_custom_key_is_never_overridden(env):
     field = cast(ModuleRefLiveField, section.fields["module"])
 
     assert field.is_modified() is False
-    assert field.get_value().is_overridden is False
+    out = field.get_value()
+    assert out is not None
+    assert out.is_overridden is False
 
 
 def test_linked_ref_missing_key_is_invalid_and_relinks_on_readd(env, monkeypatch):

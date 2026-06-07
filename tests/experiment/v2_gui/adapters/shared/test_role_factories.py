@@ -20,7 +20,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_reset_ref_default,
 )
 from zcu_tools.gui.app.main.adapter import (
-    DisabledRefValue,
     EvalValue,
     ModuleRefValue,
     WaveformRefValue,
@@ -92,9 +91,7 @@ def test_pi2_pulse_ref_falls_back_to_blank():
 
 
 def test_pi_pulse_ref_optional_returns_disabled_when_lib_empty():
-    assert isinstance(
-        make_pi_pulse_ref_default(_empty_ctx(), optional=True), DisabledRefValue
-    )
+    assert make_pi_pulse_ref_default(_empty_ctx(), optional=True) is None
 
 
 # --- readout (blank inline pulse+ro_cfg; ref to library) --------------------
@@ -155,9 +152,7 @@ def test_readout_ref_falls_back_to_blank():
 
 
 def test_readout_ref_optional_returns_disabled_when_lib_empty():
-    assert isinstance(
-        make_readout_ref_default(_empty_ctx(), optional=True), DisabledRefValue
-    )
+    assert make_readout_ref_default(_empty_ctx(), optional=True) is None
 
 
 # --- reset ------------------------------------------------------------------
@@ -169,9 +164,7 @@ def test_reset_default_returns_blank_pulse_reset():
 
 
 def test_reset_ref_optional_returns_disabled_when_lib_empty():
-    assert isinstance(
-        make_reset_ref_default(_empty_ctx(), optional=True), DisabledRefValue
-    )
+    assert make_reset_ref_default(_empty_ctx(), optional=True) is None
 
 
 # --- waveforms --------------------------------------------------------------

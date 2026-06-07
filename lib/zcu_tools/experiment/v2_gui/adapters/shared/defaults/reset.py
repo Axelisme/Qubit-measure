@@ -7,13 +7,12 @@ each has its own blank builder. ``make_reset_default`` is the role's blank
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
-from typing_extensions import Literal, Union, overload
+from typing_extensions import Literal, overload
 
 from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
-    DisabledRefValue,
     ModuleRefValue,
 )
 from zcu_tools.gui.app.main.specs.reset import (
@@ -101,7 +100,7 @@ def make_reset_ref_default(
     preferred_names: list[str] = ...,
     *,
     optional: Literal[True],
-) -> Union[ModuleRefValue, DisabledRefValue]: ...
+) -> Optional[ModuleRefValue]: ...
 
 
 def make_reset_ref_default(
@@ -109,13 +108,12 @@ def make_reset_ref_default(
     preferred_names: list[str] = RESET_NAMES,
     *,
     optional: bool = False,
-) -> Union[ModuleRefValue, DisabledRefValue]:
+) -> Optional[ModuleRefValue]:
     """Reference a calibrated library reset, else fall back to a blank pulse reset.
 
-    ADR-0012: when ``optional`` and no library reset is found, return a
-    ``DisabledRefValue`` marker (the field is present but not enabled) rather
-    than None — so the adapter drops it straight into ``modules`` fields without
-    an ``if x is not None`` guard, symmetric with the optional spec.
+    ADR-0021: when ``optional`` and no library reset is found, return ``None``
+    (the optional ref's disabled state) — the value tree keeps the field as a
+    present ``None`` entry, symmetric with the optional spec.
     """
     selected = select_named_module_value(
         ml=ctx.ml, module_type=AbsResetCfg, preferred_names=preferred_names
@@ -123,5 +121,5 @@ def make_reset_ref_default(
     if selected is not None:
         return ModuleRefValue(chosen_key=selected.name, value=selected.value)
     if optional:
-        return DisabledRefValue()
+        return None  # optional ref disabled (ADR-0021)
     return make_reset_default(ctx)

@@ -1229,7 +1229,9 @@ def _strip_cfg_tags(raw: object) -> object:
     if isinstance(raw, dict):
         kind = raw.get("__kind")
         if kind == "direct":
-            return raw.get("value") if not raw.get("is_unset") else None
+            return raw.get("value")  # None means unset (ADR-0021)
+        elif kind == "disabled":
+            return None  # disabled optional ref (ADR-0021)
         elif kind == "eval":
             return raw.get("expr")
         elif kind in ("module_ref", "waveform_ref"):

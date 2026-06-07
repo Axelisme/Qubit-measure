@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass
 
 from matplotlib.figure import Figure
-from typing_extensions import Annotated, Any, ClassVar, Sequence, TypeAlias
+from typing_extensions import Annotated, Any, ClassVar, Optional, Sequence, TypeAlias
 
 from zcu_tools.experiment.v2.twotone.time_domain.t2ramsey import (
     T2RamseyCfg,
@@ -136,10 +136,10 @@ class T2RamseyAdapter(
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         sweep_stop = md_eval_scaled(ctx, "t2r", factor=4.0, fallback=20.0)
         relax_delay = proper_relax(ctx)
-        _module_fields: dict[str, CfgNodeValue] = {
+        _module_fields: dict[str, Optional[CfgNodeValue]] = {
             "pi2_pulse": make_pi2_pulse_ref_default(ctx),
             "readout": make_readout_ref_default(ctx),
-            # optional → DisabledRefValue when no library reset (ADR-0012)
+            # optional → None (disabled) when no library reset (ADR-0021)
             "reset": make_reset_ref_default(ctx, optional=True),
         }
         root_val = CfgSectionValue(

@@ -448,8 +448,14 @@ CfgNodeSpec = Union[
 
 @dataclass(frozen=True)
 class DirectValue:
-    value: Any
-    is_unset: bool = False
+    """A directly-entered scalar value. ``value is None`` means *unset* (the
+    field has no value yet) — there is no separate ``is_unset`` flag, the value
+    itself is the single source of truth (ADR-0021). Scalar types are only
+    int/float/str/bool, whose legal values are never ``None``, so ``None``
+    unambiguously means unset. The ``DirectValue`` wrapper is kept even when
+    unset so the scalar's *mode* (direct vs ``EvalValue``) survives."""
+
+    value: Optional[Any] = None
 
 
 @dataclass(frozen=True)
@@ -530,24 +536,14 @@ class WaveformRefValue:
         return self
 
 
-@dataclass(frozen=True)
-class DisabledRefValue:
-    """A first-class "this optional ModuleRef/WaveformRef field is not enabled"
-    value (ADR-0012).
-
-    Symmetric with the spec side: an optional field is *always* present in the
-    spec tree (``ModuleRefSpec(optional=True)``) and is *always* present in the
-    value tree — a disabled one carries this marker instead of forcing each
-    adapter to omit the key with an ``if x is not None`` guard. LiveModel maps it
-    to ``is_enabled=False`` (and lowering omits the key, exactly as a missing key
-    does). A pure marker: enabling reveals the spec's default shape, so it needs
-    no payload. Distinct from selecting a "None Reset" entry, which is a real
-    (enabled) reset choice, not an absent field."""
-
-
 @dataclass
 class CfgSectionValue:
-    fields: dict[str, "CfgNodeValue"] = field(default_factory=dict)
+    # The value tree is always *complete*: every spec field has a corresponding
+    # entry (no missing keys, ADR-0021). A disabled optional ModuleRef/WaveformRef
+    # is represented by ``None`` (the entry is present, its value is None) — never
+    # by omitting the key. "None" here means "this optional ref is not enabled",
+    # distinct from a "None Reset" library entry (a real, enabled reset choice).
+    fields: dict[str, "Optional[CfgNodeValue]"] = field(default_factory=dict)
 
     def with_field(self, path: str, value: ScalarLeafInput) -> Self:
         """Set the scalar leaf at dotted ``path`` (in-place, returns self).
@@ -583,7 +579,6 @@ CfgNodeValue = Union[
     SweepValue,
     ModuleRefValue,
     WaveformRefValue,
-    DisabledRefValue,
     CfgSectionValue,
 ]
 

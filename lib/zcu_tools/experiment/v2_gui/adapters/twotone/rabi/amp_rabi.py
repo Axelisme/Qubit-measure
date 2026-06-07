@@ -137,7 +137,7 @@ class AmpRabiAdapter(
                     fields={
                         "qub_pulse": make_qub_probe_default(ctx),
                         "readout": make_readout_ref_default(ctx),
-                        # optional → DisabledRefValue when no library reset (ADR-0012)
+                        # optional → None (disabled) when no library reset (ADR-0021)
                         "reset": make_reset_ref_default(ctx, optional=True),
                     }
                 ),

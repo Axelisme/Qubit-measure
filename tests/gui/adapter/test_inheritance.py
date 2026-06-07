@@ -15,6 +15,7 @@ from zcu_tools.gui.app.main.adapter import (
     WaveformRefSpec,
     WaveformRefValue,
     inherit_from,
+    make_default_value,
 )
 from zcu_tools.gui.app.main.specs.readout import (
     make_direct_readout_spec,
@@ -329,3 +330,44 @@ def test_pulse_to_direct_missing_ro_cfg_uses_default():
     ro_ch = result.fields.get("ro_ch")
     assert isinstance(ro_ch, DirectValue)
     assert ro_ch.value == 0
+
+
+# ---------------------------------------------------------------------------
+# make_default_value: complete value tree + optional ref → None (ADR-0021)
+# ---------------------------------------------------------------------------
+
+
+def test_make_default_value_is_complete_and_optional_ref_is_none():
+    """The default value tree has an entry for every spec field (no missing
+    keys); an optional ModuleRef/WaveformRef defaults to None (disabled), a
+    non-optional one to an enabled ref (ADR-0021)."""
+    inner = CfgSectionSpec(label="Pulse", fields={"ch": ScalarSpec("Ch", int)})
+    spec = CfgSectionSpec(
+        fields={
+            "reps": ScalarSpec("Reps", int),
+            "opt_mod": ModuleRefSpec(allowed=[inner], label="Opt", optional=True),
+            "req_mod": ModuleRefSpec(allowed=[inner], label="Req", optional=False),
+            "opt_wf": WaveformRefSpec(allowed=[inner], label="OptWf", optional=True),
+        }
+    )
+    val = make_default_value(spec)
+
+    # complete: every spec field has an entry
+    assert set(val.fields) == set(spec.fields)
+    # optional refs default to None (disabled)
+    assert val.fields["opt_mod"] is None
+    assert val.fields["opt_wf"] is None
+    # non-optional ref defaults to an enabled ModuleRefValue
+    assert isinstance(val.fields["req_mod"], ModuleRefValue)
+
+
+def test_inherit_from_preserves_disabled_optional_ref():
+    """Inheriting from an old value whose optional ref was disabled (None) keeps
+    it disabled in the new value (ADR-0021)."""
+    inner = CfgSectionSpec(label="Pulse", fields={"ch": ScalarSpec("Ch", int)})
+    spec = CfgSectionSpec(
+        fields={"reset": ModuleRefSpec(allowed=[inner], label="Reset", optional=True)}
+    )
+    old_val = CfgSectionValue(fields={"reset": None})
+    result = inherit_from(old_val, spec, spec)
+    assert result.fields["reset"] is None

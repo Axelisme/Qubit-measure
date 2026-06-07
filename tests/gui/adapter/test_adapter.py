@@ -535,7 +535,8 @@ def test_device_ref_normal_path_produces_device_name():
 
 def test_device_ref_is_unset_raises():
     spec = CfgSectionSpec(fields={"dev": DeviceRefSpec(label="Device")})
-    val = CfgSectionValue(fields={"dev": DirectValue(value="", is_unset=True)})
+    # An empty device ref is unset → lowering raises (ADR-0021: no is_unset flag).
+    val = CfgSectionValue(fields={"dev": DirectValue(value="")})
     s = CfgSchema(spec=spec, value=val)
     with pytest.raises(RuntimeError, match="unset"):
         s.to_raw_dict(None, _make_ml())

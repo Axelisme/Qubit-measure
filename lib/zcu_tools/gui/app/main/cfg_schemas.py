@@ -38,11 +38,14 @@ from zcu_tools.program.v2.modules.waveform import AbsWaveformCfg
 # ---------------------------------------------------------------------------
 
 
-def _val(cfg: dict, key: str, default: Any = None) -> ScalarValue:
-    """Extract a scalar value from dict, marking as is_unset if key is missing."""
+def _val(cfg: dict, key: str) -> ScalarValue:
+    """Extract a scalar value from a saved cfg dict. A missing key yields
+    ``DirectValue(None)`` — unset (ADR-0021), invalid until the user fills it;
+    the field's sensible default belongs to the spec / make_default_value, not
+    to a hard-coded fallback here."""
     if key not in cfg:
-        return DirectValue(value=default, is_unset=True)
-    return DirectValue(value=cfg[key], is_unset=False)
+        return DirectValue(value=None)
+    return DirectValue(value=cfg[key])
 
 
 # ---------------------------------------------------------------------------
@@ -66,32 +69,32 @@ def waveform_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionVal
         val = CfgSectionValue(
             fields={
                 "style": DirectValue("const"),
-                "length": _val(cfg, "length", 1.0),
+                "length": _val(cfg, "length"),
             }
         )
     elif style == "cosine":
         val = CfgSectionValue(
             fields={
                 "style": DirectValue("cosine"),
-                "length": _val(cfg, "length", 0.1),
+                "length": _val(cfg, "length"),
             }
         )
     elif style == "gauss":
         val = CfgSectionValue(
             fields={
                 "style": DirectValue("gauss"),
-                "length": _val(cfg, "length", 1.0),
-                "sigma": _val(cfg, "sigma", 0.25),
+                "length": _val(cfg, "length"),
+                "sigma": _val(cfg, "sigma"),
             }
         )
     elif style == "drag":
         val = CfgSectionValue(
             fields={
                 "style": DirectValue("drag"),
-                "length": _val(cfg, "length", 1.0),
-                "sigma": _val(cfg, "sigma", 0.25),
-                "delta": _val(cfg, "delta", -200.0),
-                "alpha": _val(cfg, "alpha", 0.5),
+                "length": _val(cfg, "length"),
+                "sigma": _val(cfg, "sigma"),
+                "delta": _val(cfg, "delta"),
+                "alpha": _val(cfg, "alpha"),
             }
         )
     elif style == "flat_top":
@@ -109,7 +112,7 @@ def waveform_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionVal
         val = CfgSectionValue(
             fields={
                 "style": DirectValue("flat_top"),
-                "length": _val(cfg, "length", 1.0),
+                "length": _val(cfg, "length"),
                 "raise_waveform": WaveformRefValue(
                     chosen_key=f"<Custom:{raise_spec.label}>",
                     value=raise_val,
@@ -120,7 +123,7 @@ def waveform_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionVal
         val = CfgSectionValue(
             fields={
                 "style": DirectValue("arb"),
-                "length": _val(cfg, "length", 1.0),
+                "length": _val(cfg, "length"),
                 "data": _val(cfg, "data"),
             }
         )
@@ -151,12 +154,12 @@ def _pulse_to_value(cfg: dict) -> CfgSectionValue:
                 value=wav_val,
             ),
             "ch": DirectValue(cfg.get("ch", 0)),
-            "nqz": _val(cfg, "nqz", 2),
-            "freq": _val(cfg, "freq", 6000.0),
-            "phase": _val(cfg, "phase", 0.0),
-            "gain": _val(cfg, "gain", 0.5),
-            "pre_delay": _val(cfg, "pre_delay", 0.0),
-            "post_delay": _val(cfg, "post_delay", 0.0),
+            "nqz": _val(cfg, "nqz"),
+            "freq": _val(cfg, "freq"),
+            "phase": _val(cfg, "phase"),
+            "gain": _val(cfg, "gain"),
+            "pre_delay": _val(cfg, "pre_delay"),
+            "post_delay": _val(cfg, "post_delay"),
         }
     )
 
@@ -166,9 +169,9 @@ def _direct_readout_to_value(cfg: dict) -> CfgSectionValue:
         fields={
             "type": DirectValue("readout/direct"),
             "ro_ch": DirectValue(cfg.get("ro_ch", 0)),
-            "ro_freq": _val(cfg, "ro_freq", 6000.0),
-            "ro_length": _val(cfg, "ro_length", 1.0),
-            "trig_offset": _val(cfg, "trig_offset", 0.0),
+            "ro_freq": _val(cfg, "ro_freq"),
+            "ro_length": _val(cfg, "ro_length"),
+            "trig_offset": _val(cfg, "trig_offset"),
         }
     )
 
@@ -247,7 +250,7 @@ def _bath_reset_to_value(cfg: dict) -> CfgSectionValue:
             "pi2_cfg": _pulse_to_value(pi2)
             if isinstance(pi2, dict)
             else make_default_value(make_pulse_spec()),
-            "relax_delay": _val(cfg, "relax_delay", 1.0),
+            "relax_delay": _val(cfg, "relax_delay"),
         }
     )
 

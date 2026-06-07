@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +25,23 @@ from .types import (
 
 
 def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
-    """Produce a default CfgSectionValue mirroring the given spec structure."""
-    fields: dict[str, CfgNodeValue] = {}
+    """Produce a default CfgSectionValue mirroring the given spec structure.
+
+    A helper for adapters' ``make_default_value(ctx)``: it guesses sensible
+    defaults (scalar 0, sweep range, choices[0]) so an adapter need not spell out
+    every field — special cases are overridden via the value OO fluent. The
+    result is **complete**: every spec field has an entry, no missing keys
+    (ADR-0021). An *optional* ModuleRef/WaveformRef defaults to ``None``
+    (disabled) — the safest, least-surprising default for "this field is
+    optional"; an adapter that wants it enabled supplies a ref factory value.
+    """
+    fields: dict[str, Optional[CfgNodeValue]] = {}
     for key, node_spec in spec.fields.items():
         if isinstance(node_spec, LiteralSpec):
             fields[key] = DirectValue(node_spec.value)
         elif isinstance(node_spec, ScalarSpec):
             if node_spec.required:
-                fields[key] = DirectValue(value=None, is_unset=True)
+                fields[key] = DirectValue(value=None)  # unset (ADR-0021)
             elif node_spec.choices:
                 fields[key] = DirectValue(node_spec.choices[0])
             else:
@@ -39,13 +49,18 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
         elif isinstance(node_spec, SweepSpec):
             fields[key] = SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)
         elif isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
-            first = node_spec.allowed[0]
-            label = first.label or "Custom"
-            fields[key] = (
-                ModuleRefValue(f"<Custom:{label}>", make_default_value(first))
-                if isinstance(node_spec, ModuleRefSpec)
-                else WaveformRefValue(f"<Custom:{label}>", make_default_value(first))
-            )
+            if node_spec.optional:
+                fields[key] = None  # optional ref defaults to disabled (ADR-0021)
+            else:
+                first = node_spec.allowed[0]
+                label = first.label or "Custom"
+                fields[key] = (
+                    ModuleRefValue(f"<Custom:{label}>", make_default_value(first))
+                    if isinstance(node_spec, ModuleRefSpec)
+                    else WaveformRefValue(
+                        f"<Custom:{label}>", make_default_value(first)
+                    )
+                )
         elif isinstance(node_spec, DeviceRefSpec):
             fields[key] = DirectValue("")
         elif isinstance(node_spec, CfgSectionSpec):
@@ -64,7 +79,7 @@ def inherit_from(
         if result is not None:
             return result
 
-    new_fields: dict[str, CfgNodeValue] = {}
+    new_fields: dict[str, Optional[CfgNodeValue]] = {}
 
     for key, new_node_spec in new_spec.fields.items():
         old_node_spec = old_spec.fields.get(key)
@@ -82,7 +97,7 @@ def inherit_from(
             ):
                 new_fields[key] = old_node_val
             elif new_node_spec.required:
-                new_fields[key] = DirectValue(value=None, is_unset=True)
+                new_fields[key] = DirectValue(value=None)  # unset (ADR-0021)
             elif new_node_spec.choices:
                 new_fields[key] = DirectValue(new_node_spec.choices[0])
             else:
@@ -112,6 +127,14 @@ def inherit_from(
                 new_fields[key] = ModuleRefValue(
                     old_node_val.chosen_key, old_node_val.value
                 )
+            elif (
+                isinstance(old_node_spec, ModuleRefSpec)
+                and key in old_val.fields
+                and old_node_val is None
+            ):
+                new_fields[key] = None  # inherit the disabled state (ADR-0021)
+            elif new_node_spec.optional:
+                new_fields[key] = None  # optional ref defaults to disabled
             else:
                 first = new_node_spec.allowed[0]
                 label = first.label or "Custom"
@@ -127,6 +150,14 @@ def inherit_from(
                 new_fields[key] = WaveformRefValue(
                     old_node_val.chosen_key, old_node_val.value
                 )
+            elif (
+                isinstance(old_node_spec, WaveformRefSpec)
+                and key in old_val.fields
+                and old_node_val is None
+            ):
+                new_fields[key] = None  # inherit the disabled state (ADR-0021)
+            elif new_node_spec.optional:
+                new_fields[key] = None  # optional ref defaults to disabled
             else:
                 first = new_node_spec.allowed[0]
                 label = first.label or "Custom"

@@ -6,13 +6,12 @@ waveforms (res_flat / res_const); the blank is a plain const.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
-from typing_extensions import Literal, Union, overload
+from typing_extensions import Literal, overload
 
 from zcu_tools.gui.app.main.adapter import (
     DirectValue,
-    DisabledRefValue,
     WaveformRefValue,
 )
 from zcu_tools.gui.app.main.specs.waveform import make_const_waveform_spec
@@ -50,7 +49,7 @@ def make_res_waveform_ref_default(
     preferred_names: list[str] = ...,
     *,
     optional: Literal[True],
-) -> Union[WaveformRefValue, DisabledRefValue]: ...
+) -> Optional[WaveformRefValue]: ...
 
 
 def make_res_waveform_ref_default(
@@ -58,11 +57,11 @@ def make_res_waveform_ref_default(
     preferred_names: list[str] = RES_WAVEFORM_NAMES,
     *,
     optional: bool = False,
-) -> Union[WaveformRefValue, DisabledRefValue]:
+) -> Optional[WaveformRefValue]:
     """Reference a library resonator waveform (res_flat / res_const), else blank."""
     selected = select_named_waveform_value(ctx.ml, preferred_names)
     if selected is not None:
         return selected
     if optional:
-        return DisabledRefValue()  # ADR-0012: present-but-disabled marker
+        return None  # optional ref disabled (ADR-0021)
     return make_res_waveform_default(ctx)

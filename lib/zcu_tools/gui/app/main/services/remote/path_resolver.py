@@ -253,7 +253,7 @@ def _scalar_wire_value(field: ScalarLiveField) -> object:
     if isinstance(val, EvalValue):
         return val.expr
     if isinstance(val, DirectValue):
-        return None if val.is_unset else val.value
+        return val.value  # None means unset (ADR-0021)
     return None
 
 

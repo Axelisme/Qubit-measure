@@ -359,11 +359,11 @@ class ScalarWidget(BaseLiveWidget):
             if value.resolved is None:
                 field.set_value(None)
             else:
-                field.set_value(DirectValue(value=value.resolved, is_unset=False))
+                field.set_value(DirectValue(value=value.resolved))
             return
 
         if isinstance(value, DirectValue):
-            expr = "" if value.is_unset else str(value.value)
+            expr = "" if value.value is None else str(value.value)
             field.set_value(EvalValue(expr=expr))
 
     def _build_context_menu(self, widget: QLineEdit) -> tuple[QMenu, Any]:

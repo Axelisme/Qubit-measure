@@ -10,7 +10,6 @@ from .types import (
     CfgSectionValue,
     DeviceRefSpec,
     DirectValue,
-    DisabledRefValue,
     EvalValue,
     LiteralSpec,
     ModuleRefSpec,
@@ -122,10 +121,9 @@ def _section_to_dict_inner(
         raise RuntimeError(f"Config section '{section}' has unknown fields: {extras}")
     for key, node_spec in spec.fields.items():
         node_val = value.fields.get(key)
-        # A DisabledRefValue marker (ADR-0012) lowers exactly like a missing key:
-        # the disabled optional field is omitted from the output.
-        if isinstance(node_val, DisabledRefValue):
-            node_val = None
+        # ``None`` is a disabled optional ref (ADR-0021) — lowering omits it (the
+        # exp cfg has no such field). This is the *only* place "disabled →
+        # disappears": run/save is the boundary where an unused field drops out.
         if node_val is None:
             if isinstance(node_spec, LiteralSpec):
                 result[key] = node_spec.value
@@ -142,7 +140,7 @@ def _section_to_dict_inner(
         if isinstance(node_spec, ScalarSpec):
             assert isinstance(node_val, (DirectValue, EvalValue))
             if isinstance(node_val, DirectValue):
-                if node_val.is_unset:
+                if node_val.value is None:
                     label = node_spec.label or key
                     full_path = ".".join([*path, key])
                     raise RuntimeError(f"Config field '{full_path}' ({label}) is unset")
@@ -191,11 +189,7 @@ def _section_to_dict_inner(
 
         elif isinstance(node_spec, DeviceRefSpec):
             assert isinstance(node_val, DirectValue)
-            if (
-                node_val.is_unset
-                or not isinstance(node_val.value, str)
-                or not node_val.value
-            ):
+            if not isinstance(node_val.value, str) or not node_val.value:
                 label = node_spec.label or key
                 full_path = ".".join([*path, key])
                 raise RuntimeError(f"Config field '{full_path}' ({label}) is unset")

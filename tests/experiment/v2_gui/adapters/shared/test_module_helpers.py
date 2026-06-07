@@ -15,7 +15,6 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSchema,
     CfgSectionValue,
     DirectValue,
-    DisabledRefValue,
     ModuleRefValue,
 )
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
@@ -283,8 +282,8 @@ def test_make_readout_ref_default_fallback_prefers_ro_waveform_if_present():
 
 
 def test_make_readout_ref_default_returns_disabled_when_optional_and_empty():
-    # ADR-0012: optional ref with an empty library → DisabledRefValue marker.
+    # ADR-0021: optional ref with an empty library → None (disabled).
     ctx = _make_ctx(ModuleLibrary())
     module_ref = make_readout_ref_default(ctx, optional=True)
 
-    assert isinstance(module_ref, DisabledRefValue)
+    assert module_ref is None

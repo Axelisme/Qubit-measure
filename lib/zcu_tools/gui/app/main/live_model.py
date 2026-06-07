@@ -38,7 +38,6 @@ from .adapter import (
     CfgSectionValue,
     DeviceRefSpec,
     DirectValue,
-    DisabledRefValue,
     EvalValue,
     LiteralSpec,
     ModuleRefSpec,
@@ -49,7 +48,6 @@ from .adapter import (
     SweepValue,
     WaveformRefSpec,
     WaveformRefValue,
-    default_value_for_type,
 )
 from .sweep_model import SweepEditor
 
@@ -162,7 +160,7 @@ class ScalarLiveField(LiveField):
         if isinstance(initial_val, (DirectValue, EvalValue)):
             self._value: ScalarValue = initial_val
         else:
-            self._value = self._make_direct_value(initial_val, initial_val is None)
+            self._value = self._make_direct_value(initial_val)
 
         if isinstance(self._value, EvalValue):
             self._resolve_expression(emit_change=False)
@@ -175,7 +173,7 @@ class ScalarLiveField(LiveField):
         if isinstance(val, (DirectValue, EvalValue)):
             new_value = val
         else:
-            new_value = self._make_direct_value(val, val is None)
+            new_value = self._make_direct_value(val)
 
         if isinstance(new_value, EvalValue):
             new_value = self._resolved_eval_value(new_value)
@@ -192,10 +190,10 @@ class ScalarLiveField(LiveField):
         if isinstance(self._value, EvalValue):
             self._resolve_expression(emit_change=True)
 
-    def _make_direct_value(self, value: object, is_unset: bool) -> DirectValue:
-        if is_unset:
-            value = default_value_for_type(self.spec.type)
-        return DirectValue(value=value, is_unset=is_unset)
+    def _make_direct_value(self, value: object) -> DirectValue:
+        # ``value is None`` means unset (ADR-0021) — no placeholder substitution,
+        # the None is kept as the single source of truth.
+        return DirectValue(value=value)
 
     def _resolved_eval_value(self, value: EvalValue) -> EvalValue:
         from dataclasses import replace
@@ -224,7 +222,7 @@ class ScalarLiveField(LiveField):
 
     def _refresh_validity(self) -> None:
         if isinstance(self._value, DirectValue):
-            valid = not self._value.is_unset
+            valid = self._value.value is not None
             if not valid:
                 logger.debug(
                     "ScalarLiveField: label=%r is unset → invalid", self.spec.label
@@ -251,7 +249,7 @@ class LiteralLiveField(LiveField):
         super().__init__(spec, env)
 
     def get_value(self) -> ScalarValue:
-        return DirectValue(value=self.spec.value, is_unset=False)
+        return DirectValue(value=self.spec.value)
 
     def set_value(self, val: object) -> None:
         pass
@@ -335,7 +333,7 @@ class SweepLiveField(LiveField):
         if isinstance(value, EvalValue):
             return value
         if isinstance(value, (int, float)):
-            return DirectValue(value=float(value), is_unset=False)
+            return DirectValue(value=float(value))
         raise TypeError(
             f"Sweep edge expects float or EvalValue, got {type(value).__name__}"
         )
@@ -343,6 +341,8 @@ class SweepLiveField(LiveField):
     def _edge_value(self, value: ScalarValue) -> Union[float, EvalValue]:
         if isinstance(value, EvalValue):
             return value
+        if value.value is None:
+            raise TypeError("Sweep edge DirectValue is unset (None)")
         return float(value.value)
 
     def _on_child_change(self, *_: object) -> None:
@@ -380,22 +380,21 @@ class SectionLiveField(LiveField):
         default_val = make_default_value(spec)
         provided_val = initial_val if initial_val is not None else default_val
 
-        # Build child fields; fall back to spec default for keys missing from provided_val.
-        # An optional ModuleRef/WaveformRef that is missing, None, or carries the
-        # explicit DisabledRefValue marker (ADR-0012) → pass None so the field
-        # initialises as disabled (is_enabled=False).
+        # Build child fields. The value tree is complete (ADR-0021): a disabled
+        # optional ModuleRef/WaveformRef carries ``None`` (not a missing key, not a
+        # marker) — ``create_live_field`` maps ``None`` to disabled. A genuinely
+        # missing key (a partial ``initial_val``) falls back to the spec default,
+        # except an optional ref which defaults to disabled (``None``).
         for key, node_spec in spec.fields.items():
-            child_val = provided_val.fields.get(key)
-            if isinstance(child_val, DisabledRefValue):
-                child_val = None
-            if child_val is None:
-                if (
-                    isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec))
-                    and node_spec.optional
-                ):
-                    child_val = None  # intentionally disabled
-                else:
-                    child_val = default_val.fields.get(key)
+            if key in provided_val.fields:
+                child_val = provided_val.fields[key]
+            elif (
+                isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec))
+                and node_spec.optional
+            ):
+                child_val = None  # missing optional ref → disabled
+            else:
+                child_val = default_val.fields.get(key)
             field = create_live_field(node_spec, env, child_val)
             self.fields[key] = field
             field.on_change.connect(self._on_child_change)
@@ -413,15 +412,14 @@ class SectionLiveField(LiveField):
         self._set_valid(all(f.is_valid() for f in self.fields.values()))
 
     def get_value(self) -> CfgSectionValue:
-        fields: dict[str, CfgNodeValue] = {}
-        for k, f in self.fields.items():
-            if (
-                isinstance(f, ModuleRefLiveField)
-                and f.spec.optional
-                and not f.is_enabled
-            ):
-                continue  # disabled optional ModuleRef → omit key
-            fields[k] = cast(CfgNodeValue, f.get_value())
+        # The value tree is complete (ADR-0021): every field has an entry. A
+        # disabled optional ModuleRef/WaveformRef self-reports ``None`` from its
+        # own ``get_value`` — the parent does not reach into child ``is_enabled``
+        # nor omit keys.
+        fields: dict[str, Optional[CfgNodeValue]] = {
+            k: cast("Optional[CfgNodeValue]", f.get_value())
+            for k, f in self.fields.items()
+        }
         return CfgSectionValue(fields=fields)
 
     def set_value(self, val: object) -> None:
@@ -522,12 +520,9 @@ class ModuleRefLiveField(LiveField):
     ) -> None:
         super().__init__(spec, env)
 
-        # An explicit DisabledRefValue marker (ADR-0012) means "this optional
-        # field is not enabled" — normalise to None so it shares the existing
-        # disabled path (chosen_key = first-allowed Custom, is_enabled=False).
-        if isinstance(initial_val, DisabledRefValue):
-            initial_val = None
-
+        # ``initial_val is None`` means "this optional field is not enabled"
+        # (ADR-0021): the disabled state is a plain ``None`` in the value tree,
+        # mapped here to ``is_enabled=False`` with a first-allowed default shape.
         init_overridden = False
         if isinstance(initial_val, (ModuleRefValue, WaveformRefValue)):
             self._chosen_key = initial_val.chosen_key
@@ -745,7 +740,11 @@ class ModuleRefLiveField(LiveField):
             self._rebuild_sub_field(hint=None)
             self.on_change.emit(self.get_value())
 
-    def get_value(self) -> Union[ModuleRefValue, WaveformRefValue]:
+    def get_value(self) -> Optional[Union[ModuleRefValue, WaveformRefValue]]:
+        # A disabled optional ref self-reports ``None`` (ADR-0021): the disabled
+        # state is in-band in the value, not a parent-side omission.
+        if self.spec.optional and not self.is_enabled:
+            return None
         klass = (
             ModuleRefValue if isinstance(self.spec, ModuleRefSpec) else WaveformRefValue
         )
@@ -757,11 +756,18 @@ class ModuleRefLiveField(LiveField):
         )
 
     def set_value(self, val: object) -> None:
+        # ``None`` means "disable this optional ref" (ADR-0021), symmetric with
+        # ``get_value`` returning None and ``__init__`` mapping None to disabled.
+        if val is None:
+            self.set_enabled(False)
+            return
         if not isinstance(val, (ModuleRefValue, WaveformRefValue)):
             raise TypeError(
-                "ModuleRefLiveField expects ModuleRefValue or WaveformRefValue, "
-                f"got {type(val).__name__}"
+                "ModuleRefLiveField expects ModuleRefValue, WaveformRefValue or "
+                f"None, got {type(val).__name__}"
             )
+        if self.spec.optional and not self.is_enabled:
+            self.set_enabled(True)
         if val.chosen_key != self._chosen_key or self.is_modified():
             self._chosen_key = val.chosen_key
             self._binding_state = _binding_state_for_key(val.chosen_key)
