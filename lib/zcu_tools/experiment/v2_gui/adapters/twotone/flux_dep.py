@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing_extensions import ClassVar, Optional, TypeAlias
+from typing_extensions import ClassVar, TypeAlias
 
 from zcu_tools.experiment.v2.twotone.fluxdep import (
     FreqFluxCfg,
@@ -9,23 +9,19 @@ from zcu_tools.experiment.v2.twotone.fluxdep import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
+    CfgBuilder,
     make_pulse_module_spec,
-    make_qub_probe_default,
-    make_readout_default,
     make_readout_module_spec,
     make_reset_module_spec,
-    make_reset_ref_default,
     proper_flux_range,
     proper_qub_freq_range,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AdapterGuide,
-    CfgNodeValue,
     CfgSectionSpec,
     CfgSectionValue,
     DeviceRefSpec,
-    DirectValue,
     ExpContext,
     RunRequest,
     ScalarSpec,
@@ -120,30 +116,17 @@ class FluxDepAdapter(BaseAdapter[FreqFluxCfg, FluxDepRunResult]):
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        _module_fields: dict[str, Optional[CfgNodeValue]] = {
-            "qub_pulse": make_qub_probe_default(ctx),
-            "readout": make_readout_default(ctx),
+        return (
+            CfgBuilder(ctx, self.cfg_spec())
+            .scalars(reps=100, rounds=100, relax_delay=1.0)
+            .role("modules.qub_pulse", "qub_probe", prefer_blank=True)
+            .role("modules.readout", "readout", prefer_blank=True)
             # optional → None (disabled) when no library reset (ADR-0021)
-            "reset": make_reset_ref_default(ctx, optional=True),
-        }
-        return CfgSectionValue(
-            fields={
-                "modules": CfgSectionValue(fields=_module_fields),
-                "dev": CfgSectionValue(
-                    fields={
-                        "flux_dev": DirectValue("flux_yoko"),
-                    }
-                ),
-                "reps": DirectValue(100),
-                "rounds": DirectValue(100),
-                "relax_delay": DirectValue(1.0),
-                "sweep": CfgSectionValue(
-                    fields={
-                        "flux": proper_flux_range(ctx, 101),
-                        "freq": proper_qub_freq_range(ctx, 101, span_factor=1.0),
-                    }
-                ),
-            }
+            .role("modules.reset", "reset", optional=True)
+            .set("dev.flux_dev", "flux_yoko")
+            .set_sweep("sweep.flux", proper_flux_range(ctx, 101))
+            .set_sweep("sweep.freq", proper_qub_freq_range(ctx, 101, span_factor=1.0))
+            .build()
         )
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FreqFluxCfg:

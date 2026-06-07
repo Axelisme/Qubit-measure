@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass
 
 from matplotlib.figure import Figure
-from typing_extensions import Annotated, Any, ClassVar, Optional, Sequence, TypeAlias
+from typing_extensions import Annotated, Any, ClassVar, Sequence, TypeAlias
 
 from zcu_tools.experiment.v2.twotone.rabi.len_rabi import (
     LenRabiCfg,
@@ -13,22 +13,18 @@ from zcu_tools.experiment.v2.twotone.rabi.len_rabi import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
+    CfgBuilder,
     make_pulse_module_spec,
-    make_qub_probe_default,
     make_readout_module_spec,
-    make_readout_ref_default,
     make_reset_module_spec,
-    make_reset_ref_default,
     md_eval_scaled,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    CfgNodeValue,
     CfgSectionSpec,
     CfgSectionValue,
-    DirectValue,
     ExpContext,
     MetaDictWriteback,
     ParamMeta,
@@ -131,26 +127,18 @@ class LenRabiAdapter(
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         sweep_stop = md_eval_scaled(ctx, "pi_len", factor=4.0, fallback=0.1)
-        _module_fields: dict[str, Optional[CfgNodeValue]] = {
-            "qub_pulse": make_qub_probe_default(ctx),
-            "readout": make_readout_ref_default(ctx),
+        return (
+            CfgBuilder(ctx, self.cfg_spec())
+            .scalars(reps=100, rounds=100, relax_delay=10.5)
+            .role("modules.qub_pulse", "qub_probe", prefer_blank=True)
+            .role("modules.readout", "readout")
             # optional → None (disabled) when no library reset (ADR-0021)
-            "reset": make_reset_ref_default(ctx, optional=True),
-        }
-        root_val = CfgSectionValue(
-            fields={
-                "modules": CfgSectionValue(fields=_module_fields),
-                "reps": DirectValue(100),
-                "rounds": DirectValue(100),
-                "relax_delay": DirectValue(10.5),
-                "sweep": CfgSectionValue(
-                    fields={
-                        "length": SweepValue(start=0.03, stop=sweep_stop, expts=101),
-                    }
-                ),
-            }
+            .role("modules.reset", "reset", optional=True)
+            .set_sweep(
+                "sweep.length", SweepValue(start=0.03, stop=sweep_stop, expts=101)
+            )
+            .build()
         )
-        return root_val
 
     def get_analyze_params(
         self, result: LenRabiRunResult, ctx: ExpContext

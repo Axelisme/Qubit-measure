@@ -11,8 +11,8 @@ from zcu_tools.experiment.v2.onetone.power_dep import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
+    CfgBuilder,
     make_pulse_readout_module_spec,
-    make_readout_default,
     proper_res_freq_range,
 )
 from zcu_tools.gui.app.main.adapter import (
@@ -21,12 +21,10 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
-    DirectValue,
     ExpContext,
     RunRequest,
     ScalarSpec,
     SweepSpec,
-    SweepValue,
     require_soc_handles,
 )
 
@@ -108,24 +106,13 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        return CfgSectionValue(
-            fields={
-                "modules": CfgSectionValue(
-                    fields={
-                        "readout": make_readout_default(ctx),
-                    }
-                ),
-                "reps": DirectValue(100),
-                "rounds": DirectValue(10),
-                "relax_delay": DirectValue(10.0),
-                "earlystop_snr": DirectValue(0.0),
-                "sweep": CfgSectionValue(
-                    fields={
-                        "gain": SweepValue(start=0.001, stop=0.5, expts=101),
-                        "freq": proper_res_freq_range(ctx, 201),
-                    }
-                ),
-            }
+        return (
+            CfgBuilder(ctx, self.cfg_spec())
+            .scalars(reps=100, rounds=10, relax_delay=10.0, earlystop_snr=0.0)
+            .role("modules.readout", "readout", prefer_blank=True)
+            .sweep("sweep.gain", 0.001, 0.5, 101)
+            .set_sweep("sweep.freq", proper_res_freq_range(ctx, 201))
+            .build()
         )
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> PowerDepCfg:

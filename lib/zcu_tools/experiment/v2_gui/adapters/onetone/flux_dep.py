@@ -9,8 +9,8 @@ from zcu_tools.experiment.v2.onetone.flux_dep import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
+    CfgBuilder,
     make_pulse_readout_module_spec,
-    make_readout_default,
     md_get_float,
     md_has_key,
     proper_flux_range,
@@ -22,12 +22,10 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     DeviceRefSpec,
-    DirectValue,
     EvalValue,
     ExpContext,
     RunRequest,
     ScalarSpec,
-    ScalarValue,
     SweepSpec,
 )
 
@@ -118,35 +116,21 @@ class OneToneFluxDepAdapter(BaseAdapter[FluxDepCfg, OneToneFluxDepRunResult]):
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         probe_len = md_get_float(ctx, "res_probe_len", 1.0)
-        ro_length: Union[float, ScalarValue] = (
+        ro_length: Union[float, EvalValue] = (
             EvalValue(expr="res_probe_len - 0.1")
             if md_has_key(ctx, "res_probe_len")
             else probe_len - 0.1
         )
-        return CfgSectionValue(
-            fields={
-                "modules": CfgSectionValue(
-                    fields={
-                        "readout": make_readout_default(ctx)
-                        .with_field("pulse_cfg.gain", 0.005)
-                        .with_field("ro_cfg.ro_length", ro_length),
-                    }
-                ),
-                "dev": CfgSectionValue(
-                    fields={
-                        "flux_dev": DirectValue("flux_yoko"),
-                    }
-                ),
-                "reps": DirectValue(1000),
-                "rounds": DirectValue(1),
-                "relax_delay": DirectValue(1.0),
-                "sweep": CfgSectionValue(
-                    fields={
-                        "flux": proper_flux_range(ctx, 101),
-                        "freq": proper_res_freq_range(ctx, 101, span_factor=1.0),
-                    }
-                ),
-            }
+        return (
+            CfgBuilder(ctx, self.cfg_spec())
+            .scalars(reps=1000, rounds=1, relax_delay=1.0)
+            .role("modules.readout", "readout", prefer_blank=True)
+            .set("modules.readout.pulse_cfg.gain", 0.005)
+            .set("modules.readout.ro_cfg.ro_length", ro_length)
+            .set("dev.flux_dev", "flux_yoko")
+            .set_sweep("sweep.flux", proper_flux_range(ctx, 101))
+            .set_sweep("sweep.freq", proper_res_freq_range(ctx, 101, span_factor=1.0))
+            .build()
         )
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FluxDepCfg:

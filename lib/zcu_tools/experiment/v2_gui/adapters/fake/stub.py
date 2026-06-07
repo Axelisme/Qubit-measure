@@ -12,6 +12,7 @@ from typing_extensions import Annotated, ClassVar, Optional, Sequence, TypeAlias
 from zcu_tools.experiment.base import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
+from zcu_tools.experiment.v2_gui.adapters.shared import CfgBuilder
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AnalyzeRequest,
@@ -19,14 +20,12 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
-    DirectValue,
     ExpContext,
     MetaDictWriteback,
     ParamMeta,
     RunRequest,
     ScalarSpec,
     SweepSpec,
-    SweepValue,
     WritebackRequest,
 )
 
@@ -110,15 +109,11 @@ class FakeAdapter(
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        del ctx
-        return CfgSectionValue(
-            fields={
-                "reps": DirectValue(100),
-                "rounds": DirectValue(10),
-                "sweep": SweepValue(start=5.0, stop=6.0, expts=11),
-                "gain": DirectValue(0.1),
-                "noise_scale": DirectValue(0.1),
-            }
+        return (
+            CfgBuilder(ctx, self.cfg_spec())
+            .scalars(reps=100, rounds=10, gain=0.1, noise_scale=0.1)
+            .sweep("sweep", 5.0, 6.0, 11)
+            .build()
         )
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FakeExpCfg:

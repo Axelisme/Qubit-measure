@@ -2,30 +2,25 @@ from __future__ import annotations
 
 import time
 
-from typing_extensions import Any, ClassVar, Optional, TypeAlias
+from typing_extensions import Any, ClassVar, TypeAlias
 
 from zcu_tools.experiment.v2.twotone.power_dep import PowerCfg, PowerExp, PowerResult
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
+    CfgBuilder,
     make_pulse_module_spec,
-    make_qub_probe_default,
-    make_readout_default,
     make_readout_module_spec,
     make_reset_module_spec,
-    make_reset_ref_default,
     proper_qub_freq_range,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AdapterGuide,
-    CfgNodeValue,
     CfgSectionSpec,
     CfgSectionValue,
-    DirectValue,
     ExpContext,
     ScalarSpec,
     SweepSpec,
-    SweepValue,
 )
 
 PowerDepRunResult: TypeAlias = PowerResult
@@ -107,27 +102,17 @@ class PowerDepAdapter(BaseAdapter[PowerCfg, PowerDepRunResult]):
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        _module_fields: dict[str, Optional[CfgNodeValue]] = {
-            "qub_pulse": make_qub_probe_default(ctx),
-            "readout": make_readout_default(ctx),
+        return (
+            CfgBuilder(ctx, self.cfg_spec())
+            .scalars(reps=100, rounds=100, relax_delay=1.0)
+            .role("modules.qub_pulse", "qub_probe", prefer_blank=True)
+            .role("modules.readout", "readout", prefer_blank=True)
             # optional → None (disabled) when no library reset (ADR-0021)
-            "reset": make_reset_ref_default(ctx, optional=True),
-        }
-        root_val = CfgSectionValue(
-            fields={
-                "modules": CfgSectionValue(fields=_module_fields),
-                "reps": DirectValue(100),
-                "rounds": DirectValue(100),
-                "relax_delay": DirectValue(1.0),
-                "sweep": CfgSectionValue(
-                    fields={
-                        "gain": SweepValue(start=0.001, stop=0.5, expts=101),
-                        "freq": proper_qub_freq_range(ctx, 201),
-                    }
-                ),
-            }
+            .role("modules.reset", "reset", optional=True)
+            .sweep("sweep.gain", 0.001, 0.5, 101)
+            .set_sweep("sweep.freq", proper_qub_freq_range(ctx, 201))
+            .build()
         )
-        return root_val
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_qubit_power_{time.strftime('%H%M')}"

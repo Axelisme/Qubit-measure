@@ -9,7 +9,6 @@ from typing_extensions import (
     Any,
     ClassVar,
     Literal,
-    Optional,
     Sequence,
     TypeAlias,
 )
@@ -21,13 +20,10 @@ from zcu_tools.experiment.v2.twotone.time_domain.t2echo import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    make_pi2_pulse_ref_default,
-    make_pi_pulse_ref_default,
+    CfgBuilder,
     make_pulse_module_spec,
     make_readout_module_spec,
-    make_readout_ref_default,
     make_reset_module_spec,
-    make_reset_ref_default,
     md_eval_scaled,
     proper_relax,
 )
@@ -35,10 +31,8 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    CfgNodeValue,
     CfgSectionSpec,
     CfgSectionValue,
-    DirectValue,
     ExpContext,
     MetaDictWriteback,
     ParamMeta,
@@ -145,27 +139,19 @@ class T2EchoAdapter(
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         sweep_stop = md_eval_scaled(ctx, "t2e", factor=4.0, fallback=20.0)
         relax_delay = proper_relax(ctx)
-        _module_fields: dict[str, Optional[CfgNodeValue]] = {
-            "pi2_pulse": make_pi2_pulse_ref_default(ctx),
-            "pi_pulse": make_pi_pulse_ref_default(ctx),
-            "readout": make_readout_ref_default(ctx),
+        return (
+            CfgBuilder(ctx, self.cfg_spec())
+            .scalars(reps=100, rounds=100, relax_delay=relax_delay)
+            .role("modules.pi2_pulse", "pi2_pulse")
+            .role("modules.pi_pulse", "pi_pulse")
+            .role("modules.readout", "readout")
             # optional → None (disabled) when no library reset (ADR-0021)
-            "reset": make_reset_ref_default(ctx, optional=True),
-        }
-        root_val = CfgSectionValue(
-            fields={
-                "modules": CfgSectionValue(fields=_module_fields),
-                "reps": DirectValue(100),
-                "rounds": DirectValue(100),
-                "relax_delay": relax_delay,
-                "sweep": CfgSectionValue(
-                    fields={
-                        "length": SweepValue(start=0.0, stop=sweep_stop, expts=101),
-                    }
-                ),
-            }
+            .role("modules.reset", "reset", optional=True)
+            .set_sweep(
+                "sweep.length", SweepValue(start=0.0, stop=sweep_stop, expts=101)
+            )
+            .build()
         )
-        return root_val
 
     def get_analyze_params(
         self, result: T2EchoRunResult, ctx: ExpContext

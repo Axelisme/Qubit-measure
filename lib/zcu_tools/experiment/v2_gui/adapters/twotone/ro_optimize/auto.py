@@ -13,12 +13,10 @@ from zcu_tools.experiment.v2.twotone.ro_optimize.auto_optimize import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
+    CfgBuilder,
     make_pulse_module_spec,
-    make_qub_probe_default,
-    make_readout_default,
     make_readout_module_spec,
     make_reset_module_spec,
-    make_reset_ref_default,
     proper_res_freq_range,
 )
 from zcu_tools.gui.app.main.adapter import (
@@ -28,13 +26,11 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
-    DirectValue,
     ExpContext,
     MetaDictWriteback,
     RunRequest,
     ScalarSpec,
     SweepSpec,
-    SweepValue,
     WritebackItem,
     WritebackRequest,
     require_soc_handles,
@@ -140,27 +136,16 @@ class RoOptAutoAdapter(
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        return CfgSectionValue(
-            fields={
-                "modules": CfgSectionValue(
-                    fields={
-                        "qub_pulse": make_qub_probe_default(ctx),
-                        "readout": make_readout_default(ctx),
-                        "reset": make_reset_ref_default(ctx, optional=True),
-                    }
-                ),
-                "reps": DirectValue(1000),
-                "rounds": DirectValue(10),
-                "relax_delay": DirectValue(1.0),
-                "num_points": DirectValue(1000),
-                "sweep": CfgSectionValue(
-                    fields={
-                        "freq": proper_res_freq_range(ctx, 51, span_factor=0.2),
-                        "gain": SweepValue(start=0.1, stop=0.25, expts=51),
-                        "length": SweepValue(start=5.0, stop=10.0, expts=51),
-                    },
-                ),
-            }
+        return (
+            CfgBuilder(ctx, self.cfg_spec())
+            .scalars(reps=1000, rounds=10, relax_delay=1.0, num_points=1000)
+            .role("modules.qub_pulse", "qub_probe", prefer_blank=True)
+            .role("modules.readout", "readout", prefer_blank=True)
+            .role("modules.reset", "reset", optional=True)
+            .set_sweep("sweep.freq", proper_res_freq_range(ctx, 51, span_factor=0.2))
+            .sweep("sweep.gain", 0.1, 0.25, 51)
+            .sweep("sweep.length", 5.0, 10.0, 51)
+            .build()
         )
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> AutoOptCfg:

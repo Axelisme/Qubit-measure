@@ -17,8 +17,8 @@ from typing_extensions import (
 from zcu_tools.experiment.v2.onetone.freq import FreqCfg, FreqExp, FreqResult
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
+    CfgBuilder,
     make_onetone_freq_writeback_items,
-    make_pulse_readout_default,
     make_pulse_readout_module_spec,
     md_get_float,
     md_has_key,
@@ -30,7 +30,6 @@ from zcu_tools.gui.app.main.adapter import (
     AnalyzeResultBase,
     CfgSectionSpec,
     CfgSectionValue,
-    DirectValue,
     EvalValue,
     ExpContext,
     ParamMeta,
@@ -135,26 +134,18 @@ class OneToneFreqAdapter(
             if md_has_key(ctx, "res_probe_len")
             else probe_len - 0.1
         )
-        return CfgSectionValue(
-            {
-                "modules": CfgSectionValue(
-                    {
-                        # cfg_spec() locks freq / ro_freq to 0.0 (the sweep axis
-                        # owns frequency); the value must match the locked literal.
-                        "readout": make_pulse_readout_default(ctx)
-                        .with_field("pulse_cfg.gain", 0.05)
-                        .with_field("pulse_cfg.freq", 0.0)
-                        .with_field("ro_cfg.ro_freq", 0.0)
-                        .with_field("ro_cfg.ro_length", ro_length),
-                    }
-                ),
-                "sweep": CfgSectionValue(
-                    fields={"freq": proper_res_freq_range(ctx, 301)},
-                ),
-                "relax_delay": DirectValue(1.0),
-                "reps": DirectValue(100),
-                "rounds": DirectValue(100),
-            }
+        return (
+            CfgBuilder(ctx, self.cfg_spec())
+            .scalars(reps=100, rounds=100, relax_delay=1.0)
+            # cfg_spec() locks freq / ro_freq to 0.0 (the sweep axis owns
+            # frequency); the value must match the locked literal.
+            .role("modules.readout", "pulse_readout")
+            .set("modules.readout.pulse_cfg.gain", 0.05)
+            .set("modules.readout.pulse_cfg.freq", 0.0)
+            .set("modules.readout.ro_cfg.ro_freq", 0.0)
+            .set("modules.readout.ro_cfg.ro_length", ro_length)
+            .set_sweep("sweep.freq", proper_res_freq_range(ctx, 301))
+            .build()
         )
 
     def get_analyze_params(

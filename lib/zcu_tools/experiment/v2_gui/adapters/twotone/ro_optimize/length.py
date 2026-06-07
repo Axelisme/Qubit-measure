@@ -13,12 +13,10 @@ from zcu_tools.experiment.v2.twotone.ro_optimize.length import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
+    CfgBuilder,
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
-    make_qub_probe_default,
-    make_readout_default,
     make_reset_module_spec,
-    make_reset_ref_default,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -26,12 +24,10 @@ from zcu_tools.gui.app.main.adapter import (
     AnalyzeResultBase,
     CfgSectionSpec,
     CfgSectionValue,
-    DirectValue,
     ExpContext,
     MetaDictWriteback,
     ScalarSpec,
     SweepSpec,
-    SweepValue,
     WritebackItem,
     WritebackRequest,
 )
@@ -131,22 +127,14 @@ class RoOptLengthAdapter(
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        return CfgSectionValue(
-            fields={
-                "modules": CfgSectionValue(
-                    fields={
-                        "qub_pulse": make_qub_probe_default(ctx),
-                        "readout": make_readout_default(ctx),
-                        "reset": make_reset_ref_default(ctx, optional=True),
-                    }
-                ),
-                "reps": DirectValue(10000),
-                "rounds": DirectValue(1),
-                "relax_delay": DirectValue(1.0),
-                "sweep": CfgSectionValue(
-                    fields={"length": SweepValue(start=0.01, stop=3.5, expts=51)},
-                ),
-            }
+        return (
+            CfgBuilder(ctx, self.cfg_spec())
+            .scalars(reps=10000, rounds=1, relax_delay=1.0)
+            .role("modules.qub_pulse", "qub_probe", prefer_blank=True)
+            .role("modules.readout", "readout", prefer_blank=True)
+            .role("modules.reset", "reset", optional=True)
+            .sweep("sweep.length", 0.01, 3.5, 51)
+            .build()
         )
 
     def get_analyze_params(

@@ -39,8 +39,8 @@ from zcu_tools.experiment.v2.onetone.freq import (
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
+    CfgBuilder,
     make_onetone_freq_writeback_items,
-    make_readout_default,
     make_readout_module_spec,
     md_get_float,
 )
@@ -52,14 +52,12 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
-    DirectValue,
     ExpContext,
     ParamMeta,
     RunRequest,
     SaveDataRequest,
     ScalarSpec,
     SweepSpec,
-    SweepValue,
     WritebackItem,
     WritebackRequest,
 )
@@ -362,21 +360,12 @@ class FakeFreqAdapter(
         freq_start = r_f - half_span
         freq_stop = r_f + half_span
 
-        return CfgSectionValue(
-            fields={
-                "reps": DirectValue(100),
-                "rounds": DirectValue(100),
-                "sweep": CfgSectionValue(
-                    fields={
-                        "freq": SweepValue(start=freq_start, stop=freq_stop, expts=201)
-                    }
-                ),
-                "modules": CfgSectionValue(
-                    fields={
-                        "readout": make_readout_default(ctx),
-                    }
-                ),
-            }
+        return (
+            CfgBuilder(ctx, self.cfg_spec())
+            .scalars(reps=100, rounds=100)
+            .role("modules.readout", "readout", prefer_blank=True)
+            .sweep("sweep.freq", freq_start, freq_stop, 201)
+            .build()
         )
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FakeFreqCfg:
