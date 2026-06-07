@@ -105,47 +105,38 @@ def save_local_data(
     """
     Save data locally in a Labber-compatible format.
 
+    Backed by ``labber_io.save_labber_data`` (pure h5py/numpy, no ``Labber``
+    dependency). This is a thin compatibility wrapper around the dict-based
+    ``x_info``/``z_info``/``y_info`` API; for new code prefer calling
+    ``labber_io.save_labber_data`` / ``LabberData.save`` directly.
+
     Args:
         filepath (str): The file path where the data will be saved.
-        x_info (dict): Information about the x-axis data.
-        z_info (dict): Information about the z-axis data.
-        y_info (Optional[dict], optional): Information about the y-axis data. Defaults to None.
+        x_info (dict): Inner (x) axis, keys ``name``, ``unit``, ``values``.
+        z_info (dict): Complex log channel, keys ``name``, ``unit``, ``values``.
+            ``values`` is shaped ``(Nx,)`` for 1D or ``(Ny, Nx)`` for 2D
+            (one trace per y value).
+        y_info (Optional[dict], optional): Outer (y) axis, same keys as x_info.
+            Defaults to None (1D data).
         comment (Optional[str], optional): A comment to include in the saved file. Defaults to None.
         tag (Optional[str], optional): Tags to include in the saved file. Defaults to None.
     """
-    zdata = z_info["values"]
-    z_info.update({"complex": True, "vector": False})
-    log_channels = [z_info]
-    step_channels = list(filter(None, [x_info, y_info]))
+    from .labber_io import save_labber_data
 
-    filepath = remove_ext(filepath)  # because labber will add .hdf5 automatically
-
-    import Labber  # type: ignore
-
-    fObj = Labber.createLogFile_ForData(filepath, log_channels, step_channels)
-    if y_info:
-        for trace in zdata:
-            fObj.addEntry({z_info["name"]: trace})
-    else:
-        fObj.addEntry({z_info["name"]: zdata})
-
-    if comment:
-        fObj.setComment(comment)
-    if tag:
-        fObj.setTags(tag)
-
-    # remove labber tmp directory
-    # check path yyyy/mm/Data_mmdd/ is empty
-    # if so, remove the empty empty folder
-    try:
-        yy, mm, dd = datetime.today().strftime("%Y-%m-%d").split("-")
-        if os.path.exists(yy):
-            os.rmdir(os.path.join(yy, mm, f"Data_{mm}{dd}"))
-            os.rmdir(os.path.join(yy, mm))
-            os.rmdir(yy)
-    except OSError as e:
-        print("Fail to remove empty folder: ", e)
-        pass
+    zdata = np.asarray(z_info["values"], dtype=complex)
+    # zdata is (Nx,) for 1D, or (Ny, Nx) for 2D (one trace per y value) --
+    # exactly labber_io's z convention (inner x-axis last).
+    # axes are (name, unit, values), inner axis (x) first.
+    axes = [(x_info.get("name", "x"), x_info.get("unit", ""), x_info["values"])]
+    if y_info is not None:
+        axes.append((y_info.get("name", "y"), y_info.get("unit", ""), y_info["values"]))
+    save_labber_data(
+        format_ext(filepath),
+        z=(z_info.get("name", "S21"), z_info.get("unit", ""), zdata),
+        axes=axes,
+        comment=comment or "",
+        tags=tag,
+    )
 
 
 def load_local_data(
@@ -154,82 +145,52 @@ def load_local_data(
     """
     Load data from a local HDF5 file.
 
+    Backed by ``labber_io.load_labber_data`` (pure h5py/numpy, no ``Labber``
+    dependency). Thin compatibility wrapper that preserves this function's
+    historical *frequency-major* return shape; for new code prefer
+    ``labber_io.load_labber_data`` / ``LabberData.load`` (which return a
+    ``LabberData`` with ``.data``/``.axes`` and ``z`` in ``(Ny, Nx)`` order).
+
     Args:
-        file_path (str): The path to the HDF5 file.
+        filepath (str): The path to the HDF5 file (``.hdf5`` / ``.h5`` optional).
 
     Returns:
-        tuple[NDArray[np.complex128], NDArray[np.float64], Optional[NDArray[np.float64]]]: The loaded z, x, and y data arrays.
+        tuple[NDArray[np.complex128], NDArray[np.float64], Optional[NDArray[np.float64]]]:
+            ``(z, x, y)``. ``z`` is ``(Nx,)`` for 1D, ``(Nx, Ny)`` for 2D, and
+            ``(Nlog, Nx, Ny)`` for a file with stacked log configs; ``y`` is
+            ``None`` for 1D data.
     """
-    import h5py
+    from .labber_io import load_labber_data
 
-    filepath = format_ext(filepath)
+    d = load_labber_data(format_ext(filepath))
+    x_data = np.asarray(d.x, dtype=np.float64)
+    y_data = None if d.y is None else np.asarray(d.y, dtype=np.float64)
 
-    def parser_data(
-        data: NDArray[np.float64],
-    ) -> tuple[
-        NDArray[np.complex128], NDArray[np.float64], Optional[NDArray[np.float64]]
-    ]:
-        if data.shape[2] == 1:  # 1D data,
-            x_data = data[:, 0, 0][:]
-            y_data = None
-            z_data = data[:, -2, 0][:] + 1j * data[:, -1, 0][:]
-        else:  # 2D data
-            x_data = data[:, 0, 0][:]
-            y_data = data[0, 1, :][:]
-            z_data = data[:, -2, :][:] + 1j * data[:, -1, :][:]
-
-        return z_data, x_data, y_data
-
-    with h5py.File(filepath, "r") as file:
-        data = np.array(file["Data"]["Data"])  # type: ignore
-        z_data, x_data, y_data = parser_data(data)
-
-        assert isinstance(x_data, np.ndarray)
-        assert isinstance(z_data, np.ndarray)
-
-        if "Log_2" in file:
-            z_data = [z_data]
-
-            def check_log_valid(
-                z_i: NDArray[np.complex128],
-                x_i: NDArray[np.float64],
-                y_i: Optional[NDArray[np.float64]],
-            ) -> None:
-                if not x_data.shape == x_i.shape:
-                    raise ValueError("x data shape mismatch")
-                if not np.allclose(x_data, x_i):
-                    raise ValueError("Find different x data in log data")
-
-                if y_i is not None:
-                    if y_data is None:
-                        raise ValueError("y data is None")
-                    if not y_data.shape == y_i.shape:
-                        raise ValueError("y data shape mismatch")
-
-                    if not np.allclose(y_data, y_i):
-                        raise ValueError("Find different y data in log data")
-
-            i = 2
-            while f"Log_{i}" in file:
-                log_data = np.array(file[f"Log_{i}"]["Data"]["Data"])  # type: ignore
-                z_data_i, x_i, y_i = parser_data(log_data)
-                check_log_valid(z_data_i, x_i, y_i)
-
-                z_data.append(z_data_i)
-                i += 1
-            z_data = np.array(z_data)
+    # labber_io returns z as (Nx,) for 1D, (Ny, Nx) for 2D and (Nlog, Ny, Nx)
+    # for stacked logs.  This function's historical contract is frequency-major:
+    # (Nx,) for 1D, (Nx, Ny) for 2D, (Nlog, Nx, Ny) for stacked -- so transpose
+    # the inner two axes back.
+    z = np.asarray(d.z)
+    if z.ndim == 2:  # (Ny, Nx) -> (Nx, Ny)
+        z_data = z.T
+    elif z.ndim == 3:  # (Nlog, Ny, Nx) -> (Nlog, Nx, Ny)
+        z_data = np.transpose(z, (0, 2, 1))
+    else:  # 1D (Nx,) unchanged
+        z_data = z
 
     return z_data, x_data, y_data
 
 
 def load_comment(filepath: str) -> Optional[str]:
-    import h5py
+    """Return the file's comment string, or None if it cannot be read.
 
-    filepath = format_ext(filepath)
+    Backed by ``labber_io.load_labber_data`` (the comment is also available as
+    the ``.comment`` attribute of a loaded ``LabberData``).
+    """
+    from labber_io import load_labber_data
 
     try:
-        with h5py.File(filepath, "r") as file:
-            return str(file.attrs["comment"])
+        return load_labber_data(format_ext(filepath)).comment
     except Exception as e:
         warnings.warn(f"Failed to load comment from {filepath}: {e}")
         return None
