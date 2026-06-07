@@ -137,12 +137,11 @@ class OneToneFreqAdapter(
         return (
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=100, rounds=100, relax_delay=1.0)
-            # cfg_spec() locks freq / ro_freq to 0.0 (the sweep axis owns
-            # frequency); the value must match the locked literal.
+            # cfg_spec() locks pulse_cfg.freq / ro_cfg.ro_freq to 0.0 (the sweep
+            # axis owns frequency); build() fills those locked literals from the
+            # spec, so they are not set here.
             .role("modules.readout", "pulse_readout")
             .set("modules.readout.pulse_cfg.gain", 0.05)
-            .set("modules.readout.pulse_cfg.freq", 0.0)
-            .set("modules.readout.ro_cfg.ro_freq", 0.0)
             .set("modules.readout.ro_cfg.ro_length", ro_length)
             .set_sweep("sweep.freq", proper_res_freq_range(ctx, 301))
             .build()

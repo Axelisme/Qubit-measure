@@ -180,7 +180,7 @@ def _section_to_dict_inner(
                 full_path = ".".join([*path, key])
                 raise RuntimeError(f"Config field '{full_path}' ({label}) is missing")
             result[key] = _section_to_dict_inner(
-                _find_allowed_spec(node_spec, node_val, ml),
+                find_allowed_spec(node_spec, node_val, ml),
                 node_val.value,
                 ml,
                 [*path, key],
@@ -207,7 +207,7 @@ def _section_to_dict_inner(
     return result
 
 
-def _find_allowed_spec(
+def find_allowed_spec(
     ref_spec: Union[ModuleRefSpec, WaveformRefSpec],
     ref_val: Union[ModuleRefValue, WaveformRefValue],
     ml: "Optional[ModuleLibrary]",
@@ -349,7 +349,7 @@ def _validate_node(
                 f"Config field '{full_path}' must be an enabled module/waveform "
                 f"ref, got {type(node_val).__name__}"
             )
-        chosen_spec = _find_allowed_spec(spec, node_val, ml)
+        chosen_spec = find_allowed_spec(spec, node_val, ml)
         validate_section(chosen_spec, node_val.value, ml, [full_path])
         return
 
@@ -483,7 +483,7 @@ def _validate_dynamic_node(
     if isinstance(spec, (ModuleRefSpec, WaveformRefSpec)):
         if isinstance(node_val, (ModuleRefValue, WaveformRefValue)):
             if isinstance(node_val.value, CfgSectionValue):
-                chosen_spec = _find_allowed_spec(spec, node_val, ml)
+                chosen_spec = find_allowed_spec(spec, node_val, ml)
                 validate_dynamic_section(
                     chosen_spec, node_val.value, md, ml, [full_path]
                 )

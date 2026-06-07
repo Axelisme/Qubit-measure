@@ -27,7 +27,7 @@ from zcu_tools.gui.app.main.adapter import (
     make_default_value,
     require_soc_handles,
 )
-from zcu_tools.gui.app.main.adapter.lowering import _find_allowed_spec
+from zcu_tools.gui.app.main.adapter.lowering import find_allowed_spec
 from zcu_tools.gui.app.main.adapter.protocol import NoAnalyzeParams
 from zcu_tools.meta_tool import MetaDict
 
@@ -552,26 +552,26 @@ def test_device_ref_empty_string_raises():
 
 
 # ---------------------------------------------------------------------------
-# _find_allowed_spec — Custom key error paths
+# find_allowed_spec — Custom key error paths
 # ---------------------------------------------------------------------------
 
 
-def test_find_allowed_spec_custom_key_missing_close_bracket_raises():
+def testfind_allowed_spec_custom_key_missing_close_bracket_raises():
     inner_spec = CfgSectionSpec(label="Pulse", fields={})
     ref_spec = ModuleRefSpec(allowed=[inner_spec])
     ref_val = ModuleRefValue(chosen_key="<Custom:Pulse", value=CfgSectionValue())
 
     with pytest.raises(RuntimeError, match="Invalid custom reference key"):
-        _find_allowed_spec(ref_spec, ref_val, None)
+        find_allowed_spec(ref_spec, ref_val, None)
 
 
-def test_find_allowed_spec_custom_key_unknown_label_raises():
+def testfind_allowed_spec_custom_key_unknown_label_raises():
     inner_spec = CfgSectionSpec(label="Pulse", fields={})
     ref_spec = ModuleRefSpec(allowed=[inner_spec])
     ref_val = ModuleRefValue(chosen_key="<Custom:UnknownSpec>", value=CfgSectionValue())
 
     with pytest.raises(RuntimeError, match="Unknown custom reference label"):
-        _find_allowed_spec(ref_spec, ref_val, None)
+        find_allowed_spec(ref_spec, ref_val, None)
 
 
 # ---------------------------------------------------------------------------

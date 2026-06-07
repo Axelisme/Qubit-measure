@@ -30,7 +30,10 @@ Layering (ADR-0023):
   ``CfgSectionValue`` data container (whose ``with_field`` stays scalar-only).
 - The builder does **zero locking** (ADR-0009): locking a field is a spec-layer
   decision, declared in ``cfg_spec()`` via ``lock_literal``. The builder only
-  ever writes the value tree.
+  ever writes the value tree — but it does **fill** locked leaves: ``build()``
+  aligns every ``LiteralSpec`` leaf to its ``spec.value`` (descending mounted
+  refs), so an adapter never restates a locked value, and ``.set()`` on a locked
+  path Fast-Fails (the spec owns that value).
 - ``.build()`` does **not** validate — validation stays at the cfg boundary
   (``BaseAdapter.make_default_cfg`` / ``CfgSchema.to_raw_dict``).
 
@@ -47,6 +50,8 @@ from typing_extensions import Self
 from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
+    DirectValue,
+    LiteralSpec,
     ModuleRefSpec,
     ModuleRefValue,
     ScalarLeafInput,
@@ -54,6 +59,7 @@ from zcu_tools.gui.app.main.adapter import (
     SweepValue,
     WaveformRefSpec,
     WaveformRefValue,
+    find_allowed_spec,
     make_default_value,
 )
 
@@ -104,12 +110,22 @@ class CfgBuilder:
         """Override the scalar leaf at dotted ``path`` (Fast-Fail on a bad path).
 
         A spec-aware pre-check rejects a path that does not resolve to a leaf,
-        before delegating to ``with_field``'s value-tree descent.
+        before delegating to ``with_field``'s value-tree descent. A path that
+        lands on a **locked** leaf (``LiteralSpec``, declared in ``cfg_spec()``
+        via ``lock_literal``) is rejected: locked fields are filled automatically
+        by ``build()`` from the spec, so an adapter must not set them.
         """
         self._check_mutable()
-        if not _spec_path_exists(self._spec, _split(path)):
+        parts = _split(path)
+        if not _spec_path_exists(self._spec, parts):
             raise RuntimeError(
                 f"CfgBuilder.set: path {path!r} does not resolve to a field in the spec"
+            )
+        if _is_locked_path(self._spec, parts):
+            raise RuntimeError(
+                f"CfgBuilder.set: path {path!r} is a locked literal "
+                "(declared via lock_literal in cfg_spec); build() fills it "
+                "automatically — do not set it"
             )
         self._value.with_field(path, value)
         return self
@@ -197,8 +213,17 @@ class CfgBuilder:
         return self
 
     def build(self) -> CfgSectionValue:
-        """Return the assembled value tree; the builder is spent afterwards."""
+        """Return the assembled value tree; the builder is spent afterwards.
+
+        Before returning, every locked leaf (``LiteralSpec`` declared via
+        ``cfg_spec().lock_literal``) is aligned to its ``spec.value`` — the L1
+        blank already does this for top-level literals, but ``.role()`` mounts L2
+        factory values that are unaware of locks inside a ref shape, so a locked
+        field there would otherwise carry the L2 value. Aligning here means an
+        adapter never restates a locked value (the spec is the single source).
+        """
         self._check_mutable()
+        self._align_literals(self._spec, self._value)
         self._built = True
         return self._value
 
@@ -229,6 +254,28 @@ class CfgBuilder:
                     f"at segment {seg!r}"
                 )
         node_value.fields[parts[-1]] = node
+
+    def _align_literals(self, spec: CfgSectionSpec, value: CfgSectionValue) -> None:
+        """Recurse spec+value, forcing every LiteralSpec leaf to spec.value.
+
+        Descends nested sections and (via ``find_allowed_spec``) the chosen shape
+        of mounted refs. A disabled optional ref (value ``None``) is skipped —
+        lowering supplies the literal from the spec when an absent-but-required
+        literal field is reached, and a disabled ref contributes nothing.
+        """
+        for key, node_spec in spec.fields.items():
+            node_val = value.fields.get(key)
+            if isinstance(node_spec, LiteralSpec):
+                value.fields[key] = DirectValue(node_spec.value)
+            elif isinstance(node_spec, CfgSectionSpec) and isinstance(
+                node_val, CfgSectionValue
+            ):
+                self._align_literals(node_spec, node_val)
+            elif isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)) and isinstance(
+                node_val, (ModuleRefValue, WaveformRefValue)
+            ):
+                chosen_spec = find_allowed_spec(node_spec, node_val, self._ctx.ml)
+                self._align_literals(chosen_spec, node_val.value)
 
     def _resolve_leaf_spec(self, parts: list[str], path: str) -> CfgNodeSpec:
         """Descend the spec tree to the spec node at ``path`` (Fast-Fail)."""
@@ -303,4 +350,22 @@ def _spec_path_exists(spec: CfgSectionSpec, parts: list[str]) -> bool:
         return _spec_path_exists(child, rest)
     if isinstance(child, (ModuleRefSpec, WaveformRefSpec)):
         return any(_spec_path_exists(shape, rest) for shape in child.allowed)
+    return False
+
+
+def _is_locked_path(spec: CfgSectionSpec, parts: list[str]) -> bool:
+    """True if ``parts`` land on a ``LiteralSpec`` leaf (duck-typing across
+    ModuleRefSpec.allowed shapes). Used to reject ``.set`` on a locked field —
+    if *any* allowed shape locks the path, the field is treated as locked
+    (lock_literal applies the lock to every shape that contains the path)."""
+    head, rest = parts[0], parts[1:]
+    child: Optional[CfgNodeSpec] = spec.fields.get(head)
+    if child is None:
+        return False
+    if not rest:
+        return isinstance(child, LiteralSpec)
+    if isinstance(child, CfgSectionSpec):
+        return _is_locked_path(child, rest)
+    if isinstance(child, (ModuleRefSpec, WaveformRefSpec)):
+        return any(_is_locked_path(shape, rest) for shape in child.allowed)
     return False

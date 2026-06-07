@@ -2,6 +2,7 @@
 
 from .analyze_params import ParamMeta, describe_analyze_params, reconstruct_params
 from .inheritance import inherit_from, make_default_value
+from .lowering import find_allowed_spec
 from .protocol import ExpAdapterProtocol
 from .types import (
     AdapterCapabilities,

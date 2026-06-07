@@ -23,6 +23,7 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     DirectValue,
     EvalValue,
+    LiteralSpec,
     ModuleRefValue,
     ScalarSpec,
     SweepSpec,
@@ -62,6 +63,23 @@ def _spec() -> CfgSectionSpec:
                 label="Sweep",
                 fields={"freq": SweepSpec(label="Freq (MHz)")},
             ),
+        }
+    )
+
+
+def _locked_spec() -> CfgSectionSpec:
+    """Spec whose readout locks pulse_cfg.freq to 0.0 (mirrors onetone/freq)."""
+    return CfgSectionSpec(
+        fields={
+            "modules": CfgSectionSpec(
+                label="Modules",
+                fields={
+                    "readout": make_readout_module_spec().lock_literal(
+                        "pulse_cfg.freq", 0.0
+                    ),
+                },
+            ),
+            "reps": ScalarSpec(label="Reps", type=int),
         }
     )
 
@@ -208,6 +226,34 @@ def test_set_sweep_on_non_sweep_spec_fast_fails():
         CfgBuilder(_empty_ctx(), _spec()).set_sweep(
             "reps", SweepValue(start=0.0, stop=1.0, expts=11)
         )
+
+
+# --- locked literals (auto-fill + reject .set) -------------------------------
+
+
+def test_build_fills_locked_literal_inside_mounted_ref():
+    # .role mounts an L2 readout whose pulse_cfg.freq carries the md value;
+    # build() must overwrite it with the spec's locked 0.0.
+    b = CfgBuilder(_empty_ctx(), _locked_spec()).role(
+        "modules.readout", "pulse_readout"
+    )
+    v = b.build()
+    readout = cast(ModuleRefValue, v.fields["modules"].fields["readout"])  # type: ignore[union-attr]
+    pulse_cfg = cast(Any, readout.value.fields["pulse_cfg"])
+    assert pulse_cfg.fields["freq"] == DirectValue(0.0)
+
+
+def test_build_fills_top_level_locked_literal():
+    spec = CfgSectionSpec(fields={"reps": LiteralSpec(value=1, label="Reps")})
+    v = CfgBuilder(_empty_ctx(), spec).build()
+    assert v.fields["reps"] == DirectValue(1)
+
+
+def test_set_on_locked_path_fast_fails():
+    with pytest.raises(RuntimeError, match="locked literal"):
+        CfgBuilder(_empty_ctx(), _locked_spec()).role(
+            "modules.readout", "pulse_readout"
+        ).set("modules.readout.pulse_cfg.freq", 5.0)
 
 
 # --- one-shot ----------------------------------------------------------------
