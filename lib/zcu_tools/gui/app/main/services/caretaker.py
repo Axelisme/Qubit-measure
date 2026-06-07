@@ -1,6 +1,6 @@
 """PersistenceCaretaker — the Memento Caretaker for GUI app state.
 
-A **Driven Adapter** (ADR-0008): it does only disk I/O on a single
+A **Driven Adapter** (ADR-0005): it does only disk I/O on a single
 ``gui_state_v1.json`` file and owns the load/flush *timing*. It depends solely
 on a narrow ``PersistOriginatorPort`` (the Controller) — never on State, the
 services, the EventBus, or cfg. It asks the originator for one immutable

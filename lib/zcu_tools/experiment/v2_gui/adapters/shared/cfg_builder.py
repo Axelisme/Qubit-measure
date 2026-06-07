@@ -1,7 +1,7 @@
 """``CfgBuilder`` — fluent assembly of an adapter's default value tree.
 
 An adapter's ``make_default_value(ctx)`` must return a structurally-complete,
-spec-compliant value tree (ADR-0021/0022). Hand-building one means writing a
+spec-compliant value tree (ADR-0010/0011). Hand-building one means writing a
 nested ``CfgSectionValue(fields={...})`` literal and threading the per-role L2
 factories through it by hand. ``CfgBuilder`` replaces that with a flat,
 path-addressed fluent API:
@@ -18,7 +18,7 @@ path-addressed fluent API:
             .build()
         )
 
-Layering (ADR-0023):
+Layering (ADR-0012):
 
 - The builder starts from the **L1** blank tree (``make_default_value(spec)``),
   so completeness is guaranteed by construction — every method only *overwrites*
@@ -315,7 +315,7 @@ class CfgBuilder:
         role_id: str,
     ) -> None:
         if node is None:
-            return  # optional miss → disabled ref (ADR-0021)
+            return  # optional miss → disabled ref (ADR-0010)
         if isinstance(ref_spec, ModuleRefSpec) and not isinstance(node, ModuleRefValue):
             raise RuntimeError(
                 f"CfgBuilder.role: spec at {path!r} expects a module ref but role "

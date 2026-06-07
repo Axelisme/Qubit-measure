@@ -1,4 +1,4 @@
-"""Writeback preview/set/apply dispatch handlers (ADR-0010 persistent draft).
+"""Writeback preview/set/apply dispatch handlers (ADR-0008 persistent draft).
 
 Drives the handlers against a mock Controller whose get_tab_writeback_items
 returns crafted persistent items, so we can assert preview serialization, the

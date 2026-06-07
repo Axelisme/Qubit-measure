@@ -333,14 +333,14 @@ def test_pulse_to_direct_missing_ro_cfg_uses_default():
 
 
 # ---------------------------------------------------------------------------
-# make_default_value: complete value tree + optional ref → None (ADR-0021)
+# make_default_value: complete value tree + optional ref → None (ADR-0010)
 # ---------------------------------------------------------------------------
 
 
 def test_make_default_value_is_complete_and_optional_ref_is_none():
     """The default value tree has an entry for every spec field (no missing
     keys); an optional ModuleRef/WaveformRef defaults to None (disabled), a
-    non-optional one to an enabled ref (ADR-0021)."""
+    non-optional one to an enabled ref (ADR-0010)."""
     inner = CfgSectionSpec(label="Pulse", fields={"ch": ScalarSpec("Ch", int)})
     spec = CfgSectionSpec(
         fields={
@@ -363,7 +363,7 @@ def test_make_default_value_is_complete_and_optional_ref_is_none():
 
 def test_inherit_from_preserves_disabled_optional_ref():
     """Inheriting from an old value whose optional ref was disabled (None) keeps
-    it disabled in the new value (ADR-0021)."""
+    it disabled in the new value (ADR-0010)."""
     inner = CfgSectionSpec(label="Pulse", fields={"ch": ScalarSpec("Ch", int)})
     spec = CfgSectionSpec(
         fields={"reset": ModuleRefSpec(allowed=[inner], label="Reset", optional=True)}

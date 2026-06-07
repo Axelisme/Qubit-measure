@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 class CfgFormWidget(QWidget):
-    """A pluggable viewer over a service-owned cfg LiveModel (ADR-0010).
+    """A pluggable viewer over a service-owned cfg LiveModel (ADR-0008).
 
     The widget does *not* own a LiveModel — it ``attach``es to one that the
     ``CfgEditorService`` owns (renders it + reflects its changes) and

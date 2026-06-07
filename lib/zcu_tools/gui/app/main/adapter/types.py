@@ -246,7 +246,7 @@ class MetaDictWriteback(WritebackItem):
 class ModuleWriteback(WritebackItem):
     edit_schema: Optional["CfgSchema"] = None
     # editor_id of the service-owned (gc=False) cfg model that holds this item's
-    # live draft (ADR-0010). Stamped by WritebackService at compute time; the
+    # live draft (ADR-0008). Stamped by WritebackService at compute time; the
     # agent edits via editor.set_field(editor_id, …), the user's Edit dialog
     # attaches to the same model.
     editor_id: Optional[str] = field(default=None, init=False)
@@ -450,7 +450,7 @@ CfgNodeSpec = Union[
 class DirectValue:
     """A directly-entered scalar value. ``value is None`` means *unset* (the
     field has no value yet) — there is no separate ``is_unset`` flag, the value
-    itself is the single source of truth (ADR-0021). Scalar types are only
+    itself is the single source of truth (ADR-0010). Scalar types are only
     int/float/str/bool, whose legal values are never ``None``, so ``None``
     unambiguously means unset. The ``DirectValue`` wrapper is kept even when
     unset so the scalar's *mode* (direct vs ``EvalValue``) survives."""
@@ -539,7 +539,7 @@ class WaveformRefValue:
 @dataclass
 class CfgSectionValue:
     # The value tree is always *complete*: every spec field has a corresponding
-    # entry (no missing keys, ADR-0021). A disabled optional ModuleRef/WaveformRef
+    # entry (no missing keys, ADR-0010). A disabled optional ModuleRef/WaveformRef
     # is represented by ``None`` (the entry is present, its value is None) — never
     # by omitting the key. "None" here means "this optional ref is not enabled",
     # distinct from a "None Reset" library entry (a real, enabled reset choice).

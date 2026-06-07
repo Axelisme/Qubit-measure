@@ -21,7 +21,7 @@ _POLL_INTERVAL_MS = 50
 
 
 class QtShutdownDriver(QObject):
-    """Qt driving adapter for the Qt-free ShutdownCoordinator (ADR-0008).
+    """Qt driving adapter for the Qt-free ShutdownCoordinator (ADR-0005).
 
     Owns a periodic QTimer that pumps ``coordinator.tick`` until it reports a
     terminal state, then stops the timer and invokes the supplied ``on_closed``

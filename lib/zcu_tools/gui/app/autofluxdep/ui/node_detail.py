@@ -5,7 +5,7 @@ Shows ONE Node at a time (whichever the left list selects). Inner QTabWidget:
   run so the user can still see "what this run used".
 - "執行" (Run): the Node's liveplot — a bare matplotlib ``FigureCanvasQTAgg``
   embedded directly (NOT via gui/plotting's backend; the worker never draws, so
-  the plain Qt canvas suffices — see ADR-0018). The MainWindow owns the per-Node
+  the plain Qt canvas suffices — see ADR-0017). The MainWindow owns the per-Node
   Figure + Plotter (built at Run start, lifetime = sweep) and hands this pane the
   canvas to show for the selected Node via ``show_run_canvas``.
 

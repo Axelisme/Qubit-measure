@@ -127,7 +127,7 @@ def test_waveform_ref_roundtrip():
 
 
 def test_disabled_module_ref_roundtrip():
-    """A disabled optional ModuleRef is ``None`` in the value tree (ADR-0021)
+    """A disabled optional ModuleRef is ``None`` in the value tree (ADR-0010)
     and survives capture/restore as None — not re-enabled to the first allowed."""
     inner_spec = CfgSectionSpec(
         fields={"gain": ScalarSpec(label="Gain", type=float)},
@@ -153,7 +153,7 @@ def test_disabled_module_ref_roundtrip():
 def test_disabled_module_ref_missing_key_restores_to_none():
     """A key absent from the persisted payload (old file / never stored) for an
     optional ref restores to None (disabled), not the enabled allowed[0] —
-    this is the lookback persist bug (ADR-0021)."""
+    this is the lookback persist bug (ADR-0010)."""
     inner_spec = CfgSectionSpec(
         fields={"gain": ScalarSpec(label="Gain", type=float)},
         label="Pulse",

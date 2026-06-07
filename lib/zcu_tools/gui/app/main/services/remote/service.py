@@ -1,6 +1,6 @@
 """RemoteControlAdapter — measure-gui's second View (driving adapter).
 
-The RPC face onto the Controller, peer to the Qt ``MainWindow`` (ADR-0008 /
+The RPC face onto the Controller, peer to the Qt ``MainWindow`` (ADR-0005 /
 ADR-0013): the second user-facing client (user = an automation agent / another
 server). Pure transport — the socket lifecycle, NDJSON framing, the per-client
 writer, the ``wire.version`` / ``auth`` handshakes, and the push fan-out

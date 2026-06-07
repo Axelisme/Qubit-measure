@@ -1,4 +1,4 @@
-"""Unit tests for WritebackService — persistent draft (ADR-0010).
+"""Unit tests for WritebackService — persistent draft (ADR-0008).
 
 Items are computed once into Session.writeback_items; apply reads that draft
 as-is (no recompute) and writes md/ml directly, bumping ``context`` so
@@ -48,7 +48,7 @@ def _make_state_with_tab(tab_id: str = "t1") -> State:
 
 def _make_write_port(state: State, bus: EventBus):
     """A ContextWritePort stand-in that reproduces ContextService.apply_writes'
-    observable effects (ADR-0011) without lowering the items' mock schemas: it
+    observable effects (ADR-0006) without lowering the items' mock schemas: it
     sets md attrs, registers ml entries (the schema is the registered object —
     enough for "did it land" assertions), bumps "context" once, emits per kind,
     and dumps ml when persistent.

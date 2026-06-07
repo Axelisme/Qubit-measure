@@ -30,7 +30,7 @@ _SERVICES_DIR = Path(services_pkg.__file__).parent
 
 # Modules that mutate MetaDict / ModuleLibrary *content* directly. ContextService
 # is the canonical owner; WritebackService writes ctx.md/ctx.ml without going
-# through it (ADR-0008: delegating would create an app-service inter-dependency).
+# through it (ADR-0005: delegating would create an app-service inter-dependency).
 _MD_ML_WRITER_MODULES = ("context.py", "writeback.py")
 
 # ML write methods (called as ``<something>.<name>(...)``).

@@ -49,7 +49,7 @@ def _attach(w, schema: CfgSchema, ctrl):
     """Build a LiveModel from ``schema`` and attach the widget to it.
 
     Mirrors the production flow where the CfgEditorService owns the model and the
-    widget ``attach``es (ADR-0010). The model is returned for tests that drive it
+    widget ``attach``es (ADR-0008). The model is returned for tests that drive it
     directly (e.g. external refresh, which the service performs in production).
     """
     from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
@@ -232,7 +232,7 @@ def test_scalar_widget_unresolved_eval_can_switch_back_to_direct(qapp, ctrl):
 
     value = field.get_value()
     assert isinstance(value, DirectValue)
-    # unset scalar is value=None (ADR-0021) — no placeholder default
+    # unset scalar is value=None (ADR-0010) — no placeholder default
     assert value.value is None
     assert w._mode == "direct"
     spin = w.findChild(QDoubleSpinBox)
@@ -285,7 +285,7 @@ def test_populate_scalar_fields_round_trip(qapp, ctrl):
 def test_cfg_form_reflects_model_external_refresh(qapp, ctrl):
     """The widget repaints when the (service-owned) model refreshes an EvalValue.
 
-    Under ADR-0010 the service drives ``refresh_external`` on the model it owns;
+    Under ADR-0008 the service drives ``refresh_external`` on the model it owns;
     the attached widget reflects it for free via the model's bubbling on_change.
     Here we drive the model directly (the service-bus path is covered in
     test_cfg_editor) and assert the widget's read-back + schema_changed fire.
@@ -316,7 +316,7 @@ def test_cfg_form_reflects_model_external_refresh(qapp, ctrl):
 
 
 def test_cfg_form_does_not_subscribe_bus(qapp, ctrl):
-    """The widget no longer touches the EventBus (ADR-0010 moved refresh to the
+    """The widget no longer touches the EventBus (ADR-0008 moved refresh to the
     service). attach/detach must not register any bus subscription."""
     from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
 

@@ -212,7 +212,7 @@ def test_tab_get_then_update_cfg_roundtrip(fx):
 
         # Mutate one scalar then send back. `schema_to_raw` emits scalars in
         # tagged form (``{__kind: direct, value: ...}``; value=None means unset,
-        # ADR-0021), so mutate the inner ``value`` field.
+        # ADR-0010), so mutate the inner ``value`` field.
         raw["reps"]["value"] = 7
         _send(
             sock,

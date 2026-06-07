@@ -5,8 +5,9 @@ A session owns one ``SectionLiveField`` (a cfg draft) keyed by a server-issued
 viewer that ``attach``es to a model (renders + reflects it) and ``detach``es
 without tearing it down — so an agent edit and a user view converge on the same
 service-owned model (WYSIWYG), and a model can outlive any widget (the agent can
-edit before/without a widget being open). See ADR-0010 (supersedes ADR-0003's
-delegated model) and the CfgEditor session glossary in ``gui/CONTEXT.md``.
+edit before/without a widget being open). See ADR-0008 (which records how the
+headless-only and delegated-model designs were superseded) and the CfgEditor
+session glossary in ``gui/CONTEXT.md``.
 
 Lifetime is governed by ``gc`` (not two session kinds):
 
@@ -127,7 +128,7 @@ class CfgEditorSession:
     Lifecycle ownership is the *Repository's* concern (``CfgEditorService``), not
     the aggregate's; the session only carries the discriminators the Repository
     needs. Every session's ``root`` is service-owned (the widget attaches to it,
-    never owns it — ADR-0010); ``gc`` governs whether the Repository may reclaim
+    never owns it — ADR-0008); ``gc`` governs whether the Repository may reclaim
     it automatically (LRU / disconnect) or only on the owner's explicit teardown.
     """
 
@@ -189,7 +190,7 @@ class CfgEditorSession:
     def commit_schema(self) -> "CfgSchema":
         """Snapshot the draft as an **un-lowered** CfgSchema for the writer.
 
-        ADR-0011: the session's job ends at the CfgSchema snapshot; lowering
+        ADR-0006: the session's job ends at the CfgSchema snapshot; lowering
         (EvalValue → concrete, against the live md) + register belong to
         ContextService (the single write authority). ``commit`` applies only to
         ml-entry sessions (those carrying an ``item_kind``); a seeded session
@@ -214,7 +215,7 @@ class CfgEditorService:
     Dependencies (docs/adr/0008): ``env_ctrl`` is the LiveModel reactive env
     (narrow port); ``read_port`` (ContextReadPort) reads the current ml to seed
     ``from_name`` sessions; ``write_port`` (ContextWritePort) is the single ml/md
-    write authority used at commit (ADR-0011 — the session no longer lowers /
+    write authority used at commit (ADR-0006 — the session no longer lowers /
     registers itself); ``version_bump`` / ``version_drop`` bump / forget the ``editor:<id>`` resource
     version (a registry-level concern since the id is Repository-assigned): bump on
     every edit (so commit's guard sees concurrent edits), drop on teardown (so a
@@ -238,7 +239,7 @@ class CfgEditorService:
         self._editors: dict[str, CfgEditorSession] = {}
         self._seq = itertools.count()
         self._listener: Optional[ChangeListener] = None
-        # ADR-0010/0007 Reaction: the service owns every cfg model, so it (not the
+        # ADR-0008/0004 Reaction: the service owns every cfg model, so it (not the
         # widget) refreshes their EvalValue snapshots when md/ml/context/device
         # change. Subscribe once; refresh_all fans out to every owned model.
         from zcu_tools.gui.app.main.event_bus import GuiEvent
@@ -356,7 +357,7 @@ class CfgEditorService:
         """Return the live ``SectionLiveField`` for ``editor_id``.
 
         Exposed so the owning widget can ``attach`` to a service-owned model
-        (ADR-0010). The widget renders + reflects this model but never owns its
+        (ADR-0008). The widget renders + reflects this model but never owns its
         lifetime (the service does).
         """
         return self._require(editor_id).root
@@ -373,7 +374,7 @@ class CfgEditorService:
         return self._require(editor_id).paths_view(under=under, verbosity=verbosity)
 
     def commit(self, editor_id: str, name: str) -> None:
-        # ADR-0011: the aggregate yields its un-lowered CfgSchema; ContextService
+        # ADR-0006: the aggregate yields its un-lowered CfgSchema; ContextService
         # (the single write authority) lowers + registers. The Repository owns
         # teardown only — after a successful write, so a validation failure
         # (raised by the write port) leaves the draft intact for the agent to fix.
@@ -399,7 +400,7 @@ class CfgEditorService:
         """Tear down a UI-owned (``gc=False``) session and its LiveModel.
 
         Called by the owner (tab close, dialog close, writeback reanalyze) — the
-        service owns every model now (ADR-0010), so it is also the one to tear it
+        service owns every model now (ADR-0008), so it is also the one to tear it
         down; the widget only ``detach``es first. Unknown id is a no-op (teardown
         may race a never-opened owner).
         """
@@ -505,7 +506,7 @@ class CfgEditorService:
     def refresh_all(self, event: object) -> None:
         """Refresh every owned model against an md/ml/context/device change.
 
-        ADR-0010 / ADR-0007 Reaction: the service owns the models, so refreshing
+        ADR-0008 / ADR-0004 Reaction: the service owns the models, so refreshing
         their ``EvalValue`` snapshots when md/ml change is the owner's job (it
         moved here from the widget when ownership inverted). An attached widget
         repaints for free via the model's bubbling ``on_change``.

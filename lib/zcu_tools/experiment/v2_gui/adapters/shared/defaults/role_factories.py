@@ -52,7 +52,7 @@ if TYPE_CHECKING:
     )
 
 # A blank factory always produces a value (never None); a ref factory's optional
-# path may return None (the disabled-optional ref, ADR-0021).
+# path may return None (the disabled-optional ref, ADR-0010).
 _RefNode = Union["ModuleRefValue", "WaveformRefValue"]
 BlankFactory = Callable[["ExpContext"], _RefNode]
 RefFactory = Callable[..., Optional[_RefNode]]

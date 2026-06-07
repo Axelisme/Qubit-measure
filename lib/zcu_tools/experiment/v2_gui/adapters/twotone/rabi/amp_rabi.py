@@ -134,7 +134,7 @@ class AmpRabiAdapter(
             .scalars(reps=100, rounds=100, relax_delay=10.5)
             .role("modules.qub_pulse", "qub_probe", prefer_blank=True)
             .role("modules.readout", "readout")
-            # optional → None (disabled) when no library reset (ADR-0021)
+            # optional → None (disabled) when no library reset (ADR-0010)
             .role("modules.reset", "reset", optional=True)
             .set_sweep("sweep.gain", SweepValue(start=-0.3, stop=sweep_stop, expts=51))
             .build()

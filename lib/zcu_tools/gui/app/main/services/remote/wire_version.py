@@ -35,7 +35,7 @@ from __future__ import annotations
 #     parity with device.setup); device.snapshot includes the device info payload.
 # v4: removed context.set_ml_module / context.set_ml_waveform (raw-dict RPC); ml
 #     entries are built/edited via the editor session (create_from_role + editor.*)
-#     — ADR-0011, the single ml/md write authority is ContextService.
+#     — ADR-0006, the single ml/md write authority is ContextService.
 # v5: added device.setup_spec (discover the fields settable via device.setup's
 #     updates — name/type/choices/current/settable — from the live info model).
 # v6 (ADR-0013): (a) removed cfg.set_field — a tab's cfg is edited through its

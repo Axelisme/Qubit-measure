@@ -111,7 +111,7 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     figure: Optional["Figure"] = None
     analyze_param_instance: Optional[T_AnalyzeParams] = None
     save_path_overrides: Optional[SavePaths] = None
-    # Persistent writeback draft (ADR-0010): computed once when analyze finishes,
+    # Persistent writeback draft (ADR-0008): computed once when analyze finishes,
     # read/edited in place by UI + agent, applied as-is. Module/waveform items
     # carry a gc=False CfgEditorService model (editor_id); cleared + torn down on
     # rerun / reanalyze.

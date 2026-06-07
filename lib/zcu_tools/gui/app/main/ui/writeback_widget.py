@@ -78,7 +78,7 @@ class WritebackWidget(QWidget):
                 if w is not None:
                     w.deleteLater()
 
-        # These are the *persistent* State items (ADR-0010) — do NOT copy. UI
+        # These are the *persistent* State items (ADR-0008) — do NOT copy. UI
         # edits (checkbox, value, cfg via the editor model) land on the same
         # objects the agent and apply read.
         self._items = list(items)
@@ -149,7 +149,7 @@ class WritebackWidget(QWidget):
 
         form = QFormLayout()
         # target_name is the apply destination, decoupled from the stable
-        # session_id (ADR-0010) — editable here so the user can retarget.
+        # session_id (ADR-0008) — editable here so the user can retarget.
         name_edit = QLineEdit(item.target_name)
         form.addRow("Apply as:", name_edit)
         value_edit = QLineEdit(str(item.proposed_value))
@@ -187,7 +187,7 @@ class WritebackWidget(QWidget):
         cb: QCheckBox,
     ) -> None:
         # The item carries a persistent, service-owned cfg model (editor_id,
-        # ADR-0010). Attach the dialog widget to *that* model — the user's edits
+        # ADR-0008). Attach the dialog widget to *that* model — the user's edits
         # land on the same model the agent edits and apply reads. On close the
         # widget detaches but the model persists (torn down only on reanalyze).
         if item.editor_id is None:
@@ -204,7 +204,7 @@ class WritebackWidget(QWidget):
         layout.addWidget(hint)
 
         # target_name is the apply destination, decoupled from the stable
-        # session_id (ADR-0010) — editable so the user can retarget. Like the cfg
+        # session_id (ADR-0008) — editable so the user can retarget. Like the cfg
         # edits below, a valid change applies immediately; a blank field is left
         # on the previous name (revert on focus-out).
         name_row = QFormLayout()

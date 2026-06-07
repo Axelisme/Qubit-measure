@@ -92,7 +92,7 @@ def test_build_with_no_overrides_equals_l1_blank():
     built = CfgBuilder(_empty_ctx(), spec).build()
     blank = make_default_value(spec)
     assert set(built.fields) == set(blank.fields)
-    # every top-level key present (ADR-0021 completeness)
+    # every top-level key present (ADR-0010 completeness)
     assert built.fields.keys() == {
         "modules",
         "reps",
@@ -155,7 +155,7 @@ def test_role_mounts_module_ref():
 
 
 def test_role_optional_library_miss_mounts_none():
-    # empty ml + optional reset → disabled (None), not a blank ref (ADR-0021)
+    # empty ml + optional reset → disabled (None), not a blank ref (ADR-0010)
     b = CfgBuilder(_empty_ctx(), _spec()).role("modules.reset", "reset", optional=True)
     v = b.build()
     assert v.fields["modules"].fields["reset"] is None  # type: ignore[union-attr]

@@ -111,7 +111,7 @@ def make_reset_ref_default(
 ) -> Optional[ModuleRefValue]:
     """Reference a calibrated library reset, else fall back to a blank pulse reset.
 
-    ADR-0021: when ``optional`` and no library reset is found, return ``None``
+    ADR-0010: when ``optional`` and no library reset is found, return ``None``
     (the optional ref's disabled state) — the value tree keeps the field as a
     present ``None`` entry, symmetric with the optional spec.
     """
@@ -121,5 +121,5 @@ def make_reset_ref_default(
     if selected is not None:
         return ModuleRefValue(chosen_key=selected.name, value=selected.value)
     if optional:
-        return None  # optional ref disabled (ADR-0021)
+        return None  # optional ref disabled (ADR-0010)
     return make_reset_default(ctx)

@@ -224,7 +224,7 @@ class ContextService:
         # ``context`` (run.start / editor.commit / writeback.apply) detect this edit.
         #
         # CANONICAL ANCHOR — "writing md/ml must bump context" has TWO physical
-        # paths (ADR-0011 collapsed writeback's direct write into path 1):
+        # paths (ADR-0006 collapsed writeback's direct write into path 1):
         #   1. ContextService writes: set_md_attr / del_md_attr / set_ml_*_from_schema /
         #      del_ml_* (field-level, each bumps+emits) and apply_writes (batch:
         #      one bump + one emit per kind). Writeback / editor commit / inspect /
@@ -243,7 +243,7 @@ class ContextService:
         self._bus.emit(GuiEvent.MD_CHANGED, MdChangedPayload(md=md))
 
     # ------------------------------------------------------------------
-    # ml/md content writes — the single write authority (ADR-0011).
+    # ml/md content writes — the single write authority (ADR-0006).
     #
     # Sources holding an un-lowered CfgSchema (editor commit, writeback apply,
     # inspect save, create_from_role) write through set_ml_*_from_schema /
@@ -301,7 +301,7 @@ class ContextService:
         self._bus.emit(GuiEvent.ML_CHANGED, MlChangedPayload(ml=ctx.ml))
 
     def apply_writes(self, writes: "ContextWrites") -> None:
-        """Apply a batch of md/ml content writes atomically (ADR-0011).
+        """Apply a batch of md/ml content writes atomically (ADR-0006).
 
         One ``version.bump("context")``; at most one MD_CHANGED + one ML_CHANGED
         (the per-write methods would emit N times — a batch avoids N redundant

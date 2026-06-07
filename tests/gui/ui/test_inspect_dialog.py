@@ -45,7 +45,7 @@ def _wire_cfg_editor(ctrl: MagicMock) -> None:
     """Simulate the CfgEditorService open/open_seeded/commit/get_root contract.
 
     The modify dialog opens a *committable* session from the live ml
-    (open_cfg_editor with from_name; ADR-0011) and commits via commit_cfg_editor;
+    (open_cfg_editor with from_name; ADR-0006) and commits via commit_cfg_editor;
     seeded sessions still exist for tab/writeback. Build a real SectionLiveField
     per open so attach() works, keyed by a fake editor_id, with owner→id discovery,
     commit (records last commit), and teardown.
@@ -243,7 +243,7 @@ def test_modify_dialog_module_fixed_shape_saves_same_name_and_type(qapp):
 
     dialog._save_btn.click()
 
-    # ADR-0011: save commits the session via the single write authority.
+    # ADR-0006: save commits the session via the single write authority.
     name, _root = ctrl.committed
     assert name == "readout_rf"
     dialog.clear()

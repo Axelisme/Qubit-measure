@@ -31,7 +31,7 @@ def md():
 def ctrl(ml, md):
     """MagicMock controller whose set_ml_*_from_schema lands into the real ml.
 
-    Mirrors ContextService (ADR-0011 single write authority): the write port
+    Mirrors ContextService (ADR-0006 single write authority): the write port
     lowers the CfgSchema against the live ml/md, then registers.
     """
     from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
@@ -59,7 +59,7 @@ def ctrl(ml, md):
 @pytest.fixture()
 def service(ctrl):
     # The Repository takes the reactive-env ctrl, the context read + write ports
-    # (ADR-0011), the version bump/drop callbacks, and the EventBus (for
+    # (ADR-0006), the version bump/drop callbacks, and the EventBus (for
     # owned-model refresh). The MagicMock ctrl satisfies all facets.
     return CfgEditorService(
         ctrl,
@@ -101,7 +101,7 @@ def test_session_is_the_aggregate_with_behaviour(service, ml):
     assert _paths(session.current_paths())["freq"]["value"] == 5000.0
 
     # commit_schema is the aggregate's own behaviour: it yields the un-lowered
-    # CfgSchema (ADR-0011 — lowering + register belong to the write authority).
+    # CfgSchema (ADR-0006 — lowering + register belong to the write authority).
     session.set_field("ch", 0)
     from zcu_tools.gui.app.main.adapter import CfgSchema
 

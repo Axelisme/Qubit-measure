@@ -123,7 +123,7 @@ from zcu_tools.gui.remote.mcp_bridge import (  # noqa: E402
 # v15: non-blocking per-domain poll (Phase 120c-1) — gui_run_poll / gui_device_poll
 #      / gui_connect_poll map a zero-timeout operation.await onto finished /
 #      running / failed / no_operation, keyed on the semantic name (tab_id /
-#      device name / soc), no operation_id exposed (ADR-0005 kept). Lets an agent
+#      device name / soc), no operation_id exposed (ADR-0002 kept). Lets an agent
 #      check a slow op without blocking, replacing the run_finished event watch.
 # v16: agent not exposed to events (Phase 120c-2). The GUI still emits its full
 #      EventBus stream on the wire (RPC-side registration unchanged), but the

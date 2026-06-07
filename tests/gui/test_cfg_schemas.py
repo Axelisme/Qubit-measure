@@ -24,7 +24,7 @@ def test_waveform_cfg_to_value():
     assert cast(DirectValue, val.fields["style"]).value == "gauss"
     assert cast(DirectValue, val.fields["length"]).value == 2.0
     assert cast(DirectValue, val.fields["sigma"]).value == 0.5
-    # present key → value set (not unset, ADR-0021)
+    # present key → value set (not unset, ADR-0010)
     assert cast(DirectValue, val.fields["sigma"]).value is not None
 
 
@@ -32,7 +32,7 @@ def test_waveform_cfg_to_value_missing_fields():
     cfg = {"style": "gauss"}
     spec, val = waveform_cfg_to_value(cfg)
 
-    # A missing key is unset (value is None, ADR-0021) — no hard-coded default.
+    # A missing key is unset (value is None, ADR-0010) — no hard-coded default.
     assert cast(DirectValue, val.fields["length"]).value is None
 
 
@@ -56,7 +56,7 @@ def test_module_cfg_to_value_direct_readout():
 
     assert cast(DirectValue, val.fields["type"]).value == "readout/direct"
     assert cast(DirectValue, val.fields["ro_freq"]).value == 7000.0
-    # missing key → unset (value is None, no hard-coded default; ADR-0021)
+    # missing key → unset (value is None, no hard-coded default; ADR-0010)
     assert cast(DirectValue, val.fields["ro_length"]).value is None
 
 
@@ -124,7 +124,7 @@ def test_module_cfg_to_value_pulse_missing_fields():
     cfg = {"type": "pulse"}
     spec, val = module_cfg_to_value(cfg)
 
-    # missing keys → unset (value is None, ADR-0021)
+    # missing keys → unset (value is None, ADR-0010)
     assert cast(DirectValue, val.fields["freq"]).value is None
     assert cast(DirectValue, val.fields["gain"]).value is None
 

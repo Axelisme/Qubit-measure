@@ -180,5 +180,5 @@ def make_readout_ref_default(
     if selected is not None:
         return ModuleRefValue(chosen_key=selected.name, value=selected.value)
     if optional:
-        return None  # optional ref disabled (ADR-0021)
+        return None  # optional ref disabled (ADR-0010)
     return make_readout_default(ctx)

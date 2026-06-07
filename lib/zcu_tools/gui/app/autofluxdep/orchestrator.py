@@ -79,7 +79,7 @@ class DepDeclaring(Protocol):
 
 # notify(provider_name, flux_idx): the row-updated notification the round_hook
 # fires — the main thread redraws that provider's Plotter. Pure data (a name +
-# an index), no figure crosses the thread (ADR-0018).
+# an index), no figure crosses the thread (ADR-0017).
 Notify = Callable[[str, int], None]
 OnPoint = Callable[[int, float, "InfoStore"], None]
 # on_node(provider_name, flux_idx): fired when a provider is about to run (after

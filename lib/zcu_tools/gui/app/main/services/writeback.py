@@ -40,7 +40,7 @@ _UNSET: Any = object()
 
 
 class WritebackService:
-    """Owns the persistent writeback draft for each tab (ADR-0010).
+    """Owns the persistent writeback draft for each tab (ADR-0008).
 
     Writeback items are computed **once** when analyze finishes (``compute_items``)
     and stored on ``Session.writeback_items``. Each module/waveform item gets a
@@ -160,7 +160,7 @@ class WritebackService:
 
     def apply_tab_writeback(self, permit: WritebackPermit) -> list[str]:
         # Context + analyze-result preconditions are proven by the
-        # WritebackPermit. ADR-0011: writeback no longer writes ctx.md/ml itself —
+        # WritebackPermit. ADR-0006: writeback no longer writes ctx.md/ml itself —
         # it collects the selected items into a ContextWrites batch and hands them
         # to the single write authority (ContextService), which lowers + registers
         # + bumps "context" once + emits at most one MD/ML_CHANGED. Writeback only

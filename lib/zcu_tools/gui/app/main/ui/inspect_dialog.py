@@ -81,7 +81,7 @@ class _MlModifyDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        # ADR-0011: modify an existing ml entry is the UI twin of the agent's
+        # ADR-0006: modify an existing ml entry is the UI twin of the agent's
         # open(from_name) → edit → commit flow. Open a committable session loaded
         # from the live ml; Save commits via the single write authority. No
         # UI-side schema build / lowering / raw write.
@@ -103,7 +103,7 @@ class _MlModifyDialog(QDialog):
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
-        # CfgFormWidget attaches to the service-owned LiveModel (ADR-0010); edits
+        # CfgFormWidget attaches to the service-owned LiveModel (ADR-0008); edits
         # land in that draft and enter the live ModuleLibrary only on commit.
         self._form_widget = CfgFormWidget()
         self._scroll.setWidget(self._form_widget)
@@ -130,7 +130,7 @@ class _MlModifyDialog(QDialog):
         self._validate()
 
     def _close_cfg_editor(self, *_: Any) -> None:
-        # Detach the widget, then tear down the service-owned model (ADR-0010).
+        # Detach the widget, then tear down the service-owned model (ADR-0008).
         self._form_widget.detach()
         editor_id = self._ctrl.editor_id_for_owner(self._cfg_editor_owner)
         if editor_id is not None:
@@ -158,7 +158,7 @@ class _MlModifyDialog(QDialog):
             self._save_btn.setEnabled(False)
 
     def _on_save(self) -> None:
-        # ADR-0011: commit the service-owned session through the single write
+        # ADR-0006: commit the service-owned session through the single write
         # authority (lowering + register happen there). No UI-side lowering.
         editor_id = self._ctrl.editor_id_for_owner(self._cfg_editor_owner)
         if editor_id is None:

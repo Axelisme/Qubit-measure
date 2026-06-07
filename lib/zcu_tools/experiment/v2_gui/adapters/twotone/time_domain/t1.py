@@ -122,7 +122,7 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
             .scalars(reps=100, rounds=100, relax_delay=relax_delay)
             .role("modules.pi_pulse", "pi_pulse")
             .role("modules.readout", "readout")
-            # optional → None (disabled) when no library reset (ADR-0021)
+            # optional → None (disabled) when no library reset (ADR-0010)
             .role("modules.reset", "reset", optional=True)
             .set_sweep(
                 "sweep.length", SweepValue(start=0.0, stop=sweep_stop, expts=101)

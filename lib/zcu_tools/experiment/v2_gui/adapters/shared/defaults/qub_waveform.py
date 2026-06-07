@@ -63,5 +63,5 @@ def make_qub_waveform_ref_default(
     if selected is not None:
         return selected
     if optional:
-        return None  # optional ref disabled (ADR-0021)
+        return None  # optional ref disabled (ADR-0010)
     return make_qub_waveform_default(ctx)

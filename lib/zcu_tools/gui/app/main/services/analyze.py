@@ -116,7 +116,7 @@ class AnalyzeService(QObject):
             type(analyze_result).__name__,
         )
         # Tear down the previous analyze's writeback editor models before the new
-        # draft replaces them (ADR-0010: per-item gc=False models are tied to a
+        # draft replaces them (ADR-0008: per-item gc=False models are tied to a
         # specific analyze result). Compute the fresh persistent draft from the
         # new result (passed in, not written to State early), then commit result
         # + figure + items through the single mutator (which bumps the version).

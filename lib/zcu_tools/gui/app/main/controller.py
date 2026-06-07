@@ -473,7 +473,7 @@ class Controller:
         self._run_svc.cancel_run()
 
     # ------------------------------------------------------------------
-    # Shutdown coordination (cancel-all + wait, ADR-0014)
+    # Shutdown coordination (cancel-all + wait, ADR-0003)
     # ------------------------------------------------------------------
 
     def active_operation_count(self) -> int:
@@ -488,7 +488,7 @@ class Controller:
         then run ``on_closed`` — the View's actual teardown.
 
         Qt-free façade: the QTimer-driven coordinator lives in a driving adapter
-        (ADR-0008), built lazily here so the Controller stays importable without
+        (ADR-0005), built lazily here so the Controller stays importable without
         a Qt loop. ``on_closed`` always runs on the main thread."""
         if self._shutdown_driver is None:
             from .adapters.qt_shutdown_driver import QtShutdownDriver
@@ -708,7 +708,7 @@ class Controller:
             spec = _MODULE_SPEC_FACTORIES[discriminator]()
         else:
             spec = make_waveform_spec_by_style(discriminator)
-        # ADR-0011: hand the un-lowered CfgSchema to the single write authority;
+        # ADR-0006: hand the un-lowered CfgSchema to the single write authority;
         # ContextService lowers (against live md) + registers. No UI-side lowering.
         schema = CfgSchema(spec=spec, value=value)
         if item_kind == "module":

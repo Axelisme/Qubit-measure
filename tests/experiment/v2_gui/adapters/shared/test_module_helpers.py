@@ -282,7 +282,7 @@ def test_make_readout_ref_default_fallback_prefers_ro_waveform_if_present():
 
 
 def test_make_readout_ref_default_returns_disabled_when_optional_and_empty():
-    # ADR-0021: optional ref with an empty library → None (disabled).
+    # ADR-0010: optional ref with an empty library → None (disabled).
     ctx = _make_ctx(ModuleLibrary())
     module_ref = make_readout_ref_default(ctx, optional=True)
 

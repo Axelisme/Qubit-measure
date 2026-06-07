@@ -73,7 +73,7 @@ if __name__ == "__main__":
     # ``module://zcu_tools.gui.plotting.backend`` (that backend is for the
     # worker-draws-then-marshals model — ADR-0017). autofluxdep's worker never
     # touches matplotlib; the main thread embeds each Node's figure with a bare
-    # ``FigureCanvasQTAgg`` (ADR-0018). With ``Agg`` selected, pyplot can never
+    # ``FigureCanvasQTAgg`` (ADR-0017). With ``Agg`` selected, pyplot can never
     # pop a detached window, while the directly-constructed embed canvases work
     # as normal. (Selecting the custom pyplot backend here would route stray
     # pyplot figures to detached windows — the bug this avoids.)

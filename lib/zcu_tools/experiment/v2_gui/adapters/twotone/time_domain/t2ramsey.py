@@ -137,7 +137,7 @@ class T2RamseyAdapter(
             .scalars(reps=100, rounds=100, relax_delay=relax_delay)
             .role("modules.pi2_pulse", "pi2_pulse")
             .role("modules.readout", "readout")
-            # optional → None (disabled) when no library reset (ADR-0021)
+            # optional → None (disabled) when no library reset (ADR-0010)
             .role("modules.reset", "reset", optional=True)
             .set_sweep(
                 "sweep.length", SweepValue(start=0.0, stop=sweep_stop, expts=101)

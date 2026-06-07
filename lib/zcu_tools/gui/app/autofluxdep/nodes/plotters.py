@@ -4,7 +4,7 @@ A Plotter is a Node-type-defined, stateful object drawing that Node's figure on
 the main thread. Its lifetime is the whole Sweep (built once at Run start, fed
 the flux-aware Result as it fills, redrawn each flux point). It holds drawing
 state but never owns the Qt widget, and is NEVER marshalled — the worker only
-fills numpy rows + notifies (ADR-0018).
+fills numpy rows + notifies (ADR-0017).
 
 Each Plotter reuses ``zcu_tools.liveplot`` (LivePlot1D / LivePlot2DwithLine /
 LivePlot2D) embedded into the host Figure's axes via ``existed_axes`` — the same

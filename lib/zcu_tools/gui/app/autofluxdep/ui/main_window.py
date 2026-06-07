@@ -13,7 +13,7 @@ switch and owns the liveplot integration:
   fires ``notify``; ``notify`` and the EventBus run events are marshalled to the
   Qt main thread by ``_RunBridge``. A main-thread slot then calls
   ``plotter.update(result, idx)`` — all drawing stays on the main thread
-  (ADR-0018: the worker never touches matplotlib).
+  (ADR-0017: the worker never touches matplotlib).
 
 Prototype: the run uses synthetic signals (no hardware); Setup builds a MockSoc +
 FakeDevice + a SimplePredictor.

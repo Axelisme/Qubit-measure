@@ -1,4 +1,4 @@
-"""Tests for ContextService ml/md writes — the single write authority (ADR-0011).
+"""Tests for ContextService ml/md writes — the single write authority (ADR-0006).
 
 Writes take an un-lowered CfgSchema (``set_ml_*_from_schema`` / ``apply_writes``);
 ContextService lowers + registers + bumps "context" + emits. There is no public

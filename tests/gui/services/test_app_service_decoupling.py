@@ -1,5 +1,5 @@
 """M4 — no application service depends on another concrete application service
-(ADR-0008 violation 2). Orchestrators / read models depend on ports (interfaces)
+(ADR-0005 violation 2). Orchestrators / read models depend on ports (interfaces)
 declared in ports.py, which also prevents a back-edge / cycle from forming.
 
 This is an import-discipline gate: it scans the offender modules' source for a
@@ -121,5 +121,5 @@ def test_no_app_service_imports_another_app_service():
             offenders[mod] = deps
     assert not offenders, (
         "application services must depend on ports, not concrete sibling "
-        f"services (ADR-0008 violation 2). Found concrete deps: {offenders}"
+        f"services (ADR-0005 violation 2). Found concrete deps: {offenders}"
     )

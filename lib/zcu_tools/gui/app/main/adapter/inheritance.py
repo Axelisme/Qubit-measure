@@ -31,7 +31,7 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
     defaults (scalar 0, sweep range, choices[0]) so an adapter need not spell out
     every field — special cases are overridden via the value OO fluent. The
     result is **complete**: every spec field has an entry, no missing keys
-    (ADR-0021). An *optional* ModuleRef/WaveformRef defaults to ``None``
+    (ADR-0010). An *optional* ModuleRef/WaveformRef defaults to ``None``
     (disabled) — the safest, least-surprising default for "this field is
     optional"; an adapter that wants it enabled supplies a ref factory value.
     """
@@ -41,7 +41,7 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
             fields[key] = DirectValue(node_spec.value)
         elif isinstance(node_spec, ScalarSpec):
             if node_spec.required:
-                fields[key] = DirectValue(value=None)  # unset (ADR-0021)
+                fields[key] = DirectValue(value=None)  # unset (ADR-0010)
             elif node_spec.choices:
                 fields[key] = DirectValue(node_spec.choices[0])
             else:
@@ -50,7 +50,7 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
             fields[key] = SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)
         elif isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
             if node_spec.optional:
-                fields[key] = None  # optional ref defaults to disabled (ADR-0021)
+                fields[key] = None  # optional ref defaults to disabled (ADR-0010)
             else:
                 first = node_spec.allowed[0]
                 label = first.label or "Custom"
@@ -97,7 +97,7 @@ def inherit_from(
             ):
                 new_fields[key] = old_node_val
             elif new_node_spec.required:
-                new_fields[key] = DirectValue(value=None)  # unset (ADR-0021)
+                new_fields[key] = DirectValue(value=None)  # unset (ADR-0010)
             elif new_node_spec.choices:
                 new_fields[key] = DirectValue(new_node_spec.choices[0])
             else:
@@ -132,7 +132,7 @@ def inherit_from(
                 and key in old_val.fields
                 and old_node_val is None
             ):
-                new_fields[key] = None  # inherit the disabled state (ADR-0021)
+                new_fields[key] = None  # inherit the disabled state (ADR-0010)
             elif new_node_spec.optional:
                 new_fields[key] = None  # optional ref defaults to disabled
             else:
@@ -155,7 +155,7 @@ def inherit_from(
                 and key in old_val.fields
                 and old_node_val is None
             ):
-                new_fields[key] = None  # inherit the disabled state (ADR-0021)
+                new_fields[key] = None  # inherit the disabled state (ADR-0010)
             elif new_node_spec.optional:
                 new_fields[key] = None  # optional ref defaults to disabled
             else:

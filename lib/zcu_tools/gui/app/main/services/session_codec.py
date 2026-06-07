@@ -76,7 +76,7 @@ def _section_value_to_raw(
 ) -> dict[str, object]:
     # The value tree is complete (every spec field has an entry — guaranteed by
     # adapter make_default_cfg validation + LiveModel). A ``None`` entry is only
-    # ever a disabled *optional ref* (ADR-0021), serialised to a ``{"__kind":
+    # ever a disabled *optional ref* (ADR-0010), serialised to a ``{"__kind":
     # "disabled"}`` marker. A ``None`` for any other node is an invariant
     # violation (incomplete value tree) — fail fast rather than silently fill.
     payload: dict[str, object] = {}
@@ -156,7 +156,7 @@ def _section_value_from_raw(
     spec: CfgSectionSpec,
     raw: dict[str, object],
 ) -> CfgSectionValue:
-    # Start from the complete default (ADR-0021); override each key present in
+    # Start from the complete default (ADR-0010); override each key present in
     # ``raw``. A ``{"__kind": "disabled"}`` marker → ``None`` (disabled). A key
     # genuinely absent from ``raw`` (old file / new field) keeps the default —
     # which for an optional ref is already ``None`` (disabled), faithfully
@@ -188,7 +188,7 @@ def _node_value_from_raw(
         ):
             return EvalValue(expr=raw["expr"], resolved=None, error=None)
         if isinstance(raw, dict) and raw.get("__kind") == "direct":
-            # ``value`` is None when the scalar is unset (ADR-0021).
+            # ``value`` is None when the scalar is unset (ADR-0010).
             return DirectValue(value=raw.get("value"))
         if isinstance(raw, str) and raw.strip().startswith("="):
             raise RuntimeError("Legacy scalar '=expr' payload is unsupported")

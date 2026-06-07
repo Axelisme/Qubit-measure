@@ -274,7 +274,7 @@ def test_optional_module_ref_noop_for_non_optional(env):
 
 def test_optional_module_ref_disabled_is_none_in_value(env):
     """A disabled optional ModuleRef self-reports None — the key is present in
-    the (complete) value tree with value None, not omitted (ADR-0021)."""
+    the (complete) value tree with value None, not omitted (ADR-0010)."""
     spec = _make_optional_module_ref_spec()
     initial = CfgSectionValue(fields={"reps": DirectValue(10)})
     parent = SectionLiveField(spec, env, initial_val=initial)
@@ -286,7 +286,7 @@ def test_optional_module_ref_disabled_is_none_in_value(env):
 
 def test_module_ref_set_value_none_disables(env):
     """set_value(None) disables an optional ref; get_value round-trips to None
-    (ADR-0021) — symmetric set/get, no TypeError."""
+    (ADR-0010) — symmetric set/get, no TypeError."""
     spec = _make_optional_module_ref_spec()
     inner_val = ModuleRefValue(
         "<Custom:Pulse>", CfgSectionValue(fields={"ch": DirectValue(3)})

@@ -480,7 +480,7 @@ def test_optional_module_ref_omitted_when_disabled():
             "reps": ScalarSpec(label="Reps", type=int),
         }
     )
-    # disabled optional ref = None entry (ADR-0021); the value tree is complete
+    # disabled optional ref = None entry (ADR-0010); the value tree is complete
     # (the key is present), and lowering omits it from the raw cfg.
     outer_val = CfgSectionValue(fields={"module": None, "reps": DirectValue(100)})
     s = CfgSchema(spec=outer_spec, value=outer_val)
@@ -536,7 +536,7 @@ def test_device_ref_normal_path_produces_device_name():
 
 def test_device_ref_is_unset_raises():
     spec = CfgSectionSpec(fields={"dev": DeviceRefSpec(label="Device")})
-    # An empty device ref is unset → lowering raises (ADR-0021: no is_unset flag).
+    # An empty device ref is unset → lowering raises (ADR-0010: no is_unset flag).
     val = CfgSectionValue(fields={"dev": DirectValue(value="")})
     s = CfgSchema(spec=spec, value=val)
     with pytest.raises(RuntimeError, match="unset"):

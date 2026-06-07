@@ -121,7 +121,7 @@ def _section_to_dict_inner(
         raise RuntimeError(f"Config section '{section}' has unknown fields: {extras}")
     for key, node_spec in spec.fields.items():
         node_val = value.fields.get(key)
-        # ``None`` is a disabled optional ref (ADR-0021) — lowering omits it (the
+        # ``None`` is a disabled optional ref (ADR-0010) — lowering omits it (the
         # exp cfg has no such field). This is the *only* place "disabled →
         # disappears": run/save is the boundary where an unused field drops out.
         if node_val is None:
@@ -299,7 +299,7 @@ def _validate_node(
     ml: "Optional[ModuleLibrary]",
     full_path: str,
 ) -> None:
-    # A ``None`` entry is a disabled optional ref (ADR-0021); legal only there.
+    # A ``None`` entry is a disabled optional ref (ADR-0010); legal only there.
     if node_val is None:
         if isinstance(spec, (ModuleRefSpec, WaveformRefSpec)) and spec.optional:
             return

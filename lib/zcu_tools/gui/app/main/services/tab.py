@@ -44,7 +44,7 @@ class TabService:
         self._state = state
         self._registry = registry
         # Read model composes writeback proposals via a narrow query port — no
-        # concrete sibling app-service dependency (ADR-0008 violation 2).
+        # concrete sibling app-service dependency (ADR-0005 violation 2).
         self._writeback = writeback
 
     def get_snapshot(self, tab_id: str) -> "TabSnapshot":
@@ -55,7 +55,7 @@ class TabService:
         ctx = self._state.exp_context
         interaction = TabInteractionState(
             # cross-cutting facts read directly off State's aggregates (no
-            # app-service dependency — ADR-0008 violation 2 / ADR-0007 Query).
+            # app-service dependency — ADR-0005 violation 2 / ADR-0004 Query).
             global_run_active=self._state.is_run_active() and not tab.is_running,
             has_context=ctx.has_context(),
             has_active_context=ctx.is_active(),

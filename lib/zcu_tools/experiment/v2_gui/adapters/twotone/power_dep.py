@@ -107,7 +107,7 @@ class PowerDepAdapter(BaseAdapter[PowerCfg, PowerDepRunResult]):
             .scalars(reps=100, rounds=100, relax_delay=1.0)
             .role("modules.qub_pulse", "qub_probe", prefer_blank=True)
             .role("modules.readout", "readout", prefer_blank=True)
-            # optional → None (disabled) when no library reset (ADR-0021)
+            # optional → None (disabled) when no library reset (ADR-0010)
             .role("modules.reset", "reset", optional=True)
             .sweep("sweep.gain", 0.001, 0.5, 101)
             .set_sweep("sweep.freq", proper_qub_freq_range(ctx, 201))

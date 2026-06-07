@@ -40,7 +40,7 @@ from zcu_tools.program.v2.modules.waveform import AbsWaveformCfg
 
 def _val(cfg: dict, key: str) -> ScalarValue:
     """Extract a scalar value from a saved cfg dict. A missing key yields
-    ``DirectValue(None)`` — unset (ADR-0021), invalid until the user fills it;
+    ``DirectValue(None)`` — unset (ADR-0010), invalid until the user fills it;
     the field's sensible default belongs to the spec / make_default_value, not
     to a hard-coded fallback here."""
     if key not in cfg:

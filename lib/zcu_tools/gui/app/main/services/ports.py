@@ -63,7 +63,7 @@ class TabSnapshot:
     converts ``cfg_schema`` ↔ raw at the file boundary, so the persisted form
     never leaks into the snapshot. Lives in ``ports`` (the contract layer) so an
     application service can pass it around without importing a sibling
-    application-service module (ADR-0008).
+    application-service module (ADR-0005).
     """
 
     adapter_name: str
@@ -168,7 +168,7 @@ class ContextReadPort(Protocol):
 
     A ``CfgEditorSession`` reads the current ml to seed a session opened
     ``from_name`` (load an existing entry's shape). Reading only — all ml/md
-    *content writes* go through ``ContextWritePort`` (ADR-0011: ContextService is
+    *content writes* go through ``ContextWritePort`` (ADR-0006: ContextService is
     the single write authority). Symmetric name with ``ContextWritePort``.
     """
 
@@ -177,7 +177,7 @@ class ContextReadPort(Protocol):
 
 @runtime_checkable
 class ContextWritePort(Protocol):
-    """The single authority for ml/md content writes (ADR-0011).
+    """The single authority for ml/md content writes (ADR-0006).
 
     Sources holding an un-lowered ``CfgSchema`` (editor commit, writeback apply,
     inspect save, create_from_role) write through this port; ContextService
@@ -214,7 +214,7 @@ class WritebackQueryPort(Protocol):
 
     ``TabService.get_snapshot`` is a read-model assembler; it composes a tab's
     writeback proposals into the snapshot but must not depend on the concrete
-    ``WritebackService`` (ADR-0008 violation 2 — no app-service→app-service
+    ``WritebackService`` (ADR-0005 violation 2 — no app-service→app-service
     coupling). It depends on this narrow query port instead, which prevents a
     back-edge from ever forming. ``WritebackService`` implements it.
     """
@@ -227,7 +227,7 @@ class TabLifecyclePort(Protocol):
     """Tab create/restore/close + cfg as commanded by ``WorkspaceService``.
 
     ``WorkspaceService`` orchestrates the tab lifecycle (one-way command); it
-    depends on this port, not the concrete ``TabService`` (ADR-0008 violation 2).
+    depends on this port, not the concrete ``TabService`` (ADR-0005 violation 2).
     """
 
     def new_tab(

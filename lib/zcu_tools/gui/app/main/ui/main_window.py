@@ -431,7 +431,7 @@ class ExpTabWidget(QWidget):
         self._bind_to_controller(main_window)
 
     def _populate_cfg(self, schema: "CfgSchema", ctrl: "Controller") -> None:
-        # The cfg LiveModel is owned by the CfgEditorService (ADR-0010): open a
+        # The cfg LiveModel is owned by the CfgEditorService (ADR-0008): open a
         # gc=False session seeded from the committed schema, then attach the
         # widget to the service-owned model. tab_id is the owner key so the
         # editor_id is discoverable (tab.snapshot) and the agent can drive it.
@@ -615,7 +615,7 @@ class ExpTabWidget(QWidget):
         self.cfg_form.schema_changed.connect(schema_cb)
 
         # The cfg editor session + widget attach were already set up in
-        # populate_cfg (the service owns the model — ADR-0010). The agent reaches
+        # populate_cfg (the service owns the model — ADR-0008). The agent reaches
         # it via the tab's editor_id (exposed on tab.snapshot).
         self.analyze_form.params_changed.connect(
             lambda instance: self._ctrl.update_tab_analyze_param_instance(
@@ -653,7 +653,7 @@ class ExpTabWidget(QWidget):
     def detach(self) -> None:
         """Tear this tab widget down (mirrors ``CfgFormWidget.detach`` at the
         whole-tab scale): drop the controller signal bindings, detach the cfg
-        widget, and tell the service to tear down the model it owns (ADR-0010).
+        widget, and tell the service to tear down the model it owns (ADR-0008).
         Paired with :meth:`attach`."""
         if hasattr(self, "_validity_cb"):
             self.cfg_form.validity_changed.disconnect(self._validity_cb)
@@ -661,7 +661,7 @@ class ExpTabWidget(QWidget):
             self.cfg_form.schema_changed.disconnect(self._schema_cb)
         self._progress_unsub()
         # Detach the widget first (drop its signal bindings + widget tree), then
-        # tell the service to tear down the model it owns (ADR-0010).
+        # tell the service to tear down the model it owns (ADR-0008).
         self.cfg_form.detach()
         if self._cfg_editor_id is not None:
             self._ctrl.teardown_cfg_editor(self._cfg_editor_id)
@@ -815,7 +815,7 @@ class MainWindow(QMainWindow):
     def _on_bus_context_switched(self, payload: ContextSwitchedPayload) -> None:
         del payload
         # cfg EvalValue refresh is the CfgEditorService's job now (it owns the
-        # models — ADR-0010); here we only refresh the surrounding tab panels.
+        # models — ADR-0008); here we only refresh the surrounding tab panels.
         self.refresh_context_panel()
         for tab_id in list(self._tab_widgets):
             snapshot = self._ctrl.get_tab_snapshot(tab_id)
@@ -825,7 +825,7 @@ class MainWindow(QMainWindow):
 
     def _on_bus_ml_changed(self, payload: MlChangedPayload) -> None:
         del payload
-        # cfg EvalValue refresh is the CfgEditorService's job now (ADR-0010);
+        # cfg EvalValue refresh is the CfgEditorService's job now (ADR-0008);
         # here we only refresh the surrounding tab panels.
         for tab_id in list(self._tab_widgets):
             snapshot = self._ctrl.get_tab_snapshot(tab_id)
