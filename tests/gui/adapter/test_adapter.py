@@ -480,8 +480,9 @@ def test_optional_module_ref_omitted_when_disabled():
             "reps": ScalarSpec(label="Reps", type=int),
         }
     )
-    # value omits "module" key → disabled optional
-    outer_val = CfgSectionValue(fields={"reps": DirectValue(100)})
+    # disabled optional ref = None entry (ADR-0021); the value tree is complete
+    # (the key is present), and lowering omits it from the raw cfg.
+    outer_val = CfgSectionValue(fields={"module": None, "reps": DirectValue(100)})
     s = CfgSchema(spec=outer_spec, value=outer_val)
     result = s.to_raw_dict(None, _make_ml())
 

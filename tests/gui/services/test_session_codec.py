@@ -275,20 +275,21 @@ def test_device_ref_must_use_direct_encoding():
         raw_to_schema(base, {"dev": "lo_device"})
 
 
-def test_omitted_literal_key_round_trips_to_spec_value_not_disabled():
-    """A LiteralSpec key the adapter omits from its default value tree (e.g.
-    lookback's locked ``reps``) must serialise as its spec value, NOT as a
-    disabled marker — only optional refs use ``disabled`` (ADR-0021 regression:
-    lookback ``reps`` showed null in the cfg summary)."""
+def test_complete_literal_key_round_trips():
+    """A complete value tree (the LiteralSpec key has an entry) round-trips: the
+    literal serialises as its value, not a disabled marker (only optional refs
+    use ``disabled``)."""
     spec = CfgSectionSpec(
         fields={
             "reps": LiteralSpec(value=1, label="Reps"),
             "rounds": ScalarSpec(label="Rounds", type=int),
         }
     )
-    # Adapter default omits the locked LiteralSpec key.
     schema = CfgSchema(
-        spec=spec, value=CfgSectionValue(fields={"rounds": DirectValue(500)})
+        spec=spec,
+        value=CfgSectionValue(
+            fields={"reps": DirectValue(1), "rounds": DirectValue(500)}
+        ),
     )
 
     raw = schema_to_raw(schema)
@@ -297,3 +298,21 @@ def test_omitted_literal_key_round_trips_to_spec_value_not_disabled():
     restored = raw_to_schema(_empty(spec), raw)
     reps = restored.value.fields["reps"]
     assert isinstance(reps, DirectValue) and reps.value == 1
+
+
+def test_incomplete_value_tree_fails_fast_on_capture():
+    """A value tree that omits a non-ref key is an invariant violation — capture
+    fast-fails rather than silently filling a default (value trees are complete
+    by contract; only optional refs may be a None entry)."""
+    spec = CfgSectionSpec(
+        fields={
+            "reps": LiteralSpec(value=1, label="Reps"),
+            "rounds": ScalarSpec(label="Rounds", type=int),
+        }
+    )
+    # omits the LiteralSpec 'reps' key → incomplete
+    schema = CfgSchema(
+        spec=spec, value=CfgSectionValue(fields={"rounds": DirectValue(500)})
+    )
+    with pytest.raises(SessionCodecError, match="incomplete value tree"):
+        schema_to_raw(schema)

@@ -143,9 +143,14 @@ class LookbackAdapter(
                                 trig_fallback=0.4,
                             ),
                         ),
+                        # optional modules default to disabled (None entry)
+                        "init_pulse": None,
+                        "reset": None,
                     }
                 ),
-                # reps omitted: locked to 1 by the LiteralSpec in cfg_spec().
+                # reps is locked to 1 by the LiteralSpec in cfg_spec(); the value
+                # must carry the locked literal.
+                "reps": DirectValue(1),
                 "rounds": DirectValue(500),
                 "relax_delay": DirectValue(0.0),
             }

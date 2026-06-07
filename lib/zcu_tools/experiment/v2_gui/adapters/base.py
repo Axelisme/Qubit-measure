@@ -134,8 +134,16 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     # -- shared implementation (provided once) -----------------------------
 
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
-        """Compose the static spec with context-derived default values."""
-        return CfgSchema(spec=self.cfg_spec(), value=self.make_default_value(ctx))
+        """Compose the static spec with context-derived default values.
+
+        Validates the result: an adapter's ``make_default_value`` must return a
+        structurally-complete, spec-compliant value tree (every field present,
+        literals/types/choices valid) — a violation fast-fails here, pointing at
+        the offending adapter rather than surfacing as a later lowering error.
+        """
+        schema = CfgSchema(spec=self.cfg_spec(), value=self.make_default_value(ctx))
+        schema.validate(ctx.ml)
+        return schema
 
     @classmethod
     def analyze_params_cls(cls) -> type:

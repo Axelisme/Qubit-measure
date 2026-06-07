@@ -139,8 +139,12 @@ class OneToneFreqAdapter(
             {
                 "modules": CfgSectionValue(
                     {
+                        # cfg_spec() locks freq / ro_freq to 0.0 (the sweep axis
+                        # owns frequency); the value must match the locked literal.
                         "readout": make_pulse_readout_default(ctx)
                         .with_field("pulse_cfg.gain", 0.05)
+                        .with_field("pulse_cfg.freq", 0.0)
+                        .with_field("ro_cfg.ro_freq", 0.0)
                         .with_field("ro_cfg.ro_length", ro_length),
                     }
                 ),

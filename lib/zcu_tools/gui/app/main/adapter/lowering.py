@@ -253,3 +253,148 @@ def _find_allowed_spec(
         f"Library reference {chosen!r} resolved to unsupported spec "
         f"{chosen_spec.label!r}; allowed labels: {allowed}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Static schema validation — a value tree must be complete and spec-compliant.
+#
+# This is the "static" half (structure + scalar type/choices + literal equality)
+# that holds regardless of MetaDict — checked at the *finished-cfg* boundaries
+# (``make_default_cfg`` output, ``to_raw_dict`` before lowering). The "dynamic"
+# half (required must have a value, EvalValue must resolve) is enforced by
+# lowering itself with the live md. EvalValue is skipped here — its scalar type
+# is only fixed when resolved at lower time.
+# ---------------------------------------------------------------------------
+
+
+def validate_section(
+    spec: CfgSectionSpec,
+    value: CfgSectionValue,
+    ml: "Optional[ModuleLibrary]",
+    path: "list[str]",
+) -> None:
+    """Fast-fail if ``value`` is structurally incomplete or violates ``spec``.
+
+    Raises ``RuntimeError`` at the first problem (the path is reported). A value
+    tree produced by an adapter must be complete (every spec field has an entry)
+    and statically spec-compliant; this is the single static-validation walk.
+    """
+    extra = set(value.fields) - set(spec.fields)
+    if extra:
+        section = ".".join(path) or "<root>"
+        raise RuntimeError(
+            f"Config section '{section}' has unknown fields: {', '.join(sorted(extra))}"
+        )
+    for key, node_spec in spec.fields.items():
+        full_path = ".".join([*path, key])
+        if key not in value.fields:
+            raise RuntimeError(f"Config field '{full_path}' is missing from the value")
+        node_val = value.fields[key]
+        _validate_node(node_spec, node_val, ml, full_path)
+
+
+def _validate_node(
+    spec: object,
+    node_val: object,
+    ml: "Optional[ModuleLibrary]",
+    full_path: str,
+) -> None:
+    # A ``None`` entry is a disabled optional ref (ADR-0021); legal only there.
+    if node_val is None:
+        if isinstance(spec, (ModuleRefSpec, WaveformRefSpec)) and spec.optional:
+            return
+        raise RuntimeError(
+            f"Config field '{full_path}' is None but is not a disabled optional ref"
+        )
+
+    if isinstance(spec, LiteralSpec):
+        if not isinstance(node_val, DirectValue) or node_val.value != spec.value:
+            raise RuntimeError(
+                f"Config field '{full_path}' is a locked literal "
+                f"(must be {spec.value!r}), got {node_val!r}"
+            )
+        return
+
+    if isinstance(spec, ScalarSpec):
+        # EvalValue's scalar type is only fixed when resolved at lower time — skip.
+        if isinstance(node_val, EvalValue):
+            return
+        if not isinstance(node_val, DirectValue):
+            raise RuntimeError(
+                f"Config field '{full_path}' must be a DirectValue/EvalValue, "
+                f"got {type(node_val).__name__}"
+            )
+        _validate_scalar(spec, node_val, full_path)
+        return
+
+    if isinstance(spec, SweepSpec):
+        if not isinstance(node_val, SweepValue):
+            raise RuntimeError(
+                f"Config field '{full_path}' must be a SweepValue, "
+                f"got {type(node_val).__name__}"
+            )
+        return
+
+    if isinstance(spec, DeviceRefSpec):
+        if not isinstance(node_val, DirectValue):
+            raise RuntimeError(
+                f"Config field '{full_path}' (device ref) must be a DirectValue, "
+                f"got {type(node_val).__name__}"
+            )
+        return
+
+    if isinstance(spec, (ModuleRefSpec, WaveformRefSpec)):
+        if not isinstance(node_val, (ModuleRefValue, WaveformRefValue)):
+            raise RuntimeError(
+                f"Config field '{full_path}' must be an enabled module/waveform "
+                f"ref, got {type(node_val).__name__}"
+            )
+        chosen_spec = _find_allowed_spec(spec, node_val, ml)
+        validate_section(chosen_spec, node_val.value, ml, [full_path])
+        return
+
+    if isinstance(spec, CfgSectionSpec):
+        if not isinstance(node_val, CfgSectionValue):
+            raise RuntimeError(
+                f"Config field '{full_path}' must be a CfgSectionValue, "
+                f"got {type(node_val).__name__}"
+            )
+        validate_section(spec, node_val, ml, [full_path])
+        return
+
+    raise RuntimeError(
+        f"Config field '{full_path}': unknown spec {type(spec).__name__}"
+    )
+
+
+def _validate_scalar(spec: ScalarSpec, node_val: DirectValue, full_path: str) -> None:
+    val = node_val.value
+    # A None DirectValue is "unset" — a legal intermediate state; the *dynamic*
+    # "required must have a value" check belongs to lowering, not here.
+    if val is None:
+        return
+    # Type check (widen-only): int may stand in for a float field; bool/str/float
+    # must match exactly; float must NOT narrow to an int field.
+    if spec.type is bool:
+        ok = isinstance(val, bool)
+    elif spec.type is int:
+        ok = isinstance(val, int) and not isinstance(val, bool)
+    elif spec.type is float:
+        # int widens to float (5 -> 5.0); bool excluded.
+        ok = isinstance(val, float) or (
+            isinstance(val, int) and not isinstance(val, bool)
+        )
+    elif spec.type is str:
+        ok = isinstance(val, str)
+    else:
+        ok = isinstance(val, spec.type)
+    if not ok:
+        raise RuntimeError(
+            f"Config field '{full_path}' value {val!r} is not compatible with "
+            f"spec type {spec.type.__name__}"
+        )
+    if spec.choices is not None and val not in spec.choices:
+        raise RuntimeError(
+            f"Config field '{full_path}' value {val!r} is not in allowed choices "
+            f"{spec.choices!r}"
+        )

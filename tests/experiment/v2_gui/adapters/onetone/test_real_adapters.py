@@ -198,6 +198,7 @@ def test_onetone_freq_default_fallback_uses_direct_values_without_md_keys() -> N
 def test_onetone_freq_default_uses_eval_when_md_keys_exist() -> None:
     from zcu_tools.gui.app.main.adapter import (
         CfgSectionValue,
+        DirectValue,
         EvalValue,
         ModuleRefValue,
         SweepValue,
@@ -219,8 +220,12 @@ def test_onetone_freq_default_uses_eval_when_md_keys_exist() -> None:
     ro_cfg = readout_val.fields["ro_cfg"]
     assert isinstance(pulse_cfg, CfgSectionValue)
     assert isinstance(ro_cfg, CfgSectionValue)
-    assert isinstance(pulse_cfg.fields["freq"], EvalValue)
-    assert isinstance(ro_cfg.fields["ro_freq"], EvalValue)
+    # freq / ro_freq are lock_literal'd to 0.0 (the sweep axis owns frequency),
+    # so the value carries the locked literal — asserting they track r_f would be
+    # asserting on a field that is, by design, not user-meaningful for a freq
+    # sweep. Only the non-locked md-derived fields track md here.
+    assert pulse_cfg.fields["freq"] == DirectValue(0.0)
+    assert ro_cfg.fields["ro_freq"] == DirectValue(0.0)
     assert isinstance(pulse_cfg.fields["ch"], EvalValue)
     assert isinstance(ro_cfg.fields["ro_ch"], EvalValue)
     assert isinstance(ro_cfg.fields["trig_offset"], EvalValue)

@@ -593,6 +593,18 @@ class CfgSchema:
     spec: CfgSectionSpec
     value: CfgSectionValue
 
+    def validate(self, ml: "Optional[ModuleLibrary]") -> None:
+        """Fast-fail if the value tree is structurally incomplete or violates the
+        spec — the *static* contract (structure complete, every spec field has an
+        entry, LiteralSpec == spec.value, DirectValue scalar type/choices). The
+        *dynamic* contract (required must have a value, EvalValue must resolve) is
+        enforced by lowering with the live md. Called at finished-cfg boundaries
+        (``make_default_cfg`` output, ``to_raw_dict`` before lowering); NOT in
+        ``__post_init__`` (that would reject legal editing intermediates)."""
+        from .lowering import validate_section
+
+        validate_section(self.spec, self.value, ml, [])
+
     def to_raw_dict(
         self, md: "Optional[MetaDict]", ml: "Optional[ModuleLibrary]"
     ) -> dict[str, object]:
@@ -605,4 +617,5 @@ class CfgSchema:
         """
         from .lowering import _section_to_dict_inner
 
+        self.validate(ml)
         return _section_to_dict_inner(self.spec, self.value, ml, [], md)

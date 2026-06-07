@@ -74,12 +74,11 @@ def raw_to_schema(base_schema: CfgSchema, raw_cfg: dict[str, object]) -> CfgSche
 def _section_value_to_raw(
     spec: CfgSectionSpec, value: CfgSectionValue
 ) -> dict[str, object]:
-    # A ``None`` entry for an *optional ref* is the disabled state (ADR-0021) and
-    # serialises to a ``{"__kind": "disabled"}`` marker (the key is written, not
-    # omitted) so the disabled state survives reload. A ``None`` for any other
-    # node means the adapter's default value tree left it out (e.g. a locked
-    # LiteralSpec, or a key the adapter omits) — fall back to the node's default
-    # so the persisted payload stays a faithful, complete picture.
+    # The value tree is complete (every spec field has an entry — guaranteed by
+    # adapter make_default_cfg validation + LiveModel). A ``None`` entry is only
+    # ever a disabled *optional ref* (ADR-0021), serialised to a ``{"__kind":
+    # "disabled"}`` marker. A ``None`` for any other node is an invariant
+    # violation (incomplete value tree) — fail fast rather than silently fill.
     payload: dict[str, object] = {}
     for key, node_spec in spec.fields.items():
         node_val = value.fields.get(key)
@@ -87,22 +86,13 @@ def _section_value_to_raw(
             if isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
                 payload[key] = {"__kind": "disabled"}
             else:
-                payload[key] = _node_value_to_raw(
-                    node_spec, _default_node_value(node_spec)
+                raise SessionCodecError(
+                    f"Value field {key!r} is None for a non-ref spec "
+                    f"{type(node_spec).__name__} (incomplete value tree)"
                 )
         else:
             payload[key] = _node_value_to_raw(node_spec, node_val)
     return payload
-
-
-def _default_node_value(spec: CfgNodeSpec) -> CfgNodeValue:
-    """Build the default value for a single spec node (the adapter omitted its
-    key, e.g. a locked LiteralSpec). Mirrors make_default_value for one node.
-    Only called for non-ref specs, whose default is never None."""
-    wrapper = make_default_value(CfgSectionSpec(fields={"_": spec}))
-    default = wrapper.fields["_"]
-    assert default is not None
-    return default
 
 
 def _node_value_to_raw(spec: CfgNodeSpec, value: CfgNodeValue) -> object:
