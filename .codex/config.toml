@@ -1,11 +1,25 @@
 # Codex project-level config. Mirrors the root .mcp.json (Claude Code) so the
-# measure-gui MCP server is available in Codex too. stdio is inferred from the
-# presence of `command` — no transport/type field is needed. `uv run` is invoked
-# from the project root (the trusted-project cwd), matching .mcp.json which sets
-# no cwd; keep this in sync with .mcp.json when the launch command changes.
+# same four MCP servers (measure-gui / fluxdep-gui / dispersive-gui /
+# agent-memory) are available in Codex too. stdio is inferred from the presence
+# of `command` — no transport/type field is needed. `uv run` is invoked from the
+# project root (the trusted-project cwd), matching .mcp.json which sets no cwd;
+# keep this in sync with .mcp.json when a launch command changes.
+#
+# default_tools_approval_mode = "approve" pre-approves every tool on the server
+# without prompting — the Codex analogue of the per-server "mcp__<server>" allow
+# rules in .claude/settings.local.json. The three GUI servers additionally pass
+# through the Qt/session env vars so a GUI subprocess they launch can reach the
+# user's display; agent-memory has no GUI and needs none.
+
 [mcp_servers.measure-gui]
 command = "uv"
-args = ["run", "--extra", "gui", "python", "lib/zcu_tools/gui/app/main/services/remote/mcp_server.py"]
+args = [
+  "run",
+  "--extra",
+  "gui",
+  "python",
+  "lib/zcu_tools/mcp/measure/server.py",
+]
 env_vars = [
   "QT_QPA_PLATFORM",
   "DISPLAY",
@@ -14,162 +28,53 @@ env_vars = [
   "DBUS_SESSION_BUS_ADDRESS",
   "XDG_SESSION_TYPE",
 ]
-# Auto-approve every measure-gui tool call (no per-call confirmation), the Codex
-# analogue of the "mcp__measure-gui" allow rule in .claude/settings.local.json.
-default_tools_approval_mode = "auto"
+default_tools_approval_mode = "approve"
 
-[mcp_servers.measure-gui.tools.gui_launch]
-approval_mode = "approve"
+[mcp_servers.fluxdep-gui]
+command = "uv"
+args = [
+  "run",
+  "--extra",
+  "gui",
+  "python",
+  "lib/zcu_tools/mcp/fluxdep/server.py",
+]
+env_vars = [
+  "QT_QPA_PLATFORM",
+  "DISPLAY",
+  "WAYLAND_DISPLAY",
+  "XDG_RUNTIME_DIR",
+  "DBUS_SESSION_BUS_ADDRESS",
+  "XDG_SESSION_TYPE",
+]
+default_tools_approval_mode = "approve"
 
-[mcp_servers.measure-gui.tools.gui_adapter_list]
-approval_mode = "approve"
+[mcp_servers.dispersive-gui]
+command = "uv"
+args = [
+  "run",
+  "--extra",
+  "gui",
+  "python",
+  "lib/zcu_tools/mcp/dispersive/server.py",
+]
+env_vars = [
+  "QT_QPA_PLATFORM",
+  "DISPLAY",
+  "WAYLAND_DISPLAY",
+  "XDG_RUNTIME_DIR",
+  "DBUS_SESSION_BUS_ADDRESS",
+  "XDG_SESSION_TYPE",
+]
+default_tools_approval_mode = "approve"
 
-[mcp_servers.measure-gui.tools.gui_connect_start]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_startup_apply]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_context_new]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_state_check]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_tab_snapshot]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_tab_list_paths]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_context_get_md]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_adapter_analyze_spec]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_adapter_guide]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_context_set_md_attrs]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_events_subscribe]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_events_list]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_editor_set_fields]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_tab_get_cfg]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_context_set_md_attr]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_run_start]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_run_progress]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_run_wait]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_save_data]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_save_set_paths]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_analyze]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_tab_get_analyze_result]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_save_both]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_tab_get_analyze_params]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_tab_new]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_writeback_preview]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_writeback_apply]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_editor_set_field]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_writeback_set]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_context_get_md_attr]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_connect]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_view_snapshot]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_app_shutdown]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_context_get_ml]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_adapter_cfg_spec]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_tab_get_cfg_summary]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_run_poll]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_tab_figure_screenshot]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_save_result]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_run_running_tab]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_run_cancel]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_tab_list]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_tab_close]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_dialog_list_open]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_dialog_open]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_device_list]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_view_screenshot]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_dialog_screenshot]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_dialog_close]
-approval_mode = "approve"
-
-[mcp_servers.measure-gui.tools.gui_stop]
-approval_mode = "approve"
+[mcp_servers.agent-memory]
+command = "uv"
+args = [
+  "run",
+  "--extra",
+  "client",
+  "python",
+  "lib/zcu_tools/mcp/agent_memory/server.py",
+]
+default_tools_approval_mode = "approve"
