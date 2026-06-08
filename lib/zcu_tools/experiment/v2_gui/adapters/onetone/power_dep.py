@@ -83,8 +83,13 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
                     label="Modules",
                     fields={
                         # No reset module — one-tone runs without a qubit reset
-                        # (the ExpCfg defaults reset=None).
-                        "readout": make_pulse_readout_module_spec(),
+                        # (the ExpCfg defaults reset=None). The sweep axes own
+                        # readout freq + gain (set_param at run; "freq" writes
+                        # both pulse and ro freq), so lock them off the form.
+                        "readout": make_pulse_readout_module_spec()
+                        .lock_literal("pulse_cfg.freq", 0.0)
+                        .lock_literal("ro_cfg.ro_freq", 0.0)
+                        .lock_literal("pulse_cfg.gain", 0.0),
                     },
                 ),
                 "reps": ScalarSpec(label="Reps", type=int),

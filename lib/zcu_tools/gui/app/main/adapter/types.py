@@ -287,8 +287,8 @@ def _split_spec_path(path: str) -> list[str]:
 
 def _path_exists(spec: "CfgSectionSpec", parts: list[str]) -> bool:
     """True if the dotted ``parts`` resolve to a leaf within ``spec`` (descending
-    CfgSectionSpec.fields and ModuleRefSpec.allowed). Used by the duck-type
-    descent to decide which allowed shapes contain a path."""
+    CfgSectionSpec.fields and ModuleRefSpec/WaveformRefSpec.allowed). Used by the
+    duck-type descent to decide which allowed shapes contain a path."""
     head, rest = parts[0], parts[1:]
     child = spec.fields.get(head)
     if child is None:
@@ -297,7 +297,7 @@ def _path_exists(spec: "CfgSectionSpec", parts: list[str]) -> bool:
         return True
     if isinstance(child, CfgSectionSpec):
         return _path_exists(child, rest)
-    if isinstance(child, ModuleRefSpec):
+    if isinstance(child, (ModuleRefSpec, WaveformRefSpec)):
         return any(_path_exists(shape, rest) for shape in child.allowed)
     return False
 
@@ -310,6 +310,23 @@ class ScalarSpec:
     choices: Optional[list] = None
     decimals: Optional[int] = None
     required: bool = False
+    # ``optional``: the field may be left empty (value ``None``) and is *valid*
+    # while empty — at lowering an unset optional scalar is omitted so the model
+    # default (typically ``None``) applies (e.g. PulseCfg.mixer_freq). This is
+    # the opposite of ``required`` (which forces a value: empty = invalid), so
+    # the two are mutually exclusive.
+    optional: bool = False
+    # ``group``: pure presentation hint — fields sharing a non-empty group label
+    # render together under a collapsible sub-header (e.g. "Advanced"). It does
+    # NOT nest the value tree; the field stays a flat leaf of its section.
+    group: str = ""
+
+    def __post_init__(self) -> None:
+        if self.required and self.optional:
+            raise RuntimeError(
+                f"ScalarSpec {self.label!r}: 'required' and 'optional' are "
+                "mutually exclusive"
+            )
 
 
 @dataclass(frozen=True)
@@ -376,6 +393,34 @@ class WaveformRefSpec:
         if not self.allowed:
             raise RuntimeError("WaveformRefSpec.allowed must be non-empty")
 
+    def lock_literal(self, path: str, value: object) -> Self:
+        """Lock a leaf of this ref's allowed shapes (path is relative to the
+        shape, e.g. ``length``). Symmetric with ``ModuleRefSpec.lock_literal`` so
+        a leaf nested inside a waveform ref can be locked from the parent spec.
+        Returns a new frozen WaveformRefSpec; chains stay on this type."""
+        return self._with_override(
+            _split_spec_path(path), lambda leaf: LiteralSpec(value=value)
+        )
+
+    def _with_override(self, parts: list[str], fn: "_LeafTransform") -> Self:
+        # Duck-type descent: apply to every allowed shape that contains the path,
+        # skip those that don't. Fail only if no allowed shape matches (real typo).
+        new_allowed: list[CfgSectionSpec] = []
+        matched = False
+        for shape in self.allowed:
+            if _path_exists(shape, parts):
+                new_allowed.append(shape._with_override(parts, fn))
+                matched = True
+            else:
+                new_allowed.append(shape)
+        if not matched:
+            allowed_labels = ", ".join(s.label for s in self.allowed)
+            raise RuntimeError(
+                f"Spec override path {'.'.join(parts)!r} not found in any allowed "
+                f"shape of WaveformRefSpec (allowed: {allowed_labels})"
+            )
+        return replace(self, allowed=new_allowed)
+
 
 @dataclass(frozen=True)
 class CfgSectionSpec:
@@ -413,7 +458,7 @@ class CfgSectionSpec:
         child = self.fields[head]
         if not rest:
             new_child: CfgNodeSpec = fn(child)
-        elif isinstance(child, (CfgSectionSpec, ModuleRefSpec)):
+        elif isinstance(child, (CfgSectionSpec, ModuleRefSpec, WaveformRefSpec)):
             new_child = child._with_override(rest, fn)
         else:
             raise RuntimeError(

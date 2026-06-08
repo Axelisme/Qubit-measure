@@ -67,6 +67,22 @@ def test_scalar_field_reactivity(env):
     assert cb.called
 
 
+def test_optional_scalar_unset_is_valid(env):
+    spec = ScalarSpec(label="Mixer freq", type=float, optional=True)
+    field = ScalarLiveField(spec, env, initial_val=DirectValue(value=None))
+    assert field.is_valid()  # optional unset (None) is valid
+    field.set_value(5000.0)
+    assert field.is_valid()
+    field.set_value(None)  # clear back to unset
+    assert field.is_valid()
+
+
+def test_non_optional_scalar_unset_is_invalid(env):
+    spec = ScalarSpec(label="Reps", type=int)
+    field = ScalarLiveField(spec, env, initial_val=DirectValue(value=None))
+    assert not field.is_valid()  # non-optional unset is invalid
+
+
 def test_section_field_propagation(env):
     spec = CfgSectionSpec(
         fields={

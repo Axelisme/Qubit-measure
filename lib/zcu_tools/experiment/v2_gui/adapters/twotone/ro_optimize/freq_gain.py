@@ -109,7 +109,13 @@ class RoOptFreqGainAdapter(
                     fields={
                         "reset": make_reset_module_spec(optional=True),
                         "qub_pulse": make_pulse_module_spec(),
-                        "readout": make_pulse_readout_module_spec(),
+                        # Both sweep axes own readout freq + gain (set_param at
+                        # run; "freq" writes both pulse and ro freq), so lock
+                        # them off the form.
+                        "readout": make_pulse_readout_module_spec()
+                        .lock_literal("pulse_cfg.freq", 0.0)
+                        .lock_literal("ro_cfg.ro_freq", 0.0)
+                        .lock_literal("pulse_cfg.gain", 0.0),
                     },
                 ),
                 "reps": ScalarSpec(label="Reps", type=int),

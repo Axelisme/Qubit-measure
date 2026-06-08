@@ -108,7 +108,12 @@ class RoOptFreqAdapter(
                     fields={
                         "reset": make_reset_module_spec(optional=True),
                         "qub_pulse": make_pulse_module_spec(),
-                        "readout": make_pulse_readout_module_spec(),
+                        # The freq sweep owns the readout frequency
+                        # (set_param("freq") writes both pulse and ro freq), so
+                        # lock it off the form.
+                        "readout": make_pulse_readout_module_spec()
+                        .lock_literal("pulse_cfg.freq", 0.0)
+                        .lock_literal("ro_cfg.ro_freq", 0.0),
                     },
                 ),
                 "reps": ScalarSpec(label="Reps", type=int),

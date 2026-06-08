@@ -107,7 +107,11 @@ class RoOptPowerAdapter(
                     fields={
                         "reset": make_reset_module_spec(optional=True),
                         "qub_pulse": make_pulse_module_spec(),
-                        "readout": make_pulse_readout_module_spec(),
+                        # The gain sweep owns the readout gain (set_param("gain")
+                        # at run), so lock it off the form.
+                        "readout": make_pulse_readout_module_spec().lock_literal(
+                            "pulse_cfg.gain", 0.0
+                        ),
                     },
                 ),
                 "reps": ScalarSpec(label="Reps", type=int),

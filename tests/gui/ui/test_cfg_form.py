@@ -143,6 +143,64 @@ def test_scalar_editable_false_widget_disabled(qapp):
     assert not w.isEnabled()
 
 
+def test_optional_scalar_widget_is_line_edit_empty_for_none(qapp):
+    from qtpy.QtWidgets import QLineEdit
+    from zcu_tools.gui.app.main.ui.fields import make_scalar_widget, read_scalar_widget
+
+    spec = ScalarSpec(label="Mixer freq", type=float, optional=True)
+    # None → an empty QLineEdit (spinbox cannot show "unset"); reads back as None.
+    w = make_scalar_widget(spec, "")
+    assert isinstance(w, QLineEdit)
+    assert w.text() == ""
+    assert read_scalar_widget(w, spec) is None
+
+
+def test_optional_scalar_widget_round_trips_value(qapp):
+    from qtpy.QtWidgets import QLineEdit
+    from zcu_tools.gui.app.main.ui.fields import make_scalar_widget, read_scalar_widget
+
+    spec = ScalarSpec(label="Mixer freq", type=float, optional=True)
+    w = make_scalar_widget(spec, 5000.0)
+    assert isinstance(w, QLineEdit)
+    assert read_scalar_widget(w, spec) == pytest.approx(5000.0)
+    # Clearing the field reads back as None (unset).
+    w.setText("")
+    assert read_scalar_widget(w, spec) is None
+
+
+def test_grouped_field_renders_in_collapsed_subsection(qapp, ctrl):
+    from zcu_tools.gui.app.main.adapter import make_default_value
+    from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
+    from zcu_tools.gui.app.main.ui.fields.containers import (
+        SectionWidget,
+        _CollapsibleSection,
+    )
+
+    spec = CfgSectionSpec(
+        fields={
+            "reps": ScalarSpec(label="Reps", type=int),
+            "mixer_freq": ScalarSpec(
+                label="Mixer freq", type=float, optional=True, group="Advanced"
+            ),
+        }
+    )
+    field = SectionLiveField(spec, LiveModelEnv(ctrl=ctrl), make_default_value(spec))
+    w = SectionWidget(field, top_level=True)
+
+    # Both fields get widgets (grouping is presentation-only, not a value change).
+    assert set(w._child_widgets) == {"reps", "mixer_freq"}
+
+    # A collapsed "Advanced" sub-section was created for the grouped field.
+    advanced = [
+        s
+        for s in w.findChildren(_CollapsibleSection)
+        if s._header_label is not None and "Advanced" in s._header_label.text()
+    ]
+    assert len(advanced) == 1
+    assert advanced[0]._toggle_btn is not None
+    assert not advanced[0]._toggle_btn.isChecked()  # collapsed by default
+
+
 def test_scalar_widget_minimum_width_reduced(qapp):
     from zcu_tools.gui.app.main.ui.fields import make_scalar_widget
 

@@ -141,6 +141,11 @@ def _section_to_dict_inner(
             assert isinstance(node_val, (DirectValue, EvalValue))
             if isinstance(node_val, DirectValue):
                 if node_val.value is None:
+                    # An optional unset scalar is omitted from the lowered cfg so
+                    # the model default (typically None) applies; a non-optional
+                    # unset scalar is an error (must be filled).
+                    if node_spec.optional:
+                        continue
                     label = node_spec.label or key
                     full_path = ".".join([*path, key])
                     raise RuntimeError(f"Config field '{full_path}' ({label}) is unset")
@@ -448,6 +453,10 @@ def _validate_dynamic_node(
     if isinstance(spec, ScalarSpec):
         if isinstance(node_val, DirectValue):
             if node_val.value is None:
+                # Optional unset scalar lowers to an omitted key (model default) —
+                # not an error. Non-optional unset has no value to lower.
+                if spec.optional:
+                    return
                 label = spec.label or full_path.rsplit(".", 1)[-1]
                 raise RuntimeError(
                     f"Config field '{full_path}' ({label}) is unset (no value to lower)"

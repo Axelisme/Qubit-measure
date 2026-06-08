@@ -36,11 +36,30 @@ def make_pulse_spec(label: str = "Pulse") -> CfgSectionSpec:
                 label="Waveform",
             ),
             "ch": ScalarSpec(label="Gen ch", type=int),
-            "nqz": ScalarSpec(label="NQZ", type=int, choices=[1, 2]),
+            # nqz / phase are rarely tuned per-experiment → Advanced group (still
+            # required/normal fields, only the rendering is grouped).
+            "nqz": ScalarSpec(label="NQZ", type=int, choices=[1, 2], group="Advanced"),
             "freq": ScalarSpec(label="Freq (MHz)", type=float, decimals=2),
             "gain": ScalarSpec(label="Gain", type=float, decimals=4),
-            "phase": ScalarSpec(label="Phase (deg)", type=float, decimals=2),
-            "pre_delay": ScalarSpec(label="Pre-delay (us)", type=float, decimals=3),
-            "post_delay": ScalarSpec(label="Post-delay (us)", type=float, decimals=3),
+            "phase": ScalarSpec(
+                label="Phase (deg)", type=float, decimals=2, group="Advanced"
+            ),
+            "pre_delay": ScalarSpec(
+                label="Pre-delay (us)", type=float, decimals=3, group="Advanced"
+            ),
+            "post_delay": ScalarSpec(
+                label="Post-delay (us)", type=float, decimals=3, group="Advanced"
+            ),
+            # Optional NCO mixer frequency (PulseCfg.mixer_freq) — only relevant
+            # for generator channels that have a mixer; left empty (None) → no
+            # mixer. Tucked under an "Advanced" group to keep the common form
+            # uncluttered.
+            "mixer_freq": ScalarSpec(
+                label="Mixer freq (MHz)",
+                type=float,
+                decimals=2,
+                optional=True,
+                group="Advanced",
+            ),
         },
     )

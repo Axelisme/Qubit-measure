@@ -222,7 +222,10 @@ class ScalarLiveField(LiveField):
 
     def _refresh_validity(self) -> None:
         if isinstance(self._value, DirectValue):
-            valid = self._value.value is not None
+            # An optional scalar is valid while unset (None) — it lowers to an
+            # omitted key so the model default applies. A non-optional unset
+            # scalar is invalid (must be filled before run).
+            valid = self._value.value is not None or self.spec.optional
             if not valid:
                 logger.debug(
                     "ScalarLiveField: label=%r is unset → invalid", self.spec.label

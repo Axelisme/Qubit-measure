@@ -82,7 +82,12 @@ class PowerDepAdapter(BaseAdapter[PowerCfg, PowerDepRunResult]):
                     label="Modules",
                     fields={
                         "reset": make_reset_module_spec(optional=True),
-                        "qub_pulse": make_pulse_module_spec(),
+                        # Both sweep axes own qubit-drive freq + gain (set_param
+                        # at run); lock so the form hides the silently-overwritten
+                        # fields.
+                        "qub_pulse": make_pulse_module_spec()
+                        .lock_literal("freq", 0.0)
+                        .lock_literal("gain", 0.0),
                         "readout": make_readout_module_spec(),
                     },
                 ),

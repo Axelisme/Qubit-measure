@@ -115,7 +115,14 @@ class RoOptAutoAdapter(
                     fields={
                         "reset": make_reset_module_spec(optional=True),
                         "qub_pulse": make_pulse_module_spec(),
-                        "readout": make_readout_module_spec(),
+                        # The optimizer owns readout freq + gain (set_param at
+                        # run; "freq" writes both pulse and ro freq), so lock
+                        # them off the form. Length is swept into the pulse
+                        # waveform, not a top-level field — left editable.
+                        "readout": make_readout_module_spec()
+                        .lock_literal("pulse_cfg.freq", 0.0)
+                        .lock_literal("ro_cfg.ro_freq", 0.0)
+                        .lock_literal("pulse_cfg.gain", 0.0),
                     },
                 ),
                 "reps": ScalarSpec(label="Reps", type=int),

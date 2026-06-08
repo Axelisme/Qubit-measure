@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Optional, cast
 logger = logging.getLogger(__name__)
 
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+from qtpy.QtGui import QDoubleValidator, QIntValidator  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QAbstractSpinBox,
     QCheckBox,
@@ -73,8 +74,26 @@ def make_value_widget(
     choices: Optional[list],
     editable: bool = True,
     decimals: Optional[int] = None,
+    optional: bool = False,
 ) -> QWidget:
     """Build an input widget from raw field attributes."""
+    if optional:
+        # An optional scalar may be empty (= None), which a spinbox cannot show.
+        # Render a QLineEdit: empty text = None, a numeric validator keeps input
+        # well-formed. choices/bool optionals are not supported (fast-fail).
+        if choices or type_ is bool:
+            raise RuntimeError(
+                "optional ScalarSpec does not support choices/bool widgets"
+            )
+        w = QLineEdit("" if default in (None, "") else str(default))
+        w.setPlaceholderText("(none)")
+        if type_ is int:
+            w.setValidator(QIntValidator())
+        elif type_ is float:
+            w.setValidator(QDoubleValidator())
+        w.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
+        w.setEnabled(editable)
+        return w
     if choices:
         w = QComboBox()
         w.addItems([str(c) for c in choices])
@@ -131,17 +150,30 @@ def read_value_widget(w: QWidget, type_: type, fallback: Any = None) -> Any:
 def make_scalar_widget(spec: "ScalarSpec", value: Any) -> QWidget:
     """Build an input widget from a ScalarSpec and initial value."""
     return make_value_widget(
-        spec.type, value, spec.choices, spec.editable, spec.decimals
+        spec.type, value, spec.choices, spec.editable, spec.decimals, spec.optional
     )
 
 
 def read_scalar_widget(w: QWidget, spec: "ScalarSpec") -> Any:
     """Read the current value from a widget created by make_scalar_widget."""
+    if spec.optional and isinstance(w, QLineEdit):
+        # Empty optional field = None; a partial/invalid entry also reads as None.
+        txt = w.text().strip()
+        if txt == "":
+            return None
+        try:
+            return spec.type(txt)
+        except (ValueError, TypeError):
+            return None
     return read_value_widget(w, spec.type, fallback=None)
 
 
 def _widget_default_for_direct_value(value: DirectValue, spec: "ScalarSpec") -> Any:
     if value.value is None:
+        # An optional unset scalar shows as an empty field (the "(none)" state),
+        # not the type's zero default.
+        if spec.optional:
+            return ""
         default = default_value_for_type(spec.type)
         return "" if default is None else default
     return value.value
@@ -211,6 +243,17 @@ class ScalarWidget(BaseLiveWidget):
                 assert isinstance(inp, QLineEdit)
                 field.set_value(EvalValue(expr=inp.text().strip()))
                 self._sync_eval_ghost(field.get_value())
+            elif field.spec.optional and isinstance(inp, QLineEdit):
+                # Optional direct input: empty = None (unset). A partial/invalid
+                # entry (e.g. "-", "1e") is held until it parses — don't clobber.
+                txt = inp.text().strip()
+                if txt == "":
+                    field.set_value(None)
+                else:
+                    try:
+                        field.set_value(field.spec.type(txt))
+                    except (ValueError, TypeError):
+                        return
             else:
                 val = read_value_widget(inp, field.spec.type)
                 field.set_value(val)
@@ -278,6 +321,7 @@ class ScalarWidget(BaseLiveWidget):
                 field.spec.choices,
                 field.spec.editable,
                 field.spec.decimals,
+                field.spec.optional,
             )
             self._layout.addWidget(self._input, stretch=1)
             self._connect_direct_input()

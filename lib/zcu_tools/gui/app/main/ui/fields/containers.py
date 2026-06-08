@@ -129,6 +129,11 @@ class SectionWidget(BaseLiveWidget):
 
     def _build_children(self) -> None:
         field = cast(SectionLiveField, self._field)
+        # Fields carrying a non-empty ScalarSpec.group render together under a
+        # collapsed sub-header (e.g. "Advanced"), AFTER the ungrouped fields.
+        # This is presentation-only: the value tree is unchanged — a grouped
+        # field is still a flat leaf of this section (it lowers at top level).
+        grouped: dict[str, list[tuple[str, FieldWidgetProtocol]]] = {}
         for key, child_field in field.fields.items():
             spec = child_field.spec
             # LiteralSpec is a fixed value with no editing degree of freedom, so
@@ -140,15 +145,34 @@ class SectionWidget(BaseLiveWidget):
 
             widget_cls = get_widget_cls(child_field)
             w = widget_cls(child_field)  # type: ignore
-
-            label = spec.label or key
-            if isinstance(child_field, SweepLiveField):
-                # Sweep widgets get their own full-width row; label goes on the line above
-                self._container.form.addRow(ElidedLabel(f"{label}:"))
-                self._container.form.addRow(cast(QWidget, w))
-            else:
-                self._container.form.addRow(ElidedLabel(f"{label}:"), cast(QWidget, w))
             self._child_widgets[key] = w
+
+            group = getattr(spec, "group", "") or ""
+            if group:
+                grouped.setdefault(group, []).append((key, w))
+                continue
+            self._add_field_row(self._container.form, key, w, child_field)
+
+        for group_label, entries in grouped.items():
+            section = _CollapsibleSection(group_label, collapsible=True, collapsed=True)
+            for key, w in entries:
+                self._add_field_row(section.form, key, w, field.fields[key])
+            self._container.body_layout.addWidget(section)
+
+    def _add_field_row(
+        self,
+        form: QFormLayout,
+        key: str,
+        w: FieldWidgetProtocol,
+        child_field: Any,
+    ) -> None:
+        label = child_field.spec.label or key
+        if isinstance(child_field, SweepLiveField):
+            # Sweep widgets get their own full-width row; label goes on the line above
+            form.addRow(ElidedLabel(f"{label}:"))
+            form.addRow(cast(QWidget, w))
+        else:
+            form.addRow(ElidedLabel(f"{label}:"), cast(QWidget, w))
 
     def teardown(self) -> None:
         field = cast(SectionLiveField, self._field)

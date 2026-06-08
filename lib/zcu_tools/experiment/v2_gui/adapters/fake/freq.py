@@ -330,7 +330,12 @@ class FakeFreqAdapter(
                 "modules": CfgSectionSpec(
                     label="Modules",
                     fields={
-                        "readout": make_readout_module_spec(),
+                        # Mirrors onetone/freq: the freq sweep owns the readout
+                        # frequency, so lock it off the form (the sim reads the
+                        # sweep range directly and ignores this field anyway).
+                        "readout": make_readout_module_spec()
+                        .lock_literal("pulse_cfg.freq", 0.0)
+                        .lock_literal("ro_cfg.ro_freq", 0.0),
                     },
                 ),
                 "reps": ScalarSpec(label="Reps", type=int),

@@ -111,7 +111,14 @@ class RoOptLengthAdapter(
                     fields={
                         "reset": make_reset_module_spec(optional=True),
                         "qub_pulse": make_pulse_module_spec(),
-                        "readout": make_pulse_readout_module_spec(),
+                        # The sweep axis owns the readout acquisition window
+                        # (set_param("ro_length") at run), so lock it off the
+                        # form. The pulse waveform length is auto-derived from the
+                        # sweep max but stays editable (it sets the gaussian
+                        # ratio for shaped pulses — see Phase 140 C-table).
+                        "readout": make_pulse_readout_module_spec().lock_literal(
+                            "ro_cfg.ro_length", 0.0
+                        ),
                     },
                 ),
                 "reps": ScalarSpec(label="Reps", type=int),

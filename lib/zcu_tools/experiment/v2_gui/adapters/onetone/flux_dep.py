@@ -89,8 +89,12 @@ class OneToneFluxDepAdapter(BaseAdapter[FluxDepCfg, OneToneFluxDepRunResult]):
                     label="Modules",
                     fields={
                         # No reset module — one-tone runs without a qubit reset
-                        # (the ExpCfg defaults reset=None).
-                        "readout": make_pulse_readout_module_spec(),
+                        # (the ExpCfg defaults reset=None). The freq sweep owns
+                        # the readout frequency (set_param("freq") writes both
+                        # pulse and ro freq), so lock it off the form.
+                        "readout": make_pulse_readout_module_spec()
+                        .lock_literal("pulse_cfg.freq", 0.0)
+                        .lock_literal("ro_cfg.ro_freq", 0.0),
                     },
                 ),
                 "dev": CfgSectionSpec(

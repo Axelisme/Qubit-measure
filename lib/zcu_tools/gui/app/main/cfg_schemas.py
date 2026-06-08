@@ -160,6 +160,8 @@ def _pulse_to_value(cfg: dict) -> CfgSectionValue:
             "gain": _val(cfg, "gain"),
             "pre_delay": _val(cfg, "pre_delay"),
             "post_delay": _val(cfg, "post_delay"),
+            # Optional NCO mixer freq — absent/None → unset DirectValue(None).
+            "mixer_freq": _val(cfg, "mixer_freq"),
         }
     )
 

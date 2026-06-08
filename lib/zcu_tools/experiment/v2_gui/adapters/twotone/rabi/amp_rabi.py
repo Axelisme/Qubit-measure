@@ -109,7 +109,10 @@ class AmpRabiAdapter(
                     label="Modules",
                     fields={
                         "reset": make_reset_module_spec(optional=True),
-                        "qub_pulse": make_pulse_module_spec(),
+                        # The sweep axis owns the qubit-drive gain (set_param
+                        # ("gain") at run); lock it so the form does not show a
+                        # field the sweep silently overwrites.
+                        "qub_pulse": make_pulse_module_spec().lock_literal("gain", 0.0),
                         "readout": make_readout_module_spec(),
                     },
                 ),

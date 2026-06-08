@@ -14,6 +14,7 @@ from zcu_tools.gui.app.main.adapter import (
     ModuleRefSpec,
     ModuleRefValue,
     ScalarSpec,
+    WaveformRefSpec,
 )
 
 
@@ -113,6 +114,80 @@ def test_lock_literal_raises_on_unknown_top_segment():
     spec = _nested_spec()
     with pytest.raises(RuntimeError, match="not found"):
         spec.lock_literal("nope.freq", 0.0)
+
+
+# --- lock_literal descent through WaveformRefSpec (framework symmetry) -------
+
+
+def _pulse_with_waveform() -> CfgSectionSpec:
+    """A pulse shape whose 'waveform' is a WaveformRefSpec with two shapes."""
+    const = CfgSectionSpec(label="Const", fields={"length": ScalarSpec("Len", float)})
+    gauss = CfgSectionSpec(
+        label="Gauss",
+        fields={
+            "length": ScalarSpec("Len", float),
+            "sigma": ScalarSpec("Sigma", float),
+        },
+    )
+    return CfgSectionSpec(
+        label="Pulse",
+        fields={
+            "freq": ScalarSpec("Freq", float),
+            "waveform": WaveformRefSpec(allowed=[const, gauss]),
+        },
+    )
+
+
+def test_lock_literal_descends_into_waveform_ref_via_module_ref():
+    """A leaf nested inside a WaveformRefSpec can be locked from the parent
+    ModuleRefSpec — symmetric with the ModuleRefSpec descent."""
+    ref = ModuleRefSpec(allowed=[_pulse_with_waveform()])
+    locked = ref.lock_literal("waveform.length", 0.0)
+    wf = cast(Any, locked.allowed[0]).fields["waveform"]
+    assert isinstance(wf, WaveformRefSpec)
+    # every allowed waveform shape with a 'length' leaf is locked (duck-typed)
+    for shape in wf.allowed:
+        leaf = shape.fields["length"]
+        assert isinstance(leaf, LiteralSpec)
+        assert leaf.value == 0.0
+    # a sibling leaf (gauss.sigma) stays editable
+    assert isinstance(wf.allowed[1].fields["sigma"], ScalarSpec)
+
+
+def test_waveform_ref_spec_lock_literal_is_chain_start():
+    """WaveformRefSpec.lock_literal returns a WaveformRefSpec; original frozen."""
+    const = CfgSectionSpec(label="Const", fields={"length": ScalarSpec("Len", float)})
+    ref = WaveformRefSpec(allowed=[const])
+    locked = ref.lock_literal("length", 0.0)
+    assert isinstance(locked, WaveformRefSpec)
+    assert isinstance(locked.allowed[0].fields["length"], LiteralSpec)
+    assert isinstance(ref.allowed[0].fields["length"], ScalarSpec)  # untouched
+
+
+def test_lock_literal_descends_waveform_ref_via_full_section_path():
+    """End-to-end: section → module ref → pulse → waveform ref → leaf."""
+    spec = CfgSectionSpec(
+        fields={
+            "modules": CfgSectionSpec(
+                fields={"qub_pulse": ModuleRefSpec(allowed=[_pulse_with_waveform()])}
+            )
+        }
+    )
+    locked = spec.lock_literal("modules.qub_pulse.waveform.length", 0.0)
+    wf = (
+        cast(Any, locked.fields["modules"])
+        .fields["qub_pulse"]
+        .allowed[0]
+        .fields["waveform"]
+    )
+    assert all(isinstance(s.fields["length"], LiteralSpec) for s in wf.allowed)
+
+
+def test_lock_literal_waveform_ref_raises_when_no_shape_matches():
+    const = CfgSectionSpec(label="Const", fields={"length": ScalarSpec("Len", float)})
+    ref = WaveformRefSpec(allowed=[const])
+    with pytest.raises(RuntimeError, match="not found in any allowed"):
+        ref.lock_literal("nope", 0.0)
 
 
 # --- value.with_field -------------------------------------------------------
