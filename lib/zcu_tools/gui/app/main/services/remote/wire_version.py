@@ -83,7 +83,14 @@ from __future__ import annotations
 #      (operation_id) covering run + device setup; removed run.progress and
 #      device.setup_progress (owner-keyed). context.new precondition (no project)
 #      → PRECONDITION_FAILED reason=no_project instead of leaking controller_error.
-WIRE_VERSION = 20
+# v21: (a) tab.figure_screenshot renamed tab.get_current_figure — same handler
+#      (the figure currently on the tab's plot stack: a run's 2D map, or an
+#      analysis fit once analyzed), clearer agent-facing name. (b) save.data /
+#      save.image / save.result now return the resolved written path(s)
+#      ({data_path[, image_path]}, .hdf5 + uniqueness suffix already applied)
+#      instead of {ok}/{} — the path is known synchronously at start, so the
+#      agent need not recover it from a later diagnostic.
+WIRE_VERSION = 21
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -138,4 +145,8 @@ WIRE_VERSION = 20
 #     (persist_data=True) so "data saved" is truthful; SweepValue auto-derives
 #     step from start/stop/expts at construction (auto_norm, SweepEditor opts
 #     out) so default cfg step is consistent across views (Phase 130, WIRE 20).
-GUI_VERSION = 19
+# v20: tab.get_current_figure rename + save.* return resolved written path(s)
+#     (WIRE 21); deviceref path '<path>.device' now resolves through set_field
+#     (it was advertised by list_paths but the resolver rejected it — discovery
+#     and setter were out of sync). Phase 144.
+GUI_VERSION = 20

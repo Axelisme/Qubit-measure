@@ -451,3 +451,93 @@ def test_moduleref_tagged_key_passes_through(qapp):  # noqa: ARG001
         e for e in list_settable_paths_full(root) if e["path"] == "modules.readout.ref"
     )
     assert entry["value"] == "<Custom:Direct Readout>"
+
+
+# ---------------------------------------------------------------------------
+# DeviceRef path resolution — list_paths advertises a DeviceRef as
+# '<path>.device' (mirroring a ModuleRef's '.ref'); the resolver must accept
+# that exact advertised path. Regression: the '.device' suffix was advertised
+# but the resolver had no branch for it, so set_field('dev.flux_dev.device')
+# failed "descends into non-container DeviceRefLiveField" while list_paths told
+# the agent to use it (discovery and setter were out of sync). onetone/flux_dep
+# has a 'dev' section with a flux-device ref defaulting to 'flux_yoko'.
+# ---------------------------------------------------------------------------
+
+
+def _fluxdep_root(device_names: list[str]):
+    from unittest.mock import MagicMock
+
+    from zcu_tools.experiment.v2_gui.adapters.onetone.flux_dep import (
+        OneToneFluxDepAdapter,
+    )
+    from zcu_tools.gui.app.main.adapter import ExpContext
+    from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
+    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+
+    ctx = ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+    cfg = OneToneFluxDepAdapter().make_default_cfg(ctx)
+    ctrl = MagicMock()
+    ctrl.get_current_ml.return_value = ctx.ml
+    ctrl.get_current_md.return_value = ctx.md
+    ctrl.list_device_names.return_value = list(device_names)
+    env = LiveModelEnv(ctrl=ctrl)
+    return SectionLiveField(cfg.spec, env, initial_val=cfg.value)
+
+
+def _deviceref_value(root, path: str = "dev.flux_dev.device"):
+    from zcu_tools.gui.app.main.services.remote.path_resolver import (
+        list_settable_paths_full,
+    )
+
+    return next(e for e in list_settable_paths_full(root) if e["path"] == path)["value"]
+
+
+def test_deviceref_advertised_path_is_dotted_device(qapp):  # noqa: ARG001
+    """list_paths advertises the DeviceRef as '<path>.device' (kind deviceref)."""
+    from zcu_tools.gui.app.main.services.remote.path_resolver import (
+        list_settable_paths_full,
+    )
+
+    root = _fluxdep_root(["flux_yoko"])
+    entry = next(
+        e for e in list_settable_paths_full(root) if e["path"] == "dev.flux_dev.device"
+    )
+    assert entry["kind"] == "deviceref"
+
+
+def test_deviceref_device_path_resolves(qapp):  # noqa: ARG001
+    """The advertised '<path>.device' path round-trips through resolve_and_set."""
+    from zcu_tools.gui.app.main.services.remote.path_resolver import resolve_and_set
+
+    root = _fluxdep_root(["flux_yoko", "flux_yoko_2"])
+    resolve_and_set(root, "dev.flux_dev.device", "flux_yoko_2")
+    assert _deviceref_value(root) == "flux_yoko_2"
+
+
+def test_deviceref_bare_leaf_path_also_resolves(qapp):  # noqa: ARG001
+    """The bare-leaf form '<path>' (no '.device') is accepted as an alias."""
+    from zcu_tools.gui.app.main.services.remote.path_resolver import resolve_and_set
+
+    root = _fluxdep_root(["flux_yoko", "flux_yoko_2"])
+    resolve_and_set(root, "dev.flux_dev", "flux_yoko_2")
+    assert _deviceref_value(root) == "flux_yoko_2"
+
+
+def test_deviceref_non_string_value_rejected(qapp):  # noqa: ARG001
+    from zcu_tools.gui.app.main.services.remote.path_resolver import resolve_and_set
+    from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+
+    root = _fluxdep_root(["flux_yoko"])
+    with pytest.raises(RemoteError) as exc:
+        resolve_and_set(root, "dev.flux_dev.device", 42)
+    assert exc.value.code == ErrorCode.INVALID_PARAMS
+
+
+def test_deviceref_bad_trailing_segment_rejected(qapp):  # noqa: ARG001
+    from zcu_tools.gui.app.main.services.remote.path_resolver import resolve_and_set
+    from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+
+    root = _fluxdep_root(["flux_yoko"])
+    with pytest.raises(RemoteError) as exc:
+        resolve_and_set(root, "dev.flux_dev.bogus", "flux_yoko")
+    assert exc.value.code == ErrorCode.INVALID_PARAMS

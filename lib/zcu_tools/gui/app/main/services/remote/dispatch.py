@@ -274,7 +274,7 @@ def _h_save_data(
     data_path = params["data_path"]
     comment = str(params["comment"])
     try:
-        adapter.ctrl.save_data(
+        written = adapter.ctrl.save_data(
             tab_id, str(data_path) if data_path is not None else None, comment=comment
         )
     except RuntimeError as exc:
@@ -283,7 +283,10 @@ def _h_save_data(
             str(exc),
             reason=getattr(exc, "reason_code", ""),
         ) from exc
-    return {}
+    # The save runs async, but the resolved path (.hdf5 + uniqueness suffix) is
+    # known synchronously — return it so the caller need not recover it from a
+    # later diagnostic / snapshot.
+    return {"data_path": written}
 
 
 def _h_save_image(
@@ -292,7 +295,7 @@ def _h_save_image(
     tab_id = str(params["tab_id"])
     image_path = params["image_path"]
     try:
-        adapter.ctrl.save_image(
+        written = adapter.ctrl.save_image(
             tab_id, str(image_path) if image_path is not None else None
         )
     except RuntimeError as exc:
@@ -301,7 +304,7 @@ def _h_save_image(
             str(exc),
             reason=getattr(exc, "reason_code", ""),
         ) from exc
-    return {}
+    return {"image_path": written}
 
 
 def _h_save_result(
@@ -312,7 +315,7 @@ def _h_save_result(
     image_path = params["image_path"]
     comment = str(params["comment"])
     try:
-        adapter.ctrl.save_result(
+        written_data, written_image = adapter.ctrl.save_result(
             tab_id,
             str(data_path) if data_path is not None else None,
             str(image_path) if image_path is not None else None,
@@ -324,9 +327,10 @@ def _h_save_result(
             str(exc),
             reason=getattr(exc, "reason_code", ""),
         ) from exc
-    # Dispatched; paths were caller-supplied (already known). The save runs
-    # async — its diagnostic rides along in the next reply's notifications.
-    return {"ok": True}
+    # The data save runs async, but both resolved paths (the data path's .hdf5 +
+    # uniqueness suffix included) are known synchronously — return them so the
+    # caller need not recover them from a later diagnostic.
+    return {"data_path": written_data, "image_path": written_image}
 
 
 def _h_save_set_paths(
@@ -1477,11 +1481,12 @@ def _h_operation_progress(
 
 
 # ---------------------------------------------------------------------------
-# Tab figure screenshot handler
+# Tab current-figure handler (the figure currently shown: a run's 2D map, or an
+# analysis fit once analyzed — whichever is on top of the tab's plot stack)
 # ---------------------------------------------------------------------------
 
 
-def _h_tab_figure_screenshot(
+def _h_tab_get_current_figure(
     adapter: "RemoteControlAdapter", params: Mapping[str, object]
 ) -> Mapping[str, object]:
     import base64
@@ -1646,7 +1651,7 @@ _HANDLERS: dict[str, Handler] = {
     "dialog.screenshot": _h_dialog_screenshot,
     "view.snapshot": _h_view_snapshot,
     "view.screenshot": _h_view_screenshot,
-    "tab.figure_screenshot": _h_tab_figure_screenshot,
+    "tab.get_current_figure": _h_tab_get_current_figure,
     "predictor.load": _h_predictor_load,
     "predictor.clear": _h_predictor_clear,
     "predictor.predict": _h_predictor_predict,

@@ -94,6 +94,10 @@ def _set_recursive(
         _set_moduleref(field, head, rest, full_path, value)
         return
 
+    if isinstance(field, DeviceRefLiveField):
+        _set_deviceref(field, head, rest, full_path, value)
+        return
+
     raise RemoteError(
         ErrorCode.INVALID_PARAMS,
         f"path {full_path!r} descends into non-container {type(field).__name__}",
@@ -236,6 +240,31 @@ def _set_moduleref(
             "the current key",
         )
     _set_recursive(sub, [head, *rest], full_path, value)
+
+
+def _set_deviceref(
+    ref: DeviceRefLiveField,
+    head: str,
+    rest: list[str],
+    full_path: str,
+    value: object,
+) -> None:
+    # list_settable_paths advertises a DeviceRef as '<path>.device' (mirroring a
+    # ModuleRef's '.ref' selector), so the advertised path must resolve here —
+    # 'device' is the only valid trailing segment, and the value is the device
+    # name. (The bare-leaf form '<path>' is also accepted via _set_leaf.)
+    if head != "device" or rest:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"device ref at {full_path!r} takes only a trailing '.device' "
+            "segment set to a device name",
+        )
+    if not isinstance(value, str):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"device ref at {full_path!r} expects a string name",
+        )
+    ref.set_chosen_name(value)
 
 
 # ---------------------------------------------------------------------------

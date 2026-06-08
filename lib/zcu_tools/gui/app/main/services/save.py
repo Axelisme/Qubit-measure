@@ -56,10 +56,12 @@ class SaveService(QObject):
 
     def start_save_data(
         self, permit: SavePermit, data_path: str, comment: str = ""
-    ) -> None:
+    ) -> str:
         tab_id = permit.tab_id
         # Resolve to the path the saver will actually write (.hdf5 + uniqueness
-        # suffix) so the report matches the file — see start_save_result.
+        # suffix) so the report matches the file — see start_save_result. The
+        # resolution is synchronous (the worker that follows only writes), so we
+        # return the resolved path for the caller to report immediately.
         data_path = safe_labber_filepath(data_path)
         req = self._make_save_data_request(tab_id, data_path, comment=comment)
         tab = self._state.get_tab(tab_id)
@@ -68,11 +70,15 @@ class SaveService(QObject):
         self._runner.start_save(tab_id, tab.adapter, req)
         self._active_paths[tab_id] = data_path
         self._mark_saving(tab_id, True)
+        return data_path
 
     def start_save_result(
         self, permit: SavePermit, data_path: str, image_path: str, comment: str = ""
-    ) -> None:
-        """Sync-save image on the main thread, then async-save data on a worker thread."""
+    ) -> str:
+        """Sync-save image on the main thread, then async-save data on a worker thread.
+
+        Returns the resolved data path the worker will write (``.hdf5`` +
+        uniqueness suffix), known synchronously up front."""
         tab_id = permit.tab_id
         tab = self._state.get_tab(tab_id)
         if tab.figure is None:
@@ -111,6 +117,7 @@ class SaveService(QObject):
         self._active_paths[tab_id] = data_path
         self._pending_image[tab_id] = (image_path, image_error)
         self._mark_saving(tab_id, True)
+        return data_path
 
     def save_image_sync(self, permit: SavePermit, image_path: str) -> None:
         tab_id = permit.tab_id

@@ -397,9 +397,9 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "Capture window or tab as base64 PNG",
         (_str_opt("tab_id", "Tab to capture; omit for whole window"),),
     ),
-    "tab.figure_screenshot": MethodSpec(
+    "tab.get_current_figure": MethodSpec(
         10.0,
-        "Capture tab figure area as PNG",
+        "Get the tab's current figure (run 2D map, or analysis fit) as PNG",
         (
             _str("tab_id"),
             _str_opt("out_path", "Write PNG here instead of returning base64"),

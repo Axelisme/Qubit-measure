@@ -113,7 +113,7 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 #      run / completed analyze that produced a figure, the reply carries
 #      figure_path — a PNG rendered to the cross-platform temp dir (gettempdir,
 #      keyed by tab_id), NOT base64 — so the agent opens the file instead of a
-#      separate gui_tab_figure_screenshot call. gui_analyze becomes a hand-written
+#      separate gui_tab_get_current_figure call. gui_analyze becomes a hand-written
 #      override (was a generated forwarder) to attach it.
 # v14: gui_analyze awaits the analyze operation (WIRE 15, Phase 120c). analyze is
 #      an async worker; gui_analyze starts it (analyze.start now returns an
@@ -162,7 +162,13 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 #      be run from a background agent (the only way to free the main loop and be
 #      re-invoked on completion — there is no server push). Text only, no behavior
 #      or wire change.
-MCP_VERSION = 24
+# MCP 25: gui_tab_figure_screenshot renamed to gui_tab_get_current_figure
+#      (mirrors WIRE 21 tab.figure_screenshot -> tab.get_current_figure) — same
+#      tool, clearer name: "the figure currently shown" (run 2D map or analysis
+#      fit). gui_save_data / gui_save_image / gui_save_result now return the
+#      resolved written path(s) ({data_path[, image_path]}) instead of {ok}/{}
+#      (WIRE 21).
+MCP_VERSION = 25
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -204,7 +210,10 @@ Typical experiment loop:
     gui_connect_start degrade the same way.)
   - gui_analyze(tab_id) after a run — synchronous: on return the analysis is
     done (read gui_tab_get_analyze_result, no wait step). Then gui_save_data /
-    gui_save_image / gui_save_result to persist.
+    gui_save_image / gui_save_result to persist — each returns the resolved
+    written path ({data_path[, image_path]}, .hdf5 + uniqueness suffix applied),
+    so you need not recover it from a later diagnostic. To look at a plot (a 2D
+    run map or an analysis fit) call gui_tab_get_current_figure.
 
 Detecting completion — no events; wait or poll a handle:
   - A slow gui_run_start returns {status:'pending'}; then either gui_run_wait
@@ -825,7 +834,7 @@ def _figure_path_if_any(tab_id: str) -> "Optional[str]":
     Saves to the cross-platform temp dir (tempfile.gettempdir(), keyed by
     tab_id) and returns the path — NOT base64, so a run/analyze reply stays
     small. The agent opens the file (e.g. via Read) to see the plot, without a
-    separate gui_tab_figure_screenshot call. Returns None when the tab has no
+    separate gui_tab_get_current_figure call. Returns None when the tab has no
     figure yet (a data-only run), so the caller simply omits figure_path.
     """
     try:
@@ -837,7 +846,7 @@ def _figure_path_if_any(tab_id: str) -> "Optional[str]":
         return None
     out_path = str(Path(gettempdir()) / f"zcu_tools_figure_{tab_id}.png")
     try:
-        send_gui_rpc("tab.figure_screenshot", {"tab_id": tab_id, "out_path": out_path})
+        send_gui_rpc("tab.get_current_figure", {"tab_id": tab_id, "out_path": out_path})
     except RuntimeError:
         return None  # figure raced away / render failed — just omit it
     return out_path
@@ -915,7 +924,7 @@ def tool_gui_run_start(arguments: Dict[str, Any]) -> Dict[str, Any]:
         f"await it with gui_run_wait(tab_id={tab_id!r}).",
     )
     # On a finished run that produced a figure, fold in figure_path so the agent
-    # need not call gui_tab_figure_screenshot separately.
+    # need not call gui_tab_get_current_figure separately.
     return _with_figure(tab_id, result)
 
 
@@ -945,7 +954,7 @@ def tool_gui_analyze(arguments: Dict[str, Any]) -> Dict[str, Any]:
     Analyze runs on a worker thread, but this tool awaits its completion before
     returning, so to the agent it is one synchronous call: on return the result
     and figure are ready. Folds in figure_path (a temp PNG) so the agent need
-    not call gui_tab_figure_screenshot. Read the scalar fit summary with
+    not call gui_tab_get_current_figure. Read the scalar fit summary with
     gui_tab_get_analyze_result. 'updates' optionally overrides analyze params.
     """
     tab_id = str(arguments["tab_id"])
@@ -1127,7 +1136,7 @@ _NON_GENERATED_METHODS = frozenset(
         # client-side file write of base64 PNG
         "view.screenshot",
         "dialog.screenshot",
-        "tab.figure_screenshot",
+        "tab.get_current_figure",
         # fan-out / MCP-side queue (handled at the service, not the registry)
         "state.has_project",
         "state.has_context",
@@ -1149,7 +1158,7 @@ _NON_GENERATED_METHODS = frozenset(
         "run.start",
         "connect.start",
         # hand-written to fold figure_path into the synchronous reply (analysis
-        # almost always produces a figure; agent skips gui_tab_figure_screenshot).
+        # almost always produces a figure; agent skips gui_tab_get_current_figure).
         "analyze.start",
     }
 )
@@ -1451,7 +1460,7 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             "is complete. Read the scalar fit summary with "
             "gui_tab_get_analyze_result. The reply includes figure_path (a temp "
             "PNG of the fitted plot) when a figure was produced — open it (Read) "
-            "instead of calling gui_tab_figure_screenshot. 'updates' optionally "
+            "instead of calling gui_tab_get_current_figure. 'updates' optionally "
             "overrides analyze params (see gui_adapter_analyze_spec)."
         ),
         "inputSchema": {
@@ -1652,13 +1661,16 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             "required": ["name", "updates"],
         },
     },
-    "gui_tab_figure_screenshot": {
-        "handler": lambda args: send_gui_rpc("tab.figure_screenshot", args),
+    "gui_tab_get_current_figure": {
+        "handler": lambda args: send_gui_rpc("tab.get_current_figure", args),
         "description": (
-            "Capture only the figure/plot area of a tab as PNG. "
+            "Get the tab's CURRENT figure as PNG — the run's 2D map while/after a "
+            "run, or the analysis fit once you have analyzed (whichever is on top "
+            "of the tab's plot stack). This is how you look at any plot, including "
+            "non-analysis 2D scans (onetone/twotone flux_dep, power_dep). "
             "More focused than gui_view_screenshot — excludes config panel and progress bar. "
             "Fails with PRECONDITION_FAILED if the tab has no figure yet "
-            "(run has not completed or no analysis result). "
+            "(run has not completed). "
             "If out_path is given, the PNG is saved to disk and png_b64 is omitted from the reply."
         ),
         "inputSchema": {
@@ -1689,7 +1701,7 @@ _OVERRIDE_NAMES = frozenset(
         "gui_device_setup",
         "gui_view_screenshot",
         "gui_dialog_screenshot",
-        "gui_tab_figure_screenshot",
+        "gui_tab_get_current_figure",
         "gui_state_check",
         "gui_editor_set_fields",
         "gui_context_set_md_attrs",

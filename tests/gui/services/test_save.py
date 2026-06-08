@@ -62,12 +62,15 @@ def test_start_save_data_resolves_path_to_actual_hdf5(
     svc, _, runner = _make_service()
     data_path = tmp_path / "data" / "meas"  # no extension
 
-    svc.start_save_data(SavePermit(tab_id="tab"), str(data_path))
+    returned = svc.start_save_data(SavePermit(tab_id="tab"), str(data_path))
 
     req = runner.start_save.call_args.args[2]
     assert req.data_path.endswith("meas_1.hdf5")
     # the reported path (consumed by _on_save_finished → diagnostic) matches
     assert svc._active_paths["tab"] == req.data_path
+    # start_save_data returns that resolved path synchronously (so the RPC/agent
+    # gets it back immediately, not via a later diagnostic).
+    assert returned == req.data_path
 
 
 def test_save_image_creates_parent_at_command_boundary(

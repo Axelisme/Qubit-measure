@@ -818,7 +818,7 @@ def test_analyze_reply_includes_figure_path_when_figure_exists(monkeypatch):
         calls.append((method, params))
         if method == "tab.snapshot":
             return {"interaction": {"has_figure": True}}
-        if method == "tab.figure_screenshot":
+        if method == "tab.get_current_figure":
             return {"saved_to": params["out_path"]}
         return {}
 
@@ -837,7 +837,7 @@ def test_analyze_reply_includes_figure_path_when_figure_exists(monkeypatch):
     assert out["figure_path"].endswith("zcu_tools_figure_fake-freq-1.png")
     # analyze.start was issued, and the figure was rendered to that exact path.
     assert ("analyze.start", {"tab_id": "fake-freq-1"}) in calls
-    shot = next(c for c in calls if c[0] == "tab.figure_screenshot")
+    shot = next(c for c in calls if c[0] == "tab.get_current_figure")
     assert shot[1]["out_path"] == out["figure_path"]
 
 
@@ -897,7 +897,7 @@ def test_run_poll_finished_attaches_figure(monkeypatch):
             return {"status": "finished"}
         if method == "tab.snapshot":
             return {"interaction": {"has_figure": True}}
-        if method == "tab.figure_screenshot":
+        if method == "tab.get_current_figure":
             return {"saved_to": params["out_path"]}
         return {}
 

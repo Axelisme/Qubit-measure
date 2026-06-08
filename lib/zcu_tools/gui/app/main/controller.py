@@ -559,16 +559,20 @@ class Controller:
 
     def save_data(
         self, tab_id: str, data_path: Optional[str] = None, comment: str = ""
-    ) -> None:
+    ) -> str:
+        """Start the (async) data save; returns the path the saver will write
+        (``.hdf5`` + uniqueness suffix already applied), known synchronously."""
         permit = self._guard_svc.acquire_save_permit(tab_id)
         resolved = data_path or self._resolve_save_paths(tab_id).data_path
-        self._save_svc.start_save_data(permit, resolved, comment=comment)
+        return self._save_svc.start_save_data(permit, resolved, comment=comment)
 
-    def save_image(self, tab_id: str, image_path: Optional[str] = None) -> None:
+    def save_image(self, tab_id: str, image_path: Optional[str] = None) -> str:
+        """Save the image synchronously; returns the written image path."""
         permit = self._guard_svc.acquire_save_permit(tab_id)
         resolved = image_path or self._resolve_save_paths(tab_id).image_path
         self._save_svc.save_image_sync(permit, resolved)
         self._info(f"Image saved to {resolved}")
+        return resolved
 
     def save_result(
         self,
@@ -576,14 +580,17 @@ class Controller:
         data_path: Optional[str] = None,
         image_path: Optional[str] = None,
         comment: str = "",
-    ) -> None:
+    ) -> "tuple[str, str]":
+        """Save image (sync) + data (async); returns ``(data_path, image_path)``
+        the saver will write — the data path with its ``.hdf5``/suffix applied."""
         permit = self._guard_svc.acquire_save_permit(tab_id)
         paths = self._resolve_save_paths(tab_id)
         resolved_data = data_path or paths.data_path
         resolved_image = image_path or paths.image_path
-        self._save_svc.start_save_result(
+        written_data = self._save_svc.start_save_result(
             permit, resolved_data, resolved_image, comment=comment
         )
+        return written_data, resolved_image
 
     # ------------------------------------------------------------------
     # Context / IO (ContextService)
