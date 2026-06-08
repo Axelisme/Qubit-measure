@@ -13,6 +13,7 @@ wheels/
 .claude/*
 !.claude/skills/
 !.claude/settings.json
+agent_memory/
 
 Database/
 Database
