@@ -7,10 +7,10 @@ that keep the agent-facing tool contract stable and drift-free.
 
 from __future__ import annotations
 
-from zcu_tools.gui.app.main.services.remote import mcp_server as m
 from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
-from zcu_tools.gui.remote.mcp_bridge import generate_tools
+from zcu_tools.mcp.core.bridge import generate_tools
+from zcu_tools.mcp.measure import server as m
 
 
 def _tool_name_for(method: str, spec) -> str:

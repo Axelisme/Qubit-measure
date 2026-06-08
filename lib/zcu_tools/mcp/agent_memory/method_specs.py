@@ -8,8 +8,8 @@ key sets match).
 
 from __future__ import annotations
 
-# TEMP: these import-clean spec types relocate to ``zcu_tools.mcp.core`` in the
-# migration phase; until then they live under ``gui.remote`` (no Qt is pulled in).
+# The wire-spec primitives belong to the shared remote layer; mcp consumes them from
+# zcu_tools.gui.remote (no Qt is pulled in), it does not duplicate them under mcp/.
 from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType as J
 from zcu_tools.gui.remote.param_spec import ParamSpec as P

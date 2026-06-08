@@ -38,8 +38,8 @@ from typing import Any, Callable, Deque, Dict, List, Optional
 # ``__init__`` which eagerly loads Qt; the bridge tolerates this (it never builds
 # a QApplication), trading a heavier import for a single MethodSpec source of
 # truth shared with the dispatcher.
-# lib/zcu_tools/gui/app/main/services/remote -> lib
-_LIB_DIR = Path(__file__).resolve().parents[6]
+# lib/zcu_tools/mcp/measure -> lib
+_LIB_DIR = Path(__file__).resolve().parents[3]
 if str(_LIB_DIR) not in sys.path:
     sys.path.insert(0, str(_LIB_DIR))
 
@@ -67,7 +67,7 @@ from zcu_tools.gui.app.main.services.remote.method_specs import (  # noqa: E402
 from zcu_tools.gui.app.main.services.remote.wire_version import (  # noqa: E402
     WIRE_VERSION as MCP_WIRE_VERSION,
 )
-from zcu_tools.gui.remote.mcp_bridge import (  # noqa: E402
+from zcu_tools.mcp.core.bridge import (  # noqa: E402
     McpBridge,
     MCPBridgeConfig,
     assemble_tools,
@@ -541,8 +541,8 @@ def tool_gui_launch(arguments: Dict[str, Any]) -> str:
     token: Optional[str] = arguments.get("token")
     auto_connect = bool(arguments.get("auto_connect", True))
     clean = bool(arguments.get("clean", False))
-    # lib/zcu_tools/gui/app/main/services/remote -> repo root
-    repo_root = Path(__file__).parents[7]
+    # lib/zcu_tools/mcp/measure -> repo root
+    repo_root = Path(__file__).parents[4]
     # clean → run_measure_gui --clean (skip restoring the persisted session).
     extra_args = ["--clean"] if clean else None
     return _BRIDGE.launch(repo_root, port, token, auto_connect, extra_args=extra_args)

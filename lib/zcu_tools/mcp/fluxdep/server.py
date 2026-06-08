@@ -10,12 +10,12 @@ all pure queries — the user drives the GUI); the agent-facing lifecycle tools
 hand-written and fork ``script/run_fluxdep_gui.py``.
 
 The socket/RPC/stdio plumbing lives in the shared
-:mod:`zcu_tools.gui.remote.mcp_bridge` (:class:`McpBridge` + helpers); this module
+:mod:`zcu_tools.mcp.core.bridge` (:class:`McpBridge` + helpers); this module
 keeps only fluxdep's config + the read-only ``send_gui_rpc`` wrapper + the three
 lifecycle tools. Events are dropped (the agent uses request/reply, not event
 subscription), so no ``on_event`` hook is wired.
 
-Threading: see :mod:`zcu_tools.gui.remote.mcp_bridge`.
+Threading: see :mod:`zcu_tools.mcp.core.bridge`.
 """
 
 from __future__ import annotations
@@ -29,8 +29,8 @@ from typing import Any, Dict, Optional
 # This bridge is launched standalone (``python .../mcp_server.py``), so the repo
 # ``lib`` dir is not on sys.path by default. Add it so the wire-contract modules
 # import cleanly.
-# lib/zcu_tools/gui/app/fluxdep/services/remote -> lib
-_LIB_DIR = Path(__file__).resolve().parents[6]
+# lib/zcu_tools/mcp/fluxdep -> lib
+_LIB_DIR = Path(__file__).resolve().parents[3]
 if str(_LIB_DIR) not in sys.path:
     sys.path.insert(0, str(_LIB_DIR))
 
@@ -52,7 +52,7 @@ from zcu_tools.gui.app.fluxdep.services.remote.method_specs import (  # noqa: E4
 from zcu_tools.gui.app.fluxdep.services.remote.wire_version import (  # noqa: E402
     WIRE_VERSION as MCP_WIRE_VERSION,
 )
-from zcu_tools.gui.remote.mcp_bridge import (  # noqa: E402
+from zcu_tools.mcp.core.bridge import (  # noqa: E402
     McpBridge,
     MCPBridgeConfig,
     assemble_tools,
@@ -147,8 +147,8 @@ def tool_fluxdep_launch(arguments: Dict[str, Any]) -> str:
     port = int(arguments.get("port", _CONFIG.default_port))
     token: Optional[str] = arguments.get("token")
     auto_connect = bool(arguments.get("auto_connect", True))
-    # lib/zcu_tools/gui/app/fluxdep/services/remote -> repo root
-    repo_root = Path(__file__).parents[7]
+    # lib/zcu_tools/mcp/fluxdep -> repo root
+    repo_root = Path(__file__).parents[4]
     return _BRIDGE.launch(repo_root, port, token, auto_connect)
 
 

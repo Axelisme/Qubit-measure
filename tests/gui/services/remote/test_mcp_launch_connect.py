@@ -10,8 +10,8 @@ from __future__ import annotations
 import socket
 
 import pytest
-from zcu_tools.gui.app.main.services.remote import mcp_server
-from zcu_tools.gui.remote import mcp_bridge
+from zcu_tools.mcp.core import bridge as mcp_bridge
+from zcu_tools.mcp.measure import server as mcp_server
 
 
 @pytest.fixture

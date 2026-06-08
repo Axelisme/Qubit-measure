@@ -123,7 +123,7 @@ class Fixture:
 class FakeTransport:
     """Synchronous in-memory Transport for McpBridge tests (no socket/thread).
 
-    Implements the ``zcu_tools.gui.remote.mcp_bridge.Transport`` protocol. On
+    Implements the ``zcu_tools.mcp.core.bridge.Transport`` protocol. On
     ``send_line`` it records the outgoing ``(method, params)`` in ``sent`` and
     immediately delivers a reply (from ``replies[method]``, defaulting to
     ``{ok: True, result: {}}``) via the bridge's ``deliver_reply`` callback — so

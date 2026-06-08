@@ -32,17 +32,17 @@ if importlib.util.find_spec("yaml") is None:
     )
     raise SystemExit(1)
 
-# TEMP: reuse the import-clean MCP plumbing under gui.remote (no Qt pulled in).
-# These relocate to ``zcu_tools.mcp.core`` in the migration phase, and this import
-# (plus the dummy MCPBridgeConfig launch fields below) flips to the new home then.
-from zcu_tools.gui.remote.mcp_bridge import (  # noqa: E402
+# The shared MCP stdio plumbing lives in zcu_tools.mcp.core.bridge. It consumes the
+# wire-spec primitives from zcu_tools.gui.remote — mcp is a consumer of that shared
+# remote layer, not a leaf.
+from zcu_tools.mcp.agent_memory.method_specs import METHOD_SPECS  # noqa: E402
+from zcu_tools.mcp.agent_memory.store import MemoryStore  # noqa: E402
+from zcu_tools.mcp.core.bridge import (  # noqa: E402
     MCPBridgeConfig,
     assemble_tools,
     generate_tools,
     run_stdio_loop,
 )
-from zcu_tools.mcp.agent_memory.method_specs import METHOD_SPECS  # noqa: E402
-from zcu_tools.mcp.agent_memory.store import MemoryStore  # noqa: E402
 
 MCP_VERSION = 1
 
@@ -76,19 +76,20 @@ A failed call raises with an actionable message; reads are idempotent.
 
 # The MCP plumbing reads tool_prefix / display name / instructions from the config;
 # the launch fields (port / pid / log / run-script) are GUI-bridge concepts with no
-# meaning here, so they are dummy placeholders.
-# TEMP: a launch-free config lands with mcp/core in the migration phase.
+# meaning here, so they are unused placeholders. MCPBridgeConfig is shared with the
+# GUI bridges (which DO use those fields); a launch-free config for no-subprocess
+# servers stays an optional follow-up.
 _CONFIG = MCPBridgeConfig(
     app_name="agent_memory",
     tool_prefix="memory_",
-    default_port=0,  # TEMP dummy — no TCP (local file CRUD)
+    default_port=0,  # unused — no TCP (local file CRUD)
     mcp_version=MCP_VERSION,
-    wire_version=0,  # TEMP dummy — no two-process handshake
+    wire_version=0,  # unused — no two-process handshake
     server_display_name="agent-memory",
     server_instructions=_SERVER_INSTRUCTIONS,
-    pid_file=Path("/unused"),  # TEMP dummy — no subprocess
-    log_file=Path("/unused"),  # TEMP dummy
-    run_script_name="unused",  # TEMP dummy
+    pid_file=Path("/unused"),  # unused — no subprocess
+    log_file=Path("/unused"),  # unused
+    run_script_name="unused",  # unused
 )
 
 

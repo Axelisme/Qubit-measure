@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 import pytest
-from zcu_tools.gui.app.main.services.remote import mcp_server
+from zcu_tools.mcp.measure import server as mcp_server
 
 from ._helpers import FakeTransport
 
