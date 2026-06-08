@@ -85,16 +85,18 @@ def test_apps_keep_their_own_wire_versions() -> None:
     assert flux_wv.GUI_VERSION == 1
 
 
-# mcp_server.py is launched as a SCRIPT (``python .../mcp_server.py`` per
+# Each mcp server is launched as a SCRIPT (``uv run .../mcp/<app>/server.py`` per
 # .mcp.json), so it has no parent package — a relative import would die at launch
 # with "attempted relative import with no known parent package", which only
 # surfaces on an MCP reconnect (not in the test suite, which imports it as a
 # module). Guard the absolute-import invariant statically so a future
-# import-rewrite cannot regress it silently.
+# import-rewrite cannot regress it silently. (The servers were consolidated under
+# zcu_tools/mcp/<app>/server.py — one sub-package per server.)
 _MCP_SERVERS = [
-    "lib/zcu_tools/gui/app/main/services/remote/mcp_server.py",
-    "lib/zcu_tools/gui/app/fluxdep/services/remote/mcp_server.py",
-    "lib/zcu_tools/gui/app/dispersive/services/remote/mcp_server.py",
+    "lib/zcu_tools/mcp/measure/server.py",
+    "lib/zcu_tools/mcp/fluxdep/server.py",
+    "lib/zcu_tools/mcp/dispersive/server.py",
+    "lib/zcu_tools/mcp/agent_memory/server.py",
 ]
 
 
