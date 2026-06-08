@@ -34,6 +34,7 @@ from zcu_tools.gui.app.main.services import (
     StartupConnectionRequest,
     StartupProjectRequest,
 )
+from zcu_tools.program import describe_soc
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.controller import Controller
@@ -41,9 +42,9 @@ if TYPE_CHECKING:
 
 @runtime_checkable
 class SocConfigProtocol(Protocol):
-    """Protocol for QICK Soc configuration objects."""
+    """Protocol for QICK Soc configuration objects (dict-style field access)."""
 
-    def description(self) -> str: ...
+    def __getitem__(self, key: str) -> object: ...
 
 
 class SetupDialog(QDialog):
@@ -455,7 +456,7 @@ class SetupDialog(QDialog):
     def _maybe_show_current_cfg(self) -> None:
         soccfg = self._ctrl.get_soccfg()
         if isinstance(soccfg, SocConfigProtocol):
-            self._show_cfg(soccfg.description())
+            self._show_cfg(describe_soc(soccfg))
             self._set_conn_status("Currently connected", error=False)
 
     def _on_mock_toggled(self, state: int) -> None:
@@ -499,7 +500,7 @@ class SetupDialog(QDialog):
         self._set_conn_status("Connected", error=False)
         soccfg = self._ctrl.get_soccfg()
         if isinstance(soccfg, SocConfigProtocol):
-            self._show_cfg(soccfg.description())
+            self._show_cfg(describe_soc(soccfg))
 
     def _on_connect_failed(self, message: str) -> None:
         self._connect_btn.setEnabled(True)

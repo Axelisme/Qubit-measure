@@ -251,7 +251,7 @@ def test_device_setup_spec_requires_live_info(fx):
 
 def _install_real_mock_soccfg(fx) -> None:
     """Swap the fixture's MagicMock soccfg for a real QICK mock soccfg so
-    description()/dump_cfg() return real content."""
+    describe_soc()'s field access and dump_cfg() return real content."""
     import dataclasses
 
     from zcu_tools.program.v2.mocksoc import make_mock_soccfg
@@ -267,8 +267,10 @@ def test_soc_info_returns_description_and_cfg(fx):
         resp = call(sock, "soc.info")
         assert resp["ok"] is True
         result = resp["result"]
-        assert "QICK" in result["description"]
-        assert "signal generator" in result["description"]
+        # compact describe_soc table: header + per-channel generator/readout rows
+        assert "QICK running on" in result["description"]
+        assert "Generators" in result["description"]
+        assert "Readouts" in result["description"]
         # structured cfg carries the DAC generators with their sample rate
         gens = result["cfg"]["gens"]
         assert gens and "fs" in gens[0]

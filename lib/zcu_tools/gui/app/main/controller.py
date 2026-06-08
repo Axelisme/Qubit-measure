@@ -432,16 +432,19 @@ class Controller:
         return self._conn_svc.has_soc()
 
     def get_soc_info(self) -> dict[str, object]:
-        """Hardware summary of the connected SoC (QICK soccfg): human-readable
-        description + structured cfg (DAC/ADC channels, sample rates, freq
-        ranges). Raises if no SoC is connected (→ precondition_failed)."""
+        """Hardware summary of the connected SoC (QICK soccfg): a compact
+        per-channel description (generator/readout type, converter port, sample
+        rate, max pulse/buffer length) + structured cfg with the full detail.
+        Raises if no SoC is connected (→ precondition_failed)."""
         import json
+
+        from zcu_tools.program import describe_soc
 
         soccfg = self._conn_svc.get_soccfg()
         if soccfg is None:
             raise RuntimeError("No SoC connected")
         return {
-            "description": soccfg.description(),
+            "description": describe_soc(soccfg),
             "cfg": json.loads(soccfg.dump_cfg()),
             "is_mock": self._conn_svc.is_mock_soc(),
         }
