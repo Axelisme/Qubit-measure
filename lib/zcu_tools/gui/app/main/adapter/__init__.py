@@ -21,6 +21,8 @@ from .types import (
     EvalValue,
     ExpContext,
     ExperimentProtocol,
+    FloatSpec,
+    IntSpec,
     LiteralSpec,
     MetaDictWriteback,
     ModuleRefSpec,

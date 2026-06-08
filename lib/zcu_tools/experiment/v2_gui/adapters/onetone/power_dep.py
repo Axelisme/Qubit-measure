@@ -12,6 +12,7 @@ from zcu_tools.experiment.v2.onetone.power_dep import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    build_exp_spec,
     make_pulse_readout_module_spec,
     proper_res_freq_range,
 )
@@ -22,8 +23,8 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
+    FloatSpec,
     RunRequest,
-    ScalarSpec,
     SweepSpec,
     require_soc_handles,
 )
@@ -77,37 +78,26 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:
-        return CfgSectionSpec(
-            fields={
-                "modules": CfgSectionSpec(
-                    label="Modules",
-                    fields={
-                        # No reset module — one-tone runs without a qubit reset
-                        # (the ExpCfg defaults reset=None). The sweep axes own
-                        # readout freq + gain (set_param at run; "freq" writes
-                        # both pulse and ro freq), so lock them off the form.
-                        "readout": make_pulse_readout_module_spec()
-                        .lock_literal("pulse_cfg.freq", 0.0)
-                        .lock_literal("ro_cfg.ro_freq", 0.0)
-                        .lock_literal("pulse_cfg.gain", 0.0),
-                    },
-                ),
-                "relax_delay": ScalarSpec(
-                    label="Relax delay (us)", type=float, decimals=3
-                ),
-                "sweep": CfgSectionSpec(
-                    label="Sweep",
-                    fields={
-                        "gain": SweepSpec(label="Gain (a.u.)"),
-                        "freq": SweepSpec(label="Freq (MHz)"),
-                    },
-                ),
-                "earlystop_snr": ScalarSpec(
-                    label="Early-stop SNR (0 disables)", type=float, decimals=3
-                ),
-                "reps": ScalarSpec(label="Reps", type=int),
-                "rounds": ScalarSpec(label="Rounds", type=int),
-            }
+        return build_exp_spec(
+            modules={
+                # No reset module — one-tone runs without a qubit reset
+                # (the ExpCfg defaults reset=None). The sweep axes own
+                # readout freq + gain (set_param at run; "freq" writes
+                # both pulse and ro freq), so lock them off the form.
+                "readout": make_pulse_readout_module_spec()
+                .lock_literal("pulse_cfg.freq", 0.0)
+                .lock_literal("ro_cfg.ro_freq", 0.0)
+                .lock_literal("pulse_cfg.gain", 0.0),
+            },
+            sweep={
+                "gain": SweepSpec(label="Gain (a.u.)"),
+                "freq": SweepSpec(label="Freq (MHz)"),
+            },
+            extra={
+                "earlystop_snr": FloatSpec(
+                    label="Early-stop SNR (0 disables)", decimals=3
+                )
+            },
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:

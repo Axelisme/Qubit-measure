@@ -14,6 +14,7 @@ from zcu_tools.experiment.v2.twotone.ro_optimize.freq_gain import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    build_exp_spec,
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
     make_reset_module_spec,
@@ -28,7 +29,6 @@ from zcu_tools.gui.app.main.adapter import (
     ExpContext,
     MetaDictWriteback,
     ParamMeta,
-    ScalarSpec,
     SweepSpec,
     WritebackItem,
     WritebackRequest,
@@ -102,35 +102,22 @@ class RoOptFreqGainAdapter(
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:
-        return CfgSectionSpec(
-            fields={
-                "modules": CfgSectionSpec(
-                    label="Modules",
-                    fields={
-                        "reset": make_reset_module_spec(optional=True),
-                        "qub_pulse": make_pulse_module_spec(),
-                        # Both sweep axes own readout freq + gain (set_param at
-                        # run; "freq" writes both pulse and ro freq), so lock
-                        # them off the form.
-                        "readout": make_pulse_readout_module_spec()
-                        .lock_literal("pulse_cfg.freq", 0.0)
-                        .lock_literal("ro_cfg.ro_freq", 0.0)
-                        .lock_literal("pulse_cfg.gain", 0.0),
-                    },
-                ),
-                "relax_delay": ScalarSpec(
-                    label="Relax delay (us)", type=float, decimals=3
-                ),
-                "sweep": CfgSectionSpec(
-                    label="Sweep",
-                    fields={
-                        "freq": SweepSpec(label="Readout freq (MHz)"),
-                        "gain": SweepSpec(label="Readout gain (a.u.)"),
-                    },
-                ),
-                "reps": ScalarSpec(label="Reps", type=int),
-                "rounds": ScalarSpec(label="Rounds", type=int),
-            }
+        return build_exp_spec(
+            modules={
+                "reset": make_reset_module_spec(optional=True),
+                "qub_pulse": make_pulse_module_spec(),
+                # Both sweep axes own readout freq + gain (set_param at
+                # run; "freq" writes both pulse and ro freq), so lock
+                # them off the form.
+                "readout": make_pulse_readout_module_spec()
+                .lock_literal("pulse_cfg.freq", 0.0)
+                .lock_literal("ro_cfg.ro_freq", 0.0)
+                .lock_literal("pulse_cfg.gain", 0.0),
+            },
+            sweep={
+                "freq": SweepSpec(label="Readout freq (MHz)"),
+                "gain": SweepSpec(label="Readout gain (a.u.)"),
+            },
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:

@@ -40,6 +40,7 @@ from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    build_exp_spec,
     make_readout_module_spec,
     md_get_float,
 )
@@ -48,15 +49,14 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
+    MetaDictWriteback,
     ParamMeta,
     RunRequest,
     SaveDataRequest,
-    ScalarSpec,
     SweepSpec,
     WritebackItem,
     WritebackRequest,
@@ -325,29 +325,20 @@ class FakeFreqAdapter(
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:
-        return CfgSectionSpec(
-            fields={
-                "modules": CfgSectionSpec(
-                    label="Modules",
-                    fields={
-                        # Mirrors onetone/freq: the freq sweep owns the readout
-                        # frequency, so lock it off the form (the sim reads the
-                        # sweep range directly and ignores this field anyway).
-                        "readout": make_readout_module_spec()
-                        .lock_literal("pulse_cfg.freq", 0.0)
-                        .lock_literal("ro_cfg.ro_freq", 0.0),
-                    },
-                ),
-                "sweep": CfgSectionSpec(
-                    label="Sweep",
-                    fields={"freq": SweepSpec(label="Freq (MHz)")},
-                ),
-                "reps": ScalarSpec(label="Reps", type=int),
-                "rounds": ScalarSpec(label="Rounds", type=int),
-                # No 'model' block: the simulated resonance is fixed at adapter
-                # construction (model_type + params), hidden from the cfg, so the
-                # sweep below scans blind and the analysis must find the dip.
-            }
+        # No 'model' block: the simulated resonance is fixed at adapter
+        # construction (model_type + params), hidden from the cfg, so the
+        # sweep below scans blind and the analysis must find the dip.
+        return build_exp_spec(
+            modules={
+                # Mirrors onetone/freq: the freq sweep owns the readout
+                # frequency, so lock it off the form (the sim reads the
+                # sweep range directly and ignores this field anyway).
+                "readout": make_readout_module_spec()
+                .lock_literal("pulse_cfg.freq", 0.0)
+                .lock_literal("ro_cfg.ro_freq", 0.0),
+            },
+            sweep={"freq": SweepSpec(label="Freq (MHz)")},
+            relax_delay=False,
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:

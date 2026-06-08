@@ -14,6 +14,7 @@ from zcu_tools.experiment.v2.twotone.ro_optimize.auto_optimize import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    build_exp_spec,
     make_pulse_module_spec,
     make_readout_module_spec,
     make_reset_module_spec,
@@ -27,9 +28,9 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
+    IntSpec,
     MetaDictWriteback,
     RunRequest,
-    ScalarSpec,
     SweepSpec,
     WritebackItem,
     WritebackRequest,
@@ -108,38 +109,26 @@ class RoOptAutoAdapter(
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:
-        return CfgSectionSpec(
-            fields={
-                "modules": CfgSectionSpec(
-                    label="Modules",
-                    fields={
-                        "reset": make_reset_module_spec(optional=True),
-                        "qub_pulse": make_pulse_module_spec(),
-                        # The optimizer owns readout freq + gain (set_param at
-                        # run; "freq" writes both pulse and ro freq), so lock
-                        # them off the form. Length is swept into the pulse
-                        # waveform, not a top-level field — left editable.
-                        "readout": make_readout_module_spec()
-                        .lock_literal("pulse_cfg.freq", 0.0)
-                        .lock_literal("ro_cfg.ro_freq", 0.0)
-                        .lock_literal("pulse_cfg.gain", 0.0),
-                    },
-                ),
-                "relax_delay": ScalarSpec(
-                    label="Relax delay (us)", type=float, decimals=3
-                ),
-                "sweep": CfgSectionSpec(
-                    label="Search bounds (min–max)",
-                    fields={
-                        "freq": SweepSpec(label="Readout freq (MHz)"),
-                        "gain": SweepSpec(label="Readout gain (a.u.)"),
-                        "length": SweepSpec(label="Readout length (us)"),
-                    },
-                ),
-                "num_points": ScalarSpec(label="Optimizer points", type=int),
-                "reps": ScalarSpec(label="Reps", type=int),
-                "rounds": ScalarSpec(label="Rounds", type=int),
-            }
+        return build_exp_spec(
+            modules={
+                "reset": make_reset_module_spec(optional=True),
+                "qub_pulse": make_pulse_module_spec(),
+                # The optimizer owns readout freq + gain (set_param at
+                # run; "freq" writes both pulse and ro freq), so lock
+                # them off the form. Length is swept into the pulse
+                # waveform, not a top-level field — left editable.
+                "readout": make_readout_module_spec()
+                .lock_literal("pulse_cfg.freq", 0.0)
+                .lock_literal("ro_cfg.ro_freq", 0.0)
+                .lock_literal("pulse_cfg.gain", 0.0),
+            },
+            sweep_label="Search bounds (min–max)",
+            sweep={
+                "freq": SweepSpec(label="Readout freq (MHz)"),
+                "gain": SweepSpec(label="Readout gain (a.u.)"),
+                "length": SweepSpec(label="Readout length (us)"),
+            },
+            extra={"num_points": IntSpec(label="Optimizer points")},
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:

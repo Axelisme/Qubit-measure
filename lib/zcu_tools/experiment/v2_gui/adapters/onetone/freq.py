@@ -18,13 +18,13 @@ from zcu_tools.experiment.v2.onetone.freq import FreqCfg, FreqExp, FreqResult
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    build_exp_spec,
     make_pulse_readout_module_spec,
     md_get_float,
     md_has_key,
     proper_res_freq_range,
 )
 from zcu_tools.gui.app.main.adapter import (
-    MetaDictWriteback,
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
@@ -32,8 +32,8 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     EvalValue,
     ExpContext,
+    MetaDictWriteback,
     ParamMeta,
-    ScalarSpec,
     SweepSpec,
     WritebackItem,
     WritebackRequest,
@@ -103,28 +103,15 @@ class OneToneFreqAdapter(
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:
-        return CfgSectionSpec(
-            fields={
-                "modules": CfgSectionSpec(
-                    label="Modules",
-                    fields={
-                        # No reset module — one-tone spectroscopy runs without a
-                        # qubit reset (the ExpCfg defaults reset=None).
-                        "readout": make_pulse_readout_module_spec()
-                        .lock_literal("pulse_cfg.freq", 0.0)
-                        .lock_literal("ro_cfg.ro_freq", 0.0),
-                    },
-                ),
-                "relax_delay": ScalarSpec(
-                    label="Relax delay (us)", type=float, decimals=3
-                ),
-                "sweep": CfgSectionSpec(
-                    label="Sweep",
-                    fields={"freq": SweepSpec(label="Freq (MHz)")},
-                ),
-                "reps": ScalarSpec(label="Reps", type=int),
-                "rounds": ScalarSpec(label="Rounds", type=int),
-            }
+        return build_exp_spec(
+            modules={
+                # No reset module — one-tone spectroscopy runs without a
+                # qubit reset (the ExpCfg defaults reset=None).
+                "readout": make_pulse_readout_module_spec()
+                .lock_literal("pulse_cfg.freq", 0.0)
+                .lock_literal("ro_cfg.ro_freq", 0.0),
+            },
+            sweep={"freq": SweepSpec(label="Freq (MHz)")},
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:

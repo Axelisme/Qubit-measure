@@ -329,6 +329,58 @@ class ScalarSpec:
             )
 
 
+def IntSpec(
+    label: str,
+    *,
+    editable: bool = True,
+    choices: Optional[list] = None,
+    required: bool = False,
+    optional: bool = False,
+    group: str = "",
+) -> ScalarSpec:
+    """Sugar for ``ScalarSpec(label=..., type=int)`` — an integer field.
+
+    A thin, explicit factory (not a default ``type``): callers see ``IntSpec``
+    and know it is int, with no hidden default to remember. Mirrors the
+    ``ScalarSpec`` fields relevant to integers (``decimals`` is float-only).
+    """
+    return ScalarSpec(
+        label=label,
+        type=int,
+        editable=editable,
+        choices=choices,
+        required=required,
+        optional=optional,
+        group=group,
+    )
+
+
+def FloatSpec(
+    label: str,
+    *,
+    decimals: Optional[int] = None,
+    editable: bool = True,
+    choices: Optional[list] = None,
+    required: bool = False,
+    optional: bool = False,
+    group: str = "",
+) -> ScalarSpec:
+    """Sugar for ``ScalarSpec(label=..., type=float)`` — a float field.
+
+    Explicit counterpart to :func:`IntSpec`; carries the float-only ``decimals``.
+    """
+    return ScalarSpec(
+        label=label,
+        type=float,
+        decimals=decimals,
+        editable=editable,
+        choices=choices,
+        required=required,
+        optional=optional,
+        group=group,
+    )
+
+
 @dataclass(frozen=True)
 class LiteralSpec:
     """A fixed-value field: no widget shown, value is always spec.value."""

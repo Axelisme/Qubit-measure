@@ -14,6 +14,7 @@ from zcu_tools.experiment.v2.twotone.ro_optimize.length import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    build_exp_spec,
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
     make_reset_module_spec,
@@ -26,7 +27,6 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     ExpContext,
     MetaDictWriteback,
-    ScalarSpec,
     SweepSpec,
     WritebackItem,
     WritebackRequest,
@@ -104,33 +104,20 @@ class RoOptLengthAdapter(
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:
-        return CfgSectionSpec(
-            fields={
-                "modules": CfgSectionSpec(
-                    label="Modules",
-                    fields={
-                        "reset": make_reset_module_spec(optional=True),
-                        "qub_pulse": make_pulse_module_spec(),
-                        # The sweep axis owns the readout acquisition window
-                        # (set_param("ro_length") at run), so lock it off the
-                        # form. The pulse waveform length is auto-derived from the
-                        # sweep max but stays editable (it sets the gaussian
-                        # ratio for shaped pulses — see Phase 140 C-table).
-                        "readout": make_pulse_readout_module_spec().lock_literal(
-                            "ro_cfg.ro_length", 0.0
-                        ),
-                    },
+        return build_exp_spec(
+            modules={
+                "reset": make_reset_module_spec(optional=True),
+                "qub_pulse": make_pulse_module_spec(),
+                # The sweep axis owns the readout acquisition window
+                # (set_param("ro_length") at run), so lock it off the
+                # form. The pulse waveform length is auto-derived from the
+                # sweep max but stays editable (it sets the gaussian
+                # ratio for shaped pulses — see Phase 140 C-table).
+                "readout": make_pulse_readout_module_spec().lock_literal(
+                    "ro_cfg.ro_length", 0.0
                 ),
-                "relax_delay": ScalarSpec(
-                    label="Relax delay (us)", type=float, decimals=3
-                ),
-                "sweep": CfgSectionSpec(
-                    label="Sweep",
-                    fields={"length": SweepSpec(label="Readout length (us)")},
-                ),
-                "reps": ScalarSpec(label="Reps", type=int),
-                "rounds": ScalarSpec(label="Rounds", type=int),
-            }
+            },
+            sweep={"length": SweepSpec(label="Readout length (us)")},
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:

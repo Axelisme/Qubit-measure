@@ -10,6 +10,7 @@ from zcu_tools.experiment.v2.lookback import LookbackCfg, LookbackExp, LookbackR
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    build_exp_spec,
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
     make_reset_module_spec,
@@ -26,7 +27,6 @@ from zcu_tools.gui.app.main.adapter import (
     LiteralSpec,
     MetaDictWriteback,
     ParamMeta,
-    ScalarSpec,
     WritebackItem,
     WritebackRequest,
 )
@@ -104,26 +104,17 @@ class LookbackAdapter(
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:
-        return CfgSectionSpec(
-            fields={
-                "modules": CfgSectionSpec(
-                    label="Modules",
-                    fields={
-                        "reset": make_reset_module_spec(optional=True),
-                        "init_pulse": make_pulse_module_spec(optional=True),
-                        "readout": make_pulse_readout_module_spec(),
-                    },
-                ),
-                "relax_delay": ScalarSpec(
-                    label="Relax delay (us)", type=float, decimals=3
-                ),
-                # reps is locked to 1: decimated acquisition has no multi-rep
-                # averaging, so LookbackExp.run() forces reps=1 anyway. Locking it
-                # here means the GUI never offers a value that gets silently
-                # overridden.
-                "reps": LiteralSpec(value=1, label="Reps"),
-                "rounds": ScalarSpec(label="Rounds", type=int),
-            }
+        return build_exp_spec(
+            modules={
+                "reset": make_reset_module_spec(optional=True),
+                "init_pulse": make_pulse_module_spec(optional=True),
+                "readout": make_pulse_readout_module_spec(),
+            },
+            # reps is locked to 1: decimated acquisition has no multi-rep
+            # averaging, so LookbackExp.run() forces reps=1 anyway. Locking it
+            # here means the GUI never offers a value that gets silently
+            # overridden.
+            reps=LiteralSpec(value=1, label="Reps"),
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:

@@ -10,6 +10,7 @@ from zcu_tools.experiment.v2.onetone.flux_dep import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    build_exp_spec,
     make_pulse_readout_module_spec,
     md_get_float,
     md_has_key,
@@ -25,7 +26,6 @@ from zcu_tools.gui.app.main.adapter import (
     EvalValue,
     ExpContext,
     RunRequest,
-    ScalarSpec,
     SweepSpec,
 )
 
@@ -83,39 +83,21 @@ class OneToneFluxDepAdapter(BaseAdapter[FluxDepCfg, OneToneFluxDepRunResult]):
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:
-        return CfgSectionSpec(
-            fields={
-                "modules": CfgSectionSpec(
-                    label="Modules",
-                    fields={
-                        # No reset module — one-tone runs without a qubit reset
-                        # (the ExpCfg defaults reset=None). The freq sweep owns
-                        # the readout frequency (set_param("freq") writes both
-                        # pulse and ro freq), so lock it off the form.
-                        "readout": make_pulse_readout_module_spec()
-                        .lock_literal("pulse_cfg.freq", 0.0)
-                        .lock_literal("ro_cfg.ro_freq", 0.0),
-                    },
-                ),
-                "dev": CfgSectionSpec(
-                    label="Flux Device",
-                    fields={
-                        "flux_dev": DeviceRefSpec(label="Flux Device"),
-                    },
-                ),
-                "relax_delay": ScalarSpec(
-                    label="Relax delay (us)", type=float, decimals=3
-                ),
-                "sweep": CfgSectionSpec(
-                    label="Sweep",
-                    fields={
-                        "flux": SweepSpec(label="Flux device value", decimals=6),
-                        "freq": SweepSpec(label="Freq (MHz)"),
-                    },
-                ),
-                "reps": ScalarSpec(label="Reps", type=int),
-                "rounds": ScalarSpec(label="Rounds", type=int),
-            }
+        return build_exp_spec(
+            modules={
+                # No reset module — one-tone runs without a qubit reset
+                # (the ExpCfg defaults reset=None). The freq sweep owns
+                # the readout frequency (set_param("freq") writes both
+                # pulse and ro freq), so lock it off the form.
+                "readout": make_pulse_readout_module_spec()
+                .lock_literal("pulse_cfg.freq", 0.0)
+                .lock_literal("ro_cfg.ro_freq", 0.0),
+            },
+            dev={"flux_dev": DeviceRefSpec(label="Flux Device")},
+            sweep={
+                "flux": SweepSpec(label="Flux device value", decimals=6),
+                "freq": SweepSpec(label="Freq (MHz)"),
+            },
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:

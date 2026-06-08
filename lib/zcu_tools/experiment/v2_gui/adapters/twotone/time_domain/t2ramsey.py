@@ -14,6 +14,7 @@ from zcu_tools.experiment.v2.twotone.time_domain.t2ramsey import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
+    build_exp_spec,
     make_pulse_module_spec,
     make_readout_module_spec,
     make_reset_module_spec,
@@ -29,7 +30,6 @@ from zcu_tools.gui.app.main.adapter import (
     ExpContext,
     MetaDictWriteback,
     ParamMeta,
-    ScalarSpec,
     SweepSpec,
     SweepValue,
     WritebackItem,
@@ -107,26 +107,13 @@ class T2RamseyAdapter(
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:
-        return CfgSectionSpec(
-            fields={
-                "modules": CfgSectionSpec(
-                    label="Modules",
-                    fields={
-                        "reset": make_reset_module_spec(optional=True),
-                        "pi2_pulse": make_pulse_module_spec(),
-                        "readout": make_readout_module_spec(),
-                    },
-                ),
-                "relax_delay": ScalarSpec(
-                    label="Relax delay (us)", type=float, decimals=3
-                ),
-                "sweep": CfgSectionSpec(
-                    label="Sweep",
-                    fields={"length": SweepSpec(label="Delay (us)")},
-                ),
-                "reps": ScalarSpec(label="Reps", type=int),
-                "rounds": ScalarSpec(label="Rounds", type=int),
-            }
+        return build_exp_spec(
+            modules={
+                "reset": make_reset_module_spec(optional=True),
+                "pi2_pulse": make_pulse_module_spec(),
+                "readout": make_readout_module_spec(),
+            },
+            sweep={"length": SweepSpec(label="Delay (us)")},
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:

@@ -42,6 +42,10 @@ from .defaults import (
     select_named_module_value,
 )
 from .spec_helpers import (
+    build_exp_spec,
+    declare_dev_spec,
+    declare_modules_spec,
+    declare_sweep_spec,
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
     make_readout_module_spec,
@@ -100,4 +104,9 @@ __all__ = [
     "make_readout_module_spec",
     "make_reset_module_spec",
     "schema_from_module",
+    # Root cfg-spec assembly (canonical field order owned here)
+    "build_exp_spec",
+    "declare_modules_spec",
+    "declare_sweep_spec",
+    "declare_dev_spec",
 ]

@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from typing import Optional
 
-from zcu_tools.gui.app.main.adapter import CfgSchema, ModuleRefSpec
+from zcu_tools.gui.app.main.adapter import (
+    CfgNodeSpec,
+    CfgSchema,
+    CfgSectionSpec,
+    FloatSpec,
+    IntSpec,
+    ModuleRefSpec,
+)
 from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.app.main.specs.pulse import make_pulse_spec
 from zcu_tools.gui.app.main.specs.readout import (
@@ -62,6 +69,82 @@ def make_reset_module_spec(
         label=label,
         optional=optional,
     )
+
+
+# ---------------------------------------------------------------------------
+# Root cfg-spec assembly — the canonical top-level field order lives here, so
+# adapters never hand-order it (the order-inconsistency bug class is owned by
+# build_exp_spec, not repeated per adapter).
+# ---------------------------------------------------------------------------
+
+# Standard scalars shared by (almost) every experiment. Frozen → safe as
+# defaults. An adapter overrides only when it differs (lookback locks reps=1).
+DEFAULT_RELAX_DELAY_SPEC: CfgNodeSpec = FloatSpec(label="Relax delay (us)", decimals=3)
+DEFAULT_REPS_SPEC: CfgNodeSpec = IntSpec(label="Reps")
+DEFAULT_ROUNDS_SPEC: CfgNodeSpec = IntSpec(label="Rounds")
+
+
+def declare_modules_spec(fields: dict[str, CfgNodeSpec]) -> CfgSectionSpec:
+    """A "Modules" section wrapping the given module-ref fields."""
+    return CfgSectionSpec(label="Modules", fields=fields)
+
+
+def declare_sweep_spec(
+    fields: dict[str, CfgNodeSpec], label: str = "Sweep"
+) -> CfgSectionSpec:
+    """A sweep section wrapping the given sweep-axis fields (default label "Sweep")."""
+    return CfgSectionSpec(label=label, fields=fields)
+
+
+def declare_dev_spec(
+    fields: dict[str, CfgNodeSpec], label: str = "Device"
+) -> CfgSectionSpec:
+    """A device section wrapping the given device-ref fields."""
+    return CfgSectionSpec(label=label, fields=fields)
+
+
+def build_exp_spec(
+    *,
+    modules: dict[str, CfgNodeSpec],
+    sweep: Optional[dict[str, CfgNodeSpec]] = None,
+    sweep_label: str = "Sweep",
+    dev: Optional[dict[str, CfgNodeSpec]] = None,
+    extra: Optional[dict[str, CfgNodeSpec]] = None,
+    relax_delay: bool = True,
+    reps: CfgNodeSpec = DEFAULT_REPS_SPEC,
+    rounds: CfgNodeSpec = DEFAULT_ROUNDS_SPEC,
+) -> CfgSectionSpec:
+    """Assemble an experiment's root cfg spec in the canonical field order.
+
+    Emits the top-level fields in one fixed order so adapters never hand-order
+    them — the order is owned here, not per adapter:
+
+        modules, [dev], [relax_delay], [sweep], [*extra], reps, rounds
+
+    - ``modules`` (required): module-ref fields → the "Modules" section.
+    - ``dev``: device-ref fields → the "Device" section (omit when None).
+    - ``relax_delay``: add the standard relax-delay scalar; set ``False`` for an
+      experiment that has no relax-delay field (e.g. the fake onetone sweep).
+    - ``sweep`` / ``sweep_label``: sweep-axis fields → a section (omit the whole
+      section when None, e.g. lookback). ``sweep_label`` overrides the "Sweep"
+      header (e.g. an optimizer's "Search bounds (min–max)").
+    - ``extra``: run-only scalar knobs not part of the lowered ExpCfg (e.g.
+      ``earlystop_snr`` / ``num_points``); placed between sweep and reps.
+    - ``reps`` / ``rounds``: default to the standard int scalars; pass a
+      ``LiteralSpec`` to lock one (lookback locks reps to 1).
+    """
+    fields: dict[str, CfgNodeSpec] = {"modules": declare_modules_spec(modules)}
+    if dev is not None:
+        fields["dev"] = declare_dev_spec(dev)
+    if relax_delay:
+        fields["relax_delay"] = DEFAULT_RELAX_DELAY_SPEC
+    if sweep is not None:
+        fields["sweep"] = declare_sweep_spec(sweep, label=sweep_label)
+    if extra:
+        fields.update(extra)
+    fields["reps"] = reps
+    fields["rounds"] = rounds
+    return CfgSectionSpec(fields=fields)
 
 
 def schema_from_module(proposed: object | None) -> Optional[CfgSchema]:
