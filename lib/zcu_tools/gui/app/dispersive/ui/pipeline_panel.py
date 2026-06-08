@@ -10,9 +10,10 @@ The pipeline (each step enabled only once the prior completes — fast-fail UX):
 1. **Project & inputs** — load the fluxonium fit from params.json (the hard gate).
 2. **Load one-tone** — browse + transpose a raw one-tone hdf5.
 3. **Preprocess** — run the (off-main) signal pipeline → the Preprocess tab.
-4. **Tune g / r_f** — edit the spinboxes, then "Use these g/r_f" runs the predictor
-   off-main, draws the Tune tab, and records the result (the manual tuning IS the
-   final fit — there is no separate auto-fit). The button is disabled while computing.
+4. **Tune g / r_f** — drag the g / r_f sliders (or click "Auto tune" to let a scipy
+   optimiser pre-fit them against the dropped sample-flux lines), then "Use these
+   g/r_f" runs the predictor off-main, draws the Tune tab, and records the result (the
+   accepted values are the final fit). The button is disabled while computing.
 5. **Export** — write the dispersive section back to params.json.
 
 The heavy work (preprocess, predict) runs on a ``QThreadPool`` worker that calls only
@@ -586,7 +587,7 @@ class PipelinePanelWidget(QWidget):
         """The g slider value in MHz (1 tick = 1 MHz)."""
         return float(self._g_slider.value())
 
-    def _on_rf_slider(self, _tick: int) -> None:
+    def _on_rf_slider(self, _: int) -> None:
         """Live: move the r_f line as the slider drags; debounce the dot recompute."""
         rf_ghz = self._rf_ghz()
         self._rf_label.setText(f"{1e3 * rf_ghz:.1f} MHz")

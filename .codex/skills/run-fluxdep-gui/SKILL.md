@@ -1,7 +1,7 @@
 ---
 name: run-fluxdep-gui
 description: Launch the fluxdep-gui (a standalone Qt GUI for fluxonium flux-dependence fitting) for the user, and observe its state over MCP. The USER drives the analysis in the GUI (load spectrum hdf5 → pick half/integer flux lines → select spectral points → cross-spectrum filter → export spectrums.hdf5 → search a database for EJ/EC/EL → export params.json); the agent is READ-ONLY and reports current state. Use when asked to open/launch the fluxdep-gui app, check what state it is in, or build its search database.
-skill_version: 7
+skill_version: 8
 ---
 
 # run-fluxdep-gui
@@ -95,7 +95,7 @@ pinned to 1 thread so per-row process workers parallelise cleanly (~5x on 8
 cores); set `--n-jobs 1` for serial.
 
 The shipped databases live in `Database/simulation/` (`fluxonium_all.h5`,
-`fluxonium_int.h5`, `fluxonium_1.h5`); each has `fluxs` / `params` / `energies`
+`fluxonium_int.h5`, `fluxonium_1.h5`); each has `fluxs` / `params` / `energies` / `Ebounds`
 datasets.
 
 > **WARNING — don't clobber a database you can't cheaply rebuild.** The output

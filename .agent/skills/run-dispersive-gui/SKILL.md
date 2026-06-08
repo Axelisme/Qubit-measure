@@ -1,7 +1,7 @@
 ---
 name: run-dispersive-gui
 description: Launch the dispersive-fit-gui (a standalone Qt GUI for fluxonium dispersive-shift fitting) for the user, and observe its state over MCP. The USER drives the analysis in the GUI (load the fluxonium fit from params.json → load a one-tone spectrum → preprocess → tune the coupling g and resonator frequency bare_rf by slider or auto-fit → export the dispersive section back to params.json); the agent is READ-ONLY and reports current state. Use when asked to open/launch the dispersive-fit-gui app or check what state it is in.
-skill_version: 2
+skill_version: 3
 ---
 
 # run-dispersive-gui
@@ -33,12 +33,14 @@ A single linear flow (each step enables the next; the agent observes progress vi
 3. **Preprocess** — fit + remove the electronic delay, smooth, fit a common circle
    centre, take the phase, differentiate / normalize → the normalized phase image
    the tuning works against (a 3-panel diagnostic shows signal / edelay / phases).
-4. **Tune g / r_f** — a `g` spinbox + an `r_f` slider drive a live prediction of the
+4. **Tune g / r_f** — `g` and `r_f` sliders drive a live prediction of the
    ground/excited dispersive frequencies over the spectrum; the user matches them by
-   eye and clicks "Use these g/r_f" to accept (the manual tuning IS the final fit —
-   there is no auto-fit). They can drop draggable **sample-flux lines** that show the
-   ground (red) / excited (blue) frequency at a single flux, updated live as g / r_f
-   change — quick feedback at a few fluxes without recomputing the whole spectrum.
+   eye and clicks "Use these g/r_f" to accept (the accepted values are the final fit).
+   They can drop draggable **sample-flux lines** that show the ground (blue) / excited
+   (red) frequency at a single flux, updated live as g / r_f change — quick feedback at
+   a few fluxes without recomputing the whole spectrum. An **Auto tune** button (a
+   scipy optimiser over those sample-flux lines) can pre-fit g / r_f for the user, who
+   then still presses "Use these g/r_f" to accept.
 5. **Export** — write the `dispersive = {g, bare_rf}` section back to `params.json`,
    preserving the `fluxdep_fit` section it read.
 
@@ -60,8 +62,8 @@ fluxdep-gui (or browse to a params.json that already has a fluxdep_fit section).
 ## Run (agent path — MCP tools)
 
 ```
-dispersive_launch              # opens the GUI for the user, connects (control port 8767)
-                               # or dispersive_connect to attach to a GUI the user already started
+dispersive_launch              # opens a NEW GUI for the user, connects (control port 8767)
+dispersive_connect             # or attach to a GUI the user already started (same port 8767)
 dispersive_state_check         # {has_project, has_fit_inputs, has_onetone, has_preprocess, has_result}
 dispersive_project_info        # {chip_name, qub_name, result_dir, database_path}
 dispersive_fit_inputs_info     # {has_inputs, params:{EJ,EC,EL} or null, flux_half, flux_int, flux_period, bare_rf_seed}

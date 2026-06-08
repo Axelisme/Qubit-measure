@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 12
+skill_version: 13
 ---
 
 # run-measure-gui
@@ -19,7 +19,7 @@ against a **mock SoC** — use it to verify the GUI launches and the loop works 
 a fresh checkout.
 
 Paths below are relative to the repo root (`<repo>` = the directory with
-`run_measure_gui.py` and `.mcp.json`).
+`.mcp.json`; the GUI launcher lives at `script/run_measure_gui.py`).
 
 ## Before touching real hardware — READ THIS
 
