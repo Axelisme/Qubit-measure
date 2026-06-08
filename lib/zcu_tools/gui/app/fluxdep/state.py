@@ -126,15 +126,25 @@ def default_result_dir(chip_name: str, qub_name: str, root: str = "") -> str:
 
 
 def default_database_root(chip_name: str, qub_name: str, root: str = "") -> str:
-    """The default *raw spectrum* root for a chip/qubit.
+    """The default *raw spectrum* root for a chip/qubit (``Database/<chip>/<qubit>``).
 
-    Raw measurement hdf5 files share the chip/qubit result tree, so this is the
-    same ``result/<chip>/<qubit>`` directory. (This is the project's
-    ``database_path``, distinct from the precomputed *search* database, whose
-    default is the bundled ``Database/simulation`` — see ``ui/paths.database_dir``.)
-    ``root`` anchors it at the repo root (see ``default_result_dir``).
+    Raw measurement hdf5 files live under the repo's ``Database/`` tree per
+    chip/qubit (measure-gui saves to ``Database/<chip>/<qubit>/<date>/...``, e.g.
+    ``Database/Q5_2D/Q1/2026/05/Data_0504/R1_flux_2.hdf5``), NOT under ``result/``,
+    which holds *processed* outputs (the exported ``spectrums.hdf5``). Pointing the
+    load dialog at ``result/`` made it fall back to the bare ``result`` folder when
+    the chip/qubit subdir had no raw data. (This is the project's ``database_path``,
+    distinct from the precomputed *search* database, whose default is the bundled
+    ``Database/simulation`` — see ``ui/paths.database_dir``.) ``root`` anchors it at
+    the repo root (see ``default_result_dir``).
     """
-    return default_result_dir(chip_name, qub_name, root)
+    chip = chip_name or DEFAULT_CHIP
+    qub = qub_name or DEFAULT_QUBIT
+    return (
+        os.path.join(root, "Database", chip, qub)
+        if root
+        else os.path.join("Database", chip, qub)
+    )
 
 
 @dataclass
@@ -160,7 +170,7 @@ class ProjectInfo:
     qub_name: str = DEFAULT_QUBIT
     # Empty = "derive from chip/qubit in __post_init__"; a value overrides it.
     result_dir: str = ""  # → result/<chip>/<qubit>
-    database_path: str = ""  # raw spectrum root → result/<chip>/<qubit>
+    database_path: str = ""  # raw spectrum root → Database/<chip>/<qubit>
     # Base dir the derived defaults are anchored under (the repo root, injected by
     # the entry script). Empty keeps the legacy cwd-relative default. Not a path
     # itself — only seeds the derivation below; the GUI re-derives via the dialog.

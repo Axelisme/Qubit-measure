@@ -180,7 +180,8 @@ def test_project_info_derives_paths_from_names():
     # unset result_dir / database_path are derived from chip/qubit in __post_init__
     p = ProjectInfo(chip_name="Q5_2D", qub_name="Q1")
     assert p.result_dir == os.path.join("result", "Q5_2D", "Q1")
-    assert p.database_path == os.path.join("result", "Q5_2D", "Q1")
+    # raw spectra live under Database/, not result/ (cf. measure-gui save layout)
+    assert p.database_path == os.path.join("Database", "Q5_2D", "Q1")
 
 
 def test_project_info_default_names_derive_unknown_paths():
@@ -189,7 +190,7 @@ def test_project_info_default_names_derive_unknown_paths():
     # a bare ProjectInfo still has concrete (never empty) paths
     p = ProjectInfo()
     assert p.result_dir == os.path.join("result", "unknown_chip", "unknown_qubit")
-    assert p.database_path == os.path.join("result", "unknown_chip", "unknown_qubit")
+    assert p.database_path == os.path.join("Database", "unknown_chip", "unknown_qubit")
 
 
 def test_project_info_explicit_paths_override_derivation():
@@ -213,7 +214,7 @@ def test_project_info_root_dir_anchors_derived_defaults():
     root = os.path.join(os.sep, "repo")
     p = ProjectInfo(chip_name="Q5_2D", qub_name="Q1", root_dir=root)
     assert p.result_dir == os.path.join(root, "result", "Q5_2D", "Q1")
-    assert p.database_path == os.path.join(root, "result", "Q5_2D", "Q1")
+    assert p.database_path == os.path.join(root, "Database", "Q5_2D", "Q1")
 
 
 def test_project_info_empty_root_dir_keeps_relative_default():

@@ -1,11 +1,11 @@
 """ProjectDialog — set the project's chip / qubit names (and optional paths).
 
-The chip / qubit names locate the default output layout
-(``result/<chip>/<qubit>/...``). Both ``result_dir`` and ``database_path``
-auto-derive from the names (``result/<chip>/<qubit>``) and track them as the user
-types, until the user edits / browses a field — a manual change detaches that
-field from the derivation. Both have a Browse button (choose a folder). Returns a
-``ProjectInfo`` (or None on cancel).
+The chip / qubit names locate the default output layout (``result_dir`` →
+``result/<chip>/<qubit>`` for processed outputs, ``database_path`` →
+``Database/<chip>/<qubit>`` for raw spectra). Both auto-derive from the names and
+track them as the user types, until the user edits / browses a field — a manual
+change detaches that field from the derivation. Both have a Browse button (choose
+a folder). Returns a ``ProjectInfo`` (or None on cancel).
 """
 
 from __future__ import annotations

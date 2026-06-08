@@ -76,8 +76,8 @@ def test_database_path_auto_derives_from_names(qapp):
     d = ProjectDialog(ProjectInfo())
     d._chip_edit.setText("Q5_2D")
     d._qub_edit.setText("Q1")
-    # the raw-spectrum root tracks chip/qubit just like result_dir
-    assert d._database_edit.text() == os.path.join("result", "Q5_2D", "Q1")
+    # the raw-spectrum root tracks chip/qubit, but under Database/ (not result/)
+    assert d._database_edit.text() == os.path.join("Database", "Q5_2D", "Q1")
     d.deleteLater()
 
 
