@@ -156,7 +156,13 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 #      precondition failure (no_run_result / no_project / …) now ends with
 #      "reason: <tag>" so the agent can branch without parsing the prose. No wire
 #      change (reason already on the wire envelope; only surfaced at mcp now).
-MCP_VERSION = 23
+# MCP 24: wait-tool guidance only — gui_run_wait / gui_connect_wait /
+#      gui_device_wait_operation descriptions + _SERVER_INSTRUCTIONS now spell out
+#      that a wait BLOCKS the whole turn and that a long op should either poll or
+#      be run from a background agent (the only way to free the main loop and be
+#      re-invoked on completion — there is no server push). Text only, no behavior
+#      or wire change.
+MCP_VERSION = 24
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -209,6 +215,13 @@ Detecting completion — no events; wait or poll a handle:
     (gui_device_wait_operation / gui_device_poll) and connect
     (gui_connect_wait / gui_connect_poll). gui_analyze is synchronous to you
     (it awaits internally) and returns figure_path.
+  - A wait (gui_run_wait / gui_connect_wait / gui_device_wait_operation) BLOCKS
+    your whole turn until the op ends — minutes for a big sweep. Nothing pushes a
+    completion event; the server cannot wake you. For a long op either poll
+    instead (non-blocking — you check back), or run the wait from a background
+    agent: the block lives in the sub-agent, your main loop stays free, and the
+    harness re-invokes you with the result when it returns. Reserve inline waits
+    for ops you expect to finish quickly.
   - While 'running', the poll reply carries the live progress bars (active,
     bars[token/format/maximum/value/percent/n/total]) — no separate progress
     tool. Don't busy-poll gui_run_running_tab in a sleep loop; use gui_run_poll.
@@ -1335,7 +1348,9 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             "Returns {status, waited_seconds}: 'finished' / 'timed_out' (still "
             "running — re-wait or gui_device_poll) / 'no_operation'. Raises only on "
             "a genuine failure/cancellation. Use after a gui_device_* tool returned "
-            "status='pending'."
+            "status='pending'. This blocks your turn; for a long op (e.g. a slow "
+            "ramp) prefer gui_device_poll, or run this from a background agent to "
+            "keep your main loop free."
         ),
         "inputSchema": {
             "type": "object",
@@ -1393,7 +1408,13 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             "folded in if any), 'timed_out' (still running after the wait — not an "
             "error, re-wait or gui_run_poll), or 'no_operation' (none in flight). "
             "Raises only on a genuine run failure/cancellation. Use after "
-            "gui_run_start returned status='pending'."
+            "gui_run_start returned status='pending'. NOTE: this blocks your whole "
+            "turn until the run ends (minutes for a big sweep), and nothing pushes "
+            "a completion event. For a long run, either gui_run_poll (non-blocking "
+            "— you check back yourself), or call this from a background agent so "
+            "your main loop stays free and the harness re-invokes you with the "
+            "result when it returns; reserve inline gui_run_wait for runs you "
+            "expect to finish quickly."
         ),
         "inputSchema": {
             "type": "object",
@@ -1474,7 +1495,9 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
             "{status, waited_seconds}: 'finished' (also returns the SoC summary) / "
             "'timed_out' (still connecting — re-wait or gui_connect_poll) / "
             "'no_operation'. Raises only on a genuine connect failure. Use after "
-            "gui_connect_start returned status='pending'."
+            "gui_connect_start returned status='pending'. This blocks your turn; if "
+            "it is slow, prefer gui_connect_poll or run this from a background "
+            "agent rather than blocking."
         ),
         "inputSchema": {
             "type": "object",

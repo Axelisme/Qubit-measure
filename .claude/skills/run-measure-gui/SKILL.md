@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 13
+skill_version: 14
 ---
 
 # run-measure-gui
@@ -100,7 +100,7 @@ gui_tab_list_paths(tab_id)                        # dotted cfg paths (compact: p
 gui_tab_get_cfg_summary(tab_id)                   # current values/expressions, nested (ref nodes wrap {chosen,value} → not a path source; see list_paths)
 gui_editor_set_field(editor_id, "rounds", 30)     # WYSIWYG edit of the form's draft
 gui_run_start(tab_id)                             # waits ~1s; finished -> {status:finished,...}, slow -> {status:pending}
-gui_run_wait(tab_id)                              # block until done (only after pending)
+gui_run_wait(tab_id)                              # block until done (only after pending; blocks your turn — for a long run background it, see "Detecting completion")
 gui_analyze(tab_id)                               # SYNCHRONOUS fit; reply folds in figure_path (Read it)
 gui_save_data(tab_id) / gui_save_image / gui_save_result
 gui_view_screenshot(tab_id)                       # base64 PNG of the window/tab
@@ -115,6 +115,21 @@ a handle, never by subscribing to a push stream:
 | `gui_run_start` returned `{status:pending}` | `gui_run_wait(tab_id)` (blocks) or `gui_run_poll(tab_id)` (non-blocking) |
 | want live progress bars | already in the `gui_run_poll` reply while `status:running` (active + bars); no separate progress tool |
 | a poll says `status:cancelled` | a user/agent cancel (distinct from `failed`); not an error to recover from |
+
+**`gui_run_wait` blocks your whole turn until the run ends** (a big sweep is
+minutes), and nothing pushes a completion event — the MCP server cannot wake
+you. So for a long run, pick by who should wait:
+
+- **Free your main loop, auto-continue when done** → call `gui_run_wait` from a
+  *background agent*. The block lives in the sub-agent; your main loop stays free
+  and the harness re-invokes you with the run's result when it finishes.
+- **Just don't block, you'll check back yourself** → `gui_run_start`, then
+  `gui_run_poll(tab_id)` when you choose (the `running` reply carries live
+  progress bars).
+
+Reserve inline `gui_run_wait` for runs you expect to finish quickly. The same
+choice applies to `gui_connect_wait` / `gui_device_wait_operation`, though those
+ops are usually short.
 
 A `diagnostic{severity}` push (errors / info the GUI would show in a dialog) rides
 along in the *next* tool reply's notifications — you get it without asking. Don't
