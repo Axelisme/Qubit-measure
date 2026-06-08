@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 10
+skill_version: 11
 ---
 
 # run-measure-gui
@@ -36,10 +36,11 @@ user first**, and you **must respect device safety limits**.
   updates={"value": ...})` and any flux-sweep edge must stay in range. When in
   doubt, ask — do not guess a flux value.
 - **Read the board first with `gui_soc_info`** (after connect). It returns the
-  QICK soccfg: a human-readable `description` plus structured `cfg` — DAC/ADC
-  **channel count, sample rates (`fs`), DDS frequency ranges, tile layout**.
-  `gui_connect_start` / `gui_connect_wait` also fold this description into their
-  reply. This is the hardware you *can* see in software.
+  QICK soccfg: a compact human-readable `description` table (per-channel
+  **generator/readout type, converter port, sample rate (`fs`), max pulse/buffer
+  length**) plus a structured `cfg` carrying the full detail (DDS frequency
+  ranges, tile layout, …). `gui_connect_start` / `gui_connect_wait` also fold
+  this description into their reply. This is the hardware you *can* see in software.
 - **Ask the user for what soccfg does NOT tell you** (the wiring/physics):
   - Which DAC/ADC **channels** are wired to the readout transmission line, and
     which to the qubit drive line (soccfg lists the channels and their rates,
@@ -86,7 +87,7 @@ gui_context_new(bind_device="flux")             # create a context bound to a fl
                                                 # Omit bind_device for an unbound context; clone_from=<label>
                                                 # clones an existing one. Or gui_context_use(label) for an existing one.
 gui_state_check                                 # all four flags must be true before running
-gui_soc_info                                    # the board: channels, sample rates, freq ranges
+gui_soc_info                                    # the board: per-channel type, sample rate, port, max length (+ full cfg)
 ```
 
 Then the experiment loop (per tab):

@@ -951,10 +951,10 @@ def tool_gui_analyze(arguments: Dict[str, Any]) -> Dict[str, Any]:
 
 def _connect_soc_summary() -> Dict[str, Any]:
     """The SoC summary folded into a settled connect reply: only the human-
-    readable ``description`` (print(soccfg)) + ``is_mock``. The structured ``cfg``
-    (DAC/ADC channels, sample rates, freq ranges — ~2 KB) is NOT folded here; it
-    duplicates the description and is rarely needed at connect time. Fetch it on
-    demand with gui_soc_info."""
+    readable ``description`` (the compact describe_soc per-channel table) +
+    ``is_mock``. The structured ``cfg`` (full per-channel detail incl. DDS / freq
+    ranges — ~2 KB) is NOT folded here; it is rarely needed at connect time. Fetch
+    it on demand with gui_soc_info."""
     info = send_gui_rpc("soc.info", {})
     return {
         "description": info.get("description"),
@@ -978,8 +978,8 @@ def tool_gui_connect_start(arguments: Dict[str, Any]) -> Dict[str, Any]:
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
     send_gui_rpc("connect.start", params)
     # On a settled connect, fold in the SoC hardware summary so the agent sees
-    # the board (channels / sample rates / freq ranges) in the same reply,
-    # without a separate gui_soc_info round-trip.
+    # the board (per-channel type / sample rate / port / max length) in the same
+    # reply, without a separate gui_soc_info round-trip.
     return _start_op_with_short_wait(
         "soc",
         "SoC connect",
