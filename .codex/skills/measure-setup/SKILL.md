@@ -1,7 +1,7 @@
 ---
 name: measure-setup
 description: Collect the stable, per-rig measurement setup (board connection, project identity, channel wiring, device addresses) into a single user-filled measure_setup.yaml at the repo root, so the measuring agent reads it instead of re-asking the user every session. Use before driving a measure-gui measurement when setup info (channel wiring, device addresses, chip/qub/res names, board IP/port) is needed and not already in the file.
-skill_version: 1
+skill_version: 2
 ---
 
 # measure-setup
@@ -51,6 +51,20 @@ devices:                # instruments to connect; delete any block you do not us
   jpa_sgs:
     type: RohdeSchwarzSGS100A
     address: "TCPIP0::192.168.10.89::inst0::INSTR"
+
+# OPTIONAL, task-specific. Add a block like this only when a task needs it
+# (e.g. a flux_dep sweep). These are SUGGESTIONS / starting defaults only — NOT
+# authoritative: the adapter's gui_adapter_guide recommended ranges and live
+# tuning take precedence. Omit the whole block if you have nothing to suggest.
+# flux_scan:
+#   start: -4.0e-3        # flux device value (A for YOKOGS200 current mode)
+#   stop:  4.0e-3
+#   expts: 101            # points
+#   freq_half_span_mhz: 5 # resonator window half-span around r_f
+#   readout_gain: 0.005   # raise toward ~0.05 if SNR is poor (see the guide)
+#   reverse_on_consecutive_runs: true   # swap start/stop each run to skip ramp-back
+#   flx_half:             # (optional) calibrated half-flux sweet-spot device value
+#   flx_int:              # (optional) calibrated integer-flux sweet-spot device value
 ```
 
 ## Workflow
@@ -90,3 +104,13 @@ devices:                # instruments to connect; delete any block you do not us
   instruments change, **edit the file** — do not go back to asking field by field.
 - The `devices` section lists the instruments currently in use; add a block (with `type`
   plus its address/fields) when a new instrument joins the rig.
+- **Task-driven expansion.** When a task needs information the file does not yet hold
+  (e.g. switching from a resonator search to `flux_dep`), **edit the file to add the new
+  keys first, then ask the user only for those new blanks** — never re-ask for fields the
+  file already has. This is the whole point of the file: each task grows it once.
+- **Optional task blocks are suggestions, not authority.** A block like `flux_scan` only
+  records sensible starting defaults the user wants to keep around. The adapter's
+  `gui_adapter_guide` recommended ranges and live tuning (inspecting the figure, adjusting
+  window / gain / direction) always take precedence — treat these values as a starting
+  point, not a constraint. Stable per-qubit calibration values (e.g. `flx_half`/`flx_int`)
+  live in the GUI context (MetaDict); duplicating them here is optional convenience.

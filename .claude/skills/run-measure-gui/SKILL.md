@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 14
+skill_version: 15
 ---
 
 # run-measure-gui
@@ -94,6 +94,9 @@ Then the experiment loop (per tab):
 
 ```
 gui_adapter_list                                  # available experiments
+gui_adapter_guide(adapter_name="onetone/flux_dep")# READ FIRST (before configuring/running an experiment you
+                                                  # haven't run this session): per-experiment behavior, expected
+                                                  # md/ml, recommended ranges + gotchas live here, not in this skill
 gui_tab_new(adapter_name="fake/freq") -> tab_id   # readable id, e.g. fake-freq-1a2b3c4d
 gui_tab_snapshot(tab_id) -> editor_id             # the cfg-editing session handle
 gui_tab_list_paths(tab_id)                        # dotted cfg paths (compact: path+kind+choices)
@@ -101,9 +104,12 @@ gui_tab_get_cfg_summary(tab_id)                   # current values/expressions, 
 gui_editor_set_field(editor_id, "rounds", 30)     # WYSIWYG edit of the form's draft
 gui_run_start(tab_id)                             # waits ~1s; finished -> {status:finished,...}, slow -> {status:pending}
 gui_run_wait(tab_id)                              # block until done (only after pending; blocks your turn — for a long run background it, see "Detecting completion")
-gui_analyze(tab_id)                               # SYNCHRONOUS fit; reply folds in figure_path (Read it)
-gui_save_data(tab_id) / gui_save_image / gui_save_result
-gui_view_screenshot(tab_id)                       # base64 PNG of the window/tab
+gui_tab_get_current_figure(tab_id)                # PNG of the CURRENT plot — the run's 2D map, or the analysis fit
+                                                  # once analyzed. THIS is how you look at any plot, including
+                                                  # non-analysis 2D scans (flux_dep / power_dep). (Read the PNG.)
+gui_analyze(tab_id)                               # SYNCHRONOUS fit (analysis adapters only); reply folds in figure_path (Read it)
+gui_save_data(tab_id) / gui_save_image / gui_save_result   # each returns the resolved written path ({data_path[, image_path]})
+gui_view_screenshot(tab_id)                       # base64 PNG of the WHOLE window/tab (config + progress + plot)
 ```
 
 Detecting completion — completion is observed synchronously or by waiting/polling
@@ -205,6 +211,32 @@ Steps 7–12 (Rabi/T2/recalibrate/Rabi/T1) are the per-point qubit
 characterization. Reset characterization (single/dual/bath, in the notebook) is
 a separate sub-procedure layered on top once a π pulse exists.
 
+## Decision boundaries — act vs. ask
+
+Separate what you may infer automatically from what needs the user. The
+dividing line is **physical interpretation**: safe *procedure* is yours, *which
+feature is real / is the target* is the user's.
+
+**You may decide automatically** (safe procedure): which adapter implements a
+notebook step; sweep ranges within the guide's recommended bounds; narrowing or
+widening a window; raising readout gain to improve SNR within safe limits;
+reversing a flux sweep direction; re-running after a bad fit.
+
+**Stop and ask the user** (physical interpretation):
+
+- A coarse one-tone scan shows **multiple plausible dips/peaks** — ask which
+  feature is the target resonator **before** narrow-fitting or writeback. Do not
+  pick the strongest/first by default.
+- A **weak or unusual spectral structure** might be the intended mode or an
+  unrelated one (or a DAC mirror image) — confirm it is the target before
+  building on it.
+- Data stays **ambiguous or poor after a few reasonable parameter changes** —
+  stop and consult rather than keep guessing; the next choice likely depends on
+  physics you cannot see.
+
+When you stop, say what you see (with a `gui_tab_get_current_figure` PNG), name
+the options, and let the user choose.
+
 **Readout bring-up rules that generalize beyond one notebook run:**
 
 - **Do not start `onetone/freq` on real hardware until `lookback` has set a
@@ -233,8 +265,13 @@ a separate sub-procedure layered on top once a π pulse exists.
   user tells you the line is not power-sensitive for the task at hand, prefer
   the stronger readout drive so the signal-to-noise ratio is good enough to
   judge timing and resonator features cleanly.
-- **After every important `run`, inspect the analysis figure before trusting the
-  scalar summary.** A plausible-looking number can still come from a visibly bad
+- **After every important `run`, look at the figure before trusting any number.**
+  Call `gui_tab_get_current_figure(tab_id)` and Read the PNG — it returns the
+  current plot whether or not the adapter does analysis, so for a **2D scan with
+  no fit** (`onetone/twotone flux_dep`, `power_dep`) it is the 2D map itself.
+  Judge: is the feature clean, the window right (too wide / too narrow), the SNR
+  acceptable, the dispersive shift actually small? See the figure first, trust the
+  number second. A plausible-looking fit value can still come from a visibly bad
   fit.
 - **Before choosing a `lookback` frequency, ask whether the readout resonator is
   hanger-like (`hm`) or transmission-like (`t`).** For a hanger, the resonant
@@ -318,9 +355,10 @@ hardware) — the smoke harness uses it.
   feature you intended to measure.
 - **Saved data is always `.hdf5`, with a uniqueness suffix.** `gui_save_data` /
   `gui_save_result` force the `.hdf5` extension and append `_N` (e.g. a
-  `data_path` of `foo` or `foo.h5` lands as `foo_1.hdf5`). The reply's diagnostic
-  and the tab's `save_paths` report the resolved path — read the file back by
-  that, not by the path you passed in.
+  `data_path` of `foo` or `foo.h5` lands as `foo_1.hdf5`). **The save reply
+  returns the resolved path directly** (`{data_path}` / `{image_path}` /
+  `{data_path, image_path}`) — read the file back by that, not by the path you
+  passed in. (The tab's `save_paths` and the diagnostic also carry it.)
 - **cfg paths have no `value` segment.** Module sub-fields are
   `modules.qub_pulse.freq`, not `...qub_pulse.value.freq`; an unknown path
   fails `invalid_params` rather than silently no-op'ing. Always confirm against
