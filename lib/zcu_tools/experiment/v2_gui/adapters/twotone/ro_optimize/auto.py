@@ -125,12 +125,9 @@ class RoOptAutoAdapter(
                         .lock_literal("pulse_cfg.gain", 0.0),
                     },
                 ),
-                "reps": ScalarSpec(label="Reps", type=int),
-                "rounds": ScalarSpec(label="Rounds", type=int),
                 "relax_delay": ScalarSpec(
                     label="Relax delay (us)", type=float, decimals=3
                 ),
-                "num_points": ScalarSpec(label="Optimizer points", type=int),
                 "sweep": CfgSectionSpec(
                     label="Search bounds (min–max)",
                     fields={
@@ -139,6 +136,9 @@ class RoOptAutoAdapter(
                         "length": SweepSpec(label="Readout length (us)"),
                     },
                 ),
+                "num_points": ScalarSpec(label="Optimizer points", type=int),
+                "reps": ScalarSpec(label="Reps", type=int),
+                "rounds": ScalarSpec(label="Rounds", type=int),
             }
         )
 

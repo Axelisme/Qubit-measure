@@ -103,8 +103,6 @@ class FluxDepAdapter(BaseAdapter[FreqFluxCfg, FluxDepRunResult]):
                         "flux_dev": DeviceRefSpec(label="Flux Device"),
                     },
                 ),
-                "reps": ScalarSpec(label="Reps", type=int),
-                "rounds": ScalarSpec(label="Rounds", type=int),
                 "relax_delay": ScalarSpec(
                     label="Relax delay (us)", type=float, decimals=3
                 ),
@@ -115,6 +113,8 @@ class FluxDepAdapter(BaseAdapter[FreqFluxCfg, FluxDepRunResult]):
                         "freq": SweepSpec(label="Freq (MHz)"),
                     },
                 ),
+                "reps": ScalarSpec(label="Reps", type=int),
+                "rounds": ScalarSpec(label="Rounds", type=int),
             }
         )
 

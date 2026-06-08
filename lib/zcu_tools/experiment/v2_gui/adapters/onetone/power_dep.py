@@ -92,13 +92,8 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
                         .lock_literal("pulse_cfg.gain", 0.0),
                     },
                 ),
-                "reps": ScalarSpec(label="Reps", type=int),
-                "rounds": ScalarSpec(label="Rounds", type=int),
                 "relax_delay": ScalarSpec(
                     label="Relax delay (us)", type=float, decimals=3
-                ),
-                "earlystop_snr": ScalarSpec(
-                    label="Early-stop SNR (0 disables)", type=float, decimals=3
                 ),
                 "sweep": CfgSectionSpec(
                     label="Sweep",
@@ -107,6 +102,11 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
                         "freq": SweepSpec(label="Freq (MHz)"),
                     },
                 ),
+                "earlystop_snr": ScalarSpec(
+                    label="Early-stop SNR (0 disables)", type=float, decimals=3
+                ),
+                "reps": ScalarSpec(label="Reps", type=int),
+                "rounds": ScalarSpec(label="Rounds", type=int),
             }
         )
 

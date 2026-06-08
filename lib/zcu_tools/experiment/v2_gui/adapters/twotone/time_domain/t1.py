@@ -102,8 +102,6 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
                         "readout": make_readout_module_spec(),
                     },
                 ),
-                "reps": ScalarSpec(label="Reps", type=int),
-                "rounds": ScalarSpec(label="Rounds", type=int),
                 "relax_delay": ScalarSpec(
                     label="Relax delay (us)", type=float, decimals=3
                 ),
@@ -111,6 +109,8 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
                     label="Sweep",
                     fields={"length": SweepSpec(label="Delay (us)")},
                 ),
+                "reps": ScalarSpec(label="Reps", type=int),
+                "rounds": ScalarSpec(label="Rounds", type=int),
             }
         )
 

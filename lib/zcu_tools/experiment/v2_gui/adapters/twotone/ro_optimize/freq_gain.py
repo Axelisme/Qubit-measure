@@ -118,8 +118,6 @@ class RoOptFreqGainAdapter(
                         .lock_literal("pulse_cfg.gain", 0.0),
                     },
                 ),
-                "reps": ScalarSpec(label="Reps", type=int),
-                "rounds": ScalarSpec(label="Rounds", type=int),
                 "relax_delay": ScalarSpec(
                     label="Relax delay (us)", type=float, decimals=3
                 ),
@@ -130,6 +128,8 @@ class RoOptFreqGainAdapter(
                         "gain": SweepSpec(label="Readout gain (a.u.)"),
                     },
                 ),
+                "reps": ScalarSpec(label="Reps", type=int),
+                "rounds": ScalarSpec(label="Rounds", type=int),
             }
         )
 

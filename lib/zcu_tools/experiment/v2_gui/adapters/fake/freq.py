@@ -338,12 +338,12 @@ class FakeFreqAdapter(
                         .lock_literal("ro_cfg.ro_freq", 0.0),
                     },
                 ),
-                "reps": ScalarSpec(label="Reps", type=int),
-                "rounds": ScalarSpec(label="Rounds", type=int),
                 "sweep": CfgSectionSpec(
                     label="Sweep",
                     fields={"freq": SweepSpec(label="Freq (MHz)")},
                 ),
+                "reps": ScalarSpec(label="Reps", type=int),
+                "rounds": ScalarSpec(label="Rounds", type=int),
                 # No 'model' block: the simulated resonance is fixed at adapter
                 # construction (model_type + params), hidden from the cfg, so the
                 # sweep below scans blind and the analysis must find the dip.

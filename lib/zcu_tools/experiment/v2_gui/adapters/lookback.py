@@ -109,10 +109,13 @@ class LookbackAdapter(
                 "modules": CfgSectionSpec(
                     label="Modules",
                     fields={
-                        "readout": make_pulse_readout_module_spec(),
-                        "init_pulse": make_pulse_module_spec(optional=True),
                         "reset": make_reset_module_spec(optional=True),
+                        "init_pulse": make_pulse_module_spec(optional=True),
+                        "readout": make_pulse_readout_module_spec(),
                     },
+                ),
+                "relax_delay": ScalarSpec(
+                    label="Relax delay (us)", type=float, decimals=3
                 ),
                 # reps is locked to 1: decimated acquisition has no multi-rep
                 # averaging, so LookbackExp.run() forces reps=1 anyway. Locking it
@@ -120,9 +123,6 @@ class LookbackAdapter(
                 # overridden.
                 "reps": LiteralSpec(value=1, label="Reps"),
                 "rounds": ScalarSpec(label="Rounds", type=int),
-                "relax_delay": ScalarSpec(
-                    label="Relax delay (us)", type=float, decimals=3
-                ),
             }
         )
 

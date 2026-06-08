@@ -124,8 +124,6 @@ class T2EchoAdapter(
                         "readout": make_readout_module_spec(),
                     },
                 ),
-                "reps": ScalarSpec(label="Reps", type=int),
-                "rounds": ScalarSpec(label="Rounds", type=int),
                 "relax_delay": ScalarSpec(
                     label="Relax delay (us)", type=float, decimals=3
                 ),
@@ -133,6 +131,8 @@ class T2EchoAdapter(
                     label="Sweep",
                     fields={"length": SweepSpec(label="Total delay (us)")},
                 ),
+                "reps": ScalarSpec(label="Reps", type=int),
+                "rounds": ScalarSpec(label="Rounds", type=int),
             }
         )
 

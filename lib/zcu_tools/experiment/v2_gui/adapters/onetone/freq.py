@@ -115,15 +115,15 @@ class OneToneFreqAdapter(
                         .lock_literal("ro_cfg.ro_freq", 0.0),
                     },
                 ),
+                "relax_delay": ScalarSpec(
+                    label="Relax delay (us)", type=float, decimals=3
+                ),
                 "sweep": CfgSectionSpec(
                     label="Sweep",
                     fields={"freq": SweepSpec(label="Freq (MHz)")},
                 ),
                 "reps": ScalarSpec(label="Reps", type=int),
                 "rounds": ScalarSpec(label="Rounds", type=int),
-                "relax_delay": ScalarSpec(
-                    label="Relax delay (us)", type=float, decimals=3
-                ),
             }
         )
 

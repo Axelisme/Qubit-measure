@@ -116,8 +116,6 @@ class RoOptFreqAdapter(
                         .lock_literal("ro_cfg.ro_freq", 0.0),
                     },
                 ),
-                "reps": ScalarSpec(label="Reps", type=int),
-                "rounds": ScalarSpec(label="Rounds", type=int),
                 "relax_delay": ScalarSpec(
                     label="Relax delay (us)", type=float, decimals=3
                 ),
@@ -125,6 +123,8 @@ class RoOptFreqAdapter(
                     label="Sweep",
                     fields={"freq": SweepSpec(label="Readout freq (MHz)")},
                 ),
+                "reps": ScalarSpec(label="Reps", type=int),
+                "rounds": ScalarSpec(label="Rounds", type=int),
             }
         )
 
