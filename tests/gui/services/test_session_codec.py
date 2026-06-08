@@ -5,6 +5,8 @@ types); this file covers only the cfg lowering / rebuild transforms."""
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 from zcu_tools.gui.app.main.adapter import (
     CfgSchema,
@@ -241,6 +243,77 @@ def test_waveform_ref_preserves_override():
     wf = restored.value.fields["wf"]
     assert isinstance(wf, WaveformRefValue)
     assert wf.is_overridden is True
+
+
+def _multi_shape_module_spec() -> ModuleRefSpec:
+    """A two-shape module ref (direct vs pulse readout), discriminated by ``type``
+    — mirrors ``make_readout_module_spec``'s [direct, pulse] allowed order."""
+    direct = CfgSectionSpec(
+        fields={
+            "type": LiteralSpec(value="readout/direct"),
+            "ro_ch": ScalarSpec(label="RO ch", type=int),
+        },
+        label="Direct Readout",
+    )
+    pulse = CfgSectionSpec(
+        fields={
+            "type": LiteralSpec(value="readout/pulse"),
+            "gain": ScalarSpec(label="Gain", type=float),
+        },
+        label="Pulse Readout",
+    )
+    return ModuleRefSpec(allowed=[direct, pulse], label="Readout")
+
+
+def test_linked_multi_shape_ref_uses_value_discriminator_not_allowed0():
+    """A LINKED (library-named) ref to a *non-first* allowed shape round-trips via
+    its ``type`` discriminator — not the first allowed shape. Regression: the old
+    codec blindly picked ``allowed[0]`` for any non-Custom key, so a readout
+    linked to a library pulse-readout was serialised against the direct-readout
+    shape and crashed on the missing ``ro_ch`` field."""
+    spec = CfgSectionSpec(fields={"readout": _multi_shape_module_spec()})
+    schema = CfgSchema(
+        spec=spec,
+        value=CfgSectionValue(
+            fields={
+                "readout": ModuleRefValue(
+                    chosen_key="my_lib_readout",  # LINKED, not <Custom:...>
+                    value=CfgSectionValue(
+                        fields={
+                            "type": DirectValue("readout/pulse"),
+                            "gain": DirectValue(0.4),
+                        }
+                    ),
+                )
+            }
+        ),
+    )
+
+    raw = schema_to_raw(schema)  # used to raise SessionCodecError on 'ro_ch'
+    readout_value = cast(dict, cast(dict, raw["readout"])["value"])
+    assert readout_value["type"] == {"__kind": "direct", "value": "readout/pulse"}
+
+    restored = raw_to_schema(_empty(spec), raw)
+    readout = restored.value.fields["readout"]
+    assert isinstance(readout, ModuleRefValue)
+    assert set(readout.value.fields) == {"type", "gain"}  # pulse shape, not direct
+    assert readout.value.fields["gain"] == DirectValue(0.4)
+
+
+def test_linked_ref_unknown_discriminator_fails_fast():
+    """A LINKED multi-shape ref whose discriminator matches no allowed shape
+    fast-fails (it no longer silently mis-restores as ``allowed[0]``)."""
+    spec = CfgSectionSpec(fields={"readout": _multi_shape_module_spec()})
+    bad: dict[str, object] = {
+        "readout": {
+            "__kind": "module_ref",
+            "chosen_key": "my_lib_readout",
+            "is_overridden": False,
+            "value": {"type": {"__kind": "direct", "value": "readout/bogus"}},
+        }
+    }
+    with pytest.raises(SessionCodecError, match="no allowed shape matches"):
+        raw_to_schema(_empty(spec), bad)
 
 
 def test_rejects_legacy_scalar_eval_expr():

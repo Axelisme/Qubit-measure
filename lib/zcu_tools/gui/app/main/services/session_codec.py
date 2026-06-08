@@ -128,7 +128,11 @@ def _node_value_to_raw(spec: CfgNodeSpec, value: CfgNodeValue) -> object:
             "chosen_key": value.chosen_key,
             "is_overridden": value.is_overridden,
             "value": _section_value_to_raw(
-                _select_allowed_spec_for_restore(spec, value.chosen_key),
+                _select_allowed_spec(
+                    spec,
+                    value.chosen_key,
+                    _value_discriminator(value.value, "type"),
+                ),
                 value.value,
             ),
         }
@@ -139,7 +143,11 @@ def _node_value_to_raw(spec: CfgNodeSpec, value: CfgNodeValue) -> object:
             "chosen_key": value.chosen_key,
             "is_overridden": value.is_overridden,
             "value": _section_value_to_raw(
-                _select_allowed_spec_for_restore(spec, value.chosen_key),
+                _select_allowed_spec(
+                    spec,
+                    value.chosen_key,
+                    _value_discriminator(value.value, "style"),
+                ),
                 value.value,
             ),
         }
@@ -249,7 +257,9 @@ def _ref_value_from_raw(
         and isinstance(raw.get("value"), dict)
     ):
         chosen_key = raw["chosen_key"]
-        value_spec = _select_allowed_spec_for_restore(spec, chosen_key)
+        value_spec = _select_allowed_spec(
+            spec, chosen_key, _raw_discriminator(raw["value"], "type")
+        )
         nested = _section_value_from_raw(value_spec, raw["value"])
         return ModuleRefValue(
             chosen_key=chosen_key,
@@ -270,7 +280,9 @@ def _waveform_ref_value_from_raw(
         and isinstance(raw.get("value"), dict)
     ):
         chosen_key = raw["chosen_key"]
-        value_spec = _select_allowed_spec_for_restore(spec, chosen_key)
+        value_spec = _select_allowed_spec(
+            spec, chosen_key, _raw_discriminator(raw["value"], "style")
+        )
         nested = _section_value_from_raw(value_spec, raw["value"])
         return WaveformRefValue(
             chosen_key=chosen_key,
@@ -280,15 +292,62 @@ def _waveform_ref_value_from_raw(
     raise RuntimeError("Waveform reference must use waveform_ref payload encoding")
 
 
-def _select_allowed_spec_for_restore(
-    spec: Union[ModuleRefSpec, WaveformRefSpec], chosen_key: str
+def _value_discriminator(value: CfgSectionValue, key: str) -> object:
+    """The discriminator leaf's value from a live section value (``None`` if the
+    field is absent). ``key`` is ``type`` for modules / ``style`` for waveforms;
+    the leaf is a ``DirectValue`` whose ``.value`` names the chosen shape."""
+    leaf = value.fields.get(key)
+    return getattr(leaf, "value", None)
+
+
+def _raw_discriminator(raw_value: object, key: str) -> object:
+    """The discriminator leaf's value from a raw section dict (``None`` if absent).
+    Mirror of ``_value_discriminator`` for the serialised side."""
+    if isinstance(raw_value, dict):
+        node = raw_value.get(key)
+        if isinstance(node, dict):
+            return node.get("value")
+    return None
+
+
+def _select_allowed_spec(
+    spec: Union[ModuleRefSpec, WaveformRefSpec],
+    chosen_key: str,
+    discriminator: object,
 ) -> CfgSectionSpec:
+    """Pick the allowed shape a ref's value actually uses (both directions).
+
+    A ``<Custom:Label>`` key names the shape by label. A LINKED (library-named)
+    key does not — but the value/raw carries the shape's discriminator leaf
+    (``type`` for module refs, ``style`` for waveform refs, each locked to a
+    distinct ``LiteralSpec``), so the shape is recoverable without a
+    ``ModuleLibrary`` (this codec is pure, unlike ``find_allowed_spec``).
+
+    Fast-fails on no match rather than silently defaulting to ``allowed[0]`` —
+    that default mis-shaped a multi-shape ref (e.g. a readout LINKED to a library
+    pulse-readout but serialised against the first allowed direct-readout shape,
+    which then crashes on the missing ``ro_ch`` field)."""
     if chosen_key.startswith("<Custom:") and chosen_key.endswith(">"):
         label = chosen_key[len("<Custom:") : -1]
         for allowed_spec in spec.allowed:
             if allowed_spec.label == label:
                 return allowed_spec
-    return spec.allowed[0]
+    # A single allowed shape is unambiguous — no discriminator needed (and the
+    # shape need not even carry one).
+    if len(spec.allowed) == 1:
+        return spec.allowed[0]
+    disc_key = "type" if isinstance(spec, ModuleRefSpec) else "style"
+    for allowed_spec in spec.allowed:
+        leaf = allowed_spec.fields.get(disc_key)
+        if isinstance(leaf, LiteralSpec) and leaf.value == discriminator:
+            return allowed_spec
+    available = ", ".join(
+        repr(getattr(s.fields.get(disc_key), "value", None)) for s in spec.allowed
+    )
+    raise SessionCodecError(
+        f"Reference {chosen_key!r} has {disc_key}={discriminator!r}, but no allowed "
+        f"shape matches (available {disc_key}: {available})"
+    )
 
 
 __all__ = ["SessionCodecError", "schema_to_raw", "raw_to_schema"]
