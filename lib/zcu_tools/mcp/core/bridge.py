@@ -14,8 +14,9 @@ or diagnostics.
     ``connect`` / ``disconnect`` / ``launch`` / ``stop`` (lifecycle), and
     ``wire_version_note`` (the handshake probe). An optional ``on_event`` hook
     receives event-push lines (the reader otherwise drops them).
-  - :class:`MCPBridgeConfig` carries the per-app knobs (name / prefix / port /
-    versions / instructions / pid+log file names / run-script name).
+  - :class:`McpServerConfig` carries the prefix + display name + instructions the
+    stdio loop / tool-gen need; :class:`MCPBridgeConfig` adds the GUI-bridge launch
+    knobs (name / port / versions / pid+log file names / run-script name).
   - Module helpers build the MCP tool surface from a method-spec table
     (``coerce_arg`` / ``make_forwarder`` / ``generate_tools``) and run the MCP
     stdio protocol loop (``build_initialize_result`` / ``run_stdio_loop``).
@@ -61,21 +62,30 @@ SendFn = Callable[..., Dict[str, Any]]
 
 
 @dataclass(frozen=True)
-class MCPBridgeConfig:
-    """Per-app configuration for an MCP bridge process.
+class McpServerConfig:
+    """The minimal config the stdio loop + tool generation need.
 
-    ``tool_prefix`` is the wire-method -> tool-name prefix (e.g. ``fluxdep_``).
-    ``run_script_name`` is the launcher under ``script/`` (e.g.
-    ``run_fluxdep_gui.py``). ``pid_file`` / ``log_file`` are per-app temp paths.
+    ``tool_prefix`` is the wire-method -> tool-name prefix (e.g. ``fluxdep_``). A
+    no-subprocess server (e.g. agent-memory, dispatching in-process) needs only
+    this; the GUI bridges add the launch fields via :class:`MCPBridgeConfig`.
+    """
+
+    tool_prefix: str
+    server_display_name: str
+    server_instructions: str
+
+
+@dataclass(frozen=True)
+class MCPBridgeConfig(McpServerConfig):
+    """A :class:`McpServerConfig` plus the knobs an :class:`McpBridge` needs to
+    fork and talk to a live GUI subprocess: the control port, the wire/mcp version
+    for the handshake, and the pid / log / run-script paths.
     """
 
     app_name: str
-    tool_prefix: str
     default_port: int
     mcp_version: int
     wire_version: int
-    server_display_name: str
-    server_instructions: str
     pid_file: Path
     log_file: Path
     run_script_name: str
@@ -711,7 +721,7 @@ def make_forwarder(method: str, spec, send_fn: SendFn):
 
 
 def generate_tools(
-    config: MCPBridgeConfig,
+    config: McpServerConfig,
     method_specs: Dict[str, Any],
     non_generated: "frozenset[str]",
     send_fn: SendFn,
@@ -748,7 +758,7 @@ def assemble_tools(
 # ---------------------------------------------------------------------------
 
 
-def build_initialize_result(config: MCPBridgeConfig) -> Dict[str, Any]:
+def build_initialize_result(config: McpServerConfig) -> Dict[str, Any]:
     return {
         "protocolVersion": "2024-11-05",
         "capabilities": {"tools": {}},
@@ -758,7 +768,7 @@ def build_initialize_result(config: MCPBridgeConfig) -> Dict[str, Any]:
 
 
 def run_stdio_loop(
-    config: MCPBridgeConfig,
+    config: McpServerConfig,
     tools: ToolTable,
     *,
     on_cleanup: Optional[Callable[[], None]] = None,
@@ -889,6 +899,7 @@ def run_stdio_loop(
 __all__ = [
     "McpBridge",
     "MCPBridgeConfig",
+    "McpServerConfig",
     "assemble_tools",
     "build_initialize_result",
     "coerce_arg",

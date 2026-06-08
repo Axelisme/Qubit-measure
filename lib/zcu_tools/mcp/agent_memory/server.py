@@ -38,13 +38,11 @@ if importlib.util.find_spec("yaml") is None:
 from zcu_tools.mcp.agent_memory.method_specs import METHOD_SPECS  # noqa: E402
 from zcu_tools.mcp.agent_memory.store import MemoryStore  # noqa: E402
 from zcu_tools.mcp.core.bridge import (  # noqa: E402
-    MCPBridgeConfig,
+    McpServerConfig,
     assemble_tools,
     generate_tools,
     run_stdio_loop,
 )
-
-MCP_VERSION = 1
 
 _SERVER_INSTRUCTIONS = """\
 A persistent lab notebook for the measuring agent. Two kinds of entry:
@@ -74,22 +72,12 @@ ids are namespace-relative paths without .md (e.g.
 A failed call raises with an actionable message; reads are idempotent.
 """
 
-# The MCP plumbing reads tool_prefix / display name / instructions from the config;
-# the launch fields (port / pid / log / run-script) are GUI-bridge concepts with no
-# meaning here, so they are unused placeholders. MCPBridgeConfig is shared with the
-# GUI bridges (which DO use those fields); a launch-free config for no-subprocess
-# servers stays an optional follow-up.
-_CONFIG = MCPBridgeConfig(
-    app_name="agent_memory",
+# No GUI subprocess / socket here (tools dispatch in-process), so this needs only
+# the base McpServerConfig — none of the MCPBridgeConfig launch fields.
+_CONFIG = McpServerConfig(
     tool_prefix="memory_",
-    default_port=0,  # unused — no TCP (local file CRUD)
-    mcp_version=MCP_VERSION,
-    wire_version=0,  # unused — no two-process handshake
     server_display_name="agent-memory",
     server_instructions=_SERVER_INSTRUCTIONS,
-    pid_file=Path("/unused"),  # unused — no subprocess
-    log_file=Path("/unused"),  # unused
-    run_script_name="unused",  # unused
 )
 
 
