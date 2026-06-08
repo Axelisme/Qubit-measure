@@ -75,9 +75,17 @@ class OneToneFluxDepAdapter(BaseAdapter[FluxDepCfg, OneToneFluxDepRunResult]):
                 "flux-bias device reference (default 'flux_yoko') — and confirm it "
                 "points at a connected device. Typical sweep: flux ~101 points "
                 "across one period (driven by flx_half/flx_int when calibrated), "
-                "frequency r_f ± one linewidth over ~101 points, at a low readout "
-                "gain (~0.005) to stay below punch-out so the dip tracks cleanly. "
-                "Survey wide, then narrow around a sweet spot."
+                "frequency r_f ± one linewidth over ~101 points. Start at a low "
+                "readout gain (~0.005) to stay below punch-out so the dip tracks "
+                "cleanly; if the dip is hard to see (poor SNR), raise the gain "
+                "toward ~0.05 while keeping the frequency window tight. Survey "
+                "wide, then narrow around a sweet spot — and if the resonator's "
+                "flux dispersion (dispersive shift) looks small, narrow the "
+                "frequency window early instead of keeping a broad default span. "
+                "For consecutive flux sweeps, reverse the sweep direction (swap "
+                "start/stop) on the next run so the current source need not ramp "
+                "all the way back across the full range first. Inspect the 2D map "
+                "with gui_tab_get_current_figure to judge window / SNR / shift."
             ),
         )
 

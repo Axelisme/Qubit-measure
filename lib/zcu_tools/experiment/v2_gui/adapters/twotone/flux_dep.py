@@ -78,7 +78,11 @@ class FluxDepAdapter(BaseAdapter[FreqFluxCfg, FluxDepRunResult]):
                 "frequency ~101 points spanning ±qf_w around 'q_f'. For a first "
                 "survey use a wide flux range and a broad frequency window at "
                 "moderate drive gain to capture the full arc, then narrow both. "
-                "Confirm 'flux_dev' points at a connected device before running."
+                "For consecutive flux sweeps, reverse the sweep direction (swap "
+                "start/stop) on the next run so the flux source need not ramp "
+                "back across the full range first. Inspect the 2D map with "
+                "gui_tab_get_current_figure. Confirm 'flux_dev' points at a "
+                "connected device before running."
             ),
         )
 
