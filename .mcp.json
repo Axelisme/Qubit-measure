@@ -35,6 +35,18 @@
         "lib/zcu_tools/gui/app/dispersive/services/remote/mcp_server.py"
       ],
       "env": {}
+    },
+    "agent-memory": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--extra",
+        "client",
+        "python",
+        "lib/zcu_tools/mcp/agent_memory/server.py"
+      ],
+      "env": {}
     }
   }
 }
