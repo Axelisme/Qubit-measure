@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 9
+skill_version: 10
 ---
 
 # run-measure-gui
@@ -161,7 +161,11 @@ control port **8799** so a live MCP session on the default 8765 is undisturbed.
 section maps to a GUI **adapter** (`gui_tab_new(adapter_name=...)`); run →
 analyze → write results back (the Writeback panel, or just feed the next tab).
 The flow threads calibrated values through the MetaDict context (`r_f`, `q_f`,
-`pi_gain`, …) — the GUI persists these per flux-context.
+`pi_gain`, …) — the GUI persists these per flux-context. **`magic_names.md`
+(next to this file) is the glossary for these names**: meaning, unit, which
+experiment produces each, and the cross-experiment relations (e.g.
+`reset_f = r_f − q_f`, `post_delay = 5/(2π·rf_w)`). Per-experiment recommended
+sweep ranges stay in `gui_adapter_guide`, not the glossary.
 
 The **standard order** to characterize one bias point (→ = "then"; `(opt)` =
 optional). Each stage's fitted result is written back into the context and
