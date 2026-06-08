@@ -18,13 +18,13 @@ from zcu_tools.experiment.v2.onetone.freq import FreqCfg, FreqExp, FreqResult
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
-    make_onetone_freq_writeback_items,
     make_pulse_readout_module_spec,
     md_get_float,
     md_has_key,
     proper_res_freq_range,
 )
 from zcu_tools.gui.app.main.adapter import (
+    MetaDictWriteback,
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
@@ -172,7 +172,18 @@ class OneToneFreqAdapter(
         self, req: WritebackRequest[OneToneFreqRunResult, OneToneFreqAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
-        return make_onetone_freq_writeback_items(result.freq, result.fwhm)
+        return [
+            MetaDictWriteback(
+                target_name="r_f",
+                description="Resonator frequency (MHz)",
+                proposed_value=result.freq,
+            ),
+            MetaDictWriteback(
+                target_name="rf_w",
+                description="Resonator linewidth FWHM (MHz)",
+                proposed_value=result.fwhm,
+            ),
+        ]
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.res_name}_freq_{time.strftime('%m%d')}"

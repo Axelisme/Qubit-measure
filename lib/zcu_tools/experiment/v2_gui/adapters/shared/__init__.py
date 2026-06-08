@@ -48,14 +48,12 @@ from .spec_helpers import (
     make_reset_module_spec,
     schema_from_module,
 )
-from .writeback_helpers import make_onetone_freq_writeback_items
 
 __all__ = [
     # value-tree assembly
     "CfgBuilder",
     # ctx helpers
     "md_get_float",
-    "make_onetone_freq_writeback_items",
     "md_get_int",
     "md_has_key",
     "md_scalar_float",

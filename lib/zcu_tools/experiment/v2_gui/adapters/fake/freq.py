@@ -40,7 +40,6 @@ from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
-    make_onetone_freq_writeback_items,
     make_readout_module_spec,
     md_get_float,
 )
@@ -49,6 +48,7 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
+    MetaDictWriteback,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -419,7 +419,18 @@ class FakeFreqAdapter(
         self, req: WritebackRequest[FakeFreqRunResult, FakeFreqAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
-        return make_onetone_freq_writeback_items(result.freq, result.fwhm)
+        return [
+            MetaDictWriteback(
+                target_name="r_f",
+                description="Resonator frequency (MHz)",
+                proposed_value=result.freq,
+            ),
+            MetaDictWriteback(
+                target_name="rf_w",
+                description="Resonator linewidth FWHM (MHz)",
+                proposed_value=result.fwhm,
+            ),
+        ]
 
     def save(self, req: SaveDataRequest[FakeFreqRunResult]) -> None:
         # Pure-mock default: no HDF5 (no real instrument data). When the adapter
