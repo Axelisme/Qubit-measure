@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 11
+skill_version: 12
 ---
 
 # run-measure-gui
@@ -122,7 +122,7 @@ busy-poll `gui_run_running_tab` in a sleep loop.
 
 The full, authoritative tool reference is the **MCP server instructions block**
 (shown by the client when the server connects, defined in
-`lib/zcu_tools/gui/services/remote/mcp_server.py`). Read it for the call
+`lib/zcu_tools/mcp/measure/server.py`). Read it for the call
 contract (failed calls raise — never fire duplicates), preconditions, and the
 diagnostic-push model.
 
