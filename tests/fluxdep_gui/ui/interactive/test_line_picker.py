@@ -77,7 +77,7 @@ def test_force_magnitude_hides_checkbox(qapp):
     w = LinePickerWidget(sig, devs, freqs, force_magnitude=True)
     labels = [c.text() for c in w.findChildren(QCheckBox)]
     assert "Magnitude Only" not in labels  # locked on, checkbox hidden
-    assert w._only_use_magnitude is True
+    assert w._picker.magnitude_only is True
     w.deleteLater()
 
 
