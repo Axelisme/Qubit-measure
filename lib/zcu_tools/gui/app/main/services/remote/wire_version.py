@@ -149,4 +149,10 @@ WIRE_VERSION = 21
 #     (WIRE 21); deviceref path '<path>.device' now resolves through set_field
 #     (it was advertised by list_paths but the resolver rejected it — discovery
 #     and setter were out of sync). Phase 144.
-GUI_VERSION = 20
+# v21: AnalysisMode.INTERACTIVE — onetone/twotone flux_dep let the USER drag two
+#     lines on the 2D map (half/integer flux) and click Done; flx_half/flx_int/
+#     flx_period write back. New InteractiveHost/InteractiveSession ports +
+#     setup_interactive_analysis; analyze degrades like a run (gui_analyze ->
+#     pending for an interactive pick) — see MCP 26. WIRE unchanged (no new RPC
+#     method / param / event). Phase 145.
+GUI_VERSION = 21

@@ -841,6 +841,58 @@ def test_analyze_reply_includes_figure_path_when_figure_exists(monkeypatch):
     assert shot[1]["out_path"] == out["figure_path"]
 
 
+def test_analyze_degrades_to_pending_when_not_settled(monkeypatch):
+    """An INTERACTIVE analysis never settles in the short wait -> pending."""
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"analyze:t1": 9})
+
+    def fake_send(method, params, timeout_seconds=30.0):
+        del timeout_seconds, params
+        if method == "operation.await":
+            raise RuntimeError("GUI Error (timeout): user still picking")
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
+    out = mcp_server.TOOLS["gui_analyze"]["handler"]({"tab_id": "t1"})
+    assert out["status"] == "pending"
+
+
+def test_analyze_poll_running_then_finished_with_figure(monkeypatch):
+    from zcu_tools.mcp.measure import server as mcp_server
+
+    monkeypatch.setattr(mcp_server, "_OP_BY_KEY", {"analyze:t1": 9})
+
+    # Still picking -> running.
+    def picking(method, params, timeout_seconds=30.0):
+        del timeout_seconds, params
+        if method == "operation.await":
+            raise RuntimeError("GUI Error (timeout): not done")
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", picking)
+    assert (
+        mcp_server.TOOLS["gui_analyze_poll"]["handler"]({"tab_id": "t1"})["status"]
+        == "running"
+    )
+
+    # User clicked Done -> finished, figure folded.
+    def done(method, params, timeout_seconds=30.0):
+        del timeout_seconds
+        if method == "operation.await":
+            return {"status": "finished"}
+        if method == "tab.snapshot":
+            return {"interaction": {"has_figure": True}}
+        if method == "tab.get_current_figure":
+            return {"saved_to": params["out_path"]}
+        return {}
+
+    monkeypatch.setattr(mcp_server, "send_gui_rpc", done)
+    out = mcp_server.TOOLS["gui_analyze_poll"]["handler"]({"tab_id": "t1"})
+    assert out["status"] == "finished"
+    assert out["figure_path"].endswith("zcu_tools_figure_t1.png")
+
+
 def test_analyze_reply_omits_figure_path_when_no_figure(monkeypatch):
     from zcu_tools.mcp.measure import server as mcp_server
 

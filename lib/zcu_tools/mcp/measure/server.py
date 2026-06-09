@@ -168,7 +168,14 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 #      fit). gui_save_data / gui_save_image / gui_save_result now return the
 #      resolved written path(s) ({data_path[, image_path]}) instead of {ok}/{}
 #      (WIRE 21).
-MCP_VERSION = 25
+# MCP 26: gui_analyze degrades like a run instead of blocking — short-wait then
+#      {status:'finished'|'pending'}; added gui_analyze_wait / gui_analyze_poll
+#      (mirror gui_run_wait/poll). A FIT usually settles in the wait; an
+#      INTERACTIVE analysis (AnalysisMode.INTERACTIVE — the user picks on the plot
+#      and clicks Done) never settles, so it degrades to pending and the agent
+#      prompts + polls. No wire change (analyze.start + operation.await/poll
+#      already exist; this is mcp-side degrade + two new poll/wait tools).
+MCP_VERSION = 26
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -208,12 +215,16 @@ Typical experiment loop:
     returns {status:'finished', tab:{...}}; a slow one returns {status:'pending'}
     — then gui_run_wait(tab_id) or gui_run_poll(tab_id). (gui_device_* and
     gui_connect_start degrade the same way.)
-  - gui_analyze(tab_id) after a run — synchronous: on return the analysis is
-    done (read gui_tab_get_analyze_result, no wait step). Then gui_save_data /
-    gui_save_image / gui_save_result to persist — each returns the resolved
-    written path ({data_path[, image_path]}, .hdf5 + uniqueness suffix applied),
-    so you need not recover it from a later diagnostic. To look at a plot (a 2D
-    run map or an analysis fit) call gui_tab_get_current_figure.
+  - gui_analyze(tab_id) after a run degrades like a run: a FIT usually settles in
+    the short wait -> {status:'finished'} (read gui_tab_get_analyze_result); an
+    INTERACTIVE analysis (the user picks on the plot + clicks Done — see
+    gui_adapter_guide, e.g. flux_dep) returns {status:'pending'} — prompt the user,
+    then gui_analyze_poll until finished, read flx_* with gui_tab_get_analyze_result
+    and gui_writeback_apply. Then gui_save_data / gui_save_image / gui_save_result to
+    persist — each returns the resolved written path ({data_path[, image_path]},
+    .hdf5 + uniqueness suffix applied), so you need not recover it from a later
+    diagnostic. To look at a plot (a 2D run map or an analysis fit) call
+    gui_tab_get_current_figure.
 
 Detecting completion — no events; wait or poll a handle:
   - A slow gui_run_start returns {status:'pending'}; then either gui_run_wait
@@ -221,9 +232,10 @@ Detecting completion — no events; wait or poll a handle:
     immediately: 'finished'|'running'|'cancelled'|'failed'|'no_operation').
     'cancelled' is a user/agent cancel, distinct from 'failed'. A finished run/
     poll with a figure folds in figure_path. Same shape for devices
-    (gui_device_wait_operation / gui_device_poll) and connect
-    (gui_connect_wait / gui_connect_poll). gui_analyze is synchronous to you
-    (it awaits internally) and returns figure_path.
+    (gui_device_wait_operation / gui_device_poll), connect (gui_connect_wait /
+    gui_connect_poll) and analyze (gui_analyze_wait / gui_analyze_poll — an
+    INTERACTIVE pick stays 'running' until the user clicks Done). A finished
+    analyze folds in figure_path too.
   - A wait (gui_run_wait / gui_connect_wait / gui_device_wait_operation) BLOCKS
     your whole turn until the op ends — minutes for a big sweep. Nothing pushes a
     completion event; the server cannot wake you. For a long op either poll
@@ -949,25 +961,61 @@ def tool_gui_run_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def tool_gui_analyze(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    """Analyze the tab's run result — synchronous to the agent.
+    """Start analyze, waiting briefly (degrades like a run).
 
-    Analyze runs on a worker thread, but this tool awaits its completion before
-    returning, so to the agent it is one synchronous call: on return the result
-    and figure are ready. Folds in figure_path (a temp PNG) so the agent need
-    not call gui_tab_get_current_figure. Read the scalar fit summary with
-    gui_tab_get_analyze_result. 'updates' optionally overrides analyze params.
+    Analyze has both modes — a FIT computes on a worker (usually finishes in well
+    under a second), an INTERACTIVE pick waits for the USER to mark the plot and
+    click Done (never settles in the short wait). So it degrades like gui_run_start:
+    settles -> {status:'finished', ...} (figure_path folded in); still running ->
+    {status:'pending'} (await with gui_analyze_wait or gui_analyze_poll). For an
+    INTERACTIVE adapter (see gui_adapter_guide) a 'pending' is expected — prompt the
+    user to do the pick, then poll. 'updates' optionally overrides analyze params.
+    Read the scalar result with gui_tab_get_analyze_result.
     """
     tab_id = str(arguments["tab_id"])
+    wait_seconds = float(arguments.get("wait_seconds", 1.0))
     params: Dict[str, Any] = {"tab_id": tab_id}
     if "updates" in arguments and arguments["updates"] is not None:
         params["updates"] = arguments["updates"]
-    # Start (captures operation_id under analyze:<tab_id>, strips it from reply)
-    # then block until the worker settles — figure is in State by then, so the
-    # subsequent figure render sees has_figure=true.
+    # Start (captures operation_id under analyze:<tab_id>, strips it from reply),
+    # then wait briefly. A FIT usually finishes here; an INTERACTIVE pick degrades
+    # to a handle the user/agent then drives to completion.
     send_gui_rpc("analyze.start", params)
-    result = _await_operation_by_key(
-        f"analyze:{tab_id}", f"Analyze on tab {tab_id!r}", 600.0
+    result = _start_op_with_short_wait(
+        f"analyze:{tab_id}",
+        f"Analyze on tab {tab_id!r}",
+        wait_seconds,
+        dict,
+        f"poll with gui_analyze_poll(tab_id={tab_id!r}); for an INTERACTIVE pick, "
+        "prompt the user to mark the lines + click Done first.",
     )
+    return _with_figure(tab_id, result)
+
+
+def tool_gui_analyze_wait(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Block until the analyze on ``tab_id`` completes (mirrors gui_run_wait).
+    Returns {status, waited_seconds}: 'finished' (figure_path folded in if any) /
+    'timed_out' (re-wait or gui_analyze_poll) / 'no_operation'. Raises only on a
+    genuine failure. Use after gui_analyze returned status='pending'. NOTE: for an
+    INTERACTIVE pick this blocks until the USER clicks Done — prefer gui_analyze_poll
+    (non-blocking) so you can prompt and check back, or run this from a background
+    agent."""
+    tab_id = str(arguments["tab_id"])
+    timeout = float(arguments.get("timeout", 600.0))
+    result = _await_operation_by_key(
+        f"analyze:{tab_id}", f"Analyze on tab {tab_id!r}", timeout
+    )
+    return _with_figure(tab_id, result)
+
+
+def tool_gui_analyze_poll(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Non-blocking status of the analyze on ``tab_id``: finished / running /
+    failed / no_operation. For an INTERACTIVE pick, 'running' means the user has
+    not clicked Done yet — keep checking back. On a finished analyze with a figure
+    the reply includes figure_path; read the scalar result with
+    gui_tab_get_analyze_result."""
+    tab_id = str(arguments["tab_id"])
+    result = _poll_operation_by_key(f"analyze:{tab_id}", f"Analyze on tab {tab_id!r}")
     return _with_figure(tab_id, result)
 
 
@@ -1456,11 +1504,15 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
     "gui_analyze": {
         "handler": tool_gui_analyze,
         "description": (
-            "Analyze the tab's run result — SYNCHRONOUS: on return the analysis "
-            "is complete. Read the scalar fit summary with "
-            "gui_tab_get_analyze_result. The reply includes figure_path (a temp "
-            "PNG of the fitted plot) when a figure was produced — open it (Read) "
-            "instead of calling gui_tab_get_current_figure. 'updates' optionally "
+            "Start analyze, waiting briefly — degrades like gui_run_start. A FIT "
+            "usually finishes here -> {status:'finished'} (figure_path folded in; "
+            "read the scalar result with gui_tab_get_analyze_result, open the PNG "
+            "instead of gui_tab_get_current_figure). An INTERACTIVE analysis (see "
+            "gui_adapter_guide — e.g. flux_dep, where the USER drags lines on the "
+            "2D map and clicks Done) never settles in the short wait -> "
+            "{status:'pending'}: that is EXPECTED — prompt the user to do the pick, "
+            "then gui_analyze_poll until finished and read flx_* with "
+            "gui_tab_get_analyze_result + gui_writeback_apply. 'updates' optionally "
             "overrides analyze params (see gui_adapter_analyze_spec)."
         ),
         "inputSchema": {
@@ -1471,7 +1523,48 @@ _OVERRIDE_TOOLS: Dict[str, Dict[str, Any]] = {
                     "type": "object",
                     "description": "Analyze param updates",
                 },
+                "wait_seconds": {
+                    "type": "number",
+                    "description": "Seconds to wait before degrading to a handle (default 1.0)",
+                },
             },
+            "required": ["tab_id"],
+        },
+    },
+    "gui_analyze_wait": {
+        "handler": tool_gui_analyze_wait,
+        "description": (
+            "Block until the analyze on tab_id completes (mirrors gui_run_wait). "
+            "Returns {status, waited_seconds}: 'finished' (figure_path folded in) / "
+            "'timed_out' (re-wait or gui_analyze_poll) / 'no_operation'. Use after "
+            "gui_analyze returned status='pending'. For an INTERACTIVE pick this "
+            "blocks until the USER clicks Done — prefer gui_analyze_poll so you can "
+            "prompt and check back, or run this from a background agent."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tab_id": {"type": "string"},
+                "timeout": {
+                    "type": "number",
+                    "description": "Seconds to wait (default 600)",
+                },
+            },
+            "required": ["tab_id"],
+        },
+    },
+    "gui_analyze_poll": {
+        "handler": tool_gui_analyze_poll,
+        "description": (
+            "Non-blocking status of the analyze on tab_id: 'finished' / 'running' / "
+            "'failed' / 'no_operation'. For an INTERACTIVE pick, 'running' means the "
+            "user has not clicked Done yet — keep checking back. On a finished "
+            "analyze with a figure the reply includes figure_path; read the scalar "
+            "result with gui_tab_get_analyze_result."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"tab_id": {"type": "string"}},
             "required": ["tab_id"],
         },
     },
@@ -1710,6 +1803,8 @@ _OVERRIDE_NAMES = frozenset(
         "gui_run_wait",
         "gui_run_poll",
         "gui_analyze",
+        "gui_analyze_wait",
+        "gui_analyze_poll",
         "gui_connect_start",
         "gui_connect_wait",
         "gui_connect_poll",
