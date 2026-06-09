@@ -20,6 +20,7 @@ from zcu_tools.gui.app.fluxdep.services.remote.service import (
 )
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.project import ProjectInfo
+from zcu_tools.gui.run_app import run_qt_app
 
 
 def run_app(
@@ -37,32 +38,16 @@ def run_app(
     under; the entry script passes the repo root so a .bat launcher that cd's
     into script/ does not scope defaults under script/. None falls back to cwd.
     """
-    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-
     from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
-    from zcu_tools.gui.plotting import ensure_host, set_shutting_down
 
-    app = QApplication.instance() or QApplication(sys.argv)
+    def controller_factory() -> Controller:
+        return Controller(FluxDepState(project), EventBus(), project_root=project_root)
 
-    # Create the plot host now, on the Qt main thread: the shared embedded
-    # matplotlib backend marshals worker-thread figure work through it, and it
-    # must be built on the GUI thread before any worker plots (e.g. the search).
-    ensure_host()
-    # On teardown, mark the plot host down BEFORE Qt deletes its widgets, so the
-    # matplotlib atexit hook (Gcf.destroy_all → backend destroy → remove_canvas)
-    # becomes a no-op instead of touching a deleted container.
-    app.aboutToQuit.connect(lambda: set_shutting_down(True))
-
-    state = FluxDepState(project)
-    ctrl = Controller(state, EventBus(), project_root=project_root)
-    window = MainWindow(ctrl)
-    window.show()
-
-    if control is not None:
-        adapter = RemoteControlAdapter(ctrl, control)
-        adapter.start()
-        # stop() unsubscribes EventBus synchronously, so it must run on the Qt
-        # main thread; aboutToQuit fires there.
-        app.aboutToQuit.connect(adapter.stop)  # type: ignore[attr-defined]
-
-    sys.exit(app.exec())
+    sys.exit(
+        run_qt_app(
+            controller_factory=controller_factory,
+            window_factory=MainWindow,
+            control=control,
+            adapter_factory=RemoteControlAdapter,
+        )
+    )

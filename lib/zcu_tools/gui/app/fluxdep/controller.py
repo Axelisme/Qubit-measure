@@ -34,13 +34,14 @@ from zcu_tools.gui.app.fluxdep.services.fit import FitService, PbarFactory, Sear
 from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.services.store import SelectionService, SpectrumStore
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpecType
+from zcu_tools.gui.controller_base import BaseController
 from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.notebook.persistance import TransitionDict
 
 logger = logging.getLogger(__name__)
 
 
-class Controller:
+class Controller(BaseController[FluxDepState, EventBus]):
     """Command façade over the fluxdep pipeline services."""
 
     def __init__(
@@ -49,14 +50,7 @@ class Controller:
         bus: Optional[EventBus] = None,
         project_root: Optional[str] = None,
     ) -> None:
-        self._state = state
-        self._bus = bus if bus is not None else EventBus()
-        # Base dir the default result/database paths anchor under (the repo root,
-        # injected by the entry script) so a .bat launcher that cd's into script/
-        # does not scope defaults under script/. None → cwd (legacy / tests).
-        import os
-
-        self._project_root = project_root if project_root is not None else os.getcwd()
+        super().__init__(state, bus if bus is not None else EventBus(), project_root)
         self._load = LoadService(state)
         self._alignment = AlignmentService(state)
         self._points = PointsService(state)
@@ -65,26 +59,11 @@ class Controller:
         self._export = ExportService(state)
         self._fit = FitService(state)
 
-    @property
-    def state(self) -> FluxDepState:
-        return self._state
-
-    @property
-    def bus(self) -> EventBus:
-        return self._bus
-
-    def get_project_root(self) -> str:
-        """Base dir the default result/database paths anchor under (the repo
-        root, injected by the entry script). The project dialog derives defaults
-        through ``default_result_dir`` against this, NOT cwd, so a .bat launcher
-        that cd's into script/ still scopes under the repo root."""
-        return self._project_root
-
     # --- project ---------------------------------------------------------
 
     def setup_project(self, project: ProjectInfo) -> None:
         self._state.set_project(project)
-        self._bus.emit(ProjectChangedPayload())
+        self._emit(ProjectChangedPayload())
 
     # --- spectrum collection --------------------------------------------
 
@@ -98,23 +77,23 @@ class Controller:
         name = self._load.load_spectrum(
             filepath, spec_type, inherit_from, transpose_axes
         )
-        self._bus.emit(SpectrumAddedPayload(name=name))
+        self._emit(SpectrumAddedPayload(name=name))
         return name
 
     def load_processed_spectrums(self, filepath: str) -> list[str]:
         """Restore a processed spectrums.hdf5 (aligned + selected spectra)."""
         names = self._load.load_processed_spectrums(filepath)
         for name in names:
-            self._bus.emit(SpectrumAddedPayload(name=name))
+            self._emit(SpectrumAddedPayload(name=name))
         return names
 
     def remove_spectrum(self, name: str) -> None:
         self._store.remove_spectrum(name)
-        self._bus.emit(SpectrumRemovedPayload(name=name))
+        self._emit(SpectrumRemovedPayload(name=name))
 
     def set_active_spectrum(self, name: Optional[str]) -> None:
         self._store.set_active(name)
-        self._bus.emit(ActiveSpectrumChangedPayload(name=name))
+        self._emit(ActiveSpectrumChangedPayload(name=name))
 
     def list_spectrums(self) -> list[str]:
         return self._store.list_spectrums()
@@ -123,13 +102,13 @@ class Controller:
 
     def set_alignment(self, name: str, flux_half: float, flux_int: float) -> None:
         self._alignment.set_alignment(name, flux_half, flux_int)
-        self._bus.emit(SpectrumChangedPayload(name=name))
+        self._emit(SpectrumChangedPayload(name=name))
 
     def set_points(
         self, name: str, dev_values: NDArray[np.float64], freqs: NDArray[np.float64]
     ) -> None:
         self._points.set_points(name, dev_values, freqs)
-        self._bus.emit(SpectrumChangedPayload(name=name))
+        self._emit(SpectrumChangedPayload(name=name))
 
     # --- cross-spectrum selection ---------------------------------------
 
@@ -140,7 +119,7 @@ class Controller:
         self, selected: NDArray[np.bool_], min_distance: float = 0.0
     ) -> None:
         self._selection.set_selection(selected, min_distance)
-        self._bus.emit(SelectionChangedPayload())
+        self._emit(SelectionChangedPayload())
 
     # --- export ----------------------------------------------------------
 
@@ -160,7 +139,7 @@ class Controller:
         sample_f: Optional[float],
     ) -> None:
         self._fit.set_params(database_path, EJb, ECb, ELb, transitions, r_f, sample_f)
-        self._bus.emit(FitChangedPayload(has_result=self._state.fit.has_result))
+        self._emit(FitChangedPayload(has_result=self._state.fit.has_result))
 
     def selected_pointcloud(
         self,
@@ -185,7 +164,7 @@ class Controller:
     def record_search_result(self, result: SearchResult) -> None:
         """Write a computed search result onto State (MAIN THREAD only)."""
         self._fit.record_result(result)
-        self._bus.emit(FitChangedPayload(has_result=True))
+        self._emit(FitChangedPayload(has_result=True))
 
     def search_database(
         self,

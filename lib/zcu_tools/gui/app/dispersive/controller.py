@@ -38,12 +38,13 @@ from zcu_tools.gui.app.dispersive.state import (
     DispersiveState,
     PreprocessResult,
 )
+from zcu_tools.gui.controller_base import BaseController
 from zcu_tools.gui.project import ProjectInfo
 
 logger = logging.getLogger(__name__)
 
 
-class Controller:
+class Controller(BaseController[DispersiveState, EventBus]):
     """Command façade over the dispersive pipeline services."""
 
     def __init__(
@@ -52,14 +53,7 @@ class Controller:
         bus: Optional[EventBus] = None,
         project_root: Optional[str] = None,
     ) -> None:
-        self._state = state
-        self._bus = bus if bus is not None else EventBus()
-        # Base dir the default result/database paths anchor under (the repo root,
-        # injected by the entry script) so a .bat launcher that cd's into script/
-        # does not scope defaults under script/. None → cwd (legacy / tests).
-        import os
-
-        self._project_root = project_root if project_root is not None else os.getcwd()
+        super().__init__(state, bus if bus is not None else EventBus(), project_root)
         self._project = ProjectService(state)
         self._load = LoadService(state)
         self._preprocess = PreprocessService(state)
@@ -69,38 +63,23 @@ class Controller:
         self._predict: Optional[PredictService] = None
         self._predict_key: Optional[tuple] = None
 
-    @property
-    def state(self) -> DispersiveState:
-        return self._state
-
-    @property
-    def bus(self) -> EventBus:
-        return self._bus
-
-    def get_project_root(self) -> str:
-        """Base dir the default result/database paths anchor under (the repo
-        root, injected by the entry script). The project dialog derives defaults
-        through ``default_result_dir`` against this, NOT cwd, so a .bat launcher
-        that cd's into script/ still scopes under the repo root."""
-        return self._project_root
-
     # --- project ---------------------------------------------------------
 
     def setup_project(self, project: ProjectInfo) -> None:
         self._state.set_project(project)
-        self._bus.emit(ProjectChangedPayload())
+        self._emit(ProjectChangedPayload())
 
     def load_fit_inputs(self, params_path: Optional[str] = None) -> None:
         self._project.load_fit_inputs(params_path)
         self._invalidate_predictor()
-        self._bus.emit(FitInputsLoadedPayload(has_inputs=True))
+        self._emit(FitInputsLoadedPayload(has_inputs=True))
 
     # --- load ------------------------------------------------------------
 
     def load_onetone(self, filepath: str, transpose_axes: bool = False) -> str:
         name = self._load.load_onetone(filepath, transpose_axes=transpose_axes)
         self._invalidate_predictor()
-        self._bus.emit(OnetoneLoadedPayload(name=name))
+        self._emit(OnetoneLoadedPayload(name=name))
         return name
 
     # --- preprocess ------------------------------------------------------
@@ -113,13 +92,13 @@ class Controller:
         """Write a computed preprocessing result onto State (MAIN THREAD only)."""
         self._preprocess.record(result)
         self._invalidate_predictor()
-        self._bus.emit(PreprocessChangedPayload())
+        self._emit(PreprocessChangedPayload())
 
     def preprocess(self) -> PreprocessResult:
         """Compute + record inline (RPC / convenience path, main thread)."""
         result = self._preprocess.preprocess()
         self._invalidate_predictor()
-        self._bus.emit(PreprocessChangedPayload())
+        self._emit(PreprocessChangedPayload())
         return result
 
     # --- predict (live tuning, synchronous read) -------------------------
@@ -197,7 +176,7 @@ class Controller:
     def set_manual_fit(self, g: float, bare_rf: float, *, res_dim: int = 4) -> None:
         """Record the accepted g / bare_rf (+ its sim resolution) as the result."""
         self._state.set_disp_result(g, bare_rf, res_dim=res_dim)
-        self._bus.emit(DispFitChangedPayload(has_result=True))
+        self._emit(DispFitChangedPayload(has_result=True))
 
     # --- export ----------------------------------------------------------
 
