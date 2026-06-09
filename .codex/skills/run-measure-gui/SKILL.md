@@ -1,7 +1,7 @@
 ---
 name: run-measure-gui
 description: Run, drive, screenshot, and smoke-test the measure-gui qubit-measurement GUI over its MCP control socket. Use when asked to launch/start/test the measure-gui app, drive a single-qubit measurement (lookback, onetone/twotone spectroscopy, Rabi, T1/T2, readout optimization) via the measure-gui MCP tools, take a GUI screenshot, or follow the recommended experiment flow.
-skill_version: 15
+skill_version: 16
 ---
 
 # run-measure-gui
@@ -107,7 +107,8 @@ gui_run_wait(tab_id)                              # block until done (only after
 gui_tab_get_current_figure(tab_id)                # PNG of the CURRENT plot — the run's 2D map, or the analysis fit
                                                   # once analyzed. THIS is how you look at any plot, including
                                                   # non-analysis 2D scans (flux_dep / power_dep). (Read the PNG.)
-gui_analyze(tab_id)                               # SYNCHRONOUS fit (analysis adapters only); reply folds in figure_path (Read it)
+gui_analyze(tab_id)                               # degrades like a run: a FIT settles -> {finished} (figure_path folded);
+                                                  # an INTERACTIVE pick (flux_dep) -> {pending} → see "Interactive analysis" below
 gui_save_data(tab_id) / gui_save_image / gui_save_result   # each returns the resolved written path ({data_path[, image_path]})
 gui_view_screenshot(tab_id)                       # base64 PNG of the WHOLE window/tab (config + progress + plot)
 ```
@@ -117,10 +118,26 @@ a handle, never by subscribing to a push stream:
 
 | situation | what to do |
 |---|---|
-| fast run / any analyze | **synchronous** — the call returns when done (`gui_analyze` always; `gui_run_start` when it finishes within `wait_seconds`, default 1.0) |
-| `gui_run_start` returned `{status:pending}` | `gui_run_wait(tab_id)` (blocks) or `gui_run_poll(tab_id)` (non-blocking) |
+| fast run / fast fit | the call returns `{status:finished}` (`gui_run_start` / `gui_analyze` when it settles within `wait_seconds`, default 1.0) |
+| `gui_run_start` / `gui_analyze` returned `{status:pending}` | wait (`gui_run_wait` / `gui_analyze_wait`, blocks) or poll (`gui_run_poll` / `gui_analyze_poll`, non-blocking) |
 | want live progress bars | already in the `gui_run_poll` reply while `status:running` (active + bars); no separate progress tool |
 | a poll says `status:cancelled` | a user/agent cancel (distinct from `failed`); not an error to recover from |
+
+**Interactive analysis (e.g. `onetone`/`twotone flux_dep`).** Some adapters have no
+automatic fit — the analysis is a 2D map the **user picks on**. `gui_adapter_guide`
+flags these (its writeback describes a hand-pick). The flow:
+
+1. Run as usual, then call `gui_analyze(tab_id)`. It returns **`{status:pending}`** —
+   that is expected, *not* an error: a live picker is now mounted in the tab.
+2. **Tell the user what to do** — e.g. "drag the red (half-flux) and blue
+   (integer-flux) lines to the sweet spots on the 2D map and click **Done**" — then
+   `gui_analyze_poll(tab_id)` until `{status:finished}` (it stays `running` until the
+   user clicks Done). Don't `gui_analyze_wait` inline — it blocks your turn on a
+   human; poll and check back (or wait from a background agent).
+3. On finished, `gui_tab_get_analyze_result(tab_id)` returns the picked values
+   (`flx_half` / `flx_int` / `flx_period`); apply them with `gui_writeback_apply`.
+   **The picking is the user's judgement — you set up, prompt, observe, and write
+   back; you never decide the line positions.**
 
 **`gui_run_wait` blocks your whole turn until the run ends** (a big sweep is
 minutes), and nothing pushes a completion event — the MCP server cannot wake
