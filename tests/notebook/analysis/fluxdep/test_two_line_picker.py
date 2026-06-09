@@ -1,8 +1,9 @@
-"""Tests for the toolkit-agnostic TwoLinePicker core (headless, no Qt).
+"""Tests for the passive, toolkit-agnostic TwoLinePicker core (headless, no Qt).
 
 The core only needs a matplotlib Figure with a (headless Agg) canvas — it never
-imports Qt — so it is driven here by feeding x/y coordinates straight to its
-mouse handlers and calling its toolbar-action methods.
+imports Qt and never repaints — so it is driven here by feeding x/y coordinates
+straight to its mouse handlers and calling its toolbar-action methods, then
+asserting on the mutated state (positions).
 """
 
 from __future__ import annotations
@@ -26,15 +27,11 @@ def _spectrum(n_dev: int = 60, n_freq: int = 30):
     return sig, devs, freqs
 
 
-def _make_picker(**kwargs) -> tuple[TwoLinePicker, list[int]]:
+def _make_picker(**kwargs) -> TwoLinePicker:
     sig, devs, freqs = _spectrum()
     fig = Figure()
-    FigureCanvasAgg(fig)  # headless renderer so tight_layout/draw work
-    redraws: list[int] = []
-    picker = TwoLinePicker(
-        fig, sig, devs, freqs, redraw=lambda: redraws.append(1), **kwargs
-    )
-    return picker, redraws
+    FigureCanvasAgg(fig)  # headless renderer so tight_layout works
+    return TwoLinePicker(fig, sig, devs, freqs, **kwargs)
 
 
 # --- pure helpers (re-exported from the core) ------------------------------
@@ -59,11 +56,10 @@ def test_find_best_mirror_position_in_range():
 # --- core construction + queries -------------------------------------------
 
 
-def test_construct_redraws_and_reports_positions():
-    picker, redraws = _make_picker()
+def test_construct_reports_positions():
+    picker = _make_picker()
     half, integer = picker.positions()
     assert isinstance(half, float) and isinstance(integer, float)
-    assert redraws, "construction should trigger an initial redraw"
     assert "flux period" in picker.info_text()
     assert picker.period() == 2 * abs(integer - half)
 
@@ -72,9 +68,8 @@ def test_construct_redraws_and_reports_positions():
 
 
 def test_press_then_move_drags_the_nearest_line():
-    picker, _ = _make_picker()
+    picker = _make_picker()
     half0, _int0 = picker.positions()
-    # Press right on the half line, then move it to a new x.
     picker.on_press(half0)
     target = half0 + 1.0
     picker.on_move(target)
@@ -84,15 +79,15 @@ def test_press_then_move_drags_the_nearest_line():
 
 
 def test_press_far_from_both_picks_nothing():
-    picker, _ = _make_picker()
+    picker = _make_picker()
     half0, int0 = picker.positions()
     picker.on_press(1e6)  # nowhere near either line
-    picker.on_move(0.0)  # should be ignored (nothing picked)
+    picker.on_move(0.0)  # ignored (nothing picked)
     assert picker.positions() == (half0, int0)
 
 
 def test_conjugate_drag_moves_both_lines_together():
-    picker, _ = _make_picker()
+    picker = _make_picker()
     half0, int0 = picker.positions()
     picker.set_conjugate(True)
     picker.on_press(half0)
@@ -103,7 +98,7 @@ def test_conjugate_drag_moves_both_lines_together():
 
 
 def test_min_distance_clamp_keeps_lines_apart():
-    picker, _ = _make_picker()
+    picker = _make_picker()
     half0, int0 = picker.positions()
     # Drag the half line to just left of the int line (inside the min gap); the
     # clamp must push it back so the two stay at least min_flux_dist apart.
@@ -114,28 +109,50 @@ def test_min_distance_clamp_keeps_lines_apart():
 
 
 def test_swap_exchanges_positions():
-    picker, _ = _make_picker()
+    picker = _make_picker()
     half0, int0 = picker.positions()
     picker.swap()
     half1, int1 = picker.positions()
     assert (half1, int1) == (int0, half0)
 
 
+# --- heavy action: compute (pure) + apply (main-thread mutate) -------------
+
+
+def test_compute_aligned_positions_is_pure_and_in_range():
+    picker = _make_picker()
+    before = picker.positions()
+    half, integer = picker.compute_aligned_positions()
+    # compute returns candidate positions WITHOUT mutating the picker
+    assert picker.positions() == before
+    assert -5.0 <= half <= 5.0
+    assert -5.0 <= integer <= 5.0
+
+
+def test_apply_positions_sets_both_lines():
+    picker = _make_picker()
+    picker.apply_positions(1.25, -2.5)
+    assert picker.positions() == (1.25, -2.5)
+
+
 def test_auto_align_keeps_positions_in_range():
-    picker, _ = _make_picker()
+    picker = _make_picker()
     picker.auto_align()
     half, integer = picker.positions()
     assert -5.0 <= half <= 5.0
     assert -5.0 <= integer <= 5.0
 
 
+# --- magnitude toggle ------------------------------------------------------
+
+
 def test_magnitude_only_toggle():
-    picker, _ = _make_picker()
+    picker = _make_picker()
     assert picker.magnitude_only is False
     picker.set_magnitude_only(True)
     assert picker.magnitude_only is True
 
 
 def test_force_magnitude_starts_on():
-    picker, _ = _make_picker(force_magnitude=True)
+    picker = _make_picker(force_magnitude=True)
     assert picker.magnitude_only is True

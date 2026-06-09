@@ -4,8 +4,10 @@ Thin Qt chrome around the toolkit-agnostic ``TwoLinePicker`` core (in
 ``zcu_tools.notebook.analysis.fluxdep.interactive.two_line_picker``): the canvas
 is a Qt-embedded FigureCanvasQTAgg, the conjugate / magnitude toggles, swap /
 auto-align buttons and the info label are Qt widgets wired to the core, and
-``get_result`` returns the core's picked positions. measure-gui drives the same
-core through its own interactive analysis host.
+``get_result`` returns the core's picked positions. The core is passive (it only
+mutates state), so this widget repaints (``_repaint``) after each interaction it
+drives. measure-gui drives the same core through its own interactive analysis
+session, which repaints via the host port instead.
 
 ``fold_initial_lines`` / ``find_best_mirror_position`` are re-exported from the
 core for backwards compatibility (callers used to import them from here).
@@ -59,7 +61,8 @@ class LinePickerWidget(InteractiveMplWidget):
         self._info: Optional[QLabel] = None
 
         # The core owns the data, plots, line state and interaction; this widget
-        # is only the Qt shell. It repaints via _on_redraw (info label + canvas).
+        # is only the Qt shell. The core is passive — it never repaints — so the
+        # widget calls _repaint (info label + canvas) after each drive.
         self._picker = TwoLinePicker(
             self.figure,
             signals,
@@ -68,21 +71,22 @@ class LinePickerWidget(InteractiveMplWidget):
             flux_half=flux_half,
             flux_int=flux_int,
             force_magnitude=force_magnitude,
-            redraw=self._on_redraw,
         )
         self._build_controls()
+        self._repaint()  # initial paint
 
     # --- controls --------------------------------------------------------
 
     def _build_controls(self) -> None:
         self._conjugate_checkbox = QCheckBox("Conjugate Line")
+        # Conjugate is a flag with no visual change until the next drag — no repaint.
         self._conjugate_checkbox.toggled.connect(self._picker.set_conjugate)
         self.controls_layout.addWidget(self._conjugate_checkbox)
 
         # Magnitude toggle only when not forced (OneTone locks it on).
         if not self._force_magnitude:
             self._magnitude_checkbox = QCheckBox("Magnitude Only")
-            self._magnitude_checkbox.toggled.connect(self._picker.set_magnitude_only)
+            self._magnitude_checkbox.toggled.connect(self._on_toggle_magnitude)
             self.controls_layout.addWidget(self._magnitude_checkbox)
 
         swap_button = QPushButton("Swap Lines")
@@ -99,10 +103,8 @@ class LinePickerWidget(InteractiveMplWidget):
 
         self.add_finish_button()
 
-    def _on_redraw(self) -> None:
-        # The core asks for a repaint after a state change; refresh the info
-        # label (it reads live positions) and paint the Qt canvas. The very first
-        # redraw fires during core construction, before _info exists — guard it.
+    def _repaint(self) -> None:
+        # Refresh the info label (reads live positions) and paint the Qt canvas.
         if self._info is not None:
             self._info.setText(self._picker.info_text())
         self.canvas.draw_idle()
@@ -110,21 +112,29 @@ class LinePickerWidget(InteractiveMplWidget):
     # --- mouse interaction (base dispatches in-axes events here) ----------
 
     def on_press(self, event) -> None:  # noqa: ANN001 - MouseEvent via base
-        self._picker.on_press(event.xdata)
+        self._picker.on_press(event.xdata)  # selection only — no visual change
 
     def on_move(self, event) -> None:  # noqa: ANN001 - MouseEvent via base
         self._picker.on_move(event.xdata)
+        self._repaint()
 
     def on_release(self, event) -> None:  # noqa: ANN001 - MouseEvent via base
         self._picker.on_release(event.xdata, event.ydata)
+        self._repaint()
 
-    # --- button actions --------------------------------------------------
+    # --- button / toggle actions -----------------------------------------
 
     def _on_swap(self) -> None:
         self._picker.swap()
+        self._repaint()
 
     def _on_auto_align(self) -> None:
-        self._picker.auto_align()
+        self._picker.auto_align()  # synchronous in fluxdep (small spectra)
+        self._repaint()
+
+    def _on_toggle_magnitude(self, checked: bool) -> None:
+        self._picker.set_magnitude_only(checked)
+        self._repaint()
 
     # --- result ----------------------------------------------------------
 

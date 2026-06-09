@@ -5,17 +5,19 @@ the 2D spectrum, and the device / frequency axes, it draws the spectrum plus a
 mirror-loss view, two draggable vertical lines (half=red, int=blue), and owns the
 drag / swap / auto-align / magnitude-toggle state.
 
-It is toolkit-agnostic: the host (fluxdep-gui's Qt ``LinePickerWidget`` or
-measure-gui's interactive flux-pick analysis) feeds it mouse coordinates and
-toolbar actions and supplies a ``redraw`` callback (e.g. ``canvas.draw_idle``).
-The core never imports Qt or ipywidgets, so both Qt consumers drive the same code.
-It uses plain draw-on-event repaint (the host's ``redraw``), NOT the notebook's
-FuncAnimation; the notebook ``InteractiveLines`` keeps its own ipywidgets shell.
+It is **passive** and toolkit-agnostic: its methods only mutate state (line
+positions, image data, the matplotlib artists) — they never repaint. The caller
+(fluxdep-gui's Qt ``LinePickerWidget`` or measure-gui's interactive analysis
+session) drives it with host-fed x/y coordinates and toolbar actions and decides
+when to repaint (it owns the canvas). The core never imports Qt or ipywidgets,
+and never touches threading: heavy work is exposed as a pure ``compute_*`` method
+the caller may run off-main, paired with a main-thread ``apply_*`` mutation. The
+notebook ``InteractiveLines`` (FuncAnimation/ipywidgets) keeps its own shell.
 """
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Optional
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -63,7 +65,7 @@ def find_best_mirror_position(
     Candidates are spaced at a half-grid precision; for each, the mean of the
     non-zero ``diff_mirror`` amplitudes is the loss, and the candidate with the
     smallest finite loss wins. Falls back to ``current_pos`` when no valid
-    candidate / loss exists.
+    candidate / loss exists. Pure (numpy only) — safe to run off the main thread.
     """
     lo = float(dev_values.min())
     hi = float(dev_values.max())
@@ -100,14 +102,13 @@ def find_best_mirror_position(
 
 
 class TwoLinePicker:
-    """Draw + drive two draggable half/int flux lines on a host-provided Figure.
+    """Draw + drive two draggable half/int flux lines on a caller-provided Figure.
 
-    The host owns the ``Figure`` (and its canvas / repaint); this core lays out
-    a main spectrum subplot + a mirror-loss subplot on it, manages the line
-    state, and asks the host to repaint via ``redraw``. Mouse coordinates and
-    toolbar actions come from the host (a Qt widget or measure-gui's analysis
-    host); the conjugate / magnitude toggles are core state set via setters, so
-    the core is free of any specific UI toolkit.
+    The caller owns the ``Figure`` (and its canvas / repaint); this core lays out
+    a main spectrum subplot + a mirror-loss subplot on it and manages the line
+    state. Every method only **mutates** state — none repaints; the caller paints
+    when it chooses. Heavy work (auto-align) is a pure ``compute_*`` + a
+    main-thread ``apply_*`` so the caller may run the compute off the main thread.
     """
 
     def __init__(
@@ -120,7 +121,6 @@ class TwoLinePicker:
         flux_half: Optional[float] = None,
         flux_int: Optional[float] = None,
         force_magnitude: bool = False,
-        redraw: Callable[[], None],
     ) -> None:
         self._figure = figure
         self._signals = signals
@@ -128,7 +128,6 @@ class TwoLinePicker:
         self._freqs = freqs
         # OneTone spectra are locked to magnitude-only (phase is uninformative).
         self._force_magnitude = force_magnitude
-        self._redraw = redraw
 
         self.flux_half, self.flux_int = fold_initial_lines(
             dev_values, flux_half, flux_int
@@ -165,7 +164,7 @@ class TwoLinePicker:
             f"flux period: {self.period():.2e}"
         )
 
-    # --- plotting --------------------------------------------------------
+    # --- plotting (state only; caller repaints) --------------------------
 
     def _init_plots(self) -> None:
         # add_subplot (vs figure.subplots) gives a precise Axes type to pyright.
@@ -193,9 +192,8 @@ class TwoLinePicker:
             x=self.flux_int, color="b", linestyle="--"
         )
 
-        # Loss subplot: zoomed mirror-loss view around the active line. Refreshed
-        # on drag-release and on auto-align (Qt repaint on the main thread is
-        # cheap enough — no 500ms timer like the notebook).
+        # Loss subplot: zoomed mirror-loss view around the active line, refreshed
+        # on drag-release and on auto-align.
         self._loss_im = self._ax_loss.imshow(
             self._real_signals.T,
             aspect="auto",
@@ -210,7 +208,6 @@ class TwoLinePicker:
         self._loss_dot = self._ax_loss.plot([self.flux_half], [center_y], "ro")[0]
 
         self._figure.tight_layout()
-        self._redraw()
 
     def _extent(self) -> tuple[float, float, float, float]:
         dev = self._dev_values
@@ -225,7 +222,7 @@ class TwoLinePicker:
         )
 
     def _apply_line_positions(self) -> None:
-        """Push self.flux_half/int onto the Line2D artists (no host repaint)."""
+        """Push self.flux_half/int onto the Line2D artists."""
         self._half_line.set_xdata([self.flux_half])
         self._int_line.set_xdata([self.flux_int])
 
@@ -248,7 +245,7 @@ class TwoLinePicker:
         self._loss_dot.set_ydata([y])
         self._loss_dot.set_color("r" if self._picked is self._half_line else "b")
 
-    # --- mouse interaction (host feeds coordinates from its canvas) -------
+    # --- mouse interaction (caller feeds coordinates from its canvas) -----
 
     def on_press(self, xdata: Optional[float]) -> None:
         if xdata is None:
@@ -290,16 +287,14 @@ class TwoLinePicker:
             self.flux_int = x
 
         self._apply_line_positions()
-        self._redraw()
 
     def on_release(self, xdata: Optional[float], ydata: Optional[float]) -> None:
         if self._picked is None or xdata is None or ydata is None:
             return
         x = self.flux_half if self._picked is self._half_line else self.flux_int
         self._update_loss_view(x, float(ydata))
-        self._redraw()
 
-    # --- toolbar actions (host wires its buttons/checkboxes to these) -----
+    # --- toolbar actions (caller wires its buttons/checkboxes to these) ---
 
     def set_conjugate(self, on: bool) -> None:
         self._conjugate = bool(on)
@@ -312,25 +307,34 @@ class TwoLinePicker:
         )
         self._main_im.set_data(self._real_signals.T)
         self._main_im.autoscale()
-        self._redraw()
 
     def swap(self) -> None:
         self._picked = None
         self.flux_half, self.flux_int = self.flux_int, self.flux_half
         self._apply_line_positions()
-        self._redraw()
 
-    def auto_align(self) -> None:
-        self._picked = None
+    def compute_aligned_positions(self) -> tuple[float, float]:
+        """The mirror-loss-minimising (half, int) positions. HEAVY but PURE — it
+        only reads the data, so the caller may run it off the main thread."""
         total_width = abs(self._dev_values[-1] - self._dev_values[0])
         search_width = total_width / 20
-        self.flux_half = find_best_mirror_position(
+        half = find_best_mirror_position(
             self._dev_values, self._real_signals, self.flux_half, search_width
         )
-        self.flux_int = find_best_mirror_position(
+        intg = find_best_mirror_position(
             self._dev_values, self._real_signals, self.flux_int, search_width
         )
+        return half, intg
+
+    def apply_positions(self, flux_half: float, flux_int: float) -> None:
+        """Set both lines (+ loss view) to the given positions. MAIN-THREAD —
+        mutates matplotlib artists; the caller repaints afterwards."""
+        self._picked = None
+        self.flux_half, self.flux_int = float(flux_half), float(flux_int)
         self._apply_line_positions()
         center_y = 0.5 * (self._freqs[0] + self._freqs[-1])
         self._update_loss_view(self.flux_half, center_y)
-        self._redraw()
+
+    def auto_align(self) -> None:
+        """Synchronous convenience: compute + apply on the calling thread."""
+        self.apply_positions(*self.compute_aligned_positions())
