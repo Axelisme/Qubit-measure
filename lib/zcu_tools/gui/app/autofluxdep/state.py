@@ -10,12 +10,16 @@ but the domain content is the Node graph, not spectra.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from typing_extensions import Any, Optional
 
 from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import ExpContext
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.app.autofluxdep.tools import Predictor
 
 # VersionTable resource keys (optimistic concurrency, shared mechanism). The
 # table itself is inherited from SessionState (one shared table, decision 6);
@@ -57,26 +61,6 @@ class SetupRequest:
     params_path: str = ""
 
 
-@dataclass
-class SetupResources:
-    """The run prerequisites built by the Setup step (held as live objects).
-
-    Mock: a MockSoc + a FakeDevice flux board + a SimplePredictor stand-in. Real:
-    the soc/soccfg from ``make_soc_proxy``, a YOKOGS200 flux source, and a
-    ``FluxoniumPredictor`` loaded from params.json. The flux device is registered
-    in the global ``GlobalDeviceManager`` (a singleton), not held here — State
-    records that setup completed via ``AutoFluxDepState.has_setup``. These objects
-    stay owned by the main thread; the run worker uses them by reference. ``ml``
-    (ModuleLibrary) / ``md`` (metadata) stay unbound until those features land.
-    """
-
-    soc: Any = None
-    soccfg: Any = None
-    ml: Any = None
-    predictor: Any = None
-    md: Any = None
-
-
 class AutoFluxDepState(SessionState):
     """Mutable working set: the workflow the user is assembling + run resources.
 
@@ -94,9 +78,9 @@ class AutoFluxDepState(SessionState):
     key add/remove, no version bump), so it does not violate the "State writes
     only on the main thread" invariant. Cleared/rebuilt at each Run start.
 
-    ``resources`` (``SetupResources``) is transitional — the soc / soccfg /
-    predictor it holds move into the inherited ``exp_context`` as the session
-    services take over Setup.
+    The soc / soccfg / predictor the run needs live in the inherited
+    ``exp_context`` (the session SSOT, written by Setup / the session services);
+    ``run_predictor`` holds the adaptive predictor the current run was built with.
     """
 
     def __init__(self, ctx: ExpContext, project: Optional[ProjectInfo] = None) -> None:
@@ -104,12 +88,18 @@ class AutoFluxDepState(SessionState):
         self.project: Optional[ProjectInfo] = project
         self.nodes: list[PlacedNode] = []
         self.flux_values: list[float] = []
-        self.resources: Optional[SetupResources] = None
         self.run_results: dict[str, Any] = {}
+        # The adaptive predictor the current/last run was built with (made per-run
+        # from ``exp_context.predictor`` in ``Controller._build_tools``). Run-lived
+        # and non-serialisable — like ``run_results`` — so an Info dialog / a test
+        # can inspect the predictor the run calibrated.
+        self.run_predictor: Optional["Predictor"] = None
 
     @property
     def has_setup(self) -> bool:
-        return self.resources is not None
+        """Whether a SoC is connected — the run prerequisite. Reads the active
+        ``exp_context`` (the session SSOT), not a separate resources bundle."""
+        return self.exp_context.has_soc()
 
     def node_names(self) -> list[str]:
         return [n.name for n in self.nodes]

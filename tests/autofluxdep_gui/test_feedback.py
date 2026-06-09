@@ -147,9 +147,8 @@ def test_sweep_adapts_prediction_to_measurements():
     ctrl.set_flux_values([0.0, 0.2, 0.4, 0.6, 0.8])
     ctrl.start_run()
 
-    resources = ctrl.state.resources
-    assert resources is not None
-    predictor = resources.predictor
+    predictor = ctrl.state.run_predictor
+    assert predictor is not None
     # the synthetic resonance sits 1.5 MHz above the physical base; after the
     # sweep calibrated every point, the prediction tracks the measured (~base+1.5)
     # rather than the bare linear base. Check a calibrated flux moved.

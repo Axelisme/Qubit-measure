@@ -2,7 +2,9 @@
 
 The mock path is exercised end-to-end; the real path's helpers are unit-tested
 in isolation (predictor degradation, flux-address validation) without touching
-the network — ``make_soc_proxy`` is never called here.
+the network — ``make_soc_proxy`` is never called here. Setup writes the soc /
+predictor into the active ``exp_context`` (the session SSOT) and the run reads
+it back.
 """
 
 from __future__ import annotations
@@ -11,27 +13,28 @@ import pytest
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.controller import Controller
 from zcu_tools.gui.app.autofluxdep.state import SetupRequest
+from zcu_tools.gui.app.autofluxdep.tools import SimplePredictor
 
 # --- setup routing: mock request + legacy use_mock shorthand ---
 
 
-def test_setup_mock_request_builds_resources():
+def test_setup_mock_request_connects_mock_soc():
     ctrl = build_core()
     ctrl.setup(SetupRequest(use_mock=True))
-    res = ctrl.state.resources
-    assert res is not None
-    assert "MockQickSoc" in type(res.soc).__name__
-    assert type(res.predictor).__name__ == "SimplePredictor"
+    ctx = ctrl.state.exp_context
+    assert ctx.soc is not None
+    assert "MockQickSoc" in type(ctx.soc).__name__
+    # the mock path leaves the raw predictor unset — the run falls back to a
+    # SimplePredictor stand-in in _build_tools.
+    assert ctx.predictor is None
     assert ctrl.state.has_setup
 
 
 def test_setup_legacy_use_mock_still_works():
-    # the 11 existing call sites use setup(use_mock=True) — keep it working
+    # the existing call sites use setup(use_mock=True) — keep it working
     ctrl = build_core()
     ctrl.setup(use_mock=True)
-    res = ctrl.state.resources
-    assert res is not None
-    assert "MockQickSoc" in type(res.soc).__name__
+    assert "MockQickSoc" in type(ctrl.state.exp_context.soc).__name__
 
 
 def test_setup_emits_setup_done():
@@ -44,17 +47,26 @@ def test_setup_emits_setup_done():
     assert seen == [True]
 
 
-# --- predictor loading: degrades to SimplePredictor on missing / bad file ---
+# --- predictor loading: a missing / bad file leaves the raw predictor unset;
+#     the SimplePredictor fallback then happens in _build_tools ---
 
 
-def test_predictor_blank_path_falls_back():
-    p = Controller._load_predictor("")
-    assert type(p).__name__ == "SimplePredictor"
+def test_predictor_blank_path_returns_none():
+    assert Controller._load_predictor("") is None
 
 
-def test_predictor_bad_path_falls_back():
-    p = Controller._load_predictor("/nonexistent/params.json")
-    assert type(p).__name__ == "SimplePredictor"
+def test_predictor_bad_path_returns_none():
+    assert Controller._load_predictor("/nonexistent/params.json") is None
+
+
+def test_build_tools_falls_back_to_simple_predictor():
+    # with no raw FluxoniumPredictor in the context, the sweep's adaptive
+    # predictor is the SimplePredictor stand-in, so a mock / unconfigured run
+    # still drives the same calibrate loop.
+    ctrl = build_core()
+    ctrl.setup(use_mock=True)
+    tools = ctrl._build_tools()
+    assert isinstance(tools.predictor, SimplePredictor)
 
 
 # --- flux device: a real setup needs a non-blank address (Fast Fail) ---

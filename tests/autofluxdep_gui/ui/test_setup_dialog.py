@@ -1,7 +1,7 @@
-"""Headless SetupDialog tests — mock builds resources; real builds a SetupRequest.
+"""Headless SetupDialog tests — mock connects a MockSoc; real builds a SetupRequest.
 
-The mock path is exercised end-to-end (OK → MockSoc + FakeDevice in State). The
-real path is NOT connected here (``make_soc_proxy`` would block on a network
+The mock path is exercised end-to-end (OK → MockSoc into the active exp_context).
+The real path is NOT connected here (``make_soc_proxy`` would block on a network
 timeout); instead the dialog's ``_build_request`` is asserted to carry the
 fields, and the mock-toggle's enable/disable of the remote groups is checked.
 """
@@ -12,16 +12,15 @@ from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.ui.setup_dialog import SetupDialog
 
 
-def test_setup_dialog_ok_builds_mock_resources(qapp):
+def test_setup_dialog_ok_connects_mock_soc(qapp):
     ctrl = build_core()
     dlg = SetupDialog(ctrl)
     assert dlg._mock.isChecked()  # mock is the default path
     dlg._accept()  # simulate OK without exec()
     assert ctrl.state.has_setup
-    res = ctrl.state.resources
-    assert res is not None
-    assert res.soc is not None and res.soccfg is not None
-    assert "MockQickSoc" in type(res.soc).__name__
+    ctx = ctrl.state.exp_context
+    assert ctx.soc is not None and ctx.soccfg is not None
+    assert "MockQickSoc" in type(ctx.soc).__name__
     dlg.deleteLater()
 
 

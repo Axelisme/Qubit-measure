@@ -14,6 +14,7 @@ dependency model.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import TYPE_CHECKING, Callable
 
 from typing_extensions import Any, Optional
@@ -51,9 +52,12 @@ from zcu_tools.gui.app.autofluxdep.state import (
     WORKFLOW_VERSION_KEY,
     AutoFluxDepState,
     SetupRequest,
-    SetupResources,
 )
-from zcu_tools.gui.app.autofluxdep.tools import SimplePredictor, Tools
+from zcu_tools.gui.app.autofluxdep.tools import (
+    FluxoniumPredictorAdapter,
+    SimplePredictor,
+    Tools,
+)
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.services.build import build_session_services
 from zcu_tools.gui.session.services.io_manager import IOManager
@@ -79,6 +83,7 @@ if TYPE_CHECKING:
     )
     from zcu_tools.gui.session.types import SocCfgHandle
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+    from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 logger = logging.getLogger(__name__)
 
@@ -425,6 +430,10 @@ class Controller:
         self._bus.emit(FluxChangedPayload(count=len(values)))
 
     # --- setup (MockSoc + FakeDevice, or a real ZCU + YOKO + predictor) ---
+    # Transitional, synchronous Setup: it writes the soc / soccfg / predictor into
+    # the active ``exp_context`` (the session SSOT the run reads). This is the
+    # headless / test entry; the GUI's interactive connect goes through the shared
+    # ConnectionService (S4-c switches the dialog over and retires this path).
 
     def setup(
         self,
@@ -432,39 +441,42 @@ class Controller:
         *,
         use_mock: bool = True,
     ) -> None:
-        """Build the run prerequisites from a ``SetupRequest``.
+        """Establish the run prerequisites into the active ``exp_context``.
 
         With no ``request`` a mock setup is built (the convenience for tests /
         the ``use_mock`` shorthand). Otherwise the request's ``use_mock`` picks
-        the path: mock (MockSoc + FakeDevice + SimplePredictor) or real (the soc
-        proxy + a YOKOGS200 flux source + a FluxoniumPredictor from params.json).
+        the path: mock (MockSoc + a FakeDevice flux board) or real (the soc proxy
+        + a YOKOGS200 flux source + a FluxoniumPredictor from params.json).
 
-        A real connection that fails raises (Fast Fail — the dialog reports it
-        and stays open); a missing / unloadable predictor file degrades to a
-        SimplePredictor with a warning rather than blocking the run.
+        The mock path leaves ``predictor`` unset — the run falls back to a
+        ``SimplePredictor`` stand-in in ``_build_tools``. A real connection that
+        fails raises (Fast Fail — the dialog reports it and stays open); a missing
+        / unloadable predictor file leaves ``predictor`` None (same fallback).
         """
         if request is None:
             request = SetupRequest(use_mock=use_mock)
-        resources = (
-            self._build_mock_resources()
-            if request.use_mock
-            else self._build_real_resources(request)
+        if request.use_mock:
+            soc, soccfg, predictor = self._build_mock_setup()
+        else:
+            soc, soccfg, predictor = self._build_real_setup(request)
+        self._state.set_context(
+            replace(
+                self._state.exp_context, soc=soc, soccfg=soccfg, predictor=predictor
+            )
         )
-        self._state.resources = resources
         self._state.version.bump(SETUP_VERSION_KEY)
         logger.info(
             "setup done: soc=%s predictor=%s (use_mock=%s)",
-            type(resources.soc).__name__ if resources.soc is not None else None,
-            type(resources.predictor).__name__
-            if resources.predictor is not None
-            else None,
+            type(soc).__name__ if soc is not None else None,
+            type(predictor).__name__ if predictor is not None else None,
             request.use_mock,
         )
         self._bus.emit(SetupDonePayload())
 
     @staticmethod
-    def _build_mock_resources() -> SetupResources:
-        """MockSoc + soccfg + a FakeDevice flux board + a SimplePredictor."""
+    def _build_mock_setup() -> "tuple[Any, Any, Optional[FluxoniumPredictor]]":
+        """MockSoc + soccfg + a FakeDevice flux board; no predictor (the run uses
+        a SimplePredictor stand-in via ``_build_tools``)."""
         from zcu_tools.device import FakeDevice, GlobalDeviceManager
         from zcu_tools.program.v2.mocksoc import make_mock_soc, make_mock_soccfg
 
@@ -472,19 +484,19 @@ class Controller:
         soccfg = make_mock_soccfg()
         if "flux_dev" not in GlobalDeviceManager.get_all_devices():
             GlobalDeviceManager.register_device("flux_dev", FakeDevice(fast_mode=True))
-        return SetupResources(
-            soc=soc, soccfg=soccfg, ml=None, predictor=SimplePredictor()
-        )
+        return soc, soccfg, None
 
     @staticmethod
-    def _build_real_resources(request: SetupRequest) -> SetupResources:
-        """Connect a real ZCU + YOKOGS200 flux source + load the predictor.
+    def _build_real_setup(
+        request: SetupRequest,
+    ) -> "tuple[Any, Any, Optional[FluxoniumPredictor]]":
+        """Connect a real ZCU + YOKOGS200 flux source + load the raw predictor.
 
         Each step uses the existing library API directly (no gui-external module
-        is modified). A connection failure propagates (Fast Fail). The flux
-        device is registered as "flux_dev" in the global manager so the run finds
-        it; the predictor degrades to a SimplePredictor if params.json is absent
-        or unloadable.
+        is modified). A connection failure propagates (Fast Fail). The flux device
+        is registered as "flux_dev" in the global manager so the run finds it; the
+        predictor is the raw ``FluxoniumPredictor`` (or None if params.json is
+        absent / unloadable) — the adaptive wrapping happens in ``_build_tools``.
         """
         from zcu_tools.remote import make_soc_proxy
 
@@ -493,8 +505,7 @@ class Controller:
 
         Controller._connect_flux_device(request.flux_device_address)
         predictor = Controller._load_predictor(request.params_path)
-
-        return SetupResources(soc=soc, soccfg=soccfg, ml=None, predictor=predictor)
+        return soc, soccfg, predictor
 
     @staticmethod
     def _connect_flux_device(address: str) -> None:
@@ -515,32 +526,33 @@ class Controller:
         GlobalDeviceManager.register_device("flux_dev", device)
 
     @staticmethod
-    def _load_predictor(params_path: str) -> object:
-        """Load a FluxoniumPredictor from ``params_path``; degrade on failure.
+    def _load_predictor(params_path: str) -> "Optional[FluxoniumPredictor]":
+        """Load a raw ``FluxoniumPredictor`` from ``params_path``; None on blank /
+        unreadable.
 
-        A blank path or an unreadable / invalid params.json logs a warning and
-        falls back to the SimplePredictor stand-in, so a missing fit file does
-        not block the run (the prediction is just a linear stand-in then).
+        The adaptive wrapping (``FluxoniumPredictorAdapter``) and the
+        ``SimplePredictor`` fallback happen in ``_build_tools``, so ``exp_context``
+        holds the raw library predictor (or None) — never autofluxdep's adaptive
+        wrapper.
         """
         if not params_path.strip():
-            logger.warning("no params.json given; using SimplePredictor stand-in")
-            return SimplePredictor()
+            logger.warning(
+                "no params.json given; predictor unset (run uses SimplePredictor)"
+            )
+            return None
         try:
-            from zcu_tools.gui.app.autofluxdep.tools import FluxoniumPredictorAdapter
             from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 
             fluxonium = FluxoniumPredictor.from_file(params_path.strip())
             logger.info("loaded FluxoniumPredictor from %s", params_path)
-            # wrap into the Predictor interface (physical prediction + IDW error
-            # correction) so qubit_freq's calibrate drives the same feedback loops
-            return FluxoniumPredictorAdapter(fluxonium=fluxonium)
+            return fluxonium
         except Exception as exc:
             logger.warning(
-                "could not load predictor from %s (%s); using SimplePredictor",
+                "could not load predictor from %s (%s); predictor unset",
                 params_path,
                 exc,
             )
-            return SimplePredictor()
+            return None
 
     # --- run control (cancellable) ---
 
@@ -558,7 +570,20 @@ class Controller:
         return [service, *self._state.nodes]
 
     def _build_tools(self) -> Tools:
-        predictor = self._state.resources.predictor if self._state.resources else None
+        """Build the sweep's adaptive predictor from the active context.
+
+        ``exp_context.predictor`` holds the raw ``FluxoniumPredictor`` (loaded at
+        setup / by ConnectionService) or None. A real predictor is wrapped into
+        the adaptive ``FluxoniumPredictorAdapter``; with none loaded we fall back
+        to the ``SimplePredictor`` stand-in, so a mock / unconfigured run still
+        drives the same calibrate loop.
+        """
+        raw = self._state.exp_context.predictor
+        predictor = (
+            FluxoniumPredictorAdapter(fluxonium=raw)
+            if raw is not None
+            else SimplePredictor()
+        )
         return Tools(predictor=predictor)
 
     def _allocate_results(self, flux: "Any") -> dict[str, Any]:
@@ -597,7 +622,7 @@ class Controller:
         )
         self._bus.emit(RunStartedPayload())
 
-        soc = self._state.resources.soc if self._state.resources else None
+        soc = self._state.exp_context.soc
         # The UI pre-allocates Results (+ binds Plotters) before starting the
         # worker; a headless caller has not, so allocate here. Either way the
         # worker fills these exact containers in place.
@@ -621,9 +646,14 @@ class Controller:
             if name in user_node_names:
                 self._bus.emit(NodeEnteredPayload(name=name, idx=idx))
 
+        # Build the sweep's adaptive predictor once and stash it as run-lived
+        # state (like run_results) so an Info dialog / a test can inspect the
+        # predictor the run calibrated.
+        tools = self._build_tools()
+        self._state.run_predictor = tools.predictor
         orch = Orchestrator(
             providers=self._build_providers(),
-            tools=self._build_tools(),
+            tools=tools,
             soc=soc,
             results=results,
             notify=notify,
