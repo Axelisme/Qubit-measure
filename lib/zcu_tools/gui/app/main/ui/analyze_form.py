@@ -52,7 +52,9 @@ class AnalyzeFormWidget(QWidget):
 
         hints = get_type_hints(self._params_cls, include_extras=True)
         for field in dataclasses.fields(params_instance):
-            bare_type, choices, label, decimals = _resolve_field_info(field, hints)
+            bare_type, choices, label, decimals, optional = _resolve_field_info(
+                field, hints
+            )
             initial = getattr(params_instance, field.name)
             widget = make_value_widget(
                 bare_type,
@@ -60,6 +62,7 @@ class AnalyzeFormWidget(QWidget):
                 choices,
                 editable=True,
                 decimals=decimals,
+                optional=optional,
             )
             self._form.addRow(label + ":", widget)
             self._widgets[field.name] = widget
@@ -73,9 +76,11 @@ class AnalyzeFormWidget(QWidget):
         hints = get_type_hints(self._params_cls, include_extras=True)
         raw: dict[str, Any] = {}
         for field in dataclasses.fields(self._params_cls):
-            bare_type, choices, _, _ = _resolve_field_info(field, hints)
+            bare_type, choices, _, _, optional = _resolve_field_info(field, hints)
             widget = self._widgets[field.name]
-            raw[field.name] = self._read_widget_value(widget, bare_type, choices)
+            raw[field.name] = self._read_widget_value(
+                widget, bare_type, choices, optional
+            )
         return reconstruct_params(self._params_cls, raw)
 
     def populate_values(self, instance: object) -> None:
@@ -103,7 +108,8 @@ class AnalyzeFormWidget(QWidget):
                 elif isinstance(widget, TrimDoubleSpinBox):
                     widget.setValue(float(value))
                 elif isinstance(widget, QLineEdit):
-                    widget.setText(str(value))
+                    # An optional field's None shows as the empty "(none)" state.
+                    widget.setText("" if value is None else str(value))
         finally:
             self._hydrating = False
 
@@ -135,7 +141,11 @@ class AnalyzeFormWidget(QWidget):
         self.params_changed.emit(self.read_params())
 
     def _read_widget_value(
-        self, widget: QWidget, bare_type: type, choices: Optional[list[Any]]
+        self,
+        widget: QWidget,
+        bare_type: type,
+        choices: Optional[list[Any]],
+        optional: bool = False,
     ) -> Any:
         if choices is not None and isinstance(widget, QComboBox):
             current = widget.currentText()
@@ -143,4 +153,14 @@ class AnalyzeFormWidget(QWidget):
                 if str(choice) == current:
                     return choice
             raise RuntimeError(f"Unknown analyze param choice: {current!r}")
+        if optional and isinstance(widget, QLineEdit):
+            # Empty (the "(none)" state) or a partial/invalid entry reads as None;
+            # mirrors read_scalar_widget for the cfg form's optional scalars.
+            txt = widget.text().strip()
+            if txt == "":
+                return None
+            try:
+                return bare_type(txt)
+            except (ValueError, TypeError):
+                return None
         return read_value_widget(widget, bare_type, fallback=None)

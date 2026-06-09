@@ -27,8 +27,8 @@ class ParamMeta:
 def _resolve_field_info(
     field: dataclasses.Field,
     hints: dict[str, Any],
-) -> tuple[type, Optional[list[Any]], str, Optional[int]]:
-    """Return (bare_type, choices, label, decimals)."""
+) -> tuple[type, Optional[list[Any]], str, Optional[int], bool]:
+    """Return (bare_type, choices, label, decimals, optional)."""
     hint = hints[field.name]
     origin = get_origin(hint)
     if origin is Annotated:
@@ -38,6 +38,20 @@ def _resolve_field_info(
     else:
         bare = hint
         meta = None
+
+    # Optional[T] (= Union[T, None]) -> the field may be left blank (None): strip
+    # the None to resolve T, and flag it so the form renders the "(none)" empty
+    # state and the agent may pass null. Only single-type Optional is supported.
+    optional = False
+    if get_origin(bare) is typing.Union:
+        union_args = get_args(bare)
+        non_none = [a for a in union_args if a is not type(None)]
+        if type(None) not in union_args or len(non_none) != 1:
+            raise TypeError(
+                f"Unsupported analyze parameter Union (only Optional[T]): {field.name}"
+            )
+        optional = True
+        bare = non_none[0]
 
     bare_origin = get_origin(bare)
     if bare_origin in _LITERAL_ORIGINS:
@@ -60,7 +74,7 @@ def _resolve_field_info(
 
     label = meta.label if meta is not None and meta.label else field.name
     decimals = meta.decimals if meta is not None else None
-    return bare_type, choices, label, decimals
+    return bare_type, choices, label, decimals, optional
 
 
 T = TypeVar("T")
@@ -79,12 +93,16 @@ def describe_analyze_params(params_cls: type) -> list[dict[str, Any]]:
     hints = get_type_hints(params_cls, include_extras=True)
     out: list[dict[str, Any]] = []
     for field in fields:
-        bare_type, choices, label, decimals = _resolve_field_info(field, hints)
+        bare_type, choices, label, decimals, optional = _resolve_field_info(
+            field, hints
+        )
         entry: dict[str, Any] = {
             "name": field.name,
             "type": bare_type.__name__,
             "label": label,
         }
+        if optional:
+            entry["optional"] = True
         if choices is not None:
             entry["choices"] = list(choices)
         if decimals is not None:
@@ -115,8 +133,11 @@ def reconstruct_params(params_cls: type[T], form_values: dict[str, Any]) -> T:
 
     kwargs: dict[str, Any] = {}
     for field in fields:
-        bare_type, choices, _, _ = _resolve_field_info(field, hints)
+        bare_type, choices, _, _, optional = _resolve_field_info(field, hints)
         raw = form_values[field.name]
+        if optional and raw is None:
+            kwargs[field.name] = None
+            continue
         value = _coerce_analyze_value(field.name, bare_type, raw)
         if choices is not None and value not in choices:
             raise RuntimeError(

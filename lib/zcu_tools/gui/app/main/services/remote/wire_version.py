@@ -181,4 +181,13 @@ WIRE_VERSION = 21
 #     the driver, not an ActiveTask scope) and its cancel interpretation moves into
 #     DeviceService._on_setup_done. The "is a setup cancellable" check now reads
 #     _active_kind (no _setup_worker field). WIRE unchanged. Phase 148.
-GUI_VERSION = 24
+# v25: optional analyze params. _resolve_field_info recognises Optional[T] (=
+#      Union[T, None]) and flags it; the analyze form renders the existing
+#      optional-scalar widget (a QLineEdit whose empty "(none)" state = None, with
+#      a numeric validator — the same widget the cfg form uses for optional
+#      scalars, ADR-0010); describe_analyze_params adds optional:true so an agent
+#      knows it may pass null (dataclasses.replace already accepts None — no wire
+#      change). twotone/ro_optimize/length now exposes its t0 length-penalty knob
+#      (blank = raw SNR max). WIRE unchanged (the mcp forwards the spec / updates
+#      verbatim, never interpreting optional). Phase 149.
+GUI_VERSION = 25

@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass
 
 from matplotlib.figure import Figure
-from typing_extensions import Any, ClassVar, Sequence, TypeAlias
+from typing_extensions import Annotated, Any, ClassVar, Optional, Sequence, TypeAlias
 
 from zcu_tools.experiment.v2.twotone.ro_optimize.length import (
     LengthCfg,
@@ -27,6 +27,7 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     ExpContext,
     MetaDictWriteback,
+    ParamMeta,
     SweepSpec,
     WritebackItem,
     WritebackRequest,
@@ -37,12 +38,10 @@ RoOptLengthRunResult: TypeAlias = LengthResult
 
 @dataclass
 class RoOptLengthAnalyzeParams:
-    # The underlying analyze() takes an optional 't0' length-penalty knob
-    # (t0=None → raw SNR max; t0>0 → max snr/sqrt(length+t0), favouring shorter
-    # readout). Optional analyze fields are not yet supported by the form
-    # framework, so this adapter pins t0=None for now and exposes no field.
-    # See memory: project_gui_optional_analyze_param.
-    pass
+    # 't0' is the length-penalty knob of the underlying analyze(): t0=None → raw
+    # SNR max; t0>0 → max snr/sqrt(length+t0), favouring shorter readout. Optional
+    # float — left blank (the "(none)" field) it stays None.
+    t0: Annotated[Optional[float], ParamMeta(label="t0 length penalty (us)")] = None
 
 
 @dataclass
@@ -94,11 +93,12 @@ class RoOptLengthAdapter(
                 "'readout_dpm' role)."
             ),
             recommended=(
-                "Analysis currently picks the raw SNR maximum (the underlying "
-                "length-penalty knob that would bias toward shorter windows is not "
-                "yet exposed in the GUI). Sweep length from short to a few us "
-                "(e.g. ~0.01–3.5 us); since SNR usually keeps rising with length, "
-                "judge by eye where it plateaus and trade length for SNR."
+                "Analysis picks the raw SNR maximum by default. The optional 't0' "
+                "analyze param is a length penalty: leave it blank (None) for the "
+                "raw max, or set a small us value to bias toward shorter readout "
+                "(maximises snr/sqrt(length+t0)). Sweep length from short to a few "
+                "us (e.g. ~0.01–3.5 us); since SNR usually keeps rising with "
+                "length, judge by eye where it plateaus and trade length for SNR."
             ),
         )
 
@@ -139,8 +139,7 @@ class RoOptLengthAdapter(
     def analyze(
         self, req: AnalyzeRequest[RoOptLengthRunResult, RoOptLengthAnalyzeParams]
     ) -> RoOptLengthAnalyzeResult:
-        # t0 pinned to None (raw SNR max) until optional analyze fields land.
-        best_length, fig = LengthExp().analyze(req.run_result, t0=None)
+        best_length, fig = LengthExp().analyze(req.run_result, t0=req.analyze_params.t0)
         return RoOptLengthAnalyzeResult(best_length=best_length, figure=fig)
 
     def get_writeback_items(
